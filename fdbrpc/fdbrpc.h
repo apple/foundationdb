@@ -796,8 +796,9 @@ public:
 	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultEndpoint) const {
 		return queue->getEndpoint(taskID);
 	}
-	void makeWellKnownEndpoint(Endpoint::Token token, TaskPriority taskID) {
-		queue->makeWellKnownEndpoint(token, taskID);
+
+	void makeWellKnownEndpoint(uint64_t wlTokenID, TaskPriority taskID) {
+		queue->makeWellKnownEndpoint(Endpoint::Token(-1, wlTokenID), taskID);
 	}
 
 	bool operator==(const RequestStream<T>& rhs) const { return queue == rhs.queue; }

@@ -111,7 +111,7 @@ struct StreamingRangeReadWorkload : KVWorkload {
 		return true;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	// Reads the database using both the normal get range API and the streaming API and compares the results
 	ACTOR Future<Void> streamingClient(Database cx, StreamingRangeReadWorkload* self) {

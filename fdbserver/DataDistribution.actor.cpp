@@ -357,6 +357,10 @@ public:
 	void addref() override { ReferenceCounted<TCTeamInfo>::addref(); }
 	void delref() override { ReferenceCounted<TCTeamInfo>::delref(); }
 
+	bool hasServer(const UID& server) {
+		return std::find(serverIDs.begin(), serverIDs.end(), server) != serverIDs.end();
+	}
+
 	void addServers(const std::vector<UID>& servers) override {
 		serverIDs.reserve(servers.size());
 		for (int i = 0; i < servers.size(); i++) {
@@ -723,6 +727,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 	Promise<UID> removeFailedServer;
 
+	Reference<EventCacheHolder> ddTrackerStartingEventHolder;
+	Reference<EventCacheHolder> teamCollectionInfoEventHolder;
+	Reference<EventCacheHolder> storageServerRecruitmentEventHolder;
+
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
 		LocalityMap<UID>* storageServerMap = (LocalityMap<UID>*)storageServerSet.getPtr();
@@ -777,9 +785,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	    clearHealthyZoneFuture(true), medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO),
 	    lastMedianAvailableSpaceUpdate(0), lowestUtilizationTeam(0), highestUtilizationTeam(0),
 	    getShardMetrics(getShardMetrics), getUnhealthyRelocationCount(getUnhealthyRelocationCount),
-	    removeFailedServer(removeFailedServer) {
+	    removeFailedServer(removeFailedServer),
+	    ddTrackerStartingEventHolder(makeReference<EventCacheHolder>("DDTrackerStarting")),
+	    teamCollectionInfoEventHolder(makeReference<EventCacheHolder>("TeamCollectionInfo")),
+	    storageServerRecruitmentEventHolder(
+	        makeReference<EventCacheHolder>("StorageServerRecruitment_" + distributorId.toString())) {
 		if (!primary || configuration.usableRegions == 1) {
-			TraceEvent("DDTrackerStarting", distributorId).detail("State", "Inactive").trackLatest("DDTrackerStarting");
+			TraceEvent("DDTrackerStarting", distributorId)
+			    .detail("State", "Inactive")
+			    .trackLatest(ddTrackerStartingEventHolder->trackingKey);
 		}
 	}
 
@@ -859,7 +873,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		if (!self->primary || self->configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", self->distributorId)
 			    .detail("State", "Active")
-			    .trackLatest("DDTrackerStarting");
+			    .trackLatest(self->ddTrackerStartingEventHolder->trackingKey);
 		}
 
 		return Void();
@@ -891,6 +905,35 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		}
 
 		return Void();
+	}
+
+	// Returns a random healthy team, which does not contain excludeServer.
+	std::vector<UID> getRandomHealthyTeam(const UID& excludeServer) {
+		std::vector<int> candidates, backup;
+		for (int i = 0; i < teams.size(); ++i) {
+			if (teams[i]->isHealthy() && !teams[i]->hasServer(excludeServer)) {
+				candidates.push_back(i);
+			} else if (teams[i]->size() - (teams[i]->hasServer(excludeServer) ? 1 : 0) > 0) {
+				// If a team has at least one other server besides excludeServer, select it
+				// as a backup candidate.
+				backup.push_back(i);
+			}
+		}
+
+		// Prefer a healthy team not containing excludeServer.
+		if (candidates.size() > 0) {
+			return teams[deterministicRandom()->randomInt(0, candidates.size())]->getServerIDs();
+		}
+
+		// The backup choice is a team with at least one server besides excludeServer, in this
+		// case, the team  will be possibily relocated to a healthy destination later by DD.
+		if (backup.size() > 0) {
+			std::vector<UID> res = teams[deterministicRandom()->randomInt(0, backup.size())]->getServerIDs();
+			std::remove(res.begin(), res.end(), excludeServer);
+			return res;
+		}
+
+		return std::vector<UID>();
 	}
 
 	// SOMEDAY: Make bestTeam better about deciding to leave a shard where it is (e.g. in PRIORITY_TEAM_HEALTHY case)
@@ -2284,7 +2327,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("MinMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.first)
 		    .detail("MaxMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.second)
 		    .detail("DoBuildTeams", doBuildTeams)
-		    .trackLatest("TeamCollectionInfo");
+		    .trackLatest(teamCollectionInfoEventHolder->trackingKey);
 
 		return addedTeams;
 	}
@@ -2321,7 +2364,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		    .detail("MinMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.first)
 		    .detail("MaxMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.second)
 		    .detail("DoBuildTeams", doBuildTeams)
-		    .trackLatest("TeamCollectionInfo");
+		    .trackLatest(teamCollectionInfoEventHolder->trackingKey);
 
 		// Advance time so that we will not have multiple TeamCollectionInfo at the same time, otherwise
 		// simulation test will randomly pick one TeamCollectionInfo trace, which could be the one before build teams
@@ -2445,7 +2488,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				    .detail("MinMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.first)
 				    .detail("MaxMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.second)
 				    .detail("DoBuildTeams", self->doBuildTeams)
-				    .trackLatest("TeamCollectionInfo");
+				    .trackLatest(self->teamCollectionInfoEventHolder->trackingKey);
 			}
 		} else {
 			self->lastBuildTeamsFailed = true;
@@ -2500,6 +2543,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		TraceEvent(newServer.isTss() ? "AddedTSS" : "AddedStorageServer", distributorId)
 		    .detail("ServerID", newServer.id())
+		    .detail("ProcessID", newServer.locality.processId())
 		    .detail("ProcessClass", processClass.toString())
 		    .detail("WaitFailureToken", newServer.waitFailure.getEndpoint().token)
 		    .detail("Address", newServer.waitFailure.getEndpoint().getPrimaryAddress());
@@ -3246,7 +3290,11 @@ ACTOR Future<Void> removeWrongStoreType(DDTeamCollection* self) {
 				// Server may be removed due to failure while the wrongStoreTypeToRemove is sent to the
 				// storageServerTracker. This race may cause the server to be removed before react to
 				// wrongStoreTypeToRemove
-				server.second->wrongStoreTypeToRemove.set(true);
+				if (self->configuration.storageMigrationType == StorageMigrationType::AGGRESSIVE) {
+					// if the Storage Migration type is aggressive, let DD remove SS with wrong storage type
+					server.second->wrongStoreTypeToRemove.set(true);
+				}
+				// Otherwise, wait Perpetual Wiggler to wiggle the SS with wrong storage type
 				foundSSToRemove = true;
 				TraceEvent("WrongStoreTypeRemover", self->distributorId)
 				    .detail("Server", server.first)
@@ -3962,10 +4010,12 @@ ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getSe
 ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection) {
 	state ReadYourWritesTransaction tr(teamCollection->cx);
 	state Value writeValue;
+	state const Key writeKey =
+	    wigglingStorageServerKey.withSuffix(teamCollection->primary ? "/primary"_sr : "/remote"_sr);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> value = wait(tr.get(wigglingStorageServerKey));
+			Optional<Value> value = wait(tr.get(writeKey));
 			if (teamCollection->pid2server_info.empty()) {
 				writeValue = LiteralStringRef("");
 			} else {
@@ -3981,7 +4031,7 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 					writeValue = pid;
 				}
 			}
-			tr.set(wigglingStorageServerKey, writeValue);
+			tr.set(writeKey, writeValue);
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -3989,6 +4039,7 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 		}
 	}
 	TraceEvent(SevDebug, "PerpetualNextWigglingStoragePID", teamCollection->distributorId)
+	    .detail("Primary", teamCollection->primary)
 	    .detail("WriteValue", writeValue);
 
 	return Void();
@@ -4010,6 +4061,15 @@ ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
 					// there must not have other teams to place wiggled data
 					takeRest = teamCollection->server_info.size() <= teamCollection->configuration.storageTeamSize ||
 					           teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize;
+					teamCollection->doBuildTeams = true;
+					if (takeRest &&
+					    teamCollection->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
+						TraceEvent(SevWarn, "PerpetualWiggleSleep", teamCollection->distributorId)
+						    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
+						    .detail("ServerSize", teamCollection->server_info.size())
+						    .detail("MachineSize", teamCollection->machine_info.size())
+						    .detail("StorageTeamSize", teamCollection->configuration.storageTeamSize);
+					}
 				}
 				wait(updateNextWigglingStoragePID(teamCollection));
 			}
@@ -4028,14 +4088,16 @@ ACTOR Future<std::pair<Future<Void>, Value>> watchPerpetualStoragePIDChange(DDTe
 	state ReadYourWritesTransaction tr(self->cx);
 	state Future<Void> watchFuture;
 	state Value ret;
+	state const Key readKey = wigglingStorageServerKey.withSuffix(self->primary ? "/primary"_sr : "/remote"_sr);
+
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> value = wait(tr.get(wigglingStorageServerKey));
+			Optional<Value> value = wait(tr.get(readKey));
 			if (value.present()) {
 				ret = value.get();
 			}
-			watchFuture = tr.watch(wigglingStorageServerKey);
+			watchFuture = tr.watch(readKey);
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -4096,7 +4158,13 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				TEST(true); // paused because cluster is unhealthy
 				moveFinishFuture = Never();
 				self->includeStorageServersForWiggle();
-				TraceEvent("PerpetualStorageWigglePause", self->distributorId)
+				self->doBuildTeams = true;
+
+				TraceEvent(self->configuration.storageMigrationType == StorageMigrationType::AGGRESSIVE ? SevInfo
+				                                                                                        : SevWarn,
+				           "PerpetualStorageWigglePause",
+				           self->distributorId)
+				    .detail("Primary", self->primary)
 				    .detail("ProcessId", pid)
 				    .detail("BestTeamKeepStuckCount", self->bestTeamKeepStuckCount)
 				    .detail("ExtraHealthyTeamCount", extraTeamCount)
@@ -4108,6 +4176,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				movingCount = fv.size();
 				moveFinishFuture = waitForAll(fv);
 				TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
+				    .detail("Primary", self->primary)
 				    .detail("ProcessId", pid)
 				    .detail("ExtraHealthyTeamCount", extraTeamCount)
 				    .detail("HealthyTeamCount", self->healthyTeamCount)
@@ -4134,6 +4203,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				moveFinishFuture = Never();
 				self->includeStorageServersForWiggle();
 				TraceEvent("PerpetualStorageWiggleFinish", self->distributorId)
+				    .detail("Primary", self->primary)
 				    .detail("ProcessId", pid.toString())
 				    .detail("StorageCount", movingCount);
 
@@ -4153,6 +4223,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 	if (self->wigglingPid.present()) {
 		self->includeStorageServersForWiggle();
 		TraceEvent("PerpetualStorageWiggleExitingPause", self->distributorId)
+		    .detail("Primary", self->primary)
 		    .detail("ProcessId", self->wigglingPid.get());
 		self->wigglingPid.reset();
 	}
@@ -4190,14 +4261,16 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 					    &stopWiggleSignal, finishStorageWiggleSignal.getFuture(), teamCollection));
 					collection.add(
 					    perpetualStorageWiggler(&stopWiggleSignal, finishStorageWiggleSignal, teamCollection));
-					TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId).log();
+					TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId)
+					    .detail("Primary", teamCollection->primary);
 				} else if (speed == 0) {
 					if (!stopWiggleSignal.get()) {
 						stopWiggleSignal.set(true);
 						wait(collection.signalAndReset());
 						teamCollection->pauseWiggle->set(true);
 					}
-					TraceEvent("PerpetualStorageWiggleClose", teamCollection->distributorId).log();
+					TraceEvent("PerpetualStorageWiggleClose", teamCollection->distributorId)
+					    .detail("Primary", teamCollection->primary);
 				}
 				wait(watchFuture);
 				break;
@@ -4653,6 +4726,7 @@ ACTOR Future<Void> storageServerTracker(
 				if (worstStatus == DDTeamCollection::Status::WIGGLING && !isTss) {
 					status.isWiggling = true;
 					TraceEvent("PerpetualWigglingStorageServer", self->distributorId)
+					    .detail("Primary", self->primary)
 					    .detail("Server", server->id)
 					    .detail("ProcessId", server->lastKnownInterface.locality.processId())
 					    .detail("Address", worstAddr.toString());
@@ -4888,7 +4962,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 	state bool lastIsTss = false;
 	TraceEvent("StorageServerRecruitment", self->distributorId)
 	    .detail("State", "Idle")
-	    .trackLatest("StorageServerRecruitment_" + self->distributorId.toString());
+	    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
 	loop {
 		if (!recruiting) {
 			while (self->recruitingStream.get() == 0) {
@@ -4897,7 +4971,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 			TraceEvent("StorageServerRecruitment", self->distributorId)
 			    .detail("State", "Recruiting")
 			    .detail("IsTSS", self->isTssRecruiting ? "True" : "False")
-			    .trackLatest("StorageServerRecruitment_" + self->distributorId.toString());
+			    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
 			recruiting = true;
 			lastIsTss = self->isTssRecruiting;
 		} else {
@@ -4908,7 +4982,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 							TraceEvent("StorageServerRecruitment", self->distributorId)
 							    .detail("State", "Recruiting")
 							    .detail("IsTSS", self->isTssRecruiting ? "True" : "False")
-							    .trackLatest("StorageServerRecruitment_" + self->distributorId.toString());
+							    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
 							lastIsTss = self->isTssRecruiting;
 						}
 					}
@@ -4921,7 +4995,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection* self) {
 			}
 			TraceEvent("StorageServerRecruitment", self->distributorId)
 			    .detail("State", "Idle")
-			    .trackLatest("StorageServerRecruitment_" + self->distributorId.toString());
+			    .trackLatest(self->storageServerRecruitmentEventHolder->trackingKey);
 			recruiting = false;
 		}
 	}
@@ -5598,10 +5672,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		self->addActor.send(trackExcludedServers(self));
 		self->addActor.send(monitorHealthyTeams(self));
 		self->addActor.send(waitHealthyZoneChange(self));
-
-		if (self->primary) { // the primary dc also handle the satellite dc's perpetual wiggling
-			self->addActor.send(monitorPerpetualStorageWiggle(self));
-		}
+		self->addActor.send(monitorPerpetualStorageWiggle(self));
 		// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
 		loop choose {
@@ -5640,7 +5711,15 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 				    .detail("ServerCount", self->server_info.size())
 				    .detail("StorageTeamSize", self->configuration.storageTeamSize)
 				    .detail("HighestPriority", highestPriority)
-				    .trackLatest(self->primary ? "TotalDataInFlight" : "TotalDataInFlightRemote");
+				    .trackLatest(
+				        self->primary
+				            ? "TotalDataInFlight"
+				            : "TotalDataInFlightRemote"); // This trace event's trackLatest lifetime is controlled by
+				                                          // DataDistributorData::totalDataInFlightEventHolder or
+				                                          // DataDistributorData::totalDataInFlightRemoteEventHolder.
+				                                          // The track latest key we use here must match the key used in
+				                                          // the holder.
+
 				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 			}
 			when(wait(self->serverTrackerErrorOut.getFuture())) {} // Propagate errors from storageServerTracker
@@ -5784,9 +5863,17 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 	UID ddId;
 	PromiseStream<Future<Void>> addActor;
 	DDTeamCollection* teamCollection;
+	Reference<EventCacheHolder> initialDDEventHolder;
+	Reference<EventCacheHolder> movingDataEventHolder;
+	Reference<EventCacheHolder> totalDataInFlightEventHolder;
+	Reference<EventCacheHolder> totalDataInFlightRemoteEventHolder;
 
 	DataDistributorData(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id)
-	  : dbInfo(db), ddId(id), teamCollection(nullptr) {}
+	  : dbInfo(db), ddId(id), teamCollection(nullptr),
+	    initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
+	    movingDataEventHolder(makeReference<EventCacheHolder>("MovingData")),
+	    totalDataInFlightEventHolder(makeReference<EventCacheHolder>("TotalDataInFlight")),
+	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")) {}
 };
 
 ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo> const> db, double* lastLimited) {
@@ -5904,14 +5991,14 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					    .detail("E", initData->shards.end()[-1].key)
 					    .detail("Src", describe(initData->shards.end()[-2].primarySrc))
 					    .detail("Dest", describe(initData->shards.end()[-2].primaryDest))
-					    .trackLatest("InitialDD");
+					    .trackLatest(self->initialDDEventHolder->trackingKey);
 				} else {
 					TraceEvent("DDInitGotInitialDD", self->ddId)
 					    .detail("B", "")
 					    .detail("E", "")
 					    .detail("Src", "[no items]")
 					    .detail("Dest", "[no items]")
-					    .trackLatest("InitialDD");
+					    .trackLatest(self->initialDDEventHolder->trackingKey);
 				}
 
 				if (initData->mode && ddEnabledState->isDDEnabled()) {
@@ -5939,20 +6026,20 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				    .detail("PriorityTeam1Left", 0)
 				    .detail("PriorityTeam0Left", 0)
 				    .detail("PrioritySplitShard", 0)
-				    .trackLatest("MovingData");
+				    .trackLatest(self->movingDataEventHolder->trackingKey);
 
 				TraceEvent("TotalDataInFlight", self->ddId)
 				    .detail("Primary", true)
 				    .detail("TotalBytes", 0)
 				    .detail("UnhealthyServers", 0)
 				    .detail("HighestPriority", 0)
-				    .trackLatest("TotalDataInFlight");
+				    .trackLatest(self->totalDataInFlightEventHolder->trackingKey);
 				TraceEvent("TotalDataInFlight", self->ddId)
 				    .detail("Primary", false)
 				    .detail("TotalBytes", 0)
 				    .detail("UnhealthyServers", 0)
 				    .detail("HighestPriority", configuration.usableRegions > 1 ? 0 : -1)
-				    .trackLatest("TotalDataInFlightRemote");
+				    .trackLatest(self->totalDataInFlightRemoteEventHolder->trackingKey);
 
 				wait(waitForDataDistributionEnabled(cx, ddEnabledState));
 				TraceEvent("DataDistributionEnabled").log();
@@ -6123,6 +6210,17 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			trackerCancelled = true;
 			state Error err = e;
 			TraceEvent("DataDistributorDestroyTeamCollections").error(e);
+			state std::vector<UID> teamForDroppedRange;
+			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
+				// Choose a random healthy team to host the to-be-dropped range.
+				const UID serverID = removeFailedServer.getFuture().get();
+				std::vector<UID> pTeam = primaryTeamCollection->getRandomHealthyTeam(serverID);
+				teamForDroppedRange.insert(teamForDroppedRange.end(), pTeam.begin(), pTeam.end());
+				if (configuration.usableRegions > 1) {
+					std::vector<UID> rTeam = remoteTeamCollection->getRandomHealthyTeam(serverID);
+					teamForDroppedRange.insert(teamForDroppedRange.end(), rTeam.begin(), rTeam.end());
+				}
+			}
 			self->teamCollection = nullptr;
 			primaryTeamCollection = Reference<DDTeamCollection>();
 			remoteTeamCollection = Reference<DDTeamCollection>();
@@ -6130,7 +6228,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			TraceEvent("DataDistributorTeamCollectionsDestroyed").error(err);
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				TraceEvent("RemoveFailedServer", removeFailedServer.getFuture().get()).error(err);
-				wait(removeKeysFromFailedServer(cx, removeFailedServer.getFuture().get(), lock, ddEnabledState));
+				wait(removeKeysFromFailedServer(
+				    cx, removeFailedServer.getFuture().get(), teamForDroppedRange, lock, ddEnabledState));
 				Optional<UID> tssPairID;
 				wait(removeStorageServer(cx, removeFailedServer.getFuture().get(), tssPairID, lock, ddEnabledState));
 			} else {

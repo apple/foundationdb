@@ -37,8 +37,8 @@ struct ProtocolVersionWorkload : TestWorkload {
 
 		ASSERT(diffVersionProcess != allProcesses.end());
 
-		RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{ { (*diffVersionProcess)->addresses },
-			                                                        WLTOKEN_PROTOCOL_INFO } };
+		RequestStream<ProtocolInfoRequest> requestStream{ Endpoint::wellKnown({ (*diffVersionProcess)->addresses },
+			                                                                  WLTOKEN_PROTOCOL_INFO) };
 		ProtocolInfoReply reply = wait(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
 
 		ASSERT(reply.version != g_network->protocolVersion());

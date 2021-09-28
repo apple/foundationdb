@@ -118,7 +118,7 @@ storage migration type
 ^^^^^^^^^^^^^^^^^^^^^^
 
 Set the storage migration type, or how FDB should migrate to a new storage engine if the value is changed.
-The default is ``disabled``, which means changing the storage engine will not be possible. 
+The default is ``disabled``, which means changing the storage engine will not be possible.
 
 * ``disabled``
 * ``gradual``
@@ -127,7 +127,6 @@ The default is ``disabled``, which means changing the storage engine will not be
 ``gradual`` replaces a single storage at a time when the ``perpetual storage wiggle`` is active. This requires the perpetual storage wiggle to be set to a non-zero value to actually migrate storage servers. It is somewhat slow but very safe. This is the recommended method for all production clusters.
 ``aggressive`` tries to replace as many storages as it can at once, and will recruit a new storage server on the same process as the old one. This will be faster, but can potentially hit degraded performance or OOM with two storages on the same process. The main benefit over ``gradual`` is that this doesn't need to take one storage out of rotation, so it works for small or development clusters that have the same number of storage processes as the replication factor. Note that ``aggressive`` is not exclusive to running the perpetual wiggle.
 ``disabled`` means that if the storage engine is changed, fdb will not move the cluster over to the new storage engine. This will disable the perpetual wiggle from rewriting storage files.
-
 
 consistencycheck
 ----------------
