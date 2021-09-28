@@ -958,8 +958,8 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 			qe.storageTeams.push_back(message.first);
 			qe.messages.push_back(message.second);
 		}
-		// Currently only store commit messages in memory and not using persistent queue
-		// self->persistentQueue->push(qe, logData);
+		self->persistentQueue->push(qe, logData);
+		self->persistentQueue->commit();
 
 		self->diskQueueCommitBytes += qe.expectedSize();
 		if (self->diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES) {
@@ -998,7 +998,8 @@ Optional<std::pair<Version, StringRef>> LogGenerationData::getSerializedTLogData
                                                                                  const StorageTeamID& storageTeamID) {
 
 	auto pStorageTeamData = getStorageTeamData(storageTeamID);
-	// Is any message with version no less than the given one available?
+	// by lower_bound, if we pass in 10, we might get 12, and return 12
+	// question: is version within storageTeamId continuous?
 	auto iter = pStorageTeamData->versionMessages.lower_bound(version);
 	if (iter == pStorageTeamData->versionMessages.end()) {
 		return Optional<std::pair<Version, StringRef>>();
@@ -1027,6 +1028,11 @@ ACTOR Future<Void> tLogPeekMessages(TLogPeekRequest req, Reference<LogGeneration
 	while ((serializedData = logData->getSerializedTLogData(version, req.storageTeamID)).present()) {
 		auto result = serializedData.get();
 		version = result.first;
+
+		if (req.endVersion.present() && version > req.endVersion.get()) {
+			// [will remove afterPR] previously has a bug, if first run version is bigger than req, it will be returned anyways.
+			break;
+		}
 		auto& data = result.second;
 
 		if (!reply.beginVersion.present()) {
@@ -1038,10 +1044,6 @@ ACTOR Future<Void> tLogPeekMessages(TLogPeekRequest req, Reference<LogGeneration
 		versionCount++;
 
 		if (serializer.getTotalBytes() > TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA) {
-			break;
-		}
-
-		if (req.endVersion.present() && version >= req.endVersion.get()) {
 			break;
 		}
 	}
@@ -1475,8 +1477,7 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializePtxnTLogR
 	return Void();
 }
 
-// For now, `persistentDataAndQueues` is not used and they are created inside tLog actor.
-ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues,
+ACTOR Future<Void> tLog(std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues,
                         Reference<AsyncVar<ServerDBInfo>> db,
                         LocalityData locality,
                         PromiseStream<InitializePtxnTLogRequest> tlogRequests,
@@ -1508,13 +1509,8 @@ ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> per
 					std::vector<Future<Void>> tlogGroupRecoveries;
 					for (auto& group : req.tlogGroups) {
 						// memory managed by each tlog group
-						IKeyValueStore* persistentData =
-						    keyValueStoreMemory(joinPath(folder, "loggroup"), group.logGroupId, 500e6);
-						IDiskQueue* persistentQueue =
-						    openDiskQueue(joinPath(folder, "logqueue-" + group.logGroupId.toString() + "-"),
-						                  "fdq",
-						                  group.logGroupId,
-						                  DiskQueueVersion::V1);
+						IKeyValueStore* persistentData = persistentDataAndQueues[group.logGroupId].first;
+						IDiskQueue* persistentQueue = persistentDataAndQueues[group.logGroupId].second;
 
 						Reference<TLogGroupData> tlogGroup = makeReference<TLogGroupData>(tlogId,
 						                                                                  group.logGroupId,

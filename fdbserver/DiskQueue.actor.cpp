@@ -867,59 +867,7 @@ public:
 	}
 };
 
-// InMemoryDiskQueue placeholder.
-class InMemoryDiskQueue : public IDiskQueue, public Tracked<InMemoryDiskQueue> {
-public:
-	InMemoryDiskQueue(UID dbgid, DiskQueueVersion diskQueueVersion)
-	  : dbgid(dbgid), diskQueueVersion(diskQueueVersion), recovered(false), initialized(false) {}
 
-	location push(StringRef contents) override {
-		ASSERT(recovered);
-		return location();
-	}
-
-	void pop(location upTo) override { ASSERT(!upTo.hi); }
-
-	Future<Standalone<StringRef>> read(location from, location to, CheckHashes ch) override {
-		return Future<Standalone<StringRef>>();
-	}
-
-	Future<Void> commit() override {
-		ASSERT(recovered);
-		return Future<Void>();
-	}
-
-	Future<bool> initializeRecovery(location recoverAt) override { return Future<bool>(true); }
-	Future<Standalone<StringRef>> readNext(int bytes) override { return Future<Standalone<StringRef>>(); }
-
-	// FIXME: getNextReadLocation should ASSERT( initialized ), but the memory storage engine needs
-	// to be changed to understand the new intiailizeRecovery protocol.
-	location getNextReadLocation() const override { return location(); }
-	location getNextCommitLocation() const override { return location(); }
-	location getNextPushLocation() const override {
-		ASSERT(initialized);
-		return location();
-	}
-
-	Future<Void> getError() override { return Future<Void>(); }
-	Future<Void> onClosed() override { return Future<Void>(); }
-
-	void dispose() override {}
-
-	void close() override {}
-
-	StorageBytes getStorageBytes() const override { return StorageBytes(); }
-
-	DiskQueueVersion getDiskQueueVersion() const { return diskQueueVersion; }
-
-private:
-	UID dbgid;
-	DiskQueueVersion diskQueueVersion;
-
-	// Recovery state
-	bool recovered;
-	bool initialized;
-};
 
 class DiskQueue : public IDiskQueue, public Tracked<DiskQueue> {
 public:

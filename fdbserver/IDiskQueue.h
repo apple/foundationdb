@@ -97,6 +97,82 @@ public:
 	virtual StorageBytes getStorageBytes() const = 0;
 };
 
+// InMemoryDiskQueue
+// Use a map<location, StringRef> to emulate disk
+// the location in the key must have the same `lo` and `hi` for simplicity, can extend anytime if needed.
+class InMemoryDiskQueue : public IDiskQueue {
+public:
+	InMemoryDiskQueue(UID dbgid)
+	  : dbgid(dbgid), recovered(false), initialized(false),
+	   cursorWrite(0), cursorRead(0), cursorCommit(0) {}
+
+	location push(StringRef contents) override {
+		// ASSERT(recovered);
+		++cursorWrite;
+		q[location(cursorWrite, cursorWrite)] = contents;
+		return location(cursorWrite, cursorWrite);
+	}
+
+	void pop(location upTo) override { 
+		ASSERT(upTo.hi); 
+		cursorRead = cursorRead < upTo.hi ? upTo.hi : cursorRead;
+		cursorRead = cursorRead > cursorCommit ? cursorCommit : cursorRead;
+	}
+
+	// now `from` and `to` must be the same, and its `hi` and `lo` must also be the same.
+	Future<Standalone<StringRef>> read(location from, location to, CheckHashes ch) override {
+		ASSERT(from == to);
+		ASSERT(from.hi == from.lo);
+		if (from.hi > cursorCommit || from.hi <= cursorRead) {
+			return Future<Standalone<StringRef>>();
+		}
+		return Future<Standalone<StringRef>>(q[from]);
+	}
+
+	Future<Void> commit() override {
+		// ASSERT(recovered);
+		cursorCommit = cursorWrite;
+		return Future<Void>();
+	}
+
+	Future<bool> initializeRecovery(location recoverAt) override { return Future<bool>(true); }
+	Future<Standalone<StringRef>> readNext(int bytes) override { return Future<Standalone<StringRef>>(); }
+
+	// FIXME: getNextReadLocation should ASSERT( initialized ), but the memory storage engine needs
+	// to be changed to understand the new intiailizeRecovery protocol.
+	location getNextReadLocation() const override { return location(cursorRead + 1, cursorRead + 1); }
+	location getNextCommitLocation() const override { return location(cursorCommit + 1, cursorCommit + 1); }
+	location getNextPushLocation() const override {
+		// ASSERT(initialized);
+		return location(cursorWrite + 1, cursorWrite + 1);
+	}
+
+	Future<Void> getError() override { return Future<Void>(); }
+	Future<Void> onClosed() override { return Future<Void>(); }
+
+	void dispose() override {}
+
+	void close() override {}
+
+	StorageBytes getStorageBytes() const override { return StorageBytes(); }
+
+	int getCommitOverhead() const override {
+		return 0;
+	}
+
+private:
+	UID dbgid;
+	std::map<location, StringRef> q;
+	// cursors represent the next location. e.g. cursorRead == 7, meaning 7 has been read and 8 is the next to read.
+	int cursorWrite;
+	int cursorRead;
+	int cursorCommit;
+
+	// Recovery state
+	bool recovered;
+	bool initialized;
+};
+
 template <>
 struct Traceable<IDiskQueue::location> : std::true_type {
 	static std::string toString(const IDiskQueue::location& value) { return value; }
