@@ -1379,7 +1379,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						// Assign the shard to teamForDroppedRange in keyServer space.
 						tr.set(keyServersKey(shard.begin), keyServersValue(UIDtoTagMap, teamForDroppedRange, {}));
 
-						std::vector<Future<Void>> actors;
+						state std::vector<Future<Void>> actors;
 
 						// Unassign the shard from the dest servers.
 						for (const UID& id : dest) {
@@ -1494,6 +1494,7 @@ void setUpMetadataServers(Arena& arena,
                           CommitTransactionRef& tr,
                           std::vector<StorageServerInterface> servers,
                           std::unordered_map<UID, Tag> serverTagMap) {
+	std::cout << "SetUpMetadataServersBegin" << std::endl;
 	std::sort(servers.begin(), servers.end());
 
 	for (auto& s : servers) {
@@ -1518,6 +1519,7 @@ void setUpMetadataServers(Arena& arena,
 		krmSetPreviouslyEmptyRange(
 		    tr, arena, serverKeysPrefixFor(s.id()), systemKeys, serverKeysTrueEmptyRange, serverKeysFalse);
 	}
+	std::cout << "SetUpMetadataServersEnd" << std::endl;
 }
 
 // Called by the master server to write the very first transaction to the database

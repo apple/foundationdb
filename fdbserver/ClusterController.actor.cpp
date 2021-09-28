@@ -125,6 +125,7 @@ public:
 		int64_t dbInfoCount;
 		bool recoveryStalled;
 		bool forceRecovery;
+		bool recoverMetadata;
 		DatabaseConfiguration config; // Asynchronously updated via master registration
 		DatabaseConfiguration fullyRecoveredConfig;
 		Database db;
@@ -136,12 +137,12 @@ public:
 		DBInfo()
 		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
 		    masterRegistrationCount(0), dbInfoCount(0), recoveryStalled(false), forceRecovery(false),
-		    db(DatabaseContext::create(clientInfo,
-		                               Future<Void>(),
-		                               LocalityData(),
-		                               EnableLocalityLoadBalance::True,
-		                               TaskPriority::DefaultEndpoint,
-		                               LockAware::True)), // SOMEDAY: Locality!
+		    recoverMetadata(false), db(DatabaseContext::create(clientInfo,
+		                                                       Future<Void>(),
+		                                                       LocalityData(),
+		                                                       EnableLocalityLoadBalance::True,
+		                                                       TaskPriority::DefaultEndpoint,
+		                                                       LockAware::True)), // SOMEDAY: Locality!
 		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false) {}
 
 		void setDistributor(const DataDistributorInterface& interf) {
@@ -3193,12 +3194,14 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 			RecruitMasterRequest rmq;
 			rmq.lifetime = db->serverInfo->get().masterLifetime;
 			rmq.forceRecovery = db->forceRecovery;
+			rmq.recoverMetadata = db->recoverMetadata;
 
 			cluster->masterProcessId = masterWorker.worker.interf.locality.processId();
 			cluster->db.unfinishedRecoveries++;
 			state Future<ErrorOr<MasterInterface>> fNewMaster = masterWorker.worker.interf.master.tryGetReply(rmq);
 			wait(ready(fNewMaster) || db->forceMasterFailure.onTrigger());
 			if (fNewMaster.isReady() && fNewMaster.get().present()) {
+				db->recoverMetadata = false;
 				TraceEvent("CCWDB", cluster->id).detail("Recruited", fNewMaster.get().get().id());
 
 				// for status tool
@@ -4666,22 +4669,8 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 		TraceEvent("ForcedRecoveryStart", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("DcId", req.dcId.printable());
-		state Future<Void> fCommit = doEmptyCommit(self->cx);
-		wait(fCommit || delay(SERVER_KNOBS->FORCE_RECOVERY_CHECK_DELAY));
-		if (!fCommit.isReady() || fCommit.isError()) {
-			if (self->clusterControllerDcId != req.dcId) {
-				std::vector<Optional<Key>> dcPriority;
-				dcPriority.push_back(req.dcId);
-				dcPriority.push_back(self->clusterControllerDcId);
-				self->desiredDcIds.set(dcPriority);
-			} else {
-				self->db.forceRecovery = true;
-				self->db.forceMasterFailure.trigger();
-			}
-			wait(fCommit);
-		}
-		TraceEvent("ForcedRecoveryFinish", self->id).log();
-		self->db.forceRecovery = false;
+			self->db.recoverMetadata = true;
+			self->db.forceMasterFailure.trigger();
 		req.reply.send(Void());
 	}
 }

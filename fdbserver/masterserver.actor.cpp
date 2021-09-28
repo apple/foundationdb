@@ -236,6 +236,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	PromiseStream<Future<Void>> addActor;
 	Reference<AsyncVar<bool>> recruitmentStalled;
 	bool forceRecovery;
+	bool recoverMetadata;
+	std::unordered_map<UID, Tag> serverTagMap;
 	bool neverCreated;
 	int8_t safeLocality;
 	int8_t primaryLocality;
@@ -263,7 +265,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	           ClusterControllerFullInterface const& clusterController,
 	           Standalone<StringRef> const& dbId,
 	           PromiseStream<Future<Void>> const& addActor,
-	           bool forceRecovery)
+	           bool forceRecovery,
+	           bool recoverMetadata)
 
 	  : dbgid(myInterface.id()), lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
 	    lastCommitTime(0), liveCommittedVersion(invalidVersion), databaseLocked(false),
@@ -271,8 +274,9 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr), memoryLimit(2e9), dbId(dbId),
 	    myInterface(myInterface), clusterController(clusterController), cstate(coordinators, addActor, dbgid),
 	    dbInfo(dbInfo), registrationCount(0), addActor(addActor),
-	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery), neverCreated(false),
-	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), cc("Master", dbgid.toString()),
+	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery),
+	    recoverMetadata(recoverMetadata), neverCreated(false), safeLocality(tagLocalityInvalid),
+	    primaryLocality(tagLocalityInvalid), cc("Master", dbgid.toString()),
 	    changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
@@ -488,6 +492,7 @@ ACTOR Future<Void> newMetaDataServers(Reference<MasterData> self,
                                       std::vector<StorageServerInterface>* servers,
                                       std::unordered_map<UID, Tag>* serverTagMap) {
 	servers->clear();
+	serverTagMap->clear();
 
 	RangeResult serverTags = self->txnStateStore->readRange(serverTagKeys).get();
 
@@ -499,14 +504,14 @@ ACTOR Future<Void> newMetaDataServers(Reference<MasterData> self,
 
 	state int idx = 0;
 	while (idx < recruits.storageServers.size()) {
-		TraceEvent("MasterRecruitingInitialStorageServer", self->dbgid)
+		TraceEvent("MasterRecruitingEmergencyMetadataStorageServer", self->dbgid)
 		    .detail("CandidateWorker", recruits.storageServers[idx].locality.toString());
 		Optional<Value> dcId = recruits.storageServers[idx].locality.dcId();
 		ASSERT(dcId.present());
 
 		Optional<Value> localityValue = self->txnStateStore->readValue(tagLocalityListKeyFor(dcId.get())).get();
 		ASSERT(localityValue.present());
-		int8_t locality = decodeTagLocalityListValue(localityValue);
+		state int8_t locality = decodeTagLocalityListValue(localityValue.get());
 
 		InitializeStorageRequest isr;
 		isr.seedTag = Tag(locality, ++maxTagId);
@@ -521,15 +526,14 @@ ACTOR Future<Void> newMetaDataServers(Reference<MasterData> self,
 			    !newServer.isError(error_code_request_maybe_delivered))
 				throw newServer.getError();
 
-			TEST(true); // masterserver initial storage recuitment loop failed to get new server
 			wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY));
 		} else {
 			servers->push_back(newServer.get().interf);
-			serverTagMap[newServer.get().interf.uniqueID] = Tag(locality, maxTagId);
+			(*serverTagMap)[newServer.get().interf.uniqueID] = Tag(locality, maxTagId);
 		}
 	}
 
-	TraceEvent("MasterRecruitedInitialStorageServers", self->dbgid)
+	TraceEvent("MasterRecruitedEmergencyMetadataStorageServers", self->dbgid)
 	    .detail("TargetCount", self->configuration.storageTeamSize)
 	    .detail("Servers", describe(*servers));
 
@@ -833,7 +837,11 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand
 	// new database we are sort of lying that we are past the recruitment phase.  In a perfect world we would split that
 	// up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
-	wait(newSeedServers(self, recruits, seedServers));
+	if (!self->lastEpochEnd) {
+		wait(newSeedServers(self, recruits, seedServers));
+	} else if (self->recoverMetadata) {
+		wait(newMetaDataServers(self, recruits, seedServers, &self->serverTagMap));
+	}
 	state std::vector<Standalone<CommitTransactionRef>> confChanges;
 	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits) &&
 	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
@@ -1907,6 +1915,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		// This transaction must be the very first one in the database (version 1)
 		seedShardServers(recoveryCommitRequest.arena, tr, seedServers);
 	}
+
 	// initialConfChanges have not been conflict checked against any earlier writes in the recovery transaction, so do
 	// this as early as possible in the recovery transaction but see above comments as to why it can't be absolutely
 	// first.  Theoretically emergency transactions should conflict check against the lastEpochEndKey.
@@ -1914,6 +1923,10 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		tr.mutations.append_deep(recoveryCommitRequest.arena, itr.mutations.begin(), itr.mutations.size());
 		tr.write_conflict_ranges.append_deep(
 		    recoveryCommitRequest.arena, itr.write_conflict_ranges.begin(), itr.write_conflict_ranges.size());
+	}
+
+	if (self->recoverMetadata) {
+		setUpMetadataServers(recoveryCommitRequest.arena, tr, seedServers, self->serverTagMap);
 	}
 
 	tr.set(
@@ -2048,7 +2061,8 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 ServerCoordinators coordinators,
                                 LifetimeToken lifetime,
-                                bool forceRecovery) {
+                                bool forceRecovery,
+                                bool recoverMetadata) {
 	state Future<Void> ccTimeout = delay(SERVER_KNOBS->CC_INTERFACE_TIMEOUT);
 	while (!ccInterface->get().present() || db->get().clusterInterface != ccInterface->get().get()) {
 		wait(ccInterface->onChange() || db->onChange() || ccTimeout);
@@ -2063,8 +2077,14 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 
 	state Future<Void> onDBChange = Void();
 	state PromiseStream<Future<Void>> addActor;
-	state Reference<MasterData> self(new MasterData(
-	    db, mi, coordinators, db->get().clusterInterface, LiteralStringRef(""), addActor, forceRecovery));
+	state Reference<MasterData> self(new MasterData(db,
+	                                                mi,
+	                                                coordinators,
+	                                                db->get().clusterInterface,
+	                                                LiteralStringRef(""),
+	                                                addActor,
+	                                                forceRecovery,
+	                                                recoverMetadata));
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 	self->addActor.send(traceRole(Role::MASTER, mi.id()));
 

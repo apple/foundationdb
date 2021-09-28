@@ -76,23 +76,18 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		// Move [key, endKey) to team: {address}.
 		state NetworkAddress address = wait(self->disableDDAndMoveShard(self, cx, systemKeys));
-		wait(self->readAndVerify(self, cx, keyServersKey(key), oldValue));
+		// wait(self->readAndVerify(self, cx, keyServersKey(key), oldValue));
 
 		// Kill team {address}, and expect read to timeout.
 		self->killProcess(self, address);
-		std::cout << "Killed process: " << address.toString() << endl;
+		std::cout << "Killed process: " << address.toString() << std::endl;
 		wait(self->readAndVerify(self, cx, keyServersKey(key), "Timeout"_sr));
-		std::cout << "Verified reading metadata timeout" << endl;
+		std::cout << "Verified reading metadata timeout" << std::endl;
 
-		// Reenable DD and exclude address as fail, so that [key, endKey) will be dropped and moved to a new team.
-		// Expect read to return 'value not found'.
-		int ignore = wait(setDDMode(cx, 1));
-		wait(self->exclude(self, cx, key, address));
-		wait(self->readAndVerify(self, cx, key, Optional<Value>()));
-
+		wait(self->readAndVerify(self, cx, key, oldValue));
 		// Write will scceed.
 		wait(self->writeAndVerify(self, cx, key, newValue));
-
+		wait(forceRecovery(cx->getConnectionFile(), LiteralStringRef("1")));
 		return Void();
 	}
 

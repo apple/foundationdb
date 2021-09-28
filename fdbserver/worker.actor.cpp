@@ -1608,8 +1608,13 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				DUMPTOKEN(recruited.notifyBackupWorkerDone);
 
 				// printf("Recruited as masterServer\n");
-				Future<Void> masterProcess = masterServer(
-				    recruited, dbInfo, ccInterface, ServerCoordinators(connFile), req.lifetime, req.forceRecovery);
+				Future<Void> masterProcess = masterServer(recruited,
+				                                          dbInfo,
+				                                          ccInterface,
+				                                          ServerCoordinators(connFile),
+				                                          req.lifetime,
+				                                          req.forceRecovery,
+				                                          req.recoverMetadata);
 				errorForwarders.add(
 				    zombie(recruited, forwardError(errors, Role::MASTER, recruited.id(), masterProcess)));
 				req.reply.send(recruited);
