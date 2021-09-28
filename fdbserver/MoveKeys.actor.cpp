@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/CommitProxyInterface.h"
 #include "flow/IRandom.h"
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
@@ -28,6 +29,8 @@
 #include "fdbserver/TSSMappingUtil.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/serialize.h"
+#include <unordered_map>
+#include <vector>
 
 using std::max;
 using std::min;
@@ -1498,7 +1501,18 @@ void seedShardServers(Arena& arena,
 	tr.read_snapshot = 0;
 	tr.read_conflict_ranges.push_back_deep(arena, allKeys);
 
+	bool txs_team_set = false;
 	for (const auto& [s, _] : servers) {
+		std::vector<UID> team = { s.id() };
+		Key teamListKey = storageServerListToTeamIdKey(team);
+
+		// Create teams
+		auto teamId = txs_team_set ? deterministicRandom()->randomUniqueID() : ptxn::txsTeam;
+		txs_team_set = true;
+		tr.set(arena, storageTeamIdKey(teamId), encodeStorageTeams(team)); // TeamId -> Vec<StorageServers>
+		tr.set(arena, teamListKey, BinaryWriter::toValue(teamId, Unversioned())); // Vec<StorageServer> -> TeamId
+
+		// Assign tags
 		tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(server_tag[s.id()]));
 		tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
 		if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
