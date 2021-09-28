@@ -30,6 +30,9 @@
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystem.h"
+#include "flow/Arena.h"
+#include <iostream>
+#include <utility>
 
 Reference<StorageInfo> getStorageInfo(UID id,
                                       std::map<UID, Reference<StorageInfo>>* storageCache,
@@ -63,9 +66,12 @@ public:
 	                           Arena& arena_,
 	                           const VectorRef<MutationRef>& mutations_,
 	                           IKeyValueStore* txnStateStore_,
-	                           Reference<TLogGroupCollection> tLogGroupCollection_)
+	                           Reference<TLogGroupCollection> tLogGroupCollection_,
+	                           std::map<Tag, UID>* tagToServer_,
+	                           std::unordered_map<UID, ptxn::StorageTeamID>* ssToStorageTeam_)
 	  : spanContext(spanContext_), dbgid(dbgid_), arena(arena_), mutations(mutations_), txnStateStore(txnStateStore_),
-	    confChange(dummyConfChange), tLogGroupCollection(tLogGroupCollection_) {}
+	    confChange(dummyConfChange), tLogGroupCollection(tLogGroupCollection_), tagToServer(tagToServer_),
+	    ssToStorageTeam(ssToStorageTeam_) {}
 
 	ApplyMetadataMutationsImpl(const SpanID& spanContext_,
 	                           Arena& arena_,
@@ -84,7 +90,8 @@ public:
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), commitVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
 	    tssMapping(&proxyCommitData_.tssMapping), initialCommit(initialCommit_),
-	    tLogGroupCollection(proxyCommitData_.tLogGroupCollection) {}
+	    tLogGroupCollection(proxyCommitData_.tLogGroupCollection), tagToServer(&proxyCommitData_.tagToServer),
+	    ssToStorageTeam(&proxyCommitData_.ssToStorageTeam) {}
 
 private:
 	// The following variables are incoming parameters
@@ -139,10 +146,29 @@ private:
 	// commit
 	std::vector<std::pair<UID, UID>> tssMappingToAdd;
 
+	std::map<Tag, UID>* tagToServer = nullptr;
+	std::unordered_map<UID, ptxn::StorageTeamID>* ssToStorageTeam = nullptr;
+
 private:
 	bool dummyConfChange = false;
 
 private:
+	Optional<ptxn::StorageTeamID> tagToTeam(Tag tag) {
+		auto ss_it = tagToServer->find(tag);
+		if (ss_it == tagToServer->end()) {
+			ASSERT(false);
+			return Optional<ptxn::StorageTeamID>();
+		}
+
+		auto team_it = ssToStorageTeam->find(ss_it->second);
+		if (team_it == ssToStorageTeam->end()) {
+			ASSERT(false);
+			return Optional<ptxn::StorageTeamID>();
+		}
+
+		return team_it->second;
+	}
+
 	void checkSetKeyServersPrefix(MutationRef m) {
 		if (!m.param1.startsWith(keyServersPrefix)) {
 			return;
@@ -248,16 +274,19 @@ private:
 		if (!m.param1.startsWith(storageTeamIdKeyPrefix)) {
 			return;
 		}
+
 		ASSERT_WE_THINK(tLogGroupCollection.isValid());
 		auto teamid = storageTeamIdKeyDecode(m.param1);
+		auto team = decodeStorageTeams(m.param2);
+		ssToStorageTeam->emplace(team[0], teamid);
 
-		if (SERVER_KNOBS->TLOG_NEW_INTERFACE &&
-		    tLogGroupCollection->tryAddStorageTeam(teamid, decodeStorageTeams(m.param2))) {
+		if (SERVER_KNOBS->TLOG_NEW_INTERFACE && tLogGroupCollection->tryAddStorageTeam(teamid, team)) {
 			auto group = tLogGroupCollection->assignStorageTeam(teamid);
 			// TODO: This may be unnessary, as ApplyMetadataMutation case for this key-range
 			//     should do the assignment.
 			txnStateStore->set(
 			    KeyValueRef(storageTeamIdToTLogGroupKey(teamid), BinaryWriter::toValue(group->id(), Unversioned())));
+			ASSERT(team.size() == 1);
 		}
 
 		// Storage Team ID to Storage Server List
@@ -287,6 +316,7 @@ private:
 		}
 		UID id = decodeServerTagKey(m.param1);
 		Tag tag = decodeServerTagValue(m.param2);
+		tagToServer->emplace(tag, id);
 
 		if (toCommit) {
 			MutationRef privatized = m;
@@ -295,7 +325,7 @@ private:
 
 			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 				//TODO (Vishesh) Add LogProtocolMesssage?
-				toCommit->writeToStorageTeams(tLogGroupCollection, { ptxn::txsTeam }, privatized);
+				toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 			} else {
 				toCommit->addTag(tag);
 				toCommit->writeTypedMessage(LogProtocolMessage(), true);
@@ -1084,6 +1114,7 @@ public:
 			if (m.type == MutationRef::SetValue && isSystemKey(m.param1)) {
 				checkSetKeyServersPrefix(m);
 				checkSetServerKeysPrefix(m);
+				checkSetStorageTeamIDKeyPrefix(m);
 				checkSetServerTagsPrefix(m);
 				checkSetStorageCachePrefix(m);
 				checkSetCacheKeysPrefix(m);
@@ -1154,5 +1185,9 @@ void applyMetadataMutations(SpanID const& spanContext,
                             const VectorRef<MutationRef>& mutations,
                             IKeyValueStore* txnStateStore,
                             TLogGroupCollectionRef tLogGroupCollection) {
-	ApplyMetadataMutationsImpl(spanContext, dbgid, arena, mutations, txnStateStore, tLogGroupCollection).apply();
+	std::map<Tag, UID> tagToServer;
+	std::unordered_map<UID, ptxn::StorageTeamID> ssToStorageTeam;
+	ApplyMetadataMutationsImpl(
+	    spanContext, dbgid, arena, mutations, txnStateStore, tLogGroupCollection, &tagToServer, &ssToStorageTeam)
+	    .apply();
 }
