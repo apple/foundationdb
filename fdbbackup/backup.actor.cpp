@@ -1345,7 +1345,7 @@ static void printDBBackupUsage(bool devhelp) {
 static void printDataMovementUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("Usage: %s [TOP_LEVEL_OPTIONS] (start | status | switch | abort | pause | resume) [OPTIONS]\n\n",
-	       exeDatabaseBackup.toString().c_str());
+	       exeDataMovement.toString().c_str());
 
 	printf(" TOP LEVEL OPTIONS:\n");
 	printf("  --build_flags  Print build information and exit.\n");
