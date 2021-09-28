@@ -443,10 +443,10 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 			    .detail("TSSGetKeyLatency90", it.second->TSSgetKeyLatency.percentile(0.90))
 			    .detail("TSSGetKeyLatency99", it.second->TSSgetKeyLatency.percentile(0.99));
 
-			tssEv.detail("MeanSSGetKeyValuesLatency", it.second->SSgetKeyLatency.mean())
-			    .detail("MedianSSGetKeyValuesLatency", it.second->SSgetKeyLatency.median())
-			    .detail("SSGetKeyValuesLatency90", it.second->SSgetKeyLatency.percentile(0.90))
-			    .detail("SSGetKeyValuesLatency99", it.second->SSgetKeyLatency.percentile(0.99));
+			tssEv.detail("MeanSSGetKeyValuesLatency", it.second->SSgetKeyValuesLatency.mean())
+			    .detail("MedianSSGetKeyValuesLatency", it.second->SSgetKeyValuesLatency.median())
+			    .detail("SSGetKeyValuesLatency90", it.second->SSgetKeyValuesLatency.percentile(0.90))
+			    .detail("SSGetKeyValuesLatency99", it.second->SSgetKeyValuesLatency.percentile(0.99));
 
 			tssEv.detail("MeanTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.mean())
 			    .detail("MedianTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.median())
@@ -2004,8 +2004,25 @@ ACTOR Future<Void> monitorNetworkBusyness() {
 			tracker.windowedTimer = now();
 		}
 
-		g_network->networkInfo.metrics.networkBusyness =
-		    std::min(elapsed, tracker.duration) / elapsed; // average duration spent doing "work"
+		double busyFraction = std::min(elapsed, tracker.duration) / elapsed;
+
+		// The burstiness score is an indicator of the maximum busyness spike over the measurement interval.
+		// It scales linearly from 0 to 1 as the largest burst goes from the start to the saturation threshold.
+		// This allows us to account for saturation that happens in smaller bursts than the measurement interval.
+		//
+		// Burstiness will not be calculated if the saturation threshold is smaller than the start threshold or
+		// if either value is negative.
+		double burstiness = 0;
+		if (CLIENT_KNOBS->BUSYNESS_SPIKE_START_THRESHOLD >= 0 &&
+		    CLIENT_KNOBS->BUSYNESS_SPIKE_SATURATED_THRESHOLD >= CLIENT_KNOBS->BUSYNESS_SPIKE_START_THRESHOLD) {
+			burstiness = std::min(1.0,
+			                      std::max(0.0, tracker.maxDuration - CLIENT_KNOBS->BUSYNESS_SPIKE_START_THRESHOLD) /
+			                          std::max(1e-6,
+			                                   CLIENT_KNOBS->BUSYNESS_SPIKE_SATURATED_THRESHOLD -
+			                                       CLIENT_KNOBS->BUSYNESS_SPIKE_START_THRESHOLD));
+		}
+
+		g_network->networkInfo.metrics.networkBusyness = std::max(busyFraction, burstiness);
 
 		tracker.duration = 0;
 		tracker.maxDuration = 0;
@@ -4638,8 +4655,9 @@ double Transaction::getBackoff(int errCode) {
 				auto tagItr = priorityItr->second.find(tag);
 				if (tagItr != priorityItr->second.end()) {
 					TEST(true); // Returning throttle backoff
-					returnedBackoff = std::min(CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL,
-					                           std::max(returnedBackoff, tagItr->second.throttleDuration()));
+					returnedBackoff = std::max(
+					    returnedBackoff,
+					    std::min(CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL, tagItr->second.throttleDuration()));
 					if (returnedBackoff == CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL) {
 						break;
 					}

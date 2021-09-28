@@ -3084,7 +3084,7 @@ public:
 				state Future<Optional<Key>> fBackupKeysPacked =
 				    tr->get(backupAgent->config.get(BinaryWriter::toValue(logUid, Unversioned()))
 				                .pack(BackupAgentBase::keyConfigBackupRanges));
-				state Future<Optional<Value>> flogVersionKey = 
+				state Future<Optional<Value>> flogVersionKey =
 				    tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
 				                .pack(BackupAgentBase::keyStateLogBeginVersion));
 
@@ -3103,13 +3103,11 @@ public:
 
 					state Optional<Value> stopVersionKey = wait(fStopVersionKey);
 					Optional<Value> logVersionKey = wait(flogVersionKey);
-					state std::string logVersionText
-					    = ". Last log version is " 
-					      + (
-						logVersionKey.present()
-					        ? format("%lld", BinaryReader::fromStringRef<Version>(logVersionKey.get(), Unversioned()))
-					        : "unset"
-					      );
+					state std::string logVersionText =
+					    ". Last log version is " +
+					    (logVersionKey.present()
+					         ? format("%lld", BinaryReader::fromStringRef<Version>(logVersionKey.get(), Unversioned()))
+					         : "unset");
 					Optional<Key> backupKeysPacked = wait(fBackupKeysPacked);
 
 					state Standalone<VectorRef<KeyRangeRef>> backupRanges;
@@ -3128,8 +3126,8 @@ public:
 						    "The DR on tag `" + tagNameDisplay + "' is NOT a complete copy of the primary database.\n";
 						break;
 					case EBackupState::STATE_RUNNING_DIFFERENTIAL:
-						statusText +=
-						    "The DR on tag `" + tagNameDisplay + "' is a complete copy of the primary database" + logVersionText + ".\n";
+						statusText += "The DR on tag `" + tagNameDisplay +
+						              "' is a complete copy of the primary database" + logVersionText + ".\n";
 						break;
 					case EBackupState::STATE_COMPLETED: {
 						Version stopVersion =

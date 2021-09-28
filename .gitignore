@@ -7,8 +7,9 @@ bindings/java/foundationdb-client*.jar
 bindings/java/foundationdb-tests*.jar
 bindings/java/fdb-java-*-sources.jar
 packaging/msi/FDBInstaller.msi
-builds/
-cmake-build-debug/
+build/
+cmake-build-debug*
+
 # Generated source, build, and packaging files
 *.g.cpp
 *.g.h
@@ -62,6 +63,7 @@ packaging/msi/obj
 simfdb
 tests/oldBinaries
 trace.*.xml
+.venv
 
 # Editor files
 *.iml

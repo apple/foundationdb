@@ -496,7 +496,8 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<ClusterConn
 			if (leader.get().first.forward) {
 				TraceEvent("MonitorLeaderForwarding")
 				    .detail("NewConnStr", leader.get().first.serializedInfo.toString())
-				    .detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString()).trackLatest("MonitorLeaderForwarding");
+				    .detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString())
+				    .trackLatest("MonitorLeaderForwarding");
 				info.intermediateConnFile = makeReference<ClusterConnectionFile>(
 				    connFile->getFilename(), ClusterConnectionString(leader.get().first.serializedInfo.toString()));
 				return info;

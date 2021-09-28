@@ -110,6 +110,10 @@ if(UNIX AND NOT APPLE)
   list(APPEND FLOW_SRCS folly_memcpy.S)
 endif()
 
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  list(APPEND FLOW_SRCS aarch64/memcmp.S aarch64/memcpy.S)
+endif()
+
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config.h)
 

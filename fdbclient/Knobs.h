@@ -233,6 +233,10 @@ public:
 	double TAG_THROTTLE_RECHECK_INTERVAL;
 	double TAG_THROTTLE_EXPIRATION_INTERVAL;
 
+	// busyness reporting
+	double BUSYNESS_SPIKE_START_THRESHOLD;
+	double BUSYNESS_SPIKE_SATURATED_THRESHOLD;
+
 	ClientKnobs();
 	void initialize(bool randomize = false);
 };
