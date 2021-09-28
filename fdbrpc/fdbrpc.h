@@ -630,8 +630,7 @@ public:
 	template <class X>
 	Future<REPLY_TYPE(X)> getReply(const X& value, TaskPriority taskID) const {
 		setReplyPriority(value, taskID);
-		Future<REPLY_TYPE(X)> ret = getReply(value);
-		return ret;
+		return getReply(value);
 	}
 	template <class X>
 	Future<X> getReply() const {

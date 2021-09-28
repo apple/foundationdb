@@ -224,6 +224,7 @@ ACTOR Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
 	return std::make_pair(maxQueueSize, maxPoppedVersionLag);
 }
 
+// Returns a vector of blob worker interfaces which have been persisted under the system key space
 ACTOR Future<vector<BlobWorkerInterface>> getBlobWorkers(Database cx, bool use_system_priority = false) {
 	state Transaction tr(cx);
 	loop {

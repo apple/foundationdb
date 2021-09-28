@@ -209,7 +209,6 @@ struct BlobManagerData {
 	KeyRangeMap<bool> knownBlobRanges;
 
 	Debouncer restartRecruiting;
-	std::set<UID> recruitingIds; // the IDs of the BWs which are currently being recruited
 	std::set<NetworkAddress> recruitingLocalities; // the addrs of the workers being recruited on
 
 	int64_t epoch = -1;
@@ -833,6 +832,7 @@ ACTOR Future<Void> rangeMover(BlobManagerData* bmData) {
 	}
 }
 
+// Returns the number of blob workers on addr
 int numExistingBWOnAddr(BlobManagerData* self, const AddressExclusion& addr) {
 	int numExistingBW = 0;
 	for (auto& server : self->workersById) {
@@ -846,6 +846,7 @@ int numExistingBWOnAddr(BlobManagerData* self, const AddressExclusion& addr) {
 	return numExistingBW;
 }
 
+// Tries to recruit a blob worker on the candidateWorker process
 ACTOR Future<Void> initializeBlobWorker(BlobManagerData* self, RecruitBlobWorkerReply candidateWorker) {
 	const NetworkAddress& netAddr = candidateWorker.worker.stableAddress();
 	AddressExclusion workerAddr(netAddr.ip, netAddr.port);
@@ -858,7 +859,7 @@ ACTOR Future<Void> initializeBlobWorker(BlobManagerData* self, RecruitBlobWorker
 		initReq.reqId = deterministicRandom()->randomUniqueID();
 		initReq.interfaceId = interfaceId;
 
-		self->recruitingIds.insert(interfaceId);
+		// acknowledge that this worker is currently being recruited on
 		self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
 
 		TraceEvent("BMRecruiting")
@@ -868,11 +869,17 @@ ACTOR Future<Void> initializeBlobWorker(BlobManagerData* self, RecruitBlobWorker
 		    .detail("Interf", interfaceId)
 		    .detail("Addr", candidateWorker.worker.address());
 
+		// send initialization request to worker (i.e. worker.actor.cpp)
+		// here, the worker will construct the blob worker at which point the BW will start!
 		Future<ErrorOr<InitializeBlobWorkerReply>> fRecruit =
 		    candidateWorker.worker.blobWorker.tryGetReply(initReq, TaskPriority::BlobManager);
 
+		// wait on the reply to the request
 		state ErrorOr<InitializeBlobWorkerReply> newBlobWorker = wait(fRecruit);
 
+		// if the initialization failed in an unexpected way, then kill the BM.
+		// if it failed in an expected way, add some delay before we try to recruit again
+		// on this worker
 		if (newBlobWorker.isError()) {
 			TraceEvent(SevWarn, "BMRecruitmentError").error(newBlobWorker.getError());
 			if (!newBlobWorker.isError(error_code_recruitment_failed) &&
@@ -882,9 +889,8 @@ ACTOR Future<Void> initializeBlobWorker(BlobManagerData* self, RecruitBlobWorker
 			wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskPriority::BlobManager));
 		}
 
-		self->recruitingIds.erase(interfaceId);
-		self->recruitingLocalities.erase(candidateWorker.worker.stableAddress());
-
+		// if the initialization succeeded, add the blob worker's interface to
+		// the blob manager's data and start monitoring the blob worker
 		if (newBlobWorker.present()) {
 			BlobWorkerInterface bwi = newBlobWorker.get().interf;
 
@@ -899,6 +905,11 @@ ACTOR Future<Void> initializeBlobWorker(BlobManagerData* self, RecruitBlobWorker
 			    .detail("Interf", interfaceId)
 			    .detail("Addr", candidateWorker.worker.address());
 		}
+
+		// acknowledge that this worker is not actively being recruited on anymore.
+		// if the initialization did succeed, then this worker will still be excluded
+		// since it was added to workersById.
+		self->recruitingLocalities.erase(candidateWorker.worker.stableAddress());
 	}
 
 	// try to recruit more blob workers
@@ -906,6 +917,7 @@ ACTOR Future<Void> initializeBlobWorker(BlobManagerData* self, RecruitBlobWorker
 	return Void();
 }
 
+// Recruits blob workers in a loop
 ACTOR Future<Void> blobWorkerRecruiter(
     BlobManagerData* self,
     Reference<IAsyncListener<RequestStream<RecruitBlobWorkerRequest>>> recruitBlobWorker) {
@@ -916,12 +928,14 @@ ACTOR Future<Void> blobWorkerRecruiter(
 		try {
 			state RecruitBlobWorkerRequest recruitReq;
 
+			// workers that are used by existing blob workers should be excluded
 			for (auto const& [bwId, bwInterf] : self->workersById) {
 				auto addr = bwInterf.stableAddress();
 				AddressExclusion addrExcl(addr.ip, addr.port);
 				recruitReq.excludeAddresses.emplace_back(addrExcl);
 			}
 
+			// workers that are used by blob workers that are currently being recruited should be excluded
 			for (auto addr : self->recruitingLocalities) {
 				recruitReq.excludeAddresses.emplace_back(AddressExclusion(addr.ip, addr.port));
 			}
@@ -931,15 +945,21 @@ ACTOR Future<Void> blobWorkerRecruiter(
 			if (!fCandidateWorker.isValid() || fCandidateWorker.isReady() ||
 			    recruitReq.excludeAddresses != lastRequest.excludeAddresses) {
 				lastRequest = recruitReq;
+				// send req to cluster controller to get back a candidate worker we can recruit on
 				fCandidateWorker =
 				    brokenPromiseToNever(recruitBlobWorker->get().getReply(recruitReq, TaskPriority::BlobManager));
 			}
 
 			choose {
+				// when we get back a worker we can use, we will try to initialize a blob worker onto that process
 				when(RecruitBlobWorkerReply candidateWorker = wait(fCandidateWorker)) {
 					self->addActor.send(initializeBlobWorker(self, candidateWorker));
 				}
+
+				// when the CC changes, so does the request stream so we need to restart recruiting here
 				when(wait(recruitBlobWorker->onChange())) { fCandidateWorker = Future<RecruitBlobWorkerReply>(); }
+
+				// signal used to restart the loop and try to recruit the next blob worker
 				when(wait(self->restartRecruiting.onTrigger())) {}
 			}
 			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskPriority::BlobManager));
@@ -952,14 +972,6 @@ ACTOR Future<Void> blobWorkerRecruiter(
 	}
 }
 
-// recruitment errors
-// - process class changes
-// - already exists
-
-// blobmanagerrestart
-// - tricky: recover the ranges of all blob workers (the mapping)
-
-// TODO MOVE ELSEWHERE <-- really?
 ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
                                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                int64_t epoch) {
@@ -992,6 +1004,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		printf("Blob manager acquired lock at epoch %lld\n", epoch);
 	}
 
+	// needed to pick up changes to dbinfo in case new CC comes along
 	auto recruitBlobWorker = IAsyncListener<RequestStream<RecruitBlobWorkerRequest>>::create(
 	    dbInfo, [](auto const& info) { return info.clusterInterface.recruitBlobWorker; });
 

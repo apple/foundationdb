@@ -2254,24 +2254,30 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				printf("BW constructed backup container\n");
 			}
 		}
+
+		// register the blob worker to the system keyspace
+		wait(registerBlobWorker(&self, bwInterf));
 	} catch (Error& e) {
 		if (BW_DEBUG) {
 			printf("BW got backup container init error %s\n", e.name());
 		}
+		// if any errors came up while initializing the blob worker, let the blob manager know
+		// that recruitment failed
 		if (!recruitReply.isSet()) {
 			recruitReply.sendError(recruitment_failed());
 		}
 		throw e;
 	}
 
-	wait(registerBlobWorker(&self, bwInterf));
-
-	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> collection = actorCollection(addActor.getFuture());
-
+	// By now, we know that initialization was successful, so
+	// respond to the initialization request with the interface itself
+	// Note: this response gets picked up by the blob manager
 	InitializeBlobWorkerReply rep;
 	rep.interf = bwInterf;
 	recruitReply.send(rep);
+
+	state PromiseStream<Future<Void>> addActor;
+	state Future<Void> collection = actorCollection(addActor.getFuture());
 
 	addActor.send(waitFailureServer(bwInterf.waitFailure.getFuture()));
 	addActor.send(runCommitVersionChecks(&self));

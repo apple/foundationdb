@@ -1877,11 +1877,9 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				recruited.initEndpoints();
 				startRole(Role::BLOB_WORKER, recruited.id(), interf.id());
 
-				//				fprintf(stderr, "Recruited as blob worker\n");
-
 				ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady = req.reply;
-				Future<Void> s = blobWorker(recruited, blobWorkerReady, dbInfo);
-				errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), s));
+				Future<Void> bw = blobWorker(recruited, blobWorkerReady, dbInfo);
+				errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
 			}
 			when(InitializeCommitProxyRequest req = waitNext(interf.commitProxy.getFuture())) {
 				LocalLineage _;
