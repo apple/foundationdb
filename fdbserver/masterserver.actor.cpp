@@ -351,6 +351,7 @@ ACTOR Future<Void> newResolvers(Reference<MasterData> self, RecruitFromConfigura
 	std::vector<Future<ResolverInterface>> initializationReplies;
 	for (int i = 0; i < recr.resolvers.size(); i++) {
 		InitializeResolverRequest req;
+		req.masterId = self->dbgid;
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
 		req.commitProxyCount = recr.commitProxies.size();
 		req.resolverCount = recr.resolvers.size();
@@ -943,6 +944,9 @@ ACTOR Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self) {
 
 	state std::vector<Endpoint> endpoints;
 	for (auto& it : self->commitProxies) {
+		endpoints.push_back(it.txnState.getEndpoint());
+	}
+	for (auto& it : self->resolvers) {
 		endpoints.push_back(it.txnState.getEndpoint());
 	}
 
