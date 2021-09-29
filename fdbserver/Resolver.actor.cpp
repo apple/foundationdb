@@ -340,6 +340,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 
 namespace {
 
+// TODO: refactor with the one in CommitProxyServer.actor.cpp
 struct TransactionStateResolveContext {
 	// Maximum sequence for txnStateRequest, this is defined when the request last flag is set.
 	Sequence maxSequence = std::numeric_limits<Sequence>::max();
@@ -357,7 +358,7 @@ struct TransactionStateResolveContext {
 	PromiseStream<Future<Void>>* pActors = nullptr;
 
 	// Flag reports if the transaction state request is complete. This request should only happen during recover, i.e.
-	// once per commit proxy.
+	// once per Resolver.
 	bool processed = false;
 
 	TransactionStateResolveContext() = default;
@@ -432,20 +433,10 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		// avoids a lot of map lookups.
 		pContext->pResolverData->keyInfo.rawInsert(keyInfoData);
 
-		//Arena arena;
-		//bool confChanges;
+		ResolverData resolverData(
+		    pContext->pResolverData->dbgid, pContext->pTxnStateStore, &pContext->pResolverData->keyInfo);
 
-		// TODO
-		//applyMetadataMutations(SpanID(),
-		//                       *pContext->pCommitData,
-		//                       arena,
-		//                       Reference<ILogSystem>(),
-		//                       mutations,
-		//                       /* pToCommit= */ nullptr,
-		//                       confChanges,
-		//                       /* popVersion= */ 0,
-		//                       /* initialCommit= */ true);
-
+		applyMetadataMutations(SpanID(), resolverData, mutations);
 	} // loop
 
 	auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();
