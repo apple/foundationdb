@@ -858,10 +858,10 @@ public:
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
-	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), maxQueryQueue(0), counters(this),
+	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), maxQueryQueue(0),
+	    transactionTagCounter(ssi.id()), counters(this),
 	    storageServerSourceTLogIDEventHolder(
-	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")),
-	    transactionTagCounter(ssi.id()) {
+	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
