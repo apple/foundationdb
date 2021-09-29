@@ -23,10 +23,11 @@
 
 #pragma once
 
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/fdbrpc.h"
 
 struct ResolverInterface {
 	constexpr static FileIdentifier file_identifier = 1755944;
@@ -40,6 +41,8 @@ struct ResolverInterface {
 	RequestStream<struct ResolutionSplitRequest> split;
 
 	RequestStream<ReplyPromise<Void>> waitFailure;
+	// For receiving initial transaction state store broadcast from the master
+	RequestStream<TxnStateRequest> txnState;
 
 	ResolverInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
 	UID id() const { return uniqueID; }
@@ -50,11 +53,14 @@ struct ResolverInterface {
 	void initEndpoints() {
 		metrics.getEndpoint(TaskPriority::ResolutionMetrics);
 		split.getEndpoint(TaskPriority::ResolutionMetrics);
+		waitFailure.getEndpoint();
+		txnState.getEndpoint();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, uniqueID, locality, resolve, metrics, split, waitFailure);
+		// TODO: save space by using getAdjustedEndpoint() as in CommitProxyInterface
+		serializer(ar, uniqueID, locality, resolve, metrics, split, waitFailure, txnState);
 	}
 };
 
