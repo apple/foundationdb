@@ -879,6 +879,14 @@ struct StorageBytes {
 		              used / 1e6,
 		              temp / 1e6);
 	}
+
+	void toTraceEvent(TraceEvent& e) const {
+		e.detail("StorageBytesUsed", used)
+		    .detail("StorageBytesTemp", temp)
+		    .detail("StorageBytesTotal", total)
+		    .detail("StorageBytesFree", free)
+		    .detail("StorageBytesAvailable", available);
+	}
 };
 struct LogMessageVersion {
 	// Each message pushed into the log system has a unique, totally ordered LogMessageVersion
