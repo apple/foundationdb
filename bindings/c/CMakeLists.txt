@@ -72,17 +72,26 @@ if(NOT WIN32)
     test/mako/utils.c
     test/mako/utils.h)
 
+  add_subdirectory(test/unit/third_party)
+  find_package(Threads REQUIRED)
+  set(DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS 
+    test/unit/disconnected_timeout_tests.cpp
+    test/unit/fdb_api.cpp
+    test/unit/fdb_api.hpp)
+
   if(OPEN_FOR_IDE)
     add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)
     add_library(fdb_c_ryw_benchmark OBJECT test/ryw_benchmark.c test/test.h)
     add_library(fdb_c_txn_size_test OBJECT test/txn_size_test.c test/test.h)
     add_library(mako OBJECT ${MAKO_SRCS})
+    add_library(disconnected_timeout_unit_tests OBJECT ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
   else()
     add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
     add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
     add_executable(fdb_c_txn_size_test test/txn_size_test.c test/test.h)
     add_executable(mako ${MAKO_SRCS})
     add_executable(trace_partial_file_suffix_test test/unit/trace_partial_file_suffix_test.cpp)
+    add_executable(disconnected_timeout_unit_tests ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
     strip_debug_symbols(fdb_c_performance_test)
     strip_debug_symbols(fdb_c_ryw_benchmark)
     strip_debug_symbols(fdb_c_txn_size_test)
@@ -90,6 +99,10 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_performance_test PRIVATE fdb_c)
   target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c)
   target_link_libraries(fdb_c_txn_size_test PRIVATE fdb_c)
+
+  add_dependencies(disconnected_timeout_unit_tests doctest)
+  target_include_directories(disconnected_timeout_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
+  target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
@@ -102,6 +115,13 @@ if(NOT WIN32)
     COMMAND $<TARGET_FILE:trace_partial_file_suffix_test>
             @CLUSTER_FILE@
             fdb)
+  add_unavailable_fdbclient_test(
+    NAME disconnected_timeout_unit_tests
+    COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
+            @CLUSTER_FILE@
+            fdb
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
+            )
 endif()
 
 set(c_workloads_srcs
