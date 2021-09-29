@@ -43,6 +43,8 @@ struct BlobWorkerInterface {
 
 	void initEndpoints() {}
 	UID id() const { return myId; }
+	// TODO: why do we get addresses like this? getEndpoint gives u current machines addr?
+	// why don't we expose it as part of locality and get it from there (since locality is given by workr)
 	NetworkAddress address() const { return blobGranuleFileRequest.getEndpoint().getPrimaryAddress(); }
 	NetworkAddress stableAddress() const { return blobGranuleFileRequest.getEndpoint().getStableAddress(); }
 	bool operator==(const BlobWorkerInterface& r) const { return id() == r.id(); }
@@ -51,7 +53,14 @@ struct BlobWorkerInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, blobGranuleFileRequest, assignBlobRangeRequest, locality, myId);
+		serializer(ar,
+		           waitFailure,
+		           blobGranuleFileRequest,
+		           assignBlobRangeRequest,
+		           revokeBlobRangeRequest,
+		           granuleStatusStreamRequest,
+		           locality,
+		           myId);
 	}
 };
 
