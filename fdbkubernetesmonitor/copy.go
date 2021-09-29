@@ -21,7 +21,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 
@@ -50,7 +49,7 @@ func copyFile(logger logr.Logger, inputPath string, outputPath string, required 
 
 	outputDir := path.Dir(outputPath)
 
-	tempFile, err := ioutil.TempFile(outputDir, "")
+	tempFile, err := os.CreateTemp(outputDir, "")
 	if err != nil {
 		return err
 	}

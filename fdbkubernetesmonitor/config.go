@@ -22,6 +22,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 )
 
 // ProcessConfiguration models the configuration for starting a FoundationDB
@@ -107,7 +108,7 @@ func (argument Argument) GenerateArgument(processNumber int, env map[string]stri
 			number = number * argument.Multiplier
 		}
 		number = number + argument.Offset
-		return fmt.Sprintf("%d", number), nil
+		return strconv.Itoa(number), nil
 	case EnvironmentArgumentType:
 		var value string
 		var present bool
