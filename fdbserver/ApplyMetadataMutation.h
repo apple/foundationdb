@@ -31,6 +31,18 @@
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/ProxyCommitData.actor.h"
 
+// Resolver's data for applyMetadataMutations() calls.
+struct ResolverData {
+	UID dbgid;
+	IKeyValueStore* txnStateStore = nullptr;
+	KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr;
+	Arena arena;
+	bool confChanges;
+
+	ResolverData(UID debugId, IKeyValueStore* store, KeyRangeMap<ServerCacheInfo>* info)
+	  : dbgid(debugId), txnStateStore(store), keyInfo(info) {}
+};
+
 inline bool isMetadataMutation(MutationRef const& m) {
 	// FIXME: This is conservative - not everything in system keyspace is necessarily processed by
 	// applyMetadataMutations
@@ -63,5 +75,10 @@ void applyMetadataMutations(SpanID const& spanContext,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,
                             IKeyValueStore* txnStateStore);
+
+// Resolver's version
+void applyMetadataMutations(SpanID const& spanContext,
+                            ResolverData& resolverData,
+                            const VectorRef<MutationRef>& mutations);
 
 #endif
