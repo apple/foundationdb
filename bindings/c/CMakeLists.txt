@@ -82,6 +82,10 @@ if(NOT WIN32)
 
   set(UNIT_TEST_VERSION_510_SRCS test/unit/unit_tests_version_510.cpp)
   set(TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS test/unit/trace_partial_file_suffix_test.cpp)
+  set(DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS 
+    test/unit/disconnected_timeout_tests.cpp
+    test/unit/fdb_api.cpp
+    test/unit/fdb_api.hpp)
 
   if(OPEN_FOR_IDE)
     add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)
@@ -92,6 +96,7 @@ if(NOT WIN32)
     add_library(fdb_c_unit_tests OBJECT ${UNIT_TEST_SRCS})
     add_library(fdb_c_unit_tests_version_510 OBJECT ${UNIT_TEST_VERSION_510_SRCS})
     add_library(trace_partial_file_suffix_test OBJECT ${TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS})
+    add_library(disconnected_timeout_unit_tests OBJECT ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
   else()
     add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
     add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
@@ -101,6 +106,7 @@ if(NOT WIN32)
     add_executable(fdb_c_unit_tests ${UNIT_TEST_SRCS})
     add_executable(fdb_c_unit_tests_version_510 ${UNIT_TEST_VERSION_510_SRCS})
     add_executable(trace_partial_file_suffix_test ${TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS})
+    add_executable(disconnected_timeout_unit_tests ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
     strip_debug_symbols(fdb_c_performance_test)
     strip_debug_symbols(fdb_c_ryw_benchmark)
     strip_debug_symbols(fdb_c_txn_size_test)
@@ -112,13 +118,16 @@ if(NOT WIN32)
   add_dependencies(fdb_c_setup_tests doctest)
   add_dependencies(fdb_c_unit_tests doctest)
   add_dependencies(fdb_c_unit_tests_version_510 doctest)
+  add_dependencies(disconnected_timeout_unit_tests doctest)
   target_include_directories(fdb_c_setup_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_include_directories(fdb_c_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_include_directories(fdb_c_unit_tests_version_510 PUBLIC ${DOCTEST_INCLUDE_DIR})
+  target_include_directories(disconnected_timeout_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads)
   target_link_libraries(fdb_c_unit_tests PRIVATE fdb_c Threads::Threads)
   target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads)
   target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads)
+  target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
@@ -166,6 +175,13 @@ if(NOT WIN32)
   add_fdbclient_test(
     NAME fdb_c_external_client_unit_tests
     COMMAND $<TARGET_FILE:fdb_c_unit_tests>
+            @CLUSTER_FILE@
+            fdb
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
+            )
+  add_unavailable_fdbclient_test(
+    NAME disconnected_timeout_unit_tests
+    COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
             @CLUSTER_FILE@
             fdb
             ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
