@@ -23,7 +23,7 @@ Release Notes
 * Added RepeatableReadMultiThreadClientTest. `(PR #5212) <https://github.com/apple/foundationdb/pull/5212>`_
 * Added a new feature that allows FDB to detect grey failures and automatically recover from them. `(PR #5249) <https://github.com/apple/foundationdb/pull/5249>`_
 * Added version and timestamp to ``TimeKeeperCommit`` trace event. `(PR #5415) <https://github.com/apple/foundationdb/pull/5415>`_
-* Added `RecruitFromConfigurationRetry` trace event to improve recruitment observability. `(PR #5455) <https://github.com/apple/foundationdb/pull/5455>`_
+* Added ``RecruitFromConfigurationRetry`` trace event to improve recruitment observability. `(PR #5455) <https://github.com/apple/foundationdb/pull/5455>`_
 * Several fixes to pkg_tester and packaging. `(PR #5460) <https://github.com/apple/foundationdb/pull/5460>`_
 
 6.3.18
