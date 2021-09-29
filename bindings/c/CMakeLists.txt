@@ -153,6 +153,7 @@ if(NOT WIN32)
     COMMENT "Copy libfdb_c to use as external client for test")
   add_custom_target(external_client DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so)
   add_dependencies(fdb_c_unit_tests external_client)
+  add_dependencies(disconnected_timeout_unit_tests external_client)
 
   add_fdbclient_test(
     NAME fdb_c_setup_tests
