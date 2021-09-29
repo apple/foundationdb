@@ -7,6 +7,7 @@ import sys
 from local_cluster import LocalCluster
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
+from random import choice
 
 class ClusterFileGenerator:
     def __init__(self, output_dir: str):
@@ -16,14 +17,14 @@ class ClusterFileGenerator:
         self.tmp_dir = self.output_dir.joinpath(
             'tmp',
             ''.join(choice(LocalCluster.valid_letters_for_secret) for i in range(16)))
-        tmp_dir.mkdir(parents=True)
+        self.tmp_dir.mkdir(parents=True)
         self.cluster_file_path = self.tmp_dir.joinpath('fdb.cluster')
 
     def __enter__(self):
-       with open(self.cluster_file_path, 'x') as f:
-           f.write('foo:bar@1.1.1.1:5678')
+        with open(self.cluster_file_path, 'x') as f:
+            f.write('foo:bar@1.1.1.1:5678\n')
 
-       return self
+        return self
 
     def __exit__(self, xc_type, exc_value, traceback):
         shutil.rmtree(self.tmp_dir)
