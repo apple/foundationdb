@@ -100,6 +100,13 @@ public:
 		}
 	}
 
+	ApplyMetadataMutationsImpl(const SpanID& spanContext_,
+	                           ResolverData& resolverData_,
+	                           const VectorRef<MutationRef>& mutations_)
+	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
+	    txnStateStore(resolverData_.txnStateStore), confChange(resolverData_.confChanges),
+	    keyInfo(resolverData_.keyInfo), initialCommit(true) {}
+
 private:
 	// The following variables are incoming parameters
 
@@ -1206,6 +1213,12 @@ void applyMetadataMutations(SpanID const& spanContext,
 	ApplyMetadataMutationsImpl(
 	    spanContext, arena, mutations, proxyCommitData, logSystem, toCommit, confChange, popVersion, initialCommit)
 	    .apply();
+}
+
+void applyMetadataMutations(SpanID const& spanContext,
+                            ResolverData& resolverData,
+                            const VectorRef<MutationRef>& mutations) {
+	ApplyMetadataMutationsImpl(spanContext, resolverData, mutations).apply();
 }
 
 void applyMetadataMutations(SpanID const& spanContext,
