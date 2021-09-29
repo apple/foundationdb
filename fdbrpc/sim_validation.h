@@ -48,4 +48,12 @@ bool debug_checkMaxRestoredVersion(UID id, int64_t version, std::string context,
 bool debug_isCheckRelocationDuration();
 void debug_setCheckRelocationDuration(bool check);
 
+void debug_advanceVersionTimestamp(int64_t version, double minTime, double maxTime);
+void debug_advanceVersionMinTimestamp(int64_t version, double t);
+void debug_advanceVersionMaxTimestamp(int64_t version, double t);
+
+bool debug_checkVersionTime(int64_t version, double t, std::string context, Severity sev = SevError);
+bool debug_checkVersionMinTime(int64_t version, double t, std::string context, Severity sev = SevError);
+bool debug_checkVersionMaxTime(int64_t version, double t, std::string context, Severity sev = SevError);
+
 #endif

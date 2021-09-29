@@ -132,6 +132,7 @@ struct CycleWorkload : TestWorkload {
 						// TraceEvent("CyclicTest").detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
 						// TraceEvent("CyclicTest").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
 
+						tr.setOption(FDBTransactionOptions::USE_GRV_CACHE);
 						wait(tr.commit());
 						// TraceEvent("CycleCommit");
 						break;

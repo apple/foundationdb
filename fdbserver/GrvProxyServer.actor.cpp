@@ -26,6 +26,7 @@
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fdbrpc/sim_validation.h"
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

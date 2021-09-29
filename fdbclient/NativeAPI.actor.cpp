@@ -58,6 +58,7 @@
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/sim_validation.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Arena.h"
 #include "flow/ActorCollection.h"
@@ -195,9 +196,14 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 }
 
 void DatabaseContext::updateCachedRV(double t, Version v) {
-	if (t >= lastTimedGrv.get()) {
-		lastTimedGrv = t;
+	if (t > lastTimedGrv.get()) {
+		// TraceEvent("CheckpointCacheUpdate")
+		// 	.detail("Version", v)
+		// 	.detail("CurTime", t)
+		// 	.detail("LastVersion", cachedRv)
+		// 	.detail("LastTime", lastTimedGrv.get());
 		cachedRv = v;
+		lastTimedGrv = t;
 	}
 }
 
@@ -5758,18 +5764,20 @@ ACTOR Future<Version> extractReadVersion(Location location,
 	return rep.version;
 }
 
-ACTOR Future<Version> getDBCachedReadVersion(DatabaseContext* cx) {
-	double t = cx->lastTimedGrv.get();
-	if (now() - t > CLIENT_KNOBS->MAX_VERSION_CACHE_LAG) {
-		wait(cx->lastTimedGrv.whenAtLeast(now() - CLIENT_KNOBS->MAX_VERSION_CACHE_LAG));
+ACTOR Future<Version> getDBCachedReadVersion(DatabaseContext* cx, double requestTime) {
+	if (requestTime - cx->lastTimedGrv.get() > CLIENT_KNOBS->MAX_VERSION_CACHE_LAG) {
+		wait(cx->lastTimedGrv.whenAtLeast(requestTime - CLIENT_KNOBS->MAX_VERSION_CACHE_LAG));
 	}
+	// Want to check that the cached version is at most
+	// MAX_VERSION_CACHE_LAG (100ms) old compared to requestTime.
+	ASSERT(!debug_checkVersionTime(cx->cachedRv, requestTime, "CheckStaleness"));
 	return cx->cachedRv;
 }
 
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	if (!readVersion.isValid()) {
 		if (options.useGrvCache && cx->cachedRv > Version(0)) {
-			readVersion = getDBCachedReadVersion(getDatabase().getPtr());
+			readVersion = getDBCachedReadVersion(getDatabase().getPtr(), now());
 			return readVersion;
 		}
 		++cx->transactionReadVersions;

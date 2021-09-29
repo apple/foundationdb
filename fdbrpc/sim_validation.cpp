@@ -25,6 +25,7 @@
 
 // used for simulation validations
 static std::map<std::string, int64_t> validationData;
+static std::map<std::string, double> validationData2;
 static std::set<UID> disabledMachines;
 
 void debug_setVersionCheckEnabled(UID uid, bool enabled) {
@@ -126,4 +127,72 @@ bool debug_isCheckRelocationDuration() {
 
 void debug_setCheckRelocationDuration(bool check) {
 	checkRelocationDuration = check;
+}
+void debug_advanceVersionTimestamp(int64_t version, double minTime, double maxTime) {
+	debug_advanceVersionMinTimestamp(version, minTime);
+	debug_advanceVersionMaxTimestamp(version, maxTime);
+}
+
+void debug_advanceTime(int64_t version, double t, const char* suffix) {
+	auto& entry = validationData2[std::to_string(version) + suffix];
+	if (t > entry) {
+		entry = t;
+	}
+}
+
+void debug_advanceVersionMinTimestamp(int64_t version, double t) {
+	if (!g_network->isSimulated() || g_simulator.extraDB)
+		return;
+	debug_advanceTime(version, t, "min");
+}
+
+void debug_advanceVersionMaxTimestamp(int64_t version, double t) {
+	if (!g_network->isSimulated() || g_simulator.extraDB)
+		return;
+	debug_advanceTime(version, t, "max");
+}
+
+bool debug_checkPartVersionTime(int64_t version,
+                                double t,
+                                std::string context,
+                                std::string minormax,
+                                Severity sev = SevError) {
+	if (!g_network->isSimulated() || g_simulator.extraDB)
+		return false;
+	if (!validationData2.count(std::to_string(version) + minormax)) {
+		TraceEvent(SevWarn, (context + "UnknownTime").c_str())
+		    .detail("VersionChecking", version)
+		    .detail("TimeChecking", t);
+		return false;
+	}
+	int sign = minormax == "min" ? 1 : -1;
+	if (t * sign < validationData2[std::to_string(version) + minormax] * sign) {
+		TraceEvent(sev, (context + "DurabilityError").c_str())
+		    .detail("VersionChecking", version)
+		    .detail("TimeChecking", t)
+		    .detail("MinMaxChecking", minormax)
+		    .detail("MinTime", validationData2[std::to_string(version) + "min"])
+		    .detail("MaxTime", validationData2[std::to_string(version) + "max"]);
+		return true;
+	}
+	return false;
+}
+
+bool debug_checkVersionTime(int64_t version, double t, std::string context, Severity sev) {
+	if (!g_network->isSimulated() || g_simulator.extraDB)
+		return false;
+	return debug_checkPartVersionTime(version, t, context, "min", sev) ||
+	       debug_checkPartVersionTime(version, t, context, "max", sev);
+}
+
+bool debug_checkVersionMinTime(int64_t version, double t, std::string context, Severity sev) {
+	if (!g_network->isSimulated() || g_simulator.extraDB)
+		return false;
+	return debug_checkPartVersionTime(version, t, context, "min", sev);
+}
+
+bool debug_checkVersionMaxTime(int64_t version, double t, std::string context, Severity sev) {
+	if (!g_network->isSimulated() || g_simulator.extraDB)
+		return false;
+	return debug_checkPartVersionTime(version, t, context, "max", sev);
 }
