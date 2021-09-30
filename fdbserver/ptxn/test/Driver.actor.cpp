@@ -141,8 +141,15 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 	return context;
 }
 
-std::shared_ptr<TLogInterfaceBase> TestDriverContext::getTLogInterface(const StorageTeamID& storageTeamID) {
-	return tLogGroupLeaders.at(storageTeamIDTLogGroupIDMapper.at(storageTeamID));
+std::shared_ptr<TLogInterfaceBase> TestDriverContext::getTLogLeaderByStorageTeamID(
+    const StorageTeamID& storageTeamID) {
+	if (auto iter = storageTeamIDTLogGroupIDMapper.find(storageTeamID); iter != storageTeamIDTLogGroupIDMapper.end()) {
+		if (auto iter2 = tLogGroupLeaders.find(iter->second); iter2 != tLogGroupLeaders.end()) {
+			return iter2->second;
+		}
+		throw internal_error_msg("TLogGroupID has no leader assigned");
+	}
+	throw internal_error_msg("Storage Team ID not found in storageTeamIDTLogGroupIDMapper");
 }
 
 std::shared_ptr<StorageServerInterfaceBase> TestDriverContext::getStorageServerInterface(

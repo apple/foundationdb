@@ -101,7 +101,7 @@ struct TestDriverContext {
 	std::unordered_map<TLogGroupID, Version> tLogGroupVersion;
 	std::vector<std::shared_ptr<TLogInterfaceBase>> tLogInterfaces;
 	std::unordered_map<StorageTeamID, TLogGroupID> storageTeamIDTLogGroupIDMapper;
-	std::shared_ptr<TLogInterfaceBase> getTLogInterface(const StorageTeamID&);
+	std::shared_ptr<TLogInterfaceBase> getTLogLeaderByStorageTeamID(const StorageTeamID& storageTeamID);
 	// For a given storageTeamID, returns the pair(prevVersion, currentVersion).
 	std::pair<Version, Version> getCommitVersionPair(const TLogGroupID& tLogGroupID, const Version& currentVersion);
 

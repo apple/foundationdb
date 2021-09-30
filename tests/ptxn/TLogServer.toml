@@ -74,11 +74,11 @@ startDelay = 0
     maxTestCases = 1
     testsMatching = '/fdbserver/ptxn/test/run_storage_server'
 
-    numProxies = 5
-    numTLogs = 2
-    numStorageTeams = 40
-    numStorageServers = 40
-    numTLogGroups = 7
+    numProxies = 1
+    numTLogs = 1
+    numStorageTeams = 1
+    numStorageServers = 1
+    numTLogGroups = 1
     skipCommitValidation = 1
     numCommits = 50
     messageTransferModel = 1

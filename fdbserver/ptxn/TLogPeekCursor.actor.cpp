@@ -351,6 +351,8 @@ void ServerPeekCursor::nextMessage() {
 }
 
 StringRef ServerPeekCursor::getMessage() {
+	// This is not supported yet
+	ASSERT(false);
 	TraceEvent(SevDebug, "SPC_GetMessage", dbgid);
 	StringRef message = messageAndTags.getMessageWithoutTags();
 	rd.readBytes(message.size()); // Consumes the message.
@@ -372,7 +374,17 @@ VectorRef<Tag> ServerPeekCursor::getTags() const {
 void ServerPeekCursor::advanceTo(LogMessageVersion n) {
 	TraceEvent(SevDebug, "SPC_AdvanceTo", dbgid).detail("N", n.toString());
 	while (messageVersion < n && hasMessage()) {
-		getMessage();
+		if (LogProtocolMessage::isNextIn(rd)) {
+			LogProtocolMessage lpm;
+			rd >> lpm;
+			setProtocolVersion(rd.protocolVersion());
+		} else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
+			SpanContextMessage scm;
+			rd >> scm;
+		} else {
+			MutationRef msg;
+			rd >> msg;
+		}
 		nextMessage();
 	}
 
