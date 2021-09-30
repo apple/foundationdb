@@ -29,6 +29,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ManagementAPI.actor.h"
 
+#include "fdbserver/MoveKeys.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/CoordinationInterface.h"

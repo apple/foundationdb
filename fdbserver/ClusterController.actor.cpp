@@ -302,7 +302,7 @@ public:
 			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    fitness != ProcessClass::NeverAssign &&
 			    (!dcId.present() || it.second.details.interf.locality.dcId() == dcId.get())) {
-					++ count;
+				++count;
 				fitness_workers[fitness].push_back(it.second.details);
 			}
 		}
@@ -331,7 +331,6 @@ public:
 			throw no_more_servers();
 		}
 
-		std::cout << "result: " << results.size() << std::endl;
 		return results;
 	}
 
@@ -4672,8 +4671,110 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 		TraceEvent("ForcedRecoveryStart", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("DcId", req.dcId.printable());
-			self->db.recoverMetadata = true;
-			self->db.forceMasterFailure.trigger();
+		self->db.recoverMetadata = true;
+		self->db.forceMasterFailure.trigger();
+		req.reply.send(Void());
+	}
+}
+
+ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddress> addresses) {
+	// Disable DD to avoid DD undoing of our move.
+	state int ignore = wait(setDDMode(cx, 0));
+
+	state std::unique_ptr<FlowLock> startMoveKeysParallelismLock = std::make_unique<FlowLock>();
+	state std::unique_ptr<FlowLock> finishMoveKeysParallelismLock = std::make_unique<FlowLock>();
+
+	state Transaction tr(cx);
+
+	// Pick a random SS as the dest, keys will reside on a single server after the move.
+	state std::vector<UID> dest;
+	RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+	ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+
+	std::unordered_set<NetworkAddress> nadds;
+	std::unordered_set<std::string> ips;
+
+	for (const auto& add : addresses) {
+		nadds.insert(add);
+		ips.insert(add.ip.toString());
+	}
+
+	for (auto s = serverList.begin(); s != serverList.end() && dest.size() < addresses.size(); ++s) {
+		auto ssi = decodeServerListValue(s->value);
+		if (nadds.count(ssi.address()) > 0) {
+			dest.push_back(ssi.uniqueID);
+		} else if (ssi.secondaryAddress().present() && nadds.count(ssi.secondaryAddress().get()) > 0) {
+			dest.push_back(ssi.uniqueID);
+		} else if (ips.count(ssi.address().ip.toString()) > 0) {
+			dest.push_back(ssi.uniqueID);
+		} else if (ssi.secondaryAddress().present() && ips.count(ssi.secondaryAddress().get().ip.toString()) > 0) {
+			dest.push_back(ssi.uniqueID);
+		}
+	}
+
+	if (dest.empty()) {
+		throw internal_error();
+	}
+
+	state UID owner = deterministicRandom()->randomUniqueID();
+	state DDEnabledState ddEnabledState;
+
+	loop {
+		tr.reset();
+		try {
+			BinaryWriter wrMyOwner(Unversioned());
+			wrMyOwner << owner;
+			tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+			wait(tr.commit());
+
+			MoveKeysLock moveKeysLock;
+			moveKeysLock.myOwner = owner;
+
+			wait(moveKeys(cx,
+			              keys,
+			              dest,
+			              dest,
+			              moveKeysLock,
+			              Promise<Void>(),
+			              startMoveKeysParallelismLock.get(),
+			              finishMoveKeysParallelismLock.get(),
+			              false,
+			              UID(), // for logging only
+			              &ddEnabledState));
+			break;
+		} catch (Error& e) {
+			if (e.code() != error_code_movekeys_conflict) {
+				throw e;
+			}
+		}
+	}
+
+	TraceEvent("ShardMoved").detail("NewTeam", describe(dest));
+
+	// tr.reset();
+	// Standalone<VectorRef<const char*>> addresses = wait(tr.getAddressesForKey(keys.begin));
+
+	// // The move function is not what we are testing here, crash the test if the move fails.
+	// ASSERT(addresses.size() == 1);
+	// ASSERT(std::string(addresses[0]) == addr.toString());
+
+	// return addr;
+	return Void();
+}
+
+ACTOR Future<Void> handleMoveShard(ClusterControllerData* self, ClusterControllerFullInterface interf) {
+	loop {
+		state MoveShardRequest req = waitNext(interf.clientInterface.moveShard.getFuture());
+		TraceEvent("ManualMoveShardStart", self->id)
+		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
+		    .detail("Begin", req.shard.begin)
+		    .detail("End", req.shard.end)
+		    .detail("Addresses", describe(req.addresses));
+
+		wait(moveShard(self->db.db, req.shard, req.addresses));
+
+		TraceEvent("ForcedRecoveryFinish", self->id).log();
+
 		req.reply.send(Void());
 	}
 }

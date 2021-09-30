@@ -36,6 +36,7 @@ struct ClusterInterface {
 	RequestStream<ReplyPromise<Void>> ping;
 	RequestStream<struct GetClientWorkersRequest> getClientWorkers;
 	RequestStream<struct ForceRecoveryRequest> forceRecovery;
+	RequestStream<struct MoveShardRequest> moveShard;
 
 	bool operator==(ClusterInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ClusterInterface const& r) const { return id() != r.id(); }
@@ -291,4 +292,26 @@ struct ForceRecoveryRequest {
 	}
 };
 
+struct OpenDatabaseRequest {
+	constexpr static FileIdentifier file_identifier = 2799502;
+	// Sent by the native API to the cluster controller to open a database and track client
+	//   info changes.  Returns immediately if the current client info id is different from
+	//   knownClientInfoID; otherwise returns when it next changes (or perhaps after a long interval)
+
+	int clientCount;
+	std::vector<ItemWithExamples<Key>> issues;
+	std::vector<ItemWithExamples<Standalone<ClientVersionRef>>> supportedVersions;
+	std::vector<ItemWithExamples<Key>> maxProtocolSupported;
+
+	UID knownClientInfoID;
+	ReplyPromise<struct ClientDBInfo> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.protocolVersion().hasOpenDatabase());
+		}
+		serializer(ar, clientCount, issues, supportedVersions, maxProtocolSupported, knownClientInfoID, reply);
+	}
+}
 #endif
