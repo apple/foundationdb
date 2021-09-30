@@ -801,6 +801,9 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 		}
 	}
 
+	// TODO: Why are there two copies?
+	self->toCommit.pGroupMessageBuilders = &self->pGroupMessageBuilders;
+
 	if (self->debugID.present()) {
 		g_traceBatch.addEvent(
 		    "CommitDebug", self->debugID.get().first(), "CommitProxyServer.commitBatch.AfterResolution");
