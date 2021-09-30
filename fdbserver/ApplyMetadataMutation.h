@@ -25,11 +25,13 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/ProxyCommitData.actor.h"
+#include "flow/FastRef.h"
 
 // Resolver's data for applyMetadataMutations() calls.
 struct ResolverData {
@@ -37,10 +39,25 @@ struct ResolverData {
 	IKeyValueStore* txnStateStore = nullptr;
 	KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr;
 	Arena arena;
-	bool confChanges;
+	bool confChanges = false;
+	bool initialCommit = false;
+	Reference<ILogSystem> logSystem = Reference<ILogSystem>();
+	LogPushData* toCommit = nullptr;
+	Version popVersion = 0; // exclusive, usually set to commitVersion + 1
 
+	// For initial broadcast
 	ResolverData(UID debugId, IKeyValueStore* store, KeyRangeMap<ServerCacheInfo>* info)
-	  : dbgid(debugId), txnStateStore(store), keyInfo(info) {}
+	  : dbgid(debugId), txnStateStore(store), keyInfo(info), initialCommit(true) {}
+
+	// For transaction batches that contain metadata mutations
+	ResolverData(UID debugId,
+	             Reference<ILogSystem> logSystem,
+	             IKeyValueStore* store,
+	             KeyRangeMap<ServerCacheInfo>* info,
+	             LogPushData* toCommit,
+	             Version popVersion)
+	  : dbgid(debugId), txnStateStore(store), keyInfo(info), logSystem(logSystem), toCommit(toCommit),
+	    popVersion(popVersion) {}
 };
 
 inline bool isMetadataMutation(MutationRef const& m) {
