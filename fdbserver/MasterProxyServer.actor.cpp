@@ -241,6 +241,7 @@ struct ProxyStats {
 	                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    systemGRVQueueSize(0), defaultGRVQueueSize(0), batchGRVQueueSize(0), transactionRateAllowed(0),
 	    batchTransactionRateAllowed(0), transactionLimit(0), batchTransactionLimit(0),
+	    percentageOfDefaultGRVQueueProcessed(0), percentageOfBatchGRVQueueProcessed(0),
 	    grvConfirmEpochLiveDist(Histogram::getHistogram(LiteralStringRef("MasterProxy"),
 	                                                    LiteralStringRef("GrvConfirmEpochLive"),
 	                                                    Histogram::Unit::microseconds)),
