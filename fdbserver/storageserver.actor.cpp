@@ -666,6 +666,14 @@ public:
 
 		Optional<TagInfo> previousBusiestTag;
 
+		UID thisServerID;
+
+		Reference<EventCacheHolder> busiestReadTagEventHolder;
+
+		TransactionTagCounter(UID thisServerID)
+		  : thisServerID(thisServerID),
+		    busiestReadTagEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReadTag")) {}
+
 		int64_t costFunction(int64_t bytes) { return bytes / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1; }
 
 		void addRequest(Optional<TagSet> const& tags, int64_t bytes) {
@@ -685,7 +693,7 @@ public:
 			}
 		}
 
-		void startNewInterval(UID id) {
+		void startNewInterval() {
 			double elapsed = now() - intervalStart;
 			previousBusiestTag.reset();
 			if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
@@ -694,13 +702,13 @@ public:
 					previousBusiestTag = TagInfo(busiestTag, rate, (double)busiestTagCount / intervalTotalSampledCount);
 				}
 
-				TraceEvent("BusiestReadTag", id)
+				TraceEvent("BusiestReadTag", thisServerID)
 				    .detail("Elapsed", elapsed)
 				    .detail("Tag", printable(busiestTag))
 				    .detail("TagCost", busiestTagCount)
 				    .detail("TotalSampledCost", intervalTotalSampledCount)
 				    .detail("Reported", previousBusiestTag.present())
-				    .trackLatest(id.toString() + "/BusiestReadTag");
+				    .trackLatest(busiestReadTagEventHolder->trackingKey);
 			}
 
 			intervalCounts.clear();
@@ -777,6 +785,8 @@ public:
 		}
 	} counters;
 
+	Reference<EventCacheHolder> storageServerSourceTLogIDEventHolder;
+
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo>> const& db,
 	              StorageServerInterface const& ssi)
@@ -787,7 +797,7 @@ public:
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false), shuttingDown(false),
 	    debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0), logProtocol(0),
-	    counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()), tssInQuarantine(false),
+	    tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()), tssInQuarantine(false),
 	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), behind(false), versionBehind(false),
 	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), lastUpdate(now()),
 	    poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0),
@@ -814,7 +824,10 @@ public:
 	                                                          Histogram::Unit::microseconds)),
 	    ssDurableVersionUpdateLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                                   SS_DURABLE_VERSION_UPDATE_LATENCY_HISTOGRAM,
-	                                                                   Histogram::Unit::microseconds)) {
+	                                                                   Histogram::Unit::microseconds)),
+	    transactionTagCounter(ssi.id()), counters(this),
+	    storageServerSourceTLogIDEventHolder(
+	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
@@ -3855,7 +3868,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				TraceEvent("StorageServerSourceTLogID", data->thisServerID)
 				    .detail("SourceTLogID",
 				            data->sourceTLogID.present() ? data->sourceTLogID.get().toString() : "unknown")
-				    .trackLatest(data->thisServerID.toString() + "/StorageServerSourceTLogID");
+				    .trackLatest(data->storageServerSourceTLogIDEventHolder->trackingKey);
 			}
 
 			data->noRecentUpdates.set(false);
@@ -4919,9 +4932,9 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));
 
-	self->transactionTagCounter.startNewInterval(self->thisServerID);
-	self->actors.add(recurring([&]() { self->transactionTagCounter.startNewInterval(self->thisServerID); },
-	                           SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
+	self->transactionTagCounter.startNewInterval();
+	self->actors.add(
+	    recurring([&]() { self->transactionTagCounter.startNewInterval(); }, SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
 
 	self->coreStarted.send(Void());
 
