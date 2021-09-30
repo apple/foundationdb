@@ -26,6 +26,7 @@
 
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/ActorCollection.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/CoordinationInterface.h"

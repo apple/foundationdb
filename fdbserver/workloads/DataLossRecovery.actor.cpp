@@ -74,32 +74,65 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		wait(self->writeAndVerify(self, cx, key, oldValue));
 
+		state std::vector<UID> dest;
+		state NetworkAddress address;
+		while (dest.empty()) {
+			std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
+			if (!interfs.empty()) {
+				const auto& interf = interfs[random() % interfs.size()];
+				if (g_simulator.protectedAddresses.count(interf.address()) == 0) {
+					dest.push_back(interf.uniqueID);
+					self->addr = interf.address();
+					address = interf.address();
+				}
+			}
+		}
+
 		// Move [key, endKey) to team: {address}.
-		state NetworkAddress address = wait(self->disableDDAndMoveShard(self, cx, systemKeys));
-		// wait(self->readAndVerify(self, cx, keyServersKey(key), oldValue));
+		std::vector<NetworkAddress> addresses;
+		address.push_back(address);
+		wait(moveShard(cx.getConnectionFile(), KeyRangeRef(key, endKey), addresses));
+		wait(self->readAndVerify(self, cx, key, oldValue));
 
 		// Kill team {address}, and expect read to timeout.
 		self->killProcess(self, address);
-		std::cout << "Killed process: " << address.toString() << std::endl;
-		wait(self->readAndVerify(self, cx, keyServersKey(key), "Timeout"_sr));
-		std::cout << "Verified reading metadata timeout" << std::endl;
+		wait(self->readAndVerify(self, cx, key, "Timeout"_sr));
 
-		wait(self->readAndVerify(self, cx, key, oldValue));
-		std::cout << "Read" << std::endl;
+		// Reenable DD and exclude address as fail, so that [key, endKey) will be dropped and moved to a new team.
+		// Expect read to return 'value not found'.
+		int ignore = wait(setDDMode(cx, 1));
+		wait(self->exclude(self, cx, key, address));
+		wait(self->readAndVerify(self, cx, key, Optional<Value>()));
+
 		// Write will scceed.
 		wait(self->writeAndVerify(self, cx, key, newValue));
-		std::cout << "Write" << std::endl;
-		wait(forceRecovery(cx->getConnectionFile(), LiteralStringRef("1")));
 
-		wait(self->readAndVerify(self, cx, key, newValue));
-		std::cout << "Read2" << std::endl;
-		// Write will scceed.
-		wait(self->writeAndVerify(self, cx, key, oldValue));
-		std::cout << "Write2" << std::endl;
+		return Void();
+		// Move [key, endKey) to team: {address}.
+		// state NetworkAddress address = wait(self->disableDDAndMoveShard(self, cx, systemKeys));
+		// // wait(self->readAndVerify(self, cx, keyServersKey(key), oldValue));
 
-		wait(self->readAndVerify(self, cx, keyServersKey(key), Optional<Value>()));
-		std::cout << "Read3" << std::endl;
+		// // Kill team {address}, and expect read to timeout.
+		// self->killProcess(self, address);
+		// std::cout << "Killed process: " << address.toString() << std::endl;
+		// wait(self->readAndVerify(self, cx, keyServersKey(key), "Timeout"_sr));
+		// std::cout << "Verified reading metadata timeout" << std::endl;
 
+		// wait(self->readAndVerify(self, cx, key, oldValue));
+		// std::cout << "Read" << std::endl;
+		// // Write will scceed.
+		// wait(self->writeAndVerify(self, cx, key, newValue));
+		// std::cout << "Write" << std::endl;
+		// wait(forceRecovery(cx->getConnectionFile(), LiteralStringRef("1")));
+
+		// wait(self->readAndVerify(self, cx, key, newValue));
+		// std::cout << "Read2" << std::endl;
+		// // Write will scceed.
+		// wait(self->writeAndVerify(self, cx, key, oldValue));
+		// std::cout << "Write2" << std::endl;
+
+		// wait(self->readAndVerify(self, cx, keyServersKey(key), Optional<Value>()));
+		// std::cout << "Read3" << std::endl;
 
 		return Void();
 	}

@@ -46,7 +46,8 @@ struct ClusterInterface {
 	bool hasMessage() const {
 		return openDatabase.getFuture().isReady() || failureMonitoring.getFuture().isReady() ||
 		       databaseStatus.getFuture().isReady() || ping.getFuture().isReady() ||
-		       getClientWorkers.getFuture().isReady() || forceRecovery.getFuture().isReady();
+		       getClientWorkers.getFuture().isReady() || forceRecovery.getFuture().isReady() ||
+		       moveShard.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -56,11 +57,12 @@ struct ClusterInterface {
 		ping.getEndpoint(TaskPriority::ClusterController);
 		getClientWorkers.getEndpoint(TaskPriority::ClusterController);
 		forceRecovery.getEndpoint(TaskPriority::ClusterController);
+		moveShard.getEndpoint(TaskPriority::ClusterController);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, openDatabase, failureMonitoring, databaseStatus, ping, getClientWorkers, forceRecovery);
+		serializer(ar, openDatabase, failureMonitoring, databaseStatus, ping, getClientWorkers, forceRecovery, moveShard);
 	}
 };
 
@@ -292,26 +294,23 @@ struct ForceRecoveryRequest {
 	}
 };
 
-struct OpenDatabaseRequest {
-	constexpr static FileIdentifier file_identifier = 2799502;
+struct MoveShardRequest {
+	constexpr static FileIdentifier file_identifier = 2799592;
 	// Sent by the native API to the cluster controller to open a database and track client
 	//   info changes.  Returns immediately if the current client info id is different from
 	//   knownClientInfoID; otherwise returns when it next changes (or perhaps after a long interval)
 
-	int clientCount;
-	std::vector<ItemWithExamples<Key>> issues;
-	std::vector<ItemWithExamples<Standalone<ClientVersionRef>>> supportedVersions;
-	std::vector<ItemWithExamples<Key>> maxProtocolSupported;
+	KeyRange shard;
+	std::vector<NetworkAddress> addresses;
+	ReplyPromise<Void> reply;
 
-	UID knownClientInfoID;
-	ReplyPromise<struct ClientDBInfo> reply;
+	MoveShardRequest() {}
+	MoveShardRequest(KeyRange shard, const std::vector<NetworkAddress>& addresses)
+	  : shard(shard), addresses(addresses) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if constexpr (!is_fb_function<Ar>) {
-			ASSERT(ar.protocolVersion().hasOpenDatabase());
-		}
-		serializer(ar, clientCount, issues, supportedVersions, maxProtocolSupported, knownClientInfoID, reply);
+		serializer(ar, shard, addresses, reply);
 	}
-}
+};
 #endif

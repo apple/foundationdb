@@ -213,6 +213,10 @@ ACTOR Future<int> setDDMode(Database cx, int mode);
 
 ACTOR Future<Void> forceRecovery(Reference<ClusterConnectionFile> clusterFile, Standalone<StringRef> dcId);
 
+ACTOR Future<Void> moveShard(Reference<ClusterConnectionFile> clusterFile,
+                             KeyRangeRef shard,
+                             std::vector<NetworkAddress> addresses)
+
 ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Database cx, bool ignoreRebalance);
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);
