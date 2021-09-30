@@ -7,6 +7,8 @@ Release Notes
 * Added a ThreadID field to all trace events for the purpose of multi-threaded client debugging. `(PR #5665) <https://github.com/apple/foundationdb/pull/5665>`_
 * Fixed some histograms' group name in the master proxy. `(PR #5674) <https://github.com/apple/foundationdb/pull/5674>`_
 * Added histograms for GRV path components in the proxy. `(PR #5689) <https://github.com/apple/foundationdb/pull/5689>`_
+* Fixed race condition introduced in 6.3.20 between setting timeouts and resetting or destroying transactions. `(PR #5695) <https://github.com/apple/foundationdb/pull/5695>`_
+* Disable detailed transaction log pop tracing by default. `(PR #5696) <https://github.com/apple/foundationdb/pull/5696>`_
 
 6.3.20
 ======
