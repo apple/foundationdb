@@ -2373,6 +2373,7 @@ public:
 		self->extentUsedList.toTraceEvent(e, "UsedExtentQueue");
 		self->extentFreeList.toTraceEvent(e, "FreeExtentQueue");
 		self->getStorageBytes().toTraceEvent(e);
+		e.log();
 
 		debug_printf("DWALPager(%s) recovered.  committedVersion=%" PRId64 " logicalPageSize=%d physicalPageSize=%d\n",
 		             self->filename.c_str(),
@@ -4688,6 +4689,7 @@ public:
 		e.detail("OpenedExisting", meta.size() != 0);
 		e.detail("LatestVersion", latest);
 		self->m_lazyClearQueue.toTraceEvent(e, "LazyClearQueue");
+		e.log();
 
 		self->m_lastCommittedVersion = latest;
 		self->m_lazyClearActor = incrementalLazyClear(self);
