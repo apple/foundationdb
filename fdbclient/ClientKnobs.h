@@ -242,6 +242,10 @@ public:
 	double BUSYNESS_SPIKE_START_THRESHOLD;
 	double BUSYNESS_SPIKE_SATURATED_THRESHOLD;
 
+	// multi-version client control
+	int MVC_CLIENTLIB_CHUNK_SIZE;
+	int MVC_CLIENTLIB_TRANSACTION_SIZE;
+
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
 };

@@ -22,6 +22,7 @@
 #include "fdbclient/Schemas.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ClientKnobs.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/Platform.h"
 
@@ -31,9 +32,6 @@
 
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-
-constexpr size_t CLIENTLIB_CHUNK_SIZE = 8192;
-constexpr size_t CLIENTLIB_TRANSACTION_SIZE = CLIENTLIB_CHUNK_SIZE * 32;
 
 struct ClientLibBinaryInfo {
 	size_t totalBytes;
@@ -47,14 +45,17 @@ ACTOR Future<Void> uploadClientLibBinary(Database db,
 
 	state size_t fileOffset = 0;
 	state size_t chunkNo = 0;
+	state int transactionSize = CLIENT_KNOBS->MVC_CLIENTLIB_TRANSACTION_SIZE;
+	state int chunkSize = CLIENT_KNOBS->MVC_CLIENTLIB_CHUNK_SIZE;
 
 	state Reference<IAsyncFile> fClientLib = wait(IAsyncFileSystem::filesystem()->open(
 	    libFilePath.toString(), IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO, 0));
 
 	loop {
 		state Arena arena;
-		state StringRef buf = makeString(CLIENTLIB_TRANSACTION_SIZE, arena);
-		state int bytesRead = wait(fClientLib->read(mutateString(buf), CLIENTLIB_TRANSACTION_SIZE, fileOffset));
+
+		state StringRef buf = makeString(transactionSize, arena);
+		state int bytesRead = wait(fClientLib->read(mutateString(buf), transactionSize, fileOffset));
 		fileOffset += bytesRead;
 		if (bytesRead <= 0) {
 			break;
@@ -65,10 +66,10 @@ ACTOR Future<Void> uploadClientLibBinary(Database db,
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				size_t bufferOffset = 0;
+				int bufferOffset = 0;
 				chunkNo = firstChunkNo;
 				while (bufferOffset < bytesRead) {
-					size_t chunkLen = std::min(CLIENTLIB_CHUNK_SIZE, bytesRead - bufferOffset);
+					size_t chunkLen = std::min(chunkSize, bytesRead - bufferOffset);
 					KeyRef chunkKey = chunkKeyPrefix.withSuffix(format("%06zu", chunkNo), arena);
 					chunkNo++;
 					tr.set(chunkKey, ValueRef(mutateString(buf) + bufferOffset, chunkLen));
@@ -81,7 +82,7 @@ ACTOR Future<Void> uploadClientLibBinary(Database db,
 			}
 		}
 
-		if (bytesRead < CLIENTLIB_TRANSACTION_SIZE) {
+		if (bytesRead < transactionSize) {
 			break;
 		}
 	}
