@@ -227,7 +227,8 @@ private:
 class LatencySample {
 public:
 	LatencySample(std::string name, UID id, double loggingInterval, int sampleSize)
-	  : name(name), id(id), sample(sampleSize), sampleStart(now()) {
+	  : name(name), id(id), sampleStart(now()), sample(sampleSize),
+	    latencySampleEventHolder(makeReference<EventCacheHolder>(id.toString() + "/" + name)) {
 		logger = recurring([this]() { logSample(); }, loggingInterval);
 	}
 
@@ -240,6 +241,8 @@ private:
 
 	ContinuousSample<double> sample;
 	Future<Void> logger;
+
+	Reference<EventCacheHolder> latencySampleEventHolder;
 
 	void logSample() {
 		TraceEvent(name.c_str(), id)
@@ -254,7 +257,7 @@ private:
 		    .detail("P95", sample.percentile(0.95))
 		    .detail("P99", sample.percentile(0.99))
 		    .detail("P99.9", sample.percentile(0.999))
-		    .trackLatest(id.toString() + "/" + name);
+		    .trackLatest(latencySampleEventHolder->trackingKey);
 
 		sample.clear();
 		sampleStart = now();
