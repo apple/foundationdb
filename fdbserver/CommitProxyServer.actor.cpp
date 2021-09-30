@@ -510,6 +510,8 @@ struct CommitBatchContext {
 
 	void writeToStorageTeams(const std::set<ptxn::StorageTeamID>& storageTeams, MutationRef m);
 
+	void writeToStorageTeams(const ptxn::StorageTeamID& team, StringRef m);
+
 private:
 	void evaluateBatchSize();
 };
@@ -622,6 +624,12 @@ void CommitBatchContext::writeToStorageTeams(const std::set<ptxn::StorageTeamID>
 		ASSERT(pGroupMessageBuilders.count(groupID));
 		pGroupMessageBuilders[groupID]->write(m, team);
 	}
+}
+
+void CommitBatchContext::writeToStorageTeams(const ptxn::StorageTeamID& team, StringRef m) {
+	auto groupID = pProxyCommitData->tLogGroupCollection->assignStorageTeam(team)->id();
+    ASSERT(pGroupMessageBuilders.count(groupID));
+    pGroupMessageBuilders[groupID]->write(m, team);
 }
 
 // Try to identify recovery transaction and backup's apply mutations (blind writes).
@@ -801,7 +809,6 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 		}
 	}
 
-	// TODO: Why are there two copies?
 	self->toCommit.pGroupMessageBuilders = &self->pGroupMessageBuilders;
 
 	if (self->debugID.present()) {
@@ -1282,10 +1289,13 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		if (firstMessage) {
 			self->toCommit.addTxsTag();
 		}
-		self->toCommit.writeMessage(StringRef(m.begin(), m.size()), !firstMessage);
-		std::cout << "Unhandled TXS mutation: " << printable(StringRef(m.begin(), m.size())) << "\n";
-		// FIXME(rdar://78341241)
-		// self->writeToStorageTeams({ptxn::txsTeam}, StringRef(m.begin(), m.size()));
+
+		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			self->writeToStorageTeams(ptxn::txsTeam, StringRef(m.begin(), m.size()));
+		} else {
+			self->toCommit.writeMessage(StringRef(m.begin(), m.size()), !firstMessage);
+		}
+
 		firstMessage = false;
 	}
 
