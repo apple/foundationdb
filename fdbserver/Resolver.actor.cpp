@@ -463,8 +463,8 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 	} // loop
 
 	auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();
-	//pContext->pCommitData->locked = lockedKey.present() && lockedKey.get().size();
-	//pContext->pCommitData->metadataVersion = pContext->pTxnStateStore->readValue(metadataVersionKey).get();
+	// pContext->pCommitData->locked = lockedKey.present() && lockedKey.get().size();
+	// pContext->pCommitData->metadataVersion = pContext->pTxnStateStore->readValue(metadataVersionKey).get();
 
 	pContext->pTxnStateStore->enableSnapshot();
 
@@ -496,7 +496,7 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 	}
 	pContext->receivedSequences.insert(request.sequence);
 
-	//ASSERT(!pContext->pResolverData->validState.isSet());
+	// ASSERT(!pContext->pResolverData->validState.isSet());
 
 	for (auto& kv : request.data) {
 		pContext->pTxnStateStore->set(kv, &request.arena);
@@ -540,8 +540,7 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	state Future<Void> onError =
 	    transformError(actorCollection(addActor.getFuture()), broken_promise(), master_resolver_failed());
 	self->logSystem = ILogSystem::fromServerDBInfo(resolver.id(), db->get(), false, addActor);
-	self->logAdapter =
-	    new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
+	self->logAdapter = new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
 	self->txnStateStore = keyValueStoreLogSystem(self->logAdapter, resolver.id(), 2e9, true, true, true);
 
 	// wait for txnStateStore recovery

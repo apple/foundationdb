@@ -259,12 +259,6 @@ private:
 			return;
 		}
 		if (toCommit) {
-			{
-			TraceEvent("SendingPrivateMutation", dbgid)
-			    .detail("M", m)
-			    .detail("Server", serverKeysDecodeServer(m.param1))
-			    .detail("TagKey", serverTagKeyFor(serverKeysDecodeServer(m.param1)));
-			}
 			Tag tag = decodeServerTagValue(
 			    txnStateStore->readValue(serverTagKeyFor(serverKeysDecodeServer(m.param1))).get().get());
 			MutationRef privatized = m;
