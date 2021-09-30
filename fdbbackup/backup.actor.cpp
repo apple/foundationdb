@@ -2091,21 +2091,16 @@ ACTOR Future<Void> runAgent(Database db) {
 	return Void();
 }
 
-// TODO check whether update needed
 ACTOR Future<Void> submitDBMove(Database src,
                                 Database dest,
-                                Standalone<VectorRef<KeyRangeRef>> backupRanges,
-                                std::string tagName) {
+								std::string tagName,
+                                Key srcPrefix,
+                                Key destPrefix) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
 
-		// Backup everything, if no ranges were specified
-		if (backupRanges.size() == 0) {
-			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		}
-
 		wait(backupAgent.submitBackup(
-		    dest, KeyRef(tagName), backupRanges, StopWhenDone::False, StringRef(), StringRef(), LockDB::True));
+		    dest, KeyRef(tagName), Standalone<VectorRef<KeyRangeRef>>(), StopWhenDone::False, srcPrefix, destPrefix, LockDB::False)); 
 
 		// Check if a backup agent is running
 		bool agentRunning = wait(backupAgent.checkActive(dest));
@@ -4193,13 +4188,6 @@ int main(int argc, char* argv[]) {
 					printHelpTeaser(argv[0]);
 					return FDB_EXIT_ERROR;
 				}
-				// Otherwise, assume the item is a key range
-				try {
-					addKeyRange(args->File(argLoop), backupKeys);
-				} catch (Error&) {
-					printHelpTeaser(argv[0]);
-					return FDB_EXIT_ERROR;
-				}
 				break;
 			case ProgramExe::UNDEFINED:
 			default:
@@ -4667,9 +4655,8 @@ int main(int argc, char* argv[]) {
 				return FDB_EXIT_ERROR;
 			}
 			switch (dbMoveType) {
-			// TODO add more operations
 			case DBMoveType::START:
-				f = stopAfter(submitDBMove(sourceDb, db, backupKeys, tagName));
+				f = stopAfter(submitDBMove(sourceDb, db, tagName,Standalone<KeyRef>(addPrefix), Standalone<KeyRef>(removePrefix)));
 				break;
 			case DBMoveType::STATUS:
 				f = stopAfter(statusDBMove(sourceDb, db, tagName, maxErrors));
