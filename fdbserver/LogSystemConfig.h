@@ -176,7 +176,7 @@ struct OldTLogConf {
 };
 
 enum class LogSystemType {
-	// Used as the "0" value of LogSystem
+	// Never used.
 	empty = 0,
 	// each TLog is primary for a partition of tags and is secondary for any arbitrary tag.
 	tagPartitioned = 2,
