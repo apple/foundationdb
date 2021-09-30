@@ -44,6 +44,7 @@ struct ResolverData {
 	Reference<ILogSystem> logSystem = Reference<ILogSystem>();
 	LogPushData* toCommit = nullptr;
 	Version popVersion = 0; // exclusive, usually set to commitVersion + 1
+	std::map<UID, Reference<StorageInfo>>* storageCache = nullptr;
 
 	// For initial broadcast
 	ResolverData(UID debugId, IKeyValueStore* store, KeyRangeMap<ServerCacheInfo>* info)
@@ -55,9 +56,10 @@ struct ResolverData {
 	             IKeyValueStore* store,
 	             KeyRangeMap<ServerCacheInfo>* info,
 	             LogPushData* toCommit,
-	             Version popVersion)
+	             Version popVersion,
+	             std::map<UID, Reference<StorageInfo>>* storageCache)
 	  : dbgid(debugId), txnStateStore(store), keyInfo(info), logSystem(logSystem), toCommit(toCommit),
-	    popVersion(popVersion) {}
+	    popVersion(popVersion), storageCache(storageCache) {}
 };
 
 inline bool isMetadataMutation(MutationRef const& m) {

@@ -237,8 +237,13 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		int64_t stateMutations = 0;
 		int64_t stateBytes = 0;
 		LogPushData toCommit(self->logSystem); // For accumulating private mutations
-		ResolverData resolverData(
-		    self->dbgid, self->logSystem, self->txnStateStore, &self->keyInfo, &toCommit, req.version + 1);
+		ResolverData resolverData(self->dbgid,
+		                          self->logSystem,
+		                          self->txnStateStore,
+		                          &self->keyInfo,
+		                          &toCommit,
+		                          req.version + 1,
+		                          &self->storageCache);
 		for (int t : req.txnStateTransactions) {
 			stateMutations += req.transactions[t].mutations.size();
 			stateBytes += req.transactions[t].mutations.expectedSize();
@@ -452,7 +457,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 	//pContext->pCommitData->locked = lockedKey.present() && lockedKey.get().size();
 	//pContext->pCommitData->metadataVersion = pContext->pTxnStateStore->readValue(metadataVersionKey).get();
 
-	//pContext->pTxnStateStore->enableSnapshot();
+	pContext->pTxnStateStore->enableSnapshot();
 
 	return Void();
 }
