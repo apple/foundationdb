@@ -1564,7 +1564,7 @@ void seedShardServers(Arena& arena,
 	ASSERT(numKeyRanges > 1);
 	ASSERT(numKeyRanges <= numServers);
 
-	int serverIndex = 1;
+	int serverIndex = 1; // We start at 1, because first storage server is assigned to txsTeam.
 	StringRef keyRangeStart = allKeys.begin;
 	for (int index = 0; index < keySplits.size(); ++index) {
 		auto keyRange = KeyRangeRef(keyRangeStart, keySplits[index]);
