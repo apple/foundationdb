@@ -1181,11 +1181,7 @@ struct StorageMigrationType {
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 	int pos = locality.find(':');
 	// locality should be either 0 or in the format '<non_empty_string>:<non_empty_string>'
-	if ((pos > 0 && pos < locality.size() - 1) || locality == "0") {
-		return true;
-	}
-
-	return false;
+	return ((pos > 0 && pos < locality.size() - 1) || locality == "0");
 }
 
 #endif
