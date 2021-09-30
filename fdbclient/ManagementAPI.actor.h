@@ -215,7 +215,7 @@ ACTOR Future<Void> forceRecovery(Reference<ClusterConnectionFile> clusterFile, S
 
 ACTOR Future<Void> moveShard(Reference<ClusterConnectionFile> clusterFile,
                              KeyRangeRef shard,
-                             std::vector<NetworkAddress> addresses)
+                             std::vector<NetworkAddress> addresses);
 
 ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Database cx, bool ignoreRebalance);

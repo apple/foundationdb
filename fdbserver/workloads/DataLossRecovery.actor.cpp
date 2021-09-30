@@ -90,9 +90,19 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		// Move [key, endKey) to team: {address}.
 		std::vector<NetworkAddress> addresses;
-		address.push_back(address);
-		wait(moveShard(cx.getConnectionFile(), KeyRangeRef(key, endKey), addresses));
+		addresses.push_back(address);
+		std::cout << "Moveing." << std::endl;
+		wait(moveShard(cx->getConnectionFile(), KeyRangeRef(key, endKey), addresses));
+		std::cout << "Moved." << std::endl;
+
+		Transaction tr(cx);
+		Standalone<VectorRef<const char*>> adds = wait(tr.getAddressesForKey(key));
+		ASSERT(adds.size() == 1);
+		ASSERT(adds[0] == address.toString());
+
 		wait(self->readAndVerify(self, cx, key, oldValue));
+
+
 
 		// Kill team {address}, and expect read to timeout.
 		self->killProcess(self, address);
@@ -133,8 +143,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		// wait(self->readAndVerify(self, cx, keyServersKey(key), Optional<Value>()));
 		// std::cout << "Read3" << std::endl;
-
-		return Void();
 	}
 
 	ACTOR Future<Void> readAndVerify(DataLossRecoveryWorkload* self,

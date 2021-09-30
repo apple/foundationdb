@@ -2106,6 +2106,7 @@ ACTOR Future<Void> forceRecovery(Reference<ClusterConnectionFile> clusterFile, K
 ACTOR Future<Void> moveShard(Reference<ClusterConnectionFile> clusterFile,
                              KeyRangeRef shard,
                              std::vector<NetworkAddress> addresses) {
+	std::cout << "Moving" << std::endl;
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
 

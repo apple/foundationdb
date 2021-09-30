@@ -4766,6 +4766,7 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 ACTOR Future<Void> handleMoveShard(ClusterControllerData* self, ClusterControllerFullInterface interf) {
 	loop {
 		state MoveShardRequest req = waitNext(interf.clientInterface.moveShard.getFuture());
+		std::cout << "Received" << req.shard.toString() << std::endl;
 		TraceEvent("ManualMoveShardStart", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("Begin", req.shard.begin)
@@ -5085,6 +5086,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(updatedChangedDatacenters(&self));
 	self.addActor.send(updateDatacenterVersionDifference(&self));
 	self.addActor.send(handleForcedRecoveries(&self, interf));
+	self.addActor.send(handleMoveShard(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
 	// self.addActor.send(monitorTSSMapping(&self));
