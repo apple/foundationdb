@@ -42,6 +42,7 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/S3BlobStore.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
+#include "fdbclient/DatabaseContext.h"
 
 #include "flow/Platform.h"
 
@@ -52,6 +53,8 @@
 #include <string>
 #include <iostream>
 #include <ctime>
+#include <unordered_map>
+#include <vector>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -2137,11 +2140,60 @@ ACTOR Future<Void> submitDBMove(Database src, Database dest, std::string tagName
 	return Void();
 }
 
-ACTOR Future<Void> statusDBMove(Database src, Database dest, std::string tagName, int errorLimit) {
+ACTOR Future<Void> statusDBMove(Database src,
+                                Database dest,
+                                std::string tagName,
+                                int errorLimit,
+                                Key srcprefix,
+                                Key destPrefix,
+                                bool json) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
 
 		std::string statusText = wait(backupAgent.getStatus(dest, errorLimit, StringRef(tagName)));
+		if (json) {
+			// convert statusText to json format
+			// current schema:
+			//{
+			//    'source': <source_cluster>,
+			//    'dest': <dest_cluster>,
+			//    'source_prefix': <source_prefix>,
+			//    'dest_prefix': <dest_prefix>,
+			//    'status': <status enum string>
+			//    'lag_seconds': <lag>
+			// }
+			state json_spirit::mValue statusRootValue;
+			state JSONDoc statusRoot(statusRootValue);
+			statusRoot.create("source") = src->getConnectionFile()->getFilename();
+			statusRoot.create("dest") = dest->getConnectionFile()->getFilename();
+			statusRoot.create("source_prefix") = srcprefix.toString();
+			statusRoot.create("dest_prefix") = destPrefix.toString();
+
+			// extract status info
+			state UID logUid = wait(backupAgent.getLogUid(dest, Key(tagName)));
+			state EBackupState backupState = wait(backupAgent.getStateValue(dest, logUid));
+			std::unordered_map<int, std::string> stateMap;
+			std::vector<std::string> stateStr{ "STATE_ERRORED",   "STATE_SUBMITTED",
+				                               "STATE_RUNNING",   "STATE_RUNNING_DIFFERENTIAL",
+				                               "STATE_COMPLETED", "STATE_NEVERRAN",
+				                               "STATE_ABORTED",   "STATE_PARTIALLY_ABORTED" };
+			for (int i = 0; i < stateStr.size(); ++i) {
+				stateMap[i] = stateStr[i];
+			}
+			statusRoot.create("status") = stateMap[static_cast<int>(backupState)];
+
+			// extract lag info
+			std::string prevStr = "The DR is ";
+			std::size_t idxBefore = statusText.find(prevStr);
+			std::size_t idxAfter = statusText.find(" seconds behind.");
+			if (idxBefore != std::string::npos && idxAfter != std::string::npos) {
+				statusRoot.create("lag_seconds") =
+				    statusText.substr(idxBefore + prevStr.length(), idxAfter - idxBefore - prevStr.length());
+			}
+			statusText = json_spirit::write_string(statusRootValue);
+		} else {
+			statusText += "\nsource prefix: " + srcprefix.toString() + "\ndestination prefix: " + destPrefix.toString();
+		}
 		printf("%s\n", statusText.c_str());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -4655,11 +4707,11 @@ int main(int argc, char* argv[]) {
 			}
 			switch (dbMoveType) {
 			case DBMoveType::START:
-				f = stopAfter(submitDBMove(
-				    sourceDb, db, tagName, Standalone<KeyRef>(addPrefix), Standalone<KeyRef>(removePrefix)));
+				f = stopAfter(submitDBMove(sourceDb, db, tagName, Key(addPrefix), Key(removePrefix)));
 				break;
 			case DBMoveType::STATUS:
-				f = stopAfter(statusDBMove(sourceDb, db, tagName, maxErrors));
+				f = stopAfter(
+				    statusDBMove(sourceDb, db, tagName, maxErrors, Key(addPrefix), Key(removePrefix), jsonOutput));
 				break;
 			case DBMoveType::SWITCH:
 				f = stopAfter(switchDBMove(sourceDb, db, backupKeys, tagName, forceAction));
