@@ -628,8 +628,8 @@ void CommitBatchContext::writeToStorageTeams(const std::set<ptxn::StorageTeamID>
 
 void CommitBatchContext::writeToStorageTeams(const ptxn::StorageTeamID& team, StringRef m) {
 	auto groupID = pProxyCommitData->tLogGroupCollection->assignStorageTeam(team)->id();
-    ASSERT(pGroupMessageBuilders.count(groupID));
-    pGroupMessageBuilders[groupID]->write(m, team);
+	ASSERT(pGroupMessageBuilders.count(groupID));
+	pGroupMessageBuilders[groupID]->write(m, team);
 }
 
 // Try to identify recovery transaction and backup's apply mutations (blind writes).
@@ -804,6 +804,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	self->previousCommitVersionByGroup.swap(self->resolution[0].previousCommitVersions);
 	for (auto& it : self->previousCommitVersionByGroup) {
 		if (self->pGroupMessageBuilders.count(it.first) == 0) {
+			std::cout << "Adding to group: " << it.first.toString() << std::endl;
 			self->pGroupMessageBuilders[it.first] =
 			    std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(self->commitVersion);
 		}
