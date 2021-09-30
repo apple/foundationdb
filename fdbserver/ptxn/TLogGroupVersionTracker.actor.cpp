@@ -60,9 +60,11 @@ std::map<TLogGroupID, Version> TLogGroupVersionTracker::updateGroups(const std::
 		it->second = commitVersion;
 	}
 
-	if (SERVER_KNOBS->INSERT_EMPTY_TRANSACTION) {
+	if (SERVER_KNOBS->INSERT_EMPTY_TRANSACTION || SERVER_KNOBS->BROADCAST_TLOG_GROUPS) {
 		for (auto& [gid, version] : versions) {
-			if (results.count(gid) == 0 && commitVersion - version >= SERVER_KNOBS->LAGGING_TLOG_GROUP_VERSION_LIMIT) {
+			if (SERVER_KNOBS->BROADCAST_TLOG_GROUPS ||
+			    (results.count(gid) == 0 &&
+			     commitVersion - version >= SERVER_KNOBS->LAGGING_TLOG_GROUP_VERSION_LIMIT)) {
 				results.emplace(gid, version);
 				version = commitVersion;
 			}
