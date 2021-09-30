@@ -115,7 +115,7 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
 	printTiming << "Storage Team ID: " << storageTeamID.toString() << std::endl;
 
-	state std::shared_ptr<ptxn::TLogInterfaceBase> tli = pContext->getTLogInterface(storageTeamID);
+	state std::shared_ptr<ptxn::TLogInterfaceBase> tli = pContext->getTLogLeaderByStorageTeamID(storageTeamID);
 	state Version prevVersion = 0; // starts from 0 for first epoch
 	state Version beginVersion = 150;
 	state Version endVersion(beginVersion + deterministicRandom()->randomInt(5, 20));
@@ -187,6 +187,7 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 	dbInfoBuilder.recoveryState = RecoveryState::ACCEPTING_COMMITS;
 	dbInfoBuilder.logSystemConfig.logSystemType = LogSystemType::tagPartitioned;
 	dbInfoBuilder.logSystemConfig.tLogs.emplace_back();
+	dbInfoBuilder.isTestEnvironment = true;
 	auto& tLogSet = dbInfoBuilder.logSystemConfig.tLogs.back();
 	tLogSet.locality = locality;
 
@@ -222,7 +223,8 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 		                                folder,
 		                                pContext->storageTeamIDs[i]));
 		initializeStorage.send(storageInitializations.back());
-		printTiming << "Recruited storage server " << i << " : " << recruited.id().shortString() << "\n";
+		printTiming << "Recruited storage server " << i
+		            << " : Storage Server Debug ID = " << recruited.id().shortString() << "\n";
 	}
 
 	// replace fake Storage Servers with recruited interface
@@ -290,7 +292,9 @@ ACTOR Future<Void> commitInject(std::shared_ptr<ptxn::test::TestDriverContext> p
                                 int numCommits) {
 	state ptxn::test::print::PrintTiming printTiming("tlog/commitInject");
 
-	state std::shared_ptr<ptxn::TLogInterfaceBase> pInterface = pContext->getTLogInterface(storageTeamID);
+	state const ptxn::TLogGroupID tLogGroupID = pContext->storageTeamIDTLogGroupIDMapper.at(storageTeamID);
+	state std::shared_ptr<ptxn::TLogInterfaceBase> pInterface = pContext->getTLogLeaderByStorageTeamID(storageTeamID);
+	ASSERT(pInterface);
 
 	state Version currVersion = 0;
 	state Version prevVersion = currVersion;
@@ -339,19 +343,15 @@ ACTOR Future<Void> verifyPeek(std::shared_ptr<ptxn::test::TestDriverContext> pCo
                               int numCommits) {
 	state ptxn::test::print::PrintTiming printTiming("tlog/verifyPeek");
 
-	state std::shared_ptr<ptxn::TLogInterfaceBase> pInterface = pContext->getTLogInterface(storageTeamID);
+	state const ptxn::TLogGroupID tLogGroupID = pContext->storageTeamIDTLogGroupIDMapper.at(storageTeamID);
+	state std::shared_ptr<ptxn::TLogInterfaceBase> pInterface = pContext->getTLogLeaderByStorageTeamID(storageTeamID);
+	ASSERT(pInterface);
 
 	state Version version = 0;
 
 	state int receivedVersions = 0;
 	loop {
-		ptxn::TLogPeekRequest request(Optional<UID>(),
-		                              version,
-		                              0,
-		                              false,
-		                              false,
-		                              storageTeamID,
-		                              pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]);
+		ptxn::TLogPeekRequest request(Optional<UID>(), version, 0, false, false, storageTeamID, tLogGroupID);
 		request.endVersion.reset();
 		ptxn::TLogPeekReply reply = wait(pInterface->peek.getReply(request));
 
@@ -412,6 +412,62 @@ ACTOR Future<Void> verifyPeek(std::shared_ptr<ptxn::test::TestDriverContext> pCo
 	return Void();
 }
 
+// Not officially used since reading from storage server in simulation is not supported yet
+#if 0
+ACTOR Future<Void> verifyReadStorageServer(std::shared_ptr<ptxn::test::TestDriverContext> pContext,
+                                           ptxn::StorageTeamID storageTeamID) {
+	state ptxn::test::print::PrintTiming printTiming("storageServer/verifyRead");
+
+	state StorageServerInterface pInterface = pContext->storageServers[0];
+
+	// Get a snapshot of committed Key/Value pairs at the newest version
+	state Version latestVersion;
+	state std::unordered_map<StringRef, StringRef> keyValues;
+	for (const auto& [version, _1] : pContext->commitRecord.messages) {
+		latestVersion = version;
+		for (const auto& [storageTeamID_, _2] : _1) {
+			if (storageTeamID != storageTeamID_) {
+				continue;
+			}
+
+			for (const auto& [subsequence, message] : _2) {
+				ASSERT(message.getType() == ptxn::Message::Type::MUTATION_REF);
+				keyValues[std::get<MutationRef>(message).param1] = std::get<MutationRef>(message).param2;
+			}
+		}
+	}
+
+	loop {
+		state int tryTimes = 0;
+		state bool receivedAllNewValues = true;
+		state std::unordered_map<StringRef, StringRef>::iterator iter = std::begin(keyValues);
+
+		while(iter != std::end(keyValues)) {
+			state GetValueRequest getValueRequest;
+			getValueRequest.key = iter->first;
+			getValueRequest.version = latestVersion;
+
+			state GetValueReply getValueReply = wait(pInterface.getValue.getReply(getValueRequest));
+			if (!getValueReply.value.present() || getValueReply.value.get() != iter->second) {
+				receivedAllNewValues = false;
+			}
+		}
+
+		if (receivedAllNewValues) {
+			break;
+		}
+
+		if (++tryTimes == 3) {
+			throw internal_error_msg(
+			    "After several tries the storage server is still not receiving most recent key value pairs");
+		}
+		wait(delay(0.1));
+	}
+
+	return Void();
+}
+#endif
+
 } // anonymous namespace
 
 TEST_CASE("/fdbserver/ptxn/test/commit_peek") {
@@ -453,14 +509,14 @@ TEST_CASE("/fdbserver/ptxn/test/run_storage_server") {
 	// start real TLog servers
 	wait(startTLogServers(&actors, pContext, folder));
 
-	// Inject data
-	wait(commitInject(pContext, pContext->storageTeamIDs[1], 10));
-	wait(verifyPeek(pContext, pContext->storageTeamIDs[1], 10));
+	// Inject data, and verify the read via peek, not cursor
+	wait(waitForAll<Void>({ commitInject(pContext, pContext->storageTeamIDs[0], 10),
+	                        verifyPeek(pContext, pContext->storageTeamIDs[0], 10) }));
 
 	// start real storage servers
 	wait(startStorageServers(&actors, pContext, folder));
 
-	wait(delay(60));
+	wait(delay(2.0));
 
 	platform::eraseDirectoryRecursive(folder);
 	return Void();

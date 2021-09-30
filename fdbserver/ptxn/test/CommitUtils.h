@@ -42,8 +42,8 @@ struct CommitRecordTag {
 // Record generated commits
 struct CommitRecord {
 	Arena messageArena;
-	std::unordered_map<Version, std::unordered_map<StorageTeamID, VectorRef<std::pair<Subsequence, Message>>>> messages;
-	std::unordered_map<Version, std::unordered_map<StorageTeamID, CommitRecordTag>> tags;
+	std::map<Version, std::unordered_map<StorageTeamID, VectorRef<std::pair<Subsequence, Message>>>> messages;
+	std::map<Version, std::unordered_map<StorageTeamID, CommitRecordTag>> tags;
 
 	int getNumTotalMessages() const;
 };

@@ -556,6 +556,11 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	PromiseStream<Void> warningCollectorInput;
 
 	Reference<StorageTeamData> getStorageTeamData(const StorageTeamID& storageTeamID) {
+		for (const auto& [id, data] : storageTeamData) {
+			if (!data->storageTeamId.isValid()) {
+				ASSERT(false);
+			}
+		}
 		return storageTeamData[storageTeamID];
 	}
 
@@ -1362,7 +1367,6 @@ ACTOR Future<Void> tlogGroupRecovery(Reference<TLogGroupData> self, Promise<Void
 		wait(delay(0.000001));
 
 		self->sharedActors.send(commitQueue(self));
-		//		self->sharedActors.send(updateStorageLoop(self));
 	} catch (Error& e) {
 		self->terminated.send(Void());
 		TraceEvent("TLogError", self->dbgid).detail("GroupID", self->tlogGroupID).error(e, true);
@@ -1465,6 +1469,7 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializePtxnTLogR
 	}
 
 	wait(waitForAll(tlogGroupStarts));
+
 	req.reply.send(recruited);
 
 	TraceEvent("TLogStart", recruited.id());
