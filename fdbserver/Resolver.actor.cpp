@@ -514,6 +514,8 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 
 	// Initialize txnStateStore
 	state PromiseStream<Future<Void>> addActor;
+	state Future<Void> onError =
+	    transformError(actorCollection(addActor.getFuture()), broken_promise(), master_resolver_failed());
 	self->logSystem = ILogSystem::fromServerDBInfo(resolver.id(), db->get(), false, addActor);
 	self->logAdapter =
 	    new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
@@ -542,6 +544,7 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 			req.reply.send(rep);
 		}
 		when(wait(actors.getResult())) {}
+		when(wait(onError)) {}
 		when(wait(doPollMetrics)) {
 			self->iopsSample.poll();
 			doPollMetrics = delay(SERVER_KNOBS->SAMPLE_POLL_TIME);
