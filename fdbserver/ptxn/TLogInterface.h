@@ -129,7 +129,7 @@ struct TLogPeekReply {
 	bool onlySpilled = false;
 
 	TLogPeekReply() = default;
-	TLogPeekReply(const Optional<UID>& debugID_, Arena& arena_, StringRef data_)
+	TLogPeekReply(const Optional<UID>& debugID_, Arena arena_, StringRef data_)
 	  : debugID(debugID_), arena(arena_), data(data_) {}
 
 	template <typename Ar>

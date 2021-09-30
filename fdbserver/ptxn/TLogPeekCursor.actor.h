@@ -170,6 +170,10 @@ protected:
 	virtual bool hasRemainingImpl() const override;
 };
 
+//////////////////////////////////////////////////////////////////////////////////
+// ServerPeekCursor used for demo
+//////////////////////////////////////////////////////////////////////////////////
+
 struct ServerPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<ServerPeekCursor> {
 	Reference<AsyncVar<OptionalInterface<TLogInterface_PassivelyPull>>> interf;
 	const Tag tag;
@@ -201,7 +205,7 @@ struct ServerPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<Server
 	int fastReplies = 0;
 	int unknownReplies = 0;
 
-	ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface_PassivelyPull>>> const& interf,
+	ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface_PassivelyPull>>> interf,
 	                 Tag tag,
 	                 StorageTeamID storageTeamID,
 	                 TLogGroupID tLogGroupID,
@@ -245,6 +249,10 @@ struct ServerPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<Server
 
 	Version getMaxKnownVersion() const override { return results.maxKnownVersion; }
 };
+
+//////////////////////////////////////////////////////////////////////////////////
+// ServerPeekCursor used for demo -- end
+//////////////////////////////////////////////////////////////////////////////////
 
 } // namespace ptxn
 

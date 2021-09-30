@@ -122,17 +122,11 @@ ACTOR Future<Void> peekAndCheck(std::shared_ptr<FakeTLogContext> pContext) {
 	state std::vector<StorageTeamID>& storageTeamIDs = pContext->storageTeamIDs;
 	state std::vector<Version>& versions = pContext->versions;
 
-	printTiming << "1" << std::endl;
-
 	state Optional<UID> debugID(randomUID());
 	state StorageTeamID storageTeamID(randomlyPick(storageTeamIDs));
 
-	printTiming << "2" << std::endl;
-
 	state Version beginVersion(randomlyPick(versions));
 	state Version endVersion(beginVersion + deterministicRandom()->randomInt(5, 20));
-
-	printTiming << "AA" << std::endl;
 
 	state TLogPeekRequest request(debugID, beginVersion, endVersion, false, false, storageTeamID, TLogGroupID());
 	print::print(request);
@@ -180,14 +174,11 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/readFromSerialization") {
 	ptxn::test::fillTLogWithRandomMutations(pContext, options.initialVersion, options.numMutations);
 
 	loop {
-		std::cout << 1 << std::endl;
 		wait(ptxn::test::peekAndCheck(pContext));
-		std::cout << 2 << std::endl;
 
 		if (++numPeeks == options.peekTimes) {
 			break;
 		}
-		std::cout << 3 << std::endl;
 	}
 
 	return Void();

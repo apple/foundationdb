@@ -98,6 +98,7 @@ struct TLogSet {
 	std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>> tLogsPtxn;
 	// A list of TLog Group IDs
 	std::vector<ptxn::TLogGroupID> tLogGroupIDs;
+
 	// A list of interface sets, one for each group of "tLogGroupIDs"
 	std::vector<std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>> ptxnTLogGroups;
 

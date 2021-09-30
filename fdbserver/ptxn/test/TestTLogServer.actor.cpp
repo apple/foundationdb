@@ -27,6 +27,8 @@
 #include "fdbserver/ptxn/TLogInterface.h"
 #include "fdbserver/ptxn/MessageSerializer.h"
 #include "fdbserver/ptxn/test/Driver.h"
+#include "fdbserver/ptxn/test/FakeLogSystem.h"
+#include "fdbserver/ptxn/test/FakePeekCursor.h"
 #include "fdbserver/ptxn/test/Utils.h"
 #include "flow/Arena.h"
 
@@ -73,6 +75,10 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 	for (i = 0; i < pContext->numTLogs; i++) {
 		*(pContext->tLogInterfaces[i]) = interfaces[i];
 	}
+	// Update the TLogGroupID to interface mapping
+	for (auto& [tLogGroupID, tLogGroupLeader] : pContext->tLogGroupLeaders) {
+		tLogGroupLeader = ptxn::test::randomlyPick(pContext->tLogInterfaces);
+	}
 	return Void();
 }
 
@@ -116,8 +122,10 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 	state Optional<UID> debugID(ptxn::test::randomUID());
 
 	generateMutations(beginVersion, COMMIT_PEEK_CHECK_MUTATIONS, { storageTeamID }, pContext->commitRecord);
+	printTiming << "Generated " << pContext->commitRecord.getNumTotalMessages() << " messages" << std::endl;
 	auto serialized = serializeMutations(beginVersion, storageTeamID, pContext->commitRecord);
 	std::unordered_map<ptxn::StorageTeamID, StringRef> messages = { { storageTeamID, serialized } };
+
 	// Commit
 	ptxn::TLogCommitRequest commitRequest(ptxn::test::randomUID(),
 	                                      pContext->storageTeamIDTLogGroupIDMapper[storageTeamID],
@@ -130,6 +138,7 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 	                                      debugID);
 	ptxn::test::print::print(commitRequest);
 
+	// Reply
 	ptxn::TLogCommitReply commitReply = wait(tli->commit.getReply(commitRequest));
 	ptxn::test::print::print(commitReply);
 
@@ -168,15 +177,20 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
                                        std::shared_ptr<ptxn::test::TestDriverContext> pContext,
                                        std::string folder) {
+	ptxn::test::print::PrintTiming printTiming("testTLogServer/startStorageServers");
 	// For demo purpose, each storage server only has one storage team
-	ASSERT(pContext->numStorageServers == pContext->numStorageTeamIDs);
+	ASSERT_EQ(pContext->numStorageServers, pContext->numStorageTeamIDs);
 	state std::vector<InitializeStorageRequest> storageInitializations;
 	state uint8_t locality = 0; // data center locality
+
 	ServerDBInfo dbInfoBuilder;
 	dbInfoBuilder.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+	dbInfoBuilder.logSystemConfig.logSystemType = LogSystemType::tagPartitioned;
 	dbInfoBuilder.logSystemConfig.tLogs.emplace_back();
 	auto& tLogSet = dbInfoBuilder.logSystemConfig.tLogs.back();
 	tLogSet.locality = locality;
+
+	printTiming << "Assign TLog group leaders" << std::endl;
 	for (auto tLogGroup : pContext->tLogGroupLeaders) {
 		OptionalInterface<ptxn::TLogInterface_PassivelyPull> optionalInterface =
 		    OptionalInterface<ptxn::TLogInterface_PassivelyPull>(
@@ -188,6 +202,7 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo = makeReference<AsyncVar<ServerDBInfo>>(dbInfoBuilder);
 	state Version tssSeedVersion = 0;
 	state int i = 0;
+	printTiming << "Recruiting new storage servers" << std::endl;
 	for (; i < pContext->numStorageServers; i++) {
 		pContext->storageServers.emplace_back();
 		auto& recruited = pContext->storageServers.back();
@@ -208,11 +223,12 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 		                                nullptr,
 		                                pContext->storageTeamIDs[i]));
 		initializeStorage.send(storageInitializations.back());
-		std::cout << "Recruit storage server " << i << " : " << recruited.id().shortString() << "\n";
+		printTiming << "Recruited storage server " << i << " : " << recruited.id().shortString() << "\n";
 	}
 
-	// replace fake TLogInterface with recruited interface
-	std::vector<Future<InitializeStorageReply>> interfaceFutures(pContext->numTLogs);
+	// replace fake Storage Servers with recruited interface
+	printTiming << "Updating interfaces" << std::endl;
+	std::vector<Future<InitializeStorageReply>> interfaceFutures(pContext->numStorageServers);
 	for (i = 0; i < pContext->numStorageServers; i++) {
 		interfaceFutures[i] = storageInitializations[i].reply.getFuture();
 	}
@@ -258,30 +274,6 @@ TEST_CASE("/fdbserver/ptxn/test/peek_tlog_server") {
 	// start a real TLog server
 	wait(startTLogServers(&actors, pContext, folder));
 	wait(commitPeekAndCheck(pContext));
-
-	platform::eraseDirectoryRecursive(folder);
-	return Void();
-}
-
-TEST_CASE("/fdbserver/ptxn/test/run_storage_server") {
-	state ptxn::test::TestDriverOptions options(params);
-	state std::vector<Future<Void>> actors;
-	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
-
-	for (const auto& group : pContext->tLogGroups) {
-		std::cout << "TLog Group " << group.logGroupId;
-		for (const auto& [storageTeamId, tags] : group.storageTeams) {
-			std::cout << ", SS team " << storageTeamId;
-		}
-		std::cout << "\n";
-	}
-
-	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
-	platform::createDirectory(folder);
-	// start real TLog servers
-	wait(startTLogServers(&actors, pContext, folder));
-	// start real storage servers
-	//	wait(startStorageServers(&actors, pContext, folder));
 
 	platform::eraseDirectoryRecursive(folder);
 	return Void();
@@ -443,6 +435,33 @@ TEST_CASE("/fdbserver/ptxn/test/commit_peek") {
 	std::vector<Future<Void>> communicateActors{ commitInject(pContext, storageTeamID, NUM_COMMITS),
 		                                         verifyPeek(pContext, storageTeamID, NUM_COMMITS) };
 	wait(waitForAll(communicateActors));
+
+	platform::eraseDirectoryRecursive(folder);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ptxn/test/run_storage_server") {
+	state ptxn::test::TestDriverOptions options(params);
+	state std::vector<Future<Void>> actors;
+	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
+
+	for (const auto& group : pContext->tLogGroups) {
+		ptxn::test::print::print(group);
+	}
+
+	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
+	platform::createDirectory(folder);
+	// start real TLog servers
+	wait(startTLogServers(&actors, pContext, folder));
+
+	// Inject data
+	wait(commitInject(pContext, pContext->storageTeamIDs[1], 10));
+	wait(verifyPeek(pContext, pContext->storageTeamIDs[1], 10));
+
+	// start real storage servers
+	wait(startStorageServers(&actors, pContext, folder));
+
+	wait(delay(60));
 
 	platform::eraseDirectoryRecursive(folder);
 	return Void();

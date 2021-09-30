@@ -5188,6 +5188,12 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Optional<ptxn::StorageTeamID> storageTeamID) {
 
 	state StorageServer self(persistentData, db, ssi, mockLogSystem != nullptr);
+
+	self.storageTeamID = storageTeamID;
+	if (storageTeamID.present()) {
+		self.logProtocol = ProtocolVersion::withPartitionTransaction();
+	}
+
 	if (ssi.isTss()) {
 		self.setTssPair(ssi.tssPairID.get());
 		ASSERT(self.isTss());
@@ -5213,7 +5219,6 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		} else {
 			self.tag = seedTag;
 		}
-		self.storageTeamID = storageTeamID;
 
 		self.storage.makeNewStorageServerDurable();
 		wait(self.storage.commit());
