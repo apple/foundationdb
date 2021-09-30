@@ -1,0 +1,65 @@
+[configuration]
+storageEngineExcludeTypes = [3]
+
+# write 1000 Keys ending with even numbers
+[[test]]
+testTitle = 'SnapTestPre'
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'SnapTest'
+    numSnaps = 1
+    maxSnapDelay = 3.0
+    testID = 0
+    retryLimit = 30
+
+# Take snap and do read/write
+[[test]]
+testTitle = 'SnapTestTakeSnap'
+clearAfterTest = false
+
+        [[test.workload]]
+        testName = 'ReadWrite'
+        testDuration = 10.0
+        transactionsPerSecond = 10000
+        writesPerTransactionA = 0
+        readsPerTransactionA = 10
+        writesPerTransactionB = 10
+        readsPerTransactionB = 1
+        alpha = 0.5
+        nodeCount = 100000
+        valueBytes = 16
+        discardEdgeMeasurements = false
+
+        [[test.workload]]
+        testName = 'SnapTest'
+        numSnaps = 1
+        maxSnapDelay = 10.0
+        testID = 1
+        retryLimit = 30
+
+        [[test.workload]]
+        testName = 'Attrition'
+        testDuration = 10.0
+
+# write 1000 Keys ending with odd numbers
+[[test]]
+testTitle = 'SnapTestPost'
+clearAfterTest = false
+
+        [[test.workload]]
+        testName = 'SnapTest'
+        numSnaps = 1
+        maxSnapDelay = 25.0
+        testID = 2
+        retryLimit = 30
+
+# save and shutdown
+[[test]]
+testTitle = 'SnapSimpleShutdown'
+
+        [[test.workload]]
+        testName = 'SaveAndKill'
+        restartInfoLocation = 'simfdb/restartInfo.ini'
+        testDuration = 10.0
+        isRestoring = 1
