@@ -236,6 +236,9 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		auto& stateTransactions = self->recentStateTransactions[req.version];
 		int64_t stateMutations = 0;
 		int64_t stateBytes = 0;
+		LogPushData toCommit(self->logSystem); // For accumulating private mutations
+		ResolverData resolverData(
+		    self->dbgid, self->logSystem, self->txnStateStore, &self->keyInfo, &toCommit, req.version + 1);
 		for (int t : req.txnStateTransactions) {
 			stateMutations += req.transactions[t].mutations.size();
 			stateBytes += req.transactions[t].mutations.expectedSize();
@@ -243,7 +246,13 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			    stateTransactions.arena(),
 			    StateTransactionRef(reply.committed[t] == ConflictBatch::TransactionCommitted,
 			                        req.transactions[t].mutations));
+
+			// Generate private mutations for metadata mutations
+			if (reply.committed[t] == ConflictBatch::TransactionCommitted) {
+				applyMetadataMutations(SpanID(), resolverData, req.transactions[t].mutations);
+			}
 		}
+		// TODO: add private mutations & resolverData.confChanges to Reply messages
 
 		self->resolvedStateTransactions += req.txnStateTransactions.size();
 		self->resolvedStateMutations += stateMutations;

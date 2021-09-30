@@ -27,6 +27,7 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
+#include "flow/Error.h"
 
 Reference<StorageInfo> getStorageInfo(UID id,
                                       std::map<UID, Reference<StorageInfo>>* storageCache,
@@ -85,8 +86,9 @@ public:
 	                           ResolverData& resolverData_,
 	                           const VectorRef<MutationRef>& mutations_)
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
-	    txnStateStore(resolverData_.txnStateStore), confChange(resolverData_.confChanges),
-	    keyInfo(resolverData_.keyInfo), initialCommit(true) {}
+	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
+	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
+	    keyInfo(resolverData_.keyInfo), initialCommit(resolverData_.initialCommit), forResolver(true) {}
 
 private:
 	// The following variables are incoming parameters
@@ -123,6 +125,9 @@ private:
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
 	bool initialCommit = false;
+
+	// true if called from Resolver
+	bool forResolver = false;
 
 private:
 	// The following variables are used internally
@@ -255,7 +260,7 @@ private:
 	void checkSetStorageCachePrefix(MutationRef m) {
 		if (!m.param1.startsWith(storageCachePrefix))
 			return;
-		if (cacheInfo) {
+		if (cacheInfo || forResolver) {
 			KeyRef k = m.param1.removePrefix(storageCachePrefix);
 
 			// Create a private mutation for storage servers
@@ -266,7 +271,7 @@ private:
 				//TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString());
 				cachedRangeInfo[k] = privatized;
 			}
-			if (k != allKeys.end) {
+			if (cacheInfo && k != allKeys.end) {
 				KeyRef end = cacheInfo->rangeContaining(k).end();
 				std::vector<uint16_t> serverIndices;
 				decodeStorageCacheValue(m.param2, serverIndices);
@@ -604,10 +609,7 @@ private:
 	}
 
 	void checkClearTagLocalityListKeys(KeyRangeRef range) {
-		if (!tagLocalityListKeys.intersects(range)) {
-			return;
-		}
-		if (initialCommit) {
+		if (!tagLocalityListKeys.intersects(range) || initialCommit) {
 			return;
 		}
 		txnStateStore->clear(range & tagLocalityListKeys);
@@ -630,8 +632,12 @@ private:
 				    .detail("PopVersion", popVersion)
 				    .detail("Tag", tag.toString())
 				    .detail("Server", decodeServerTagKey(kv.key));
-				logSystem->pop(popVersion, decodeServerTagValue(kv.value));
-				(*tag_popped)[tag] = popVersion;
+				if (!forResolver) {
+					logSystem->pop(popVersion, decodeServerTagValue(kv.value));
+					(*tag_popped)[tag] = popVersion;
+				}
+				ASSERT_WE_THINK(forResolver && tag_popped == nullptr);
+				ASSERT_WE_THINK(!forResolver && tag_popped != nullptr);
 
 				if (toCommit) {
 					MutationRef privatized = m;
@@ -693,8 +699,12 @@ private:
 				    .detail("PopVersion", popVersion)
 				    .detail("Tag", tag.toString())
 				    .detail("Version", decodeServerTagHistoryKey(kv.key));
-				logSystem->pop(popVersion, tag);
-				(*tag_popped)[tag] = popVersion;
+				if (!forResolver) {
+					logSystem->pop(popVersion, tag);
+					(*tag_popped)[tag] = popVersion;
+				}
+				ASSERT_WE_THINK(forResolver && tag_popped == nullptr);
+				ASSERT_WE_THINK(!forResolver && tag_popped != nullptr);
 			}
 		}
 		if (!initialCommit)
