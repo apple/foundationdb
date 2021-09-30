@@ -2091,16 +2091,17 @@ ACTOR Future<Void> runAgent(Database db) {
 	return Void();
 }
 
-ACTOR Future<Void> submitDBMove(Database src,
-                                Database dest,
-								std::string tagName,
-                                Key srcPrefix,
-                                Key destPrefix) {
+ACTOR Future<Void> submitDBMove(Database src, Database dest, std::string tagName, Key srcPrefix, Key destPrefix) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
 
-		wait(backupAgent.submitBackup(
-		    dest, KeyRef(tagName), Standalone<VectorRef<KeyRangeRef>>(), StopWhenDone::False, srcPrefix, destPrefix, LockDB::False)); 
+		wait(backupAgent.submitBackup(dest,
+		                              KeyRef(tagName),
+		                              Standalone<VectorRef<KeyRangeRef>>(),
+		                              StopWhenDone::False,
+		                              srcPrefix,
+		                              destPrefix,
+		                              LockDB::False));
 
 		// Check if a backup agent is running
 		bool agentRunning = wait(backupAgent.checkActive(dest));
@@ -2111,10 +2112,8 @@ ACTOR Future<Void> submitDBMove(Database src,
 
 			// Throw an error that will not display any additional information
 			throw actor_cancelled();
-		} else {
-			printf("The data movement on tag `%s' was successfully submitted.\n",
-			       printable(StringRef(tagName)).c_str());
 		}
+		printf("The data movement on tag `%s' was successfully submitted.\n", printable(StringRef(tagName)).c_str());
 	}
 
 	catch (Error& e) {
@@ -4656,7 +4655,8 @@ int main(int argc, char* argv[]) {
 			}
 			switch (dbMoveType) {
 			case DBMoveType::START:
-				f = stopAfter(submitDBMove(sourceDb, db, tagName,Standalone<KeyRef>(addPrefix), Standalone<KeyRef>(removePrefix)));
+				f = stopAfter(submitDBMove(
+				    sourceDb, db, tagName, Standalone<KeyRef>(addPrefix), Standalone<KeyRef>(removePrefix)));
 				break;
 			case DBMoveType::STATUS:
 				f = stopAfter(statusDBMove(sourceDb, db, tagName, maxErrors));
