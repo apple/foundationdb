@@ -13,6 +13,7 @@ set(FDBCLI_SRCS
   FlowLineNoise.actor.cpp
   FlowLineNoise.h
   ForceRecoveryWithDataLossCommand.actor.cpp
+  ManualMoveShardCommand.actor.cpp
   IncludeCommand.actor.cpp
   KillCommand.actor.cpp
   LockCommand.actor.cpp

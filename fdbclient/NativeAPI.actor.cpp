@@ -6548,6 +6548,10 @@ ACTOR static Future<Void> createSnapshotActor(DatabaseContext* cx, UID snapUID, 
 	return Void();
 }
 
+Future<Void> DatabaseContext::forceRecoveryWithDataLoss(KeyRangeRef shard, std::vector<NetworkAddress> addresses) {
+	return moveShard(getConnectionFile(), shard, addresses);
+}
+
 Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_command) {
 	std::string uid_str = uid.toString();
 	if (!std::all_of(uid_str.begin(), uid_str.end(), [](unsigned char c) { return std::isxdigit(c); }) ||

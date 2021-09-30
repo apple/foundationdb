@@ -93,12 +93,12 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		addresses.push_back(address);
 		std::cout << "Moveing." << std::endl;
 		wait(moveShard(cx->getConnectionFile(), KeyRangeRef(key, endKey), addresses));
-		std::cout << "Moved." << std::endl;
 
 		Transaction tr(cx);
 		Standalone<VectorRef<const char*>> adds = wait(tr.getAddressesForKey(key));
 		ASSERT(adds.size() == 1);
 		ASSERT(adds[0] == address.toString());
+		std::cout << "Moved to: " << adds[0] << std::endl;
 
 		wait(self->readAndVerify(self, cx, key, oldValue));
 

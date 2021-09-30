@@ -251,6 +251,7 @@ public:
 	Future<Void> forceRecoveryWithDataLoss(StringRef dcId);
 	// Management API, create snapshot
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
+	Future<Void> moveShard(KeyRangeRef shard, std::vector<NetworkAddress> addresses);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
