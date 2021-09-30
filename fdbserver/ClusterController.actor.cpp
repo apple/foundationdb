@@ -307,8 +307,6 @@ public:
 			}
 		}
 
-		std::cout << "fitneww_workers: " << count << std::endl;
-
 		for (auto& it : fitness_workers) {
 			for (auto& worker : it.second) {
 				logServerMap->add(worker.interf.locality, &worker);

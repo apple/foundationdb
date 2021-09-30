@@ -2027,8 +2027,8 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	}
 
 	if (self->recoverMetadata) {
+		populateRecoverMetadataMutations(self, recoveryCommitRequest.arena, tr);
 		setUpMetadataServers(recoveryCommitRequest.arena, tr, seedServers, self->serverTagMap);
-		// populateRecoverMetadataMutations(self, recoveryCommitRequest.arena, tr);
 	}
 
 	// initialConfChanges have not been conflict checked against any earlier writes in the recovery transaction, so do
