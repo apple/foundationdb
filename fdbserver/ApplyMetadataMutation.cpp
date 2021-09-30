@@ -106,7 +106,8 @@ public:
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
 	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
 	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
-	    keyInfo(resolverData_.keyInfo), initialCommit(resolverData_.initialCommit), forResolver(true) {}
+	    keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
+	    initialCommit(resolverData_.initialCommit), forResolver(true) {}
 
 private:
 	// The following variables are incoming parameters
@@ -258,6 +259,12 @@ private:
 			return;
 		}
 		if (toCommit) {
+			{
+			TraceEvent("SendingPrivateMutation", dbgid)
+			    .detail("M", m)
+			    .detail("Server", serverKeysDecodeServer(m.param1))
+			    .detail("TagKey", serverTagKeyFor(serverKeysDecodeServer(m.param1)));
+			}
 			Tag tag = decodeServerTagValue(
 			    txnStateStore->readValue(serverTagKeyFor(serverKeysDecodeServer(m.param1))).get().get());
 			MutationRef privatized = m;
@@ -786,8 +793,7 @@ private:
 					logSystem->pop(popVersion, decodeServerTagValue(kv.value));
 					(*tag_popped)[tag] = popVersion;
 				}
-				ASSERT_WE_THINK(forResolver && tag_popped == nullptr);
-				ASSERT_WE_THINK(!forResolver && tag_popped != nullptr);
+				ASSERT_WE_THINK(forResolver ^ (tag_popped != nullptr));
 
 				if (toCommit) {
 					MutationRef privatized = m;
@@ -863,8 +869,7 @@ private:
 					logSystem->pop(popVersion, tag);
 					(*tag_popped)[tag] = popVersion;
 				}
-				ASSERT_WE_THINK(forResolver && tag_popped == nullptr);
-				ASSERT_WE_THINK(!forResolver && tag_popped != nullptr);
+				ASSERT_WE_THINK(forResolver ^ (tag_popped != nullptr));
 			}
 		}
 		if (!initialCommit)
