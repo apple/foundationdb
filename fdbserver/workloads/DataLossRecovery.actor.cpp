@@ -85,9 +85,22 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		std::cout << "Verified reading metadata timeout" << std::endl;
 
 		wait(self->readAndVerify(self, cx, key, oldValue));
+		std::cout << "Read" << std::endl;
 		// Write will scceed.
 		wait(self->writeAndVerify(self, cx, key, newValue));
+		std::cout << "Write" << std::endl;
 		wait(forceRecovery(cx->getConnectionFile(), LiteralStringRef("1")));
+
+		wait(self->readAndVerify(self, cx, keyServersKey(key), "Timeout"_sr));
+		std::cout << "Read3" << std::endl;
+
+		wait(self->readAndVerify(self, cx, key, newValue));
+		std::cout << "Read2" << std::endl;
+		// Write will scceed.
+		wait(self->writeAndVerify(self, cx, key, oldValue));
+		std::cout << "Write2" << std::endl;
+
+
 		return Void();
 	}
 
@@ -103,6 +116,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				state Optional<Value> res = wait(timeout(tr.get(key), 10.0, Optional<Value>("Timeout"_sr)));
 				if (res != expectedValue) {
 					self->validationFailed(expectedValue, res);
+					// ASSERT(false);
 				}
 				break;
 			} catch (Error& e) {

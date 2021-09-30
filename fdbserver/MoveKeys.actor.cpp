@@ -1500,6 +1500,8 @@ void setUpMetadataServers(Arena& arena,
 	for (auto& s : servers) {
 		tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(serverTagMap[s.id()]));
 		tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
+		std::cout << "setting server " << s.id().toString() << ", tag: " << serverTagMap[s.id()].toString()
+		          << std::endl;
 	}
 
 	std::vector<Tag> serverTags;
@@ -1513,11 +1515,13 @@ void setUpMetadataServers(Arena& arena,
 	auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS ? keyServersValue(serverTags)
 	                                                    : keyServersValue(RangeResult(), serverSrcUID);
 
+	tr.clear(arena, KeyRangeRef(keyServersKey(systemKeys.begin), keyServersKey(systemKeys.end)));
 	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, systemKeys, ksValue, Value());
 
 	for (auto& s : servers) {
 		krmSetPreviouslyEmptyRange(
 		    tr, arena, serverKeysPrefixFor(s.id()), systemKeys, serverKeysTrueEmptyRange, serverKeysFalse);
+		std::cout << "server id: " << s.id().toString() << " keys: " << systemKeys.toString() << std::endl;
 	}
 	std::cout << "SetUpMetadataServersEnd" << std::endl;
 }

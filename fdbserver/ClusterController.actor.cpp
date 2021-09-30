@@ -295,15 +295,19 @@ public:
 		LocalityMap<WorkerDetails>* logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
 		bool bCompleted = false;
 
+		int count = 0;
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(ProcessClass::Storage);
 			if (workerAvailable(it.second, false) && !conf.isExcludedServer(it.second.details.interf.addresses()) &&
 			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    fitness != ProcessClass::NeverAssign &&
 			    (!dcId.present() || it.second.details.interf.locality.dcId() == dcId.get())) {
+					++ count;
 				fitness_workers[fitness].push_back(it.second.details);
 			}
 		}
+
+		std::cout << "fitneww_workers: " << count << std::endl;
 
 		for (auto& it : fitness_workers) {
 			for (auto& worker : it.second) {
@@ -329,6 +333,7 @@ public:
 			throw no_more_servers();
 		}
 
+		std::cout << "result: " << results.size() << std::endl;
 		return results;
 	}
 
@@ -865,7 +870,7 @@ public:
 			}
 		}
 
-		ASSERT(resultSet.size() <= desired);
+		// ASSERT(resultSet.size() <= desired);
 
 		for (auto& result : resultSet) {
 			id_used[result.interf.locality.processId()]++;

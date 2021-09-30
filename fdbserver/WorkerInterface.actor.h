@@ -550,15 +550,15 @@ struct RecruitMasterRequest {
 	Arena arena;
 	LifetimeToken lifetime;
 	bool forceRecovery;
-	bool recoverMetadata;
 	ReplyPromise<struct MasterInterface> reply;
+	bool recoverMetadata;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, lifetime, forceRecovery, recoverMetadata, reply, arena);
+		serializer(ar, lifetime, forceRecovery, reply, arena, recoverMetadata);
 	}
 };
 

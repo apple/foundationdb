@@ -487,6 +487,90 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 	return Void();
 }
 
+void randomMetaDataServers(Reference<MasterData> self,
+                           RecruitFromConfigurationReply recruits,
+                           std::vector<StorageServerInterface>* servers,
+                           std::unordered_map<UID, Tag>* serverTagMap) {
+	servers->clear();
+	serverTagMap->clear();
+
+	RangeResult serverList = self->txnStateStore->readRange(serverListKeys).get();
+
+	int32_t num = self->configuration.storageTeamSize;
+	std::unordered_set<UID> selected;
+	while (selected.size() < num) {
+		const int idx = deterministicRandom()->randomInt(0, serverList.size());
+		const UID serverId = decodeServerListKey(serverList[idx].key);
+		if (selected.count(serverId) > 0) {
+			continue;
+		}
+		servers->push_back(decodeServerListValue(serverList[idx].value));
+		Tag tag = decodeServerTagValue(self->txnStateStore->readValue(serverTagKeyFor(serverId)).get().get());
+		(*serverTagMap)[serverId] = tag;
+		selected.insert(serverId);
+	}
+
+	// for (int i = 0; i < serverList.size(); i++) {
+	// 	auto ssi = decodeServerListValue(serverList[i].value);
+	// 	if (!ssi.isTss()) {
+	// 		result->allServers.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
+	// 		server_dc[ssi.id()] = ssi.locality.dcId();
+	// 	} else {
+	// 		tss_servers.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
+	// 	}
+	// }
+	// RangeResult serverTags = self->txnStateStore->readRange(serverTagKeys).get();
+
+	// state uint16_t maxTagId = 0;
+	// for (const KeyValueRef& kv : serverTags) {
+	// 	Tag t = decodeServerTagValue(kv.value);
+	// 	maxTagId = std::max(maxTagId, t.id);
+	// }
+	// std::cout << "maxTagId: " << maxTagId << std::endl;
+
+	// ASSERT(!recruits.storageServers.empty());
+	// state int idx = 0;
+	// while (idx < recruits.storageServers.size()) {
+	// 	std::cout << "MasterRecruitingEmergencyMetadataStorageServer" << std::endl;
+	// 	TraceEvent("MasterRecruitingEmergencyMetadataStorageServer", self->dbgid)
+	// 	    .detail("CandidateWorker", recruits.storageServers[idx].locality.toString());
+	// 	Optional<Value> dcId = recruits.storageServers[idx].locality.dcId();
+	// 	ASSERT(dcId.present());
+
+	// 	Optional<Value> localityValue = self->txnStateStore->readValue(tagLocalityListKeyFor(dcId.get())).get();
+	// 	ASSERT(localityValue.present());
+	// 	state int8_t locality = decodeTagLocalityListValue(localityValue.get());
+
+	// 	InitializeStorageRequest isr;
+	// 	isr.seedTag = Tag(locality, ++maxTagId);
+	// 	isr.storeType = self->configuration.storageServerStoreType;
+	// 	isr.reqId = deterministicRandom()->randomUniqueID();
+	// 	isr.interfaceId = deterministicRandom()->randomUniqueID();
+
+	// 	ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
+
+	// 	if (newServer.isError()) {
+	// 		std::cout << "New storage server failure: " << newServer.getError().name() << std::endl;
+	// 		if (!newServer.isError(error_code_recruitment_failed) &&
+	// 		    !newServer.isError(error_code_request_maybe_delivered))
+	// 			throw newServer.getError();
+
+	// 		wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY));
+	// 	} else {
+	// 		std::cout << "New storage server: " << std::endl;
+	// 		servers->push_back(newServer.get().interf);
+	// 		(*serverTagMap)[newServer.get().interf.uniqueID] = Tag(locality, maxTagId);
+	// 	}
+	// 	++idx;
+	// }
+
+	// TraceEvent("MasterRecruitedEmergencyMetadataStorageServers", self->dbgid)
+	//     .detail("TargetCount", self->configuration.storageTeamSize)
+	//     .detail("Servers", describe(*servers));
+
+	// return Void();
+}
+
 ACTOR Future<Void> newMetaDataServers(Reference<MasterData> self,
                                       RecruitFromConfigurationReply recruits,
                                       std::vector<StorageServerInterface>* servers,
@@ -501,9 +585,13 @@ ACTOR Future<Void> newMetaDataServers(Reference<MasterData> self,
 		Tag t = decodeServerTagValue(kv.value);
 		maxTagId = std::max(maxTagId, t.id);
 	}
+	maxTagId = (maxTagId + SERVER_KNOBS->MAX_SKIP_TAGS) * 10;
+	std::cout << "maxTagId: " << maxTagId << std::endl;
 
+	ASSERT(!recruits.storageServers.empty());
 	state int idx = 0;
 	while (idx < recruits.storageServers.size()) {
+		std::cout << "MasterRecruitingEmergencyMetadataStorageServer" << std::endl;
 		TraceEvent("MasterRecruitingEmergencyMetadataStorageServer", self->dbgid)
 		    .detail("CandidateWorker", recruits.storageServers[idx].locality.toString());
 		Optional<Value> dcId = recruits.storageServers[idx].locality.dcId();
@@ -522,15 +610,18 @@ ACTOR Future<Void> newMetaDataServers(Reference<MasterData> self,
 		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
 
 		if (newServer.isError()) {
+			std::cout << "New storage server failure: " << newServer.getError().name() << std::endl;
 			if (!newServer.isError(error_code_recruitment_failed) &&
 			    !newServer.isError(error_code_request_maybe_delivered))
 				throw newServer.getError();
 
 			wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY));
 		} else {
+			std::cout << "New storage server: " << std::endl;
 			servers->push_back(newServer.get().interf);
 			(*serverTagMap)[newServer.get().interf.uniqueID] = Tag(locality, maxTagId);
 		}
+		++idx;
 	}
 
 	TraceEvent("MasterRecruitedEmergencyMetadataStorageServers", self->dbgid)
@@ -792,9 +883,9 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 		maxLogRouters = std::max(maxLogRouters, old.logRouterTags);
 	}
 
-	state RecruitFromConfigurationReply recruits =
-	    wait(brokenPromiseToNever(self->clusterController.recruitFromConfiguration.getReply(
-	        RecruitFromConfigurationRequest(self->configuration, self->lastEpochEnd == 0, maxLogRouters))));
+	state RecruitFromConfigurationReply recruits = wait(
+	    brokenPromiseToNever(self->clusterController.recruitFromConfiguration.getReply(RecruitFromConfigurationRequest(
+	        self->configuration, (self->lastEpochEnd == 0 || self->recoverMetadata), maxLogRouters))));
 
 	std::string primaryDcIds, remoteDcIds;
 
@@ -840,7 +931,8 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	if (!self->lastEpochEnd) {
 		wait(newSeedServers(self, recruits, seedServers));
 	} else if (self->recoverMetadata) {
-		wait(newMetaDataServers(self, recruits, seedServers, &self->serverTagMap));
+		// wait(newMetaDataServers(self, recruits, seedServers, &self->serverTagMap));
+		randomMetaDataServers(self, recruits, seedServers, &self->serverTagMap);
 	}
 	state std::vector<Standalone<CommitTransactionRef>> confChanges;
 	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits) &&
@@ -1739,6 +1831,24 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 	return Void();
 }
 
+static void populateRecoverMetadataMutations(Reference<MasterData> self, Arena& arena, CommitTransactionRef& tr) {
+	KeyRange txnKeys = allKeys;
+	// state std::map<Tag, UID> tag_uid;
+
+	// RangeResult UIDtoTagMap = pContext->pTxnStateStore->readRange(serverTagKeys).get();
+	// for (const KeyValueRef& kv : UIDtoTagMap) {
+	// 	tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
+	// }
+
+	// wait(yield());
+
+	RangeResult data = self->txnStateStore->readRange(txnKeys).get();
+	ASSERT(!data.empty());
+	for (auto& kv : data) {
+		tr.set(arena, kv.key, kv.value);
+	}
+}
+
 ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	state TraceInterval recoveryInterval("MasterRecovery");
 	state double recoverStartTime = now();
@@ -1916,6 +2026,11 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		seedShardServers(recoveryCommitRequest.arena, tr, seedServers);
 	}
 
+	if (self->recoverMetadata) {
+		setUpMetadataServers(recoveryCommitRequest.arena, tr, seedServers, self->serverTagMap);
+		// populateRecoverMetadataMutations(self, recoveryCommitRequest.arena, tr);
+	}
+
 	// initialConfChanges have not been conflict checked against any earlier writes in the recovery transaction, so do
 	// this as early as possible in the recovery transaction but see above comments as to why it can't be absolutely
 	// first.  Theoretically emergency transactions should conflict check against the lastEpochEndKey.
@@ -1923,10 +2038,6 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		tr.mutations.append_deep(recoveryCommitRequest.arena, itr.mutations.begin(), itr.mutations.size());
 		tr.write_conflict_ranges.append_deep(
 		    recoveryCommitRequest.arena, itr.write_conflict_ranges.begin(), itr.write_conflict_ranges.size());
-	}
-
-	if (self->recoverMetadata) {
-		setUpMetadataServers(recoveryCommitRequest.arena, tr, seedServers, self->serverTagMap);
 	}
 
 	tr.set(
@@ -1972,18 +2083,58 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	// So that all changes to transaction state store is only in the master's RAM?
 	wait(discardCommit(self->txnStateStore, self->txnStateLogAdapter));
 
+	if (self->recoverMetadata) {
+		for (auto& s : seedServers) {
+			std::cout
+			    << decodeServerTagValue(self->txnStateStore->readValue(serverTagKeyFor(s.id())).get().get()).toString()
+			    << std::endl;
+		}
+	}
+
 	// Wait for the recovery transaction to complete.
 	// SOMEDAY: For faster recovery, do this and setDBState asynchronously and don't wait for them
 	// unless we want to change TLogs
 	wait((success(recoveryCommit) && sendInitialCommitToResolvers(self)));
 	if (recoveryCommit.isReady() && recoveryCommit.get().isError()) {
 		TEST(true); // Master recovery failed because of the initial commit failed
+		const Error& e = recoveryCommit.get().getError();
+		std::cout << "recovery transaction failed: " << e.name() << std::endl;
+		TraceEvent("MasterRecoveryCommitError", self->dbgid).error(e);
 		throw master_recovery_failed();
 	}
 
+	std::cout << "recovery transaction completed: " << std::endl;
 	ASSERT(self->recoveryTransactionVersion != 0);
 
 	// Here.
+
+	// if (self->recoverMetadata) {
+	// 	std::cout << "start recover metadata transaction." << std::endl;
+	// 	CommitTransactionRequest recoverMetadataCommitRequest;
+	// 	recoverMetadataCommitRequest.flags = recoverMetadataCommitRequest.flags |
+	// 	                                     CommitTransactionRequest::FLAG_SUPPRESS_PRIVATE_MUTATIONS |
+	// 	                                     CommitTransactionRequest::FLAG_FIRST_IN_BATCH;
+	// 	CommitTransactionRef& txn = recoverMetadataCommitRequest.transaction;
+	// 	populateRecoverMetadataMutations(self, recoverMetadataCommitRequest.arena, txn);
+
+	// 	state Future<ErrorOr<CommitID>> recoverMetadataCommit =
+	// 	    self->commitProxies[0].commit.tryGetReply(recoverMetadataCommitRequest);
+	// 	try {
+	// 		wait(success(recoverMetadataCommit));
+	// 		std::cout << "finished recover metadata transaction." << std::endl;
+	// 	} catch (Error& e) {
+	// 		TraceEvent("MasterRecoverMetadataCommitError", self->dbgid).error(e);
+	// 		throw master_recovery_failed();
+	// 	}
+	// 	if (recoverMetadataCommit.isReady() && recoverMetadataCommit.get().isError()) {
+	// 		const Error& e = recoverMetadataCommit.get().getError();
+	// 		std::cout << "finished recover metadata transaction." << e.name() << std::endl;
+	// 		TraceEvent("MasterRecoverMetadataCommitError", self->dbgid).error(e);
+	// 		throw master_recovery_failed();
+	// 	}
+	// 	ASSERT(recoverMetadataCommit.isReady());
+	// 	TraceEvent("MasterRecoverMetadata", self->dbgid);
+	// }
 
 	self->recoveryState = RecoveryState::WRITING_CSTATE;
 	TraceEvent("MasterRecoveryState", self->dbgid)
