@@ -40,8 +40,8 @@ ACTOR Future<bool> moveShardCommandActor(Reference<IDatabase> db, std::vector<St
 }
 
 CommandFactory moveShardFactory(
-    "force_recovery_with_data_loss",
-    CommandHelp("force_recovery_with_data_loss <DCID>",
+    "move_shard",
+    CommandHelp("move_shard <BEGIN_KEY> <BEGIN_KEY> <ADDRESS...>",
                 "Force the database to recover into DCID",
                 "A forced recovery will cause the database to lose the most recently committed mutations. The "
                 "amount of mutations that will be lost depends on how far behind the remote datacenter is. This "

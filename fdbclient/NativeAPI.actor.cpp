@@ -6548,8 +6548,8 @@ ACTOR static Future<Void> createSnapshotActor(DatabaseContext* cx, UID snapUID, 
 	return Void();
 }
 
-Future<Void> DatabaseContext::forceRecoveryWithDataLoss(KeyRangeRef shard, std::vector<NetworkAddress> addresses) {
-	return moveShard(getConnectionFile(), shard, addresses);
+Future<Void> DatabaseContext::moveShard(KeyRangeRef shard, std::vector<NetworkAddress> addresses) {
+	return ::moveShard(getConnectionFile(), shard, addresses);
 }
 
 Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_command) {

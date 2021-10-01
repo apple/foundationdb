@@ -4681,6 +4681,7 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddress> addresses) {
 	// Disable DD to avoid DD undoing of our move.
 	state int ignore = wait(setDDMode(cx, 0));
+	std::cout << "Disabled DDj" << std::endl;
 
 	state std::unique_ptr<FlowLock> startMoveKeysParallelismLock = std::make_unique<FlowLock>();
 	state std::unique_ptr<FlowLock> finishMoveKeysParallelismLock = std::make_unique<FlowLock>();
@@ -4706,12 +4707,21 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 			dest.push_back(ssi.uniqueID);
 		} else if (ssi.secondaryAddress().present() && nadds.count(ssi.secondaryAddress().get()) > 0) {
 			dest.push_back(ssi.uniqueID);
-		} else if (ips.count(ssi.address().ip.toString()) > 0) {
-			dest.push_back(ssi.uniqueID);
-		} else if (ssi.secondaryAddress().present() && ips.count(ssi.secondaryAddress().get().ip.toString()) > 0) {
-			dest.push_back(ssi.uniqueID);
 		}
 	}
+
+	if (dest.size() < addresses.size()) {
+		for (auto s = serverList.begin(); s != serverList.end() && dest.size() < addresses.size(); ++s) {
+			auto ssi = decodeServerListValue(s->value);
+			if (ips.count(ssi.address().ip.toString()) > 0) {
+				dest.push_back(ssi.uniqueID);
+			} else if (ssi.secondaryAddress().present() && ips.count(ssi.secondaryAddress().get().ip.toString()) > 0) {
+				dest.push_back(ssi.uniqueID);
+			}
+		}
+	}
+
+	std::cout << "Found Storage Server(s):" << std::endl << describe(dest) << std::endl;
 
 	if (dest.empty()) {
 		throw internal_error();
@@ -4749,6 +4759,8 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 			}
 		}
 	}
+
+	std::cout << "Moved Shard To New Team: " << describe(dest) << std::endl;
 
 	TraceEvent("ShardMoved").detail("NewTeam", describe(dest));
 
