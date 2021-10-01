@@ -2148,13 +2148,13 @@ void print_report(mako_args_t* args,
 	if (fp) {
 		fprintf(fp, "\"results\": {");
 		fprintf(fp, "\"Total Duration\": %6.3f,", total_duration);
-		fprintf(fp, "\"Total Processes\": %8d,", args->num_processes);
-		fprintf(fp, "\"Total Threads\": %8d,", args->num_threads);
-		fprintf(fp, "\"Target TPS\": %8d,", args->tpsmax);
-		fprintf(fp, "\"Total Xacts\": %8lld,", totalxacts);
-		fprintf(fp, "\"Total Conflicts\": %8lld,", conflicts);
-		fprintf(fp, "\"Total Errors\": %8lld,", totalerrors);
-		fprintf(fp, "\"Overall TPS\": %8lld,", totalxacts * 1000000000 / durationns);
+		fprintf(fp, "\"Total Processes\": %d,", args->num_processes);
+		fprintf(fp, "\"Total Threads\": %d,", args->num_threads);
+		fprintf(fp, "\"Target TPS\": %d,", args->tpsmax);
+		fprintf(fp, "\"Total Xacts\": %lld,", totalxacts);
+		fprintf(fp, "\"Total Conflicts\": %lld,", conflicts);
+		fprintf(fp, "\"Total Errors\": %lld,", totalerrors);
+		fprintf(fp, "\"Overall TPS\": %lld,", totalxacts * 1000000000 / durationns);
 	}
 
 	/* per-op stats */
