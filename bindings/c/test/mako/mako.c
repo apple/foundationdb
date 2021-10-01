@@ -1848,7 +1848,7 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 }
 
 char* get_ops_name(int ops_code) {
-	switch(ops_code) {
+	switch (ops_code) {
 	case OP_GETREADVERSION:
 		return "GRV";
 	case OP_GET:
@@ -2071,7 +2071,7 @@ void print_report(mako_args_t* args,
                   struct timespec* timer_now,
                   struct timespec* timer_start,
                   pid_t* pid_main,
-				  FILE* fp) {
+                  FILE* fp) {
 	int i, j, k, op, index;
 	uint64_t totalxacts = 0;
 	uint64_t conflicts = 0;
@@ -2435,7 +2435,7 @@ int stats_process_main(mako_args_t* args,
 	if (args->verbose >= VERBOSE_DEFAULT)
 		print_stats_header(args, false, true, false);
 
-	FILE *fp = NULL;
+	FILE* fp = NULL;
 	if (args->output_json) {
 		fp = fopen("mako.json", "w");
 		fprintf(fp, "{\"samples\": [");
