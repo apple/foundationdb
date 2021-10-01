@@ -26,6 +26,10 @@
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+/**
+ * Workload for testing ClientLib management operations, declared in
+ * MultiVersionClientControl.actor.h
+ */
 struct ClientLibManagementWorkload : public TestWorkload {
 
 	static constexpr const char TEST_FILE_NAME[] = "dummyclientlib";
@@ -33,8 +37,13 @@ struct ClientLibManagementWorkload : public TestWorkload {
 	static constexpr size_t TEST_FILE_SIZE = FILE_CHUNK_SIZE * 80; // 10MB
 
 	RandomByteGenerator rbg;
+	bool success;
 
-	ClientLibManagementWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+	/*----------------------------------------------------------------
+	 *  Interface
+	 */
+
+	ClientLibManagementWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), success(true) {}
 
 	std::string description() const override { return "ClientLibManagement"; }
 
@@ -45,7 +54,15 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		return Void();
 	}
 
-	Reference<AsyncFileBuffer> allocateBuffer(size_t size) { return makeReference<AsyncFileBuffer>(size, false); }
+	Future<Void> start(Database const& cx) override { return _start(this, cx); }
+
+	Future<bool> check(Database const& cx) override { return success; }
+
+	void getMetrics(std::vector<PerfMetric>& m) override {}
+
+	/*----------------------------------------------------------------
+	 *  Setup
+	 */
 
 	ACTOR Future<Void> _setup(ClientLibManagementWorkload* self) {
 		int64_t flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE;
@@ -63,7 +80,110 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		return Void();
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(this, cx); }
+	/*----------------------------------------------------------------
+	 *  Tests
+	 */
+
+	ACTOR static Future<Void> _start(ClientLibManagementWorkload* self, Database cx) {
+		wait(testUploadClientLibInvalidInput(self, cx));
+		wait(testClientLibUploadFileDoesNotExist(self, cx));
+		wait(testUploadClientLib(self, cx));
+		return Void();
+	}
+
+	ACTOR static Future<Void> testUploadClientLibInvalidInput(ClientLibManagementWorkload* self, Database cx) {
+		state std::vector<std::string> invalidMetadataStrs = {
+			"{foo", // invalid json
+			"[]", // json array
+		};
+
+		// add garbage attribute
+		json_spirit::mObject metadataJson;
+		validClientLibMetadataSample(metadataJson);
+		metadataJson["unknownattr"] = "someval";
+		invalidMetadataStrs.push_back(json_spirit::write_string(json_spirit::mValue(metadataJson)));
+
+		const char* mandatoryAttrs[] = { "platform", "version", "checksum", "type" };
+
+		for (const char* attr : mandatoryAttrs) {
+			validClientLibMetadataSample(metadataJson);
+			metadataJson.erase(attr);
+			invalidMetadataStrs.push_back(json_spirit::write_string(json_spirit::mValue(metadataJson)));
+		}
+
+		for (auto& testMetadataStr : invalidMetadataStrs) {
+			state StringRef metadataStr = StringRef(testMetadataStr);
+			try {
+				// Try to pass some invalid metadata input
+				wait(uploadClientLibrary(cx, metadataStr, LiteralStringRef(TEST_FILE_NAME)));
+				self->unexpectedSuccess(
+				    "InvalidMetadata", error_code_client_lib_invalid_metadata, metadataStr.toString().c_str());
+			} catch (Error& e) {
+				self->testErrorCode("InvalidMetadata",
+				                    error_code_client_lib_invalid_metadata,
+				                    e.code(),
+				                    metadataStr.toString().c_str());
+			}
+		}
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> testClientLibUploadFileDoesNotExist(ClientLibManagementWorkload* self, Database cx) {
+		json_spirit::mObject metadataJson;
+		validClientLibMetadataSample(metadataJson);
+		state Standalone<StringRef> metadataStr =
+		    StringRef(json_spirit::write_string(json_spirit::mValue(metadataJson)));
+		try {
+			wait(uploadClientLibrary(cx, metadataStr, LiteralStringRef("some_not_existing_file_name")));
+			self->unexpectedSuccess("FileDoesNotExist", error_code_file_not_found);
+		} catch (Error& e) {
+			self->testErrorCode("FileDoesNotExist", error_code_file_not_found, e.code());
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> testUploadClientLib(ClientLibManagementWorkload* self, Database cx) {
+		json_spirit::mObject metadataJson;
+		validClientLibMetadataSample(metadataJson);
+
+		state Standalone<StringRef> metadataStr =
+		    StringRef(json_spirit::write_string(json_spirit::mValue(metadataJson)));
+
+		// Test two concurrent uploads of the same library, one of the must fail and another succeed
+		state std::vector<Future<ErrorOr<Void>>> concurrentUploads;
+		for (int i1 = 0; i1 < 2; i1++) {
+			Future<Void> uploadActor = uploadClientLibrary(cx, metadataStr, LiteralStringRef(TEST_FILE_NAME));
+			concurrentUploads.push_back(errorOr(uploadActor));
+		}
+
+		wait(waitForAll(concurrentUploads));
+
+		int successCnt = 0;
+		for (auto uploadRes : concurrentUploads) {
+			if (uploadRes.get().isError()) {
+				self->testErrorCode(
+				    "ConcurrentUpload", error_code_client_lib_already_exists, uploadRes.get().getError().code());
+			} else {
+				successCnt++;
+			}
+		}
+
+		if (successCnt == 0) {
+			TraceEvent(SevError, "ClientLibUploadFailed").log();
+			self->success = false;
+			return Void();
+		} else if (successCnt > 1) {
+			TraceEvent(SevError, "ClientLibConflictingUpload").log();
+		}
+		return Void();
+	}
+
+	/* ----------------------------------------------------------------
+	 * Utility methods
+	 */
+
+	Reference<AsyncFileBuffer> allocateBuffer(size_t size) { return makeReference<AsyncFileBuffer>(size, false); }
 
 	static std::string randomHexadecimalStr(int length) {
 		std::string s;
@@ -76,26 +196,40 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		return s;
 	}
 
-	ACTOR static Future<Void> _start(ClientLibManagementWorkload* self, Database cx) {
-		json_spirit::mObject metadataJson;
+	static void validClientLibMetadataSample(json_spirit::mObject& metadataJson) {
+		metadataJson.clear();
 		metadataJson["platform"] = "x86_64-linux";
 		metadataJson["version"] = "7.1.0";
 		metadataJson["githash"] = randomHexadecimalStr(40);
 		metadataJson["type"] = "debug";
 		metadataJson["checksum"] = randomHexadecimalStr(32);
 		metadataJson["status"] = "available";
-
-		state Standalone<StringRef> metadataStr =
-		    StringRef(json_spirit::write_string(json_spirit::mValue(metadataJson)));
-
-		wait(uploadClientLibrary(cx, metadataStr, LiteralStringRef(TEST_FILE_NAME)));
-
-		return Void();
 	}
 
-	Future<bool> check(Database const& cx) override { return true; }
+	void unexpectedSuccess(const char* testName, int expectedErrorCode, const char* optionalDetails = nullptr) {
+		TraceEvent trEv(SevError, "ClientLibManagementUnexpectedSuccess");
+		trEv.detail("Test", testName).detail("ExpectedError", expectedErrorCode);
+		if (optionalDetails != nullptr) {
+			trEv.detail("Details", optionalDetails);
+		}
+		success = false;
+	}
 
-	void getMetrics(std::vector<PerfMetric>& m) override {}
+	void testErrorCode(const char* testName,
+	                   int expectedErrorCode,
+	                   int actualErrorCode,
+	                   const char* optionalDetails = nullptr) {
+		if (actualErrorCode != expectedErrorCode) {
+			TraceEvent trEv(SevError, "ClientLibManagementUnexpectedError");
+			trEv.detail("Test", testName)
+			    .detail("ExpectedError", expectedErrorCode)
+			    .detail("ActualError", actualErrorCode);
+			if (optionalDetails != nullptr) {
+				trEv.detail("Details", optionalDetails);
+			}
+			success = false;
+		}
+	}
 };
 
 WorkloadFactory<ClientLibManagementWorkload> ClientLibOperationsWorkloadFactory("ClientLibManagement");

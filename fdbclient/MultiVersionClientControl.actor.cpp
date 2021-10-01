@@ -116,7 +116,8 @@ static bool getClientLibIdFromMetadataJson(const json_spirit::mObject& metadataJ
 ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, StringRef libFilePath) {
 
 	json_spirit::mValue parsedMetadata;
-	if (!json_spirit::read_string(metadataString.toString(), parsedMetadata)) {
+	if (!json_spirit::read_string(metadataString.toString(), parsedMetadata) ||
+	    parsedMetadata.type() != json_spirit::obj_type) {
 		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
 		    .detail("Reason", "InvalidJSON")
 		    .detail("Configuration", metadataString);
@@ -131,7 +132,7 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 	}
 
 	std::string errorStr;
-	if (!schemaMatch(schema.get_obj(), metadataJson, errorStr)) {
+	if (!schemaMatch(schema.get_obj(), metadataJson, errorStr, SevWarnAlways)) {
 		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
 		    .detail("Reason", "SchemaMismatch")
 		    .detail("Configuration", metadataString)
