@@ -138,7 +138,7 @@ typedef struct {
 	char txntagging_prefix[TAGPREFIXLENGTH_MAX];
 	FDBStreamingMode streaming_mode;
 	int disable_ryw;
-	int output_json;
+	char json_output_path[PATH_MAX];
 } mako_args_t;
 
 /* shared memory */

@@ -1448,7 +1448,7 @@ int init_args(mako_args_t* args) {
 		args->txnspec.ops[i][OP_COUNT] = 0;
 	}
 	args->disable_ryw = 0;
-	args->output_json = 0;
+	args->json_output_path[0] = '\0';
 	return 0;
 }
 
@@ -1614,7 +1614,7 @@ void usage() {
 	printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
 	printf("%-24s %s\n", "    --streaming", "Streaming mode: all (default), iterator, small, medium, large, serial");
 	printf("%-24s %s\n", "    --disable_ryw", "Disable snapshot read-your-writes");
-	printf("%-24s %s\n", "    --json", "Output stats to a json file");
+	printf("%-24s %s\n", "    --json=PATH", "Output stats to the specified json file");
 }
 
 /* parse benchmark paramters */
@@ -1649,9 +1649,9 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "trace_format", required_argument, NULL, ARG_TRACEFORMAT },
 			                                    { "streaming", required_argument, NULL, ARG_STREAMING_MODE },
 			                                    { "txntrace", required_argument, NULL, ARG_TXNTRACE },
+												{ "json", required_argument, NULL, 'j' },
 			                                    /* no args */
 			                                    { "help", no_argument, NULL, 'h' },
-			                                    { "json", no_argument, NULL, 'j' },
 			                                    { "zipf", no_argument, NULL, 'z' },
 			                                    { "commitget", no_argument, NULL, ARG_COMMITGET },
 			                                    { "flatbuffers", no_argument, NULL, ARG_FLATBUFFERS },
@@ -1714,7 +1714,7 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			}
 			break;
 		case 'j':
-			args->output_json = 1;
+			strcpy(args->json_output_path, optarg);
 			break;
 		case ARG_KEYLEN:
 			args->key_length = atoi(optarg);
@@ -2436,8 +2436,8 @@ int stats_process_main(mako_args_t* args,
 		print_stats_header(args, false, true, false);
 
 	FILE* fp = NULL;
-	if (args->output_json) {
-		fp = fopen("mako.json", "w");
+	if (args->json_output_path[0] != '\0') {
+		fp = fopen(args->json_output_path, "w");
 		fprintf(fp, "{\"samples\": [");
 	}
 
@@ -2488,7 +2488,7 @@ int stats_process_main(mako_args_t* args,
 		}
 	}
 
-	if (args->output_json) {
+	if (fp) {
 		fprintf(fp, "],");
 	}
 
@@ -2501,7 +2501,7 @@ int stats_process_main(mako_args_t* args,
 		print_report(args, stats, &timer_now, &timer_start, pid_main, fp);
 	}
 
-	if (args->output_json) {
+	if (fp) {
 		fprintf(fp, "}");
 		fclose(fp);
 	}
