@@ -1496,20 +1496,18 @@ void seedShardServers(Arena& arena,
 		server_tag[s.id()] = Tag(t.locality, t.id);
 		t.id++;
 	}
-	std::sort(servers.begin(), servers.end());
+	// We can't sort this, because the last team is txsTeam.
+	// std::sort(servers.begin(), servers.end());
 
 	// This isn't strictly necessary, but make sure this is the first transaction
 	tr.read_snapshot = 0;
 	tr.read_conflict_ranges.push_back_deep(arena, allKeys);
 
-	bool txs_team_set = false;
-	for (const auto& [s, _] : servers) {
+	for (const auto& [s, teamId] : servers) {
 		std::vector<UID> team = { s.id() };
 		Key teamListKey = storageServerListToTeamIdKey(team);
 
 		// Create teams
-		auto teamId = txs_team_set ? deterministicRandom()->randomUniqueID() : ptxn::txsTeam;
-		txs_team_set = true;
 		tr.set(arena, storageTeamIdKey(teamId), encodeStorageTeams(team)); // TeamId -> Vec<StorageServers>
 		tr.set(arena, teamListKey, BinaryWriter::toValue(teamId, Unversioned())); // Vec<StorageServer> -> TeamId
 
@@ -1563,9 +1561,11 @@ void seedShardServers(Arena& arena,
 	const int numKeyRanges = keySplits.size() + 1;
 
 	ASSERT(numKeyRanges > 1);
-	ASSERT(numKeyRanges <= numServers);
 
-	int serverIndex = 1; // We start at 1, because first storage server is assigned to txsTeam.
+	// TODO: when numKeyRanges < numServers, txsTeam is not assigned to the last SS.
+	ASSERT(numKeyRanges == numServers);
+
+	int serverIndex = 0;
 	StringRef keyRangeStart = allKeys.begin;
 	for (int index = 0; index < keySplits.size(); ++index) {
 		auto keyRange = KeyRangeRef(keyRangeStart, keySplits[index]);
