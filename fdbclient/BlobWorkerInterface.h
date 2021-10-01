@@ -35,6 +35,8 @@ struct BlobWorkerInterface {
 	RequestStream<struct AssignBlobRangeRequest> assignBlobRangeRequest;
 	RequestStream<struct RevokeBlobRangeRequest> revokeBlobRangeRequest;
 	RequestStream<struct GranuleStatusStreamRequest> granuleStatusStreamRequest;
+	RequestStream<struct HaltBlobWorkerRequest> haltBlobWorker;
+
 	struct LocalityData locality;
 	UID myId;
 
@@ -57,6 +59,7 @@ struct BlobWorkerInterface {
 		           assignBlobRangeRequest,
 		           revokeBlobRangeRequest,
 		           granuleStatusStreamRequest,
+		           haltBlobWorker,
 		           locality,
 		           myId);
 	}
@@ -179,6 +182,22 @@ struct GranuleStatusStreamRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, managerEpoch, reply);
+	}
+};
+
+struct HaltBlobWorkerRequest {
+	constexpr static FileIdentifier file_identifier = 1985879;
+	UID requesterID;
+	ReplyPromise<Void> reply;
+
+	int64_t managerEpoch;
+
+	HaltBlobWorkerRequest() {}
+	explicit HaltBlobWorkerRequest(int64_t managerEpoch, UID uid) : requesterID(uid), managerEpoch(managerEpoch) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, managerEpoch, requesterID, reply);
 	}
 };
 

@@ -34,14 +34,13 @@
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/Arena.h"
+#include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // has to be last include
 #include "flow/flow.h"
 
 #define BW_DEBUG true
 #define BW_REQUEST_DEBUG false
-
-// FIXME: change all BlobWorkerData* to Reference<BlobWorkerData> to avoid segfaults if core loop gets error
 
 // TODO add comments + documentation
 struct BlobFileIndex {
@@ -76,10 +75,12 @@ struct GranuleChangeFeedInfo {
 // FIXME: the circular dependencies here are getting kind of gross
 struct GranuleMetadata;
 struct BlobWorkerData;
-ACTOR Future<GranuleChangeFeedInfo> persistAssignWorkerRange(BlobWorkerData* bwData, AssignBlobRangeRequest req);
-ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<GranuleMetadata> metadata);
+ACTOR Future<GranuleChangeFeedInfo> persistAssignWorkerRange(Reference<BlobWorkerData> bwData,
+                                                             AssignBlobRangeRequest req);
+ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData, Reference<GranuleMetadata> metadata);
 
-// for a range that is active
+// for a range that may or may not be set
+
 struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	KeyRange keyRange;
 
@@ -112,12 +113,17 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 
 	AssignBlobRangeRequest originalReq;
 
-	Future<Void> start(BlobWorkerData* bwData, AssignBlobRangeRequest req) {
+	Future<Void> start(Reference<BlobWorkerData> bwData, AssignBlobRangeRequest req) {
 		originalReq = req;
 		assignFuture = persistAssignWorkerRange(bwData, req);
 		fileUpdaterFuture = blobGranuleUpdateFiles(bwData, Reference<GranuleMetadata>::addRef(this));
+		// bwData->actors.add(blobGranuleUpdateFiles(bwData, Reference<GranuleMetadata>::addRef(this)));
+		// this could be the cause of the seg fault. since this is not being waited on,
+		// when start get cancelled, blobGranuleUpdateFiles won't get cancelled. so instead I added it to actors, so
+		// that it is explicitly cancelled. maybe this fixes it?
 
 		return success(assignFuture);
+		// return Void();
 	}
 
 	void resume() {
@@ -145,7 +151,6 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	}
 };
 
-// for a range that may or may not be set
 struct GranuleRangeMetadata {
 	int64_t lastEpoch;
 	int64_t lastSeqno;
@@ -154,13 +159,24 @@ struct GranuleRangeMetadata {
 	GranuleRangeMetadata() : lastEpoch(0), lastSeqno(0) {}
 	GranuleRangeMetadata(int64_t epoch, int64_t seqno, Reference<GranuleMetadata> activeMetadata)
 	  : lastEpoch(epoch), lastSeqno(seqno), activeMetadata(activeMetadata) {}
+	/*
+	~GranuleRangeMetadata() {
+	    if (activeMetadata.isValid()) {
+	        activeMetadata->cancel(false);
+	    }
+	}
+	*/
 };
 
-struct BlobWorkerData {
+struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	UID id;
 	Database db;
+	AsyncVar<bool> dead;
 
 	BlobWorkerStats stats;
+
+	PromiseStream<Future<Void>> addActor;
+	ActorCollection actors{ false };
 
 	LocalityData locality;
 	int64_t currentManagerEpoch = -1;
@@ -178,7 +194,8 @@ struct BlobWorkerData {
 
 	PromiseStream<AssignBlobRangeRequest> granuleUpdateErrors;
 
-	BlobWorkerData(UID id, Database db) : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
+	BlobWorkerData(UID id, Database db)
+	  : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL), actors(false), dead(false) {}
 	~BlobWorkerData() { printf("Destroying blob worker data for %s\n", id.toString().c_str()); }
 
 	bool managerEpochOk(int64_t epoch) {
@@ -481,7 +498,7 @@ static Value getFileValue(std::string fname, int64_t offset, int64_t length) {
 // the data in it may not yet be committed, and even though previous delta fiels with lower versioned data may still be
 // in flight. The synchronization happens after the s3 file is written, but before we update the FDB index of what files
 // exist. Before updating FDB, we ensure the version is committed and all previous delta files have updated FDB.
-ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
+ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
                                            KeyRange keyRange,
                                            int64_t epoch,
                                            int64_t seqno,
@@ -589,7 +606,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
 	}
 }
 
-ACTOR Future<BlobFileIndex> writeSnapshot(BlobWorkerData* bwData,
+ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
                                           KeyRange keyRange,
                                           int64_t epoch,
                                           int64_t seqno,
@@ -707,7 +724,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(BlobWorkerData* bwData,
 	return BlobFileIndex(version, fname, 0, serialized.size());
 }
 
-ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(BlobWorkerData* bwData, Reference<GranuleMetadata> metadata) {
+ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData> bwData,
+                                                       Reference<GranuleMetadata> metadata) {
 	if (BW_DEBUG) {
 		printf("Dumping snapshot from FDB for [%s - %s)\n",
 		       metadata->keyRange.begin.printable().c_str(),
@@ -755,7 +773,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(BlobWorkerData* bwData, R
 }
 
 // files might not be the current set of files in metadata, in the case of doing the initial snapshot of a granule.
-ACTOR Future<BlobFileIndex> compactFromBlob(BlobWorkerData* bwData,
+ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
                                             Reference<GranuleMetadata> metadata,
                                             GranuleFiles files) {
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
@@ -874,7 +892,7 @@ static bool filterOldMutations(const KeyRange& range,
 	return false;
 }
 
-ACTOR Future<Void> handleCompletedDeltaFile(BlobWorkerData* bwData,
+ACTOR Future<Void> handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
                                             Reference<GranuleMetadata> metadata,
                                             BlobFileIndex completedDeltaFile,
                                             Key cfKey,
@@ -892,12 +910,15 @@ ACTOR Future<Void> handleCompletedDeltaFile(BlobWorkerData* bwData,
 		// have completed
 		// FIXME: also have these be async, have each pop change feed wait on the prior one, wait on them before
 		// re-snapshotting
+		printf("in handleCompletedDeltaFile for BW %s\n", bwData->id.toString().c_str());
 		Future<Void> popFuture = bwData->db->popChangeFeedMutations(cfKey, completedDeltaFile.version);
 		wait(popFuture);
+		printf("popChangeFeedMutations returned\n");
 	}
 	while (!rollbacksInProgress.empty() && completedDeltaFile.version >= rollbacksInProgress.front().first) {
 		rollbacksInProgress.pop_front();
 	}
+	printf("removed rollbacks\n");
 	return Void();
 }
 
@@ -1026,7 +1047,7 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 // updater for a single granule
 // TODO: this is getting kind of large. Should try to split out this actor if it continues to grow?
 // FIXME: handle errors here (forward errors)
-ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<GranuleMetadata> metadata) {
+ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData, Reference<GranuleMetadata> metadata) {
 	state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> oldChangeFeedStream;
 	state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> changeFeedStream;
 	state Future<BlobFileIndex> inFlightBlobSnapshot;
@@ -1146,6 +1167,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 			                                    changeFeedInfo.granuleSplitFrom.get() /*metadata->keyRange*/);
 		} else {
 			readOldChangeFeed = false;
+			printf("before getChangeFeedStream, my ID is %s\n", bwData->id.toString().c_str());
 			changeFeedFuture = bwData->db->getChangeFeedStream(
 			    changeFeedStream, cfKey, startVersion + 1, MAX_VERSION, metadata->keyRange);
 		}
@@ -1347,12 +1369,15 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 						Optional<Void> result = wait(timeout(metadata->resumeSnapshot.getFuture(), 1.0));
 						if (result.present()) {
 							break;
+						} else if (bwData->dead.get()) {
+							throw actor_cancelled();
 						}
 						// FIXME: re-trigger this loop if blob manager status stream changes
 						if (BW_DEBUG) {
-							printf("Granule [%s - %s)\n, hasn't heard back from BM, re-sending status\n",
+							printf("Granule [%s - %s)\n, hasn't heard back from BM in BW %s, re-sending status\n",
 							       metadata->keyRange.begin.printable().c_str(),
-							       metadata->keyRange.end.printable().c_str());
+							       metadata->keyRange.end.printable().c_str(),
+							       bwData->id.toString().c_str());
 						}
 					}
 
@@ -1528,6 +1553,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 		}
 
 	} catch (Error& e) {
+		printf("IN CATCH FOR blobGranuleUpdateFiles -----------------------------------\n ");
 		if (e.code() == error_code_operation_cancelled) {
 			throw;
 		}
@@ -1642,7 +1668,7 @@ static Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version 
 	return waitForVersionActor(metadata, v);
 }
 
-ACTOR Future<Void> handleBlobGranuleFileRequest(BlobWorkerData* bwData, BlobGranuleFileRequest req) {
+ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, BlobGranuleFileRequest req) {
 	try {
 		// TODO REMOVE in api V2
 		ASSERT(req.beginVersion == 0);
@@ -1713,7 +1739,10 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(BlobWorkerData* bwData, BlobGran
 				choose {
 					when(wait(waitForVersionFuture)) {}
 					when(wait(metadata->rollbackCount.onChange())) {}
-					when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
+					when(wait(metadata->cancelled.getFuture())) {
+						printf("metadata was cancelled\n");
+						throw wrong_shard_server();
+					}
 				}
 
 				if (rollbackCount == metadata->rollbackCount.get()) {
@@ -1821,7 +1850,8 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(BlobWorkerData* bwData, BlobGran
 	return Void();
 }
 
-ACTOR Future<GranuleChangeFeedInfo> persistAssignWorkerRange(BlobWorkerData* bwData, AssignBlobRangeRequest req) {
+ACTOR Future<GranuleChangeFeedInfo> persistAssignWorkerRange(Reference<BlobWorkerData> bwData,
+                                                             AssignBlobRangeRequest req) {
 	ASSERT(!req.continueAssignment);
 	state Transaction tr(bwData->db);
 	state Key lockKey = granuleLockKey(req.keyRange);
@@ -1971,7 +2001,7 @@ ACTOR Future<GranuleChangeFeedInfo> persistAssignWorkerRange(BlobWorkerData* bwD
 	}
 }
 
-static GranuleRangeMetadata constructActiveBlobRange(BlobWorkerData* bwData,
+static GranuleRangeMetadata constructActiveBlobRange(Reference<BlobWorkerData> bwData,
                                                      KeyRange keyRange,
                                                      int64_t epoch,
                                                      int64_t seqno) {
@@ -2013,7 +2043,7 @@ static bool newerRangeAssignment(GranuleRangeMetadata oldMetadata, int64_t epoch
 // Returns future to wait on to ensure prior work of other granules is done before responding to the manager with a
 // successful assignment And if the change produced a new granule that needs to start doing work, returns the new
 // granule so that the caller can start() it with the appropriate starting state.
-static std::pair<Future<Void>, Reference<GranuleMetadata>> changeBlobRange(BlobWorkerData* bwData,
+static std::pair<Future<Void>, Reference<GranuleMetadata>> changeBlobRange(Reference<BlobWorkerData> bwData,
                                                                            KeyRange keyRange,
                                                                            int64_t epoch,
                                                                            int64_t seqno,
@@ -2105,7 +2135,7 @@ static std::pair<Future<Void>, Reference<GranuleMetadata>> changeBlobRange(BlobW
 	return std::pair(waitForAll(futures), newMetadata.activeMetadata);
 }
 
-static bool resumeBlobRange(BlobWorkerData* bwData, KeyRange keyRange, int64_t epoch, int64_t seqno) {
+static bool resumeBlobRange(Reference<BlobWorkerData> bwData, KeyRange keyRange, int64_t epoch, int64_t seqno) {
 	auto existingRange = bwData->granuleMetadata.rangeContaining(keyRange.begin);
 	// if range boundaries don't match, or this (epoch, seqno) is old or the granule is inactive, ignore
 	if (keyRange.begin != existingRange.begin() || keyRange.end != existingRange.end() ||
@@ -2142,7 +2172,7 @@ static bool resumeBlobRange(BlobWorkerData* bwData, KeyRange keyRange, int64_t e
 	return true;
 }
 
-ACTOR Future<Void> registerBlobWorker(BlobWorkerData* bwData, BlobWorkerInterface interf) {
+ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData, BlobWorkerInterface interf) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2167,7 +2197,9 @@ ACTOR Future<Void> registerBlobWorker(BlobWorkerData* bwData, BlobWorkerInterfac
 	}
 }
 
-ACTOR Future<Void> handleRangeAssign(BlobWorkerData* bwData, AssignBlobRangeRequest req, bool isSelfReassign) {
+ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
+                                     AssignBlobRangeRequest req,
+                                     bool isSelfReassign) {
 	try {
 		if (req.continueAssignment) {
 			resumeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno);
@@ -2178,6 +2210,9 @@ ACTOR Future<Void> handleRangeAssign(BlobWorkerData* bwData, AssignBlobRangeRequ
 			wait(futureAndNewGranule.first);
 
 			if (futureAndNewGranule.second.isValid()) {
+				printf("BW %s ABOUT TO WAIT IN HANDLERANGEASSIGN\n", bwData->id.toString().c_str());
+				// WAITING ON START BUT ITS NOT AN ACTOR!!!!!!! SO WHEN handlerangeassign gets operation_cancelled, it
+				// won't get propogated to start
 				wait(futureAndNewGranule.second->start(bwData, req));
 			}
 		}
@@ -2187,6 +2222,8 @@ ACTOR Future<Void> handleRangeAssign(BlobWorkerData* bwData, AssignBlobRangeRequ
 		}
 		return Void();
 	} catch (Error& e) {
+		printf("BW %s GOT ERROR %s IN HANDLERANGEASSIGN\n", bwData->id.toString().c_str(), e.name());
+		state Error eState = e;
 		if (BW_DEBUG) {
 			printf("AssignRange [%s - %s) got error %s\n",
 			       req.keyRange.begin.printable().c_str(),
@@ -2194,16 +2231,23 @@ ACTOR Future<Void> handleRangeAssign(BlobWorkerData* bwData, AssignBlobRangeRequ
 			       e.name());
 		}
 
+		/*
+		if (futureAndNewGranule.get().second.isValid()) {
+		    wait(futureAndNewGranule.get().second->cancel(false));
+		}
+		*/
+
 		if (!isSelfReassign) {
-			if (canReplyWith(e)) {
-				req.reply.sendError(e);
+			if (canReplyWith(eState)) {
+				req.reply.sendError(eState);
 			}
 		}
-		throw;
+
+		throw eState;
 	}
 }
 
-ACTOR Future<Void> handleRangeRevoke(BlobWorkerData* bwData, RevokeBlobRangeRequest req) {
+ACTOR Future<Void> handleRangeRevoke(Reference<BlobWorkerData> bwData, RevokeBlobRangeRequest req) {
 	try {
 		wait(
 		    changeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno, false, req.dispose, false).first);
@@ -2229,7 +2273,7 @@ ACTOR Future<Void> handleRangeRevoke(BlobWorkerData* bwData, RevokeBlobRangeRequ
 // uncommitted data. This means we must ensure the data is actually committed before "committing" those writes in
 // the blob granule. The simplest way to do this is to have the blob worker do a periodic GRV, which is guaranteed
 // to be an earlier committed version.
-ACTOR Future<Void> runCommitVersionChecks(BlobWorkerData* bwData) {
+ACTOR Future<Void> runCommitVersionChecks(Reference<BlobWorkerData> bwData) {
 	state Transaction tr(bwData->db);
 	loop {
 		// only do grvs to get committed version if we need it to persist delta files
@@ -2262,9 +2306,12 @@ ACTOR Future<Void> runCommitVersionChecks(BlobWorkerData* bwData) {
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
                               ReplyPromise<InitializeBlobWorkerReply> recruitReply,
                               Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	state BlobWorkerData self(bwInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
-	self.id = bwInterf.id();
-	self.locality = bwInterf.locality;
+	state Reference<BlobWorkerData> self(
+	    new BlobWorkerData(bwInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
+	self->id = bwInterf.id();
+	self->locality = bwInterf.locality;
+
+	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 
 	if (BW_DEBUG) {
 		printf("Initializing blob worker s3 stuff\n");
@@ -2275,19 +2322,19 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			if (BW_DEBUG) {
 				printf("BW constructing simulated backup container\n");
 			}
-			self.bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/");
+			self->bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/");
 		} else {
 			if (BW_DEBUG) {
 				printf("BW constructing backup container from %s\n", SERVER_KNOBS->BG_URL.c_str());
 			}
-			self.bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
+			self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
 			if (BW_DEBUG) {
 				printf("BW constructed backup container\n");
 			}
 		}
 
 		// register the blob worker to the system keyspace
-		wait(registerBlobWorker(&self, bwInterf));
+		wait(registerBlobWorker(self, bwInterf));
 	} catch (Error& e) {
 		if (BW_DEBUG) {
 			printf("BW got backup container init error %s\n", e.name());
@@ -2307,11 +2354,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	rep.interf = bwInterf;
 	recruitReply.send(rep);
 
-	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> collection = actorCollection(addActor.getFuture());
-
-	addActor.send(waitFailureServer(bwInterf.waitFailure.getFuture()));
-	addActor.send(runCommitVersionChecks(&self));
+	self->actors.add(waitFailureServer(bwInterf.waitFailure.getFuture()));
+	self->actors.add(runCommitVersionChecks(self));
 
 	try {
 		loop choose {
@@ -2319,25 +2363,25 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				/*printf("Got blob granule request [%s - %s)\n",
 				       req.keyRange.begin.printable().c_str(),
 				       req.keyRange.end.printable().c_str());*/
-				++self.stats.readRequests;
-				++self.stats.activeReadRequests;
-				addActor.send(handleBlobGranuleFileRequest(&self, req));
+				++self->stats.readRequests;
+				++self->stats.activeReadRequests;
+				self->actors.add(handleBlobGranuleFileRequest(self, req));
 			}
 			when(GranuleStatusStreamRequest req = waitNext(bwInterf.granuleStatusStreamRequest.getFuture())) {
-				if (self.managerEpochOk(req.managerEpoch)) {
+				if (self->managerEpochOk(req.managerEpoch)) {
 					if (BW_DEBUG) {
-						printf("Worker %s got new granule status endpoint\n", self.id.toString().c_str());
+						printf("Worker %s got new granule status endpoint\n", self->id.toString().c_str());
 					}
-					self.currentManagerStatusStream = req.reply;
+					self->currentManagerStatusStream = req.reply;
 				}
 			}
 			when(AssignBlobRangeRequest _req = waitNext(bwInterf.assignBlobRangeRequest.getFuture())) {
-				++self.stats.rangeAssignmentRequests;
-				--self.stats.numRangesAssigned;
+				++self->stats.rangeAssignmentRequests;
+				--self->stats.numRangesAssigned;
 				state AssignBlobRangeRequest assignReq = _req;
 				if (BW_DEBUG) {
 					printf("Worker %s assigned range [%s - %s) @ (%lld, %lld):\n  continue=%s\n",
-					       self.id.toString().c_str(),
+					       self->id.toString().c_str(),
 					       assignReq.keyRange.begin.printable().c_str(),
 					       assignReq.keyRange.end.printable().c_str(),
 					       assignReq.managerEpoch,
@@ -2345,18 +2389,18 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 					       assignReq.continueAssignment ? "T" : "F");
 				}
 
-				if (self.managerEpochOk(assignReq.managerEpoch)) {
-					addActor.send(handleRangeAssign(&self, assignReq, false));
+				if (self->managerEpochOk(assignReq.managerEpoch)) {
+					self->actors.add(handleRangeAssign(self, assignReq, false));
 				} else {
 					assignReq.reply.send(AssignBlobRangeReply(false));
 				}
 			}
 			when(RevokeBlobRangeRequest _req = waitNext(bwInterf.revokeBlobRangeRequest.getFuture())) {
 				state RevokeBlobRangeRequest revokeReq = _req;
-				--self.stats.numRangesAssigned;
+				--self->stats.numRangesAssigned;
 				if (BW_DEBUG) {
 					printf("Worker %s revoked range [%s - %s) @ (%lld, %lld):\n  dispose=%s\n",
-					       self.id.toString().c_str(),
+					       self->id.toString().c_str(),
 					       revokeReq.keyRange.begin.printable().c_str(),
 					       revokeReq.keyRange.end.printable().c_str(),
 					       revokeReq.managerEpoch,
@@ -2364,30 +2408,48 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 					       revokeReq.dispose ? "T" : "F");
 				}
 
-				if (self.managerEpochOk(revokeReq.managerEpoch)) {
-					addActor.send(handleRangeRevoke(&self, revokeReq));
+				if (self->managerEpochOk(revokeReq.managerEpoch)) {
+					self->actors.add(handleRangeRevoke(self, revokeReq));
 				} else {
 					revokeReq.reply.send(AssignBlobRangeReply(false));
 				}
 			}
-			when(AssignBlobRangeRequest granuleToReassign = waitNext(self.granuleUpdateErrors.getFuture())) {
-				addActor.send(handleRangeAssign(&self, granuleToReassign, true));
+			when(AssignBlobRangeRequest granuleToReassign = waitNext(self->granuleUpdateErrors.getFuture())) {
+				self->actors.add(handleRangeAssign(self, granuleToReassign, true));
 			}
+			when(HaltBlobWorkerRequest req = waitNext(bwInterf.haltBlobWorker.getFuture())) {
+				req.reply.send(Void());
+				if (self->managerEpochOk(req.managerEpoch)) {
+					TraceEvent("BlobWorkerHalted", bwInterf.id()).detail("ReqID", req.requesterID);
+					printf("BW %s was halted\n", bwInterf.id().toString().c_str());
+					break;
+				}
+			}
+			// when(wait(delay(10))) { throw granule_assignment_conflict(); }
 			when(wait(collection)) {
 				if (BW_DEBUG) {
 					printf("BW actor collection returned, exiting\n");
 				}
 				ASSERT(false);
-				throw internal_error();
+				throw granule_assignment_conflict();
 			}
 		}
 	} catch (Error& e) {
 		if (BW_DEBUG) {
 			printf("Blob worker got error %s, exiting\n", e.name());
 		}
-		TraceEvent("BlobWorkerDied", self.id).error(e, true);
-		throw e;
+		TraceEvent("BlobWorkerDied", self->id).error(e, true);
 	}
+
+	printf("cancelling actors for BW %s\n", self->id.toString().c_str());
+	self->actors.clear(false);
+	// self->addActor.sendError(granule_assignment_conflict());
+	//
+	// self.addActor..clear(false); // tehcnically shouldn't need this since when self goes out of scope, so will
+	// self.actors
+	// at which point the cancels will be triggered?
+	self->dead.set(true);
+	return Void();
 }
 
 // TODO add unit tests for assign/revoke range, especially version ordering
