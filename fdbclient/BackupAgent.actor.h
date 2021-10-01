@@ -360,6 +360,8 @@ inline FileBackupAgent::ERestoreState Codec<FileBackupAgent::ERestoreState>::unp
 	return (FileBackupAgent::ERestoreState)val.getInt(0);
 }
 
+using EBackupState = BackupAgentBase::EnumState;
+
 class DatabaseBackupAgent : public BackupAgentBase {
 public:
 	DatabaseBackupAgent();
@@ -448,7 +450,125 @@ public:
 	                         DstOnly = DstOnly::False,
 	                         WaitForDestUID = WaitForDestUID::False);
 
-	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
+	struct BackupStatus {
+
+		std::string srcClusterFile;
+		std::string destClusterFile;
+		Key srcPrefix;
+		Key destPrefix;
+		EBackupState backupState;
+		std::string tagNameDisplay;
+		std::string logVersionText;
+		Optional<Value> stopVersionKey;
+
+		int errorLimit = 0;
+		RangeResult errorValues;
+		Optional<Value> paused;
+		const char* errorName = nullptr;
+		double secondsBehind = 0;
+
+		std::unordered_map<int, std::string> stateMap;
+
+		BackupStatus() {
+			std::vector<std::string> stateStr{ "STATE_ERRORED",   "STATE_SUBMITTED",
+				                               "STATE_RUNNING",   "STATE_RUNNING_DIFFERENTIAL",
+				                               "STATE_COMPLETED", "STATE_NEVERRAN",
+				                               "STATE_ABORTED",   "STATE_PARTIALLY_ABORTED" };
+			for (int i = 0; i < stateStr.size(); ++i) {
+				stateMap[i] = stateStr[i];
+			}
+		}
+
+		std::string toString() {
+			std::string statusText;
+			if (backupState == EBackupState::STATE_NEVERRAN) {
+				statusText += "No previous backups found.\n";
+			} else {
+				switch (backupState) {
+				case EBackupState::STATE_SUBMITTED:
+					statusText += "The DR on tag `" + tagNameDisplay +
+					              "' is NOT a complete copy of the primary database (just started).\n";
+					break;
+				case EBackupState::STATE_RUNNING:
+					statusText +=
+					    "The DR on tag `" + tagNameDisplay + "' is NOT a complete copy of the primary database.\n";
+					break;
+				case EBackupState::STATE_RUNNING_DIFFERENTIAL:
+					statusText += "The DR on tag `" + tagNameDisplay + "' is a complete copy of the primary database" +
+					              logVersionText + ".\n";
+					break;
+				case EBackupState::STATE_COMPLETED: {
+					Version stopVersion =
+					    stopVersionKey.present()
+					        ? BinaryReader::fromStringRef<Version>(stopVersionKey.get(), Unversioned())
+					        : -1;
+					statusText += "The previous DR on tag `" + tagNameDisplay + "' completed at version " +
+					              format("%lld", stopVersion) + ".\n";
+				} break;
+				case EBackupState::STATE_PARTIALLY_ABORTED: {
+					statusText += "The previous DR on tag `" + tagNameDisplay + "' " +
+					              BackupAgentBase::getStateText(backupState) + logVersionText + ".\n";
+					statusText += "Abort the DR with --cleanup before starting a new DR.\n";
+					break;
+				}
+				default:
+					statusText += "The previous DR on tag `" + tagNameDisplay + "' " +
+					              BackupAgentBase::getStateText(backupState) + logVersionText + ".\n";
+					break;
+				}
+			}
+			// Display the errors, if any
+			if (errorValues.size() > 0) {
+				// Inform the user that the list of errors is complete or partial
+				statusText += (errorValues.size() < errorLimit)
+				                  ? "WARNING: Some DR agents have reported issues:\n"
+				                  : "WARNING: Some DR agents have reported issues (printing " +
+				                        std::to_string(errorLimit) + "):\n";
+
+				for (auto& s : errorValues) {
+					statusText += "   " + printable(s.value) + "\n";
+				}
+			}
+			statusText += format("\nThe DR is %.6f seconds behind.\n", secondsBehind);
+			if (paused.present()) {
+				statusText += format("\nAll DR agents have been paused.\n");
+			}
+			statusText += "\nsource prefix: " + srcPrefix.toString() + "\ndestination prefix: " + destPrefix.toString();
+			if (errorName != nullptr) {
+				statusText += format("\nWARNING: Could not fetch full DR status: %s\n", errorName);
+			}
+			return statusText;
+		}
+
+		std::string toJson() {
+			// convert statusText to json format
+			// current schema:
+			//{
+			//    'source': <source_cluster>,
+			//    'dest': <dest_cluster>,
+			//    'source_prefix': <source_prefix>,
+			//    'dest_prefix': <dest_prefix>,
+			//    'status': <status enum string>
+			//    'lag_seconds': <lag>
+			// }
+			json_spirit::mValue statusRootValue;
+			JSONDoc statusRoot(statusRootValue);
+			statusRoot.create("source") = srcClusterFile;
+			statusRoot.create("dest") = destClusterFile;
+			statusRoot.create("source_prefix") = srcPrefix.toString();
+			statusRoot.create("dest_prefix") = destPrefix.toString();
+
+			// extract status info
+			statusRoot.create("status") = stateMap[static_cast<int>(backupState)];
+
+			// extract lag info
+			statusRoot.create("lag_seconds") = secondsBehind;
+
+			return json_spirit::write_string(statusRootValue);
+		}
+	};
+
+	Future<BackupStatus> getStatus(Database cx, int errorLimit, Key tagName);
 
 	Future<EnumState> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot = Snapshot::False);
 	Future<EnumState> getStateValue(Database cx, UID logUid) {
@@ -566,7 +686,6 @@ ACTOR Future<Void> applyMutations(Database cx,
                                   Reference<KeyRangeMap<Version>> keyVersion);
 ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData);
 
-using EBackupState = BackupAgentBase::EnumState;
 template <>
 inline Tuple Codec<EBackupState>::pack(EBackupState const& val) {
 	return Tuple().append(static_cast<int>(val));

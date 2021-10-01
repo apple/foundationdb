@@ -1243,10 +1243,10 @@ std::vector<KeyRef> checkTenant(StorageServer* data,
                                 TenantName const& tenantName,
                                 KeyRef begin,
                                 Optional<KeyRef> end = Optional<KeyRef>()) {
-	    .detail("Version", version)
-	    .detail("Name", tenantName)
-	    .detail("Begin", begin)
-	    .detail("End", end);
+	// .detail("Version", version)
+	// .detail("Name", tenantName)
+	// .detail("Begin", begin)
+	// .detail("End", end);
 
 	std::vector<KeyRef> lockedPrefixes;
 	if (tenantName.hasName()) {

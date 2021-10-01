@@ -3049,13 +3049,14 @@ public:
 		}
 	}
 
-	ACTOR static Future<std::string> getStatus(DatabaseBackupAgent* backupAgent,
-	                                           Database cx,
-	                                           int errorLimit,
-	                                           Key tagName) {
+	ACTOR static Future<DatabaseBackupAgent::BackupStatus> getStatus(DatabaseBackupAgent* backupAgent,
+	                                                                 Database cx,
+	                                                                 int errorLimit,
+	                                                                 Key tagName) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state std::string statusText;
+		state DatabaseBackupAgent::BackupStatus backupStatus;
+		backupStatus.errorLimit = errorLimit;
 		state int retries = 0;
 
 		loop {
@@ -3066,8 +3067,6 @@ public:
 				state Transaction scrTr(backupAgent->taskBucket->src);
 				scrTr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				state Future<Version> srcReadVersion = scrTr.getReadVersion();
-
-				statusText = "";
 
 				state UID logUid = wait(backupAgent->getLogUid(tr, tagName));
 
@@ -3101,25 +3100,28 @@ public:
 				                .pack(BackupAgentBase::keyStateLogBeginVersion));
 
 				state EBackupState backupState = wait(backupAgent->getStateValue(tr, logUid));
+				backupStatus.backupState = backupState;
 
-				if (backupState == EBackupState::STATE_NEVERRAN) {
-					statusText += "No previous backups found.\n";
-				} else {
+				if (backupState != EBackupState::STATE_NEVERRAN) {
 					state std::string tagNameDisplay;
 					Optional<Key> tagName = wait(fTagName);
 
 					// Define the display tag name
 					if (tagName.present()) {
 						tagNameDisplay = tagName.get().toString();
+						backupStatus.tagNameDisplay = tagNameDisplay;
 					}
-
 					state Optional<Value> stopVersionKey = wait(fStopVersionKey);
+					backupStatus.stopVersionKey = stopVersionKey;
+
 					Optional<Value> logVersionKey = wait(flogVersionKey);
 					state std::string logVersionText =
 					    ". Last log version is " +
 					    (logVersionKey.present()
 					         ? format("%lld", BinaryReader::fromStringRef<Version>(logVersionKey.get(), Unversioned()))
 					         : "unset");
+					backupStatus.logVersionText = logVersionText;
+
 					Optional<Key> backupKeysPacked = wait(fBackupKeysPacked);
 
 					state Standalone<VectorRef<KeyRangeRef>> backupRanges;
@@ -3127,57 +3129,12 @@ public:
 						BinaryReader br(backupKeysPacked.get(), IncludeVersion());
 						br >> backupRanges;
 					}
-
-					switch (backupState) {
-					case EBackupState::STATE_SUBMITTED:
-						statusText += "The DR on tag `" + tagNameDisplay +
-						              "' is NOT a complete copy of the primary database (just started).\n";
-						break;
-					case EBackupState::STATE_RUNNING:
-						statusText +=
-						    "The DR on tag `" + tagNameDisplay + "' is NOT a complete copy of the primary database.\n";
-						break;
-					case EBackupState::STATE_RUNNING_DIFFERENTIAL:
-						statusText += "The DR on tag `" + tagNameDisplay +
-						              "' is a complete copy of the primary database" + logVersionText + ".\n";
-						break;
-					case EBackupState::STATE_COMPLETED: {
-						Version stopVersion =
-						    stopVersionKey.present()
-						        ? BinaryReader::fromStringRef<Version>(stopVersionKey.get(), Unversioned())
-						        : -1;
-						statusText += "The previous DR on tag `" + tagNameDisplay + "' completed at version " +
-						              format("%lld", stopVersion) + ".\n";
-					} break;
-					case EBackupState::STATE_PARTIALLY_ABORTED: {
-						statusText += "The previous DR on tag `" + tagNameDisplay + "' " +
-						              BackupAgentBase::getStateText(backupState) + logVersionText + ".\n";
-						statusText += "Abort the DR with --cleanup before starting a new DR.\n";
-						break;
-					}
-					default:
-						statusText += "The previous DR on tag `" + tagNameDisplay + "' " +
-						              BackupAgentBase::getStateText(backupState) + logVersionText + ".\n";
-						break;
-					}
 				}
 
 				// Append the errors, if requested
 				if (errorLimit > 0) {
 					RangeResult values = wait(fErrorValues);
-
-					// Display the errors, if any
-					if (values.size() > 0) {
-						// Inform the user that the list of errors is complete or partial
-						statusText += (values.size() < errorLimit)
-						                  ? "WARNING: Some DR agents have reported issues:\n"
-						                  : "WARNING: Some DR agents have reported issues (printing " +
-						                        std::to_string(errorLimit) + "):\n";
-
-						for (auto& s : values) {
-							statusText += "   " + printable(s.value) + "\n";
-						}
-					}
+					backupStatus.errorValues = values;
 				}
 
 				// calculate time differential
@@ -3189,27 +3146,25 @@ public:
 						Version sourceVersion = wait(srcReadVersion);
 						double secondsBehind =
 						    ((double)(sourceVersion - destApplyBegin)) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
-						statusText += format("\nThe DR is %.6f seconds behind.\n", secondsBehind);
+						backupStatus.secondsBehind = secondsBehind;
 					}
 				}
 
 				Optional<Value> paused = wait(fPaused);
-				if (paused.present()) {
-					statusText += format("\nAll DR agents have been paused.\n");
-				}
+				backupStatus.paused = paused;
 
 				break;
 			} catch (Error& e) {
 				retries++;
 				if (retries > 5) {
-					statusText += format("\nWARNING: Could not fetch full DR status: %s\n", e.name());
-					return statusText;
+					backupStatus.errorName = e.name();
+					return backupStatus;
 				}
 				wait(tr->onError(e));
 			}
 		}
 
-		return statusText;
+		return backupStatus;
 	}
 
 	ACTOR static Future<EBackupState> getStateValue(DatabaseBackupAgent* backupAgent,
@@ -3289,7 +3244,7 @@ Future<Void> DatabaseBackupAgent::abortBackup(Database cx,
 	return DatabaseBackupAgentImpl::abortBackup(this, cx, tagName, partial, abortOldBackup, dstOnly, waitForDestUID);
 }
 
-Future<std::string> DatabaseBackupAgent::getStatus(Database cx, int errorLimit, Key tagName) {
+Future<DatabaseBackupAgent::BackupStatus> DatabaseBackupAgent::getStatus(Database cx, int errorLimit, Key tagName) {
 	return DatabaseBackupAgentImpl::getStatus(this, cx, errorLimit, tagName);
 }
 

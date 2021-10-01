@@ -1622,7 +1622,7 @@ ProgramExe getProgramType(std::string programExe) {
 		enProgramExe = ProgramExe::DB_BACKUP;
 	}
 
-	// Check if data movement between multi-tenant clusters
+	// Check if moving data between clusters
 	else if ((programExe.length() >= exeDatabaseMovement.size()) &&
 	         (programExe.compare(programExe.length() - exeDatabaseMovement.size(),
 	                             exeDatabaseMovement.size(),
@@ -2102,8 +2102,8 @@ ACTOR Future<Void> submitDBMove(Database src, Database dest, std::string tagName
 		                              KeyRef(tagName),
 		                              Standalone<VectorRef<KeyRangeRef>>(),
 		                              StopWhenDone::False,
-		                              srcPrefix,
 		                              destPrefix,
+		                              srcPrefix,
 		                              LockDB::False));
 
 		// Check if a backup agent is running
@@ -2119,6 +2119,7 @@ ACTOR Future<Void> submitDBMove(Database src, Database dest, std::string tagName
 		printf("The data movement on tag `%s' was successfully submitted.\n", printable(StringRef(tagName)).c_str());
 	}
 
+	// TODO: think about 1. do we need these tags here? 2. If so, we might need data movement specified tag
 	catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
@@ -2127,7 +2128,9 @@ ACTOR Future<Void> submitDBMove(Database src, Database dest, std::string tagName
 			fprintf(stderr, "ERROR: An error was encountered during submission\n");
 			break;
 		case error_code_backup_duplicate:
-			fprintf(stderr, "ERROR: A DR is already running on tag `%s'\n", printable(StringRef(tagName)).c_str());
+			fprintf(stderr,
+			        "ERROR: A data movement is already running on tag `%s'\n",
+			        printable(StringRef(tagName)).c_str());
 			break;
 		default:
 			fprintf(stderr, "ERROR: %s\n", e.what());
@@ -2144,56 +2147,20 @@ ACTOR Future<Void> statusDBMove(Database src,
                                 Database dest,
                                 std::string tagName,
                                 int errorLimit,
-                                Key srcprefix,
+                                Key srcPrefix,
                                 Key destPrefix,
                                 bool json) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
+		DatabaseBackupAgent::BackupStatus backUpStatus =
+		    wait(backupAgent.getStatus(dest, errorLimit, StringRef(tagName)));
 
-		std::string statusText = wait(backupAgent.getStatus(dest, errorLimit, StringRef(tagName)));
-		if (json) {
-			// convert statusText to json format
-			// current schema:
-			//{
-			//    'source': <source_cluster>,
-			//    'dest': <dest_cluster>,
-			//    'source_prefix': <source_prefix>,
-			//    'dest_prefix': <dest_prefix>,
-			//    'status': <status enum string>
-			//    'lag_seconds': <lag>
-			// }
-			state json_spirit::mValue statusRootValue;
-			state JSONDoc statusRoot(statusRootValue);
-			statusRoot.create("source") = src->getConnectionFile()->getFilename();
-			statusRoot.create("dest") = dest->getConnectionFile()->getFilename();
-			statusRoot.create("source_prefix") = srcprefix.toString();
-			statusRoot.create("dest_prefix") = destPrefix.toString();
+		backUpStatus.srcClusterFile = src->getConnectionFile()->getFilename();
+		backUpStatus.destClusterFile = dest->getConnectionFile()->getFilename();
+		backUpStatus.srcPrefix = srcPrefix;
+		backUpStatus.destPrefix = destPrefix;
 
-			// extract status info
-			state UID logUid = wait(backupAgent.getLogUid(dest, Key(tagName)));
-			state EBackupState backupState = wait(backupAgent.getStateValue(dest, logUid));
-			std::unordered_map<int, std::string> stateMap;
-			std::vector<std::string> stateStr{ "STATE_ERRORED",   "STATE_SUBMITTED",
-				                               "STATE_RUNNING",   "STATE_RUNNING_DIFFERENTIAL",
-				                               "STATE_COMPLETED", "STATE_NEVERRAN",
-				                               "STATE_ABORTED",   "STATE_PARTIALLY_ABORTED" };
-			for (int i = 0; i < stateStr.size(); ++i) {
-				stateMap[i] = stateStr[i];
-			}
-			statusRoot.create("status") = stateMap[static_cast<int>(backupState)];
-
-			// extract lag info
-			std::string prevStr = "The DR is ";
-			std::size_t idxBefore = statusText.find(prevStr);
-			std::size_t idxAfter = statusText.find(" seconds behind.");
-			if (idxBefore != std::string::npos && idxAfter != std::string::npos) {
-				statusRoot.create("lag_seconds") =
-				    statusText.substr(idxBefore + prevStr.length(), idxAfter - idxBefore - prevStr.length());
-			}
-			statusText = json_spirit::write_string(statusRootValue);
-		} else {
-			statusText += "\nsource prefix: " + srcprefix.toString() + "\ndestination prefix: " + destPrefix.toString();
-		}
+		std::string statusText = json ? backUpStatus.toJson() : backUpStatus.toString();
 		printf("%s\n", statusText.c_str());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -2490,8 +2457,8 @@ ACTOR Future<Void> switchDBBackup(Database src,
 ACTOR Future<Void> statusDBBackup(Database src, Database dest, std::string tagName, int errorLimit) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
-
-		std::string statusText = wait(backupAgent.getStatus(dest, errorLimit, StringRef(tagName)));
+		state auto backupStatus = wait(backupAgent.getStatus(dest, errorLimit, StringRef(tagName)));
+		std::string statusText = backupStatus.toString();
 		printf("%s\n", statusText.c_str());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
