@@ -922,14 +922,19 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		// Prefer a healthy team not containing excludeServer.
 		if (candidates.size() > 0) {
-			return teams[deterministicRandom()->randomInt(0, candidates.size())]->getServerIDs();
-		}
-
-		// The backup choice is a team with at least one server besides excludeServer, in this
-		// case, the team  will be possibily relocated to a healthy destination later by DD.
-		if (backup.size() > 0) {
-			std::vector<UID> res = teams[deterministicRandom()->randomInt(0, backup.size())]->getServerIDs();
-			std::remove(res.begin(), res.end(), excludeServer);
+			return teams[candidates[deterministicRandom()->randomInt(0, candidates.size())]]->getServerIDs();
+		} else if (backup.size() > 0) {
+			// The backup choice is a team with at least one server besides excludeServer, in this
+			// case, the team  will be possibily relocated to a healthy destination later by DD.
+			std::vector<UID> servers =
+			    teams[backup[deterministicRandom()->randomInt(0, backup.size())]]->getServerIDs();
+			std::vector<UID> res;
+			for (const UID& id : servers) {
+				if (id != excludeServer) {
+					res.push_back(id);
+				}
+			}
+			TraceEvent("FoundNonoptimalTeamForDroppedShard", excludeServer).detail("Team", describe(res));
 			return res;
 		}
 

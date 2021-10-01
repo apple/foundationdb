@@ -3244,7 +3244,7 @@ void ShardInfo::addMutation(Version version, MutationRef const& mutation) {
 	}
 }
 
-enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE };
+enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY };
 const char* changeServerKeysContextName[] = { "Update", "Restore" };
 
 void changeServerKeys(StorageServer* data,
@@ -3312,6 +3312,7 @@ void changeServerKeys(StorageServer* data,
 	auto vr = data->newestAvailableVersion.intersectingRanges(keys);
 	std::vector<std::pair<KeyRange, Version>> changeNewestAvailable;
 	std::vector<KeyRange> removeRanges;
+	std::vector<KeyRange> clearRanges;
 	for (auto r = vr.begin(); r != vr.end(); ++r) {
 		KeyRangeRef range = keys & r->range();
 		bool dataAvailable = r->value() == latestVersion || r->value() >= version;
@@ -3322,7 +3323,22 @@ void changeServerKeys(StorageServer* data,
 		//     .detail("NowAssigned", nowAssigned)
 		//     .detail("NewestAvailable", r->value())
 		//     .detail("ShardState0", data->shards[range.begin]->debugDescribeState());
-		if (!nowAssigned) {
+		if (context == CSK_ASSIGN_EMPTY && !dataAvailable) {
+			ASSERT(nowAssigned);
+			TraceEvent("ChangeServerKeysAddEmptyRange", data->thisServerID)
+			    .detail("Begin", range.begin)
+			    .detail("End", range.end);
+			// MutationRef clearRange(MutationRef::ClearRange, range.begin, range.end);
+			// Version clv = data->data().getLatestVersion();
+			// clearRange = data->addMutationToMutationLog(data->addVersionToMutationLog(clv), clearRange);
+
+			// Wait (if necessary) for the latest version at which any key in keys was previously available (+1) to be
+			// durable
+
+			clearRanges.push_back(range);
+			// changeNewestAvailable.emplace_back(range, invalidVersion);
+			data->addShard(ShardInfo::newReadWrite(range, data));
+		} else if (!nowAssigned) {
 			if (dataAvailable) {
 				ASSERT(r->value() ==
 				       latestVersion); // Not that we care, but this used to be checked instead of dataAvailable
@@ -3335,7 +3351,7 @@ void changeServerKeys(StorageServer* data,
 		} else if (!dataAvailable) {
 			// SOMEDAY: Avoid restarting adding/transferred shards
 			if (version == 0) { // bypass fetchkeys; shard is known empty at version 0
-				TraceEvent("ChangeServerKeysAddEmptyRange", data->thisServerID)
+				TraceEvent("ChangeServerKeysInitialRange", data->thisServerID)
 				    .detail("Begin", range.begin)
 				    .detail("End", range.end);
 				changeNewestAvailable.emplace_back(range, latestVersion);
@@ -3368,6 +3384,13 @@ void changeServerKeys(StorageServer* data,
 	for (auto r = removeRanges.begin(); r != removeRanges.end(); ++r) {
 		removeDataRange(data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->shards, *r);
 		setAvailableStatus(data, *r, false);
+	}
+
+	for (auto r = clearRanges.begin(); r != clearRanges.end(); ++r) {
+		MutationRef clearRange(MutationRef::ClearRange, r->begin, r->end);
+		data->addMutation(data->data().getLatestVersion(), clearRange, *r, data->updateEagerReads);
+		data->newestAvailableVersion.insert(*r, latestVersion);
+		setAvailableStatus(data, *r, true);
 	}
 	validate(data);
 }
@@ -3513,8 +3536,8 @@ private:
 				// the data for change.version-1 (changes from versions < change.version)
 				// If emptyRange, treat the shard as empty, see removeKeysFromFailedServer() for more details about this
 				// scenario.
-				const Version shardVersion = (emptyRange && nowAssigned) ? 0 : currentVersion - 1;
-				changeServerKeys(data, keys, nowAssigned, shardVersion, CSK_UPDATE);
+				const ChangeServerKeysContext context = emptyRange ? CSK_ASSIGN_EMPTY : CSK_UPDATE;
+				changeServerKeys(data, keys, nowAssigned, currentVersion - 1, context);
 			}
 
 			processedStartKey = false;
@@ -5003,7 +5026,7 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 			level = SevWarnAlways;
 		}
 
-		TraceEvent(level, "FetchKeyCurrentStatus")
+		TraceEvent(level, "FetchKeysCurrentStatus", self->thisServerID)
 		    .detail("Timestamp", now())
 		    .detail("LongestRunningTime", longestRunningFetchKeys.first)
 		    .detail("StartKey", longestRunningFetchKeys.second.begin)
