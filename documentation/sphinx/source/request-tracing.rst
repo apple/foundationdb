@@ -95,3 +95,13 @@ Tracing can be enabled or disabled for individual transactions. The special key
 space exposes an API to set a custom trace ID for a transaction, or to disable
 tracing for the transaction. See the special key space :ref:`tracing module
 documentation <special-key-space-tracing-module>` to learn more.
+
+^^^^^^^^^^^^^^
+Trace sampling
+^^^^^^^^^^^^^^
+
+By default, all traces are recorded. If tracing is producing too much data,
+adjust the trace sample rate with the ``TRACING_SAMPLE_RATE`` knob. Set the
+knob to 0.0 to record no traces, to 1.0 to record all traces, or somewhere in
+the middle. Traces are sampled as a unit. All individual spans in the trace
+will be included in the sample.
