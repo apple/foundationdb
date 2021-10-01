@@ -1649,7 +1649,7 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "trace_format", required_argument, NULL, ARG_TRACEFORMAT },
 			                                    { "streaming", required_argument, NULL, ARG_STREAMING_MODE },
 			                                    { "txntrace", required_argument, NULL, ARG_TXNTRACE },
-												{ "json", required_argument, NULL, 'j' },
+			                                    { "json", required_argument, NULL, 'j' },
 			                                    /* no args */
 			                                    { "help", no_argument, NULL, 'h' },
 			                                    { "zipf", no_argument, NULL, 'z' },
