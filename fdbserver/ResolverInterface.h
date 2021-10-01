@@ -99,9 +99,19 @@ struct ResolveTransactionBatchReply {
 	// Each group's previous commit version
 	std::map<ptxn::TLogGroupID, Version> previousCommitVersions;
 
+	// Privatized mutations with tags, one for each TLog location
+	VectorRef<StringRef> privateMutations;
+
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, committed, stateMutations, debugID, conflictingKeyRangeMap, previousCommitVersions, arena);
+		serializer(ar,
+		           committed,
+		           stateMutations,
+		           debugID,
+		           conflictingKeyRangeMap,
+		           previousCommitVersions,
+		           privateMutations,
+		           arena);
 	}
 };
 

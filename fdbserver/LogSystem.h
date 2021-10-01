@@ -791,6 +791,9 @@ struct LogPushData : NonCopyable {
 
 	Standalone<StringRef> getMessages(int loc) { return messagesWriter[loc].toValue(); }
 
+	// Returns all locations' messages, including empty ones.
+	std::vector<Standalone<StringRef>> getAllMessages();
+
 	// Records if a tlog (specified by "loc") will receive an empty version batch message.
 	// "value" is the message returned by getMessages() call.
 	void recordEmptyMessage(int loc, const Standalone<StringRef>& value);

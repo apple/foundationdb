@@ -50,6 +50,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/FastRef.h"
+#include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/Trace.h"
@@ -955,6 +956,13 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 			self->firstStateMutations = false;
 			self->forceRecovery = false;
 		}
+	}
+	auto privateMutations = self->toCommit.getAllMessages();
+	ResolveTransactionBatchReply& reply = self->resolution[0];
+	ASSERT_WE_THINK(privateMutations.size() == reply.privateMutations.size());
+	for (int i = 0; i < privateMutations.size(); i++) {
+		std::cout << i << "\n" << printable(privateMutations[i]) << "\n" << printable(reply.privateMutations[i]) << "\n\n";
+		ASSERT_WE_THINK(privateMutations[i] == reply.privateMutations[i]);
 	}
 	if (self->forceRecovery) {
 		for (; t < trs.size(); t++)
