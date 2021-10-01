@@ -1447,6 +1447,7 @@ int init_args(mako_args_t* args) {
 		args->txnspec.ops[i][OP_COUNT] = 0;
 	}
 	args->disable_ryw = 0;
+	args->output_json = 0;
 	return 0;
 }
 
@@ -1612,6 +1613,7 @@ void usage() {
 	printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
 	printf("%-24s %s\n", "    --streaming", "Streaming mode: all (default), iterator, small, medium, large, serial");
 	printf("%-24s %s\n", "    --disable_ryw", "Disable snapshot read-your-writes");
+	printf("%-24s %s\n", "    --json", "Output stats to a json file");
 }
 
 /* parse benchmark paramters */
@@ -1658,6 +1660,7 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
 			                                    { "version", no_argument, NULL, ARG_VERSION },
 			                                    { "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
+												{ "json", no_argument, NULL, ARG_JSON_OUTPUT },
 			                                    { NULL, 0, NULL, 0 }
 		};
 		idx = 0;
