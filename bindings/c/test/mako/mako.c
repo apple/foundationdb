@@ -1979,7 +1979,7 @@ void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, s
 		// char* str = NULL;
 		// sprintf(str, "\"TPS\": %.2f,", tps);
 		// fwrite(str, 1, strlen(str), fp);
-		fprintf(fp, "\"TPS\": %.2f,", tps);
+		fprintf(fp, "\"tps\": %.2f,", tps);
 	}
 	totalxacts_prev = totalxacts;
 
@@ -1987,7 +1987,7 @@ void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, s
 	double conflicts_diff = (conflicts - conflicts_prev) * 1000000000.0 / durationns;
 	printf("%" STR(STATS_FIELD_WIDTH) ".2f\n", conflicts_diff);
 	if (fp) {
-		fprintf(fp, "\"Conflicts\": %.2f},", conflicts_diff);
+		fprintf(fp, "\"conflicts\": %.2f},", conflicts_diff);
 	}
 	conflicts_prev = conflicts;
 
@@ -1997,7 +1997,7 @@ void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, s
 			if (args->txnspec.ops[op][OP_COUNT] > 0) {
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", errors_diff[op]);
 				if (fp) {
-					fprintf(fp, "\"Errors\": %.2f", conflicts_diff);
+					fprintf(fp, "\"errors\": %.2f", conflicts_diff);
 				}
 			}
 		}
@@ -2147,14 +2147,14 @@ void print_report(mako_args_t* args,
 
 	if (fp) {
 		fprintf(fp, "\"results\": {");
-		fprintf(fp, "\"Total Duration\": %6.3f,", total_duration);
-		fprintf(fp, "\"Total Processes\": %d,", args->num_processes);
-		fprintf(fp, "\"Total Threads\": %d,", args->num_threads);
-		fprintf(fp, "\"Target TPS\": %d,", args->tpsmax);
-		fprintf(fp, "\"Total Xacts\": %lld,", totalxacts);
-		fprintf(fp, "\"Total Conflicts\": %lld,", conflicts);
-		fprintf(fp, "\"Total Errors\": %lld,", totalerrors);
-		fprintf(fp, "\"Overall TPS\": %lld,", totalxacts * 1000000000 / durationns);
+		fprintf(fp, "\"totalDuration\": %6.3f,", total_duration);
+		fprintf(fp, "\"totalProcesses\": %d,", args->num_processes);
+		fprintf(fp, "\"totalThreads\": %d,", args->num_threads);
+		fprintf(fp, "\"targetTPS\": %d,", args->tpsmax);
+		fprintf(fp, "\"totalXacts\": %lld,", totalxacts);
+		fprintf(fp, "\"totalConflicts\": %lld,", conflicts);
+		fprintf(fp, "\"totalErrors\": %lld,", totalerrors);
+		fprintf(fp, "\"overallTPS\": %lld,", totalxacts * 1000000000 / durationns);
 	}
 
 	/* per-op stats */
@@ -2163,7 +2163,7 @@ void print_report(mako_args_t* args,
 	/* OPS */
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Total OPS");
 	if (fp) {
-		fprintf(fp, "\"Total OPS\": {");
+		fprintf(fp, "\"totalOps\": {");
 	}
 	for (op = 0; op < MAX_OP; op++) {
 		if ((args->txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) || op == OP_COMMIT) {
@@ -2183,7 +2183,7 @@ void print_report(mako_args_t* args,
 	printf("%" STR(STATS_FIELD_WIDTH) ".2f\n", conflicts_rate);
 
 	if (fp) {
-		fprintf(fp, "}, \"TPS\": %.2f, \"Conflicts\": %.2f, \"Errors\": {", tps, conflicts_rate);
+		fprintf(fp, "}, \"tps\": %.2f, \"conflicts\": %.2f, \"errors\": {", tps, conflicts_rate);
 	}
 
 	/* Errors */
@@ -2197,7 +2197,7 @@ void print_report(mako_args_t* args,
 		}
 	}
 	if (fp) {
-		fprintf(fp, "}, \"Latency (us)\": {");
+		fprintf(fp, "}, \"latency\": {");
 	}
 	printf("\n\n");
 
@@ -2222,7 +2222,7 @@ void print_report(mako_args_t* args,
 
 	/* Min Latency */
 	if (fp) {
-		fprintf(fp, "}, \"Min\": {");
+		fprintf(fp, "}, \"min\": {");
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Min");
 	for (op = 0; op < MAX_OP; op++) {
@@ -2241,7 +2241,7 @@ void print_report(mako_args_t* args,
 
 	/* Avg Latency */
 	if (fp) {
-		fprintf(fp, "}, \"Avg\": {");
+		fprintf(fp, "}, \"avg\": {");
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Avg");
 	for (op = 0; op < MAX_OP; op++) {
@@ -2260,7 +2260,7 @@ void print_report(mako_args_t* args,
 
 	/* Max Latency */
 	if (fp) {
-		fprintf(fp, "}, \"Max\": {");
+		fprintf(fp, "}, \"max\": {");
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Max");
 	for (op = 0; op < MAX_OP; op++) {
@@ -2283,7 +2283,7 @@ void print_report(mako_args_t* args,
 
 	/* Median Latency */
 	if (fp) {
-		fprintf(fp, "}, \"Median\": {");
+		fprintf(fp, "}, \"median\": {");
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Median");
 	int num_points[MAX_OP] = { 0 };
