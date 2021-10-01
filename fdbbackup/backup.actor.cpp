@@ -107,7 +107,7 @@ enum class DBMoveType {
 	UNDEFINED = 0,
 	START,
 	STATUS,
-	SWITCH,
+	FINISH,
 	ABORT,
 	PAUSE,
 	RESUME
@@ -932,6 +932,8 @@ CSimpleOpt::SOption g_rgDBMoveStartOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_PREFIX_ADD, "--add_prefix", SO_REQ_SEP },
+	{ OPT_PREFIX_REMOVE, "--remove_prefix", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -964,6 +966,9 @@ CSimpleOpt::SOption g_rgDBMoveStatusOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_JSON, "--json", SO_NONE },
+	{ OPT_PREFIX_ADD, "--add_prefix", SO_REQ_SEP },
+	{ OPT_PREFIX_REMOVE, "--remove_prefix", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -1505,9 +1510,12 @@ static void printDBMovementUsage(bool devhelp) {
 	       "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 	       "                 Has no effect unless --log is specified.\n");
 	printf("  -h, --help     Display this help and exit.\n");
+	printf("  --remove_prefix PREFIX\n");
+	printf("                 Prefix to remove from the restored keys.\n");
+	printf("  --add_prefix PREFIX\n");
+	printf("                 Prefix to add to the restored keys\n");
 	printf("\n"
 	       "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
-
 	if (devhelp) {
 #ifdef _WIN32
 		printf("  -n             Create a new console.\n");
@@ -1705,6 +1713,9 @@ DBMoveType getDBMoveType(std::string dbMoveTypeStr) {
 	static std::map<std::string, DBMoveType> values;
 	if (values.empty()) {
 		values["start"] = DBMoveType::START;
+		values["status"] = DBMoveType::STATUS;
+		values["finish"] = DBMoveType::FINISH;
+		values["abort"] = DBMoveType::ABORT;
 		// TODO add more mapping if more commands are supported here
 	}
 	auto res = values.find(dbMoveTypeStr);
@@ -2094,17 +2105,21 @@ ACTOR Future<Void> runAgent(Database db) {
 	return Void();
 }
 
-ACTOR Future<Void> submitDBMove(Database src, Database dest, std::string tagName, Key addPrefix, Key removePrefix) {
+ACTOR Future<Void> submitDBMove(Database src,
+                                Database dest,
+                                Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                std::string tagName,
+                                Key addPrefix,
+                                Key removePrefix) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
 
-		wait(backupAgent.submitBackup(dest,
-		                              KeyRef(tagName),
-		                              Standalone<VectorRef<KeyRangeRef>>(),
-		                              StopWhenDone::False,
-		                              addPrefix,
-		                              removePrefix,
-		                              LockDB::False));
+		// Backup everything, if no ranges were specified
+		if (backupRanges.size() == 0) {
+			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
+		}
+		wait(backupAgent.submitBackup(
+		    dest, KeyRef(tagName), backupRanges, StopWhenDone::False, addPrefix, removePrefix, LockDB::False));
 
 		// Check if a backup agent is running
 		bool agentRunning = wait(backupAgent.checkActive(dest));
@@ -2149,15 +2164,15 @@ ACTOR Future<Void> statusDBMove(Database src,
                                 int errorLimit,
                                 KeyRef destPrefix,
                                 KeyRef srcPrefix,
-                                bool json) {
+                                bool json = false) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
 		state BackupStatus backUpStatus = wait(backupAgent.getStatusData(dest, errorLimit, StringRef(tagName)));
 
 		backUpStatus.srcClusterFile = src->getConnectionFile()->getFilename();
 		backUpStatus.destClusterFile = dest->getConnectionFile()->getFilename();
-		backUpStatus.srcPrefix = srcPrefix;
-		backUpStatus.destPrefix = destPrefix;
+		backUpStatus.srcPrefix = srcPrefix.size() ? srcPrefix : KeyRef("`not specified`");
+		backUpStatus.destPrefix = destPrefix.size() ? destPrefix : KeyRef("`not specified`");
 
 		std::string statusText = json ? backUpStatus.toJson() : backUpStatus.toString();
 		printf("%s\n", statusText.c_str());
@@ -2171,7 +2186,7 @@ ACTOR Future<Void> statusDBMove(Database src,
 	return Void();
 }
 
-ACTOR Future<Void> switchDBMove(Database src,
+ACTOR Future<Void> finishDBMove(Database src,
                                 Database dest,
                                 Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                 std::string tagName,
@@ -2184,8 +2199,9 @@ ACTOR Future<Void> switchDBMove(Database src,
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		}
 
-		wait(backupAgent.atomicSwitchover(dest, KeyRef(tagName), backupRanges, StringRef(), StringRef(), forceAction));
-		printf("The DR on tag `%s' was successfully switched.\n", printable(StringRef(tagName)).c_str());
+		wait(backupAgent.atomicSwitchover(
+		    dest, KeyRef(tagName), backupRanges, StringRef(), StringRef(), forceAction, false));
+		printf("The data movement on tag `%s' was successfully switched.\n", printable(StringRef(tagName)).c_str());
 	}
 
 	catch (Error& e) {
@@ -2196,7 +2212,9 @@ ACTOR Future<Void> switchDBMove(Database src,
 			fprintf(stderr, "ERROR: An error was encountered during submission\n");
 			break;
 		case error_code_backup_duplicate:
-			fprintf(stderr, "ERROR: A DR is already running on tag `%s'\n", printable(StringRef(tagName)).c_str());
+			fprintf(stderr,
+			        "ERROR: A data movement is already running on tag `%s'\n",
+			        printable(StringRef(tagName)).c_str());
 			break;
 		default:
 			fprintf(stderr, "ERROR: %s\n", e.what());
@@ -2220,7 +2238,7 @@ ACTOR Future<Void> abortDBMove(Database src,
 		wait(backupAgent.abortBackup(dest, Key(tagName), partial, AbortOldBackup::False, dstOnly));
 		wait(backupAgent.unlockBackup(dest, Key(tagName)));
 
-		printf("The DR on tag `%s' was successfully aborted.\n", printable(StringRef(tagName)).c_str());
+		printf("The data movement on tag `%s' was successfully aborted.\n", printable(StringRef(tagName)).c_str());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
@@ -2229,7 +2247,8 @@ ACTOR Future<Void> abortDBMove(Database src,
 			fprintf(stderr, "ERROR: An error was encountered during submission\n");
 			break;
 		case error_code_backup_unneeded:
-			fprintf(stderr, "ERROR: A DR was not running on tag `%s'\n", printable(StringRef(tagName)).c_str());
+			fprintf(
+			    stderr, "ERROR: A data movement was not running on tag `%s'\n", printable(StringRef(tagName)).c_str());
 			break;
 		default:
 			fprintf(stderr, "ERROR: %s\n", e.what());
@@ -3663,7 +3682,7 @@ int main(int argc, char* argv[]) {
 			case DBMoveType::STATUS:
 				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMoveStatusOptions, SO_O_EXACT);
 				break;
-			case DBMoveType::SWITCH:
+			case DBMoveType::FINISH:
 				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMoveSwitchOptions, SO_O_EXACT);
 				break;
 			case DBMoveType::ABORT:
@@ -4672,14 +4691,14 @@ int main(int argc, char* argv[]) {
 			}
 			switch (dbMoveType) {
 			case DBMoveType::START:
-				f = stopAfter(submitDBMove(sourceDb, db, tagName, Key(addPrefix), Key(removePrefix)));
+				f = stopAfter(submitDBMove(sourceDb, db, backupKeys, tagName, Key(addPrefix), Key(removePrefix)));
 				break;
 			case DBMoveType::STATUS:
 				f = stopAfter(statusDBMove(
 				    sourceDb, db, tagName, maxErrors, KeyRef(addPrefix), KeyRef(removePrefix), jsonOutput));
 				break;
-			case DBMoveType::SWITCH:
-				f = stopAfter(switchDBMove(sourceDb, db, backupKeys, tagName, forceAction));
+			case DBMoveType::FINISH:
+				f = stopAfter(finishDBMove(sourceDb, db, backupKeys, tagName, forceAction));
 				break;
 			case DBMoveType::ABORT:
 				f = stopAfter(abortDBMove(sourceDb, db, tagName, partial, dstOnly));

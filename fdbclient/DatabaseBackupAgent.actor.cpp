@@ -2683,7 +2683,8 @@ public:
 	                                           Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                           Key addPrefix,
 	                                           Key removePrefix,
-	                                           ForceAction forceAction) {
+	                                           ForceAction forceAction,
+	                                           bool doSwitch) {
 		state DatabaseBackupAgent drAgent(dest);
 		state UID destlogUid = wait(backupAgent->getLogUid(dest, tagName));
 		state EBackupState status = wait(backupAgent->getStateValue(dest, destlogUid));
@@ -2792,29 +2793,31 @@ public:
 
 		TraceEvent("DBA_SwitchoverVersionUpgraded").log();
 
-		try {
-			wait(drAgent.submitBackup(backupAgent->taskBucket->src,
-			                          tagName,
-			                          backupRanges,
-			                          StopWhenDone::False,
-			                          addPrefix,
-			                          removePrefix,
-			                          LockDB::True,
-			                          DatabaseBackupAgent::PreBackupAction::NONE));
-		} catch (Error& e) {
-			if (e.code() != error_code_backup_duplicate)
-				throw;
+		if (doSwitch) {
+			try {
+				wait(drAgent.submitBackup(backupAgent->taskBucket->src,
+				                          tagName,
+				                          backupRanges,
+				                          StopWhenDone::False,
+				                          addPrefix,
+				                          removePrefix,
+				                          LockDB::True,
+				                          DatabaseBackupAgent::PreBackupAction::NONE));
+			} catch (Error& e) {
+				if (e.code() != error_code_backup_duplicate)
+					throw;
+			}
+
+			TraceEvent("DBA_SwitchoverSubmitted").log();
+
+			wait(success(drAgent.waitSubmitted(backupAgent->taskBucket->src, tagName)));
+
+			TraceEvent("DBA_SwitchoverStarted").log();
+
+			wait(backupAgent->unlockBackup(dest, tagName));
+
+			TraceEvent("DBA_SwitchoverUnlocked").log();
 		}
-
-		TraceEvent("DBA_SwitchoverSubmitted").log();
-
-		wait(success(drAgent.waitSubmitted(backupAgent->taskBucket->src, tagName)));
-
-		TraceEvent("DBA_SwitchoverStarted").log();
-
-		wait(backupAgent->unlockBackup(dest, tagName));
-
-		TraceEvent("DBA_SwitchoverUnlocked").log();
 
 		return Void();
 	}
@@ -3221,9 +3224,10 @@ Future<Void> DatabaseBackupAgent::atomicSwitchover(Database dest,
                                                    Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                                    Key addPrefix,
                                                    Key removePrefix,
-                                                   ForceAction forceAction) {
+                                                   ForceAction forceAction,
+                                                   bool doSwitch) {
 	return DatabaseBackupAgentImpl::atomicSwitchover(
-	    this, dest, tagName, backupRanges, addPrefix, removePrefix, forceAction);
+	    this, dest, tagName, backupRanges, addPrefix, removePrefix, forceAction, doSwitch);
 }
 
 Future<Void> DatabaseBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr,

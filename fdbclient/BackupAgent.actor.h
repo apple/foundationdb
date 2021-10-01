@@ -443,7 +443,7 @@ struct BackupStatus {
 		if (paused.present()) {
 			statusText += format("\nAll DR agents have been paused.\n");
 		}
-		statusText += "\nsource prefix: " + srcPrefix.toString() + "\ndestination prefix: " + destPrefix.toString();
+		statusText += "source prefix: " + srcPrefix.toString() + "\ndestination prefix: " + destPrefix.toString();
 		if (errorName != nullptr) {
 			statusText += format("\nWARNING: Could not fetch full DR status: %s\n", errorName);
 		}
@@ -515,7 +515,8 @@ public:
 	                              Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                              Key addPrefix,
 	                              Key removePrefix,
-	                              ForceAction = ForceAction::False);
+	                              ForceAction = ForceAction::False,
+	                              bool doSwitch = true);
 
 	Future<Void> unlockBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<Void> unlockBackup(Database cx, Key tagName) {
