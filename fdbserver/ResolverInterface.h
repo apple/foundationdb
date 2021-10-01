@@ -90,9 +90,12 @@ struct ResolveTransactionBatchReply {
 	std::map<int, VectorRef<int>>
 	    conflictingKeyRangeMap; // transaction index -> conflicting read_conflict_range ids given by the resolver
 
+	// Privatized mutations with tags, one for each TLog location
+	VectorRef<StringRef> privateMutations;
+
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, committed, stateMutations, debugID, conflictingKeyRangeMap, arena);
+		serializer(ar, committed, stateMutations, debugID, conflictingKeyRangeMap, privateMutations, arena);
 	}
 };
 

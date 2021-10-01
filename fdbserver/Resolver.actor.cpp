@@ -257,7 +257,13 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 				applyMetadataMutations(SpanID(), resolverData, req.transactions[t].mutations);
 			}
 		}
-		// TODO: add private mutations & resolverData.confChanges to Reply messages
+
+		// Adds private mutation messages to the reply message.
+		auto privateMutations = toCommit.getAllMessages();
+		for (const auto& mutations : privateMutations) {
+			reply.privateMutations.push_back(reply.arena, mutations);
+			reply.arena.dependsOn(mutations.arena());
+		}
 
 		self->resolvedStateTransactions += req.txnStateTransactions.size();
 		self->resolvedStateMutations += stateMutations;

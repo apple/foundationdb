@@ -307,6 +307,15 @@ void LogPushData::writeMessage(StringRef rawMessageWithoutLength, bool usePrevio
 	}
 }
 
+std::vector<Standalone<StringRef>> LogPushData::getAllMessages() {
+	std::vector<Standalone<StringRef>> results;
+	results.reserve(messagesWriter.size());
+	for (int loc = 0; loc < messagesWriter.size(); loc++) {
+		results.push_back(getMessages(loc));
+	}
+	return results;
+}
+
 void LogPushData::recordEmptyMessage(int loc, const Standalone<StringRef>& value) {
 	if (!isEmptyMessage[loc]) {
 		BinaryWriter w(AssumeVersion(g_network->protocolVersion()));
