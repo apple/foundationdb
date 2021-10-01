@@ -35,7 +35,15 @@ Reference<StorageInfo> getStorageInfo(UID id,
 	auto cacheItr = storageCache->find(id);
 	if (cacheItr == storageCache->end()) {
 		storageInfo = makeReference<StorageInfo>();
-		storageInfo->tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(id)).get().get());
+		Optional<Value> tagValue = txnStateStore->readValue(serverTagKeyFor(id)).get();
+		Optional<Value> serverValue = txnStateStore->readValue(serverListKeyFor(id)).get();
+		if (!tagValue.present()) {
+			TraceEvent(SevWarnAlways, "MissingServerTag").detail("ServerID", id.toString());
+		}
+		if (!serverValue.present()) {
+			TraceEvent(SevWarnAlways, "MissingServerInterf").detail("ServerID", id.toString());
+		}
+		storageInfo->tag = decodeServerTagValue(tagValue.get());
 		storageInfo->interf = decodeServerListValue(txnStateStore->readValue(serverListKeyFor(id)).get().get());
 		(*storageCache)[id] = storageInfo;
 	} else {
