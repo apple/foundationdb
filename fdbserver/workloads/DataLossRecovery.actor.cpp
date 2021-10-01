@@ -73,7 +73,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		state Value newValue = "TestNewValue"_sr;
 
 		wait(self->writeAndVerify(self, cx, key, oldValue));
-		
+
 		// Move [key, endKey) to team: {address}.
 		state NetworkAddress address = wait(self->disableDDAndMoveShard(self, cx, KeyRangeRef(key, endKey)));
 		wait(self->readAndVerify(self, cx, key, oldValue));
