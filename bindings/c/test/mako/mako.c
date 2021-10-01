@@ -1987,7 +1987,7 @@ void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, s
 	double conflicts_diff = (conflicts - conflicts_prev) * 1000000000.0 / durationns;
 	printf("%" STR(STATS_FIELD_WIDTH) ".2f\n", conflicts_diff);
 	if (fp) {
-		fprintf(fp, "\"conflicts\": %.2f},", conflicts_diff);
+		fprintf(fp, "\"conflictsPerSec\": %.2f},", conflicts_diff);
 	}
 	conflicts_prev = conflicts;
 
@@ -2183,7 +2183,7 @@ void print_report(mako_args_t* args,
 	printf("%" STR(STATS_FIELD_WIDTH) ".2f\n", conflicts_rate);
 
 	if (fp) {
-		fprintf(fp, "}, \"tps\": %.2f, \"conflicts\": %.2f, \"errors\": {", tps, conflicts_rate);
+		fprintf(fp, "}, \"tps\": %.2f, \"conflictsPerSec\": %.2f, \"errors\": {", tps, conflicts_rate);
 	}
 
 	/* Errors */
@@ -2197,7 +2197,7 @@ void print_report(mako_args_t* args,
 		}
 	}
 	if (fp) {
-		fprintf(fp, "}, \"latency\": {");
+		fprintf(fp, "}, \"numSamples\": {");
 	}
 	printf("\n\n");
 
@@ -2222,7 +2222,7 @@ void print_report(mako_args_t* args,
 
 	/* Min Latency */
 	if (fp) {
-		fprintf(fp, "}, \"min\": {");
+		fprintf(fp, "}, \"minLatency\": {");
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Min");
 	for (op = 0; op < MAX_OP; op++) {
@@ -2241,7 +2241,7 @@ void print_report(mako_args_t* args,
 
 	/* Avg Latency */
 	if (fp) {
-		fprintf(fp, "}, \"avg\": {");
+		fprintf(fp, "}, \"avgLatency\": {");
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Avg");
 	for (op = 0; op < MAX_OP; op++) {
@@ -2260,7 +2260,7 @@ void print_report(mako_args_t* args,
 
 	/* Max Latency */
 	if (fp) {
-		fprintf(fp, "}, \"max\": {");
+		fprintf(fp, "}, \"maxLatency\": {");
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Max");
 	for (op = 0; op < MAX_OP; op++) {
@@ -2283,7 +2283,7 @@ void print_report(mako_args_t* args,
 
 	/* Median Latency */
 	if (fp) {
-		fprintf(fp, "}, \"median\": {");
+		fprintf(fp, "}, \"medianLatency\": {");
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Median");
 	int num_points[MAX_OP] = { 0 };
@@ -2333,7 +2333,7 @@ void print_report(mako_args_t* args,
 
 	/* 95%ile Latency */
 	if (fp) {
-		fprintf(fp, "}, \"p95\": {");
+		fprintf(fp, "}, \"p95Latency\": {");
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "95.0 pctile");
 	for (op = 0; op < MAX_OP; op++) {
@@ -2357,7 +2357,7 @@ void print_report(mako_args_t* args,
 
 	/* 99%ile Latency */
 	if (fp) {
-		fprintf(fp, "}, \"p99\": {");
+		fprintf(fp, "}, \"p99Latency\": {");
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "99.0 pctile");
 	for (op = 0; op < MAX_OP; op++) {
@@ -2381,7 +2381,7 @@ void print_report(mako_args_t* args,
 
 	/* 99.9%ile Latency */
 	if (fp) {
-		fprintf(fp, "}, \"p99.9\": {");
+		fprintf(fp, "}, \"p99.9Latency\": {");
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "99.9 pctile");
 	for (op = 0; op < MAX_OP; op++) {
