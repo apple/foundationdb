@@ -3049,13 +3049,13 @@ public:
 		}
 	}
 
-	ACTOR static Future<DatabaseBackupAgent::BackupStatus> getStatus(DatabaseBackupAgent* backupAgent,
-	                                                                 Database cx,
-	                                                                 int errorLimit,
-	                                                                 Key tagName) {
+	ACTOR static Future<BackupStatus> getStatusData(DatabaseBackupAgent* backupAgent,
+	                                                Database cx,
+	                                                int errorLimit,
+	                                                Key tagName) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state DatabaseBackupAgent::BackupStatus backupStatus;
+		state BackupStatus backupStatus;
 		backupStatus.errorLimit = errorLimit;
 		state int retries = 0;
 
@@ -3163,8 +3163,15 @@ public:
 				wait(tr->onError(e));
 			}
 		}
-
 		return backupStatus;
+	}
+
+	ACTOR static Future<std::string> getStatus(DatabaseBackupAgent* backupAgent,
+	                                           Database cx,
+	                                           int errorLimit,
+	                                           Key tagName) {
+		state BackupStatus backupStatus = wait(getStatusData(backupAgent, cx, errorLimit, tagName));
+		return backupStatus.toString();
 	}
 
 	ACTOR static Future<EBackupState> getStateValue(DatabaseBackupAgent* backupAgent,
@@ -3244,7 +3251,11 @@ Future<Void> DatabaseBackupAgent::abortBackup(Database cx,
 	return DatabaseBackupAgentImpl::abortBackup(this, cx, tagName, partial, abortOldBackup, dstOnly, waitForDestUID);
 }
 
-Future<DatabaseBackupAgent::BackupStatus> DatabaseBackupAgent::getStatus(Database cx, int errorLimit, Key tagName) {
+Future<BackupStatus> DatabaseBackupAgent::getStatusData(Database cx, int errorLimit, Key tagName) {
+	return DatabaseBackupAgentImpl::getStatusData(this, cx, errorLimit, tagName);
+}
+
+Future<std::string> DatabaseBackupAgent::getStatus(Database cx, int errorLimit, Key tagName) {
 	return DatabaseBackupAgentImpl::getStatus(this, cx, errorLimit, tagName);
 }
 

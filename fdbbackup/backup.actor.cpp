@@ -2094,7 +2094,7 @@ ACTOR Future<Void> runAgent(Database db) {
 	return Void();
 }
 
-ACTOR Future<Void> submitDBMove(Database src, Database dest, std::string tagName, Key srcPrefix, Key destPrefix) {
+ACTOR Future<Void> submitDBMove(Database src, Database dest, std::string tagName, Key addPrefix, Key removePrefix) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
 
@@ -2102,8 +2102,8 @@ ACTOR Future<Void> submitDBMove(Database src, Database dest, std::string tagName
 		                              KeyRef(tagName),
 		                              Standalone<VectorRef<KeyRangeRef>>(),
 		                              StopWhenDone::False,
-		                              destPrefix,
-		                              srcPrefix,
+		                              addPrefix,
+		                              removePrefix,
 		                              LockDB::False));
 
 		// Check if a backup agent is running
@@ -2147,13 +2147,12 @@ ACTOR Future<Void> statusDBMove(Database src,
                                 Database dest,
                                 std::string tagName,
                                 int errorLimit,
-                                Key srcPrefix,
-                                Key destPrefix,
+                                KeyRef destPrefix,
+                                KeyRef srcPrefix,
                                 bool json) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
-		DatabaseBackupAgent::BackupStatus backUpStatus =
-		    wait(backupAgent.getStatus(dest, errorLimit, StringRef(tagName)));
+		state BackupStatus backUpStatus = wait(backupAgent.getStatusData(dest, errorLimit, StringRef(tagName)));
 
 		backUpStatus.srcClusterFile = src->getConnectionFile()->getFilename();
 		backUpStatus.destClusterFile = dest->getConnectionFile()->getFilename();
@@ -2457,8 +2456,7 @@ ACTOR Future<Void> switchDBBackup(Database src,
 ACTOR Future<Void> statusDBBackup(Database src, Database dest, std::string tagName, int errorLimit) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
-		state auto backupStatus = wait(backupAgent.getStatus(dest, errorLimit, StringRef(tagName)));
-		std::string statusText = backupStatus.toString();
+		std::string statusText = wait(backupAgent.getStatus(dest, errorLimit, StringRef(tagName)));
 		printf("%s\n", statusText.c_str());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -4677,8 +4675,8 @@ int main(int argc, char* argv[]) {
 				f = stopAfter(submitDBMove(sourceDb, db, tagName, Key(addPrefix), Key(removePrefix)));
 				break;
 			case DBMoveType::STATUS:
-				f = stopAfter(
-				    statusDBMove(sourceDb, db, tagName, maxErrors, Key(addPrefix), Key(removePrefix), jsonOutput));
+				f = stopAfter(statusDBMove(
+				    sourceDb, db, tagName, maxErrors, KeyRef(addPrefix), KeyRef(removePrefix), jsonOutput));
 				break;
 			case DBMoveType::SWITCH:
 				f = stopAfter(switchDBMove(sourceDb, db, backupKeys, tagName, forceAction));
