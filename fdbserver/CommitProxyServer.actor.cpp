@@ -534,6 +534,8 @@ CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
 
 	evaluateBatchSize();
 
+	toCommit.pGroupMessageBuilders = &pGroupMessageBuilders;
+
 	if (batchOperations != 0) {
 		latencyBucket =
 		    std::min<int>(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS - 1,
@@ -809,8 +811,6 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 			    std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(self->commitVersion);
 		}
 	}
-
-	self->toCommit.pGroupMessageBuilders = &self->pGroupMessageBuilders;
 
 	if (self->debugID.present()) {
 		g_traceBatch.addEvent(
@@ -1317,7 +1317,6 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
 
 	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-		self->toCommit.pGroupMessageBuilders = &self->pGroupMessageBuilders;
 		std::vector<Future<Version>> pushResults;
 		pushResults.reserve(self->pGroupMessageBuilders.size());
 		for (auto& [groupId, _] : self->pGroupMessageBuilders) {
