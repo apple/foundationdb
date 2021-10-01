@@ -557,9 +557,7 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 
 	Reference<StorageTeamData> getStorageTeamData(const StorageTeamID& storageTeamID) {
 		for (const auto& [id, data] : storageTeamData) {
-			if (!data->storageTeamId.isValid()) {
-				ASSERT(false);
-			}
+			ASSERT_WE_THINK(data->storageTeamId.isValid());
 		}
 		return storageTeamData[storageTeamID];
 	}
