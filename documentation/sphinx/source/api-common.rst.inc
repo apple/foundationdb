@@ -591,7 +591,7 @@
 
 .. |option-knob| replace::
    
-   Sets internal tuning or debugging knobs.
+   Sets internal tuning or debugging knobs. Available knobs could be found at https://github.com/apple/foundationdb/blob/master/fdbclient/ClientKnobs.h.
 
 .. |option-tls-verify-peers| replace::
 

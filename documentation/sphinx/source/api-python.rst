@@ -217,7 +217,7 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
 
       |option-set-disable-local-client|
 
-    .. method :: fdb.options.set_ client_threads_per_version(number)
+    .. method :: fdb.options.set_client_threads_per_version(number)
 
        |option-set-client-threads-per-version|
 
