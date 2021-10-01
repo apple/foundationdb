@@ -303,6 +303,19 @@ struct FetchInjectionInfo {
 	vector<VerUpdateRef> changes;
 };
 
+struct ReadCounter {
+	int64_t& count;
+	int64_t increment;
+
+	explicit ReadCounter(int64_t& count, int64_t increment = 1) : count(count), increment(increment) {
+		count += increment;
+	}
+	~ReadCounter() { count -= increment; }
+
+	ReadCounter(const ReadCounter&) = delete;
+	ReadCounter& operator=(const ReadCounter&) = delete;
+};
+
 struct StorageServer {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
 
@@ -417,6 +430,18 @@ public:
 	std::map<Version, Standalone<VerUpdateRef>>& getMutableMutationLog() { return mutationLog; }
 	VersionedData const& data() const { return versionedData; }
 	VersionedData& mutableData() { return versionedData; }
+
+	int64_t readsInFlight = 0;
+	double readRate() const {
+		if (readsInFlight >= SERVER_KNOBS->STORAGE_READ_QUEUE_HARD_MAX) {
+			return 0.;
+		} else if (readsInFlight >= SERVER_KNOBS->STORAGE_READ_QUEUE_SOFT_MAX) {
+			return 1.0 -
+			       (double(readsInFlight - SERVER_KNOBS->STORAGE_READ_QUEUE_SOFT_MAX) /
+			        double(SERVER_KNOBS->STORAGE_READ_QUEUE_HARD_MAX - SERVER_KNOBS->STORAGE_READ_QUEUE_SOFT_MAX));
+		}
+		return 1.;
+	}
 
 	double old_rate = 1.0;
 	double currentRate() {
@@ -715,6 +740,7 @@ public:
 			specialCounter(cc, "DesiredOldestVersion", [self]() { return self->desiredOldestVersion.get(); });
 			specialCounter(cc, "VersionLag", [self]() { return self->versionLag; });
 			specialCounter(cc, "LocalRate", [self] { return self->currentRate() * 100; });
+			specialCounter(cc, "ReadsInFlight", [self] { return self->readsInFlight; });
 
 			specialCounter(cc, "BytesReadSampleCount", [self]() { return self->metrics.bytesReadSample.queue.size(); });
 
@@ -833,6 +859,11 @@ public:
 		                (currentRate() < 1e-6 ? 1e6 : 1.0 / currentRate()));
 	}
 
+	double getReadPenalty() {
+		double rate = readRate();
+		return rate < 1e-6 ? 1e6 : 1. / rate;
+	}
+
 	// Normally the storage server prefers to serve read requests over making mutations
 	// durable to disk. However, when the storage server falls to far behind on
 	// making mutations durable, this function will change the priority to prefer writes.
@@ -875,6 +906,16 @@ public:
 			++counters.readsRejected;
 			return Void();
 		}
+
+		// If the read queue gets too deep (readRate ~ 0), the read is not going to succeed
+		// regardless. Probabilistically drop reads to try to lighten the load.
+		rate = readRate();
+		if (rate < 1. && deterministicRandom()->random01() > rate) {
+			sendErrorWithPenalty(request.reply, server_overloaded(), getReadPenalty());
+			++counters.readsRejected;
+			return Void();
+		}
+
 		return fun(this, request);
 	}
 };
@@ -1082,6 +1123,7 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 }
 
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
+	state ReadCounter counter(data->readsInFlight);
 	state int64_t resultSize = 0;
 
 	try {
@@ -1417,6 +1459,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
                                           KeyRange range,
                                           int limit,
                                           int* pLimitBytes) {
+	state ReadCounter counter(data->readsInFlight);
 	state GetKeyValuesReply result;
 	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
 	state StorageServer::VersionedData::iterator vCurrent = view.end();
@@ -1745,13 +1788,13 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterVersion");
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
-		//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
+		// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
 		//"None").detail("In", "getKeyValues>getShardKeyRange"); throw e; }
 
 		if (!selectorInRange(req.end, shard) && !(req.end.isFirstGreaterOrEqual() && req.end.getKey() == shard.end)) {
 			//			TraceEvent("WrongShardServer1", data->thisServerID).detail("Begin",
-			//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
-			//shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
+			// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
+			// shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
 			throw wrong_shard_server();
 		}
 
@@ -1977,6 +2020,7 @@ void getQueuingMetrics(StorageServer* self, StorageQueuingMetricsRequest const& 
 #endif
 
 ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager) {
+	state ReadCounter counter(data->readsInFlight, eager->keyBegin.size() + eager->keys.size());
 	eager->finishKeyBegin();
 
 	if (SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS) {
@@ -3465,8 +3509,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				data->sourceTLogID = curSourceTLogID;
 
 				TraceEvent("StorageServerSourceTLogID", data->thisServerID)
-					.detail("SourceTLogID", data->sourceTLogID.present() ? data->sourceTLogID.get().toString() : "unknown")
-					.trackLatest(data->thisServerID.toString() + "/StorageServerSourceTLogID");
+				    .detail("SourceTLogID",
+				            data->sourceTLogID.present() ? data->sourceTLogID.get().toString() : "unknown")
+				    .trackLatest(data->thisServerID.toString() + "/StorageServerSourceTLogID");
 			}
 
 			data->noRecentUpdates.set(false);
@@ -3494,10 +3539,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			//TraceEvent("StorageServerUpdated", data->thisServerID).detail("Ver", ver).detail("DataVersion", data->version.get())
 			//	.detail("LastTLogVersion", data->lastTLogVersion).detail("NewOldest",
-			//data->oldestVersion.get()).detail("DesiredOldest",data->desiredOldestVersion.get())
+			// data->oldestVersion.get()).detail("DesiredOldest",data->desiredOldestVersion.get())
 			//	.detail("MaxVersionInMemory", maxVersionsInMemory).detail("Proposed",
-			//proposedOldestVersion).detail("PrimaryLocality", data->primaryLocality).detail("Tag",
-			//data->tag.toString());
+			// proposedOldestVersion).detail("PrimaryLocality", data->primaryLocality).detail("Tag",
+			// data->tag.toString());
 
 			while (!data->recoveryVersionSkips.empty() &&
 			       proposedOldestVersion > data->recoveryVersionSkips.front().first) {
