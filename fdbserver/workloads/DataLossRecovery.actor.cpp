@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -73,16 +73,20 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		state Value newValue = "TestNewValue"_sr;
 
 		wait(self->writeAndVerify(self, cx, key, oldValue));
-
+		
 		// Move [key, endKey) to team: {address}.
-		state NetworkAddress address =
-		    wait(self->disableDDAndMoveShard(self, cx, KeyRangeRef(systemKeys.begin, systemKeys.end)));
+		state NetworkAddress address = wait(self->disableDDAndMoveShard(self, cx, KeyRangeRef(key, endKey)));
+		wait(self->readAndVerify(self, cx, key, oldValue));
 
 		// Kill team {address}, and expect read to timeout.
 		self->killProcess(self, address);
+		wait(self->readAndVerify(self, cx, key, "Timeout"_sr));
 
-		// Expect reads on metadata to timeout.
-		wait(self->readAndVerify(self, cx, keyServersKey(key), "Timeout"_sr));
+		// Reenable DD and exclude address as fail, so that [key, endKey) will be dropped and moved to a new team.
+		// Expect read to return 'value not found'.
+		int ignore = wait(setDDMode(cx, 1));
+		wait(self->exclude(self, cx, key, address));
+		wait(self->readAndVerify(self, cx, key, Optional<Value>()));
 
 		// Write will scceed.
 		wait(self->writeAndVerify(self, cx, key, newValue));
@@ -97,7 +101,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		state Transaction tr(cx);
 
 		loop {
-			tr.reset();
 			try {
 				state Optional<Value> res = wait(timeout(tr.get(key), 10.0, Optional<Value>("Timeout"_sr)));
 				if (res != expectedValue) {
@@ -115,7 +118,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	ACTOR Future<Void> writeAndVerify(DataLossRecoveryWorkload* self, Database cx, Key key, Optional<Value> value) {
 		state Transaction tr(cx);
 		loop {
-			tr.reset();
 			try {
 				if (value.present()) {
 					tr.set(key, value.get());
@@ -136,7 +138,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 	ACTOR Future<Void> exclude(DataLossRecoveryWorkload* self, Database cx, Key key, NetworkAddress addr) {
 		state Transaction tr(cx);
-		Standalone<VectorRef<const char*>> addresses = wait(tr.getAddressesForKey(key));
 		state std::vector<AddressExclusion> servers;
 		servers.push_back(AddressExclusion(addr.ip, addr.port));
 		loop {
@@ -171,7 +172,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		while (dest.empty()) {
 			std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
 			if (!interfs.empty()) {
-				const auto& interf = interfs[random() % interfs.size()];
+				const auto& interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
 				if (g_simulator.protectedAddresses.count(interf.address()) == 0) {
 					dest.push_back(interf.uniqueID);
 					self->addr = interf.address();
@@ -186,7 +187,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		state Transaction tr(cx);
 
 		loop {
-			tr.reset();
 			try {
 				BinaryWriter wrMyOwner(Unversioned());
 				wrMyOwner << owner;
@@ -212,6 +212,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				if (e.code() != error_code_movekeys_conflict) {
 					throw e;
 				}
+				wait(tr.onError(e));
 			}
 		}
 
@@ -231,7 +232,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		ISimulator::ProcessInfo* process = g_simulator.getProcessByAddress(addr);
 		ASSERT(process->addresses.contains(addr));
 		g_simulator.killProcess(process, ISimulator::KillInstantly);
-		TraceEvent("TestTeamKilled").detail("Address", addr.toString());
+		TraceEvent("TestTeamKilled").detail("Address", addr);
 	}
 
 	Future<bool> check(Database const& cx) override { return pass; }
