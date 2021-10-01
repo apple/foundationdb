@@ -103,16 +103,7 @@ enum class DBType { UNDEFINED = 0, START, STATUS, SWITCH, ABORT, PAUSE, RESUME }
 // New fast restore reuses the type from legacy slow restore
 enum class RestoreType { UNKNOWN, START, STATUS, ABORT, WAIT };
 
-enum class DBMoveType {
-	UNDEFINED = 0,
-	START,
-	STATUS,
-	FINISH,
-	ABORT,
-	PAUSE,
-	RESUME
-	// TODO: add more operation type
-};
+enum class DBMoveType { UNDEFINED = 0, START, STATUS, FINISH, ABORT, CLEAN, CLEAR_SRC };
 
 //
 enum {
@@ -975,7 +966,7 @@ CSimpleOpt::SOption g_rgDBMoveStatusOptions[] = {
 	    SO_END_OF_OPTIONS
 };
 
-CSimpleOpt::SOption g_rgDBMoveSwitchOptions[] = {
+CSimpleOpt::SOption g_rgDBMoveFinishOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
@@ -1032,6 +1023,34 @@ CSimpleOpt::SOption g_rgDBMoveAbortOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
+	    SO_END_OF_OPTIONS
+};
+
+CSimpleOpt::SOption g_rgDBMoveCleanupOptions[] = {
+#ifdef _WIN32
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
+#endif
+	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_DELETE_DATA, "--delete_data", SO_NONE },
+	{ OPT_MIN_CLEANUP_SECONDS, "--min_cleanup_seconds", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -1475,7 +1494,7 @@ static void printDBBackupUsage(bool devhelp) {
 // TODO: need to update the usage describtion here
 static void printDBMovementUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("Usage: %s [TOP_LEVEL_OPTIONS] (start | status | switch | abort | pause | resume) [OPTIONS]\n\n",
+	printf("Usage: %s [TOP_LEVEL_OPTIONS] (start | status | finish | abort | cleanup) [OPTIONS]\n\n",
 	       exeDatabaseMovement.toString().c_str());
 
 	printf(" TOP LEVEL OPTIONS:\n");
@@ -1716,7 +1735,8 @@ DBMoveType getDBMoveType(std::string dbMoveTypeStr) {
 		values["status"] = DBMoveType::STATUS;
 		values["finish"] = DBMoveType::FINISH;
 		values["abort"] = DBMoveType::ABORT;
-		// TODO add more mapping if more commands are supported here
+		values["clean"] = DBMoveType::CLEAN;
+		// TODO values["clear"] = DBMoveType::CLEAR_SRC;
 	}
 	auto res = values.find(dbMoveTypeStr);
 	if (res != values.end()) {
@@ -2254,6 +2274,19 @@ ACTOR Future<Void> abortDBMove(Database src,
 			fprintf(stderr, "ERROR: %s\n", e.what());
 			break;
 		}
+		throw;
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> cleanupDBMove(Database db, DeleteData deleteData) {
+	try {
+		wait(cleanupBackup(db, deleteData));
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
 
@@ -3683,16 +3716,16 @@ int main(int argc, char* argv[]) {
 				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMoveStatusOptions, SO_O_EXACT);
 				break;
 			case DBMoveType::FINISH:
-				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMoveSwitchOptions, SO_O_EXACT);
+				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMoveFinishOptions, SO_O_EXACT);
 				break;
 			case DBMoveType::ABORT:
 				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMoveAbortOptions, SO_O_EXACT);
 				break;
-			case DBMoveType::PAUSE:
-				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMovePauseOptions, SO_O_EXACT);
+			case DBMoveType::CLEAN:
+				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMoveCleanupOptions, SO_O_EXACT);
 				break;
-			case DBMoveType::RESUME:
-				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMovePauseOptions, SO_O_EXACT);
+			case DBMoveType::CLEAR_SRC:
+				// TODO
 				break;
 			default:
 				args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
@@ -4703,11 +4736,11 @@ int main(int argc, char* argv[]) {
 			case DBMoveType::ABORT:
 				f = stopAfter(abortDBMove(sourceDb, db, tagName, partial, dstOnly));
 				break;
-			case DBMoveType::PAUSE:
-				f = stopAfter(changeDBMoveResumed(sourceDb, db, true));
+			case DBMoveType::CLEAN:
+				f = stopAfter(cleanupDBMove(db, deleteData));
 				break;
-			case DBMoveType::RESUME:
-				f = stopAfter(changeDBMoveResumed(sourceDb, db, false));
+			case DBMoveType::CLEAR_SRC:
+				// TODO: clear and unlock source db
 				break;
 			case DBMoveType::UNDEFINED:
 			default:
