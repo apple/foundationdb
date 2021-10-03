@@ -1942,7 +1942,7 @@ void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, s
 	uint64_t totalxacts = 0;
 	static uint64_t conflicts_prev = 0;
 	uint64_t conflicts = 0;
-	double duration = (now->tv_sec - prev->tv_sec) * 1000000000.0 + (now->tv_nsec - prev->tv_nsec);
+	double duration_nsec = (now->tv_sec - prev->tv_sec) * 1000000000.0 + (now->tv_nsec - prev->tv_nsec);
 
 	for (i = 0; i < args->num_processes; i++) {
 		for (j = 0; j < args->num_threads; j++) {
@@ -1973,18 +1973,15 @@ void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, s
 		}
 	}
 	/* TPS */
-	double tps = (totalxacts - totalxacts_prev) * 1000000000.0 / duration;
+	double tps = (totalxacts - totalxacts_prev) * 1000000000.0 / duration_nsec;
 	printf("%" STR(STATS_FIELD_WIDTH) ".2f ", tps);
 	if (fp) {
-		// char* str = NULL;
-		// sprintf(str, "\"TPS\": %.2f,", tps);
-		// fwrite(str, 1, strlen(str), fp);
 		fprintf(fp, "\"tps\": %.2f,", tps);
 	}
 	totalxacts_prev = totalxacts;
 
 	/* Conflicts */
-	double conflicts_diff = (conflicts - conflicts_prev) * 1000000000.0 / duration;
+	double conflicts_diff = (conflicts - conflicts_prev) * 1000000000.0 / duration_nsec;
 	printf("%" STR(STATS_FIELD_WIDTH) ".2f\n", conflicts_diff);
 	if (fp) {
 		fprintf(fp, "\"conflictsPerSec\": %.2f},", conflicts_diff);
@@ -2083,7 +2080,7 @@ void print_report(mako_args_t* args,
 	uint64_t lat_samples[MAX_OP] = { 0 };
 	uint64_t lat_max[MAX_OP] = { 0 };
 
-	uint64_t duration =
+	uint64_t duration_nsec =
 	    (timer_now->tv_sec - timer_start->tv_sec) * 1000000000 + (timer_now->tv_nsec - timer_start->tv_nsec);
 
 	for (op = 0; op < MAX_OP; op++) {
@@ -2117,7 +2114,7 @@ void print_report(mako_args_t* args,
 	}
 
 	/* overall stats */
-	double total_duration = duration * 1.0 / 1000000000;
+	double total_duration = duration_nsec * 1.0 / 1000000000;
 	printf("\n====== Total Duration %6.3f sec ======\n\n", total_duration);
 	printf("Total Processes:  %8d\n", args->num_processes);
 	printf("Total Threads:    %8d\n", args->num_threads);
@@ -2143,7 +2140,7 @@ void print_report(mako_args_t* args,
 	printf("Total Xacts:      %8lld\n", totalxacts);
 	printf("Total Conflicts:  %8lld\n", conflicts);
 	printf("Total Errors:     %8lld\n", totalerrors);
-	printf("Overall TPS:      %8lld\n\n", totalxacts * 1000000000 / duration);
+	printf("Overall TPS:      %8lld\n\n", totalxacts * 1000000000 / duration_nsec);
 
 	if (fp) {
 		fprintf(fp, "\"results\": {");
@@ -2154,7 +2151,7 @@ void print_report(mako_args_t* args,
 		fprintf(fp, "\"totalXacts\": %lld,", totalxacts);
 		fprintf(fp, "\"totalConflicts\": %lld,", conflicts);
 		fprintf(fp, "\"totalErrors\": %lld,", totalerrors);
-		fprintf(fp, "\"overallTPS\": %lld,", totalxacts * 1000000000 / duration);
+		fprintf(fp, "\"overallTPS\": %lld,", totalxacts * 1000000000 / duration_nsec);
 	}
 
 	/* per-op stats */
@@ -2175,11 +2172,11 @@ void print_report(mako_args_t* args,
 	}
 
 	/* TPS */
-	double tps = totalxacts * 1000000000.0 / duration;
+	double tps = totalxacts * 1000000000.0 / duration_nsec;
 	printf("%" STR(STATS_FIELD_WIDTH) ".2f ", tps);
 
 	/* Conflicts */
-	double conflicts_rate = conflicts * 1000000000.0 / duration;
+	double conflicts_rate = conflicts * 1000000000.0 / duration_nsec;
 	printf("%" STR(STATS_FIELD_WIDTH) ".2f\n", conflicts_rate);
 
 	if (fp) {
