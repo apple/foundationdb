@@ -28,6 +28,7 @@
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "flow/Error.h"
+#include "flow/Trace.h"
 
 Reference<StorageInfo> getStorageInfo(UID id,
                                       std::map<UID, Reference<StorageInfo>>* storageCache,
@@ -231,6 +232,8 @@ private:
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			TraceEvent("ServerTag", dbgid).detail("Server", id).detail("Tag", tag.toString());
 
+			TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", "LogProtocolMessage");
+			TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
 			toCommit->addTag(tag);
 			toCommit->writeTypedMessage(LogProtocolMessage(), true);
 			toCommit->addTag(tag);
@@ -293,6 +296,7 @@ private:
 		// This is done to make the cache servers aware of the cached key-ranges
 		MutationRef privatized = m;
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+		TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
 		toCommit->addTag(cacheTag);
 		toCommit->writeTypedMessage(privatized);
 	}
@@ -371,6 +375,7 @@ private:
 
 			Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get();
 			if (tagV.present()) {
+				TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
 				toCommit->addTag(decodeServerTagValue(tagV.get()));
 				toCommit->writeTypedMessage(privatized);
 			}
@@ -400,6 +405,7 @@ private:
 		if (tagV.present()) {
 			MutationRef privatized = m;
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+			TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
 			toCommit->writeTypedMessage(privatized);
 		}
@@ -518,10 +524,12 @@ private:
 		if (m.param1 == lastEpochEndKey) {
 			toCommit->addTags(allTags);
 			toCommit->writeTypedMessage(LogProtocolMessage(), true);
+			TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", "LogProtocolMessage");
 		}
 
 		MutationRef privatized = m;
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+		TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", m.toString());
 		toCommit->addTags(allTags);
 		toCommit->writeTypedMessage(privatized);
 	}
@@ -648,6 +656,8 @@ private:
 					privatized.param1 = kv.key.withPrefix(systemKeys.begin, arena);
 					privatized.param2 = keyAfter(kv.key, arena).withPrefix(systemKeys.begin, arena);
 
+					TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
+
 					toCommit->addTag(decodeServerTagValue(kv.value));
 					toCommit->writeTypedMessage(privatized);
 				}
@@ -670,6 +680,7 @@ private:
 								privatized.param2 =
 								    keyAfter(maybeTssRange.begin, arena).withPrefix(systemKeys.begin, arena);
 
+								TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
 								toCommit->addTag(decodeServerTagValue(tagV.get()));
 								toCommit->writeTypedMessage(privatized);
 							}
@@ -853,6 +864,7 @@ private:
 		if (Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get(); tagV.present()) {
 			MutationRef privatized = m;
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+			TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
 			toCommit->writeTypedMessage(privatized);
 		}
@@ -878,6 +890,7 @@ private:
 
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+					TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
 					toCommit->addTag(decodeServerTagValue(tagV.get()));
 					toCommit->writeTypedMessage(privatized);
 				}
@@ -971,6 +984,8 @@ private:
 			}
 
 			// Add the tags to both begin and end mutations
+			TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", mutationBegin.toString());
+			TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", mutationEnd.toString());
 			toCommit->addTags(allTags);
 			toCommit->writeTypedMessage(mutationBegin);
 			toCommit->addTags(allTags);
