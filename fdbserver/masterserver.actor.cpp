@@ -1831,7 +1831,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 	return Void();
 }
 
-static void populateRecoverMetadataMutations(Reference<MasterData> self, Arena& arena, CommitTransactionRef& tr) {
+static void populateRecoverMetadataMutations(Reference<MasterData> self, CommitTransactionRef& tr, Arena& arena) {
 	KeyRange txnKeys = allKeys;
 	// state std::map<Tag, UID> tag_uid;
 
@@ -1841,12 +1841,32 @@ static void populateRecoverMetadataMutations(Reference<MasterData> self, Arena& 
 	// }
 
 	// wait(yield());
-
+	// std::unordered_map<UID, CoalescedKeyRangeMap<Value>> serverKeysMap;
 	RangeResult data = self->txnStateStore->readRange(txnKeys).get();
+	RangeResult UID2Tag = self->txnStateStore->readRange(serverTagKeys).get();
 	ASSERT(!data.empty());
-	for (auto& kv : data) {
+	for (int i = 0; i < data.size() - 1; ++i) {
+		const auto& kv = data[i];
+		const KeyRangeRef keys(data[i].key, data[i + 1].key);
 		tr.set(arena, kv.key, kv.value);
+		std::vector<UID> src, dest;
+		decodeKeyServersValue(UID2Tag, kv.value, src, dest);
+		for (const UID& id : src) {
+			// auto& serverKeys = serverKeysMap[id];
+			// serverKeys.insert(keys, serverKeysTrue);
+			krmSetPreviouslyEmptyRange(
+			    tr, arena, serverKeysPrefixFor(id), allKeys, serverKeysTrue, serverKeysFalse);
+		}
+		for (const UID& id : dest) {
+			krmSetPreviouslyEmptyRange(
+			    tr, arena, serverKeysPrefixFor(id), allKeys, serverKeysTrue, serverKeysFalse);
+		}
 	}
+	// for (const auto& it : serverKeysMap) {
+	// 	for (const auto& range : it.second.ranges()) {
+	// 		tr.set(arena, serverKeysKey(it.first, kv.key), kv.value);
+	// 	}
+	// }
 }
 
 ACTOR Future<Void> masterCore(Reference<MasterData> self) {

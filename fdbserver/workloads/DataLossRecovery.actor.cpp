@@ -74,75 +74,99 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		wait(self->writeAndVerify(self, cx, key, oldValue));
 
-		state std::vector<UID> dest;
-		state NetworkAddress address;
-		while (dest.empty()) {
-			std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
-			if (!interfs.empty()) {
-				const auto& interf = interfs[random() % interfs.size()];
-				if (g_simulator.protectedAddresses.count(interf.address()) == 0) {
-					dest.push_back(interf.uniqueID);
-					self->addr = interf.address();
-					address = interf.address();
-				}
-			}
-		}
+		state Optional<StorageServerInterface> ssi = wait(self->getRandomStorageServer(cx));
+		ASSERT(ssi.present());
 
 		// Move [key, endKey) to team: {address}.
-		std::vector<NetworkAddress> addresses;
-		addresses.push_back(address);
-		std::cout << "Moveing." << std::endl;
+		state std::vector<NetworkAddress> addresses;
+		addresses.push_back(ssi.get().address());
+		std::cout << "Moving." << std::endl;
 		wait(moveShard(cx->getConnectionFile(), KeyRangeRef(key, endKey), addresses));
 
 		Transaction tr(cx);
 		Standalone<VectorRef<const char*>> adds = wait(tr.getAddressesForKey(key));
 		ASSERT(adds.size() == 1);
-		ASSERT(adds[0] == address.toString());
-		std::cout << "Moved to: " << adds[0] << std::endl;
+		ASSERT(adds[0] == ssi.get().address().toString());
+		std::cout << "Moved to: " << adds[0] << "(" << ssi.get().uniqueID.toString() << ")" << std::endl;
 
 		wait(self->readAndVerify(self, cx, key, oldValue));
 
-
-
 		// Kill team {address}, and expect read to timeout.
-		self->killProcess(self, address);
+		self->killProcess(self, ssi.get().address());
 		wait(self->readAndVerify(self, cx, key, "Timeout"_sr));
 
 		// Reenable DD and exclude address as fail, so that [key, endKey) will be dropped and moved to a new team.
 		// Expect read to return 'value not found'.
 		int ignore = wait(setDDMode(cx, 1));
-		wait(self->exclude(self, cx, key, address));
+		wait(self->exclude(self, cx, key, ssi.get().address()));
 		wait(self->readAndVerify(self, cx, key, Optional<Value>()));
 
 		// Write will scceed.
 		wait(self->writeAndVerify(self, cx, key, newValue));
 
+		// **********************************************************************
+
+		state Optional<StorageServerInterface> ssi2 = wait(self->getRandomStorageServer(cx));
+		ASSERT(ssi2.present());
+		ASSERT(ssi2 != ssi);
+
+		// Move [\xff, \xff\xff) to team: {ssi}.
+		addresses.clear();
+		addresses.push_back(ssi2.get().address());
+		std::cout << "Moving." << std::endl;
+		wait(moveShard(cx->getConnectionFile(), systemKeys, addresses));
+
+		// Kill team {address}, and expect read to timeout.
+		self->killProcess(self, ssi2.get().address());
+		std::cout << "Killed process: " << ssi2.get().address().toString() << "(" << ssi2.get().toString() << ")"
+		          << std::endl;
+		wait(self->readAndVerify(self, cx, keyServersKey(key), "Timeout"_sr));
+		std::cout << "Verified reading metadata timeout" << std::endl;
+
+		wait(self->readAndVerify(self, cx, key, newValue));
+		std::cout << "Read" << std::endl;
+		// Write will scceed.
+		wait(self->writeAndVerify(self, cx, key, oldValue));
+		std::cout << "Write" << std::endl;
+		wait(forceRecovery(cx->getConnectionFile(), LiteralStringRef("1")));
+
+		// Write will scceed.
+		wait(self->writeAndVerify(self, cx, key, oldValue));
+		std::cout << "Write2" << std::endl;
+
+		Optional<Value> res = wait(self->read(self, cx, keyServersKey(key)));
+		ASSERT(res.present());
+		std::cout << "Read3" << std::endl;
+
 		return Void();
-		// Move [key, endKey) to team: {address}.
-		// state NetworkAddress address = wait(self->disableDDAndMoveShard(self, cx, systemKeys));
-		// // wait(self->readAndVerify(self, cx, keyServersKey(key), oldValue));
+	}
 
-		// // Kill team {address}, and expect read to timeout.
-		// self->killProcess(self, address);
-		// std::cout << "Killed process: " << address.toString() << std::endl;
-		// wait(self->readAndVerify(self, cx, keyServersKey(key), "Timeout"_sr));
-		// std::cout << "Verified reading metadata timeout" << std::endl;
+	ACTOR Future<Optional<StorageServerInterface>> getRandomStorageServer(Database cx) {
+		loop {
+			std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
+			if (!interfs.empty()) {
+				const auto& interf = interfs[random() % interfs.size()];
+				if (g_simulator.protectedAddresses.count(interf.address()) == 0) {
+					return interf;
+				}
+			}
+		}
+	}
 
-		// wait(self->readAndVerify(self, cx, key, oldValue));
-		// std::cout << "Read" << std::endl;
-		// // Write will scceed.
-		// wait(self->writeAndVerify(self, cx, key, newValue));
-		// std::cout << "Write" << std::endl;
-		// wait(forceRecovery(cx->getConnectionFile(), LiteralStringRef("1")));
+	ACTOR Future<Optional<Value>> read(DataLossRecoveryWorkload* self, Database cx, Key key) {
+		state Transaction tr(cx);
 
-		// wait(self->readAndVerify(self, cx, key, newValue));
-		// std::cout << "Read2" << std::endl;
-		// // Write will scceed.
-		// wait(self->writeAndVerify(self, cx, key, oldValue));
-		// std::cout << "Write2" << std::endl;
+		loop {
+			tr.reset();
+			try {
+				state Optional<Value> res = wait(timeout(tr.get(key), 10.0, Optional<Value>("Timeout"_sr)));
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
 
-		// wait(self->readAndVerify(self, cx, keyServersKey(key), Optional<Value>()));
-		// std::cout << "Read3" << std::endl;
+		return res;
 	}
 
 	ACTOR Future<Void> readAndVerify(DataLossRecoveryWorkload* self,
