@@ -20,6 +20,7 @@
 
 #ifndef FDBSERVER_APPLYMETADATAMUTATION_H
 #define FDBSERVER_APPLYMETADATAMUTATION_H
+#include <cstddef>
 #pragma once
 
 #include "fdbclient/BackupAgent.actor.h"
@@ -45,6 +46,7 @@ struct ResolverData {
 	LogPushData* toCommit = nullptr;
 	Version popVersion = 0; // exclusive, usually set to commitVersion + 1
 	std::map<UID, Reference<StorageInfo>>* storageCache = nullptr;
+	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
 	// For initial broadcast
 	ResolverData(UID debugId, IKeyValueStore* store, KeyRangeMap<ServerCacheInfo>* info)
@@ -57,9 +59,10 @@ struct ResolverData {
 	             KeyRangeMap<ServerCacheInfo>* info,
 	             LogPushData* toCommit,
 	             Version popVersion,
-	             std::map<UID, Reference<StorageInfo>>* storageCache)
+	             std::map<UID, Reference<StorageInfo>>* storageCache,
+	             std::unordered_map<UID, StorageServerInterface>* tssMapping)
 	  : dbgid(debugId), txnStateStore(store), keyInfo(info), logSystem(logSystem), toCommit(toCommit),
-	    popVersion(popVersion), storageCache(storageCache) {}
+	    popVersion(popVersion), storageCache(storageCache), tssMapping(tssMapping) {}
 };
 
 inline bool isMetadataMutation(MutationRef const& m) {

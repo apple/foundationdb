@@ -187,16 +187,20 @@ struct CommitTransactionRef {
 	VectorRef<MutationRef> mutations;
 	Version read_snapshot;
 	bool report_conflicting_keys;
+	SpanID spanContext;
 
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
 		if constexpr (is_fb_function<Ar>) {
 			serializer(
-			    ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot, report_conflicting_keys);
+			    ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot, report_conflicting_keys, spanContext);
 		} else {
 			serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot);
 			if (ar.protocolVersion().hasReportConflictingKeys()) {
 				serializer(ar, report_conflicting_keys);
+			}
+			if (ar.protocolVersion().hasSpanContext()) {
+				serializer(ar, spanContext);
 			}
 		}
 	}

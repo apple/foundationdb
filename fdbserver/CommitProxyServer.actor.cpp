@@ -180,12 +180,16 @@ struct ResolutionRequestBuilder {
 				getOutTransaction(resolver, trIn.read_snapshot)
 				    .write_conflict_ranges.push_back(requests[resolver].arena, r);
 		}
-		if (isTXNStateTransaction)
+		if (isTXNStateTransaction) {
 			for (int r = 0; r < requests.size(); r++) {
 				int transactionNumberInRequest =
 				    &getOutTransaction(r, trIn.read_snapshot) - requests[r].transactions.begin();
 				requests[r].txnStateTransactions.push_back(requests[r].arena, transactionNumberInRequest);
 			}
+			// Note only Resolver 0 got the correct spanContext, which means
+			// the reply from Resolver 0 has the right one back.
+			getOutTransaction(0, trIn.read_snapshot).spanContext = trRequest.spanContext;
+		}
 
 		std::vector<int> resolversUsed;
 		for (int r = 0; r < outTr.size(); r++)
@@ -863,7 +867,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	ResolveTransactionBatchReply& reply = self->resolution[0];
 	ASSERT_WE_THINK(privateMutations.size() == reply.privateMutations.size());
 	for (int i = 0; i < privateMutations.size(); i++) {
-		std::cout << i << "\n" << printable(privateMutations[i]) << "\n" << printable(reply.privateMutations[i]) << "\n\n";
+		// std::cout << i << "\n" << printable(privateMutations[i]) << "\n" << printable(reply.privateMutations[i]) << "\n\n";
 		ASSERT_WE_THINK(privateMutations[i] == reply.privateMutations[i]);
 	}
 	if (self->forceRecovery) {
