@@ -73,6 +73,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 
 	std::map<UID, Reference<StorageInfo>> storageCache;
 	KeyRangeMap<ServerCacheInfo> keyInfo; // keyrange -> all storage servers in all DCs for the keyrange
+	std::unordered_map<UID, StorageServerInterface> tssMapping;
 
 	Version debugMinRecentStateVersion;
 
@@ -252,7 +253,8 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		                          &self->keyInfo,
 		                          &toCommit,
 		                          req.version + 1,
-		                          &self->storageCache);
+		                          &self->storageCache,
+		                          &self->tssMapping);
 		for (int t : req.txnStateTransactions) {
 			stateMutations += req.transactions[t].mutations.size();
 			stateBytes += req.transactions[t].mutations.expectedSize();
@@ -263,7 +265,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 
 			// Generate private mutations for metadata mutations
 			if (reply.committed[t] == ConflictBatch::TransactionCommitted) {
-				applyMetadataMutations(SpanID(), resolverData, req.transactions[t].mutations);
+				applyMetadataMutations(req.transactions[t].spanContext, resolverData, req.transactions[t].mutations);
 			}
 		}
 
