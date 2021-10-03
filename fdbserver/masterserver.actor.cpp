@@ -1843,24 +1843,30 @@ static void populateRecoverMetadataMutations(Reference<MasterData> self, CommitT
 	// wait(yield());
 	// std::unordered_map<UID, CoalescedKeyRangeMap<Value>> serverKeysMap;
 	RangeResult data = self->txnStateStore->readRange(txnKeys).get();
+	RangeResult keyServers = self->txnStateStore->readRange(keyServersKeys).get();
 	RangeResult UID2Tag = self->txnStateStore->readRange(serverTagKeys).get();
 	ASSERT(!data.empty());
-	for (int i = 0; i < data.size() - 1; ++i) {
-		const auto& kv = data[i];
-		const KeyRangeRef keys(data[i].key, data[i + 1].key);
-		tr.set(arena, kv.key, kv.value);
+	ASSERT(!keyServers.empty());
+	ASSERT(!UID2Tag.empty());
+	for (int i = 0; i < keyServers.size() - 1; ++i) {
+		const KeyRangeRef keys(keyServers[i].key, keyServers[i + 1].key);
 		std::vector<UID> src, dest;
-		decodeKeyServersValue(UID2Tag, kv.value, src, dest);
+		decodeKeyServersValue(UID2Tag, keyServers[i].value, src, dest);
 		for (const UID& id : src) {
 			// auto& serverKeys = serverKeysMap[id];
 			// serverKeys.insert(keys, serverKeysTrue);
-			krmSetPreviouslyEmptyRange(
-			    tr, arena, serverKeysPrefixFor(id), allKeys, serverKeysTrue, serverKeysFalse);
+			krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(id), keys, serverKeysTrue, serverKeysFalse);
+			TraceEvent("RecoveryPopulateSrcServerKeys", id). detail("Begin", keys.begin).detail("End", keys.end);
 		}
 		for (const UID& id : dest) {
-			krmSetPreviouslyEmptyRange(
-			    tr, arena, serverKeysPrefixFor(id), allKeys, serverKeysTrue, serverKeysFalse);
+			krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(id), keys, serverKeysTrue, serverKeysFalse);
+			TraceEvent("RecoveryPopulateDestServerKeys", id). detail("Begin", keys.begin).detail("End", keys.end);
 		}
+	}
+
+	// Fill in keyServers, serverTags, serverList, etc.
+	for (const auto& kv : data) {
+		tr.set(arena, kv.key, kv.value);
 	}
 	// for (const auto& it : serverKeysMap) {
 	// 	for (const auto& range : it.second.ranges()) {
@@ -2047,7 +2053,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	}
 
 	if (self->recoverMetadata) {
-		populateRecoverMetadataMutations(self, recoveryCommitRequest.arena, tr);
+		populateRecoverMetadataMutations(self, tr, recoveryCommitRequest.arena);
 		setUpMetadataServers(recoveryCommitRequest.arena, tr, seedServers, self->serverTagMap);
 	}
 
