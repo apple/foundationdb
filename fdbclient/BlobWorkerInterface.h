@@ -43,8 +43,6 @@ struct BlobWorkerInterface {
 
 	void initEndpoints() {}
 	UID id() const { return myId; }
-	// TODO: why do we get addresses like this? getEndpoint gives u current machines addr?
-	// why don't we expose it as part of locality and get it from there (since locality is given by workr)
 	NetworkAddress address() const { return blobGranuleFileRequest.getEndpoint().getPrimaryAddress(); }
 	NetworkAddress stableAddress() const { return blobGranuleFileRequest.getEndpoint().getStableAddress(); }
 	bool operator==(const BlobWorkerInterface& r) const { return id() == r.id(); }
@@ -65,7 +63,6 @@ struct BlobWorkerInterface {
 };
 
 struct BlobGranuleFileReply {
-	// TODO is there a "proper" way to generate file_identifier?
 	constexpr static FileIdentifier file_identifier = 6858612;
 	Arena arena;
 	VectorRef<BlobGranuleChunkRef> chunks;
