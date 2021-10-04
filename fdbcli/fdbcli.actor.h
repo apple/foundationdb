@@ -156,6 +156,7 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 ACTOR Future<bool> moveShardCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+ACTOR Future<bool> repairSystemDataCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // include command
 ACTOR Future<bool> includeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // kill command

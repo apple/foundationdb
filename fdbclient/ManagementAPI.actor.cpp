@@ -2123,6 +2123,23 @@ ACTOR Future<Void> moveShard(Reference<ClusterConnectionFile> clusterFile,
 	}
 }
 
+ACTOR Future<Void> repairSystemData(Reference<ClusterConnectionFile> clusterFile) {
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+
+	loop {
+		choose {
+			when(wait(clusterInterface->get().present()
+			              ? brokenPromiseToNever(
+			                    clusterInterface->get().get().repairSystemData.getReply(RepairSystemDataRequest()))
+			              : Never())) {
+				return Void();
+			}
+			when(wait(clusterInterface->onChange())) {}
+		}
+	}
+}
+
 ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {
 	state ReadYourWritesTransaction tr(cx);
 

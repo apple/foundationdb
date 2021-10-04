@@ -332,5 +332,5 @@ struct RepairSystemDataRequest {
 	void serialize(Ar& ar) {
 		serializer(ar, reply);
 	}
-}
+};
 #endif

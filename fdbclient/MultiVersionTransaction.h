@@ -287,6 +287,7 @@ public:
 	ThreadFuture<Void> moveShard(const KeyRangeRef& keys, std::vector<NetworkAddress> addresses) override {
 		return unsupported_operation();
 	};
+	ThreadFuture<Void> repairSystemData() override { return unsupported_operation(); };
 
 private:
 	const Reference<FdbCApi> api;
@@ -501,6 +502,7 @@ public:
 	ThreadFuture<Void> moveShard(const KeyRangeRef& keys, std::vector<NetworkAddress> addresses) override {
 		return unsupported_operation();
 	};
+	ThreadFuture<Void> repairSystemData() override { return unsupported_operation(); };
 
 	// private:
 

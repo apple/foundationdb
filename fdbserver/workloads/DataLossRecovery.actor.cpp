@@ -129,7 +129,8 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		// Write will scceed.
 		wait(self->writeAndVerify(self, cx, key, oldValue));
 		std::cout << "Write" << std::endl;
-		wait(forceRecovery(cx->getConnectionFile(), LiteralStringRef("1")));
+
+		wait(repairSystemData(cx->getConnectionFile()));
 
 		// Write will scceed.
 		wait(self->writeAndVerify(self, cx, key, oldValue));

@@ -6552,6 +6552,10 @@ Future<Void> DatabaseContext::moveShard(KeyRangeRef shard, std::vector<NetworkAd
 	return ::moveShard(getConnectionFile(), shard, addresses);
 }
 
+Future<Void> DatabaseContext::repairSystemData() {
+	return ::repairSystemData(getConnectionFile());
+}
+
 Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_command) {
 	std::string uid_str = uid.toString();
 	if (!std::all_of(uid_str.begin(), uid_str.end(), [](unsigned char c) { return std::isxdigit(c); }) ||

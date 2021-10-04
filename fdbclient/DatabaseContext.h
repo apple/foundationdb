@@ -252,6 +252,7 @@ public:
 	// Management API, create snapshot
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 	Future<Void> moveShard(KeyRangeRef shard, std::vector<NetworkAddress> addresses);
+	Future<Void> repairSystemData();
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,

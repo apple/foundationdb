@@ -100,6 +100,11 @@ ThreadFuture<Void> ThreadSafeDatabase::moveShard(const KeyRangeRef& keys, std::v
 	return onMainThread([db, shard, addresses]() -> Future<Void> { return db->moveShard(shard, addresses); });
 }
 
+ThreadFuture<Void> ThreadSafeDatabase::repairSystemData() {
+	DatabaseContext* db = this->db;
+	return onMainThread([db]() -> Future<Void> { return db->repairSystemData(); });
+}
+
 // Return the main network thread busyness
 double ThreadSafeDatabase::getMainThreadBusyness() {
 	ASSERT(g_network);

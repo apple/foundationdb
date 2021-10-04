@@ -4676,7 +4676,7 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 		wait(fCommit || delay(SERVER_KNOBS->FORCE_RECOVERY_CHECK_DELAY));
 		if (!fCommit.isReady() || fCommit.isError()) {
 			if (self->clusterControllerDcId != req.dcId) {
-				vector<Optional<Key>> dcPriority;
+				std::vector<Optional<Key>> dcPriority;
 				dcPriority.push_back(req.dcId);
 				dcPriority.push_back(self->clusterControllerDcId);
 				self->desiredDcIds.set(dcPriority);
@@ -4694,10 +4694,9 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 
 ACTOR Future<Void> handleRepairSystemData(ClusterControllerData* self, ClusterControllerFullInterface interf) {
 	loop {
-		state RepairSystemDataRequest req = waitNext(interf.clientInterface.forceRecovery.getFuture());
+		state RepairSystemDataRequest req = waitNext(interf.clientInterface.repairSystemData.getFuture());
 		TraceEvent("RepairSystemDataStart", self->id)
-		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
-		    .detail("DcId", req.dcId.printable());
+		    .detail("ClusterControllerDcId", self->clusterControllerDcId);
 		self->db.recoverMetadata = true;
 		self->db.forceMasterFailure.trigger();
 		req.reply.send(Void());
