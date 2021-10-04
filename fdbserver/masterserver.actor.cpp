@@ -993,8 +993,11 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> sel
 	for (auto& it : self->commitProxies) {
 		endpoints.push_back(it.txnState.getEndpoint());
 	}
-	for (auto& it : self->resolvers) {
-		endpoints.push_back(it.txnState.getEndpoint());
+	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+		// Broadcasts transaction state store to resolvers.
+		for (auto& it : self->resolvers) {
+			endpoints.push_back(it.txnState.getEndpoint());
+		}
 	}
 
 	loop {
