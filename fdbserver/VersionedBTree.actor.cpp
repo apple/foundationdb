@@ -1991,6 +1991,8 @@ Future<T> forwardError(Future<T> f, Promise<Void> target) {
 	}
 }
 
+constexpr int initialVersion = 0;
+
 class DWALPagerSnapshot;
 
 // An implementation of IPager2 that supports atomicUpdate() of a page without forcing a change to new page ID.
@@ -2314,7 +2316,6 @@ public:
 
 			// Write new header using desiredPageSize
 			self->pHeader->formatVersion = Header::FORMAT_VERSION;
-			constexpr int initialVersion = 0;
 			self->pHeader->committedVersion = initialVersion;
 			self->pHeader->oldestVersion = initialVersion;
 			// No meta key until a user sets one and commits
@@ -7274,7 +7275,7 @@ ACTOR Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i =
 	    written->lower_bound(std::make_pair(start.toString(), 0));
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd =
-	    written->upper_bound(std::make_pair(end.toString(), 0));
+	    written->upper_bound(std::make_pair(end.toString(), initialVersion));
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iLast;
 
 	state VersionedBTree::BTreeCursor cur;
