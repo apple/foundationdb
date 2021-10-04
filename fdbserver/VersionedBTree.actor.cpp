@@ -1991,7 +1991,7 @@ Future<T> forwardError(Future<T> f, Promise<Void> target) {
 	}
 }
 
-constexpr int initialVersion = 0;
+constexpr int initialVersion = invalidVersion;
 
 class DWALPagerSnapshot;
 
@@ -2358,10 +2358,11 @@ public:
 			self->remapCleanupFuture = Void();
 		}
 
-		debug_printf("DWALPager(%s) recovered.  committedVersion=%" PRId64 " oldestVersion=%" PRId64
+		self->recoveryVersion = self->pHeader->committedVersion;
+		debug_printf("DWALPager(%s) recovered.  recoveryVersion=%" PRId64 " oldestVersion=%" PRId64
 		             " logicalPageSize=%d physicalPageSize=%d\n",
 		             self->filename.c_str(),
-		             self->pHeader->committedVersion,
+		             self->recoveryVersion,
 		             self->pHeader->oldestVersion,
 		             self->logicalPageSize,
 		             self->physicalPageSize);
@@ -3004,20 +3005,11 @@ public:
 	// Get snapshot as of the most recent committed version of the pager
 	Reference<IPagerSnapshot> getReadSnapshot(Version v) override;
 	void addSnapshot(Version version, KeyRef meta) {
-		if (!snapshots.empty() && snapshots.back().version == version) {
-			// Replacing the latest snapshot is currently only allowed for the initial commit at version 0
-			// Committing at the same version multiple times in a row could be supported (and likely is already
-			// supported physically) but it would be a bad practice for a user to do since after recovery it would
-			// be unclear which "version" of the same version was recovered to unless the user stores some other
-			// metadata to differentiate them.
-			ASSERT(version == 0);
-			snapshots.back().snapshot =
-			    makeReference<DWALPagerSnapshot>(this, meta, version, snapshots.back().expired.getFuture());
-		} else {
-			Promise<Void> expired;
-			snapshots.push_back(
-			    { version, expired, makeReference<DWALPagerSnapshot>(this, meta, version, expired.getFuture()) });
-		}
+		ASSERT(snapshots.empty() || snapshots.back().version != version);
+
+		Promise<Void> expired;
+		snapshots.push_back(
+		    { version, expired, makeReference<DWALPagerSnapshot>(this, meta, version, expired.getFuture()) });
 	}
 
 	// Set the pending oldest versiont to keep as of the next commit
@@ -3271,8 +3263,8 @@ public:
 
 	ACTOR static Future<Void> commit_impl(DWALPager* self, Version v) {
 		debug_printf("DWALPager(%s) commit begin %s\n", self->filename.c_str(), ::toString(v).c_str());
+		ASSERT(v > self->pLastCommittedHeader->committedVersion);
 
-		ASSERT(v >= self->pLastCommittedHeader->committedVersion);
 		// Write old committed header to Page 1
 		self->writeHeaderPage(1, self->lastCommittedHeaderPage);
 
@@ -3541,6 +3533,7 @@ private:
 	int desiredPageSize;
 	int desiredExtentSize;
 
+	Version recoveryVersion;
 	Reference<ArenaPage> lastCommittedHeaderPage;
 	Header* pLastCommittedHeader;
 
@@ -4474,6 +4467,7 @@ public:
 	// Set key to value as of the next commit
 	// The new value is not readable until after the next commit is completed.
 	void set(KeyValueRef keyValue) {
+		++m_mutationCount;
 		++g_redwoodMetrics.metric.opSet;
 		g_redwoodMetrics.metric.opSetKeyBytes += keyValue.key.size();
 		g_redwoodMetrics.metric.opSetValueBytes += keyValue.value.size();
@@ -4481,6 +4475,7 @@ public:
 	}
 
 	void clear(KeyRangeRef clearedRange) {
+		++m_mutationCount;
 		// Optimization for single key clears to create just one mutation boundary instead of two
 		if (clearedRange.begin.size() == clearedRange.end.size() - 1 &&
 		    clearedRange.end[clearedRange.end.size() - 1] == 0 && clearedRange.end.startsWith(clearedRange.begin)) {
@@ -4506,7 +4501,7 @@ public:
 	Version getLastCommittedVersion() const { return m_pager->getLastCommittedVersion(); }
 
 	VersionedBTree(IPager2* pager, std::string name)
-	  : m_pager(pager), m_pBuffer(nullptr), m_name(name), m_pHeader(nullptr), m_headerSpace(0) {
+	  : m_pager(pager), m_pBuffer(nullptr), m_mutationCount(0), m_name(name), m_pHeader(nullptr), m_headerSpace(0) {
 
 		m_lazyClearActor = 0;
 		m_init = init_impl(this);
@@ -4937,11 +4932,13 @@ private:
 
 	// The mutation buffer currently being written to
 	std::unique_ptr<MutationBuffer> m_pBuffer;
+	int64_t m_mutationCount;
 
 	struct CommitBatch {
 		Version readVersion;
 		Version writeVersion;
 		std::unique_ptr<MutationBuffer> mutations;
+		int64_t mutationCount;
 		Reference<IPagerSnapshot> snapshot;
 	};
 
@@ -6531,6 +6528,9 @@ private:
 		state CommitBatch batch;
 		batch.mutations = std::move(self->m_pBuffer);
 		self->m_pBuffer.reset(new MutationBuffer());
+		batch.mutationCount = self->m_mutationCount;
+		self->m_mutationCount = 0;
+
 		batch.writeVersion = writeVersion;
 
 		// Replace the lastCommit future with a new one and then wait on the old one
@@ -6540,6 +6540,14 @@ private:
 
 		// Wait for the latest commit to be finished.
 		wait(previousCommit);
+
+		// If the write version has not advanced then there can be no changes pending.
+		// If there are no changes, then the commit is a no-op.
+		if (writeVersion == self->m_pager->getLastCommittedVersion()) {
+			ASSERT(batch.mutationCount == 0);
+			committed.send(Void());
+			return Void();
+		}
 
 		// For this commit, use the latest snapshot that was just committed.
 		batch.readVersion = self->m_pager->getLastCommittedVersion();
@@ -6975,7 +6983,7 @@ public:
 	ACTOR Future<Void> init_impl(KeyValueStoreRedwood* self) {
 		TraceEvent(SevInfo, "RedwoodInit").detail("FilePrefix", self->m_filePrefix);
 		wait(self->m_tree->init());
-		self->m_nextCommitVersion = self->m_tree->getLastCommittedVersion() + 1;
+		self->m_nextCommitVersion = self->m_tree->getLastCommittedVersion();
 		TraceEvent(SevInfo, "RedwoodInitComplete")
 		    .detail("FilePrefix", self->m_filePrefix)
 		    .detail("Version", self->m_tree->getLastCommittedVersion());
@@ -7001,7 +7009,10 @@ public:
 		delete self;
 	}
 
-	void setCommitVersion(Version v) override { m_nextCommitVersion = v; }
+	void setCommitVersion(Version v) override {
+		debug_printf("setCommitVersion %lld\n", v);
+		m_nextCommitVersion = v;
+	}
 
 	// Get latest durable committed version
 	Future<Version> getCommittedVersion() override { return m_tree->getLastCommittedVersion(); }
@@ -7016,7 +7027,6 @@ public:
 		Future<Void> c = m_tree->commit(m_nextCommitVersion);
 		// Currently not keeping history
 		m_tree->setOldestReadableVersion(m_nextCommitVersion);
-		++m_nextCommitVersion;
 		return catchError(c);
 	}
 
