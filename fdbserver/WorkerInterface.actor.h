@@ -834,6 +834,7 @@ struct Role {
 	static const Role DATA_DISTRIBUTOR;
 	static const Role RATEKEEPER;
 	static const Role BLOB_MANAGER;
+	static const Role BLOB_WORKER;
 	static const Role STORAGE_CACHE;
 	static const Role COORDINATOR;
 	static const Role BACKUP;
@@ -866,6 +867,8 @@ struct Role {
 			return RATEKEEPER;
 		case ProcessClass::BlobManager:
 			return BLOB_MANAGER;
+		case ProcessClass::BlobWorker:
+			return BLOB_WORKER;
 		case ProcessClass::StorageCache:
 			return STORAGE_CACHE;
 		case ProcessClass::Backup:

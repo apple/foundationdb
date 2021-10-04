@@ -53,7 +53,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "grv_proxy",
                   "master",
                   "test",
-                  "storage_cache"
+                  "storage_cache",
+                  "blob_worker"
                ]
             },
             "degraded":true,
@@ -95,6 +96,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "data_distributor",
                         "ratekeeper",
                         "blob_manager",
+                        "blob_worker",
                         "storage_cache",
                         "router",
                         "coordinator"
