@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
@@ -35,6 +36,7 @@
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/ActorCollection.h"
 #include <map>
+#include <string>
 #include <vector>
 #include "fdbclient/CommitTransaction.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -257,6 +259,10 @@ private:
 template <typename T>
 std::string toString(const T& o) {
 	return o.toString();
+}
+
+std::string toString(const std::string& s) {
+	return s;
 }
 
 std::string toString(StringRef s) {
@@ -2351,9 +2357,11 @@ public:
 			self->remapCleanupFuture = Void();
 		}
 
-		debug_printf("DWALPager(%s) recovered.  committedVersion=%" PRId64 " logicalPageSize=%d physicalPageSize=%d\n",
+		debug_printf("DWALPager(%s) recovered.  committedVersion=%" PRId64 " oldestVersion=%" PRId64
+		             " logicalPageSize=%d physicalPageSize=%d\n",
 		             self->filename.c_str(),
 		             self->pHeader->committedVersion,
+		             self->pHeader->oldestVersion,
 		             self->logicalPageSize,
 		             self->physicalPageSize);
 		return Void();
@@ -2501,7 +2509,7 @@ public:
 
 		VALGRIND_MAKE_MEM_DEFINED(page->begin(), page->size());
 		page->updateChecksum(pageID);
-		debug_printf("DWALPager(%s) writePhysicalPage %s CalculatedChecksum=%d ChecksumInPage=%d\n",
+		debug_printf("DWALPager(%s) writePhysicalPage %s CalculatedChecksum=%x ChecksumInPage=%x\n",
 		             self->filename.c_str(),
 		             toString(pageID).c_str(),
 		             page->calculateChecksum(pageID),
@@ -5068,7 +5076,7 @@ private:
 	                                           VectorRef<RedwoodRecordRef> records,
 	                                           int height,
 	                                           int blockSize) {
-		debug_printf("splitPages height=%d records=%d lowerBound=%s upperBound=%s\n",
+		debug_printf("splitPages height=%d records=%d\n\tlowerBound=%s\n\tupperBound=%s\n",
 		             height,
 		             records.size(),
 		             lowerBound->toString(false).c_str(),
@@ -5297,7 +5305,8 @@ private:
 
 			if (REDWOOD_DEBUG) {
 				auto& p = pagesToBuild[pageIndex];
-				debug_printf("Wrote %s original=%s deltaTreeSize=%d for %s\nlower: %s\nupper: %s\n",
+				debug_printf("Wrote %s %s original=%s deltaTreeSize=%d for %s\nlower: %s\nupper: %s\n",
+				             toString(v).c_str(),
 				             toString(childPageID).c_str(),
 				             toString(previousID).c_str(),
 				             written,
@@ -6635,23 +6644,35 @@ public:
 		bool intialized() const { return pager.isValid(); }
 		bool isValid() const { return valid; }
 
-		std::string toString() const {
+		// path entries at dumpHeight or below will have their entire pages printed
+		std::string toString(int dumpHeight = 0) const {
 			std::string r = format("{ptr=%p reason=%s %s ",
 			                       this,
-			                       PagerEventsStrings[(int)reason],
+			                       PagerEventReasonsStrings[(int)reason],
 			                       ::toString(pager->getVersion()).c_str());
 			for (int i = 0; i < path.size(); ++i) {
 				std::string id = "<debugOnly>";
 #if REDWOOD_DEBUG
 				id = ::toString(path[i].id);
 #endif
-				r += format("[Level=%d ID=%s ptr=%p Cursor=%s]   ",
-				            path[i].btPage()->height,
+				int height = path[i].btPage()->height;
+				r += format("\n\t[Level=%d ID=%s ptr=%p Cursor=%s]   ",
+				            height,
 				            id.c_str(),
 				            path[i].page->begin(),
 				            path[i].cursor.valid() ? path[i].cursor.get().toString(path[i].btPage()->isLeaf()).c_str()
 				                                   : "<invalid>");
+				if (height <= dumpHeight) {
+					BTreePage::BinaryTree::Cursor c = path[i].cursor;
+					c.moveFirst();
+					int i = 0;
+					while (c.valid()) {
+						r += format("\n\t\%7d: %s", ++i, c.get().toString(height == 1).c_str());
+						c.moveNext();
+					}
+				}
 			}
+			r += "\n";
 			if (!valid) {
 				r += " (invalid) ";
 			}
@@ -6865,7 +6886,7 @@ public:
 
 				if (self->path.size() == 1) {
 					self->valid = false;
-					debug_printf("move%s() exit cursor=%s\n", forward ? "Next" : "Prev", self->toString().c_str());
+					debug_printf("move%s() exit cursor=%s\n", forward ? "Next" : "Prev", self->toString(1).c_str());
 					return Void();
 				}
 
@@ -6894,7 +6915,7 @@ public:
 
 			self->valid = true;
 
-			debug_printf("move%s() exit cursor=%s\n", forward ? "Next" : "Prev", self->toString().c_str());
+			debug_printf("move%s() exit cursor=%s\n", forward ? "Next" : "Prev", self->toString(1).c_str());
 			return Void();
 		}
 
@@ -6978,6 +6999,11 @@ public:
 		    .detail("Dispose", dispose);
 		delete self;
 	}
+
+	void setCommitVersion(Version v) override { m_nextCommitVersion = v; }
+
+	// Get latest durable committed version
+	Future<Version> getCommittedVersion() override { return m_tree->getLastCommittedVersion(); }
 
 	void close() override { shutdown(this, false); }
 
@@ -7237,13 +7263,11 @@ KeyValue randomKV(int maxKeySize = 10, int maxValueSize = 5) {
 
 // Verify a range using a BTreeCursor.
 // Assumes that the BTree holds a single data version and the version is 0.
-ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
-                                         Key start,
-                                         Key end,
-                                         Version v,
-                                         std::map<std::pair<std::string, Version>, Optional<std::string>>* written,
-                                         int* pErrorCount) {
-	state int errors = 0;
+ACTOR Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
+                                          Key start,
+                                          Key end,
+                                          Version v,
+                                          std::map<std::pair<std::string, Version>, Optional<std::string>>* written) {
 	if (end <= start)
 		end = keyAfter(start);
 
@@ -7295,41 +7319,33 @@ ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
 		}
 
 		if (iLast == iEnd) {
-			++errors;
-			++*pErrorCount;
-			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n",
+			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR:BTree key '%s' vs nothing in written map.\n",
 			       v,
 			       start.printable().c_str(),
 			       end.printable().c_str(),
 			       cur.get().key.toString().c_str());
-			break;
+			ASSERT(false);
 		}
 
 		if (cur.get().key != iLast->first.first) {
-			++errors;
-			++*pErrorCount;
-			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' but expected '%s'\n",
+			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR:BTree key '%s' but expected '%s'\n",
 			       v,
 			       start.printable().c_str(),
 			       end.printable().c_str(),
 			       cur.get().key.toString().c_str(),
 			       iLast->first.first.c_str());
-			break;
+			ASSERT(false);
 		}
 		if (cur.get().value.get() != iLast->second.get()) {
-			++errors;
-			++*pErrorCount;
-			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' has tree value '%s' but expected '%s'\n",
+			printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR:BTree key '%s' has tree value '%s' but expected '%s'\n",
 			       v,
 			       start.printable().c_str(),
 			       end.printable().c_str(),
 			       cur.get().key.toString().c_str(),
 			       cur.get().value.get().toString().c_str(),
 			       iLast->second.get().c_str());
-			break;
+			ASSERT(false);
 		}
-
-		ASSERT(errors == 0);
 
 		results.push_back(results.arena(), cur.get().toKeyValueRef());
 		results.arena().dependsOn(cur.back().cursor.cache->arena);
@@ -7350,14 +7366,13 @@ ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
 	}
 
 	if (iLast != iEnd) {
-		++errors;
-		++*pErrorCount;
-		printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: Tree range ended but written has @%" PRId64 " '%s'\n",
+		printf("VerifyRange(@%" PRId64 ", %s, %s) ERROR: BTree range ended but written has @%" PRId64 " '%s'\n",
 		       v,
 		       start.printable().c_str(),
 		       end.printable().c_str(),
 		       iLast->first.second,
 		       iLast->first.first.c_str());
+		ASSERT(false);
 	}
 
 	debug_printf(
@@ -7377,39 +7392,33 @@ ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
 
 	while (cur.isValid() && cur.get().key >= start) {
 		if (r == results.rend()) {
-			++errors;
-			++*pErrorCount;
-			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n",
+			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR:BTree key '%s' vs nothing in written map.\n",
 			       v,
 			       start.printable().c_str(),
 			       end.printable().c_str(),
 			       cur.get().key.toString().c_str());
-			break;
+			ASSERT(false);
 		}
 
 		if (cur.get().key != r->key) {
-			++errors;
-			++*pErrorCount;
-			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' but expected '%s'\n",
+			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR:BTree key '%s' but expected '%s'\n",
 			       v,
 			       start.printable().c_str(),
 			       end.printable().c_str(),
 			       cur.get().key.toString().c_str(),
 			       r->key.toString().c_str());
-			break;
+			ASSERT(false);
 		}
 		if (cur.get().value.get() != r->value) {
-			++errors;
-			++*pErrorCount;
 			printf("VerifyRangeReverse(@%" PRId64
-			       ", %s, %s) ERROR: Tree key '%s' has tree value '%s' but expected '%s'\n",
+			       ", %s, %s) ERROR:BTree key '%s' has tree value '%s' but expected '%s'\n",
 			       v,
 			       start.printable().c_str(),
 			       end.printable().c_str(),
 			       cur.get().key.toString().c_str(),
 			       cur.get().value.get().toString().c_str(),
 			       r->value.toString().c_str());
-			break;
+			ASSERT(false);
 		}
 
 		++r;
@@ -7417,26 +7426,23 @@ ACTOR Future<int> verifyRangeBTreeCursor(VersionedBTree* btree,
 	}
 
 	if (r != results.rend()) {
-		++errors;
-		++*pErrorCount;
-		printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree range ended but written has '%s'\n",
+		printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: BTree range ended but written has '%s'\n",
 		       v,
 		       start.printable().c_str(),
 		       end.printable().c_str(),
 		       r->key.toString().c_str());
+		ASSERT(false);
 	}
 
-	return errors;
+	return Void();
 }
 
 // Verify the result of point reads for every set or cleared key at the given version
-ACTOR Future<int> seekAllBTreeCursor(VersionedBTree* btree,
-                                     Version v,
-                                     std::map<std::pair<std::string, Version>, Optional<std::string>>* written,
-                                     int* pErrorCount) {
+ACTOR Future<Void> seekAllBTreeCursor(VersionedBTree* btree,
+                                      Version v,
+                                      std::map<std::pair<std::string, Version>, Optional<std::string>>* written) {
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i = written->cbegin();
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd = written->cend();
-	state int errors = 0;
 	state VersionedBTree::BTreeCursor cur;
 
 	wait(btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead));
@@ -7455,8 +7461,6 @@ ACTOR Future<int> seekAllBTreeCursor(VersionedBTree* btree,
 			if (val.present()) {
 				bool valueMatch = hasValue && cur.get().value.get() == val.get();
 				if (!foundKey || !hasValue || !valueMatch) {
-					++errors;
-					++*pErrorCount;
 					if (!foundKey) {
 						printf("Verify ERROR: key_not_found: '%s' -> '%s' @%" PRId64 "\n",
 						       key.c_str(),
@@ -7474,25 +7478,24 @@ ACTOR Future<int> seekAllBTreeCursor(VersionedBTree* btree,
 						       val.get().c_str(),
 						       ver);
 					}
+					ASSERT(false);
 				}
 			} else if (foundKey && hasValue) {
-				++errors;
-				++*pErrorCount;
 				printf("Verify ERROR: cleared_key_found: '%s' -> '%s' @%" PRId64 "\n",
 				       key.c_str(),
 				       cur.get().value.get().toString().c_str(),
 				       ver);
+				ASSERT(false);
 			}
 		}
 		++i;
 	}
-	return errors;
+	return Void();
 }
 
 ACTOR Future<Void> verify(VersionedBTree* btree,
                           FutureStream<Version> vStream,
                           std::map<std::pair<std::string, Version>, Optional<std::string>>* written,
-                          int* pErrorCount,
                           bool serial) {
 
 	// Queue of committed versions still readable from btree
@@ -7524,10 +7527,10 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 			wait(btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead));
 
 			debug_printf("Verifying entire key range at version %" PRId64 "\n", v);
-			state Future<int> fRangeAll = verifyRangeBTreeCursor(
-			    btree, LiteralStringRef(""), LiteralStringRef("\xff\xff"), v, written, pErrorCount);
+			state Future<Void> fRangeAll =
+			    verifyRangeBTreeCursor(btree, LiteralStringRef(""), LiteralStringRef("\xff\xff"), v, written);
 			if (serial) {
-				wait(success(fRangeAll));
+				wait(fRangeAll);
 			}
 
 			Key begin = randomKV().key;
@@ -7535,23 +7538,20 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 
 			debug_printf(
 			    "Verifying range (%s, %s) at version %" PRId64 "\n", toString(begin).c_str(), toString(end).c_str(), v);
-			state Future<int> fRangeRandom = verifyRangeBTreeCursor(btree, begin, end, v, written, pErrorCount);
+			state Future<Void> fRangeRandom = verifyRangeBTreeCursor(btree, begin, end, v, written);
 			if (serial) {
-				wait(success(fRangeRandom));
+				wait(fRangeRandom);
 			}
 
 			debug_printf("Verifying seeks to each changed key at version %" PRId64 "\n", v);
-			state Future<int> fSeekAll = seekAllBTreeCursor(btree, v, written, pErrorCount);
+			state Future<Void> fSeekAll = seekAllBTreeCursor(btree, v, written);
 			if (serial) {
-				wait(success(fSeekAll));
+				wait(fSeekAll);
 			}
 
-			wait(success(fRangeAll) && success(fRangeRandom) && success(fSeekAll));
+			wait(fRangeAll && fRangeRandom && fSeekAll);
 
-			printf("Verified version %" PRId64 ", %d errors\n", v, *pErrorCount);
-
-			if (*pErrorCount != 0)
-				break;
+			printf("Verified version %" PRId64 "\n", v);
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_end_of_stream && e.code() != error_code_transaction_too_old) {
@@ -8900,12 +8900,11 @@ TEST_CASE("/redwood/correctness/btree") {
 	state SimpleCounter sets;
 	state SimpleCounter rangeClears;
 	state SimpleCounter keyBytesCleared;
-	state int errorCount;
 	state int mutationBytesThisCommit = 0;
 	state int mutationBytesTargetThisCommit = randomSize(maxCommitSize);
 
 	state PromiseStream<Version> committedVersions;
-	state Future<Void> verifyTask = verify(btree, committedVersions.getFuture(), &written, &errorCount, serialTest);
+	state Future<Void> verifyTask = verify(btree, committedVersions.getFuture(), &written, serialTest);
 	state Future<Void> randomTask = serialTest ? Void() : (randomReader(btree) || btree->getError());
 	committedVersions.send(lastVer);
 
@@ -9060,7 +9059,7 @@ TEST_CASE("/redwood/correctness/btree") {
 				debug_printf("Waiting for verification to complete.\n");
 				wait(verifyTask);
 				committedVersions = PromiseStream<Version>();
-				verifyTask = verify(btree, committedVersions.getFuture(), &written, &errorCount, serialTest);
+				verifyTask = verify(btree, committedVersions.getFuture(), &written, serialTest);
 			}
 
 			mutationBytesThisCommit = 0;
@@ -9099,7 +9098,7 @@ TEST_CASE("/redwood/correctness/btree") {
 
 				// Create new promise stream and start the verifier again
 				committedVersions = PromiseStream<Version>();
-				verifyTask = verify(btree, committedVersions.getFuture(), &written, &errorCount, serialTest);
+				verifyTask = verify(btree, committedVersions.getFuture(), &written, serialTest);
 				if (!serialTest) {
 					randomTask = randomReader(btree) || btree->getError();
 				}
@@ -9108,9 +9107,6 @@ TEST_CASE("/redwood/correctness/btree") {
 
 			version += versionIncrement;
 		}
-
-		// Check for errors
-		ASSERT(errorCount == 0);
 	}
 
 	debug_printf("Waiting for outstanding commit\n");
@@ -9119,9 +9115,6 @@ TEST_CASE("/redwood/correctness/btree") {
 	randomTask.cancel();
 	debug_printf("Waiting for verification to complete.\n");
 	wait(verifyTask);
-
-	// Check for errors
-	ASSERT(errorCount == 0);
 
 	// Reopen pager and btree with a remap cleanup window of 0 to reclaim all old pages
 	state Future<Void> closedFuture = btree->onClosed();
