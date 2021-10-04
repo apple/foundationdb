@@ -38,6 +38,63 @@ struct ClientLibBinaryInfo {
 	size_t chunkCnt;
 };
 
+namespace ClientLibUtils {
+
+static void parseMetadataJson(StringRef metadataString, json_spirit::mObject& metadataJson) {
+	json_spirit::mValue parsedMetadata;
+	if (!json_spirit::read_string(metadataString.toString(), parsedMetadata) ||
+	    parsedMetadata.type() != json_spirit::obj_type) {
+		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
+		    .detail("Reason", "InvalidJSON")
+		    .detail("Configuration", metadataString);
+		throw client_lib_invalid_metadata();
+	}
+
+	metadataJson = parsedMetadata.get_obj();
+}
+
+static const std::string& getMetadataStrAttr(const json_spirit::mObject& metadataJson, const char* attrName) {
+	auto attrIter = metadataJson.find(attrName);
+	if (attrIter == metadataJson.cend() || attrIter->second.type() != json_spirit::str_type) {
+		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
+		    .detail("Error", format("Missing attribute %s", attrName));
+		throw client_lib_invalid_metadata();
+	}
+	return attrIter->second.get_str();
+}
+
+static int getMetadataIntAttr(const json_spirit::mObject& metadataJson, const char* attrName) {
+	auto attrIter = metadataJson.find(attrName);
+	if (attrIter == metadataJson.cend() || attrIter->second.type() != json_spirit::int_type) {
+		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
+		    .detail("Error", format("Missing attribute %s", attrName));
+		throw client_lib_invalid_metadata();
+	}
+	return attrIter->second.get_int();
+}
+
+static void getIdFromMetadataJson(const json_spirit::mObject& metadataJson, std::string& clientLibId) {
+	const char* clientLibIdAttrs[] = { "platform", "version", "type", "checksum" };
+	std::ostringstream libIdBuilder;
+	for (auto attrName : clientLibIdAttrs) {
+		if (attrName != clientLibIdAttrs[0]) {
+			libIdBuilder << "/";
+		}
+		libIdBuilder << getMetadataStrAttr(metadataJson, attrName);
+	}
+	clientLibId = libIdBuilder.str();
+}
+
+} // namespace ClientLibUtils
+
+using namespace ClientLibUtils;
+
+void getClientLibIdFromMetadataJson(StringRef metadataString, std::string& clientLibId) {
+	json_spirit::mObject parsedMetadata;
+	parseMetadataJson(metadataString, parsedMetadata);
+	getIdFromMetadataJson(parsedMetadata, clientLibId);
+}
+
 ACTOR Future<Void> uploadClientLibBinary(Database db,
                                          StringRef libFilePath,
                                          KeyRef chunkKeyPrefix,
@@ -53,7 +110,6 @@ ACTOR Future<Void> uploadClientLibBinary(Database db,
 
 	loop {
 		state Arena arena;
-
 		state StringRef buf = makeString(transactionSize, arena);
 		state int bytesRead = wait(fClientLib->read(mutateString(buf), transactionSize, fileOffset));
 		fileOffset += bytesRead;
@@ -91,40 +147,9 @@ ACTOR Future<Void> uploadClientLibBinary(Database db,
 	return Void();
 }
 
-static bool getClientLibIdFromMetadataJson(const json_spirit::mObject& metadataJson,
-                                           std::string& clientLibId,
-                                           std::string* errorStr = nullptr) {
-	const char* clientLibIdAttrs[] = { "platform", "version", "type", "checksum" };
-	std::ostringstream libIdBuilder;
-	for (auto attrName : clientLibIdAttrs) {
-		auto attrIter = metadataJson.find(attrName);
-		if (attrIter == metadataJson.cend() || attrIter->second.type() != json_spirit::str_type) {
-			if (errorStr != nullptr) {
-				*errorStr = format("Missing identification attribute %s", attrName);
-			}
-			return false;
-		}
-		if (attrName != clientLibIdAttrs[0]) {
-			libIdBuilder << "/";
-		}
-		libIdBuilder << attrIter->second.get_str();
-	}
-	clientLibId = libIdBuilder.str();
-	return true;
-}
-
 ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, StringRef libFilePath) {
-
-	json_spirit::mValue parsedMetadata;
-	if (!json_spirit::read_string(metadataString.toString(), parsedMetadata) ||
-	    parsedMetadata.type() != json_spirit::obj_type) {
-		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
-		    .detail("Reason", "InvalidJSON")
-		    .detail("Configuration", metadataString);
-		throw client_lib_invalid_metadata();
-	}
-
-	state json_spirit::mObject metadataJson = parsedMetadata.get_obj();
+	state json_spirit::mObject metadataJson;
+	parseMetadataJson(metadataString, metadataJson);
 
 	json_spirit::mValue schema;
 	if (!json_spirit::read_string(JSONSchemas::clientLibMetadataSchema.toString(), schema)) {
@@ -141,19 +166,12 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 	}
 
 	std::string clientLibId;
-	if (!getClientLibIdFromMetadataJson(metadataJson, clientLibId, &errorStr)) {
-		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
-		    .detail("Reason", "InvalidIdentification")
-		    .detail("Configuration", metadataString)
-		    .detail("Error", errorStr);
-		throw client_lib_invalid_metadata();
-	}
-
+	getIdFromMetadataJson(metadataJson, clientLibId);
 	state Key clientLibMetaKey = StringRef(clientLibId).withPrefix(clientLibMetadataPrefix);
 	state Key clientLibBinPrefix =
 	    StringRef(clientLibId).withPrefix(clientLibBinaryPrefix).withSuffix(LiteralStringRef("/"));
 
-	state std::string targetStatus = metadataJson["status"].get_str();
+	state std::string targetStatus = getMetadataStrAttr(metadataJson, "status");
 	metadataJson["status"] = "uploading";
 	state std::string jsStr = json_spirit::write_string(json_spirit::mValue(metadataJson));
 
@@ -197,7 +215,7 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 	 * and change its state from "uploading" to the given one
 	 */
 	metadataJson["size"] = static_cast<int64_t>(binInfo.totalBytes);
-	metadataJson["chunkcount"] = static_cast<int64_t>(binInfo.totalBytes);
+	metadataJson["chunkcount"] = static_cast<int64_t>(binInfo.chunkCnt);
 	metadataJson["filename"] = basename(libFilePath.toString());
 	metadataJson["status"] = targetStatus;
 	jsStr = json_spirit::write_string(json_spirit::mValue(metadataJson));
@@ -215,6 +233,124 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 	}
 
 	TraceEvent("ClientLibraryUploadDone").detail("Key", clientLibMetaKey);
+
+	return Void();
+}
+
+ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, StringRef libFilePath) {
+
+	state Key clientLibMetaKey = StringRef(clientLibId).withPrefix(clientLibMetadataPrefix);
+	state Key chunkKeyPrefix =
+	    StringRef(clientLibId).withPrefix(clientLibBinaryPrefix).withSuffix(LiteralStringRef("/"));
+	state json_spirit::mObject metadataJson;
+
+	TraceEvent("ClientLibraryBeginDownload").detail("Key", clientLibMetaKey);
+
+	/*
+	 * First read the metadata to get information about the status and
+	 * the chunk count of the client library
+	 */
+
+	loop {
+		state Transaction tr(db);
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			Optional<Value> metadataOpt = wait(tr.get(clientLibMetaKey));
+			if (!metadataOpt.present()) {
+				TraceEvent(SevWarnAlways, "ClientLibraryNotFound").detail("Key", clientLibMetaKey);
+				throw client_lib_not_found();
+			}
+			parseMetadataJson(metadataOpt.get(), metadataJson);
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_client_lib_not_found) {
+				throw;
+			}
+			wait(tr.onError(e));
+		}
+	}
+
+	// TODO: Review the possible states
+	if (getMetadataStrAttr(metadataJson, "status") == "uploading") {
+		throw client_lib_not_available();
+	}
+
+	int64_t flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE |
+	                IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
+	state Reference<IAsyncFile> fClientLib =
+	    wait(IAsyncFileSystem::filesystem()->open(libFilePath.toString(), flags, 0666));
+
+	state size_t fileOffset = 0;
+	state int transactionSize = CLIENT_KNOBS->MVC_CLIENTLIB_TRANSACTION_SIZE;
+	state size_t chunkCount = getMetadataIntAttr(metadataJson, "chunkcount");
+	state size_t binarySize = getMetadataIntAttr(metadataJson, "size");
+	state size_t expectedChunkSize =
+	    (binarySize % chunkCount == 0) ? (binarySize / chunkCount) : (binarySize / chunkCount + 1);
+	state size_t chunkNo = 0;
+
+	loop {
+		state Arena arena;
+		state Transaction tr1(db);
+		state StringRef buf = makeString(transactionSize, arena);
+		state size_t bufferOffset = 0;
+		state size_t firstChunkNo = chunkNo;
+
+		loop {
+			try {
+				bufferOffset = 0;
+				chunkNo = firstChunkNo;
+				tr1.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				loop {
+					state KeyRef chunkKey = chunkKeyPrefix.withSuffix(format("%06zu", chunkNo), arena);
+					state Optional<Value> chunkValOpt = wait(tr1.get(chunkKey));
+					if (!chunkValOpt.present()) {
+						TraceEvent(SevWarnAlways, "ClientLibraryChunkNotFound").detail("Key", chunkKey);
+						throw client_lib_invalid_binary();
+					}
+					StringRef chunkVal = chunkValOpt.get();
+					if (chunkVal.size() > expectedChunkSize) {
+						TraceEvent(SevWarnAlways, "ClientLibraryInvalidChunkSize")
+						    .detail("Key", chunkKey)
+						    .detail("MaxSize", expectedChunkSize)
+						    .detail("ActualSize", chunkVal.size());
+						throw client_lib_invalid_binary();
+					}
+					memcpy(mutateString(buf) + bufferOffset, chunkVal.begin(), chunkVal.size());
+					chunkNo++;
+					bufferOffset += chunkVal.size();
+
+					// finish transaction if last chunk read or transaction size limit reached
+					if (bufferOffset + expectedChunkSize > transactionSize || chunkNo == chunkCount) {
+						break;
+					}
+				}
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_client_lib_invalid_binary) {
+					throw;
+				}
+				wait(tr1.onError(e));
+			}
+		}
+
+		wait(fClientLib->write(buf.begin(), bufferOffset, fileOffset));
+		fileOffset += bufferOffset;
+
+		if (chunkNo == chunkCount) {
+			break;
+		}
+	}
+
+	if (fileOffset != binarySize) {
+		TraceEvent(SevWarnAlways, "ClientLibraryInvalidSize")
+		    .detail("ExpectedSize", binarySize)
+		    .detail("ActualSize", fileOffset);
+		throw client_lib_invalid_binary();
+	}
+
+	wait(fClientLib->sync());
+
+	TraceEvent("ClientLibraryDownloadDone").detail("Key", clientLibMetaKey);
 
 	return Void();
 }

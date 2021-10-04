@@ -30,7 +30,16 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+// Upload a client library binary from a file and associated metadata JSON
+// to the system keyspace of the database
 ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, StringRef libFilePath);
+
+// Determine clientLibId from the relevant attributes of the metadata JSON
+void getClientLibIdFromMetadataJson(StringRef metadataString, std::string& clientLibId);
+
+// Download a client library binary from to the system keyspace of the database
+// and save it at the given file path
+ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, StringRef libFilePath);
 
 #include "flow/unactorcompiler.h"
 #endif

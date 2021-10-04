@@ -37,6 +37,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 	static constexpr size_t TEST_FILE_SIZE = FILE_CHUNK_SIZE * 80; // 10MB
 
 	RandomByteGenerator rbg;
+	std::string uploadedClientLibId;
 	bool success;
 
 	/*----------------------------------------------------------------
@@ -88,6 +89,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		wait(testUploadClientLibInvalidInput(self, cx));
 		wait(testClientLibUploadFileDoesNotExist(self, cx));
 		wait(testUploadClientLib(self, cx));
+		wait(testDownloadClientLib(self, cx));
 		return Void();
 	}
 
@@ -150,6 +152,8 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		state Standalone<StringRef> metadataStr =
 		    StringRef(json_spirit::write_string(json_spirit::mValue(metadataJson)));
 
+		getClientLibIdFromMetadataJson(metadataStr, self->uploadedClientLibId);
+
 		// Test two concurrent uploads of the same library, one of the must fail and another succeed
 		state std::vector<Future<ErrorOr<Void>>> concurrentUploads;
 		for (int i1 = 0; i1 < 2; i1++) {
@@ -176,6 +180,48 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		} else if (successCnt > 1) {
 			TraceEvent(SevError, "ClientLibConflictingUpload").log();
 		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> testClientLibDownloadNotExisting(ClientLibManagementWorkload* self, Database cx) {
+		// Generate a random valid clientLibId
+		json_spirit::mObject metadataJson;
+		validClientLibMetadataSample(metadataJson);
+		Standalone<StringRef> metadataStr = StringRef(json_spirit::write_string(json_spirit::mValue(metadataJson)));
+		state std::string clientLibId;
+		getClientLibIdFromMetadataJson(metadataStr, clientLibId);
+
+		state std::string destFileName = format("clientLibDownload%d", self->clientId);
+
+		try {
+			wait(downloadClientLibrary(cx, metadataStr, destFileName));
+			self->unexpectedSuccess("ClientLibDoesNotExist", error_code_client_lib_not_found);
+		} catch (Error& e) {
+			self->testErrorCode("ClientLibDoesNotExist", error_code_client_lib_not_found, e.code());
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> testDownloadClientLib(ClientLibManagementWorkload* self, Database cx) {
+		state std::string destFileName = format("clientLibDownload%d", self->clientId);
+		wait(downloadClientLibrary(cx, self->uploadedClientLibId, StringRef(destFileName)));
+
+		FILE* f = fopen(destFileName.c_str(), "r");
+		if (f == nullptr) {
+			TraceEvent(SevError, "ClientLibDownloadFileDoesNotExist").detail("FileName", destFileName);
+			self->success = false;
+		} else {
+			fseek(f, 0L, SEEK_END);
+			size_t fileSize = ftell(f);
+			if (fileSize != TEST_FILE_SIZE) {
+				TraceEvent(SevError, "ClientLibDownloadFileSizeMismatch")
+				    .detail("ExpectedSize", TEST_FILE_SIZE)
+				    .detail("ActualSize", fileSize);
+				self->success = false;
+			}
+			fclose(f);
+		}
+
 		return Void();
 	}
 
