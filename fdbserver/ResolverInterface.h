@@ -23,6 +23,8 @@
 
 #pragma once
 
+#include <stdint.h>
+
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
@@ -101,6 +103,7 @@ struct ResolveTransactionBatchReply {
 
 	// Privatized mutations with tags, one for each TLog location
 	VectorRef<StringRef> privateMutations;
+	uint32_t privateMutationCount;
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -111,6 +114,7 @@ struct ResolveTransactionBatchReply {
 		           conflictingKeyRangeMap,
 		           previousCommitVersions,
 		           privateMutations,
+		           privateMutationCount,
 		           arena);
 	}
 };

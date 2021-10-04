@@ -275,6 +275,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			reply.privateMutations.push_back(reply.arena, mutations);
 			reply.arena.dependsOn(mutations.arena());
 		}
+		reply.privateMutationCount = toCommit.getMutationCount();;
 
 		self->resolvedStateTransactions += req.txnStateTransactions.size();
 		self->resolvedStateMutations += stateMutations;
