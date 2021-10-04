@@ -30,6 +30,14 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+enum ClientLibStatus {
+	CLIENTLIB_DISABLED = 0,
+	CLIENTLIB_AVAILABLE, // 1
+	CLIENTLIB_UPLOADING, // 2
+	CLIENTLIB_DELETING, // 3
+	CLIENTLIB_STATUS_COUNT // must be the last one
+};
+
 // Upload a client library binary from a file and associated metadata JSON
 // to the system keyspace of the database
 ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, StringRef libFilePath);
@@ -37,9 +45,12 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 // Determine clientLibId from the relevant attributes of the metadata JSON
 void getClientLibIdFromMetadataJson(StringRef metadataString, std::string& clientLibId);
 
-// Download a client library binary from to the system keyspace of the database
+// Download a client library binary from the system keyspace of the database
 // and save it at the given file path
 ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, StringRef libFilePath);
+
+// Delete the client library binary from to the system keyspace of the database
+ACTOR Future<Void> deleteClientLibrary(Database db, StringRef clientLibId);
 
 #include "flow/unactorcompiler.h"
 #endif

@@ -90,6 +90,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		wait(testClientLibUploadFileDoesNotExist(self, cx));
 		wait(testUploadClientLib(self, cx));
 		wait(testDownloadClientLib(self, cx));
+		wait(testDeleteClientLib(self, cx));
 		return Void();
 	}
 
@@ -222,6 +223,11 @@ struct ClientLibManagementWorkload : public TestWorkload {
 			fclose(f);
 		}
 
+		return Void();
+	}
+
+	ACTOR static Future<Void> testDeleteClientLib(ClientLibManagementWorkload* self, Database cx) {
+		wait(deleteClientLibrary(cx, self->uploadedClientLibId));
 		return Void();
 	}
 

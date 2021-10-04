@@ -245,6 +245,7 @@ public:
 	// multi-version client control
 	int MVC_CLIENTLIB_CHUNK_SIZE;
 	int MVC_CLIENTLIB_TRANSACTION_SIZE;
+	int MVC_CLIENTLIB_DELETE_KEYS_PER_TRANSACTION;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
