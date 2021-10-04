@@ -5000,7 +5000,7 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 			level = SevWarnAlways;
 		}
 
-		TraceEvent(level, "FetchKeyCurrentStatus")
+		TraceEvent(level, "FetchKeyCurrentStatus", self->thisServerID)
 		    .detail("Timestamp", now())
 		    .detail("LongestRunningTime", longestRunningFetchKeys.first)
 		    .detail("StartKey", longestRunningFetchKeys.second.begin)

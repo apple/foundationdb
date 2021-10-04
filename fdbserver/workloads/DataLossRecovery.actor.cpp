@@ -132,14 +132,11 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		wait(repairSystemData(cx->getConnectionFile()));
 
-		// Write will scceed.
-		wait(self->writeAndVerify(self, cx, key, oldValue));
-		std::cout << "Write2" << std::endl;
-
 		Optional<Value> res = wait(self->read(self, cx, keyServersKey(key)));
 		ASSERT(res.present());
 		std::cout << "Read3" << std::endl;
 
+		wait(self->exclude(self, cx, key, ssi2.get().address()));
 		return Void();
 	}
 
@@ -217,8 +214,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 	ACTOR Future<Void> exclude(DataLossRecoveryWorkload* self, Database cx, Key key, NetworkAddress addr) {
 		state Transaction tr(cx);
-		Standalone<VectorRef<const char*>> addresses = wait(tr.getAddressesForKey(key));
-		state std::vector<AddressExclusion> servers;
 		servers.push_back(AddressExclusion(addr.ip, addr.port));
 		loop {
 			tr.reset();
