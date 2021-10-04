@@ -3338,6 +3338,9 @@ void changeServerKeys(StorageServer* data,
 				TraceEvent("ChangeServerKeysAddEmptyRange", data->thisServerID)
 				    .detail("Begin", range.begin)
 				    .detail("End", range.end);
+				MutationRef clearRange(MutationRef::ClearRange, range.begin, range.end);
+				clearRange = data->addMutationToMutationLog(
+				    data->addVersionToMutationLog(data->data().getLatestVersion()), clearRange);
 				changeNewestAvailable.emplace_back(range, latestVersion);
 				data->addShard(ShardInfo::newReadWrite(range, data));
 				setAvailableStatus(data, range, true);

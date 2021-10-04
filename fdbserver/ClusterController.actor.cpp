@@ -4672,6 +4672,32 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 		TraceEvent("ForcedRecoveryStart", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("DcId", req.dcId.printable());
+		state Future<Void> fCommit = doEmptyCommit(self->cx);
+		wait(fCommit || delay(SERVER_KNOBS->FORCE_RECOVERY_CHECK_DELAY));
+		if (!fCommit.isReady() || fCommit.isError()) {
+			if (self->clusterControllerDcId != req.dcId) {
+				vector<Optional<Key>> dcPriority;
+				dcPriority.push_back(req.dcId);
+				dcPriority.push_back(self->clusterControllerDcId);
+				self->desiredDcIds.set(dcPriority);
+			} else {
+				self->db.forceRecovery = true;
+				self->db.forceMasterFailure.trigger();
+			}
+			wait(fCommit);
+		}
+		TraceEvent("ForcedRecoveryFinish", self->id).log();
+		self->db.forceRecovery = false;
+		req.reply.send(Void());
+	}
+}
+
+ACTOR Future<Void> handleRepairSystemData(ClusterControllerData* self, ClusterControllerFullInterface interf) {
+	loop {
+		state RepairSystemDataRequest req = waitNext(interf.clientInterface.forceRecovery.getFuture());
+		TraceEvent("RepairSystemDataStart", self->id)
+		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
+		    .detail("DcId", req.dcId.printable());
 		self->db.recoverMetadata = true;
 		self->db.forceMasterFailure.trigger();
 		req.reply.send(Void());
@@ -4787,7 +4813,7 @@ ACTOR Future<Void> handleMoveShard(ClusterControllerData* self, ClusterControlle
 
 		wait(moveShard(self->db.db, req.shard, req.addresses));
 
-		TraceEvent("ForcedRecoveryFinish", self->id).log();
+		TraceEvent("ManualMoveShardFinish", self->id).log();
 
 		req.reply.send(Void());
 	}
@@ -5099,6 +5125,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(updateDatacenterVersionDifference(&self));
 	self.addActor.send(handleForcedRecoveries(&self, interf));
 	self.addActor.send(handleMoveShard(&self, interf));
+	self.addActor.send(handleRepairSystemData (&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
 	// self.addActor.send(monitorTSSMapping(&self));

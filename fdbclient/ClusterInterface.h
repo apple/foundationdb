@@ -37,6 +37,7 @@ struct ClusterInterface {
 	RequestStream<struct GetClientWorkersRequest> getClientWorkers;
 	RequestStream<struct ForceRecoveryRequest> forceRecovery;
 	RequestStream<struct MoveShardRequest> moveShard;
+	RequestStream<struct RepairSystemDataRequest> repairSystemData;
 
 	bool operator==(ClusterInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ClusterInterface const& r) const { return id() != r.id(); }
@@ -47,7 +48,7 @@ struct ClusterInterface {
 		return openDatabase.getFuture().isReady() || failureMonitoring.getFuture().isReady() ||
 		       databaseStatus.getFuture().isReady() || ping.getFuture().isReady() ||
 		       getClientWorkers.getFuture().isReady() || forceRecovery.getFuture().isReady() ||
-		       moveShard.getFuture().isReady();
+		       moveShard.getFuture().isReady() || repairSystemData.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -58,11 +59,20 @@ struct ClusterInterface {
 		getClientWorkers.getEndpoint(TaskPriority::ClusterController);
 		forceRecovery.getEndpoint(TaskPriority::ClusterController);
 		moveShard.getEndpoint(TaskPriority::ClusterController);
+		repairSystemData.getEndpoint(TaskPriority::ClusterController);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, openDatabase, failureMonitoring, databaseStatus, ping, getClientWorkers, forceRecovery, moveShard);
+		serializer(ar,
+		           openDatabase,
+		           failureMonitoring,
+		           databaseStatus,
+		           ping,
+		           getClientWorkers,
+		           forceRecovery,
+		           moveShard,
+		           repairSystemData);
 	}
 };
 
@@ -296,9 +306,6 @@ struct ForceRecoveryRequest {
 
 struct MoveShardRequest {
 	constexpr static FileIdentifier file_identifier = 2799592;
-	// Sent by the native API to the cluster controller to open a database and track client
-	//   info changes.  Returns immediately if the current client info id is different from
-	//   knownClientInfoID; otherwise returns when it next changes (or perhaps after a long interval)
 
 	KeyRange shard;
 	std::vector<NetworkAddress> addresses;
@@ -313,4 +320,17 @@ struct MoveShardRequest {
 		serializer(ar, shard, addresses, reply);
 	}
 };
+
+struct RepairSystemDataRequest {
+	constexpr static FileIdentifier file_identifier = 2799593;
+
+	ReplyPromise<Void> reply;
+
+	RepairSystemDataRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+}
 #endif
