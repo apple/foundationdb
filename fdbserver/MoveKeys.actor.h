@@ -101,6 +101,7 @@ ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> t
 // Obviously that could change later!
 ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
                                               UID serverID,
+                                              std::vector<UID> teamForDroppedRange,
                                               MoveKeysLock lock,
                                               const DDEnabledState* ddEnabledState);
 // Directly removes serverID from serverKeys and keyServers system keyspace.
