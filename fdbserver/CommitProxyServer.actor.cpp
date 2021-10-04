@@ -852,7 +852,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 			                       self->arena,
 			                       pProxyCommitData->logSystem,
 			                       trs[t].transaction.mutations,
-			                       /* pToCommit= */ nullptr,
+			                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
 			                       self->forceRecovery,
 			                       self->commitVersion + 1,
 			                       /* initialCommit= */ false);
@@ -863,10 +863,10 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 			self->forceRecovery = false;
 		}
 	}
-	auto privateMutations = self->toCommit.getAllMessages();
-	ResolveTransactionBatchReply& reply = self->resolution[0];
-	ASSERT_WE_THINK(privateMutations.size() == reply.privateMutations.size());
-	self->toCommit.setMutations(reply.privateMutationCount, reply.privateMutations);
+	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+		ResolveTransactionBatchReply& reply = self->resolution[0];
+		self->toCommit.setMutations(reply.privateMutationCount, reply.privateMutations);
+	}
 	if (self->forceRecovery) {
 		for (; t < trs.size(); t++)
 			self->committed[t] = ConflictBatch::TransactionConflict;

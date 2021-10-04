@@ -20,8 +20,9 @@
 
 #ifndef FDBSERVER_APPLYMETADATAMUTATION_H
 #define FDBSERVER_APPLYMETADATAMUTATION_H
-#include <cstddef>
 #pragma once
+
+#include <cstddef>
 
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/MutationList.h"

@@ -192,8 +192,13 @@ struct CommitTransactionRef {
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
 		if constexpr (is_fb_function<Ar>) {
-			serializer(
-			    ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot, report_conflicting_keys, spanContext);
+			serializer(ar,
+			           read_conflict_ranges,
+			           write_conflict_ranges,
+			           mutations,
+			           read_snapshot,
+			           report_conflicting_keys,
+			           spanContext);
 		} else {
 			serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot);
 			if (ar.protocolVersion().hasReportConflictingKeys()) {
