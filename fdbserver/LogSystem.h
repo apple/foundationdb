@@ -22,6 +22,7 @@
 #define FDBSERVER_LOGSYSTEM_H
 
 #include <set>
+#include <stdint.h>
 #include <vector>
 
 #include "fdbserver/SpanContextMessage.h"
@@ -804,6 +805,13 @@ struct LogPushData : NonCopyable {
 	// Returns the ratio of empty messages in this version batch.
 	// MUST be called after getMessages() and recordEmptyMessage().
 	float getEmptyMessageRatio() const;
+
+	// Returns the total number of mutations.
+	uint32_t getMutationCount() const { return subsequence; }
+
+	// Sets mutations for all internal writers. "mutations" is the output from
+	// getAllMessages() and is used before writing any other mutations.
+	void setMutations(uint32_t totalMutations, VectorRef<StringRef> mutations);
 
 private:
 	Reference<ILogSystem> logSystem;
