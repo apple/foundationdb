@@ -639,9 +639,6 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	pProxyCommitData->stats.lastCommitVersionAssigned = versionReply.version;
 	pProxyCommitData->stats.getCommitVersionDist->sampleSeconds(now() - beforeGettingCommitVersion);
 
-	TraceEvent("GetCommitVersionReply")
-	    .detail("Version", versionReply.version)
-	    .detail("PrvVersion", versionReply.prevVersion);
 	self->commitVersion = versionReply.version;
 	self->prevVersion = versionReply.prevVersion;
 
@@ -881,9 +878,6 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 
 	if (!self->isMyFirstBatch &&
 	    pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get() != self->oldCoordinators.get()) {
-		if (self->debugID.present()) {
-			TraceEvent("ApplyMutationToCommittedTxn change coordinator", self->debugID.get());
-		}
 		wait(brokenPromiseToNever(pProxyCommitData->db->get().clusterInterface.changeCoordinators.getReply(
 		    ChangeCoordinatorsRequest(pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get()))));
 		ASSERT(false); // ChangeCoordinatorsRequest should always throw

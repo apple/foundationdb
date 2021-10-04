@@ -1584,27 +1584,12 @@ public:
 		                                     remoteDC,
 		                                     req.exclusionWorkerIds);
 
-		if (req.dbgId.present()) {
-			TraceEvent("FindRemoteWorkersForConf_GetWorkersForLogs", req.dbgId.get())
-			    .detail("RemoteDcId", req.dcId)
-			    .detail("RemoteLog.size", remoteLogs.size());
-		} else {
-			TraceEvent("FindRemoteWorkersForConf_GetWorkersForLogs")
-			    .detail("RemoteDcId", req.dcId)
-			    .detail("RemoteLog.size", remoteLogs.size());
-		}
-
 		for (int i = 0; i < remoteLogs.size(); i++) {
 			result.remoteTLogs.push_back(remoteLogs[i].interf);
 		}
 
 		auto logRouters = getWorkersForRoleInDatacenter(
 		    req.dcId, ProcessClass::LogRouter, req.logRouterCount, req.configuration, id_used);
-		if (req.dbgId.present()) {
-			TraceEvent("FindRemoteWorkersForConf_GetWorkersForRoleInDc", req.dbgId.get())
-			    .detail("RemoteDcId", req.dcId)
-			    .detail("LogRouters.size", logRouters.size());
-		}
 
 		for (int i = 0; i < logRouters.size(); i++) {
 			result.logRouters.push_back(logRouters[i].interf);
@@ -3548,27 +3533,6 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
 		               std::back_inserter(exclusionWorkerIds),
 		               [](const WorkerInterface& in) { return in.id(); });
 
-		/*
-		state RecruitRemoteFromConfigurationRequest recruitReq;
-		recruitReq.configuration = self->configuration;
-		recruitReq.dcId = remoteDcId;
-		recruitReq.logRouterCount =
-		    recr.tLogs.size() *
-		    std::max<int>(1, self->configuration.desiredLogRouterCount / std::max<int>(1, recr.tLogs.size()));
-		recruitReq.dbgId = self->dbgid;
-
-		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = brokenPromiseToNever(
-		    self->clusterController.recruitRemoteFromConfiguration.getReply(RecruitRemoteFromConfigurationRequest(
-		        self->configuration,
-		        remoteDcId,
-		        recr.tLogs.size() *
-		            std::max<int>(1, self->configuration.desiredLogRouterCount / std::max<int>(1, recr.tLogs.size())),
-		        exclusionWorkerIds)));
-		TraceEvent("NewTLogServers", self->dbgid).log();
-		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = brokenPromiseToNeverWithLogs(
-		    self->clusterController.recruitRemoteFromConfiguration.getReply(recruitReq), self->dbgid);
-		*/
-
 		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers =
 		    self->controllerData->findRemoteWorkersForConfiguration(RecruitRemoteFromConfigurationRequest(
 		        self->configuration,
@@ -4197,7 +4161,7 @@ ACTOR Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Refer
 		trigger = self->registrationTrigger.onTrigger();
 
 		auto logSystemConfig = logSystem->getLogSystemConfig();
-		
+
 		TraceEvent("UpdateRegistration", self->dbgid)
 		    .detail("RecoveryCount", self->cstate.myDBState.recoveryCount)
 		    .detail("OldestBackupEpoch", logSystemConfig.oldestBackupEpoch)
@@ -5041,8 +5005,6 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::accepting_commits])
 	    .detail("StoreType", self->configuration.storageServerStoreType)
 	    .detail("RecoveryDuration", recoveryDuration)
-		.detail("ClientDBInfo", self->controllerData->db.serverInfo->get().client.id.toString())
-		.detail("ServerDBInfo", self->controllerData->db.serverInfo->get().id.toString())
 	    .trackLatest("ClusterRecoveryState");
 
 	TraceEvent("ClusterRecoveryAvailable", self->dbgid)
@@ -5173,7 +5135,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 
 				recoveryData->addActor.send(handleLeaderReplacement(recoveryData));
 				collection = actorCollection(recoveryData->addActor.getFuture());
-				TraceEvent("ClusterRecovery start", recoveryData->dbgid);
 				recoveryCore = ClusterControllerRecovery::clusterRecoveryCore(recoveryData);
 			} else {
 				recoveryCore = Never();
@@ -5670,10 +5631,6 @@ ACTOR Future<Void> clusterRecruitRemoteFromConfiguration(ClusterControllerData* 
 	loop {
 		try {
 			RecruitRemoteFromConfigurationReply rep = self->findRemoteWorkersForConfiguration(req);
-			if (rep.dbgId.present()) {
-				TraceEvent("ClusterRecuitmentRemoteFromConf", rep.dbgId.get())
-				    .detail("Result_RemoteLogs", rep.remoteTLogs.size());
-			}
 			req.reply.send(rep);
 			return Void();
 		} catch (Error& e) {
@@ -5775,7 +5732,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		// TODO why construct a new one and not just copy the old one and change proxies + id?
 		ClientDBInfo clientInfo;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
-		TraceEvent("ClientDBInfo").detail("Id", clientInfo.id.toString()).detail("Master", db->serverInfo->get().master.id());
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
 		db->clientInfo->set(clientInfo);
@@ -7035,7 +6991,6 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, configDBType));
 			}
 		} catch (Error& e) {
-			TraceEvent("ClusterController", cci.id()).error(e, true);
 			if (inRole)
 				endRole(Role::CLUSTER_CONTROLLER,
 				        cci.id(),
