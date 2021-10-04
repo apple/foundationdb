@@ -3098,7 +3098,7 @@ bool tlogTerminated(TLogData* self, IKeyValueStore* persistentData, TLogQueue* p
 	}
 
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
-	    e.code() == error_code_file_not_found) {
+	    e.code() == error_code_file_not_found || e.code() == error_code_invalid_cluster_id) {
 		TraceEvent("TLogTerminated", self->dbgid).error(e, true);
 		return true;
 	} else
@@ -3407,9 +3407,16 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 						// operator must first manually clear the data files on
 						// the TLog before adding it to a new cluster.
 						if (self.clusterId.isValid() && self.clusterId != req.clusterId) {
-							throw worker_removed();
+							// throw worker_removed();
+							NetworkAddress address = g_network->getLocalAddress();
+							wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
+							// throw invalid_cluster_id();
 						}
 
+						// Durably persist the cluster ID if it is not already
+						// durable. This should only occur for new tlogs or
+						// existing tlogs being upgraded from an older FDB
+						// version.
 						if (!self.clusterId.isValid()) {
 							self.clusterId = req.clusterId;
 							// Will let commit loop durably write the cluster ID.
@@ -3444,24 +3451,47 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 			if (e.code() != error_code_worker_removed) {
 				throw;
 			}
-			// It's possible to have an invalid cluster ID when restoring from
-			// disk if this is an upgrade from an FDB version that did not
-			// support cluster IDs.
-			ASSERT(self.clusterId.isValid() || (!self.clusterId.isValid() && restoreFromDisk));
-			state UID fetchedClusterId;
-			if (!clusterId.present()) {
-				// TODO: This hangs sometimes...
-				UID tmpClusterId = wait(getClusterId(&self));
-				fetchedClusterId = tmpClusterId;
-			} else {
-				fetchedClusterId = clusterId.get();
+			// // It's possible to have an invalid cluster ID when restoring from
+			// // disk if this is an upgrade from an FDB version that did not
+			// // support cluster IDs.
+			// ASSERT(self.clusterId.isValid() || (!self.clusterId.isValid() && restoreFromDisk));
+			// auto recoveryState = self.dbInfo->get().recoveryState;
+			// // When starting a tlog from durable data on disk, we need to check
+			// // its cluster ID against the cluster ID of the system. Read the
+			// // systems cluster ID from the txnStateStore and don't delete this
+			// // tlogs data if its cluster ID is different from that of the
+			// // system. Otherwise, the tlog has just been recruited and should
+			// // have been passed a cluster ID as part of its recruitment.
+			// state UID fetchedClusterId;
+			// if (!clusterId.present()) {
+			// 	// TODO: This hangs sometimes...
+			// 	if (recoveryState == RecoveryState::FULLY_RECOVERED) {
+			// 		UID tmpClusterId = wait(getClusterId(&self));
+			// 		fetchedClusterId = tmpClusterId;
+			// 	} else {
+			// 		// TODO: Make sure tlog doesn't delete data?
+			// 		throw invalid_cluster_id();
+			// 	}
+			// } else {
+			// 	fetchedClusterId = clusterId.get();
+			// }
+			// // If cluster ID of this tlog matches the cluster ID read from the
+			// // txnStateStore, this was a valid tlog recruitment message and the
+			// // tlog should delete its old data.
+			// if (!fetchedClusterId.isValid() || fetchedClusterId == self.clusterId) {
+			// 	throw worker_removed();
+			// }
+			// // Otherwise, the tlog is being recruited to join a new cluster.
+			// // Exclude the TLog to prevent its data files from being deleted.
+			// NetworkAddress address = g_network->getLocalAddress();
+			// wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
+			// throw invalid_cluster_id();
+
+			if (!self.clusterId.isValid()) {
+				throw;
 			}
-			if (!fetchedClusterId.isValid() || fetchedClusterId == self.clusterId) {
-				throw worker_removed();
-			}
-			// Exclude the TLog to prevent its data files from being deleted.
-			NetworkAddress address = g_network->getLocalAddress();
-			wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
+			// NetworkAddress address = g_network->getLocalAddress();
+			// wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
 			throw invalid_cluster_id();
 		}
 	} catch (Error& e) {

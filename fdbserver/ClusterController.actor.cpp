@@ -3410,10 +3410,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 				    .detail("ChangeID", dbInfo.id);
 				db->serverInfo->set(dbInfo);
 
-				// TODO: CC should store cluster ID
-				// UID clusterId = wait(getClusterId(cluster));
-				// cluster->clusterId = clusterId;
-
 				state Future<Void> spinDelay = delay(
 				    SERVER_KNOBS
 				        ->MASTER_SPIN_DELAY); // Don't retry master recovery more than once per second, but don't delay

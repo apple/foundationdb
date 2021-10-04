@@ -6377,8 +6377,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			}
 			// When a storage server connects to a new cluster, it deletes its
 			// old data and creates a new, empty data file for the new cluster.
-			// We want to avoid that and force a manual removal of the storage
-			// servers old data when being assigned to a new cluster to avoid
+			// We want to avoid this and force a manual removal of the storage
+			// servers' old data when being assigned to a new cluster to avoid
 			// accidental data loss.
 			TraceEvent(SevError, "StorageServerBelongsToExistingCluster")
 			    .detail("ClusterID", self.clusterId)
