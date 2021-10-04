@@ -20,14 +20,14 @@
 
 #include <vector>
 
-#include "flow/Util.h"
-#include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/MoveKeys.actor.h"
+#include "fdbrpc/FailureMonitor.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
+#include "flow/Util.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -1493,15 +1493,38 @@ ACTOR Future<Void> moveKeys(Database cx,
 void setUpMetadataServers(Arena& arena,
                           CommitTransactionRef& tr,
                           std::vector<StorageServerInterface> servers,
-                          std::unordered_map<UID, Tag> serverTagMap) {
+                          std::unordered_map<UID, Tag> serverTagMap,
+                          IKeyValueStore* txnStateStore) {
 	std::cout << "SetUpMetadataServersBegin" << std::endl;
 	std::sort(servers.begin(), servers.end());
 
-	for (auto& s : servers) {
-		tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(serverTagMap[s.id()]));
-		tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
-		std::cout << "setting server " << s.id().toString() << ", tag: " << serverTagMap[s.id()].toString()
-		          << std::endl;
+	// For now, the SSes are existing ones, no need to update the metadata.
+	// for (auto& s : servers) {
+	// 	tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(serverTagMap[s.id()]));
+	// 	tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
+	// 	std::cout << "setting server " << s.id().toString() << ", tag: " << serverTagMap[s.id()].toString()
+	// 	          << std::endl;
+	// }
+
+	RangeResult UID2Tag = txnStateStore->readRange(serverTagKeys).get();
+	RangeResult keyServers =
+	    txnStateStore->readRange(KeyRangeRef(keyServersKey(systemKeys.begin), keyServersKey(systemKeys.end))).get();
+	std::vector<UID> metaServers;
+	for (int i = 0; i < keyServers.size() - 1; ++i) {
+		std::vector<UID> src, dest;
+		decodeKeyServersValue(UID2Tag, keyServers[i].value, src, dest);
+		metaServers.insert(metaServers.end(), src.begin(), src.end());
+		metaServers.insert(metaServers.end(), dest.begin(), dest.end());
+	}
+	TraceEvent("OldSystemDataServers").detail("Servers", describe(metaServers));
+
+	for (auto& s : metaServers) {
+		tr.clear(arena, KeyRangeRef(serverKeysKey(s, systemKeys.begin), serverKeysKey(s, systemKeys.end)));
+	}
+
+	// Is this redundant?
+	for (auto& s : metaServers) {
+		krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(s), systemKeys, serverKeysFalse, serverKeysFalse);
 	}
 
 	std::vector<Tag> serverTags;
@@ -1518,6 +1541,9 @@ void setUpMetadataServers(Arena& arena,
 	tr.clear(arena, KeyRangeRef(keyServersKey(systemKeys.begin), keyServersKey(systemKeys.end)));
 	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, systemKeys, ksValue, Value());
 
+	for (auto& s : servers) {
+		tr.clear(arena, KeyRangeRef(serverKeysKey(s.id(), systemKeys.begin), serverKeysKey(s.id(), systemKeys.end)));
+	}
 	for (auto& s : servers) {
 		krmSetPreviouslyEmptyRange(
 		    tr, arena, serverKeysPrefixFor(s.id()), systemKeys, serverKeysTrueEmptyRange, serverKeysFalse);

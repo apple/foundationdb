@@ -25,9 +25,10 @@
 #elif !defined(FDBSERVER_MOVEKEYS_ACTOR_H)
 #define FDBSERVER_MOVEKEYS_ACTOR_H
 
-#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/MasterInterface.h"
 #include "flow/actorcompiler.h"
 
@@ -65,7 +66,8 @@ Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, const
 void setUpMetadataServers(Arena& arena,
                           CommitTransactionRef& tr,
                           std::vector<StorageServerInterface> servers,
-                          std::unordered_map<UID, Tag> serverTagMap);
+                          std::unordered_map<UID, Tag> serverTagMap,
+                          IKeyValueStore* txnStateStore);
 
 void seedShardServers(Arena& trArena, CommitTransactionRef& tr, std::vector<StorageServerInterface> servers);
 // Called by the master server to write the very first transaction to the database

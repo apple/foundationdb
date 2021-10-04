@@ -48,8 +48,9 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	  : TestWorkload(wcx), startMoveKeysParallelismLock(1), finishMoveKeysParallelismLock(1), enabled(!clientId),
 	    pass(true) {}
 
-	void validationFailed(Optional<Value>& expectedValue, Optional<Value>& actualValue) {
+	void validationFailed(KeyRef key, Optional<Value>& expectedValue, Optional<Value>& actualValue) {
 		TraceEvent(SevError, "TestFailed")
+		    .detail("Key", key.toString())
 		    .detail("ExpectedValue", printValue(expectedValue))
 		    .detail("ActualValue", printValue(actualValue));
 		pass = false;
@@ -180,7 +181,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 			try {
 				state Optional<Value> res = wait(timeout(tr.get(key), 10.0, Optional<Value>("Timeout"_sr)));
 				if (res != expectedValue) {
-					self->validationFailed(expectedValue, res);
+					self->validationFailed(key, expectedValue, res);
 				}
 				break;
 			} catch (Error& e) {

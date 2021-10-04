@@ -1831,7 +1831,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 	return Void();
 }
 
-static void populateRecoverMetadataMutations(Reference<MasterData> self, CommitTransactionRef& tr, Arena& arena) {
+static void backfillTxnStateStoreToSS(Reference<MasterData> self, CommitTransactionRef& tr, Arena& arena) {
 	KeyRange txnKeys = allKeys;
 	// state std::map<Tag, UID> tag_uid;
 
@@ -1843,9 +1843,20 @@ static void populateRecoverMetadataMutations(Reference<MasterData> self, CommitT
 	// wait(yield());
 	// std::unordered_map<UID, CoalescedKeyRangeMap<Value>> serverKeysMap;
 	RangeResult data = self->txnStateStore->readRange(txnKeys).get();
+	// Fill in keyServers, serverTags, serverList, etc.
+	for (const auto& kv : data) {
+		tr.set(arena, kv.key, kv.value);
+	}
+	// for (const auto& it : serverKeysMap) {
+	// 	for (const auto& range : it.second.ranges()) {
+	// 		tr.set(arena, serverKeysKey(it.first, kv.key), kv.value);
+	// 	}
+	// }
+}
+
+static void backfillDerivedMetaDataToSS(Reference<MasterData> self, CommitTransactionRef& tr, Arena& arena) {
 	RangeResult keyServers = self->txnStateStore->readRange(keyServersKeys).get();
 	RangeResult UID2Tag = self->txnStateStore->readRange(serverTagKeys).get();
-	ASSERT(!data.empty());
 	ASSERT(!keyServers.empty());
 	ASSERT(!UID2Tag.empty());
 	for (int i = 0; i < keyServers.size() - 1; ++i) {
@@ -1856,23 +1867,13 @@ static void populateRecoverMetadataMutations(Reference<MasterData> self, CommitT
 			// auto& serverKeys = serverKeysMap[id];
 			// serverKeys.insert(keys, serverKeysTrue);
 			krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(id), keys, serverKeysTrue, serverKeysFalse);
-			TraceEvent("RecoveryPopulateSrcServerKeys", id). detail("Begin", keys.begin).detail("End", keys.end);
+			TraceEvent("RecoveryPopulateSrcServerKeys", id).detail("Begin", keys.begin).detail("End", keys.end);
 		}
 		for (const UID& id : dest) {
 			krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(id), keys, serverKeysTrue, serverKeysFalse);
-			TraceEvent("RecoveryPopulateDestServerKeys", id). detail("Begin", keys.begin).detail("End", keys.end);
+			TraceEvent("RecoveryPopulateDestServerKeys", id).detail("Begin", keys.begin).detail("End", keys.end);
 		}
 	}
-
-	// Fill in keyServers, serverTags, serverList, etc.
-	for (const auto& kv : data) {
-		tr.set(arena, kv.key, kv.value);
-	}
-	// for (const auto& it : serverKeysMap) {
-	// 	for (const auto& range : it.second.ranges()) {
-	// 		tr.set(arena, serverKeysKey(it.first, kv.key), kv.value);
-	// 	}
-	// }
 }
 
 ACTOR Future<Void> masterCore(Reference<MasterData> self) {
@@ -2053,8 +2054,8 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	}
 
 	if (self->recoverMetadata) {
-		populateRecoverMetadataMutations(self, tr, recoveryCommitRequest.arena);
-		setUpMetadataServers(recoveryCommitRequest.arena, tr, seedServers, self->serverTagMap);
+		backfillTxnStateStoreToSS(self, tr, recoveryCommitRequest.arena);
+		setUpMetadataServers(recoveryCommitRequest.arena, tr, seedServers, self->serverTagMap, self->txnStateStore);
 	}
 
 	// initialConfChanges have not been conflict checked against any earlier writes in the recovery transaction, so do
@@ -2092,6 +2093,8 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	                       self->txnStateStore);
 	mmApplied = tr.mutations.size();
 
+	backfillDerivedMetaDataToSS(self, tr, recoveryCommitRequest.arena);
+
 	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial
 	                                                     // window of the resolver(s)
 
@@ -2109,13 +2112,13 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	// So that all changes to transaction state store is only in the master's RAM?
 	wait(discardCommit(self->txnStateStore, self->txnStateLogAdapter));
 
-	if (self->recoverMetadata) {
-		for (auto& s : seedServers) {
-			std::cout
-			    << decodeServerTagValue(self->txnStateStore->readValue(serverTagKeyFor(s.id())).get().get()).toString()
-			    << std::endl;
-		}
-	}
+	// if (self->recoverMetadata) {
+	// 	for (auto& s : seedServers) {
+	// 		std::cout
+	// 		    << decodeServerTagValue(self->txnStateStore->readValue(serverTagKeyFor(s.id())).get().get()).toString()
+	// 		    << std::endl;
+	// 	}
+	// }
 
 	// Wait for the recovery transaction to complete.
 	// SOMEDAY: For faster recovery, do this and setDBState asynchronously and don't wait for them
@@ -2141,7 +2144,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	// 	                                     CommitTransactionRequest::FLAG_SUPPRESS_PRIVATE_MUTATIONS |
 	// 	                                     CommitTransactionRequest::FLAG_FIRST_IN_BATCH;
 	// 	CommitTransactionRef& txn = recoverMetadataCommitRequest.transaction;
-	// 	populateRecoverMetadataMutations(self, recoverMetadataCommitRequest.arena, txn);
+	// 	backfillTxnStateStoreToSS(self, recoverMetadataCommitRequest.arena, txn);
 
 	// 	state Future<ErrorOr<CommitID>> recoverMetadataCommit =
 	// 	    self->commitProxies[0].commit.tryGetReply(recoverMetadataCommitRequest);
