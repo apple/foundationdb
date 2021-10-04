@@ -255,18 +255,21 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			                        req.transactions[t].mutations));
 
 			// Generate private mutations for metadata mutations
-			if (reply.committed[t] == ConflictBatch::TransactionCommitted) {
+			if (reply.committed[t] == ConflictBatch::TransactionCommitted &&
+			    SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 				applyMetadataMutations(req.transactions[t].spanContext, resolverData, req.transactions[t].mutations);
 			}
 		}
 
 		// Adds private mutation messages to the reply message.
-		auto privateMutations = toCommit.getAllMessages();
-		for (const auto& mutations : privateMutations) {
-			reply.privateMutations.push_back(reply.arena, mutations);
-			reply.arena.dependsOn(mutations.arena());
+		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+			auto privateMutations = toCommit.getAllMessages();
+			for (const auto& mutations : privateMutations) {
+				reply.privateMutations.push_back(reply.arena, mutations);
+				reply.arena.dependsOn(mutations.arena());
+			}
+			reply.privateMutationCount = toCommit.getMutationCount();
 		}
-		reply.privateMutationCount = toCommit.getMutationCount();;
 
 		self->resolvedStateTransactions += req.txnStateTransactions.size();
 		self->resolvedStateMutations += stateMutations;
@@ -388,7 +391,7 @@ struct TransactionStateResolveContext {
 
 	TransactionStateResolveContext(Reference<Resolver> pResolverData_, PromiseStream<Future<Void>>* pActors_)
 	  : pResolverData(pResolverData_), pTxnStateStore(pResolverData_->txnStateStore), pActors(pActors_) {
-		ASSERT(pTxnStateStore != nullptr);
+		ASSERT(pTxnStateStore != nullptr || !SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS);
 	}
 };
 
@@ -536,18 +539,22 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	}
 
 	// Initialize txnStateStore
+	self->logSystem = ILogSystem::fromServerDBInfo(resolver.id(), db->get(), false, addActor);
+
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> onError =
 	    transformError(actorCollection(addActor.getFuture()), broken_promise(), master_resolver_failed());
-	self->logSystem = ILogSystem::fromServerDBInfo(resolver.id(), db->get(), false, addActor);
-	self->logAdapter = new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-	self->txnStateStore = keyValueStoreLogSystem(self->logAdapter, resolver.id(), 2e9, true, true, true);
+	state TransactionStateResolveContext transactionStateResolveContext;
+	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+		self->logAdapter = new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
+		self->txnStateStore = keyValueStoreLogSystem(self->logAdapter, resolver.id(), 2e9, true, true, true);
 
-	// wait for txnStateStore recovery
-	wait(success(self->txnStateStore->readValue(StringRef())));
+		// wait for txnStateStore recovery
+		wait(success(self->txnStateStore->readValue(StringRef())));
 
-	// This has to be declared after the self->txnStateStore get initialized
-	state TransactionStateResolveContext transactionStateResolveContext(self, &addActor);
+		// This has to be declared after the self->txnStateStore get initialized
+		transactionStateResolveContext = TransactionStateResolveContext(self, &addActor);
+	}
 
 	loop choose {
 		when(ResolveTransactionBatchRequest batch = waitNext(resolver.resolve.getFuture())) {
@@ -572,7 +579,11 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 			doPollMetrics = delay(SERVER_KNOBS->SAMPLE_POLL_TIME);
 		}
 		when(TxnStateRequest request = waitNext(resolver.txnState.getFuture())) {
-			addActor.send(processTransactionStateRequestPart(&transactionStateResolveContext, request));
+			if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+				addActor.send(processTransactionStateRequestPart(&transactionStateResolveContext, request));
+			} else {
+				ASSERT(false);
+			}
 		}
 	}
 }
