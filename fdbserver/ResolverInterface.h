@@ -22,6 +22,8 @@
 #define FDBSERVER_RESOLVERINTERFACE_H
 #pragma once
 
+#include <stdint.h>
+
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
@@ -92,10 +94,18 @@ struct ResolveTransactionBatchReply {
 
 	// Privatized mutations with tags, one for each TLog location
 	VectorRef<StringRef> privateMutations;
+	uint32_t privateMutationCount;
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, committed, stateMutations, debugID, conflictingKeyRangeMap, privateMutations, arena);
+		serializer(ar,
+		           committed,
+		           stateMutations,
+		           debugID,
+		           conflictingKeyRangeMap,
+		           privateMutations,
+		           privateMutationCount,
+		           arena);
 	}
 };
 

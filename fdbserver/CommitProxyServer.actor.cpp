@@ -852,7 +852,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 			                       self->arena,
 			                       pProxyCommitData->logSystem,
 			                       trs[t].transaction.mutations,
-			                       &self->toCommit,
+			                       /* pToCommit= */ nullptr,
 			                       self->forceRecovery,
 			                       self->commitVersion + 1,
 			                       /* initialCommit= */ false);
@@ -866,10 +866,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	auto privateMutations = self->toCommit.getAllMessages();
 	ResolveTransactionBatchReply& reply = self->resolution[0];
 	ASSERT_WE_THINK(privateMutations.size() == reply.privateMutations.size());
-	for (int i = 0; i < privateMutations.size(); i++) {
-		// std::cout << i << "\n" << printable(privateMutations[i]) << "\n" << printable(reply.privateMutations[i]) << "\n\n";
-		ASSERT_WE_THINK(privateMutations[i] == reply.privateMutations[i]);
-	}
+	self->toCommit.setMutations(reply.privateMutationCount, reply.privateMutations);
 	if (self->forceRecovery) {
 		for (; t < trs.size(); t++)
 			self->committed[t] = ConflictBatch::TransactionConflict;

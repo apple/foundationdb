@@ -232,9 +232,9 @@ private:
 			TraceEvent("ServerTag", dbgid).detail("Server", id).detail("Tag", tag.toString());
 
 			TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", "LogProtocolMessage");
-			TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
 			toCommit->addTag(tag);
 			toCommit->writeTypedMessage(LogProtocolMessage(), true);
+			TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
 			toCommit->addTag(tag);
 			toCommit->writeTypedMessage(privatized);
 		}
