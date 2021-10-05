@@ -131,7 +131,7 @@ public:
 	Future<Void> commit() override {
 		// ASSERT(recovered);
 		cursorCommit = cursorWrite;
-		return Future<Void>();
+		return Void();
 	}
 
 	Future<bool> initializeRecovery(location recoverAt) override { return Future<bool>(true); }

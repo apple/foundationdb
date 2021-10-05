@@ -72,7 +72,6 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 		StringRef fileVersionedLogDataPrefix = "log2-"_sr;
 		StringRef fileLogDataPrefix = "log-"_sr;
 		StringRef fileLogQueuePrefix = "logqueue-"_sr;
-		StringRef tlogQueueExtension = "fdq"_sr;
 		ptxn::InitializePtxnTLogRequest req = tLogInitializations.back();
 		const StringRef prefix = req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 		std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues;
@@ -587,8 +586,6 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 		UID workerId = ptxn::test::randomUID();
 		StringRef fileVersionedLogDataPrefix = "log2-"_sr;
 		StringRef fileLogDataPrefix = "log-"_sr;
-		StringRef fileLogQueuePrefix = "logqueue-"_sr;
-		StringRef tlogQueueExtension = "fdq"_sr;
 		ptxn::InitializePtxnTLogRequest req = tLogInitializations.back();
 		const StringRef prefix = req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 

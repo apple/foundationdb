@@ -804,9 +804,7 @@ ACTOR Future<Void> doQueueCommit(Reference<TLogGroupData> self,
 	logData->queueCommittingVersion = ver;
 
 	g_network->setCurrentTask(TaskPriority::TLogCommitReply);
-	// Currently only store commit messages in memory and not using persistent queue
-	// Future<Void> c = self->persistentQueue->commit();
-	Future<Void> c = Future<Void>(Void());
+	Future<Void> c = self->persistentQueue->commit();
 	self->diskQueueCommitBytes = 0;
 	self->largeDiskQueueCommitBytes.set(false);
 
@@ -959,7 +957,6 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 			qe.messages.push_back(message.second);
 		}
 		self->persistentQueue->push(qe, logData);
-		self->persistentQueue->commit();
 
 		self->diskQueueCommitBytes += qe.expectedSize();
 		if (self->diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES) {
@@ -1319,6 +1316,10 @@ bool tlogTerminated(Reference<TLogGroupData> self,
                     Error const& e) {
 	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise just
 	// close it.
+	
+	// assign an empty PromiseSteam to self->sharedActors would delete the referenfce of the internal queue in PromiseSteam
+	// thus the actors can be cancenlled in the case there is no more references of the old queue
+	self->sharedActors = PromiseStream<Future<Void>>();
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
 		persistentData->dispose();
 		persistentQueue->dispose();
@@ -1328,7 +1329,7 @@ bool tlogTerminated(Reference<TLogGroupData> self,
 	}
 
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
-	    e.code() == error_code_file_not_found) {
+	    e.code() == error_code_file_not_found || e.code() == error_code_operation_cancelled) {
 		TraceEvent("TLogTerminated", self->dbgid).error(e, true);
 		return true;
 	} else

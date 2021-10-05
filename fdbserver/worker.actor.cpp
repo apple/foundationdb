@@ -1703,7 +1703,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				// question: why do we need logData and use PromiseSteam to send request at all?
 				logData.ptxnRequests.send(req);
 				if (!logData.actor.isValid() || logData.actor.isReady()) {
-					// question: what does this if mean?
 					UID logId = deterministicRandom()->randomUniqueID();
 					std::map<std::string, std::string> details;
 					details["ForMaster"] = req.recruitmentID.shortString();
@@ -1717,9 +1716,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>>
 					    persistentDataAndQueues;
 					for (auto& group : req.tlogGroups) {
-						// memory managed by each tlog group
-						// worker.actor.cpp have more complex logic to construct IDiskQueue and IKeyValueStore
-						// not sure which one to use
 						IKeyValueStore* data =
 						    keyValueStoreMemory(joinPath(folder, "loggroup"), group.logGroupId, 500e6);
 						IDiskQueue* queue =
