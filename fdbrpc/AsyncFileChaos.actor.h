@@ -85,7 +85,8 @@ public:
 		if (enabled && res) {
 			auto bitFlipPercentage = static_cast<BitFlipper*>(res)->getBitFlipPercentage();
 			if (bitFlipPercentage > 0.0) {
-				if (deterministicRandom()->random01() < bitFlipPercentage) {
+				auto bitFlipProb = bitFlipPercentage/100;
+				if (deterministicRandom()->random01() < bitFlipProb) {
 					pdata = (char*)arena.allocate4kAlignedBuffer(length);
 					memcpy(pdata, data, length);
 					// flip a random bit in the copied buffer

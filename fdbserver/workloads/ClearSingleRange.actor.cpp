@@ -47,9 +47,18 @@ struct ClearSingleRange : TestWorkload {
 
 	ACTOR static Future<Void> fdbClientClearRange(Database db, ClearSingleRange* self) {
 		state Transaction tr(db);
-		TraceEvent("ClearSingleRangeWaiting").detail("StartDelay", self->startDelay);
-		wait(delay(self->startDelay));
-		tr.clear(KeyRangeRef(self->begin, self->end));
+		try {
+			TraceEvent("ClearSingleRange").
+				detail("Begin", printable(self->begin)).
+				detail("End", printable(self->end)).detail("StartDelay", self->startDelay);
+			tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
+			wait(delay(self->startDelay));
+			tr.clear(KeyRangeRef(self->begin, self->end));
+			wait(tr.commit());
+		} catch (Error& e) {
+			TraceEvent("ClearRangeError").error(e);
+			wait(tr.onError(e));
+		}
 		return Void();
 	}
 };

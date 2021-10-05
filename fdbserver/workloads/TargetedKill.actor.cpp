@@ -78,6 +78,7 @@ struct TargetedKillWorkload : TestWorkload {
 			     workers[i].processClass != ProcessClass::TesterClass)) {
 				TraceEvent("WorkerKill").detail("TargetedMachine", address).detail("Worker", workers[i].interf.id());
 				workers[i].interf.clientInterface.reboot.send(rbReq);
+				killed++;
 			}
 		}
 

@@ -225,7 +225,7 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 					if (self->throttleDisk) {
 						int diskDelays = chaosMetrics->second.getInt("DiskDelays");
 						if (diskDelays > 0) {
-							foundChaosMetrics++;
+							foundChaosMetrics += diskDelays;
 						}
 					}
 
@@ -233,7 +233,7 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 					if (self->corruptFile) {
 						int bitFlips = chaosMetrics->second.getInt("BitFlips");
 						if (bitFlips > 0) {
-							foundChaosMetrics++;
+							foundChaosMetrics += bitFlips;
 						}
 					}
 				}
