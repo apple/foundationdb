@@ -220,7 +220,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		                    GenericPromise<bool>(new FDBPromiseImpl(promise)));
 		return f;
 	}
-	void getMetrics(vector<PerfMetric>& out) override {
+	void getMetrics(std::vector<PerfMetric>& out) override {
 		if (!success) {
 			return;
 		}

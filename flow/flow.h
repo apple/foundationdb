@@ -791,11 +791,11 @@ public:
 	Future(const Future<T>& rhs) : sav(rhs.sav) {
 		if (sav)
 			sav->addFutureRef();
-		// if (sav->endpoint.isValid()) cout << "Future copied for " << sav->endpoint.key << endl;
+		// if (sav->endpoint.isValid()) std::cout << "Future copied for " << sav->endpoint.key << std::endl;
 	}
 	Future(Future<T>&& rhs) noexcept : sav(rhs.sav) {
 		rhs.sav = 0;
-		// if (sav->endpoint.isValid()) cout << "Future moved for " << sav->endpoint.key << endl;
+		// if (sav->endpoint.isValid()) std::cout << "Future moved for " << sav->endpoint.key << std::endl;
 	}
 	Future(const T& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(presentValue); }
 	Future(T&& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(std::move(presentValue)); }
@@ -808,7 +808,7 @@ public:
 #endif
 
 	~Future() {
-		// if (sav && sav->endpoint.isValid()) cout << "Future destroyed for " << sav->endpoint.key << endl;
+		// if (sav && sav->endpoint.isValid()) std::cout << "Future destroyed for " << sav->endpoint.key << std::endl;
 		if (sav)
 			sav->delFutureRef();
 	}
@@ -854,7 +854,7 @@ public:
 	int getPromiseReferenceCount() const { return sav->getPromiseReferenceCount(); }
 
 	explicit Future(SAV<T>* sav) : sav(sav) {
-		// if (sav->endpoint.isValid()) cout << "Future created for " << sav->endpoint.key << endl;
+		// if (sav->endpoint.isValid()) std::cout << "Future created for " << sav->endpoint.key << std::endl;
 	}
 
 private:

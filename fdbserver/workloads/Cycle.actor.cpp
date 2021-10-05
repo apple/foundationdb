@@ -35,7 +35,7 @@ struct CycleWorkload : TestWorkload {
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
 	Key keyPrefix;
 
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries, tooOldRetries, commitFailedRetries;
 	PerfDoubleCounter totalLatency;
 
@@ -68,7 +68,7 @@ struct CycleWorkload : TestWorkload {
 		clients.clear();
 		return cycleCheck(cx->clone(), this, !errors);
 	}
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(transactions.getMetric());
 		m.push_back(retries.getMetric());
 		m.push_back(tooOldRetries.getMetric());

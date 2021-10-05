@@ -30,7 +30,7 @@ struct DDBalanceWorkload : TestWorkload {
 	double testDuration, warmingDelay, transactionsPerSecond;
 	bool discardEdgeMeasurements;
 
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter bin_shifts, operations, retries;
 	ContinuousSample<double> latencies;
 
@@ -75,7 +75,7 @@ struct DDBalanceWorkload : TestWorkload {
 		return ok;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		double duration = testDuration * (discardEdgeMeasurements ? 0.75 : 1.0);
 		m.emplace_back("Operations/sec", operations.getValue() / duration, Averaged::False);
 		m.push_back(operations.getMetric());
@@ -123,14 +123,14 @@ struct DDBalanceWorkload : TestWorkload {
 
 	ACTOR Future<Void> ddbalanceSetup(Database cx, DDBalanceWorkload* self) {
 		state int i;
-		state vector<int> order;
+		state std::vector<int> order;
 
 		for (int o = 0; o <= self->nodesPerActor * self->actorsPerClient / 10; o++)
 			order.push_back(o * 10);
 
 		deterministicRandom()->randomShuffle(order);
 		for (i = 0; i < order.size();) {
-			vector<Future<Void>> fs;
+			std::vector<Future<Void>> fs;
 			for (int j = 0; j < 100 && i < order.size(); j++) {
 				fs.push_back(self->ddbalanceSetupRange(cx, self, order[i], order[i] + 10));
 				i++;
@@ -237,7 +237,7 @@ struct DDBalanceWorkload : TestWorkload {
 			while (nextBin == currentBin)
 				nextBin = deterministicRandom()->randomInt(key_space_drift, self->binCount + key_space_drift);
 
-			vector<Future<Void>> fs;
+			std::vector<Future<Void>> fs;
 			fs.reserve(self->actorsPerClient / self->moversPerClient);
 			for (int i = 0; i < self->actorsPerClient / self->moversPerClient; i++)
 				fs.push_back(self->ddBalanceWorker(cx,

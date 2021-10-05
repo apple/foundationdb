@@ -148,7 +148,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>&) override {}
+	void getMetrics(std::vector<PerfMetric>&) override {}
 
 	std::set<AddressExclusion> getNetworks(std::vector<ISimulator::ProcessInfo*> const& processes) {
 		std::set<AddressExclusion> processAddrs;
@@ -386,9 +386,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("KillTotal", toKill1.size())
 			    .detail("ToKill", describe(toKill1))
 			    .detail("ClusterAvailable", g_simulator.isAvailable());
-			wait(includeServers(cx, vector<AddressExclusion>(1)));
-			wait(includeLocalities(cx, vector<std::string>(), failed, true));
-			wait(includeLocalities(cx, vector<std::string>(), !failed, true));
+			wait(includeServers(cx, std::vector<AddressExclusion>(1)));
+			wait(includeLocalities(cx, std::vector<std::string>(), failed, true));
+			wait(includeLocalities(cx, std::vector<std::string>(), !failed, true));
 			self->includeAddresses(toKill1);
 		}
 
@@ -431,9 +431,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		    .detail("KillTotal", toKill2.size())
 		    .detail("ToKill", describe(toKill2))
 		    .detail("ClusterAvailable", g_simulator.isAvailable());
-		wait(includeServers(cx, vector<AddressExclusion>(1)));
-		wait(includeLocalities(cx, vector<std::string>(), failed, true));
-		wait(includeLocalities(cx, vector<std::string>(), !failed, true));
+		wait(includeServers(cx, std::vector<AddressExclusion>(1)));
+		wait(includeLocalities(cx, std::vector<std::string>(), failed, true));
+		wait(includeLocalities(cx, std::vector<std::string>(), !failed, true));
 		self->includeAddresses(toKill2);
 
 		return Void();
@@ -523,9 +523,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		    .detail("ClusterAvailable", g_simulator.isAvailable())
 		    .detail("MarkExcludeAsFailed", markExcludeAsFailed);
 		state bool failed = true;
-		wait(includeServers(cx, vector<AddressExclusion>(1)));
-		wait(includeLocalities(cx, vector<std::string>(), failed, true));
-		wait(includeLocalities(cx, vector<std::string>(), !failed, true));
+		wait(includeServers(cx, std::vector<AddressExclusion>(1)));
+		wait(includeLocalities(cx, std::vector<std::string>(), failed, true));
+		wait(includeLocalities(cx, std::vector<std::string>(), !failed, true));
 		TraceEvent("RemoveAndKill", functionId)
 		    .detail("Step", "Included all")
 		    .detail("ClusterAvailable", g_simulator.isAvailable())
@@ -721,9 +721,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return Void();
 	}
 
-	static vector<ISimulator::ProcessInfo*> getServers() {
-		vector<ISimulator::ProcessInfo*> machines;
-		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
+	static std::vector<ISimulator::ProcessInfo*> getServers() {
+		std::vector<ISimulator::ProcessInfo*> machines;
+		std::vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
 		for (int i = 0; i < all.size(); i++) {
 			if (all[i]->name == std::string("Server") && all[i]->isAvailableClass()) {
 				machines.push_back(all[i]);
@@ -788,7 +788,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			addressToIndexMap[workers[i].address] = i;
 		}
 
-		vector<ISimulator::ProcessInfo*> processes = g_simulator.getAllProcesses();
+		std::vector<ISimulator::ProcessInfo*> processes = g_simulator.getAllProcesses();
 		for (auto process : processes) {
 			if (addressToIndexMap.find(process->address) != addressToIndexMap.end()) {
 				if (workers[addressToIndexMap[process->address]].locality.processId().present()) {

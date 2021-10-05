@@ -33,6 +33,12 @@
 
 NetworkAddress serverAddress;
 
+enum TutorialWellKnownEndpoints {
+	WLTOKEN_SIMPLE_KV_SERVER = WLTOKEN_FIRST_AVAILABLE,
+	WLTOKEN_ECHO_SERVER,
+	WLTOKEN_COUNT_IN_TUTORIAL
+};
+
 // this is a simple actor that will report how long
 // it is already running once a second.
 ACTOR Future<Void> simpleTimer() {
@@ -153,7 +159,7 @@ struct StreamReply : ReplyPromiseStreamReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, index);
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, index);
 	}
 };
 
@@ -171,7 +177,7 @@ uint64_t tokenCounter = 1;
 
 ACTOR Future<Void> echoServer() {
 	state EchoServerInterface echoServer;
-	echoServer.getInterface.makeWellKnownEndpoint(UID(-1, ++tokenCounter), TaskPriority::DefaultEndpoint);
+	echoServer.getInterface.makeWellKnownEndpoint(WLTOKEN_ECHO_SERVER, TaskPriority::DefaultEndpoint);
 	loop {
 		try {
 			choose {
@@ -204,7 +210,8 @@ ACTOR Future<Void> echoServer() {
 
 ACTOR Future<Void> echoClient() {
 	state EchoServerInterface server;
-	server.getInterface = RequestStream<GetInterfaceRequest>(Endpoint({ serverAddress }, UID(-1, ++tokenCounter)));
+	server.getInterface =
+	    RequestStream<GetInterfaceRequest>(Endpoint::wellKnown({ serverAddress }, WLTOKEN_ECHO_SERVER));
 	EchoServerInterface s = wait(server.getInterface.getReply(GetInterfaceRequest()));
 	server = s;
 	EchoRequest echoRequest;
@@ -291,7 +298,7 @@ struct ClearRequest {
 ACTOR Future<Void> kvStoreServer() {
 	state SimpleKeyValueStoreInteface inf;
 	state std::map<std::string, std::string> store;
-	inf.connect.makeWellKnownEndpoint(UID(-1, ++tokenCounter), TaskPriority::DefaultEndpoint);
+	inf.connect.makeWellKnownEndpoint(WLTOKEN_SIMPLE_KV_SERVER, TaskPriority::DefaultEndpoint);
 	loop {
 		choose {
 			when(GetKVInterface req = waitNext(inf.connect.getFuture())) {
@@ -328,7 +335,7 @@ ACTOR Future<Void> kvStoreServer() {
 ACTOR Future<SimpleKeyValueStoreInteface> connect() {
 	std::cout << format("%llu: Connect...\n", uint64_t(g_network->now()));
 	SimpleKeyValueStoreInteface c;
-	c.connect = RequestStream<GetKVInterface>(Endpoint({ serverAddress }, UID(-1, ++tokenCounter)));
+	c.connect = RequestStream<GetKVInterface>(Endpoint::wellKnown({ serverAddress }, WLTOKEN_SIMPLE_KV_SERVER));
 	SimpleKeyValueStoreInteface result = wait(c.connect.getReply(GetKVInterface()));
 	std::cout << format("%llu: done..\n", uint64_t(g_network->now()));
 	return result;
@@ -562,7 +569,7 @@ int main(int argc, char* argv[]) {
 	}
 	platformInit();
 	g_network = newNet2(TLSConfig(), false, true);
-	FlowTransport::createInstance(!isServer, 0);
+	FlowTransport::createInstance(!isServer, 0, WLTOKEN_COUNT_IN_TUTORIAL);
 	NetworkAddress publicAddress = NetworkAddress::parse("0.0.0.0:0");
 	if (isServer) {
 		publicAddress = NetworkAddress::parse("0.0.0.0:" + port);

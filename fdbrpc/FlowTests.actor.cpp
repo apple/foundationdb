@@ -32,8 +32,6 @@
 
 void forceLinkFlowTests() {}
 
-using std::vector;
-
 constexpr int firstLine = __LINE__;
 TEST_CASE("/flow/actorcompiler/lineNumbers") {
 	loop {
@@ -438,9 +436,9 @@ TEST_CASE("/flow/flow/networked futures") {
 }
 
 TEST_CASE("/flow/flow/quorum") {
-	vector<Promise<int>> ps(5);
-	vector<Future<int>> fs;
-	vector<Future<Void>> qs;
+	std::vector<Promise<int>> ps(5);
+	std::vector<Future<int>> fs;
+	std::vector<Future<Void>> qs;
 	for (auto& p : ps)
 		fs.push_back(p.getFuture());
 
@@ -774,7 +772,7 @@ TEST_CASE("/flow/perf/yieldedFuture") {
 
 	Promise<Void> p;
 	Future<Void> f = p.getFuture();
-	vector<Future<Void>> ys;
+	std::vector<Future<Void>> ys;
 
 	start = timer();
 	for (int i = 0; i < N; i++)
@@ -879,8 +877,8 @@ TEST_CASE("/flow/flow/perf/actor patterns") {
 	}
 
 	{
-		vector<Promise<Void>> pipe(N);
-		vector<Future<Void>> out(N);
+		std::vector<Promise<Void>> pipe(N);
+		std::vector<Future<Void>> out(N);
 		start = timer();
 		for (int i = 0; i < N; i++) {
 			out[i] = oneWaitActor(pipe[i].getFuture());
@@ -893,8 +891,8 @@ TEST_CASE("/flow/flow/perf/actor patterns") {
 	}
 
 	{
-		vector<Promise<Void>> pipe(N);
-		vector<Future<Void>> out(N);
+		std::vector<Promise<Void>> pipe(N);
+		std::vector<Future<Void>> out(N);
 		start = timer();
 		for (int i = 0; i < N; i++) {
 			out[i] = oneWaitActor(pipe[i].getFuture());
@@ -955,8 +953,8 @@ TEST_CASE("/flow/flow/perf/actor patterns") {
 	}
 
 	{
-		vector<Promise<Void>> pipe(N);
-		vector<Future<Void>> out(N);
+		std::vector<Promise<Void>> pipe(N);
+		std::vector<Future<Void>> out(N);
 		start = timer();
 		for (int i = 0; i < N; i++) {
 			out[i] = chooseTwoActor(pipe[i].getFuture(), never);
@@ -969,8 +967,8 @@ TEST_CASE("/flow/flow/perf/actor patterns") {
 	}
 
 	{
-		vector<Promise<Void>> pipe(N);
-		vector<Future<Void>> out(N);
+		std::vector<Promise<Void>> pipe(N);
+		std::vector<Future<Void>> out(N);
 		start = timer();
 		for (int i = 0; i < N; i++) {
 			out[i] = chooseTwoActor(pipe[i].getFuture(), pipe[i].getFuture());
@@ -983,8 +981,8 @@ TEST_CASE("/flow/flow/perf/actor patterns") {
 	}
 
 	{
-		vector<Promise<Void>> pipe(N);
-		vector<Future<Void>> out(N);
+		std::vector<Promise<Void>> pipe(N);
+		std::vector<Future<Void>> out(N);
 		start = timer();
 		for (int i = 0; i < N; i++) {
 			out[i] = chooseTwoActor(chooseTwoActor(pipe[i].getFuture(), never), never);
@@ -1008,8 +1006,8 @@ TEST_CASE("/flow/flow/perf/actor patterns") {
 	}
 
 	{
-		vector<Promise<Void>> pipe(N);
-		vector<Future<Void>> out(N);
+		std::vector<Promise<Void>> pipe(N);
+		std::vector<Future<Void>> out(N);
 		start = timer();
 		for (int i = 0; i < N; i++) {
 			out[i] = oneWaitActor(chooseTwoActor(pipe[i].getFuture(), never));
@@ -1035,9 +1033,9 @@ TEST_CASE("/flow/flow/perf/actor patterns") {
 	}
 
 	{
-		vector<Promise<Void>> pipe(N);
-		vector<Future<Void>> out1(N);
-		vector<Future<Void>> out2(N);
+		std::vector<Promise<Void>> pipe(N);
+		std::vector<Future<Void>> out1(N);
+		std::vector<Future<Void>> out2(N);
 		start = timer();
 		for (int i = 0; i < N; i++) {
 			Future<Void> f = chooseTwoActor(pipe[i].getFuture(), never);
@@ -1052,9 +1050,9 @@ TEST_CASE("/flow/flow/perf/actor patterns") {
 	}
 
 	{
-		vector<Promise<Void>> pipe(N);
-		vector<Future<Void>> out1(N);
-		vector<Future<Void>> out2(N);
+		std::vector<Promise<Void>> pipe(N);
+		std::vector<Future<Void>> out1(N);
+		std::vector<Future<Void>> out2(N);
 		start = timer();
 		for (int i = 0; i < N; i++) {
 			Future<Void> f = chooseTwoActor(oneWaitActor(pipe[i].getFuture()), never);
@@ -1069,9 +1067,9 @@ TEST_CASE("/flow/flow/perf/actor patterns") {
 	}
 
 	{
-		vector<Promise<Void>> pipe(N);
-		vector<Future<Void>> out1(N);
-		vector<Future<Void>> out2(N);
+		std::vector<Promise<Void>> pipe(N);
+		std::vector<Future<Void>> out1(N);
+		std::vector<Future<Void>> out2(N);
 		start = timer();
 		for (int i = 0; i < N; i++) {
 			g_cheese = pipe[i].getFuture();
@@ -1101,8 +1099,8 @@ TEST_CASE("/flow/flow/perf/actor patterns") {
 
 	{
 		start = timer();
-		vector<Promise<Void>> ps(3);
-		vector<Future<Void>> fs(3);
+		std::vector<Promise<Void>> ps(3);
+		std::vector<Future<Void>> fs(3);
 
 		for (int i = 0; i < N; i++) {
 			ps.clear();
