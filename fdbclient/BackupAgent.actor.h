@@ -362,7 +362,7 @@ inline FileBackupAgent::ERestoreState Codec<FileBackupAgent::ERestoreState>::unp
 
 using EBackupState = BackupAgentBase::EnumState;
 
-struct BackupStatus {
+struct DatabaseBackupStatus {
 	std::string srcClusterFile;
 	std::string destClusterFile;
 	Key srcPrefix;
@@ -380,7 +380,7 @@ struct BackupStatus {
 
 	std::unordered_map<int, std::string> stateMap;
 
-	BackupStatus() {
+	DatabaseBackupStatus() {
 		std::vector<std::string> stateStr{ "STATE_ERRORED",   "STATE_SUBMITTED",
 			                               "STATE_RUNNING",   "STATE_RUNNING_DIFFERENTIAL",
 			                               "STATE_COMPLETED", "STATE_NEVERRAN",
@@ -574,7 +574,7 @@ public:
 	                         DstOnly = DstOnly::False,
 	                         WaitForDestUID = WaitForDestUID::False);
 
-	Future<BackupStatus> getStatusData(Database cx, int errorLimit, Key tagName);
+	Future<DatabaseBackupStatus> getStatusData(Database cx, int errorLimit, Key tagName);
 	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
 	Future<EnumState> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot = Snapshot::False);
 	Future<EnumState> getStateValue(Database cx, UID logUid) {

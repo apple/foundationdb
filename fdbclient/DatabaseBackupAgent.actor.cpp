@@ -2681,9 +2681,6 @@ public:
 	                                      Reference<ReadYourWritesTransaction> tr,
 	                                      Database db,
 	                                      Key removePrefix) {
-		// unlock the db
-		// remove the prefix
-		wait(backupAgent->unlockBackup(db, removePrefix));
 		tr->clear(removePrefix);
 		return Void();
 	}
@@ -3063,13 +3060,13 @@ public:
 		}
 	}
 
-	ACTOR static Future<BackupStatus> getStatusData(DatabaseBackupAgent* backupAgent,
-	                                                Database cx,
-	                                                int errorLimit,
-	                                                Key tagName) {
+	ACTOR static Future<DatabaseBackupStatus> getStatusData(DatabaseBackupAgent* backupAgent,
+	                                                        Database cx,
+	                                                        int errorLimit,
+	                                                        Key tagName) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state BackupStatus backupStatus;
+		state DatabaseBackupStatus backupStatus;
 		backupStatus.errorLimit = errorLimit;
 		state int retries = 0;
 
@@ -3184,7 +3181,7 @@ public:
 	                                           Database cx,
 	                                           int errorLimit,
 	                                           Key tagName) {
-		state BackupStatus backupStatus = wait(getStatusData(backupAgent, cx, errorLimit, tagName));
+		state DatabaseBackupStatus backupStatus = wait(getStatusData(backupAgent, cx, errorLimit, tagName));
 		return backupStatus.toString();
 	}
 
@@ -3270,7 +3267,7 @@ Future<Void> DatabaseBackupAgent::abortBackup(Database cx,
 	return DatabaseBackupAgentImpl::abortBackup(this, cx, tagName, partial, abortOldBackup, dstOnly, waitForDestUID);
 }
 
-Future<BackupStatus> DatabaseBackupAgent::getStatusData(Database cx, int errorLimit, Key tagName) {
+Future<DatabaseBackupStatus> DatabaseBackupAgent::getStatusData(Database cx, int errorLimit, Key tagName) {
 	return DatabaseBackupAgentImpl::getStatusData(this, cx, errorLimit, tagName);
 }
 

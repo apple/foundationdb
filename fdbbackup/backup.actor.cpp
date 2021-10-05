@@ -1529,7 +1529,7 @@ static void printDBBackupUsage(bool devhelp) {
 // TODO: need to update the usage describtion here
 static void printDBMovementUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("Usage: %s [TOP_LEVEL_OPTIONS] (start | status | finish | abort | cleanup) [OPTIONS]\n\n",
+	printf("Usage: %s [TOP_LEVEL_OPTIONS] (start | status | finish | abort | cleanup | clear | list) [OPTIONS]\n\n",
 	       exeDatabaseMovement.toString().c_str());
 
 	printf(" TOP LEVEL OPTIONS:\n");
@@ -2169,11 +2169,6 @@ ACTOR Future<Void> submitDBMove(Database src,
                                 Key removePrefix) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
-
-		// Backup everything, if no ranges were specified
-		if (backupRanges.size() == 0) {
-			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		}
 		wait(backupAgent.submitBackup(
 		    dest, KeyRef(tagName), backupRanges, StopWhenDone::False, addPrefix, removePrefix, LockDB::False));
 
@@ -2223,7 +2218,7 @@ ACTOR Future<Void> statusDBMove(Database src,
                                 bool json = false) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
-		state BackupStatus backUpStatus = wait(backupAgent.getStatusData(dest, errorLimit, StringRef(tagName)));
+		state DatabaseBackupStatus backUpStatus = wait(backupAgent.getStatusData(dest, errorLimit, StringRef(tagName)));
 
 		backUpStatus.srcClusterFile = src->getConnectionFile()->getFilename();
 		backUpStatus.destClusterFile = dest->getConnectionFile()->getFilename();
@@ -4880,14 +4875,14 @@ int main(int argc, char* argv[]) {
 				break;
 			case DBMoveType::LIST: {
 				bool canInitCluster = initCluster();
-				bool canInitSourceCLuster = initSourceCluster(true);
-				if (!canInitCluster && !canInitSourceCLuster) {
+				bool canInitSourceCluster = initSourceCluster(true);
+				if (!canInitCluster && !canInitSourceCluster) {
 					return FDB_EXIT_ERROR;
 				}
-				if (canInitCluster && canInitSourceCLuster) {
+				if (canInitCluster && canInitSourceCluster) {
 					f = stopAfter(listDBMove(sourceDb, db));
 				} else {
-					f = stopAfter(listDBMove(canInitSourceCLuster ? sourceDb : db, canInitSourceCLuster));
+					f = stopAfter(listDBMove(canInitSourceCluster ? sourceDb : db, canInitSourceCluster));
 				}
 				break;
 			}
