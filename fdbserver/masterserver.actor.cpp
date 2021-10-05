@@ -2054,7 +2054,6 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	}
 
 	if (self->recoverMetadata) {
-		backfillTxnStateStoreToSS(self, tr, recoveryCommitRequest.arena);
 		setUpMetadataServers(recoveryCommitRequest.arena, tr, seedServers, self->serverTagMap, self->txnStateStore);
 	}
 
@@ -2093,7 +2092,10 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	                       self->txnStateStore);
 	mmApplied = tr.mutations.size();
 
-	// backfillDerivedMetaDataToSS(self, tr, recoveryCommitRequest.arena);
+	if (self->recoverMetadata) {
+		backfillTxnStateStoreToSS(self, tr, recoveryCommitRequest.arena);
+		backfillDerivedMetaDataToSS(self, tr, recoveryCommitRequest.arena);
+	}
 
 	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial
 	                                                     // window of the resolver(s)
@@ -2137,37 +2139,42 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 
 	// Here.
 
-	if (self->recoverMetadata) {
-		std::cout << "start recover metadata transaction." << std::endl;
-		CommitTransactionRequest recoverMetadataCommitRequest;
-		recoverMetadataCommitRequest.flags = recoverMetadataCommitRequest.flags |
-		                                     CommitTransactionRequest::FLAG_SUPPRESS_PRIVATE_MUTATIONS |
-		                                     CommitTransactionRequest::FLAG_FIRST_IN_BATCH;
-		CommitTransactionRef& txn = recoverMetadataCommitRequest.transaction;
-		// backfillTxnStateStoreToSS(self, recoverMetadataCommitRequest.arena, txn);
+	// if (self->recoverMetadata) {
+	// 	std::cout << "start recover metadata transaction." << std::endl;
+	// 	CommitTransactionRequest recoverMetadataCommitRequest;
+	// 	recoverMetadataCommitRequest.flags = recoverMetadataCommitRequest.flags |
+	// 	                                     CommitTransactionRequest::FLAG_SUPPRESS_PRIVATE_MUTATIONS |
+	// 	                                     CommitTransactionRequest::FLAG_FIRST_IN_BATCH;
+	// 	CommitTransactionRef& txn = recoverMetadataCommitRequest.transaction;
+	// 	// backfillTxnStateStoreToSS(self, recoverMetadataCommitRequest.arena, txn);
 
-		backfillDerivedMetaDataToSS(self, txn, recoverMetadataCommitRequest.arena);
+	// 	backfillTxnStateStoreToSS(self, txn, recoverMetadataCommitRequest.arena);
+	// 	backfillDerivedMetaDataToSS(self, txn, recoverMetadataCommitRequest.arena);
 
-		txn.read_snapshot = self->recoveryTransactionVersion;
+	// 	txn.read_snapshot = self->recoveryTransactionVersion;
 
-		state Future<ErrorOr<CommitID>> recoverMetadataCommit =
-		    self->commitProxies[0].commit.tryGetReply(recoverMetadataCommitRequest);
-		try {
-			wait(success(recoverMetadataCommit));
-			std::cout << "finished recover metadata transaction." << std::endl;
-		} catch (Error& e) {
-			TraceEvent("MasterRecoverMetadataCommitError", self->dbgid).error(e);
-			throw master_recovery_failed();
-		}
-		if (recoverMetadataCommit.isReady() && recoverMetadataCommit.get().isError()) {
-			const Error& e = recoverMetadataCommit.get().getError();
-			std::cout << "finished recover metadata transaction." << e.name() << std::endl;
-			TraceEvent("MasterRecoverMetadataCommitError", self->dbgid).error(e);
-			throw master_recovery_failed();
-		}
-		ASSERT(recoverMetadataCommit.isReady());
-		TraceEvent("MasterRecoverMetadata", self->dbgid);
-	}
+	// 	state Future<ErrorOr<CommitID>> recoverMetadataCommit =
+	// 	    self->commitProxies[0].commit.tryGetReply(recoverMetadataCommitRequest);
+	// 	try {
+	// 		ErrorOr<CommitID> res = wait(recoverMetadataCommit);
+	// 		if (res.isError()) {
+	// 			throw master_recovery_failed();
+	// 		}
+	// 		TraceEvent("RecoverMetadataCommitSucceed").detail("Version", res.get().version);
+	// 		std::cout << "finished recover metadata transaction." << std::endl;
+	// 	} catch (Error& e) {
+	// 		TraceEvent("MasterRecoverMetadataCommitError", self->dbgid).error(e);
+	// 		throw master_recovery_failed();
+	// 	}
+	// 	if (recoverMetadataCommit.isReady() && recoverMetadataCommit.get().isError()) {
+	// 		const Error& e = recoverMetadataCommit.get().getError();
+	// 		std::cout << "finished recover metadata transaction." << e.name() << std::endl;
+	// 		TraceEvent("MasterRecoverMetadataCommitError", self->dbgid).error(e);
+	// 		throw master_recovery_failed();
+	// 	}
+	// 	ASSERT(recoverMetadataCommit.isReady());
+	// 	TraceEvent("MasterRecoverMetadata", self->dbgid);
+	// }
 
 	self->recoveryState = RecoveryState::WRITING_CSTATE;
 	TraceEvent("MasterRecoveryState", self->dbgid)

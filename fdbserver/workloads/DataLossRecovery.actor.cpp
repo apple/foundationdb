@@ -131,12 +131,20 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		std::cout << "Write" << std::endl;
 
 		wait(repairSystemData(cx->getConnectionFile()));
+		wait(delay(30));
 
-		Optional<Value> res = wait(self->read(self, cx, keyServersKey(key)));
-		ASSERT(res.present());
+		// Optional<Value> res =
+		//     wait(self->readFirstInRange(self, cx, KeyRange(keyServersKey(key), keyServersKey(systemKeys.begin))));
+		// ASSERT(res.present());
+		state Transaction tr(cx);
+		RangeResult res = wait(tr.getRange(systemKeys, 1));
+		ASSERT(!res.empty());
+
 		std::cout << "Read3" << std::endl;
 
 		wait(self->exclude(self, cx, key, ssi2.get().address()));
+		int ignore = wait(setDDMode(cx, 1));
+
 		return Void();
 	}
 
@@ -152,21 +160,22 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Optional<Value>> read(DataLossRecoveryWorkload* self, Database cx, Key key) {
-		state Transaction tr(cx);
+	// ACTOR Future<Optional<Value>> readFirstInRange(DataLossRecoveryWorkload* self, Database cx, KeyRange keys) {
+	// 	state Transaction tr(cx);
+	// 	loop {
+	// 		try {
+	// 			state RangeResult res = wait(tr.getRange(keys, 1));
+	// 			break;
+	// 		} catch (Error& e) {
+	// 			wait(tr.onError(e));
+	// 		}
+	// 	}
 
-		loop {
-			tr.reset();
-			try {
-				state Optional<Value> res = wait(timeout(tr.get(key), 10.0, Optional<Value>("Timeout"_sr)));
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-
-		return res;
-	}
+	// 	if (res.empty()) {
+	// 		return Optional<Value>();
+	// 	}
+	// 	return res[0].value;
+	// }
 
 	ACTOR Future<Void> readAndVerify(DataLossRecoveryWorkload* self,
 	                                 Database cx,
@@ -214,6 +223,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 	ACTOR Future<Void> exclude(DataLossRecoveryWorkload* self, Database cx, Key key, NetworkAddress addr) {
 		state Transaction tr(cx);
+		state std::vector<AddressExclusion> servers;
 		servers.push_back(AddressExclusion(addr.ip, addr.port));
 		loop {
 			tr.reset();

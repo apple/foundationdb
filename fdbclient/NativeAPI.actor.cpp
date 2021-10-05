@@ -3283,6 +3283,7 @@ ACTOR Future<RangeResult> getRange(Database cx,
 
 	try {
 		state Version version = wait(fVersion);
+		TraceEvent("GetRangeReadVersion").detail("Version", version);
 		cx->validateVersion(version);
 
 		state double startTime = now();
