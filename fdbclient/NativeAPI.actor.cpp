@@ -2151,6 +2151,14 @@ Future<Reference<CommitProxyInfo>> DatabaseContext::getCommitProxiesFuture(bool 
 	return ::getCommitProxiesFuture(this, useProvisionalProxies);
 }
 
+Reference<TenantBalancerInterface> DatabaseContext::getTenantBalancer() const {
+	return Reference<TenantBalancerInterface>();
+}
+
+Future<Void> DatabaseContext::onTenantBalancerChanged() const {
+	return Never();
+}
+
 void GetRangeLimits::decrement(VectorRef<KeyValueRef> const& data) {
 	if (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED) {
 		ASSERT(data.size() <= rows);
