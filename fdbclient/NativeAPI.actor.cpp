@@ -5709,7 +5709,6 @@ ACTOR Future<Version> extractReadVersion(Location location,
 	state Span span(spanContext, location, { parent });
 	GetReadVersionReply rep = wait(f);
 	double latency = now() - startTime;
-	cx->updateCachedRV(startTime, rep.version);
 	cx->GRVLatencies.addSample(latency);
 	if (trLogInfo)
 		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(

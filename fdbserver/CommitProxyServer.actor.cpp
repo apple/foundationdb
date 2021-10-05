@@ -1188,7 +1188,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	self->commitStartTime = now();
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
 	auto curTime = now();
-	debug_advanceVersionTimestamp(self->commitVersion, curTime, curTime + CLIENT_KNOBS->MAX_VERSION_CACHE_LAG);
+	debug_advanceVersionTimestamp(self->commitVersion, 0, curTime + CLIENT_KNOBS->MAX_VERSION_CACHE_LAG);
 	self->loggingComplete = pProxyCommitData->logSystem->push(self->prevVersion,
 	                                                          self->commitVersion,
 	                                                          pProxyCommitData->committedVersion.get(),
