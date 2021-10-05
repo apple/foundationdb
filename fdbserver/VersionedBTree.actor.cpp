@@ -6545,6 +6545,7 @@ private:
 		// If there are no changes, then the commit is a no-op.
 		if (writeVersion == self->m_pager->getLastCommittedVersion()) {
 			ASSERT(batch.mutationCount == 0);
+			debug_printf("%s: Empty commit at repeat version %" PRId64 "\n", self->m_name.c_str(), batch.writeVersion);
 			committed.send(Void());
 			return Void();
 		}
@@ -8919,6 +8920,11 @@ TEST_CASE("/redwood/correctness/btree") {
 	state Future<Void> randomTask = serialTest ? Void() : (randomReader(btree) || btree->getError());
 	committedVersions.send(lastVer);
 
+	// Sometimes do zero-change commit at last version
+	if (deterministicRandom()->coinflip()) {
+		wait(btree->commit(lastVer));
+	}
+
 	state Future<Void> commit = Void();
 	state int64_t totalPageOps = 0;
 
@@ -9107,13 +9113,18 @@ TEST_CASE("/redwood/correctness/btree") {
 				       version);
 				ASSERT(v == version);
 
+				// Sometimes do zero-change commit at last version
+				if (deterministicRandom()->coinflip()) {
+					wait(btree->commit(version));
+				}
+
 				// Create new promise stream and start the verifier again
 				committedVersions = PromiseStream<Version>();
 				verifyTask = verify(btree, committedVersions.getFuture(), &written, serialTest);
 				if (!serialTest) {
 					randomTask = randomReader(btree) || btree->getError();
 				}
-				committedVersions.send(v);
+				committedVersions.send(version);
 			}
 
 			version += versionIncrement;
