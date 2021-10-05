@@ -2677,6 +2677,17 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<Void> clearPrefix(DatabaseBackupAgent* backupAgent,
+	                                      Reference<ReadYourWritesTransaction> tr,
+	                                      Database db,
+	                                      Key removePrefix) {
+		// unlock the db
+		// remove the prefix
+		wait(backupAgent->unlockBackup(db, removePrefix));
+		tr->clear(removePrefix);
+		return Void();
+	}
+
 	ACTOR static Future<Void> atomicSwitchover(DatabaseBackupAgent* backupAgent,
 	                                           Database dest,
 	                                           Key tagName,
@@ -3214,6 +3225,10 @@ public:
 		return (logUid.present()) ? BinaryReader::fromStringRef<UID>(logUid.get(), Unversioned()) : UID();
 	}
 };
+
+Future<Void> DatabaseBackupAgent::clearPrefix(Reference<ReadYourWritesTransaction> tr, Database db, Key removePrefix) {
+	return DatabaseBackupAgentImpl::clearPrefix(this, tr, db, removePrefix);
+}
 
 Future<Void> DatabaseBackupAgent::unlockBackup(Reference<ReadYourWritesTransaction> tr, Key tagName) {
 	return DatabaseBackupAgentImpl::unlockBackup(this, tr, tagName);

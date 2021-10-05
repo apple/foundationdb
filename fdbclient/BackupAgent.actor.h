@@ -510,6 +510,13 @@ public:
 		return taskBucket->run(cx, futureBucket, pollDelay, maxConcurrentTasks);
 	}
 
+	// Unlock the db and clear the data specified by the removePrefix.
+	Future<Void> clearPrefix(Reference<ReadYourWritesTransaction> tr, Database db, Key removePrefix);
+	Future<Void> clearPrefix(Database db, Key removePrefix) {
+		return runRYWTransaction(
+		    db, [=](Reference<ReadYourWritesTransaction> tr) { return clearPrefix(tr, db, removePrefix); });
+	}
+
 	Future<Void> atomicSwitchover(Database dest,
 	                              Key tagName,
 	                              Standalone<VectorRef<KeyRangeRef>> backupRanges,

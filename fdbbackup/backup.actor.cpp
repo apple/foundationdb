@@ -43,6 +43,7 @@
 #include "fdbclient/S3BlobStore.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/StatusClient.h"
 
 #include "flow/Platform.h"
 
@@ -103,7 +104,7 @@ enum class DBType { UNDEFINED = 0, START, STATUS, SWITCH, ABORT, PAUSE, RESUME }
 // New fast restore reuses the type from legacy slow restore
 enum class RestoreType { UNKNOWN, START, STATUS, ABORT, WAIT };
 
-enum class DBMoveType { UNDEFINED = 0, START, STATUS, FINISH, ABORT, CLEAN, CLEAR_SRC };
+enum class DBMoveType { UNDEFINED = 0, START, STATUS, FINISH, ABORT, CLEAN, CLEAR_SRC, LIST };
 
 //
 enum {
@@ -896,7 +897,6 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	    SO_END_OF_OPTIONS
 };
 
-// TODO update for data movement
 CSimpleOpt::SOption g_rgDBMoveStartOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
@@ -1057,7 +1057,37 @@ CSimpleOpt::SOption g_rgDBMoveCleanupOptions[] = {
 	    SO_END_OF_OPTIONS
 };
 
-CSimpleOpt::SOption g_rgDBMovePauseOptions[] = {
+CSimpleOpt::SOption g_rgDBMoveClearSrcOptions[] = {
+#ifdef _WIN32
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
+#endif
+	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
+	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
+	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
+	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
+	    SO_END_OF_OPTIONS
+};
+
+CSimpleOpt::SOption g_rgDBMoveListOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
@@ -1065,6 +1095,10 @@ CSimpleOpt::SOption g_rgDBMovePauseOptions[] = {
 	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
+	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
+	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
@@ -1736,7 +1770,8 @@ DBMoveType getDBMoveType(std::string dbMoveTypeStr) {
 		values["finish"] = DBMoveType::FINISH;
 		values["abort"] = DBMoveType::ABORT;
 		values["clean"] = DBMoveType::CLEAN;
-		// TODO values["clear"] = DBMoveType::CLEAR_SRC;
+		values["clear"] = DBMoveType::CLEAR_SRC;
+		values["list"] = DBMoveType::LIST;
 	}
 	auto res = values.find(dbMoveTypeStr);
 	if (res != values.end()) {
@@ -2293,11 +2328,61 @@ ACTOR Future<Void> cleanupDBMove(Database db, DeleteData deleteData) {
 	return Void();
 }
 
-ACTOR Future<Void> changeDBMoveResumed(Database src, Database dest, bool pause) {
+// TODO change error code for all the operations about dbmove
+ACTOR Future<Void> clearSrcDBMove(Database src, KeyRef srcPrefix) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
-		wait(backupAgent.taskBucket->changePause(dest, pause));
-		printf("All DR agents have been %s.\n", pause ? "paused" : "resumed");
+		wait(backupAgent.clearPrefix(src, srcPrefix));
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		fprintf(stderr, "ERROR: %s\n", e.what());
+		throw;
+	}
+
+	return Void();
+}
+
+// list movement from src to dest
+ACTOR Future<Void> listDBMove(Database src, Database dest) {
+	try {
+		// todo
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		fprintf(stderr, "ERROR: %s\n", e.what());
+		throw;
+	}
+
+	return Void();
+}
+
+// list movement from src, or to dest, depending on isSrc
+ACTOR Future<Void> listDBMove(Database db, bool isSrc) {
+	try {
+		// TODO distinguish dr and data movement
+		// get running data movement
+		// todo make sure is this the right way to get status json?
+		StatusObject statusObjCluster = wait(StatusClient::statusFetcher(db));
+		StatusObjectReader reader(statusObjCluster);
+
+		std::string context = isSrc ? "dr_backup" : "dr_backup_dest";
+		std::string path = format("layers.%s.tags", context.c_str());
+		StatusObjectReader tags;
+
+		printf("%s\n", "List running data movement");
+		if (reader.tryGet(path, tags)) {
+			for (auto itr : tags.obj()) {
+				JSONDoc tag(itr.second);
+				bool running = false;
+				tag.tryGet("running_backup", running);
+				if (running) {
+					std::string uid;
+					tag.tryGet("mutation_stream_id", uid);
+					printf("tag: %s  uid: %s\n", itr.first.c_str(), uid.c_str());
+				}
+			}
+		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
@@ -3725,7 +3810,11 @@ int main(int argc, char* argv[]) {
 				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMoveCleanupOptions, SO_O_EXACT);
 				break;
 			case DBMoveType::CLEAR_SRC:
-				// TODO
+				// arguments: source, prefix
+				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMoveClearSrcOptions, SO_O_EXACT);
+				break;
+			case DBMoveType::LIST:
+				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMoveListOptions, SO_O_EXACT);
 				break;
 			default:
 				args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
@@ -4719,29 +4808,57 @@ int main(int argc, char* argv[]) {
 			}
 			break;
 		case ProgramExe::DB_MOVE:
-			if (!initCluster() || !initSourceCluster(dbMoveType != DBMoveType::ABORT || !dstOnly)) {
-				return FDB_EXIT_ERROR;
-			}
 			switch (dbMoveType) {
 			case DBMoveType::START:
+				if (!initCluster() || !initSourceCluster(true)) {
+					return FDB_EXIT_ERROR;
+				}
 				f = stopAfter(submitDBMove(sourceDb, db, backupKeys, tagName, Key(addPrefix), Key(removePrefix)));
 				break;
 			case DBMoveType::STATUS:
+				if (!initCluster() || !initSourceCluster(true)) {
+					return FDB_EXIT_ERROR;
+				}
 				f = stopAfter(statusDBMove(
 				    sourceDb, db, tagName, maxErrors, KeyRef(addPrefix), KeyRef(removePrefix), jsonOutput));
 				break;
 			case DBMoveType::FINISH:
+				if (!initCluster() || !initSourceCluster(true)) {
+					return FDB_EXIT_ERROR;
+				}
 				f = stopAfter(finishDBMove(sourceDb, db, backupKeys, tagName, forceAction));
 				break;
 			case DBMoveType::ABORT:
+				if (!initCluster() || !initSourceCluster(true)) {
+					return FDB_EXIT_ERROR;
+				}
 				f = stopAfter(abortDBMove(sourceDb, db, tagName, partial, dstOnly));
 				break;
 			case DBMoveType::CLEAN:
+				if (!initCluster()) {
+					return FDB_EXIT_ERROR;
+				}
 				f = stopAfter(cleanupDBMove(db, deleteData));
 				break;
 			case DBMoveType::CLEAR_SRC:
-				// TODO: clear and unlock source db
+				if (!initSourceCluster(true)) {
+					return FDB_EXIT_ERROR;
+				}
+				f = stopAfter(clearSrcDBMove(sourceDb, removePrefix));
 				break;
+			case DBMoveType::LIST: {
+				bool canInitCluster = initCluster();
+				bool canInitSourceCLuster = initSourceCluster(true);
+				if (!canInitCluster && !canInitSourceCLuster) {
+					return FDB_EXIT_ERROR;
+				}
+				if (canInitCluster && canInitSourceCLuster) {
+					f = stopAfter(listDBMove(sourceDb, db));
+				} else {
+					f = stopAfter(listDBMove(canInitSourceCLuster ? sourceDb : db, canInitSourceCLuster));
+				}
+				break;
+			}
 			case DBMoveType::UNDEFINED:
 			default:
 				fprintf(stderr, "ERROR: Unsupported data movement action %s\n", argv[1]);
