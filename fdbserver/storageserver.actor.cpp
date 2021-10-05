@@ -1243,11 +1243,6 @@ std::vector<KeyRef> checkTenant(StorageServer* data,
                                 TenantName const& tenantName,
                                 KeyRef begin,
                                 Optional<KeyRef> end = Optional<KeyRef>()) {
-	    .detail("Version", version)
-	    .detail("Name", tenantName)
-	    .detail("Begin", begin)
-	    .detail("End", end);
-
 	std::vector<KeyRef> lockedPrefixes;
 	if (tenantName.hasName()) {
 		auto view = data->tenantMap.at(version);
@@ -1260,7 +1255,6 @@ std::vector<KeyRef> checkTenant(StorageServer* data,
 			throw key_not_in_tenant();
 		}
 	} else if (tenantName.isDefaultTenant()) {
-		TraceEvent("TenantDebug_CheckingDefaultTenant");
 		if (!data->allowDefaultTenant) {
 			throw tenant_name_required();
 		}
