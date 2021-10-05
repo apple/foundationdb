@@ -95,6 +95,7 @@ enum class TaskPriority {
 	DataDistribution = 3502,
 	DataDistributionLow = 3501,
 	DataDistributionVeryLow = 3500,
+	BlobManager = 3490,
 	DiskWrite = 3010,
 	UpdateStorage = 3000,
 	CompactCache = 2900,

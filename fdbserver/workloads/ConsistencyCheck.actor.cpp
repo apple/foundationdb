@@ -295,6 +295,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					wait(::success(self->checkForStorage(cx, configuration, tssMapping, self)));
 					wait(::success(self->checkForExtraDataStores(cx, self)));
 
+					// Check blob workers are operating as expected
+					bool blobWorkersCorrect = wait(self->checkBlobWorkers(cx, configuration, self));
+					if (!blobWorkersCorrect)
+						self->testFailure("Blob workers incorrect");
+
 					// Check that each machine is operating as its desired class
 					bool usingDesiredClasses = wait(self->checkUsingDesiredClasses(cx, self));
 					if (!usingDesiredClasses)
@@ -1930,6 +1935,78 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			return false;
 		}
 
+		return true;
+	}
+
+	// Checks if the blob workers are "correct".
+	// Returns false if ANY of the following
+	// - any blob worker is on a diff DC than the blob manager/CC, or
+	// - any worker that should have a blob worker does not have exactly one, or
+	// - any worker that should NOT have a blob worker does indeed have one
+	ACTOR Future<bool> checkBlobWorkers(Database cx,
+	                                    DatabaseConfiguration configuration,
+	                                    ConsistencyCheckWorkload* self) {
+		// TODO: assert that there are blob workers iff the blob gate is true
+		state vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(cx));
+		state vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+
+		// process addr -> num blob workers on that process
+		state std::unordered_map<NetworkAddress, int> blobWorkersByAddr;
+		Optional<Key> ccDcId;
+		NetworkAddress ccAddr = self->dbInfo->get().clusterInterface.clientInterface.address();
+
+		// get the CC's DCID
+		for (const auto& worker : workers) {
+			if (ccAddr == worker.interf.address()) {
+				ccDcId = worker.interf.locality.dcId();
+				break;
+			}
+		}
+
+		if (!ccDcId.present()) {
+			TraceEvent("ConsistencyCheck_DidNotFindCC");
+			return false;
+		}
+
+		for (const auto& bwi : blobWorkers) {
+			if (bwi.locality.dcId() != ccDcId) {
+				TraceEvent("ConsistencyCheck_BWOnDiffDcThanCC")
+				    .detail("BWID", bwi.id())
+				    .detail("BwDcId", bwi.locality.dcId())
+				    .detail("CcDcId", ccDcId);
+				return false;
+			}
+			blobWorkersByAddr[bwi.stableAddress()]++;
+		}
+
+		for (const auto& worker : workers) {
+			NetworkAddress addr = worker.interf.stableAddress();
+			if (!configuration.isExcludedServer(worker.interf.addresses())) {
+				if (worker.processClass == ProcessClass::BlobWorkerClass) {
+					// this is a worker with processClass == BWClass, so should have exactly one blob worker
+					if (blobWorkersByAddr[addr] == 0) {
+						TraceEvent("ConsistencyCheck_NoBWsOnBWClass")
+						    .detail("Address", addr)
+						    .detail("NumBlobWorkersOnAddr", blobWorkersByAddr[addr]);
+						return false;
+					}
+					/* TODO: replace above code with this once blob manager recovery is handled
+					if (blobWorkersByAddr[addr] != 1) {
+					    TraceEvent("ConsistencyCheck_NoBWOrManyBWsOnBWClass")
+					        .detail("Address", addr)
+					        .detail("NumBlobWorkersOnAddr", blobWorkersByAddr[addr]);
+					    return false;
+					}
+					*/
+				} else {
+					// this is a worker with processClass != BWClass, so there should be no BWs on it
+					if (blobWorkersByAddr[addr] > 0) {
+						TraceEvent("ConsistencyCheck_BWOnNonBWClass").detail("Address", addr);
+						return false;
+					}
+				}
+			}
+		}
 		return true;
 	}
 

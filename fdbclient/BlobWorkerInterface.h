@@ -44,18 +44,25 @@ struct BlobWorkerInterface {
 	void initEndpoints() {}
 	UID id() const { return myId; }
 	NetworkAddress address() const { return blobGranuleFileRequest.getEndpoint().getPrimaryAddress(); }
+	NetworkAddress stableAddress() const { return blobGranuleFileRequest.getEndpoint().getStableAddress(); }
 	bool operator==(const BlobWorkerInterface& r) const { return id() == r.id(); }
 	bool operator!=(const BlobWorkerInterface& r) const { return !(*this == r); }
 	std::string toString() const { return id().shortString(); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, blobGranuleFileRequest, assignBlobRangeRequest, locality, myId);
+		serializer(ar,
+		           waitFailure,
+		           blobGranuleFileRequest,
+		           assignBlobRangeRequest,
+		           revokeBlobRangeRequest,
+		           granuleStatusStreamRequest,
+		           locality,
+		           myId);
 	}
 };
 
 struct BlobGranuleFileReply {
-	// TODO is there a "proper" way to generate file_identifier?
 	constexpr static FileIdentifier file_identifier = 6858612;
 	Arena arena;
 	VectorRef<BlobGranuleChunkRef> chunks;

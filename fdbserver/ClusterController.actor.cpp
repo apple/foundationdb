@@ -300,6 +300,26 @@ public:
 		throw no_more_servers();
 	}
 
+	// Returns a worker that can be used by a blob worker
+	// Note: we restrict the set of possible workers to those in the same DC as the BM/CC
+	WorkerDetails getBlobWorker(RecruitBlobWorkerRequest const& req) {
+		std::set<AddressExclusion> excludedAddresses(req.excludeAddresses.begin(), req.excludeAddresses.end());
+		for (auto& it : id_worker) {
+			// the worker must be available, have the same dcID as CC,
+			// not be one of the excluded addrs from req and have the approriate fitness
+			if (workerAvailable(it.second, false) &&
+			    clusterControllerDcId == it.second.details.interf.locality.dcId() &&
+			    !addressExcluded(excludedAddresses, it.second.details.interf.address()) &&
+			    (!it.second.details.interf.secondaryAddress().present() ||
+			     !addressExcluded(excludedAddresses, it.second.details.interf.secondaryAddress().get())) &&
+			    it.second.details.processClass.machineClassFitness(ProcessClass::BlobWorker) == ProcessClass::BestFit) {
+				return it.second.details;
+			}
+		}
+
+		throw no_more_servers();
+	}
+
 	std::vector<WorkerDetails> getWorkersForSeedServers(
 	    DatabaseConfiguration const& conf,
 	    Reference<IReplicationPolicy> const& policy,
@@ -3035,6 +3055,7 @@ public:
 	std::vector<RecruitFromConfigurationRequest> outstandingRecruitmentRequests;
 	std::vector<RecruitRemoteFromConfigurationRequest> outstandingRemoteRecruitmentRequests;
 	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
+	std::vector<std::pair<RecruitBlobWorkerRequest, double>> outstandingBlobWorkerRequests;
 	ActorCollection ac;
 	UpdateWorkerList updateWorkerList;
 	Future<Void> outstandingRequestChecker;
@@ -3410,6 +3431,42 @@ void checkOutstandingStorageRequests(ClusterControllerData* self) {
 	}
 }
 
+// When workers aren't available at the time of request, the request
+// gets added to a list of outstanding reqs. Here, we try to resolve these
+// outstanding requests.
+void checkOutstandingBlobWorkerRequests(ClusterControllerData* self) {
+	for (int i = 0; i < self->outstandingBlobWorkerRequests.size(); i++) {
+		auto& req = self->outstandingBlobWorkerRequests[i];
+		try {
+			if (req.second < now()) {
+				req.first.reply.sendError(timed_out());
+				swapAndPop(&self->outstandingBlobWorkerRequests, i--);
+			} else {
+				if (!self->gotProcessClasses)
+					throw no_more_servers();
+
+				auto worker = self->getBlobWorker(req.first);
+				RecruitBlobWorkerReply rep;
+				rep.worker = worker.interf;
+				rep.processClass = worker.processClass;
+				req.first.reply.send(rep);
+				// can remove it once we know the worker was found
+				swapAndPop(&self->outstandingBlobWorkerRequests, i--);
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_no_more_servers) {
+				TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", self->id)
+				    .suppressFor(1.0)
+				    .detail("OutstandingReq", i)
+				    .error(e);
+			} else {
+				TraceEvent(SevError, "RecruitBlobWorkerError", self->id).error(e);
+				throw;
+			}
+		}
+	}
+}
+
 // Finds and returns a new process for role
 WorkerDetails findNewProcessForSingleton(ClusterControllerData* self,
                                          const ProcessClass::ClusterRole role,
@@ -3589,6 +3646,7 @@ ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 
 		checkOutstandingRecruitmentRequests(self);
 		checkOutstandingStorageRequests(self);
+		checkOutstandingBlobWorkerRequests(self);
 		checkBetterSingletons(self);
 
 		self->checkRecoveryStalled();
@@ -3746,6 +3804,29 @@ void clusterRecruitStorage(ClusterControllerData* self, RecruitStorageRequest re
 			    .error(e);
 		} else {
 			TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
+			throw; // Any other error will bring down the cluster controller
+		}
+	}
+}
+
+// Trys to send a reply to req with a worker (process) that a blob worker can be recruited on
+// Otherwise, add the req to a list of outstanding reqs that will eventually be dealt with
+void clusterRecruitBlobWorker(ClusterControllerData* self, RecruitBlobWorkerRequest req) {
+	try {
+		if (!self->gotProcessClasses)
+			throw no_more_servers();
+		auto worker = self->getBlobWorker(req);
+		RecruitBlobWorkerReply rep;
+		rep.worker = worker.interf;
+		rep.processClass = worker.processClass;
+		req.reply.send(rep);
+	} catch (Error& e) {
+		if (e.code() == error_code_no_more_servers) {
+			self->outstandingBlobWorkerRequests.push_back(
+			    std::make_pair(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT));
+			TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", self->id).error(e);
+		} else {
+			TraceEvent(SevError, "RecruitBlobWorkerError", self->id).error(e);
 			throw; // Any other error will bring down the cluster controller
 		}
 	}
@@ -5199,6 +5280,9 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		}
 		when(RecruitStorageRequest req = waitNext(interf.recruitStorage.getFuture())) {
 			clusterRecruitStorage(&self, req);
+		}
+		when(RecruitBlobWorkerRequest req = waitNext(interf.recruitBlobWorker.getFuture())) {
+			clusterRecruitBlobWorker(&self, req);
 		}
 		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;

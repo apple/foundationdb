@@ -39,7 +39,7 @@
 #include "flow/flow.h"
 
 #define BW_DEBUG true
-#define BW_REQUEST_DEBUG false
+#define BW_REQUEST_DEBUG true
 
 // FIXME: change all BlobWorkerData* to Reference<BlobWorkerData> to avoid segfaults if core loop gets error
 
@@ -2228,7 +2228,9 @@ ACTOR Future<Void> runCommitVersionChecks(BlobWorkerData* bwData) {
 	}
 }
 
-ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
+                              ReplyPromise<InitializeBlobWorkerReply> recruitReply,
+                              Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	state BlobWorkerData self(bwInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 	self.id = bwInterf.id();
 	self.locality = bwInterf.locality;
@@ -2236,6 +2238,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf, Reference<AsyncVar<S
 	if (BW_DEBUG) {
 		printf("Initializing blob worker s3 stuff\n");
 	}
+
 	try {
 		if (g_network->isSimulated()) {
 			if (BW_DEBUG) {
@@ -2251,14 +2254,27 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf, Reference<AsyncVar<S
 				printf("BW constructed backup container\n");
 			}
 		}
+
+		// register the blob worker to the system keyspace
+		wait(registerBlobWorker(&self, bwInterf));
 	} catch (Error& e) {
 		if (BW_DEBUG) {
 			printf("BW got backup container init error %s\n", e.name());
 		}
-		return Void();
+		// if any errors came up while initializing the blob worker, let the blob manager know
+		// that recruitment failed
+		if (!recruitReply.isSet()) {
+			recruitReply.sendError(recruitment_failed());
+		}
+		throw e;
 	}
 
-	wait(registerBlobWorker(&self, bwInterf));
+	// By now, we know that initialization was successful, so
+	// respond to the initialization request with the interface itself
+	// Note: this response gets picked up by the blob manager
+	InitializeBlobWorkerReply rep;
+	rep.interf = bwInterf;
+	recruitReply.send(rep);
 
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> collection = actorCollection(addActor.getFuture());
