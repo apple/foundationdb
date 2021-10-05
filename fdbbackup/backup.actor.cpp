@@ -56,6 +56,7 @@
 #include <ctime>
 #include <unordered_map>
 #include <vector>
+#include <unordered_set>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -2343,34 +2344,17 @@ ACTOR Future<Void> clearSrcDBMove(Database src, KeyRef srcPrefix) {
 	return Void();
 }
 
-// list movement from src to dest
-ACTOR Future<Void> listDBMove(Database src, Database dest) {
-	try {
-		// todo
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
-			throw;
-		fprintf(stderr, "ERROR: %s\n", e.what());
-		throw;
-	}
-
-	return Void();
-}
-
-// list movement from src, or to dest, depending on isSrc
-ACTOR Future<Void> listDBMove(Database db, bool isSrc) {
+ACTOR Future<std::unordered_map<std::string, std::string>> fetchDBMove(Database db, bool isSrc) {
+	state std::unordered_map<std::string, std::string> recorder;
 	try {
 		// TODO distinguish dr and data movement
 		// get running data movement
 		// todo make sure is this the right way to get status json?
-		StatusObject statusObjCluster = wait(StatusClient::statusFetcher(db));
+		state StatusObject statusObjCluster = wait(StatusClient::statusFetcher(db));
 		StatusObjectReader reader(statusObjCluster);
-
 		std::string context = isSrc ? "dr_backup" : "dr_backup_dest";
 		std::string path = format("layers.%s.tags", context.c_str());
 		StatusObjectReader tags;
-
-		printf("%s\n", "List running data movement");
 		if (reader.tryGet(path, tags)) {
 			for (auto itr : tags.obj()) {
 				JSONDoc tag(itr.second);
@@ -2379,8 +2363,56 @@ ACTOR Future<Void> listDBMove(Database db, bool isSrc) {
 				if (running) {
 					std::string uid;
 					tag.tryGet("mutation_stream_id", uid);
-					printf("tag: %s  uid: %s\n", itr.first.c_str(), uid.c_str());
+					recorder[itr.first] = uid;
 				}
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		fprintf(stderr, "ERROR: %s\n", e.what());
+		throw;
+	}
+
+	return recorder;
+}
+
+// list movement from src, or to dest, depending on isSrc
+ACTOR Future<Void> listDBMove(Database db, bool isSrc) {
+	try {
+		state std::unordered_map<std::string, std::string> recorder = wait(fetchDBMove(db, isSrc));
+		printf("%s %s %s\n",
+		       "List running data movement",
+		       (isSrc ? "from" : "to"),
+		       db->getConnectionFile()->getFilename().c_str());
+		for (const auto& entry : recorder) {
+			printf("tag: %s  uid: %s\n", entry.first.c_str(), entry.second.c_str());
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		fprintf(stderr, "ERROR: %s\n", e.what());
+		throw;
+	}
+	return Void();
+}
+
+// list movement from src to dest
+ACTOR Future<Void> listDBMove(Database src, Database dest) {
+	try {
+		printf("%s from %s to %s\n",
+		       "List running data movement",
+		       src->getConnectionFile()->getFilename().c_str(),
+		       dest->getConnectionFile()->getFilename().c_str());
+		state std::unordered_map<std::string, std::string> srcRecorder = wait(fetchDBMove(src, true));
+		state std::unordered_map<std::string, std::string> destRecorder = wait(fetchDBMove(dest, false));
+		std::unordered_set<std::string> visited;
+		for (const auto& [_, uid] : srcRecorder) {
+			visited.insert(uid);
+		}
+		for (const auto& entry : destRecorder) {
+			if (visited.count(entry.second)) {
+				printf("tag: %s  uid: %s\n", entry.first.c_str(), entry.second.c_str());
 			}
 		}
 	} catch (Error& e) {
