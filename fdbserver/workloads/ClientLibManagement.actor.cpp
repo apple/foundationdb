@@ -26,6 +26,8 @@
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+using namespace ClientLibUtils;
+
 /**
  * Workload for testing ClientLib management operations, declared in
  * MultiVersionClientControl.actor.h
@@ -34,10 +36,11 @@ struct ClientLibManagementWorkload : public TestWorkload {
 
 	static constexpr const char TEST_FILE_NAME[] = "dummyclientlib";
 	static constexpr size_t FILE_CHUNK_SIZE = 128 * 1024;
-	static constexpr size_t TEST_FILE_SIZE = FILE_CHUNK_SIZE * 80; // 10MB
+	static constexpr size_t TEST_FILE_SIZE = FILE_CHUNK_SIZE * 8; // 1MB
 
 	RandomByteGenerator rbg;
 	std::string uploadedClientLibId;
+	json_spirit::mObject uploadedMetadataJson;
 	bool success;
 
 	/*----------------------------------------------------------------
@@ -89,8 +92,10 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		wait(testUploadClientLibInvalidInput(self, cx));
 		wait(testClientLibUploadFileDoesNotExist(self, cx));
 		wait(testUploadClientLib(self, cx));
+		wait(testClientLibListAfterUpload(self, cx));
 		wait(testDownloadClientLib(self, cx));
 		wait(testDeleteClientLib(self, cx));
+		wait(testUploadedClientLibInList(self, cx, ClientLibFilter(), false, "No filter, after delete"));
 		return Void();
 	}
 
@@ -106,7 +111,9 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		metadataJson["unknownattr"] = "someval";
 		invalidMetadataStrs.push_back(json_spirit::write_string(json_spirit::mValue(metadataJson)));
 
-		const char* mandatoryAttrs[] = { "platform", "version", "checksum", "type" };
+		const char* mandatoryAttrs[] = { CLIENTLIB_ATTR_PLATFORM,   CLIENTLIB_ATTR_VERSION,  CLIENTLIB_ATTR_CHECKSUM,
+			                             CLIENTLIB_ATTR_TYPE,       CLIENTLIB_ATTR_GIT_HASH, CLIENTLIB_ATTR_PROTOCOL,
+			                             CLIENTLIB_ATTR_API_VERSION };
 
 		for (const char* attr : mandatoryAttrs) {
 			validClientLibMetadataSample(metadataJson);
@@ -147,12 +154,9 @@ struct ClientLibManagementWorkload : public TestWorkload {
 	}
 
 	ACTOR static Future<Void> testUploadClientLib(ClientLibManagementWorkload* self, Database cx) {
-		json_spirit::mObject metadataJson;
-		validClientLibMetadataSample(metadataJson);
-
+		validClientLibMetadataSample(self->uploadedMetadataJson);
 		state Standalone<StringRef> metadataStr =
-		    StringRef(json_spirit::write_string(json_spirit::mValue(metadataJson)));
-
+		    StringRef(json_spirit::write_string(json_spirit::mValue(self->uploadedMetadataJson)));
 		getClientLibIdFromMetadataJson(metadataStr, self->uploadedClientLibId);
 
 		// Test two concurrent uploads of the same library, one of the must fail and another succeed
@@ -231,6 +235,70 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<Void> testClientLibListAfterUpload(ClientLibManagementWorkload* self, Database cx) {
+		state int uploadedApiVersion = self->uploadedMetadataJson[CLIENTLIB_ATTR_API_VERSION].get_int();
+		state ClientLibPlatform uploadedPlatform =
+		    getPlatformByName(self->uploadedMetadataJson[CLIENTLIB_ATTR_PLATFORM].get_str());
+		state std::string uploadedVersion = self->uploadedMetadataJson[CLIENTLIB_ATTR_VERSION].get_str();
+		state ClientLibFilter filter;
+
+		filter = ClientLibFilter();
+		wait(testUploadedClientLibInList(self, cx, filter, true, "No filter"));
+		filter = ClientLibFilter().filterAvailable();
+		wait(testUploadedClientLibInList(self, cx, filter, true, "Filter available"));
+		filter = ClientLibFilter().filterAvailable().filterCompatibleAPI(uploadedApiVersion);
+		wait(testUploadedClientLibInList(self, cx, filter, true, "Filter available, the same API"));
+		filter = ClientLibFilter().filterAvailable().filterCompatibleAPI(uploadedApiVersion + 1);
+		wait(testUploadedClientLibInList(self, cx, filter, false, "Filter available, newer API"));
+		filter = ClientLibFilter().filterCompatibleAPI(uploadedApiVersion).filterPlatform(uploadedPlatform);
+		wait(testUploadedClientLibInList(self, cx, filter, true, "Filter the same API, the same platform"));
+		ASSERT(uploadedPlatform != CLIENTLIB_X86_64_WINDOWS);
+		filter = ClientLibFilter().filterAvailable().filterPlatform(CLIENTLIB_X86_64_WINDOWS);
+		wait(testUploadedClientLibInList(self, cx, filter, false, "Filter available, different platform"));
+		filter = ClientLibFilter().filterAvailable().filterNewerPackageVersion(uploadedVersion);
+		wait(testUploadedClientLibInList(self, cx, filter, false, "Filter available, the same version"));
+		filter =
+		    ClientLibFilter().filterAvailable().filterNewerPackageVersion("1.15.10").filterPlatform(uploadedPlatform);
+		wait(testUploadedClientLibInList(
+		    self, cx, filter, true, "Filter available, an older version, the same platform"));
+		filter = ClientLibFilter()
+		             .filterAvailable()
+		             .filterNewerPackageVersion(uploadedVersion)
+		             .filterPlatform(uploadedPlatform);
+		wait(testUploadedClientLibInList(
+		    self, cx, filter, false, "Filter available, the same version, the same platform"));
+		filter = ClientLibFilter().filterNewerPackageVersion("100.1.1");
+		wait(testUploadedClientLibInList(self, cx, filter, false, "Filter a newer version"));
+		filter = ClientLibFilter().filterNewerPackageVersion("1.15.10");
+		wait(testUploadedClientLibInList(self, cx, filter, true, "Filter an older version"));
+		return Void();
+	}
+
+	ACTOR static Future<Void> testUploadedClientLibInList(ClientLibManagementWorkload* self,
+	                                                      Database cx,
+	                                                      ClientLibFilter filter,
+	                                                      bool expectInList,
+	                                                      const char* testDescr) {
+		Standalone<VectorRef<StringRef>> allLibs = wait(listClientLibraries(cx, filter));
+		bool found = false;
+		for (StringRef metadataJson : allLibs) {
+			std::string clientLibId;
+			getClientLibIdFromMetadataJson(metadataJson, clientLibId);
+			if (clientLibId == self->uploadedClientLibId) {
+				found = true;
+			}
+		}
+		if (found != expectInList) {
+			TraceEvent(SevError, "ClientLibInListTestFailed")
+			    .detail("Test", testDescr)
+			    .detail("ClientLibId", self->uploadedClientLibId)
+			    .detail("Expected", expectInList)
+			    .detail("Actual", found);
+			self->success = false;
+		}
+		return Void();
+	}
+
 	/* ----------------------------------------------------------------
 	 * Utility methods
 	 */
@@ -250,12 +318,14 @@ struct ClientLibManagementWorkload : public TestWorkload {
 
 	static void validClientLibMetadataSample(json_spirit::mObject& metadataJson) {
 		metadataJson.clear();
-		metadataJson["platform"] = "x86_64-linux";
-		metadataJson["version"] = "7.1.0";
-		metadataJson["githash"] = randomHexadecimalStr(40);
-		metadataJson["type"] = "debug";
-		metadataJson["checksum"] = randomHexadecimalStr(32);
-		metadataJson["status"] = "available";
+		metadataJson[CLIENTLIB_ATTR_PLATFORM] = getPlatformName(CLIENTLIB_X86_64_LINUX);
+		metadataJson[CLIENTLIB_ATTR_VERSION] = "7.1.0";
+		metadataJson[CLIENTLIB_ATTR_GIT_HASH] = randomHexadecimalStr(40);
+		metadataJson[CLIENTLIB_ATTR_TYPE] = "debug";
+		metadataJson[CLIENTLIB_ATTR_CHECKSUM] = randomHexadecimalStr(32);
+		metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(CLIENTLIB_AVAILABLE);
+		metadataJson[CLIENTLIB_ATTR_API_VERSION] = 710;
+		metadataJson[CLIENTLIB_ATTR_PROTOCOL] = "fdb00b07001001";
 	}
 
 	void unexpectedSuccess(const char* testName, int expectedErrorCode, const char* optionalDetails = nullptr) {

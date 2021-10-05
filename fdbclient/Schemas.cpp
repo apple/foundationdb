@@ -1044,8 +1044,10 @@ const KeyRef JSONSchemas::clientLibMetadataSchema = LiteralStringRef(R"""(
     "githash": "e28fef6264d05ab0c9488238022d1ee885a30bea",
     "type": "debug",
     "checksum": "fcef53fb4ae86d2c4fff4dc17c7e5d08",
+    "apiversion": 710,
+    "protocol": "fdb00b07001001",
     "filename": "libfdb_c.7.1.0.so",
     "size" : 19467552,
     "chunkcount" : 2377,
-    "status": "new"
+    "status": "available"
 })""");

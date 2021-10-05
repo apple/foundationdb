@@ -23,6 +23,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ClientKnobs.h"
+#include "fdbclient/versions.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/Platform.h"
 
@@ -43,11 +44,11 @@ struct ClientLibBinaryInfo {
 static const char* g_statusNames[] = { "disabled", "available", "uploading", "deleting" };
 static std::map<std::string, ClientLibStatus> g_statusByName;
 
-static const char* getStatusName(ClientLibStatus status) {
+const char* getStatusName(ClientLibStatus status) {
 	return g_statusNames[status];
 }
 
-static ClientLibStatus getStatusByName(const std::string& statusName) {
+ClientLibStatus getStatusByName(const std::string& statusName) {
 	// initialize the map on demand
 	if (g_statusByName.empty()) {
 		for (int i = 0; i < CLIENTLIB_STATUS_COUNT; i++) {
@@ -61,6 +62,29 @@ static ClientLibStatus getStatusByName(const std::string& statusName) {
 		throw client_lib_invalid_metadata();
 	}
 	return statusIter->second;
+}
+
+static const char* g_platformNames[] = { "unknown", "x84_64-linux", "x86_64-windows", "x86_64-macos" };
+static std::map<std::string, ClientLibPlatform> g_platformByName;
+
+const char* getPlatformName(ClientLibPlatform platform) {
+	return g_platformNames[platform];
+}
+
+ClientLibPlatform getPlatformByName(const std::string& statusName) {
+	// initialize the map on demand
+	if (g_platformByName.empty()) {
+		for (int i = 0; i < CLIENTLIB_PLATFORM_COUNT; i++) {
+			g_platformByName[g_platformNames[i]] = static_cast<ClientLibPlatform>(i);
+		}
+	}
+	auto platfIter = g_platformByName.find(statusName);
+	if (platfIter == g_platformByName.cend()) {
+		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
+		    .detail("Error", format("Unknown platform value %s", statusName.c_str()));
+		throw client_lib_invalid_metadata();
+	}
+	return platfIter->second;
 }
 
 static bool isValidTargetStatus(ClientLibStatus status) {
@@ -100,15 +124,28 @@ static int getMetadataIntAttr(const json_spirit::mObject& metadataJson, const ch
 	return attrIter->second.get_int();
 }
 
-static void getIdFromMetadataJson(const json_spirit::mObject& metadataJson, std::string& clientLibId) {
-	const char* clientLibIdAttrs[] = { "platform", "version", "type", "checksum" };
-	std::ostringstream libIdBuilder;
-	for (auto attrName : clientLibIdAttrs) {
-		if (attrName != clientLibIdAttrs[0]) {
-			libIdBuilder << "/";
-		}
-		libIdBuilder << getMetadataStrAttr(metadataJson, attrName);
+static bool validVersionPartNum(int num) {
+	return (num >= 0 && num < 1000);
+}
+
+static int getNumericVersionEncoding(const std::string& versionStr) {
+	int major, minor, patch;
+	int numScanned = sscanf(versionStr.c_str(), "%d.%d.%d", &major, &minor, &patch);
+	if (numScanned != 3 || !validVersionPartNum(major) || !validVersionPartNum(minor) || !validVersionPartNum(patch)) {
+		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
+		    .detail("Error", format("Invalid version string %s", versionStr.c_str()));
+		throw client_lib_invalid_metadata();
 	}
+	return ((major * 1000) + minor) * 1000 + patch;
+}
+
+static void getIdFromMetadataJson(const json_spirit::mObject& metadataJson, std::string& clientLibId) {
+	std::ostringstream libIdBuilder;
+	libIdBuilder << getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_PLATFORM) << "/";
+	libIdBuilder << format("%09d", getNumericVersionEncoding(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_VERSION)))
+	             << "/";
+	libIdBuilder << getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_TYPE) << "/";
+	libIdBuilder << getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_CHECKSUM);
 	clientLibId = libIdBuilder.str();
 }
 
@@ -124,9 +161,31 @@ static KeyRef chunkKeyFromNo(StringRef clientLibBinPrefix, size_t chunkNo, Arena
 	return clientLibBinPrefix.withSuffix(format("%06zu", chunkNo), arena);
 }
 
+static ClientLibPlatform getCurrentClientPlatform() {
+#ifdef __x86_64__
+#if defined(_WIN32)
+	return CLIENTLIB_X86_64_WINDOWS;
+#elif defined(__linux__)
+	return CLIENTLIB_X86_64_LINUX;
+#elif defined(__FreeBSD__) || defined(__APPLE__)
+	return CLIENTLIB_X86_64_MACOS;
+#else
+	return CLIENTLIB_UNKNOWN_PLATFORM;
+#endif
+#else // not __x86_64__
+	return CLIENTLIB_UNKNOWN_PLATFORM;
+#endif
+}
+
 } // namespace ClientLibUtils
 
 using namespace ClientLibUtils;
+
+ClientLibFilter& ClientLibFilter::filterNewerPackageVersion(const std::string& versionStr) {
+	matchNewerPackageVersion = true;
+	this->numericPkgVersion = getNumericVersionEncoding(versionStr);
+	return *this;
+}
 
 void getClientLibIdFromMetadataJson(StringRef metadataString, std::string& clientLibId) {
 	json_spirit::mObject parsedMetadata;
@@ -209,7 +268,7 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 	state Key clientLibMetaKey = metadataKeyFromId(clientLibId);
 	state Key clientLibBinPrefix = chunkKeyPrefixFromId(clientLibId);
 
-	state ClientLibStatus targetStatus = getStatusByName(getMetadataStrAttr(metadataJson, "status"));
+	state ClientLibStatus targetStatus = getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS));
 	if (!isValidTargetStatus(targetStatus)) {
 		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
 		    .detail("Reason", "InvalidTargetStatus")
@@ -217,7 +276,12 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 		throw client_lib_invalid_metadata();
 	}
 
-	metadataJson["status"] = getStatusName(CLIENTLIB_UPLOADING);
+	// Check if further mandatory attributes are set
+	getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_GIT_HASH);
+	getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_PROTOCOL);
+	getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_API_VERSION);
+
+	metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(CLIENTLIB_UPLOADING);
 	state std::string jsStr = json_spirit::write_string(json_spirit::mValue(metadataJson));
 
 	/*
@@ -259,10 +323,10 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 	 * Update the metadata entry, with additional information about the binary
 	 * and change its state from "uploading" to the given one
 	 */
-	metadataJson["size"] = static_cast<int64_t>(binInfo.totalBytes);
-	metadataJson["chunkcount"] = static_cast<int64_t>(binInfo.chunkCnt);
-	metadataJson["filename"] = basename(libFilePath.toString());
-	metadataJson["status"] = getStatusName(targetStatus);
+	metadataJson[CLIENTLIB_ATTR_SIZE] = static_cast<int64_t>(binInfo.totalBytes);
+	metadataJson[CLIENTLIB_ATTR_CHUNK_COUNT] = static_cast<int64_t>(binInfo.chunkCnt);
+	metadataJson[CLIENTLIB_ATTR_FILENAME] = basename(libFilePath.toString());
+	metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(targetStatus);
 	jsStr = json_spirit::write_string(json_spirit::mValue(metadataJson));
 
 	tr.reset();
@@ -283,7 +347,6 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 }
 
 ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, StringRef libFilePath) {
-
 	state Key clientLibMetaKey = metadataKeyFromId(clientLibId.toString());
 	state Key chunkKeyPrefix = chunkKeyPrefixFromId(clientLibId.toString());
 	state json_spirit::mObject metadataJson;
@@ -314,7 +377,7 @@ ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, Str
 	}
 
 	// Allow downloading only libraries in the available state
-	if (getStatusByName(getMetadataStrAttr(metadataJson, "status")) != CLIENTLIB_AVAILABLE) {
+	if (getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS)) != CLIENTLIB_AVAILABLE) {
 		throw client_lib_not_available();
 	}
 
@@ -325,8 +388,8 @@ ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, Str
 
 	state size_t fileOffset = 0;
 	state int transactionSize = CLIENT_KNOBS->MVC_CLIENTLIB_TRANSACTION_SIZE;
-	state size_t chunkCount = getMetadataIntAttr(metadataJson, "chunkcount");
-	state size_t binarySize = getMetadataIntAttr(metadataJson, "size");
+	state size_t chunkCount = getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_CHUNK_COUNT);
+	state size_t binarySize = getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_SIZE);
 	state size_t expectedChunkSize =
 	    (binarySize % chunkCount == 0) ? (binarySize / chunkCount) : (binarySize / chunkCount + 1);
 	state size_t chunkNo = 0;
@@ -401,7 +464,6 @@ ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, Str
 }
 
 ACTOR Future<Void> deleteClientLibrary(Database db, StringRef clientLibId) {
-
 	state Key clientLibMetaKey = metadataKeyFromId(clientLibId.toString());
 	state Key chunkKeyPrefix = chunkKeyPrefixFromId(clientLibId.toString());
 	state json_spirit::mObject metadataJson;
@@ -421,7 +483,7 @@ ACTOR Future<Void> deleteClientLibrary(Database db, StringRef clientLibId) {
 				throw client_lib_not_found();
 			}
 			parseMetadataJson(metadataOpt.get(), metadataJson);
-			metadataJson["status"] = getStatusName(CLIENTLIB_DELETING);
+			metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(CLIENTLIB_DELETING);
 			state std::string jsStr = json_spirit::write_string(json_spirit::mValue(metadataJson));
 			tr.set(clientLibMetaKey, ValueRef(jsStr));
 			wait(tr.commit());
@@ -435,7 +497,7 @@ ACTOR Future<Void> deleteClientLibrary(Database db, StringRef clientLibId) {
 	}
 
 	state size_t chunkNo = 0;
-	state size_t chunkCount = getMetadataIntAttr(metadataJson, "chunkcount");
+	state size_t chunkCount = getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_CHUNK_COUNT);
 	state size_t keysPerTransaction = CLIENT_KNOBS->MVC_CLIENTLIB_DELETE_KEYS_PER_TRANSACTION;
 	loop {
 		state Arena arena;
@@ -472,4 +534,75 @@ ACTOR Future<Void> deleteClientLibrary(Database db, StringRef clientLibId) {
 
 	TraceEvent("ClientLibraryDeleteDone").detail("Key", clientLibMetaKey);
 	return Void();
+}
+
+static void applyClientLibFilter(const ClientLibFilter& filter,
+                                 const RangeResultRef& scanResults,
+                                 Standalone<VectorRef<StringRef>>& filteredResults) {
+	for (const auto& [k, v] : scanResults) {
+		try {
+			json_spirit::mObject metadataJson;
+			parseMetadataJson(v, metadataJson);
+			if (filter.matchAvailableOnly &&
+			    getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS)) != CLIENTLIB_AVAILABLE) {
+				continue;
+			}
+			if (filter.matchCompatibleAPI &&
+			    getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_API_VERSION) < filter.apiVersion) {
+				continue;
+			}
+			if (filter.matchNewerPackageVersion && !filter.matchPlatform &&
+			    getNumericVersionEncoding(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_VERSION)) <=
+			        filter.numericPkgVersion) {
+				continue;
+			}
+			filteredResults.push_back_deep(filteredResults.arena(), v);
+		} catch (Error& e) {
+			// Entries with invalid metadata on the cluster
+			// Can happen only if the official management interface is bypassed
+			ASSERT(e.code() == error_code_client_lib_invalid_metadata);
+			TraceEvent(SevError, "ClientLibraryIgnoringInvalidMetadata").detail("Metadata", v);
+		}
+	}
+}
+
+ACTOR Future<Standalone<VectorRef<StringRef>>> listClientLibraries(Database db, ClientLibFilter filter) {
+	state Standalone<VectorRef<StringRef>> result;
+	loop {
+		state Transaction tr(db);
+		state PromiseStream<Standalone<RangeResultRef>> scanResults;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			state KeyRangeRef scanRange;
+			if (filter.matchPlatform) {
+				Key prefixWithPlatform =
+				    clientLibMetadataPrefix.withSuffix(std::string(getPlatformName(filter.platformVal)));
+				state Key fromKey = prefixWithPlatform.withSuffix(LiteralStringRef("/"));
+				if (filter.matchNewerPackageVersion) {
+					fromKey = fromKey.withSuffix(format("%09d", filter.numericPkgVersion + 1));
+				}
+				state Key toKey = prefixWithPlatform.withSuffix(LiteralStringRef("0"));
+				scanRange = KeyRangeRef(StringRef(fromKey), toKey);
+			} else {
+				scanRange = clientLibMetadataKeys;
+			}
+			state Future<Void> stream = tr.getRangeStream(scanResults, scanRange, GetRangeLimits());
+			loop {
+				Standalone<RangeResultRef> scanResultRange = waitNext(scanResults.getFuture());
+				applyClientLibFilter(filter, scanResultRange, result);
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_end_of_stream) {
+				break;
+			}
+			wait(tr.onError(e));
+		}
+	}
+	return result;
+}
+
+Future<Standalone<VectorRef<StringRef>>> listCompatibleClientLibraries(Database db, int apiVersion) {
+	return listClientLibraries(
+	    db,
+	    ClientLibFilter().filterAvailable().filterCompatibleAPI(apiVersion).filterPlatform(getCurrentClientPlatform()));
 }

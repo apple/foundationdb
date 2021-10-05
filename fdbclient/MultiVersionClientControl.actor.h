@@ -38,6 +38,70 @@ enum ClientLibStatus {
 	CLIENTLIB_STATUS_COUNT // must be the last one
 };
 
+enum ClientLibPlatform {
+	CLIENTLIB_UNKNOWN_PLATFORM = 0,
+	CLIENTLIB_X86_64_LINUX,
+	CLIENTLIB_X86_64_WINDOWS,
+	CLIENTLIB_X86_64_MACOS,
+	CLIENTLIB_PLATFORM_COUNT // must be the last one
+};
+
+#define CLIENTLIB_ATTR_PLATFORM "platform"
+#define CLIENTLIB_ATTR_STATUS "status"
+#define CLIENTLIB_ATTR_CHECKSUM "checksum"
+#define CLIENTLIB_ATTR_VERSION "version"
+#define CLIENTLIB_ATTR_TYPE "type"
+#define CLIENTLIB_ATTR_API_VERSION "apiversion"
+#define CLIENTLIB_ATTR_PROTOCOL "protocol"
+#define CLIENTLIB_ATTR_GIT_HASH "githash"
+#define CLIENTLIB_ATTR_FILENAME "filename"
+#define CLIENTLIB_ATTR_SIZE "size"
+#define CLIENTLIB_ATTR_CHUNK_COUNT "chunkcount"
+
+struct ClientLibFilter {
+	bool matchAvailableOnly;
+	bool matchPlatform;
+	bool matchCompatibleAPI;
+	bool matchNewerPackageVersion;
+	ClientLibPlatform platformVal;
+	int apiVersion;
+	int numericPkgVersion;
+
+	ClientLibFilter()
+	  : matchAvailableOnly(false), matchPlatform(false), matchCompatibleAPI(false), matchNewerPackageVersion(false),
+	    platformVal(CLIENTLIB_UNKNOWN_PLATFORM), apiVersion(0) {}
+
+	ClientLibFilter& filterAvailable() {
+		matchAvailableOnly = true;
+		return *this;
+	}
+
+	ClientLibFilter& filterPlatform(ClientLibPlatform platformVal) {
+		matchPlatform = true;
+		this->platformVal = platformVal;
+		return *this;
+	}
+
+	ClientLibFilter& filterCompatibleAPI(int apiVersion) {
+		matchCompatibleAPI = true;
+		this->apiVersion = apiVersion;
+		return *this;
+	}
+
+	// expects a version string like "6.3.10"
+	ClientLibFilter& filterNewerPackageVersion(const std::string& versionStr);
+};
+
+namespace ClientLibUtils {
+
+const char* getStatusName(ClientLibStatus status);
+ClientLibStatus getStatusByName(const std::string& statusName);
+
+const char* getPlatformName(ClientLibPlatform platform);
+ClientLibPlatform getPlatformByName(const std::string& statusName);
+
+} // namespace ClientLibUtils
+
 // Upload a client library binary from a file and associated metadata JSON
 // to the system keyspace of the database
 ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, StringRef libFilePath);
@@ -51,6 +115,13 @@ ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, Str
 
 // Delete the client library binary from to the system keyspace of the database
 ACTOR Future<Void> deleteClientLibrary(Database db, StringRef clientLibId);
+
+// List client libraries available on the cluster, with the specified filter
+// Returns metadata JSON of each library
+ACTOR Future<Standalone<VectorRef<StringRef>>> listClientLibraries(Database db, ClientLibFilter filter);
+
+// List available client libraries that are compatible with the current client
+Future<Standalone<VectorRef<StringRef>>> listAvailableCompatibleClientLibraries(Database db, int apiVersion);
 
 #include "flow/unactorcompiler.h"
 #endif
