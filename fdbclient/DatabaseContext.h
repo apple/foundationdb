@@ -32,6 +32,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
+#include "fdbclient/TenantBalancerInterface.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
@@ -198,6 +199,9 @@ public:
 	Reference<GrvProxyInfo> getGrvProxies(bool useProvisionalProxies);
 	Future<Void> onProxiesChanged() const;
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
+
+	Reference<TenantBalancerInterface> getTenantBalancer() const;
+	Future<Void> onTenantBalancerChanged() const;
 
 	// Returns the protocol version reported by the coordinator this client is connected to
 	// If an expected version is given, the future won't return until the protocol version is different than expected
