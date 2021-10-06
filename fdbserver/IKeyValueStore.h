@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
+#include "flow/Trace.h"
 
 class IClosable {
 public:
@@ -88,7 +89,10 @@ public:
 	*/
 	// `init()` MUST be idempotent as it will be called more than once on a KeyValueStore in case
 	// of a rollback.
-	virtual Future<Void> init() { return Void(); }
+	virtual Future<Void> init() {
+		TraceEvent(SevWarnAlways, "localKVStore").detail("Action", "init");
+		return Void();
+	}
 
 protected:
 	virtual ~IKeyValueStore() {}
@@ -117,12 +121,33 @@ extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
                                               bool replaceContent,
                                               bool exactRecovery);
 
+extern IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
+                                         std::string const& filename,
+                                         UID logID,
+                                         int64_t memoryLimit,
+                                         bool checkChecksums = false,
+                                         bool checkIntegrity = false);
+
+extern IKeyValueStore* openRemoteKVStoreTemp();
+
 inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                                    std::string const& filename,
                                    UID logID,
                                    int64_t memoryLimit,
                                    bool checkChecksums = false,
-                                   bool checkIntegrity = false) {
+                                   bool checkIntegrity = false,
+                                   bool openRemotely = false,
+                                   bool temp = false) {
+	std::string traceStr = "opened remotely: ";
+	TraceEvent(SevWarnAlways, "OpenRemoteIKVStore")
+	    .detail("RemoteKVStore", traceStr.append((openRemotely ? "true" : "false")))
+	    .detail("type", storeType);
+	if (temp) {
+		return openRemoteKVStoreTemp();
+	}
+	if (openRemotely) {
+		return openRemoteKVStore(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity);
+	}
 	switch (storeType) {
 	case KeyValueStoreType::SSD_BTREE_V1:
 		return keyValueStoreSQLite(filename, logID, KeyValueStoreType::SSD_BTREE_V1, false, checkIntegrity);

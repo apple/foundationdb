@@ -176,7 +176,9 @@ public:
 };
 
 struct StorageServerDisk {
-	explicit StorageServerDisk(struct StorageServer* data, IKeyValueStore* storage) : data(data), storage(storage) {}
+	explicit StorageServerDisk(struct StorageServer* data, IKeyValueStore* storage) : data(data), storage(storage) {
+		TraceEvent(SevDebug, "StorageServerDisk").detail("Event", "Constructor");
+	}
 
 	void makeNewStorageServerDurable();
 	bool makeVersionMutationsDurable(Version& prevStorageVersion, Version newStorageVersion, int64_t& bytesLeft);
@@ -191,7 +193,10 @@ struct StorageServerDisk {
 	void clearRange(KeyRangeRef keys);
 
 	Future<Void> getError() { return storage->getError(); }
-	Future<Void> init() { return storage->init(); }
+	Future<Void> init() {
+		TraceEvent(SevDebug, "StorageServerDisk").detail("action", "remote init");
+		return storage->init();
+	}
 	Future<Void> commit() { return storage->commit(); }
 
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
@@ -849,16 +854,25 @@ public:
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), maxQueryQueue(0), counters(this) {
+		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 1);
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
+		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 2);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
+		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 3);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
+		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 4);
 		desiredOldestVersion.initMetric(LiteralStringRef("StorageServer.DesiredOldestVersion"), counters.cc.id);
+		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 5);
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
+		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 6);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
+		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 7);
 		addShard(ShardInfo::newNotAssigned(allKeys));
+		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 8);
 
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
+		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 9);
 	}
 
 	//~StorageServer() { fclose(log); }
@@ -5173,18 +5187,24 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder) {
 	state StorageServer self(persistentData, db, ssi);
+
+	TraceEvent(SevDebug, "RStorageServer").detail("event", "initialized");
 	if (ssi.isTss()) {
 		self.setTssPair(ssi.tssPairID.get());
 		ASSERT(self.isTss());
 	}
+	TraceEvent(SevDebug, "RStorageServer").detail("event", 2);
 
 	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
 	              .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
 	self.folder = folder;
 
+	TraceEvent(SevDebug, "RStorageServer").detail("event", 3);
 	try {
 		wait(self.storage.init());
+		TraceEvent(SevDebug, "RStorageServer").detail("event", "post init");
 		wait(self.storage.commit());
+		TraceEvent(SevDebug, "RStorageServer").detail("event", "post commit");
 
 		if (seedTag == invalidTag) {
 			std::pair<Version, Tag> verAndTag = wait(addStorageServer(
@@ -5198,6 +5218,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		} else {
 			self.tag = seedTag;
 		}
+
+		TraceEvent(SevDebug, "StorageServer").detail("event", 4);
 
 		self.storage.makeNewStorageServerDurable();
 		wait(self.storage.commit());
@@ -5218,6 +5240,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	} catch (Error& e) {
 		// If we die with an error before replying to the recruitment request, send the error to the recruiter
 		// (ClusterController, and from there to the DataDistributionTeamCollection)
+		TraceEvent(SevDebug, "RStorageServerError").detail("error", e.code());
 		if (!recruitReply.isSet())
 			recruitReply.sendError(recruitment_failed());
 		if (storageServerTerminated(self, persistentData, e))

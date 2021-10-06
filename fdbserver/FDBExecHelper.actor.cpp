@@ -159,6 +159,8 @@ ACTOR Future<int> spawnProcess(std::string path,
 		state Arena arena;
 		state char* outputBuffer = new (arena) char[SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT];
 		state size_t bytesRead = 0;
+		int flags = fcntl(readFD.get(), F_GETFL, 0);
+		fcntl(readFD.get(), F_SETFL, flags | O_NONBLOCK);
 		while (true) {
 			if (runTime > maxWaitTime) {
 				// timing out
@@ -173,11 +175,17 @@ ACTOR Future<int> spawnProcess(std::string path,
 			loop {
 				int bytes =
 				    read(readFD.get(), &outputBuffer[bytesRead], SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT - bytesRead);
-				bytesRead += bytes;
-				if (bytes == 0)
+				if (bytes < 0 && errno == EAGAIN)
 					break;
+				else if (bytes < 0) {
+					std::cout << "error in process\n";
+					throw internal_error();
+				} else if (bytes == 0)
+					break;
+				bytesRead += bytes;
 			}
-
+			TraceEvent(SevWarnAlways, "SpawnPID").detail("PID", pid);
+			TraceEvent(SevWarnAlways, "errorPID").detail("errno", err);
 			if (err < 0) {
 				TraceEvent event(SevWarnAlways, "SpawnProcessFailure");
 				setupTraceWithOutput(event, bytesRead, outputBuffer);
@@ -199,7 +207,7 @@ ACTOR Future<int> spawnProcess(std::string path,
 			} else {
 				// child process completed
 				if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-					TraceEvent event(SevWarnAlways, "SpawnProcessFailure");
+					TraceEvent event(SevWarnAlways, "SpawnProcessFailurePostComplete");
 					setupTraceWithOutput(event, bytesRead, outputBuffer);
 					event.detail("Reason", "Command failed")
 					    .detail("Cmd", path)

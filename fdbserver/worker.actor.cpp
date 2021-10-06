@@ -46,6 +46,7 @@
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/LocalConfiguration.h"
+#include "fdbserver/RemoteIKeyValueStore.actor.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "flow/Profiler.h"
@@ -1325,8 +1326,9 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 			if (s.storedComponent == DiskStore::Storage) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
+				// add a knob in fdbserver/Knobs.h for the last argument
 				IKeyValueStore* kv =
-				    openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, false, validateDataFiles);
+				    openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, false, validateDataFiles, true);
 				Future<Void> kvClosed = kv->onClosed();
 				filesClosed.add(kvClosed);
 
@@ -1396,7 +1398,9 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					logQueueBasename = fileLogQueuePrefix.toString() + optionsString.toString() + "-";
 				}
 				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder);
-				IKeyValueStore* kv = openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles);
+				TraceEvent(SevWarnAlways, "openRemoteKVStore").detail("Type", "TlogData");
+				IKeyValueStore* kv =
+				    openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles, false, true);
 				const DiskQueueVersion dqv =
 				    s.tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
 				const int64_t diskQueueWarnSize =
@@ -1718,7 +1722,8 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					    req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 					std::string filename =
 					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
-					IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit);
+					TraceEvent(SevWarnAlways, "openRemoteKVStore").detail("Type", "3");
+					IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit, false, false, true);
 					const DiskQueueVersion dqv =
 					    tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
 					IDiskQueue* queue = openDiskQueue(
@@ -1798,11 +1803,17 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					                   folder,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
-					IKeyValueStore* data = openKVStore(req.storeType, filename, recruited.id(), memoryLimit);
+
+					TraceEvent(SevWarnAlways, "openRemoteKVStore").detail("Type", "4");
+					IKeyValueStore* data =
+					    openKVStore(req.storeType, filename, recruited.id(), memoryLimit, false, false, true);
+
+					TraceEvent(SevWarnAlways, "openRemoteKVStoreComplete").detail("Type", "4");
 					Future<Void> kvClosed = data->onClosed();
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 					storageCache.set(req.reqId, storageReady.getFuture());
+					TraceEvent(SevWarnAlways, "openingStorageServer").detail("Type", "4");
 					Future<Void> s = storageServer(data,
 					                               recruited,
 					                               req.seedTag,
@@ -1810,6 +1821,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					                               storageReady,
 					                               dbInfo,
 					                               folder);
+					TraceEvent(SevWarnAlways, "StorageServerOpened").detail("Type", "4");
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(&runningStorages,
@@ -2022,6 +2034,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 			when(wait(handleErrors)) {}
 		}
 	} catch (Error& err) {
+		TraceEvent(SevDebug, "WorkerServer").detail("Error", err.code());
 		// Make sure actors are cancelled before "recovery" promises are destructed.
 		for (auto f : recoveries)
 			f.cancel();
