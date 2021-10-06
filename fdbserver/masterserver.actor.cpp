@@ -1251,10 +1251,10 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				if (req.version > self->liveCommittedVersion) {
 					auto curTime = now();
 					// add debug here to change liveCommittedVersion to time bound of now()
-					debug_advanceVersionTimestamp(
-					    self->liveCommittedVersion, 0, curTime + CLIENT_KNOBS->MAX_VERSION_CACHE_LAG);
+					debug_advanceVersionTimestamp(self->liveCommittedVersion,
+					                              curTime + CLIENT_KNOBS->MAX_VERSION_CACHE_LAG);
 					// also add req.version but with no time bound
-					debug_advanceVersionTimestamp(req.version, 0, std::numeric_limits<double>::max());
+					debug_advanceVersionTimestamp(req.version, std::numeric_limits<double>::max());
 					self->liveCommittedVersion = req.version;
 					self->databaseLocked = req.locked;
 					self->proxyMetadataVersion = req.metadataVersion;
