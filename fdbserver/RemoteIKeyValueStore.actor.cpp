@@ -17,6 +17,8 @@ ACTOR Future<Void> remoteIKVSCommit(IKeyValueStore* kvStore, IKVSCommitRequest c
 ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterface) {
 	std::cout << "open KV store request received\n";
 
+	// state ActorCollection actors(false); // actor causes some compilation issue, will get to it after connection
+	// issue is fixed
 	TraceEvent(SevWarnAlways, "RemoteKVStore").detail("Action", "initializing local store");
 	state IKeyValueStore* kvStore = openKVStore(openReq.storeType,
 	                                            openReq.filename,
