@@ -692,7 +692,7 @@ public:
 	                                  // queue is empty
 	int REDWOOD_LAZY_CLEAR_MAX_PAGES; // Maximum number of pages to free before ending a lazy clear cycle, unless the
 	                                  // queue is empty
-	int64_t REDWOOD_REMAP_CLEANUP_WINDOW_SECONDS; // Remap remover lag interval in which to coalesce page writes
+	int64_t REDWOOD_REMAP_CLEANUP_WINDOW; // Remap remover lag interval in which to coalesce page writes
 	double REDWOOD_REMAP_CLEANUP_LAG; // Maximum allowed remap remover lag behind the cleanup window as a multiple of
 	                                  // the window size
 	double REDWOOD_METRICS_INTERVAL;

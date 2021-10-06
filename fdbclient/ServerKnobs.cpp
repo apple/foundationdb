@@ -746,7 +746,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES,                    10 );
 	init( REDWOOD_LAZY_CLEAR_MIN_PAGES,                            0 );
 	init( REDWOOD_LAZY_CLEAR_MAX_PAGES,                          1e6 );
-	init( REDWOOD_REMAP_CLEANUP_WINDOW_SECONDS,                   60 );
+	init( REDWOOD_REMAP_CLEANUP_WINDOW,                           50 );
 	init( REDWOOD_REMAP_CLEANUP_LAG,                             0.1 );
 	init( REDWOOD_METRICS_INTERVAL,                              5.0 );
 	init( REDWOOD_HISTOGRAM_INTERVAL,                           30.0 );

@@ -58,12 +58,6 @@ public:
 	// The total size of the returned value (less the last entry) will be less than byteLimit
 	virtual Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) = 0;
 
-	// Set the version of the next commit.
-	// Must be greater than 0 and greater than previous commit version.
-	virtual void setCommitVersion(Version v);
-	// Get latest durable committed version
-	virtual Future<Version> getCommittedVersion();
-
 	// To debug MEMORY_RADIXTREE type ONLY
 	// Returns (1) how many key & value pairs have been inserted (2) how many nodes have been created (3) how many
 	// key size is less than 12 bytes
