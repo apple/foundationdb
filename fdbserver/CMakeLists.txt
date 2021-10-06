@@ -122,6 +122,7 @@ set(FDBSERVER_SRCS
   TagPartitionedLogSystem.actor.h
   template_fdb.h
   tester.actor.cpp
+  TenantBalancer.actor.cpp
   TesterInterface.actor.h
   TLogInterface.h
   TLogServer.actor.cpp
