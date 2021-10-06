@@ -37,6 +37,10 @@ void initializeSystemMonitorMachineState(SystemMonitorMachineState machineState)
 	::machineState.monitorStartTime = now();
 }
 
+double machineStartTime() {
+	return ::machineState.monitorStartTime;
+}
+
 void systemMonitor() {
 	static StatisticsState statState = StatisticsState();
 	customSystemMonitor("ProcessMetrics", &statState, true);
