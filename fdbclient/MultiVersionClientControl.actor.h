@@ -57,6 +57,7 @@ enum ClientLibPlatform {
 #define CLIENTLIB_ATTR_FILENAME "filename"
 #define CLIENTLIB_ATTR_SIZE "size"
 #define CLIENTLIB_ATTR_CHUNK_COUNT "chunkcount"
+#define CLIENTLIB_ATTR_CHUNK_SIZE "chunksize"
 
 struct ClientLibFilter {
 	bool matchAvailableOnly;
