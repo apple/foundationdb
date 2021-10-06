@@ -26,6 +26,7 @@
 
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/ActorCollection.h"
+#include "flow/SystemMonitor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/CoordinationInterface.h"
@@ -2233,8 +2234,7 @@ public:
 
 		if (db.config.regions.size() > 1 && db.config.regions[0].priority > db.config.regions[1].priority &&
 		    db.config.regions[0].dcId != clusterControllerDcId.get() && versionDifferenceUpdated &&
-		    datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE &&
-		    !remoteTransactionSystemContainsDegradedServers()) {
+		    datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE && remoteDCIsHealthy()) {
 			checkRegions(db.config.regions);
 		}
 
@@ -2978,7 +2978,6 @@ public:
 			return false;
 		}
 
-		const ServerDBInfo dbi = db.serverInfo->get();
 		for (const auto& excludedServer : degradedServers) {
 			if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
 				return true;
@@ -2986,6 +2985,20 @@ public:
 		}
 
 		return false;
+	}
+
+	// Returns true if remote DC is healthy and can failover to.
+	bool remoteDCIsHealthy() {
+		// When we just start, we ignore any remote DC health info since the current CC may be elected at wrong DC due
+		// to that all the processes are still starting.
+		if (machineStartTime() == 0) {
+			return true;
+		}
+		if (now() - machineStartTime() < SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY) {
+			return true;
+		}
+
+		return !remoteTransactionSystemContainsDegradedServers();
 	}
 
 	// Returns true when the cluster controller should trigger a recovery due to degraded servers used in the
@@ -3012,6 +3025,15 @@ public:
 	// transaction system in the primary data center, and no degradation in the remote data center.
 	bool shouldTriggerFailoverDueToDegradedServers() {
 		if (db.config.usableRegions <= 1) {
+			return false;
+		}
+
+		if (SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION >
+		    SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION) {
+			TraceEvent(SevWarn, "TriggerFailoverDueToDegradedServersInvalidConfig")
+			    .suppressFor(1.0)
+			    .detail("Min", SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION)
+			    .detail("Max", SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION);
 			return false;
 		}
 
@@ -4609,11 +4631,6 @@ ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData* self) {
 
 ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self) {
 	state double lastLogTime = 0;
-
-	// The purpose of the initial delay is to wait for the cluster to achieve a steady state before calculating the DC
-	// version difference, since DC version difference may trigger a failover, and we don't want that to happen too
-	// frequently.
-	wait(delay(SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY));
 	loop {
 		self->versionDifferenceUpdated = false;
 		if (self->db.serverInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
@@ -5023,7 +5040,7 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 				} else if (self->shouldTriggerFailoverDueToDegradedServers()) {
 					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER) {
 						TraceEvent("DegradedServerDetectedAndTriggerFailover").log();
-						vector<Optional<Key>> dcPriority;
+						std::vector<Optional<Key>> dcPriority;
 						auto remoteDcId = self->db.config.regions[0].dcId == self->clusterControllerDcId.get()
 						                      ? self->db.config.regions[1].dcId
 						                      : self->db.config.regions[0].dcId;
@@ -5073,7 +5090,6 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(updatedChangingDatacenters(&self));
 	self.addActor.send(updatedChangedDatacenters(&self));
 	self.addActor.send(updateDatacenterVersionDifference(&self));
-	self.addActor.send(updateRemoteDCHealth(&self));
 	self.addActor.send(handleForcedRecoveries(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
@@ -5089,6 +5105,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 
 	if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
 		self.addActor.send(workerHealthMonitor(&self));
+		self.addActor.send(updateRemoteDCHealth(&self));
 	}
 
 	loop choose {
