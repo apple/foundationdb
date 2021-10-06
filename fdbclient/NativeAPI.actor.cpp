@@ -6678,11 +6678,12 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
+			// FIXME shouldn't this also just send to the stream so it throws in mergeChangeFeedStream and retries in
+			/*if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_unknown_change_feed ||
 			    e.code() == error_code_actor_cancelled) {
-				throw;
-			}
+			    throw;
+			}*/
 			results.sendError(e);
 			return Void();
 		}
