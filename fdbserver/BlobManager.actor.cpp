@@ -701,27 +701,16 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 	return Void();
 }
 
-ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterface bwInterf) {
-	try {
-		state Future<Void> waitFailure = waitFailureClient(bwInterf.waitFailure, SERVER_KNOBS->BLOB_WORKER_TIMEOUT);
-		state ReplyPromiseStream<GranuleStatusReply> statusStream =
-		    bwInterf.granuleStatusStreamRequest.getReplyStream(GranuleStatusStreamRequest(bmData->epoch));
-		state KeyRangeMap<std::pair<int64_t, int64_t>> lastSeenSeqno;
-
-		loop choose {
-			when(wait(waitFailure)) {
-				// FIXME: actually handle this!!
-				if (BM_DEBUG) {
-					printf("BM %lld detected BW %s is dead\n", bmData->epoch, bwInterf.id().toString().c_str());
-				}
-				// get all of its ranges
-				// send revoke request to get back all its ranges
-				// send halt (look at rangeMover)
-				// send all its ranges to assignranges stream
-				return Void();
-			}
-			when(GranuleStatusReply _rep = waitNext(statusStream.getFuture())) {
-				GranuleStatusReply rep = _rep;
+ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerInterface bwInterf) {
+	state KeyRangeMap<std::pair<int64_t, int64_t>> lastSeenSeqno;
+	// outer loop handles reconstructing stream if it got a retryable error
+	loop {
+		try {
+			state ReplyPromiseStream<GranuleStatusReply> statusStream =
+			    bwInterf.granuleStatusStreamRequest.getReplyStream(GranuleStatusStreamRequest(bmData->epoch));
+			// read from stream until worker fails (should never get explicit end_of_stream)
+			loop {
+				GranuleStatusReply rep = waitNext(statusStream.getFuture());
 				if (BM_DEBUG) {
 					printf("BM %lld got status of [%s - %s) @ (%lld, %lld) from BW %s: %s\n",
 					       bmData->epoch,
@@ -769,12 +758,66 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 					bmData->addActor.send(maybeSplitRange(bmData, bwInterf.id(), rep.granuleRange));
 				}
 			}
+		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) {
+				throw e;
+			}
+			// if we got an error constructing or reading from stream that is retryable, wait and retry.
+			ASSERT(e.code() != error_code_end_of_stream);
+			if (e.code() == error_code_connection_failed || e.code() == error_code_request_maybe_delivered) {
+				// FIXME: this could throw connection_failed and we could handle catch this the same as the failure
+				// detection triggering
+				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				continue;
+			} else {
+				if (BM_DEBUG) {
+					printf("BM got unexpected error %s monitoring BW %s status\n",
+					       e.name(),
+					       bwInterf.id().toString().c_str());
+				}
+				// TODO change back from SevError?
+				TraceEvent(SevError, "BWStatusMonitoringFailed", bmData->id)
+				    .detail("BlobWorkerID", bwInterf.id())
+				    .error(e);
+				throw e;
+			}
+		}
+	}
+}
+
+ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterface bwInterf) {
+	try {
+		state Future<Void> waitFailure = waitFailureClient(bwInterf.waitFailure, SERVER_KNOBS->BLOB_WORKER_TIMEOUT);
+		state Future<Void> monitorStatus = monitorBlobWorkerStatus(bmData, bwInterf);
+
+		choose {
+			when(wait(waitFailure)) {
+				// FIXME: actually handle this!!
+				if (BM_DEBUG) {
+					printf("BM %lld detected BW %s is dead\n", bmData->epoch, bwInterf.id().toString().c_str());
+				}
+				TraceEvent("BlobWorkerFailed", bmData->id).detail("BlobWorkerID", bwInterf.id());
+				// get all of its ranges
+				// send revoke request to get back all its ranges
+				// send halt (look at rangeMover)
+				// send all its ranges to assignranges stream
+				return Void();
+			}
+			when(wait(monitorStatus)) {
+				ASSERT(false);
+				throw internal_error();
+			}
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_operation_cancelled) {
+			throw e;
+		}
 		// FIXME: forward errors somewhere from here
 		if (BM_DEBUG) {
 			printf("BM got unexpected error %s monitoring BW %s\n", e.name(), bwInterf.id().toString().c_str());
 		}
+		// TODO change back from SevError?
+		TraceEvent(SevError, "BWMonitoringFailed", bmData->id).detail("BlobWorkerID", bwInterf.id()).error(e);
 		throw e;
 	}
 }

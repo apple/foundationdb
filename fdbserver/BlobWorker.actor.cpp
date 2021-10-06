@@ -39,7 +39,7 @@
 #include "flow/flow.h"
 
 #define BW_DEBUG true
-#define BW_REQUEST_DEBUG true
+#define BW_REQUEST_DEBUG false
 
 // FIXME: change all BlobWorkerData* to Reference<BlobWorkerData> to avoid segfaults if core loop gets error
 
@@ -491,6 +491,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
                                            Future<BlobFileIndex> previousDeltaFileFuture,
                                            Optional<KeyRange> oldChangeFeedDataComplete,
                                            Optional<UID> oldChangeFeedId) {
+	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 	// potentially kick off delta file commit check, if our version isn't already known to be committed
 	state uint64_t checkCount = -1;
 	if (bwData->knownCommittedVersion.get() < currentDeltaVersion) {
@@ -527,7 +528,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(BlobWorkerData* bwData,
 			wait(bwData->knownCommittedVersion.onChange());
 		}
 		BlobFileIndex prev = wait(previousDeltaFileFuture);
-		wait(yield()); // prevent stack overflow of many chained futures
+		wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
 
 		// update FDB with new file
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
@@ -600,11 +601,14 @@ ACTOR Future<BlobFileIndex> writeSnapshot(BlobWorkerData* bwData,
 	state Arena arena;
 	state GranuleSnapshot snapshot;
 
+	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
+
 	loop {
 		try {
 			RangeResult res = waitNext(rows.getFuture());
 			arena.dependsOn(res.arena());
 			snapshot.append(arena, res.begin(), res.size());
+			wait(yield(TaskPriority::BlobWorkerUpdateStorage));
 		} catch (Error& e) {
 			if (e.code() == error_code_end_of_stream) {
 				break;
@@ -612,6 +616,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(BlobWorkerData* bwData,
 			throw e;
 		}
 	}
+
+	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
 	if (BW_DEBUG) {
 		printf("Granule [%s - %s) read %d snapshot rows\n",
@@ -647,6 +653,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(BlobWorkerData* bwData,
 	// TODO: inject write error
 	wait(objectFile->append(serialized.begin(), serialized.size()));
 	wait(objectFile->finish());
+
+	wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
 
 	// object uploaded successfully, save it to system key space
 	// TODO add conflict range for writes?
@@ -750,6 +758,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(BlobWorkerData* bwData, R
 ACTOR Future<BlobFileIndex> compactFromBlob(BlobWorkerData* bwData,
                                             Reference<GranuleMetadata> metadata,
                                             GranuleFiles files) {
+	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 	if (BW_DEBUG) {
 		printf("Compacting snapshot from blob for [%s - %s)\n",
 		       metadata->keyRange.begin.printable().c_str(),
@@ -1044,6 +1053,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 		// before starting, make sure worker persists range assignment and acquires the granule lock
 		GranuleChangeFeedInfo _info = wait(metadata->assignFuture);
 		changeFeedInfo = _info;
+
+		wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
+
 		cfKey = StringRef(changeFeedInfo.changeFeedId.toString());
 		if (changeFeedInfo.prevChangeFeedId.present()) {
 			oldCFKey = StringRef(changeFeedInfo.prevChangeFeedId.get().toString());
@@ -1105,6 +1117,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 				startVersion = newSnapshotFile.version;
 				metadata->files.snapshotFiles.push_back(newSnapshotFile);
 				metadata->durableSnapshotVersion.set(startVersion);
+
+				wait(yield(TaskPriority::BlobWorkerUpdateStorage));
 			}
 			metadata->pendingSnapshotVersion = startVersion;
 		}
@@ -1148,6 +1162,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 					       metadata->keyRange.begin.printable().c_str(),
 					       metadata->keyRange.end.printable().c_str());
 				}
+
+				wait(yield(TaskPriority::BlobWorkerUpdateStorage));
 			}
 			if (!inFlightBlobSnapshot.isValid()) {
 				while (inFlightDeltaFiles.size() > 0) {
@@ -1159,7 +1175,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 						                              cfKey,
 						                              changeFeedInfo.changeFeedStartVersion,
 						                              rollbacksCompleted));
+
 						inFlightDeltaFiles.pop_front();
+						wait(yield(TaskPriority::BlobWorkerUpdateStorage));
 					} else {
 						break;
 					}
@@ -1168,7 +1186,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 
 			// inject delay into reading change feed stream
 			if (BUGGIFY_WITH_PROB(0.001)) {
-				wait(delay(deterministicRandom()->random01()));
+				wait(delay(deterministicRandom()->random01(), TaskPriority::BlobWorkerReadChangeFeed));
+			} else {
+				wait(delay(0, TaskPriority::BlobWorkerReadChangeFeed));
 			}
 
 			state Standalone<VectorRef<MutationsAndVersionRef>> mutations;
@@ -1288,6 +1308,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 						metadata->files.snapshotFiles.push_back(completedSnapshot);
 						metadata->durableSnapshotVersion.set(completedSnapshot.version);
 						inFlightBlobSnapshot = Future<BlobFileIndex>(); // not valid!
+						wait(yield(TaskPriority::BlobWorkerUpdateStorage));
 					}
 					for (auto& it : inFlightDeltaFiles) {
 						BlobFileIndex completedDeltaFile = wait(it.future);
@@ -1297,6 +1318,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 						                              cfKey,
 						                              changeFeedInfo.changeFeedStartVersion,
 						                              rollbacksCompleted));
+						wait(yield(TaskPriority::BlobWorkerUpdateStorage));
 					}
 					inFlightDeltaFiles.clear();
 
@@ -1326,6 +1348,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 						if (result.present()) {
 							break;
 						}
+						// FIXME: re-trigger this loop if blob manager status stream changes
 						if (BW_DEBUG) {
 							printf("Granule [%s - %s)\n, hasn't heard back from BM, re-sending status\n",
 							       metadata->keyRange.begin.printable().c_str(),
@@ -1359,23 +1382,30 @@ ACTOR Future<Void> blobGranuleUpdateFiles(BlobWorkerData* bwData, Reference<Gran
 					// if we're in the old change feed case and can't snapshot but we have enough data to, don't queue
 					// too many delta files in parallel
 					while (inFlightDeltaFiles.size() > 10) {
-						printf("[%s - %s) Waiting on delta file b/c old change feed\n",
-						       metadata->keyRange.begin.printable().c_str(),
-						       metadata->keyRange.end.printable().c_str());
+						if (BW_DEBUG) {
+							printf("[%s - %s) Waiting on delta file b/c old change feed\n",
+							       metadata->keyRange.begin.printable().c_str(),
+							       metadata->keyRange.end.printable().c_str());
+						}
 						BlobFileIndex completedDeltaFile = wait(inFlightDeltaFiles.front().future);
-						printf("  [%s - %s) Got completed delta file\n",
-						       metadata->keyRange.begin.printable().c_str(),
-						       metadata->keyRange.end.printable().c_str());
+						if (BW_DEBUG) {
+							printf("  [%s - %s) Got completed delta file\n",
+							       metadata->keyRange.begin.printable().c_str(),
+							       metadata->keyRange.end.printable().c_str());
+						}
 						wait(handleCompletedDeltaFile(bwData,
 						                              metadata,
 						                              completedDeltaFile,
 						                              cfKey,
 						                              changeFeedInfo.changeFeedStartVersion,
 						                              rollbacksCompleted));
+						wait(yield(TaskPriority::BlobWorkerUpdateStorage));
 						inFlightDeltaFiles.pop_front();
 					}
 				}
 				snapshotEligible = false;
+
+				wait(yield(TaskPriority::BlobWorkerReadChangeFeed));
 
 				// finally, after we optionally write delta and snapshot files, add new mutations to buffer
 				if (!deltas.mutations.empty()) {
@@ -1685,6 +1715,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(BlobWorkerData* bwData, BlobGran
 					when(wait(metadata->rollbackCount.onChange())) {}
 					when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
 				}
+
 				if (rollbackCount == metadata->rollbackCount.get()) {
 					break;
 				} else if (BW_REQUEST_DEBUG) {
@@ -1772,7 +1803,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(BlobWorkerData* bwData, BlobGran
 
 			bwData->stats.readReqTotalFilesReturned += chunk.deltaFiles.size() + int(chunk.snapshotFile.present());
 
-			wait(yield());
+			wait(yield(TaskPriority::DefaultEndpoint));
 		}
 		req.reply.send(rep);
 		--bwData->stats.activeReadRequests;
@@ -2343,6 +2374,9 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				addActor.send(handleRangeAssign(&self, granuleToReassign, true));
 			}
 			when(wait(collection)) {
+				if (BW_DEBUG) {
+					printf("BW actor collection returned, exiting\n");
+				}
 				ASSERT(false);
 				throw internal_error();
 			}
