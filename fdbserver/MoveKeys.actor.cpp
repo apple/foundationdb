@@ -1413,6 +1413,9 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							trace.detail("DropedDest", describe(dest));
 						}
 						trace.detail("NewTeamForDroppedShard", describe(teamForDroppedRange));
+						std::cout << "Shard [" << shard.begin.toString() << ", " << shard.end.toString()
+						          << ") lost all shards, it will be cleared and moved to: "
+						          << describe(teamForDroppedRange) << std::endl;
 					} else {
 						TraceEvent(SevDebug, "FailedServerSetKey", serverID)
 						    .detail("Key", shard.begin)
@@ -1507,25 +1510,42 @@ void setUpMetadataServers(Arena& arena,
 	// }
 
 	RangeResult UID2Tag = txnStateStore->readRange(serverTagKeys).get();
-	RangeResult keyServers =
-	    txnStateStore->readRange(KeyRangeRef(keyServersKey(systemKeys.begin), keyServersKey(systemKeys.end))).get();
+	RangeResult keyServers = txnStateStore->readRange(keyServersKeys).get();
 	std::vector<UID> metaServers;
+	std::unordered_map<UID, Optional<KeyRangeRef>> lastOwnedNormalRange;
 	for (int i = 0; i < keyServers.size() - 1; ++i) {
+		KeyRangeRef shard(keyServers[i].key.removePrefix(keyServersPrefix),
+		                  keyServers[i + 1].key.removePrefix(keyServersPrefix));
 		std::vector<UID> src, dest;
 		decodeKeyServersValue(UID2Tag, keyServers[i].value, src, dest);
-		metaServers.insert(metaServers.end(), src.begin(), src.end());
-		metaServers.insert(metaServers.end(), dest.begin(), dest.end());
+		if (shard.begin < systemKeys.begin) {
+			for (const UID& id : src) {
+				lastOwnedNormalRange[id] = shard;
+			}
+			for (const UID& id : dest) {
+				lastOwnedNormalRange[id] = shard;
+			}
+		}
+		if (shard.intersects(systemKeys)) {
+			metaServers.insert(metaServers.end(), src.begin(), src.end());
+			metaServers.insert(metaServers.end(), dest.begin(), dest.end());
+		}
 	}
 	TraceEvent("OldSystemDataServers").detail("Servers", describe(metaServers));
 
-	for (auto& s : metaServers) {
-		tr.clear(arena, KeyRangeRef(serverKeysKey(s, systemKeys.begin), serverKeysKey(s, systemKeys.end)));
-	}
+	// for (auto& s : metaServers) {
+	// 	KeyRef last = lastOwnedNormalRange[s].present() ? lastOwnedNormalRange[s].get() : allKeys.begin;
+	// 	KeyRef key = std::min(systemKeys.begin, last);
+	// 	tr.clear(arena, KeyRangeRef(serverKeysKey(s, key), serverKeysKey(s, systemKeys.end)));
+	// 	// tr.set(arena, serverKeysKey(s, key), serverKeysFalse);
+	// 	krmSetPreviouslyEmptyRange(
+	// 	    tr, arena, serverKeysPrefixFor(s), KeyRangeRef(key, systemKeys.end), serverKeysFalse, serverKeysFalse);
+	// }
 
 	// Is this redundant?
-	for (auto& s : metaServers) {
-		krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(s), systemKeys, serverKeysFalse, serverKeysFalse);
-	}
+	// for (auto& s : metaServers) {
+	// 	krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(s), systemKeys, serverKeysFalse, serverKeysFalse);
+	// }
 
 	std::vector<Tag> serverTags;
 	std::vector<UID> serverSrcUID;
@@ -1545,8 +1565,19 @@ void setUpMetadataServers(Arena& arena,
 		tr.clear(arena, KeyRangeRef(serverKeysKey(s.id(), systemKeys.begin), serverKeysKey(s.id(), systemKeys.end)));
 	}
 	for (auto& s : servers) {
-		krmSetPreviouslyEmptyRange(
-		    tr, arena, serverKeysPrefixFor(s.id()), systemKeys, serverKeysTrueEmptyRange, serverKeysFalse);
+		Optional<KeyRangeRef>& last = lastOwnedNormalRange[s.id()];
+		if (!last.present() || last.get().end < systemKeys.begin) {
+			krmSetPreviouslyEmptyRange(
+			    tr, arena, serverKeysPrefixFor(s.id()), systemKeys, serverKeysTrueEmptyRange, serverKeysFalse);
+		} else {
+			krmSetPreviouslyEmptyRange(tr,
+			                           arena,
+			                           serverKeysPrefixFor(s.id()),
+			                           KeyRangeRef(last.get().begin, systemKeys.end),
+			                           serverKeysTrueEmptyRange,
+			                           serverKeysFalse);
+			// tr.set(arena, serverKeysKey(s.id(), systemKeys.begin), serverKeysTrueEmptyRange);
+		}
 		std::cout << "server id: " << s.id().toString() << " keys: " << systemKeys.toString() << std::endl;
 	}
 	std::cout << "SetUpMetadataServersEnd" << std::endl;

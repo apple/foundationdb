@@ -3204,7 +3204,10 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 			state Future<ErrorOr<MasterInterface>> fNewMaster = masterWorker.worker.interf.master.tryGetReply(rmq);
 			wait(ready(fNewMaster) || db->forceMasterFailure.onTrigger());
 			if (fNewMaster.isReady() && fNewMaster.get().present()) {
-				db->recoverMetadata = false;
+				if (db->recoverMetadata) {
+					TraceEvent("RepairedSystemData", cluster->id);
+					db->recoverMetadata = false;
+				}
 				TraceEvent("CCWDB", cluster->id).detail("Recruited", fNewMaster.get().get().id());
 
 				// for status tool
@@ -4695,8 +4698,7 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 ACTOR Future<Void> handleRepairSystemData(ClusterControllerData* self, ClusterControllerFullInterface interf) {
 	loop {
 		state RepairSystemDataRequest req = waitNext(interf.clientInterface.repairSystemData.getFuture());
-		TraceEvent("RepairSystemDataStart", self->id)
-		    .detail("ClusterControllerDcId", self->clusterControllerDcId);
+		TraceEvent("RepairSystemDataStart", self->id).detail("ClusterControllerDcId", self->clusterControllerDcId);
 		self->db.recoverMetadata = true;
 		self->db.forceMasterFailure.trigger();
 		req.reply.send(Void());
@@ -4706,7 +4708,8 @@ ACTOR Future<Void> handleRepairSystemData(ClusterControllerData* self, ClusterCo
 ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddress> addresses) {
 	// Disable DD to avoid DD undoing of our move.
 	state int ignore = wait(setDDMode(cx, 0));
-	std::cout << "Disabled DDj" << std::endl;
+	std::cout << "Disabled DD" << std::endl
+	          << "Start moving Shard [" << keys.begin.toString() << ", " << keys.end.toString() << ")." << std::endl;
 
 	state std::unique_ptr<FlowLock> startMoveKeysParallelismLock = std::make_unique<FlowLock>();
 	state std::unique_ptr<FlowLock> finishMoveKeysParallelismLock = std::make_unique<FlowLock>();
@@ -4746,7 +4749,7 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 		}
 	}
 
-	std::cout << "Found Storage Server(s):" << std::endl << describe(dest) << std::endl;
+	// std::cout << "Found Storage Server(s):" << std::endl << describe(dest) << std::endl;
 
 	if (dest.empty()) {
 		throw internal_error();
@@ -4785,9 +4788,10 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 		}
 	}
 
-	std::cout << "Moved Shard To New Team: " << describe(dest) << std::endl;
+	std::cout << "Moved Shard [" << keys.begin.toString() << ", " << keys.end.toString() << ")"
+	          << " to New Team: " << describe(dest) << std::endl;
 
-	TraceEvent("ShardMoved").detail("NewTeam", describe(dest));
+	TraceEvent("ShardMoved").detail("Begin", keys.begin).detail("End", keys.end).detail("NewTeam", describe(dest));
 
 	// tr.reset();
 	// Standalone<VectorRef<const char*>> addresses = wait(tr.getAddressesForKey(keys.begin));
@@ -4803,7 +4807,6 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 ACTOR Future<Void> handleMoveShard(ClusterControllerData* self, ClusterControllerFullInterface interf) {
 	loop {
 		state MoveShardRequest req = waitNext(interf.clientInterface.moveShard.getFuture());
-		std::cout << "Received" << req.shard.toString() << std::endl;
 		TraceEvent("ManualMoveShardStart", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("Begin", req.shard.begin)
@@ -5124,7 +5127,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(updateDatacenterVersionDifference(&self));
 	self.addActor.send(handleForcedRecoveries(&self, interf));
 	self.addActor.send(handleMoveShard(&self, interf));
-	self.addActor.send(handleRepairSystemData (&self, interf));
+	self.addActor.send(handleRepairSystemData(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
 	// self.addActor.send(monitorTSSMapping(&self));

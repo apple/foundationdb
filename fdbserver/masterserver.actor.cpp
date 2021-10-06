@@ -586,7 +586,7 @@ ACTOR Future<Void> newMetaDataServers(Reference<MasterData> self,
 		maxTagId = std::max(maxTagId, t.id);
 	}
 	maxTagId = (maxTagId + SERVER_KNOBS->MAX_SKIP_TAGS) * 10;
-	std::cout << "maxTagId: " << maxTagId << std::endl;
+	// std::cout << "maxTagId: " << maxTagId << std::endl;
 
 	ASSERT(!recruits.storageServers.empty());
 	state int idx = 0;
@@ -617,7 +617,8 @@ ACTOR Future<Void> newMetaDataServers(Reference<MasterData> self,
 
 			wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY));
 		} else {
-			std::cout << "New storage server: " << std::endl;
+			std::cout << "Recruit emergency storage server for system data complete: " << describe(*servers)
+			          << std::endl;
 			servers->push_back(newServer.get().interf);
 			(*serverTagMap)[newServer.get().interf.uniqueID] = Tag(locality, maxTagId);
 		}
@@ -1832,6 +1833,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 }
 
 static void backfillTxnStateStoreToSS(Reference<MasterData> self, CommitTransactionRef& tr, Arena& arena) {
+	std::cout << "Repair sytem data start." << std::endl;
 	KeyRange txnKeys = allKeys;
 	// state std::map<Tag, UID> tag_uid;
 
@@ -1845,6 +1847,7 @@ static void backfillTxnStateStoreToSS(Reference<MasterData> self, CommitTransact
 	RangeResult data = self->txnStateStore->readRange(txnKeys).get();
 	// Fill in keyServers, serverTags, serverList, etc.
 	for (const auto& kv : data) {
+		std::cout << "Setting key: " << kv.key.toString() << ", value: " << kv.value.toString() << std::endl;
 		tr.set(arena, kv.key, kv.value);
 	}
 	// for (const auto& it : serverKeysMap) {
@@ -1852,9 +1855,11 @@ static void backfillTxnStateStoreToSS(Reference<MasterData> self, CommitTransact
 	// 		tr.set(arena, serverKeysKey(it.first, kv.key), kv.value);
 	// 	}
 	// }
+	std::cout << "Repair system data complete." << std::endl;
 }
 
 static void backfillDerivedMetaDataToSS(Reference<MasterData> self, CommitTransactionRef& tr, Arena& arena) {
+	std::cout << "Reconstruct data distribution start." << std::endl;
 	RangeResult keyServers = self->txnStateStore->readRange(keyServersKeys).get();
 	RangeResult UID2Tag = self->txnStateStore->readRange(serverTagKeys).get();
 	ASSERT(!keyServers.empty());
@@ -1868,12 +1873,17 @@ static void backfillDerivedMetaDataToSS(Reference<MasterData> self, CommitTransa
 			// serverKeys.insert(keys, serverKeysTrue);
 			krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(id), keys, serverKeysTrue, serverKeysFalse);
 			TraceEvent("RecoveryPopulateSrcServerKeys", id).detail("Begin", keys.begin).detail("End", keys.end);
+			std::cout << "Assigning range [" << keys.begin.toString() << ", " << keys.end.toString()
+			          << ") to: " << id.toString() << std::endl;
 		}
 		for (const UID& id : dest) {
 			krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(id), keys, serverKeysTrue, serverKeysFalse);
 			TraceEvent("RecoveryPopulateDestServerKeys", id).detail("Begin", keys.begin).detail("End", keys.end);
+			std::cout << "Assigning range [" << keys.begin.toString() << ", " << keys.end.toString()
+			          << ") to: " << id.toString() << std::endl;
 		}
 	}
+	std::cout << "Reconstruct data distribution complete." << std::endl;
 }
 
 ACTOR Future<Void> masterCore(Reference<MasterData> self) {
@@ -2134,7 +2144,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		throw master_recovery_failed();
 	}
 
-	std::cout << "recovery transaction completed: " << std::endl;
+	std::cout << "Recovery transaction completed." << std::endl;
 	ASSERT(self->recoveryTransactionVersion != 0);
 
 	// Here.

@@ -84,10 +84,17 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		std::cout << "Moving." << std::endl;
 		wait(moveShard(cx->getConnectionFile(), KeyRangeRef(key, endKey), addresses));
 
-		Transaction tr(cx);
-		Standalone<VectorRef<const char*>> adds = wait(tr.getAddressesForKey(key));
-		ASSERT(adds.size() == 1);
-		ASSERT(adds[0] == ssi.get().address().toString());
+		state Transaction txn(cx);
+		loop {
+			try {
+				state Standalone<VectorRef<const char*>> adds = wait(txn.getAddressesForKey(key));
+				ASSERT(adds.size() == 1);
+				ASSERT(adds[0] == ssi.get().address().toString());
+				break;
+			} catch (Error& e) {
+				wait(txn.onError(e));
+			}
+		}
 		std::cout << "Moved to: " << adds[0] << "(" << ssi.get().uniqueID.toString() << ")" << std::endl;
 
 		wait(self->readAndVerify(self, cx, key, oldValue));
@@ -124,12 +131,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		wait(self->readAndVerify(self, cx, keyServersKey(key), "Timeout"_sr));
 		std::cout << "Verified reading metadata timeout" << std::endl;
 
-		wait(self->readAndVerify(self, cx, key, newValue));
-		std::cout << "Read" << std::endl;
-		// Write will scceed.
-		wait(self->writeAndVerify(self, cx, key, oldValue));
-		std::cout << "Write" << std::endl;
-
 		wait(repairSystemData(cx->getConnectionFile()));
 		wait(delay(30));
 
@@ -142,8 +143,8 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		std::cout << "Read3" << std::endl;
 
-		wait(self->exclude(self, cx, key, ssi2.get().address()));
-		int ignore = wait(setDDMode(cx, 1));
+		// wait(self->exclude(self, cx, key, ssi2.get().address()));
+		// int ignore = wait(setDDMode(cx, 1));
 
 		return Void();
 	}
