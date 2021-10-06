@@ -6653,14 +6653,14 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
 				state ChangeFeedStreamReply rep = waitNext(replyStream.getFuture());
 				begin = rep.mutations.back().version + 1;
 
-				if (rangeID.printable() == "8696f5d434d2247e73307a158f9f2a6b" && begin >= 234494075) {
-					printf("  NA CF %s [%s - %s) got %d at %lld\n",
-					       rangeID.printable().c_str(),
-					       range.begin.printable().c_str(),
-					       range.end.printable().c_str(),
-					       rep.mutations.size(),
-					       begin);
-				}
+				/*if (rangeID.printable() == "8696f5d434d2247e73307a158f9f2a6b" && begin >= 234494075) {
+				    printf("  NA CF %s [%s - %s) got %d at %lld\n",
+				           rangeID.printable().c_str(),
+				           range.begin.printable().c_str(),
+				           range.end.printable().c_str(),
+				           rep.mutations.size(),
+				           begin);
+				}*/
 				state int resultLoc = 0;
 				// TODO TELL EVAN about fix
 				while (resultLoc < rep.mutations.size()) {
@@ -6769,6 +6769,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				Version readVer = wait(tr.getReadVersion());
 				if (readVer < begin) {
 					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+					tr.reset();
 				} else {
 					Optional<Value> val = wait(tr.get(rangeIDKey));
 					if (!val.present()) {
@@ -6877,6 +6878,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 			    e.code() == error_code_connection_failed || e.code() == error_code_unknown_change_feed) {
 				cx->invalidateCache(keys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
+				tr.reset();
 			} else {
 				results.sendError(e);
 				return Void();

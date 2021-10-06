@@ -1840,7 +1840,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 		}
 	} catch (Error& e) {
 		// TODO REMOVE
-		printf("CF Stream got error %s\n", e.name());
+		printf("CF Stream %s got error %s\n", req.rangeID.printable().c_str(), e.name());
 		if (e.code() != error_code_operation_obsolete) {
 			if (!canReplyWith(e))
 				throw;
