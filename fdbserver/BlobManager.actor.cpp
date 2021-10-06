@@ -703,10 +703,12 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 
 ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerInterface bwInterf) {
 	state KeyRangeMap<std::pair<int64_t, int64_t>> lastSeenSeqno;
+	// outer loop handles reconstructing stream if it got a retryable error
 	loop {
 		try {
 			state ReplyPromiseStream<GranuleStatusReply> statusStream =
 			    bwInterf.granuleStatusStreamRequest.getReplyStream(GranuleStatusStreamRequest(bmData->epoch));
+			// read from stream until worker fails (should never get explicit end_of_stream)
 			loop {
 				GranuleStatusReply rep = waitNext(statusStream.getFuture());
 				if (BM_DEBUG) {
@@ -760,6 +762,7 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 			if (e.code() == error_code_operation_cancelled) {
 				throw e;
 			}
+			// if we got an error constructing or reading from stream that is retryable, wait and retry.
 			ASSERT(e.code() != error_code_end_of_stream);
 			if (e.code() == error_code_connection_failed || e.code() == error_code_request_maybe_delivered) {
 				// FIXME: this could throw connection_failed and we could handle catch this the same as the failure

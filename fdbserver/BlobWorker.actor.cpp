@@ -1716,8 +1716,6 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(BlobWorkerData* bwData, BlobGran
 					when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
 				}
 
-				wait(yield(TaskPriority::DefaultEndpoint));
-
 				if (rollbackCount == metadata->rollbackCount.get()) {
 					break;
 				} else if (BW_REQUEST_DEBUG) {
@@ -1804,6 +1802,8 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(BlobWorkerData* bwData, BlobGran
 			rep.chunks.push_back(rep.arena, chunk);
 
 			bwData->stats.readReqTotalFilesReturned += chunk.deltaFiles.size() + int(chunk.snapshotFile.present());
+
+			wait(yield(TaskPriority::DefaultEndpoint));
 		}
 		req.reply.send(rep);
 		--bwData->stats.activeReadRequests;
