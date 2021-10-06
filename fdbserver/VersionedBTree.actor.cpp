@@ -3263,7 +3263,6 @@ public:
 
 	ACTOR static Future<Void> commit_impl(DWALPager* self, Version v) {
 		debug_printf("DWALPager(%s) commit begin %s\n", self->filename.c_str(), ::toString(v).c_str());
-		ASSERT(v > self->pLastCommittedHeader->committedVersion);
 
 		// Write old committed header to Page 1
 		self->writeHeaderPage(1, self->lastCommittedHeaderPage);
@@ -3328,6 +3327,7 @@ public:
 	Future<Void> commit(Version v) override {
 		// Can't have more than one commit outstanding.
 		ASSERT(commitFuture.isReady());
+		ASSERT(v > pLastCommittedHeader->committedVersion);
 		commitFuture = forwardError(commit_impl(this, v), errorPromise);
 		return commitFuture;
 	}
@@ -6965,7 +6965,7 @@ public:
 		        : FLOW_KNOBS->PAGE_CACHE_4K;
 		Version remapCleanupWindow =
 		    SERVER_KNOBS->VERSIONS_PER_SECOND *
-		    (BUGGIFY ? deterministicRandom()->randomInt64(0, 100) : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW_SECONDS);
+		    (BUGGIFY ? deterministicRandom()->randomInt64(0, 100) : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW);
 
 		IPager2* pager = new DWALPager(pageSize,
 		                               extentSize,
@@ -6984,10 +6984,10 @@ public:
 	ACTOR Future<Void> init_impl(KeyValueStoreRedwood* self) {
 		TraceEvent(SevInfo, "RedwoodInit").detail("FilePrefix", self->m_filePrefix);
 		wait(self->m_tree->init());
-		self->m_nextCommitVersion = self->m_tree->getLastCommittedVersion();
 		TraceEvent(SevInfo, "RedwoodInitComplete")
 		    .detail("FilePrefix", self->m_filePrefix)
 		    .detail("Version", self->m_tree->getLastCommittedVersion());
+		self->m_nextCommitVersion = self->m_tree->getLastCommittedVersion() + 1;
 		return Void();
 	}
 
@@ -7010,14 +7010,6 @@ public:
 		delete self;
 	}
 
-	void setCommitVersion(Version v) override {
-		debug_printf("setCommitVersion %lld\n", v);
-		m_nextCommitVersion = v;
-	}
-
-	// Get latest durable committed version
-	Future<Version> getCommittedVersion() override { return m_tree->getLastCommittedVersion(); }
-
 	void close() override { shutdown(this, false); }
 
 	void dispose() override { shutdown(this, true); }
@@ -7028,6 +7020,7 @@ public:
 		Future<Void> c = m_tree->commit(m_nextCommitVersion);
 		// Currently not keeping history
 		m_tree->setOldestReadableVersion(m_nextCommitVersion);
+		++m_nextCommitVersion;
 		return catchError(c);
 	}
 
