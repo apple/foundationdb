@@ -21,7 +21,8 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/MultiVersionClientControl.actor.h"
 #include "fdbserver/workloads/AsyncFile.actor.h"
-
+#include "fdbclient/md5/md5.h"
+#include "fdbclient/libb64/encode.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -34,13 +35,14 @@ using namespace ClientLibUtils;
  */
 struct ClientLibManagementWorkload : public TestWorkload {
 
-	static constexpr const char TEST_FILE_NAME[] = "dummyclientlib";
 	static constexpr size_t FILE_CHUNK_SIZE = 128 * 1024;
 	static constexpr size_t TEST_FILE_SIZE = FILE_CHUNK_SIZE * 8; // 1MB
 
 	RandomByteGenerator rbg;
 	std::string uploadedClientLibId;
 	json_spirit::mObject uploadedMetadataJson;
+	std::string generatedChecksum;
+	std::string generatedFileName;
 	bool success;
 
 	/*----------------------------------------------------------------
@@ -51,12 +53,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 
 	std::string description() const override { return "ClientLibManagement"; }
 
-	Future<Void> setup(Database const& cx) override {
-		if (clientId == 0)
-			return _setup(this);
-
-		return Void();
-	}
+	Future<Void> setup(Database const& cx) override { return _setup(this); }
 
 	Future<Void> start(Database const& cx) override { return _start(this, cx); }
 
@@ -69,18 +66,32 @@ struct ClientLibManagementWorkload : public TestWorkload {
 	 */
 
 	ACTOR Future<Void> _setup(ClientLibManagementWorkload* self) {
+		self->generatedFileName = format("clientLibUpload%d", self->clientId);
 		int64_t flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE;
-		state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(TEST_FILE_NAME, flags, 0666));
+		state Reference<IAsyncFile> file =
+		    wait(IAsyncFileSystem::filesystem()->open(self->generatedFileName, flags, 0666));
 		ASSERT(file.isValid());
 
 		state Reference<AsyncFileBuffer> data = self->allocateBuffer(FILE_CHUNK_SIZE);
 		state int64_t i;
 		state Future<Void> lastWrite = Void();
+
+		state MD5_CTX sum;
+		::MD5_Init(&sum);
+
 		for (i = 0; i < TEST_FILE_SIZE; i += FILE_CHUNK_SIZE) {
 			self->rbg.writeRandomBytesToBuffer(data->buffer, FILE_CHUNK_SIZE);
 			wait(file->write(data->buffer, FILE_CHUNK_SIZE, i));
+
+			::MD5_Update(&sum, data->buffer, FILE_CHUNK_SIZE);
 		}
 		wait(file->sync());
+
+		std::string sumBytes;
+		sumBytes.resize(16);
+		::MD5_Final((unsigned char*)sumBytes.data(), &sum);
+		self->generatedChecksum = base64::encoder::from_string(sumBytes);
+
 		return Void();
 	}
 
@@ -125,7 +136,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 			state StringRef metadataStr = StringRef(testMetadataStr);
 			try {
 				// Try to pass some invalid metadata input
-				wait(uploadClientLibrary(cx, metadataStr, LiteralStringRef(TEST_FILE_NAME)));
+				wait(uploadClientLibrary(cx, metadataStr, self->generatedFileName));
 				self->unexpectedSuccess(
 				    "InvalidMetadata", error_code_client_lib_invalid_metadata, metadataStr.toString().c_str());
 			} catch (Error& e) {
@@ -153,8 +164,25 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<Void> testUploadClientLibWrongChecksum(ClientLibManagementWorkload* self, Database cx) {
+		validClientLibMetadataSample(self->uploadedMetadataJson);
+		state Standalone<StringRef> metadataStr =
+		    StringRef(json_spirit::write_string(json_spirit::mValue(self->uploadedMetadataJson)));
+		getClientLibIdFromMetadataJson(metadataStr, self->uploadedClientLibId);
+		try {
+			wait(uploadClientLibrary(cx, metadataStr, self->generatedFileName));
+			self->unexpectedSuccess("ChecksumMismatch", error_code_client_lib_invalid_binary);
+		} catch (Error& e) {
+			self->testErrorCode("ChecksumMismatch", error_code_client_lib_invalid_binary, e.code());
+		}
+
+		wait(testUploadedClientLibInList(self, cx, ClientLibFilter(), false, "After upload with wrong checksum"));
+		return Void();
+	}
+
 	ACTOR static Future<Void> testUploadClientLib(ClientLibManagementWorkload* self, Database cx) {
 		validClientLibMetadataSample(self->uploadedMetadataJson);
+		self->uploadedMetadataJson[CLIENTLIB_ATTR_CHECKSUM] = self->generatedChecksum;
 		state Standalone<StringRef> metadataStr =
 		    StringRef(json_spirit::write_string(json_spirit::mValue(self->uploadedMetadataJson)));
 		getClientLibIdFromMetadataJson(metadataStr, self->uploadedClientLibId);
@@ -162,7 +190,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		// Test two concurrent uploads of the same library, one of the must fail and another succeed
 		state std::vector<Future<ErrorOr<Void>>> concurrentUploads;
 		for (int i1 = 0; i1 < 2; i1++) {
-			Future<Void> uploadActor = uploadClientLibrary(cx, metadataStr, LiteralStringRef(TEST_FILE_NAME));
+			Future<Void> uploadActor = uploadClientLibrary(cx, metadataStr, self->generatedFileName);
 			concurrentUploads.push_back(errorOr(uploadActor));
 		}
 
@@ -322,7 +350,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		metadataJson[CLIENTLIB_ATTR_VERSION] = "7.1.0";
 		metadataJson[CLIENTLIB_ATTR_GIT_HASH] = randomHexadecimalStr(40);
 		metadataJson[CLIENTLIB_ATTR_TYPE] = "debug";
-		metadataJson[CLIENTLIB_ATTR_CHECKSUM] = randomHexadecimalStr(32);
+		metadataJson[CLIENTLIB_ATTR_CHECKSUM] = randomHexadecimalStr(22);
 		metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(CLIENTLIB_AVAILABLE);
 		metadataJson[CLIENTLIB_ATTR_API_VERSION] = 710;
 		metadataJson[CLIENTLIB_ATTR_PROTOCOL] = "fdb00b07001001";
