@@ -114,6 +114,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( LOG_RANGE_BLOCK_SIZE, CORE_VERSIONSPERSECOND );
 	init( MUTATION_BLOCK_SIZE,	            	  10000);
 	init( MAX_VERSION_CACHE_LAG,                    0.1 );
+	init( DEBUG_USE_GRV_CACHE,                    false );
 
 	// TaskBucket
 	init( TASKBUCKET_LOGGING_DELAY,                5.0 );

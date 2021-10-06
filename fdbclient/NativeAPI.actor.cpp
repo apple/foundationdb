@@ -5770,7 +5770,7 @@ ACTOR Future<Version> getDBCachedReadVersion(DatabaseContext* cx, double request
 
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	if (!readVersion.isValid()) {
-		if (options.useGrvCache && cx->cachedRv > Version(0)) {
+		if ((CLIENT_KNOBS->DEBUG_USE_GRV_CACHE || options.useGrvCache) && cx->cachedRv > Version(0)) {
 			readVersion = getDBCachedReadVersion(getDatabase().getPtr(), now());
 			return readVersion;
 		}

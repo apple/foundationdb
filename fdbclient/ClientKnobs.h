@@ -117,6 +117,7 @@ public:
 	int LOG_RANGE_BLOCK_SIZE;
 	int MUTATION_BLOCK_SIZE;
 	double MAX_VERSION_CACHE_LAG;
+	bool DEBUG_USE_GRV_CACHE; // Turn on to have all GRVs request to use the cache
 
 	// Taskbucket
 	double TASKBUCKET_LOGGING_DELAY;
