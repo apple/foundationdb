@@ -864,8 +864,8 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 
 					if ((workerInPrimary && addressInDbAndPrimaryDc(address, dbInfo)) ||
 					    (!workerInPrimary && addressInDbAndRemoteDc(address, dbInfo))) {
-						// Ignore the servers that are not in the database's transaction system and not in the primary
-						// DC. Note that currently we are not monitor storage servers, since lagging in storage servers
+						// Only monitoring the servers that in the primary or remote DC's transaction systems.
+						// Note that currently we are not monitor storage servers, since lagging in storage servers
 						// today already can trigger server exclusion by data distributor.
 
 						if (peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
