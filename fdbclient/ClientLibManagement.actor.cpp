@@ -39,11 +39,10 @@
 namespace ClientLibManagement {
 
 struct ClientLibBinaryInfo {
-	size_t totalBytes;
-	size_t chunkCnt;
-	size_t chunkSize;
+	size_t totalBytes = 0;
+	size_t chunkCnt = 0;
+	size_t chunkSize = 0;
 	std::string sumBytes;
-	ClientLibBinaryInfo() : totalBytes(0), chunkCnt(0), chunkSize(0) {}
 };
 
 const std::string& getStatusName(ClientLibStatus status) {

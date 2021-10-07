@@ -62,17 +62,13 @@ inline const std::string CLIENTLIB_ATTR_CHUNK_COUNT{ "chunkcount" };
 inline const std::string CLIENTLIB_ATTR_CHUNK_SIZE{ "chunksize" };
 
 struct ClientLibFilter {
-	bool matchAvailableOnly;
-	bool matchPlatform;
-	bool matchCompatibleAPI;
-	bool matchNewerPackageVersion;
-	ClientLibPlatform platformVal;
-	int apiVersion;
-	int numericPkgVersion;
-
-	ClientLibFilter()
-	  : matchAvailableOnly(false), matchPlatform(false), matchCompatibleAPI(false), matchNewerPackageVersion(false),
-	    platformVal(CLIENTLIB_UNKNOWN_PLATFORM), apiVersion(0) {}
+	bool matchAvailableOnly = false;
+	bool matchPlatform = false;
+	bool matchCompatibleAPI = false;
+	bool matchNewerPackageVersion = false;
+	ClientLibPlatform platformVal = CLIENTLIB_UNKNOWN_PLATFORM;
+	int apiVersion = 0;
+	int numericPkgVersion = 0;
 
 	ClientLibFilter& filterAvailable() {
 		matchAvailableOnly = true;
