@@ -66,17 +66,15 @@ struct ClientLibManagementWorkload : public TestWorkload {
 	 */
 
 	ACTOR Future<Void> _setup(ClientLibManagementWorkload* self) {
+		state Reference<AsyncFileBuffer> data = self->allocateBuffer(FILE_CHUNK_SIZE);
+		state int64_t i;
+		state MD5_CTX sum;
+
 		self->generatedFileName = format("clientLibUpload%d", self->clientId);
 		int64_t flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE;
 		state Reference<IAsyncFile> file =
 		    wait(IAsyncFileSystem::filesystem()->open(self->generatedFileName, flags, 0666));
-		ASSERT(file.isValid());
 
-		state Reference<AsyncFileBuffer> data = self->allocateBuffer(FILE_CHUNK_SIZE);
-		state int64_t i;
-		state Future<Void> lastWrite = Void();
-
-		state MD5_CTX sum;
 		::MD5_Init(&sum);
 
 		for (i = 0; i < TEST_FILE_SIZE; i += FILE_CHUNK_SIZE) {
@@ -115,6 +113,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 			"{foo", // invalid json
 			"[]", // json array
 		};
+		state StringRef metadataStr;
 
 		// add garbage attribute
 		json_spirit::mObject metadataJson;
@@ -134,7 +133,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		}
 
 		for (auto& testMetadataStr : invalidMetadataStrs) {
-			state StringRef metadataStr = StringRef(testMetadataStr);
+			metadataStr = StringRef(testMetadataStr);
 			try {
 				// Try to pass some invalid metadata input
 				wait(uploadClientLibrary(cx, metadataStr, self->generatedFileName));
@@ -152,10 +151,10 @@ struct ClientLibManagementWorkload : public TestWorkload {
 	}
 
 	ACTOR static Future<Void> testClientLibUploadFileDoesNotExist(ClientLibManagementWorkload* self, Database cx) {
+		state Standalone<StringRef> metadataStr;
 		json_spirit::mObject metadataJson;
 		validClientLibMetadataSample(metadataJson);
-		state Standalone<StringRef> metadataStr =
-		    StringRef(json_spirit::write_string(json_spirit::mValue(metadataJson)));
+		metadataStr = StringRef(json_spirit::write_string(json_spirit::mValue(metadataJson)));
 		try {
 			wait(uploadClientLibrary(cx, metadataStr, LiteralStringRef("some_not_existing_file_name")));
 			self->unexpectedSuccess("FileDoesNotExist", error_code_file_not_found);
@@ -166,9 +165,9 @@ struct ClientLibManagementWorkload : public TestWorkload {
 	}
 
 	ACTOR static Future<Void> testUploadClientLibWrongChecksum(ClientLibManagementWorkload* self, Database cx) {
+		state Standalone<StringRef> metadataStr;
 		validClientLibMetadataSample(self->uploadedMetadataJson);
-		state Standalone<StringRef> metadataStr =
-		    StringRef(json_spirit::write_string(json_spirit::mValue(self->uploadedMetadataJson)));
+		metadataStr = StringRef(json_spirit::write_string(json_spirit::mValue(self->uploadedMetadataJson)));
 		getClientLibIdFromMetadataJson(metadataStr, self->uploadedClientLibId);
 		try {
 			wait(uploadClientLibrary(cx, metadataStr, self->generatedFileName));
@@ -182,14 +181,14 @@ struct ClientLibManagementWorkload : public TestWorkload {
 	}
 
 	ACTOR static Future<Void> testUploadClientLib(ClientLibManagementWorkload* self, Database cx) {
+		state Standalone<StringRef> metadataStr;
+		state std::vector<Future<ErrorOr<Void>>> concurrentUploads;
 		validClientLibMetadataSample(self->uploadedMetadataJson);
 		self->uploadedMetadataJson[CLIENTLIB_ATTR_CHECKSUM] = self->generatedChecksum;
-		state Standalone<StringRef> metadataStr =
-		    StringRef(json_spirit::write_string(json_spirit::mValue(self->uploadedMetadataJson)));
+		metadataStr = StringRef(json_spirit::write_string(json_spirit::mValue(self->uploadedMetadataJson)));
 		getClientLibIdFromMetadataJson(metadataStr, self->uploadedClientLibId);
 
 		// Test two concurrent uploads of the same library, one of the must fail and another succeed
-		state std::vector<Future<ErrorOr<Void>>> concurrentUploads;
 		for (int i1 = 0; i1 < 2; i1++) {
 			Future<Void> uploadActor = uploadClientLibrary(cx, metadataStr, self->generatedFileName);
 			concurrentUploads.push_back(errorOr(uploadActor));
@@ -219,16 +218,17 @@ struct ClientLibManagementWorkload : public TestWorkload {
 
 	ACTOR static Future<Void> testClientLibDownloadNotExisting(ClientLibManagementWorkload* self, Database cx) {
 		// Generate a random valid clientLibId
+		state std::string clientLibId;
+		state std::string destFileName;
 		json_spirit::mObject metadataJson;
 		validClientLibMetadataSample(metadataJson);
 		Standalone<StringRef> metadataStr = StringRef(json_spirit::write_string(json_spirit::mValue(metadataJson)));
-		state std::string clientLibId;
 		getClientLibIdFromMetadataJson(metadataStr, clientLibId);
 
-		state std::string destFileName = format("clientLibDownload%d", self->clientId);
+		destFileName = format("clientLibDownload%d", self->clientId);
 
 		try {
-			wait(downloadClientLibrary(cx, metadataStr, destFileName));
+			wait(downloadClientLibrary(cx, clientLibId, destFileName));
 			self->unexpectedSuccess("ClientLibDoesNotExist", error_code_client_lib_not_found);
 		} catch (Error& e) {
 			self->testErrorCode("ClientLibDoesNotExist", error_code_client_lib_not_found, e.code());

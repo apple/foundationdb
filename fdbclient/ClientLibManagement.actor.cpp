@@ -203,10 +203,16 @@ ACTOR Future<Void> uploadClientLibBinary(Database db,
                                          KeyRef chunkKeyPrefix,
                                          ClientLibBinaryInfo* binInfo) {
 
-	state size_t fileOffset = 0;
-	state size_t chunkNo = 0;
 	state int transactionSize = getAlignedUpperBound(CLIENT_KNOBS->MVC_CLIENTLIB_TRANSACTION_SIZE, _PAGE_SIZE);
 	state int chunkSize = getAlignedUpperBound(CLIENT_KNOBS->MVC_CLIENTLIB_CHUNK_SIZE, 1024);
+	state size_t fileOffset = 0;
+	state size_t chunkNo = 0;
+	state MD5_CTX sum;
+	state Arena arena;
+	state StringRef buf;
+	state Transaction tr;
+	state size_t firstChunkNo;
+
 	if (transactionSize % chunkSize != 0) {
 		TraceEvent(SevError, "ClientLibraryInvalidConfig")
 		    .detail("Reason", format("Invalid chunk size configuration, falling back to %d", _PAGE_SIZE));
@@ -216,12 +222,11 @@ ACTOR Future<Void> uploadClientLibBinary(Database db,
 	state Reference<IAsyncFile> fClientLib = wait(IAsyncFileSystem::filesystem()->open(
 	    libFilePath.toString(), IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
 
-	state MD5_CTX sum;
 	::MD5_Init(&sum);
 
 	loop {
-		state Arena arena;
-		state StringRef buf = makeAlignedString(_PAGE_SIZE, transactionSize, arena);
+		arena = Arena();
+		buf = makeAlignedString(_PAGE_SIZE, transactionSize, arena);
 		state int bytesRead = wait(fClientLib->read(mutateString(buf), transactionSize, fileOffset));
 		fileOffset += bytesRead;
 		if (bytesRead <= 0) {
@@ -230,8 +235,8 @@ ACTOR Future<Void> uploadClientLibBinary(Database db,
 
 		::MD5_Update(&sum, buf.begin(), bytesRead);
 
-		state Transaction tr(db);
-		state size_t firstChunkNo = chunkNo;
+		tr = Transaction(db);
+		firstChunkNo = chunkNo;
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -269,20 +274,24 @@ ACTOR Future<Void> uploadClientLibBinary(Database db,
 ACTOR Future<Void> deleteClientLibBinary(Database db, Key chunkKeyPrefix, size_t chunkCount) {
 	state size_t chunkNo = 0;
 	state size_t keysPerTransaction = CLIENT_KNOBS->MVC_CLIENTLIB_DELETE_KEYS_PER_TRANSACTION;
+	state Arena arena;
+	state Transaction tr;
+	state size_t endChunk;
+
 	loop {
-		state Arena arena;
-		state Transaction tr1(db);
+		arena = Arena();
+		tr = Transaction(db);
 		loop {
 			try {
-				tr1.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state size_t endChunk = std::min(chunkNo + keysPerTransaction, chunkCount);
-				tr1.clear(KeyRangeRef(chunkKeyFromNo(chunkKeyPrefix, chunkNo, arena),
-				                      chunkKeyFromNo(chunkKeyPrefix, endChunk, arena)));
-				wait(tr1.commit());
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				endChunk = std::min(chunkNo + keysPerTransaction, chunkCount);
+				tr.clear(KeyRangeRef(chunkKeyFromNo(chunkKeyPrefix, chunkNo, arena),
+				                     chunkKeyFromNo(chunkKeyPrefix, endChunk, arena)));
+				wait(tr.commit());
 				chunkNo = endChunk;
 				break;
 			} catch (Error& e) {
-				wait(tr1.onError(e));
+				wait(tr.onError(e));
 			}
 		}
 		if (chunkNo == chunkCount) {
@@ -293,15 +302,15 @@ ACTOR Future<Void> deleteClientLibBinary(Database db, Key chunkKeyPrefix, size_t
 }
 
 ACTOR Future<Void> deleteClientLibMetadataEntry(Database db, Key clientLibMetaKey) {
+	state Transaction tr(db);
 	loop {
-		state Transaction tr2(db);
 		try {
-			tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr2.clear(clientLibMetaKey);
-			wait(tr2.commit());
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.clear(clientLibMetaKey);
+			wait(tr.commit());
 			break;
 		} catch (Error& e) {
-			wait(tr2.onError(e));
+			wait(tr.onError(e));
 		}
 	}
 	return Void();
@@ -311,6 +320,14 @@ ACTOR Future<Void> deleteClientLibMetadataEntry(Database db, Key clientLibMetaKe
 
 ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, StringRef libFilePath) {
 	state json_spirit::mObject metadataJson;
+	state std::string clientLibId;
+	state Key clientLibMetaKey;
+	state Key clientLibBinPrefix;
+	state std::string jsStr;
+	state Transaction tr;
+	state ClientLibBinaryInfo binInfo;
+	state ClientLibStatus targetStatus;
+
 	parseMetadataJson(metadataString, metadataJson);
 
 	json_spirit::mValue schema;
@@ -327,12 +344,11 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 		throw client_lib_invalid_metadata();
 	}
 
-	state std::string clientLibId;
 	getIdFromMetadataJson(metadataJson, clientLibId);
-	state Key clientLibMetaKey = metadataKeyFromId(clientLibId);
-	state Key clientLibBinPrefix = chunkKeyPrefixFromId(clientLibId);
+	clientLibMetaKey = metadataKeyFromId(clientLibId);
+	clientLibBinPrefix = chunkKeyPrefixFromId(clientLibId);
 
-	state ClientLibStatus targetStatus = getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS));
+	targetStatus = getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS));
 	if (!isValidTargetStatus(targetStatus)) {
 		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
 		    .detail("Reason", "InvalidTargetStatus")
@@ -346,13 +362,13 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 	getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_API_VERSION);
 
 	metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(CLIENTLIB_UPLOADING);
-	state std::string jsStr = json_spirit::write_string(json_spirit::mValue(metadataJson));
+	jsStr = json_spirit::write_string(json_spirit::mValue(metadataJson));
 
 	/*
 	 * Check if the client library with the same identifier already exists.
 	 * If not, write its metadata with "uploading" state to prevent concurrent uploads
 	 */
-	state Transaction tr(db);
+	tr = Transaction(db);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -380,7 +396,6 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 	/*
 	 * Upload the binary of the client library in chunks
 	 */
-	state ClientLibBinaryInfo binInfo;
 	wait(uploadClientLibBinary(db, libFilePath, clientLibBinPrefix, &binInfo));
 
 	std::string checkSum = getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_CHECKSUM);
@@ -429,7 +444,21 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, StringRef libFilePath) {
 	state Key clientLibMetaKey = metadataKeyFromId(clientLibId.toString());
 	state Key chunkKeyPrefix = chunkKeyPrefixFromId(clientLibId.toString());
+	state int transactionSize = getAlignedUpperBound(CLIENT_KNOBS->MVC_CLIENTLIB_TRANSACTION_SIZE, _PAGE_SIZE);
 	state json_spirit::mObject metadataJson;
+	state std::string checkSum;
+	state size_t chunkCount;
+	state size_t binarySize;
+	state size_t expectedChunkSize;
+	state Transaction tr;
+	state size_t fileOffset;
+	state size_t chunkNo;
+	state MD5_CTX sum;
+	state Arena arena;
+	state StringRef buf;
+	state size_t bufferOffset;
+	state size_t firstChunkNo;
+	state KeyRef chunkKey;
 
 	TraceEvent("ClientLibraryBeginDownload").detail("Key", clientLibMetaKey);
 
@@ -438,7 +467,7 @@ ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, Str
 	 * the chunk count of the client library
 	 */
 	loop {
-		state Transaction tr(db);
+		tr = Transaction(db);
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			Optional<Value> metadataOpt = wait(tr.get(clientLibMetaKey));
@@ -466,33 +495,31 @@ ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, Str
 	state Reference<IAsyncFile> fClientLib =
 	    wait(IAsyncFileSystem::filesystem()->open(libFilePath.toString(), flags, 0666));
 
-	state std::string checkSum = getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_CHECKSUM);
-	state int transactionSize = getAlignedUpperBound(CLIENT_KNOBS->MVC_CLIENTLIB_TRANSACTION_SIZE, _PAGE_SIZE);
-	state size_t chunkCount = getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_CHUNK_COUNT);
-	state size_t binarySize = getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_SIZE);
-	state size_t expectedChunkSize = getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_CHUNK_SIZE);
+	checkSum = getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_CHECKSUM);
+	chunkCount = getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_CHUNK_COUNT);
+	binarySize = getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_SIZE);
+	expectedChunkSize = getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_CHUNK_SIZE);
 	ASSERT(transactionSize % expectedChunkSize == 0);
-	state size_t fileOffset = 0;
-	state size_t chunkNo = 0;
+	fileOffset = 0;
+	chunkNo = 0;
 
-	state MD5_CTX sum;
 	::MD5_Init(&sum);
 
 	loop {
-		state Arena arena;
-		state Transaction tr1(db);
-		state StringRef buf = makeAlignedString(_PAGE_SIZE, transactionSize, arena);
-		state size_t bufferOffset = 0;
-		state size_t firstChunkNo = chunkNo;
+		arena = Arena();
+		tr = Transaction(db);
+		buf = makeAlignedString(_PAGE_SIZE, transactionSize, arena);
+		bufferOffset = 0;
+		firstChunkNo = chunkNo;
 
 		loop {
 			try {
 				bufferOffset = 0;
 				chunkNo = firstChunkNo;
-				tr1.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				loop {
-					state KeyRef chunkKey = chunkKeyFromNo(chunkKeyPrefix, chunkNo, arena);
-					state Optional<Value> chunkValOpt = wait(tr1.get(chunkKey));
+					chunkKey = chunkKeyFromNo(chunkKeyPrefix, chunkNo, arena);
+					state Optional<Value> chunkValOpt = wait(tr.get(chunkKey));
 					if (!chunkValOpt.present()) {
 						TraceEvent(SevWarnAlways, "ClientLibraryChunkNotFound").detail("Key", chunkKey);
 						throw client_lib_invalid_binary();
@@ -522,7 +549,7 @@ ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, Str
 				if (e.code() == error_code_client_lib_invalid_binary) {
 					throw;
 				}
-				wait(tr1.onError(e));
+				wait(tr.onError(e));
 			}
 		}
 
@@ -566,6 +593,8 @@ ACTOR Future<Void> deleteClientLibrary(Database db, StringRef clientLibId) {
 	state Key clientLibMetaKey = metadataKeyFromId(clientLibId.toString());
 	state Key chunkKeyPrefix = chunkKeyPrefixFromId(clientLibId.toString());
 	state json_spirit::mObject metadataJson;
+	state std::string jsStr;
+	state size_t chunkCount;
 
 	TraceEvent("ClientLibraryBeginDelete").detail("Key", clientLibMetaKey);
 
@@ -583,7 +612,7 @@ ACTOR Future<Void> deleteClientLibrary(Database db, StringRef clientLibId) {
 			}
 			parseMetadataJson(metadataOpt.get(), metadataJson);
 			metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(CLIENTLIB_DELETING);
-			state std::string jsStr = json_spirit::write_string(json_spirit::mValue(metadataJson));
+			jsStr = json_spirit::write_string(json_spirit::mValue(metadataJson));
 			tr.set(clientLibMetaKey, ValueRef(jsStr));
 			wait(tr.commit());
 			break;
@@ -595,7 +624,7 @@ ACTOR Future<Void> deleteClientLibrary(Database db, StringRef clientLibId) {
 		}
 	}
 
-	state size_t chunkCount = getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_CHUNK_COUNT);
+	chunkCount = getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_CHUNK_COUNT);
 	wait(deleteClientLibBinary(db, chunkKeyPrefix, chunkCount));
 	wait(deleteClientLibMetadataEntry(db, clientLibMetaKey));
 
@@ -639,25 +668,30 @@ void applyClientLibFilter(const ClientLibFilter& filter,
 
 ACTOR Future<Standalone<VectorRef<StringRef>>> listClientLibraries(Database db, ClientLibFilter filter) {
 	state Standalone<VectorRef<StringRef>> result;
+	state Transaction tr(db);
+	state PromiseStream<Standalone<RangeResultRef>> scanResults;
+	state Key fromKey;
+	state Key toKey;
+	state KeyRangeRef scanRange;
+	state Future<Void> stream;
+
 	loop {
-		state Transaction tr(db);
-		state PromiseStream<Standalone<RangeResultRef>> scanResults;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			state KeyRangeRef scanRange;
 			if (filter.matchPlatform) {
 				Key prefixWithPlatform =
 				    clientLibMetadataPrefix.withSuffix(std::string(getPlatformName(filter.platformVal)));
-				state Key fromKey = prefixWithPlatform.withSuffix(LiteralStringRef("/"));
+				fromKey = prefixWithPlatform.withSuffix(LiteralStringRef("/"));
 				if (filter.matchNewerPackageVersion) {
 					fromKey = fromKey.withSuffix(format("%09d", filter.numericPkgVersion + 1));
 				}
-				state Key toKey = prefixWithPlatform.withSuffix(LiteralStringRef("0"));
+				toKey = prefixWithPlatform.withSuffix(LiteralStringRef("0"));
 				scanRange = KeyRangeRef(StringRef(fromKey), toKey);
 			} else {
 				scanRange = clientLibMetadataKeys;
 			}
-			state Future<Void> stream = tr.getRangeStream(scanResults, scanRange, GetRangeLimits());
+			scanResults = PromiseStream<Standalone<RangeResultRef>>();
+			stream = tr.getRangeStream(scanResults, scanRange, GetRangeLimits());
 			loop {
 				Standalone<RangeResultRef> scanResultRange = waitNext(scanResults.getFuture());
 				applyClientLibFilter(filter, scanResultRange, result);
