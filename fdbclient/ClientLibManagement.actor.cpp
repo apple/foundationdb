@@ -24,8 +24,6 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ClientKnobs.h"
 #include "fdbclient/versions.h"
-#include "fdbclient/md5/md5.h"
-#include "fdbclient/libb64/encode.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/Platform.h"
 
@@ -42,7 +40,7 @@ struct ClientLibBinaryInfo {
 	size_t totalBytes = 0;
 	size_t chunkCnt = 0;
 	size_t chunkSize = 0;
-	std::string sumBytes;
+	Standalone<StringRef> sumBytes;
 };
 
 const std::string& getStatusName(ClientLibStatus status) {
@@ -182,7 +180,25 @@ ClientLibPlatform getCurrentClientPlatform() {
 	return CLIENTLIB_UNKNOWN_PLATFORM;
 #endif
 }
+
+Standalone<StringRef> byteArrayToHexString(StringRef input) {
+	static const char* digits = "0123456789abcdef";
+	Standalone<StringRef> output = makeString(input.size() * 2);
+	char* pout = reinterpret_cast<char*>(mutateString(output));
+	for (const uint8_t* pin = input.begin(); pin != input.end(); ++pin) {
+		*pout++ = digits[(*pin >> 4) & 0xF];
+		*pout++ = digits[(*pin) & 0xF];
+	}
+	return output;
+}
+
 } // namespace
+
+Standalone<StringRef> MD5SumToHexString(MD5_CTX& sum) {
+	Standalone<StringRef> sumBytes = makeString(16);
+	::MD5_Final(mutateString(sumBytes), &sum);
+	return byteArrayToHexString(sumBytes);
+}
 
 ClientLibFilter& ClientLibFilter::filterNewerPackageVersion(const std::string& versionStr) {
 	matchNewerPackageVersion = true;
@@ -219,8 +235,9 @@ ACTOR Future<Void> uploadClientLibBinary(Database db,
 		chunkSize = _PAGE_SIZE;
 	}
 
+	// Disabling AIO, because it supports only page-aligned writes
 	state Reference<IAsyncFile> fClientLib = wait(IAsyncFileSystem::filesystem()->open(
-	    libFilePath.toString(), IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
+	    libFilePath.toString(), IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO, 0));
 
 	::MD5_Init(&sum);
 
@@ -263,11 +280,7 @@ ACTOR Future<Void> uploadClientLibBinary(Database db,
 	binInfo->totalBytes = fileOffset;
 	binInfo->chunkCnt = chunkNo;
 	binInfo->chunkSize = chunkSize;
-
-	std::string sumBytes;
-	sumBytes.resize(16);
-	::MD5_Final((unsigned char*)sumBytes.data(), &sum);
-	binInfo->sumBytes = base64::encoder::from_string(sumBytes);
+	binInfo->sumBytes = MD5SumToHexString(sum);
 	return Void();
 }
 
@@ -279,6 +292,9 @@ ACTOR Future<Void> deleteClientLibBinary(Database db, Key chunkKeyPrefix, size_t
 	state size_t endChunk;
 
 	loop {
+		if (chunkNo == chunkCount) {
+			break;
+		}
 		arena = Arena();
 		tr = Transaction(db);
 		loop {
@@ -293,9 +309,6 @@ ACTOR Future<Void> deleteClientLibBinary(Database db, Key chunkKeyPrefix, size_t
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
-		}
-		if (chunkNo == chunkCount) {
-			break;
 		}
 	}
 	return Void();
@@ -399,7 +412,7 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 	wait(uploadClientLibBinary(db, libFilePath, clientLibBinPrefix, &binInfo));
 
 	std::string checkSum = getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_CHECKSUM);
-	if (binInfo.sumBytes != checkSum) {
+	if (binInfo.sumBytes != StringRef(checkSum)) {
 		TraceEvent(SevWarnAlways, "ClientLibraryChecksumMismatch")
 		    .detail("Expected", checkSum)
 		    .detail("Actual", binInfo.sumBytes)
@@ -490,8 +503,9 @@ ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, Str
 		throw client_lib_not_available();
 	}
 
+	// Disabling AIO, because it supports only page-aligned writes
 	int64_t flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE |
-	                IAsyncFile::OPEN_UNCACHED;
+	                IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
 	state Reference<IAsyncFile> fClientLib =
 	    wait(IAsyncFileSystem::filesystem()->open(libFilePath.toString(), flags, 0666));
 
@@ -506,6 +520,10 @@ ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, Str
 	::MD5_Init(&sum);
 
 	loop {
+		if (chunkNo == chunkCount) {
+			break;
+		}
+
 		arena = Arena();
 		tr = Transaction(db);
 		buf = makeAlignedString(_PAGE_SIZE, transactionSize, arena);
@@ -527,7 +545,7 @@ ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, Str
 					StringRef chunkVal = chunkValOpt.get();
 					// All chunks exept for the last one must be of the expected size to guarantee
 					// alignment when writing to file
-					if ((chunkNo != chunkCount && chunkVal.size() != expectedChunkSize) ||
+					if ((chunkNo != (chunkCount - 1) && chunkVal.size() != expectedChunkSize) ||
 					    chunkVal.size() > expectedChunkSize) {
 						TraceEvent(SevWarnAlways, "ClientLibraryInvalidChunkSize")
 						    .detail("Key", chunkKey)
@@ -558,10 +576,6 @@ ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, Str
 			fileOffset += bufferOffset;
 			::MD5_Update(&sum, buf.begin(), bufferOffset);
 		}
-
-		if (chunkNo == chunkCount) {
-			break;
-		}
 	}
 
 	if (fileOffset != binarySize) {
@@ -571,14 +585,11 @@ ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, Str
 		throw client_lib_invalid_binary();
 	}
 
-	std::string sumBytes;
-	sumBytes.resize(16);
-	::MD5_Final((unsigned char*)sumBytes.data(), &sum);
-	std::string sumBase64 = base64::encoder::from_string(sumBytes);
-	if (sumBase64 != checkSum) {
+	Standalone<StringRef> sumBytesStr = MD5SumToHexString(sum);
+	if (sumBytesStr != StringRef(checkSum)) {
 		TraceEvent(SevWarnAlways, "ClientLibraryChecksumMismatch")
 		    .detail("Expected", checkSum)
-		    .detail("Actual", sumBase64)
+		    .detail("Actual", sumBytesStr)
 		    .detail("Key", clientLibMetaKey);
 		throw client_lib_invalid_binary();
 	}

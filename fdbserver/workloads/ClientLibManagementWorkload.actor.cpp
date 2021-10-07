@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
+#include "fdbrpc/IAsyncFile.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/ClientLibManagement.actor.h"
 #include "fdbserver/workloads/AsyncFile.actor.h"
 #include "fdbclient/md5/md5.h"
-#include "fdbclient/libb64/encode.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -34,22 +34,25 @@ using namespace ClientLibManagement;
  * MultiVersionClientControl.actor.h
  */
 struct ClientLibManagementWorkload : public TestWorkload {
+	static constexpr size_t FILE_CHUNK_SIZE = 128 * 1024; // Used for test setup only
 
-	static constexpr size_t FILE_CHUNK_SIZE = 128 * 1024;
-	static constexpr size_t TEST_FILE_SIZE = FILE_CHUNK_SIZE * 8; // 1MB
-
+	size_t testFileSize = 0;
 	RandomByteGenerator rbg;
 	std::string uploadedClientLibId;
 	json_spirit::mObject uploadedMetadataJson;
-	std::string generatedChecksum;
+	Standalone<StringRef> generatedChecksum;
 	std::string generatedFileName;
-	bool success;
+	bool success = true;
 
 	/*----------------------------------------------------------------
 	 *  Interface
 	 */
 
-	ClientLibManagementWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), success(true) {}
+	ClientLibManagementWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+		int minTestFileSize = getOption(options, LiteralStringRef("minTestFileSize"), 0);
+		int maxTestFileSize = getOption(options, LiteralStringRef("maxTestFileSize"), 1024 * 1024);
+		testFileSize = deterministicRandom()->randomInt(minTestFileSize, maxTestFileSize + 1);
+	}
 
 	std::string description() const override { return "ClientLibManagement"; }
 
@@ -67,28 +70,28 @@ struct ClientLibManagementWorkload : public TestWorkload {
 
 	ACTOR Future<Void> _setup(ClientLibManagementWorkload* self) {
 		state Reference<AsyncFileBuffer> data = self->allocateBuffer(FILE_CHUNK_SIZE);
-		state int64_t i;
+		state size_t fileOffset;
 		state MD5_CTX sum;
+		state size_t bytesToWrite;
 
 		self->generatedFileName = format("clientLibUpload%d", self->clientId);
-		int64_t flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE;
+		int64_t flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE |
+		                IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
 		state Reference<IAsyncFile> file =
 		    wait(IAsyncFileSystem::filesystem()->open(self->generatedFileName, flags, 0666));
 
 		::MD5_Init(&sum);
 
-		for (i = 0; i < TEST_FILE_SIZE; i += FILE_CHUNK_SIZE) {
+		for (fileOffset = 0; fileOffset < self->testFileSize; fileOffset += FILE_CHUNK_SIZE) {
 			self->rbg.writeRandomBytesToBuffer(data->buffer, FILE_CHUNK_SIZE);
-			wait(file->write(data->buffer, FILE_CHUNK_SIZE, i));
+			bytesToWrite = std::min(FILE_CHUNK_SIZE, self->testFileSize - fileOffset);
+			wait(file->write(data->buffer, bytesToWrite, fileOffset));
 
-			::MD5_Update(&sum, data->buffer, FILE_CHUNK_SIZE);
+			::MD5_Update(&sum, data->buffer, bytesToWrite);
 		}
 		wait(file->sync());
 
-		std::string sumBytes;
-		sumBytes.resize(16);
-		::MD5_Final((unsigned char*)sumBytes.data(), &sum);
-		self->generatedChecksum = base64::encoder::from_string(sumBytes);
+		self->generatedChecksum = MD5SumToHexString(sum);
 
 		return Void();
 	}
@@ -101,6 +104,10 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		wait(testUploadClientLibInvalidInput(self, cx));
 		wait(testClientLibUploadFileDoesNotExist(self, cx));
 		wait(testUploadClientLib(self, cx));
+		if (!self->success) {
+			// The further tests depend on successful upload
+			return Void();
+		}
 		wait(testClientLibListAfterUpload(self, cx));
 		wait(testDownloadClientLib(self, cx));
 		wait(testDeleteClientLib(self, cx));
@@ -184,7 +191,9 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		state Standalone<StringRef> metadataStr;
 		state std::vector<Future<ErrorOr<Void>>> concurrentUploads;
 		validClientLibMetadataSample(self->uploadedMetadataJson);
-		self->uploadedMetadataJson[CLIENTLIB_ATTR_CHECKSUM] = self->generatedChecksum;
+		self->uploadedMetadataJson[CLIENTLIB_ATTR_CHECKSUM] = self->generatedChecksum.toString();
+		// avoid clientLibId clashes, when multiple clients try to upload the same file
+		self->uploadedMetadataJson[CLIENTLIB_ATTR_TYPE] = format("devbuild%d", self->clientId);
 		metadataStr = StringRef(json_spirit::write_string(json_spirit::mValue(self->uploadedMetadataJson)));
 		getClientLibIdFromMetadataJson(metadataStr, self->uploadedClientLibId);
 
@@ -247,9 +256,9 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		} else {
 			fseek(f, 0L, SEEK_END);
 			size_t fileSize = ftell(f);
-			if (fileSize != TEST_FILE_SIZE) {
+			if (fileSize != self->testFileSize) {
 				TraceEvent(SevError, "ClientLibDownloadFileSizeMismatch")
-				    .detail("ExpectedSize", TEST_FILE_SIZE)
+				    .detail("ExpectedSize", self->testFileSize)
 				    .detail("ActualSize", fileSize);
 				self->success = false;
 			}
@@ -351,7 +360,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		metadataJson[CLIENTLIB_ATTR_VERSION] = "7.1.0";
 		metadataJson[CLIENTLIB_ATTR_GIT_HASH] = randomHexadecimalStr(40);
 		metadataJson[CLIENTLIB_ATTR_TYPE] = "debug";
-		metadataJson[CLIENTLIB_ATTR_CHECKSUM] = randomHexadecimalStr(22);
+		metadataJson[CLIENTLIB_ATTR_CHECKSUM] = randomHexadecimalStr(32);
 		metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(CLIENTLIB_AVAILABLE);
 		metadataJson[CLIENTLIB_ATTR_API_VERSION] = 710;
 		metadataJson[CLIENTLIB_ATTR_PROTOCOL] = "fdb00b07001001";

@@ -27,6 +27,7 @@
 
 #include <string>
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/md5/md5.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -96,6 +97,9 @@ ClientLibStatus getStatusByName(std::string_view statusName);
 
 const std::string& getPlatformName(ClientLibPlatform platform);
 ClientLibPlatform getPlatformByName(std::string_view platformName);
+
+// encodes MD5 result to a hexadecimal string to be provided in the checksum attribute
+Standalone<StringRef> MD5SumToHexString(MD5_CTX& sum);
 
 // Upload a client library binary from a file and associated metadata JSON
 // to the system keyspace of the database
