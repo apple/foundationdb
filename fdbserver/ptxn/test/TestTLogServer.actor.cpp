@@ -323,9 +323,30 @@ Version& increaseVersion(Version& version) {
 	return version;
 }
 
-ACTOR Future<Void> commitInject(std::shared_ptr<ptxn::test::TestDriverContext> pContext,
-                                ptxn::StorageTeamID storageTeamID,
-                                int numCommits) {
+Standalone<StringRef> getLogEntryContent(ptxn::TLogCommitRequest req, UID tlogId) {
+	ptxn::TLogQueueEntryRef qe;
+	qe.version = req.version;
+	// when knownCommittedVersion starts to be changed(now it is 0 constant), here it needs to be changed too
+	qe.knownCommittedVersion = 0;
+	qe.id = tlogId;
+	qe.storageTeams.reserve(req.messages.size());
+	qe.messages.reserve(req.messages.size());
+	for (auto& message : req.messages) {
+		qe.storageTeams.push_back(message.first);
+		qe.messages.push_back(message.second);
+	}
+	BinaryWriter wr(Unversioned()); // outer framing is not versioned
+	wr << uint32_t(0);
+	IncludeVersion(ProtocolVersion::withTLogQueueEntryRef()).write(wr); // payload is versioned
+	wr << qe;
+	wr << uint8_t(1);
+	*(uint32_t*)wr.getData() = wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t);
+	return wr.toValue();
+}
+
+ACTOR Future<std::vector<Standalone<StringRef>>> commitInject(std::shared_ptr<ptxn::test::TestDriverContext> pContext,
+                                                              ptxn::StorageTeamID storageTeamID,
+                                                              int numCommits) {
 	state ptxn::test::print::PrintTiming printTiming("tlog/commitInject");
 
 	state const ptxn::TLogGroupID tLogGroupID = pContext->storageTeamIDTLogGroupIDMapper.at(storageTeamID);
@@ -337,6 +358,7 @@ ACTOR Future<Void> commitInject(std::shared_ptr<ptxn::test::TestDriverContext> p
 	increaseVersion(currVersion);
 
 	state std::vector<ptxn::TLogCommitRequest> requests;
+	state std::vector<Standalone<StringRef>> writtenMessages;
 	for (auto i = 0; i < numCommits; ++i) {
 		generateMutations(currVersion, 16, { storageTeamID }, pContext->commitRecord);
 		auto serialized = serializeMutations(currVersion, storageTeamID, pContext->commitRecord);
@@ -350,12 +372,11 @@ ACTOR Future<Void> commitInject(std::shared_ptr<ptxn::test::TestDriverContext> p
 		                      0,
 		                      0,
 		                      Optional<UID>());
-
+		writtenMessages.emplace_back(getLogEntryContent(requests.back(), pInterface->id()));
 		prevVersion = currVersion;
 		increaseVersion(currVersion);
 	}
 	printTiming << "Generated " << numCommits << " commit requests" << std::endl;
-
 	{
 		std::mt19937 g(deterministicRandom()->randomUInt32());
 		std::shuffle(std::begin(requests), std::end(requests), g);
@@ -371,7 +392,7 @@ ACTOR Future<Void> commitInject(std::shared_ptr<ptxn::test::TestDriverContext> p
 	wait(waitForAll(replies));
 	printTiming << "Received all replies" << std::endl;
 
-	return Void();
+	return writtenMessages;
 }
 
 ACTOR Future<Void> verifyPeek(std::shared_ptr<ptxn::test::TestDriverContext> pContext,
@@ -510,6 +531,7 @@ TEST_CASE("/fdbserver/ptxn/test/commit_peek") {
 	state ptxn::test::TestDriverOptions options(params);
 	state std::vector<Future<Void>> actors;
 	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
+	state const int NUM_COMMITS = 10;
 
 	for (const auto& group : pContext->tLogGroups) {
 		ptxn::test::print::print(group);
@@ -522,11 +544,8 @@ TEST_CASE("/fdbserver/ptxn/test/commit_peek") {
 	platform::createDirectory(folder);
 
 	wait(startTLogServers(&actors, pContext, folder));
-	const int NUM_COMMITS = 10;
-	std::vector<Future<Void>> communicateActors{ commitInject(pContext, storageTeamID, NUM_COMMITS),
-		                                         verifyPeek(pContext, storageTeamID, NUM_COMMITS) };
-	wait(waitForAll(communicateActors));
-
+	std::vector<Standalone<StringRef>> messages = wait(commitInject(pContext, storageTeamID, NUM_COMMITS));
+	wait(verifyPeek(pContext, storageTeamID, NUM_COMMITS));
 	platform::eraseDirectoryRecursive(folder);
 	return Void();
 }
@@ -546,9 +565,9 @@ TEST_CASE("/fdbserver/ptxn/test/run_storage_server") {
 	wait(startTLogServers(&actors, pContext, folder));
 
 	// Inject data, and verify the read via peek, not cursor
-	wait(waitForAll<Void>({ commitInject(pContext, pContext->storageTeamIDs[0], 10),
-	                        verifyPeek(pContext, pContext->storageTeamIDs[0], 10) }));
 
+	std::vector<Standalone<StringRef>> messages = wait(commitInject(pContext, pContext->storageTeamIDs[0], 10));
+	wait(verifyPeek(pContext, pContext->storageTeamIDs[0], 10));
 	// start real storage servers
 	wait(startStorageServers(&actors, pContext, folder));
 
@@ -627,9 +646,9 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 		*(pContext->tLogInterfaces[i]) = interfaces[i];
 	}
 
-	std::vector<Future<Void>> communicateActors{ commitInject(pContext, storageTeamID, NUM_COMMITS),
-		                                         verifyPeek(pContext, storageTeamID, NUM_COMMITS) };
-	wait(waitForAll(communicateActors));
+	state std::vector<Standalone<StringRef>> expectedMessages =
+	    wait(commitInject(pContext, storageTeamID, NUM_COMMITS));
+	wait(verifyPeek(pContext, storageTeamID, NUM_COMMITS));
 
 	// only wrote to a single storageTeamId, thus only 1 tlogGroup, while each tlogGroup has their own disk queue.
 	state IDiskQueue* q = qs[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
@@ -637,14 +656,17 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	// in this test, Location must has the same `lo` and `hi`
 	// because I did not implement merging multiple location into a single StringRef and return for InMemoryDiskQueue
 	ASSERT(q->getNextReadLocation().hi + NUM_COMMITS == q->getNextCommitLocation().hi);
+	state int commitCnt = 0;
 	loop {
 		state IDiskQueue::location nextLoc = q->getNextReadLocation();
-		state Standalone<StringRef> res = wait(q->read(nextLoc, nextLoc, CheckHashes::NO));
-		ASSERT(res.size());
+		state Standalone<StringRef> actual = wait(q->read(nextLoc, nextLoc, CheckHashes::NO));
+		// Assert contents read are the ones that we previously wrote
+		ASSERT(actual.toString() == expectedMessages[commitCnt].toString());
 		q->pop(nextLoc);
 		if (q->getNextReadLocation().hi >= q->getNextCommitLocation().hi) {
 			break;
 		}
+		commitCnt++;
 	}
 
 	ASSERT(q->getNextReadLocation() == q->getNextCommitLocation());

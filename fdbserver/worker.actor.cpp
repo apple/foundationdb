@@ -1700,7 +1700,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				// id seems confusing -- sometimes tlog groups, sometimes tlog. need to finalize it.
 				TLogOptions tLogOptions(req.logVersion, req.spillType);
 				auto& logData = sharedLogs[SharedLogsKey(tLogOptions, req.storeType)];
-				// question: why do we need logData and use PromiseSteam to send request at all?
 				logData.ptxnRequests.send(req);
 				if (!logData.actor.isValid() || logData.actor.isReady()) {
 					UID logId = deterministicRandom()->randomUniqueID();

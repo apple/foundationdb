@@ -159,7 +159,7 @@ public:
 
 private:
 	UID dbgid;
-	std::map<location, StringRef> q;
+	std::map<location, Standalone<StringRef>> q;
 	// cursors represent the next location. e.g. cursorRead == 7, meaning 7 has been read and 8 is the next to read.
 	int cursorWrite;
 	int cursorRead;
