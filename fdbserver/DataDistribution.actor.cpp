@@ -2420,10 +2420,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// Exclude teams who have members in the wrong configuration, since we don't want these teams
 			int teamCount = 0;
 			int totalTeamCount = 0;
+			int wigglingTeams = 0;
 			for (int i = 0; i < self->teams.size(); ++i) {
 				if (!self->teams[i]->isWrongConfiguration()) {
 					if (self->teams[i]->isHealthy()) {
 						teamCount++;
+					}
+					if (self->teams[i]->getPriority() == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE) {
+						wigglingTeams++;
 					}
 					totalTeamCount++;
 				}
@@ -2431,13 +2435,23 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 			// teamsToBuild is calculated such that we will not build too many teams in the situation
 			// when all (or most of) teams become unhealthy temporarily and then healthy again
-			state int teamsToBuild = std::max(0, std::min(desiredTeams - teamCount, maxTeams - totalTeamCount));
+			state int teamsToBuild;
+			if (teamCount < 1 || wigglingTeams == 0) {
+				// Case 1: no wiggling team or zero healthy teams, calculate as usual
+				teamsToBuild = std::max(0, std::min(desiredTeams - teamCount, maxTeams - totalTeamCount));
+			} else {
+				// Case 2: there are wiggling teams and the cluster is healthy. To avoid too many redundant team after
+				// re-include the wiggling SS, - wigglingTeams is needed here
+				teamsToBuild =
+				    std::max(0, std::min(desiredTeams - teamCount - wigglingTeams, maxTeams - totalTeamCount));
+			}
 
 			TraceEvent("BuildTeamsBegin", self->distributorId)
 			    .detail("TeamsToBuild", teamsToBuild)
 			    .detail("DesiredTeams", desiredTeams)
 			    .detail("MaxTeams", maxTeams)
 			    .detail("BadServerTeams", self->badTeams.size())
+			    .detail("PerpetualWiggleTeams", wigglingTeams)
 			    .detail("UniqueMachines", uniqueMachines)
 			    .detail("TeamSize", self->configuration.storageTeamSize)
 			    .detail("Servers", serverCount)
@@ -3752,6 +3766,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				           serverWiggling == serverUndesired) {
 					// the wrong configured and undesired server is the wiggling server
 					team->setPriority(SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE);
+
 				} else if (badTeam || anyWrongConfiguration) {
 					if (redundantTeam) {
 						team->setPriority(SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT);
