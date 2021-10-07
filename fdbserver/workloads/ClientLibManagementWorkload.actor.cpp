@@ -1,5 +1,5 @@
 /*
- * ClientLibManagement.actor.cpp
+ * ClientLibManagementWorkload.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,7 +19,7 @@
  */
 
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbclient/MultiVersionClientControl.actor.h"
+#include "fdbclient/ClientLibManagement.actor.h"
 #include "fdbserver/workloads/AsyncFile.actor.h"
 #include "fdbclient/md5/md5.h"
 #include "fdbclient/libb64/encode.h"
@@ -27,7 +27,7 @@
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-using namespace ClientLibUtils;
+using namespace ClientLibManagement;
 
 /**
  * Workload for testing ClientLib management operations, declared in
@@ -122,11 +122,12 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		metadataJson["unknownattr"] = "someval";
 		invalidMetadataStrs.push_back(json_spirit::write_string(json_spirit::mValue(metadataJson)));
 
-		const char* mandatoryAttrs[] = { CLIENTLIB_ATTR_PLATFORM,   CLIENTLIB_ATTR_VERSION,  CLIENTLIB_ATTR_CHECKSUM,
-			                             CLIENTLIB_ATTR_TYPE,       CLIENTLIB_ATTR_GIT_HASH, CLIENTLIB_ATTR_PROTOCOL,
-			                             CLIENTLIB_ATTR_API_VERSION };
+		const std::string mandatoryAttrs[] = { CLIENTLIB_ATTR_PLATFORM,   CLIENTLIB_ATTR_VERSION,
+			                                   CLIENTLIB_ATTR_CHECKSUM,   CLIENTLIB_ATTR_TYPE,
+			                                   CLIENTLIB_ATTR_GIT_HASH,   CLIENTLIB_ATTR_PROTOCOL,
+			                                   CLIENTLIB_ATTR_API_VERSION };
 
-		for (const char* attr : mandatoryAttrs) {
+		for (const std::string& attr : mandatoryAttrs) {
 			validClientLibMetadataSample(metadataJson);
 			metadataJson.erase(attr);
 			invalidMetadataStrs.push_back(json_spirit::write_string(json_spirit::mValue(metadataJson)));

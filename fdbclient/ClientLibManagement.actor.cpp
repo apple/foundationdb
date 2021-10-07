@@ -1,5 +1,5 @@
 /*
- * MultiVersionClientControl.actor.cpp
+ * ClientLibManagement.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/MultiVersionClientControl.actor.h"
+#include "fdbclient/ClientLibManagement.actor.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -36,7 +36,7 @@
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-namespace ClientLibUtils {
+namespace ClientLibManagement {
 
 struct ClientLibBinaryInfo {
 	size_t totalBytes;
@@ -109,21 +109,21 @@ static void parseMetadataJson(StringRef metadataString, json_spirit::mObject& me
 	metadataJson = parsedMetadata.get_obj();
 }
 
-static const std::string& getMetadataStrAttr(const json_spirit::mObject& metadataJson, const char* attrName) {
+static const std::string& getMetadataStrAttr(const json_spirit::mObject& metadataJson, const std::string& attrName) {
 	auto attrIter = metadataJson.find(attrName);
 	if (attrIter == metadataJson.cend() || attrIter->second.type() != json_spirit::str_type) {
 		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
-		    .detail("Error", format("Missing attribute %s", attrName));
+		    .detail("Error", format("Missing attribute %s", attrName.c_str()));
 		throw client_lib_invalid_metadata();
 	}
 	return attrIter->second.get_str();
 }
 
-static int getMetadataIntAttr(const json_spirit::mObject& metadataJson, const char* attrName) {
+static int getMetadataIntAttr(const json_spirit::mObject& metadataJson, const std::string& attrName) {
 	auto attrIter = metadataJson.find(attrName);
 	if (attrIter == metadataJson.cend() || attrIter->second.type() != json_spirit::int_type) {
 		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
-		    .detail("Error", format("Missing attribute %s", attrName));
+		    .detail("Error", format("Missing attribute %s", attrName.c_str()));
 		throw client_lib_invalid_metadata();
 	}
 	return attrIter->second.get_int();
@@ -181,10 +181,6 @@ static ClientLibPlatform getCurrentClientPlatform() {
 	return CLIENTLIB_UNKNOWN_PLATFORM;
 #endif
 }
-
-} // namespace ClientLibUtils
-
-using namespace ClientLibUtils;
 
 ClientLibFilter& ClientLibFilter::filterNewerPackageVersion(const std::string& versionStr) {
 	matchNewerPackageVersion = true;
@@ -671,3 +667,5 @@ Future<Standalone<VectorRef<StringRef>>> listCompatibleClientLibraries(Database 
 	    db,
 	    ClientLibFilter().filterAvailable().filterCompatibleAPI(apiVersion).filterPlatform(getCurrentClientPlatform()));
 }
+
+} // namespace ClientLibManagement

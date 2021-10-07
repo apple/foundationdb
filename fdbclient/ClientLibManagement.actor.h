@@ -1,5 +1,5 @@
 /*
- * MultiVersionClientControl.actor.h
+ * ClientLibManagement.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,7 +21,7 @@
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_MULTI_VERSION_CLIENT_CONTROL_ACTOR_G_H)
 #define FDBCLIENT_MULTI_VERSION_CLIENT_CONTROL_ACTOR_G_H
-#include "fdbclient/MultiVersionClientControl.actor.g.h"
+#include "fdbclient/ClientLibManagement.actor.g.h"
 #elif !defined(FDBCLIENT_MULTI_VERSION_CLIENT_CONTROL_ACTOR_H)
 #define FDBCLIENT_MULTI_VERSION_CLIENT_CONTROL_ACTOR_H
 
@@ -29,6 +29,8 @@
 #include "fdbclient/NativeAPI.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
+
+namespace ClientLibManagement {
 
 enum ClientLibStatus {
 	CLIENTLIB_DISABLED = 0,
@@ -46,18 +48,18 @@ enum ClientLibPlatform {
 	CLIENTLIB_PLATFORM_COUNT // must be the last one
 };
 
-#define CLIENTLIB_ATTR_PLATFORM "platform"
-#define CLIENTLIB_ATTR_STATUS "status"
-#define CLIENTLIB_ATTR_CHECKSUM "checksum"
-#define CLIENTLIB_ATTR_VERSION "version"
-#define CLIENTLIB_ATTR_TYPE "type"
-#define CLIENTLIB_ATTR_API_VERSION "apiversion"
-#define CLIENTLIB_ATTR_PROTOCOL "protocol"
-#define CLIENTLIB_ATTR_GIT_HASH "githash"
-#define CLIENTLIB_ATTR_FILENAME "filename"
-#define CLIENTLIB_ATTR_SIZE "size"
-#define CLIENTLIB_ATTR_CHUNK_COUNT "chunkcount"
-#define CLIENTLIB_ATTR_CHUNK_SIZE "chunksize"
+inline const std::string CLIENTLIB_ATTR_PLATFORM{ "platform" };
+inline const std::string CLIENTLIB_ATTR_STATUS{ "status" };
+inline const std::string CLIENTLIB_ATTR_CHECKSUM{ "checksum" };
+inline const std::string CLIENTLIB_ATTR_VERSION{ "version" };
+inline const std::string CLIENTLIB_ATTR_TYPE{ "type" };
+inline const std::string CLIENTLIB_ATTR_API_VERSION{ "apiversion" };
+inline const std::string CLIENTLIB_ATTR_PROTOCOL{ "protocol" };
+inline const std::string CLIENTLIB_ATTR_GIT_HASH{ "githash" };
+inline const std::string CLIENTLIB_ATTR_FILENAME{ "filename" };
+inline const std::string CLIENTLIB_ATTR_SIZE{ "size" };
+inline const std::string CLIENTLIB_ATTR_CHUNK_COUNT{ "chunkcount" };
+inline const std::string CLIENTLIB_ATTR_CHUNK_SIZE{ "chunksize" };
 
 struct ClientLibFilter {
 	bool matchAvailableOnly;
@@ -93,15 +95,11 @@ struct ClientLibFilter {
 	ClientLibFilter& filterNewerPackageVersion(const std::string& versionStr);
 };
 
-namespace ClientLibUtils {
-
 const char* getStatusName(ClientLibStatus status);
 ClientLibStatus getStatusByName(const std::string& statusName);
 
 const char* getPlatformName(ClientLibPlatform platform);
 ClientLibPlatform getPlatformByName(const std::string& statusName);
-
-} // namespace ClientLibUtils
 
 // Upload a client library binary from a file and associated metadata JSON
 // to the system keyspace of the database
@@ -123,6 +121,8 @@ ACTOR Future<Standalone<VectorRef<StringRef>>> listClientLibraries(Database db, 
 
 // List available client libraries that are compatible with the current client
 Future<Standalone<VectorRef<StringRef>>> listAvailableCompatibleClientLibraries(Database db, int apiVersion);
+
+} // namespace ClientLibManagement
 
 #include "flow/unactorcompiler.h"
 #endif
