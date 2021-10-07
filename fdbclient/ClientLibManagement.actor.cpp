@@ -89,6 +89,29 @@ ClientLibPlatform getPlatformByName(std::string_view platformName) {
 	return platfIter->second;
 }
 
+const std::string& getChecksumAlgName(ClientLibChecksumAlg checksumAlg) {
+	static const std::string checksumAlgNames[] = { "md5" };
+	return checksumAlgNames[checksumAlg];
+}
+
+ClientLibChecksumAlg getChecksumAlgByName(std::string_view checksumAlgName) {
+	static std::map<std::string_view, ClientLibChecksumAlg> checksumAlgByName;
+	// initialize the map on demand
+	if (checksumAlgByName.empty()) {
+		for (int i = 0; i < CLIENTLIB_CHECKSUM_ALG_COUNT; i++) {
+			ClientLibChecksumAlg checksumAlg = static_cast<ClientLibChecksumAlg>(i);
+			checksumAlgByName[getChecksumAlgName(checksumAlg)] = checksumAlg;
+		}
+	}
+	auto iter = checksumAlgByName.find(checksumAlgName);
+	if (iter == checksumAlgByName.cend()) {
+		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
+		    .detail("Error", format("Unknown checksum algorithm %s", std::string(checksumAlgName).c_str()));
+		throw client_lib_invalid_metadata();
+	}
+	return iter->second;
+}
+
 namespace {
 
 bool isValidTargetStatus(ClientLibStatus status) {
@@ -368,6 +391,10 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 		    .detail("Configuration", metadataString);
 		throw client_lib_invalid_metadata();
 	}
+
+	// check if checksumalg and platform attributes have valid values
+	getChecksumAlgByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_CHECKSUM_ALG));
+	getPlatformByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_PLATFORM));
 
 	// Check if further mandatory attributes are set
 	getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_GIT_HASH);

@@ -49,6 +49,13 @@ enum ClientLibPlatform {
 	CLIENTLIB_PLATFORM_COUNT // must be the last one
 };
 
+// Currently we support only one,
+// but we may want to change it in the future
+enum ClientLibChecksumAlg {
+	CLIENTLIB_CHECKSUM_ALG_MD5 = 0,
+	CLIENTLIB_CHECKSUM_ALG_COUNT // must be the last one
+};
+
 inline const std::string CLIENTLIB_ATTR_PLATFORM{ "platform" };
 inline const std::string CLIENTLIB_ATTR_STATUS{ "status" };
 inline const std::string CLIENTLIB_ATTR_CHECKSUM{ "checksum" };
@@ -61,6 +68,7 @@ inline const std::string CLIENTLIB_ATTR_FILENAME{ "filename" };
 inline const std::string CLIENTLIB_ATTR_SIZE{ "size" };
 inline const std::string CLIENTLIB_ATTR_CHUNK_COUNT{ "chunkcount" };
 inline const std::string CLIENTLIB_ATTR_CHUNK_SIZE{ "chunksize" };
+inline const std::string CLIENTLIB_ATTR_CHECKSUM_ALG{ "checksumalg" };
 
 struct ClientLibFilter {
 	bool matchAvailableOnly = false;
@@ -97,6 +105,9 @@ ClientLibStatus getStatusByName(std::string_view statusName);
 
 const std::string& getPlatformName(ClientLibPlatform platform);
 ClientLibPlatform getPlatformByName(std::string_view platformName);
+
+const std::string& getChecksumAlgName(ClientLibChecksumAlg checksumAlg);
+ClientLibChecksumAlg getChecksumAlgByName(std::string_view checksumAlgName);
 
 // encodes MD5 result to a hexadecimal string to be provided in the checksum attribute
 Standalone<StringRef> MD5SumToHexString(MD5_CTX& sum);

@@ -128,10 +128,10 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		metadataJson["unknownattr"] = "someval";
 		invalidMetadataStrs.push_back(json_spirit::write_string(json_spirit::mValue(metadataJson)));
 
-		const std::string mandatoryAttrs[] = { CLIENTLIB_ATTR_PLATFORM,   CLIENTLIB_ATTR_VERSION,
-			                                   CLIENTLIB_ATTR_CHECKSUM,   CLIENTLIB_ATTR_TYPE,
-			                                   CLIENTLIB_ATTR_GIT_HASH,   CLIENTLIB_ATTR_PROTOCOL,
-			                                   CLIENTLIB_ATTR_API_VERSION };
+		const std::string mandatoryAttrs[] = { CLIENTLIB_ATTR_PLATFORM,    CLIENTLIB_ATTR_VERSION,
+			                                   CLIENTLIB_ATTR_CHECKSUM,    CLIENTLIB_ATTR_TYPE,
+			                                   CLIENTLIB_ATTR_GIT_HASH,    CLIENTLIB_ATTR_PROTOCOL,
+			                                   CLIENTLIB_ATTR_API_VERSION, CLIENTLIB_ATTR_CHECKSUM_ALG };
 
 		for (const std::string& attr : mandatoryAttrs) {
 			validClientLibMetadataSample(metadataJson);
@@ -364,6 +364,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(CLIENTLIB_AVAILABLE);
 		metadataJson[CLIENTLIB_ATTR_API_VERSION] = 710;
 		metadataJson[CLIENTLIB_ATTR_PROTOCOL] = "fdb00b07001001";
+		metadataJson[CLIENTLIB_ATTR_CHECKSUM_ALG] = "md5";
 	}
 
 	void unexpectedSuccess(const char* testName, int expectedErrorCode, const char* optionalDetails = nullptr) {
