@@ -1136,6 +1136,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     bytesPerCommit(1000), mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
     internal(internal), transactionTracingEnabled(true), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
+    transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size())
@@ -1377,8 +1378,9 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), latencies(1000),
     readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false),
-    transactionTracingEnabled(true) {}
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
+    transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
+    internal(false), transactionTracingEnabled(true) {}
 
 // Static constructor used by server processes to create a DatabaseContext
 // For internal (fdbserver) use only
@@ -5552,6 +5554,20 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 	state Future<Void> timeout;
 	state Optional<UID> debugID;
 	state bool send_batch;
+	state Reference<Histogram> batchSizeDist = Histogram::getHistogram(LiteralStringRef("GrvBatcher"),
+	                                                                   LiteralStringRef("ClientGrvBatchSize"),
+	                                                                   Histogram::Unit::count,
+	                                                                   0,
+	                                                                   CLIENT_KNOBS->MAX_BATCH_SIZE * 2);
+	state Reference<Histogram> batchIntervalDist =
+	    Histogram::getHistogram(LiteralStringRef("GrvBatcher"),
+	                            LiteralStringRef("ClientGrvBatchInterval"),
+	                            Histogram::Unit::microseconds,
+	                            0,
+	                            CLIENT_KNOBS->GRV_BATCH_TIMEOUT * 1000000 * 2);
+	state Reference<Histogram> grvReplyLatencyDist = Histogram::getHistogram(
+	    LiteralStringRef("GrvBatcher"), LiteralStringRef("ClientGrvReplyLatency"), Histogram::Unit::microseconds);
+	state double lastRequestTime = now();
 
 	state TransactionTagMap<uint32_t> tags;
 
@@ -5576,22 +5592,34 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 					++tags[tag];
 				}
 
-				if (requests.size() == CLIENT_KNOBS->MAX_BATCH_SIZE)
+				if (requests.size() == CLIENT_KNOBS->MAX_BATCH_SIZE) {
 					send_batch = true;
-				else if (!timeout.isValid())
+					++cx->transactionGrvFullBatches;
+				} else if (!timeout.isValid()) {
 					timeout = delay(batchTime, TaskPriority::GetConsistentReadVersion);
+				}
 			}
-			when(wait(timeout.isValid() ? timeout : Never())) { send_batch = true; }
+			when(wait(timeout.isValid() ? timeout : Never())) {
+				send_batch = true;
+				++cx->transactionGrvTimedOutBatches;
+			}
 			// dynamic batching monitors reply latencies
 			when(double reply_latency = waitNext(replyTimes.getFuture())) {
 				double target_latency = reply_latency * 0.5;
 				batchTime = min(0.1 * target_latency + 0.9 * batchTime, CLIENT_KNOBS->GRV_BATCH_TIMEOUT);
+				grvReplyLatencyDist->sampleSeconds(reply_latency);
 			}
 			when(wait(collection)) {} // for errors
 		}
 		if (send_batch) {
 			int count = requests.size();
 			ASSERT(count);
+
+			batchSizeDist->sampleRecordCounter(count);
+			auto requestTime = now();
+			batchIntervalDist->sampleSeconds(requestTime - lastRequestTime);
+			lastRequestTime = requestTime;
+
 			// dynamic batching
 			Promise<GetReadVersionReply> GRVReply;
 			requests.push_back(GRVReply);
