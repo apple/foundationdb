@@ -7001,7 +7001,16 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 	state Transaction tr(cx);
 	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
 	state Span span("NAPI:PopChangeFeedMutations"_loc);
-	Optional<Value> val = wait(tr.get(rangeIDKey));
+	state Optional<Value> val;
+	loop {
+		try {
+			Optional<Value> _val = wait(tr.get(rangeIDKey));
+			val = _val;
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 	if (!val.present()) {
 		throw unsupported_operation();
 	}
