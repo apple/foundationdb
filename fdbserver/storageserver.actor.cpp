@@ -854,25 +854,16 @@ public:
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), maxQueryQueue(0), counters(this) {
-		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 1);
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
-		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 2);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
-		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 3);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
-		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 4);
 		desiredOldestVersion.initMetric(LiteralStringRef("StorageServer.DesiredOldestVersion"), counters.cc.id);
-		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 5);
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
-		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 6);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
-		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 7);
 		addShard(ShardInfo::newNotAssigned(allKeys));
-		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 8);
 
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
-		TraceEvent(SevDebug, "RselfStorageServer").detail("Event", 9);
 	}
 
 	//~StorageServer() { fclose(log); }
@@ -5193,13 +5184,13 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		self.setTssPair(ssi.tssPairID.get());
 		ASSERT(self.isTss());
 	}
-	TraceEvent(SevDebug, "RStorageServer").detail("event", 2);
+	TraceEvent(SevDebug, "RStorageServer").detail("event", "2");
 
 	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
 	              .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
 	self.folder = folder;
 
-	TraceEvent(SevDebug, "RStorageServer").detail("event", 3);
+	TraceEvent(SevDebug, "RStorageServer").detail("event", "3");
 	try {
 		wait(self.storage.init());
 		TraceEvent(SevDebug, "RStorageServer").detail("event", "post init");
@@ -5219,7 +5210,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			self.tag = seedTag;
 		}
 
-		TraceEvent(SevDebug, "StorageServer").detail("event", 4);
+		TraceEvent(SevDebug, "StorageServer").detail("event", "4");
 
 		self.storage.makeNewStorageServerDurable();
 		wait(self.storage.commit());

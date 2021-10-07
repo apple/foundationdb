@@ -90,7 +90,7 @@ public:
 	// `init()` MUST be idempotent as it will be called more than once on a KeyValueStore in case
 	// of a rollback.
 	virtual Future<Void> init() {
-		TraceEvent(SevWarnAlways, "localKVStore").detail("Action", "init");
+		TraceEvent(SevDebug, "localKVStore").detail("Action", "init");
 		return Void();
 	}
 
@@ -128,23 +128,17 @@ extern IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
                                          bool checkChecksums = false,
                                          bool checkIntegrity = false);
 
-extern IKeyValueStore* openRemoteKVStoreTemp();
-
 inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                                    std::string const& filename,
                                    UID logID,
                                    int64_t memoryLimit,
                                    bool checkChecksums = false,
                                    bool checkIntegrity = false,
-                                   bool openRemotely = false,
-                                   bool temp = false) {
+                                   bool openRemotely = false) {
 	std::string traceStr = "opened remotely: ";
 	TraceEvent(SevWarnAlways, "OpenRemoteIKVStore")
 	    .detail("RemoteKVStore", traceStr.append((openRemotely ? "true" : "false")))
-	    .detail("type", storeType);
-	if (temp) {
-		return openRemoteKVStoreTemp();
-	}
+	    .detail("storeType", storeType);
 	if (openRemotely) {
 		return openRemoteKVStore(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity);
 	}

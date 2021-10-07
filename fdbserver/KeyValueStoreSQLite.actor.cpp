@@ -1565,20 +1565,20 @@ struct ThreadSafeCounter {
 class KeyValueStoreSQLite final : public IKeyValueStore {
 public:
 	void dispose() override {
-		TraceEvent(SevWarnAlways, "LocalBTREEKVStore").detail("Action", "dispose");
+		TraceEvent(SevDebug, "LocalBTREEKVStore").detail("Action", "dispose");
 		doClose(this, true);
 	}
 	void close() override {
-		TraceEvent(SevWarnAlways, "LocalBTREEKVStore").detail("Action", "close");
+		TraceEvent(SevDebug, "LocalBTREEKVStore").detail("Action", "close");
 		doClose(this, false);
 	}
 
 	Future<Void> getError() override {
-		TraceEvent(SevWarnAlways, "LocalBTREEKVStore").detail("Action", "getError");
+		TraceEvent(SevDebug, "LocalBTREEKVStore").detail("Action", "getError");
 		return delayed(readThreads->getError() || writeThread->getError());
 	}
 	Future<Void> onClosed() override {
-		TraceEvent(SevWarnAlways, "LocalBTREEKVStore").detail("Action", "onClosed");
+		TraceEvent(SevDebug, "LocalBTREEKVStore").detail("Action", "onClosed");
 		return stopped.getFuture();
 	}
 
@@ -2173,7 +2173,7 @@ KeyValueStoreSQLite::~KeyValueStoreSQLite() {
 StorageBytes KeyValueStoreSQLite::getStorageBytes() const {
 	int64_t free;
 	int64_t total;
-	TraceEvent(SevWarnAlways, "LocalBTREEKVStore").detail("Action", "getStorageByte");
+	TraceEvent(SevDebug, "LocalBTREEKVStore").detail("Action", "getStorageByte");
 
 	g_network->getDiskBytes(parentDirectory(filename), free, total);
 
@@ -2191,17 +2191,17 @@ void KeyValueStoreSQLite::startReadThreads() {
 }
 
 void KeyValueStoreSQLite::set(KeyValueRef keyValue, const Arena* arena) {
-	TraceEvent(SevWarnAlways, "LocalBTREEKVStore").detail("Action", "set").detail("keyValue", keyValue);
+	TraceEvent(SevDebug, "LocalBTREEKVStore").detail("Action", "set").detail("keyValue", keyValue);
 	++writesRequested;
 	writeThread->post(new Writer::SetAction(keyValue));
 }
 void KeyValueStoreSQLite::clear(KeyRangeRef range, const Arena* arena) {
-	TraceEvent(SevWarnAlways, "LocalBTREEKVStore").detail("Action", "clear");
+	TraceEvent(SevDebug, "LocalBTREEKVStore").detail("Action", "clear");
 	++writesRequested;
 	writeThread->post(new Writer::ClearAction(range));
 }
 Future<Void> KeyValueStoreSQLite::commit(bool sequential) {
-	TraceEvent(SevWarnAlways, "LocalBTREEKVStore").detail("Action", "commit");
+	TraceEvent(SevDebug, "LocalBTREEKVStore").detail("Action", "commit");
 	++writesRequested;
 	auto p = new Writer::CommitAction;
 	auto f = p->result.getFuture();
@@ -2209,7 +2209,7 @@ Future<Void> KeyValueStoreSQLite::commit(bool sequential) {
 	return f;
 }
 Future<Optional<Value>> KeyValueStoreSQLite::readValue(KeyRef key, Optional<UID> debugID) {
-	TraceEvent(SevWarnAlways, "LocalBTREEKVStore").detail("Action", "readValue").detail("key", key);
+	TraceEvent(SevDebug, "LocalBTREEKVStore").detail("Action", "readValue").detail("key", key);
 	++readsRequested;
 	auto p = new Reader::ReadValueAction(key, debugID);
 	auto f = p->result.getFuture();
@@ -2217,7 +2217,7 @@ Future<Optional<Value>> KeyValueStoreSQLite::readValue(KeyRef key, Optional<UID>
 	return f;
 }
 Future<Optional<Value>> KeyValueStoreSQLite::readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID) {
-	TraceEvent(SevWarnAlways, "LocalBTREEKVStore").detail("Action", "readValuePrefix");
+	TraceEvent(SevDebug, "LocalBTREEKVStore").detail("Action", "readValuePrefix");
 	++readsRequested;
 	auto p = new Reader::ReadValuePrefixAction(key, maxLength, debugID);
 	auto f = p->result.getFuture();
@@ -2225,7 +2225,7 @@ Future<Optional<Value>> KeyValueStoreSQLite::readValuePrefix(KeyRef key, int max
 	return f;
 }
 Future<RangeResult> KeyValueStoreSQLite::readRange(KeyRangeRef keys, int rowLimit, int byteLimit) {
-	TraceEvent(SevWarnAlways, "LocalBTREEKVStore").detail("Action", "readRange").detail("keys", keys);
+	TraceEvent(SevDebug, "LocalBTREEKVStore").detail("Action", "readRange").detail("keys", keys);
 	++readsRequested;
 	auto p = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 	auto f = p->result.getFuture();
@@ -2233,7 +2233,7 @@ Future<RangeResult> KeyValueStoreSQLite::readRange(KeyRangeRef keys, int rowLimi
 	return f;
 }
 Future<KeyValueStoreSQLite::SpringCleaningWorkPerformed> KeyValueStoreSQLite::doClean() {
-	TraceEvent(SevWarnAlways, "LocalBTREEKVStore").detail("Action", "clean");
+	TraceEvent(SevDebug, "LocalBTREEKVStore").detail("Action", "clean");
 	++writesRequested;
 	auto p = new Writer::SpringCleaningAction;
 	auto f = p->result.getFuture();

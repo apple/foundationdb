@@ -184,8 +184,8 @@ ACTOR Future<int> spawnProcess(std::string path,
 					break;
 				bytesRead += bytes;
 			}
-			TraceEvent(SevWarnAlways, "SpawnPID").detail("PID", pid);
-			TraceEvent(SevWarnAlways, "errorPID").detail("errno", err);
+			TraceEvent(SevDebug, "SpawnPID").detail("PID", pid);
+			TraceEvent(SevDebug, "errorPID").detail("errno", err);
 			if (err < 0) {
 				TraceEvent event(SevWarnAlways, "SpawnProcessFailure");
 				setupTraceWithOutput(event, bytesRead, outputBuffer);

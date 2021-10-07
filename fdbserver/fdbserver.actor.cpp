@@ -1669,102 +1669,8 @@ private:
 };
 } // namespace
 
-struct RemoteIKVSServerInterface {
-	constexpr static FileIdentifier file_identifier = 1938843;
-	RequestStream<struct GetRemoteIKVSServerRequest> getRemoteIKVSServerInterf;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, getRemoteIKVSServerInterf);
-	}
-};
-
-struct GetRemoteIKVSServerRequest {
-	constexpr static FileIdentifier file_identifier = 9393921;
-	ReplyPromise<RemoteIKVSServerInterface> reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply);
-	}
-};
-
-// ACTOR Future<Void> runRemoteIKVSServer() {
-
-// 	state RemoteIKVSServerInterface remoteIKVSServer;
-// 	remoteIKVSServer.getRemoteIKVSServerInterf.makeWellKnownEndpoint(WLTOKEN_FIRST_AVAILABLE,
-// 	                                                                 TaskPriority::DefaultEndpoint);
-// 	loop choose {
-// 		when(wait(delay(1.5))) { std::cout << "Waiting for connection...\n"; }
-// 		when(GetRemoteIKVSServerRequest req = waitNext(remoteIKVSServer.getRemoteIKVSServerInterf.getFuture())) {
-// 			std::cout << "received response for running remote IKVS server\n";
-// 			req.reply.send(remoteIKVSServer);
-// 		}
-// 	}
-// }
-
-// probably somewhere in worker.actor.cpp
-// struct IKVSProcess {
-// 	IKVSProcessInterface processInterface; // do this in the caller
-// 	Future<int> ikvsProcess = 0; // do this in the caller
-
-// 	Future<Void> init() { return init(this); }
-
-// private:
-// 	// TODO: rename to initializeIKVSProcess
-// 	ACTOR static Future<Void> init(IKVSProcess* self) {
-// 		// check if endpoint is made...?s process interface is initialized and
-// 		// listening, if not spawn a separate process for it
-
-// 		// wait with timeout on getting process interface
-// 		state NetworkAddress addr = NetworkAddress::parse("127.0.0.1:7777");
-// 		state IKVSProcessInterface ikvsProcessServer;
-// 		ikvsProcessServer.getProcessInterface =
-// 		    RequestStream<GetIKVSProcessInterfaceRequest>(Endpoint({ addr }, UID(-1, 2)));
-
-// 		// wait(success(processInterface) || success(delay(2.0)));
-// 		// if (!processInterface.isReady()) {
-// 		if (self->ikvsProcess.isReady()) {
-// 			// no ikvs process is running
-// 			state std::vector<std::string> paramList = { "bin/fdbserver", "-r", "remoteIKVS", "-p", "127.0.0.1:7777" };
-// 			self->ikvsProcess = spawnProcess("bin/fdbserver", paramList, 20.0, false, 0.01);
-// 			std::cout << "created new endpoint\n";
-// 			IKVSProcessInterface processInterface =
-// 			    wait(ikvsProcessServer.getProcessInterface.getReply(GetIKVSProcessInterfaceRequest()));
-// 			self->processInterface = processInterface; // because flow is stupid
-// 		}
-// 		return Void();
-// 	}
-// };
-
-ACTOR Future<Void> testRemoteIKVSClient() {
-	// state IKVSProcessInterface server;
-	// state NetworkAddress addr = NetworkAddress::parse("127.0.0.1:7777");
-	// std::cout << "initializing connection to server...\n";
-	// server.getProcessInterface =
-	//     RequestStream<GetIKVSProcessInterfaceRequest>(Endpoint::wellKnown({ addr }, WLTOKEN_IKVS_PROCESS_SERVER));
-	// IKVSProcessInterface interf = wait(server.getProcessInterface.getReply(GetIKVSProcessInterfaceRequest()));
-	// std::cout << "Connection established\n";
-	// server = interf;
-	// IKVSInterface ikvsInterface = wait(server.openKVStore.getReply(OpenKVStoreRequest{}));
-	// std::cout << "IKVS interface connection established\n";
-	// RemoteIKeyValueStore store;
-	// wait(store.commit());
-	// std::cout << "after commit\n";
-
-	std::cout << "removed remote IKVS test client";
-	return Void();
-}
-
 ACTOR Future<Void> spawnRemoteIKVSTest() {
-
-	// std::cout << "initializing connection to server...\n";
-	// state IKVSProcess process;
-	// wait(process.init());
-	// std::cout << "Connection established\n";
-	// IKVSInterface ikvsInterface = wait(process.processInterface.openKVStore.getReply(OpenKVStoreRequest{}));
-	// std::cout << "kv store opened\n";
-	state IKeyValueStore* store = openKVStore(KeyValueStoreType{}, "", UID(3, 0), 8000, false, false, true, true);
+	state IKeyValueStore* store = openKVStore(KeyValueStoreType{}, "", UID(3, 0), 8000, false, false, true);
 	wait(delay(2.0));
 	wait(store->commit());
 
@@ -2239,11 +2145,8 @@ int main(int argc, char* argv[]) {
 
 			f = result;
 		} else if (role == ServerRole::RemoteIKVS) {
-			TraceEvent(SevWarnAlways, "StartingRemoteIKVSServer").detail("From", "fdbserver");
+			TraceEvent(SevDebug, "StartingRemoteIKVSServer").detail("From", "fdbserver");
 			f = stopAfter(runRemoteServer());
-			g_network->run();
-		} else if (role == ServerRole::RemoteIKVSClient) {
-			f = stopAfter(testRemoteIKVSClient());
 			g_network->run();
 		} else if (role == ServerRole::SpawnRemoteIKVS) {
 			f = stopAfter(spawnRemoteIKVSTest());

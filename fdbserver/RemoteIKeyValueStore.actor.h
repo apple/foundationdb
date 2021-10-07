@@ -1,5 +1,4 @@
 #pragma once
-#include <string>
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_REMOTE_IKEYVALUESTORE_ACTOR_G_H)
 #define FDBSERVER_REMOTE_IKEYVALUESTORE_ACTOR_G_H
 #include "fdbserver/RemoteIKeyValueStore.actor.g.h"
@@ -13,6 +12,7 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/network.h"
+#include <string>
 
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -64,44 +64,15 @@ struct IKVSInterface {
 
 	UID uniqueID = deterministicRandom()->randomUniqueID();
 
-	std::string tempId;
-
 	UID id() const { return uniqueID; }
 
 	KeyValueStoreType storeType;
 
 	KeyValueStoreType type() const { return storeType; }
 
-	void initializeEndpoints() {
-		getValue.makeWellKnownEndpoint(WLTOKEN_IKVS_GET, TaskPriority::DefaultEndpoint);
-		set.makeWellKnownEndpoint(WLTOKEN_IKVS_SET, TaskPriority::DefaultEndpoint);
-		clear.makeWellKnownEndpoint(WLTOKEN_IKVS_CLEAR, TaskPriority::DefaultEndpoint);
-		commit.makeWellKnownEndpoint(WLTOKEN_IKVS_COMMIT, TaskPriority::DefaultEndpoint);
-		readValuePrefix.makeWellKnownEndpoint(WLTOKEN_IKVS_READ_PREFIX, TaskPriority::DefaultEndpoint);
-		readRange.makeWellKnownEndpoint(WLTOKEN_IKVS_READ_RANGE, TaskPriority::DefaultEndpoint);
-		getStorageBytes.makeWellKnownEndpoint(WLTOKEN_IKVS_GET_STORAGE_BYTES, TaskPriority::DefaultEndpoint);
-		getError.makeWellKnownEndpoint(WLTOKEN_IKVS_GET_ERROR, TaskPriority::DefaultEndpoint);
-		onClosed.makeWellKnownEndpoint(WLTOKEN_IKVS_ON_CLOSED, TaskPriority::DefaultEndpoint);
-		dispose.makeWellKnownEndpoint(WLTOKEN_IKVS_DISPOSE, TaskPriority::DefaultEndpoint);
-		close.makeWellKnownEndpoint(WLTOKEN_IKVS_CLOSE, TaskPriority::DefaultEndpoint);
-	}
-
 	IKVSInterface() {}
 
 	IKVSInterface(KeyValueStoreType type) : storeType(type) {}
-
-	// IKVSInterface()
-	//   : getValue(Endpoint::wellKnown({ addr }, WLTOKEN_IKVS_GET)), set(Endpoint::wellKnown({ addr },
-	//   WLTOKEN_IKVS_SET)),
-	//     clear(Endpoint::wellKnown({ addr }, WLTOKEN_IKVS_CLEAR)),
-	//     commit(Endpoint::wellKnown({ addr }, WLTOKEN_IKVS_COMMIT)),
-	//     readValuePrefix(Endpoint::wellKnown({ addr }, WLTOKEN_IKVS_READ_PREFIX)),
-	//     readRange(Endpoint::wellKnown({ addr }, WLTOKEN_IKVS_READ_RANGE)),
-	//     getStorageBytes(Endpoint::wellKnown({ addr }, WLTOKEN_IKVS_GET_STORAGE_BYTES)),
-	//     getError(Endpoint::wellKnown({ addr }, WLTOKEN_IKVS_GET_ERROR)),
-	//     onClosed(Endpoint::wellKnown({ addr }, WLTOKEN_IKVS_ON_CLOSED)),
-	//     dispose(Endpoint::wellKnown({ addr }, WLTOKEN_IKVS_DISPOSE)),
-	//     close(Endpoint::wellKnown({ addr }, WLTOKEN_IKVS_CLOSE)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -117,8 +88,7 @@ struct IKVSInterface {
 		           onClosed,
 		           dispose,
 		           close,
-		           uniqueID,
-		           tempId);
+		           uniqueID);
 	}
 };
 
@@ -287,67 +257,66 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 
 	Future<Void> init() override {
 
-		TraceEvent(SevWarnAlways, "RemoteKVStore").detail("Action", "remote init");
+		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote init");
 		return initialized;
 	}
 	// TODO: Implement all
 	Future<Void> getError() override {
+		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote get error");
 		return interf.getError.getReply(IKVSGetErrorRequest{});
-		TraceEvent(SevWarnAlways, "RemoteKVStore").detail("Action", "remote get error");
 	}
 	Future<Void> onClosed() override {
+		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote onclosed");
 		return interf.onClosed.getReply(IKVSOnClosedRequest{});
-		TraceEvent(SevWarnAlways, "RemoteKVStore").detail("Action", "remote onclosed");
 	}
 	// remove reply fields
 	void dispose() override {
 		interf.dispose.send(IKVSDisposeRequest{});
-		TraceEvent(SevWarnAlways, "RemoteKVStore").detail("Action", "remote dispose");
+		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote dispose");
 	}
 	void close() override {
 		interf.close.send(IKVSCloseRequest{});
-		TraceEvent(SevWarnAlways, "RemoteKVStore").detail("Action", "remote close");
+		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote close");
 	}
 
 	KeyValueStoreType getType() const override {
-		TraceEvent(SevWarnAlways, "RemoteKVStore").detail("Action", "remote getType");
+		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote getType");
 		return interf.type();
 	}
 
 	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
-		TraceEvent(SevWarnAlways, "RemoteKVStore").detail("Action", "remote set");
+		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote set");
 		interf.set.send(IKVSSetRequest{ keyValue });
 	}
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override {
-		TraceEvent(SevWarnAlways, "RemoteKVStore").detail("Action", "remote readRange");
+		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote readRange");
 		interf.clear.send(IKVSClearRequest{ range });
 	}
 
 	Future<Void> commit(bool sequential = false) override {
-		std::cout << "sending commit request\n";
-		TraceEvent(SevWarnAlways, "RemoteKVStore").detail("Action", "remote commit");
+		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote commit");
 		return interf.commit.getReply(IKVSCommitRequest{ sequential });
 	}
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) override {
-		TraceEvent(SevWarnAlways, "RemoteKVStore").detail("Action", "remote readValue");
+		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote readValue");
 		return interf.getValue.getReply(IKVSGetValueRequest{ key, debugID });
 	}
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
 	                                        Optional<UID> debugID = Optional<UID>()) override {
-		TraceEvent(SevWarnAlways, "RemoteKVStore").detail("Action", "remote readValuePrefix");
+		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote readValuePrefix");
 		return interf.readValuePrefix.getReply(IKVSReadValuePrefixRequest{ key, maxLength, debugID });
 	}
 
 	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) override {
-		TraceEvent(SevWarnAlways, "RemoteKVStore").detail("Action", "remote read range");
+		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote read range");
 		return interf.readRange.getReply(IKVSReadRangeRequest{ keys, rowLimit, byteLimit });
 	}
 
 	StorageBytes getStorageBytes() const override {
-		TraceEvent(SevWarnAlways, "RemoteKVStore").detail("Action", "remote getStorageByte");
+		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote getStorageByte");
 		return StorageBytes{};
 	}
 };
