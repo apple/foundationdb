@@ -887,12 +887,15 @@ void MultiVersionTransaction::setTimeout(Optional<StringRef> value) {
 	double timeoutDuration = extractIntOption(value, 0, std::numeric_limits<int>::max()) / 1000.0;
 
 	ThreadFuture<Void> prevTimeout;
-	ThreadFuture<Void> newTimeout = onMainThread([this, timeoutDuration]() {
-		return timeoutImpl(timeoutTsav, timeoutDuration - std::max(0.0, now() - startTime));
-	});
+	double transactionStartTime = startTime;
 
 	{ // lock scope
 		ThreadSpinLockHolder holder(timeoutLock);
+
+		Reference<ThreadSingleAssignmentVar<Void>> tsav = timeoutTsav;
+		ThreadFuture<Void> newTimeout = onMainThread([transactionStartTime, tsav, timeoutDuration]() {
+			return timeoutImpl(tsav, timeoutDuration - std::max(0.0, now() - transactionStartTime));
+		});
 
 		prevTimeout = currentTimeout;
 		currentTimeout = newTimeout;
@@ -910,12 +913,12 @@ template <class T>
 ThreadFuture<T> MultiVersionTransaction::makeTimeout() {
 	ThreadFuture<Void> f;
 
-	// We create a ThreadFuture that holds a reference to this below,
-	// but the ThreadFuture does not increment the ref count
-	timeoutTsav->addref();
-
 	{ // lock scope
 		ThreadSpinLockHolder holder(timeoutLock);
+
+		// Our ThreadFuture holds a reference to this TSAV,
+		// but the ThreadFuture does not increment the ref count
+		timeoutTsav->addref();
 		f = ThreadFuture<Void>(timeoutTsav.getPtr());
 	}
 
@@ -1972,8 +1975,28 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 			std::string valueStr;
 			try {
 				if (platform::getEnvironmentVar(("FDB_NETWORK_OPTION_" + option.second.name).c_str(), valueStr)) {
+					FDBOptionInfo::ParamType curParamType = option.second.paramType;
 					for (auto value : parseOptionValues(valueStr)) {
-						Standalone<StringRef> currentValue = StringRef(value);
+						Standalone<StringRef> currentValue;
+						int64_t intParamVal;
+						if (curParamType == FDBOptionInfo::ParamType::Int) {
+							try {
+								size_t nextIdx;
+								intParamVal = std::stoll(value, &nextIdx);
+								if (nextIdx != value.length()) {
+									throw invalid_option_value();
+								}
+							} catch (std::exception e) {
+								TraceEvent(SevError, "EnvironmentVariableParseIntegerFailed")
+								    .detail("Option", option.second.name)
+								    .detail("Value", valueStr)
+								    .detail("Error", e.what());
+								throw invalid_option_value();
+							}
+							currentValue = StringRef(reinterpret_cast<uint8_t*>(&intParamVal), 8);
+						} else {
+							currentValue = StringRef(value);
+						}
 						{ // lock scope
 							MutexHolder holder(lock);
 							if (setEnvOptions[option.first].count(currentValue) == 0) {
