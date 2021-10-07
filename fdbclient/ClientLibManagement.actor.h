@@ -95,11 +95,11 @@ struct ClientLibFilter {
 	ClientLibFilter& filterNewerPackageVersion(const std::string& versionStr);
 };
 
-const char* getStatusName(ClientLibStatus status);
-ClientLibStatus getStatusByName(const std::string& statusName);
+const std::string& getStatusName(ClientLibStatus status);
+ClientLibStatus getStatusByName(std::string_view statusName);
 
-const char* getPlatformName(ClientLibPlatform platform);
-ClientLibPlatform getPlatformByName(const std::string& statusName);
+const std::string& getPlatformName(ClientLibPlatform platform);
+ClientLibPlatform getPlatformByName(std::string_view platformName);
 
 // Upload a client library binary from a file and associated metadata JSON
 // to the system keyspace of the database

@@ -46,47 +46,47 @@ struct ClientLibBinaryInfo {
 	ClientLibBinaryInfo() : totalBytes(0), chunkCnt(0), chunkSize(0) {}
 };
 
-static const char* g_statusNames[] = { "disabled", "available", "uploading", "deleting" };
-static std::map<std::string, ClientLibStatus> g_statusByName;
-
-const char* getStatusName(ClientLibStatus status) {
-	return g_statusNames[status];
+const std::string& getStatusName(ClientLibStatus status) {
+	static const std::string statusNames[] = { "disabled", "available", "uploading", "deleting" };
+	return statusNames[status];
 }
 
-ClientLibStatus getStatusByName(const std::string& statusName) {
+ClientLibStatus getStatusByName(std::string_view statusName) {
+	static std::map<std::string_view, ClientLibStatus> statusByName;
 	// initialize the map on demand
-	if (g_statusByName.empty()) {
+	if (statusByName.empty()) {
 		for (int i = 0; i < CLIENTLIB_STATUS_COUNT; i++) {
-			g_statusByName[g_statusNames[i]] = static_cast<ClientLibStatus>(i);
+			ClientLibStatus status = static_cast<ClientLibStatus>(i);
+			statusByName[getStatusName(status)] = status;
 		}
 	}
-	auto statusIter = g_statusByName.find(statusName);
-	if (statusIter == g_statusByName.cend()) {
+	auto statusIter = statusByName.find(statusName);
+	if (statusIter == statusByName.cend()) {
 		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
-		    .detail("Error", format("Unknown status value %s", statusName.c_str()));
+		    .detail("Error", format("Unknown status value %s", std::string(statusName).c_str()));
 		throw client_lib_invalid_metadata();
 	}
 	return statusIter->second;
 }
 
-static const char* g_platformNames[] = { "unknown", "x84_64-linux", "x86_64-windows", "x86_64-macos" };
-static std::map<std::string, ClientLibPlatform> g_platformByName;
-
-const char* getPlatformName(ClientLibPlatform platform) {
-	return g_platformNames[platform];
+const std::string& getPlatformName(ClientLibPlatform platform) {
+	static const std::string platformNames[] = { "unknown", "x84_64-linux", "x86_64-windows", "x86_64-macos" };
+	return platformNames[platform];
 }
 
-ClientLibPlatform getPlatformByName(const std::string& statusName) {
+ClientLibPlatform getPlatformByName(std::string_view platformName) {
+	static std::map<std::string_view, ClientLibPlatform> platformByName;
 	// initialize the map on demand
-	if (g_platformByName.empty()) {
+	if (platformByName.empty()) {
 		for (int i = 0; i < CLIENTLIB_PLATFORM_COUNT; i++) {
-			g_platformByName[g_platformNames[i]] = static_cast<ClientLibPlatform>(i);
+			ClientLibPlatform platform = static_cast<ClientLibPlatform>(i);
+			platformByName[getPlatformName(platform)] = platform;
 		}
 	}
-	auto platfIter = g_platformByName.find(statusName);
-	if (platfIter == g_platformByName.cend()) {
+	auto platfIter = platformByName.find(platformName);
+	if (platfIter == platformByName.cend()) {
 		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
-		    .detail("Error", format("Unknown platform value %s", statusName.c_str()));
+		    .detail("Error", format("Unknown platform value %s", std::string(platformName).c_str()));
 		throw client_lib_invalid_metadata();
 	}
 	return platfIter->second;
