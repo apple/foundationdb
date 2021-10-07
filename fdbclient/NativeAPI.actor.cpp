@@ -2151,12 +2151,13 @@ Future<Reference<CommitProxyInfo>> DatabaseContext::getCommitProxiesFuture(bool 
 	return ::getCommitProxiesFuture(this, useProvisionalProxies);
 }
 
-Reference<TenantBalancerInterface> DatabaseContext::getTenantBalancer() const {
-	return Reference<TenantBalancerInterface>();
+Optional<TenantBalancerInterface> DatabaseContext::getTenantBalancer() const {
+	return clientInfo->get().tenantBalancer;
 }
 
 Future<Void> DatabaseContext::onTenantBalancerChanged() const {
-	return Never();
+	// TODO: target tenant balancer specifically
+	return clientInfo->onChange();
 }
 
 void GetRangeLimits::decrement(VectorRef<KeyValueRef> const& data) {

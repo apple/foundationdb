@@ -30,6 +30,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/GlobalConfig.h"
+#include "fdbclient/TenantBalancerInterface.h"
 
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
@@ -113,6 +114,7 @@ struct ClientDBInfo {
 	std::vector<CommitProxyInterface> commitProxies;
 	Optional<CommitProxyInterface>
 	    firstCommitProxy; // not serialized, used for commitOnFirstProxy when the commit proxies vector has been shrunk
+	Optional<TenantBalancerInterface> tenantBalancer;
 	Optional<Value> forward;
 	std::vector<VersionHistory> history;
 
@@ -126,7 +128,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history);
+		serializer(ar, grvProxies, commitProxies, id, forward, history, tenantBalancer);
 	}
 };
 

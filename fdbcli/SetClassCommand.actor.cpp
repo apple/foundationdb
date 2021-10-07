@@ -125,6 +125,6 @@ CommandFactory setClassFactory(
                 "classes are `unset', `storage', `transaction', `resolution', `commit_proxy', `grv_proxy', "
                 "`master', `test', "
                 "`stateless', `log', `router', `cluster_controller', `fast_restore', `data_distributor', "
-                "`coordinator', `ratekeeper', `storage_cache', `backup', and `default'."));
+                "`coordinator', `ratekeeper', `storage_cache', `backup', 'tenant_balancer', and `default'."));
 
 } // namespace fdb_cli

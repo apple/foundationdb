@@ -200,7 +200,7 @@ public:
 	Future<Void> onProxiesChanged() const;
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
-	Reference<TenantBalancerInterface> getTenantBalancer() const;
+	Optional<TenantBalancerInterface> getTenantBalancer() const; // TODO: avoid copies?
 	Future<Void> onTenantBalancerChanged() const;
 
 	// Returns the protocol version reported by the coordinator this client is connected to

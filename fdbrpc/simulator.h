@@ -158,6 +158,8 @@ public:
 				return false;
 			case ProcessClass::BackupClass:
 				return false;
+			case ProcessClass::TenantBalancerClass:
+				return false;
 			default:
 				return false;
 			}

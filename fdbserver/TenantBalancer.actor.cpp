@@ -35,8 +35,8 @@ ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> con
 }
 
 struct TenantBalancer {
-	TenantBalancer(Reference<AsyncVar<ServerDBInfo> const> dbInfo, Reference<TenantBalancerInterface> tbi)
-	  : dbInfo(dbInfo), tbi(tbi), actors(false) {
+	TenantBalancer(TenantBalancerInterface tbi, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
+	  : tbi(tbi), dbInfo(dbInfo), actors(false) {
 		auto info = makeReference<AsyncVar<ClientDBInfo>>();
 		db = DatabaseContext::create(info,
 		                             extractClientInfo(dbInfo, info),
@@ -48,8 +48,8 @@ struct TenantBalancer {
 		agent = DatabaseBackupAgent(db);
 	}
 
+	TenantBalancerInterface tbi;
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
-	Reference<TenantBalancerInterface> tbi;
 
 	Database db;
 
@@ -150,34 +150,33 @@ ACTOR Future<Void> cleanupMovementSource(TenantBalancer* self, CleanupMovementSo
 
 ACTOR Future<Void> tenantBalancerCore(TenantBalancer* self) {
 	loop choose {
-		when(MoveTenantToClusterRequest req = waitNext(self->tbi->moveTenantToCluster.getFuture())) {
+		when(MoveTenantToClusterRequest req = waitNext(self->tbi.moveTenantToCluster.getFuture())) {
 			self->actors.add(moveTenantToCluster(self, req));
 		}
-		when(ReceiveTenantFromClusterRequest req = waitNext(self->tbi->receiveTenantFromCluster.getFuture())) {
+		when(ReceiveTenantFromClusterRequest req = waitNext(self->tbi.receiveTenantFromCluster.getFuture())) {
 			self->actors.add(receiveTenantFromCluster(self, req));
 		}
-		when(GetActiveMovementsRequest req = waitNext(self->tbi->getActiveMovements.getFuture())) {
+		when(GetActiveMovementsRequest req = waitNext(self->tbi.getActiveMovements.getFuture())) {
 			self->actors.add(getActiveMovements(self, req));
 		}
-		when(FinishSourceMovementRequest req = waitNext(self->tbi->finishSourceMovement.getFuture())) {
+		when(FinishSourceMovementRequest req = waitNext(self->tbi.finishSourceMovement.getFuture())) {
 			self->actors.add(finishSourceMovement(self, req));
 		}
-		when(FinishDestinationMovementRequest req = waitNext(self->tbi->finishDestinationMovement.getFuture())) {
+		when(FinishDestinationMovementRequest req = waitNext(self->tbi.finishDestinationMovement.getFuture())) {
 			self->actors.add(finishDestinationMovement(self, req));
 		}
-		when(AbortMovementRequest req = waitNext(self->tbi->abortMovement.getFuture())) {
+		when(AbortMovementRequest req = waitNext(self->tbi.abortMovement.getFuture())) {
 			self->actors.add(abortMovement(self, req));
 		}
-		when(CleanupMovementSourceRequest req = waitNext(self->tbi->cleanupMovementSource.getFuture())) {
+		when(CleanupMovementSourceRequest req = waitNext(self->tbi.cleanupMovementSource.getFuture())) {
 			self->actors.add(cleanupMovementSource(self, req));
 		}
 		when(wait(self->actors.getResult())) {}
 	}
 }
 
-// for recovering an existing storage server
-ACTOR Future<Void> tenantBalancer(Reference<AsyncVar<ServerDBInfo> const> db, Reference<TenantBalancerInterface> tbi) {
-	state TenantBalancer self(db, tbi);
+ACTOR Future<Void> tenantBalancer(TenantBalancerInterface tbi, Reference<AsyncVar<ServerDBInfo> const> db) {
+	state TenantBalancer self(tbi, db);
 
 	try {
 		wait(tenantBalancerCore(&self));

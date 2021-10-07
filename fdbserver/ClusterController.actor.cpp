@@ -27,6 +27,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/TenantBalancerInterface.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
@@ -69,6 +70,7 @@ struct WorkerInfo : NonCopyable {
 	WorkerDetails details;
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
+	Future<Void> haltTenantBalancer;
 	Standalone<VectorRef<StringRef>> issues;
 
 	WorkerInfo()
@@ -89,7 +91,8 @@ struct WorkerInfo : NonCopyable {
 	WorkerInfo(WorkerInfo&& r) noexcept
 	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots),
 	    initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
-	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor), issues(r.issues) {}
+	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor), haltTenantBalancer(r.haltTenantBalancer),
+	    issues(r.issues) {}
 	void operator=(WorkerInfo&& r) noexcept {
 		watcher = std::move(r.watcher);
 		reply = std::move(r.reply);
@@ -100,6 +103,7 @@ struct WorkerInfo : NonCopyable {
 		details = std::move(r.details);
 		haltRatekeeper = r.haltRatekeeper;
 		haltDistributor = r.haltDistributor;
+		haltTenantBalancer = r.haltTenantBalancer;
 		issues = r.issues;
 	}
 };
@@ -160,6 +164,18 @@ public:
 			serverInfo->set(newInfo);
 		}
 
+		void setTenantBalancer(TenantBalancerInterface interf) {
+			auto newServerInfo = serverInfo->get();
+			newServerInfo.id = deterministicRandom()->randomUniqueID();
+			newServerInfo.infoGeneration = ++dbInfoCount;
+
+			newServerInfo.client.id = deterministicRandom()->randomUniqueID();
+			newServerInfo.client.tenantBalancer = interf;
+			db->clientInfo->set(newServerInfo.client);
+
+			serverInfo->set(newServerInfo);
+		}
+
 		void clearInterf(ProcessClass::ClassType t) {
 			auto newInfo = serverInfo->get();
 			newInfo.id = deterministicRandom()->randomUniqueID();
@@ -168,6 +184,10 @@ public:
 				newInfo.distributor = Optional<DataDistributorInterface>();
 			} else if (t == ProcessClass::RatekeeperClass) {
 				newInfo.ratekeeper = Optional<RatekeeperInterface>();
+			} else if (t == ProcessClass::TenantBalancerClass) {
+				newInfo.client.id = deterministicRandom()->randomUniqueID();
+				newInfo.client.tenantBalancer = Optional<TenantBalancerInterface>();
+				db->clientInfo->set(newInfo.client);
 			}
 			serverInfo->set(newInfo);
 		}
@@ -242,7 +262,9 @@ public:
 		return (db.serverInfo->get().distributor.present() &&
 		        db.serverInfo->get().distributor.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().ratekeeper.present() &&
-		        db.serverInfo->get().ratekeeper.get().locality.processId() == processId);
+		        db.serverInfo->get().ratekeeper.get().locality.processId() == processId) ||
+		       (db.serverInfo->get().client.tenantBalancer.present() &&
+		        db.serverInfo->get().client.tenantBalancer.get().locality.processId() == processId);
 	}
 
 	WorkerDetails getStorageWorker(RecruitStorageRequest const& req) {
@@ -2756,7 +2778,8 @@ public:
 	bool onMasterIsBetter(const WorkerDetails& worker, ProcessClass::ClusterRole role) const {
 		ASSERT(masterProcessId.present());
 		const auto& pid = worker.interf.locality.processId();
-		if ((role != ProcessClass::DataDistributor && role != ProcessClass::Ratekeeper) ||
+		if ((role != ProcessClass::DataDistributor && role != ProcessClass::Ratekeeper &&
+		     role != ProcessClass::TenantBalancer) ||
 		    pid == masterProcessId.get()) {
 			return false;
 		}
@@ -3043,6 +3066,8 @@ public:
 	Optional<UID> recruitingDistributorID;
 	AsyncVar<bool> recruitRatekeeper;
 	Optional<UID> recruitingRatekeeperID;
+	AsyncVar<bool> recruitTenantBalancer;
+	Optional<UID> recruitingTenantBalancerID;
 
 	// Stores the health information from a particular worker's perspective.
 	struct WorkerHealth {
@@ -3078,7 +3103,7 @@ public:
 	    clusterControllerDcId(locality.dcId()), id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()),
 	    outstandingRemoteRequestChecker(Void()), startTime(now()), goodRecruitmentTime(Never()),
 	    goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0), versionDifferenceUpdated(false),
-	    recruitDistributor(false), recruitRatekeeper(false),
+	    recruitDistributor(false), recruitRatekeeper(false), recruitTenantBalancer(false),
 	    clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
@@ -3159,6 +3184,28 @@ struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
 	void recruit(ClusterControllerData* cc) const { cc->recruitDistributor.set(true); }
 };
 
+struct TenantBalancerSingleton : Singleton<TenantBalancerInterface> {
+
+	TenantBalancerSingleton(const Optional<TenantBalancerInterface>& interface)
+	  : Singleton(interface.present() ? interface : Optional<TenantBalancerInterface>()) {}
+
+	Role getRole() const { return Role::TENANT_BALANCER; }
+	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::TenantBalancer; }
+
+	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
+		if (interface.present()) {
+			cc->db.setTenantBalancer(interface.get());
+		}
+	}
+	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
+		if (interface.present()) {
+			cc->id_worker[pid].haltTenantBalancer =
+			    brokenPromiseToNever(interface.get().haltTenantBalancer.getReply(HaltTenantBalancerRequest(cc->id)));
+		}
+	}
+	void recruit(ClusterControllerData* cc) const { cc->recruitTenantBalancer.set(true); }
+};
+
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterControllerData::DBInfo* db) {
 	state MasterInterface iMaster;
 
@@ -3217,6 +3264,9 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 				dbInfo.clusterInterface = db->serverInfo->get().clusterInterface;
 				dbInfo.distributor = db->serverInfo->get().distributor;
 				dbInfo.ratekeeper = db->serverInfo->get().ratekeeper;
+				dbInfo.client.id = deterministicRandom()->randomUniqueID();
+				dbInfo.client.tenantBalancer = db->serverInfo->get().client.tenantBalancer;
+				// TODO: tenant balancer?
 				dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
 
 				TraceEvent("CCWDB", cluster->id)
@@ -3482,14 +3532,17 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// Try to find a new process for each singleton.
 	WorkerDetails newRKWorker = findNewProcessForSingleton(self, ProcessClass::Ratekeeper, id_used);
 	WorkerDetails newDDWorker = findNewProcessForSingleton(self, ProcessClass::DataDistributor, id_used);
+	WorkerDetails newTBWorker = findNewProcessForSingleton(self, ProcessClass::TenantBalancer, id_used);
 
 	// Find best possible fitnesses for each singleton.
 	auto bestFitnessForRK = findBestFitnessForSingleton(self, newRKWorker, ProcessClass::Ratekeeper);
 	auto bestFitnessForDD = findBestFitnessForSingleton(self, newDDWorker, ProcessClass::DataDistributor);
+	auto bestFitnessForTB = findBestFitnessForSingleton(self, newTBWorker, ProcessClass::TenantBalancer);
 
 	auto& db = self->db.serverInfo->get();
 	auto rkSingleton = RatekeeperSingleton(db.ratekeeper);
 	auto ddSingleton = DataDistributorSingleton(db.distributor);
+	auto tbSingleton = TenantBalancerSingleton(db.client.tenantBalancer);
 
 	// Check if the singletons are healthy.
 	// side effect: try to rerecruit the singletons to more optimal processes
@@ -3499,9 +3552,12 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	bool ddHealthy = isHealthySingleton<DataDistributorInterface>(
 	    self, newDDWorker, ddSingleton, bestFitnessForDD, self->recruitingDistributorID);
 
+	bool tbHealthy = isHealthySingleton<TenantBalancerInterface>(
+	    self, newTBWorker, tbSingleton, bestFitnessForTB, self->recruitingTenantBalancerID);
+
 	// if any of the singletons are unhealthy (rerecruited or not stable), then do not
 	// consider any further re-recruitments
-	if (!(rkHealthy && ddHealthy)) {
+	if (!(rkHealthy && ddHealthy && tbHealthy)) {
 		return;
 	}
 
@@ -3510,20 +3566,25 @@ void checkBetterSingletons(ClusterControllerData* self) {
 
 	Optional<Standalone<StringRef>> currRKProcessId = rkSingleton.interface.get().locality.processId();
 	Optional<Standalone<StringRef>> currDDProcessId = ddSingleton.interface.get().locality.processId();
+	Optional<Standalone<StringRef>> currTBProcessId = tbSingleton.interface.get().locality.processId();
 	Optional<Standalone<StringRef>> newRKProcessId = newRKWorker.interf.locality.processId();
 	Optional<Standalone<StringRef>> newDDProcessId = newDDWorker.interf.locality.processId();
+	Optional<Standalone<StringRef>> newTBProcessId = newTBWorker.interf.locality.processId();
 
-	auto currColocMap = getColocCounts({ currRKProcessId, currDDProcessId });
-	auto newColocMap = getColocCounts({ newRKProcessId, newDDProcessId });
+	auto currColocMap = getColocCounts({ currRKProcessId, currDDProcessId, currTBProcessId });
+	auto newColocMap = getColocCounts({ newRKProcessId, newDDProcessId, newTBProcessId });
 
 	// if the new coloc counts are not worse (i.e. each singleton's coloc count has not increased)
 	if (newColocMap[newRKProcessId] <= currColocMap[currRKProcessId] &&
-	    newColocMap[newDDProcessId] <= currColocMap[currDDProcessId]) {
+	    newColocMap[newDDProcessId] <= currColocMap[currDDProcessId] &&
+	    newColocMap[newTBProcessId] <= currColocMap[currTBProcessId]) {
 		// rerecruit the singleton for which we have found a better process, if any
 		if (newColocMap[newRKProcessId] < currColocMap[currRKProcessId]) {
 			rkSingleton.recruit(self);
 		} else if (newColocMap[newDDProcessId] < currColocMap[currDDProcessId]) {
 			ddSingleton.recruit(self);
+		} else if (newColocMap[newTBProcessId] < currColocMap[currTBProcessId]) {
+			tbSingleton.recruit(self);
 		}
 	}
 }
@@ -3834,13 +3895,10 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
 	    db->clientInfo->get().grvProxies != req.grvProxies) {
 		isChanged = true;
-		// TODO why construct a new one and not just copy the old one and change proxies + id?
-		ClientDBInfo clientInfo;
-		clientInfo.id = deterministicRandom()->randomUniqueID();
-		clientInfo.commitProxies = req.commitProxies;
-		clientInfo.grvProxies = req.grvProxies;
-		db->clientInfo->set(clientInfo);
-		dbInfo.client = db->clientInfo->get();
+		dbInfo.client.id = deterministicRandom()->randomUniqueID();
+		dbInfo.client.commitProxies = req.commitProxies;
+		dbInfo.client.grvProxies = req.grvProxies;
+		db->clientInfo->set(dbInfo.client);
 	}
 
 	if (!dbInfo.logSystemConfig.isEqual(req.logSystemConfig)) {
@@ -4049,6 +4107,13 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 		auto registeringSingleton = RatekeeperSingleton(req.ratekeeperInterf);
 		haltRegisteringOrCurrentSingleton<RatekeeperInterface>(
 		    self, w, currSingleton, registeringSingleton, self->recruitingRatekeeperID);
+	}
+
+	if (req.tenantBalancerInterf.present()) {
+		auto currSingleton = TenantBalancerSingleton(self->db.serverInfo->get().client.tenantBalancer);
+		auto registeringSingleton = TenantBalancerSingleton(req.tenantBalancerInterf);
+		haltRegisteringOrCurrentSingleton<TenantBalancerInterface>(
+		    self, w, currSingleton, registeringSingleton, self->recruitingTenantBalancerID);
 	}
 
 	// Notify the worker to register again with new process class/exclusive property
@@ -4862,6 +4927,95 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData* self) {
 	}
 }
 
+ACTOR Future<Void> startTenantBalancer(ClusterControllerData* self) {
+	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
+
+	TraceEvent("CCStartTenantBalancer", self->id).log();
+	loop {
+		try {
+			state bool noTenantBalancer = !self->db.serverInfo->get().client.tenantBalancer.present();
+			while (!self->masterProcessId.present() ||
+			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
+			       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
+			}
+			if (noTenantBalancer && self->db.serverInfo->get().client.tenantBalancer.present()) {
+				// Existing tenant balancer registers while waiting, so skip.
+				return Void();
+			}
+
+			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+			WorkerFitnessInfo tbWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
+			                                                                ProcessClass::TenantBalancer,
+			                                                                ProcessClass::NeverAssign,
+			                                                                self->db.config,
+			                                                                id_used);
+			InitializeTenantBalancerRequest req(deterministicRandom()->randomUniqueID());
+			state WorkerDetails worker = tbWorker.worker;
+			if (self->onMasterIsBetter(worker, ProcessClass::TenantBalancer)) {
+				worker = self->id_worker[self->masterProcessId.get()].details;
+			}
+
+			self->recruitingTenantBalancerID = req.reqId;
+			TraceEvent("CCRecruitTenantBalancer", self->id)
+			    .detail("Addr", worker.interf.address())
+			    .detail("TenantBalancerId", req.reqId);
+
+			ErrorOr<TenantBalancerInterface> interf = wait(worker.interf.tenantBalancer.getReplyUnlessFailedFor(
+			    req, SERVER_KNOBS->WAIT_FOR_TENANT_BALANCER_JOIN_DELAY, 0));
+			if (interf.present()) {
+				self->recruitTenantBalancer.set(false);
+				self->recruitingTenantBalancerID = interf.get().id();
+				const auto& tenantBalancer = self->db.serverInfo->get().client.tenantBalancer;
+				TraceEvent("CCTenantBalancerRecruited", self->id)
+				    .detail("Addr", worker.interf.address())
+				    .detail("TenantBalancerId", interf.get().id());
+
+				if (tenantBalancer.present() && tenantBalancer.get().id() != interf.get().id() &&
+				    self->id_worker.count(tenantBalancer.get().locality.processId())) {
+					TraceEvent("CCHaltTenantBalancerAfterRecruit", self->id)
+					    .detail("TenantBalancerId", tenantBalancer.get().id())
+					    .detail("DcId", printable(self->clusterControllerDcId));
+					TenantBalancerSingleton(tenantBalancer).halt(self, tenantBalancer.get().locality.processId());
+				}
+				if (!tenantBalancer.present() || tenantBalancer.get().id() != interf.get().id()) {
+					self->db.setTenantBalancer(interf.get());
+				}
+				checkOutstandingRequests(self);
+				return Void();
+			}
+		} catch (Error& e) {
+			TraceEvent("CCTenantBalancerRecruitError", self->id).error(e);
+			if (e.code() != error_code_no_more_servers) {
+				throw;
+			}
+		}
+		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+	}
+}
+
+ACTOR Future<Void> monitorTenantBalancer(ClusterControllerData* self) {
+	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+		wait(self->db.serverInfo->onChange());
+	}
+
+	loop {
+		if (self->db.serverInfo->get().client.tenantBalancer.present() && !self->recruitTenantBalancer.get()) {
+			choose {
+				when(wait(waitFailureClient(self->db.serverInfo->get().client.tenantBalancer.get().waitFailure,
+				                            SERVER_KNOBS->TENANT_BALANCER_FAILURE_TIME))) {
+					TraceEvent("CCTenantBalancerDied", self->id)
+					    .detail("TenantBalancerId", self->db.serverInfo->get().client.tenantBalancer.get().id());
+					self->db.clearInterf(ProcessClass::TenantBalancerClass);
+				}
+				when(wait(self->recruitTenantBalancer.onChange())) {}
+			}
+		} else {
+			wait(startTenantBalancer(self));
+		}
+	}
+}
+
 ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 	state Future<Void> dbInfoChange = self->db.serverInfo->onChange();
 	state Future<Void> updateDBInfo = self->updateDBInfo.onTrigger();
@@ -4990,6 +5144,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(handleForcedRecoveries(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
+	self.addActor.send(monitorTenantBalancer(&self));
 	// self.addActor.send(monitorTSSMapping(&self));
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(traceCounters("ClusterControllerMetrics",

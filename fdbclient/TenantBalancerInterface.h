@@ -24,11 +24,16 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/Locality.h"
 
-struct TenantBalancerInterface : public ReferenceCounted<TenantBalancerInterface> {
+struct TenantBalancerInterface {
 	constexpr static FileIdentifier file_identifier = 6185894;
 
+	struct LocalityData locality;
 	UID uniqueId;
+
+	RequestStream<ReplyPromise<Void>> waitFailure;
+	RequestStream<struct HaltTenantBalancerRequest> haltTenantBalancer;
 
 	// Start is two separate requests here. This could be made into one if the tenant balancer in the source could talk
 	// to the dest
@@ -47,7 +52,8 @@ struct TenantBalancerInterface : public ReferenceCounted<TenantBalancerInterface
 	RequestStream<struct AbortMovementRequest> abortMovement;
 	RequestStream<struct CleanupMovementSourceRequest> cleanupMovementSource;
 
-	explicit TenantBalancerInterface(UID uniqueId) : uniqueId(uniqueId) {}
+	explicit TenantBalancerInterface(const struct LocalityData& locality, UID uniqueId)
+	  : locality(locality), uniqueId(uniqueId) {}
 	TenantBalancerInterface() : uniqueId(deterministicRandom()->randomUniqueID()) {}
 
 	NetworkAddress address() const { return moveTenantToCluster.getEndpoint().getPrimaryAddress(); }
@@ -63,6 +69,8 @@ struct TenantBalancerInterface : public ReferenceCounted<TenantBalancerInterface
 	void serialize(Ar& ar) {
 		serializer(ar,
 		           uniqueId,
+		           waitFailure,
+		           haltTenantBalancer,
 		           moveTenantToCluster,
 		           receiveTenantFromCluster,
 		           getActiveMovements,
@@ -333,6 +341,20 @@ struct CleanupMovementSourceRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, tenantName, cleanupType, reply);
+	}
+};
+
+struct HaltTenantBalancerRequest {
+	constexpr static FileIdentifier file_identifier = 15769279;
+	UID requesterID;
+	ReplyPromise<Void> reply;
+
+	HaltTenantBalancerRequest() {}
+	explicit HaltTenantBalancerRequest(UID uid) : requesterID(uid) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, requesterID, reply);
 	}
 };
 

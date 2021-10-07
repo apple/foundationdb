@@ -127,7 +127,7 @@ def setclass(logger):
     class_types = ['storage', 'transaction', 'resolution',
                    'commit_proxy', 'grv_proxy', 'master', 'stateless', 'log',
                    'router', 'cluster_controller', 'fast_restore', 'data_distributor',
-                   'coordinator', 'ratekeeper', 'storage_cache', 'backup'
+                   'coordinator', 'ratekeeper', 'storage_cache', 'backup', 'tenant_balancer'
                    ]
     random_class_type = random.choice(class_types)
     logger.debug("Change to type: {}".format(random_class_type))

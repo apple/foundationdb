@@ -56,6 +56,7 @@ struct WorkerInterface {
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
 	RequestStream<struct InitializeBackupRequest> backup;
+	RequestStream<struct InitializeTenantBalancerRequest> tenantBalancer;
 
 	RequestStream<struct LoadedPingRequest> debugPing;
 	RequestStream<struct CoordinationPingMessage> coordinationPing;
@@ -120,7 +121,8 @@ struct WorkerInterface {
 		           workerSnapReq,
 		           backup,
 		           updateServerDBInfo,
-		           configBroadcastInterface);
+		           configBroadcastInterface,
+		           tenantBalancer);
 	}
 };
 
@@ -375,6 +377,7 @@ struct RegisterWorkerRequest {
 	Generation generation;
 	Optional<DataDistributorInterface> distributorInterf;
 	Optional<RatekeeperInterface> ratekeeperInterf;
+	Optional<TenantBalancerInterface> tenantBalancerInterf;
 	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise<RegisterWorkerReply> reply;
@@ -391,12 +394,14 @@ struct RegisterWorkerRequest {
 	                      Generation generation,
 	                      Optional<DataDistributorInterface> ddInterf,
 	                      Optional<RatekeeperInterface> rkInterf,
+	                      Optional<TenantBalancerInterface> tenantBalancerInterf,
 	                      bool degraded,
 	                      Version lastSeenKnobVersion,
 	                      ConfigClassSet knobConfigClassSet)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
-	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded),
-	    lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet) {}
+	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf),
+	    tenantBalancerInterf(tenantBalancerInterf), degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion),
+	    knobConfigClassSet(knobConfigClassSet) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -413,7 +418,8 @@ struct RegisterWorkerRequest {
 		           reply,
 		           degraded,
 		           lastSeenKnobVersion,
-		           knobConfigClassSet);
+		           knobConfigClassSet,
+		           tenantBalancerInterf);
 	}
 };
 
@@ -653,6 +659,19 @@ struct InitializeStorageRequest {
 	}
 };
 
+struct InitializeTenantBalancerRequest {
+	constexpr static FileIdentifier file_identifier = 5875895;
+	UID reqId;
+	ReplyPromise<TenantBalancerInterface> reply;
+
+	InitializeTenantBalancerRequest() {}
+	explicit InitializeTenantBalancerRequest(UID uid) : reqId(uid) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reqId, reply);
+	}
+};
+
 struct TraceBatchDumpRequest {
 	constexpr static FileIdentifier file_identifier = 8184121;
 	ReplyPromise<Void> reply;
@@ -816,6 +835,7 @@ struct Role {
 	static const Role STORAGE_CACHE;
 	static const Role COORDINATOR;
 	static const Role BACKUP;
+	static const Role TENANT_BALANCER;
 
 	std::string roleName;
 	std::string abbreviation;
@@ -847,6 +867,8 @@ struct Role {
 			return STORAGE_CACHE;
 		case ProcessClass::Backup:
 			return BACKUP;
+		case ProcessClass::TenantBalancer:
+			return TENANT_BALANCER;
 		case ProcessClass::Worker:
 			return WORKER;
 		case ProcessClass::NoRole:
@@ -964,6 +986,7 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface interf,
 ACTOR Future<Void> backupWorker(BackupInterface bi,
                                 InitializeBackupRequest req,
                                 Reference<AsyncVar<ServerDBInfo> const> db);
+ACTOR Future<Void> tenantBalancer(TenantBalancerInterface tbi, Reference<AsyncVar<ServerDBInfo> const> db);
 
 void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);

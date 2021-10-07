@@ -517,6 +517,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
                                       ProcessClass initialClass,
                                       Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
                                       Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
+                                      Reference<AsyncVar<Optional<TenantBalancerInterface>> const> tenantBalancerInterf,
                                       Reference<AsyncVar<bool> const> degraded,
                                       Reference<ClusterConnectionFile> connFile,
                                       Reference<AsyncVar<std::set<std::string>> const> issues,
@@ -539,6 +540,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		                              requestGeneration++,
 		                              ddInterf->get(),
 		                              rkInterf->get(),
+		                              tenantBalancerInterf->get(),
 		                              degraded->get(),
 		                              localConfig->lastSeenVersion(),
 		                              localConfig->configClassSet());
@@ -596,6 +598,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			when(wait(ccInterface->onChange())) { break; }
 			when(wait(ddInterf->onChange())) { break; }
 			when(wait(rkInterf->onChange())) { break; }
+			when(wait(tenantBalancerInterf->onChange())) { break; }
 			when(wait(degraded->onChange())) { break; }
 			when(wait(FlowTransport::transport().onIncompatibleChanged())) { break; }
 			when(wait(issues->onChange())) { break; }
@@ -1232,6 +1235,8 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
 	    new AsyncVar<Optional<DataDistributorInterface>>());
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf(new AsyncVar<Optional<RatekeeperInterface>>());
+	state Reference<AsyncVar<Optional<TenantBalancerInterface>>> tenantBalancerInterf(
+	    new AsyncVar<Optional<TenantBalancerInterface>>());
 	state Future<Void> handleErrors = workerHandleErrors(errors.getFuture()); // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
@@ -1493,6 +1498,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 		                                       initialClass,
 		                                       ddInterf,
 		                                       rkInterf,
+		                                       tenantBalancerInterf,
 		                                       degraded,
 		                                       connFile,
 		                                       issues,
@@ -1686,6 +1692,37 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				} else {
 					forwardPromise(req.reply, backupWorkerCache.get(req.reqId));
 				}
+			}
+			when(InitializeTenantBalancerRequest req = waitNext(interf.tenantBalancer.getFuture())) {
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::TenantBalancer;
+				TenantBalancerInterface recruited(locality, req.reqId);
+				recruited.initEndpoints();
+
+				if (tenantBalancerInterf->get().present()) {
+					recruited = tenantBalancerInterf->get().get();
+					TEST(true); // Recruited while already a tenant balancer.
+				} else {
+					startRole(Role::TENANT_BALANCER, recruited.id(), interf.id());
+					DUMPTOKEN(recruited.moveTenantToCluster);
+					DUMPTOKEN(recruited.receiveTenantFromCluster);
+					DUMPTOKEN(recruited.getActiveMovements);
+					DUMPTOKEN(recruited.finishSourceMovement);
+					DUMPTOKEN(recruited.finishDestinationMovement);
+					DUMPTOKEN(recruited.abortMovement);
+					DUMPTOKEN(recruited.cleanupMovementSource);
+
+					Future<Void> tenantBalancerProcess = tenantBalancer(recruited, dbInfo);
+					errorForwarders.add(forwardError(errors,
+					                                 Role::TENANT_BALANCER,
+					                                 recruited.id(),
+					                                 setWhenDoneOrError(tenantBalancerProcess,
+					                                                    tenantBalancerInterf,
+					                                                    Optional<TenantBalancerInterface>())));
+					tenantBalancerInterf->set(Optional<TenantBalancerInterface>(recruited));
+				}
+				TraceEvent("TenantBalancerInitRequest", req.reqId).detail("TenantBalancerId", recruited.id());
+				req.reply.send(recruited);
 			}
 			when(InitializeTLogRequest req = waitNext(interf.tLog.getFuture())) {
 				// For now, there's a one-to-one mapping of spill type to TLogVersion.
@@ -2492,3 +2529,4 @@ const Role Role::RATEKEEPER("Ratekeeper", "RK");
 const Role Role::STORAGE_CACHE("StorageCache", "SC");
 const Role Role::COORDINATOR("Coordinator", "CD");
 const Role Role::BACKUP("Backup", "BK");
+const Role Role::TENANT_BALANCER("TenantBalancer", "TB");
