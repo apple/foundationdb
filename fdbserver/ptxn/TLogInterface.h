@@ -36,6 +36,40 @@
 
 namespace ptxn {
 
+struct TLogQueueEntryRef {
+	UID id;
+	std::vector<StorageTeamID> storageTeams;
+	std::vector<StringRef> messages;
+	Version version;
+	Version knownCommittedVersion;
+
+	TLogQueueEntryRef() : version(0), knownCommittedVersion(0) {}
+	TLogQueueEntryRef(Arena& a, TLogQueueEntryRef const& from)
+	  : version(from.version), knownCommittedVersion(from.knownCommittedVersion), id(from.id),
+	    storageTeams(from.storageTeams) {
+		messages.reserve(from.messages.size());
+		for (const auto& message : from.messages) {
+			messages.emplace_back(a, message);
+		}
+	}
+
+	// To change this serialization, ProtocolVersion::TLogQueueEntryRef must be updated, and downgrades need to be
+	// considered
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, messages, knownCommittedVersion, id, storageTeams, messages);
+	}
+	size_t expectedSize() const {
+		size_t total = 0;
+		for (const auto& message : messages) {
+			total += message.expectedSize();
+		}
+		return total;
+	}
+};
+
+typedef Standalone<TLogQueueEntryRef> TLogQueueEntry;
+
 struct TLogCommitReply {
 	constexpr static FileIdentifier file_identifier = 178491;
 

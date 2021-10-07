@@ -82,3 +82,18 @@ startDelay = 0
     skipCommitValidation = 1
     numCommits = 50
     messageTransferModel = 1
+
+[[test]]
+testTitle = 'Team Partitioned TLog Server Test 6: Read from persisted disk'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/read_persisted_disk_on_tlog'
+
+    numTLogs = 1
+    numStorageTeams = 40
+    numTLogGroups = 7
+    numCommits = 20

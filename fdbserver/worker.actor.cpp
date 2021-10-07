@@ -1697,6 +1697,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					    .detail("MinRecruitable", TLogVersion::MIN_RECRUITABLE);
 					req.reply.sendError(internal_error());
 				}
+				// id seems confusing -- sometimes tlog groups, sometimes tlog. need to finalize it.
 				TLogOptions tLogOptions(req.logVersion, req.spillType);
 				auto& logData = sharedLogs[SharedLogsKey(tLogOptions, req.storeType)];
 				logData.ptxnRequests.send(req);
@@ -1711,24 +1712,21 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					startRole(Role::SHARED_TRANSACTION_LOG, logId, interf.id(), details);
 
 					// TODO: create kv and disk queue per TLog group.
-					std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues;
-					const StringRef prefix =
-					    req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
-					std::string filename =
-					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
-					IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit);
-					const DiskQueueVersion dqv =
-					    tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
-					IDiskQueue* queue = openDiskQueue(
-					    joinPath(folder,
-					             fileLogQueuePrefix.toString() + tLogOptions.toPrefix() + logId.toString() + "-"),
-					    tlogQueueExtension.toString(),
-					    logId,
-					    dqv);
-					filesClosed.add(data->onClosed());
-					filesClosed.add(queue->onClosed());
+					std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>>
+					    persistentDataAndQueues;
+					for (auto& group : req.tlogGroups) {
+						IKeyValueStore* data =
+						    keyValueStoreMemory(joinPath(folder, "loggroup"), group.logGroupId, 500e6);
+						IDiskQueue* queue =
+						    openDiskQueue(joinPath(folder, "logqueue-" + group.logGroupId.toString() + "-"),
+						                  "fdq",
+						                  group.logGroupId,
+						                  DiskQueueVersion::V1);
+						persistentDataAndQueues[group.logGroupId] = std::make_pair(data, queue);
+						filesClosed.add(data->onClosed());
+						filesClosed.add(queue->onClosed());
+					}
 
-					persistentDataAndQueues.emplace_back(data, queue);
 					Future<Void> tLogCore = ptxn::tLog(persistentDataAndQueues,
 					                                   dbInfo,
 					                                   locality,
@@ -1741,8 +1739,12 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					                                   folder,
 					                                   degraded,
 					                                   activeSharedTLog);
-					tLogCore = handleIOErrors(tLogCore, data, logId);
-					tLogCore = handleIOErrors(tLogCore, queue, logId);
+
+					for (auto& entry : persistentDataAndQueues) {
+						tLogCore = handleIOErrors(tLogCore, entry.second.first, entry.first);
+						tLogCore = handleIOErrors(tLogCore, entry.second.second, entry.first);
+					}
+
 					errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, logId, tLogCore));
 					logData.actor = tLogCore;
 					logData.uid = logId;

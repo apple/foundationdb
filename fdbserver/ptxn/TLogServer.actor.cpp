@@ -57,39 +57,6 @@
 
 namespace ptxn {
 
-struct TLogQueueEntryRef {
-	UID id;
-	std::vector<StorageTeamID> storageTeams;
-	std::vector<StringRef> messages;
-	Version version;
-	Version knownCommittedVersion;
-
-	TLogQueueEntryRef() : version(0), knownCommittedVersion(0) {}
-	TLogQueueEntryRef(Arena& a, TLogQueueEntryRef const& from)
-	  : version(from.version), knownCommittedVersion(from.knownCommittedVersion), id(from.id),
-	    storageTeams(from.storageTeams) {
-		messages.reserve(from.messages.size());
-		for (const auto& message : from.messages) {
-			messages.emplace_back(a, message);
-		}
-	}
-
-	// To change this serialization, ProtocolVersion::TLogQueueEntryRef must be updated, and downgrades need to be
-	// considered
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, version, messages, knownCommittedVersion, id, storageTeams, messages);
-	}
-	size_t expectedSize() const {
-		size_t total = 0;
-		for (const auto& message : messages) {
-			total += message.expectedSize();
-		}
-		return total;
-	}
-};
-
-typedef Standalone<TLogQueueEntryRef> TLogQueueEntry;
 struct LogGenerationData;
 struct TLogGroupData;
 struct TLogServerData;
@@ -804,9 +771,7 @@ ACTOR Future<Void> doQueueCommit(Reference<TLogGroupData> self,
 	logData->queueCommittingVersion = ver;
 
 	g_network->setCurrentTask(TaskPriority::TLogCommitReply);
-	// Currently only store commit messages in memory and not using persistent queue
-	// Future<Void> c = self->persistentQueue->commit();
-	Future<Void> c = Future<Void>(Void());
+	Future<Void> c = self->persistentQueue->commit();
 	self->diskQueueCommitBytes = 0;
 	self->largeDiskQueueCommitBytes.set(false);
 
@@ -958,8 +923,7 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 			qe.storageTeams.push_back(message.first);
 			qe.messages.push_back(message.second);
 		}
-		// Currently only store commit messages in memory and not using persistent queue
-		// self->persistentQueue->push(qe, logData);
+		self->persistentQueue->push(qe, logData);
 
 		self->diskQueueCommitBytes += qe.expectedSize();
 		if (self->diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES) {
@@ -998,7 +962,7 @@ Optional<std::pair<Version, StringRef>> LogGenerationData::getSerializedTLogData
                                                                                  const StorageTeamID& storageTeamID) {
 
 	auto pStorageTeamData = getStorageTeamData(storageTeamID);
-	// Is any message with version no less than the given one available?
+	// by lower_bound, if we pass in 10, we might get 12, and return 12
 	auto iter = pStorageTeamData->versionMessages.lower_bound(version);
 	if (iter == pStorageTeamData->versionMessages.end()) {
 		return Optional<std::pair<Version, StringRef>>();
@@ -1027,6 +991,12 @@ ACTOR Future<Void> tLogPeekMessages(TLogPeekRequest req, Reference<LogGeneration
 	while ((serializedData = logData->getSerializedTLogData(version, req.storageTeamID)).present()) {
 		auto result = serializedData.get();
 		version = result.first;
+
+		if (req.endVersion.present() && version > req.endVersion.get()) {
+			// [will remove afterPR] previously has a bug, if first run version is bigger than req, it will be returned
+			// anyways.
+			break;
+		}
 		auto& data = result.second;
 
 		if (!reply.beginVersion.present()) {
@@ -1038,10 +1008,6 @@ ACTOR Future<Void> tLogPeekMessages(TLogPeekRequest req, Reference<LogGeneration
 		versionCount++;
 
 		if (serializer.getTotalBytes() > TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA) {
-			break;
-		}
-
-		if (req.endVersion.present() && version >= req.endVersion.get()) {
 			break;
 		}
 	}
@@ -1316,6 +1282,10 @@ bool tlogTerminated(Reference<TLogGroupData> self,
                     Error const& e) {
 	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise just
 	// close it.
+	
+	// assign an empty PromiseSteam to self->sharedActors would delete the referenfce of the internal queue in PromiseSteam
+	// thus the actors can be cancenlled in the case there is no more references of the old queue
+	self->sharedActors = PromiseStream<Future<Void>>();
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
 		persistentData->dispose();
 		persistentQueue->dispose();
@@ -1325,7 +1295,7 @@ bool tlogTerminated(Reference<TLogGroupData> self,
 	}
 
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
-	    e.code() == error_code_file_not_found) {
+	    e.code() == error_code_file_not_found || e.code() == error_code_operation_cancelled) {
 		TraceEvent("TLogTerminated", self->dbgid).error(e, true);
 		return true;
 	} else
@@ -1475,19 +1445,19 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializePtxnTLogR
 	return Void();
 }
 
-// For now, `persistentDataAndQueues` is not used and they are created inside tLog actor.
-ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues,
-                        Reference<AsyncVar<ServerDBInfo>> db,
-                        LocalityData locality,
-                        PromiseStream<InitializePtxnTLogRequest> tlogRequests,
-                        UID tlogId,
-                        UID workerID,
-                        bool restoreFromDisk,
-                        Promise<Void> recovered,
-                        Promise<Void> oldLog,
-                        std::string folder,
-                        Reference<AsyncVar<bool>> degraded,
-                        Reference<AsyncVar<UID>> activeSharedTLog) {
+ACTOR Future<Void> tLog(
+    std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues,
+    Reference<AsyncVar<ServerDBInfo>> db,
+    LocalityData locality,
+    PromiseStream<InitializePtxnTLogRequest> tlogRequests,
+    UID tlogId,
+    UID workerID,
+    bool restoreFromDisk,
+    Promise<Void> recovered,
+    Promise<Void> oldLog,
+    std::string folder,
+    Reference<AsyncVar<bool>> degraded,
+    Reference<AsyncVar<UID>> activeSharedTLog) {
 
 	state Reference<TLogServerData> self = makeReference<TLogServerData>(tlogId, workerID, db, degraded, folder);
 	state Future<Void> error = actorCollection(self->sharedActors.getFuture());
@@ -1508,13 +1478,8 @@ ACTOR Future<Void> tLog(std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> per
 					std::vector<Future<Void>> tlogGroupRecoveries;
 					for (auto& group : req.tlogGroups) {
 						// memory managed by each tlog group
-						IKeyValueStore* persistentData =
-						    keyValueStoreMemory(joinPath(folder, "loggroup"), group.logGroupId, 500e6);
-						IDiskQueue* persistentQueue =
-						    openDiskQueue(joinPath(folder, "logqueue-" + group.logGroupId.toString() + "-"),
-						                  "fdq",
-						                  group.logGroupId,
-						                  DiskQueueVersion::V1);
+						IKeyValueStore* persistentData = persistentDataAndQueues[group.logGroupId].first;
+						IDiskQueue* persistentQueue = persistentDataAndQueues[group.logGroupId].second;
 
 						Reference<TLogGroupData> tlogGroup = makeReference<TLogGroupData>(tlogId,
 						                                                                  group.logGroupId,
