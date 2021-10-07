@@ -207,14 +207,12 @@ def suspend(logger):
     logger.debug("Address: {}".format(address))
     db_available = get_value_from_status_json(False, 'client', 'database_status', 'available')
     assert db_available
-    # use pgrep to get the pid of the fdb process
-    pinfos = subprocess.check_output(['pgrep', '-a', 'fdbserver']).decode().strip().split('\n')
     port = address.split(':')[1]
     logger.debug("Port: {}".format(port))
-    # use the port number to find the exact fdb process we are connecting to
-    pinfo = list(filter(lambda x: port in x, pinfos))
-    assert len(pinfo) == 1
-    pid = pinfo[0].split(' ')[0]
+    # use list of open files to find pid of fdbserver with the expected port
+    pids = subprocess.check_output(['lsof', '-a', '-c', 'fdbserver', '-iTCP:{}'.format(port), '-t']).decode().strip().split('\n')
+    assert len(pids) == 1
+    pid = pids[0]
     logger.debug("Pid: {}".format(pid))
     process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
     # suspend the process for enough long time
@@ -222,7 +220,7 @@ def suspend(logger):
     # the cluster should be unavailable after the only process being suspended
     assert not get_value_from_status_json(False, 'client', 'database_status', 'available')
     # check the process pid still exists
-    pids = subprocess.check_output(['pidof', 'fdbserver']).decode().strip()
+    pids = subprocess.check_output(['lsof', '-a', '-c', 'fdbserver', '-iTCP:{}'.format(port), '-t']).decode().strip().split('\n')
     logger.debug("PIDs: {}".format(pids))
     assert pid in pids
     # kill the process by pid
