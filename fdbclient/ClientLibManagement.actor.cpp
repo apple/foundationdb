@@ -92,11 +92,13 @@ ClientLibPlatform getPlatformByName(std::string_view platformName) {
 	return platfIter->second;
 }
 
-static bool isValidTargetStatus(ClientLibStatus status) {
+namespace {
+
+bool isValidTargetStatus(ClientLibStatus status) {
 	return status == CLIENTLIB_AVAILABLE || status == CLIENTLIB_DISABLED;
 }
 
-static void parseMetadataJson(StringRef metadataString, json_spirit::mObject& metadataJson) {
+void parseMetadataJson(StringRef metadataString, json_spirit::mObject& metadataJson) {
 	json_spirit::mValue parsedMetadata;
 	if (!json_spirit::read_string(metadataString.toString(), parsedMetadata) ||
 	    parsedMetadata.type() != json_spirit::obj_type) {
@@ -109,7 +111,7 @@ static void parseMetadataJson(StringRef metadataString, json_spirit::mObject& me
 	metadataJson = parsedMetadata.get_obj();
 }
 
-static const std::string& getMetadataStrAttr(const json_spirit::mObject& metadataJson, const std::string& attrName) {
+const std::string& getMetadataStrAttr(const json_spirit::mObject& metadataJson, const std::string& attrName) {
 	auto attrIter = metadataJson.find(attrName);
 	if (attrIter == metadataJson.cend() || attrIter->second.type() != json_spirit::str_type) {
 		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
@@ -119,7 +121,7 @@ static const std::string& getMetadataStrAttr(const json_spirit::mObject& metadat
 	return attrIter->second.get_str();
 }
 
-static int getMetadataIntAttr(const json_spirit::mObject& metadataJson, const std::string& attrName) {
+int getMetadataIntAttr(const json_spirit::mObject& metadataJson, const std::string& attrName) {
 	auto attrIter = metadataJson.find(attrName);
 	if (attrIter == metadataJson.cend() || attrIter->second.type() != json_spirit::int_type) {
 		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
@@ -129,11 +131,11 @@ static int getMetadataIntAttr(const json_spirit::mObject& metadataJson, const st
 	return attrIter->second.get_int();
 }
 
-static bool validVersionPartNum(int num) {
+bool validVersionPartNum(int num) {
 	return (num >= 0 && num < 1000);
 }
 
-static int getNumericVersionEncoding(const std::string& versionStr) {
+int getNumericVersionEncoding(const std::string& versionStr) {
 	int major, minor, patch;
 	int numScanned = sscanf(versionStr.c_str(), "%d.%d.%d", &major, &minor, &patch);
 	if (numScanned != 3 || !validVersionPartNum(major) || !validVersionPartNum(minor) || !validVersionPartNum(patch)) {
@@ -144,7 +146,7 @@ static int getNumericVersionEncoding(const std::string& versionStr) {
 	return ((major * 1000) + minor) * 1000 + patch;
 }
 
-static void getIdFromMetadataJson(const json_spirit::mObject& metadataJson, std::string& clientLibId) {
+void getIdFromMetadataJson(const json_spirit::mObject& metadataJson, std::string& clientLibId) {
 	std::ostringstream libIdBuilder;
 	libIdBuilder << getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_PLATFORM) << "/";
 	libIdBuilder << format("%09d", getNumericVersionEncoding(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_VERSION)))
@@ -154,19 +156,19 @@ static void getIdFromMetadataJson(const json_spirit::mObject& metadataJson, std:
 	clientLibId = libIdBuilder.str();
 }
 
-static Key metadataKeyFromId(const std::string& clientLibId) {
+Key metadataKeyFromId(const std::string& clientLibId) {
 	return StringRef(clientLibId).withPrefix(clientLibMetadataPrefix);
 }
 
-static Key chunkKeyPrefixFromId(const std::string& clientLibId) {
+Key chunkKeyPrefixFromId(const std::string& clientLibId) {
 	return StringRef(clientLibId).withPrefix(clientLibBinaryPrefix).withSuffix(LiteralStringRef("/"));
 }
 
-static KeyRef chunkKeyFromNo(StringRef clientLibBinPrefix, size_t chunkNo, Arena& arena) {
+KeyRef chunkKeyFromNo(StringRef clientLibBinPrefix, size_t chunkNo, Arena& arena) {
 	return clientLibBinPrefix.withSuffix(format("%06zu", chunkNo), arena);
 }
 
-static ClientLibPlatform getCurrentClientPlatform() {
+ClientLibPlatform getCurrentClientPlatform() {
 #ifdef __x86_64__
 #if defined(_WIN32)
 	return CLIENTLIB_X86_64_WINDOWS;
@@ -181,6 +183,7 @@ static ClientLibPlatform getCurrentClientPlatform() {
 	return CLIENTLIB_UNKNOWN_PLATFORM;
 #endif
 }
+} // namespace
 
 ClientLibFilter& ClientLibFilter::filterNewerPackageVersion(const std::string& versionStr) {
 	matchNewerPackageVersion = true;
@@ -193,6 +196,8 @@ void getClientLibIdFromMetadataJson(StringRef metadataString, std::string& clien
 	parseMetadataJson(metadataString, parsedMetadata);
 	getIdFromMetadataJson(parsedMetadata, clientLibId);
 }
+
+namespace {
 
 ACTOR Future<Void> uploadClientLibBinary(Database db,
                                          StringRef libFilePath,
@@ -302,6 +307,8 @@ ACTOR Future<Void> deleteClientLibMetadataEntry(Database db, Key clientLibMetaKe
 	}
 	return Void();
 }
+
+} // namespace
 
 ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, StringRef libFilePath) {
 	state json_spirit::mObject metadataJson;
@@ -597,9 +604,11 @@ ACTOR Future<Void> deleteClientLibrary(Database db, StringRef clientLibId) {
 	return Void();
 }
 
-static void applyClientLibFilter(const ClientLibFilter& filter,
-                                 const RangeResultRef& scanResults,
-                                 Standalone<VectorRef<StringRef>>& filteredResults) {
+namespace {
+
+void applyClientLibFilter(const ClientLibFilter& filter,
+                          const RangeResultRef& scanResults,
+                          Standalone<VectorRef<StringRef>>& filteredResults) {
 	for (const auto& [k, v] : scanResults) {
 		try {
 			json_spirit::mObject metadataJson;
@@ -626,6 +635,8 @@ static void applyClientLibFilter(const ClientLibFilter& filter,
 		}
 	}
 }
+
+} // namespace
 
 ACTOR Future<Standalone<VectorRef<StringRef>>> listClientLibraries(Database db, ClientLibFilter filter) {
 	state Standalone<VectorRef<StringRef>> result;
