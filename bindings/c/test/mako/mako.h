@@ -104,6 +104,8 @@ typedef struct {
 #define LOGGROUP_MAX 256
 #define KNOB_MAX 256
 #define TAGPREFIXLENGTH_MAX 8
+#define NUM_CLUSTERS_MAX 3
+#define NUM_DATABASES_MAX 10
 
 /* benchmark parameters */
 typedef struct {
@@ -126,7 +128,7 @@ typedef struct {
 	int commit_get;
 	int verbose;
 	mako_txnspec_t txnspec;
-	char cluster_files[2][PATH_MAX];
+	char cluster_files[NUM_CLUSTERS_MAX][PATH_MAX];
 	int num_fdb_clusters;
 	int num_databases;
 	char log_group[LOGGROUP_MAX];
@@ -179,7 +181,7 @@ typedef struct {
 	pid_t parent_id;
 	mako_args_t* args;
 	mako_shmhdr_t* shm;
-	FDBDatabase* databases[10];
+	FDBDatabase* databases[NUM_DATABASES_MAX];
 } process_info_t;
 
 /* args for threads */

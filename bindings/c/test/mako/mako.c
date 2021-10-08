@@ -1065,7 +1065,8 @@ void* worker_thread(void* thread_args) {
 	int worker_id = ((thread_args_t*)thread_args)->process->worker_id;
 	int thread_id = ((thread_args_t*)thread_args)->thread_id;
 	mako_args_t* args = ((thread_args_t*)thread_args)->process->args;
-	FDBDatabase* database = ((thread_args_t*)thread_args)->process->databases[((thread_args_t*)thread_args)->database_index];
+	FDBDatabase* database =
+	    ((thread_args_t*)thread_args)->process->databases[((thread_args_t*)thread_args)->database_index];
 	fdb_error_t err;
 	int rc;
 	FDBTransaction* transaction;
@@ -1293,9 +1294,13 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 	}
 
 	if (args->client_threads_per_version > 0) {
-		err = fdb_network_set_option(FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, (uint8_t*) &args->client_threads_per_version, sizeof(int64_t));
+		err = fdb_network_set_option(
+		    FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, (uint8_t*)&args->client_threads_per_version, sizeof(int64_t));
 		if (err) {
-			fprintf(stderr, "ERROR: fdb_network_set_option (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) (%d): %s\n", (uint8_t*) &args->client_threads_per_version, fdb_get_error(err));
+			fprintf(stderr,
+			        "ERROR: fdb_network_set_option (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) (%d): %s\n",
+			        (uint8_t*)&args->client_threads_per_version,
+			        fdb_get_error(err));
 		}
 	}
 
@@ -1341,11 +1346,12 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 	for (size_t i = 0; i < args->num_databases; i++) {
 		size_t cluster_index = args->num_fdb_clusters <= 1 ? 0 : i % args->num_fdb_clusters;
 		fdb_create_database(args->cluster_files[cluster_index], &process.databases[i]);
+		if (args->disable_ryw) {
+			fdb_database_set_option(process.databases[i], FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, (uint8_t*)NULL, 0);
+		}
 	}
 #endif
-	if (args->disable_ryw) {
-		fdb_database_set_option(process.database, FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, (uint8_t*)NULL, 0);
-	}
+
 	fprintf(debugme, "DEBUG: creating %d worker threads\n", args->num_threads);
 	worker_threads = (pthread_t*)calloc(sizeof(pthread_t), args->num_threads);
 	if (!worker_threads) {
@@ -1642,51 +1648,53 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 	int idx;
 	while (1) {
 		const char* short_options = "a:c:d:p:t:r:s:i:x:v:m:hjz";
-		static struct option long_options[] = { /* name, has_arg, flag, val */
-			                                    { "api_version", required_argument, NULL, 'a' },
-			                                    { "cluster", required_argument, NULL, 'c' },
-												{ "num_databases", optional_argument, NULL, 'd' },
-			                                    { "procs", required_argument, NULL, 'p' },
-			                                    { "threads", required_argument, NULL, 't' },
-			                                    { "rows", required_argument, NULL, 'r' },
-			                                    { "seconds", required_argument, NULL, 's' },
-			                                    { "iteration", required_argument, NULL, 'i' },
-			                                    { "keylen", required_argument, NULL, ARG_KEYLEN },
-			                                    { "vallen", required_argument, NULL, ARG_VALLEN },
-			                                    { "transaction", required_argument, NULL, 'x' },
-			                                    { "tps", required_argument, NULL, ARG_TPS },
-			                                    { "tpsmax", required_argument, NULL, ARG_TPSMAX },
-			                                    { "tpsmin", required_argument, NULL, ARG_TPSMIN },
-			                                    { "tpsinterval", required_argument, NULL, ARG_TPSINTERVAL },
-			                                    { "tpschange", required_argument, NULL, ARG_TPSCHANGE },
-			                                    { "sampling", required_argument, NULL, ARG_SAMPLING },
-			                                    { "verbose", required_argument, NULL, 'v' },
-			                                    { "mode", required_argument, NULL, 'm' },
-			                                    { "knobs", required_argument, NULL, ARG_KNOBS },
-			                                    { "loggroup", required_argument, NULL, ARG_LOGGROUP },
-			                                    { "tracepath", required_argument, NULL, ARG_TRACEPATH },
-			                                    { "trace_format", required_argument, NULL, ARG_TRACEFORMAT },
-			                                    { "streaming", required_argument, NULL, ARG_STREAMING_MODE },
-			                                    { "txntrace", required_argument, NULL, ARG_TXNTRACE },
-			                                    /* no args */
-			                                    { "help", no_argument, NULL, 'h' },
-			                                    { "json", no_argument, NULL, 'j' },
-			                                    { "zipf", no_argument, NULL, 'z' },
-			                                    { "commitget", no_argument, NULL, ARG_COMMITGET },
-			                                    { "flatbuffers", no_argument, NULL, ARG_FLATBUFFERS },
-			                                    { "prefix_padding", no_argument, NULL, ARG_PREFIXPADDING },
-			                                    { "trace", no_argument, NULL, ARG_TRACE },
-			                                    { "txntagging", required_argument, NULL, ARG_TXNTAGGING },
-			                                    { "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
-			                                    { "version", no_argument, NULL, ARG_VERSION },
-												{ "client_threads_per_version", required_argument, NULL, ARG_CLIENT_THREADS_PER_VERSION },
-			                                    { "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
-			                                    { NULL, 0, NULL, 0 }
+		static struct option long_options[] = {
+			/* name, has_arg, flag, val */
+			{ "api_version", required_argument, NULL, 'a' },
+			{ "cluster", required_argument, NULL, 'c' },
+			{ "num_databases", optional_argument, NULL, 'd' },
+			{ "procs", required_argument, NULL, 'p' },
+			{ "threads", required_argument, NULL, 't' },
+			{ "rows", required_argument, NULL, 'r' },
+			{ "seconds", required_argument, NULL, 's' },
+			{ "iteration", required_argument, NULL, 'i' },
+			{ "keylen", required_argument, NULL, ARG_KEYLEN },
+			{ "vallen", required_argument, NULL, ARG_VALLEN },
+			{ "transaction", required_argument, NULL, 'x' },
+			{ "tps", required_argument, NULL, ARG_TPS },
+			{ "tpsmax", required_argument, NULL, ARG_TPSMAX },
+			{ "tpsmin", required_argument, NULL, ARG_TPSMIN },
+			{ "tpsinterval", required_argument, NULL, ARG_TPSINTERVAL },
+			{ "tpschange", required_argument, NULL, ARG_TPSCHANGE },
+			{ "sampling", required_argument, NULL, ARG_SAMPLING },
+			{ "verbose", required_argument, NULL, 'v' },
+			{ "mode", required_argument, NULL, 'm' },
+			{ "knobs", required_argument, NULL, ARG_KNOBS },
+			{ "loggroup", required_argument, NULL, ARG_LOGGROUP },
+			{ "tracepath", required_argument, NULL, ARG_TRACEPATH },
+			{ "trace_format", required_argument, NULL, ARG_TRACEFORMAT },
+			{ "streaming", required_argument, NULL, ARG_STREAMING_MODE },
+			{ "txntrace", required_argument, NULL, ARG_TXNTRACE },
+			/* no args */
+			{ "help", no_argument, NULL, 'h' },
+			{ "json", no_argument, NULL, 'j' },
+			{ "zipf", no_argument, NULL, 'z' },
+			{ "commitget", no_argument, NULL, ARG_COMMITGET },
+			{ "flatbuffers", no_argument, NULL, ARG_FLATBUFFERS },
+			{ "prefix_padding", no_argument, NULL, ARG_PREFIXPADDING },
+			{ "trace", no_argument, NULL, ARG_TRACE },
+			{ "txntagging", required_argument, NULL, ARG_TXNTAGGING },
+			{ "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
+			{ "version", no_argument, NULL, ARG_VERSION },
+			{ "client_threads_per_version", required_argument, NULL, ARG_CLIENT_THREADS_PER_VERSION },
+			{ "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
+			{ NULL, 0, NULL, 0 }
 		};
 		idx = 0;
 		c = getopt_long(argc, argv, short_options, long_options, &idx);
-		if (c < 0)
+		if (c < 0) {
 			break;
+		}
 		switch (c) {
 		case '?':
 		case 'h':
@@ -1695,10 +1703,16 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 		case 'a':
 			args->api_version = atoi(optarg);
 			break;
-		case 'c':
-			strcpy(args->cluster_files[args->num_fdb_clusters], optarg);
-			args->num_fdb_clusters++;
+		case 'c': {
+			const char delim[2] = ",";
+			char* token = strtok(optarg, delim);
+			while (token != NULL) {
+				strcpy(args->cluster_files[args->num_fdb_clusters], token);
+				args->num_fdb_clusters++;
+				token = strtok(NULL, optarg);
+			}
 			break;
+		}
 		case 'd':
 			args->num_databases = atoi(optarg);
 			break;
