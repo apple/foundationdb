@@ -935,8 +935,6 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 	state Transaction tr;
 	state double grvDelay = 0.001;
-	cx->lastTimedGrv = 0.0;
-	cx->cachedRv = Version(0);
 	TraceEvent(SevDebug, "BackgroundGrvUpdaterStart").detail("DBID", cx->dbId).detail("GrvDelay", grvDelay);
 	try {
 		loop {
@@ -1199,9 +1197,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), outstandingWatches(0),
-    transactionTracingEnabled(true), taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor),
-    coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
-    detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    lastTimedGrv(0.0), cachedRv(0), transactionTracingEnabled(true), taskID(taskID), clientInfo(clientInfo),
+    clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0),
+    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size())
@@ -1222,7 +1221,6 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 
 	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
 	tssMismatchHandler = handleTssMismatches(this);
-	grvUpdateHandler = backgroundGrvUpdater(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
 
@@ -1482,7 +1480,9 @@ DatabaseContext::~DatabaseContext() {
 	monitorProxiesInfoChange.cancel();
 	monitorTssInfoChange.cancel();
 	tssMismatchHandler.cancel();
-	grvUpdateHandler.cancel();
+	if (grvUpdateHandler.isValid()) {
+		grvUpdateHandler.cancel();
+	}
 	for (auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT(server_interf.empty());
@@ -5784,6 +5784,10 @@ ACTOR Future<Version> getDBCachedReadVersion(DatabaseContext* cx, double request
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	if (!readVersion.isValid()) {
 		if ((CLIENT_KNOBS->DEBUG_USE_GRV_CACHE || options.useGrvCache) && cx->cachedRv > Version(0)) {
+			// Upon our first request to use cached RVs, start the background updater
+			if (!cx->grvUpdateHandler.isValid()) {
+				cx->grvUpdateHandler = backgroundGrvUpdater(getDatabase().getPtr());
+			}
 			readVersion = getDBCachedReadVersion(getDatabase().getPtr(), now());
 			return readVersion;
 		}

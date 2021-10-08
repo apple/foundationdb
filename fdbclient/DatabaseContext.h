@@ -330,11 +330,6 @@ public:
 	// map from tssid -> metrics for that tss pair
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
 
-	// Database-level read version cache storing the most recent successful GRV as well as the time it was requested.
-	NotifiedDouble lastTimedGrv;
-	Version cachedRv;
-	void updateCachedRV(double t, Version v);
-
 	UID dbId;
 	IsInternal internal; // Only contexts created through the C client and fdbcli are non-internal
 
@@ -388,6 +383,11 @@ public:
 
 	int outstandingWatches;
 	int maxOutstandingWatches;
+
+	// Database-level read version cache storing the most recent successful GRV as well as the time it was requested.
+	NotifiedDouble lastTimedGrv;
+	Version cachedRv;
+	void updateCachedRV(double t, Version v);
 
 	int snapshotRywEnabled;
 
