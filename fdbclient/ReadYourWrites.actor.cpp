@@ -2252,6 +2252,9 @@ void ReadYourWritesTransaction::setOptionImpl(FDBTransactionOptions::Option opti
 	case FDBTransactionOptions::USE_GRV_CACHE:
 		validateOptionValueNotPresent(value);
 		options.useGrvCache = true;
+	case FDBTransactionOptions::SKIP_GRV_CACHE:
+		validateOptionValueNotPresent(value);
+		options.skipGrvCache = true;
 	default:
 		break;
 	}

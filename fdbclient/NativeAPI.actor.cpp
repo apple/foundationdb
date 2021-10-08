@@ -951,6 +951,7 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 			    .detail("Bound", CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay);
 			if (curTime - lastTime >= (CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay)) {
 				try {
+					tr.setOption(FDBTransactionOptions::SKIP_GRV_CACHE);
 					wait(success(tr.getReadVersion()));
 					grvDelay = (grvDelay + (now() - curTime)) / 2.0;
 					TraceEvent(SevDebug, "BackgroundGrvUpdaterSuccess")
@@ -4789,6 +4790,7 @@ void TransactionOptions::clear() {
 	priority = TransactionPriority::DEFAULT;
 	expensiveClearCostEstimation = false;
 	useGrvCache = false;
+	skipGrvCache = false;
 }
 
 TransactionOptions::TransactionOptions() {
@@ -5567,6 +5569,11 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		options.useGrvCache = true;
 		break;
 
+	case FDBTransactionOptions::SKIP_GRV_CACHE:
+		validateOptionValueNotPresent(value);
+		options.skipGrvCache = true;
+		break;
+
 	default:
 		break;
 	}
@@ -5783,7 +5790,7 @@ ACTOR Future<Version> getDBCachedReadVersion(DatabaseContext* cx, double request
 
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	if (!readVersion.isValid()) {
-		if ((CLIENT_KNOBS->DEBUG_USE_GRV_CACHE || options.useGrvCache) && cx->cachedRv > Version(0)) {
+		if (!options.skipGrvCache && (CLIENT_KNOBS->DEBUG_USE_GRV_CACHE || options.useGrvCache)) {
 			// Upon our first request to use cached RVs, start the background updater
 			if (!cx->grvUpdateHandler.isValid()) {
 				cx->grvUpdateHandler = backgroundGrvUpdater(getDatabase().getPtr());
