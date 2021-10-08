@@ -357,6 +357,10 @@ public:
 	void addref() override { ReferenceCounted<TCTeamInfo>::addref(); }
 	void delref() override { ReferenceCounted<TCTeamInfo>::delref(); }
 
+	bool hasServer(const UID& server) {
+		return std::find(serverIDs.begin(), serverIDs.end(), server) != serverIDs.end();
+	}
+
 	void addServers(const std::vector<UID>& servers) override {
 		serverIDs.reserve(servers.size());
 		for (int i = 0; i < servers.size(); i++) {

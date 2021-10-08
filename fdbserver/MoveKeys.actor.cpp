@@ -275,10 +275,10 @@ ACTOR Future<std::vector<UID>> pickReadWriteServers(Transaction* tr, std::vector
 	return result;
 }
 
-ACTOR Future<vector<vector<UID>>> additionalSources(RangeResult shards,
-                                                    Reference<ReadYourWritesTransaction> tr,
-                                                    int desiredHealthy,
-                                                    int maxServers) {
+ACTOR Future<std::vector<std::vector<UID>>> additionalSources(RangeResult shards,
+                                                              Reference<ReadYourWritesTransaction> tr,
+                                                              int desiredHealthy,
+                                                              int maxServers) {
 	state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 	std::vector<Future<Optional<Value>>> serverListEntries;
@@ -1335,10 +1335,9 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
 				                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
 				state KeyRange currentKeys = KeyRangeRef(begin, keyServers.end()[-1].key);
-				for (int i = 0; i < keyServers.size() - 1; ++i) {
-					auto it = keyServers[i];
-					std::vector<UID> src;
-					std::vector<UID> dest;
+				state int i = 0;
+				for (; i < keyServers.size() - 1; ++i) {
+					state KeyValueRef it = keyServers[i];
 					decodeKeyServersValue(UIDtoTagMap, it.value, src, dest);
 
 					// The failed server is not present
