@@ -65,45 +65,39 @@ private:
 	Key key, keyDesc;
 };
 
-class ClusterConnectionFile : NonCopyable, public ReferenceCounted<ClusterConnectionFile> {
+class IClusterConnectionRecord {
 public:
-	ClusterConnectionFile() {}
-	// Loads and parses the file at 'path', throwing errors if the file cannot be read or the format is invalid.
-	//
-	// The format of the file is: description:id@[addrs]+
-	//  The description and id together are called the "key"
-	//
-	// The following is enforced about the format of the file:
-	//  - The key must contain one (and only one) ':' character
-	//  - The description contains only allowed characters (a-z, A-Z, 0-9, _)
-	//  - The ID contains only allowed characters (a-z, A-Z, 0-9)
-	//  - At least one address is specified
-	//  - There is no address present more than once
-	explicit ClusterConnectionFile(std::string const& path);
-	explicit ClusterConnectionFile(ClusterConnectionString const& cs) : cs(cs), setConn(false) {}
-	explicit ClusterConnectionFile(std::string const& filename, ClusterConnectionString const& contents);
+	IClusterConnectionRecord(bool connectionStringNeedsPersisted)
+	  : connectionStringNeedsPersisted(connectionStringNeedsPersisted) {}
+	virtual ~IClusterConnectionRecord() {}
 
-	// returns <resolved name, was default file>
-	static std::pair<std::string, bool> lookupClusterFileName(std::string const& filename);
-	// get a human readable error message describing the error returned from the constructor
-	static std::string getErrorString(std::pair<std::string, bool> const& resolvedFile, Error const& e);
+	virtual ClusterConnectionString const& getConnectionString() const = 0;
+	virtual Future<Void> setConnectionString(ClusterConnectionString const&) = 0;
+	virtual Future<ClusterConnectionString> getStoredConnectionString() = 0;
 
-	ClusterConnectionString const& getConnectionString() const;
-	bool writeFile();
-	void setConnectionString(ClusterConnectionString const&);
-	std::string const& getFilename() const {
-		ASSERT(filename.size());
-		return filename;
-	}
-	bool canGetFilename() const { return filename.size() != 0; }
-	bool fileContentsUpToDate() const;
-	bool fileContentsUpToDate(ClusterConnectionString& fileConnectionString) const;
+	Future<bool> upToDate();
+	virtual Future<bool> upToDate(ClusterConnectionString& connectionString) = 0;
+
+	virtual Standalone<StringRef> getLocation() const = 0;
+	virtual Reference<IClusterConnectionRecord> makeIntermediateRecord(
+	    ClusterConnectionString const& connectionString) const = 0;
+
+	virtual bool isValid() const = 0;
+	virtual std::string toString() const = 0;
+
 	void notifyConnected();
 
+	virtual void addref() = 0;
+	virtual void delref() = 0;
+
+protected:
+	virtual Future<bool> persist() = 0;
+
+	bool needsToBePersisted() const;
+	void setPersisted();
+
 private:
-	ClusterConnectionString cs;
-	std::string filename;
-	bool setConn;
+	bool connectionStringNeedsPersisted;
 };
 
 struct LeaderInfo {
@@ -199,9 +193,9 @@ class ClientCoordinators {
 public:
 	std::vector<ClientLeaderRegInterface> clientLeaderServers;
 	Key clusterKey;
-	Reference<ClusterConnectionFile> ccf;
+	Reference<IClusterConnectionRecord> ccr;
 
-	explicit ClientCoordinators(Reference<ClusterConnectionFile> ccf);
+	explicit ClientCoordinators(Reference<IClusterConnectionRecord> ccr);
 	explicit ClientCoordinators(Key clusterKey, std::vector<NetworkAddress> coordinators);
 	ClientCoordinators() {}
 };

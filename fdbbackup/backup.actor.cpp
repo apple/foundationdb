@@ -37,6 +37,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/RunTransaction.actor.h"
@@ -2220,8 +2221,8 @@ ACTOR Future<Void> statusDBMove(Database src,
 		state DatabaseBackupAgent backupAgent(src);
 		state DatabaseBackupStatus backUpStatus = wait(backupAgent.getStatusData(dest, errorLimit, StringRef(tagName)));
 
-		backUpStatus.srcClusterFile = src->getConnectionFile()->getFilename();
-		backUpStatus.destClusterFile = dest->getConnectionFile()->getFilename();
+		backUpStatus.srcClusterFile = src->getConnectionRecord()->getLocation().toString();
+		backUpStatus.destClusterFile = dest->getConnectionRecord()->getLocation().toString();
 		backUpStatus.srcPrefix = srcPrefix.size() ? srcPrefix : KeyRef("`not specified`");
 		backUpStatus.destPrefix = destPrefix.size() ? destPrefix : KeyRef("`not specified`");
 
@@ -2379,7 +2380,7 @@ ACTOR Future<Void> listDBMove(Database db, bool isSrc) {
 		printf("%s %s %s\n",
 		       "List running data movement",
 		       (isSrc ? "from" : "to"),
-		       db->getConnectionFile()->getFilename().c_str());
+		       db->getConnectionRecord()->getLocation().toString().c_str());
 		for (const auto& entry : recorder) {
 			printf("tag: %s  uid: %s\n", entry.first.c_str(), entry.second.c_str());
 		}
@@ -2397,8 +2398,8 @@ ACTOR Future<Void> listDBMove(Database src, Database dest) {
 	try {
 		printf("%s from %s to %s\n",
 		       "List running data movement",
-		       src->getConnectionFile()->getFilename().c_str(),
-		       dest->getConnectionFile()->getFilename().c_str());
+		       src->getConnectionRecord()->getLocation().toString().c_str(),
+		       dest->getConnectionRecord()->getLocation().toString().c_str());
 		state std::unordered_map<std::string, std::string> srcRecorder = wait(fetchDBMove(src, true));
 		state std::unordered_map<std::string, std::string> destRecorder = wait(fetchDBMove(dest, false));
 		std::unordered_set<std::string> visited;
