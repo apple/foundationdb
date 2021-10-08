@@ -732,10 +732,10 @@ ACTOR static Future<Void> monitorProxiesChange(DatabaseContext* cx,
 					// 2. If the old set of Grv proxies is empty, there's nothing to do
 					// 3. If the new set of Grv proxies is empty, it means the recovery is not complete. So if an old
 					//    Grv proxy still gives out read versions, this would be correct behavior.
-					// 4. If we see a provisionoal proxy, it means the recovery didn't complete yet, so the same as (3)
+					// 4. If we see a provisional proxy, it means the recovery didn't complete yet, so the same as (3)
 					//    applies.
 					if (deterministicRandom()->random01() < cx->verifyCausalReadsProp && !curGrvProxies.empty() &&
-					    !curGrvProxies.empty() && !clientDBInfo->get().grvProxies.empty() &&
+					    !clientDBInfo->get().grvProxies.empty() &&
 					    !clientDBInfo->get().grvProxies[0].provisional) {
 						actors.add(attemptGRVFromOldProxies(curGrvProxies, clientDBInfo->get().grvProxies));
 					}
