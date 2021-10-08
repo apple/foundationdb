@@ -22,6 +22,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/TenantBalancerInterface.h"
 #include "fdbserver/ServerDBInfo.actor.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -38,12 +39,7 @@ struct TenantBalancer {
 	TenantBalancer(TenantBalancerInterface tbi, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
 	  : tbi(tbi), dbInfo(dbInfo), actors(false) {
 		auto info = makeReference<AsyncVar<ClientDBInfo>>();
-		db = DatabaseContext::create(info,
-		                             extractClientInfo(dbInfo, info),
-		                             LocalityData(),
-		                             EnableLocalityLoadBalance::True,
-		                             TaskPriority::DefaultEndpoint,
-		                             LockAware::True); // TODO: Check these params
+		db = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::False, EnableLocalityLoadBalance::True);
 
 		agent = DatabaseBackupAgent(db);
 	}
