@@ -1900,8 +1900,15 @@ public:
 		if (machineStartTime() == 0) {
 			return true;
 		}
+
 		if (now() - machineStartTime() < SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY) {
 			return true;
+		}
+
+		// When remote DC health is not monitored, we may not know whether the remote is healthy or not. So return false
+		// here to prevent failover.
+		if (!remoteDCMonitorStarted) {
+			return false;
 		}
 
 		return !remoteTransactionSystemContainsDegradedServers();
@@ -2011,6 +2018,7 @@ public:
 	Optional<UID> recruitingRatekeeperID;
 	AsyncVar<bool> recruitRatekeeper;
 
+	bool remoteDCMonitorStarted;
 	bool remoteTransactionSystemDegraded;
 
 	// Stores the health information from a particular worker's perspective.
@@ -2045,8 +2053,8 @@ public:
 	    ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), gotProcessClasses(false),
 	    gotFullyRecoveredConfig(false), startTime(now()), goodRecruitmentTime(Never()),
 	    goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0), versionDifferenceUpdated(false),
-	    recruitingDistributor(false), recruitRatekeeper(false), remoteTransactionSystemDegraded(false),
-	    clusterControllerMetrics("ClusterController", id.toString()),
+	    recruitingDistributor(false), recruitRatekeeper(false), remoteDCMonitorStarted(false),
+	    remoteTransactionSystemDegraded(false), clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
 	    getWorkersRequests("GetWorkersRequests", clusterControllerMetrics),
@@ -3560,6 +3568,15 @@ ACTOR Future<Void> updateRemoteDCHealth(ClusterControllerData* self) {
 	// The purpose of the initial delay is to wait for the cluster to achieve a steady state before checking remote DC
 	// health, since remote DC healthy may trigger a failover, and we don't want that to happen too frequently.
 	wait(delay(SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY));
+
+	self->remoteDCMonitorStarted = true;
+
+	// When the remote DC health just start, we may just recover from a health degradation. Check if we can failback if
+	// we are currently in the remote DC in the database configuration.
+	if (!self->remoteTransactionSystemDegraded) {
+		checkOutstandingRequests(self);
+	}
+
 	loop {
 		bool oldRemoteTransactionSystemDegraded = self->remoteTransactionSystemDegraded;
 		self->remoteTransactionSystemDegraded = self->remoteTransactionSystemContainsDegradedServers();
@@ -3856,7 +3873,9 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 						TraceEvent("DegradedServerDetectedAndSuggestRecovery");
 					}
 				} else if (self->shouldTriggerFailoverDueToDegradedServers()) {
-					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER) {
+					double ccUpTime = now() - machineStartTime();
+					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER &&
+					    ccUpTime > SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY) {
 						TraceEvent("DegradedServerDetectedAndTriggerFailover").log();
 						std::vector<Optional<Key>> dcPriority;
 						auto remoteDcId = self->db.config.regions[0].dcId == self->clusterControllerDcId.get()
@@ -3869,7 +3888,7 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 						dcPriority.push_back(self->clusterControllerDcId);
 						self->desiredDcIds.set(dcPriority);
 					} else {
-						TraceEvent("DegradedServerDetectedAndSuggestFailover").log();
+						TraceEvent("DegradedServerDetectedAndSuggestFailover").detail("CCUpTime", ccUpTime);
 					}
 				}
 			}
