@@ -760,6 +760,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "proxies":6,
          "backup_worker_enabled":1,
          "perpetual_storage_wiggle":0,
+         "perpetual_storage_wiggle_locality":"0",
          "storage_migration_type": {
              "$enum":[
              "disabled",

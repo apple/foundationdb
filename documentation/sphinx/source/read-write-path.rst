@@ -16,7 +16,7 @@ The processing order of multiple transactions is important because it affects th
 The content is based on FDB 6.2 and is true for FDB 6.3.  A new timestamp proxy role is introduced in post FDB 6.3,
 which affects the read path. We will discuss the timestamp proxy role in the future version of this document.
 
-.. image:: /images/FDB_read_path.png
+.. image:: images/FDB_read_path.png
 
 Components
 =================
@@ -198,7 +198,7 @@ Write path of a transaction
 Suppose a client has a write-only transaction. Fig. 2 below shows the write path in a non-HA cluster.
 We will discuss how a transaction with both read and write works in the next section.
 
-.. image:: /images/FDB_write_path.png
+.. image:: images/FDB_write_path.png
 
 To simplify the explanation, the steps below do not include transaction batching on proxy,
 which is a typical database technique to increase transaction throughput.
@@ -461,7 +461,7 @@ The ordering is enforced in the timestamp generator, the concurrency control com
 We use the following example and draw its swimlane diagram to illustrate how two write transactions are ordered in FDB.
 The diagram with notes can be viewed at `here <https://lucid.app/lucidchart/6336dbe3-cff4-4c46-995a-4ca3d9260696/view?page=0_0#?folder_id=home&browser=icon>`_.
 
-.. image:: /images/FDB_multiple_txn_swimlane_diagram.png
+.. image:: images/FDB_multiple_txn_swimlane_diagram.png
 
 Reference
 ============

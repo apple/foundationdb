@@ -2197,10 +2197,10 @@ public:
 		    db.recoveryStalled) {
 			if (db.config.regions.size() > 1) {
 				auto regions = db.config.regions;
-				if (clusterControllerDcId.get() == regions[0].dcId) {
+				if (clusterControllerDcId.get() == regions[0].dcId && regions[1].priority >= 0) {
 					std::swap(regions[0], regions[1]);
 				}
-				ASSERT(clusterControllerDcId.get() == regions[1].dcId);
+				ASSERT(regions[1].priority < 0 || clusterControllerDcId.get() == regions[1].dcId);
 				checkRegions(regions);
 			}
 		}
@@ -3071,6 +3071,8 @@ public:
 	Counter registerMasterRequests;
 	Counter statusRequests;
 
+	Reference<EventCacheHolder> recruitedMasterWorkerEventHolder;
+
 	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
 	                      LocalityData const& locality,
 	                      ServerCoordinators const& coordinators)
@@ -3085,7 +3087,8 @@ public:
 	    getWorkersRequests("GetWorkersRequests", clusterControllerMetrics),
 	    getClientWorkersRequests("GetClientWorkersRequests", clusterControllerMetrics),
 	    registerMasterRequests("RegisterMasterRequests", clusterControllerMetrics),
-	    statusRequests("StatusRequests", clusterControllerMetrics) {
+	    statusRequests("StatusRequests", clusterControllerMetrics),
+	    recruitedMasterWorkerEventHolder(makeReference<EventCacheHolder>("RecruitedMasterWorker")) {
 		auto serverInfo = ServerDBInfo();
 		serverInfo.id = deterministicRandom()->randomUniqueID();
 		serverInfo.infoGeneration = ++db.dbInfoCount;
@@ -3201,7 +3204,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 				// for status tool
 				TraceEvent("RecruitedMasterWorker", cluster->id)
 				    .detail("Address", fNewMaster.get().get().address())
-				    .trackLatest("RecruitedMasterWorker");
+				    .trackLatest(cluster->recruitedMasterWorkerEventHolder->trackingKey);
 
 				iMaster = fNewMaster.get().get();
 

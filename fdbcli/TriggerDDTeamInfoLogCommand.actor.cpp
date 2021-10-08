@@ -31,7 +31,7 @@
 
 namespace fdb_cli {
 
-ACTOR Future<Void> triggerddteaminfologCommandActor(Reference<IDatabase> db) {
+ACTOR Future<bool> triggerddteaminfologCommandActor(Reference<IDatabase> db) {
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		try {
@@ -41,7 +41,7 @@ ACTOR Future<Void> triggerddteaminfologCommandActor(Reference<IDatabase> db) {
 			tr->set(triggerDDTeamInfoPrintKey, v);
 			wait(safeThreadFutureToFuture(tr->commit()));
 			printf("Triggered team info logging in data distribution.\n");
-			return Void();
+			return true;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
