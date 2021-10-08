@@ -5471,22 +5471,26 @@ private:
 
 			// Write this btree page, which is made of 1 or more pager pages.
 			state BTreePageIDRef childPageID;
-			state int k;
 
-			// If we are only writing 1 page and it has the same BTreePageID size as the original then try to reuse the
-			// LogicalPageIDs in previousID and try to update them atomically.
-			if (pagesToBuild.size() == 1 && previousID.size() == p.blockSize && p.blockSize == 1) {
+			// If we are only writing 1 BTree node and its block count is 1 and the original node also had 1 block
+			// then try to update the page atomically so its logical page ID does not change
+			if (pagesToBuild.size() == 1 && p.blockCount == 1 && previousID.size() == 1) {
 				LogicalPageID id = wait(
 				    self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, height, previousID.front(), pages, v));
 				childPageID.push_back(records.arena(), id);
 			} else {
-				// Either the original page is being split, or it's not but it has changed BTreePageID size.
-				// Either way, there is no point in reusing any of the original page IDs because the parent
-				// must be rewritten anyway to count for the change in child count or child links.
+				// Either the original node is being split, or it's not but it has changed BTreePageID size or
+				// it is now a multi-page node (and maybe was before as well)
+				// Either way, there is no point in reusing any of the original page IDs because either
+				// the parent must be rewritten anyway to account for the change in child link count or size,
+				// or the parent would be rewritten because it the same cost or cheaper than incurring the second
+				// write of 2 or more pages of a multi-page node.
+
 				// Free the old IDs, but only once (before the first output record is added).
 				if (records.empty()) {
 					self->freeBTreePage(previousID, v);
 				}
+
 				state Standalone<VectorRef<LogicalPageID>> emptyPages;
 				emptyPages.resize(emptyPages.arena(), p.blockCount);
 				state int i = 0;
