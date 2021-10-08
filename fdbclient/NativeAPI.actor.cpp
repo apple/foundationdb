@@ -55,6 +55,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TransactionLineage.h"
 #include "fdbclient/versions.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
@@ -2111,7 +2112,7 @@ void setupNetwork(uint64_t transportId, UseMetrics useMetrics) {
 	g_network = newNet2(tlsConfig, false, useMetrics || networkOptions.traceDirectory.present());
 	g_network->addStopCallback(Net2FileSystem::stop);
 	g_network->addStopCallback(TLS::DestroyOpenSSLGlobalState);
-	FlowTransport::createInstance(true, transportId);
+	FlowTransport::createInstance(true, transportId, WLTOKEN_RESERVED_COUNT);
 	Net2FileSystem::newFileSystem();
 
 	uncancellable(monitorNetworkBusyness());
@@ -4766,8 +4767,9 @@ double Transaction::getBackoff(int errCode) {
 				auto tagItr = priorityItr->second.find(tag);
 				if (tagItr != priorityItr->second.end()) {
 					TEST(true); // Returning throttle backoff
-					returnedBackoff = std::min(CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL,
-					                           std::max(returnedBackoff, tagItr->second.throttleDuration()));
+					returnedBackoff = std::max(
+					    returnedBackoff,
+					    std::min(CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL, tagItr->second.throttleDuration()));
 					if (returnedBackoff == CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL) {
 						break;
 					}
@@ -5894,7 +5896,8 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 
 // Gets the protocol version reported by a coordinator via the protocol info interface
 ACTOR Future<ProtocolVersion> getCoordinatorProtocol(NetworkAddressList coordinatorAddresses) {
-	RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{ { coordinatorAddresses }, WLTOKEN_PROTOCOL_INFO } };
+	RequestStream<ProtocolInfoRequest> requestStream{ Endpoint::wellKnown({ coordinatorAddresses },
+		                                                                  WLTOKEN_PROTOCOL_INFO) };
 	ProtocolInfoReply reply = wait(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
 
 	return reply.version;
