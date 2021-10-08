@@ -90,7 +90,8 @@ enum {
 	OPT_BUILD_FLAGS,
 	OPT_TRACE_FORMAT,
 	OPT_KNOB,
-	OPT_DEBUG_TLS
+	OPT_DEBUG_TLS,
+	OPT_API_VERSION,
 };
 
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -112,6 +113,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
 	                                  { OPT_KNOB, "--knob_", SO_REQ_SEP },
 	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
+	                                  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	                                  TLS_OPTION_FLAGS
@@ -428,6 +430,8 @@ static void printProgramUsage(const char* name) {
 	       "                 and then exits.\n"
 	       "  --no-status    Disables the initial status check done when starting\n"
 	       "                 the CLI.\n"
+	       "  --api-version  APIVERSION\n"
+	       "                 Specifies the version of the API for the CLI to use.\n"
 #ifndef TLS_DISABLED
 	       TLS_HELP
 #endif
@@ -469,47 +473,6 @@ void initHelp() {
 	    "clear a range of keys from the database",
 	    "All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will "
 	    "succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
-	helpMap["configure"] = CommandHelp(
-	    "configure [new|tss]"
-	    "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|"
-	    "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
-	    "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|storage_migration_type={disabled|gradual|"
-	    "aggressive}",
-	    "change the database configuration",
-	    "The `new' option, if present, initializes a new database with the given configuration rather than changing "
-	    "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
-	    "specified.\n\ntss: when enabled, configures the testing storage server for the cluster instead."
-	    "When used with new to set up tss for the first time, it requires both a count and a storage engine."
-	    "To disable the testing storage server, run \"configure tss count=0\"\n\n"
-	    "Redundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies "
-	    "of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - "
-	    "See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage "
-	    "engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small "
-	    "datasets.\n\nproxies=<PROXIES>: Sets the desired number of proxies in the cluster. The proxy role is being "
-	    "deprecated and split into GRV proxy and Commit proxy, now prefer configure 'grv_proxies' and 'commit_proxies' "
-	    "separately. Generally we should follow that 'commit_proxies' is three times of 'grv_proxies' and "
-	    "'grv_proxies' "
-	    "should be not more than 4. If 'proxies' is specified, it will be converted to 'grv_proxies' and "
-	    "'commit_proxies'. "
-	    "Must be at least 2 (1 GRV proxy, 1 Commit proxy), or set to -1 which restores the number of proxies to the "
-	    "default value.\n\ncommit_proxies=<COMMIT_PROXIES>: Sets the desired number of commit proxies in the cluster. "
-	    "Must be at least 1, or set to -1 which restores the number of commit proxies to the default "
-	    "value.\n\ngrv_proxies=<GRV_PROXIES>: Sets the desired number of GRV proxies in the cluster. Must be at least "
-	    "1, or set to -1 which restores the number of GRV proxies to the default value.\n\nlogs=<LOGS>: Sets the "
-	    "desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of "
-	    "logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. "
-	    "Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\n"
-	    "perpetual_storage_wiggle=<WIGGLE_SPEED>: Set the value speed (a.k.a., the number of processes that the Data "
-	    "Distributor should wiggle at a time). Currently, only 0 and 1 are supported. The value 0 means to disable the "
-	    "perpetual storage wiggle.\n\n"
-	    "See the FoundationDB Administration Guide for more information.");
-	helpMap["fileconfigure"] = CommandHelp(
-	    "fileconfigure [new] <FILENAME>",
-	    "change the database configuration from a file",
-	    "The `new' option, if present, initializes a new database with the given configuration rather than changing "
-	    "the configuration of an existing one. Load a JSON document from the provided file, and change the database "
-	    "configuration to match the contents of the JSON document. The format should be the same as the value of the "
-	    "\"configuration\" entry in status JSON without \"excluded_servers\" or \"coordinators_count\".");
 	helpMap["exit"] = CommandHelp("exit", "exit the CLI", "");
 	helpMap["quit"] = CommandHelp();
 	helpMap["waitconnected"] = CommandHelp();
@@ -672,353 +635,7 @@ ACTOR Future<Void> commitTransaction(Reference<ITransaction> tr) {
 	return Void();
 }
 
-ACTOR Future<bool> configure(Database db,
-                             std::vector<StringRef> tokens,
-                             Reference<ClusterConnectionFile> ccf,
-                             LineNoise* linenoise,
-                             Future<Void> warn) {
-	state ConfigurationResult result;
-	state int startToken = 1;
-	state bool force = false;
-	if (tokens.size() < 2)
-		result = ConfigurationResult::NO_OPTIONS_PROVIDED;
-	else {
-		if (tokens[startToken] == LiteralStringRef("FORCE")) {
-			force = true;
-			startToken = 2;
-		}
-
-		state Optional<ConfigureAutoResult> conf;
-		if (tokens[startToken] == LiteralStringRef("auto")) {
-			StatusObject s = wait(makeInterruptable(StatusClient::statusFetcher(db)));
-			if (warn.isValid())
-				warn.cancel();
-
-			conf = parseConfig(s);
-
-			if (!conf.get().isValid()) {
-				printf("Unable to provide advice for the current configuration.\n");
-				return true;
-			}
-
-			bool noChanges = conf.get().old_replication == conf.get().auto_replication &&
-			                 conf.get().old_logs == conf.get().auto_logs &&
-			                 conf.get().old_commit_proxies == conf.get().auto_commit_proxies &&
-			                 conf.get().old_grv_proxies == conf.get().auto_grv_proxies &&
-			                 conf.get().old_resolvers == conf.get().auto_resolvers &&
-			                 conf.get().old_processes_with_transaction == conf.get().auto_processes_with_transaction &&
-			                 conf.get().old_machines_with_transaction == conf.get().auto_machines_with_transaction;
-
-			bool noDesiredChanges = noChanges && conf.get().old_logs == conf.get().desired_logs &&
-			                        conf.get().old_commit_proxies == conf.get().desired_commit_proxies &&
-			                        conf.get().old_grv_proxies == conf.get().desired_grv_proxies &&
-			                        conf.get().old_resolvers == conf.get().desired_resolvers;
-
-			std::string outputString;
-
-			outputString += "\nYour cluster has:\n\n";
-			outputString += format("  processes %d\n", conf.get().processes);
-			outputString += format("  machines  %d\n", conf.get().machines);
-
-			if (noDesiredChanges)
-				outputString += "\nConfigure recommends keeping your current configuration:\n\n";
-			else if (noChanges)
-				outputString +=
-				    "\nConfigure cannot modify the configuration because some parameters have been set manually:\n\n";
-			else
-				outputString += "\nConfigure recommends the following changes:\n\n";
-			outputString += " ------------------------------------------------------------------- \n";
-			outputString += "| parameter                   | old              | new              |\n";
-			outputString += " ------------------------------------------------------------------- \n";
-			outputString += format("| replication                 | %16s | %16s |\n",
-			                       conf.get().old_replication.c_str(),
-			                       conf.get().auto_replication.c_str());
-			outputString +=
-			    format("| logs                        | %16d | %16d |", conf.get().old_logs, conf.get().auto_logs);
-			outputString += conf.get().auto_logs != conf.get().desired_logs
-			                    ? format(" (manually set; would be %d)\n", conf.get().desired_logs)
-			                    : "\n";
-			outputString += format("| commit_proxies              | %16d | %16d |",
-			                       conf.get().old_commit_proxies,
-			                       conf.get().auto_commit_proxies);
-			outputString += conf.get().auto_commit_proxies != conf.get().desired_commit_proxies
-			                    ? format(" (manually set; would be %d)\n", conf.get().desired_commit_proxies)
-			                    : "\n";
-			outputString += format("| grv_proxies                 | %16d | %16d |",
-			                       conf.get().old_grv_proxies,
-			                       conf.get().auto_grv_proxies);
-			outputString += conf.get().auto_grv_proxies != conf.get().desired_grv_proxies
-			                    ? format(" (manually set; would be %d)\n", conf.get().desired_grv_proxies)
-			                    : "\n";
-			outputString += format(
-			    "| resolvers                   | %16d | %16d |", conf.get().old_resolvers, conf.get().auto_resolvers);
-			outputString += conf.get().auto_resolvers != conf.get().desired_resolvers
-			                    ? format(" (manually set; would be %d)\n", conf.get().desired_resolvers)
-			                    : "\n";
-			outputString += format("| transaction-class processes | %16d | %16d |\n",
-			                       conf.get().old_processes_with_transaction,
-			                       conf.get().auto_processes_with_transaction);
-			outputString += format("| transaction-class machines  | %16d | %16d |\n",
-			                       conf.get().old_machines_with_transaction,
-			                       conf.get().auto_machines_with_transaction);
-			outputString += " ------------------------------------------------------------------- \n\n";
-
-			std::printf("%s", outputString.c_str());
-
-			if (noChanges)
-				return false;
-
-			// TODO: disable completion
-			Optional<std::string> line = wait(linenoise->read("Would you like to make these changes? [y/n]> "));
-
-			if (!line.present() || (line.get() != "y" && line.get() != "Y")) {
-				return false;
-			}
-		}
-
-		ConfigurationResult r = wait(makeInterruptable(
-		    changeConfig(db, std::vector<StringRef>(tokens.begin() + startToken, tokens.end()), conf, force)));
-		result = r;
-	}
-
-	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
-	// there are various results specific to changeConfig() that we need to report:
-	bool ret;
-	switch (result) {
-	case ConfigurationResult::NO_OPTIONS_PROVIDED:
-	case ConfigurationResult::CONFLICTING_OPTIONS:
-	case ConfigurationResult::UNKNOWN_OPTION:
-	case ConfigurationResult::INCOMPLETE_CONFIGURATION:
-		printUsage(LiteralStringRef("configure"));
-		ret = true;
-		break;
-	case ConfigurationResult::INVALID_CONFIGURATION:
-		fprintf(stderr, "ERROR: These changes would make the configuration invalid\n");
-		ret = true;
-		break;
-	case ConfigurationResult::DATABASE_ALREADY_CREATED:
-		fprintf(stderr, "ERROR: Database already exists! To change configuration, don't say `new'\n");
-		ret = true;
-		break;
-	case ConfigurationResult::DATABASE_CREATED:
-		printf("Database created\n");
-		ret = false;
-		break;
-	case ConfigurationResult::DATABASE_UNAVAILABLE:
-		fprintf(stderr, "ERROR: The database is unavailable\n");
-		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
-		break;
-	case ConfigurationResult::STORAGE_IN_UNKNOWN_DCID:
-		fprintf(stderr, "ERROR: All storage servers must be in one of the known regions\n");
-		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
-		break;
-	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
-		fprintf(stderr,
-		        "ERROR: When usable_regions > 1, all regions with priority >= 0 must be fully replicated "
-		        "before changing the configuration\n");
-		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
-		break;
-	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
-		fprintf(stderr, "ERROR: When changing usable_regions, only one region can have priority >= 0\n");
-		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
-		break;
-	case ConfigurationResult::REGIONS_CHANGED:
-		fprintf(stderr,
-		        "ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
-		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
-		break;
-	case ConfigurationResult::NOT_ENOUGH_WORKERS:
-		fprintf(stderr, "ERROR: Not enough processes exist to support the specified configuration\n");
-		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
-		break;
-	case ConfigurationResult::REGION_REPLICATION_MISMATCH:
-		fprintf(stderr, "ERROR: `three_datacenter' replication is incompatible with region configuration\n");
-		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
-		break;
-	case ConfigurationResult::DCID_MISSING:
-		fprintf(stderr, "ERROR: `No storage servers in one of the specified regions\n");
-		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
-		break;
-	case ConfigurationResult::SUCCESS:
-		printf("Configuration changed\n");
-		ret = false;
-		break;
-	case ConfigurationResult::LOCKED_NOT_NEW:
-		fprintf(stderr, "ERROR: `only new databases can be configured as locked`\n");
-		ret = false;
-		break;
-	case ConfigurationResult::SUCCESS_WARN_PPW_GRADUAL:
-		printf("Configuration changed, with warnings\n");
-		fprintf(stderr,
-		        "WARN: To make progress toward the desired storage type with storage_migration_type=gradual, the "
-		        "Perpetual Wiggle must be enabled.\n");
-		fprintf(stderr,
-		        "Type `configure perpetual_storage_wiggle=1' to enable the perpetual wiggle, or `configure "
-		        "storage_migration_type=gradual' to set the gradual migration type.\n");
-		ret = true;
-		break;
-	case ConfigurationResult::SUCCESS_WARN_CHANGE_STORAGE_NOMIGRATE:
-		printf("Configuration changed, with warnings\n");
-		fprintf(stderr,
-		        "WARN: Storage engine type changed, but nothing will be migrated because "
-		        "storage_migration_mode=disabled.\n");
-		fprintf(stderr,
-		        "Type `configure perpetual_storage_wiggle=1 storage_migration_type=gradual' to enable gradual "
-		        "migration with the perpetual wiggle, or `configure "
-		        "storage_migration_type=aggressive' for aggressive migration.\n");
-		ret = true;
-		break;
-	default:
-		ASSERT(false);
-		ret = true;
-	};
-	return ret;
-}
-
-ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDatabase, bool force) {
-	std::string contents(readFileBytes(filePath, 100000));
-	json_spirit::mValue config;
-	if (!json_spirit::read_string(contents, config)) {
-		fprintf(stderr, "ERROR: Invalid JSON\n");
-		return true;
-	}
-	if (config.type() != json_spirit::obj_type) {
-		fprintf(stderr, "ERROR: Configuration file must contain a JSON object\n");
-		return true;
-	}
-	StatusObject configJSON = config.get_obj();
-
-	json_spirit::mValue schema;
-	if (!json_spirit::read_string(JSONSchemas::clusterConfigurationSchema.toString(), schema)) {
-		ASSERT(false);
-	}
-
-	std::string errorStr;
-	if (!schemaMatch(schema.get_obj(), configJSON, errorStr)) {
-		printf("%s", errorStr.c_str());
-		return true;
-	}
-
-	std::string configString;
-	if (isNewDatabase) {
-		configString = "new";
-	}
-
-	for (const auto& [name, value] : configJSON) {
-		if (!configString.empty()) {
-			configString += " ";
-		}
-		if (value.type() == json_spirit::int_type) {
-			configString += name + ":=" + format("%d", value.get_int());
-		} else if (value.type() == json_spirit::str_type) {
-			configString += value.get_str();
-		} else if (value.type() == json_spirit::array_type) {
-			configString +=
-			    name + "=" +
-			    json_spirit::write_string(json_spirit::mValue(value.get_array()), json_spirit::Output_options::none);
-		} else {
-			printUsage(LiteralStringRef("fileconfigure"));
-			return true;
-		}
-	}
-	ConfigurationResult result = wait(makeInterruptable(changeConfig(db, configString, force)));
-	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
-	// there are various results specific to changeConfig() that we need to report:
-	bool ret;
-	switch (result) {
-	case ConfigurationResult::NO_OPTIONS_PROVIDED:
-		fprintf(stderr, "ERROR: No options provided\n");
-		ret = true;
-		break;
-	case ConfigurationResult::CONFLICTING_OPTIONS:
-		fprintf(stderr, "ERROR: Conflicting options\n");
-		ret = true;
-		break;
-	case ConfigurationResult::UNKNOWN_OPTION:
-		fprintf(stderr, "ERROR: Unknown option\n"); // This should not be possible because of schema match
-		ret = true;
-		break;
-	case ConfigurationResult::INCOMPLETE_CONFIGURATION:
-		fprintf(stderr,
-		        "ERROR: Must specify both a replication level and a storage engine when creating a new database\n");
-		ret = true;
-		break;
-	case ConfigurationResult::INVALID_CONFIGURATION:
-		fprintf(stderr, "ERROR: These changes would make the configuration invalid\n");
-		ret = true;
-		break;
-	case ConfigurationResult::DATABASE_ALREADY_CREATED:
-		fprintf(stderr, "ERROR: Database already exists! To change configuration, don't say `new'\n");
-		ret = true;
-		break;
-	case ConfigurationResult::DATABASE_CREATED:
-		printf("Database created\n");
-		ret = false;
-		break;
-	case ConfigurationResult::DATABASE_UNAVAILABLE:
-		fprintf(stderr, "ERROR: The database is unavailable\n");
-		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret = true;
-		break;
-	case ConfigurationResult::STORAGE_IN_UNKNOWN_DCID:
-		fprintf(stderr, "ERROR: All storage servers must be in one of the known regions\n");
-		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret = true;
-		break;
-	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
-		fprintf(stderr,
-		        "ERROR: When usable_regions > 1, All regions with priority >= 0 must be fully replicated "
-		        "before changing the configuration\n");
-		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret = true;
-		break;
-	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
-		fprintf(stderr, "ERROR: When changing usable_regions, only one region can have priority >= 0\n");
-		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret = true;
-		break;
-	case ConfigurationResult::REGIONS_CHANGED:
-		fprintf(stderr,
-		        "ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
-		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret = true;
-		break;
-	case ConfigurationResult::NOT_ENOUGH_WORKERS:
-		fprintf(stderr, "ERROR: Not enough processes exist to support the specified configuration\n");
-		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
-		ret = true;
-		break;
-	case ConfigurationResult::REGION_REPLICATION_MISMATCH:
-		fprintf(stderr, "ERROR: `three_datacenter' replication is incompatible with region configuration\n");
-		printf("Type `fileconfigure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
-		break;
-	case ConfigurationResult::DCID_MISSING:
-		fprintf(stderr, "ERROR: `No storage servers in one of the specified regions\n");
-		printf("Type `fileconfigure FORCE <TOKEN...>' to configure without this check\n");
-		ret = true;
-		break;
-	case ConfigurationResult::SUCCESS:
-		printf("Configuration changed\n");
-		ret = false;
-		break;
-	default:
-		ASSERT(false);
-		ret = true;
-	};
-	return ret;
-}
-
 // FIXME: Factor address parsing from coordinators, include, exclude
-
 ACTOR Future<bool> coordinators(Database db, std::vector<StringRef> tokens, bool isClusterTLS) {
 	state StringRef setName;
 	StringRef nameTokenBegin = LiteralStringRef("description=");
@@ -1558,6 +1175,7 @@ void configureGenerator(const char* text, const char* line, std::vector<std::str
 		                   "logs=",
 		                   "resolvers=",
 		                   "perpetual_storage_wiggle=",
+		                   "perpetual_storage_wiggle_locality=",
 		                   "storage_migration_type=",
 		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
@@ -1757,6 +1375,9 @@ struct CLIOptions {
 
 	std::vector<std::pair<std::string, std::string>> knobs;
 
+	// api version, using the latest version by default
+	int api_version = FDB_API_VERSION;
+
 	CLIOptions(int argc, char* argv[]) {
 		program_name = argv[0];
 		for (int a = 0; a < argc; a++) {
@@ -1819,6 +1440,22 @@ struct CLIOptions {
 		case OPT_CONNFILE:
 			clusterFile = args.OptionArg();
 			break;
+		case OPT_API_VERSION: {
+			char* endptr;
+			api_version = strtoul((char*)args.OptionArg(), &endptr, 10);
+			if (*endptr != '\0') {
+				fprintf(stderr, "ERROR: invalid client version %s\n", args.OptionArg());
+				return 1;
+			} else if (api_version < 700 || api_version > FDB_API_VERSION) {
+				// multi-version fdbcli only available after 7.0
+				fprintf(stderr,
+				        "ERROR: api version %s is not supported. (Min: 700, Max: %d)\n",
+				        args.OptionArg(),
+				        FDB_API_VERSION);
+				return 1;
+			}
+			break;
+		}
 		case OPT_TRACE:
 			trace = true;
 			break;
@@ -1945,7 +1582,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	TraceEvent::setNetworkThread();
 
 	try {
-		localDb = Database::createDatabase(ccf, -1, IsInternal::False);
+		localDb = Database::createDatabase(ccf, opt.api_version, IsInternal::False);
 		if (!opt.exec.present()) {
 			printf("Using cluster file `%s'.\n", ccf->getFilename().c_str());
 		}
@@ -2137,7 +1774,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "waitopen")) {
-					wait(success(safeThreadFutureToFuture(getTransaction(db, tr, options, intrans)->getReadVersion())));
+					wait(makeInterruptable(
+					    success(safeThreadFutureToFuture(getTransaction(db, tr, options, intrans)->getReadVersion()))));
 					continue;
 				}
 
@@ -2169,7 +1807,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "triggerddteaminfolog")) {
-					wait(triggerddteaminfologCommandActor(db));
+					wait(success(makeInterruptable(triggerddteaminfologCommandActor(db))));
 					continue;
 				}
 
@@ -2181,8 +1819,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "configure")) {
-					bool err = wait(configure(localDb, tokens, localDb->getConnectionFile(), &linenoise, warn));
-					if (err)
+					bool _result =
+					    wait(makeInterruptable(configureCommandActor(db, localDb, tokens, &linenoise, warn)));
+					if (!_result)
 						is_error = true;
 					continue;
 				}
@@ -2190,11 +1829,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "fileconfigure")) {
 					if (tokens.size() == 2 || (tokens.size() == 3 && (tokens[1] == LiteralStringRef("new") ||
 					                                                  tokens[1] == LiteralStringRef("FORCE")))) {
-						bool err = wait(fileConfigure(localDb,
-						                              tokens.back().toString(),
-						                              tokens[1] == LiteralStringRef("new"),
-						                              tokens[1] == LiteralStringRef("FORCE")));
-						if (err)
+						bool _result =
+						    wait(makeInterruptable(fileConfigureCommandActor(db,
+						                                                     tokens.back().toString(),
+						                                                     tokens[1] == LiteralStringRef("new"),
+						                                                     tokens[1] == LiteralStringRef("FORCE"))));
+						if (!_result)
 							is_error = true;
 					} else {
 						printUsage(tokens[0]);
@@ -2225,14 +1865,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "snapshot")) {
-					bool _result = wait(snapshotCommandActor(db, tokens));
+					bool _result = wait(makeInterruptable(snapshotCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "lock")) {
-					bool _result = wait(lockCommandActor(db, tokens));
+					bool _result = wait(makeInterruptable(lockCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -2644,7 +2284,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "throttle")) {
-					bool _result = wait(throttleCommandActor(db, tokens));
+					bool _result = wait(makeInterruptable(throttleCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -2875,8 +2515,7 @@ int main(int argc, char** argv) {
 	}
 
 	try {
-		// Note: refactoring fdbcli, in progress
-		API->selectApiVersion(FDB_API_VERSION);
+		API->selectApiVersion(opt.api_version);
 		API->setupNetwork();
 		Future<int> cliFuture = runCli(opt);
 		Future<Void> timeoutFuture = opt.exit_timeout ? timeExit(opt.exit_timeout) : Never();

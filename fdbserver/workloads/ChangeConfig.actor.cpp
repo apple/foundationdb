@@ -64,12 +64,13 @@ struct ChangeConfigWorkload : TestWorkload {
 				if (g_simulator.startingDisabledConfiguration != "") {
 					// It is not safe to allow automatic failover to a region which is not fully replicated,
 					// so wait for both regions to be fully replicated before enabling failover
-					wait(success(changeConfig(extraDB, g_simulator.startingDisabledConfiguration, true)));
+					wait(success(ManagementAPI::changeConfig(
+					    extraDB.getReference(), g_simulator.startingDisabledConfiguration, true)));
 					TraceEvent("WaitForReplicasExtra").log();
 					wait(waitForFullReplication(extraDB));
 					TraceEvent("WaitForReplicasExtraEnd").log();
 				}
-				wait(success(changeConfig(extraDB, self->configMode, true)));
+				wait(success(ManagementAPI::changeConfig(extraDB.getReference(), self->configMode, true)));
 			}
 			if (self->networkAddresses.size()) {
 				if (self->networkAddresses == "auto")
@@ -98,12 +99,13 @@ struct ChangeConfigWorkload : TestWorkload {
 			if (g_network->isSimulated() && g_simulator.startingDisabledConfiguration != "") {
 				// It is not safe to allow automatic failover to a region which is not fully replicated,
 				// so wait for both regions to be fully replicated before enabling failover
-				wait(success(changeConfig(cx, g_simulator.startingDisabledConfiguration, true)));
+				wait(success(
+				    ManagementAPI::changeConfig(cx.getReference(), g_simulator.startingDisabledConfiguration, true)));
 				TraceEvent("WaitForReplicas").log();
 				wait(waitForFullReplication(cx));
 				TraceEvent("WaitForReplicasEnd").log();
 			}
-			wait(success(changeConfig(cx, self->configMode, true)));
+			wait(success(ManagementAPI::changeConfig(cx.getReference(), self->configMode, true)));
 		}
 		if (self->networkAddresses.size()) {
 			if (self->networkAddresses == "auto")

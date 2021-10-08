@@ -34,10 +34,10 @@ ConfigFollowerInterface::ConfigFollowerInterface() : _id(deterministicRandom()->
 
 ConfigFollowerInterface::ConfigFollowerInterface(NetworkAddress const& remote)
   : _id(deterministicRandom()->randomUniqueID()),
-    getSnapshotAndChanges(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETSNAPSHOTANDCHANGES)),
-    getChanges(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCHANGES)),
-    compact(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_COMPACT)),
-    getCommittedVersion(Endpoint({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCOMMITTEDVERSION)) {}
+    getSnapshotAndChanges(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_GETSNAPSHOTANDCHANGES)),
+    getChanges(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCHANGES)),
+    compact(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_COMPACT)),
+    getCommittedVersion(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCOMMITTEDVERSION)) {}
 
 bool ConfigFollowerInterface::operator==(ConfigFollowerInterface const& rhs) const {
 	return _id == rhs._id;
