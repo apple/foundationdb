@@ -3109,14 +3109,15 @@ public:
 	PromiseStream<Future<Void>> addActor;
 	bool versionDifferenceUpdated;
 
+	bool remoteDCMonitorStarted;
+	bool remoteTransactionSystemDegraded;
+
 	// recruitX is used to signal when role X needs to be (re)recruited.
 	// recruitingXID is used to track the ID of X's interface which is being recruited.
 	// We use AsyncVars to kill (i.e. halt) singletons that have been replaced.
 	AsyncVar<bool> recruitDistributor;
 	Optional<UID> recruitingDistributorID;
 
-	bool remoteDCMonitorStarted;
-	bool remoteTransactionSystemDegraded;
 	AsyncVar<bool> recruitRatekeeper;
 	Optional<UID> recruitingRatekeeperID;
 
