@@ -208,7 +208,7 @@ struct BlobManagerData {
 	KeyRangeMap<UID> workerAssignments;
 	KeyRangeMap<bool> knownBlobRanges;
 
-	AsyncVar<Void> restartRecruiting;
+	Debouncer restartRecruiting;
 	std::set<NetworkAddress> recruitingLocalities; // the addrs of the workers being recruited on
 
 	int64_t epoch = -1;
@@ -221,7 +221,8 @@ struct BlobManagerData {
 	PromiseStream<RangeAssignment> rangesToAssign;
 
 	BlobManagerData(UID id, Database db)
-	  : id(id), db(db), knownBlobRanges(false, normalKeys.end), restartRecruiting() {}
+	  : id(id), db(db), knownBlobRanges(false, normalKeys.end),
+	    restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY) {}
 	~BlobManagerData() { printf("Destroying blob manager data for %s\n", id.toString().c_str()); }
 };
 
@@ -433,7 +434,9 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 
 			workerId = assignment.worker.present() ? assignment.worker.get() : pickWorkerForAssign(bmData);
 			bmData->workerAssignments.insert(assignment.keyRange, workerId);
-			bmData->workerStats[workerId].numGranulesAssigned += 1;
+			if (bmData->workerStats.count(workerId)) {
+				bmData->workerStats[workerId].numGranulesAssigned += 1;
+			}
 
 			printf("current ranges after inserting assign: \n");
 			for (auto it : bmData->workerAssignments.ranges()) {
@@ -1090,10 +1093,12 @@ ACTOR Future<Void> blobWorkerRecruiter(
 			}
 
 			TraceEvent("BMRecruiting").detail("State", "Sending request to CC");
+			/*
 			printf("EXCLUDING THE FOLLOWING IN REQ:\n");
 			for (auto addr : recruitReq.excludeAddresses) {
-				printf("- %s\n", addr.toString().c_str());
+			    printf("- %s\n", addr.toString().c_str());
 			}
+			*/
 
 			if (!fCandidateWorker.isValid() || fCandidateWorker.isReady() ||
 			    recruitReq.excludeAddresses != lastRequest.excludeAddresses) {
@@ -1113,7 +1118,7 @@ ACTOR Future<Void> blobWorkerRecruiter(
 				when(wait(recruitBlobWorker->onChange())) { fCandidateWorker = Future<RecruitBlobWorkerReply>(); }
 
 				// signal used to restart the loop and try to recruit the next blob worker
-				when(wait(self->restartRecruiting.onChange())) { printf("RESTARTED RECRUITING. BACK TO TOP\n"); }
+				when(wait(self->restartRecruiting.onTrigger())) { printf("RESTARTED RECRUITING. BACK TO TOP\n"); }
 			}
 			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskPriority::BlobManager));
 		} catch (Error& e) {
