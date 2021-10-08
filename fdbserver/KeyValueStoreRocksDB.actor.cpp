@@ -7,6 +7,7 @@
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
+#include <rocksdb/version.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
 #include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
@@ -23,6 +24,13 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
+
+// Enforcing rocksdb version to be 6.22.1 or greater.
+static_assert(ROCKSDB_MAJOR >= 6, "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
+static_assert(ROCKSDB_MAJOR == 6 ? ROCKSDB_MINOR >= 22 : true,
+              "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
+static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 22) ? ROCKSDB_PATCH >= 1 : true,
+              "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
 
 namespace {
 
@@ -236,10 +244,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.done.sendError(statusToError(status));
 			} else {
 				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
-				onMainThread([&] {
-					a.metrics = rocksDBMetricLogger(options.statistics, db);
-					return Future<bool>(true);
-				}).blockUntilReady();
+				// The current thread and main thread are same when the code runs in simulation.
+				// blockUntilReady() is getting the thread into deadlock state, so avoiding the
+				// metric logger in simulation.
+				if (!g_network->isSimulated()) {
+					onMainThread([&] {
+						a.metrics = rocksDBMetricLogger(options.statistics, db);
+						return Future<bool>(true);
+					}).blockUntilReady();
+				}
 				a.done.send(Void());
 			}
 		}

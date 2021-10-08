@@ -2119,7 +2119,7 @@ void net2_test(){
 
 	double before = timer();
 
-	vector<TestGVR> reqs;
+	std::vector<TestGVR> reqs;
 	reqs.reserve( 10000 );
 
 	int totalBytes = 0;

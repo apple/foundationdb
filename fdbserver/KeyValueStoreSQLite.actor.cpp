@@ -899,7 +899,7 @@ struct RawCursor {
 		}
 	}
 	void fastClear(KeyRangeRef keys, bool& freeTableEmpty) {
-		vector<int> clearBuffer(SERVER_KNOBS->CLEAR_BUFFER_SIZE);
+		std::vector<int> clearBuffer(SERVER_KNOBS->CLEAR_BUFFER_SIZE);
 		clearBuffer[0] = 0;
 
 		while (true) {
@@ -937,7 +937,7 @@ struct RawCursor {
 		}
 	}
 	int lazyDelete(int desiredPages) {
-		vector<int> clearBuffer(SERVER_KNOBS->CLEAR_BUFFER_SIZE);
+		std::vector<int> clearBuffer(SERVER_KNOBS->CLEAR_BUFFER_SIZE);
 		clearBuffer[0] = 0;
 
 		IntKeyCursor fc(db, db.freetable, true);
@@ -1611,7 +1611,7 @@ private:
 	volatile int64_t diskBytesUsed;
 	volatile int64_t freeListPages;
 
-	vector<Reference<ReadCursor>> readCursors;
+	std::vector<Reference<ReadCursor>> readCursors;
 	Reference<IAsyncFile> dbFile, walFile;
 
 	struct Reader : IThreadPoolReceiver {
@@ -1718,7 +1718,7 @@ private:
 		volatile int64_t& diskBytesUsed;
 		volatile int64_t& freeListPages;
 		UID dbgid;
-		vector<Reference<ReadCursor>>& readThreads;
+		std::vector<Reference<ReadCursor>>& readThreads;
 		bool checkAllChecksumsOnOpen;
 		bool checkIntegrityOnOpen;
 
@@ -1731,7 +1731,7 @@ private:
 		                volatile int64_t& diskBytesUsed,
 		                volatile int64_t& freeListPages,
 		                UID dbgid,
-		                vector<Reference<ReadCursor>>* pReadThreads)
+		                std::vector<Reference<ReadCursor>>* pReadThreads)
 		  : kvs(kvs), conn(kvs->filename, isBtreeV2, isBtreeV2), cursor(nullptr), commits(), setsThisCommit(),
 		    freeTableEmpty(false), writesComplete(writesComplete), springCleaningStats(springCleaningStats),
 		    diskBytesUsed(diskBytesUsed), freeListPages(freeListPages), dbgid(dbgid), readThreads(*pReadThreads),

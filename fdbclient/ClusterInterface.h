@@ -267,7 +267,7 @@ struct StatusRequest {
 
 struct GetClientWorkersRequest {
 	constexpr static FileIdentifier file_identifier = 10771791;
-	ReplyPromise<vector<ClientWorkerInterface>> reply;
+	ReplyPromise<std::vector<ClientWorkerInterface>> reply;
 
 	GetClientWorkersRequest() {}
 

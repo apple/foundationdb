@@ -291,7 +291,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return success; }
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<ThreadSafetyWorkload> ThreadSafetyWorkloadFactory("ThreadSafety");

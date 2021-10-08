@@ -715,7 +715,7 @@ struct TPCC : TestWorkload {
 		int endWID = startWID + self->warehousesPerClient;
 		state int w_id;
 		state int d_id;
-		state vector<Future<Void>> emulatedUsers;
+		state std::vector<Future<Void>> emulatedUsers;
 		for (w_id = startWID; w_id < endWID; ++w_id) {
 			for (d_id = 0; d_id < 10; ++d_id) {
 				emulatedUsers.push_back(timeout(emulatedUser(self, cx, w_id, d_id), self->testDuration, Void()));
@@ -728,7 +728,7 @@ struct TPCC : TestWorkload {
 	Future<bool> check(Database const& cx) override {
 		return (transactionsPerMinute() > expectedTransactionsPerMinute);
 	}
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		double multiplier = static_cast<double>(clientCount) / static_cast<double>(clientsUsed);
 
 		m.emplace_back("Transactions Per Minute", transactionsPerMinute(), Averaged::False);

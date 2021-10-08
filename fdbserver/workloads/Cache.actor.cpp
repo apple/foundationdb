@@ -20,7 +20,7 @@ struct CacheWorkload : TestWorkload {
 	}
 	Future<Void> start(Database const& cx) override { return Void(); }
 	Future<bool> check(Database const& cx) override { return true; }
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<CacheWorkload> CacheWorkloadFactory("Cache");
