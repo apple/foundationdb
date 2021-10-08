@@ -285,6 +285,7 @@ public:
 	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
 	// Set true to simplify simulation configs for easier debugging
 	bool simpleConfig = false;
+	int extraMachineCountDC = 0;
 	Optional<bool> generateFearless, buggify;
 	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
 	    stderrSeverity, machineCount, processesPerMachine, coordinators;
@@ -338,7 +339,8 @@ public:
 		    .add("machineCount", &machineCount)
 		    .add("processesPerMachine", &processesPerMachine)
 		    .add("coordinators", &coordinators)
-		    .add("configDB", &configDBType);
+		    .add("configDB", &configDBType)
+		    .add("extraMachineCountDC", &extraMachineCountDC);
 		try {
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
@@ -1248,7 +1250,7 @@ void SimulationConfig::setRandomConfig() {
 		set_config("perpetual_storage_wiggle=0");
 	} else {
 		// TraceEvent("SimulatedConfigRandom").detail("PerpetualWiggle", 1);
-		set_config("storage_migration_type=gradual perpetual_storage_wiggle=1");
+		set_config("perpetual_storage_wiggle=1");
 	}
 
 	if (deterministicRandom()->random01() < 0.5) {
@@ -1655,6 +1657,7 @@ void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
 			machine_count = std::max(machine_count, deterministicRandom()->randomInt(5, extraDB ? 6 : 10));
 		}
 	}
+	machine_count += datacenters * testConfig.extraMachineCountDC;
 }
 
 // Sets the coordinator count based on the testConfig. May be overwritten later
@@ -1693,7 +1696,7 @@ void SimulationConfig::setTss(const TestConfig& testConfig) {
 
 	// reduce tss to half of extra non-seed servers that can be recruited in usable regions.
 	tssCount =
-	    std::max(0, std::min(tssCount, (db.usableRegions * (machine_count / datacenters) - replication_type) / 2));
+	    std::max(0, std::min(tssCount, db.usableRegions * ((machine_count / datacenters) - db.storageTeamSize) / 2));
 
 	if (!testConfig.config.present() && tssCount > 0) {
 		std::string confStr = format("tss_count:=%d tss_storage_engine:=%d", tssCount, db.storageServerStoreType);
@@ -1779,6 +1782,13 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	auto configDBType = testConfig.getConfigDBType();
 	for (auto kv : startingConfigJSON) {
 		if ("tss_storage_engine" == kv.first) {
+			continue;
+		}
+		if ("perpetual_storage_wiggle_locality" == kv.first) {
+			if (deterministicRandom()->random01() < 0.25) {
+				int dcId = deterministicRandom()->randomInt(0, simconfig.datacenters);
+				startingConfigString += " " + kv.first + "=" + "data_hall:" + std::to_string(dcId);
+			}
 			continue;
 		}
 		startingConfigString += " ";
@@ -1980,6 +1990,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 	bool requiresExtraDBMachines = testConfig.extraDB && g_simulator.extraDB->toString() != conn.toString();
 	int assignedMachines = 0, nonVersatileMachines = 0;
+	bool gradualMigrationPossible = true;
 	std::vector<ProcessClass::ClassType> processClassesSubSet = { ProcessClass::UnsetClass,
 		                                                          ProcessClass::StatelessClass };
 	for (int dc = 0; dc < dataCenters; dc++) {
@@ -1988,6 +1999,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		std::vector<UID> machineIdentities;
 		int machines = machineCount / dataCenters +
 		               (dc < machineCount % dataCenters); // add remainder of machines to first datacenter
+		int possible_ss = 0;
 		int dcCoordinators = coordinatorCount / dataCenters + (dc < coordinatorCount % dataCenters);
 		printf("Datacenter %d: %d/%d machines, %d/%d coordinators\n",
 		       dc,
@@ -2028,8 +2040,12 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 3),
 					                            ProcessClass::CommandLineSource); // Unset, Storage, or Transaction
 				if (processClass ==
-				    ProcessClass::StatelessClass) // *can't* be assigned to other roles, even in an emergency
+				    ProcessClass::StatelessClass) { // *can't* be assigned to other roles, even in an emergency
 					nonVersatileMachines++;
+				}
+				if (processClass == ProcessClass::UnsetClass || processClass == ProcessClass::StorageClass) {
+					possible_ss++;
+				}
 			}
 
 			// FIXME: temporarily code to test storage cache
@@ -2097,6 +2113,10 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 			assignedMachines++;
 		}
+
+		if (possible_ss - simconfig.db.desiredTSSCount / simconfig.db.usableRegions <= simconfig.db.storageTeamSize) {
+			gradualMigrationPossible = false;
+		}
 	}
 
 	g_simulator.desiredCoordinators = coordinatorCount;
@@ -2144,6 +2164,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	// save some state that we only need when restarting the simulator.
 	g_simulator.connectionString = conn.toString();
 	g_simulator.testerCount = testerCount;
+	g_simulator.allowStorageMigrationTypeChange = gradualMigrationPossible;
 
 	TraceEvent("SimulatedClusterStarted")
 	    .detail("DataCenters", dataCenters)
@@ -2152,6 +2173,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	    .detail("SSLEnabled", sslEnabled)
 	    .detail("SSLOnly", sslOnly)
 	    .detail("ClassesAssigned", assignClasses)
+	    .detail("GradualMigrationPossible", gradualMigrationPossible)
 	    .detail("StartingConfiguration", pStartingConfiguration->toString());
 }
 

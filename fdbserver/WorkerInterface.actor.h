@@ -989,6 +989,10 @@ ACTOR Future<Void> backupWorker(BackupInterface bi,
 ACTOR Future<Void> tenantBalancer(TenantBalancerInterface tbi, Reference<AsyncVar<ServerDBInfo> const> db);
 
 void registerThreadForProfiling();
+
+// Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's remote DC.
+bool addressInDbAndRemoteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
+
 void updateCpuProfiler(ProfilerRequest req);
 
 namespace oldTLog_4_6 {

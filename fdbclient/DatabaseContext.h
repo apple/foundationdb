@@ -379,6 +379,8 @@ public:
 	Counter transactionsProcessBehind;
 	Counter transactionsThrottled;
 	Counter transactionsExpensiveClearCostEstCount;
+	Counter transactionGrvFullBatches;
+	Counter transactionGrvTimedOutBatches;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
 	    bytesPerCommit;

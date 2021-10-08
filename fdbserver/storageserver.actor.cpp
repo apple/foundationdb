@@ -698,6 +698,14 @@ public:
 
 		Optional<TagInfo> previousBusiestTag;
 
+		UID thisServerID;
+
+		Reference<EventCacheHolder> busiestReadTagEventHolder;
+
+		TransactionTagCounter(UID thisServerID)
+		  : thisServerID(thisServerID),
+		    busiestReadTagEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReadTag")) {}
+
 		int64_t costFunction(int64_t bytes) { return bytes / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1; }
 
 		void addRequest(Optional<TagSet> const& tags, int64_t bytes) {
@@ -717,7 +725,7 @@ public:
 			}
 		}
 
-		void startNewInterval(UID id) {
+		void startNewInterval() {
 			double elapsed = now() - intervalStart;
 			previousBusiestTag.reset();
 			if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
@@ -726,13 +734,13 @@ public:
 					previousBusiestTag = TagInfo(busiestTag, rate, (double)busiestTagCount / intervalTotalSampledCount);
 				}
 
-				TraceEvent("BusiestReadTag", id)
+				TraceEvent("BusiestReadTag", thisServerID)
 				    .detail("Elapsed", elapsed)
 				    .detail("Tag", printable(busiestTag))
 				    .detail("TagCost", busiestTagCount)
 				    .detail("TotalSampledCost", intervalTotalSampledCount)
 				    .detail("Reported", previousBusiestTag.present())
-				    .trackLatest(id.toString() + "/BusiestReadTag");
+				    .trackLatest(busiestReadTagEventHolder->trackingKey);
 			}
 
 			intervalCounts.clear();
@@ -824,6 +832,8 @@ public:
 		}
 	} counters;
 
+	Reference<EventCacheHolder> storageServerSourceTLogIDEventHolder;
+
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi)
@@ -861,7 +871,10 @@ public:
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
-	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), maxQueryQueue(0), counters(this) {
+	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), maxQueryQueue(0),
+	    transactionTagCounter(ssi.id()), counters(this),
+	    storageServerSourceTLogIDEventHolder(
+	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
@@ -3377,6 +3390,9 @@ void changeServerKeys(StorageServer* data,
 		} else if (!dataAvailable) {
 			// SOMEDAY: Avoid restarting adding/transferred shards
 			if (version == 0) { // bypass fetchkeys; shard is known empty at version 0
+				TraceEvent("ChangeServerKeysAddEmptyRange", data->thisServerID)
+				    .detail("Begin", range.begin)
+				    .detail("End", range.end);
 				changeNewestAvailable.emplace_back(range, latestVersion);
 				data->addShard(ShardInfo::newReadWrite(range, data));
 				setAvailableStatus(data, range, true);
@@ -3529,6 +3545,7 @@ private:
 
 	KeyRef startKey;
 	bool nowAssigned;
+	bool emptyRange;
 	bool processedStartKey;
 
 	KeyRef cacheStartKey;
@@ -3551,7 +3568,10 @@ private:
 
 				// The changes for version have already been received (and are being processed now).  We need to fetch
 				// the data for change.version-1 (changes from versions < change.version)
-				changeServerKeys(data, keys, nowAssigned, currentVersion - 1, CSK_UPDATE);
+				// If emptyRange, treat the shard as empty, see removeKeysFromFailedServer() for more details about this
+				// scenario.
+				const Version shardVersion = (emptyRange && nowAssigned) ? 0 : currentVersion - 1;
+				changeServerKeys(data, keys, nowAssigned, shardVersion, CSK_UPDATE);
 			}
 
 			processedStartKey = false;
@@ -3561,6 +3581,7 @@ private:
 			// keys
 			startKey = m.param1;
 			nowAssigned = m.param2 != serverKeysFalse;
+			emptyRange = m.param2 == serverKeysTrueEmptyRange;
 			processedStartKey = true;
 		} else if (m.type == MutationRef::SetValue && m.param1 == lastEpochEndPrivateKey) {
 			// lastEpochEnd transactions are guaranteed by the master to be alone in their own batch (version)
@@ -4041,7 +4062,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				TraceEvent("StorageServerSourceTLogID", data->thisServerID)
 				    .detail("SourceTLogID",
 				            data->sourceTLogID.present() ? data->sourceTLogID.get().toString() : "unknown")
-				    .trackLatest(data->thisServerID.toString() + "/StorageServerSourceTLogID");
+				    .trackLatest(data->storageServerSourceTLogIDEventHolder->trackingKey);
 			}
 
 			data->noRecentUpdates.set(false);
@@ -5131,9 +5152,9 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));
 
-	self->transactionTagCounter.startNewInterval(self->thisServerID);
-	self->actors.add(recurring([&]() { self->transactionTagCounter.startNewInterval(self->thisServerID); },
-	                           SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
+	self->transactionTagCounter.startNewInterval();
+	self->actors.add(
+	    recurring([&]() { self->transactionTagCounter.startNewInterval(); }, SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
 
 	self->coreStarted.send(Void());
 
