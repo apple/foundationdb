@@ -18,6 +18,23 @@
  * limitations under the License.
  */
 
+#ifdef POST_ACTOR_COMPILER
+#ifndef FLOW_DEFINED_WAIT_AND_WAIT_NEXT
+#define FLOW_DEFINED_WAIT_AND_WAIT_NEXT
+
+// These should all be re-written by the actor compiler. We don't want to
+// accidentally call them from something that's not an actor. `wait` is such a
+// common identifier that `wait` calls outside ACTORs might accidentally
+// compile.
+template <class T>
+T wait(const Future<T>&) = delete;
+void wait(const Never&) = delete;
+template <class T>
+T waitNext(const FutureStream<T>&) = delete;
+
+#endif
+#endif
+
 #ifndef POST_ACTOR_COMPILER
 
 template <typename T>

@@ -424,7 +424,8 @@ Future<Void> ILogSystem::ServerPeekCursor::getMore(TaskPriority taskID) {
 	if (hasMessage() && !parallelGetMore)
 		return Void();
 	if (!more.isValid() || more.isReady()) {
-		if (usePeekStream && (tag.locality >= 0 || tag.locality == tagLocalityLogRouter || tag.locality == tagLocalityRemoteLog)) {
+		if (usePeekStream &&
+		    (tag.locality >= 0 || tag.locality == tagLocalityLogRouter || tag.locality == tagLocalityRemoteLog)) {
 			more = serverPeekStreamGetMore(this, taskID);
 		} else if (parallelGetMore || onlySpilled || futureResults.size()) {
 			more = serverPeekParallelGetMore(this, taskID);
@@ -500,7 +501,7 @@ Version ILogSystem::ServerPeekCursor::popped() const {
 	return poppedVersion;
 }
 
-ILogSystem::MergedPeekCursor::MergedPeekCursor(vector<Reference<ILogSystem::IPeekCursor>> const& serverCursors,
+ILogSystem::MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ILogSystem::IPeekCursor>> const& serverCursors,
                                                Version begin)
   : serverCursors(serverCursors), tag(invalidTag), bestServer(-1), currentCursor(0), readQuorum(serverCursors.size()),
     messageVersion(begin), hasNextMessage(false), randomID(deterministicRandom()->randomUniqueID()),
@@ -539,7 +540,7 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor(
 	sortedVersions.resize(serverCursors.size());
 }
 
-ILogSystem::MergedPeekCursor::MergedPeekCursor(vector<Reference<ILogSystem::IPeekCursor>> const& serverCursors,
+ILogSystem::MergedPeekCursor::MergedPeekCursor(std::vector<Reference<ILogSystem::IPeekCursor>> const& serverCursors,
                                                LogMessageVersion const& messageVersion,
                                                int bestServer,
                                                int readQuorum,
@@ -554,7 +555,7 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor(vector<Reference<ILogSystem::IPee
 }
 
 Reference<ILogSystem::IPeekCursor> ILogSystem::MergedPeekCursor::cloneNoMore() {
-	vector<Reference<ILogSystem::IPeekCursor>> cursors;
+	std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
 	for (auto it : serverCursors) {
 		cursors.push_back(it->cloneNoMore());
 	}
@@ -705,7 +706,7 @@ ACTOR Future<Void> mergedPeekGetMore(ILogSystem::MergedPeekCursor* self,
 			wait(self->serverCursors[self->bestServer]->getMore(taskID) ||
 			     self->serverCursors[self->bestServer]->onFailed());
 		} else {
-			vector<Future<Void>> q;
+			std::vector<Future<Void>> q;
 			for (auto& c : self->serverCursors)
 				if (!c->hasMessage())
 					q.push_back(c->getMore(taskID));
@@ -825,7 +826,7 @@ ILogSystem::SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& l
 }
 
 Reference<ILogSystem::IPeekCursor> ILogSystem::SetPeekCursor::cloneNoMore() {
-	vector<vector<Reference<ILogSystem::IPeekCursor>>> cursors;
+	std::vector<std::vector<Reference<ILogSystem::IPeekCursor>>> cursors;
 	cursors.resize(logSets.size());
 	for (int i = 0; i < logSets.size(); i++) {
 		for (int j = 0; j < logSets[i]->logServers.size(); j++) {
@@ -1046,7 +1047,7 @@ ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self,
 				}
 
 				//TraceEvent("LPC_GetMore3", self->randomID).detail("Start", startVersion.toString()).detail("Tag", self->tag.toString()).detail("BestSetSize", self->serverCursors[self->bestSet].size());
-				vector<Future<Void>> q;
+				std::vector<Future<Void>> q;
 				for (auto& c : self->serverCursors[self->bestSet]) {
 					if (!c->hasMessage()) {
 						q.push_back(c->getMore(taskID));
@@ -1059,7 +1060,7 @@ ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self,
 			} else {
 				// FIXME: this will peeking way too many cursors when satellites exist, and does not need to peek
 				// bestSet cursors since we cannot get anymore data from them
-				vector<Future<Void>> q;
+				std::vector<Future<Void>> q;
 				//TraceEvent("LPC_GetMore4", self->randomID).detail("Start", startVersion.toString()).detail("Tag", self->tag.toString());
 				for (auto& cursors : self->serverCursors) {
 					for (auto& c : cursors) {

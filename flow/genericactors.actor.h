@@ -547,14 +547,14 @@ public:
 		}
 	}
 	void clear(K const& k) { set(k, V()); }
-	V const& get(K const& k) {
+	V const& get(K const& k) const {
 		auto it = items.find(k);
 		if (it != items.end())
 			return it->second.value;
 		else
 			return defaultValue;
 	}
-	int count(K const& k) {
+	int count(K const& k) const {
 		auto it = items.find(k);
 		if (it != items.end())
 			return 1;
@@ -566,7 +566,7 @@ public:
 			return destroyOnCancel(this, k, item.change.getFuture());
 		return item.change.getFuture();
 	}
-	std::vector<K> getKeys() {
+	std::vector<K> getKeys() const {
 		std::vector<K> keys;
 		keys.reserve(items.size());
 		for (auto i = items.begin(); i != items.end(); ++i)
@@ -1625,9 +1625,7 @@ struct YieldedFutureActor : SAV<Void>, ActorCallback<YieldedFutureActor, 1, Void
 	void destroy() override { delete this; }
 
 #ifdef ENABLE_SAMPLING
-	LineageReference* lineageAddr() {
-		return currentLineage;
-	}
+	LineageReference* lineageAddr() { return currentLineage; }
 #endif
 
 	void a_callback_fire(ActorCallback<YieldedFutureActor, 1, Void>*, Void) {
@@ -1985,6 +1983,8 @@ public:
 	virtual Output const& get() const = 0;
 	virtual Future<Void> onChange() const = 0;
 	template <class Input, class F>
+	static Reference<IAsyncListener> create(Reference<AsyncVar<Input> const> const& input, F const& f);
+	template <class Input, class F>
 	static Reference<IAsyncListener> create(Reference<AsyncVar<Input>> const& input, F const& f);
 	static Reference<IAsyncListener> create(Reference<AsyncVar<Output>> const& output);
 };
@@ -2014,8 +2014,15 @@ public:
 
 template <class Output>
 template <class Input, class F>
-Reference<IAsyncListener<Output>> IAsyncListener<Output>::create(Reference<AsyncVar<Input>> const& input, F const& f) {
+Reference<IAsyncListener<Output>> IAsyncListener<Output>::create(Reference<AsyncVar<Input> const> const& input,
+                                                                 F const& f) {
 	return makeReference<IAsyncListenerImpl::AsyncListener<Input, Output, F>>(input, f);
+}
+
+template <class Output>
+template <class Input, class F>
+Reference<IAsyncListener<Output>> IAsyncListener<Output>::create(Reference<AsyncVar<Input>> const& input, F const& f) {
+	return create(Reference<AsyncVar<Input> const>(input), f);
 }
 
 template <class Output>

@@ -43,7 +43,7 @@ FDB_DECLARE_BOOLEAN_PARAM(IsTest);
  *    - Register with the broadcaster to receive new updates for the relevant configuration classes
  *      - Persist these updates when received, and restart if necessary
  */
-class LocalConfiguration {
+class LocalConfiguration : public ReferenceCounted<LocalConfiguration> {
 	PImpl<class LocalConfigurationImpl> impl;
 
 public:
@@ -51,10 +51,7 @@ public:
 	                   std::string const& configPath,
 	                   std::map<std::string, std::string> const& manualKnobOverrides,
 	                   IsTest = IsTest::False);
-	LocalConfiguration(LocalConfiguration&&);
-	LocalConfiguration& operator=(LocalConfiguration&&);
 	~LocalConfiguration();
-	Future<Void> initialize();
 	FlowKnobs const& getFlowKnobs() const;
 	ClientKnobs const& getClientKnobs() const;
 	ServerKnobs const& getServerKnobs() const;
@@ -63,8 +60,11 @@ public:
 	UID getID() const;
 	Version lastSeenVersion() const;
 	ConfigClassSet configClassSet() const;
+	Future<Void> initialize();
 
 public: // Testing
 	Future<Void> addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
 	                        Version mostRecentVersion);
+	void close();
+	Future<Void> onClosed();
 };

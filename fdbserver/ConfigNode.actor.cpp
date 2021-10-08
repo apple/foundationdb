@@ -100,6 +100,8 @@ class ConfigNodeImpl {
 
 	// Follower counters
 	Counter compactRequests;
+	Counter rollbackRequests;
+	Counter rollforwardRequests;
 	Counter successfulChangeRequests;
 	Counter failedChangeRequests;
 	Counter snapshotRequests;
@@ -314,35 +316,65 @@ class ConfigNodeImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> commit(ConfigNodeImpl* self, ConfigTransactionCommitRequest req) {
-		ConfigGeneration currentGeneration = wait(getGeneration(self));
-		if (req.generation != currentGeneration) {
-			++self->failedCommits;
-			req.reply.sendError(transaction_too_old());
-			return Void();
-		}
+	ACTOR static Future<Void> commitMutations(ConfigNodeImpl* self,
+	                                          Standalone<VectorRef<VersionedConfigMutationRef>> mutations,
+	                                          Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations,
+	                                          Version commitVersion) {
+		Version latestVersion = 0;
 		int index = 0;
-		for (const auto& mutation : req.mutations) {
-			Key key = versionedMutationKey(req.generation.liveVersion, index++);
-			Value value = ObjectWriter::toValue(mutation, IncludeVersion());
-			if (mutation.isSet()) {
+		for (const auto& mutation : mutations) {
+			if (mutation.version > commitVersion) {
+				continue;
+			}
+			// Mutations should be in ascending version order.
+			ASSERT_GE(mutation.version, latestVersion);
+			if (mutation.version > latestVersion) {
+				latestVersion = mutation.version;
+				index = 0;
+			}
+			Key key = versionedMutationKey(mutation.version, index++);
+			Value value = ObjectWriter::toValue(mutation.mutation, IncludeVersion());
+			if (mutation.mutation.isSet()) {
 				TraceEvent("ConfigNodeSetting")
-				    .detail("ConfigClass", mutation.getConfigClass())
-				    .detail("KnobName", mutation.getKnobName())
-				    .detail("Value", mutation.getValue().toString())
-				    .detail("Version", req.generation.liveVersion);
+				    .detail("ConfigClass", mutation.mutation.getConfigClass())
+				    .detail("KnobName", mutation.mutation.getKnobName())
+				    .detail("Value", mutation.mutation.getValue().toString())
+				    .detail("Version", mutation.version);
 				++self->setMutations;
 			} else {
 				++self->clearMutations;
 			}
 			self->kvStore->set(KeyValueRef(key, value));
 		}
-		self->kvStore->set(KeyValueRef(versionedAnnotationKey(req.generation.liveVersion),
-		                               BinaryWriter::toValue(req.annotation, IncludeVersion())));
-		ConfigGeneration newGeneration = { req.generation.liveVersion, req.generation.liveVersion };
+		for (const auto& annotation : annotations) {
+			self->kvStore->set(KeyValueRef(versionedAnnotationKey(annotation.version),
+			                               BinaryWriter::toValue(annotation.annotation, IncludeVersion())));
+		}
+		ConfigGeneration newGeneration = { commitVersion, commitVersion };
 		self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(newGeneration, IncludeVersion())));
 		wait(self->kvStore->commit());
 		++self->successfulCommits;
+		return Void();
+	}
+
+	ACTOR static Future<Void> commit(ConfigNodeImpl* self, ConfigTransactionCommitRequest req) {
+		ConfigGeneration currentGeneration = wait(getGeneration(self));
+		if (req.generation.committedVersion != currentGeneration.committedVersion) {
+			++self->failedCommits;
+			req.reply.sendError(commit_unknown_result());
+			return Void();
+		} else if (req.generation.liveVersion != currentGeneration.liveVersion) {
+			++self->failedCommits;
+			req.reply.sendError(not_committed());
+			return Void();
+		}
+		Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
+		for (const auto& mutation : req.mutations) {
+			mutations.emplace_back_deep(mutations.arena(), req.generation.liveVersion, mutation);
+		}
+		Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
+		annotations.emplace_back_deep(annotations.arena(), req.generation.liveVersion, req.annotation);
+		wait(commitMutations(self, mutations, annotations, req.generation.liveVersion));
 		req.reply.send(Void());
 		return Void();
 	}
@@ -439,6 +471,37 @@ class ConfigNodeImpl {
 		return Void();
 	}
 
+	ACTOR static Future<Void> rollback(ConfigNodeImpl* self, ConfigFollowerRollbackRequest req) {
+		state ConfigGeneration generation = wait(getGeneration(self));
+		if (req.version < generation.committedVersion) {
+			Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
+			    wait(getMutations(self, req.version + 1, generation.committedVersion));
+			self->kvStore->clear(KeyRangeRef(versionedMutationKey(req.version + 1, 0),
+			                                 versionedMutationKey(generation.committedVersion + 1, 0)));
+			self->kvStore->clear(KeyRangeRef(versionedAnnotationKey(req.version + 1),
+			                                 versionedAnnotationKey(generation.committedVersion + 1)));
+
+			generation.committedVersion = req.version;
+			self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(generation, IncludeVersion())));
+			wait(self->kvStore->commit());
+		}
+		req.reply.send(Void());
+		return Void();
+	}
+
+	ACTOR static Future<Void> rollforward(ConfigNodeImpl* self, ConfigFollowerRollforwardRequest req) {
+		ConfigGeneration currentGeneration = wait(getGeneration(self));
+		if (req.lastKnownCommitted != currentGeneration.committedVersion) {
+			++self->failedCommits;
+			req.reply.sendError(not_committed());
+			return Void();
+		}
+		ASSERT_GT(req.mutations[0].version, currentGeneration.committedVersion);
+		wait(commitMutations(self, req.mutations, req.annotations, req.target));
+		req.reply.send(Void());
+		return Void();
+	}
+
 	ACTOR static Future<Void> getCommittedVersion(ConfigNodeImpl* self, ConfigFollowerGetCommittedVersionRequest req) {
 		ConfigGeneration generation = wait(getGeneration(self));
 		req.reply.send(ConfigFollowerGetCommittedVersionReply{ generation.committedVersion });
@@ -460,6 +523,14 @@ class ConfigNodeImpl {
 					++self->compactRequests;
 					wait(compact(self, req));
 				}
+				when(ConfigFollowerRollbackRequest req = waitNext(cfi->rollback.getFuture())) {
+					++self->rollbackRequests;
+					wait(rollback(self, req));
+				}
+				when(ConfigFollowerRollforwardRequest req = waitNext(cfi->rollforward.getFuture())) {
+					++self->rollforwardRequests;
+					wait(rollforward(self, req));
+				}
 				when(ConfigFollowerGetCommittedVersionRequest req = waitNext(cfi->getCommittedVersion.getFuture())) {
 					++self->getCommittedVersionRequests;
 					wait(getCommittedVersion(self, req));
@@ -472,7 +543,8 @@ class ConfigNodeImpl {
 public:
 	ConfigNodeImpl(std::string const& folder)
 	  : id(deterministicRandom()->randomUniqueID()), kvStore(folder, id, "globalconf-"), cc("ConfigNode"),
-	    compactRequests("CompactRequests", cc), successfulChangeRequests("SuccessfulChangeRequests", cc),
+	    compactRequests("CompactRequests", cc), rollbackRequests("RollbackRequests", cc),
+	    rollforwardRequests("RollforwardRequests", cc), successfulChangeRequests("SuccessfulChangeRequests", cc),
 	    failedChangeRequests("FailedChangeRequests", cc), snapshotRequests("SnapshotRequests", cc),
 	    getCommittedVersionRequests("GetCommittedVersionRequests", cc), successfulCommits("SuccessfulCommits", cc),
 	    failedCommits("FailedCommits", cc), setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
@@ -484,6 +556,10 @@ public:
 	Future<Void> serve(ConfigTransactionInterface const& cti) { return serve(this, &cti); }
 
 	Future<Void> serve(ConfigFollowerInterface const& cfi) { return serve(this, &cfi); }
+
+	void close() { kvStore.close(); }
+
+	Future<Void> onClosed() { return kvStore.onClosed(); }
 };
 
 ConfigNode::ConfigNode(std::string const& folder) : impl(PImpl<ConfigNodeImpl>::create(folder)) {}
@@ -496,4 +572,12 @@ Future<Void> ConfigNode::serve(ConfigTransactionInterface const& cti) {
 
 Future<Void> ConfigNode::serve(ConfigFollowerInterface const& cfi) {
 	return impl->serve(cfi);
+}
+
+void ConfigNode::close() {
+	impl->close();
+}
+
+Future<Void> ConfigNode::onClosed() {
+	return impl->onClosed();
 }

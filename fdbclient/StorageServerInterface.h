@@ -30,7 +30,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
 #include "fdbrpc/TSSComparison.h"
-#include "fdbclient/TagThrottle.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "flow/UnitTest.h"
 
 // Dead code, removed in the next protocol version
@@ -313,7 +313,14 @@ struct GetKeyValuesStreamReply : public ReplyPromiseStreamReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, data, version, more, cached, arena);
+		serializer(ar,
+		           ReplyPromiseStreamReply::acknowledgeToken,
+		           ReplyPromiseStreamReply::sequence,
+		           data,
+		           version,
+		           more,
+		           cached,
+		           arena);
 	}
 };
 

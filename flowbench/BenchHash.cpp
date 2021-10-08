@@ -67,3 +67,30 @@ static void bench_hash(benchmark::State& state) {
 BENCHMARK_TEMPLATE(bench_hash, HashType::CRC32C)->DenseRange(2, 18)->ReportAggregatesOnly(true);
 BENCHMARK_TEMPLATE(bench_hash, HashType::HashLittle2)->DenseRange(2, 18)->ReportAggregatesOnly(true);
 BENCHMARK_TEMPLATE(bench_hash, HashType::XXHash3)->DenseRange(2, 18)->ReportAggregatesOnly(true);
+
+static void bench_memcmp(benchmark::State& state) {
+	constexpr int kLength = 10000;
+	std::unique_ptr<char[]> b1{ new char[kLength] };
+	std::unique_ptr<char[]> b2{ new char[kLength] };
+	memset(b1.get(), 0, kLength);
+	memset(b2.get(), 0, kLength);
+	b2.get()[kLength - 1] = 1;
+
+	while (state.KeepRunning()) {
+		benchmark::DoNotOptimize(memcmp(b1.get(), b2.get(), kLength));
+	}
+}
+
+static void bench_memcpy(benchmark::State& state) {
+	constexpr int kLength = 10000;
+	std::unique_ptr<char[]> b1{ new char[kLength] };
+	std::unique_ptr<char[]> b2{ new char[kLength] };
+	memset(b1.get(), 0, kLength);
+
+	while (state.KeepRunning()) {
+		benchmark::DoNotOptimize(memcpy(b2.get(), b1.get(), kLength));
+	}
+}
+
+BENCHMARK(bench_memcmp);
+BENCHMARK(bench_memcpy);

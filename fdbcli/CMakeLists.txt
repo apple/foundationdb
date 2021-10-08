@@ -2,15 +2,30 @@ set(FDBCLI_SRCS
   fdbcli.actor.cpp
   fdbcli.actor.h
   AdvanceVersionCommand.actor.cpp
+  CacheRangeCommand.actor.cpp
+  ConfigureCommand.actor.cpp
   ConsistencyCheckCommand.actor.cpp
+  CoordinatorsCommand.actor.cpp
+  DataDistributionCommand.actor.cpp
+  ExcludeCommand.actor.cpp
+  ExpensiveDataCheckCommand.actor.cpp
+  FileConfigureCommand.actor.cpp
   FlowLineNoise.actor.cpp
   FlowLineNoise.h
   ForceRecoveryWithDataLossCommand.actor.cpp
+  IncludeCommand.actor.cpp
+  KillCommand.actor.cpp
+  LockCommand.actor.cpp
   MaintenanceCommand.actor.cpp
+  ProfileCommand.actor.cpp
   SetClassCommand.actor.cpp
   SnapshotCommand.actor.cpp
+  StatusCommand.actor.cpp
+  SuspendCommand.actor.cpp
   ThrottleCommand.actor.cpp
-  Util.cpp
+  TriggerDDTeamInfoLogCommand.actor.cpp
+  TssqCommand.actor.cpp
+  Util.actor.cpp
   linenoise/linenoise.h)
 
 if(NOT WIN32)

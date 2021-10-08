@@ -532,9 +532,7 @@ public:
 		}
 		return res;
 	}
-	Reference<ActorLineage> getParent() {
-		return parent;
-	}
+	Reference<ActorLineage> getParent() { return parent; }
 };
 
 // A Reference subclass with knowledge on the true owner of the contained
@@ -570,7 +568,9 @@ extern thread_local LineageReference* currentLineage;
 #ifdef ENABLE_SAMPLING
 LineageReference getCurrentLineage();
 #else
-#define getCurrentLineage() if (false) (*currentLineage)
+#define getCurrentLineage()                                                                                            \
+	if (false)                                                                                                         \
+	(*currentLineage)
 #endif
 void replaceLineage(LineageReference* lineage);
 
@@ -582,12 +582,8 @@ struct StackLineage : LineageProperties<StackLineage> {
 #ifdef ENABLE_SAMPLING
 struct LineageScope {
 	LineageReference* oldLineage;
-	LineageScope(LineageReference* with) : oldLineage(currentLineage) {
-		replaceLineage(with);
-	}
-	~LineageScope() {
-		replaceLineage(oldLineage);
-	}
+	LineageScope(LineageReference* with) : oldLineage(currentLineage) { replaceLineage(with); }
+	~LineageScope() { replaceLineage(oldLineage); }
 };
 #endif
 
@@ -795,11 +791,11 @@ public:
 	Future(const Future<T>& rhs) : sav(rhs.sav) {
 		if (sav)
 			sav->addFutureRef();
-		// if (sav->endpoint.isValid()) cout << "Future copied for " << sav->endpoint.key << endl;
+		// if (sav->endpoint.isValid()) std::cout << "Future copied for " << sav->endpoint.key << std::endl;
 	}
 	Future(Future<T>&& rhs) noexcept : sav(rhs.sav) {
 		rhs.sav = 0;
-		// if (sav->endpoint.isValid()) cout << "Future moved for " << sav->endpoint.key << endl;
+		// if (sav->endpoint.isValid()) std::cout << "Future moved for " << sav->endpoint.key << std::endl;
 	}
 	Future(const T& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(presentValue); }
 	Future(T&& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(std::move(presentValue)); }
@@ -812,7 +808,7 @@ public:
 #endif
 
 	~Future() {
-		// if (sav && sav->endpoint.isValid()) cout << "Future destroyed for " << sav->endpoint.key << endl;
+		// if (sav && sav->endpoint.isValid()) std::cout << "Future destroyed for " << sav->endpoint.key << std::endl;
 		if (sav)
 			sav->delFutureRef();
 	}
@@ -858,7 +854,7 @@ public:
 	int getPromiseReferenceCount() const { return sav->getPromiseReferenceCount(); }
 
 	explicit Future(SAV<T>* sav) : sav(sav) {
-		// if (sav->endpoint.isValid()) cout << "Future created for " << sav->endpoint.key << endl;
+		// if (sav->endpoint.isValid()) std::cout << "Future created for " << sav->endpoint.key << std::endl;
 	}
 
 private:
@@ -904,6 +900,7 @@ public:
 	}
 	bool isSet() const { return sav->isSet(); }
 	bool canBeSet() const { return sav->canBeSet(); }
+	bool isError() const { return sav->isError(); }
 
 	bool isValid() const { return sav != nullptr; }
 	Promise() : sav(new SAV<T>(0, 1)) {}
@@ -1251,13 +1248,12 @@ struct Actor : SAV<ReturnValue> {
 	int8_t actor_wait_state; // -1 means actor is cancelled; 0 means actor is not waiting; 1-N mean waiting in callback
 	                         // group #
 
-	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) { /*++actorCount;*/ }
+	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) { /*++actorCount;*/
+	}
 	// ~Actor() { --actorCount; }
 
 #ifdef ENABLE_SAMPLING
-	LineageReference* lineageAddr() {
-		return std::addressof(lineage);
-	}
+	LineageReference* lineageAddr() { return std::addressof(lineage); }
 #endif
 };
 
@@ -1270,13 +1266,12 @@ struct Actor<void> {
 #endif
 	int8_t actor_wait_state; // 0 means actor is not waiting; 1-N mean waiting in callback group #
 
-	Actor() : actor_wait_state(0) { /*++actorCount;*/ }
+	Actor() : actor_wait_state(0) { /*++actorCount;*/
+	}
 	// ~Actor() { --actorCount; }
 
 #ifdef ENABLE_SAMPLING
-	LineageReference* lineageAddr() {
-		return std::addressof(lineage);
-	}
+	LineageReference* lineageAddr() { return std::addressof(lineage); }
 #endif
 };
 

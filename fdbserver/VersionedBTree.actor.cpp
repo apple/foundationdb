@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
@@ -1440,6 +1441,12 @@ public:
 
 	// For debugging
 	std::string name;
+
+	void toTraceEvent(TraceEvent& e, const char* prefix) const {
+		e.detail(format("%sRecords", prefix), numEntries);
+		e.detail(format("%sPages", prefix), numPages);
+		e.detail(format("%sRecordsPerPage", prefix), numPages > 0 ? (double)numEntries / numPages : 0);
+	}
 };
 
 int nextPowerOf2(uint32_t x) {
@@ -1526,36 +1533,9 @@ struct RedwoodMetrics {
 		Reference<Histogram> buildItemCountSketch;
 		Reference<Histogram> modifyItemCountSketch;
 
-		Level() { clear(); }
+		Level() { metrics = {}; }
 
-		void clear(int level = 0) {
-			metrics = {};
-
-			if (level > 0) {
-				if (!buildFillPctSketch) {
-					std::string levelString = format("L%d", level);
-					buildFillPctSketch = Histogram::getHistogram(
-					    LiteralStringRef("buildFillPct"), levelString, Histogram::Unit::percentage);
-					modifyFillPctSketch = Histogram::getHistogram(
-					    LiteralStringRef("modifyFillPct"), levelString, Histogram::Unit::percentage);
-					buildStoredPctSketch = Histogram::getHistogram(
-					    LiteralStringRef("buildStoredPct"), levelString, Histogram::Unit::percentage);
-					modifyStoredPctSketch = Histogram::getHistogram(
-					    LiteralStringRef("modifyStoredPct"), levelString, Histogram::Unit::percentage);
-					buildItemCountSketch = Histogram::getHistogram(
-					    LiteralStringRef("buildItemCount"), levelString, Histogram::Unit::count, 0, maxRecordCount);
-					modifyItemCountSketch = Histogram::getHistogram(
-					    LiteralStringRef("modifyItemCount"), levelString, Histogram::Unit::count, 0, maxRecordCount);
-				}
-
-				buildFillPctSketch->clear();
-				modifyFillPctSketch->clear();
-				buildStoredPctSketch->clear();
-				modifyStoredPctSketch->clear();
-				buildItemCountSketch->clear();
-				modifyItemCountSketch->clear();
-			}
-		}
+		void clear() { metrics = {}; }
 	};
 
 	struct metrics {
@@ -1583,33 +1563,57 @@ struct RedwoodMetrics {
 	};
 
 	RedwoodMetrics() {
-		kvSizeWritten =
-		    Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("Written"), Histogram::Unit::bytes);
-		kvSizeReadByGet =
-		    Histogram::getHistogram(LiteralStringRef("kvSize"), LiteralStringRef("ReadByGet"), Histogram::Unit::bytes);
-		kvSizeReadByGetRange = Histogram::getHistogram(
-		    LiteralStringRef("kvSize"), LiteralStringRef("ReadByGetRange"), Histogram::Unit::bytes);
+		// All histograms have reset their buckets to 0 in the constructor.
+		kvSizeWritten = Reference<Histogram>(
+		    new Histogram(Reference<HistogramRegistry>(), "kvSize", "Written", Histogram::Unit::bytes));
+		kvSizeReadByGet = Reference<Histogram>(
+		    new Histogram(Reference<HistogramRegistry>(), "kvSize", "ReadByGet", Histogram::Unit::bytes));
+		kvSizeReadByGetRange = Reference<Histogram>(
+		    new Histogram(Reference<HistogramRegistry>(), "kvSize", "ReadByGetRange", Histogram::Unit::bytes));
+
+		// These histograms are used for Btree events, hence level > 0
+		unsigned int levelCounter = 0;
+		for (RedwoodMetrics::Level& level : levels) {
+			if (levelCounter > 0) {
+				std::string levelString = "L" + std::to_string(levelCounter);
+				level.buildFillPctSketch = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "buildFillPct", levelString, Histogram::Unit::percentageLinear));
+				level.modifyFillPctSketch = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "modifyFillPct", levelString, Histogram::Unit::percentageLinear));
+				level.buildStoredPctSketch = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "buildStoredPct", levelString, Histogram::Unit::percentageLinear));
+				level.modifyStoredPctSketch = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "modifyStoredPct", levelString, Histogram::Unit::percentageLinear));
+				level.buildItemCountSketch = Reference<Histogram>(new Histogram(Reference<HistogramRegistry>(),
+				                                                                "buildItemCount",
+				                                                                levelString,
+				                                                                Histogram::Unit::countLinear,
+				                                                                0,
+				                                                                maxRecordCount));
+				level.modifyItemCountSketch = Reference<Histogram>(new Histogram(Reference<HistogramRegistry>(),
+				                                                                 "modifyItemCount",
+				                                                                 levelString,
+				                                                                 Histogram::Unit::countLinear,
+				                                                                 0,
+				                                                                 maxRecordCount));
+			}
+			++levelCounter;
+		}
 		clear();
 	}
 
 	void clear() {
-		unsigned int levelCounter = 0;
 		for (RedwoodMetrics::Level& level : levels) {
-			level.clear(levelCounter);
-			++levelCounter;
+			level.clear();
 		}
-		level(100).clear();
 		metric = {};
-
-		kvSizeWritten->clear();
-		kvSizeReadByGet->clear();
-		kvSizeReadByGetRange->clear();
-
 		startTime = g_network ? now() : 0;
 	}
+
 	// btree levels and one extra level for non btree level.
 	Level levels[btreeLevels + 1];
 	metrics metric;
+
 	Reference<Histogram> kvSizeWritten;
 	Reference<Histogram> kvSizeReadByGet;
 	Reference<Histogram> kvSizeReadByGetRange;
@@ -1637,6 +1641,25 @@ struct RedwoodMetrics {
 				level.buildItemCountSketch->updateUpperBound(maxRecordCount);
 				level.modifyItemCountSketch->updateUpperBound(maxRecordCount);
 			}
+		}
+	}
+
+	void logHistograms(double elapsed) {
+		// All histograms have reset their buckets to 0 after writeToLog.
+		kvSizeWritten->writeToLog(elapsed);
+		kvSizeReadByGet->writeToLog(elapsed);
+		kvSizeReadByGetRange->writeToLog(elapsed);
+		unsigned int levelCounter = 0;
+		for (RedwoodMetrics::Level& level : levels) {
+			if (levelCounter > 0) {
+				level.buildFillPctSketch->writeToLog(elapsed);
+				level.modifyFillPctSketch->writeToLog(elapsed);
+				level.buildStoredPctSketch->writeToLog(elapsed);
+				level.modifyStoredPctSketch->writeToLog(elapsed);
+				level.buildItemCountSketch->writeToLog(elapsed);
+				level.modifyItemCountSketch->writeToLog(elapsed);
+			}
+			++levelCounter;
 		}
 	}
 
@@ -1766,11 +1789,21 @@ int RedwoodMetrics::maxRecordCount = 315;
 RedwoodMetrics g_redwoodMetrics = {};
 Future<Void> g_redwoodMetricsActor;
 
+ACTOR Future<Void> redwoodHistogramsLogger(double interval) {
+	state double currTime;
+	loop {
+		currTime = now();
+		wait(delay(interval));
+		double elapsed = now() - currTime;
+		g_redwoodMetrics.logHistograms(elapsed);
+	}
+}
+
 ACTOR Future<Void> redwoodMetricsLogger() {
 	g_redwoodMetrics.clear();
-
+	state Future<Void> loggingFuture = redwoodHistogramsLogger(SERVER_KNOBS->REDWOOD_HISTOGRAM_INTERVAL);
 	loop {
-		wait(delay(SERVER_KNOBS->REDWOOD_LOGGING_INTERVAL));
+		wait(delay(SERVER_KNOBS->REDWOOD_METRICS_INTERVAL));
 
 		TraceEvent e("RedwoodMetrics");
 		double elapsed = now() - g_redwoodMetrics.startTime;
@@ -2257,16 +2290,11 @@ public:
 			self->remapQueue.resetHeadReader();
 
 			self->remapCleanupFuture = remapCleanup(self);
-			TraceEvent(SevInfo, "RedwoodRecovered")
-			    .detail("FileName", self->filename.c_str())
-			    .detail("CommittedVersion", self->pHeader->committedVersion)
-			    .detail("LogicalPageSize", self->logicalPageSize)
-			    .detail("PhysicalPageSize", self->physicalPageSize)
-			    .detail("RemapEntries", self->remapQueue.numEntries);
 		} else {
 			// Note: If the file contains less than 2 pages but more than 0 bytes then the pager was never successfully
 			// committed. A new pager will be created in its place.
 			// TODO:  Is the right behavior?
+			exists = false;
 
 			debug_printf("DWALPager(%s) creating new pager\n", self->filename.c_str());
 
@@ -2325,6 +2353,27 @@ public:
 			self->remapCleanupFuture = Void();
 			wait(self->commit());
 		}
+
+		if (!self->memoryOnly) {
+			wait(store(fileSize, self->pageFile->size()));
+		}
+
+		TraceEvent e(SevInfo, "RedwoodRecoveredPager");
+		e.detail("FileName", self->filename.c_str());
+		e.detail("LogicalFileSize", self->pHeader->pageCount * self->physicalPageSize);
+		e.detail("PhysicalFileSize", fileSize);
+		e.detail("OpenedExisting", exists);
+		e.detail("CommittedVersion", self->pHeader->committedVersion);
+		e.detail("LogicalPageSize", self->logicalPageSize);
+		e.detail("PhysicalPageSize", self->physicalPageSize);
+
+		self->remapQueue.toTraceEvent(e, "RemapQueue");
+		self->delayedFreeList.toTraceEvent(e, "FreeQueue");
+		self->freeList.toTraceEvent(e, "DelayedFreeQueue");
+		self->extentUsedList.toTraceEvent(e, "UsedExtentQueue");
+		self->extentFreeList.toTraceEvent(e, "FreeExtentQueue");
+		self->getStorageBytes().toTraceEvent(e);
+		e.log();
 
 		debug_printf("DWALPager(%s) recovered.  committedVersion=%" PRId64 " logicalPageSize=%d physicalPageSize=%d\n",
 		             self->filename.c_str(),
@@ -2919,7 +2968,7 @@ public:
 	Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) override {
 		debug_printf("DWALPager(%s) op=readExtent %s\n", filename.c_str(), toString(pageID).c_str());
 		PageCacheEntry* pCacheEntry = extentCache.getIfExists(pageID);
-		auto& eventReasons = g_redwoodMetrics.level(0).metrics.events;
+		auto& eventReasons = g_redwoodMetrics.level(nonBtreeLevel).metrics.events;
 		if (pCacheEntry != nullptr) {
 			eventReasons.addEventReason(PagerEvents::CacheLookup, PagerEventReasons::MetaData);
 			debug_printf("DWALPager(%s) Cache Entry exists for %s\n", filename.c_str(), toString(pageID).c_str());
@@ -3343,7 +3392,6 @@ public:
 	Future<Void> onClosed() override { return closedPromise.getFuture(); }
 
 	StorageBytes getStorageBytes() const override {
-		ASSERT(recoverFuture.isReady());
 		int64_t free;
 		int64_t total;
 		if (memoryOnly) {
@@ -3357,7 +3405,15 @@ public:
 		// It is not exactly known how many pages on the delayed free list are usable as of right now.  It could be
 		// known, if each commit delayed entries that were freeable were shuffled from the delayed free queue to the
 		// free queue, but this doesn't seem necessary.
-		int64_t reusable = (freeList.numEntries + delayedFreeList.numEntries) * physicalPageSize;
+
+		// Amount of space taken up by all of the items in the free lists
+		int64_t reusablePageSpace = (freeList.numEntries + delayedFreeList.numEntries) * physicalPageSize;
+		// Amount of space taken up by the free list queues themselves, as if we were to pop and use
+		// items on the free lists the space the items are stored in would also become usable
+		int64_t reusableQueueSpace = (freeList.numPages + delayedFreeList.numPages) * physicalPageSize;
+		int64_t reusable = reusablePageSpace + reusableQueueSpace;
+
+		// Space currently in used by old page versions have have not yet been freed due to the remap cleanup window.
 		int64_t temp = remapQueue.numEntries * physicalPageSize;
 
 		return StorageBytes(free, total, pagerSize - reusable, free + reusable, temp);
@@ -4628,6 +4684,13 @@ public:
 
 		debug_printf("Recovered btree at version %" PRId64 ": %s\n", latest, self->m_pHeader->toString().c_str());
 
+		TraceEvent e(SevInfo, "RedwoodRecoveredBTree");
+		e.detail("FileName", self->m_name);
+		e.detail("OpenedExisting", meta.size() != 0);
+		e.detail("LatestVersion", latest);
+		self->m_lazyClearQueue.toTraceEvent(e, "LazyClearQueue");
+		e.log();
+
 		self->m_lastCommittedVersion = latest;
 		self->m_lazyClearActor = incrementalLazyClear(self);
 		return Void();
@@ -4669,8 +4732,6 @@ public:
 	}
 
 	ACTOR static Future<Void> clearAllAndCheckSanity_impl(VersionedBTree* self) {
-		ASSERT(g_network->isSimulated());
-
 		debug_printf("Clearing tree.\n");
 		self->setWriteVersion(self->getLatestVersion() + 1);
 		self->clear(KeyRangeRef(dbBegin.key, dbEnd.key));
@@ -5236,7 +5297,6 @@ private:
 				    .detail("BytesWritten", written);
 				ASSERT(false);
 			}
-
 			auto& metrics = g_redwoodMetrics.level(height);
 			metrics.metrics.pageBuild += 1;
 			metrics.metrics.pageBuildExt += p.blockCount - 1;
@@ -5569,6 +5629,7 @@ private:
 		// Page was updated in-place through edits and written to maybeNewID
 		void updatedInPlace(BTreePageIDRef maybeNewID, BTreePage* btPage, int capacity) {
 			inPlaceUpdate = true;
+
 			auto& metrics = g_redwoodMetrics.level(btPage->height);
 			metrics.metrics.pageModify += 1;
 			metrics.metrics.pageModifyExt += (maybeNewID.size() - 1);
@@ -9438,6 +9499,7 @@ TEST_CASE(":/redwood/performance/set") {
 	state int scanPrefetchBytes = params.getInt("scanPrefetchBytes").orDefault(0);
 	state bool pagerMemoryOnly = params.getInt("pagerMemoryOnly").orDefault(0);
 	state bool traceMetrics = params.getInt("traceMetrics").orDefault(0);
+	state bool destructiveSanityCheck = params.getInt("destructiveSanityCheck").orDefault(0);
 
 	printf("pagerMemoryOnly: %d\n", pagerMemoryOnly);
 	printf("pageSize: %d\n", pageSize);
@@ -9464,6 +9526,7 @@ TEST_CASE(":/redwood/performance/set") {
 	printf("fileName: %s\n", fileName.c_str());
 	printf("openExisting: %d\n", openExisting);
 	printf("insertRecords: %d\n", insertRecords);
+	printf("destructiveSanityCheck: %d\n", destructiveSanityCheck);
 
 	// If using stdout for metrics, prevent trace event metrics logger from starting
 	if (!traceMetrics) {
@@ -9597,6 +9660,10 @@ TEST_CASE(":/redwood/performance/set") {
 		if (!traceMetrics) {
 			printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 		}
+	}
+
+	if (destructiveSanityCheck) {
+		wait(btree->clearAllAndCheckSanity());
 	}
 
 	Future<Void> closedFuture = btree->onClosed();
@@ -10080,11 +10147,32 @@ TEST_CASE(":/redwood/performance/histogramThroughput") {
 	std::default_random_engine generator;
 	std::uniform_int_distribution<uint32_t> distribution(0, UINT32_MAX);
 	state size_t inputSize = pow(10, 8);
-	state vector<uint32_t> uniform;
+	state std::vector<uint32_t> uniform;
 	for (int i = 0; i < inputSize; i++) {
 		uniform.push_back(distribution(generator));
 	}
 	std::cout << "size of input: " << uniform.size() << std::endl;
+	{
+		// Time needed to log 33 histograms.
+		std::vector<Reference<Histogram>> histograms;
+		for (int i = 0; i < 33; i++) {
+			std::string levelString = "L" + std::to_string(i);
+			histograms.push_back(Histogram::getHistogram(
+			    LiteralStringRef("histogramTest"), LiteralStringRef("levelString"), Histogram::Unit::bytes));
+		}
+		for (int i = 0; i < 33; i++) {
+			for (int j = 0; j < 32; j++) {
+				histograms[i]->sample(std::pow(2, j));
+			}
+		}
+		auto t_start = std::chrono::high_resolution_clock::now();
+		for (int i = 0; i < 33; i++) {
+			histograms[i]->writeToLog(30.0);
+		}
+		auto t_end = std::chrono::high_resolution_clock::now();
+		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+		std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
+	}
 	{
 		std::cout << "Histogram Unit bytes" << std::endl;
 		auto t_start = std::chrono::high_resolution_clock::now();
@@ -10108,7 +10196,7 @@ TEST_CASE(":/redwood/performance/histogramThroughput") {
 		std::cout << "Histogram Unit percentage: " << std::endl;
 		auto t_start = std::chrono::high_resolution_clock::now();
 		Reference<Histogram> h = Histogram::getHistogram(
-		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::percentage);
+		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::percentageLinear);
 		ASSERT(uniform.size() == inputSize);
 		for (size_t i = 0; i < uniform.size(); i++) {
 			h->samplePercentage((double)uniform[i] / UINT32_MAX);
@@ -10125,7 +10213,7 @@ TEST_CASE(":/redwood/performance/continuousSmapleThroughput") {
 	std::default_random_engine generator;
 	std::uniform_int_distribution<uint32_t> distribution(0, UINT32_MAX);
 	state size_t inputSize = pow(10, 8);
-	state vector<uint32_t> uniform;
+	state std::vector<uint32_t> uniform;
 	for (int i = 0; i < inputSize; i++) {
 		uniform.push_back(distribution(generator));
 	}

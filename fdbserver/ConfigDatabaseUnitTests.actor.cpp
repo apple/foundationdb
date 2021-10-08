@@ -67,8 +67,8 @@ class WriteToTransactionEnvironment {
 
 	ACTOR static Future<Void> set(WriteToTransactionEnvironment* self,
 	                              Optional<KeyRef> configClass,
-	                              int64_t value,
-	                              KeyRef knobName) {
+	                              KeyRef knobName,
+	                              int64_t value) {
 		state Reference<IConfigTransaction> tr = IConfigTransaction::createTestSimple(self->cti);
 		auto configKey = encodeConfigKey(configClass, knobName);
 		tr->set(configKey, longToValue(value));
@@ -77,9 +77,11 @@ class WriteToTransactionEnvironment {
 		return Void();
 	}
 
-	ACTOR static Future<Void> clear(WriteToTransactionEnvironment* self, Optional<KeyRef> configClass) {
+	ACTOR static Future<Void> clear(WriteToTransactionEnvironment* self,
+	                                Optional<KeyRef> configClass,
+	                                KeyRef knobName) {
 		state Reference<IConfigTransaction> tr = IConfigTransaction::createTestSimple(self->cti);
-		auto configKey = encodeConfigKey(configClass, "test_long"_sr);
+		auto configKey = encodeConfigKey(configClass, knobName);
 		tr->clear(configKey);
 		wait(tr->commit());
 		self->lastWrittenVersion = tr->getCommittedVersion();
@@ -98,13 +100,23 @@ public:
 		setup();
 	}
 
-	Future<Void> set(Optional<KeyRef> configClass, int64_t value, KeyRef knobName = "test_long"_sr) {
-		return set(this, configClass, value, knobName);
+	Future<Void> set(Optional<KeyRef> configClass, KeyRef knobName, int64_t value) {
+		return set(this, configClass, knobName, value);
 	}
 
-	Future<Void> clear(Optional<KeyRef> configClass) { return clear(this, configClass); }
+	Future<Void> clear(Optional<KeyRef> configClass, KeyRef knobName) { return clear(this, configClass, knobName); }
 
 	Future<Void> compact() { return cfi.compact.getReply(ConfigFollowerCompactRequest{ lastWrittenVersion }); }
+
+	Future<Void> rollback(Version version) { return cfi.rollback.getReply(ConfigFollowerRollbackRequest{ version }); }
+
+	Future<Void> rollforward(Version lastKnownCommitted,
+	                         Version target,
+	                         Standalone<VectorRef<VersionedConfigMutationRef>> mutations,
+	                         Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations) {
+		return cfi.rollforward.getReply(
+		    ConfigFollowerRollforwardRequest{ lastKnownCommitted, target, mutations, annotations });
+	}
 
 	void restartNode() {
 		cfiServer.cancel();
@@ -117,27 +129,33 @@ public:
 
 	ConfigFollowerInterface getFollowerInterface() const { return cfi; }
 
+	void close() const { node->close(); }
+
+	Future<Void> onClosed() const { return node->onClosed(); }
+
 	Future<Void> getError() const { return cfiServer || ctiServer; }
 };
 
 class ReadFromLocalConfigEnvironment {
 	UID id;
 	std::string dataDir;
-	LocalConfiguration localConfiguration;
+	Reference<LocalConfiguration> localConfiguration;
 	Reference<AsyncVar<ConfigBroadcastInterface> const> cbi;
 	Future<Void> consumer;
 
-	ACTOR static Future<Void> checkEventually(LocalConfiguration const* localConfiguration,
-	                                          Optional<int64_t> expected) {
+	ACTOR template <class T, class V, class E>
+	static Future<Void> checkEventually(Reference<LocalConfiguration const> localConfiguration,
+	                                    V T::*member,
+	                                    Optional<E> expected) {
 		state double lastMismatchTime = now();
 		loop {
-			if (localConfiguration->getTestKnobs().TEST_LONG == expected.orDefault(0)) {
+			if (localConfiguration->getTestKnobs().*member == expected.orDefault(0)) {
 				return Void();
 			}
 			if (now() > lastMismatchTime + 1.0) {
 				TraceEvent(SevWarn, "CheckEventuallyStillChecking")
 				    .detail("Expected", expected.present() ? expected.get() : 0)
-				    .detail("TestLong", localConfiguration->getTestKnobs().TEST_LONG);
+				    .detail("TestMember", localConfiguration->getTestKnobs().*member);
 				lastMismatchTime = now();
 			}
 			wait(delayJittered(0.1));
@@ -145,7 +163,7 @@ class ReadFromLocalConfigEnvironment {
 	}
 
 	ACTOR static Future<Void> setup(ReadFromLocalConfigEnvironment* self) {
-		wait(self->localConfiguration.initialize());
+		wait(self->localConfiguration->initialize());
 		if (self->cbi) {
 			// LocalConfiguration runs in a loop waiting for messages from the
 			// broadcaster. These unit tests use the same
@@ -155,7 +173,7 @@ class ReadFromLocalConfigEnvironment {
 			// prevents two actors trying to listen for the same message on the
 			// same interface, causing lots of issues!
 			self->consumer.cancel();
-			self->consumer = self->localConfiguration.consume(self->cbi->get());
+			self->consumer = self->localConfiguration->consume(self->cbi->get());
 		}
 		return Void();
 	}
@@ -164,49 +182,57 @@ public:
 	ReadFromLocalConfigEnvironment(std::string const& dataDir,
 	                               std::string const& configPath,
 	                               std::map<std::string, std::string> const& manualKnobOverrides)
-	  : dataDir(dataDir), localConfiguration(dataDir, configPath, manualKnobOverrides, IsTest::True),
+	  : dataDir(dataDir),
+	    localConfiguration(makeReference<LocalConfiguration>(dataDir, configPath, manualKnobOverrides, IsTest::True)),
 	    consumer(Never()) {}
 
 	Future<Void> setup() { return setup(this); }
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
-		localConfiguration = LocalConfiguration(dataDir, newConfigPath, {}, IsTest::True);
+		std::map<std::string, std::string> manualKnobOverrides = {};
+		localConfiguration =
+		    makeReference<LocalConfiguration>(dataDir, newConfigPath, manualKnobOverrides, IsTest::True);
 		return setup();
 	}
 
 	void connectToBroadcaster(Reference<AsyncVar<ConfigBroadcastInterface> const> const& cbi) {
 		this->cbi = cbi;
-		consumer = localConfiguration.consume(cbi->get());
+		consumer = localConfiguration->consume(cbi->get());
 	}
 
-	void checkImmediate(Optional<int64_t> expected) const {
+	template <class T, class V, class E>
+	void checkImmediate(V T::*member, Optional<E> expected) const {
 		if (expected.present()) {
-			ASSERT_EQ(localConfiguration.getTestKnobs().TEST_LONG, expected.get());
+			ASSERT_EQ(localConfiguration->getTestKnobs().*member, expected.get());
 		} else {
-			ASSERT_EQ(localConfiguration.getTestKnobs().TEST_LONG, 0);
+			ASSERT_EQ(localConfiguration->getTestKnobs().*member, 0);
 		}
 	}
 
-	Future<Void> checkEventually(Optional<int64_t> expected) const {
-		return checkEventually(&localConfiguration, expected);
+	template <class T, class V, class E>
+	Future<Void> checkEventually(V T::*member, Optional<E> expected) const {
+		return checkEventually(localConfiguration, member, expected);
 	}
 
-	LocalConfiguration& getMutableLocalConfiguration() { return localConfiguration; }
+	LocalConfiguration& getMutableLocalConfiguration() { return *localConfiguration; }
+
+	void close() const { localConfiguration->close(); }
+	Future<Void> onClosed() const { return localConfiguration->onClosed(); }
 
 	Future<Void> getError() const { return consumer; }
 
-	Version lastSeenVersion() { return localConfiguration.lastSeenVersion(); }
+	Version lastSeenVersion() { return localConfiguration->lastSeenVersion(); }
 
-	ConfigClassSet configClassSet() { return localConfiguration.configClassSet(); }
+	ConfigClassSet configClassSet() { return localConfiguration->configClassSet(); }
 };
 
 class LocalConfigEnvironment {
 	ReadFromLocalConfigEnvironment readFrom;
 	Version lastWrittenVersion{ 0 };
 
-	Future<Void> addMutation(Optional<KeyRef> configClass, Optional<KnobValueRef> value) {
+	Future<Void> addMutation(Optional<KeyRef> configClass, KeyRef knobName, Optional<KnobValueRef> value) {
 		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
-		appendVersionedMutation(versionedMutations, ++lastWrittenVersion, configClass, "test_long"_sr, value);
+		appendVersionedMutation(versionedMutations, ++lastWrittenVersion, configClass, knobName, value);
 		return readFrom.getMutableLocalConfiguration().addChanges(versionedMutations, lastWrittenVersion);
 	}
 
@@ -220,12 +246,15 @@ public:
 		return readFrom.restartLocalConfig(newConfigPath);
 	}
 	Future<Void> getError() const { return Never(); }
-	Future<Void> clear(Optional<KeyRef> configClass) { return addMutation(configClass, {}); }
-	Future<Void> set(Optional<KeyRef> configClass, int64_t value) {
+	Future<Void> clear(Optional<KeyRef> configClass, KeyRef knobName) { return addMutation(configClass, knobName, {}); }
+	Future<Void> set(Optional<KeyRef> configClass, KeyRef knobName, int64_t value) {
 		auto knobValue = KnobValueRef::create(value);
-		return addMutation(configClass, knobValue.contents());
+		return addMutation(configClass, knobName, knobValue.contents());
 	}
-	void check(Optional<int64_t> value) const { return readFrom.checkImmediate(value); }
+	template <class T, class V, class E>
+	void check(V T::*member, Optional<E> value) const {
+		return readFrom.checkImmediate(member, value);
+	}
 };
 
 class BroadcasterToLocalConfigEnvironment {
@@ -234,18 +263,21 @@ class BroadcasterToLocalConfigEnvironment {
 	ConfigBroadcaster broadcaster;
 	Version lastWrittenVersion{ 0 };
 	Future<Void> broadcastServer;
+	Promise<Void> workerFailure;
+	Future<Void> workerFailed_;
 
 	ACTOR static Future<Void> setup(BroadcasterToLocalConfigEnvironment* self, ConfigClassSet configClassSet) {
 		wait(self->readFrom.setup());
 		self->cbi = makeReference<AsyncVar<ConfigBroadcastInterface>>();
 		self->readFrom.connectToBroadcaster(self->cbi);
-		self->broadcastServer = self->broadcaster.registerWorker(0, configClassSet, Never(), self->cbi->get());
+		self->broadcastServer =
+		    self->broadcaster.registerWorker(0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
 		return Void();
 	}
 
-	void addMutation(Optional<KeyRef> configClass, KnobValueRef value) {
+	void addMutation(Optional<KeyRef> configClass, KeyRef knobName, KnobValueRef value) {
 		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
-		appendVersionedMutation(versionedMutations, ++lastWrittenVersion, configClass, "test_long"_sr, value);
+		appendVersionedMutation(versionedMutations, ++lastWrittenVersion, configClass, knobName, value);
 		broadcaster.applyChanges(versionedMutations, lastWrittenVersion, {});
 	}
 
@@ -256,28 +288,45 @@ public:
 
 	Future<Void> setup(ConfigClassSet const& configClassSet) { return setup(this, configClassSet); }
 
-	void set(Optional<KeyRef> configClass, int64_t value) {
+	void set(Optional<KeyRef> configClass, KeyRef knobName, int64_t value) {
 		auto knobValue = KnobValueRef::create(value);
-		addMutation(configClass, knobValue.contents());
+		addMutation(configClass, knobName, knobValue.contents());
 	}
 
-	void clear(Optional<KeyRef> configClass) { addMutation(configClass, {}); }
+	void clear(Optional<KeyRef> configClass, KeyRef knobName) { addMutation(configClass, knobName, {}); }
 
-	Future<Void> check(Optional<int64_t> value) const { return readFrom.checkEventually(value); }
+	template <class T, class V, class E>
+	Future<Void> check(V T::*member, Optional<E> value) const {
+		return readFrom.checkEventually(member, value);
+	}
 
 	void changeBroadcaster() {
 		broadcastServer.cancel();
 		cbi->set(ConfigBroadcastInterface{});
 		readFrom.connectToBroadcaster(cbi);
-		broadcastServer =
-		    broadcaster.registerWorker(readFrom.lastSeenVersion(), readFrom.configClassSet(), Never(), cbi->get());
+		broadcastServer = broadcaster.registerWorker(
+		    readFrom.lastSeenVersion(), readFrom.configClassSet(), workerFailure.getFuture(), cbi->get());
 	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
 		return readFrom.restartLocalConfig(newConfigPath);
 	}
 
+	void killLocalConfig() {
+		workerFailed_ = broadcaster.getClientFailure(cbi->get().id());
+		workerFailure.send(Void());
+	}
+
+	Future<Void> workerFailed() {
+		ASSERT(workerFailed_.isValid());
+		return workerFailed_;
+	}
+
 	void compact() { broadcaster.compact(lastWrittenVersion); }
+
+	void close() const { readFrom.close(); }
+
+	Future<Void> onClosed() const { return readFrom.onClosed(); }
 
 	Future<Void> getError() const { return readFrom.getError() || broadcaster.getError(); }
 };
@@ -287,10 +336,11 @@ class TransactionEnvironment {
 
 	ACTOR static Future<Void> check(TransactionEnvironment* self,
 	                                Optional<KeyRef> configClass,
+	                                KeyRef knobName,
 	                                Optional<int64_t> expected) {
 		state Reference<IConfigTransaction> tr =
 		    IConfigTransaction::createTestSimple(self->writeTo.getTransactionInterface());
-		state Key configKey = encodeConfigKey(configClass, "test_long"_sr);
+		state Key configKey = encodeConfigKey(configClass, knobName);
 		state Optional<Value> value = wait(tr->get(configKey));
 		if (expected.present()) {
 			ASSERT_EQ(BinaryReader::fromStringRef<int64_t>(value.get(), Unversioned()), expected.get());
@@ -349,12 +399,12 @@ public:
 
 	void restartNode() { writeTo.restartNode(); }
 	template <class T>
-	Future<Void> set(Optional<KeyRef> configClass, T value, KeyRef knobName = "test_long"_sr) {
-		return writeTo.set(configClass, value, knobName);
+	Future<Void> set(Optional<KeyRef> configClass, KeyRef knobName, T value) {
+		return writeTo.set(configClass, knobName, value);
 	}
-	Future<Void> clear(Optional<KeyRef> configClass) { return writeTo.clear(configClass); }
-	Future<Void> check(Optional<KeyRef> configClass, Optional<int64_t> expected) {
-		return check(this, configClass, expected);
+	Future<Void> clear(Optional<KeyRef> configClass, KeyRef knobName) { return writeTo.clear(configClass, knobName); }
+	Future<Void> check(Optional<KeyRef> configClass, KeyRef knobName, Optional<int64_t> expected) {
+		return check(this, configClass, knobName, expected);
 	}
 	Future<Void> badRangeRead() { return badRangeRead(this); }
 
@@ -364,6 +414,13 @@ public:
 	}
 
 	Future<Void> compact() { return writeTo.compact(); }
+	Future<Void> rollback(Version version) { return writeTo.rollback(version); }
+	Future<Void> rollforward(Version lastKnownCommitted,
+	                         Version target,
+	                         Standalone<VectorRef<VersionedConfigMutationRef>> mutations,
+	                         Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations) {
+		return writeTo.rollforward(lastKnownCommitted, target, mutations, annotations);
+	}
 	Future<Void> getError() const { return writeTo.getError(); }
 };
 
@@ -373,12 +430,15 @@ class TransactionToLocalConfigEnvironment {
 	Reference<AsyncVar<ConfigBroadcastInterface>> cbi;
 	ConfigBroadcaster broadcaster;
 	Future<Void> broadcastServer;
+	Promise<Void> workerFailure;
+	Future<Void> workerFailed_;
 
 	ACTOR static Future<Void> setup(TransactionToLocalConfigEnvironment* self, ConfigClassSet configClassSet) {
 		wait(self->readFrom.setup());
 		self->cbi = makeReference<AsyncVar<ConfigBroadcastInterface>>();
 		self->readFrom.connectToBroadcaster(self->cbi);
-		self->broadcastServer = self->broadcaster.registerWorker(0, configClassSet, Never(), self->cbi->get());
+		self->broadcastServer =
+		    self->broadcaster.registerWorker(0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
 		return Void();
 	}
 
@@ -395,22 +455,40 @@ public:
 		broadcastServer.cancel();
 		cbi->set(ConfigBroadcastInterface{});
 		readFrom.connectToBroadcaster(cbi);
-		broadcastServer =
-		    broadcaster.registerWorker(readFrom.lastSeenVersion(), readFrom.configClassSet(), Never(), cbi->get());
+		broadcastServer = broadcaster.registerWorker(
+		    readFrom.lastSeenVersion(), readFrom.configClassSet(), workerFailure.getFuture(), cbi->get());
 	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
 		return readFrom.restartLocalConfig(newConfigPath);
 	}
 
+	void killLocalConfig() {
+		workerFailed_ = broadcaster.getClientFailure(cbi->get().id());
+		workerFailure.send(Void());
+	}
+
+	Future<Void> workerFailed() {
+		ASSERT(workerFailed_.isValid());
+		return workerFailed_;
+	}
+
 	Future<Void> compact() { return writeTo.compact(); }
 
 	template <class T>
-	Future<Void> set(Optional<KeyRef> configClass, T const& value) {
-		return writeTo.set(configClass, value);
+	Future<Void> set(Optional<KeyRef> configClass, KeyRef knobName, T const& value) {
+		return writeTo.set(configClass, knobName, value);
 	}
-	Future<Void> clear(Optional<KeyRef> configClass) { return writeTo.clear(configClass); }
-	Future<Void> check(Optional<int64_t> value) const { return readFrom.checkEventually(value); }
+	Future<Void> clear(Optional<KeyRef> configClass, KeyRef knobName) { return writeTo.clear(configClass, knobName); }
+	template <class T, class V, class E>
+	Future<Void> check(V T::*member, Optional<E> value) const {
+		return readFrom.checkEventually(member, value);
+	}
+	void close() const {
+		writeTo.close();
+		readFrom.close();
+	}
+	Future<Void> onClosed() const { return writeTo.onClosed() && readFrom.onClosed(); }
 	Future<Void> getError() const { return writeTo.getError() || readFrom.getError() || broadcaster.getError(); }
 };
 
@@ -450,17 +528,25 @@ Future<Void> compact(BroadcasterToLocalConfigEnvironment& env) {
 	env.compact();
 	return Void();
 }
+template <class Env, class... Args>
+Future<Void> rollback(Env& env, Args&&... args) {
+	return waitOrError(env.rollback(std::forward<Args>(args)...), env.getError());
+}
+template <class Env, class... Args>
+Future<Void> rollforward(Env& env, Args&&... args) {
+	return waitOrError(env.rollforward(std::forward<Args>(args)...), env.getError());
+}
 
 ACTOR template <class Env>
 Future<Void> testRestartLocalConfig(UnitTestParameters params) {
 	state Env env(params.getDataDir(), "class-A");
 	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
-	wait(set(env, "class-A"_sr, int64_t{ 1 }));
-	wait(check(env, int64_t{ 1 }));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
 	wait(env.restartLocalConfig("class-A"));
-	wait(check(env, int64_t{ 1 }));
-	wait(set(env, "class-A"_sr, 2));
-	wait(check(env, int64_t{ 2 }));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
+	wait(set(env, "class-A"_sr, "test_long"_sr, 2));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 2 }));
 	return Void();
 }
 
@@ -468,12 +554,12 @@ ACTOR template <class Env>
 Future<Void> testRestartLocalConfigAndChangeClass(UnitTestParameters params) {
 	state Env env(params.getDataDir(), "class-A");
 	wait(env.setup(ConfigClassSet({ "class-A"_sr, "class-B"_sr })));
-	wait(set(env, "class-A"_sr, int64_t{ 1 }));
-	wait(check(env, int64_t{ 1 }));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
 	wait(env.restartLocalConfig("class-B"));
-	wait(check(env, int64_t{ 0 }));
-	wait(set(env, "class-B"_sr, int64_t{ 2 }));
-	wait(check(env, int64_t{ 2 }));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 0 }));
+	wait(set(env, "class-B"_sr, "test_long"_sr, int64_t{ 2 }));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 2 }));
 	return Void();
 }
 
@@ -481,8 +567,8 @@ ACTOR template <class Env>
 Future<Void> testNewLocalConfigAfterCompaction(UnitTestParameters params) {
 	state Env env(params.getDataDir(), "class-A");
 	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
-	wait(set(env, "class-A"_sr, int64_t{ 1 }));
-	wait(check(env, int64_t{ 1 }));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
 	wait(compact(env));
 	// Erase the data dir to simulate a new worker joining the system after
 	// compaction.
@@ -491,9 +577,22 @@ Future<Void> testNewLocalConfigAfterCompaction(UnitTestParameters params) {
 	wait(env.restartLocalConfig("class-A"));
 	// Reregister worker with broadcaster.
 	env.changeBroadcaster();
-	wait(check(env, int64_t{ 1 }));
-	wait(set(env, "class-A"_sr, 2));
-	wait(check(env, int64_t{ 2 }));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
+	wait(set(env, "class-A"_sr, "test_long"_sr, 2));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 2 }));
+	return Void();
+}
+
+ACTOR template <class Env>
+Future<Void> testKillWorker(UnitTestParameters params) {
+	state Env env(params.getDataDir(), "class-A");
+	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
+	env.killLocalConfig();
+	// Make sure broadcaster detects worker death in a timely manner.
+	wait(timeoutError(env.workerFailed(), 3));
+	Future<Void> closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -501,8 +600,25 @@ ACTOR template <class Env>
 Future<Void> testSet(UnitTestParameters params) {
 	state Env env(params.getDataDir(), "class-A");
 	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
-	wait(set(env, "class-A"_sr, int64_t{ 1 }));
-	wait(check(env, int64_t{ 1 }));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
+	return Void();
+}
+
+ACTOR template <class Env>
+Future<Void> testAtomicSet(UnitTestParameters params) {
+	state Env env(params.getDataDir(), "class-A");
+	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
+	state bool restarted = false;
+	try {
+		wait(set(env, "class-A"_sr, "test_atomic_long"_sr, int64_t{ 1 }));
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_local_config_changed);
+		restarted = true;
+	}
+	ASSERT(restarted);
+	wait(env.restartLocalConfig("class-A"));
+	wait(check(env, &TestKnobs::TEST_ATOMIC_LONG, Optional<int64_t>{ 1 }));
 	return Void();
 }
 
@@ -510,9 +626,33 @@ ACTOR template <class Env>
 Future<Void> testClear(UnitTestParameters params) {
 	state Env env(params.getDataDir(), "class-A");
 	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
-	wait(set(env, "class-A"_sr, int64_t{ 1 }));
-	wait(clear(env, "class-A"_sr));
-	wait(check(env, Optional<int64_t>{}));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	wait(clear(env, "class-A"_sr, "test_long"_sr));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{}));
+	return Void();
+}
+
+ACTOR template <class Env>
+Future<Void> testAtomicClear(UnitTestParameters params) {
+	state Env env(params.getDataDir(), "class-A");
+	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
+	state bool restarted = false;
+	try {
+		wait(set(env, "class-A"_sr, "test_atomic_long"_sr, int64_t{ 1 }));
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_local_config_changed);
+		restarted = true;
+	}
+	ASSERT(restarted);
+	restarted = false;
+	try {
+		wait(clear(env, "class-A"_sr, "test_atomic_long"_sr));
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_local_config_changed);
+		restarted = true;
+	}
+	ASSERT(restarted);
+	wait(check(env, &TestKnobs::TEST_ATOMIC_LONG, Optional<int64_t>{}));
 	return Void();
 }
 
@@ -520,10 +660,10 @@ ACTOR template <class Env>
 Future<Void> testGlobalSet(UnitTestParameters params) {
 	state Env env(params.getDataDir(), "class-A");
 	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
-	wait(set(env, Optional<KeyRef>{}, int64_t{ 1 }));
-	wait(check(env, int64_t{ 1 }));
-	wait(set(env, "class-A"_sr, int64_t{ 10 }));
-	wait(check(env, int64_t{ 10 }));
+	wait(set(env, Optional<KeyRef>{}, "test_long"_sr, int64_t{ 1 }));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 10 }));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 10 }));
 	return Void();
 }
 
@@ -531,10 +671,10 @@ ACTOR template <class Env>
 Future<Void> testIgnore(UnitTestParameters params) {
 	state Env env(params.getDataDir(), "class-A");
 	wait(env.setup(ConfigClassSet({ "class-A"_sr, "class-B"_sr })));
-	wait(set(env, "class-B"_sr, int64_t{ 1 }));
+	wait(set(env, "class-B"_sr, "test_long"_sr, int64_t{ 1 }));
 	choose {
 		when(wait(delay(5))) {}
-		when(wait(check(env, int64_t{ 1 }))) { ASSERT(false); }
+		when(wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }))) { ASSERT(false); }
 	}
 	return Void();
 }
@@ -543,11 +683,11 @@ ACTOR template <class Env>
 Future<Void> testCompact(UnitTestParameters params) {
 	state Env env(params.getDataDir(), "class-A");
 	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
-	wait(set(env, "class-A"_sr, int64_t{ 1 }));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
 	wait(compact(env));
-	wait(check(env, 1));
-	wait(set(env, "class-A"_sr, int64_t{ 2 }));
-	wait(check(env, 2));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 2 }));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 2 }));
 	return Void();
 }
 
@@ -555,11 +695,11 @@ ACTOR template <class Env>
 Future<Void> testChangeBroadcaster(UnitTestParameters params) {
 	state Env env(params.getDataDir(), "class-A");
 	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
-	wait(set(env, "class-A"_sr, int64_t{ 1 }));
-	wait(check(env, int64_t{ 1 }));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
 	env.changeBroadcaster();
-	wait(set(env, "class-A"_sr, int64_t{ 2 }));
-	wait(check(env, int64_t{ 2 }));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 2 }));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 2 }));
 	return Void();
 }
 
@@ -573,8 +713,8 @@ bool matches(Standalone<VectorRef<KeyRef>> const& vec, std::set<Key> const& comp
 
 ACTOR Future<Void> testGetConfigClasses(UnitTestParameters params, bool doCompact) {
 	state TransactionEnvironment env(params.getDataDir());
-	wait(set(env, "class-A"_sr, int64_t{ 1 }));
-	wait(set(env, "class-B"_sr, int64_t{ 1 }));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	wait(set(env, "class-B"_sr, "test_long"_sr, int64_t{ 1 }));
 	if (doCompact) {
 		wait(compact(env));
 	}
@@ -589,9 +729,9 @@ ACTOR Future<Void> testGetKnobs(UnitTestParameters params, bool global, bool doC
 	if (!global) {
 		configClass = "class-A"_sr;
 	}
-	wait(set(env, configClass.castTo<KeyRef>(), int64_t{ 1 }, "test_long"_sr));
-	wait(set(env, configClass.castTo<KeyRef>(), int{ 2 }, "test_int"_sr));
-	wait(set(env, "class-B"_sr, double{ 3.0 }, "test_double"_sr)); // ignored
+	wait(set(env, configClass.castTo<KeyRef>(), "test_long"_sr, int64_t{ 1 }));
+	wait(set(env, configClass.castTo<KeyRef>(), "test_int"_sr, int{ 2 }));
+	wait(set(env, "class-B"_sr, "test_double"_sr, double{ 3.0 })); // ignored
 	if (doCompact) {
 		wait(compact(env));
 	}
@@ -605,6 +745,11 @@ ACTOR Future<Void> testGetKnobs(UnitTestParameters params, bool global, bool doC
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Set") {
 	wait(testSet<LocalConfigEnvironment>(params));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/AtomicSet") {
+	wait(testAtomicSet<LocalConfigEnvironment>(params));
 	return Void();
 }
 
@@ -623,6 +768,11 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Clear") {
 	return Void();
 }
 
+TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/AtomicClear") {
+	wait(testAtomicClear<LocalConfigEnvironment>(params));
+	return Void();
+}
+
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/GlobalSet") {
 	wait(testGlobalSet<LocalConfigEnvironment>(params));
 	return Void();
@@ -631,17 +781,17 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/GlobalSet") {
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConflictingOverrides") {
 	state LocalConfigEnvironment env(params.getDataDir(), "class-A/class-B", {});
 	wait(env.setup(ConfigClassSet({ "class-A"_sr, "class-B"_sr })));
-	wait(set(env, "class-A"_sr, int64_t{ 1 }));
-	wait(set(env, "class-B"_sr, int64_t{ 10 }));
-	env.check(10);
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	wait(set(env, "class-B"_sr, "test_long"_sr, int64_t{ 10 }));
+	env.check(&TestKnobs::TEST_LONG, Optional<int64_t>{ 10 });
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Manual") {
 	state LocalConfigEnvironment env(params.getDataDir(), "class-A", { { "test_long", "1000" } });
 	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
-	wait(set(env, "class-A"_sr, int64_t{ 1 }));
-	env.check(1000);
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	env.check(&TestKnobs::TEST_LONG, Optional<int64_t>{ 1000 });
 	return Void();
 }
 
@@ -690,6 +840,11 @@ TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/RestartLocalConfiguratio
 	return Void();
 }
 
+TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/KillWorker") {
+	wait(testKillWorker<BroadcasterToLocalConfigEnvironment>(params));
+	return Void();
+}
+
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/Set") {
 	wait(testSet<TransactionToLocalConfigEnvironment>(params));
 	return Void();
@@ -708,9 +863,9 @@ TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/GlobalSet") {
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartNode") {
 	state TransactionToLocalConfigEnvironment env(params.getDataDir(), "class-A");
 	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
-	wait(set(env, "class-A"_sr, int64_t{ 1 }));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
 	env.restartNode();
-	wait(check(env, int64_t{ 1 }));
+	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
 	return Void();
 }
 
@@ -734,38 +889,138 @@ TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartLocalConfiguratio
 	return Void();
 }
 
+TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/KillWorker") {
+	wait(testKillWorker<TransactionToLocalConfigEnvironment>(params));
+	return Void();
+}
+
 TEST_CASE("/fdbserver/ConfigDB/Transaction/Set") {
 	state TransactionEnvironment env(params.getDataDir());
 	wait(env.setup());
-	wait(set(env, "class-A"_sr, int64_t{ 1 }));
-	wait(check(env, "class-A"_sr, int64_t{ 1 }));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/Clear") {
 	state TransactionEnvironment env(params.getDataDir());
 	wait(env.setup());
-	wait(set(env, "class-A"_sr, int64_t{ 1 }));
-	wait(clear(env, "class-A"_sr));
-	wait(check(env, "class-A"_sr, Optional<int64_t>{}));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	wait(clear(env, "class-A"_sr, "test_long"_sr));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{}));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/Restart") {
 	state TransactionEnvironment env(params.getDataDir());
-	wait(set(env, "class-A"_sr, int64_t{ 1 }));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
 	env.restartNode();
-	wait(check(env, "class-A"_sr, int64_t{ 1 }));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactNode") {
 	state TransactionEnvironment env(params.getDataDir());
-	wait(set(env, "class-A"_sr, int64_t{ 1 }));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
 	wait(compact(env));
-	wait(check(env, "class-A"_sr, int64_t{ 1 }));
-	wait(set(env, "class-A"_sr, int64_t{ 2 }));
-	wait(check(env, "class-A"_sr, int64_t{ 2 }));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 2 }));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 2 }));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/Rollback") {
+	state TransactionEnvironment env(params.getDataDir());
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	// Rollback to version 0 should undo the set.
+	wait(rollback(env, 0));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{}));
+	// Make sure sets still work after rollback.
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 2 }));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 2 }));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/RollbackToCurrentVersion") {
+	state TransactionEnvironment env(params.getDataDir());
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	// Rollback to the latest written version shouldn't undo anything.
+	wait(rollback(env, 1));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/RollbackToNewerVersion") {
+	state TransactionEnvironment env(params.getDataDir());
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	// Rollback to the a version not yet committed should have no effect.
+	wait(rollback(env, 999));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/Rollforward") {
+	state TransactionEnvironment env(params.getDataDir());
+	Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
+	appendVersionedMutation(
+	    mutations, 1, "class-A"_sr, "test_long_v1"_sr, KnobValueRef::create(int64_t{ 1 }).contents());
+	appendVersionedMutation(
+	    mutations, 2, "class-B"_sr, "test_long_v2"_sr, KnobValueRef::create(int64_t{ 2 }).contents());
+	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
+	annotations.emplace_back_deep(annotations.arena(), 1, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
+	annotations.emplace_back_deep(annotations.arena(), 2, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
+	wait(rollforward(env, 0, 2, mutations, annotations));
+	wait(check(env, "class-A"_sr, "test_long_v1"_sr, Optional<int64_t>{ 1 }));
+	wait(check(env, "class-B"_sr, "test_long_v2"_sr, Optional<int64_t>{ 2 }));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/RollforwardWithExistingMutation") {
+	state TransactionEnvironment env(params.getDataDir());
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
+	appendVersionedMutation(
+	    mutations, 2, "class-A"_sr, "test_long_v2"_sr, KnobValueRef::create(int64_t{ 2 }).contents());
+	appendVersionedMutation(
+	    mutations, 3, "class-A"_sr, "test_long_v3"_sr, KnobValueRef::create(int64_t{ 3 }).contents());
+	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
+	annotations.emplace_back_deep(annotations.arena(), 2, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
+	annotations.emplace_back_deep(annotations.arena(), 3, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
+	wait(rollforward(env, 1, 3, mutations, annotations));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
+	wait(check(env, "class-A"_sr, "test_long_v2"_sr, Optional<int64_t>{ 2 }));
+	wait(check(env, "class-A"_sr, "test_long_v3"_sr, Optional<int64_t>{ 3 }));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/RollforwardWithInvalidMutation") {
+	state TransactionEnvironment env(params.getDataDir());
+	Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
+	appendVersionedMutation(
+	    mutations, 1, "class-A"_sr, "test_long_v1"_sr, KnobValueRef::create(int64_t{ 1 }).contents());
+	appendVersionedMutation(
+	    mutations, 10, "class-A"_sr, "test_long_v10"_sr, KnobValueRef::create(int64_t{ 2 }).contents());
+	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
+	annotations.emplace_back_deep(annotations.arena(), 1, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
+	wait(rollforward(env, 0, 5, mutations, annotations));
+	wait(check(env, "class-A"_sr, "test_long_v1"_sr, Optional<int64_t>{ 1 }));
+	wait(check(env, "class-A"_sr, "test_long_v10"_sr, Optional<int64_t>{}));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/RollbackThenRollforward") {
+	state TransactionEnvironment env(params.getDataDir());
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	wait(rollback(env, 0));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{}));
+	Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
+	appendVersionedMutation(
+	    mutations, 1, "class-B"_sr, "test_long_v1"_sr, KnobValueRef::create(int64_t{ 2 }).contents());
+	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
+	annotations.emplace_back_deep(annotations.arena(), 1, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
+	wait(rollforward(env, 0, 1, mutations, annotations));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{}));
+	wait(check(env, "class-B"_sr, "test_long_v1"_sr, Optional<int64_t>{ 2 }));
 	return Void();
 }
 
@@ -809,5 +1064,3 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/BadRangeRead") {
 	}
 	return Void();
 }
-
-// TODO: Test worker failure detection on ConfigBroadcaster

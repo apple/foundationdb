@@ -422,7 +422,7 @@ struct GetWorkersRequest {
 	enum { TESTER_CLASS_ONLY = 0x1, NON_EXCLUDED_PROCESSES_ONLY = 0x2 };
 
 	int flags;
-	ReplyPromise<vector<WorkerDetails>> reply;
+	ReplyPromise<std::vector<WorkerDetails>> reply;
 
 	GetWorkersRequest() : flags(0) {}
 	explicit GetWorkersRequest(int fl) : flags(fl) {}
@@ -966,6 +966,10 @@ ACTOR Future<Void> backupWorker(BackupInterface bi,
                                 Reference<AsyncVar<ServerDBInfo> const> db);
 
 void registerThreadForProfiling();
+
+// Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's remote DC.
+bool addressInDbAndRemoteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
+
 void updateCpuProfiler(ProfilerRequest req);
 
 namespace oldTLog_4_6 {

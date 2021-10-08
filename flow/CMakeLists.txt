@@ -120,6 +120,10 @@ if(UNIX AND NOT APPLE)
   list(APPEND FLOW_SRCS folly_memcpy.S)
 endif()
 
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  list(APPEND FLOW_SRCS aarch64/memcmp.S aarch64/memcpy.S)
+endif()
+
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config.h)
 
@@ -129,6 +133,9 @@ target_link_libraries(flow PRIVATE stacktrace)
 add_flow_target(STATIC_LIBRARY NAME flow_sampling SRCS ${FLOW_SRCS})
 target_link_libraries(flow_sampling PRIVATE stacktrace)
 target_compile_definitions(flow_sampling PRIVATE -DENABLE_SAMPLING)
+if(WIN32)
+  add_dependencies(flow_sampling_actors flow_actors)
+endif()
 
 if (NOT APPLE AND NOT WIN32)
   set (FLOW_LIBS ${FLOW_LIBS} rt)

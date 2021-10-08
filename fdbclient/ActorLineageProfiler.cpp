@@ -239,11 +239,14 @@ std::vector<std::shared_ptr<Sample>> SampleCollection_t::get(double from /*= 0.0
 }
 
 void sample(LineageReference* lineagePtr) {
-	if (!lineagePtr->isValid()) { return; }
+	if (!lineagePtr->isValid()) {
+		return;
+	}
 	(*lineagePtr)->modify(&NameLineage::actorName) = lineagePtr->actorName();
-	boost::asio::post(ActorLineageProfiler::instance().context(), [lineage = LineageReference::addRef(lineagePtr->getPtr())]() {
-		SampleCollection::instance().collect(lineage);
-	});
+	boost::asio::post(ActorLineageProfiler::instance().context(),
+	                  [lineage = LineageReference::addRef(lineagePtr->getPtr())]() {
+		                  SampleCollection::instance().collect(lineage);
+	                  });
 }
 
 struct ProfilerImpl {

@@ -122,7 +122,7 @@ struct ProxyStats {
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-      maxComputeNS(0), minComputeNS(1e12),
+	    maxComputeNS(0), minComputeNS(1e12),
 	    commitBatchQueuingDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
 	                                                   LiteralStringRef("CommitBatchQueuing"),
 	                                                   Histogram::Unit::microseconds)),
@@ -161,7 +161,7 @@ struct ProxyCommitData {
 	int64_t commitBatchesMemBytesCount;
 	ProxyStats stats;
 	MasterInterface master;
-	vector<ResolverInterface> resolvers;
+	std::vector<ResolverInterface> resolvers;
 	LogSystemDiskQueueAdapter* logAdapter;
 	Reference<ILogSystem> logSystem;
 	IKeyValueStore* txnStateStore;
@@ -201,7 +201,7 @@ struct ProxyCommitData {
 	Deque<std::pair<Version, Version>> txsPopVersions;
 	Version lastTxsPop;
 	bool popRemoteTxs;
-	vector<Standalone<StringRef>> whitelistedBinPathVec;
+	std::vector<Standalone<StringRef>> whitelistedBinPathVec;
 
 	Optional<LatencyBandConfig> latencyBandConfig;
 	double lastStartCommit;
@@ -209,7 +209,7 @@ struct ProxyCommitData {
 	int updateCommitRequests = 0;
 	NotifiedDouble lastCommitTime;
 
-	vector<double> commitComputePerOperation;
+	std::vector<double> commitComputePerOperation;
 	UIDTransactionTagMap<TransactionCommitCostEstimation> ssTrTagCommitCost;
 	double lastMasterReset;
 	double lastResolverReset;
@@ -217,7 +217,7 @@ struct ProxyCommitData {
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
 	// signify they must be repopulated. We do not repopulate them immediately to avoid a slow task.
-	const vector<Tag>& tagsForKey(StringRef key) {
+	const std::vector<Tag>& tagsForKey(StringRef key) {
 		auto& tags = keyInfo[key].tags;
 		if (!tags.size()) {
 			auto& r = keyInfo.rangeContaining(key).value();

@@ -26,19 +26,29 @@
 class TestKnobs : public KnobsImpl<TestKnobs> {
 public:
 	TestKnobs();
+
+	// Nonatomic test knobs
 	int64_t TEST_LONG;
 	int TEST_INT;
 	double TEST_DOUBLE;
 	bool TEST_BOOL;
 	std::string TEST_STRING;
+
+	// Atomic test knobs
+	int64_t TEST_ATOMIC_LONG;
+	int TEST_ATOMIC_INT;
+	double TEST_ATOMIC_DOUBLE;
+	bool TEST_ATOMIC_BOOL;
+	std::string TEST_ATOMIC_STRING;
+
 	bool operator==(TestKnobs const&) const;
 	bool operator!=(TestKnobs const&) const;
 	void initialize();
 };
 
 /*
- * Stores both flow knobs, client knobs, server knobs, and test knobs. As the name implies, this class is only meant to
- * be used for testing
+ * Stores both flow knobs, client knobs, server knobs, and test knobs. As the
+ * name implies, this class is only meant to be used for testing.
  */
 class TestKnobCollection : public IKnobCollection {
 	ServerKnobCollection serverKnobCollection;
@@ -52,6 +62,8 @@ public:
 	ClientKnobs const& getClientKnobs() const override { return serverKnobCollection.getClientKnobs(); }
 	ServerKnobs const& getServerKnobs() const override { return serverKnobCollection.getServerKnobs(); }
 	TestKnobs const& getTestKnobs() const override { return testKnobs; }
+	void clearTestKnobs() override;
 	Optional<KnobValue> tryParseKnobValue(std::string const& knobName, std::string const& knobValue) const override;
 	bool trySetKnob(std::string const& knobName, KnobValueRef const& knobValue) override;
+	bool isAtomic(std::string const& knobName) const override;
 };

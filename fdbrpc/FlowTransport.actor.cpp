@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/CoordinationInterface.h"
 #include "fdbrpc/FlowTransport.h"
 #include "flow/network.h"
 
@@ -46,12 +45,8 @@
 
 static NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();
 
-constexpr UID WLTOKEN_ENDPOINT_NOT_FOUND(-1, 0);
-constexpr UID WLTOKEN_PING_PACKET(-1, 1);
 constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
 const uint64_t TOKEN_STREAM_FLAG = 1;
-
-static constexpr int WLTOKEN_COUNTS = 21; // number of wellKnownEndpoints
 
 class EndpointMap : NonCopyable {
 public:
@@ -98,7 +93,7 @@ void EndpointMap::realloc() {
 
 void EndpointMap::insertWellKnown(NetworkMessageReceiver* r, const Endpoint::Token& token, TaskPriority priority) {
 	int index = token.second();
-	ASSERT(index <= WLTOKEN_COUNTS);
+	ASSERT(index <= wellKnownEndpointCount);
 	ASSERT(data[index].receiver == nullptr);
 	data[index].receiver = r;
 	data[index].token() =
@@ -197,7 +192,8 @@ void EndpointMap::remove(Endpoint::Token const& token, NetworkMessageReceiver* r
 
 struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
 	EndpointNotFoundReceiver(EndpointMap& endpoints) {
-		endpoints.insertWellKnown(this, WLTOKEN_ENDPOINT_NOT_FOUND, TaskPriority::DefaultEndpoint);
+		endpoints.insertWellKnown(
+		    this, Endpoint::wellKnownToken(WLTOKEN_ENDPOINT_NOT_FOUND), TaskPriority::DefaultEndpoint);
 	}
 
 	void receive(ArenaObjectReader& reader) override {
@@ -221,7 +217,7 @@ struct PingRequest {
 
 struct PingReceiver final : NetworkMessageReceiver {
 	PingReceiver(EndpointMap& endpoints) {
-		endpoints.insertWellKnown(this, WLTOKEN_PING_PACKET, TaskPriority::ReadSocket);
+		endpoints.insertWellKnown(this, Endpoint::wellKnownToken(WLTOKEN_PING_PACKET), TaskPriority::ReadSocket);
 	}
 	void receive(ArenaObjectReader& reader) override {
 		PingRequest req;
@@ -235,7 +231,7 @@ struct PingReceiver final : NetworkMessageReceiver {
 
 class TransportData {
 public:
-	TransportData(uint64_t transportId);
+	TransportData(uint64_t transportId, int maxWellKnownEndpoints);
 
 	~TransportData();
 
@@ -342,8 +338,8 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 	}
 }
 
-TransportData::TransportData(uint64_t transportId)
-  : warnAlwaysForLargePacket(true), endpoints(WLTOKEN_COUNTS), endpointNotFoundReceiver(endpoints),
+TransportData::TransportData(uint64_t transportId, int maxWellKnownEndpoints)
+  : warnAlwaysForLargePacket(true), endpoints(maxWellKnownEndpoints), endpointNotFoundReceiver(endpoints),
     pingReceiver(endpoints), numIncompatibleConnections(0), lastIncompatibleMessage(0), transportId(transportId) {
 	degraded = makeReference<AsyncVar<bool>>(false);
 	pingLogger = pingLatencyLogger(this);
@@ -431,7 +427,7 @@ static ReliablePacket* sendPacket(TransportData* self,
                                   bool reliable);
 
 ACTOR Future<Void> connectionMonitor(Reference<Peer> peer) {
-	state Endpoint remotePingEndpoint({ peer->destination }, WLTOKEN_PING_PACKET);
+	state Endpoint remotePingEndpoint({ peer->destination }, Endpoint::wellKnownToken(WLTOKEN_PING_PACKET));
 	loop {
 		if (!FlowTransport::isClient() && !peer->destination.isPublic() && peer->compatible) {
 			// Don't send ping messages to clients unless necessary. Instead monitor incoming client pings.
@@ -962,13 +958,13 @@ ACTOR static void deliver(TransportData* self,
 			if (self->isLocalAddress(destination.getPrimaryAddress())) {
 				sendLocal(self,
 				          SerializeSource<UID>(destination.token),
-				          Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND));
+				          Endpoint::wellKnown(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND));
 			} else {
 				Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
 				sendPacket(self,
 				           peer,
 				           SerializeSource<UID>(destination.token),
-				           Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND),
+				           Endpoint::wellKnown(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND),
 				           false);
 			}
 		}
@@ -1422,7 +1418,8 @@ ACTOR static Future<Void> multiVersionCleanupWorker(TransportData* self) {
 	}
 }
 
-FlowTransport::FlowTransport(uint64_t transportId) : self(new TransportData(transportId)) {
+FlowTransport::FlowTransport(uint64_t transportId, int maxWellKnownEndpoints)
+  : self(new TransportData(transportId, maxWellKnownEndpoints)) {
 	self->multiVersionCleanup = multiVersionCleanupWorker(self);
 }
 
@@ -1567,7 +1564,8 @@ static ReliablePacket* sendPacket(TransportData* self,
 
 	// If there isn't an open connection, a public address, or the peer isn't compatible, we can't send
 	if (!peer || (peer->outgoingConnectionIdle && !destination.getPrimaryAddress().isPublic()) ||
-	    (peer->incompatibleProtocolVersionNewer && destination.token != WLTOKEN_PING_PACKET)) {
+	    (peer->incompatibleProtocolVersionNewer &&
+	     destination.token != Endpoint::wellKnownToken(WLTOKEN_PING_PACKET))) {
 		TEST(true); // Can't send to private address without a compatible open connection
 		return nullptr;
 	}
@@ -1652,7 +1650,7 @@ static ReliablePacket* sendPacket(TransportData* self,
 #endif
 
 	peer->send(pb, rp, firstUnsent);
-	if (destination.token != WLTOKEN_PING_PACKET) {
+	if (destination.token != Endpoint::wellKnownToken(WLTOKEN_PING_PACKET)) {
 		peer->lastDataPacketSentTime = now();
 	}
 	return rp;
@@ -1717,8 +1715,9 @@ bool FlowTransport::incompatibleOutgoingConnectionsPresent() {
 	return self->numIncompatibleConnections > 0;
 }
 
-void FlowTransport::createInstance(bool isClient, uint64_t transportId) {
-	g_network->setGlobal(INetwork::enFlowTransport, (flowGlobalType) new FlowTransport(transportId));
+void FlowTransport::createInstance(bool isClient, uint64_t transportId, int maxWellKnownEndpoints) {
+	g_network->setGlobal(INetwork::enFlowTransport,
+	                     (flowGlobalType) new FlowTransport(transportId, maxWellKnownEndpoints));
 	g_network->setGlobal(INetwork::enNetworkAddressFunc, (flowGlobalType)&FlowTransport::getGlobalLocalAddress);
 	g_network->setGlobal(INetwork::enNetworkAddressesFunc, (flowGlobalType)&FlowTransport::getGlobalLocalAddresses);
 	g_network->setGlobal(INetwork::enFailureMonitor, (flowGlobalType) new SimpleFailureMonitor());

@@ -1145,7 +1145,7 @@ Future<RangeResult> ExclusionInProgressRangeImpl::getRange(ReadYourWritesTransac
 }
 
 ACTOR Future<RangeResult> getProcessClassActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
-	vector<ProcessData> _workers = wait(getWorkers(&ryw->getTransaction()));
+	std::vector<ProcessData> _workers = wait(getWorkers(&ryw->getTransaction()));
 	auto workers = _workers; // strip const
 	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
@@ -1168,7 +1168,7 @@ ACTOR Future<Optional<std::string>> processClassCommitActor(ReadYourWritesTransa
 	ryw->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	ryw->setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
-	vector<ProcessData> workers = wait(
+	std::vector<ProcessData> workers = wait(
 	    getWorkers(&ryw->getTransaction())); // make sure we use the Transaction object to avoid used_during_commit()
 
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
@@ -1259,7 +1259,7 @@ void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& 
 }
 
 ACTOR Future<RangeResult> getProcessClassSourceActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
-	vector<ProcessData> _workers = wait(getWorkers(&ryw->getTransaction()));
+	std::vector<ProcessData> _workers = wait(getWorkers(&ryw->getTransaction()));
 	auto workers = _workers; // strip const
 	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
@@ -1290,7 +1290,8 @@ ACTOR Future<RangeResult> getLockedKeyActor(ReadYourWritesTransaction* ryw, KeyR
 	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
 	RangeResult result;
 	if (val.present()) {
-		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, val.get()));
+		UID uid = UID::fromString(BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()).toString());
+		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, Value(uid.toString())));
 	}
 	return result;
 }
@@ -1313,16 +1314,15 @@ Future<RangeResult> LockDatabaseImpl::getRange(ReadYourWritesTransaction* ryw, K
 	}
 }
 
-ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransaction* ryw) {
+ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransaction* ryw, UID uid) {
 	state Optional<std::string> msg;
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
-	UID uid = deterministicRandom()->randomUniqueID();
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != uid) {
 		// check database not locked
 		// if locked already, throw error
-		msg = ManagementAPIError::toJsonString(false, "lock", "Database has already been locked");
+		throw database_locked();
 	} else if (!val.present()) {
 		// lock database
 		ryw->getTransaction().atomicOp(databaseLockedKey,
@@ -1348,7 +1348,15 @@ ACTOR Future<Optional<std::string>> unlockDatabaseCommitActor(ReadYourWritesTran
 Future<Optional<std::string>> LockDatabaseImpl::commit(ReadYourWritesTransaction* ryw) {
 	auto lockId = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("lock")].second;
 	if (lockId.present()) {
-		return lockDatabaseCommitActor(ryw);
+		std::string uidStr = lockId.get().toString();
+		UID uid;
+		try {
+			uid = UID::fromString(uidStr);
+		} catch (Error& e) {
+			return Optional<std::string>(
+			    ManagementAPIError::toJsonString(false, "lock", "Invalid UID hex string: " + uidStr));
+		}
+		return lockDatabaseCommitActor(ryw, uid);
 	} else {
 		return unlockDatabaseCommitActor(ryw);
 	}
@@ -1615,7 +1623,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 	state int index;
 	state bool parse_error = false;
 
-	// check update for cluster_description
+	// check update for coordinators
 	Key processes_key = LiteralStringRef("processes").withPrefix(kr.begin);
 	auto processes_entry = ryw->getSpecialKeySpaceWriteMap()[processes_key];
 	if (processes_entry.first) {
@@ -1683,29 +1691,14 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 	    .detail("Result", r.present() ? static_cast<int>(r.get()) : -1); // -1 means success
 	if (r.present()) {
 		auto res = r.get();
-		std::string error_msg;
 		bool retriable = false;
-		if (res == CoordinatorsResult::INVALID_NETWORK_ADDRESSES) {
-			error_msg = "The specified network addresses are invalid";
-		} else if (res == CoordinatorsResult::SAME_NETWORK_ADDRESSES) {
-			error_msg = "No change (existing configuration satisfies request)";
-		} else if (res == CoordinatorsResult::NOT_COORDINATORS) {
-			error_msg = "Coordination servers are not running on the specified network addresses";
-		} else if (res == CoordinatorsResult::DATABASE_UNREACHABLE) {
-			error_msg = "Database unreachable";
-		} else if (res == CoordinatorsResult::BAD_DATABASE_STATE) {
-			error_msg = "The database is in an unexpected state from which changing coordinators might be unsafe";
-		} else if (res == CoordinatorsResult::COORDINATOR_UNREACHABLE) {
-			error_msg = "One of the specified coordinators is unreachable";
+		if (res == CoordinatorsResult::COORDINATOR_UNREACHABLE) {
 			retriable = true;
-		} else if (res == CoordinatorsResult::NOT_ENOUGH_MACHINES) {
-			error_msg = "Too few fdbserver machines to provide coordination at the current redundancy level";
 		} else if (res == CoordinatorsResult::SUCCESS) {
 			TraceEvent(SevError, "SpecialKeysForCoordinators").detail("UnexpectedSuccessfulResult", "");
-		} else {
 			ASSERT(false);
 		}
-		msg = ManagementAPIError::toJsonString(retriable, "coordinators", error_msg);
+		msg = ManagementAPIError::toJsonString(retriable, "coordinators", ManagementAPI::generateErrorMessage(res));
 	}
 	return msg;
 }
@@ -1750,7 +1743,9 @@ ACTOR static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransac
 		// we could get not_enough_machines if we happen to see the database while the cluster controller is updating
 		// the worker list, so make sure it happens twice before returning a failure
 		ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(
-		    true, "auto_coordinators", "The auto change attempt did not get enough machines, please try again"));
+		    true,
+		    "auto_coordinators",
+		    "Too few fdbserver machines to provide coordination at the current redundancy level"));
 		throw special_keys_api_failure();
 	}
 
@@ -1964,16 +1959,29 @@ void parse(StringRef& val, WaitState& w) {
 
 void parse(StringRef& val, time_t& t) {
 	struct tm tm = { 0 };
+#ifdef _WIN32
+	std::istringstream s(val.toString());
+	s.imbue(std::locale(setlocale(LC_TIME, nullptr)));
+	s >> std::get_time(&tm, "%FT%T%z");
+	if (s.fail()) {
+		throw std::invalid_argument("failed to parse ISO 8601 datetime");
+	}
+	long timezone;
+	if (_get_timezone(&timezone) != 0) {
+		throw std::runtime_error("failed to convert ISO 8601 datetime");
+	}
+	timezone = -timezone;
+#else
 	if (strptime(val.toString().c_str(), "%FT%T%z", &tm) == nullptr) {
 		throw std::invalid_argument("failed to parse ISO 8601 datetime");
 	}
-
 	long timezone = tm.tm_gmtoff;
 	t = timegm(&tm);
 	if (t == -1) {
 		throw std::runtime_error("failed to convert ISO 8601 datetime");
 	}
 	t -= timezone;
+#endif
 }
 
 void parse(StringRef& val, NetworkAddress& a) {
@@ -2084,7 +2092,7 @@ ACTOR static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransac
 	// Open endpoint to target process on each call. This can be optimized at
 	// some point...
 	state ProcessInterface process;
-	process.getInterface = RequestStream<GetProcessInterfaceRequest>(Endpoint({ host }, WLTOKEN_PROCESS));
+	process.getInterface = RequestStream<GetProcessInterfaceRequest>(Endpoint::wellKnown({ host }, WLTOKEN_PROCESS));
 	ProcessInterface p = wait(retryBrokenPromise(process.getInterface, GetProcessInterfaceRequest{}));
 	process = p;
 
@@ -2109,8 +2117,11 @@ ACTOR static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransac
 		dt = datetime;
 
 		for (const auto& [waitState, data] : sample.data) {
-			if (seq < seqStart) { continue; }
-			else if (seq >= seqEnd) { break; }
+			if (seq < seqStart) {
+				continue;
+			} else if (seq >= seqEnd) {
+				break;
+			}
 
 			std::ostringstream streamKey;
 			if (SpecialKeySpace::getActorLineageApiCommandRange("state").contains(kr)) {

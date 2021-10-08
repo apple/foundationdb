@@ -2743,7 +2743,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		if (!backupWorkerEnabled && partitionedLog.get().present() && partitionedLog.get().get()) {
 			// Change configuration only when we set to use partitioned logs and
 			// the flag was not set before.
-			wait(success(changeConfig(cx, "backup_worker_enabled:=1", true)));
+			wait(success(ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=1", true)));
 			backupWorkerEnabled = true;
 		}
 
@@ -3426,7 +3426,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 
 		state Key mutationLogPrefix = restore.mutationLogPrefix();
 		state Reference<IAsyncFile> inFile = wait(bc->readFile(logFile.fileName));
-		state Standalone<VectorRef<KeyValueRef>> dataOriginal = wait(decodeMutationLogFileBlock(inFile, readOffset, readLen));
+		state Standalone<VectorRef<KeyValueRef>> dataOriginal =
+		    wait(decodeMutationLogFileBlock(inFile, readOffset, readLen));
 
 		// Filter the KV pairs extracted from the log file block to remove any records known to not be needed for this
 		// restore based on the restore range set.

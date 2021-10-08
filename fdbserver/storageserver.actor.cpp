@@ -241,10 +241,12 @@ struct UpdateEagerReadInfo {
 
 	void addMutation(MutationRef const& m) {
 		// SOMEDAY: Theoretically we can avoid a read if there is an earlier overlapping ClearRange
-		if (m.type == MutationRef::ClearRange && !m.param2.startsWith(systemKeys.end))
+		if (m.type == MutationRef::ClearRange && !m.param2.startsWith(systemKeys.end) &&
+		    SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS)
 			keyBegin.push_back(m.param2);
 		else if (m.type == MutationRef::CompareAndClear) {
-			keyBegin.push_back(keyAfter(m.param1, arena));
+			if (SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS)
+				keyBegin.push_back(keyAfter(m.param1, arena));
 			if (keys.size() > 0 && keys.back().first == m.param1) {
 				// Don't issue a second read, if the last read was equal to the current key.
 				// CompareAndClear is likely to be used after another atomic operation on same key.
@@ -260,8 +262,10 @@ struct UpdateEagerReadInfo {
 	}
 
 	void finishKeyBegin() {
-		std::sort(keyBegin.begin(), keyBegin.end());
-		keyBegin.resize(std::unique(keyBegin.begin(), keyBegin.end()) - keyBegin.begin());
+		if (SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS) {
+			std::sort(keyBegin.begin(), keyBegin.end());
+			keyBegin.resize(std::unique(keyBegin.begin(), keyBegin.end()) - keyBegin.begin());
+		}
 		std::sort(keys.begin(), keys.end(), [](const std::pair<KeyRef, int>& lhs, const std::pair<KeyRef, int>& rhs) {
 			return (lhs.first < rhs.first) || (lhs.first == rhs.first && lhs.second > rhs.second);
 		});
@@ -307,7 +311,7 @@ static int mvccStorageBytes(MutationRef const& m) {
 
 struct FetchInjectionInfo {
 	Arena arena;
-	vector<VerUpdateRef> changes;
+	std::vector<VerUpdateRef> changes;
 };
 
 class ServerWatchMetadata : public ReferenceCounted<ServerWatchMetadata> {
@@ -441,8 +445,8 @@ public:
 	} currentRunningFetchKeys;
 
 	Tag tag;
-	vector<std::pair<Version, Tag>> history;
-	vector<std::pair<Version, Tag>> allHistory;
+	std::vector<std::pair<Version, Tag>> history;
+	std::vector<std::pair<Version, Tag>> allHistory;
 	Version poppedAllAfter;
 	std::map<Version, Arena>
 	    freeable; // for each version, an Arena that must be held until that version is < oldestVersion
@@ -495,8 +499,8 @@ public:
 				poppedAllAfter = std::numeric_limits<Version>::max();
 			}
 
-			vector<std::pair<Version, Tag>>* hist = &history;
-			vector<std::pair<Version, Tag>> allHistoryCopy;
+			std::vector<std::pair<Version, Tag>>* hist = &history;
+			std::vector<std::pair<Version, Tag>> allHistoryCopy;
 			if (popAllTags) {
 				allHistoryCopy = allHistory;
 				hist = &allHistoryCopy;
@@ -642,7 +646,7 @@ public:
 	FlowLock fetchKeysParallelismLock;
 	int64_t fetchKeysBytesBudget;
 	AsyncVar<bool> fetchKeysBudgetUsed;
-	vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
+	std::vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
 
 	int64_t instanceID;
 
@@ -681,6 +685,14 @@ public:
 
 		Optional<TagInfo> previousBusiestTag;
 
+		UID thisServerID;
+
+		Reference<EventCacheHolder> busiestReadTagEventHolder;
+
+		TransactionTagCounter(UID thisServerID)
+		  : thisServerID(thisServerID),
+		    busiestReadTagEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReadTag")) {}
+
 		int64_t costFunction(int64_t bytes) { return bytes / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1; }
 
 		void addRequest(Optional<TagSet> const& tags, int64_t bytes) {
@@ -700,7 +712,7 @@ public:
 			}
 		}
 
-		void startNewInterval(UID id) {
+		void startNewInterval() {
 			double elapsed = now() - intervalStart;
 			previousBusiestTag.reset();
 			if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
@@ -709,13 +721,13 @@ public:
 					previousBusiestTag = TagInfo(busiestTag, rate, (double)busiestTagCount / intervalTotalSampledCount);
 				}
 
-				TraceEvent("BusiestReadTag", id)
+				TraceEvent("BusiestReadTag", thisServerID)
 				    .detail("Elapsed", elapsed)
 				    .detail("Tag", printable(busiestTag))
 				    .detail("TagCost", busiestTagCount)
 				    .detail("TotalSampledCost", intervalTotalSampledCount)
 				    .detail("Reported", previousBusiestTag.present())
-				    .trackLatest(id.toString() + "/BusiestReadTag");
+				    .trackLatest(busiestReadTagEventHolder->trackingKey);
 			}
 
 			intervalCounts.clear();
@@ -807,6 +819,8 @@ public:
 		}
 	} counters;
 
+	Reference<EventCacheHolder> storageServerSourceTLogIDEventHolder;
+
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi)
@@ -844,7 +858,10 @@ public:
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
-	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), maxQueryQueue(0), counters(this) {
+	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), maxQueryQueue(0),
+	    transactionTagCounter(ssi.id()), counters(this),
+	    storageServerSourceTLogIDEventHolder(
+	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
@@ -1278,7 +1295,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		DEBUG_MUTATION("ShardGetValue",
 		               version,
 		               MutationRef(MutationRef::DebugKey, req.key, v.present() ? v.get() : LiteralStringRef("<null>")),
-					   data->thisServerID);
+		               data->thisServerID);
 		DEBUG_MUTATION("ShardGetPath",
 		               version,
 		               MutationRef(MutationRef::DebugKey,
@@ -1286,7 +1303,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		                           path == 0   ? LiteralStringRef("0")
 		                           : path == 1 ? LiteralStringRef("1")
 		                                       : LiteralStringRef("2")),
-					   data->thisServerID);
+		               data->thisServerID);
 
 		/*
 		StorageMetrics m;
@@ -1395,7 +1412,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanID parent
 			    MutationRef(MutationRef::DebugKey,
 			                metadata->key,
 			                reply.value.present() ? StringRef(reply.value.get()) : LiteralStringRef("<null>")),
-				data->thisServerID);
+			    data->thisServerID);
 
 			if (metadata->debugID.present())
 				g_traceBatch.addEvent(
@@ -2186,7 +2203,9 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 					throw transaction_too_old();
 				}
 
-				state int byteLimit = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+				state int byteLimit = (BUGGIFY && g_simulator.tssMode == ISimulator::TSSMode::Disabled)
+				                          ? 1
+				                          : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 				GetKeyValuesReply _r =
 				    wait(readRange(data, version, KeyRangeRef(begin, end), req.limit, &byteLimit, span.context));
 				GetKeyValuesStreamReply r(_r);
@@ -2384,21 +2403,22 @@ void getQueuingMetrics(StorageServer* self, StorageQueuingMetricsRequest const& 
 ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager) {
 	eager->finishKeyBegin();
 
-	vector<Future<Key>> keyEnd(eager->keyBegin.size());
-	for (int i = 0; i < keyEnd.size(); i++)
-		keyEnd[i] = data->storage.readNextKeyInclusive(eager->keyBegin[i]);
+	if (SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS) {
+		std::vector<Future<Key>> keyEnd(eager->keyBegin.size());
+		for (int i = 0; i < keyEnd.size(); i++)
+			keyEnd[i] = data->storage.readNextKeyInclusive(eager->keyBegin[i]);
 
-	state Future<vector<Key>> futureKeyEnds = getAll(keyEnd);
+		state Future<std::vector<Key>> futureKeyEnds = getAll(keyEnd);
+		state std::vector<Key> keyEndVal = wait(futureKeyEnds);
+		eager->keyEnd = keyEndVal;
+	}
 
-	vector<Future<Optional<Value>>> value(eager->keys.size());
+	std::vector<Future<Optional<Value>>> value(eager->keys.size());
 	for (int i = 0; i < value.size(); i++)
 		value[i] = data->storage.readValuePrefix(eager->keys[i].first, eager->keys[i].second);
 
-	state Future<vector<Optional<Value>>> futureValues = getAll(value);
-	state vector<Key> keyEndVal = wait(futureKeyEnds);
-	vector<Optional<Value>> optionalValues = wait(futureValues);
-
-	eager->keyEnd = keyEndVal;
+	state Future<std::vector<Optional<Value>>> futureValues = getAll(value);
+	std::vector<Optional<Value>> optionalValues = wait(futureValues);
 	eager->value = optionalValues;
 
 	return Void();
@@ -2507,7 +2527,7 @@ bool expandMutation(MutationRef& m,
 		i = d.lastLessOrEqual(m.param2);
 		if (i && i->isClearTo() && i->getEndKey() >= m.param2) {
 			m.param2 = i->getEndKey();
-		} else {
+		} else if (SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS) {
 			// Expand to the next set or clear (from storage or latestVersion), and if it
 			// is a clear, engulf it as well
 			i = d.lower_bound(m.param2);
@@ -2943,9 +2963,12 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					    .detail("More", this_block.more);
 
 					DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys, data->thisServerID);
-					if(MUTATION_TRACKING_ENABLED) {
+					if (MUTATION_TRACKING_ENABLED) {
 						for (auto k = this_block.begin(); k != this_block.end(); ++k) {
-							DEBUG_MUTATION("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value), data->thisServerID);
+							DEBUG_MUTATION("fetch",
+							               fetchVersion,
+							               MutationRef(MutationRef::SetValue, k->key, k->value),
+							               data->thisServerID);
 						}
 					}
 
@@ -3110,7 +3133,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		for (auto b = batch->changes.begin() + startSize; b != batch->changes.end(); ++b) {
 			ASSERT(b->version >= checkv);
 			checkv = b->version;
-			if(MUTATION_TRACKING_ENABLED) {
+			if (MUTATION_TRACKING_ENABLED) {
 				for (auto& m : b->mutations) {
 					DEBUG_MUTATION("fetchKeysFinalCommitInject", batch->changes[0].version, m, data->thisServerID);
 				}
@@ -3260,7 +3283,7 @@ void changeServerKeys(StorageServer* data,
 
 	// Save a backup of the ShardInfo references before we start messing with shards, in order to defer fetchKeys
 	// cancellation (and its potential call to removeDataRange()) until shards is again valid
-	vector<Reference<ShardInfo>> oldShards;
+	std::vector<Reference<ShardInfo>> oldShards;
 	auto os = data->shards.intersectingRanges(keys);
 	for (auto r = os.begin(); r != os.end(); ++r)
 		oldShards.push_back(r->value());
@@ -3312,6 +3335,9 @@ void changeServerKeys(StorageServer* data,
 		} else if (!dataAvailable) {
 			// SOMEDAY: Avoid restarting adding/transferred shards
 			if (version == 0) { // bypass fetchkeys; shard is known empty at version 0
+				TraceEvent("ChangeServerKeysAddEmptyRange", data->thisServerID)
+				    .detail("Begin", range.begin)
+				    .detail("End", range.end);
 				changeNewestAvailable.emplace_back(range, latestVersion);
 				data->addShard(ShardInfo::newReadWrite(range, data));
 				setAvailableStatus(data, range, true);
@@ -3462,6 +3488,7 @@ private:
 
 	KeyRef startKey;
 	bool nowAssigned;
+	bool emptyRange;
 	bool processedStartKey;
 
 	KeyRef cacheStartKey;
@@ -3484,7 +3511,10 @@ private:
 
 				// The changes for version have already been received (and are being processed now).  We need to fetch
 				// the data for change.version-1 (changes from versions < change.version)
-				changeServerKeys(data, keys, nowAssigned, currentVersion - 1, CSK_UPDATE);
+				// If emptyRange, treat the shard as empty, see removeKeysFromFailedServer() for more details about this
+				// scenario.
+				const Version shardVersion = (emptyRange && nowAssigned) ? 0 : currentVersion - 1;
+				changeServerKeys(data, keys, nowAssigned, shardVersion, CSK_UPDATE);
 			}
 
 			processedStartKey = false;
@@ -3494,6 +3524,7 @@ private:
 			// keys
 			startKey = m.param1;
 			nowAssigned = m.param2 != serverKeysFalse;
+			emptyRange = m.param2 == serverKeysTrueEmptyRange;
 			processedStartKey = true;
 		} else if (m.type == MutationRef::SetValue && m.param1 == lastEpochEndPrivateKey) {
 			// lastEpochEnd transactions are guaranteed by the master to be alone in their own batch (version)
@@ -3927,7 +3958,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				TraceEvent("StorageServerSourceTLogID", data->thisServerID)
 				    .detail("SourceTLogID",
 				            data->sourceTLogID.present() ? data->sourceTLogID.get().toString() : "unknown")
-				    .trackLatest(data->thisServerID.toString() + "/StorageServerSourceTLogID");
+				    .trackLatest(data->storageServerSourceTLogIDEventHolder->trackingKey);
 			}
 
 			data->noRecentUpdates.set(false);
@@ -4998,9 +5029,9 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));
 
-	self->transactionTagCounter.startNewInterval(self->thisServerID);
-	self->actors.add(recurring([&]() { self->transactionTagCounter.startNewInterval(self->thisServerID); },
-	                           SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
+	self->transactionTagCounter.startNewInterval();
+	self->actors.add(
+	    recurring([&]() { self->transactionTagCounter.startNewInterval(); }, SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
 
 	self->coreStarted.send(Void());
 

@@ -43,10 +43,8 @@
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-using std::make_pair;
 using std::max;
 using std::min;
-using std::pair;
 
 namespace oldTLog_6_2 {
 
@@ -339,7 +337,7 @@ struct TLogData : NonCopyable {
 	int64_t targetVolatileBytes; // The number of bytes of mutations this TLog should hold in memory before spilling.
 	int64_t overheadBytesInput;
 	int64_t overheadBytesDurable;
-	int activePeekStreams;
+	int activePeekStreams = 0;
 
 	WorkerCache<TLogInterface> tlogCache;
 	FlowLock peekMemoryLimiter;
@@ -1007,7 +1005,7 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 							msg = std::upper_bound(tagData->versionMessages.begin(),
 							                       tagData->versionMessages.end(),
 							                       std::make_pair(currentVersion, LengthPrefixedStringRef()),
-							                       CompareFirst<std::pair<Version, LengthPrefixedStringRef>>());
+							                       [](const auto& l, const auto& r) { return l.first < r.first; });
 						}
 					}
 				}
@@ -1378,7 +1376,7 @@ Version poppedVersion(Reference<LogData> self, Tag tag) {
 		if (tag == txsTag || tag.locality == tagLocalityTxs) {
 			return 0;
 		}
-		return self->recoveredAt;
+		return self->recoveredAt + 1;
 	}
 	return tagData->popped;
 }
@@ -1470,7 +1468,7 @@ ACTOR Future<Void> tLogPop(TLogData* self, TLogPopRequest req, Reference<LogData
 		TraceEvent("EnableTLogPlayAllIgnoredPops").log();
 		// use toBePopped and issue all the pops
 		std::map<Tag, Version>::iterator it;
-		vector<Future<Void>> ignoredPops;
+		std::vector<Future<Void>> ignoredPops;
 		self->ignorePopRequest = false;
 		self->ignorePopUid = "";
 		self->ignorePopDeadline = 0.0;
@@ -1504,7 +1502,7 @@ void peekMessagesFromMemory(Reference<LogData> self,
 	auto it = std::lower_bound(deque.begin(),
 	                           deque.end(),
 	                           std::make_pair(begin, LengthPrefixedStringRef()),
-	                           CompareFirst<std::pair<Version, LengthPrefixedStringRef>>());
+	                           [](const auto& l, const auto& r) { return l.first < r.first; });
 
 	Version currentVersion = -1;
 	for (; it != deque.end(); ++it) {
@@ -2368,7 +2366,7 @@ ACTOR Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData*
 	TraceEvent("EnableTLogPlayAllIgnoredPops2").log();
 	// use toBePopped and issue all the pops
 	std::map<Tag, Version>::iterator it;
-	state vector<Future<Void>> ignoredPops;
+	state std::vector<Future<Void>> ignoredPops;
 	self->ignorePopRequest = false;
 	self->ignorePopDeadline = 0.0;
 	self->ignorePopUid = "";

@@ -438,7 +438,7 @@ std::vector<DiskStore> getDiskStores(std::string folder,
                                      KeyValueStoreType type,
                                      FilesystemCheck check) {
 	std::vector<DiskStore> result;
-	vector<std::string> files;
+	std::vector<std::string> files;
 
 	if (check == FilesystemCheck::FILES_ONLY || check == FilesystemCheck::FILES_AND_DIRECTORIES) {
 		files = platform::listFiles(folder, suffix);
@@ -520,7 +520,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
                                       Reference<AsyncVar<bool> const> degraded,
                                       Reference<ClusterConnectionFile> connFile,
                                       Reference<AsyncVar<std::set<std::string>> const> issues,
-                                      LocalConfiguration* localConfig) {
+                                      Reference<LocalConfiguration> localConfig) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply
 	// (requiring us to re-register) The registration request piggybacks optional distributor interface if it exists.
@@ -625,7 +625,6 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 		}
 	}
 
-
 	for (const auto& grvProxy : dbi.client.grvProxies) {
 		if (grvProxy.addresses().contains(address)) {
 			return true;
@@ -707,15 +706,99 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	// Last, tests that proxies included in the ClientDbInfo are considered as local.
 	NetworkAddress grvProxyAddress(IPAddress(0x26262626), 1);
 	GrvProxyInterface grvProxyInterf;
-	grvProxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
+	grvProxyInterf.getConsistentReadVersion =
+	    RequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
 	testDbInfo.client.grvProxies.push_back(grvProxyInterf);
 	ASSERT(addressInDbAndPrimaryDc(grvProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
 	NetworkAddress commitProxyAddress(IPAddress(0x37373737), 1);
 	CommitProxyInterface commitProxyInterf;
-	commitProxyInterf.commit = RequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
+	commitProxyInterf.commit =
+	    RequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
 	testDbInfo.client.commitProxies.push_back(commitProxyInterf);
 	ASSERT(addressInDbAndPrimaryDc(commitProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	return Void();
+}
+
+} // namespace
+
+bool addressInDbAndRemoteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	const auto& dbi = dbInfo->get();
+
+	for (const auto& logSet : dbi.logSystemConfig.tLogs) {
+		if (logSet.isLocal || logSet.locality == tagLocalitySatellite) {
+			continue;
+		}
+		for (const auto& tlog : logSet.tLogs) {
+			if (tlog.present() && tlog.interf().addresses().contains(address)) {
+				return true;
+			}
+		}
+
+		for (const auto& logRouter : logSet.logRouters) {
+			if (logRouter.present() && logRouter.interf().addresses().contains(address)) {
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+bool addressesInDbAndRemoteDc(const NetworkAddressList& addresses, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	return addressInDbAndRemoteDc(addresses.address, dbInfo) ||
+	       (addresses.secondaryAddress.present() && addressInDbAndRemoteDc(addresses.secondaryAddress.get(), dbInfo));
+}
+
+namespace {
+
+TEST_CASE("/fdbserver/worker/addressInDbAndRemoteDc") {
+	// Setup a ServerDBInfo for test.
+	ServerDBInfo testDbInfo;
+	LocalityData testLocal;
+	testLocal.set(LiteralStringRef("dcid"), StringRef(std::to_string(1)));
+	testDbInfo.master.locality = testLocal;
+
+	// First, create an empty TLogInterface, and check that it shouldn't be considered as in remote DC.
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().isLocal = true;
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface<TLogInterface>());
+	ASSERT(!addressInDbAndRemoteDc(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	TLogInterface localTlog(testLocal);
+	localTlog.initEndpoints();
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(localTlog));
+	ASSERT(!addressInDbAndRemoteDc(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a remote TLog, and it should be considered as in remote DC.
+	LocalityData fakeRemote;
+	fakeRemote.set(LiteralStringRef("dcid"), StringRef(std::to_string(2)));
+	TLogInterface remoteTlog(fakeRemote);
+	remoteTlog.initEndpoints();
+
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().isLocal = false;
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(remoteTlog));
+	ASSERT(addressInDbAndRemoteDc(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a remote log router, and it should be considered as in remote DC.
+	NetworkAddress logRouterAddress(IPAddress(0x26262626), 1);
+	TLogInterface remoteLogRouter(fakeRemote);
+	remoteLogRouter.initEndpoints();
+	remoteLogRouter.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ logRouterAddress }, UID(1, 2)));
+	testDbInfo.logSystemConfig.tLogs.back().logRouters.push_back(OptionalInterface(remoteLogRouter));
+	ASSERT(addressInDbAndRemoteDc(logRouterAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a satellite tlog, and it shouldn't be considered as in remote DC.
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().locality = tagLocalitySatellite;
+	NetworkAddress satelliteTLogAddress(IPAddress(0x13131313), 1);
+	TLogInterface satelliteTLog(fakeRemote);
+	satelliteTLog.initEndpoints();
+	satelliteTLog.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ satelliteTLogAddress }, UID(1, 2)));
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(satelliteTLog));
+	ASSERT(!addressInDbAndRemoteDc(satelliteTLogAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
 	return Void();
 }
@@ -729,49 +812,63 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
                                  Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	loop {
 		Future<Void> nextHealthCheckDelay = Never();
-		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
-		    addressesInDbAndPrimaryDc(interf.addresses(), dbInfo) && ccInterface->get().present()) {
+		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS && ccInterface->get().present()) {
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
 			const auto& allPeers = FlowTransport::transport().getAllPeers();
 			UpdateWorkerHealthRequest req;
-			for (const auto& [address, peer] : allPeers) {
-				if (peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
-					// Ignore peers that don't have enough samples.
-					// TODO(zhewu): Currently, FlowTransport latency monitor clears ping latency samples on a regular
-					//              basis, which may affect the measurement count. Currently,
-					//              WORKER_HEALTH_MONITOR_INTERVAL is much smaller than the ping clearance interval, so
-					//              it may be ok. If this ends to be a problem, we need to consider keep track of last
-					//              ping latencies logged.
-					continue;
-				}
 
-				if (!addressInDbAndPrimaryDc(address, dbInfo)) {
-					// Ignore the servers that are not in the database's transaction system and not in the primary DC.
-					// Note that currently we are not monitor storage servers, since lagging in storage servers today
-					// already can trigger server exclusion by data distributor.
-					continue;
-				}
+			bool workerInDb = false;
+			bool workerInPrimary = false;
+			if (addressesInDbAndPrimaryDc(interf.addresses(), dbInfo)) {
+				workerInDb = true;
+				workerInPrimary = true;
+			} else if (addressesInDbAndRemoteDc(interf.addresses(), dbInfo)) {
+				workerInDb = true;
+				workerInPrimary = false;
+			}
 
-				if (peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
-				        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD ||
-				    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
-				        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
-					// This is a degraded peer.
-					TraceEvent("HealthMonitorDetectDegradedPeer")
-					    .suppressFor(30)
-					    .detail("Peer", address)
-					    .detail("Elapsed", now() - peer->lastLoggedTime)
-					    .detail("MinLatency", peer->pingLatencies.min())
-					    .detail("MaxLatency", peer->pingLatencies.max())
-					    .detail("MeanLatency", peer->pingLatencies.mean())
-					    .detail("MedianLatency", peer->pingLatencies.median())
-					    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
-					    .detail("CheckedPercentileLatency",
-					            peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
-					    .detail("Count", peer->pingLatencies.getPopulationSize())
-					    .detail("TimeoutCount", peer->timeoutCount);
+			if (workerInDb) {
+				for (const auto& [address, peer] : allPeers) {
+					if (peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
+						// Ignore peers that don't have enough samples.
+						// TODO(zhewu): Currently, FlowTransport latency monitor clears ping latency samples on a
+						// regular
+						//              basis, which may affect the measurement count. Currently,
+						//              WORKER_HEALTH_MONITOR_INTERVAL is much smaller than the ping clearance interval,
+						//              so it may be ok. If this ends to be a problem, we need to consider keep track of
+						//              last ping latencies logged.
+						continue;
+					}
 
-					req.degradedPeers.push_back(address);
+					if ((workerInPrimary && addressInDbAndPrimaryDc(address, dbInfo)) ||
+					    (!workerInPrimary && addressInDbAndRemoteDc(address, dbInfo))) {
+						// Only monitoring the servers that in the primary or remote DC's transaction systems.
+						// Note that currently we are not monitor storage servers, since lagging in storage servers
+						// today already can trigger server exclusion by data distributor.
+
+						if (peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
+						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD ||
+						    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
+						        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
+							// This is a degraded peer.
+							TraceEvent("HealthMonitorDetectDegradedPeer")
+							    .suppressFor(30)
+							    .detail("Peer", address)
+							    .detail("Elapsed", now() - peer->lastLoggedTime)
+							    .detail("MinLatency", peer->pingLatencies.min())
+							    .detail("MaxLatency", peer->pingLatencies.max())
+							    .detail("MeanLatency", peer->pingLatencies.mean())
+							    .detail("MedianLatency", peer->pingLatencies.median())
+							    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
+							    .detail(
+							        "CheckedPercentileLatency",
+							        peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
+							    .detail("Count", peer->pingLatencies.getPopulationSize())
+							    .detail("TimeoutCount", peer->timeoutCount);
+
+							req.degradedPeers.push_back(address);
+						}
+					}
 				}
 			}
 
@@ -1226,7 +1323,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
                                 std::string whitelistBinPaths,
                                 Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                 ConfigDBType configDBType,
-                                LocalConfiguration* localConfig) {
+                                Reference<LocalConfiguration> localConfig) {
 	state PromiseStream<ErrorInfo> errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
 	    new AsyncVar<Optional<DataDistributorInterface>>());
@@ -1616,7 +1713,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 			when(InitializeDataDistributorRequest req = waitNext(interf.dataDistributor.getFuture())) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::DataDistributor;
-				DataDistributorInterface recruited(locality);
+				DataDistributorInterface recruited(locality, req.reqId);
 				recruited.initEndpoints();
 
 				if (ddInterf->get().present()) {
@@ -2195,11 +2292,12 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 	}
 }
 
-ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration(Reference<ClusterConnectionFile> connFile,
-                                                                   Reference<AsyncVar<Value>> result,
-                                                                   MonitorLeaderInfo info) {
+ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGeneration(
+    Reference<ClusterConnectionFile> connFile,
+    Reference<AsyncVar<Value>> result,
+    MonitorLeaderInfo info) {
 	state ClusterConnectionString ccf = info.intermediateConnFile->getConnectionString();
-	state vector<NetworkAddress> addrs = ccf.coordinators();
+	state std::vector<NetworkAddress> addrs = ccf.coordinators();
 	state ElectionResultRequest request;
 	state int index = 0;
 	state int successIndex = 0;
@@ -2256,25 +2354,27 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration(Reference<Clu
 	}
 }
 
-ACTOR Future<Void> monitorLeaderRemotelyInternal(Reference<ClusterConnectionFile> connFile,
-                                                 Reference<AsyncVar<Value>> outSerializedLeaderInfo) {
+ACTOR Future<Void> monitorLeaderWithDelayedCandidacyImplInternal(Reference<ClusterConnectionFile> connFile,
+                                                                 Reference<AsyncVar<Value>> outSerializedLeaderInfo) {
 	state MonitorLeaderInfo info(connFile);
 	loop {
-		MonitorLeaderInfo _info = wait(monitorLeaderRemotelyOneGeneration(connFile, outSerializedLeaderInfo, info));
+		MonitorLeaderInfo _info =
+		    wait(monitorLeaderWithDelayedCandidacyImplOneGeneration(connFile, outSerializedLeaderInfo, info));
 		info = _info;
 	}
 }
 
 template <class LeaderInterface>
-Future<Void> monitorLeaderRemotely(Reference<ClusterConnectionFile> const& connFile,
-                                   Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
+Future<Void> monitorLeaderWithDelayedCandidacyImpl(
+    Reference<ClusterConnectionFile> const& connFile,
+    Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
 	LeaderDeserializer<LeaderInterface> deserializer;
 	auto serializedInfo = makeReference<AsyncVar<Value>>();
-	Future<Void> m = monitorLeaderRemotelyInternal(connFile, serializedInfo);
+	Future<Void> m = monitorLeaderWithDelayedCandidacyImplInternal(connFile, serializedInfo);
 	return m || deserializer(serializedInfo, outKnownLeader);
 }
 
-ACTOR Future<Void> monitorLeaderRemotelyWithDelayedCandidacy(
+ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
     Reference<ClusterConnectionFile> connFile,
     Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
     Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
@@ -2282,7 +2382,7 @@ ACTOR Future<Void> monitorLeaderRemotelyWithDelayedCandidacy(
     LocalityData locality,
     Reference<AsyncVar<ServerDBInfo>> dbInfo,
     ConfigDBType configDBType) {
-	state Future<Void> monitor = monitorLeaderRemotely(connFile, currentCC);
+	state Future<Void> monitor = monitorLeaderWithDelayedCandidacyImpl(connFile, currentCC);
 	state Future<Void> timeout;
 
 	wait(recoveredDiskFiles);
@@ -2371,16 +2471,17 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
                         std::string configPath,
                         std::map<std::string, std::string> manualKnobOverrides,
                         ConfigDBType configDBType) {
-	state vector<Future<Void>> actors;
+	state std::vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
-	state LocalConfiguration localConfig(dataFolder, configPath, manualKnobOverrides);
+	state Reference<LocalConfiguration> localConfig =
+	    makeReference<LocalConfiguration>(dataFolder, configPath, manualKnobOverrides);
 	// setupStackSignal();
 	getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::Worker;
 
 	// FIXME: Initializing here causes simulation issues, these must be fixed
 	/*
 	if (configDBType != ConfigDBType::DISABLED) {
-	    wait(localConfig.initialize());
+	    wait(localConfig->initialize());
 	}
 	*/
 
@@ -2426,7 +2527,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		} else if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::WorstFit &&
 		           SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS > 0) {
 			actors.push_back(reportErrors(
-			    monitorLeaderRemotelyWithDelayedCandidacy(
+			    monitorLeaderWithDelayedCandidacy(
 			        connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, dbInfo, configDBType),
 			    "ClusterController"));
 		} else {
@@ -2451,7 +2552,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		                                                 whitelistBinPaths,
 		                                                 dbInfo,
 		                                                 configDBType,
-		                                                 &localConfig),
+		                                                 localConfig),
 		                                    "WorkerServer",
 		                                    UID(),
 		                                    &normalWorkerErrors()));
