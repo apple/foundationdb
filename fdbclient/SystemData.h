@@ -527,7 +527,10 @@ int64_t decodeBlobManagerEpochValue(ValueRef const& value);
 
 // blob granule keys
 
-// \xff\x02/bgf/(startKey, endKey, {snapshot|delta}, version) = [[filename]]
+extern const uint8_t BG_FILE_TYPE_DELTA;
+extern const uint8_t BG_FILE_TYPE_SNAPSHOT;
+
+// \xff\x02/bgf/(granuleID, {snapshot|delta}, version) = [[filename]]
 extern const KeyRangeRef blobGranuleFileKeys;
 
 // TODO could shrink the size of the mapping keyspace by using something similar to tags instead of UIDs. We'd probably
@@ -536,35 +539,53 @@ extern const KeyRangeRef blobGranuleFileKeys;
 // \xff\x02/bgm/[[begin]] = [[BlobWorkerUID]]
 extern const KeyRangeRef blobGranuleMappingKeys;
 
-// \xff\x02/bgl/(begin,end) = (epoch, seqno, changefeed id)
+// \xff\x02/bgl/(begin,end) = (epoch, seqno, granuleID)
 extern const KeyRangeRef blobGranuleLockKeys;
 
-// \xff\x02/bgs/(oldbegin,oldend,newbegin) = state
+// \xff\x02/bgs/(parentGranuleID, granuleID) = state
 extern const KeyRangeRef blobGranuleSplitKeys;
 
-// \xff\x02/bgh/(start,end) = [(oldbegin, oldend)]
+// \xff\x02/bgh/(start,end,version) = { granuleID, [parentGranuleHistoryKeys] }
 extern const KeyRangeRef blobGranuleHistoryKeys;
+
+// FIXME: better way to represent file type than a string ref?
+const Key blobGranuleFileKeyFor(UID granuleID, uint8_t fileType, Version fileVersion);
+std::tuple<UID, uint8_t, Version> decodeBlobGranuleFileKey(ValueRef const& value);
+const KeyRange blobGranuleFileKeyRangeFor(UID granuleID);
+
+const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length);
+std::tuple<Standalone<StringRef>, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value);
 
 const Value blobGranuleMappingValueFor(UID const& workerID);
 UID decodeBlobGranuleMappingValue(ValueRef const& value);
+
+const Key blobGranuleLockKeyFor(KeyRangeRef const& granuleRange);
 
 const Value blobGranuleLockValueFor(int64_t epochNum, int64_t sequenceNum, UID changeFeedId);
 // FIXME: maybe just define a struct?
 std::tuple<int64_t, int64_t, UID> decodeBlobGranuleLockValue(ValueRef const& value);
 
+const Key blobGranuleSplitKeyFor(UID const& parentGranuleID, UID const& granuleID);
+std::pair<UID, UID> decodeBlobGranuleSplitKey(KeyRef const& key);
+const KeyRange blobGranuleSplitKeyRangeFor(UID const& parentGranuleID);
+
 // these are versionstamped
 const Value blobGranuleSplitValueFor(BlobGranuleSplitState st);
 std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(ValueRef const& value);
 
-const Value blobGranuleHistoryValueFor(Standalone<VectorRef<KeyRangeRef>> const& parentGranules);
-Standalone<VectorRef<KeyRangeRef>> decodeBlobGranuleHistoryValue(ValueRef const& value);
+const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version);
+std::pair<KeyRange, Version> decodeBlobGranuleHistoryKey(KeyRef const& value);
+const KeyRange blobGranuleHistoryKeyRangeFor(KeyRangeRef const& range);
+
+const Value blobGranuleHistoryValueFor(Standalone<BlobGranuleHistoryValue> const& historyValue);
+Standalone<BlobGranuleHistoryValue> decodeBlobGranuleHistoryValue(ValueRef const& value);
 
 // \xff/bwl/[[BlobWorkerID]] = [[BlobWorkerInterface]]
 extern const KeyRangeRef blobWorkerListKeys;
 
 const Key blobWorkerListKeyFor(UID workerID);
-const Value blobWorkerListValue(BlobWorkerInterface const& interface);
 UID decodeBlobWorkerListKey(KeyRef const& key);
+const Value blobWorkerListValue(BlobWorkerInterface const& interface);
 BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 
 #pragma clang diagnostic pop

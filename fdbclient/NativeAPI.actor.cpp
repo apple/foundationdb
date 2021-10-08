@@ -7296,12 +7296,16 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 			for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
 				granuleStartKey = blobGranuleMapping[i].key;
 				granuleEndKey = blobGranuleMapping[i + 1].key;
+				// if this was a time travel and the request returned larger bounds, skip this chunk
+				if (granuleEndKey <= keyRange.begin) {
+					continue;
+				}
 				workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
 				// prune first/last granules to requested range
-				if (i == 0) {
+				if (keyRange.begin > granuleStartKey) {
 					granuleStartKey = keyRange.begin;
 				}
-				if (i == blobGranuleMapping.size() - 2) {
+				if (keyRange.end < granuleEndKey) {
 					granuleEndKey = keyRange.end;
 				}
 

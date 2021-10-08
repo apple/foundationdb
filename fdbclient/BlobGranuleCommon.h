@@ -117,4 +117,16 @@ struct BlobGranuleChunkRef {
 };
 
 enum BlobGranuleSplitState { Unknown = 0, Started = 1, Assigned = 2, Done = 3 };
+
+struct BlobGranuleHistoryValue {
+	constexpr static FileIdentifier file_identifier = 991434;
+	UID granuleID;
+	VectorRef<std::pair<KeyRangeRef, Version>> parentGranules;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, granuleID, parentGranules);
+	}
+};
+
 #endif

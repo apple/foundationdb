@@ -52,6 +52,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	int64_t mismatches = 0;
 	int64_t initialReads = 0;
 	int64_t timeTravelReads = 0;
+	int64_t timeTravelTooOld = 0;
 	int64_t rowsRead = 0;
 	int64_t bytesRead = 0;
 	std::vector<Future<Void>> clients;
@@ -312,7 +313,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	};
 
 	ACTOR Future<Void> verifyGranules(Database cx, BlobGranuleVerifierWorkload* self) {
-		// TODO add time travel + verification
 		state double last = now();
 		state double endTime = last + self->testDuration;
 		state std::map<double, OldRead> timeTravelChecks;
@@ -340,11 +340,17 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					timeTravelIt = timeTravelChecks.erase(timeTravelIt);
 					// advance iterator before doing read, so if it gets error we don't retry it
 
-					std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> reReadResult =
-					    wait(self->readFromBlob(cx, self, oldRead.range, oldRead.v));
-					self->compareResult(oldRead.oldResult, reReadResult, oldRead.range, oldRead.v, false);
-
-					self->timeTravelReads++;
+					try {
+						std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> reReadResult =
+						    wait(self->readFromBlob(cx, self, oldRead.range, oldRead.v));
+						self->compareResult(oldRead.oldResult, reReadResult, oldRead.range, oldRead.v, false);
+						self->timeTravelReads++;
+					} catch (Error& e) {
+						if (e.code() == error_code_transaction_too_old) {
+							self->timeTravelTooOld++;
+							// TODO: add debugging info for when this is a failure
+						}
+					}
 				}
 
 				// pick a random range
@@ -404,6 +410,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		state Version readVersion = wait(tr.getReadVersion());
 		state int checks = 0;
 
+		state bool availabilityPassed = true;
 		state std::vector<KeyRange> allRanges = self->granuleRanges.get();
 		for (auto& range : allRanges) {
 			state KeyRange r = range;
@@ -437,20 +444,24 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						       last.begin.printable().c_str(),
 						       last.end.printable().c_str());
 					}
-					throw e;
+					availabilityPassed = false;
+					break;
 				}
 			}
 		}
 		printf("Blob Granule Verifier finished with:\n");
+		printf("  %d successful final granule checks\n", checks);
+		printf("  %d failed final granule checks\n", availabilityPassed ? 0 : 1);
 		printf("  %lld mismatches\n", self->mismatches);
+		printf("  %lld time travel too old\n", self->timeTravelTooOld);
 		printf("  %lld errors\n", self->errors);
 		printf("  %lld initial reads\n", self->initialReads);
 		printf("  %lld time travel reads\n", self->timeTravelReads);
 		printf("  %lld rows\n", self->rowsRead);
 		printf("  %lld bytes\n", self->bytesRead);
-		printf("  %d final granule checks\n", checks);
+		// FIXME: add above as details
 		TraceEvent("BlobGranuleVerifierChecked");
-		return self->mismatches == 0 && checks > 0;
+		return availabilityPassed && self->mismatches == 0 && checks > 0 && self->timeTravelTooOld == 0;
 	}
 
 	Future<bool> check(Database const& cx) override {
