@@ -2421,10 +2421,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					if (self->teams[i]->isHealthy()) {
 						teamCount++;
 					}
-					if (self->teams[i]->getPriority() == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE) {
-						wigglingTeams++;
-					}
 					totalTeamCount++;
+				}
+				if (self->teams[i]->getPriority() == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE) {
+					wigglingTeams++;
 				}
 			}
 
