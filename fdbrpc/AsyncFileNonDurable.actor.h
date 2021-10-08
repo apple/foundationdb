@@ -415,7 +415,7 @@ private:
 	// results
 	ACTOR Future<int> onRead(AsyncFileNonDurable* self, void* data, int length, int64_t offset) {
 		wait(checkKilled(self, "Read"));
-		vector<Future<Void>> priorModifications = self->getModificationsAndInsert(offset, length);
+		std::vector<Future<Void>> priorModifications = self->getModificationsAndInsert(offset, length);
 		wait(waitForAll(priorModifications));
 		state Future<int> readFuture = self->file->read(data, length, offset);
 		wait(success(readFuture) || self->killed.getFuture());
@@ -513,7 +513,7 @@ private:
 		int diskPageLength = saveDurable ? length : 4096;
 		int diskSectorLength = saveDurable ? length : 512;
 
-		vector<Future<Void>> writeFutures;
+		std::vector<Future<Void>> writeFutures;
 		for (int writeOffset = 0; writeOffset < length;) {
 			// Number of bytes until the next diskPageLength file offset within the write or the end of the write.
 			int pageLength = diskPageLength;

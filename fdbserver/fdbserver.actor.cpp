@@ -41,6 +41,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbmonitor/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
@@ -217,7 +218,7 @@ bool enableFailures = true;
 
 #define test_assert(x)                                                                                                 \
 	if (!(x)) {                                                                                                        \
-		cout << "Test failed: " #x << endl;                                                                            \
+		std::cout << "Test failed: " #x << std::endl;                                                                  \
 		return false;                                                                                                  \
 	}
 
@@ -803,9 +804,10 @@ Optional<bool> checkBuggifyOverride(const char* testFile) {
 
 // Takes a vector of public and listen address strings given via command line, and returns vector of NetworkAddress
 // objects.
-std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const ClusterConnectionFile& connectionFile,
-                                                                        const vector<std::string>& publicAddressStrs,
-                                                                        vector<std::string>& listenAddressStrs) {
+std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
+    const ClusterConnectionFile& connectionFile,
+    const std::vector<std::string>& publicAddressStrs,
+    std::vector<std::string>& listenAddressStrs) {
 	if (listenAddressStrs.size() > 0 && publicAddressStrs.size() != listenAddressStrs.size()) {
 		fprintf(stderr,
 		        "ERROR: Listen addresses (if provided) should be equal to the number of public addresses in order.\n");
@@ -1680,6 +1682,14 @@ int main(int argc, char* argv[]) {
 		const auto opts = CLIOptions::parseArgs(argc, argv);
 		const auto role = opts.role;
 
+#ifdef _WIN32
+		// For now, ignore all tests for Windows
+		if (role == ServerRole::Simulation || role == ServerRole::UnitTests || role == ServerRole::Test) {
+			printf("Windows tests are not supported yet\n");
+			flushAndExit(FDB_EXIT_SUCCESS);
+		}
+#endif
+
 		if (role == ServerRole::Simulation)
 			printf("Random seed is %u...\n", opts.randomSeed);
 
@@ -1771,7 +1781,7 @@ int main(int argc, char* argv[]) {
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 			g_network->addStopCallback(Net2FileSystem::stop);
-			FlowTransport::createInstance(false, 1);
+			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
 
 			const bool expectsPublicAddress =
 			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::Restore);
@@ -2010,7 +2020,7 @@ int main(int argc, char* argv[]) {
 				if (!dataFolder.size())
 					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
-				vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
+				std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 				actors.push_back(restoreWorker(opts.connectionFile, opts.localities, dataFolder));
 				f = stopAfter(waitForAll(actors));
 				printf("Fast restore worker started\n");
@@ -2025,7 +2035,7 @@ int main(int argc, char* argv[]) {
 				if (!dataFolder.size())
 					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
-				vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
+				std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 				actors.push_back(fdbd(opts.connectionFile,
 				                      opts.localities,
 				                      opts.processClass,
@@ -2151,13 +2161,13 @@ int main(int argc, char* argv[]) {
 		        printf("  #%lld %p\n", (*a)->creationIndex, (*a));
 		}*/
 
-		/*cout << Actor::allActors.size() << " surviving actors:" << endl;
+		/*cout << Actor::allActors.size() << " surviving actors:" << std::endl;
 		std::map<std::string,int> actorCount;
 		for(int i=0; i<Actor::allActors.size(); i++)
 		    ++actorCount[Actor::allActors[i]->getName()];
 		for(auto i = actorCount.rbegin(); !(i == actorCount.rend()); ++i)
-		    cout << "  " << i->second << " " << i->first << endl;*/
-		//	cout << "  " << Actor::allActors[i]->getName() << endl;
+		    std::cout << "  " << i->second << " " << i->first << std::endl;*/
+		//	std::cout << "  " << Actor::allActors[i]->getName() << std::endl;
 
 		if (role == ServerRole::Simulation) {
 			unsigned long sevErrorEventsLogged = TraceEvent::CountEventsLoggedAt(SevError);
@@ -2178,7 +2188,7 @@ int main(int argc, char* argv[]) {
 			          << FastAllocator<4096>::pageCount << " " << FastAllocator<8192>::pageCount << " "
 			          << FastAllocator<16384>::pageCount << std::endl;
 
-			vector<std::pair<std::string, const char*>> typeNames;
+			std::vector<std::pair<std::string, const char*>> typeNames;
 			for (auto i = allocInstr.begin(); i != allocInstr.end(); ++i) {
 				std::string s;
 

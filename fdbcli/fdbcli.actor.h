@@ -28,6 +28,8 @@
 #elif !defined(FDBCLI_FDBCLI_ACTOR_H)
 #define FDBCLI_FDBCLI_ACTOR_H
 
+#include "fdbcli/FlowLineNoise.h"
+
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/StatusClient.h"
@@ -119,10 +121,17 @@ void printStatus(StatusObjectReader statusObj,
                  bool hideErrorMessages = false);
 
 // All fdbcli commands (alphabetically)
+// All below actors return true if the command is executed successfully
 // advanceversion command
 ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // cache_range command
 ACTOR Future<bool> cacheRangeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// configure command
+ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
+                                         Database localDb,
+                                         std::vector<StringRef> tokens,
+                                         LineNoise* linenoise,
+                                         Future<Void> warn);
 // consistency command
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
                                                 std::vector<StringRef> tokens,
@@ -139,6 +148,11 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
     Reference<ITransaction> tr,
     std::vector<StringRef> tokens,
     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
+// fileconfigure command
+ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
+                                             std::string filePath,
+                                             bool isNewDatabase,
+                                             bool force);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // include command
@@ -176,7 +190,7 @@ ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
 // throttle command
 ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // triggerteaminfolog command
-ACTOR Future<Void> triggerddteaminfologCommandActor(Reference<IDatabase> db);
+ACTOR Future<bool> triggerddteaminfologCommandActor(Reference<IDatabase> db);
 // tssq command
 ACTOR Future<bool> tssqCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 

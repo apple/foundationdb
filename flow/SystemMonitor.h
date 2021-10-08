@@ -46,6 +46,9 @@ struct SystemMonitorMachineState {
 
 void initializeSystemMonitorMachineState(SystemMonitorMachineState machineState);
 
+// Returns the machine start time. 0 if the system monitor is not initialized.
+double machineStartTime();
+
 struct NetworkData {
 	int64_t bytesSent;
 	int64_t countPacketsReceived;

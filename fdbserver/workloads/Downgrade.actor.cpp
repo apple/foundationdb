@@ -162,7 +162,7 @@ struct DowngradeWorkload : TestWorkload {
 		// Failures are checked with assertions
 		return true;
 	}
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<DowngradeWorkload> DowngradeWorkloadFactory(DowngradeWorkload::NAME);

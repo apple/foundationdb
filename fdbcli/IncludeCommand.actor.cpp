@@ -34,7 +34,7 @@ namespace {
 // Remove the given localities from the exclusion list.
 // include localities by clearing the keys.
 ACTOR Future<Void> includeLocalities(Reference<IDatabase> db,
-                                     vector<std::string> localities,
+                                     std::vector<std::string> localities,
                                      bool failed,
                                      bool includeAll) {
 	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
@@ -65,7 +65,7 @@ ACTOR Future<Void> includeLocalities(Reference<IDatabase> db,
 	}
 }
 
-ACTOR Future<Void> includeServers(Reference<IDatabase> db, vector<AddressExclusion> servers, bool failed) {
+ACTOR Future<Void> includeServers(Reference<IDatabase> db, std::vector<AddressExclusion> servers, bool failed) {
 	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {

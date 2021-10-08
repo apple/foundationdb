@@ -34,7 +34,7 @@ struct ConflictRangeWorkload : TestWorkload {
 	double testDuration;
 	bool testReadYourWrites;
 
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter withConflicts, withoutConflicts, retries;
 
 	ConflictRangeWorkload(WorkloadContext const& wcx)
@@ -58,7 +58,7 @@ struct ConflictRangeWorkload : TestWorkload {
 		return true;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(withConflicts.getMetric());
 		m.push_back(withoutConflicts.getMetric());
 		m.push_back(retries.getMetric());

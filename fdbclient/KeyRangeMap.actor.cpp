@@ -25,7 +25,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-void KeyRangeActorMap::getRangesAffectedByInsertion(const KeyRangeRef& keys, vector<KeyRange>& affectedRanges) {
+void KeyRangeActorMap::getRangesAffectedByInsertion(const KeyRangeRef& keys, std::vector<KeyRange>& affectedRanges) {
 	auto s = map.rangeContaining(keys.begin);
 	if (s.begin() != keys.begin && s.value().isValid() && !s.value().isReady())
 		affectedRanges.push_back(KeyRangeRef(s.begin(), keys.begin));
@@ -176,7 +176,7 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 	state KeyRange maxWithPrefix =
 	    KeyRangeRef(mapPrefix.toString() + maxRange.begin.toString(), mapPrefix.toString() + maxRange.end.toString());
 
-	state vector<Future<RangeResult>> keys;
+	state std::vector<Future<RangeResult>> keys;
 	keys.push_back(
 	    tr->getRange(lastLessThan(withPrefix.begin), firstGreaterOrEqual(withPrefix.begin), 1, Snapshot::True));
 	keys.push_back(
