@@ -1868,24 +1868,37 @@ static void backfillDerivedMetaDataToSS(Reference<MasterData> self, CommitTransa
 	RangeResult UID2Tag = self->txnStateStore->readRange(serverTagKeys).get();
 	ASSERT(!keyServers.empty());
 	ASSERT(!UID2Tag.empty());
+	std::unordered_map<UID, CoalescedKeyRangeMap<ValueRef>> serverKeysMap;
 	for (int i = 0; i < keyServers.size() - 1; ++i) {
-		const KeyRangeRef keys(keyServers[i].key, keyServers[i + 1].key);
+		const KeyRangeRef keys(keyServers[i].key.removePrefix(keyServersPrefix),
+		                       keyServers[i + 1].key.removePrefix(keyServersPrefix));
 		std::vector<UID> src, dest;
 		decodeKeyServersValue(UID2Tag, keyServers[i].value, src, dest);
 		for (const UID& id : src) {
-			// auto& serverKeys = serverKeysMap[id];
-			// serverKeys.insert(keys, serverKeysTrue);
-			krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(id), keys, serverKeysTrue, serverKeysFalse);
-			TraceEvent("RecoveryPopulateSrcServerKeys", id).detail("Begin", keys.begin).detail("End", keys.end);
-			std::cout << "Assigning range [" << keys.begin.toString() << ", " << keys.end.toString()
-			          << ") to: " << id.toString() << std::endl;
+			auto& serverKeys = serverKeysMap[id];
+			serverKeys.insert(keys, serverKeysTrue);
 		}
 		for (const UID& id : dest) {
-			krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(id), keys, serverKeysTrue, serverKeysFalse);
-			TraceEvent("RecoveryPopulateDestServerKeys", id).detail("Begin", keys.begin).detail("End", keys.end);
-			std::cout << "Assigning range [" << keys.begin.toString() << ", " << keys.end.toString()
-			          << ") to: " << id.toString() << std::endl;
+			auto& serverKeys = serverKeysMap[id];
+			serverKeys.insert(keys, serverKeysTrue);
 		}
+	}
+	for (auto& [serverID, keyMap] : serverKeysMap) {
+		for (auto& it : keyMap.ranges()) {
+			krmSetPreviouslyEmptyRange(
+			    tr, arena, serverKeysPrefixFor(serverID), it.range(), it.value(), serverKeysFalse);
+			TraceEvent("RecoveryPopulateServerKeys", serverID)
+			    .detail("Begin", it.begin())
+			    .detail("End", it.end())
+			    .detail("Value", it.value());
+		}
+		// TraceEvent("RecoveryPopulateSrcServerKeys", id).detail("Begin", keys.begin).detail("End", keys.end);
+		// std::cout << "Assigning range [" << keys.begin.toString() << ", " << keys.end.toString()
+		//           << ") to: " << id.toString() << std::endl;
+		// krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(id), keys, serverKeysTrue, serverKeysFalse);
+		// TraceEvent("RecoveryPopulateDestServerKeys", id).detail("Begin", keys.begin).detail("End", keys.end);
+		// std::cout << "Assigning range [" << keys.begin.toString() << ", " << keys.end.toString()
+		//           << ") to: " << id.toString() << std::endl;
 	}
 	std::cout << "Reconstruct data distribution complete." << std::endl;
 }

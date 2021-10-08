@@ -1533,14 +1533,15 @@ void setUpMetadataServers(Arena& arena,
 	}
 	TraceEvent("OldSystemDataServers").detail("Servers", describe(metaServers));
 
-	// for (auto& s : metaServers) {
-	// 	KeyRef last = lastOwnedNormalRange[s].present() ? lastOwnedNormalRange[s].get() : allKeys.begin;
-	// 	KeyRef key = std::min(systemKeys.begin, last);
-	// 	tr.clear(arena, KeyRangeRef(serverKeysKey(s, key), serverKeysKey(s, systemKeys.end)));
-	// 	// tr.set(arena, serverKeysKey(s, key), serverKeysFalse);
-	// 	krmSetPreviouslyEmptyRange(
-	// 	    tr, arena, serverKeysPrefixFor(s), KeyRangeRef(key, systemKeys.end), serverKeysFalse, serverKeysFalse);
-	// }
+	for (auto& s : metaServers) {
+		KeyRef last = lastOwnedNormalRange[s].present() ? lastOwnedNormalRange[s].get().end : allKeys.begin;
+		KeyRef key = std::min(systemKeys.begin, last);
+		TraceEvent("OldMetaDataLastOwnedShardEnd", s).detail("End", key.toString()).detail("Last", last.toString());
+		tr.clear(arena, KeyRangeRef(serverKeysKey(s, key), serverKeysKey(s, systemKeys.end)));
+		// tr.set(arena, serverKeysKey(s, key), serverKeysFalse);
+		krmSetPreviouslyEmptyRange(
+		    tr, arena, serverKeysPrefixFor(s), KeyRangeRef(key, systemKeys.end), serverKeysFalse, serverKeysFalse);
+	}
 
 	// Is this redundant?
 	// for (auto& s : metaServers) {

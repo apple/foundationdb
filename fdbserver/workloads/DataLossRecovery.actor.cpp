@@ -142,8 +142,8 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		std::cout << "Read3" << std::endl;
 
-		// wait(self->exclude(self, cx, key, ssi2.get().address()));
-		// int ignore = wait(setDDMode(cx, 1));
+		wait(self->exclude(self, cx, key, ssi2.get().address()));
+		int ignore = wait(setDDMode(cx, 1));
 
 		return Void();
 	}

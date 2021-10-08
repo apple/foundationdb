@@ -3324,7 +3324,7 @@ void changeServerKeys(StorageServer* data,
 		    .detail("EmptyRange", context == CSK_ASSIGN_EMPTY)
 		    .detail("NewestAvailable", r->value())
 		    .detail("ShardState0", data->shards[range.begin]->debugDescribeState());
-		if (context == CSK_ASSIGN_EMPTY) {
+		if (context == CSK_ASSIGN_EMPTY && !dataAvailable) {
 			ASSERT(nowAssigned);
 			TraceEvent("ChangeServerKeysAddEmptyRange", data->thisServerID)
 			    .detail("Begin", range.begin)
