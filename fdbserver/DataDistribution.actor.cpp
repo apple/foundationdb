@@ -5291,7 +5291,6 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 		// Ask the candidateWorker to initialize a SS only if the worker does not have a pending request
 		state UID interfaceId = deterministicRandom()->randomUniqueID();
 
-		// TODO: Move to CC
 		UID clusterId = wait(getClusterId(self));
 
 		state InitializeStorageRequest isr;

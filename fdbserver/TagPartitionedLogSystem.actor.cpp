@@ -2917,7 +2917,6 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 			req.logRouterTags = logSystem->logRouterTags;
 			req.txsTags = logSystem->txsTags;
 			req.clusterId = clusterId;
-			// TraceEvent("LUKAS_TPLS_InitializeTLogRequest").detail("ClusterId", clusterId).detail("To", recr.tLogs[i].address().toString());
 		}
 
 		satelliteInitializationReplies.reserve(recr.satelliteTLogs.size());

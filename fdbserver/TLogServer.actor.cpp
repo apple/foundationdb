@@ -3378,7 +3378,6 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Reference<AsyncVar<ServerDBInfo> const> db,
                         LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests,
-                        Optional<UID> clusterId,
                         UID tlogId,
                         UID workerID,
                         bool restoreFromDisk,
@@ -3460,8 +3459,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 			// Don't need to worry about deleting data if there is no durable
 			// cluster ID.
 			if (!self.durableClusterId.isValid()) {
-				// throw;
-				throw worker_removed();
+				throw;
 			}
 			// When a tlog joins a new cluster and has data for an old cluster,
 			// it should automatically exclude itself to avoid being used in
