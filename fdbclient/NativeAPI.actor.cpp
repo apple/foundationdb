@@ -693,8 +693,11 @@ Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
 	Span span(deterministicRandom()->randomUniqueID(), "VerifyCausalReadRisky"_loc);
 	std::vector<Future<Void>> replies;
 	replies.reserve(oldProxies.size());
-	GetReadVersionRequest req(
-	    span.context, 1, TransactionPriority::DEFAULT, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY);
+	GetReadVersionRequest req(span.context,
+	                          1,
+	                          TransactionPriority::DEFAULT,
+	                          GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY |
+	                              GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE);
 	TraceEvent evt("AttemptGRVFromOldProxies");
 	evt.detail("NumOldProxies", oldProxies.size()).detail("NumNewProxies", newProxies.size());
 	auto traceProxies = [&](std::vector<GrvProxyInterface>& proxies, std::string const& key) {
@@ -705,6 +708,7 @@ Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
 	};
 	traceProxies(oldProxies, "OldProxy"s);
 	traceProxies(newProxies, "NewProxy"s);
+	evt.log();
 	for (auto& i : oldProxies) {
 		req.reply = ReplyPromise<GetReadVersionReply>();
 		replies.push_back(assertFailure(i, i.getConsistentReadVersion.tryGetReply(req)));
