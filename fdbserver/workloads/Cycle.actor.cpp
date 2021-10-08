@@ -110,6 +110,7 @@ struct CycleWorkload : TestWorkload {
 				}
 				while (true) {
 					try {
+						tr.setOption(FDBTransactionOptions::USE_GRV_CACHE);
 						// Reverse next and next^2 node
 						Optional<Value> v = wait(tr.get(self->key(r)));
 						if (!v.present())
@@ -132,7 +133,6 @@ struct CycleWorkload : TestWorkload {
 						// TraceEvent("CyclicTest").detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
 						// TraceEvent("CyclicTest").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
 
-						tr.setOption(FDBTransactionOptions::USE_GRV_CACHE);
 						wait(tr.commit());
 						// TraceEvent("CycleCommit");
 						break;

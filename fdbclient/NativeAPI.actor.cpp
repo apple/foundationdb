@@ -193,7 +193,7 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 }
 
 void DatabaseContext::updateCachedRV(double t, Version v) {
-	if (t > lastTimedGrv.get()) {
+	if (t > lastTimedGrv.get() && v >= cachedRv) {
 		// TraceEvent("CheckpointCacheUpdate")
 		// 	.detail("Version", v)
 		// 	.detail("CurTime", t)
@@ -937,15 +937,28 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 	state double grvDelay = 0.001;
 	cx->lastTimedGrv = 0.0;
 	cx->cachedRv = Version(0);
+	TraceEvent(SevDebug, "BackgroundGrvUpdaterStart").detail("DBID", cx->dbId).detail("GrvDelay", grvDelay);
 	try {
 		loop {
 			wait(refreshTransaction(cx, &tr));
 			state double curTime = now();
 			state double lastTime = cx->lastTimedGrv.get();
+			TraceEvent(SevDebug, "BackgroundGrvUpdaterBefore")
+			    .detail("CurTime", curTime)
+			    .detail("LastTime", lastTime)
+			    .detail("GrvDelay", grvDelay)
+			    .detail("CachedRv", cx->cachedRv)
+			    .detail("CachedTime", cx->lastTimedGrv.get())
+			    .detail("Gap", curTime - lastTime)
+			    .detail("Bound", CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay);
 			if (curTime - lastTime >= (CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay)) {
 				try {
 					wait(success(tr.getReadVersion()));
 					grvDelay = (grvDelay + (now() - curTime)) / 2.0;
+					TraceEvent(SevDebug, "BackgroundGrvUpdaterSuccess")
+					    .detail("GrvDelay", grvDelay)
+					    .detail("CachedRv", cx->cachedRv)
+					    .detail("CachedTime", cx->lastTimedGrv.get());
 				} catch (Error& e) {
 					TraceEvent("BackgroundGrvUpdaterTxnError").error(e, true);
 					wait(tr.onError(e));
