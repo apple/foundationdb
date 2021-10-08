@@ -121,7 +121,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		// Move [\xff, \xff\xff) to team: {ssi}.
 		addresses.clear();
 		addresses.push_back(ssi2.get().address());
-		std::cout << "Moving." << std::endl;
 		wait(moveShard(cx->getConnectionFile(), systemKeys, addresses));
 
 		// Kill team {address}, and expect read to timeout.

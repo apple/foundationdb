@@ -954,6 +954,7 @@ struct TrackRunningStorage {
 };
 
 ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValueStoreType>>* runningStorages,
+
                                                  Future<Void> prevStorageServer,
                                                  KeyValueStoreType storeType,
                                                  std::string filename,

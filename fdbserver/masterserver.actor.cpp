@@ -501,7 +501,8 @@ void randomMetaDataServers(Reference<MasterData> self,
 	while (selected.size() < num) {
 		const int idx = deterministicRandom()->randomInt(0, serverList.size());
 		const UID serverId = decodeServerListKey(serverList[idx].key);
-		if (selected.count(serverId) > 0) {
+		StorageServerInterface ssi = decodeServerListValue(serverList[idx].value);
+		if (selected.count(serverId) > 0 || ssi.isTss()) {
 			continue;
 		}
 		servers->push_back(decodeServerListValue(serverList[idx].value));
@@ -569,6 +570,9 @@ void randomMetaDataServers(Reference<MasterData> self,
 	//     .detail("Servers", describe(*servers));
 
 	// return Void();
+	TraceEvent("MasterRecruitedMetadataStorageServers", self->dbgid)
+	    .detail("TargetCount", self->configuration.storageTeamSize)
+	    .detail("Servers", describe(*servers));
 }
 
 ACTOR Future<Void> newMetaDataServers(Reference<MasterData> self,

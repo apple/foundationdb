@@ -334,7 +334,7 @@ struct StorageServer {
 private:
 	// versionedData contains sets and clears.
 
-	// * Nonoverlapping: No clear overlaps a set or another clear, or adjoins another clear.
+	// * Nonoverlapping:r overlaps a set or another clear, or adjoins another clear.
 	// ~ Clears are maximal: If versionedData.at(v) contains a clear [b,e) then
 	//      there is a key data[e]@v, or e==allKeys.end, or a shard boundary or former boundary at e
 
@@ -3244,7 +3244,7 @@ void ShardInfo::addMutation(Version version, MutationRef const& mutation) {
 	}
 }
 
-enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE };
+enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY };
 const char* changeServerKeysContextName[] = { "Update", "Restore" };
 
 void changeServerKeys(StorageServer* data,
@@ -3312,17 +3312,35 @@ void changeServerKeys(StorageServer* data,
 	auto vr = data->newestAvailableVersion.intersectingRanges(keys);
 	std::vector<std::pair<KeyRange, Version>> changeNewestAvailable;
 	std::vector<KeyRange> removeRanges;
+	std::vector<KeyRange> clearRanges;
 	for (auto r = vr.begin(); r != vr.end(); ++r) {
 		KeyRangeRef range = keys & r->range();
 		bool dataAvailable = r->value() == latestVersion || r->value() >= version;
-		// TraceEvent("CSKRange", data->thisServerID)
-		//     .detail("KeyBegin", range.begin)
-		//     .detail("KeyEnd", range.end)
-		//     .detail("Available", dataAvailable)
-		//     .detail("NowAssigned", nowAssigned)
-		//     .detail("NewestAvailable", r->value())
-		//     .detail("ShardState0", data->shards[range.begin]->debugDescribeState());
-		if (!nowAssigned) {
+		TraceEvent("CSKRange", data->thisServerID)
+		    .detail("KeyBegin", range.begin)
+		    .detail("KeyEnd", range.end)
+		    .detail("Available", dataAvailable)
+		    .detail("NowAssigned", nowAssigned)
+		    .detail("EmptyRange", context == CSK_ASSIGN_EMPTY)
+		    .detail("NewestAvailable", r->value())
+		    .detail("ShardState0", data->shards[range.begin]->debugDescribeState());
+		if (context == CSK_ASSIGN_EMPTY) {
+			ASSERT(nowAssigned);
+			TraceEvent("ChangeServerKeysAddEmptyRange", data->thisServerID)
+			    .detail("Begin", range.begin)
+			    .detail("End", range.end);
+			// MutationRef clearRange(MutationRef::ClearRange, range.begin, range.end);
+			// Version clv = data->data().getLatestVersion();
+			// clearRange = data->addMutationToMutationLog(data->addVersionToMutationLog(clv), clearRange);
+
+			// Wait (if necessary) for the latest version at which any key in keys was previously available (+1) to be
+			// durable
+
+			// clearRanges.push_back(range);
+			changeNewestAvailable.emplace_back(range, latestVersion);
+			data->addShard(ShardInfo::newReadWrite(range, data));
+			setAvailableStatus(data, range, true);
+		} else if (!nowAssigned) {
 			if (dataAvailable) {
 				ASSERT(r->value() ==
 				       latestVersion); // Not that we care, but this used to be checked instead of dataAvailable
@@ -3335,13 +3353,9 @@ void changeServerKeys(StorageServer* data,
 		} else if (!dataAvailable) {
 			// SOMEDAY: Avoid restarting adding/transferred shards
 			if (version == 0) { // bypass fetchkeys; shard is known empty at version 0
-				TraceEvent("ChangeServerKeysAddEmptyRange", data->thisServerID)
+				TraceEvent("ChangeServerKeysInitialRange", data->thisServerID)
 				    .detail("Begin", range.begin)
 				    .detail("End", range.end);
-				MutationRef clearRange(MutationRef::ClearRange, range.begin, range.end);
-				Version clv = data->data().getLatestVersion();
-				clearRange = data->addMutationToMutationLog(data->addVersionToMutationLog(clv), clearRange);
-				TraceEvent("ClearedEmptyRangeData").detail("Version", clv);
 				changeNewestAvailable.emplace_back(range, latestVersion);
 				data->addShard(ShardInfo::newReadWrite(range, data));
 				setAvailableStatus(data, range, true);
@@ -3372,6 +3386,12 @@ void changeServerKeys(StorageServer* data,
 	for (auto r = removeRanges.begin(); r != removeRanges.end(); ++r) {
 		removeDataRange(data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->shards, *r);
 		setAvailableStatus(data, *r, false);
+	}
+	for (auto r = clearRanges.begin(); r != clearRanges.end(); ++r) {
+		MutationRef clearRange(MutationRef::ClearRange, r->begin, r->end);
+		Standalone<VerUpdateRef>& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+		clearRange = data->addMutationToMutationLog(mLV, clearRange);
+		data->mutableData().erase(r->begin, r->end);
 	}
 	validate(data);
 }
@@ -3517,10 +3537,11 @@ private:
 				// the data for change.version-1 (changes from versions < change.version)
 				// If emptyRange, treat the shard as empty, see removeKeysFromFailedServer() for more details about this
 				// scenario.
-				const Version shardVersion = (emptyRange && nowAssigned) ? 0 : currentVersion - 1;
-				changeServerKeys(data, keys, nowAssigned, shardVersion, CSK_UPDATE);
+				const ChangeServerKeysContext context = emptyRange ? CSK_ASSIGN_EMPTY : CSK_UPDATE;
+				changeServerKeys(data, keys, nowAssigned, currentVersion - 1, context);
 			}
 
+			emptyRange = false;
 			processedStartKey = false;
 		} else if (m.type == MutationRef::SetValue && m.param1.startsWith(data->sk)) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
@@ -4829,6 +4850,9 @@ ACTOR Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetVa
 		GetValueRequest req = waitNext(getValue);
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
 		// before doing real work
+		TraceEvent("SSRecivedGetValueRequest", self->thisServerID)
+		    .detail("Key", req.key.toString())
+		    .detail("Version", req.version);
 		if (req.debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.debugID.get().first(),
