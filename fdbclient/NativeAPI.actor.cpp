@@ -693,11 +693,8 @@ Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
 	Span span(deterministicRandom()->randomUniqueID(), "VerifyCausalReadRisky"_loc);
 	std::vector<Future<Void>> replies;
 	replies.reserve(oldProxies.size());
-	GetReadVersionRequest req(span.context,
-	                          1,
-	                          TransactionPriority::DEFAULT,
-	                          GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY |
-	                              GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE);
+	GetReadVersionRequest req(
+	    span.context, 1, TransactionPriority::IMMEDIATE, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY);
 	TraceEvent evt("AttemptGRVFromOldProxies");
 	evt.detail("NumOldProxies", oldProxies.size()).detail("NumNewProxies", newProxies.size());
 	auto traceProxies = [&](std::vector<GrvProxyInterface>& proxies, std::string const& key) {
@@ -739,8 +736,7 @@ ACTOR static Future<Void> monitorProxiesChange(DatabaseContext* cx,
 					// 4. If we see a provisional proxy, it means the recovery didn't complete yet, so the same as (3)
 					//    applies.
 					if (deterministicRandom()->random01() < cx->verifyCausalReadsProp && !curGrvProxies.empty() &&
-					    !clientDBInfo->get().grvProxies.empty() &&
-					    !clientDBInfo->get().grvProxies[0].provisional) {
+					    !clientDBInfo->get().grvProxies.empty() && !clientDBInfo->get().grvProxies[0].provisional) {
 						actors.add(attemptGRVFromOldProxies(curGrvProxies, clientDBInfo->get().grvProxies));
 					}
 					curCommitProxies = clientDBInfo->get().commitProxies;
