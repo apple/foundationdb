@@ -7183,6 +7183,7 @@ public:
 		wait(
 		    self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::PointRead));
 
+		// Not locking for point reads, instead relying on IO priority lock
 		// state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
 
 		++g_redwoodMetrics.metric.opGet;
