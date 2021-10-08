@@ -27,6 +27,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/TenantBalancerInterface.h"
 #include "fdbserver/BackupInterface.h"
@@ -5412,7 +5413,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 	}
 }
 
-ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> connFile,
+ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRecord,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
@@ -5422,7 +5423,7 @@ ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> connFile,
 	state bool hasConnected = false;
 	loop {
 		try {
-			ServerCoordinators coordinators(connFile);
+			ServerCoordinators coordinators(connRecord);
 			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType));
 		} catch (Error& e) {
 			if (e.code() != error_code_coordinators_changed)

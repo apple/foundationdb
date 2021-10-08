@@ -19,6 +19,7 @@
  */
 
 #include "boost/lexical_cast.hpp"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IClientApi.h"

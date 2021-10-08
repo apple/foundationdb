@@ -519,7 +519,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
                                       Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
                                       Reference<AsyncVar<Optional<TenantBalancerInterface>> const> tenantBalancerInterf,
                                       Reference<AsyncVar<bool> const> degraded,
-                                      Reference<ClusterConnectionFile> connFile,
+                                      Reference<IClusterConnectionRecord> connRecord,
                                       Reference<AsyncVar<std::set<std::string>> const> issues,
                                       Reference<LocalConfiguration> localConfig) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
@@ -533,6 +533,16 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 	state Future<Void> cacheErrorsFuture;
 	state Optional<double> incorrectTime;
 	loop {
+		state ClusterConnectionString fileConnectionString;
+		state bool upToDate;
+		if (connRecord) {
+			bool upToDateResult = wait(connRecord->upToDate(fileConnectionString));
+			upToDate = upToDateResult;
+		}
+		if (!connRecord || upToDate) {
+			incorrectTime = Optional<double>();
+		}
+
 		RegisterWorkerRequest request(interf,
 		                              initialClass,
 		                              processClass,
@@ -544,28 +554,26 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		                              degraded->get(),
 		                              localConfig->lastSeenVersion(),
 		                              localConfig->configClassSet());
+
 		for (auto const& i : issues->get()) {
 			request.issues.push_back_deep(request.issues.arena(), i);
 		}
-		ClusterConnectionString fileConnectionString;
-		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
+
+		if (!upToDate) {
 			request.issues.push_back_deep(request.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
-			std::string connectionString = connFile->getConnectionString().toString();
+			std::string connectionString = connRecord->getConnectionString().toString();
 			if (!incorrectTime.present()) {
 				incorrectTime = now();
 			}
-			if (connFile->canGetFilename()) {
-				// Don't log a SevWarnAlways initially to account for transient issues (e.g. someone else changing the
-				// file right before us)
+			if (connRecord->isValid()) {
+				// Don't log a SevWarnAlways initially to account for transient issues (e.g. someone else changing
+				// the file right before us)
 				TraceEvent(now() - incorrectTime.get() > 300 ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
-				    .detail("Filename", connFile->getFilename())
+				    .detail("ClusterFile", connRecord->toString())
 				    .detail("ConnectionStringFromFile", fileConnectionString.toString())
 				    .detail("CurrentConnectionString", connectionString);
 			}
-		} else {
-			incorrectTime = Optional<double>();
 		}
-
 		auto peers = FlowTransport::transport().getIncompatiblePeers();
 		for (auto it = peers->begin(); it != peers->end();) {
 			if (now() - it->second.second > FLOW_KNOBS->INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING) {
@@ -1098,7 +1106,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		DUMPTOKEN(recruited.getKeyValuesStream);
 
 		prevStorageServer =
-		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<ClusterConnectionFile>(nullptr));
+		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<IClusterConnectionRecord>(nullptr));
 		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
 	}
 }
@@ -1311,7 +1319,7 @@ struct SharedLogsValue {
 	  : actor(actor), uid(uid), requests(requests) {}
 };
 
-ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
+ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 LocalityData locality,
                                 Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
@@ -1388,7 +1396,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 	errorForwarders.add(loadedPonger(interf.debugPing.getFuture()));
 	errorForwarders.add(waitFailureServer(interf.waitFailure.getFuture()));
 	errorForwarders.add(monitorTraceLogIssues(issues));
-	errorForwarders.add(testerServerCore(interf.testerInterface, connFile, dbInfo, locality));
+	errorForwarders.add(testerServerCore(interf.testerInterface, connRecord, dbInfo, locality));
 	errorForwarders.add(monitorHighMemory(memoryProfileThreshold));
 
 	filesClosed.add(stopping.getFuture());
@@ -1469,7 +1477,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				DUMPTOKEN(recruited.getKeyValuesStream);
 
 				Promise<Void> recovery;
-				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connFile);
+				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord);
 				recoveries.push_back(recovery.getFuture());
 				f = handleIOErrors(f, kv, s.storeID, kvClosed);
 				f = storageServerRollbackRebooter(&runningStorages,
@@ -1596,7 +1604,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 		                                       rkInterf,
 		                                       tenantBalancerInterf,
 		                                       degraded,
-		                                       connFile,
+		                                       connRecord,
 		                                       issues,
 		                                       localConfig));
 
@@ -1711,7 +1719,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 
 				// printf("Recruited as masterServer\n");
 				Future<Void> masterProcess = masterServer(
-				    recruited, dbInfo, ccInterface, ServerCoordinators(connFile), req.lifetime, req.forceRecovery);
+				    recruited, dbInfo, ccInterface, ServerCoordinators(connRecord), req.lifetime, req.forceRecovery);
 				errorForwarders.add(
 				    zombie(recruited, forwardError(errors, Role::MASTER, recruited.id(), masterProcess)));
 				req.reply.send(recruited);
@@ -2330,10 +2338,10 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 }
 
 ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGeneration(
-    Reference<ClusterConnectionFile> connFile,
+    Reference<IClusterConnectionRecord> connRecord,
     Reference<AsyncVar<Value>> result,
     MonitorLeaderInfo info) {
-	state ClusterConnectionString ccf = info.intermediateConnFile->getConnectionString();
+	state ClusterConnectionString ccf = info.intermediateConnRecord->getConnectionString();
 	state std::vector<NetworkAddress> addrs = ccf.coordinators();
 	state ElectionResultRequest request;
 	state int index = 0;
@@ -2351,24 +2359,24 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 		if (leader.present()) {
 			if (leader.get().present()) {
 				if (leader.get().get().forward) {
-					info.intermediateConnFile = makeReference<ClusterConnectionFile>(
-					    connFile->getFilename(), ClusterConnectionString(leader.get().get().serializedInfo.toString()));
+					info.intermediateConnRecord = connRecord->makeIntermediateRecord(
+					    ClusterConnectionString(leader.get().get().serializedInfo.toString()));
 					return info;
 				}
-				if (connFile != info.intermediateConnFile) {
+				if (connRecord != info.intermediateConnRecord) {
 					if (!info.hasConnected) {
 						TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection")
-						    .detail("Filename", connFile->getFilename())
-						    .detail("ConnectionStringFromFile", connFile->getConnectionString().toString())
+						    .detail("ClusterFile", connRecord->toString())
+						    .detail("ConnectionStringFromFile", connRecord->getConnectionString().toString())
 						    .detail("CurrentConnectionString",
-						            info.intermediateConnFile->getConnectionString().toString());
+						            info.intermediateConnRecord->getConnectionString().toString());
 					}
-					connFile->setConnectionString(info.intermediateConnFile->getConnectionString());
-					info.intermediateConnFile = connFile;
+					connRecord->setConnectionString(info.intermediateConnRecord->getConnectionString());
+					info.intermediateConnRecord = connRecord;
 				}
 
 				info.hasConnected = true;
-				connFile->notifyConnected();
+				connRecord->notifyConnected();
 				request.knownLeader = leader.get().get().changeID;
 
 				ClusterControllerPriorityInfo info = leader.get().get().getPriorityInfo();
@@ -2391,35 +2399,35 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 	}
 }
 
-ACTOR Future<Void> monitorLeaderWithDelayedCandidacyImplInternal(Reference<ClusterConnectionFile> connFile,
+ACTOR Future<Void> monitorLeaderWithDelayedCandidacyImplInternal(Reference<IClusterConnectionRecord> connRecord,
                                                                  Reference<AsyncVar<Value>> outSerializedLeaderInfo) {
-	state MonitorLeaderInfo info(connFile);
+	state MonitorLeaderInfo info(connRecord);
 	loop {
 		MonitorLeaderInfo _info =
-		    wait(monitorLeaderWithDelayedCandidacyImplOneGeneration(connFile, outSerializedLeaderInfo, info));
+		    wait(monitorLeaderWithDelayedCandidacyImplOneGeneration(connRecord, outSerializedLeaderInfo, info));
 		info = _info;
 	}
 }
 
 template <class LeaderInterface>
 Future<Void> monitorLeaderWithDelayedCandidacyImpl(
-    Reference<ClusterConnectionFile> const& connFile,
+    Reference<IClusterConnectionRecord> const& connRecord,
     Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
 	LeaderDeserializer<LeaderInterface> deserializer;
 	auto serializedInfo = makeReference<AsyncVar<Value>>();
-	Future<Void> m = monitorLeaderWithDelayedCandidacyImplInternal(connFile, serializedInfo);
+	Future<Void> m = monitorLeaderWithDelayedCandidacyImplInternal(connRecord, serializedInfo);
 	return m || deserializer(serializedInfo, outKnownLeader);
 }
 
 ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
-    Reference<ClusterConnectionFile> connFile,
+    Reference<IClusterConnectionRecord> connRecord,
     Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
     Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
     Future<Void> recoveredDiskFiles,
     LocalityData locality,
     Reference<AsyncVar<ServerDBInfo>> dbInfo,
     ConfigDBType configDBType) {
-	state Future<Void> monitor = monitorLeaderWithDelayedCandidacyImpl(connFile, currentCC);
+	state Future<Void> monitor = monitorLeaderWithDelayedCandidacyImpl(connRecord, currentCC);
 	state Future<Void> timeout;
 
 	wait(recoveredDiskFiles);
@@ -2445,7 +2453,7 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
 			when(wait(timeout.isValid() ? timeout : Never())) {
 				monitor.cancel();
 				wait(clusterController(
-				    connFile, currentCC, asyncPriorityInfo, recoveredDiskFiles, locality, configDBType));
+				    connRecord, currentCC, asyncPriorityInfo, recoveredDiskFiles, locality, configDBType));
 				return Void();
 			}
 		}
@@ -2495,7 +2503,7 @@ ACTOR Future<Void> serveProcess() {
 	}
 }
 
-ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
+ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                         LocalityData localities,
                         ProcessClass processClass,
                         std::string dataFolder,
@@ -2526,7 +2534,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 	actors.push_back(serveProcess());
 
 	try {
-		ServerCoordinators coordinators(connFile);
+		ServerCoordinators coordinators(connRecord);
 		if (g_network->isSimulated()) {
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
 		}
@@ -2543,7 +2551,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		if (coordFolder.size()) {
 			// SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up
 			// their files
-			actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder, coordinators.ccf, configDBType)));
+			actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder, coordinators.ccr, configDBType)));
 		}
 
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
@@ -2560,21 +2568,25 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
 		                              "MonitorAndWriteCCPriorityInfo"));
 		if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::NeverAssign) {
-			actors.push_back(reportErrors(monitorLeader(connFile, cc), "ClusterController"));
+			actors.push_back(reportErrors(monitorLeader(connRecord, cc), "ClusterController"));
 		} else if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::WorstFit &&
 		           SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS > 0) {
-			actors.push_back(reportErrors(
-			    monitorLeaderWithDelayedCandidacy(
-			        connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, dbInfo, configDBType),
-			    "ClusterController"));
+			actors.push_back(reportErrors(monitorLeaderWithDelayedCandidacy(connRecord,
+			                                                                cc,
+			                                                                asyncPriorityInfo,
+			                                                                recoveredDiskFiles.getFuture(),
+			                                                                localities,
+			                                                                dbInfo,
+			                                                                configDBType),
+			                              "ClusterController"));
 		} else {
 			actors.push_back(reportErrors(
 			    clusterController(
-			        connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, configDBType),
+			        connRecord, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, configDBType),
 			    "ClusterController"));
 		}
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
-		actors.push_back(reportErrorsExcept(workerServer(connFile,
+		actors.push_back(reportErrorsExcept(workerServer(connRecord,
 		                                                 cc,
 		                                                 localities,
 		                                                 asyncPriorityInfo,

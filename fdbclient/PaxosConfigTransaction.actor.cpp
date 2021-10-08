@@ -312,7 +312,7 @@ public:
 	Future<Void> commit() { return commit(this); }
 
 	PaxosConfigTransactionImpl(Database const& cx) : cx(cx) {
-		auto coordinators = cx->getConnectionFile()->getConnectionString().coordinators();
+		auto coordinators = cx->getConnectionRecord()->getConnectionString().coordinators();
 		ctis.reserve(coordinators.size());
 		for (const auto& coordinator : coordinators) {
 			ctis.emplace_back(coordinator);

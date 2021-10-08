@@ -137,21 +137,21 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 
 				if (!hasConnected) {
 					TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection")
-					    .detail("Filename", coordinators.ccf->getFilename())
-					    .detail("ConnectionStringFromFile", coordinators.ccf->getConnectionString().toString())
+					    .detail("ClusterFile", coordinators.ccr->toString())
+					    .detail("ConnectionStringFromFile", coordinators.ccr->getConnectionString().toString())
 					    .detail("CurrentConnectionString", leader.get().first.serializedInfo.toString());
 				}
-				coordinators.ccf->setConnectionString(
+				coordinators.ccr->setConnectionString(
 				    ClusterConnectionString(leader.get().first.serializedInfo.toString()));
 				TraceEvent("LeaderForwarding")
-				    .detail("ConnStr", coordinators.ccf->getConnectionString().toString())
+				    .detail("ConnStr", coordinators.ccr->getConnectionString().toString())
 				    .trackLatest("LeaderForwarding");
 				throw coordinators_changed();
 			}
 
 			if (leader.present() && leader.get().second) {
 				hasConnected = true;
-				coordinators.ccf->notifyConnected();
+				coordinators.ccr->notifyConnected();
 			}
 
 			if (leader.present() && leader.get().second && leader.get().first.equalInternalId(myInfo)) {
