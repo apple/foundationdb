@@ -47,6 +47,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
+#include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/Trace.h"
@@ -179,12 +180,16 @@ struct ResolutionRequestBuilder {
 				getOutTransaction(resolver, trIn.read_snapshot)
 				    .write_conflict_ranges.push_back(requests[resolver].arena, r);
 		}
-		if (isTXNStateTransaction)
+		if (isTXNStateTransaction) {
 			for (int r = 0; r < requests.size(); r++) {
 				int transactionNumberInRequest =
 				    &getOutTransaction(r, trIn.read_snapshot) - requests[r].transactions.begin();
 				requests[r].txnStateTransactions.push_back(requests[r].arena, transactionNumberInRequest);
 			}
+			// Note only Resolver 0 got the correct spanContext, which means
+			// the reply from Resolver 0 has the right one back.
+			getOutTransaction(0, trIn.read_snapshot).spanContext = trRequest.spanContext;
+		}
 
 		std::vector<int> resolversUsed;
 		for (int r = 0; r < outTr.size(); r++)
@@ -925,7 +930,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 			                       self->arena,
 			                       pProxyCommitData->logSystem,
 			                       trs[t].transaction.mutations,
-			                       &self->toCommit,
+			                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
 			                       self->forceRecovery,
 			                       self->commitVersion + 1,
 			                       /* initialCommit= */ false);
@@ -935,6 +940,10 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 			self->firstStateMutations = false;
 			self->forceRecovery = false;
 		}
+	}
+	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+		ResolveTransactionBatchReply& reply = self->resolution[0];
+		self->toCommit.setMutations(reply.privateMutationCount, reply.privateMutations);
 	}
 	if (self->forceRecovery) {
 		for (; t < trs.size(); t++)
