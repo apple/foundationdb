@@ -810,7 +810,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndRemoteDc") {
 
 	// Create a satellite tlog, and it shouldn't be considered as in remote DC.
 	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
-	testDbInfo.logSystemConfig.tLogs.back().locality == tagLocalitySatellite;
+	testDbInfo.logSystemConfig.tLogs.back().locality = tagLocalitySatellite;
 	NetworkAddress satelliteTLogAddress(IPAddress(0x13131313), 1);
 	TLogInterface satelliteTLog(fakeRemote);
 	satelliteTLog.initEndpoints();
@@ -888,7 +888,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 							    .detail("Count", peer->pingLatencies.getPopulationSize())
 							    .detail("TimeoutCount", peer->timeoutCount);
 
-                                                        currentDegradedPeers.push_back(address);
+							currentDegradedPeers.push_back(address);
 						}
 					}
 				}
