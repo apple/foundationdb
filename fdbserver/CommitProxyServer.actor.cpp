@@ -141,6 +141,10 @@ struct ResolutionRequestBuilder {
 			if (isMetadataMutation(m)) {
 				isTXNStateTransaction = true;
 				getOutTransaction(0, trIn.read_snapshot).mutations.push_back(requests[0].arena, m);
+				for (int r = 1; r < requests.size() && SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS; r++) {
+					// Keep metadata in sync on all resolvers
+					getOutTransaction(r, trIn.read_snapshot).mutations.push_back(requests[r].arena, m);
+				}
 			}
 		}
 		if (isTXNStateTransaction && !trRequest.isLockAware()) {
