@@ -643,7 +643,7 @@ public:
 	Reference<ILogSystem> logSystem;
 	Reference<ILogSystem::IPeekCursor> logCursor;
 
-	UID clusterId;
+	Future<UID> clusterId;
 	UID thisServerID;
 	Optional<UID> tssPairID; // if this server is a tss, this is the id of its (ss) pair
 	Optional<UID> ssPairID; // if this server is an ss, this is the id of its (tss) pair
@@ -4953,8 +4953,8 @@ void StorageServerDisk::makeNewStorageServerDurable() {
 	if (data->tssPairID.present()) {
 		storage->set(KeyValueRef(persistTssPairID, BinaryWriter::toValue(data->tssPairID.get(), Unversioned())));
 	}
-	ASSERT(data->clusterId.isValid());
-	storage->set(KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(data->clusterId, Unversioned())));
+	ASSERT(data->clusterId.isReady() && data->clusterId.get().isValid());
+	storage->set(KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(data->clusterId.get(), Unversioned())));
 	storage->set(KeyValueRef(persistVersion, BinaryWriter::toValue(data->version.get(), Unversioned())));
 	storage->set(KeyValueRef(persistShardAssignedKeys.begin.toString(), LiteralStringRef("0")));
 	storage->set(KeyValueRef(persistShardAvailableKeys.begin.toString(), LiteralStringRef("0")));
@@ -6370,9 +6370,10 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			if (e.code() != error_code_worker_removed) {
 				throw;
 			}
-			ASSERT(self.clusterId.isValid());
-			UID clusterId = wait(getClusterId(&self));
-			if (clusterId == self.clusterId) {
+			state UID clusterId = wait(getClusterId(&self));
+			UID durableClusterId = wait(self.clusterId);
+			ASSERT(durableClusterId.isValid());
+			if (clusterId == durableClusterId) {
 				throw worker_removed();
 			}
 			// When a storage server connects to a new cluster, it deletes its
@@ -6381,7 +6382,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			// servers' old data when being assigned to a new cluster to avoid
 			// accidental data loss.
 			TraceEvent(SevError, "StorageServerBelongsToExistingCluster")
-			    .detail("ClusterID", self.clusterId)
+			    .detail("ClusterID", durableClusterId)
 			    .detail("NewClusterID", clusterId);
 			wait(Future<Void>(Never()));
 		}

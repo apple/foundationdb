@@ -315,7 +315,13 @@ struct TLogData : NonCopyable {
 	Deque<UID> spillOrder;
 	std::map<UID, Reference<struct LogData>> id_data;
 
-	UID clusterId;
+	// The durable cluster ID identifies which cluster the tlogs persistent
+	// data is written from. This value is restored from disk when the tlog
+	// restarts.
+	UID durableClusterId;
+	// The master cluster ID stores the cluster ID read from the txnStateStore.
+	// It is cached in this variable.
+	UID masterClusterId;
 	UID dbgid;
 	UID workerID;
 
@@ -2218,6 +2224,22 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 	return Void();
 }
 
+ACTOR Future<UID> getClusterId(TLogData* self) {
+	state Transaction tr(self->cx);
+	loop {
+		try {
+			Optional<Value> clusterId = wait(tr.get(clusterIdKey));
+			if (clusterId.present()) {
+				return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
+			} else {
+				return UID();
+			}
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> rejoinMasters(TLogData* self,
                                  TLogInterface tli,
                                  DBRecoveryCount recoveryCount,
@@ -2238,14 +2260,21 @@ ACTOR Future<Void> rejoinMasters(TLogData* self,
 		}
 		isDisplaced = isDisplaced && !inf.logSystemConfig.hasTLog(tli.id());
 		if (isDisplaced) {
-			TraceEvent("TLogDisplaced", tli.id())
-			    .detail("Reason", "DBInfoDoesNotContain")
+			state TraceEvent ev("TLogDisplaced", tli.id());
+			ev.detail("Reason", "DBInfoDoesNotContain")
 			    .detail("RecoveryCount", recoveryCount)
 			    .detail("InfRecoveryCount", inf.recoveryCount)
 			    .detail("RecoveryState", (int)inf.recoveryState)
 			    .detail("LogSysConf", describe(inf.logSystemConfig.tLogs))
 			    .detail("PriorLogs", describe(inf.priorCommittedLogServers))
 			    .detail("OldLogGens", inf.logSystemConfig.oldTLogs.size());
+			// Read and cache cluster ID before displacing this tlog. We want
+			// to avoid removing the tlogs data if it has joined a new cluster
+			// with a different cluster ID.
+			state UID clusterId = wait(getClusterId(self));
+			ASSERT(clusterId.isValid());
+			self->masterClusterId = clusterId;
+			ev.detail("ClusterId", clusterId).detail("SelfClusterId", self->durableClusterId);
 			if (BUGGIFY)
 				wait(delay(SERVER_KNOBS->BUGGIFY_WORKER_REMOVED_MAX_LAG * deterministicRandom()->random01()));
 			throw worker_removed();
@@ -2834,7 +2863,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	                             fTLogSpillTypes }));
 
 	if (fClusterId.get().present()) {
-		self->clusterId = BinaryReader::fromStringRef<UID>(fClusterId.get().get(), Unversioned());
+		self->durableClusterId = BinaryReader::fromStringRef<UID>(fClusterId.get().get(), Unversioned());
 	}
 
 	if (fFormat.get().present() && !persistFormatReadableRange.contains(fFormat.get().get())) {
@@ -3343,22 +3372,6 @@ ACTOR Future<Void> startSpillingInTenSeconds(TLogData* self, UID tlogId, Referen
 	return Void();
 }
 
-ACTOR Future<UID> getClusterId(TLogData* self) {
-	state Transaction tr(self->cx);
-	loop {
-		try {
-			Optional<Value> clusterId = wait(tr.get(clusterIdKey));
-			if (clusterId.present()) {
-				return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
-			} else {
-				return UID();
-			}
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
 // New tLog (if !recoverFrom.size()) or restore from network
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
@@ -3402,23 +3415,12 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 				choose {
 					when(state InitializeTLogRequest req = waitNext(tlogRequests.getFuture())) {
 						ASSERT(req.clusterId.isValid());
-						// Disallow recruitment of this TLog into a new
-						// cluster. To prevent accidental data loss, an
-						// operator must first manually clear the data files on
-						// the TLog before adding it to a new cluster.
-						if (self.clusterId.isValid() && self.clusterId != req.clusterId) {
-							// throw worker_removed();
-							NetworkAddress address = g_network->getLocalAddress();
-							wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
-							// throw invalid_cluster_id();
-						}
-
 						// Durably persist the cluster ID if it is not already
 						// durable. This should only occur for new tlogs or
 						// existing tlogs being upgraded from an older FDB
 						// version.
-						if (!self.clusterId.isValid()) {
-							self.clusterId = req.clusterId;
+						if (!self.durableClusterId.isValid()) {
+							self.durableClusterId = req.clusterId;
 							// Will let commit loop durably write the cluster ID.
 							self.persistentData->set(
 							    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(req.clusterId, Unversioned())));
@@ -3451,47 +3453,26 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 			if (e.code() != error_code_worker_removed) {
 				throw;
 			}
-			// // It's possible to have an invalid cluster ID when restoring from
-			// // disk if this is an upgrade from an FDB version that did not
-			// // support cluster IDs.
-			// ASSERT(self.clusterId.isValid() || (!self.clusterId.isValid() && restoreFromDisk));
-			// auto recoveryState = self.dbInfo->get().recoveryState;
-			// // When starting a tlog from durable data on disk, we need to check
-			// // its cluster ID against the cluster ID of the system. Read the
-			// // systems cluster ID from the txnStateStore and don't delete this
-			// // tlogs data if its cluster ID is different from that of the
-			// // system. Otherwise, the tlog has just been recruited and should
-			// // have been passed a cluster ID as part of its recruitment.
-			// state UID fetchedClusterId;
-			// if (!clusterId.present()) {
-			// 	// TODO: This hangs sometimes...
-			// 	if (recoveryState == RecoveryState::FULLY_RECOVERED) {
-			// 		UID tmpClusterId = wait(getClusterId(&self));
-			// 		fetchedClusterId = tmpClusterId;
-			// 	} else {
-			// 		// TODO: Make sure tlog doesn't delete data?
-			// 		throw invalid_cluster_id();
-			// 	}
-			// } else {
-			// 	fetchedClusterId = clusterId.get();
-			// }
-			// // If cluster ID of this tlog matches the cluster ID read from the
-			// // txnStateStore, this was a valid tlog recruitment message and the
-			// // tlog should delete its old data.
-			// if (!fetchedClusterId.isValid() || fetchedClusterId == self.clusterId) {
-			// 	throw worker_removed();
-			// }
-			// // Otherwise, the tlog is being recruited to join a new cluster.
-			// // Exclude the TLog to prevent its data files from being deleted.
-			// NetworkAddress address = g_network->getLocalAddress();
-			// wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
-			// throw invalid_cluster_id();
-
-			if (!self.clusterId.isValid()) {
-				throw;
+			// It's possible to have an invalid cluster ID when restoring from
+			// disk if this is an upgrade from an FDB version that did not
+			// support cluster IDs.
+			ASSERT(self.durableClusterId.isValid() || (!self.durableClusterId.isValid() && restoreFromDisk));
+			// Don't need to worry about deleting data if there is no durable
+			// cluster ID.
+			if (!self.durableClusterId.isValid()) {
+				// throw;
+				throw worker_removed();
 			}
-			// NetworkAddress address = g_network->getLocalAddress();
-			// wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
+			// When a tlog joins a new cluster and has data for an old cluster,
+			// it should automatically exclude itself to avoid being used in
+			// the new cluster while also not blocking recovery.
+			if (self.masterClusterId.isValid() && self.masterClusterId != self.durableClusterId) {
+				state NetworkAddress address = g_network->getLocalAddress();
+				wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
+			}
+			// If the tlog has a valid durable cluster ID, we don't want it to
+			// wipe its data! Throw this error to signal to `tlogTerminated` to
+			// close the persistent data store instead of deleting it.
 			throw invalid_cluster_id();
 		}
 	} catch (Error& e) {
