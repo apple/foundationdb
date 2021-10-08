@@ -7101,8 +7101,10 @@ public:
 		if (rowLimit > 0) {
 			f = cur.seekGTE(keys.begin);
 			if (!f.isReady()) {
+				TEST(true); // Uncached forward range read seek
 				wait(store(lock, self->m_concurrentReads.lock()));
 			}
+			TEST(true); // Cached forward range read seek
 			wait(f);
 
 			if (self->prefetch) {
@@ -7152,8 +7154,10 @@ public:
 		} else {
 			f = cur.seekLT(keys.end);
 			if (!f.isReady()) {
+				TEST(true); // Uncached reverse range read seek
 				wait(store(lock, self->m_concurrentReads.lock()));
 			}
+			TEST(true); // Cached reverse range read seek
 			wait(f);
 
 			if (self->prefetch) {
