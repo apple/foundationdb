@@ -509,6 +509,15 @@ extern const KeyRef tenantMapPrivatePrefix;
 // This prefix is prepended to the tenant names of locked tenants
 extern const StringRef lockedTenantPrefix;
 
+// Tenant balancer state
+extern const KeyRangeRef tenantBalancerKeys;
+extern const KeyRangeRef tenantBalancerSourceMovementKeys;
+extern const KeyRef tenantBalancerSourceMovementPrefix;
+extern const KeyRangeRef tenantBalancerDestinationMovementKeys;
+extern const KeyRef tenantBalancerDestinationMovementPrefix;
+extern const KeyRangeRef tenantBalancerExternalDatabaseKeys;
+extern const KeyRef tenantBalancerExternalDatabasePrefix;
+
 #pragma clang diagnostic pop
 
 #endif

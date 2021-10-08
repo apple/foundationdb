@@ -1043,6 +1043,18 @@ const KeyRef tenantMapPrefix = tenantMapKeys.begin;
 const KeyRef tenantMapPrivatePrefix = "\xff\xff\x02/tenantMap/"_sr;
 const StringRef lockedTenantPrefix = "\xfflockedTenant/"_sr;
 
+// Tenant balancer state
+const KeyRangeRef tenantBalancerKeys("\xff\x02/tenantBalancer/"_sr, "\xff\x02/tenantBalancer0"_sr);
+const KeyRangeRef tenantBalancerSourceMovementKeys("\xff\x02/tenantBalancer/movementSource/"_sr,
+                                                   "\xff\x02/tenantBalancer/movementSource0"_sr);
+const KeyRef tenantBalancerSourceMovementPrefix = tenantBalancerSourceMovementKeys.begin;
+const KeyRangeRef tenantBalancerDestinationMovementKeys("\xff\x02/tenantBalancer/movementDest/"_sr,
+                                                        "\xff\x02/tenantBalancer/movementDest0"_sr);
+const KeyRef tenantBalancerDestinationMovementPrefix = tenantBalancerDestinationMovementKeys.begin;
+const KeyRangeRef tenantBalancerExternalDatabaseKeys("\xff\x02/tenantBalancer/externalDatabase/"_sr,
+                                                     "\xff\x02/tenantBalancer/externalDatabase0"_sr);
+const KeyRef tenantBalancerExternalDatabasePrefix = tenantBalancerExternalDatabaseKeys.begin;
+
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {
 	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\naddress=%s\ngetValue=%s\n\n\n",

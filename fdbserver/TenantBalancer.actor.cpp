@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/BackupAgent.actor.h"
-#include "fdbclient/ClusterConnectionMemoryRecord.h"
+#include "fdbclient/ClusterConnectionKey.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/TenantBalancerInterface.h"
 #include "fdbserver/ServerDBInfo.actor.h"
@@ -108,34 +108,72 @@ struct TenantBalancer {
 		return itr->second;
 	}
 
-	void saveOutgoingMovement(SourceMovementRecord const& record) {
+	Future<Void> saveOutgoingMovement(SourceMovementRecord const& record) {
 		outgoingMovements[record.getSourcePrefix()] = record;
 		// TODO: persist in DB
+		return Void();
 	}
 
-	void saveIncomingMovement(DestinationMovementRecord const& record) {
+	Future<Void> saveIncomingMovement(DestinationMovementRecord const& record) {
 		incomingMovements[record.getDestinationPrefix()] = record;
 		// TODO: persist in DB
+		return Void();
 	}
 
 	bool hasSourceMovement(Key prefix) const { return outgoingMovements.count(prefix) > 0; }
 	bool hasDestinationMovement(Key prefix) const { return incomingMovements.count(prefix) > 0; }
 
-	// Returns true if the database is inserted or matches the existing entry
-	bool addExternalDatabase(std::string name, std::string connectionString) {
-		auto itr = externalDatabases.find(name);
-		if (itr != externalDatabases.end()) {
-			return itr->second->getConnectionRecord()->getConnectionString().toString() == connectionString;
+	// Returns a database if name doesn't exist or the connection string matches the existing entry
+	ACTOR static Future<Optional<Database>> addExternalDatabaseImpl(TenantBalancer* self,
+	                                                                std::string name,
+	                                                                std::string connectionString) {
+		auto itr = self->externalDatabases.find(name);
+		if (itr != self->externalDatabases.end()) {
+			if (itr->second->getConnectionRecord()->getConnectionString().toString() == connectionString) {
+				return itr->second;
+			}
+
+			TraceEvent("ExternalDatabaseMismatch", self->tbi.id())
+			    .detail("Name", name)
+			    .detail("ExistingConnectionString",
+			            itr->second->getConnectionRecord()->getConnectionString().toString())
+			    .detail("AttemptedConnectionString", connectionString);
+
+			return Optional<Database>();
 		}
 
-		// TODO: use a key-backed connection file
-		externalDatabases[name] = Database::createDatabase(
-		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(connectionString)),
+		state Transaction tr(self->db);
+		state Key dbKey = StringRef(name).withPrefix(tenantBalancerExternalDatabasePrefix);
+		loop {
+			try {
+				Optional<Value> v = wait(tr.get(dbKey));
+				ASSERT(!v.present());
+
+				tr.set(dbKey, ValueRef(connectionString));
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				// TODO: timeouts?
+				wait(tr.onError(e));
+			}
+		}
+
+		Database externalDb = Database::createDatabase(
+		    makeReference<ClusterConnectionKey>(self->db, dbKey, ClusterConnectionString(connectionString)),
 		    Database::API_VERSION_LATEST,
 		    IsInternal::True,
-		    tbi.locality);
+		    self->tbi.locality);
 
-		return true;
+		TraceEvent("AddedExternalDatabase", self->tbi.id())
+		    .detail("Name", name)
+		    .detail("ConnectionString", connectionString);
+
+		self->externalDatabases[name] = externalDb;
+		return externalDb;
+	}
+
+	Future<Optional<Database>> addExternalDatabase(std::string name, std::string connectionString) {
+		return addExternalDatabaseImpl(this, name, connectionString);
 	}
 
 	Optional<Database> getExternalDatabase(std::string name) const {
@@ -146,6 +184,51 @@ struct TenantBalancer {
 
 		return itr->second;
 	}
+
+	ACTOR static Future<Void> recoverImpl(TenantBalancer* self) {
+		TraceEvent("TenantBalancerRecovering", self->tbi.id());
+		state Transaction tr(self->db);
+
+		state Key begin = tenantBalancerKeys.begin;
+		loop {
+			try {
+				// TODO: prevent simultaneous modifications to tenant balancer space?
+				Standalone<RangeResultRef> result = wait(tr.getRange(KeyRangeRef(begin, tenantBalancerKeys.end), 1000));
+				for (auto kv : result) {
+					if (kv.key.startsWith(tenantBalancerSourceMovementPrefix)) {
+						// TODO
+					} else if (kv.key.startsWith(tenantBalancerDestinationMovementPrefix)) {
+						// TODO
+					} else if (kv.key.startsWith(tenantBalancerExternalDatabasePrefix)) {
+						std::string name = kv.key.removePrefix(tenantBalancerExternalDatabasePrefix).toString();
+						self->externalDatabases[name] = Database::createDatabase(
+						    makeReference<ClusterConnectionKey>(
+						        self->db, kv.key, ClusterConnectionString(kv.value.toString())),
+						    Database::API_VERSION_LATEST,
+						    IsInternal::True,
+						    self->tbi.locality);
+					} else {
+						ASSERT(false);
+					}
+				}
+
+				if (result.more) {
+					ASSERT(result.size() > 0);
+					begin = keyAfter(result.rbegin()->key);
+					tr.fullReset();
+				} else {
+					break;
+				}
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		TraceEvent("TenantBalancerRecovered", self->tbi.id());
+		return Void();
+	}
+
+	Future<Void> recover() { return recoverImpl(this); }
 
 private:
 	std::unordered_map<std::string, Database> externalDatabases;
@@ -245,6 +328,7 @@ ACTOR Future<Void> cleanupMovementSource(TenantBalancer* self, CleanupMovementSo
 }
 
 ACTOR Future<Void> tenantBalancerCore(TenantBalancer* self) {
+	TraceEvent("TenantBalancerStarting", self->tbi.id());
 	loop choose {
 		when(MoveTenantToClusterRequest req = waitNext(self->tbi.moveTenantToCluster.getFuture())) {
 			self->actors.add(moveTenantToCluster(self, req));
@@ -275,10 +359,11 @@ ACTOR Future<Void> tenantBalancer(TenantBalancerInterface tbi, Reference<AsyncVa
 	state TenantBalancer self(tbi, db);
 
 	try {
+		wait(self.recover());
 		wait(tenantBalancerCore(&self));
 		throw internal_error();
 	} catch (Error& e) {
-		TraceEvent("TenantBalancerTerminated").error(e);
+		TraceEvent("TenantBalancerTerminated", tbi.id()).error(e);
 		throw e;
 	}
 }
