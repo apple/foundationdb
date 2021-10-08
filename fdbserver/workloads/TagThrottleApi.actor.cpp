@@ -52,7 +52,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	static Optional<TagThrottleType> randomTagThrottleType() {
 		Optional<TagThrottleType> throttleType;

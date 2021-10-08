@@ -38,7 +38,7 @@ namespace fdb_cli {
 ACTOR Future<bool> profileCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens, bool intrans) {
 	state bool result = true;
 	if (tokens.size() == 1) {
-		fprintf(stderr, "ERROR: Usage: profile <client|list|flow|heap>\n");
+		printUsage(tokens[0]);
 		result = false;
 	} else if (tokencmp(tokens[1], "client")) {
 		if (tokens.size() == 2) {

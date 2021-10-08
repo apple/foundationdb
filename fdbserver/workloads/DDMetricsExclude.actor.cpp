@@ -99,7 +99,7 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 		return true;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.emplace_back("peakMovingData", peakMovingData, Averaged::False);
 		m.emplace_back("peakInQueue", peakInQueue, Averaged::False);
 		m.emplace_back("peakInFlight", peakInFlight, Averaged::False);

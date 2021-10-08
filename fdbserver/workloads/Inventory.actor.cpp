@@ -31,7 +31,7 @@ struct InventoryTestWorkload : TestWorkload {
 
 	int actorCount, productsPerWrite, nProducts;
 	double testDuration, transactionsPerSecond, fractionWriteTransactions;
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 
 	PerfIntCounter transactions, retries;
 	PerfDoubleCounter totalLatency;
@@ -75,7 +75,7 @@ struct InventoryTestWorkload : TestWorkload {
 		return inventoryTestCheck(cx->clone(), this);
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.emplace_back("Client Failures", failures(), Averaged::False);
 		m.push_back(transactions.getMetric());
 		m.push_back(retries.getMetric());
@@ -175,7 +175,7 @@ struct InventoryTestWorkload : TestWorkload {
 				for (auto p = products.begin(); p != products.end(); ++p)
 					self->maxExpectedResults[*p]++;
 				while (1) {
-					vector<Future<Void>> todo;
+					std::vector<Future<Void>> todo;
 					for (auto p = products.begin(); p != products.end(); ++p)
 						todo.push_back(self->inventoryTestWrite(&tr, *p));
 					try {

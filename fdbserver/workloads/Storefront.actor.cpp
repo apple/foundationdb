@@ -35,7 +35,7 @@ struct StorefrontWorkload : TestWorkload {
 	int actorCount, itemCount, maxOrderSize;
 	// bool isFulfilling;
 
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	std::map<orderID, std::map<int, int>> orders;
 	PerfIntCounter transactions, retries, spuriousCommitFailures;
 	PerfDoubleCounter totalLatency;
@@ -79,7 +79,7 @@ struct StorefrontWorkload : TestWorkload {
 		return inventoryCheck(cx->clone(), this, !errors);
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(transactions.getMetric());
 		m.push_back(retries.getMetric());
 		m.emplace_back("Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), Averaged::True);
@@ -145,9 +145,9 @@ struct StorefrontWorkload : TestWorkload {
 							items[deterministicRandom()->randomInt(0, self->itemCount)]++;
 
 						// create "value"
-						state vector<int> itemList;
+						state std::vector<int> itemList;
 						std::map<int, int>::iterator it;
-						state vector<Future<Void>> updaters;
+						state std::vector<Future<Void>> updaters;
 						for (it = items.begin(); it != items.end(); it++) {
 							for (int i = 0; i < it->second; i++)
 								itemList.push_back(it->first);
@@ -178,8 +178,8 @@ struct StorefrontWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<vector<int>> orderAccumulator(Database cx, StorefrontWorkload* self, KeyRangeRef keyRange) {
-		state vector<int> result(self->itemCount);
+	ACTOR Future<std::vector<int>> orderAccumulator(Database cx, StorefrontWorkload* self, KeyRangeRef keyRange) {
+		state std::vector<int> result(self->itemCount);
 		state Transaction tr(cx);
 		state int fetched = 10000;
 		state KeySelectorRef begin = firstGreaterThan(keyRange.begin);
@@ -188,7 +188,7 @@ struct StorefrontWorkload : TestWorkload {
 			RangeResult values = wait(tr.getRange(begin, end, 10000));
 			int orderIdx;
 			for (orderIdx = 0; orderIdx < values.size(); orderIdx++) {
-				vector<int> saved;
+				std::vector<int> saved;
 				BinaryReader br(values[orderIdx].value, AssumeVersion(g_network->protocolVersion()));
 				br >> saved;
 				for (int c = 0; c < saved.size(); c++)
@@ -201,7 +201,7 @@ struct StorefrontWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> tableBalancer(Database cx, StorefrontWorkload* self, KeyRangeRef keyRange) {
-		state vector<Future<vector<int>>> accumulators;
+		state std::vector<Future<std::vector<int>>> accumulators;
 		accumulators.push_back(
 		    self->orderAccumulator(cx, self, KeyRangeRef(LiteralStringRef("/orders/f"), LiteralStringRef("/orders0"))));
 		for (int c = 0; c < 15; c++)
@@ -213,9 +213,9 @@ struct StorefrontWorkload : TestWorkload {
 		    tr.getRange(KeyRangeRef(self->itemKey(0), self->itemKey(self->itemCount)), self->itemCount + 1);
 
 		wait(waitForAll(accumulators));
-		state vector<int> totals(self->itemCount);
+		state std::vector<int> totals(self->itemCount);
 		for (int c = 0; c < accumulators.size(); c++) {
-			vector<int> subTotals = accumulators[c].get();
+			std::vector<int> subTotals = accumulators[c].get();
 			for (int i = 0; i < subTotals.size(); i++)
 				totals[i] += subTotals[i];
 		}
@@ -234,7 +234,7 @@ struct StorefrontWorkload : TestWorkload {
 		return true;
 	}
 
-	ACTOR Future<bool> orderChecker(Database cx, StorefrontWorkload* self, vector<orderID> ids) {
+	ACTOR Future<bool> orderChecker(Database cx, StorefrontWorkload* self, std::vector<orderID> ids) {
 		state Transaction tr(cx);
 		state int idx = 0;
 		loop {
@@ -246,7 +246,7 @@ struct StorefrontWorkload : TestWorkload {
 						TraceEvent(SevError, "TestFailure").detail("Reason", "OrderNotPresent").detail("OrderID", id);
 						return false;
 					}
-					vector<int> itemList;
+					std::vector<int> itemList;
 					std::map<int, int>::iterator it;
 					for (it = self->orders[id].begin(); it != self->orders[id].end(); it++) {
 						for (int i = 0; i < it->second; i++)
@@ -269,11 +269,11 @@ struct StorefrontWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> inventoryCheck(Database cx, StorefrontWorkload* self, bool ok) {
-		state vector<Future<bool>> checkers;
+		state std::vector<Future<bool>> checkers;
 		state std::map<orderID, std::map<int, int>>::iterator it(self->orders.begin());
 		while (it != self->orders.end()) {
 			for (int a = 0; a < self->actorCount && it != self->orders.end(); a++) {
-				vector<orderID> orderIDs;
+				std::vector<orderID> orderIDs;
 				for (int i = 0; i < 100 && it != self->orders.end(); i++) {
 					orderIDs.push_back(it->first);
 					it++;

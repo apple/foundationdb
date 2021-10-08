@@ -28,6 +28,8 @@
 #elif !defined(FDBCLI_FDBCLI_ACTOR_H)
 #define FDBCLI_FDBCLI_ACTOR_H
 
+#include "fdbcli/FlowLineNoise.h"
+
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/StatusClient.h"
@@ -63,9 +65,25 @@ struct CommandFactory {
 extern const KeyRef advanceVersionSpecialKey;
 // consistencycheck
 extern const KeyRef consistencyCheckSpecialKey;
+// coordinators
+extern const KeyRef clusterDescriptionSpecialKey;
+extern const KeyRef coordinatorsAutoSpecialKey;
+extern const KeyRef coordinatorsProcessSpecialKey;
 // datadistribution
 extern const KeyRef ddModeSpecialKey;
 extern const KeyRef ddIgnoreRebalanceSpecialKey;
+// exclude/include
+extern const KeyRangeRef excludedServersSpecialKeyRange;
+extern const KeyRangeRef failedServersSpecialKeyRange;
+extern const KeyRangeRef excludedLocalitySpecialKeyRange;
+extern const KeyRangeRef failedLocalitySpecialKeyRange;
+extern const KeyRef excludedForceOptionSpecialKey;
+extern const KeyRef failedForceOptionSpecialKey;
+extern const KeyRef excludedLocalityForceOptionSpecialKey;
+extern const KeyRef failedLocalityForceOptionSpecialKey;
+extern const KeyRangeRef exclusionInProgressSpecialKeyRange;
+// lock/unlock
+extern const KeyRef lockSpecialKey;
 // maintenance
 extern const KeyRangeRef maintenanceSpecialKeyRange;
 extern const KeyRef ignoreSSFailureSpecialKey;
@@ -79,6 +97,8 @@ inline const KeyRef errorMsgSpecialKey = LiteralStringRef("\xff\xff/error_messag
 ACTOR Future<Void> addInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
                                 Reference<FlowLock> connectLock,
                                 KeyValue kv);
+// get all workers' info
+ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers);
 
 // compare StringRef with the given c string
 bool tokencmp(StringRef token, const char* command);
@@ -101,29 +121,50 @@ void printStatus(StatusObjectReader statusObj,
                  bool hideErrorMessages = false);
 
 // All fdbcli commands (alphabetically)
+// All below actors return true if the command is executed successfully
 // advanceversion command
 ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // cache_range command
 ACTOR Future<bool> cacheRangeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// configure command
+ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
+                                         Database localDb,
+                                         std::vector<StringRef> tokens,
+                                         LineNoise* linenoise,
+                                         Future<Void> warn);
 // consistency command
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
                                                 std::vector<StringRef> tokens,
                                                 bool intrans);
+// coordinators command
+ACTOR Future<bool> coordinatorsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // datadistribution command
 ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// exclude command
+ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, Future<Void> warn);
 // expensive_data_check command
 ACTOR Future<bool> expensiveDataCheckCommandActor(
     Reference<IDatabase> db,
     Reference<ITransaction> tr,
     std::vector<StringRef> tokens,
     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
+// fileconfigure command
+ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
+                                             std::string filePath,
+                                             bool isNewDatabase,
+                                             bool force);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// include command
+ACTOR Future<bool> includeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // kill command
 ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
                                     Reference<ITransaction> tr,
                                     std::vector<StringRef> tokens,
                                     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
+// lock/unlock command
+ACTOR Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
 // maintenance command
 ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);
 ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
@@ -149,7 +190,7 @@ ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
 // throttle command
 ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // triggerteaminfolog command
-ACTOR Future<Void> triggerddteaminfologCommandActor(Reference<IDatabase> db);
+ACTOR Future<bool> triggerddteaminfologCommandActor(Reference<IDatabase> db);
 // tssq command
 ACTOR Future<bool> tssqCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 
