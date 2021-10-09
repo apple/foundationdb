@@ -27,6 +27,9 @@
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// TODO: do we need any recoverable error states?
+enum class MovementState { INITIALIZING, STARTED, READY_FOR_SWITCH, COMPLETED };
+
 class SourceMovementRecord {
 public:
 	SourceMovementRecord() {}
@@ -34,14 +37,43 @@ public:
 	                     Standalone<StringRef> destinationPrefix,
 	                     std::string databaseName,
 	                     Database destinationDb)
-	  : sourcePrefix(sourcePrefix), destinationPrefix(destinationPrefix), databaseName(databaseName),
-	    destinationDb(destinationDb) {}
+	  : id(deterministicRandom()->randomUniqueID()), sourcePrefix(sourcePrefix), destinationPrefix(destinationPrefix),
+	    databaseName(databaseName), destinationDb(destinationDb) {}
 
 	Standalone<StringRef> getSourcePrefix() const { return sourcePrefix; }
 	Standalone<StringRef> getDestinationPrefix() const { return destinationPrefix; }
+	std::string getDatabaseName() const { return databaseName; }
 	Database getDestinationDatabase() const { return destinationDb; }
 
+	void setDestinationDatabase(Database db) { destinationDb = db; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, id, sourcePrefix, destinationPrefix, databaseName);
+	}
+
+	Key getKey() const { return StringRef(id.toString()).withPrefix(tenantBalancerSourceMovementPrefix); }
+
+	Value toValue() const {
+		BinaryWriter wr(IncludeVersion());
+		wr << *this;
+		return wr.toValue();
+	}
+
+	static SourceMovementRecord fromValue(Value value) {
+		SourceMovementRecord record;
+		BinaryReader rd(value, IncludeVersion());
+		rd >> record;
+
+		return record;
+	}
+
+	MovementState movementState = MovementState::INITIALIZING;
+
 private:
+	// Private variables are not intended to be modified by requests
+	UID id;
+
 	Standalone<StringRef> sourcePrefix;
 	Standalone<StringRef> destinationPrefix;
 
@@ -54,12 +86,37 @@ class DestinationMovementRecord {
 public:
 	DestinationMovementRecord() {}
 	DestinationMovementRecord(Standalone<StringRef> sourcePrefix, Standalone<StringRef> destinationPrefix)
-	  : sourcePrefix(sourcePrefix), destinationPrefix(destinationPrefix) {}
+	  : id(deterministicRandom()->randomUniqueID()), sourcePrefix(sourcePrefix), destinationPrefix(destinationPrefix) {}
 
 	Standalone<StringRef> getSourcePrefix() const { return sourcePrefix; }
 	Standalone<StringRef> getDestinationPrefix() const { return destinationPrefix; }
 
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, id, sourcePrefix, destinationPrefix);
+	}
+
+	Key getKey() const { return StringRef(id.toString()).withPrefix(tenantBalancerDestinationMovementPrefix); }
+
+	Value toValue() const {
+		BinaryWriter wr(IncludeVersion());
+		wr << *this;
+		return wr.toValue();
+	}
+
+	static DestinationMovementRecord fromValue(Value value) {
+		DestinationMovementRecord record;
+		BinaryReader rd(value, IncludeVersion());
+		rd >> record;
+
+		return record;
+	}
+
+	MovementState movementState = MovementState::INITIALIZING;
+
 private:
+	// Private variables are not intended to be modified by requests
+	UID id;
 	Standalone<StringRef> sourcePrefix;
 	Standalone<StringRef> destinationPrefix;
 };
@@ -108,16 +165,65 @@ struct TenantBalancer {
 		return itr->second;
 	}
 
+	ACTOR template <class Record>
+	static Future<Void> persistMovementRecord(TenantBalancer* self, Record record) {
+		state Transaction tr(self->db);
+		state Key key = record.getKey();
+		state Value value = record.toValue();
+
+		loop {
+			try {
+				tr.set(key, value);
+				wait(tr.commit());
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	Future<Void> saveOutgoingMovement(SourceMovementRecord const& record) {
-		outgoingMovements[record.getSourcePrefix()] = record;
-		// TODO: persist in DB
-		return Void();
+		return map(persistMovementRecord(this, record), [this, record](Void _) {
+			outgoingMovements[record.getSourcePrefix()] = record;
+			return Void();
+		});
 	}
 
 	Future<Void> saveIncomingMovement(DestinationMovementRecord const& record) {
-		incomingMovements[record.getDestinationPrefix()] = record;
-		// TODO: persist in DB
-		return Void();
+		return map(persistMovementRecord(this, record), [this, record](Void _) {
+			incomingMovements[record.getDestinationPrefix()] = record;
+			return Void();
+		});
+	}
+
+	ACTOR template <class Record>
+	static Future<Void> clearMovementRecord(TenantBalancer* self, Record record) {
+		state Transaction tr(self->db);
+		state Key key = record.getKey();
+
+		loop {
+			try {
+				tr.clear(key);
+				wait(tr.commit());
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	Future<Void> clearOutgoingMovement(SourceMovementRecord const& record) {
+		return map(clearMovementRecord(this, record), [this, record](Void _) {
+			outgoingMovements.erase(record.getSourcePrefix());
+			return Void();
+		});
+	}
+
+	Future<Void> clearIncomingMovement(DestinationMovementRecord const& record) {
+		return map(clearMovementRecord(this, record), [this, record](Void _) {
+			incomingMovements.erase(record.getDestinationPrefix());
+			return Void();
+		});
 	}
 
 	bool hasSourceMovement(Key prefix) const { return outgoingMovements.count(prefix) > 0; }
@@ -196,9 +302,11 @@ struct TenantBalancer {
 				Standalone<RangeResultRef> result = wait(tr.getRange(KeyRangeRef(begin, tenantBalancerKeys.end), 1000));
 				for (auto kv : result) {
 					if (kv.key.startsWith(tenantBalancerSourceMovementPrefix)) {
-						// TODO
+						SourceMovementRecord record = SourceMovementRecord::fromValue(kv.value);
+						self->outgoingMovements[record.getSourcePrefix()] = record;
 					} else if (kv.key.startsWith(tenantBalancerDestinationMovementPrefix)) {
-						// TODO
+						DestinationMovementRecord record = DestinationMovementRecord::fromValue(kv.value);
+						self->incomingMovements[record.getSourcePrefix()] = record;
 					} else if (kv.key.startsWith(tenantBalancerExternalDatabasePrefix)) {
 						std::string name = kv.key.removePrefix(tenantBalancerExternalDatabasePrefix).toString();
 						self->externalDatabases[name] = Database::createDatabase(
@@ -224,6 +332,12 @@ struct TenantBalancer {
 			}
 		}
 
+		for (auto itr : self->outgoingMovements) {
+			auto dbItr = self->externalDatabases.find(itr.second.getDatabaseName());
+			ASSERT(dbItr != self->externalDatabases.end());
+			itr.second.setDestinationDatabase(dbItr->second);
+		}
+
 		TraceEvent("TenantBalancerRecovered", self->tbi.id());
 		return Void();
 	}
@@ -231,6 +345,7 @@ struct TenantBalancer {
 	Future<Void> recover() { return recoverImpl(this); }
 
 private:
+	// TODO: ref count external databases and delete when all references are gone
 	std::unordered_map<std::string, Database> externalDatabases;
 	std::map<Key, SourceMovementRecord> outgoingMovements;
 	std::map<Key, DestinationMovementRecord> incomingMovements;
