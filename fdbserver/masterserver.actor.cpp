@@ -1401,7 +1401,8 @@ std::pair<KeyRangeRef, bool> findRange(CoalescedKeyRangeMap<int>& key_resolver,
 }
 
 ACTOR Future<Void> resolutionBalancing(Reference<MasterData> self) {
-	state CoalescedKeyRangeMap<int> key_resolver;
+	state CoalescedKeyRangeMap<int> key_resolver(
+	    0, SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys.end : allKeys.end);
 	key_resolver.insert(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys : allKeys, 0);
 	loop {
 		wait(delay(SERVER_KNOBS->MIN_BALANCE_TIME, TaskPriority::ResolutionMetrics));
