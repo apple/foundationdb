@@ -256,20 +256,19 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	RemoteIKeyValueStore() {}
 
 	Future<Void> init() override {
-
 		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote init");
 		return initialized;
 	}
-	// TODO: Implement all
+
 	Future<Void> getError() override {
 		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote get error");
-		return interf.getError.getReply(IKVSGetErrorRequest{});
+		return getErrorImpl(this);
 	}
 	Future<Void> onClosed() override {
 		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote onclosed");
-		return interf.onClosed.getReply(IKVSOnClosedRequest{});
+		return onCloseImpl(this);
 	}
-	// remove reply fields
+
 	void dispose() override {
 		interf.dispose.send(IKVSDisposeRequest{});
 		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote dispose");
@@ -300,7 +299,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) override {
 		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote readValue");
-		return interf.getValue.getReply(IKVSGetValueRequest{ key, debugID });
+		return readValueImpl(this, IKVSGetValueRequest{ key, debugID });
 	}
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
@@ -318,6 +317,27 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	StorageBytes getStorageBytes() const override {
 		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote getStorageByte");
 		return StorageBytes{};
+	}
+
+	ACTOR static Future<Optional<Value>> readValueImpl(RemoteIKeyValueStore* self, IKVSGetValueRequest req) {
+		wait(self->init());
+		TraceEvent(SevDebug, "RemoteKVStore").detail("Event", "post init, before readValue");
+		Optional<Value> val = wait(self->interf.getValue.getReply(req));
+		return val;
+	}
+
+	ACTOR static Future<Void> getErrorImpl(RemoteIKeyValueStore* self) {
+		wait(self->init());
+		TraceEvent(SevDebug, "RemoteKVStore").detail("Event", "post init, before getError");
+		wait(self->interf.getError.getReply(IKVSGetErrorRequest{}));
+		return Void();
+	}
+
+	ACTOR static Future<Void> onCloseImpl(RemoteIKeyValueStore* self) {
+		wait(self->init());
+		TraceEvent(SevDebug, "RemoteKVStore").detail("Event", "post init, before onClosed");
+		wait(self->interf.onClosed.getReply(IKVSOnClosedRequest{}));
+		return Void();
 	}
 };
 

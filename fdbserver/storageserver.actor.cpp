@@ -5192,6 +5192,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 	TraceEvent(SevDebug, "RStorageServer").detail("event", "3");
 	try {
+		// Optional<Value> val = wait(self.storage.readValue(KeyRef("foo")));
+		// TraceEvent(SevDebug, "IKVSInterface").detail("event", "after read").detail("value", val);
 		wait(self.storage.init());
 		TraceEvent(SevDebug, "RStorageServer").detail("event", "post init");
 		wait(self.storage.commit());

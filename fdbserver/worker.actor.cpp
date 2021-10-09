@@ -1723,7 +1723,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					std::string filename =
 					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
 					TraceEvent(SevDebug, "openRemoteKVStore").detail("storeType", "3");
-					IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit, false, false, true);
+					IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit, false, false);
 					const DiskQueueVersion dqv =
 					    tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
 					IDiskQueue* queue = openDiskQueue(
