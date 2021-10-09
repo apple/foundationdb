@@ -579,7 +579,8 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 		}
 		when(ResolutionMetricsRequest req = waitNext(resolver.metrics.getFuture())) {
 			++self->metricsRequests;
-			req.reply.send(self->iopsSample.getEstimate(allKeys));
+			req.reply.send(self->iopsSample.getEstimate(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys
+			                                                                                               : allKeys));
 		}
 		when(ResolutionSplitRequest req = waitNext(resolver.split.getFuture())) {
 			++self->splitRequests;
