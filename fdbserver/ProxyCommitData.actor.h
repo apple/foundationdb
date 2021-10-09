@@ -176,6 +176,9 @@ struct ProxyCommitData {
 	uint64_t commitVersionRequestNumber;
 	uint64_t mostRecentProcessedRequestNumber;
 	KeyRangeMap<Deque<std::pair<Version, int>>> keyResolvers;
+	// When all resolvers process system keys (for private mutations), the "keyResolvers"
+	// only tracks normalKeys. This is used for tracking versions for systemKeys.
+	Deque<Version> systemKeyVersions;
 	KeyRangeMap<ServerCacheInfo> keyInfo; // keyrange -> all storage servers in all DCs for the keyrange
 	KeyRangeMap<bool> cacheInfo;
 	std::map<Key, ApplyMutationsData> uid_applyMutationsData;
