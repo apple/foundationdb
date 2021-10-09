@@ -255,6 +255,11 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		                          req.version + 1,
 		                          &self->storageCache,
 		                          &self->tssMapping);
+		bool isLocked = false;
+		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+			auto lockedKey = self->txnStateStore->readValue(databaseLockedKey).get();
+			isLocked = lockedKey.present() && lockedKey.get().size();
+		}
 		for (int t : req.txnStateTransactions) {
 			stateMutations += req.transactions[t].mutations.size();
 			stateBytes += req.transactions[t].mutations.expectedSize();
@@ -263,9 +268,12 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			    StateTransactionRef(reply.committed[t] == ConflictBatch::TransactionCommitted,
 			                        req.transactions[t].mutations));
 
+			// for (const auto& m : req.transactions[t].mutations)
+			//	DEBUG_MUTATION("Resolver", req.version, m, self->dbgid);
+
 			// Generate private mutations for metadata mutations
 			if (reply.committed[t] == ConflictBatch::TransactionCommitted &&
-			    SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+			    SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && (!isLocked || req.transactions[t].lock_aware)) {
 				applyMetadataMutations(req.transactions[t].spanContext, resolverData, req.transactions[t].mutations);
 			}
 		}
