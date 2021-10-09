@@ -96,6 +96,9 @@ struct ResolveTransactionBatchReply {
 	VectorRef<StringRef> privateMutations;
 	uint32_t privateMutationCount;
 
+	std::unordered_map<uint16_t, Version> tpcvMap;
+	std::set<Tag> writtenTags;
+
 	template <class Archive>
 	void serialize(Archive& ar) {
 		serializer(ar,
@@ -105,6 +108,8 @@ struct ResolveTransactionBatchReply {
 		           conflictingKeyRangeMap,
 		           privateMutations,
 		           privateMutationCount,
+		           tpcvMap,
+		           writtenTags,
 		           arena);
 	}
 };
@@ -123,6 +128,8 @@ struct ResolveTransactionBatchRequest {
 	ReplyPromise<ResolveTransactionBatchReply> reply;
 	Optional<UID> debugID;
 
+	std::set<Tag> writtenTags;
+
 	template <class Archive>
 	void serialize(Archive& ar) {
 		serializer(ar,
@@ -134,6 +141,7 @@ struct ResolveTransactionBatchRequest {
 		           reply,
 		           arena,
 		           debugID,
+		           writtenTags,
 		           spanContext);
 	}
 };
