@@ -706,7 +706,7 @@ struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, mutations, arena);
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, mutations, arena);
 	}
 };
 
