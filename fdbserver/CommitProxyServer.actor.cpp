@@ -1008,11 +1008,10 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 			self->committed[t] = ConflictBatch::TransactionConflict;
 		TraceEvent(SevWarn, "RestartingTxnSubsystem", pProxyCommitData->dbgid).detail("Stage", "AwaitCommit");
 	}
-	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && !self->forceRecovery) {
-		// TODO: forceRecovery set some transaction to conflict
-
+	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+		// Resolver also calculates forceRecovery and only applies metadata mutations
+		// in the same set of transactions as this proxy.
 		ResolveTransactionBatchReply& reply = self->resolution[0];
-		// ASSERT_WE_THINK(privateMutations.size() == reply.privateMutations.size());
 		self->toCommit.setMutations(reply.privateMutationCount, reply.privateMutations);
 	}
 

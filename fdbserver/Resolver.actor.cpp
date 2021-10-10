@@ -38,6 +38,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
+#include "flow/Error.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -50,8 +51,8 @@ struct ProxyRequestsInfo {
 };
 
 struct Resolver : ReferenceCounted<Resolver> {
-	UID dbgid;
-	int commitProxyCount, resolverCount;
+	const UID dbgid;
+	const int commitProxyCount, resolverCount;
 	NotifiedVersion version;
 	AsyncVar<Version> neededVersion;
 	ptxn::TLogGroupVersionTracker versionTracker; // tracks per group commit version
@@ -67,15 +68,16 @@ struct Resolver : ReferenceCounted<Resolver> {
 	// Use LogSystem as backend for txnStateStore. However, the real commit
 	// happens at commit proxies and we never "write" to the LogSystem at
 	// Resolvers.
-	LogSystemDiskQueueAdapter* logAdapter;
+	LogSystemDiskQueueAdapter* logAdapter = nullptr;
 	Reference<ILogSystem> logSystem;
-	IKeyValueStore* txnStateStore;
+	IKeyValueStore* txnStateStore = nullptr;
 
 	std::map<UID, Reference<StorageInfo>> storageCache;
 	KeyRangeMap<ServerCacheInfo> keyInfo; // keyrange -> all storage servers in all DCs for the keyrange
 	std::unordered_map<UID, StorageServerInterface> tssMapping;
+	bool forceRecovery = false;
 
-	Version debugMinRecentStateVersion;
+	Version debugMinRecentStateVersion = 0;
 
 	CounterCollection cc;
 	Counter resolveBatchIn;
@@ -98,10 +100,10 @@ struct Resolver : ReferenceCounted<Resolver> {
 
 	Resolver(UID dbgid, int commitProxyCount, int resolverCount)
 	  : dbgid(dbgid), commitProxyCount(commitProxyCount), resolverCount(resolverCount), version(-1),
-	    conflictSet(newConflictSet()), iopsSample(SERVER_KNOBS->KEY_BYTES_PER_SAMPLE), debugMinRecentStateVersion(0),
-	    cc("Resolver", dbgid.toString()), resolveBatchIn("ResolveBatchIn", cc),
-	    resolveBatchStart("ResolveBatchStart", cc), resolvedTransactions("ResolvedTransactions", cc),
-	    resolvedBytes("ResolvedBytes", cc), resolvedReadConflictRanges("ResolvedReadConflictRanges", cc),
+	    conflictSet(newConflictSet()), iopsSample(SERVER_KNOBS->KEY_BYTES_PER_SAMPLE), cc("Resolver", dbgid.toString()),
+	    resolveBatchIn("ResolveBatchIn", cc), resolveBatchStart("ResolveBatchStart", cc),
+	    resolvedTransactions("ResolvedTransactions", cc), resolvedBytes("ResolvedBytes", cc),
+	    resolvedReadConflictRanges("ResolvedReadConflictRanges", cc),
 	    resolvedWriteConflictRanges("ResolvedWriteConflictRanges", cc),
 	    transactionsAccepted("TransactionsAccepted", cc), transactionsTooOld("TransactionsTooOld", cc),
 	    transactionsConflicted("TransactionsConflicted", cc),
@@ -252,6 +254,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		                          self->txnStateStore,
 		                          &self->keyInfo,
 		                          &toCommit,
+		                          self->forceRecovery,
 		                          req.version + 1,
 		                          &self->storageCache,
 		                          &self->tssMapping);
@@ -272,10 +275,12 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			//	DEBUG_MUTATION("Resolver", req.version, m, self->dbgid);
 
 			// Generate private mutations for metadata mutations
+			// The condition here must match CommitBatch::applyMetadataToCommittedTransactions()
 			if (reply.committed[t] == ConflictBatch::TransactionCommitted &&
 			    SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && (!isLocked || req.transactions[t].lock_aware)) {
 				applyMetadataMutations(req.transactions[t].spanContext, resolverData, req.transactions[t].mutations);
 			}
+			TEST(self->forceRecovery); // Resolver detects forced recovery
 		}
 
 		// Adds private mutation messages to the reply message.
@@ -476,8 +481,10 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		// avoids a lot of map lookups.
 		pContext->pResolverData->keyInfo.rawInsert(keyInfoData);
 
-		ResolverData resolverData(
-		    pContext->pResolverData->dbgid, pContext->pTxnStateStore, &pContext->pResolverData->keyInfo);
+		ResolverData resolverData(pContext->pResolverData->dbgid,
+		                          pContext->pTxnStateStore,
+		                          &pContext->pResolverData->keyInfo,
+		                          pContext->pResolverData->forceRecovery);
 
 		applyMetadataMutations(SpanID(), resolverData, mutations);
 	} // loop
