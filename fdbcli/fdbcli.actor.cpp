@@ -1852,7 +1852,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							is_error = true;
 							continue;
 						}
-						wait(changeFeedList(db));
+						wait(changeFeedList(localDb));
 						continue;
 					} else if (tokencmp(tokens[1], "register")) {
 						if (tokens.size() != 5) {
@@ -1860,7 +1860,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							is_error = true;
 							continue;
 						}
-						trx = Transaction(db);
+						trx = Transaction(localDb);
 						loop {
 							try {
 								wait(trx.registerChangeFeed(tokens[2], KeyRangeRef(tokens[3], tokens[4])));
@@ -1876,7 +1876,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							is_error = true;
 							continue;
 						}
-						trx = Transaction(db);
+						trx = Transaction(localDb);
 						loop {
 							try {
 								trx.destroyChangeFeed(tokens[2]);
@@ -1912,7 +1912,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 						}
 						Standalone<VectorRef<MutationsAndVersionRef>> res =
-						    wait(db->getChangeFeedMutations(tokens[2], begin, end));
+						    wait(localDb->getChangeFeedMutations(tokens[2], begin, end));
 						printf("\n");
 						for (auto& it : res) {
 							for (auto& it2 : it.mutations) {
@@ -1948,7 +1948,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							warn.cancel();
 						}
 						state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> feedResults;
-						state Future<Void> feed = db->getChangeFeedStream(feedResults, tokens[2], begin, end);
+						state Future<Void> feed = localDb->getChangeFeedStream(feedResults, tokens[2], begin, end);
 						printf("\n");
 						try {
 							state Future<Void> feedInterrupt = LineNoise::onKeyboardInterrupt();
@@ -1989,7 +1989,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printUsage(tokens[0]);
 							is_error = true;
 						} else {
-							wait(db->popChangeFeedMutations(tokens[2], v));
+							wait(localDb->popChangeFeedMutations(tokens[2], v));
 						}
 					}
 					continue;

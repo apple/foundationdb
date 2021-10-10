@@ -6898,7 +6898,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 					continue;
 				}
 
-				vector<Future<Void>> ok(locations[loc].second->size());
+				std::vector<Future<Void>> ok(locations[loc].second->size());
 				for (int i = 0; i < ok.size(); i++) {
 					ok[i] = IFailureMonitor::failureMonitor().onStateEqual(
 					    locations[loc].second->get(i, &StorageServerInterface::changeFeedStream).getEndpoint(),
