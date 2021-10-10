@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/Arena.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_TAG_THROTTLE_ACTOR_G_H)
 #define FDBCLIENT_TAG_THROTTLE_ACTOR_G_H
 #include "fdbclient/TagThrottle.actor.g.h"
@@ -247,7 +248,9 @@ ACTOR template <class Tr>
 Future<bool> getValidAutoEnabled(Reference<Tr> tr) {
 	state bool result;
 	loop {
-		Optional<Value> value = wait(safeThreadFutureToFuture(tr->get(tagThrottleAutoEnabledKey)));
+		// hold the returned standalone object's memory
+		state typename Tr::template FutureT<Optional<Value>> valueF = tr->get(tagThrottleAutoEnabledKey);
+		Optional<Value> value = wait(safeThreadFutureToFuture(valueF));
 		if (!value.present()) {
 			tr->reset();
 			wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
@@ -466,10 +469,12 @@ Future<bool> unthrottleTags(Reference<DB> db,
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
+			state std::vector<typename DB::TransactionT::template FutureT<Optional<Value>>> valueFutures;
 			state std::vector<Future<Optional<Value>>> values;
 			values.reserve(keys.size());
 			for (auto key : keys) {
-				values.push_back(safeThreadFutureToFuture(tr->get(key)));
+				valueFutures.push_back(tr->get(key));
+				values.push_back(safeThreadFutureToFuture(valueFutures.back()));
 			}
 
 			wait(waitForAll(values));
@@ -535,7 +540,9 @@ Future<Void> throttleTags(Reference<DB> db,
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
 			if (throttleType == TagThrottleType::MANUAL) {
-				Optional<Value> oldThrottle = wait(safeThreadFutureToFuture(tr->get(key)));
+				// hold the returned standalone object's memory
+				state typename DB::TransactionT::template FutureT<Optional<Value>> oldThrottleF = tr->get(key);
+				Optional<Value> oldThrottle = wait(safeThreadFutureToFuture(oldThrottleF));
 				if (!oldThrottle.present()) {
 					wait(updateThrottleCount(tr, 1));
 				}
@@ -562,7 +569,10 @@ Future<Void> enableAuto(Reference<DB> db, bool enabled) {
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
-			Optional<Value> value = wait(safeThreadFutureToFuture(tr->get(tagThrottleAutoEnabledKey)));
+			// hold the returned standalone object's memory
+			state typename DB::TransactionT::template FutureT<Optional<Value>> valueF =
+			    tr->get(tagThrottleAutoEnabledKey);
+			Optional<Value> value = wait(safeThreadFutureToFuture(valueF));
 			if (!value.present() || (enabled && value.get() != LiteralStringRef("1")) ||
 			    (!enabled && value.get() != LiteralStringRef("0"))) {
 				tr->set(tagThrottleAutoEnabledKey, LiteralStringRef(enabled ? "1" : "0"));

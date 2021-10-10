@@ -34,4 +34,8 @@ public:
 	~ConfigNode();
 	Future<Void> serve(ConfigTransactionInterface const&);
 	Future<Void> serve(ConfigFollowerInterface const&);
+
+public: // Testing
+	void close();
+	Future<Void> onClosed();
 };

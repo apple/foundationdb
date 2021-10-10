@@ -53,7 +53,7 @@ struct SidebandWorkload : TestWorkload {
 	double testDuration, operationsPerSecond;
 	SidebandInterface interf;
 
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter messages, consistencyErrors, keysUnexpectedlyPresent;
 
 	SidebandWorkload(WorkloadContext const& wcx)
@@ -82,7 +82,7 @@ struct SidebandWorkload : TestWorkload {
 		return !errors && !consistencyErrors.getValue();
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(messages.getMetric());
 		m.push_back(consistencyErrors.getMetric());
 		m.push_back(keysUnexpectedlyPresent.getMetric());

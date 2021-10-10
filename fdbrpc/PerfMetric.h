@@ -27,8 +27,6 @@
 #include "flow/BooleanParam.h"
 #include "flow/flow.h"
 
-using std::vector;
-
 FDB_DECLARE_BOOLEAN_PARAM(Averaged);
 
 struct PerfMetric {
@@ -62,7 +60,7 @@ private:
 
 struct PerfIntCounter {
 	PerfIntCounter(std::string name) : name(name), value(0) {}
-	PerfIntCounter(std::string name, vector<PerfIntCounter*>& v) : name(name), value(0) { v.push_back(this); }
+	PerfIntCounter(std::string name, std::vector<PerfIntCounter*>& v) : name(name), value(0) { v.push_back(this); }
 	void operator+=(int64_t delta) { value += delta; }
 	void operator++() { value += 1; }
 	PerfMetric getMetric() const { return PerfMetric(name, static_cast<double>(value), Averaged::False, "%.0lf"); }
@@ -76,7 +74,9 @@ private:
 
 struct PerfDoubleCounter {
 	PerfDoubleCounter(std::string name) : name(name), value(0) {}
-	PerfDoubleCounter(std::string name, vector<PerfDoubleCounter*>& v) : name(name), value(0) { v.push_back(this); }
+	PerfDoubleCounter(std::string name, std::vector<PerfDoubleCounter*>& v) : name(name), value(0) {
+		v.push_back(this);
+	}
 	void operator+=(double delta) { value += delta; }
 	void operator++() { value += 1.0; }
 	PerfMetric getMetric() const { return PerfMetric(name, value, Averaged::False); }

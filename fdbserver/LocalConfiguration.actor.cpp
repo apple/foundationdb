@@ -380,6 +380,10 @@ public:
 		return initFuture;
 	}
 
+	void close() { kvStore.close(); }
+
+	Future<Void> onClosed() { return kvStore.onClosed(); }
+
 	static void testManualKnobOverridesInvalidName() {
 		std::map<std::string, std::string> invalidOverrides;
 		invalidOverrides["knob_name_that_does_not_exist"] = "";
@@ -454,6 +458,14 @@ Future<Void> LocalConfiguration::consume(ConfigBroadcastInterface const& broadca
 Future<Void> LocalConfiguration::addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> changes,
                                             Version mostRecentVersion) {
 	return impl->addChanges(changes, mostRecentVersion);
+}
+
+void LocalConfiguration::close() {
+	impl->close();
+}
+
+Future<Void> LocalConfiguration::onClosed() {
+	return impl->onClosed();
 }
 
 UID LocalConfiguration::getID() const {

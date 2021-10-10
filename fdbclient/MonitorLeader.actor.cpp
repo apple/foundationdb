@@ -328,7 +328,7 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 	return Void();
 }
 
-ClusterConnectionString::ClusterConnectionString(vector<NetworkAddress> servers, Key key) : coord(servers) {
+ClusterConnectionString::ClusterConnectionString(std::vector<NetworkAddress> servers, Key key) : coord(servers) {
 	parseKey(key.toString());
 }
 
@@ -383,9 +383,9 @@ ClientCoordinators::ClientCoordinators(Key clusterKey, std::vector<NetworkAddres
 }
 
 ClientLeaderRegInterface::ClientLeaderRegInterface(NetworkAddress remote)
-  : getLeader(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_GETLEADER)),
-    openDatabase(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_OPENDATABASE)),
-    checkDescriptorMutable(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE)) {}
+  : getLeader(Endpoint::wellKnown({ remote }, WLTOKEN_CLIENTLEADERREG_GETLEADER)),
+    openDatabase(Endpoint::wellKnown({ remote }, WLTOKEN_CLIENTLEADERREG_OPENDATABASE)),
+    checkDescriptorMutable(Endpoint::wellKnown({ remote }, WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE)) {}
 
 ClientLeaderRegInterface::ClientLeaderRegInterface(INetwork* local) {
 	getLeader.makeWellKnownEndpoint(WLTOKEN_CLIENTLEADERREG_GETLEADER, TaskPriority::Coordination);
@@ -394,9 +394,8 @@ ClientLeaderRegInterface::ClientLeaderRegInterface(INetwork* local) {
 	                                             TaskPriority::Coordination);
 }
 
-// Nominee is the worker among all workers that are considered as leader by a coordinator
-// This function contacts a coordinator coord to ask if the worker is considered as a leader (i.e., if the worker
-// is a nominee)
+// Nominee is the worker among all workers that are considered as leader by one coordinator
+// This function contacts a coordinator coord to ask who is its nominee.
 ACTOR Future<Void> monitorNominee(Key key,
                                   ClientLeaderRegInterface coord,
                                   AsyncTrigger* nomineeChange,
@@ -428,13 +427,13 @@ ACTOR Future<Void> monitorNominee(Key key,
 // Also used in fdbserver/LeaderElection.actor.cpp!
 // bool represents if the LeaderInfo is a majority answer or not.
 // This function also masks the first 7 bits of changeId of the nominees and returns the Leader with masked changeId
-Optional<std::pair<LeaderInfo, bool>> getLeader(const vector<Optional<LeaderInfo>>& nominees) {
+Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<LeaderInfo>>& nominees) {
 	// If any coordinator says that the quorum is forwarded, then it is
 	for (int i = 0; i < nominees.size(); i++)
 		if (nominees[i].present() && nominees[i].get().forward)
 			return std::pair<LeaderInfo, bool>(nominees[i].get(), true);
 
-	vector<std::pair<UID, int>> maskedNominees;
+	std::vector<std::pair<UID, int>> maskedNominees;
 	maskedNominees.reserve(nominees.size());
 	for (int i = 0; i < nominees.size(); i++) {
 		if (nominees[i].present()) {
@@ -527,18 +526,6 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<ClusterConn
 		}
 		wait(nomineeChange.onTrigger() || allActors);
 	}
-}
-
-Future<Void> monitorLeaderRemotelyInternal(Reference<ClusterConnectionFile> const& connFile,
-                                           Reference<AsyncVar<Value>> const& outSerializedLeaderInfo);
-
-template <class LeaderInterface>
-Future<Void> monitorLeaderRemotely(Reference<ClusterConnectionFile> const& connFile,
-                                   Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
-	LeaderDeserializer<LeaderInterface> deserializer;
-	auto serializedInfo = makeReference<AsyncVar<Value>>();
-	Future<Void> m = monitorLeaderRemotelyInternal(connFile, serializedInfo);
-	return m || deserializer(serializedInfo, outKnownLeader);
 }
 
 ACTOR Future<Void> monitorLeaderInternal(Reference<ClusterConnectionFile> connFile,
@@ -656,7 +643,7 @@ ACTOR Future<Void> getClientInfoFromLeader(Reference<AsyncVar<Optional<ClusterCo
 		choose {
 			when(ClientDBInfo ni =
 			         wait(brokenPromiseToNever(knownLeader->get().get().clientInterface.openDatabase.getReply(req)))) {
-				TraceEvent("MonitorLeaderForProxiesGotClientInfo", knownLeader->get().get().clientInterface.id())
+				TraceEvent("GetClientInfoFromLeaderGotClientInfo", knownLeader->get().get().clientInterface.id())
 				    .detail("CommitProxy0", ni.commitProxies.size() ? ni.commitProxies[0].id() : UID())
 				    .detail("GrvProxy0", ni.grvProxies.size() ? ni.grvProxies[0].id() : UID())
 				    .detail("ClientID", ni.id);
@@ -667,11 +654,11 @@ ACTOR Future<Void> getClientInfoFromLeader(Reference<AsyncVar<Optional<ClusterCo
 	}
 }
 
-ACTOR Future<Void> monitorLeaderForProxies(Key clusterKey,
-                                           vector<NetworkAddress> coordinators,
-                                           ClientData* clientData,
-                                           Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo) {
-	state vector<ClientLeaderRegInterface> clientLeaderServers;
+ACTOR Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
+                                                 std::vector<NetworkAddress> coordinators,
+                                                 ClientData* clientData,
+                                                 Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo) {
+	state std::vector<ClientLeaderRegInterface> clientLeaderServers;
 	state AsyncTrigger nomineeChange;
 	state std::vector<Optional<LeaderInfo>> nominees;
 	state Future<Void> allActors;
@@ -695,7 +682,7 @@ ACTOR Future<Void> monitorLeaderForProxies(Key clusterKey,
 
 	loop {
 		Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
-		TraceEvent("MonitorLeaderForProxiesChange")
+		TraceEvent("MonitorLeaderAndGetClientInfoLeaderChange")
 		    .detail("NewLeader", leader.present() ? leader.get().first.changeID : UID(1, 1))
 		    .detail("Key", clusterKey.printable());
 		if (leader.present()) {
@@ -705,7 +692,7 @@ ACTOR Future<Void> monitorLeaderForProxies(Key clusterKey,
 				outInfo.forward = leader.get().first.serializedInfo;
 				clientData->clientInfo->set(CachedSerialization<ClientDBInfo>(outInfo));
 				leaderInfo->set(leader.get().first);
-				TraceEvent("MonitorLeaderForProxiesForwarding")
+				TraceEvent("MonitorLeaderAndGetClientInfoForwarding")
 				    .detail("NewConnStr", leader.get().first.serializedInfo.toString());
 				return Void();
 			}
@@ -762,7 +749,6 @@ void shrinkProxyList(ClientDBInfo& ni,
 	}
 }
 
-// Leader is the process that will be elected by coordinators as the cluster controller
 ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
     Reference<ClusterConnectionFile> connFile,
     Reference<AsyncVar<ClientDBInfo>> clientInfo,
@@ -771,9 +757,9 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
     Key traceLogGroup) {
 	state ClusterConnectionString cs = info.intermediateConnFile->getConnectionString();
-	state vector<NetworkAddress> addrs = cs.coordinators();
+	state std::vector<NetworkAddress> addrs = cs.coordinators();
 	state int idx = 0;
-	state int successIdx = 0;
+	state int successIndex = 0;
 	state Optional<double> incorrectTime;
 	state std::vector<UID> lastCommitProxyUIDs;
 	state std::vector<CommitProxyInterface> lastCommitProxies;
@@ -840,11 +826,11 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			auto& ni = rep.get().mutate();
 			shrinkProxyList(ni, lastCommitProxyUIDs, lastCommitProxies, lastGrvProxyUIDs, lastGrvProxies);
 			clientInfo->set(ni);
-			successIdx = idx;
+			successIndex = idx;
 		} else {
 			TEST(rep.getError().code() == error_code_failed_to_progress); // Coordinator cant talk to cluster controller
 			idx = (idx + 1) % addrs.size();
-			if (idx == successIdx) {
+			if (idx == successIndex) {
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
 			}
 		}
