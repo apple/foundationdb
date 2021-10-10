@@ -6665,9 +6665,7 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-			    e.code() == error_code_connection_failed || e.code() == error_code_unknown_change_feed ||
-			    e.code() == error_code_actor_cancelled) {
+			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
 			results.sendError(e);
@@ -6746,12 +6744,12 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
                                             Version end,
                                             KeyRange range) {
 	state Database cx(db);
-	state Transaction tr(cx);
 	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
 	state Span span("NAPI:GetChangeFeedStream"_loc);
 	state KeyRange keys;
 
 	loop {
+		state Transaction tr(cx);
 		loop {
 			try {
 				Version readVer = wait(tr.getReadVersion());
@@ -6983,14 +6981,23 @@ ACTOR static Future<Void> popChangeFeedBackup(Database cx, StringRef rangeID, Ve
 
 ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, StringRef rangeID, Version version) {
 	state Database cx(db);
-	state Transaction tr(cx);
 	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
 	state Span span("NAPI:PopChangeFeedMutations"_loc);
-	Optional<Value> val = wait(tr.get(rangeIDKey));
-	if (!val.present()) {
-		throw unsupported_operation();
+
+	state Transaction tr(cx);
+	state KeyRange keys;
+	loop {
+		try {
+			Optional<Value> val = wait(tr.get(rangeIDKey));
+			if (!val.present()) {
+				throw unsupported_operation();
+			}
+			keys = std::get<0>(decodeChangeFeedValue(val.get()));
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
 	}
-	state KeyRange keys = std::get<0>(decodeChangeFeedValue(val.get()));
 	state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 	    wait(getKeyRangeLocations(cx,
 	                              keys,
