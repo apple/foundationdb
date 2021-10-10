@@ -1616,16 +1616,14 @@ MutationsAndVersionRef filterMutations(Arena& arena, MutationsAndVersionRef cons
 				modifiedMutations.get().push_back(arena, m.mutations[i]);
 			}
 			if (!modifiedMutations.present() && !range.contains(m.mutations[i].param1)) {
-				modifiedMutations = m.mutations;
-				modifiedMutations.get().resize(arena, i);
+				modifiedMutations = m.mutations.slice(0, i);
 				arena.dependsOn(range.arena());
 			}
 		} else {
 			ASSERT(m.mutations[i].type == MutationRef::ClearRange);
 			if (!modifiedMutations.present() &&
 			    (m.mutations[i].param1 < range.begin || m.mutations[i].param2 > range.end)) {
-				modifiedMutations = m.mutations;
-				modifiedMutations.get().resize(arena, i);
+				modifiedMutations = m.mutations.slice(0, i);
 				arena.dependsOn(range.arena());
 			}
 			if (modifiedMutations.present()) {
@@ -1663,7 +1661,7 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 	state Version dequeVersion = data->version.get();
 	if (req.end <= feed->second->emptyVersion + 1) {
 	} else if (feed->second->durableVersion == invalidVersion || req.begin > feed->second->durableVersion) {
-		for (auto it : feed->second->mutations) {
+		for (auto& it : feed->second->mutations) {
 			if (it.version >= req.end || remainingLimitBytes <= 0) {
 				break;
 			}
