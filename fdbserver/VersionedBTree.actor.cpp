@@ -630,6 +630,9 @@ public:
 			    "FIFOQueue::Cursor(%s) loadPage start id=%s\n", toString().c_str(), ::toString(nextPageID).c_str());
 			nextPageReader = queue->pager->readPage(
 			    PagerEventReasons::MetaData, nonBtreeLevel, nextPageID, ioMaxPriority, true, false);
+			if (!nextPageReader.isReady()) {
+				nextPageReader = waitOrError(nextPageReader, queue->pagerError);
+			}
 		}
 
 		Future<Void> loadExtent() {
