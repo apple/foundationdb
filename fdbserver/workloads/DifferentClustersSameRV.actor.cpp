@@ -70,7 +70,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		return true;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<std::pair<Version, Optional<Value>>> doRead(Database cx,
 	                                                                DifferentClustersSameRVWorkload* self) {

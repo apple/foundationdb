@@ -30,7 +30,7 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 	Reference<AsyncFileBuffer> writeBuffer;
 
 	// The futures for the asynchronous write futures
-	vector<Future<Void>> writeFutures;
+	std::vector<Future<Void>> writeFutures;
 
 	// Number of writes to perform in parallel.  Write tests are performed only if this is greater than zero and
 	// numParallelReads is zero
@@ -145,7 +145,7 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 		}
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		if (enabled) {
 			m.emplace_back("Bytes written/sec", bytesWritten.getValue() / testDuration, Averaged::False);
 			m.emplace_back("Average CPU Utilization (Percentage)", averageCpuUtilization * 100, Averaged::False);

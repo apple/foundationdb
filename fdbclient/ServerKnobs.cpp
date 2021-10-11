@@ -102,7 +102,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PUSH_STATS_SLOW_RATIO,                                 0.5 );
 	init( TLOG_POP_BATCH_SIZE,                                  1000 ); if ( randomize && BUGGIFY ) TLOG_POP_BATCH_SIZE = 10;
 	init( TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE,     250e6 );
-	init( ENABLE_DETAILED_TLOG_POP_TRACE,                       true );
+	init( ENABLE_DETAILED_TLOG_POP_TRACE,                      false ); if ( randomize && BUGGIFY ) ENABLE_DETAILED_TLOG_POP_TRACE = true;
 
 	// disk snapshot max timeout, to be put in TLog, storage and coordinator nodes
 	init( MAX_FORKED_PROCESS_OUTPUT,                            1024 );
@@ -443,7 +443,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BACKUP_TIMEOUT,                                        0.4 );
 	init( BACKUP_NOOP_POP_DELAY,                                 5.0 );
 	init( BACKUP_FILE_BLOCK_BYTES,                       1024 * 1024 );
-	init( BACKUP_LOCK_BYTES,                                     3e9 ); if(randomize && BUGGIFY) BACKUP_LOCK_BYTES = deterministicRandom()->randomInt(1024, 4096) * 1024;
+	init( BACKUP_LOCK_BYTES,                                     3e9 ); if(randomize && BUGGIFY) BACKUP_LOCK_BYTES = deterministicRandom()->randomInt(1024, 4096) * 15 * 1024;
 	init( BACKUP_UPLOAD_DELAY,                                  10.0 ); if(randomize && BUGGIFY) BACKUP_UPLOAD_DELAY = deterministicRandom()->random01() * 60;
 
 	//Cluster Controller
@@ -465,6 +465,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CHECK_OUTSTANDING_INTERVAL,                            0.5 ); if( randomize && BUGGIFY ) CHECK_OUTSTANDING_INTERVAL = 0.001;
 	init( VERSION_LAG_METRIC_INTERVAL,                           0.5 ); if( randomize && BUGGIFY ) VERSION_LAG_METRIC_INTERVAL = 10.0;
 	init( MAX_VERSION_DIFFERENCE,           20 * VERSIONS_PER_SECOND );
+	init( INITIAL_UPDATE_CROSS_DC_INFO_DELAY,                    300 );
+	init( CHECK_REMOTE_HEALTH_INTERVAL,                           60 );
 	init( FORCE_RECOVERY_CHECK_DELAY,                            5.0 );
 	init( RATEKEEPER_FAILURE_TIME,                               1.0 );
 	init( REPLACE_INTERFACE_DELAY,                              60.0 );
@@ -479,7 +481,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CC_MAX_EXCLUSION_DUE_TO_HEALTH,                          2 );
 	init( CC_HEALTH_TRIGGER_RECOVERY,                          false );
 	init( CC_TRACKING_HEALTH_RECOVERY_INTERVAL,               3600.0 );
-	init( CC_MAX_HEALTH_RECOVERY_COUNT,                            2 );
+	init( CC_MAX_HEALTH_RECOVERY_COUNT,                            5 );
+	init( CC_HEALTH_TRIGGER_FAILOVER,                          false );
+	init( CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION,               5 );
+	init( CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION,              10 );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && BUGGIFY ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
 	init( EXPECTED_MASTER_FITNESS,            ProcessClass::UnsetFit );

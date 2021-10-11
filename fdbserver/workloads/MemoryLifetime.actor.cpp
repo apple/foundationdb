@@ -29,7 +29,7 @@
 
 struct MemoryLifetime : KVWorkload {
 	double testDuration;
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 
 	std::string valueString;
 
@@ -59,7 +59,7 @@ struct MemoryLifetime : KVWorkload {
 
 	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> _setup(Database cx, MemoryLifetime* self) {
 		state Promise<double> loadTime;

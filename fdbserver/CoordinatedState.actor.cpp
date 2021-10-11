@@ -147,8 +147,8 @@ struct CoordinatedStateImpl {
 	ACTOR static Future<GenerationRegReadReply> replicatedRead(CoordinatedStateImpl* self,
 	                                                           GenerationRegReadRequest req) {
 		state std::vector<GenerationRegInterface>& replicas = self->coordinators.stateServers;
-		state vector<Future<GenerationRegReadReply>> rep_empty_reply;
-		state vector<Future<GenerationRegReadReply>> rep_reply;
+		state std::vector<Future<GenerationRegReadReply>> rep_empty_reply;
+		state std::vector<Future<GenerationRegReadReply>> rep_reply;
 		for (int i = 0; i < replicas.size(); i++) {
 			Future<GenerationRegReadReply> reply =
 			    waitAndSendRead(replicas[i].read, GenerationRegReadRequest(req.key, req.gen));
@@ -189,7 +189,7 @@ struct CoordinatedStateImpl {
 
 	ACTOR static Future<UniqueGeneration> replicatedWrite(CoordinatedStateImpl* self, GenerationRegWriteRequest req) {
 		state std::vector<GenerationRegInterface>& replicas = self->coordinators.stateServers;
-		state vector<Future<UniqueGeneration>> wrep_reply;
+		state std::vector<Future<UniqueGeneration>> wrep_reply;
 		for (int i = 0; i < replicas.size(); i++) {
 			Future<UniqueGeneration> reply =
 			    waitAndSendWrite(replicas[i].write, GenerationRegWriteRequest(req.kv, req.gen));

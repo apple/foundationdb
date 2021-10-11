@@ -121,6 +121,7 @@ public:
 	double CHAOS_LOGGING_INTERVAL;
 
 	bool WRITE_TRACING_ENABLED;
+	double TRACING_SAMPLE_RATE;
 	int TRACING_UDP_LISTENER_PORT;
 
 	// run loop profiling

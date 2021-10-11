@@ -144,8 +144,8 @@ struct DBCoreState {
 
 	DBCoreState() : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty) {}
 
-	vector<UID> getPriorCommittedLogServers() {
-		vector<UID> priorCommittedLogServers;
+	std::vector<UID> getPriorCommittedLogServers() {
+		std::vector<UID> priorCommittedLogServers;
 		for (auto& it : tLogs) {
 			for (auto& log : it.tLogs) {
 				priorCommittedLogServers.push_back(log);

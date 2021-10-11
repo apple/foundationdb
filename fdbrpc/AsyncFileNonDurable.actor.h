@@ -415,7 +415,7 @@ private:
 	// results
 	ACTOR Future<int> onRead(AsyncFileNonDurable* self, void* data, int length, int64_t offset) {
 		wait(checkKilled(self, "Read"));
-		vector<Future<Void>> priorModifications = self->getModificationsAndInsert(offset, length);
+		std::vector<Future<Void>> priorModifications = self->getModificationsAndInsert(offset, length);
 		wait(waitForAll(priorModifications));
 		state Future<int> readFuture = self->file->read(data, length, offset);
 		wait(success(readFuture) || self->killed.getFuture());
@@ -456,13 +456,13 @@ private:
 	                         void const* data,
 	                         int length,
 	                         int64_t offset) {
+		state Standalone<StringRef> dataCopy(StringRef((uint8_t*)data, length));
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		wait(g_simulator.onMachine(currentProcess));
 
 		state double delayDuration =
 		    g_simulator.speedUpSimulation ? 0.0001 : (deterministicRandom()->random01() * self->maxWriteDelay);
-		state Standalone<StringRef> dataCopy(StringRef((uint8_t*)data, length));
 
 		state Future<bool> startSyncFuture = self->startSyncPromise.getFuture();
 
@@ -512,7 +512,7 @@ private:
 		int diskPageLength = saveDurable ? length : 4096;
 		int diskSectorLength = saveDurable ? length : 512;
 
-		vector<Future<Void>> writeFutures;
+		std::vector<Future<Void>> writeFutures;
 		for (int writeOffset = 0; writeOffset < length;) {
 			// Number of bytes until the next diskPageLength file offset within the write or the end of the write.
 			int pageLength = diskPageLength;

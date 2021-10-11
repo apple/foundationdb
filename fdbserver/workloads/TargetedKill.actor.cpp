@@ -54,7 +54,7 @@ struct TargetedKillWorkload : TestWorkload {
 		return Void();
 	}
 	Future<bool> check(Database const& cx) override { return true; }
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> killEndpoint(NetworkAddress address, Database cx, TargetedKillWorkload* self) {
 		if (&g_simulator == g_network) {
@@ -62,7 +62,7 @@ struct TargetedKillWorkload : TestWorkload {
 			return Void();
 		}
 
-		state vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 
 		int killed = 0;
 		state RebootRequest rbReq;
@@ -92,7 +92,7 @@ struct TargetedKillWorkload : TestWorkload {
 
 	ACTOR Future<Void> assassin(Database cx, TargetedKillWorkload* self) {
 		wait(delay(self->killAt));
-		state vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+		state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
 
 		NetworkAddress machine;
 		if (self->machineToKill == "master") {
