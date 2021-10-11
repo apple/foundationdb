@@ -1065,8 +1065,8 @@ void* worker_thread(void* thread_args) {
 	int worker_id = ((thread_args_t*)thread_args)->process->worker_id;
 	int thread_id = ((thread_args_t*)thread_args)->thread_id;
 	mako_args_t* args = ((thread_args_t*)thread_args)->process->args;
-	FDBDatabase* database =
-	    ((thread_args_t*)thread_args)->process->databases[((thread_args_t*)thread_args)->database_index];
+	size_t database_index = ((thread_args_t*)thread_args)->database_index;
+	FDBDatabase* database = ((thread_args_t*)thread_args)->process->databases[database_index];
 	fdb_error_t err;
 	int rc;
 	FDBTransaction* transaction;
@@ -1100,11 +1100,12 @@ void* worker_thread(void* thread_args) {
 	}
 
 	fprintf(debugme,
-	        "DEBUG: worker_id:%d (%d) thread_id:%d (%d) (tid:%lld)\n",
+	        "DEBUG: worker_id:%d (%d) thread_id:%d (%d) database_index:%d (tid:%lld)\n",
 	        worker_id,
 	        args->num_processes,
 	        thread_id,
 	        args->num_threads,
+	        database_index,
 	        (uint64_t)pthread_self());
 
 	if (args->tpsmax) {
@@ -1341,11 +1342,10 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 	fdb_future_destroy(f);
 
 #else /* >= 610 */
-	// added support for multiple databases in multiple clusters
-	// the rest of the databases are divided equally to each cluster
 	for (size_t i = 0; i < args->num_databases; i++) {
 		size_t cluster_index = args->num_fdb_clusters <= 1 ? 0 : i % args->num_fdb_clusters;
 		fdb_create_database(args->cluster_files[cluster_index], &process.databases[i]);
+		fprintf(debugme, "DEBUG: creating database at cluster %s\n", args->cluster_files[cluster_index]);
 		if (args->disable_ryw) {
 			fdb_database_set_option(process.databases[i], FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, (uint8_t*)NULL, 0);
 		}
@@ -1704,12 +1704,11 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			args->api_version = atoi(optarg);
 			break;
 		case 'c': {
-			const char delim[2] = ",";
-			char* token = strtok(optarg, delim);
-			while (token != NULL) {
-				strcpy(args->cluster_files[args->num_fdb_clusters], token);
-				args->num_fdb_clusters++;
-				token = strtok(NULL, optarg);
+			const char delim[] = ",";
+			char* cluster_file = strtok(optarg, delim);
+			while (cluster_file != NULL) {
+				strcpy(args->cluster_files[args->num_fdb_clusters++], cluster_file);
+				cluster_file = strtok(NULL, delim);
 			}
 			break;
 		}
