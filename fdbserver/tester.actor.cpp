@@ -1703,3 +1703,59 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 		}
 	}
 }
+
+namespace {
+ACTOR Future<Void> testExpectedErrorImpl(Future<Void> test,
+                                         const char* testDescr,
+                                         Error expectedError,
+                                         bool* successFlag,
+                                         std::map<std::string, std::string> details,
+                                         Error throwOnError,
+                                         UID id) {
+	state Error actualError;
+	try {
+		wait(test);
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		actualError = e;
+		// The test failed as expected
+		if (!expectedError.isValid() || actualError.code() == expectedError.code()) {
+			return Void();
+		}
+	}
+
+	// The test has failed
+	if (successFlag != nullptr) {
+		*successFlag = false;
+	}
+	TraceEvent evt(SevError, "TestErrorFailed", id);
+	evt.detail("TestDescr", testDescr);
+	evt.detail("ExpectedError", expectedError.name());
+	evt.detail("ExpectedErrorCode", expectedError.code());
+	if (actualError.isValid()) {
+		evt.detail("ActualError", actualError.name());
+		evt.detail("ActualErrorCode", actualError.code());
+	} else {
+		evt.detail("Reason", "Unexpected success");
+	}
+	for (auto& p : details) {
+		evt.detail(p.first.c_str(), p.second);
+	}
+	if (throwOnError.isValid()) {
+		throw throwOnError;
+	}
+	return Void();
+}
+} // namespace
+
+Future<Void> testExpectedError(Future<Void> test,
+                               const char* testDescr,
+                               Error expectedError,
+                               bool* successFlag,
+                               std::map<std::string, std::string> details,
+                               Error throwOnError,
+                               UID id) {
+	return testExpectedErrorImpl(test, testDescr, expectedError, successFlag, details, throwOnError, id);
+}

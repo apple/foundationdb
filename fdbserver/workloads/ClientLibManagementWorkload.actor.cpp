@@ -104,12 +104,9 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		wait(testUploadClientLibInvalidInput(self, cx));
 		wait(testClientLibUploadFileDoesNotExist(self, cx));
 		wait(testUploadClientLib(self, cx));
-		if (!self->success) {
-			// The further tests depend on successful upload
-			return Void();
-		}
 		wait(testClientLibListAfterUpload(self, cx));
 		wait(testDownloadClientLib(self, cx));
+		wait(testClientLibDownloadNotExisting(self, cx));
 		wait(testDeleteClientLib(self, cx));
 		wait(testUploadedClientLibInList(self, cx, ClientLibFilter(), false, "No filter, after delete"));
 		return Void();
@@ -141,17 +138,11 @@ struct ClientLibManagementWorkload : public TestWorkload {
 
 		for (auto& testMetadataStr : invalidMetadataStrs) {
 			metadataStr = StringRef(testMetadataStr);
-			try {
-				// Try to pass some invalid metadata input
-				wait(uploadClientLibrary(cx, metadataStr, self->generatedFileName));
-				self->unexpectedSuccess(
-				    "InvalidMetadata", error_code_client_lib_invalid_metadata, metadataStr.toString().c_str());
-			} catch (Error& e) {
-				self->testErrorCode("InvalidMetadata",
-				                    error_code_client_lib_invalid_metadata,
-				                    e.code(),
-				                    metadataStr.toString().c_str());
-			}
+			wait(testExpectedError(uploadClientLibrary(cx, metadataStr, self->generatedFileName),
+			                       "uploadClientLibrary with invalid metadata",
+			                       client_lib_invalid_metadata(),
+			                       &self->success,
+			                       { { "Metadata", metadataStr.toString().c_str() } }));
 		}
 
 		return Void();
@@ -162,12 +153,10 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		json_spirit::mObject metadataJson;
 		validClientLibMetadataSample(metadataJson);
 		metadataStr = StringRef(json_spirit::write_string(json_spirit::mValue(metadataJson)));
-		try {
-			wait(uploadClientLibrary(cx, metadataStr, LiteralStringRef("some_not_existing_file_name")));
-			self->unexpectedSuccess("FileDoesNotExist", error_code_file_not_found);
-		} catch (Error& e) {
-			self->testErrorCode("FileDoesNotExist", error_code_file_not_found, e.code());
-		}
+		wait(testExpectedError(uploadClientLibrary(cx, metadataStr, "some_not_existing_file_name"_sr),
+		                       "uploadClientLibrary with a not existing file",
+		                       file_not_found(),
+		                       &self->success));
 		return Void();
 	}
 
@@ -176,13 +165,10 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		validClientLibMetadataSample(self->uploadedMetadataJson);
 		metadataStr = StringRef(json_spirit::write_string(json_spirit::mValue(self->uploadedMetadataJson)));
 		getClientLibIdFromMetadataJson(metadataStr, self->uploadedClientLibId);
-		try {
-			wait(uploadClientLibrary(cx, metadataStr, self->generatedFileName));
-			self->unexpectedSuccess("ChecksumMismatch", error_code_client_lib_invalid_binary);
-		} catch (Error& e) {
-			self->testErrorCode("ChecksumMismatch", error_code_client_lib_invalid_binary, e.code());
-		}
-
+		wait(testExpectedError(uploadClientLibrary(cx, metadataStr, self->generatedFileName),
+		                       "uploadClientLibrary wrong checksum",
+		                       client_lib_invalid_binary(),
+		                       &self->success));
 		wait(testUploadedClientLibInList(self, cx, ClientLibFilter(), false, "After upload with wrong checksum"));
 		return Void();
 	}
@@ -209,7 +195,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		for (auto uploadRes : concurrentUploads) {
 			if (uploadRes.get().isError()) {
 				self->testErrorCode(
-				    "ConcurrentUpload", error_code_client_lib_already_exists, uploadRes.get().getError().code());
+				    "concurrent client lib upload", client_lib_already_exists(), uploadRes.get().getError());
 			} else {
 				successCnt++;
 			}
@@ -218,9 +204,10 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		if (successCnt == 0) {
 			TraceEvent(SevError, "ClientLibUploadFailed").log();
 			self->success = false;
-			return Void();
+			throw operation_failed();
 		} else if (successCnt > 1) {
 			TraceEvent(SevError, "ClientLibConflictingUpload").log();
+			self->success = false;
 		}
 		return Void();
 	}
@@ -235,13 +222,10 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		getClientLibIdFromMetadataJson(metadataStr, clientLibId);
 
 		destFileName = format("clientLibDownload%d", self->clientId);
-
-		try {
-			wait(downloadClientLibrary(cx, clientLibId, destFileName));
-			self->unexpectedSuccess("ClientLibDoesNotExist", error_code_client_lib_not_found);
-		} catch (Error& e) {
-			self->testErrorCode("ClientLibDoesNotExist", error_code_client_lib_not_found, e.code());
-		}
+		wait(testExpectedError(downloadClientLibrary(cx, clientLibId, destFileName),
+		                       "download not existing client library",
+		                       client_lib_not_found(),
+		                       &self->success));
 		return Void();
 	}
 
@@ -367,26 +351,20 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		metadataJson[CLIENTLIB_ATTR_CHECKSUM_ALG] = "md5";
 	}
 
-	void unexpectedSuccess(const char* testName, int expectedErrorCode, const char* optionalDetails = nullptr) {
-		TraceEvent trEv(SevError, "ClientLibManagementUnexpectedSuccess");
-		trEv.detail("Test", testName).detail("ExpectedError", expectedErrorCode);
-		if (optionalDetails != nullptr) {
-			trEv.detail("Details", optionalDetails);
-		}
-		success = false;
-	}
-
-	void testErrorCode(const char* testName,
-	                   int expectedErrorCode,
-	                   int actualErrorCode,
-	                   const char* optionalDetails = nullptr) {
-		if (actualErrorCode != expectedErrorCode) {
-			TraceEvent trEv(SevError, "ClientLibManagementUnexpectedError");
-			trEv.detail("Test", testName)
-			    .detail("ExpectedError", expectedErrorCode)
-			    .detail("ActualError", actualErrorCode);
-			if (optionalDetails != nullptr) {
-				trEv.detail("Details", optionalDetails);
+	void testErrorCode(const char* testDescr,
+	                   Error expectedError,
+	                   Error actualError,
+	                   std::map<std::string, std::string> details = {},
+	                   UID id = UID()) {
+		ASSERT(expectedError.isValid());
+		ASSERT(actualError.isValid());
+		if (expectedError.code() != actualError.code()) {
+			TraceEvent evt(SevError, "TestErrorCodeFailed", id);
+			evt.detail("TestDesc", testDescr);
+			evt.detail("ExpectedError", expectedError.code());
+			evt.error(actualError);
+			for (auto& p : details) {
+				evt.detail(p.first.c_str(), p.second);
 			}
 			success = false;
 		}
