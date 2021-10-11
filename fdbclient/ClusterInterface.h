@@ -36,6 +36,8 @@ struct ClusterInterface {
 	RequestStream<ReplyPromise<Void>> ping;
 	RequestStream<struct GetClientWorkersRequest> getClientWorkers;
 	RequestStream<struct ForceRecoveryRequest> forceRecovery;
+	RequestStream<struct MoveShardRequest> moveShard;
+	RequestStream<struct RepairSystemDataRequest> repairSystemData;
 
 	bool operator==(ClusterInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ClusterInterface const& r) const { return id() != r.id(); }
@@ -45,7 +47,8 @@ struct ClusterInterface {
 	bool hasMessage() const {
 		return openDatabase.getFuture().isReady() || failureMonitoring.getFuture().isReady() ||
 		       databaseStatus.getFuture().isReady() || ping.getFuture().isReady() ||
-		       getClientWorkers.getFuture().isReady() || forceRecovery.getFuture().isReady();
+		       getClientWorkers.getFuture().isReady() || forceRecovery.getFuture().isReady() ||
+		       moveShard.getFuture().isReady() || repairSystemData.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -55,11 +58,21 @@ struct ClusterInterface {
 		ping.getEndpoint(TaskPriority::ClusterController);
 		getClientWorkers.getEndpoint(TaskPriority::ClusterController);
 		forceRecovery.getEndpoint(TaskPriority::ClusterController);
+		moveShard.getEndpoint(TaskPriority::ClusterController);
+		repairSystemData.getEndpoint(TaskPriority::ClusterController);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, openDatabase, failureMonitoring, databaseStatus, ping, getClientWorkers, forceRecovery);
+		serializer(ar,
+		           openDatabase,
+		           failureMonitoring,
+		           databaseStatus,
+		           ping,
+		           getClientWorkers,
+		           forceRecovery,
+		           moveShard,
+		           repairSystemData);
 	}
 };
 
@@ -291,4 +304,33 @@ struct ForceRecoveryRequest {
 	}
 };
 
+struct MoveShardRequest {
+	constexpr static FileIdentifier file_identifier = 2799592;
+
+	KeyRange shard;
+	std::vector<NetworkAddress> addresses;
+	ReplyPromise<Void> reply;
+
+	MoveShardRequest() {}
+	MoveShardRequest(KeyRange shard, const std::vector<NetworkAddress>& addresses)
+	  : shard(shard), addresses(addresses) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, shard, addresses, reply);
+	}
+};
+
+struct RepairSystemDataRequest {
+	constexpr static FileIdentifier file_identifier = 2799593;
+
+	ReplyPromise<Void> reply;
+
+	RepairSystemDataRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
 #endif
