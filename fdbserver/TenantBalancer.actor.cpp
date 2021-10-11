@@ -269,7 +269,7 @@ struct TenantBalancer {
 		}
 
 		Database externalDb = Database::createDatabase(
-		    makeReference<ClusterConnectionKey>(self->db, dbKey, ClusterConnectionString(connectionString)),
+		    makeReference<ClusterConnectionKey>(self->db, dbKey, ClusterConnectionString(connectionString), true),
 		    Database::API_VERSION_LATEST,
 		    IsInternal::True,
 		    self->tbi.locality);
@@ -317,7 +317,7 @@ struct TenantBalancer {
 						std::string name = kv.key.removePrefix(tenantBalancerExternalDatabasePrefix).toString();
 						self->externalDatabases[name] = Database::createDatabase(
 						    makeReference<ClusterConnectionKey>(
-						        self->db, kv.key, ClusterConnectionString(kv.value.toString())),
+						        self->db, kv.key, ClusterConnectionString(kv.value.toString()), true),
 						    Database::API_VERSION_LATEST,
 						    IsInternal::True,
 						    self->tbi.locality);

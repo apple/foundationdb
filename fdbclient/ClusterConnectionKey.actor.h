@@ -34,10 +34,15 @@
 
 class ClusterConnectionKey : public IClusterConnectionRecord, ReferenceCounted<ClusterConnectionKey>, NonCopyable {
 public:
-	ClusterConnectionKey() : IClusterConnectionRecord(false), valid(false) {}
-	ClusterConnectionKey(Database db, Key connectionStringKey, ClusterConnectionString const& contents);
+	ClusterConnectionKey() : IClusterConnectionRecord(false), valid(false), allowSystemKeys(false) {}
+	ClusterConnectionKey(Database db,
+	                     Key connectionStringKey,
+	                     ClusterConnectionString const& contents,
+	                     bool allowSystemKeys = false);
 
-	ACTOR static Future<ClusterConnectionKey> loadClusterConnectionKey(Database db, Key connectionStringKey);
+	ACTOR static Future<ClusterConnectionKey> loadClusterConnectionKey(Database db,
+	                                                                   Key connectionStringKey,
+	                                                                   bool allowSystemKeys = false);
 
 	ClusterConnectionString const& getConnectionString() const override;
 	Future<Void> setConnectionString(ClusterConnectionString const&) override;
@@ -68,6 +73,7 @@ private:
 	ClusterConnectionString cs;
 	Key connectionStringKey;
 	bool valid;
+	bool allowSystemKeys;
 };
 
 #include "flow/unactorcompiler.h"

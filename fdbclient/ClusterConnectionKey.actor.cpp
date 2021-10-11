@@ -19,23 +19,31 @@
  */
 
 #include "fdbclient/ClusterConnectionKey.actor.h"
+#include "fdbclient/FDBOptions.g.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 ClusterConnectionKey::ClusterConnectionKey(Database db,
                                            Key connectionStringKey,
-                                           ClusterConnectionString const& contents)
-  : IClusterConnectionRecord(true), db(db), cs(contents), connectionStringKey(connectionStringKey), valid(true) {}
+                                           ClusterConnectionString const& contents,
+                                           bool allowSystemKeys)
+  : IClusterConnectionRecord(true), db(db), cs(contents), connectionStringKey(connectionStringKey), valid(true),
+    allowSystemKeys(allowSystemKeys) {}
 
 ACTOR Future<ClusterConnectionKey> ClusterConnectionKey::loadClusterConnectionKey(Database db,
-                                                                                  Key connectionStringKey) {
+                                                                                  Key connectionStringKey,
+                                                                                  bool allowSystemKeys) {
 	state Transaction tr(db);
 	loop {
 		try {
+			if (allowSystemKeys) {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			}
 			Optional<Value> v = wait(tr.get(connectionStringKey));
 			if (!v.present()) {
 				throw connection_string_invalid();
 			}
-			return ClusterConnectionKey(db, connectionStringKey, ClusterConnectionString(v.get().toString()));
+			return ClusterConnectionKey(
+			    db, connectionStringKey, ClusterConnectionString(v.get().toString()), allowSystemKeys);
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -92,6 +100,9 @@ ACTOR Future<bool> ClusterConnectionKey::persistImpl(Reference<ClusterConnection
 			state Transaction tr(self->db);
 			loop {
 				try {
+					if (self->allowSystemKeys) {
+						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					}
 					tr.set(self->connectionStringKey, StringRef(self->cs.toString()));
 					wait(tr.commit());
 					return true;
