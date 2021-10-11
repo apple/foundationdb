@@ -599,7 +599,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 }
 
 ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
-                                        Reference<ClusterConnectionFile> ccf,
+                                        Reference<IClusterConnectionRecord> ccr,
                                         Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
                                         LocalityData locality) {
 	state WorkloadInterface workIface;
@@ -614,7 +614,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 		startRole(Role::TESTER, workIface.id(), UID(), details);
 
 		if (work.useDatabase) {
-			cx = Database::createDatabase(ccf, -1, IsInternal::True, locality);
+			cx = Database::createDatabase(ccr, -1, IsInternal::True, locality);
 			wait(delay(1.0));
 		}
 
@@ -658,7 +658,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 }
 
 ACTOR Future<Void> testerServerCore(TesterInterface interf,
-                                    Reference<ClusterConnectionFile> ccf,
+                                    Reference<IClusterConnectionRecord> ccr,
                                     Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
                                     LocalityData locality) {
 	state PromiseStream<Future<Void>> addWorkload;
@@ -668,7 +668,7 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 	loop choose {
 		when(wait(workerFatalError)) {}
 		when(WorkloadRequest work = waitNext(interf.recruitments.getFuture())) {
-			addWorkload.send(testerServerWorkload(work, ccf, dbInfo, locality));
+			addWorkload.send(testerServerWorkload(work, ccr, dbInfo, locality));
 		}
 	}
 }
@@ -1583,8 +1583,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
  * functionality. Its main purpose is to generate the test specification from passed arguments and then call into the
  * correct actor which will orchestrate the actual test.
  *
- * \param connFile A cluster connection file. Not all tests require a functional cluster but all tests require
- * a cluster file.
+ * \param connRecord A cluster connection record. Not all tests require a functional cluster but all tests require
+ * a cluster record.
  * \param whatToRun TEST_TYPE_FROM_FILE to read the test description from a passed toml file or
  * TEST_TYPE_CONSISTENCY_CHECK to generate a test spec for consistency checking
  * \param at TEST_HERE: this process will act as a test client and execute the given workload. TEST_ON_SERVERS: Run a
@@ -1600,7 +1600,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
  *
  * \returns A future which will be set after all tests finished.
  */
-ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
+ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
                             test_type_t whatToRun,
                             test_location_t at,
                             int minTestersExpected,
@@ -1612,8 +1612,8 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
 	auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
 	std::vector<Future<Void>> actors;
-	if (connFile) {
-		actors.push_back(reportErrors(monitorLeader(connFile, cc), "MonitorLeader"));
+	if (connRecord) {
+		actors.push_back(reportErrors(monitorLeader(connRecord, cc), "MonitorLeader"));
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
 	}
 
@@ -1688,7 +1688,7 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 		std::vector<TesterInterface> iTesters(1);
 		actors.push_back(
 		    reportErrors(monitorServerDBInfo(cc, LocalityData(), db), "MonitorServerDBInfo")); // FIXME: Locality
-		actors.push_back(reportErrors(testerServerCore(iTesters[0], connFile, db, locality), "TesterServerCore"));
+		actors.push_back(reportErrors(testerServerCore(iTesters[0], connRecord, db, locality), "TesterServerCore"));
 		tests = runTests(cc, ci, iTesters, testSpecs, startingConfiguration, locality);
 	} else {
 		tests = reportErrors(runTests(cc, ci, testSpecs, at, minTestersExpected, startingConfiguration, locality),

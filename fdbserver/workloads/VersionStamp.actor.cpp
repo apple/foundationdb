@@ -19,6 +19,7 @@
  */
 
 #include "fdbrpc/ContinuousSample.h"
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -150,7 +151,7 @@ struct VersionStampWorkload : TestWorkload {
 
 	ACTOR Future<bool> _check(Database cx, VersionStampWorkload* self) {
 		if (self->validateExtraDB) {
-			auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
+			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
 			cx = Database::createDatabase(extraFile, -1);
 		}
 		state ReadYourWritesTransaction tr(cx);
@@ -309,7 +310,7 @@ struct VersionStampWorkload : TestWorkload {
 		state Database extraDB;
 
 		if (g_simulator.extraDB != nullptr) {
-			auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
+			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
 			extraDB = Database::createDatabase(extraFile, -1);
 		}
 

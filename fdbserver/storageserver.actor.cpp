@@ -5190,13 +5190,13 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 		return false;
 }
 
-ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<ClusterConnectionFile> connFile, UID id) {
-	if (store->getType() != KeyValueStoreType::MEMORY || connFile.getPtr() == nullptr) {
+ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<IClusterConnectionRecord> connRecord, UID id) {
+	if (store->getType() != KeyValueStoreType::MEMORY || connRecord.getPtr() == nullptr) {
 		return Never();
 	}
 
 	// create a temp client connect to DB
-	Database cx = Database::createDatabase(connFile, Database::API_VERSION_LATEST);
+	Database cx = Database::createDatabase(connRecord, Database::API_VERSION_LATEST);
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 	state int noCanRemoveCount = 0;
@@ -5430,7 +5430,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
                                  Promise<Void> recovered,
-                                 Reference<ClusterConnectionFile> connFile) {
+                                 Reference<IClusterConnectionRecord> connRecord) {
 	state StorageServer self(persistentData, db, ssi);
 	self.folder = folder;
 
@@ -5444,7 +5444,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			// for memory storage engine type, wait until recovery is done before commit
 			when(wait(self.storage.commit())) {}
 
-			when(wait(memoryStoreRecover(persistentData, connFile, self.thisServerID))) {
+			when(wait(memoryStoreRecover(persistentData, connRecord, self.thisServerID))) {
 				TraceEvent("DisposeStorageServer", self.thisServerID).log();
 				throw worker_removed();
 			}
