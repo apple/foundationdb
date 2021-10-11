@@ -28,8 +28,8 @@
 // An implementation of IClusterConnectionRecord backed by a file.
 class ClusterConnectionFile : public IClusterConnectionRecord, ReferenceCounted<ClusterConnectionFile>, NonCopyable {
 public:
-	// Loads and parses the file at 'path', throwing errors if the file cannot be read or the format is invalid.
-	explicit ClusterConnectionFile(std::string const& path);
+	// Loads and parses the file at 'filename', throwing errors if the file cannot be read or the format is invalid.
+	explicit ClusterConnectionFile(std::string const& filename);
 
 	// Creates a cluster file with a given connection string and saves it to the specified file.
 	explicit ClusterConnectionFile(std::string const& filename, ClusterConnectionString const& contents);
@@ -38,7 +38,7 @@ public:
 	// been persisted or if the file has been modified externally.
 	ClusterConnectionString const& getConnectionString() const override;
 
-	// Sets the connections string held by this object. Calling this function does not persist the string to disk.
+	// Sets the connections string held by this object and persists it.
 	Future<Void> setConnectionString(ClusterConnectionString const&) override;
 
 	// Get the connection string stored in the file.

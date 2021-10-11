@@ -50,6 +50,8 @@ std::string trim(std::string const& connectionString) {
 
 } // namespace
 
+FDB_DEFINE_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
+
 Future<bool> IClusterConnectionRecord::upToDate() {
 	ClusterConnectionString temp;
 	return upToDate(temp);

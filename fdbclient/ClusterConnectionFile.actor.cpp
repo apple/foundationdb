@@ -22,8 +22,9 @@
 #include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-// Loads and parses the file at 'path', throwing errors if the file cannot be read or the format is invalid.
-ClusterConnectionFile::ClusterConnectionFile(std::string const& filename) : IClusterConnectionRecord(false) {
+// Loads and parses the file at 'filename', throwing errors if the file cannot be read or the format is invalid.
+ClusterConnectionFile::ClusterConnectionFile(std::string const& filename)
+  : IClusterConnectionRecord(ConnectionStringNeedsPersisted::False) {
 	if (!fileExists(filename)) {
 		throw no_cluster_file_found();
 	}
@@ -34,7 +35,7 @@ ClusterConnectionFile::ClusterConnectionFile(std::string const& filename) : IClu
 
 // Creates a cluster file with a given connection string and saves it to the specified file.
 ClusterConnectionFile::ClusterConnectionFile(std::string const& filename, ClusterConnectionString const& contents)
-  : IClusterConnectionRecord(true) {
+  : IClusterConnectionRecord(ConnectionStringNeedsPersisted::True) {
 	this->filename = filename;
 	cs = contents;
 }
@@ -45,7 +46,7 @@ ClusterConnectionString const& ClusterConnectionFile::getConnectionString() cons
 	return cs;
 }
 
-// Sets the connections string held by this object. Calling this function does not persist the string to disk.
+// Sets the connections string held by this object and persists it.
 Future<Void> ClusterConnectionFile::setConnectionString(ClusterConnectionString const& conn) {
 	ASSERT(filename.size());
 	cs = conn;
