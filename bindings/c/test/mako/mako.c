@@ -1902,7 +1902,17 @@ int validate_args(mako_args_t* args) {
 		return -1;
 	}
 	if (args->num_databases < args->num_fdb_clusters) {
-		fprintf(stderr, "ERROR: --num_databases must be >= number of clusters\n");
+		fprintf(stderr,
+		        "ERROR: --num_databases (%d) must be >= number of clusters(%d)\n",
+		        args->num_databases,
+		        args->num_fdb_clusters);
+		return -1;
+	}
+	if (args->num_threads < args->num_databases) {
+		fprintf(stderr,
+		        "ERROR: --threads (%d) must be >= number of databases (%d)\n",
+		        args->num_threads,
+		        args->num_databases);
 		return -1;
 	}
 	if (args->key_length < 4 /* "mako" */ + digits(args->rows)) {
