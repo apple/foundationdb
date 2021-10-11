@@ -618,6 +618,7 @@ public:
 	NotifiedVersion durableVersion; // At least this version will be readable from storage after a power failure
 	Version rebootAfterDurableVersion;
 	int8_t primaryLocality;
+	Version knownCommittedVersion;
 
 	Deque<std::pair<Version, Version>> recoveryVersionSkips;
 	int64_t versionLag; // An estimate for how many versions it takes for the data to move from the logs to this storage
@@ -868,10 +869,10 @@ public:
 	                                                                   Histogram::Unit::microseconds)),
 	    tag(invalidTag), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0),
 	    storage(this, storage), shardChangeCounter(0), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
-	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), primaryLocality(tagLocalityInvalid),
-	    versionLag(0), logProtocol(0), thisServerID(ssi.id()), tssInQuarantine(false), db(db), actors(false),
-	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), durableInProgress(Void()), watchBytes(0),
-	    numWatches(0), noRecentUpdates(false), lastUpdate(now()),
+	    knownCommittedVersion(0), rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
+	    primaryLocality(tagLocalityInvalid), versionLag(0), logProtocol(0), thisServerID(ssi.id()),
+	    tssInQuarantine(false), db(db), actors(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")),
+	    durableInProgress(Void()), watchBytes(0), numWatches(0), noRecentUpdates(false), lastUpdate(now()),
 	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), updateEagerReads(nullptr),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
@@ -1637,7 +1638,7 @@ MutationsAndVersionRef filterMutations(Arena& arena, MutationsAndVersionRef cons
 		}
 	}
 	if (modifiedMutations.present()) {
-		return MutationsAndVersionRef(modifiedMutations.get(), m.version);
+		return MutationsAndVersionRef(modifiedMutations.get(), m.version, m.knownCommittedVersion);
 	}
 	return m;
 }
@@ -1659,6 +1660,7 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 		throw unknown_change_feed();
 	}
 	state Version dequeVersion = data->version.get();
+	state Version dequeKnownCommit = data->knownCommittedVersion;
 	if (req.end <= feed->second->emptyVersion + 1) {
 	} else if (feed->second->durableVersion == invalidVersion || req.begin > feed->second->durableVersion) {
 		for (auto& it : feed->second->mutations) {
@@ -1689,11 +1691,13 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 		Version lastVersion = req.begin - 1;
 		for (auto& kv : res) {
 			Key id;
-			Version version;
+			Version version, knownCommittedVersion;
+			Standalone<VectorRef<MutationRef>> mutations;
 			std::tie(id, version) = decodeChangeFeedDurableKey(kv.key);
-			auto mutations = decodeChangeFeedDurableValue(kv.value);
+			std::tie(mutations, knownCommittedVersion) = decodeChangeFeedDurableValue(kv.value);
 			reply.arena.dependsOn(mutations.arena());
-			auto m = filterMutations(reply.arena, MutationsAndVersionRef(mutations, version), req.range);
+			auto m = filterMutations(
+			    reply.arena, MutationsAndVersionRef(mutations, version, knownCommittedVersion), req.range);
 			reply.mutations.push_back(reply.arena, m);
 			remainingLimitBytes -=
 			    sizeof(KeyValueRef) +
@@ -1745,7 +1749,8 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 	}
 	Version finalVersion = std::min(req.end - 1, dequeVersion);
 	if ((reply.mutations.empty() || reply.mutations.back().version < finalVersion) && remainingLimitBytes > 0) {
-		reply.mutations.push_back(reply.arena, MutationsAndVersionRef(finalVersion));
+		reply.mutations.push_back(
+		    reply.arena, MutationsAndVersionRef(finalVersion, finalVersion == dequeVersion ? dequeKnownCommit : 0));
 	}
 	return reply;
 }
@@ -2960,7 +2965,7 @@ void applyMutation(StorageServer* self,
 		if (!fromFetch) {
 			for (auto& it : self->keyChangeFeed[m.param1]) {
 				if (it->mutations.empty() || it->mutations.back().version != version) {
-					it->mutations.push_back(MutationsAndVersionRef(version));
+					it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion));
 				}
 				it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
 				self->currentChangeFeeds.insert(it->id);
@@ -2978,7 +2983,7 @@ void applyMutation(StorageServer* self,
 			for (auto& r : ranges) {
 				for (auto& it : r.value()) {
 					if (it->mutations.empty() || it->mutations.back().version != version) {
-						it->mutations.push_back(MutationsAndVersionRef(version));
+						it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion));
 					}
 					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
 					self->currentChangeFeeds.insert(it->id);
@@ -3262,8 +3267,9 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange ra
 				Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(feedResults.getFuture());
 				for (auto& it : res) {
 					if (it.mutations.size()) {
-						data->storage.writeKeyValue(KeyValueRef(changeFeedDurableKey(rangeId, it.version),
-						                                        changeFeedDurableValue(it.mutations)));
+						data->storage.writeKeyValue(
+						    KeyValueRef(changeFeedDurableKey(rangeId, it.version),
+						                changeFeedDurableValue(it.mutations, it.knownCommittedVersion)));
 					}
 				}
 				wait(yield());
@@ -3291,7 +3297,8 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange ra
 					if (remoteResult[remoteLoc].mutations.size()) {
 						data->storage.writeKeyValue(
 						    KeyValueRef(changeFeedDurableKey(rangeId, remoteResult[remoteLoc].version),
-						                changeFeedDurableValue(remoteResult[remoteLoc].mutations)));
+						                changeFeedDurableValue(remoteResult[remoteLoc].mutations,
+						                                       remoteResult[remoteLoc].knownCommittedVersion)));
 					}
 					remoteLoc++;
 				} else if (remoteResult[remoteLoc].version == localResult.version) {
@@ -3301,7 +3308,8 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange ra
 						    remoteResult.arena(), localResult.mutations.begin(), localResult.mutations.size());
 						data->storage.writeKeyValue(
 						    KeyValueRef(changeFeedDurableKey(rangeId, remoteResult[remoteLoc].version),
-						                changeFeedDurableValue(remoteResult[remoteLoc].mutations)));
+						                changeFeedDurableValue(remoteResult[remoteLoc].mutations,
+						                                       remoteResult[remoteLoc].knownCommittedVersion)));
 					}
 					remoteLoc++;
 					Standalone<MutationsAndVersionRef> _localResult = waitNext(localResults.getFuture());
@@ -3748,7 +3756,7 @@ void AddingShard::addMutation(Version version, bool fromFetch, MutationRef const
 			if (mutation.type == MutationRef::SetValue) {
 				for (auto& it : server->keyChangeFeed[mutation.param1]) {
 					if (it->mutations.empty() || it->mutations.back().version != version) {
-						it->mutations.push_back(MutationsAndVersionRef(version));
+						it->mutations.push_back(MutationsAndVersionRef(version, server->knownCommittedVersion));
 					}
 					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), mutation);
 					server->currentChangeFeeds.insert(it->id);
@@ -3758,7 +3766,7 @@ void AddingShard::addMutation(Version version, bool fromFetch, MutationRef const
 				for (auto& r : ranges) {
 					for (auto& it : r.value()) {
 						if (it->mutations.empty() || it->mutations.back().version != version) {
-							it->mutations.push_back(MutationsAndVersionRef(version));
+							it->mutations.push_back(MutationsAndVersionRef(version, server->knownCommittedVersion));
 						}
 						it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), mutation);
 						server->currentChangeFeeds.insert(it->id);
@@ -4062,7 +4070,7 @@ private:
 				rollback(data, rollbackVersion, currentVersion);
 			}
 			for (auto& it : data->uidChangeFeed) {
-				it.second->mutations.push_back(MutationsAndVersionRef(currentVersion));
+				it.second->mutations.push_back(MutationsAndVersionRef(currentVersion, rollbackVersion));
 				it.second->mutations.back().mutations.push_back_deep(it.second->mutations.back().arena(), m);
 				data->currentChangeFeeds.insert(it.first);
 			}
@@ -4281,6 +4289,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 		++data->counters.updateBatches;
 		data->lastTLogVersion = cursor->getMaxKnownVersion();
+		data->knownCommittedVersion = cursor->getMinKnownCommittedVersion();
 		data->versionLag = std::max<int64_t>(0, data->lastTLogVersion - data->version.get());
 
 		ASSERT(*pReceivedUpdate == false);
@@ -4677,8 +4686,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					if (it.version > newOldestVersion) {
 						break;
 					}
-					data->storage.writeKeyValue(KeyValueRef(changeFeedDurableKey(info->second->id, it.version),
-					                                        changeFeedDurableValue(it.mutations)));
+					data->storage.writeKeyValue(
+					    KeyValueRef(changeFeedDurableKey(info->second->id, it.version),
+					                changeFeedDurableValue(it.mutations, it.knownCommittedVersion)));
 					info->second->storageVersion = it.version;
 				}
 				wait(yield(TaskPriority::UpdateStorage));

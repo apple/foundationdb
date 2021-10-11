@@ -505,10 +505,10 @@ extern const KeyRef changeFeedPrivatePrefix;
 extern const KeyRangeRef changeFeedDurableKeys;
 extern const KeyRef changeFeedDurablePrefix;
 
-const Value changeFeedDurableKey(Key const& feed, Version const& version);
+const Value changeFeedDurableKey(Key const& feed, Version version);
 std::pair<Key, Version> decodeChangeFeedDurableKey(ValueRef const& key);
-const Value changeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations);
-Standalone<VectorRef<MutationRef>> decodeChangeFeedDurableValue(ValueRef const& value);
+const Value changeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations, Version knownCommittedVersion);
+std::pair<Standalone<VectorRef<MutationRef>>, Version> decodeChangeFeedDurableValue(ValueRef const& value);
 
 // Configuration database special keys
 extern const KeyRef configTransactionDescriptionKey;
