@@ -27,7 +27,7 @@
 ClusterConnectionKey::ClusterConnectionKey(Database db,
                                            Key connectionStringKey,
                                            ClusterConnectionString const& contents,
-                                           bool needsToBePersisted)
+                                           ConnectionStringNeedsPersisted needsToBePersisted)
   : IClusterConnectionRecord(needsToBePersisted), db(db), cs(contents), connectionStringKey(connectionStringKey) {}
 
 // Loads and parses the connection string at the specified key, throwing errors if the file cannot be read or the
@@ -41,8 +41,10 @@ ACTOR Future<Reference<ClusterConnectionKey>> ClusterConnectionKey::loadClusterC
 			if (!v.present()) {
 				throw connection_string_invalid();
 			}
-			return makeReference<ClusterConnectionKey>(
-			    db, connectionStringKey, ClusterConnectionString(v.get().toString()), false);
+			return makeReference<ClusterConnectionKey>(db,
+			                                           connectionStringKey,
+			                                           ClusterConnectionString(v.get().toString()),
+			                                           ConnectionStringNeedsPersisted::False);
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -55,8 +57,7 @@ ClusterConnectionString const& ClusterConnectionKey::getConnectionString() const
 	return cs;
 }
 
-// Sets the connections string held by this object. Calling this function does not persist the string to the
-// database.
+// Sets the connections string held by this object and persists it.
 Future<Void> ClusterConnectionKey::setConnectionString(ClusterConnectionString const& connectionString) {
 	cs = connectionString;
 	return success(persist());

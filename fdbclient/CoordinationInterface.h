@@ -77,6 +77,8 @@ private:
 	Key key, keyDesc;
 };
 
+FDB_DECLARE_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
+
 // A record that stores the connection string used to connect to a cluster. This record can be updated when a cluster
 // notifies a connected party that the connection string has changed.
 //
@@ -85,7 +87,7 @@ private:
 // one that is only stored in memory.
 class IClusterConnectionRecord {
 public:
-	IClusterConnectionRecord(bool connectionStringNeedsPersisted)
+	IClusterConnectionRecord(ConnectionStringNeedsPersisted connectionStringNeedsPersisted)
 	  : connectionStringNeedsPersisted(connectionStringNeedsPersisted) {}
 	virtual ~IClusterConnectionRecord() {}
 
@@ -93,7 +95,7 @@ public:
 	// been persisted or if the persistent storage for the record has been modified externally.
 	virtual ClusterConnectionString const& getConnectionString() const = 0;
 
-	// Sets the connections string held by this object. Calling this function does not persist the record.
+	// Sets the connections string held by this object and persists it.
 	virtual Future<Void> setConnectionString(ClusterConnectionString const&) = 0;
 
 	// If this record is backed by persistent storage, get the connection string from that storage. Otherwise, return
@@ -129,14 +131,14 @@ protected:
 	// Writes the connection string to the backing persistent storage, if applicable.
 	virtual Future<bool> persist() = 0;
 
-	// Returns whether the connection record contains a connection string that should be persisted upon connection.
+	// Returns whether the connection record contains a connection string that needs to be persisted upon connection.
 	bool needsToBePersisted() const;
 
 	// Clears the flag needs persisted flag.
 	void setPersisted();
 
 private:
-	// A flag that indicates whether this connection record should be persisted when it succesfully establishes a
+	// A flag that indicates whether this connection record needs to be persisted when it succesfully establishes a
 	// connection.
 	bool connectionStringNeedsPersisted;
 };

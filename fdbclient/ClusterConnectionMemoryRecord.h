@@ -31,7 +31,8 @@ class ClusterConnectionMemoryRecord : public IClusterConnectionRecord,
 public:
 	// Creates a cluster file with a given connection string.
 	explicit ClusterConnectionMemoryRecord(ClusterConnectionString const& cs)
-	  : IClusterConnectionRecord(false), id(deterministicRandom()->randomUniqueID()), cs(cs) {}
+	  : IClusterConnectionRecord(ConnectionStringNeedsPersisted::False), id(deterministicRandom()->randomUniqueID()),
+	    cs(cs) {}
 
 	// Returns the connection string currently held in this object.
 	ClusterConnectionString const& getConnectionString() const override;

@@ -41,7 +41,7 @@ public:
 	ClusterConnectionKey(Database db,
 	                     Key connectionStringKey,
 	                     ClusterConnectionString const& contents,
-	                     bool needsToBePersisted = true);
+	                     ConnectionStringNeedsPersisted needsToBePersisted = ConnectionStringNeedsPersisted::True);
 
 	// Loads and parses the connection string at the specified key, throwing errors if the file cannot be read or the
 	// format is invalid.
@@ -51,8 +51,7 @@ public:
 	// hasn't been persisted or if the key has been modified externally.
 	ClusterConnectionString const& getConnectionString() const override;
 
-	// Sets the connections string held by this object. Calling this function does not persist the string to the
-	// database.
+	// Sets the connections string held by this object and persists it.
 	Future<Void> setConnectionString(ClusterConnectionString const&) override;
 
 	// Get the connection string stored in the database.
