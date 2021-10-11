@@ -54,11 +54,11 @@ struct ClientData {
 
 struct MonitorLeaderInfo {
 	bool hasConnected;
-	Reference<ClusterConnectionFile> intermediateConnFile;
+	Reference<IClusterConnectionRecord> intermediateConnRecord;
 
 	MonitorLeaderInfo() : hasConnected(false) {}
-	explicit MonitorLeaderInfo(Reference<ClusterConnectionFile> intermediateConnFile)
-	  : hasConnected(false), intermediateConnFile(intermediateConnFile) {}
+	explicit MonitorLeaderInfo(Reference<IClusterConnectionRecord> intermediateConnRecord)
+	  : hasConnected(false), intermediateConnRecord(intermediateConnRecord) {}
 };
 
 Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<LeaderInfo>>& nominees);
@@ -68,7 +68,7 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<Leade
 // If a leader is elected for long enough and communication with a quorum of coordinators is possible, eventually
 // outKnownLeader will be that leader's interface.
 template <class LeaderInterface>
-Future<Void> monitorLeader(Reference<ClusterConnectionFile> const& connFile,
+Future<Void> monitorLeader(Reference<IClusterConnectionRecord> const& connFile,
                            Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader);
 
 // This is one place where the leader election algorithm is run. The coodinator contacts all coodinators to collect
@@ -80,7 +80,7 @@ Future<Void> monitorLeaderAndGetClientInfo(Value const& key,
                                            Reference<AsyncVar<Optional<LeaderInfo>>> const& leaderInfo);
 
 Future<Void> monitorProxies(
-    Reference<AsyncVar<Reference<ClusterConnectionFile>>> const& connFile,
+    Reference<AsyncVar<Reference<IClusterConnectionRecord>>> const& connRecord,
     Reference<AsyncVar<ClientDBInfo>> const& clientInfo,
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> const& coordinator,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> const& supportedVersions,
@@ -96,7 +96,7 @@ void shrinkProxyList(ClientDBInfo& ni,
 #pragma region Implementation
 #endif
 
-Future<Void> monitorLeaderInternal(Reference<ClusterConnectionFile> const& connFile,
+Future<Void> monitorLeaderInternal(Reference<IClusterConnectionRecord> const& connRecord,
                                    Reference<AsyncVar<Value>> const& outSerializedLeaderInfo);
 
 template <class LeaderInterface>
@@ -119,11 +119,11 @@ struct LeaderDeserializer<ClusterInterface> {
 };
 
 template <class LeaderInterface>
-Future<Void> monitorLeader(Reference<ClusterConnectionFile> const& connFile,
+Future<Void> monitorLeader(Reference<IClusterConnectionRecord> const& connRecord,
                            Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
 	LeaderDeserializer<LeaderInterface> deserializer;
 	auto serializedInfo = makeReference<AsyncVar<Value>>();
-	Future<Void> m = monitorLeaderInternal(connFile, serializedInfo);
+	Future<Void> m = monitorLeaderInternal(connRecord, serializedInfo);
 	return m || deserializer(serializedInfo, outKnownLeader);
 }
 

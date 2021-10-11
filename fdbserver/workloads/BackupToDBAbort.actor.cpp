@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -35,7 +36,7 @@ struct BackupToDBAbort : TestWorkload {
 
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 
-		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
+		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
 		extraDB = Database::createDatabase(extraFile, -1);
 
 		lockid = UID(0xbeeffeed, 0xdecaf00d);
