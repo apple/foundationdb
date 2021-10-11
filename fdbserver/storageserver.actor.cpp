@@ -3317,6 +3317,8 @@ void changeServerKeys(StorageServer* data,
 		KeyRangeRef range = keys & r->range();
 		bool dataAvailable = r->value() == latestVersion || r->value() >= version;
 		TraceEvent("CSKRange", data->thisServerID)
+		    .detail("Version", version)
+			.detail("LatestVersion", latestVersion)
 		    .detail("KeyBegin", range.begin)
 		    .detail("KeyEnd", range.end)
 		    .detail("Available", dataAvailable)
@@ -3336,8 +3338,8 @@ void changeServerKeys(StorageServer* data,
 			// Wait (if necessary) for the latest version at which any key in keys was previously available (+1) to be
 			// durable
 
-			// clearRanges.push_back(range);
-			changeNewestAvailable.emplace_back(range, latestVersion);
+			clearRanges.push_back(range);
+			changeNewestAvailable.emplace_back(range, invalidVersion);
 			data->addShard(ShardInfo::newReadWrite(range, data));
 			setAvailableStatus(data, range, true);
 		} else if (!nowAssigned) {

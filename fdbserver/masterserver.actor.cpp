@@ -1851,7 +1851,7 @@ static void backfillTxnStateStoreToSS(Reference<MasterData> self, CommitTransact
 	RangeResult data = self->txnStateStore->readRange(txnKeys).get();
 	// Fill in keyServers, serverTags, serverList, etc.
 	for (const auto& kv : data) {
-		std::cout << "Setting key: " << kv.key.toString() << ", value: " << kv.value.toString() << std::endl;
+		// std::cout << "Setting key: " << kv.key.toString() << ", value: " << kv.value.toString() << std::endl;
 		tr.set(arena, kv.key, kv.value);
 	}
 	// for (const auto& it : serverKeysMap) {
@@ -1859,11 +1859,12 @@ static void backfillTxnStateStoreToSS(Reference<MasterData> self, CommitTransact
 	// 		tr.set(arena, serverKeysKey(it.first, kv.key), kv.value);
 	// 	}
 	// }
-	std::cout << "Repair system data complete." << std::endl;
+	// std::cout << "Repair system data complete." << std::endl;
 }
 
 static void backfillDerivedMetaDataToSS(Reference<MasterData> self, CommitTransactionRef& tr, Arena& arena) {
-	std::cout << "Reconstruct data distribution start." << std::endl;
+	TraceEvent("BackfillDerivedMetaDataBegin", self->dbgid);
+	// std::cout << "Reconstruct data distribution start." << std::endl;
 	RangeResult keyServers = self->txnStateStore->readRange(keyServersKeys).get();
 	RangeResult UID2Tag = self->txnStateStore->readRange(serverTagKeys).get();
 	ASSERT(!keyServers.empty());
@@ -1900,7 +1901,7 @@ static void backfillDerivedMetaDataToSS(Reference<MasterData> self, CommitTransa
 		// std::cout << "Assigning range [" << keys.begin.toString() << ", " << keys.end.toString()
 		//           << ") to: " << id.toString() << std::endl;
 	}
-	std::cout << "Reconstruct data distribution complete." << std::endl;
+	// std::cout << "Reconstruct data distribution complete." << std::endl;
 }
 
 ACTOR Future<Void> masterCore(Reference<MasterData> self) {

@@ -137,8 +137,15 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		//     wait(self->readFirstInRange(self, cx, KeyRange(keyServersKey(key), keyServersKey(systemKeys.begin))));
 		// ASSERT(res.present());
 		state Transaction tr(cx);
-		RangeResult res = wait(tr.getRange(systemKeys, 1));
-		ASSERT(!res.empty());
+		loop {
+			try {
+				RangeResult res = wait(tr.getRange(systemKeys, 1));
+				ASSERT(!res.empty());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
 
 		std::cout << "Read3" << std::endl;
 
