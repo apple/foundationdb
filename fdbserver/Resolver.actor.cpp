@@ -267,7 +267,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 
 			// Generate private mutations for metadata mutations
 			// The condition here must match CommitBatch::applyMetadataToCommittedTransactions()
-			if (reply.committed[t] == ConflictBatch::TransactionCommitted &&
+			if (reply.committed[t] == ConflictBatch::TransactionCommitted && !self->forceRecovery &&
 			    SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && (!isLocked || req.transactions[t].lock_aware)) {
 				applyMetadataMutations(req.transactions[t].spanContext, resolverData, req.transactions[t].mutations);
 			}
@@ -472,10 +472,9 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		// avoids a lot of map lookups.
 		pContext->pResolverData->keyInfo.rawInsert(keyInfoData);
 
-		ResolverData resolverData(pContext->pResolverData->dbgid,
-		                          pContext->pTxnStateStore,
-		                          &pContext->pResolverData->keyInfo,
-		                          pContext->pResolverData->forceRecovery);
+		bool confChanges; // Ignore configuration changes for initial commits.
+		ResolverData resolverData(
+		    pContext->pResolverData->dbgid, pContext->pTxnStateStore, &pContext->pResolverData->keyInfo, confChanges);
 
 		applyMetadataMutations(SpanID(), resolverData, mutations);
 	} // loop
