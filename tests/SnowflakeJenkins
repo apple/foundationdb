@@ -1,6 +1,6 @@
 def buildScmInfo
 stage("Build") {
-    node('test-dynamic-slave') {
+    node('regular-memory-node') {
         cleanWs()
 
         sfScmInfo = checkout([$class: 'GitSCM',
@@ -38,7 +38,7 @@ stage("Build") {
 
 def makeTestStep(iteration) {
     return {
-        node("test-dynamic-slave") {
+        node("regular-memory-node") {
             cleanWs()
             sfScmInfo = checkout([$class: 'GitSCM',
                 branches: [[name: '*']],
@@ -106,7 +106,7 @@ stage("Test") {
         propagate: false
 }
 stage("Report") {
-    node('test-dynamic-slave') {
+    node('regular-memory-node') {
         cleanWs()
 
         sfScmInfo = checkout([$class: 'GitSCM',
