@@ -21,6 +21,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionKey.actor.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/TenantBalancerInterface.h"
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -78,7 +79,6 @@ private:
 	Standalone<StringRef> destinationPrefix;
 
 	std::string databaseName;
-	// TODO: leave this open, or open it at request time?
 	Database destinationDb;
 };
 
@@ -173,6 +173,7 @@ struct TenantBalancer {
 
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.set(key, value);
 				wait(tr.commit());
 				return Void();
@@ -203,6 +204,7 @@ struct TenantBalancer {
 
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.clear(key);
 				wait(tr.commit());
 				return Void();
@@ -252,6 +254,8 @@ struct TenantBalancer {
 		state Key dbKey = StringRef(name).withPrefix(tenantBalancerExternalDatabasePrefix);
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
 				Optional<Value> v = wait(tr.get(dbKey));
 				ASSERT(!v.present());
 
@@ -298,6 +302,8 @@ struct TenantBalancer {
 		state Key begin = tenantBalancerKeys.begin;
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+
 				// TODO: prevent simultaneous modifications to tenant balancer space?
 				Standalone<RangeResultRef> result = wait(tr.getRange(KeyRangeRef(begin, tenantBalancerKeys.end), 1000));
 				for (auto kv : result) {
