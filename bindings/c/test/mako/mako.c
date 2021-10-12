@@ -1901,6 +1901,14 @@ int validate_args(mako_args_t* args) {
 		fprintf(stderr, "ERROR: --vallen must be a positive integer\n");
 		return -1;
 	}
+	if (args->num_fdb_clusters > NUM_CLUSTERS_MAX) {
+		fprintf(stderr, "ERROR: Mako is not supported to do work to more than %d clusters\n", NUM_CLUSTERS_MAX);
+		return -1;
+	}
+	if (args->num_databases > NUM_DATABASES_MAX) {
+		fprintf(stderr, "ERROR: Mako is not supported to do work to more than %d databases\n", NUM_DATABASES_MAX);
+		return -1;
+	}
 	if (args->num_databases < args->num_fdb_clusters) {
 		fprintf(stderr,
 		        "ERROR: --num_databases (%d) must be >= number of clusters(%d)\n",
