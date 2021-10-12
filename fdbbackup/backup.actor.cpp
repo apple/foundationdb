@@ -2231,18 +2231,33 @@ ACTOR Future<Void> submitDBMove(Database src, Database dest, Key destPrefix, Key
 	return Void();
 }
 
+ACTOR Future<std::vector<TenantMovementInfo>> getActiveMovements(Database database) {
+	state GetActiveMovementsRequest getActiveMovementsRequest;
+	state Future<ErrorOr<GetActiveMovementsReply>> getActiveMovementsReply = Never();
+	state Future<Void> initialize = Void();
+	loop choose {
+		when(ErrorOr<GetActiveMovementsReply> reply = wait(getActiveMovementsReply)) {
+			if (reply.isError()) {
+				throw reply.getError();
+			}
+			return reply.get().activeMovements;
+		}
+		when(wait(database->onTenantBalancerChanged() || initialize)) {
+			initialize = Never();
+			getActiveMovementsReply =
+			    database->getTenantBalancer().present()
+			        ? database->getTenantBalancer().get().getActiveMovements.tryGetReply(getActiveMovementsRequest)
+			        : Never();
+		}
+	}
+}
+
 ACTOR Future<Void> statusDBMove(Database src, Database dest, KeyRef srcPrefix, bool json = false) {
 	try {
-		// Send GetActiveMovementsRequest to source cluster
-		GetActiveMovementsRequest getActiveMovementsRequest;
-		state ErrorOr<GetActiveMovementsReply> getActiveMovementsReply =
-		    wait(src->getTenantBalancer().get().getActiveMovements.tryGetReply(getActiveMovementsRequest));
-		if (getActiveMovementsReply.isError()) {
-			throw getActiveMovementsReply.getError();
-		}
+		// Get active movement list
+		state std::vector<TenantMovementInfo> activeMovements = wait(getActiveMovements(src));
 
 		// Filter for desired movements
-		std::vector<TenantMovementInfo> activeMovements = getActiveMovementsReply.get().activeMovements;
 		bool foundMovement = false;
 		for (const auto& movement : activeMovements) {
 			if (movement.destConnectionString == dest->getConnectionRecord()->getConnectionString().toString()) {
@@ -2268,17 +2283,12 @@ ACTOR Future<Void> statusDBMove(Database src, Database dest, KeyRef srcPrefix, b
 // list movement from src, or to dest, depending on isSrc
 ACTOR Future<Void> listDBMove(Database db, bool isSrc) {
 	try {
-		// Send GetActiveMovementsRequest to source cluster
-		GetActiveMovementsRequest getActiveMovementsRequest;
-		state ErrorOr<GetActiveMovementsReply> getActiveMovementsReply =
-		    wait(db->getTenantBalancer().get().getActiveMovements.tryGetReply(getActiveMovementsRequest));
-		if (getActiveMovementsReply.isError()) {
-			throw getActiveMovementsReply.getError();
-		}
+		// Get active movement list
+		state std::vector<TenantMovementInfo> activeMovements = wait(getActiveMovements(db));
 
 		// Filter for desired movements
 		std::vector<TenantMovementInfo> targetMovements;
-		for (const auto& movement : getActiveMovementsReply.get().activeMovements) {
+		for (const auto& movement : activeMovements) {
 			if ((movement.movementLocation == TenantMovementInfo::Location::SOURCE) == isSrc) {
 				targetMovements.push_back(movement);
 			}
@@ -2306,16 +2316,11 @@ ACTOR Future<Void> listDBMove(Database src, Database dest) {
 		       "List running data movement",
 		       src->getConnectionRecord()->getConnectionString().toString().c_str(),
 		       dest->getConnectionRecord()->getConnectionString().toString().c_str());
-		// Send GetActiveMovementsRequest to clusters
-		GetActiveMovementsRequest srcActiveMovementsRequest;
-		state ErrorOr<GetActiveMovementsReply> srcActiveMovementsReply =
-		    wait(src->getTenantBalancer().get().getActiveMovements.tryGetReply(srcActiveMovementsRequest));
-		if (srcActiveMovementsReply.isError()) {
-			throw srcActiveMovementsReply.getError();
-		}
+		// Get active movement list
+		state std::vector<TenantMovementInfo> activeMovements = wait(getActiveMovements(src));
 
 		// Filter for desired movements
-		for (const auto& movement : srcActiveMovementsReply.get().activeMovements) {
+		for (const auto& movement : activeMovements) {
 			if (movement.destConnectionString == dest->getConnectionRecord()->getConnectionString().toString()) {
 				printf(movement.toString().c_str());
 			}
@@ -2372,17 +2377,26 @@ ACTOR Future<Void> abortDBMove(Optional<Database> src, Optional<Database> dest, 
 	ASSERT(src.present() || dest.present());
 
 	try {
-		AbortMovementRequest abortMovementRequest;
+		state AbortMovementRequest abortMovementRequest;
 		abortMovementRequest.tenantName = targetPrefix.toString();
 		abortMovementRequest.isSrc = src.present();
-		state ErrorOr<AbortMovementReply> abortMovementReply =
-		    wait((abortMovementRequest.isSrc ? src : dest)
-		             .get()
-		             ->getTenantBalancer()
-		             .get()
-		             .abortMovement.tryGetReply(abortMovementRequest));
-		if (abortMovementReply.isError()) {
-			throw abortMovementReply.getError();
+		state Future<ErrorOr<AbortMovementReply>> abortMovementReply = Never();
+		state Future<Void> initialize = Void();
+		state Database targetDatabase = (abortMovementRequest.isSrc ? src : dest).get();
+		loop choose {
+			when(ErrorOr<AbortMovementReply> reply = wait(abortMovementReply)) {
+				if (reply.isError()) {
+					throw reply.getError();
+				}
+				break;
+			}
+			when(wait(targetDatabase->onTenantBalancerChanged() || initialize)) {
+				initialize = Never();
+				abortMovementReply =
+				    targetDatabase->getTenantBalancer().present()
+				        ? targetDatabase->getTenantBalancer().get().abortMovement.tryGetReply(abortMovementRequest)
+				        : Never();
+			}
 		}
 		printf("The data movement was successfully aborted.\n");
 	} catch (Error& e) {
