@@ -1496,8 +1496,12 @@ void seedShardServers(Arena& arena,
 		server_tag[s.id()] = Tag(t.locality, t.id);
 		t.id++;
 	}
-	// We can't sort this, because the last team is txsTeam.
-	// std::sort(servers.begin(), servers.end());
+
+	// We can't sort this in ptxn, because the last team is txsTeam.
+	if (!SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		// TODO: Why are we sorted?
+		std::sort(servers.begin(), servers.end());
+	}
 
 	// This isn't strictly necessary, but make sure this is the first transaction
 	tr.read_snapshot = 0;
