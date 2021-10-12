@@ -431,12 +431,6 @@ struct TenantBalancer {
 		                         [=](Reference<ReadYourWritesTransaction> tr) { return isTenantEmpty(tr, prefix); });
 	}
 
-private:
-	// TODO: ref count external databases and delete when all references are gone
-	std::unordered_map<std::string, Database> externalDatabases;
-	std::map<Key, SourceMovementRecord> outgoingMovements;
-	std::map<Key, DestinationMovementRecord> incomingMovements;
-
 	CounterCollection tenantBalancerMetrics;
 
 	Counter moveTenantToClusterRequests;
@@ -446,6 +440,12 @@ private:
 	Counter finishDestinationMovementRequests;
 	Counter abortMovementRequests;
 	Counter cleanupMovementSourceRequests;
+
+private:
+	// TODO: ref count external databases and delete when all references are gone
+	std::unordered_map<std::string, Database> externalDatabases;
+	std::map<Key, SourceMovementRecord> outgoingMovements;
+	std::map<Key, DestinationMovementRecord> incomingMovements;
 };
 
 // src
@@ -454,6 +454,8 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 	    .detail("SourcePrefix", req.sourcePrefix)
 	    .detail("DestinationPrefix", req.destPrefix)
 	    .detail("DestinationConnectionString", req.destConnectionString);
+
+	++self->moveTenantToClusterRequests;
 
 	try {
 		// 1.Extract necessary data from metadata
@@ -516,6 +518,8 @@ ACTOR Future<Void> receiveTenantFromCluster(TenantBalancer* self, ReceiveTenantF
 	    .detail("SourcePrefix", req.sourcePrefix)
 	    .detail("DestinationPrefix", req.destPrefix)
 	    .detail("SourceConnectionString", req.srcConnectionString);
+
+	++self->receiveTenantFromClusterRequests;
 
 	try {
 		// 0.Extract necessary variables
@@ -615,6 +619,8 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 }
 
 ACTOR Future<Void> getActiveMovements(TenantBalancer* self, GetActiveMovementsRequest req) {
+	++self->getActiveMovementsRequests;
+
 	try {
 		state std::vector<TenantMovementInfo> statusAsSrc = wait(fetchDBMove(self, true));
 		state std::vector<TenantMovementInfo> statusAsDest = wait(fetchDBMove(self, false));
@@ -630,7 +636,7 @@ ACTOR Future<Void> getActiveMovements(TenantBalancer* self, GetActiveMovementsRe
 }
 
 ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMovementRequest req) {
-	wait(delay(0)); // TODO: this is temporary; to be removed when we add code
+	++self->finishSourceMovementRequests;
 
 	try {
 		// 1.Get target tenant and version
@@ -663,6 +669,7 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 }
 
 ACTOR Future<Void> finishDestinationMovement(TenantBalancer* self, FinishDestinationMovementRequest req) {
+	++self->finishDestinationMovementRequests;
 	wait(delay(0)); // TODO: this is temporary; to be removed when we add code
 
 	try {
@@ -684,6 +691,8 @@ ACTOR Future<Void> finishDestinationMovement(TenantBalancer* self, FinishDestina
 }
 
 ACTOR Future<Void> abortMovement(TenantBalancer* self, AbortMovementRequest req) {
+	++self->abortMovementRequests;
+
 	try {
 		state Database targetDB;
 		state std::string tagName;
@@ -712,6 +721,8 @@ ACTOR Future<Void> abortMovement(TenantBalancer* self, AbortMovementRequest req)
 }
 
 ACTOR Future<Void> cleanupMovementSource(TenantBalancer* self, CleanupMovementSourceRequest req) {
+	++self->cleanupMovementSourceRequests;
+
 	try {
 		// TODO once the range has been unlocked, it will no longer be legal to run cleanup
 		state std::string tenantName = req.tenantName;
