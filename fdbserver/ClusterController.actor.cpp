@@ -4718,8 +4718,15 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 
 	// Pick a random SS as the dest, keys will reside on a single server after the move.
 	state std::vector<UID> dest;
-	RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
-	ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+	loop {
+		try {
+			state RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 
 	std::unordered_set<NetworkAddress> nadds;
 	std::unordered_set<std::string> ips;
@@ -4758,13 +4765,13 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 	state UID owner = deterministicRandom()->randomUniqueID();
 	state DDEnabledState ddEnabledState;
 
+	state Transaction txn;
 	loop {
-		tr.reset();
 		try {
 			BinaryWriter wrMyOwner(Unversioned());
 			wrMyOwner << owner;
-			tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
-			wait(tr.commit());
+			txn.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+			wait(txn.commit());
 
 			MoveKeysLock moveKeysLock;
 			moveKeysLock.myOwner = owner;
@@ -4782,8 +4789,11 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 			              &ddEnabledState));
 			break;
 		} catch (Error& e) {
-			if (e.code() != error_code_movekeys_conflict) {
-				throw e;
+			if (e.code() == error_code_movekeys_conflict) {
+				txn.reset();
+				wait(delay(1.0));
+			} else {
+				wait(txn.onError(e));
 			}
 		}
 	}
