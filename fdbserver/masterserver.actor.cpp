@@ -289,15 +289,15 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
+	    versionVectorSizeOnCVReply("VersionVectorSizeOnCVReply",
+	                               dbgid,
+	                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                               SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    masterRecoveryStateEventHolder(makeReference<EventCacheHolder>("MasterRecoveryState")),
 	    masterRecoveryGenerationsEventHolder(makeReference<EventCacheHolder>("MasterRecoveryGenerations")),
 	    masterRecoveryDurationEventHolder(makeReference<EventCacheHolder>("MasterRecoveryDuration")),
 	    masterRecoveryAvailableEventHolder(makeReference<EventCacheHolder>("MasterRecoveryAvailable")),
-	    recoveredConfigEventHolder(makeReference<EventCacheHolder>("RecoveredConfig")),
-	    versionVectorSizeOnCVReply("VersionVectorSizeOnCVReply",
-	                               dbgid,
-	                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                               SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {
+	    recoveredConfigEventHolder(makeReference<EventCacheHolder>("RecoveredConfig")) {
 		logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
 		if (forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();

@@ -235,7 +235,7 @@ struct ReportRawCommittedVersionRequest {
 	                                 Optional<Version> prevVersion,
 	                                 Optional<std::set<Tag>> writtenTags = Optional<std::set<Tag>>())
 	  : version(version), locked(locked), metadataVersion(metadataVersion),
-	    minKnownCommittedVersion(minKnownCommittedVersion), writtenTags(writtenTags), prevVersion(prevVersion) {}
+	    minKnownCommittedVersion(minKnownCommittedVersion), prevVersion(prevVersion), writtenTags(writtenTags) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
