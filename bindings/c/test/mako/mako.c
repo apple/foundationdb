@@ -1623,7 +1623,7 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 	int c;
 	int idx;
 	while (1) {
-		const char* short_options = "a:c:p:t:r:s:i:x:v:m:hjz";
+		const char* short_options = "a:c:p:t:r:s:i:x:v:m:hz";
 		static struct option long_options[] = { /* name, has_arg, flag, val */
 			                                    { "api_version", required_argument, NULL, 'a' },
 			                                    { "cluster", required_argument, NULL, 'c' },
@@ -1649,7 +1649,6 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "trace_format", required_argument, NULL, ARG_TRACEFORMAT },
 			                                    { "streaming", required_argument, NULL, ARG_STREAMING_MODE },
 			                                    { "txntrace", required_argument, NULL, ARG_TXNTRACE },
-			                                    { "json_report", required_argument, NULL, 'j' },
 			                                    /* no args */
 			                                    { "help", no_argument, NULL, 'h' },
 			                                    { "zipf", no_argument, NULL, 'z' },
@@ -1661,6 +1660,7 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
 			                                    { "version", no_argument, NULL, ARG_VERSION },
 			                                    { "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
+			                                    { "json_report", optional_argument, NULL, ARG_JSON_REPORT },
 			                                    { NULL, 0, NULL, 0 }
 		};
 		idx = 0;
@@ -1712,9 +1712,6 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			} else if (strcmp(optarg, "run") == 0) {
 				args->mode = MODE_RUN;
 			}
-			break;
-		case 'j':
-			strcpy(args->json_output_path, optarg);
 			break;
 		case ARG_KEYLEN:
 			args->key_length = atoi(optarg);
@@ -1820,6 +1817,13 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			break;
 		case ARG_DISABLE_RYW:
 			args->disable_ryw = 1;
+			break;
+		case ARG_JSON_REPORT:
+			if (optarg == NULL) {
+				strcpy(args->json_output_path, "mako.json");
+			} else {
+				strcpy(args->json_output_path, optarg);
+			}
 			break;
 		}
 	}
