@@ -2439,7 +2439,39 @@ int stats_process_main(mako_args_t* args,
 	FILE* fp = NULL;
 	if (args->json_output_path[0] != '\0') {
 		fp = fopen(args->json_output_path, "w");
-		fprintf(fp, "{\"samples\": [");
+		fprintf(fp, "{\"makoArgs\": {");
+		fprintf(fp, "\"api_version\": %d,", args->api_version);
+		fprintf(fp, "\"json\": %d,", args->json);
+		fprintf(fp, "\"num_processes\": %d,", args->num_processes);
+		fprintf(fp, "\"num_threads\": %d,", args->num_threads);
+		fprintf(fp, "\"mode\": %d,", args->mode);
+		fprintf(fp, "\"rows\": %d,", args->rows);
+		fprintf(fp, "\"seconds\": %d,", args->seconds);
+		fprintf(fp, "\"iteration\": %d,", args->iteration);
+		fprintf(fp, "\"tpsmax\": %d,", args->tpsmax);
+		fprintf(fp, "\"tpsmin\": %d,", args->tpsmin);
+		fprintf(fp, "\"tpsinterval\": %d,", args->tpsinterval);
+		fprintf(fp, "\"tpschange\": %d,", args->tpschange);
+		fprintf(fp, "\"sampling\": %d,", args->sampling);
+		fprintf(fp, "\"key_length\": %d,", args->key_length);
+		fprintf(fp, "\"value_length\": %d,", args->value_length);
+		fprintf(fp, "\"commit_get\": %d,", args->commit_get);
+		fprintf(fp, "\"verbose\": %d,", args->verbose);
+		fprintf(fp, "\"cluster_file\": \"%s\",", args->cluster_file);
+		fprintf(fp, "\"log_group\": \"%s\",", args->log_group);
+		fprintf(fp, "\"prefixpadding\": %d,", args->prefixpadding);
+		fprintf(fp, "\"trace\": %d,", args->trace);
+		fprintf(fp, "\"tracepath\": \"%s\",", args->tracepath);
+		fprintf(fp, "\"traceformat\": %d,", args->traceformat);
+		fprintf(fp, "\"knobs\": \"%s\",", args->knobs);
+		fprintf(fp, "\"flatbuffers\": %d,", args->flatbuffers);
+		fprintf(fp, "\"txntrace\": %d,", args->txntrace);
+		fprintf(fp, "\"txntagging\": %d,", args->txntagging);
+		fprintf(fp, "\"txntagging_prefix\": \"%s\",", args->txntagging_prefix);
+		fprintf(fp, "\"streaming_mode\": %d,", args->streaming_mode);
+		fprintf(fp, "\"disable_ryw\": %d,", args->disable_ryw);
+		fprintf(fp, "\"json_output_path\": \"%s\",", args->json_output_path);
+		fprintf(fp, "},{\"samples\": [");
 	}
 
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_start);
