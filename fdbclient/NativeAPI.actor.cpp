@@ -402,7 +402,8 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 		    .detail("MaxMutationsPerCommit", cx->mutationsPerCommit.max())
 		    .detail("MeanBytesPerCommit", cx->bytesPerCommit.mean())
 		    .detail("MedianBytesPerCommit", cx->bytesPerCommit.median())
-		    .detail("MaxBytesPerCommit", cx->bytesPerCommit.max());
+		    .detail("MaxBytesPerCommit", cx->bytesPerCommit.max())
+		    .detail("NumLocalityCacheEntries", cx->locationCache.size());
 
 		cx->latencies.clear();
 		cx->readLatencies.clear();
