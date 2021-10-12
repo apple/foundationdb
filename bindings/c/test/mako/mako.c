@@ -1819,7 +1819,9 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			args->disable_ryw = 1;
 			break;
 		case ARG_JSON_REPORT:
-			if (optarg == NULL) {
+			if (optarg == NULL || (argv[optind] != NULL && argv[optind][0] == '-')) {
+				// if --report_json is the last option and no file is specified
+				// or --report_json is followed by another option
 				strcpy(args->json_output_path, "mako.json");
 			} else {
 				strcpy(args->json_output_path, optarg);
