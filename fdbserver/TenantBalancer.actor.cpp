@@ -412,7 +412,7 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 		                              LockDB::False));
 
 		// Check if a backup agent is running
-		bool agentRunning = wait(self->agent.checkActive(destDatabase.get()));
+		state bool agentRunning = wait(self->agent.checkActive(destDatabase.get()));
 
 		// 3.Do record
 		wait(self->saveOutgoingMovement(sourceMovementRecord));
