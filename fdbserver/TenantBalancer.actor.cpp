@@ -388,10 +388,15 @@ private:
 ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToClusterRequest req) {
 	try {
 		// 1.Extract necessary data from metadata
-		self->addExternalDatabase(req.destConnectionString, req.destConnectionString);
-		state Database destDatabase = self->getExternalDatabase(req.destConnectionString).get();
+		state Optional<Database> destDatabase =
+		    wait(self->addExternalDatabase(req.destConnectionString, req.destConnectionString));
+		if (!destDatabase.present()) {
+			// TODO: how to handle this?
+			ASSERT(false);
+		}
+
 		state SourceMovementRecord sourceMovementRecord(
-		    req.sourcePrefix, req.destPrefix, req.destConnectionString, destDatabase);
+		    req.sourcePrefix, req.destPrefix, req.destConnectionString, destDatabase.get());
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		backupRanges.add(prefixRange(req.sourcePrefix));
 		// TODO we'll need to log the metadata once here and then again after we submit the backup,
@@ -405,15 +410,16 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 		                              req.destPrefix,
 		                              req.sourcePrefix,
 		                              LockDB::False));
+
 		// Check if a backup agent is running
-		bool agentRunning = wait(self->agent.checkActive(destDatabase));
+		bool agentRunning = wait(self->agent.checkActive(destDatabase.get()));
 
 		// 3.Do record
 		self->saveOutgoingMovement(sourceMovementRecord);
 
 		MoveTenantToClusterReply reply;
 		if (!agentRunning) {
-			throw actor_cancelled();
+			throw movement_agent_not_running();
 		}
 		req.reply.send(reply);
 	} catch (Error& e) {
@@ -427,22 +433,26 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 ACTOR Future<Void> receiveTenantFromCluster(TenantBalancer* self, ReceiveTenantFromClusterRequest req) {
 	try {
 		// 0.Extract necessary variables
-		Key targetPrefix = req.destPrefix;
-		self->addExternalDatabase(req.srcConnectionString, req.srcConnectionString);
-		state Database srcDatabase = self->getExternalDatabase(req.srcConnectionString).get();
+		state Optional<Database> srcDatabase =
+		    wait(self->addExternalDatabase(req.srcConnectionString, req.srcConnectionString));
+
+		if (!srcDatabase.present()) {
+			// TODO: how to handle this?
+			ASSERT(false);
+		}
 
 		// 1.Lock the destination before we start the movement
 		// TODO
 
 		// 2.Check if prefix is empty.
-		bool isPrefixEmpty = wait(self->isTenantEmpty(self->db, targetPrefix));
+		bool isPrefixEmpty = wait(self->isTenantEmpty(self->db, req.destPrefix));
 		if (!isPrefixEmpty) {
 			throw movement_dest_prefix_not_empty();
 		}
 
 		// 3.Do record
 		DestinationMovementRecord destinationMovementRecord(
-		    req.sourcePrefix, req.destPrefix, req.srcConnectionString, srcDatabase);
+		    req.sourcePrefix, req.destPrefix, req.srcConnectionString, srcDatabase.get());
 		self->saveIncomingMovement(destinationMovementRecord);
 
 		ReceiveTenantFromClusterReply reply;

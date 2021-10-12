@@ -2168,18 +2168,46 @@ ACTOR Future<Void> submitDBMove(Database src, Database dest, Key destPrefix, Key
 		// TODO: transaction guarantee
 		state ReceiveTenantFromClusterRequest destRequest(
 		    srcPrefix, destPrefix, src->getConnectionRecord()->getConnectionString().toString());
-		state ErrorOr<ReceiveTenantFromClusterReply> receiveTenantFromClusterReply =
-		    wait(dest->getTenantBalancer().get().receiveTenantFromCluster.tryGetReply(destRequest));
-		if (receiveTenantFromClusterReply.isError()) {
-			throw receiveTenantFromClusterReply.getError();
+
+		state Future<ErrorOr<ReceiveTenantFromClusterReply>> destReply = Never();
+		state Future<Void> initialize = Void();
+
+		loop choose {
+			when(ErrorOr<ReceiveTenantFromClusterReply> reply = wait(destReply)) {
+				if (reply.isError()) {
+					throw reply.getError();
+				}
+				break;
+			}
+			when(wait(dest->onTenantBalancerChanged() || initialize)) {
+				initialize = Never();
+				destReply = dest->getTenantBalancer().present()
+				                ? dest->getTenantBalancer().get().receiveTenantFromCluster.tryGetReply(destRequest)
+				                : Never();
+			}
 		}
+
 		state MoveTenantToClusterRequest srcRequest(
 		    srcPrefix, destPrefix, dest->getConnectionRecord()->getConnectionString().toString());
-		state ErrorOr<MoveTenantToClusterReply> moveTenantToClusterReply =
-		    wait(src->getTenantBalancer().get().moveTenantToCluster.tryGetReply(srcRequest));
-		if (moveTenantToClusterReply.isError()) {
-			throw moveTenantToClusterReply.getError();
+
+		state Future<ErrorOr<MoveTenantToClusterReply>> srcReply = Never();
+		initialize = Void();
+
+		loop choose {
+			when(ErrorOr<MoveTenantToClusterReply> reply = wait(srcReply)) {
+				if (reply.isError()) {
+					throw reply.getError();
+				}
+				break;
+			}
+			when(wait(src->onTenantBalancerChanged() || initialize)) {
+				initialize = Never();
+				srcReply = src->getTenantBalancer().present()
+				               ? src->getTenantBalancer().get().moveTenantToCluster.tryGetReply(srcRequest)
+				               : Never();
+			}
 		}
+
 		printf("The data movement was successfully submitted.\n");
 	} catch (Error& e) {
 		// TODO This list of errors may change
