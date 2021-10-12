@@ -23,6 +23,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/TenantBalancerInterface.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ITrace.h"
@@ -149,11 +150,30 @@ ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> con
 
 struct TenantBalancer {
 	TenantBalancer(TenantBalancerInterface tbi, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
-	  : tbi(tbi), dbInfo(dbInfo), actors(false) {
+	  : tbi(tbi), dbInfo(dbInfo), actors(false), tenantBalancerMetrics("TenantBalancer", tbi.id().toString()),
+	    moveTenantToClusterRequests("MoveTenantToClusterRequests", tenantBalancerMetrics),
+	    receiveTenantFromClusterRequests("ReceiveTenantFromClusterRequests", tenantBalancerMetrics),
+	    getActiveMovementsRequests("GetActiveMovementsRequests", tenantBalancerMetrics),
+	    finishSourceMovementRequests("FinishSourceMovementRequests", tenantBalancerMetrics),
+	    finishDestinationMovementRequests("FinishDestinationMovementRequests", tenantBalancerMetrics),
+	    abortMovementRequests("AbortMovementRequests", tenantBalancerMetrics),
+	    cleanupMovementSourceRequests("CleanupMovementSourceRequests", tenantBalancerMetrics) {
 		auto info = makeReference<AsyncVar<ClientDBInfo>>();
 		db = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::False, EnableLocalityLoadBalance::True);
 
 		agent = DatabaseBackupAgent(db);
+
+		specialCounter(tenantBalancerMetrics, "OpenDatabases", [this]() { return externalDatabases.size(); });
+		specialCounter(tenantBalancerMetrics, "ActiveSourceMoves", [this]() { return externalDatabases.size(); });
+		specialCounter(tenantBalancerMetrics, "ActiveMovesAsSource", [this]() { return outgoingMovements.size(); });
+		specialCounter(
+		    tenantBalancerMetrics, "ActiveMovesAsDestination", [this]() { return incomingMovements.size(); });
+
+		actors.add(traceCounters("TenantBalancerMetrics",
+		                         tbi.id(),
+		                         SERVER_KNOBS->STORAGE_LOGGING_DELAY,
+		                         &tenantBalancerMetrics,
+		                         tbi.id().toString() + "/TenantBalancerMetrics"));
 	}
 
 	TenantBalancerInterface tbi;
@@ -416,6 +436,16 @@ private:
 	std::unordered_map<std::string, Database> externalDatabases;
 	std::map<Key, SourceMovementRecord> outgoingMovements;
 	std::map<Key, DestinationMovementRecord> incomingMovements;
+
+	CounterCollection tenantBalancerMetrics;
+
+	Counter moveTenantToClusterRequests;
+	Counter receiveTenantFromClusterRequests;
+	Counter getActiveMovementsRequests;
+	Counter finishSourceMovementRequests;
+	Counter finishDestinationMovementRequests;
+	Counter abortMovementRequests;
+	Counter cleanupMovementSourceRequests;
 };
 
 // src
