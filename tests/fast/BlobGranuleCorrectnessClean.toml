@@ -1,0 +1,10 @@
+[[test]]
+testTitle = 'BlobGranuleCorrectnessTest'
+
+    [[test.workload]]
+    testName = 'WriteDuringRead'
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'BlobGranuleVerifier'
+    testDuration = 120.0

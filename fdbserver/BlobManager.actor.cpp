@@ -434,7 +434,7 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 
 			workerId = assignment.worker.present() ? assignment.worker.get() : pickWorkerForAssign(bmData);
 			bmData->workerAssignments.insert(assignment.keyRange, workerId);
-			if (bmData->workerStats.count(workerId)) {
+			if (bmData->workerStats.count(workerId) && !assignment.assign.get().continueAssignment) {
 				bmData->workerStats[workerId].numGranulesAssigned += 1;
 			}
 
@@ -897,13 +897,11 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 
 		choose {
 			when(wait(waitFailure)) {
-				// FIXME: actually handle this!!
 				if (BM_DEBUG) {
 					printf("BM %lld detected BW %s is dead\n", bmData->epoch, bwInterf.id().toString().c_str());
 				}
 				TraceEvent("BlobWorkerFailed", bmData->id).detail("BlobWorkerID", bwInterf.id());
 				killBlobWorker(bmData, bwInterf);
-				return Void();
 			}
 			when(wait(monitorStatus)) {
 				ASSERT(false);
@@ -963,7 +961,6 @@ ACTOR Future<Void> rangeMover(BlobManagerData* bmData) {
 					RangeAssignment revokeOld;
 					revokeOld.isAssign = false;
 					revokeOld.keyRange = randomRange.range();
-					revokeOld.worker = randomRange.value();
 					revokeOld.revoke = RangeRevokeData(false);
 					bmData->rangesToAssign.send(revokeOld);
 
