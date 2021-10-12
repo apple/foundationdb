@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_TENANTBALANCERINTERFACE_H
 #define FDBCLIENT_TENANTBALANCERINTERFACE_H
+#include <stdbool.h>
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -119,16 +120,17 @@ struct MoveTenantToClusterRequest {
 	KeyRef destPrefix;
 
 	// TODO: dest cluster info
+	std::string destConnectionString;
 
 	ReplyPromise<MoveTenantToClusterReply> reply;
 
 	MoveTenantToClusterRequest() {}
-	MoveTenantToClusterRequest(KeyRef sourcePrefix, KeyRef destPrefix)
-	  : sourcePrefix(arena, sourcePrefix), destPrefix(arena, destPrefix) {}
+	MoveTenantToClusterRequest(KeyRef sourcePrefix, KeyRef destPrefix, std::string destConnectionString)
+	  : sourcePrefix(arena, sourcePrefix), destPrefix(arena, destPrefix), destConnectionString(destConnectionString) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sourcePrefix, destPrefix, reply, arena);
+		serializer(ar, sourcePrefix, destPrefix, destConnectionString, reply, arena);
 	}
 };
 
@@ -155,16 +157,17 @@ struct ReceiveTenantFromClusterRequest {
 	KeyRef destPrefix;
 
 	// TODO: source cluster info
+	std::string srcConnectionString;
 
 	ReplyPromise<ReceiveTenantFromClusterReply> reply;
 
 	ReceiveTenantFromClusterRequest() {}
-	ReceiveTenantFromClusterRequest(KeyRef sourcePrefix, KeyRef destPrefix)
-	  : sourcePrefix(arena, sourcePrefix), destPrefix(arena, destPrefix) {}
+	ReceiveTenantFromClusterRequest(KeyRef sourcePrefix, KeyRef destPrefix, std::string srcConnectionString)
+	  : sourcePrefix(arena, sourcePrefix), destPrefix(arena, destPrefix), srcConnectionString(srcConnectionString) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sourcePrefix, destPrefix, reply, arena);
+		serializer(ar, sourcePrefix, destPrefix, srcConnectionString, reply, arena);
 	}
 };
 
@@ -183,10 +186,28 @@ struct TenantMovementInfo {
 	// DR info?
 	// movement status
 
+	// TODO: how to track destClusterFile?
+	std::string destConnectionString;
+	std::string tenantMovementStatus;
+	std::string secondsBehind;
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sourcePrefix, destPrefix, movementLocation);
+		serializer(
+		    ar, sourcePrefix, destPrefix, movementLocation, destConnectionString, tenantMovementStatus, secondsBehind);
 	}
+
+	std::string toJson() {
+		// TODO transfer the element into json format, after we settle down all the needed elements here
+		return "";
+	}
+
+	std::string toString() {
+		// TODO transfer the element into plain text format, after we settle down all the needed elements here
+		return "";
+	}
+
+	std::string toString(bool isJson = false) const { return isJson ? toJson() : toString(); }
 };
 
 struct GetActiveMovementsReply {
@@ -208,7 +229,6 @@ struct GetActiveMovementsRequest {
 	Arena arena;
 
 	// TODO: optional source and dest cluster selectors
-
 	ReplyPromise<GetActiveMovementsReply> reply;
 
 	GetActiveMovementsRequest() {}
@@ -231,7 +251,7 @@ struct FinishSourceMovementReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version);
+		serializer(ar, tenantName, version);
 	}
 };
 
@@ -240,15 +260,17 @@ struct FinishSourceMovementRequest {
 
 	std::string sourceTenant; // Or prefix?
 	// TODO: dest cluster info
+	double maxLagSeconds;
 
 	ReplyPromise<FinishSourceMovementReply> reply;
 
 	FinishSourceMovementRequest() {}
-	FinishSourceMovementRequest(std::string sourceTenant) : sourceTenant(sourceTenant) {}
+	FinishSourceMovementRequest(std::string sourceTenant, double maxLagSecond)
+	  : sourceTenant(sourceTenant), maxLagSecond(maxLagSecond) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sourceTenant, reply);
+		serializer(ar, sourceTenant, maxLagSeconds, reply);
 	}
 };
 
@@ -300,14 +322,15 @@ struct AbortMovementRequest {
 	constexpr static FileIdentifier file_identifier = 14058403;
 
 	std::string tenantName;
+	bool isSrc = true;
+
 	ReplyPromise<AbortMovementReply> reply;
 
 	AbortMovementRequest() {}
-	AbortMovementRequest(std::string tenantName) : tenantName(tenantName) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tenantName, reply);
+		serializer(ar, tenantName, isSrc, reply);
 	}
 };
 
