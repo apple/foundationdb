@@ -415,7 +415,7 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 		bool agentRunning = wait(self->agent.checkActive(destDatabase.get()));
 
 		// 3.Do record
-		self->saveOutgoingMovement(sourceMovementRecord);
+		wait(self->saveOutgoingMovement(sourceMovementRecord));
 
 		MoveTenantToClusterReply reply;
 		if (!agentRunning) {
@@ -453,7 +453,7 @@ ACTOR Future<Void> receiveTenantFromCluster(TenantBalancer* self, ReceiveTenantF
 		// 3.Do record
 		DestinationMovementRecord destinationMovementRecord(
 		    req.sourcePrefix, req.destPrefix, req.srcConnectionString, srcDatabase.get());
-		self->saveIncomingMovement(destinationMovementRecord);
+		wait(self->saveIncomingMovement(destinationMovementRecord));
 
 		ReceiveTenantFromClusterReply reply;
 		req.reply.send(reply);
