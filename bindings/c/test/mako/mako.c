@@ -1614,7 +1614,7 @@ void usage() {
 	printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
 	printf("%-24s %s\n", "    --streaming", "Streaming mode: all (default), iterator, small, medium, large, serial");
 	printf("%-24s %s\n", "    --disable_ryw", "Disable snapshot read-your-writes");
-	printf("%-24s %s\n", "    --json=PATH", "Output stats to the specified json file");
+	printf("%-24s %s\n", "    --json_report=PATH", "Output stats to the specified json file (Default: mako.json)");
 }
 
 /* parse benchmark paramters */
@@ -1649,7 +1649,7 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "trace_format", required_argument, NULL, ARG_TRACEFORMAT },
 			                                    { "streaming", required_argument, NULL, ARG_STREAMING_MODE },
 			                                    { "txntrace", required_argument, NULL, ARG_TXNTRACE },
-			                                    { "json", required_argument, NULL, 'j' },
+			                                    { "json_report", required_argument, NULL, 'j' },
 			                                    /* no args */
 			                                    { "help", no_argument, NULL, 'h' },
 			                                    { "zipf", no_argument, NULL, 'z' },
