@@ -195,6 +195,11 @@ struct TenantBalancer {
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
+				TraceEvent(SevDebug, "TenantBalancerPersistMovementRecordError", self->tbi.id())
+				    .error(e)
+				    .detail("SourcePrefix", record.getSourcePrefix())
+				    .detail("DestinationPrefix", record.getDestinationPrefix());
+
 				wait(tr.onError(e));
 			}
 		}
@@ -226,6 +231,11 @@ struct TenantBalancer {
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
+				TraceEvent(SevDebug, "TenantBalancerClearMovementRecordError", self->tbi.id())
+				    .error(e)
+				    .detail("SourcePrefix", record.getSourcePrefix())
+				    .detail("DestinationPrefix", record.getDestinationPrefix());
+
 				wait(tr.onError(e));
 			}
 		}
@@ -255,10 +265,14 @@ struct TenantBalancer {
 		auto itr = self->externalDatabases.find(name);
 		if (itr != self->externalDatabases.end()) {
 			if (itr->second->getConnectionRecord()->getConnectionString().toString() == connectionString) {
+				TraceEvent(SevDebug, "TenantBalancerReuseDatabase", self->tbi.id())
+				    .detail("Name", name)
+				    .detail("ConnectionString", connectionString);
+
 				return itr->second;
 			}
 
-			TraceEvent("ExternalDatabaseMismatch", self->tbi.id())
+			TraceEvent("TenantBalancerExternalDatabaseMismatch", self->tbi.id())
 			    .detail("Name", name)
 			    .detail("ExistingConnectionString",
 			            itr->second->getConnectionRecord()->getConnectionString().toString())
@@ -281,6 +295,11 @@ struct TenantBalancer {
 				break;
 			} catch (Error& e) {
 				// TODO: timeouts?
+				TraceEvent(SevDebug, "TenantBalancerAddExternalDatabaseError", self->tbi.id())
+				    .error(e)
+				    .detail("Name", name)
+				    .detail("ConnectionString", connectionString);
+
 				wait(tr.onError(e));
 			}
 		}
@@ -291,7 +310,7 @@ struct TenantBalancer {
 		    IsInternal::True,
 		    self->tbi.locality);
 
-		TraceEvent("AddedExternalDatabase", self->tbi.id())
+		TraceEvent("TenantBalancerAddedExternalDatabase", self->tbi.id())
 		    .detail("Name", name)
 		    .detail("ConnectionString", connectionString);
 
@@ -327,9 +346,19 @@ struct TenantBalancer {
 					if (kv.key.startsWith(tenantBalancerSourceMovementPrefix)) {
 						SourceMovementRecord record = SourceMovementRecord::fromValue(kv.value);
 						self->outgoingMovements[record.getSourcePrefix()] = record;
+
+						TraceEvent(SevDebug, "TenantBalancerRecoverSourceMove", self->tbi.id())
+						    .detail("SourcePrefix", record.getSourcePrefix())
+						    .detail("DestinationPrefix", record.getDestinationPrefix())
+						    .detail("DatabaseName", record.getDestinationDatabaseName());
 					} else if (kv.key.startsWith(tenantBalancerDestinationMovementPrefix)) {
 						DestinationMovementRecord record = DestinationMovementRecord::fromValue(kv.value);
 						self->incomingMovements[record.getSourcePrefix()] = record;
+
+						TraceEvent(SevDebug, "TenantBalancerRecoverDestinationMove", self->tbi.id())
+						    .detail("SourcePrefix", record.getSourcePrefix())
+						    .detail("DestinationPrefix", record.getDestinationPrefix())
+						    .detail("DatabaseName", record.getSourceDatabaseName());
 					} else if (kv.key.startsWith(tenantBalancerExternalDatabasePrefix)) {
 						std::string name = kv.key.removePrefix(tenantBalancerExternalDatabasePrefix).toString();
 						self->externalDatabases[name] = Database::createDatabase(
@@ -338,6 +367,10 @@ struct TenantBalancer {
 						    Database::API_VERSION_LATEST,
 						    IsInternal::True,
 						    self->tbi.locality);
+
+						TraceEvent(SevDebug, "TenantBalancerRecoverDatabaseConnection", self->tbi.id())
+						    .detail("Name", name)
+						    .detail("ConnectionString", kv.value);
 					} else {
 						ASSERT(false);
 					}
@@ -351,6 +384,7 @@ struct TenantBalancer {
 					break;
 				}
 			} catch (Error& e) {
+				TraceEvent(SevDebug, "TenantBalancerRecoveryError", self->tbi.id()).error(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -386,6 +420,11 @@ private:
 
 // src
 ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToClusterRequest req) {
+	TraceEvent(SevDebug, "TenantBalancerMoveTenantToCluster", self->tbi.id())
+	    .detail("SourcePrefix", req.sourcePrefix)
+	    .detail("DestinationPrefix", req.destPrefix)
+	    .detail("DestinationConnectionString", req.destConnectionString);
+
 	try {
 		// 1.Extract necessary data from metadata
 		state Optional<Database> destDatabase =
@@ -421,8 +460,20 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 		if (!agentRunning) {
 			throw movement_agent_not_running();
 		}
+
+		TraceEvent(SevDebug, "TenantBalancerMoveTenantToClusterComplete", self->tbi.id())
+		    .detail("SourcePrefix", req.sourcePrefix)
+		    .detail("DestinationPrefix", req.destPrefix)
+		    .detail("DestinationConnectionString", req.destConnectionString);
+
 		req.reply.send(reply);
 	} catch (Error& e) {
+		TraceEvent(SevDebug, "TenantBalancerMoveTenantToClusterError", self->tbi.id())
+		    .error(e)
+		    .detail("SourcePrefix", req.sourcePrefix)
+		    .detail("DestinationPrefix", req.destPrefix)
+		    .detail("DestinationConnectionString", req.destConnectionString);
+
 		req.reply.sendError(e);
 	}
 
@@ -431,6 +482,11 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 
 // dest
 ACTOR Future<Void> receiveTenantFromCluster(TenantBalancer* self, ReceiveTenantFromClusterRequest req) {
+	TraceEvent(SevDebug, "TenantBalancerReceiveTenantFromCluster", self->tbi.id())
+	    .detail("SourcePrefix", req.sourcePrefix)
+	    .detail("DestinationPrefix", req.destPrefix)
+	    .detail("SourceConnectionString", req.srcConnectionString);
+
 	try {
 		// 0.Extract necessary variables
 		state Optional<Database> srcDatabase =
@@ -455,9 +511,20 @@ ACTOR Future<Void> receiveTenantFromCluster(TenantBalancer* self, ReceiveTenantF
 		    req.sourcePrefix, req.destPrefix, req.srcConnectionString, srcDatabase.get());
 		wait(self->saveIncomingMovement(destinationMovementRecord));
 
+		TraceEvent(SevDebug, "TenantBalancerReceiveTenantFromClusterComplete", self->tbi.id())
+		    .detail("SourcePrefix", req.sourcePrefix)
+		    .detail("DestinationPrefix", req.destPrefix)
+		    .detail("SourceConnectionString", req.srcConnectionString);
+
 		ReceiveTenantFromClusterReply reply;
 		req.reply.send(reply);
 	} catch (Error& e) {
+		TraceEvent(SevDebug, "TenantBalancerReceiveTenantFromClusterError", self->tbi.id())
+		    .error(e)
+		    .detail("SourcePrefix", req.sourcePrefix)
+		    .detail("DestinationPrefix", req.destPrefix)
+		    .detail("SourceConnectionString", req.srcConnectionString);
+
 		req.reply.sendError(e);
 	}
 
