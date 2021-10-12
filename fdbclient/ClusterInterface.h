@@ -314,7 +314,7 @@ struct MoveShardRequest {
 
 	MoveShardRequest() {}
 	MoveShardRequest(KeyRange shard, std::vector<NetworkAddress> addresses)
-	  : shard{std::move(shard)}, addresses{std::move(addresses)} {}
+	  : shard{ std::move(shard) }, addresses{ std::move(addresses) } {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
