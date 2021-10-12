@@ -2219,7 +2219,7 @@ ACTOR Future<Void> statusDBMove(Database src, Database dest, KeyRef srcPrefix, b
 		for (const auto& movement : activeMovements) {
 			if (movement.destConnectionString == dest->getConnectionRecord()->getConnectionString().toString()) {
 				foundMovement = true;
-				std::string statusText = movement.toString(json);
+				std::string statusText = json ? movement.toJson() : movement.toString();
 				printf("%s\n", statusText.c_str());
 				break;
 			}
@@ -2260,7 +2260,7 @@ ACTOR Future<Void> listDBMove(Database db, bool isSrc) {
 		       (isSrc ? "from" : "to"),
 		       db->getConnectionRecord()->getConnectionString().toString().c_str());
 		for (const auto& movement : targetMovements) {
-			printf(movement.toString(false).c_str());
+			printf(movement.toString().c_str());
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -2289,7 +2289,7 @@ ACTOR Future<Void> listDBMove(Database src, Database dest) {
 		// Filter for desired movements
 		for (const auto& movement : srcActiveMovementsReply.get().activeMovements) {
 			if (movement.destConnectionString == dest->getConnectionRecord()->getConnectionString().toString()) {
-				printf(movement.toString(false).c_str());
+				printf(movement.toString().c_str());
 			}
 		}
 	} catch (Error& e) {
@@ -2341,11 +2341,9 @@ ACTOR Future<Void> finishDBMove(Database src, Database dest, Key srcPrefix, Opti
 }
 
 ACTOR Future<Void> abortDBMove(Optional<Database> src, Optional<Database> dest, Key targetPrefix) {
+	ASSERT(src.present() || dest.present());
+
 	try {
-		// TODO it's a double check. Should we remove it?
-		if (!src.present() && !dest.present()) {
-			throw;
-		}
 		AbortMovementRequest abortMovementRequest;
 		abortMovementRequest.tenantName = targetPrefix.toString();
 		abortMovementRequest.isSrc = src.present();
@@ -4853,7 +4851,9 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				}
 				// TODO if both clusters are able to be initialized, what else should we consider?
-				f = stopAfter(abortDBMove(sourceDb, db, canInitSourceCluster ? Key(removePrefix) : Key(addPrefix)));
+				f = stopAfter(abortDBMove(canInitSourceCluster ? sourceDb : Optional<Database>(),
+				                          canInitCluster ? db : Optional<Database>(),
+				                          canInitSourceCluster ? Key(removePrefix) : Key(addPrefix)));
 				break;
 			}
 			case DBMoveType::CLEAN:

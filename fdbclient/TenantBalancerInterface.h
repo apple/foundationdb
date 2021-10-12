@@ -197,17 +197,15 @@ struct TenantMovementInfo {
 		    ar, sourcePrefix, destPrefix, movementLocation, destConnectionString, tenantMovementStatus, secondsBehind);
 	}
 
-	std::string toJson() {
+	std::string toJson() const {
 		// TODO transfer the element into json format, after we settle down all the needed elements here
 		return "";
 	}
 
-	std::string toString() {
+	std::string toString() const {
 		// TODO transfer the element into plain text format, after we settle down all the needed elements here
 		return "";
 	}
-
-	std::string toString(bool isJson = false) const { return isJson ? toJson() : toString(); }
 };
 
 struct GetActiveMovementsReply {
@@ -265,8 +263,8 @@ struct FinishSourceMovementRequest {
 	ReplyPromise<FinishSourceMovementReply> reply;
 
 	FinishSourceMovementRequest() {}
-	FinishSourceMovementRequest(std::string sourceTenant, double maxLagSecond)
-	  : sourceTenant(sourceTenant), maxLagSecond(maxLagSecond) {}
+	FinishSourceMovementRequest(std::string sourceTenant, double maxLagSeconds)
+	  : sourceTenant(sourceTenant), maxLagSeconds(maxLagSeconds) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

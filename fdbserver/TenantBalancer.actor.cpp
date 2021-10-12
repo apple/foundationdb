@@ -534,7 +534,7 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 		backupRanges.add(prefixRange(req.sourceTenant));
 		Database dest = self->getOutgoingMovement(Key(req.sourceTenant)).getDestinationDatabase();
 		// TODO check if arguments here are correct - ForceAction especially
-		// TODO check if maxLagSecond is exceeded
+		// TODO check if maxLagSeconds is exceeded
 		wait(self->agent.atomicSwitchover(dest,
 		                                  KeyRef(dest->getConnectionRecord()->getConnectionString().toString()),
 		                                  backupRanges,
@@ -578,8 +578,8 @@ ACTOR Future<Void> finishDestinationMovement(TenantBalancer* self, FinishDestina
 
 ACTOR Future<Void> abortMovement(TenantBalancer* self, AbortMovementRequest req) {
 	try {
-		Database targetDB;
-		std::string tagName;
+		state Database targetDB;
+		state std::string tagName;
 		if (req.isSrc) {
 			SourceMovementRecord srcRecord = self->getOutgoingMovement(Key(req.tenantName));
 			targetDB = srcRecord.getDestinationDatabase();
@@ -607,13 +607,12 @@ ACTOR Future<Void> abortMovement(TenantBalancer* self, AbortMovementRequest req)
 ACTOR Future<Void> cleanupMovementSource(TenantBalancer* self, CleanupMovementSourceRequest req) {
 	try {
 		// TODO once the range has been unlocked, it will no longer be legal to run cleanup
-		CleanupMovementSourceRequest::CleanupType cleanupType = req.cleanupType;
 		state std::string tenantName = req.tenantName;
-		if (cleanupType != CleanupMovementSourceRequest::CleanupType::UNLOCK) {
+		if (req.cleanupType != CleanupMovementSourceRequest::CleanupType::UNLOCK) {
 			// erase
 			wait(self->agent.clearPrefix(self->db, Key(tenantName)));
 		}
-		if (cleanupType != CleanupMovementSourceRequest::CleanupType::ERASE) {
+		if (req.cleanupType != CleanupMovementSourceRequest::CleanupType::ERASE) {
 			// TODO unlock
 			self->clearOutgoingMovement(self->getOutgoingMovement(Key(req.tenantName)));
 		}
