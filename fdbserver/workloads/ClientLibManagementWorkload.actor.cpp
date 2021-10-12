@@ -107,6 +107,8 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		wait(testClientLibListAfterUpload(self, cx));
 		wait(testDownloadClientLib(self, cx));
 		wait(testClientLibDownloadNotExisting(self, cx));
+		wait(testChangeClientLibStatusErrors(self, cx));
+		wait(testDisableClientLib(self, cx));
 		wait(testDeleteClientLib(self, cx));
 		wait(testUploadedClientLibInList(self, cx, ClientLibFilter(), false, "No filter, after delete"));
 		return Void();
@@ -318,6 +320,41 @@ struct ClientLibManagementWorkload : public TestWorkload {
 			    .detail("Actual", found);
 			self->success = false;
 		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> testChangeClientLibStatusErrors(ClientLibManagementWorkload* self, Database cx) {
+		wait(testExpectedError(changeClientLibraryStatus(cx, self->uploadedClientLibId, ClientLibStatus::UPLOADING),
+		                       "Setting invalid client library status",
+		                       client_lib_invalid_metadata(),
+		                       &self->success));
+
+		wait(testExpectedError(changeClientLibraryStatus(cx, "notExistingClientLib"_sr, ClientLibStatus::DOWNLOAD),
+		                       "Changing not existing client library status",
+		                       client_lib_not_found(),
+		                       &self->success));
+		return Void();
+	}
+
+	ACTOR static Future<Void> testDisableClientLib(ClientLibManagementWorkload* self, Database cx) {
+		state std::string destFileName = format("clientLibDownload%d", self->clientId);
+
+		// Set disabled status on the uploaded library
+		wait(changeClientLibraryStatus(cx, self->uploadedClientLibId, ClientLibStatus::DISABLED));
+		state ClientLibStatus newStatus = wait(getClientLibraryStatus(cx, self->uploadedClientLibId));
+		if (newStatus != ClientLibStatus::DISABLED) {
+			TraceEvent(SevError, "ClientLibDisableClientLibFailed")
+			    .detail("Reason", "Unexpected status")
+			    .detail("Expected", ClientLibStatus::DISABLED)
+			    .detail("Actual", newStatus);
+			self->success = false;
+		}
+
+		// It should not be possible to download a disabled client library
+		wait(testExpectedError(downloadClientLibrary(cx, self->uploadedClientLibId, StringRef(destFileName)),
+		                       "Downloading disabled client library",
+		                       client_lib_not_available(),
+		                       &self->success));
 		return Void();
 	}
 
