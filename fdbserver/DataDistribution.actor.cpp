@@ -2393,9 +2393,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// buildTeams will not count teams larger than teamSize against the desired teams.
 	ACTOR static Future<Void> buildTeams(DDTeamCollection* self) {
 		state int desiredTeams;
-		int serverCount = 0;
-		int uniqueMachines = 0;
-		std::set<Optional<Standalone<StringRef>>> machines;
+		state int serverCount = 0;
+		state int uniqueMachines = 0;
+		state std::set<Optional<Standalone<StringRef>>> machines;
+
+		if(self->healthyTeamCount) {
+			// wait to see whether restartTeamBuilder is triggered
+			wait(delay(0, g_network->getCurrentTask()));
+		}
 
 		for (auto i = self->server_info.begin(); i != self->server_info.end(); ++i) {
 			if (!self->server_status.get(i->first).isUnhealthy()) {
@@ -4246,8 +4251,6 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				TEST(true); // paused because cluster is unhealthy
 				moveFinishFuture = Never();
 				self->includeStorageServersForWiggle();
-				self->doBuildTeams = true;
-
 				TraceEvent(self->configuration.storageMigrationType == StorageMigrationType::AGGRESSIVE ? SevInfo
 				                                                                                        : SevWarn,
 				           "PerpetualStorageWigglePause",
@@ -4416,9 +4419,6 @@ ACTOR Future<Void> waitServerListChange(DDTeamCollection* self,
 							                self->serverTrackerErrorOut,
 							                tr.getReadVersion().get(),
 							                ddEnabledState);
-							if (!ssi.isTss()) {
-								self->doBuildTeams = true;
-							}
 						}
 					}
 
@@ -4609,10 +4609,6 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self,
 		choose {
 			when(wait(healthChanged)) {
 				status->isFailed = !status->isFailed;
-				if (!status->isFailed && !server->lastKnownInterface.isTss() &&
-				    (server->teams.size() < targetTeamNumPerServer || self->lastBuildTeamsFailed)) {
-					self->doBuildTeams = true;
-				}
 				if (status->isFailed && self->healthyZone.get().present()) {
 					if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
 						// Ignore the failed storage server
@@ -5389,9 +5385,6 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 				TraceEvent(SevWarn, "DDRecruitmentError")
 				    .detail("Reason", "Server ID already recruited")
 				    .detail("ServerID", id);
-			}
-			if (!recruitTss) {
-				self->doBuildTeams = true;
 			}
 		}
 	}
