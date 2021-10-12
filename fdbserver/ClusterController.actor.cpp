@@ -317,11 +317,6 @@ public:
 			}
 		}
 
-		/* printf("No blob workers found bc we excluded the following\n");
-		for (auto addr : req.excludeAddresses) {
-		    printf("- %s\n", addr.toString().c_str());
-		}
-		*/
 		throw no_more_servers();
 	}
 

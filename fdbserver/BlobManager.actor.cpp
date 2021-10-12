@@ -283,10 +283,6 @@ static UID pickWorkerForAssign(BlobManagerData* bmData) {
 	}
 
 	// pick a random worker out of the eligible workers
-	if (eligibleWorkers.size() == 0) {
-		printf("%d eligible workers\n", bmData->workerStats.size());
-	}
-
 	ASSERT(eligibleWorkers.size() > 0);
 	int idx = deterministicRandom()->randomInt(0, eligibleWorkers.size());
 	if (BM_DEBUG) {
@@ -325,7 +321,7 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 
 			// if that worker isn't alive anymore, add the range back into the stream
 			if (bmData->workersById.count(workerID) == 0) {
-				throw granule_assignment_conflict(); // TODO: find a better error to throw
+				throw worker_for_granule_not_found();
 			}
 			AssignBlobRangeReply _rep = wait(bmData->workersById[workerID].assignBlobRangeRequest.getReply(req));
 			rep = _rep;
@@ -419,9 +415,7 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 			// Ensure range isn't currently assigned anywhere, and there is only 1 intersecting range
 			auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
 			int count = 0;
-			printf("intersecting ranges in currentAssignments:\n");
 			for (auto& it : currentAssignments) {
-				printf("[%s - %s]\n", it.begin().printable().c_str(), it.end().printable().c_str());
 				if (assignment.assign.get().continueAssignment) {
 					ASSERT(assignment.worker.present());
 					ASSERT(it.value() == assignment.worker.get());
@@ -434,13 +428,10 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 
 			workerId = assignment.worker.present() ? assignment.worker.get() : pickWorkerForAssign(bmData);
 			bmData->workerAssignments.insert(assignment.keyRange, workerId);
-			if (bmData->workerStats.count(workerId) && !assignment.assign.get().continueAssignment) {
-				bmData->workerStats[workerId].numGranulesAssigned += 1;
-			}
 
-			printf("current ranges after inserting assign: \n");
-			for (auto it : bmData->workerAssignments.ranges()) {
-				printf("[%s - %s]\n", it.begin().printable().c_str(), it.end().printable().c_str());
+			ASSERT(bmData->workerStats.count(workerId));
+			if (!assignment.assign.get().continueAssignment) {
+				bmData->workerStats[workerId].numGranulesAssigned += 1;
 			}
 
 			// FIXME: if range is assign, have some sort of semaphore for outstanding assignments so we don't assign
@@ -466,10 +457,6 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 			}
 
 			bmData->workerAssignments.insert(assignment.keyRange, UID());
-			printf("current ranges after inserting revoke: \n");
-			for (auto it : bmData->workerAssignments.ranges()) {
-				printf("[%s - %s]\n", it.begin().printable().c_str(), it.end().printable().c_str());
-			}
 		}
 	}
 }
@@ -733,53 +720,27 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 	return Void();
 }
 
-void reassignRanges(BlobManagerData* bmData, UID bwId) {
-	printf("taking back ranges for worker %s\n", bwId.toString().c_str());
-	// for every range owned by this blob worker, we want to
-	// - send a revoke request for that range to the blob worker
-	// - add the range back to the stream of ranges to be assigned
-	for (auto& it : bmData->workerAssignments.ranges()) {
-		if (it.cvalue() == bwId) {
-			// Send revoke request to worker
-			RangeAssignment raRevoke;
-			raRevoke.isAssign = false;
-			raRevoke.worker = bwId;
-			raRevoke.keyRange = it.range();
-			raRevoke.revoke = RangeRevokeData(false);
-			bmData->rangesToAssign.send(raRevoke);
-
-			// Add range back into the stream of ranges to be assigned
-			RangeAssignment raAssign;
-			raAssign.isAssign = true;
-			raAssign.worker = Optional<UID>();
-			raAssign.keyRange = it.range();
-			raAssign.assign = RangeAssignmentData(false); // not a continue
-			bmData->rangesToAssign.send(raAssign);
-		}
-	}
-}
-
 void killBlobWorker(BlobManagerData* bmData, BlobWorkerInterface bwInterf) {
 	UID bwId = bwInterf.id();
 
 	// Remove blob worker from stats map so that when we try to find a worker to takeover the range,
 	// the one we just killed isn't considered.
-	// Remove it from workersById also since otherwise that addr will remain excluded
+	// Remove it from workersById also since otherwise that worker addr will remain excluded
 	// when we try to recruit new blob workers.
-	printf("removing bw %s from BM workerStats\n", bwId.toString().c_str());
 	bmData->workerStats.erase(bwId);
 	bmData->workersById.erase(bwId);
 
 	// for every range owned by this blob worker, we want to
-	// - send a revoke request for that range to the blob worker
+	// - send a revoke request for that range
 	// - add the range back to the stream of ranges to be assigned
-	printf("taking back ranges from bw %s\n", bwId.toString().c_str());
+	if (BM_DEBUG) {
+		printf("Taking back ranges from BW %s\n", bwId.toString().c_str());
+	}
 	for (auto& it : bmData->workerAssignments.ranges()) {
 		if (it.cvalue() == bwId) {
-			// Send revoke request to worker
+			// Send revoke request
 			RangeAssignment raRevoke;
 			raRevoke.isAssign = false;
-			raRevoke.worker = bwId;
 			raRevoke.keyRange = it.range();
 			raRevoke.revoke = RangeRevokeData(false);
 			bmData->rangesToAssign.send(raRevoke);
@@ -795,7 +756,9 @@ void killBlobWorker(BlobManagerData* bmData, BlobWorkerInterface bwInterf) {
 	}
 
 	// Send halt to blob worker, with no expectation of hearing back
-	printf("sending halt to bw %s\n", bwId.toString().c_str());
+	if (BM_DEBUG) {
+		printf("Sending halt to BW %s\n", bwId.toString().c_str());
+	}
 	bmData->addActor.send(
 	    brokenPromiseToNever(bwInterf.haltBlobWorker.getReply(HaltBlobWorkerRequest(bmData->epoch, bmData->id))));
 }
@@ -835,6 +798,7 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 				// to split the range.
 				ASSERT(rep.doSplit);
 
+				// only evaluate for split if this worker currently owns the granule in this blob manager's mapping
 				auto currGranuleAssignment = bmData->workerAssignments.rangeContaining(rep.granuleRange.begin);
 				if (!(currGranuleAssignment.begin() == rep.granuleRange.begin &&
 				      currGranuleAssignment.end() == rep.granuleRange.end &&
@@ -901,7 +865,6 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 					printf("BM %lld detected BW %s is dead\n", bmData->epoch, bwInterf.id().toString().c_str());
 				}
 				TraceEvent("BlobWorkerFailed", bmData->id).detail("BlobWorkerID", bwInterf.id());
-				killBlobWorker(bmData, bwInterf);
 			}
 			when(wait(monitorStatus)) {
 				ASSERT(false);
@@ -921,11 +884,18 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 		throw e;
 	}
 
+	// kill the blob worker
+	killBlobWorker(bmData, bwInterf);
+
 	// Trigger recruitment for a new blob worker
-	printf("restarting recruitment in monitorblobworker\n");
+	if (BM_DEBUG) {
+		printf("Restarting recruitment to replace dead BW %s\n", bwInterf.id().toString().c_str());
+	}
 	bmData->restartRecruiting.trigger();
 
-	printf("about to stop monitoring %s\n", bwInterf.id().toString().c_str());
+	if (BM_DEBUG) {
+		printf("No longer monitoring BW %s\n", bwInterf.id().toString().c_str());
+	}
 	return Void();
 }
 
@@ -1090,12 +1060,6 @@ ACTOR Future<Void> blobWorkerRecruiter(
 			}
 
 			TraceEvent("BMRecruiting").detail("State", "Sending request to CC");
-			/*
-			printf("EXCLUDING THE FOLLOWING IN REQ:\n");
-			for (auto addr : recruitReq.excludeAddresses) {
-			    printf("- %s\n", addr.toString().c_str());
-			}
-			*/
 
 			if (!fCandidateWorker.isValid() || fCandidateWorker.isReady() ||
 			    recruitReq.excludeAddresses != lastRequest.excludeAddresses) {
@@ -1115,7 +1079,7 @@ ACTOR Future<Void> blobWorkerRecruiter(
 				when(wait(recruitBlobWorker->onChange())) { fCandidateWorker = Future<RecruitBlobWorkerReply>(); }
 
 				// signal used to restart the loop and try to recruit the next blob worker
-				when(wait(self->restartRecruiting.onTrigger())) { printf("RESTARTED RECRUITING. BACK TO TOP\n"); }
+				when(wait(self->restartRecruiting.onTrigger())) {}
 			}
 			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskPriority::BlobManager));
 		} catch (Error& e) {

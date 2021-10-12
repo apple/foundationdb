@@ -29,7 +29,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-#define BGV_DEBUG true
+#define BGV_DEBUG false
 
 /*
  * This workload is designed to verify the correctness of the blob data produced by the blob workers.
@@ -209,7 +209,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				out.append(out.arena(), chunkRows.begin(), chunkRows.size());
 			} catch (Error& e) {
 				if (e.code() == error_code_end_of_stream) {
-					printf("got end of stream\n");
 					break;
 				}
 				throw e;
