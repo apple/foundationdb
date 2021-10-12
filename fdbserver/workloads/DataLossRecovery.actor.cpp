@@ -74,6 +74,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		state Value newValue = "TestNewValue"_sr;
 
 		wait(self->writeAndVerify(self, cx, key, oldValue));
+		TraceEvent("InitialDataReady");
 
 		state Optional<StorageServerInterface> ssi = wait(self->getRandomStorageServer(cx));
 		ASSERT(ssi.present());
@@ -193,7 +194,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		loop {
 			tr.reset();
 			try {
-				state Optional<Value> res = wait(timeout(tr.get(key), 10.0, Optional<Value>("Timeout"_sr)));
+				state Optional<Value> res = wait(timeout(tr.get(key), 30.0, Optional<Value>("Timeout"_sr)));
 				if (res != expectedValue) {
 					self->validationFailed(key, expectedValue, res);
 				}
@@ -216,7 +217,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				} else {
 					tr.clear(key);
 				}
-				wait(timeout(tr.commit(), 10.0, Void()));
+				wait(timeout(tr.commit(), 30.0, Void()));
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));

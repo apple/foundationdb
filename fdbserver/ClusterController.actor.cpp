@@ -4728,6 +4728,8 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 		}
 	}
 
+	std::cout << "Got serverList" << std::endl;
+
 	std::unordered_set<NetworkAddress> nadds;
 	std::unordered_set<std::string> ips;
 
@@ -4756,7 +4758,7 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 		}
 	}
 
-	// std::cout << "Found Storage Server(s):" << std::endl << describe(dest) << std::endl;
+	std::cout << "Dest: " << describe(dest) << std::endl;
 
 	if (dest.empty()) {
 		throw internal_error();
@@ -4764,14 +4766,28 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 
 	state UID owner = deterministicRandom()->randomUniqueID();
 	state DDEnabledState ddEnabledState;
+	// state KeyRef ownerKey = "\xff/moveKeysLock/Owner"_sr;
 
-	state Transaction txn;
+	state Transaction txn(cx);
 	loop {
 		try {
-			BinaryWriter wrMyOwner(Unversioned());
-			wrMyOwner << owner;
-			txn.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
-			wait(txn.commit());
+			loop {
+				try {
+					BinaryWriter wrMyOwner(Unversioned());
+					wrMyOwner << owner;
+					std::cout << "moveKeysLockOwnerKey: " << moveKeysLockOwnerKey.toString()
+					          << ", Value: " << wrMyOwner.toValue().toString() << std::endl;
+					txn.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+					std::cout << "SetDone" << std::endl;
+					wait(txn.commit());
+					break;
+				} catch (Error& e) {
+					TraceEvent("SetMoveKeysLockOwnerKeyError").error(e);
+					wait(txn.onError(e));
+				}
+			}
+
+			std::cout << "Set moveKeysLockOwner" << std::endl;
 
 			MoveKeysLock moveKeysLock;
 			moveKeysLock.myOwner = owner;
@@ -4789,11 +4805,12 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 			              &ddEnabledState));
 			break;
 		} catch (Error& e) {
+			TraceEvent("MoveShardError").error(e);
 			if (e.code() == error_code_movekeys_conflict) {
 				txn.reset();
 				wait(delay(1.0));
 			} else {
-				wait(txn.onError(e));
+				throw e;
 			}
 		}
 	}
@@ -4822,12 +4839,13 @@ ACTOR Future<Void> handleMoveShard(ClusterControllerData* self, ClusterControlle
 		    .detail("Begin", req.shard.begin)
 		    .detail("End", req.shard.end)
 		    .detail("Addresses", describe(req.addresses));
-
-		wait(moveShard(self->db.db, req.shard, req.addresses));
-
-		TraceEvent("ManualMoveShardFinish", self->id).log();
-
-		req.reply.send(Void());
+		try {
+			wait(moveShard(self->db.db, req.shard, req.addresses));
+			TraceEvent("ManualMoveShardFinish", self->id).log();
+			req.reply.send(Void());
+		} catch (Error& e) {
+			req.reply.sendError(e);
+		}
 	}
 }
 
