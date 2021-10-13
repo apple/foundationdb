@@ -644,7 +644,7 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 
 		// 2. Finish movement
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
-		backupRanges.add(prefixRange(req.sourceTenant));
+		backupRanges.push_back_deep(backupRanges.arena(), prefixRange(req.sourceTenant));
 		Database dest = self->getOutgoingMovement(Key(req.sourceTenant)).getDestinationDatabase();
 		// TODO check if arguments here are correct - ForceAction especially
 		// TODO check if maxLagSeconds is exceeded
