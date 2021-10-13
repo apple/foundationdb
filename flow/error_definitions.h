@@ -80,7 +80,6 @@ ERROR( local_config_changed, 1056, "Local configuration file has changed. Restar
 ERROR( failed_to_reach_quorum, 1057, "Failed to reach quorum from configuration database nodes. Retry sending these requests" )
 ERROR( unknown_change_feed, 1058, "Change feed not found" )
 ERROR( granule_assignment_conflict, 1059, "Conflicting attempts to assign blob granules" )
-ERROR( worker_for_granule_not_found, 1060, "The chosen worker to assign the granule to was not found" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )

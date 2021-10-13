@@ -321,7 +321,7 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 
 			// if that worker isn't alive anymore, add the range back into the stream
 			if (bmData->workersById.count(workerID) == 0) {
-				throw worker_for_granule_not_found();
+				throw no_more_servers();
 			}
 			AssignBlobRangeReply _rep = wait(bmData->workersById[workerID].assignBlobRangeRequest.getReply(req));
 			rep = _rep;

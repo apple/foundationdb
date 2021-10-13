@@ -1,5 +1,5 @@
 [[test]]
-testTitle = 'BlobGranuleCorrectnessTest'
+testTitle = 'BlobGranuleCorrectnessCleanTest'
 
     [[test.workload]]
     testName = 'WriteDuringRead'

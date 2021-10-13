@@ -125,6 +125,10 @@ struct GranuleRangeMetadata {
 	  : lastEpoch(epoch), lastSeqno(seqno), activeMetadata(activeMetadata) {}
 };
 
+// FIXME: there is a reference cycle here. BWData has GranuleRangeMetadata objects in a map,
+// but each of those has a future to a forever-running actor which has a reference to BWData.
+// To fix this, we should only pass the necessary, specfic fields of BWData to those actors
+// rather than the reference to BWData itself.
 struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	UID id;
 	Database db;
@@ -555,6 +559,9 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 			throw e;
 		}
 
+		// if commit failed the first time due to granule assignment conflict (which is non-retryable),
+		// then the file key was persisted and we should delete it. Otherwise, the commit failed
+		// for some other reason and the key wasn't persisted, so we should just propogate the error
 		if (numIterations != 1 || e.code() != error_code_granule_assignment_conflict) {
 			throw e;
 		}
@@ -665,6 +672,9 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 			throw e;
 		}
 
+		// if commit failed the first time due to granule assignment conflict (which is non-retryable),
+		// then the file key was persisted and we should delete it. Otherwise, the commit failed
+		// for some other reason and the key wasn't persisted, so we should just propogate the error
 		if (numIterations != 1 || e.code() != error_code_granule_assignment_conflict) {
 			throw e;
 		}
