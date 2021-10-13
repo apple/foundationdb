@@ -1122,6 +1122,64 @@ ACTOR Future<Void> rejoinMasters(Reference<TLogServerData> self,
 	}
 }
 
+ACTOR Future<TLogGroupLockResult> lockTLogGroup(Reference<TLogGroupData> groupData,
+                                                Reference<LogGenerationData> logData) {
+	state Version stopVersion = logData->version.get();
+	TEST(true); // TLog stopped by recovering master
+	TEST(logData->stopped); // logData already stopped
+	TEST(!logData->stopped); // logData not yet stopped
+	TraceEvent("TLogGroupLock", groupData->dbgid)
+	    .detail("LogId", logData->logId)
+	    .detail("Ver", stopVersion)
+	    .detail("TLogGroupID", groupData->tlogGroupID)
+	    .detail("IsStopped", logData->stopped)
+	    .detail("QueueCommitted", logData->queueCommittedVersion.get());
+
+	logData->stopped = true;
+	if (!logData->recoveryComplete.isSet()) {
+		logData->recoveryComplete.sendError(end_of_stream());
+	}
+
+	wait(logData->queueCommittedVersion.whenAtLeast(stopVersion));
+
+	ASSERT(stopVersion == logData->version.get());
+
+	Version kcv = logData->knownCommittedVersion;
+	TraceEvent("TLogGroupLock2", groupData->dbgid)
+	    .detail("LogId", logData->logId)
+	    .detail("Ver", stopVersion)
+	    .detail("TLogGroupID", groupData->tlogGroupID)
+	    .detail("IsStopped", logData->stopped)
+	    .detail("QueueCommitted", logData->queueCommittedVersion.get())
+	    .detail("KnownCommitted", kcv);
+
+	TLogGroupLockResult groupResult;
+	groupResult.id = groupData->tlogGroupID;
+	groupResult.end = stopVersion;
+	groupResult.knownCommittedVersion = kcv;
+
+	return groupResult;
+}
+
+ACTOR Future<Void> lockTLogServer(
+    Reference<TLogServerData> self,
+    ReplyPromise<TLogLockResult> reply,
+    std::shared_ptr<std::unordered_map<TLogGroupID, Reference<LogGenerationData>>> activeGeneration) {
+	state std::unordered_map<TLogGroupID, Reference<TLogGroupData>>::iterator team;
+	TraceEvent("TLogLock", self->dbgid).detail("WrokerID", self->workerID);
+	state TLogLockResult result;
+	for (team = self->tlogGroups.begin(); team != self->tlogGroups.end(); team++) {
+		TLogGroupID id = team->first;
+		auto tlogGroup = activeGeneration->find(id);
+		Reference<LogGenerationData> logDataActiveGeneration = tlogGroup->second;
+		TLogGroupLockResult groupResult = wait(lockTLogGroup(team->second, logDataActiveGeneration));
+		result.groupResults.emplace_back(groupResult);
+	}
+	TraceEvent("TLogLock2", self->dbgid).detail("WrokerID", self->workerID);
+	reply.send(result);
+	return Void();
+}
+
 ACTOR Future<Void> serveTLogInterface_PassivelyPull(
     Reference<TLogServerData> self,
     TLogInterface_PassivelyPull tli,
@@ -1177,6 +1235,9 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 			}
 			Reference<LogGenerationData> logData = tlogGroup->second;
 			logData->addActor.send(tLogPeekMessages(req, logData));
+		}
+		when(ReplyPromise<TLogLockResult> reply = waitNext(tli.lock.getFuture())) {
+			wait(lockTLogServer(self, reply, activeGeneration));
 		}
 	}
 }

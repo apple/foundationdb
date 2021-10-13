@@ -245,14 +245,27 @@ struct TLogPopRequest {
 	}
 };
 
-struct TLogLockResult {
-	constexpr static FileIdentifier file_identifier = 5232634;
+struct TLogGroupLockResult {
+	// is this random?
+	constexpr static FileIdentifier file_identifier = 4635715;
+
+	TLogGroupID id;
 	Version end;
 	Version knownCommittedVersion;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, end, knownCommittedVersion);
+		serializer(ar, id, end, knownCommittedVersion);
+	}
+};
+
+struct TLogLockResult {
+	constexpr static FileIdentifier file_identifier = 5232634;
+	std::vector<TLogGroupLockResult> groupResults;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, groupResults);
 	}
 };
 

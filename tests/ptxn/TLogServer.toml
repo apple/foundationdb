@@ -97,3 +97,17 @@ startDelay = 0
     numStorageTeams = 40
     numTLogGroups = 7
     numCommits = 20
+
+[[test]]
+testTitle = 'Team Partitioned TLog Server Test 7: Test locking tlog in partitioned tlog system'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/lock_tlog'
+
+    numTLogs = 1
+    numStorageTeams = 40
+    numTLogGroups = 7
