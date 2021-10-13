@@ -469,7 +469,7 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 		state SourceMovementRecord sourceMovementRecord(
 		    req.sourcePrefix, req.destPrefix, req.destConnectionString, destDatabase.get());
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
-		backupRanges.add(prefixRange(req.sourcePrefix));
+		backupRanges.push_back_deep(backupRanges.arena(), prefixRange(req.sourcePrefix));
 		// TODO we'll need to log the metadata once here and then again after we submit the backup,
 		// this is going to require having a movement state field in our record that we can update as we make progress;
 
