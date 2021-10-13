@@ -357,10 +357,10 @@ private:
 				toCommit->writeToStorageTeams(tLogGroupCollection, { team }, LogProtocolMessage());
 				toCommit->writeToStorageTeams(tLogGroupCollection, { team }, privatized);
 			} else {
-				TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", "LogProtocolMessage");
+				TraceEvent(SevDebug, "SendingPrivatized_ServerTag", dbgid).detail("M", "LogProtocolMessage");
 				toCommit->addTag(tag);
 				toCommit->writeTypedMessage(LogProtocolMessage(), true);
-				TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
+				TraceEvent(SevDebug, "SendingPrivatized_ServerTag", dbgid).detail("M", privatized.toString());
 				toCommit->addTag(tag);
 				toCommit->writeTypedMessage(privatized);
 			}
@@ -428,7 +428,7 @@ private:
 			// TODO (Vishesh): Cache tags need team of its own.
 			toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(cacheTag).get() }, privatized);
 		} else {
-			TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
+			TraceEvent(SevDebug, "SendingPrivatized_CacheTag", dbgid).detail("M", privatized.toString());
 			toCommit->addTag(cacheTag);
 			toCommit->writeTypedMessage(privatized);
 		}
@@ -510,7 +510,7 @@ private:
 				if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 					toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 				} else {
-					TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
+					TraceEvent(SevDebug, "SendingPrivatized_TSSID", dbgid).detail("M", privatized.toString());
 					toCommit->addTag(tag);
 					toCommit->writeTypedMessage(privatized);
 				}
@@ -544,7 +544,7 @@ private:
 			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 				toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 			} else {
-				TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
+				TraceEvent(SevDebug, "SendingPrivatized_TSSQuarantine", dbgid).detail("M", privatized.toString());
 				toCommit->addTag(tag);
 				toCommit->writeTypedMessage(privatized);
 			}
@@ -664,7 +664,7 @@ private:
 		if (m.param1 == lastEpochEndKey) {
 			toCommit->addTags(allTags);
 			toCommit->writeTypedMessage(LogProtocolMessage(), true);
-			TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", "LogProtocolMessage");
+			TraceEvent(SevDebug, "SendingPrivatized_GlobalKeys", dbgid).detail("M", "LogProtocolMessage");
 		}
 
 		MutationRef privatized = m;
@@ -676,7 +676,7 @@ private:
 			}
 			toCommit->writeToStorageTeams(tLogGroupCollection, allTeams, privatized);
 		} else {
-			TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", m.toString());
+			TraceEvent(SevDebug, "SendingPrivatized_GlobalKeys", dbgid).detail("M", m.toString());
 			toCommit->addTags(allTags);
 			toCommit->writeTypedMessage(privatized);
 		}
@@ -804,7 +804,8 @@ private:
 					if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 						toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 					} else {
-						TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
+						TraceEvent(SevDebug, "SendingPrivatized_ClearServerTag", dbgid)
+						    .detail("M", privatized.toString());
 						toCommit->addTag(tag);
 						toCommit->writeTypedMessage(privatized);
 					}
@@ -833,7 +834,8 @@ private:
 								if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 									toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 								} else {
-									TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
+									TraceEvent(SevDebug, "SendingPrivatized_TSSClearServerTag", dbgid)
+									    .detail("M", privatized.toString());
 									toCommit->addTag(tag);
 									toCommit->writeTypedMessage(privatized);
 								}
@@ -1024,7 +1026,7 @@ private:
 			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 				toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 			} else {
-				TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
+				TraceEvent(SevDebug, "SendingPrivatized_ClearTSSMapping", dbgid).detail("M", privatized.toString());
 				toCommit->addTag(tag);
 				toCommit->writeTypedMessage(privatized);
 			}
@@ -1056,7 +1058,8 @@ private:
 					if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 						toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 					} else {
-						TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
+						TraceEvent(SevDebug, "SendingPrivatized_ClearTSSQuarantine", dbgid)
+						    .detail("M", privatized.toString());
 						toCommit->addTag(tag);
 						toCommit->writeTypedMessage(privatized);
 					}
@@ -1156,8 +1159,9 @@ private:
 				toCommit->writeToStorageTeams(tLogGroupCollection, teams, mutationBegin);
 				toCommit->writeToStorageTeams(tLogGroupCollection, teams, mutationEnd);
 			} else {
-				TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", mutationBegin.toString());
-				TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", mutationEnd.toString());
+				TraceEvent(SevDebug, "SendingPrivatized_CachedKeyRange", dbgid)
+				    .detail("MBegin", mutationBegin.toString())
+				    .detail("MEnd", mutationEnd.toString());
 				toCommit->addTags(allTags);
 				toCommit->writeTypedMessage(mutationBegin);
 				toCommit->addTags(allTags);

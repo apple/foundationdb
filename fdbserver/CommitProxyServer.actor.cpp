@@ -1582,6 +1582,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 				r->value().front().first = 0;
 		}
 		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+			// Only normal key space, because \xff key space is processed by all resolvers.
 			pProxyCommitData->keyResolvers.coalesce(normalKeys);
 			auto& versions = pProxyCommitData->systemKeyVersions;
 			while (versions.size() > 1 && versions[1] < oldestVersion) {
