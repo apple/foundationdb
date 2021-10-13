@@ -36,10 +36,10 @@
 #include <boost/lexical_cast.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0) {
+ACTOR Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0) {
 	loop {
 		choose {
-			when(vector<WorkerDetails> w = wait(brokenPromiseToNever(
+			when(std::vector<WorkerDetails> w = wait(brokenPromiseToNever(
 			         dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest(flags))))) {
 				return w;
 			}
@@ -53,7 +53,7 @@ ACTOR Future<WorkerInterface> getMasterWorker(Database cx, Reference<AsyncVar<Se
 	TraceEvent("GetMasterWorker").detail("Stage", "GettingWorkers");
 
 	loop {
-		state vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
+		state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
 
 		for (int i = 0; i < workers.size(); i++) {
 			if (workers[i].interf.address() == dbInfo->get().master.address()) {
@@ -80,7 +80,7 @@ ACTOR Future<WorkerInterface> getDataDistributorWorker(Database cx, Reference<As
 	TraceEvent("GetDataDistributorWorker").detail("Stage", "GettingWorkers");
 
 	loop {
-		state vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
+		state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
 		if (!dbInfo->get().distributor.present())
 			continue;
 
@@ -145,7 +145,8 @@ int64_t getPoppedVersionLag(const TraceEventFields& md) {
 	return persistentDataDurableVersion - queuePoppedVersion;
 }
 
-ACTOR Future<vector<WorkerInterface>> getCoordWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+ACTOR Future<std::vector<WorkerInterface>> getCoordWorkers(Database cx,
+                                                           Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
 
 	Optional<Value> coordinators =
@@ -165,7 +166,7 @@ ACTOR Future<vector<WorkerInterface>> getCoordWorkers(Database cx, Reference<Asy
 		coordinatorsAddrSet.insert(addr);
 	}
 
-	vector<WorkerInterface> result;
+	std::vector<WorkerInterface> result;
 	for (const auto& worker : workers) {
 		NetworkAddress primary = worker.interf.address();
 		Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
@@ -225,7 +226,7 @@ ACTOR Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
 }
 
 // Returns a vector of blob worker interfaces which have been persisted under the system key space
-ACTOR Future<vector<BlobWorkerInterface>> getBlobWorkers(Database cx, bool use_system_priority = false) {
+ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx, bool use_system_priority = false) {
 	state Transaction tr(cx);
 	loop {
 		if (use_system_priority) {
@@ -236,7 +237,7 @@ ACTOR Future<vector<BlobWorkerInterface>> getBlobWorkers(Database cx, bool use_s
 			RangeResult blobWorkersList = wait(tr.getRange(blobWorkerListKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!blobWorkersList.more && blobWorkersList.size() < CLIENT_KNOBS->TOO_MANY);
 
-			vector<BlobWorkerInterface> blobWorkers;
+			std::vector<BlobWorkerInterface> blobWorkers;
 			blobWorkers.reserve(blobWorkersList.size());
 			for (int i = 0; i < blobWorkersList.size(); i++) {
 				blobWorkers.push_back(decodeBlobWorkerListValue(blobWorkersList[i].value));
@@ -248,7 +249,7 @@ ACTOR Future<vector<BlobWorkerInterface>> getBlobWorkers(Database cx, bool use_s
 	}
 }
 
-ACTOR Future<vector<StorageServerInterface>> getStorageServers(Database cx, bool use_system_priority = false) {
+ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx, bool use_system_priority = false) {
 	state Transaction tr(cx);
 	loop {
 		if (use_system_priority) {
@@ -259,7 +260,7 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers(Database cx, bool
 			RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
-			vector<StorageServerInterface> servers;
+			std::vector<StorageServerInterface> servers;
 			servers.reserve(serverList.size());
 			for (int i = 0; i < serverList.size(); i++)
 				servers.push_back(decodeServerListValue(serverList[i].value));
@@ -270,9 +271,9 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers(Database cx, bool
 	}
 }
 
-ACTOR Future<vector<WorkerInterface>> getStorageWorkers(Database cx,
-                                                        Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                                                        bool localOnly) {
+ACTOR Future<std::vector<WorkerInterface>> getStorageWorkers(Database cx,
+                                                             Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                                             bool localOnly) {
 	state std::vector<StorageServerInterface> servers = wait(getStorageServers(cx));
 	state std::map<NetworkAddress, WorkerInterface> workersMap;
 	std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
@@ -292,7 +293,7 @@ ACTOR Future<vector<WorkerInterface>> getStorageWorkers(Database cx,
 	}
 	auto masterDcId = dbInfo->get().master.locality.dcId();
 
-	vector<WorkerInterface> result;
+	std::vector<WorkerInterface> result;
 	for (const auto& server : servers) {
 		TraceEvent(SevDebug, "DcIdInfo")
 		    .detail("ServerLocalityID", server.locality.dcId())
@@ -611,17 +612,17 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
 			    .detail("RemoteDead", remoteDead)
 			    .detail("PrimaryDead", primaryDead);
 			g_simulator.usableRegions = 1;
-			wait(success(changeConfig(cx,
-			                          (primaryDead ? g_simulator.disablePrimary : g_simulator.disableRemote) +
-			                              " repopulate_anti_quorum=1",
-			                          true)));
+			wait(success(ManagementAPI::changeConfig(
+			    cx.getReference(),
+			    (primaryDead ? g_simulator.disablePrimary : g_simulator.disableRemote) + " repopulate_anti_quorum=1",
+			    true)));
 			while (dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED) {
 				wait(dbInfo->onChange());
 			}
 			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration")
 			    .detail("Location", context)
 			    .detail("Stage", "Usable_Regions");
-			wait(success(changeConfig(cx, "usable_regions=1", true)));
+			wait(success(ManagementAPI::changeConfig(cx.getReference(), "usable_regions=1", true)));
 		}
 	}
 	return Void();
@@ -655,22 +656,22 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	state Future<int64_t> storageQueueSize;
 	state Future<bool> dataDistributionActive;
 	state Future<bool> storageServersRecruiting;
-
 	auto traceMessage = "QuietDatabase" + phase + "Begin";
-	TraceEvent(traceMessage.c_str());
+	TraceEvent(traceMessage.c_str()).log();
 
 	// In a simulated environment, wait 5 seconds so that workers can move to their optimal locations
 	if (g_network->isSimulated())
 		wait(delay(5.0));
+
 	// The quiet database check (which runs at the end of every test) will always time out due to active data movement.
 	// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.
+
 	printf("Set perpetual_storage_wiggle=0 ...\n");
 	wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
 	printf("Set perpetual_storage_wiggle=0 Done.\n");
 
 	// Require 3 consecutive successful quiet database checks spaced 2 second apart
 	state int numSuccesses = 0;
-
 	loop {
 		try {
 			TraceEvent("QuietDatabaseWaitingOnDataDistributor").log();
@@ -710,15 +711,15 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 			if (dataInFlight.get() > dataInFlightGate || tLogQueueInfo.get().first > maxTLogQueueGate ||
 			    tLogQueueInfo.get().second > maxPoppedVersionLag ||
 			    dataDistributionQueueSize.get() > maxDataDistributionQueueSize ||
-			    storageQueueSize.get() > maxStorageServerQueueGate || dataDistributionActive.get() == false ||
-			    storageServersRecruiting.get() == true || teamCollectionValid.get() == false) {
+			    storageQueueSize.get() > maxStorageServerQueueGate || !dataDistributionActive.get() ||
+			    storageServersRecruiting.get() || !teamCollectionValid.get()) {
 
 				wait(delay(1.0));
 				numSuccesses = 0;
 			} else {
 				if (++numSuccesses == 3) {
 					auto msg = "QuietDatabase" + phase + "Done";
-					TraceEvent(msg.c_str());
+					TraceEvent(msg.c_str()).log();
 					break;
 				} else {
 					wait(delay(g_network->isSimulated() ? 2.0 : 30.0));

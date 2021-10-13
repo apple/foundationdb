@@ -53,7 +53,9 @@ set(FDBSERVER_SRCS
   LocalConfiguration.h
   LogProtocolMessage.h
   LogRouter.actor.cpp
+  LogSystem.cpp
   LogSystem.h
+  LogSystemConfig.cpp
   LogSystemConfig.h
   LogSystemDiskQueueAdapter.actor.cpp
   LogSystemDiskQueueAdapter.h
@@ -121,6 +123,7 @@ set(FDBSERVER_SRCS
   StorageMetrics.h
   storageserver.actor.cpp
   TagPartitionedLogSystem.actor.cpp
+  TagPartitionedLogSystem.actor.h
   template_fdb.h
   tester.actor.cpp
   TesterInterface.actor.h
@@ -234,6 +237,7 @@ set(FDBSERVER_SRCS
   workloads/SlowTaskWorkload.actor.cpp
   workloads/SnapTest.actor.cpp
   workloads/SpecialKeySpaceCorrectness.actor.cpp
+  workloads/StreamingRangeRead.actor.cpp
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
   workloads/StreamingRead.actor.cpp

@@ -27,22 +27,9 @@
 #include "fdbrpc/Locality.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClusterInterface.h"
+#include "fdbclient/WellKnownEndpoints.h"
 
 const int MAX_CLUSTER_FILE_BYTES = 60000;
-
-// well known endpoints published to the client.
-constexpr UID WLTOKEN_CLIENTLEADERREG_GETLEADER(-1, 2);
-constexpr UID WLTOKEN_CLIENTLEADERREG_OPENDATABASE(-1, 3);
-
-// the value of this endpoint should be stable and not change.
-constexpr UID WLTOKEN_PROTOCOL_INFO(-1, 10);
-constexpr UID WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE(-1, 11);
-
-constexpr UID WLTOKEN_CONFIGTXN_GETGENERATION(-1, 12);
-constexpr UID WLTOKEN_CONFIGTXN_GET(-1, 13);
-constexpr UID WLTOKEN_CONFIGTXN_GETCLASSES(-1, 14);
-constexpr UID WLTOKEN_CONFIGTXN_GETKNOBS(-1, 15);
-constexpr UID WLTOKEN_CONFIGTXN_COMMIT(-1, 16);
 
 struct ClientLeaderRegInterface {
 	RequestStream<struct GetLeaderRequest> getLeader;
@@ -62,8 +49,8 @@ class ClusterConnectionString {
 public:
 	ClusterConnectionString() {}
 	ClusterConnectionString(std::string const& connectionString);
-	ClusterConnectionString(vector<NetworkAddress>, Key);
-	vector<NetworkAddress> const& coordinators() const { return coord; }
+	ClusterConnectionString(std::vector<NetworkAddress>, Key);
+	std::vector<NetworkAddress> const& coordinators() const { return coord; }
 	Key clusterKey() const { return key; }
 	Key clusterKeyName() const {
 		return keyDesc;
@@ -74,7 +61,7 @@ public:
 private:
 	void parseKey(std::string const& key);
 
-	vector<NetworkAddress> coord;
+	std::vector<NetworkAddress> coord;
 	Key key, keyDesc;
 };
 
@@ -199,7 +186,7 @@ struct OpenDatabaseCoordRequest {
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
 	UID knownClientInfoID;
 	Key clusterKey;
-	vector<NetworkAddress> coordinators;
+	std::vector<NetworkAddress> coordinators;
 	ReplyPromise<CachedSerialization<struct ClientDBInfo>> reply;
 
 	template <class Ar>
@@ -210,7 +197,7 @@ struct OpenDatabaseCoordRequest {
 
 class ClientCoordinators {
 public:
-	vector<ClientLeaderRegInterface> clientLeaderServers;
+	std::vector<ClientLeaderRegInterface> clientLeaderServers;
 	Key clusterKey;
 	Reference<ClusterConnectionFile> ccf;
 

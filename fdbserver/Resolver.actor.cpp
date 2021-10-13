@@ -174,8 +174,8 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 
 		ResolveTransactionBatchReply& reply = proxyInfo.outstandingBatches[req.version];
 
-		vector<int> commitList;
-		vector<int> tooOldList;
+		std::vector<int> commitList;
+		std::vector<int> tooOldList;
 
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;

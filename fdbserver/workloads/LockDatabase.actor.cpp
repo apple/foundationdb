@@ -48,7 +48,7 @@ struct LockDatabaseWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return ok; }
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<RangeResult> lockAndSave(Database cx, LockDatabaseWorkload* self, UID lockID) {
 		state Transaction tr(cx);

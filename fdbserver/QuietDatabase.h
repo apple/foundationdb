@@ -37,18 +37,20 @@ Future<int64_t> getDataDistributionQueueSize(Database const& cx,
                                              bool const& reportInFlight);
 Future<bool> getTeamCollectionValid(Database const& cx, WorkerInterface const&);
 Future<bool> getTeamCollectionValid(Database const& cx, Reference<AsyncVar<struct ServerDBInfo> const> const&);
-Future<vector<StorageServerInterface>> getStorageServers(Database const& cx, bool const& use_system_priority = false);
-Future<vector<BlobWorkerInterface>> getBlobWorkers(Database const& cx, bool const& use_system_priority = false);
-Future<vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo, int const& flags = 0);
+Future<std::vector<StorageServerInterface>> getStorageServers(Database const& cx,
+                                                              bool const& use_system_priority = false);
+Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database const& cx, bool const& use_system_priority = false);
+Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
+                                              int const& flags = 0);
 Future<WorkerInterface> getMasterWorker(Database const& cx, Reference<AsyncVar<ServerDBInfo> const> const& dbInfo);
 Future<Void> repairDeadDatacenter(Database const& cx,
                                   Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
                                   std::string const& context);
-Future<vector<WorkerInterface>> getStorageWorkers(Database const& cx,
-                                                  Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
-                                                  bool const& localOnly);
-Future<vector<WorkerInterface>> getCoordWorkers(Database const& cx,
-                                                Reference<AsyncVar<ServerDBInfo> const> const& dbInfo);
+Future<std::vector<WorkerInterface>> getStorageWorkers(Database const& cx,
+                                                       Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
+                                                       bool const& localOnly);
+Future<std::vector<WorkerInterface>> getCoordWorkers(Database const& cx,
+                                                     Reference<AsyncVar<ServerDBInfo> const> const& dbInfo);
 
 #include "flow/unactorcompiler.h"
 #endif

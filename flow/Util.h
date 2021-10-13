@@ -27,8 +27,7 @@
 template <typename C>
 void swapAndPop(C* container, int index) {
 	if (index != container->size() - 1) {
-		using std::swap;
-		swap((*container)[index], container->back());
+		std::swap((*container)[index], container->back());
 	}
 
 	container->pop_back();

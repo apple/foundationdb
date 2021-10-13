@@ -330,7 +330,14 @@ struct GetKeyValuesStreamReply : public ReplyPromiseStreamReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, data, version, more, cached, arena);
+		serializer(ar,
+		           ReplyPromiseStreamReply::acknowledgeToken,
+		           ReplyPromiseStreamReply::sequence,
+		           data,
+		           version,
+		           more,
+		           cached,
+		           arena);
 	}
 };
 
@@ -674,7 +681,7 @@ struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, mutations, arena);
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, mutations, arena);
 	}
 };
 

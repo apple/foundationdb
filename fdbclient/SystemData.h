@@ -44,7 +44,7 @@ extern const KeyRangeRef specialKeys; // [FF][FF] to [FF][FF][FF], some client f
                                       // using these special keys, see pr#2662
 extern const KeyRef afterAllKeys;
 
-//    "\xff/keyServers/[[begin]]" := "[[vector<serverID>, vector<serverID>]|[vector<Tag>, vector<Tag>]]"
+//    "\xff/keyServers/[[begin]]" := "[[vector<serverID>, std::vector<serverID>]|[vector<Tag>, std::vector<Tag>]]"
 //	An internal mapping of where shards are located in the database. [[begin]] is the start of the shard range
 //	and the result is a list of serverIDs or Tags where these shards are located. These values can be changed
 //	as data movement occurs.
@@ -90,7 +90,7 @@ void decodeStorageCacheValue(const ValueRef& value, std::vector<uint16_t>& serve
 //	as the key, the value indicates whether the shard does or does not exist on the server.
 //	These values can be changed as data movement occurs.
 extern const KeyRef serverKeysPrefix;
-extern const ValueRef serverKeysTrue, serverKeysFalse;
+extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
 const Key serverKeysKey(UID serverID, const KeyRef& keys);
 const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
@@ -211,6 +211,7 @@ extern const KeyRangeRef configKeys;
 extern const KeyRef configKeysPrefix;
 
 extern const KeyRef perpetualStorageWiggleKey;
+extern const KeyRef perpetualStorageWiggleLocalityKey;
 extern const KeyRef wigglingStorageServerKey;
 // Change the value of this key to anything and that will trigger detailed data distribution team info log.
 extern const KeyRef triggerDDTeamInfoPrintKey;
@@ -331,9 +332,9 @@ extern const KeyRef logsKey;
 //	Used during backup/recovery to restrict version requirements
 extern const KeyRef minRequiredCommitVersionKey;
 
-const Value logsValue(const vector<std::pair<UID, NetworkAddress>>& logs,
-                      const vector<std::pair<UID, NetworkAddress>>& oldLogs);
-std::pair<vector<std::pair<UID, NetworkAddress>>, vector<std::pair<UID, NetworkAddress>>> decodeLogsValue(
+const Value logsValue(const std::vector<std::pair<UID, NetworkAddress>>& logs,
+                      const std::vector<std::pair<UID, NetworkAddress>>& oldLogs);
+std::pair<std::vector<std::pair<UID, NetworkAddress>>, std::vector<std::pair<UID, NetworkAddress>>> decodeLogsValue(
     const ValueRef& value);
 
 // The "global keys" are sent to each storage server any time they are changed
@@ -505,10 +506,10 @@ extern const KeyRef changeFeedPrivatePrefix;
 extern const KeyRangeRef changeFeedDurableKeys;
 extern const KeyRef changeFeedDurablePrefix;
 
-const Value changeFeedDurableKey(Key const& feed, Version const& version);
+const Value changeFeedDurableKey(Key const& feed, Version version);
 std::pair<Key, Version> decodeChangeFeedDurableKey(ValueRef const& key);
-const Value changeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations);
-Standalone<VectorRef<MutationRef>> decodeChangeFeedDurableValue(ValueRef const& value);
+const Value changeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations, Version knownCommittedVersion);
+std::pair<Standalone<VectorRef<MutationRef>>, Version> decodeChangeFeedDurableValue(ValueRef const& value);
 
 // Configuration database special keys
 extern const KeyRef configTransactionDescriptionKey;

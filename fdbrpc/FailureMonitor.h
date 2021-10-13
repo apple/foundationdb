@@ -27,8 +27,6 @@
 #include <unordered_map>
 #include <unordered_set>
 
-using std::vector;
-
 /*
 
 IFailureMonitor is used by load balancing, data distribution and other components

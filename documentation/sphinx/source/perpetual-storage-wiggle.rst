@@ -31,12 +31,18 @@ Configuration
 
 You can configure the Perpetual Storage Wiggle via the FDB :ref:`command line interface <command-line-interface>`.
 
+Note that to have the Perpetual Storage Wiggle change the storage engine type, you must configure ``storage_migration_type=gradual``.
+
 Example commands
 ----------------
 
 Open perpetual storage wiggle: ``configure perpetual_storage_wiggle=1``.
 
 Disable perpetual storage wiggle on the cluster: ``configure perpetual_storage_wiggle=0``.
+
+Open perpetual storage wiggle for only processes matching the given locality key and value: ``configure perpetual_storage_wiggle=1 perpetual_storage_wiggle_locality=<LOCALITY_KEY>:<LOCALITY_VALUE>``.
+
+Disable perpetual storage wiggle locality matching filter, which wiggles all the processes: ``configure perpetual_storage_wiggle_locality=0``.
 
 Monitor
 =======

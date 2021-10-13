@@ -29,15 +29,17 @@
 struct MutationsAndVersionRef {
 	VectorRef<MutationRef> mutations;
 	Version version;
+	Version knownCommittedVersion;
 
 	MutationsAndVersionRef() {}
-	explicit MutationsAndVersionRef(Version version) : version(version) {}
-	MutationsAndVersionRef(VectorRef<MutationRef> mutations, Version version)
-	  : mutations(mutations), version(version) {}
-	MutationsAndVersionRef(Arena& to, VectorRef<MutationRef> mutations, Version version)
-	  : mutations(to, mutations), version(version) {}
+	explicit MutationsAndVersionRef(Version version, Version knownCommittedVersion)
+	  : version(version), knownCommittedVersion(knownCommittedVersion) {}
+	MutationsAndVersionRef(VectorRef<MutationRef> mutations, Version version, Version knownCommittedVersion)
+	  : mutations(mutations), version(version), knownCommittedVersion(knownCommittedVersion) {}
+	MutationsAndVersionRef(Arena& to, VectorRef<MutationRef> mutations, Version version, Version knownCommittedVersion)
+	  : mutations(to, mutations), version(version), knownCommittedVersion(knownCommittedVersion) {}
 	MutationsAndVersionRef(Arena& to, const MutationsAndVersionRef& from)
-	  : mutations(to, from.mutations), version(from.version) {}
+	  : mutations(to, from.mutations), version(from.version), knownCommittedVersion(from.knownCommittedVersion) {}
 	int expectedSize() const { return mutations.expectedSize(); }
 
 	struct OrderByVersion {
@@ -48,7 +50,7 @@ struct MutationsAndVersionRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, mutations, version);
+		serializer(ar, mutations, version, knownCommittedVersion);
 	}
 };
 

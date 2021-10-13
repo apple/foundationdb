@@ -173,7 +173,7 @@ struct ChangeFeedsWorkload : TestWorkload {
 		client = Future<Void>();
 		return true;
 	}
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> changeFeedClient(Database cx, ChangeFeedsWorkload* self) {
 		// Enable change feeds for a key range

@@ -415,7 +415,7 @@ public:
 	void setTransactionID(uint64_t id);
 	void setToken(uint64_t token);
 
-	const vector<Future<std::pair<Key, Key>>>& getExtraReadConflictRanges() const { return extraConflictRanges; }
+	const std::vector<Future<std::pair<Key, Key>>>& getExtraReadConflictRanges() const { return extraConflictRanges; }
 	Standalone<VectorRef<KeyRangeRef>> readConflictRanges() const {
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.read_conflict_ranges, tr.arena);
 	}
@@ -432,7 +432,7 @@ private:
 	CommitTransactionRequest tr;
 	Future<Version> readVersion;
 	Promise<Optional<Value>> metadataVersion;
-	vector<Future<std::pair<Key, Key>>> extraConflictRanges;
+	std::vector<Future<std::pair<Key, Key>>> extraConflictRanges;
 	Promise<Void> commitResult;
 	Future<Void> committing;
 };
@@ -453,7 +453,7 @@ int64_t extractIntOption(Optional<StringRef> value,
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
-ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions);
+ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);
 
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
 	return bytes / std::max(1, CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR) + 1;

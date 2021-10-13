@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
@@ -629,6 +630,9 @@ public:
 			    "FIFOQueue::Cursor(%s) loadPage start id=%s\n", toString().c_str(), ::toString(nextPageID).c_str());
 			nextPageReader = queue->pager->readPage(
 			    PagerEventReasons::MetaData, nonBtreeLevel, nextPageID, ioMaxPriority, true, false);
+			if (!nextPageReader.isReady()) {
+				nextPageReader = waitOrError(nextPageReader, queue->pagerError);
+			}
 		}
 
 		Future<Void> loadExtent() {
@@ -1440,6 +1444,12 @@ public:
 
 	// For debugging
 	std::string name;
+
+	void toTraceEvent(TraceEvent& e, const char* prefix) const {
+		e.detail(format("%sRecords", prefix), numEntries);
+		e.detail(format("%sPages", prefix), numPages);
+		e.detail(format("%sRecordsPerPage", prefix), numPages > 0 ? (double)numEntries / numPages : 0);
+	}
 };
 
 int nextPowerOf2(uint32_t x) {
@@ -2283,16 +2293,11 @@ public:
 			self->remapQueue.resetHeadReader();
 
 			self->remapCleanupFuture = remapCleanup(self);
-			TraceEvent(SevInfo, "RedwoodRecovered")
-			    .detail("FileName", self->filename.c_str())
-			    .detail("CommittedVersion", self->pHeader->committedVersion)
-			    .detail("LogicalPageSize", self->logicalPageSize)
-			    .detail("PhysicalPageSize", self->physicalPageSize)
-			    .detail("RemapEntries", self->remapQueue.numEntries);
 		} else {
 			// Note: If the file contains less than 2 pages but more than 0 bytes then the pager was never successfully
 			// committed. A new pager will be created in its place.
 			// TODO:  Is the right behavior?
+			exists = false;
 
 			debug_printf("DWALPager(%s) creating new pager\n", self->filename.c_str());
 
@@ -2351,6 +2356,27 @@ public:
 			self->remapCleanupFuture = Void();
 			wait(self->commit());
 		}
+
+		if (!self->memoryOnly) {
+			wait(store(fileSize, self->pageFile->size()));
+		}
+
+		TraceEvent e(SevInfo, "RedwoodRecoveredPager");
+		e.detail("FileName", self->filename.c_str());
+		e.detail("LogicalFileSize", self->pHeader->pageCount * self->physicalPageSize);
+		e.detail("PhysicalFileSize", fileSize);
+		e.detail("OpenedExisting", exists);
+		e.detail("CommittedVersion", self->pHeader->committedVersion);
+		e.detail("LogicalPageSize", self->logicalPageSize);
+		e.detail("PhysicalPageSize", self->physicalPageSize);
+
+		self->remapQueue.toTraceEvent(e, "RemapQueue");
+		self->delayedFreeList.toTraceEvent(e, "FreeQueue");
+		self->freeList.toTraceEvent(e, "DelayedFreeQueue");
+		self->extentUsedList.toTraceEvent(e, "UsedExtentQueue");
+		self->extentFreeList.toTraceEvent(e, "FreeExtentQueue");
+		self->getStorageBytes().toTraceEvent(e);
+		e.log();
 
 		debug_printf("DWALPager(%s) recovered.  committedVersion=%" PRId64 " logicalPageSize=%d physicalPageSize=%d\n",
 		             self->filename.c_str(),
@@ -3369,7 +3395,6 @@ public:
 	Future<Void> onClosed() override { return closedPromise.getFuture(); }
 
 	StorageBytes getStorageBytes() const override {
-		ASSERT(recoverFuture.isReady());
 		int64_t free;
 		int64_t total;
 		if (memoryOnly) {
@@ -3383,7 +3408,15 @@ public:
 		// It is not exactly known how many pages on the delayed free list are usable as of right now.  It could be
 		// known, if each commit delayed entries that were freeable were shuffled from the delayed free queue to the
 		// free queue, but this doesn't seem necessary.
-		int64_t reusable = (freeList.numEntries + delayedFreeList.numEntries) * physicalPageSize;
+
+		// Amount of space taken up by all of the items in the free lists
+		int64_t reusablePageSpace = (freeList.numEntries + delayedFreeList.numEntries) * physicalPageSize;
+		// Amount of space taken up by the free list queues themselves, as if we were to pop and use
+		// items on the free lists the space the items are stored in would also become usable
+		int64_t reusableQueueSpace = (freeList.numPages + delayedFreeList.numPages) * physicalPageSize;
+		int64_t reusable = reusablePageSpace + reusableQueueSpace;
+
+		// Space currently in used by old page versions have have not yet been freed due to the remap cleanup window.
 		int64_t temp = remapQueue.numEntries * physicalPageSize;
 
 		return StorageBytes(free, total, pagerSize - reusable, free + reusable, temp);
@@ -4654,6 +4687,13 @@ public:
 
 		debug_printf("Recovered btree at version %" PRId64 ": %s\n", latest, self->m_pHeader->toString().c_str());
 
+		TraceEvent e(SevInfo, "RedwoodRecoveredBTree");
+		e.detail("FileName", self->m_name);
+		e.detail("OpenedExisting", meta.size() != 0);
+		e.detail("LatestVersion", latest);
+		self->m_lazyClearQueue.toTraceEvent(e, "LazyClearQueue");
+		e.log();
+
 		self->m_lastCommittedVersion = latest;
 		self->m_lazyClearActor = incrementalLazyClear(self);
 		return Void();
@@ -4695,8 +4735,6 @@ public:
 	}
 
 	ACTOR static Future<Void> clearAllAndCheckSanity_impl(VersionedBTree* self) {
-		ASSERT(g_network->isSimulated());
-
 		debug_printf("Clearing tree.\n");
 		self->setWriteVersion(self->getLatestVersion() + 1);
 		self->clear(KeyRangeRef(dbBegin.key, dbEnd.key));
@@ -7051,8 +7089,8 @@ public:
 		state VersionedBTree::BTreeCursor cur;
 		wait(
 		    self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::RangeRead));
-
-		state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
+		state PriorityMultiLock::Lock lock;
+		state Future<Void> f;
 		++g_redwoodMetrics.metric.opGetRange;
 
 		state RangeResult result;
@@ -7064,7 +7102,15 @@ public:
 		}
 
 		if (rowLimit > 0) {
-			wait(cur.seekGTE(keys.begin));
+			f = cur.seekGTE(keys.begin);
+			if (f.isReady()) {
+				TEST(true); // Cached forward range read seek
+				f.get();
+			} else {
+				TEST(true); // Uncached forward range read seek
+				wait(store(lock, self->m_concurrentReads.lock()));
+				wait(f);
+			}
 
 			if (self->prefetch) {
 				cur.prefetch(keys.end, true, rowLimit, byteLimit);
@@ -7111,7 +7157,15 @@ public:
 				wait(cur.moveNext());
 			}
 		} else {
-			wait(cur.seekLT(keys.end));
+			f = cur.seekLT(keys.end);
+			if (f.isReady()) {
+				TEST(true); // Cached reverse range read seek
+				f.get();
+			} else {
+				TEST(true); // Uncached reverse range read seek
+				wait(store(lock, self->m_concurrentReads.lock()));
+				wait(f);
+			}
 
 			if (self->prefetch) {
 				cur.prefetch(keys.begin, false, -rowLimit, byteLimit);
@@ -7175,9 +7229,10 @@ public:
 		wait(
 		    self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::PointRead));
 
-		state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
-		++g_redwoodMetrics.metric.opGet;
+		// Not locking for point reads, instead relying on IO priority lock
+		// state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
 
+		++g_redwoodMetrics.metric.opGet;
 		wait(cur.seekGTE(key));
 		if (cur.isValid() && cur.get().key == key) {
 			// Return a Value whose arena depends on the source page arena
@@ -9464,6 +9519,7 @@ TEST_CASE(":/redwood/performance/set") {
 	state int scanPrefetchBytes = params.getInt("scanPrefetchBytes").orDefault(0);
 	state bool pagerMemoryOnly = params.getInt("pagerMemoryOnly").orDefault(0);
 	state bool traceMetrics = params.getInt("traceMetrics").orDefault(0);
+	state bool destructiveSanityCheck = params.getInt("destructiveSanityCheck").orDefault(0);
 
 	printf("pagerMemoryOnly: %d\n", pagerMemoryOnly);
 	printf("pageSize: %d\n", pageSize);
@@ -9490,6 +9546,7 @@ TEST_CASE(":/redwood/performance/set") {
 	printf("fileName: %s\n", fileName.c_str());
 	printf("openExisting: %d\n", openExisting);
 	printf("insertRecords: %d\n", insertRecords);
+	printf("destructiveSanityCheck: %d\n", destructiveSanityCheck);
 
 	// If using stdout for metrics, prevent trace event metrics logger from starting
 	if (!traceMetrics) {
@@ -9623,6 +9680,10 @@ TEST_CASE(":/redwood/performance/set") {
 		if (!traceMetrics) {
 			printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 		}
+	}
+
+	if (destructiveSanityCheck) {
+		wait(btree->clearAllAndCheckSanity());
 	}
 
 	Future<Void> closedFuture = btree->onClosed();
@@ -10106,7 +10167,7 @@ TEST_CASE(":/redwood/performance/histogramThroughput") {
 	std::default_random_engine generator;
 	std::uniform_int_distribution<uint32_t> distribution(0, UINT32_MAX);
 	state size_t inputSize = pow(10, 8);
-	state vector<uint32_t> uniform;
+	state std::vector<uint32_t> uniform;
 	for (int i = 0; i < inputSize; i++) {
 		uniform.push_back(distribution(generator));
 	}
@@ -10172,7 +10233,7 @@ TEST_CASE(":/redwood/performance/continuousSmapleThroughput") {
 	std::default_random_engine generator;
 	std::uniform_int_distribution<uint32_t> distribution(0, UINT32_MAX);
 	state size_t inputSize = pow(10, 8);
-	state vector<uint32_t> uniform;
+	state std::vector<uint32_t> uniform;
 	for (int i = 0; i < inputSize; i++) {
 		uniform.push_back(distribution(generator));
 	}

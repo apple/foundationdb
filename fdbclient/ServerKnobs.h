@@ -391,6 +391,10 @@ public:
 	double INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
 	double VERSION_LAG_METRIC_INTERVAL;
 	int64_t MAX_VERSION_DIFFERENCE;
+	double INITIAL_UPDATE_CROSS_DC_INFO_DELAY; // The intial delay in a new Cluster Controller just started to refresh
+	                                           // the info of remote DC, such as remote DC health, and whether we need
+	                                           // to take remote DC health info when making failover decision.
+	double CHECK_REMOTE_HEALTH_INTERVAL; // Remote DC health refresh interval.
 	double FORCE_RECOVERY_CHECK_DELAY;
 	double RATEKEEPER_FAILURE_TIME;
 	double BLOB_MANAGER_FAILURE_TIME;
@@ -414,7 +418,13 @@ public:
 	double CC_TRACKING_HEALTH_RECOVERY_INTERVAL; // The number of recovery count should not exceed
 	                                             // CC_MAX_HEALTH_RECOVERY_COUNT within
 	                                             // CC_TRACKING_HEALTH_RECOVERY_INTERVAL.
-	int CC_MAX_HEALTH_RECOVERY_COUNT;
+	int CC_MAX_HEALTH_RECOVERY_COUNT; // The max number of recoveries can be triggered due to worker health within
+	                                  // CC_TRACKING_HEALTH_RECOVERY_INTERVAL
+	bool CC_HEALTH_TRIGGER_FAILOVER; // Whether to enable health triggered failover in CC.
+	int CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION; // The minimum number of degraded servers that can trigger a
+	                                               // failover.
+	int CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION; // The maximum number of degraded servers that can trigger a
+	                                               // failover.
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
