@@ -1658,7 +1658,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 		// TODO REMOVE in api V2
 		ASSERT(req.beginVersion == 0);
 		state BlobGranuleFileReply rep;
-		state vector<Reference<GranuleMetadata>> granules;
+		state std::vector<Reference<GranuleMetadata>> granules;
 
 		auto checkRanges = bwData->granuleMetadata.intersectingRanges(req.keyRange);
 		// check for gaps as errors and copy references to granule metadata before yielding or doing any work

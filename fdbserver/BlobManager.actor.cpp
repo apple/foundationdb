@@ -1185,7 +1185,7 @@ TEST_CASE("/blobmanager/updateranges") {
 	StringRef inactive = StringRef();
 
 	RangeResult dbDataEmpty;
-	vector<std::pair<KeyRangeRef, bool>> kbrRanges;
+	std::vector<std::pair<KeyRangeRef, bool>> kbrRanges;
 
 	StringRef keyA = StringRef(ar, LiteralStringRef("A"));
 	StringRef keyB = StringRef(ar, LiteralStringRef("B"));

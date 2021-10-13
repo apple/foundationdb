@@ -1962,8 +1962,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	                                    DatabaseConfiguration configuration,
 	                                    ConsistencyCheckWorkload* self) {
 		// TODO: assert that there are blob workers iff the blob gate is true
-		state vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(cx));
-		state vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+		state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(cx));
+		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 
 		// process addr -> num blob workers on that process
 		state std::unordered_map<NetworkAddress, int> blobWorkersByAddr;

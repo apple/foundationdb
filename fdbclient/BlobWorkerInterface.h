@@ -164,7 +164,7 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, granuleRange, doSplit, epoch, seqno);
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, granuleRange, doSplit, epoch, seqno);
 	}
 };
 

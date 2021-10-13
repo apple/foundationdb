@@ -725,7 +725,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies,
     std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
     ServerCoordinators coordinators,
-    vector<BlobWorkerInterface> blobWorkers,
+    std::vector<BlobWorkerInterface> blobWorkers,
     Database cx,
     Optional<DatabaseConfiguration> configuration,
     Optional<Key> healthyZone,
@@ -3002,7 +3002,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			// ...also blob workers
-			state vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(cx, true));
+			state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(cx, true));
 
 			wait(waitForAll(warningFutures));
 		} else {

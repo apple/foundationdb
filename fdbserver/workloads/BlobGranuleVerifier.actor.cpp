@@ -54,7 +54,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	int64_t timeTravelReads = 0;
 	int64_t rowsRead = 0;
 	int64_t bytesRead = 0;
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 
 	Reference<BackupContainerFileSystem> bstore;
 	AsyncVar<std::vector<KeyRange>> granuleRanges;
@@ -404,7 +404,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		state Version readVersion = wait(tr.getReadVersion());
 		state int checks = 0;
 
-		state vector<KeyRange> allRanges = self->granuleRanges.get();
+		state std::vector<KeyRange> allRanges = self->granuleRanges.get();
 		for (auto& range : allRanges) {
 			state KeyRange r = range;
 			state PromiseStream<Standalone<BlobGranuleChunkRef>> chunkStream;
@@ -460,7 +460,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 		return _check(cx, this);
 	}
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<BlobGranuleVerifierWorkload> BlobGranuleVerifierWorkloadFactory("BlobGranuleVerifier");
