@@ -251,6 +251,9 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
 	init( BUSYNESS_SPIKE_SATURATED_THRESHOLD,     0.500 );
 
+	// blob granules 
+	init( ENABLE_BLOB_GRANULES,                    true ); // same as SERVER_KNOBS->ENABLE_BLOB_GRANULES
+
 	// clang-format on
 }
 

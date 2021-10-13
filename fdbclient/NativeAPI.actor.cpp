@@ -7096,6 +7096,9 @@ ACTOR Future<Void> getBlobGranuleRangesStreamActor(Reference<DatabaseContext> db
 }
 
 Future<Void> DatabaseContext::getBlobGranuleRangesStream(const PromiseStream<KeyRange>& results, KeyRange range) {
+	if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		throw client_invalid_operation();
+	}
 	return getBlobGranuleRangesStreamActor(Reference<DatabaseContext>::addRef(this), results, range);
 }
 
@@ -7296,6 +7299,9 @@ Future<Void> DatabaseContext::readBlobGranulesStream(const PromiseStream<Standal
                                                      KeyRange range,
                                                      Version begin,
                                                      Version end) {
+	if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		throw client_invalid_operation();
+	}
 	return readBlobGranulesStreamActor(Reference<DatabaseContext>::addRef(this), results, range, begin, end);
 }
 

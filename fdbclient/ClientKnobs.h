@@ -242,6 +242,9 @@ public:
 	double BUSYNESS_SPIKE_START_THRESHOLD;
 	double BUSYNESS_SPIKE_SATURATED_THRESHOLD;
 
+	// blob granules
+	bool ENABLE_BLOB_GRANULES;
+
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
 };
