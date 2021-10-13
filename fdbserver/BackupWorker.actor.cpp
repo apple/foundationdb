@@ -834,6 +834,10 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			// make sure file is saved on version boundary
 			popVersion = lastVersion;
 			numMsg = lastVersionIndex;
+
+			// If we aren't able to process any messages and the lock is blocking us from
+			// queuing more, then we are stuck. This could suggest the lock capacity is too small.
+			ASSERT(numMsg > 0 || self->lock->waiters() == 0);
 		}
 		if (((numMsg > 0 || popVersion > lastPopVersion) && self->pulling) || self->pullFinished()) {
 			TraceEvent("BackupWorkerSave", self->myId)
