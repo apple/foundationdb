@@ -123,6 +123,10 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 	std::string description() const override { return "BlobGranuleVerifier"; }
 	Future<Void> setup(Database const& cx) override {
+		if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+			return Void();
+		}
+
 		if (doSetup) {
 			double initialDelay = deterministicRandom()->random01() * (maxDelay - minDelay) + minDelay;
 			if (BGV_DEBUG) {
@@ -380,6 +384,10 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
+		if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+			return Void();
+		}
+
 		clients.reserve(threads + 1);
 		clients.push_back(timeout(findGranules(cx, this), testDuration, Void()));
 		for (int i = 0; i < threads; i++) {
@@ -445,7 +453,13 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		return self->mismatches == 0 && checks > 0;
 	}
 
-	Future<bool> check(Database const& cx) override { return _check(cx, this); }
+	Future<bool> check(Database const& cx) override {
+		if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+			return true;
+		}
+
+		return _check(cx, this);
+	}
 	void getMetrics(vector<PerfMetric>& m) override {}
 };
 

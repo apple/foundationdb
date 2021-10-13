@@ -296,9 +296,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					wait(::success(self->checkForExtraDataStores(cx, self)));
 
 					// Check blob workers are operating as expected
-					bool blobWorkersCorrect = wait(self->checkBlobWorkers(cx, configuration, self));
-					if (!blobWorkersCorrect)
-						self->testFailure("Blob workers incorrect");
+					if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+						bool blobWorkersCorrect = wait(self->checkBlobWorkers(cx, configuration, self));
+						if (!blobWorkersCorrect)
+							self->testFailure("Blob workers incorrect");
+					}
 
 					// Check that each machine is operating as its desired class
 					bool usingDesiredClasses = wait(self->checkUsingDesiredClasses(cx, self));
@@ -2335,7 +2337,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check BlobManager
-		if (db.blobManager.present() &&
+		if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES && db.blobManager.present() &&
 		    (!nonExcludedWorkerProcessMap.count(db.blobManager.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.blobManager.get().address()].processClass.machineClassFitness(
 		         ProcessClass::BlobManager) > fitnessLowerBound)) {

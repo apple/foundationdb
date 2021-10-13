@@ -5241,7 +5241,9 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(handleForcedRecoveries(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
-	self.addActor.send(monitorBlobManager(&self));
+	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		self.addActor.send(monitorBlobManager(&self));
+	}
 	// self.addActor.send(monitorTSSMapping(&self));
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(traceCounters("ClusterControllerMetrics",
