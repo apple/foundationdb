@@ -298,7 +298,7 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 
 	if (BM_DEBUG) {
 		printf("BM %s %s range [%s - %s) @ (%lld, %lld)\n",
-		       workerID.toString().c_str(),
+		       bmData->id.toString().c_str(),
 		       assignment.isAssign ? "assigning" : "revoking",
 		       assignment.keyRange.begin.printable().c_str(),
 		       assignment.keyRange.end.printable().c_str(),
@@ -318,6 +318,11 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 			req.managerEpoch = bmData->epoch;
 			req.managerSeqno = seqNo;
 			req.continueAssignment = assignment.assign.get().continueAssignment;
+
+			// if that worker isn't alive anymore, add the range back into the stream
+			if (bmData->workersById.count(workerID) == 0) {
+				throw no_more_servers();
+			}
 			AssignBlobRangeReply _rep = wait(bmData->workersById[workerID].assignBlobRangeRequest.getReply(req));
 			rep = _rep;
 		} else {
@@ -331,8 +336,13 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 			req.managerSeqno = seqNo;
 			req.dispose = assignment.revoke.get().dispose;
 
-			AssignBlobRangeReply _rep = wait(bmData->workersById[workerID].revokeBlobRangeRequest.getReply(req));
-			rep = _rep;
+			// if that worker isn't alive anymore, this is a noop
+			if (bmData->workersById.count(workerID)) {
+				AssignBlobRangeReply _rep = wait(bmData->workersById[workerID].revokeBlobRangeRequest.getReply(req));
+				rep = _rep;
+			} else {
+				return Void();
+			}
 		}
 		if (!rep.epochOk) {
 			if (BM_DEBUG) {
@@ -349,7 +359,8 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 			if (BM_DEBUG) {
 				printf("BM got error assigning range [%s - %s) to worker %s, requeueing\n",
 				       assignment.keyRange.begin.printable().c_str(),
-				       assignment.keyRange.end.printable().c_str());
+				       assignment.keyRange.end.printable().c_str(),
+				       workerID.toString().c_str());
 			}
 			// re-send revoke to queue to handle range being un-assigned from that worker before the new one
 			RangeAssignment revokeOld;
@@ -417,7 +428,11 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 
 			workerId = assignment.worker.present() ? assignment.worker.get() : pickWorkerForAssign(bmData);
 			bmData->workerAssignments.insert(assignment.keyRange, workerId);
-			bmData->workerStats[workerId].numGranulesAssigned += 1;
+
+			ASSERT(bmData->workerStats.count(workerId));
+			if (!assignment.assign.get().continueAssignment) {
+				bmData->workerStats[workerId].numGranulesAssigned += 1;
+			}
 
 			// FIXME: if range is assign, have some sort of semaphore for outstanding assignments so we don't assign
 			// a ton ranges at once and blow up FDB with reading initial snapshots.
@@ -432,9 +447,13 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 
 				// It is fine for multiple disjoint sub-ranges to have the same sequence number since they were part of
 				// the same logical change
-				bmData->workerStats[it.value()].numGranulesAssigned -= 1;
-				if (!assignment.worker.present() || assignment.worker.get() == it.value())
-					bmData->addActor.send(doRangeAssignment(bmData, assignment, it.value(), seqNo));
+
+				if (bmData->workerStats.count(it.value())) {
+					bmData->workerStats[it.value()].numGranulesAssigned -= 1;
+				}
+
+				// revoke the range for the worker that owns it, not the worker specified in the revoke
+				bmData->addActor.send(doRangeAssignment(bmData, assignment, it.value(), seqNo));
 			}
 
 			bmData->workerAssignments.insert(assignment.keyRange, UID());
@@ -701,6 +720,49 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 	return Void();
 }
 
+void killBlobWorker(BlobManagerData* bmData, BlobWorkerInterface bwInterf) {
+	UID bwId = bwInterf.id();
+
+	// Remove blob worker from stats map so that when we try to find a worker to takeover the range,
+	// the one we just killed isn't considered.
+	// Remove it from workersById also since otherwise that worker addr will remain excluded
+	// when we try to recruit new blob workers.
+	bmData->workerStats.erase(bwId);
+	bmData->workersById.erase(bwId);
+
+	// for every range owned by this blob worker, we want to
+	// - send a revoke request for that range
+	// - add the range back to the stream of ranges to be assigned
+	if (BM_DEBUG) {
+		printf("Taking back ranges from BW %s\n", bwId.toString().c_str());
+	}
+	for (auto& it : bmData->workerAssignments.ranges()) {
+		if (it.cvalue() == bwId) {
+			// Send revoke request
+			RangeAssignment raRevoke;
+			raRevoke.isAssign = false;
+			raRevoke.keyRange = it.range();
+			raRevoke.revoke = RangeRevokeData(false);
+			bmData->rangesToAssign.send(raRevoke);
+
+			// Add range back into the stream of ranges to be assigned
+			RangeAssignment raAssign;
+			raAssign.isAssign = true;
+			raAssign.worker = Optional<UID>();
+			raAssign.keyRange = it.range();
+			raAssign.assign = RangeAssignmentData(false); // not a continue
+			bmData->rangesToAssign.send(raAssign);
+		}
+	}
+
+	// Send halt to blob worker, with no expectation of hearing back
+	if (BM_DEBUG) {
+		printf("Sending halt to BW %s\n", bwId.toString().c_str());
+	}
+	bmData->addActor.send(
+	    brokenPromiseToNever(bwInterf.haltBlobWorker.getReply(HaltBlobWorkerRequest(bmData->epoch, bmData->id))));
+}
+
 ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerInterface bwInterf) {
 	state KeyRangeMap<std::pair<int64_t, int64_t>> lastSeenSeqno;
 	// outer loop handles reconstructing stream if it got a retryable error
@@ -711,6 +773,7 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 			// read from stream until worker fails (should never get explicit end_of_stream)
 			loop {
 				GranuleStatusReply rep = waitNext(statusStream.getFuture());
+
 				if (BM_DEBUG) {
 					printf("BM %lld got status of [%s - %s) @ (%lld, %lld) from BW %s: %s\n",
 					       bmData->epoch,
@@ -723,7 +786,8 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 				}
 				if (rep.epoch > bmData->epoch) {
 					if (BM_DEBUG) {
-						printf("BM heard from BW that there is a new manager with higher epoch\n");
+						printf("BM heard from BW %s that there is a new manager with higher epoch\n",
+						       bwInterf.id().toString().c_str());
 					}
 					if (bmData->iAmReplaced.canBeSet()) {
 						bmData->iAmReplaced.send(Void());
@@ -734,8 +798,13 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 				// to split the range.
 				ASSERT(rep.doSplit);
 
-				// FIXME: only evaluate for split if this worker currently owns the granule in this blob manager's
-				// mapping
+				// only evaluate for split if this worker currently owns the granule in this blob manager's mapping
+				auto currGranuleAssignment = bmData->workerAssignments.rangeContaining(rep.granuleRange.begin);
+				if (!(currGranuleAssignment.begin() == rep.granuleRange.begin &&
+				      currGranuleAssignment.end() == rep.granuleRange.end &&
+				      currGranuleAssignment.cvalue() == bwInterf.id())) {
+					continue;
+				}
 
 				auto lastReqForGranule = lastSeenSeqno.rangeContaining(rep.granuleRange.begin);
 				if (rep.granuleRange.begin == lastReqForGranule.begin() &&
@@ -792,16 +861,10 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 
 		choose {
 			when(wait(waitFailure)) {
-				// FIXME: actually handle this!!
 				if (BM_DEBUG) {
 					printf("BM %lld detected BW %s is dead\n", bmData->epoch, bwInterf.id().toString().c_str());
 				}
 				TraceEvent("BlobWorkerFailed", bmData->id).detail("BlobWorkerID", bwInterf.id());
-				// get all of its ranges
-				// send revoke request to get back all its ranges
-				// send halt (look at rangeMover)
-				// send all its ranges to assignranges stream
-				return Void();
 			}
 			when(wait(monitorStatus)) {
 				ASSERT(false);
@@ -820,6 +883,20 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 		TraceEvent(SevError, "BWMonitoringFailed", bmData->id).detail("BlobWorkerID", bwInterf.id()).error(e);
 		throw e;
 	}
+
+	// kill the blob worker
+	killBlobWorker(bmData, bwInterf);
+
+	// Trigger recruitment for a new blob worker
+	if (BM_DEBUG) {
+		printf("Restarting recruitment to replace dead BW %s\n", bwInterf.id().toString().c_str());
+	}
+	bmData->restartRecruiting.trigger();
+
+	if (BM_DEBUG) {
+		printf("No longer monitoring BW %s\n", bwInterf.id().toString().c_str());
+	}
+	return Void();
 }
 
 // TODO this is only for chaos testing right now!! REMOVE LATER
@@ -854,7 +931,6 @@ ACTOR Future<Void> rangeMover(BlobManagerData* bmData) {
 					RangeAssignment revokeOld;
 					revokeOld.isAssign = false;
 					revokeOld.keyRange = randomRange.range();
-					revokeOld.worker = randomRange.value();
 					revokeOld.revoke = RangeRevokeData(false);
 					bmData->rangesToAssign.send(revokeOld);
 
@@ -937,8 +1013,8 @@ ACTOR Future<Void> initializeBlobWorker(BlobManagerData* self, RecruitBlobWorker
 		if (newBlobWorker.present()) {
 			BlobWorkerInterface bwi = newBlobWorker.get().interf;
 
-			self->workersById.insert({ bwi.id(), bwi });
-			self->workerStats.insert({ bwi.id(), BlobWorkerStats() });
+			self->workersById[bwi.id()] = bwi;
+			self->workerStats[bwi.id()] = BlobWorkerStats();
 			self->addActor.send(monitorBlobWorker(self, bwi));
 
 			TraceEvent("BMRecruiting")

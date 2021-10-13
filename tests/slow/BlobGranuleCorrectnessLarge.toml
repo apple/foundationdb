@@ -1,5 +1,5 @@
 [[test]]
-testTitle = 'BlobGranuleCorrectnessTestLarge'
+testTitle = 'BlobGranuleCorrectnessLargeTest'
 
     [[test.workload]]
     testName = 'ReadWrite'
@@ -19,3 +19,27 @@ testTitle = 'BlobGranuleCorrectnessTestLarge'
     [[test.workload]]
     testName = 'BlobGranuleVerifier'
     testDuration = 200.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 200.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 30.0
+    testDuration = 200.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 200.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 200.0
+

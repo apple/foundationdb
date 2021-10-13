@@ -481,12 +481,14 @@ public:
 	const Endpoint& getEndpoint() const { return queue->getEndpoint(TaskPriority::ReadSocket); }
 
 	bool operator==(const ReplyPromiseStream<T>& rhs) const { return queue == rhs.queue; }
+	bool operator!=(const ReplyPromiseStream<T>& rhs) const { return !(*this == rhs); }
+
 	bool isEmpty() const { return !queue->isReady(); }
 	uint32_t size() const { return queue->size(); }
 
 	// Must be called on the server before sending results on the stream to ratelimit the amount of data outstanding to
 	// the client
-	Future<Void> onReady() {
+	Future<Void> onReady() const {
 		ASSERT(queue->acknowledgements.bytesLimit > 0);
 		if (queue->acknowledgements.failures.isError()) {
 			return queue->acknowledgements.failures.getError();
