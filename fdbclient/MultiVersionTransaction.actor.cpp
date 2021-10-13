@@ -533,6 +533,8 @@ void DLApi::runNetwork() {
 			hook.first(hook.second);
 		} catch (Error& e) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
+		} catch (std::exception& e) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error()).detail("RootException", e.what());
 		} catch (...) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
 		}
@@ -1803,9 +1805,14 @@ THREAD_FUNC_RETURN runNetworkThread(void* param) {
 	try {
 		((ClientInfo*)param)->api->runNetwork();
 	} catch (Error& e) {
-		TraceEvent(SevError, "RunNetworkError").error(e);
+		TraceEvent(SevError, "ExternalRunNetworkError").error(e);
+	} catch (std::exception& e) {
+		TraceEvent(SevError, "ExternalRunNetworkError").error(unknown_error()).detail("RootException", e.what());
+	} catch (...) {
+		TraceEvent(SevError, "ExternalRunNetworkError").error(unknown_error());
 	}
 
+	TraceEvent("ExternalNetworkThreadTerminating");
 	THREAD_RETURN;
 }
 
@@ -1842,6 +1849,7 @@ void MultiVersionApi::stopNetwork() {
 	}
 	lock.leave();
 
+	TraceEvent("MultiVersionStopNetwork");
 	localClient->api->stopNetwork();
 
 	if (!bypassMultiClientApi) {

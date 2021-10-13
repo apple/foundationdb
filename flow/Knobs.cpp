@@ -53,6 +53,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( SLOWTASK_PROFILING_LOG_INTERVAL,                       0 ); // A value of 0 means use RUN_LOOP_PROFILING_INTERVAL
 	init( SLOWTASK_PROFILING_MAX_LOG_INTERVAL,                 1.0 );
 	init( SLOWTASK_PROFILING_LOG_BACKOFF,                      2.0 );
+	init( SLOWTASK_BLOCKED_INTERVAL,                          60.0 );
 	init( SATURATION_PROFILING_LOG_INTERVAL,                   0.5 ); // A value of 0 means use RUN_LOOP_PROFILING_INTERVAL
 	init( SATURATION_PROFILING_MAX_LOG_INTERVAL,               5.0 );
 	init( SATURATION_PROFILING_LOG_BACKOFF,                    2.0 );
