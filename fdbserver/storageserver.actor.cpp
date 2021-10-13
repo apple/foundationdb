@@ -643,7 +643,7 @@ public:
 	Reference<ILogSystem> logSystem;
 	Reference<ILogSystem::IPeekCursor> logCursor;
 
-	Future<UID> clusterId;
+	Promise<UID> clusterId;
 	UID thisServerID;
 	Optional<UID> tssPairID; // if this server is a tss, this is the id of its (ss) pair
 	Optional<UID> ssPairID; // if this server is an ss, this is the id of its (tss) pair
@@ -4953,8 +4953,9 @@ void StorageServerDisk::makeNewStorageServerDurable() {
 	if (data->tssPairID.present()) {
 		storage->set(KeyValueRef(persistTssPairID, BinaryWriter::toValue(data->tssPairID.get(), Unversioned())));
 	}
-	ASSERT(data->clusterId.isReady() && data->clusterId.get().isValid());
-	storage->set(KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(data->clusterId.get(), Unversioned())));
+	ASSERT(data->clusterId.getFuture().isReady() && data->clusterId.getFuture().get().isValid());
+	storage->set(
+	    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(data->clusterId.getFuture().get(), Unversioned())));
 	storage->set(KeyValueRef(persistVersion, BinaryWriter::toValue(data->version.get(), Unversioned())));
 	storage->set(KeyValueRef(persistShardAssignedKeys.begin.toString(), LiteralStringRef("0")));
 	storage->set(KeyValueRef(persistShardAvailableKeys.begin.toString(), LiteralStringRef("0")));
@@ -5214,7 +5215,7 @@ ACTOR Future<Void> persistClusterId(StorageServer* self) {
 				    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(uid, Unversioned())));
 				// Purposely not calling commit here, and letting the recurring
 				// commit handle save this value to disk
-				self->clusterId = uid;
+				self->clusterId.send(uid);
 			}
 			break;
 		} catch (Error& e) {
@@ -5269,7 +5270,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	}
 
 	if (fClusterID.get().present()) {
-		data->clusterId = BinaryReader::fromStringRef<UID>(fClusterID.get().get(), Unversioned());
+		data->clusterId.send(BinaryReader::fromStringRef<UID>(fClusterID.get().get(), Unversioned()));
 	} else {
 		TEST(true); // storage server upgraded to version supporting cluster IDs
 		data->actors.add(persistClusterId(data));
@@ -6117,7 +6118,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder) {
 	state StorageServer self(persistentData, db, ssi);
-	self.clusterId = clusterId;
+	self.clusterId.send(clusterId);
 	if (ssi.isTss()) {
 		self.setTssPair(ssi.tssPairID.get());
 		ASSERT(self.isTss());
@@ -6371,7 +6372,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 				throw;
 			}
 			state UID clusterId = wait(getClusterId(&self));
-			UID durableClusterId = wait(self.clusterId);
+			ASSERT(self.clusterId.isValid());
+			UID durableClusterId = wait(self.clusterId.getFuture());
 			ASSERT(durableClusterId.isValid());
 			if (clusterId == durableClusterId) {
 				throw worker_removed();

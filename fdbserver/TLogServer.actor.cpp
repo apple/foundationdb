@@ -315,6 +315,10 @@ struct TLogData : NonCopyable {
 	Deque<UID> spillOrder;
 	std::map<UID, Reference<struct LogData>> id_data;
 
+	// The temporary durable cluster ID stores the cluster ID if the tlog is
+	// recruited during a recovery. The cluster ID is not persisted to disk
+	// until recovery is complete.
+	UID tmpDurableClusterId;
 	// The durable cluster ID identifies which cluster the tlogs persistent
 	// data is written from. This value is restored from disk when the tlog
 	// restarts.
@@ -2493,6 +2497,16 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			} else {
 				logData->logSystem->set(Reference<ILogSystem>());
 			}
+
+			// Persist cluster ID once cluster has recovered.
+			if (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
+			    !self->durableClusterId.isValid() && self->tmpDurableClusterId.isValid()) {
+				self->durableClusterId = self->tmpDurableClusterId;
+				self->persistentData->set(
+				    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(self->tmpDurableClusterId, Unversioned())));
+				self->tmpDurableClusterId = UID();
+				wait(self->persistentData->commit());
+			}
 		}
 		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
 			TraceEvent(SevDebug, "TLogPeekStream", logData->logId)
@@ -3415,14 +3429,19 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 					when(state InitializeTLogRequest req = waitNext(tlogRequests.getFuture())) {
 						ASSERT(req.clusterId.isValid());
 						// Durably persist the cluster ID if it is not already
-						// durable. This should only occur for new tlogs or
-						// existing tlogs being upgraded from an older FDB
-						// version.
-						if (!self.durableClusterId.isValid()) {
+						// durable and the cluster has progressed far enough
+						// through recovery. To avoid different partitions from
+						// persisting different cluster IDs, we need to wait
+						// until a single cluster ID has been persisted in the
+						// txnStateStore before finally writing it to disk.
+						auto recoveryState = self.dbInfo->get().recoveryState;
+						if (!self.durableClusterId.isValid() && recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 							self.durableClusterId = req.clusterId;
 							// Will let commit loop durably write the cluster ID.
 							self.persistentData->set(
 							    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(req.clusterId, Unversioned())));
+						} else {
+							self.tmpDurableClusterId = req.clusterId;
 						}
 
 						if (!self.tlogCache.exists(req.recruitmentID)) {
@@ -3452,10 +3471,6 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 			if (e.code() != error_code_worker_removed) {
 				throw;
 			}
-			// It's possible to have an invalid cluster ID when restoring from
-			// disk if this is an upgrade from an FDB version that did not
-			// support cluster IDs.
-			ASSERT(self.durableClusterId.isValid() || (!self.durableClusterId.isValid() && restoreFromDisk));
 			// Don't need to worry about deleting data if there is no durable
 			// cluster ID.
 			if (!self.durableClusterId.isValid()) {
@@ -3463,10 +3478,15 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 			}
 			// When a tlog joins a new cluster and has data for an old cluster,
 			// it should automatically exclude itself to avoid being used in
-			// the new cluster while also not blocking recovery.
-			if (self.masterClusterId.isValid() && self.masterClusterId != self.durableClusterId) {
+			// the new cluster.
+			auto recoveryState = self.dbInfo->get().recoveryState;
+			if (recoveryState == RecoveryState::FULLY_RECOVERED && self.masterClusterId.isValid() &&
+			    self.durableClusterId.isValid() && self.masterClusterId != self.durableClusterId) {
 				state NetworkAddress address = g_network->getLocalAddress();
 				wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
+				TraceEvent(SevWarnAlways, "TLogBelongsToExistingCluster")
+				    .detail("ClusterId", self.durableClusterId)
+				    .detail("NewClusterId", self.masterClusterId);
 			}
 			// If the tlog has a valid durable cluster ID, we don't want it to
 			// wipe its data! Throw this error to signal to `tlogTerminated` to
