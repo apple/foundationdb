@@ -2235,9 +2235,9 @@ void print_report(mako_args_t* args,
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", lat_min[op]);
-			}
-			if (fp) {
-				fprintf(fp, "\"%s\": %lld,", get_ops_name(op), lat_min[op]);
+				if (fp) {
+					fprintf(fp, "\"%s\": %lld,", get_ops_name(op), lat_min[op]);
+				}
 			}
 		}
 	}
@@ -2252,11 +2252,11 @@ void print_report(mako_args_t* args,
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (lat_total[op]) {
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", lat_total[op] / lat_samples[op]);
+				if (fp) {
+					fprintf(fp, "\"%s\": %lld,", get_ops_name(op), lat_total[op] / lat_samples[op]);
+				}
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
-			}
-			if (fp) {
-				fprintf(fp, "\"%s\": %lld,", get_ops_name(op), lat_total[op] / lat_samples[op]);
 			}
 		}
 	}
@@ -2273,9 +2273,9 @@ void print_report(mako_args_t* args,
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", lat_max[op]);
-			}
-			if (fp) {
-				fprintf(fp, "\"%s\": %lld,", get_ops_name(op), lat_max[op]);
+				if (fp) {
+					fprintf(fp, "\"%s\": %lld,", get_ops_name(op), lat_max[op]);
+				}
 			}
 		}
 	}
