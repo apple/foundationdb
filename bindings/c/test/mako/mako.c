@@ -1822,9 +1822,10 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			if (optarg == NULL && (argv[optind] == NULL || (argv[optind] != NULL && argv[optind][0] == '-'))) {
 				// if --report_json is the last option and no file is specified
 				// or --report_json is followed by another option
-				strcpy(args->json_output_path, "mako.json");
+				char default_file[] = "mako.json";
+				strncpy(args->json_output_path, default_file, strlen(default_file));
 			} else {
-				strcpy(args->json_output_path, optarg);
+				strncpy(args->json_output_path, optarg, strlen(optarg) + 1);
 			}
 			break;
 		}
@@ -2473,7 +2474,7 @@ int stats_process_main(mako_args_t* args,
 		fprintf(fp, "\"streaming_mode\": %d,", args->streaming_mode);
 		fprintf(fp, "\"disable_ryw\": %d,", args->disable_ryw);
 		fprintf(fp, "\"json_output_path\": \"%s\",", args->json_output_path);
-		fprintf(fp, "},{\"samples\": [");
+		fprintf(fp, "},\"samples\": [");
 	}
 
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_start);
