@@ -2397,7 +2397,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		state int uniqueMachines = 0;
 		state std::set<Optional<Standalone<StringRef>>> machines;
 
-		if(self->healthyTeamCount) {
+		if (self->healthyTeamCount) {
 			// wait to see whether restartTeamBuilder is triggered
 			wait(delay(0, g_network->getCurrentTask()));
 		}
