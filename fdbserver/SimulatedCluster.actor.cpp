@@ -2003,7 +2003,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		// FIXME: we hardcode some machines to specifically test storage cache and blob workers
 		int storageCacheMachines = dc == 0 ? 1 : 0;
 		int blobWorkerMachines = 0;
-		if (SERVER_KNOBS->ENABLE_BLOB_GRANULES) {
+		if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
 			blobWorkerMachines = 2 + deterministicRandom()->randomInt(0, NUM_EXTRA_BW_MACHINES + 1);
 		}
 

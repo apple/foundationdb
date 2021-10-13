@@ -767,7 +767,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	// TODO should discuss proper value for this
 	init( BLOB_WORKER_TIMEOUT,                                  10.0 ); if( randomize && BUGGIFY ) BLOB_WORKER_TIMEOUT = 1.0;
-	init( ENABLE_BLOB_GRANULES,                                 true ); // TODO: change to isSimulated
 
 	// clang-format on
 

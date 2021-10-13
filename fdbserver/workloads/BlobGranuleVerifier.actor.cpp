@@ -123,7 +123,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 	std::string description() const override { return "BlobGranuleVerifier"; }
 	Future<Void> setup(Database const& cx) override {
-		if (!SERVER_KNOBS->ENABLE_BLOB_GRANULES) {
+		if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
 			return Void();
 		}
 
@@ -384,7 +384,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		if (!SERVER_KNOBS->ENABLE_BLOB_GRANULES) {
+		if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
 			return Void();
 		}
 
@@ -454,7 +454,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	}
 
 	Future<bool> check(Database const& cx) override {
-		if (!SERVER_KNOBS->ENABLE_BLOB_GRANULES) {
+		if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
 			return true;
 		}
 

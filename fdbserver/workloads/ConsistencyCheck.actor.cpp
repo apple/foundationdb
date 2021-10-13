@@ -296,7 +296,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					wait(::success(self->checkForExtraDataStores(cx, self)));
 
 					// Check blob workers are operating as expected
-					if (SERVER_KNOBS->ENABLE_BLOB_GRANULES) {
+					if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
 						bool blobWorkersCorrect = wait(self->checkBlobWorkers(cx, configuration, self));
 						if (!blobWorkersCorrect)
 							self->testFailure("Blob workers incorrect");
@@ -2337,7 +2337,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check BlobManager
-		if (SERVER_KNOBS->ENABLE_BLOB_GRANULES && db.blobManager.present() &&
+		if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES && db.blobManager.present() &&
 		    (!nonExcludedWorkerProcessMap.count(db.blobManager.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.blobManager.get().address()].processClass.machineClassFitness(
 		         ProcessClass::BlobManager) > fitnessLowerBound)) {
