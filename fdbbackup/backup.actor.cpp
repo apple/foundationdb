@@ -157,6 +157,10 @@ enum {
 	OPT_RESTORE_BEGIN_VERSION,
 	OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY,
 
+	// Move constants
+	OPT_PREFIX,
+	OPT_DESTINATION_PREFIX,
+
 	// Shared constants
 	OPT_CLUSTERFILE,
 	OPT_QUIET,
@@ -908,10 +912,6 @@ CSimpleOpt::SOption g_rgDBMoveStartOptions[] = {
 	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
-	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
-	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
-	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
-	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
@@ -926,8 +926,8 @@ CSimpleOpt::SOption g_rgDBMoveStartOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
-	{ OPT_PREFIX_ADD, "--add_prefix", SO_REQ_SEP },
-	{ OPT_PREFIX_REMOVE, "--remove_prefix", SO_REQ_SEP },
+	{ OPT_PREFIX, "--prefix", SO_REQ_SEP },
+	{ OPT_DESTINATION_PREFIX, "--destination_prefix", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -944,8 +944,6 @@ CSimpleOpt::SOption g_rgDBMoveStatusOptions[] = {
 	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
 	{ OPT_ERRORLIMIT, "-e", SO_REQ_SEP },
 	{ OPT_ERRORLIMIT, "--errorlimit", SO_REQ_SEP },
-	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
-	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
@@ -961,8 +959,8 @@ CSimpleOpt::SOption g_rgDBMoveStatusOptions[] = {
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
 	{ OPT_JSON, "--json", SO_NONE },
-	{ OPT_PREFIX_ADD, "--add_prefix", SO_REQ_SEP },
-	{ OPT_PREFIX_REMOVE, "--remove_prefix", SO_REQ_SEP },
+	{ OPT_PREFIX, "--prefix", SO_REQ_SEP },
+	{ OPT_DESTINATION_PREFIX, "--destination_prefix", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -977,7 +975,6 @@ CSimpleOpt::SOption g_rgDBMoveFinishOptions[] = {
 	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
-	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
@@ -994,6 +991,7 @@ CSimpleOpt::SOption g_rgDBMoveFinishOptions[] = {
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
 	{ OPT_MAX_LAG_SEC, "--lag", SO_REQ_SEP },
+	{ OPT_PREFIX, "--prefix", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -1010,8 +1008,6 @@ CSimpleOpt::SOption g_rgDBMoveAbortOptions[] = {
 	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
 	{ OPT_CLEANUP, "--cleanup", SO_NONE },
 	{ OPT_DSTONLY, "--dstonly", SO_NONE },
-	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
-	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
@@ -1026,6 +1022,8 @@ CSimpleOpt::SOption g_rgDBMoveAbortOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_PREFIX, "--prefix", SO_REQ_SEP },
+	{ OPT_PREFIX, "--destination_prefix", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -1054,6 +1052,7 @@ CSimpleOpt::SOption g_rgDBMoveCleanupOptions[] = {
 	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
 	{ OPT_DELETE_DATA, "--delete_data", SO_NONE },
 	{ OPT_MIN_CLEANUP_SECONDS, "--min_cleanup_seconds", SO_REQ_SEP },
+	{ OPT_PREFIX, "--prefix", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -1067,9 +1066,6 @@ CSimpleOpt::SOption g_rgDBMoveClearSrcOptions[] = {
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
 	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
-	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
-	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
-	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
@@ -1084,6 +1080,7 @@ CSimpleOpt::SOption g_rgDBMoveClearSrcOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_PREFIX, "--prefix", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -1098,10 +1095,6 @@ CSimpleOpt::SOption g_rgDBMoveListOptions[] = {
 	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
-	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
-	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
-	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
-	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
@@ -1548,8 +1541,6 @@ static void printDBMovementUsage(bool devhelp) {
 	       "                 The path of a file containing the connection string for the\n"
 	       "                 source FoundationDB cluster.\n");
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
-	printf("  -k KEYS        List of key ranges to backup.\n"
-	       "                 If not specified, the entire database will be backed up.\n");
 	printf("  --cleanup      Abort will attempt to stop mutation logging on the source cluster.\n");
 	printf("  --dstonly      Abort will not make any changes on the source cluster.\n");
 #ifndef TLS_DISABLED
@@ -1566,10 +1557,11 @@ static void printDBMovementUsage(bool devhelp) {
 	       "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 	       "                 Has no effect unless --log is specified.\n");
 	printf("  -h, --help     Display this help and exit.\n");
-	printf("  --remove_prefix PREFIX\n");
-	printf("                 Prefix to remove from the restored keys.\n");
-	printf("  --add_prefix PREFIX\n");
-	printf("                 Prefix to add to the restored keys\n");
+	printf("  --prefix PREFIX\n");
+	printf("                 The prefix to move.\n");
+	printf("  --destination_prefix PREFIX\n");
+	printf("                 If specified, the data will be written into the new cluster with the original\n"
+	       "                 prefix replaced by the specified prefix.\n");
 	printf("\n"
 	       "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
 	if (devhelp) {
@@ -3918,6 +3910,8 @@ int main(int argc, char* argv[]) {
 		std::string restoreContainer;
 		std::string addPrefix;
 		std::string removePrefix;
+		Optional<std::string> prefix;
+		Optional<std::string> destinationPrefix;
 		Standalone<VectorRef<KeyRangeRef>> backupKeys;
 		Standalone<VectorRef<KeyRangeRef>> backupKeysFilter;
 		int maxErrors = 20;
@@ -4217,6 +4211,12 @@ int main(int argc, char* argv[]) {
 				break;
 			case OPT_PREFIX_REMOVE:
 				removePrefix = args->OptionArg();
+				break;
+			case OPT_PREFIX:
+				prefix = args->OptionArg();
+				break;
+			case OPT_DESTINATION_PREFIX:
+				destinationPrefix = args->OptionArg();
 				break;
 			case OPT_ERRORLIMIT: {
 				const char* a = args->OptionArg();
@@ -4872,19 +4872,39 @@ int main(int argc, char* argv[]) {
 				if (!initCluster() || !initSourceCluster(true)) {
 					return FDB_EXIT_ERROR;
 				}
-				f = stopAfter(submitDBMove(sourceDb, db, Key(addPrefix), Key(removePrefix)));
+
+				if (!prefix.present()) {
+					fprintf(stderr, "ERROR: --prefix is required\n");
+					return FDB_EXIT_ERROR;
+				} else if (!destinationPrefix.present()) {
+					destinationPrefix = prefix;
+				}
+
+				f = stopAfter(submitDBMove(sourceDb, db, Key(prefix.get()), Key(destinationPrefix.get())));
 				break;
 			case DBMoveType::STATUS:
 				if (!initCluster() || !initSourceCluster(true)) {
 					return FDB_EXIT_ERROR;
 				}
-				f = stopAfter(statusDBMove(sourceDb, db, KeyRef(removePrefix), jsonOutput));
+
+				if (!prefix.present()) {
+					fprintf(stderr, "ERROR: --prefix is required\n");
+					return FDB_EXIT_ERROR;
+				}
+
+				f = stopAfter(statusDBMove(sourceDb, db, Key(prefix.get()), jsonOutput));
 				break;
 			case DBMoveType::FINISH:
 				if (!initCluster() || !initSourceCluster(true)) {
 					return FDB_EXIT_ERROR;
 				}
-				f = stopAfter(finishDBMove(sourceDb, db, Key(removePrefix), maxLagSec));
+
+				if (!prefix.present()) {
+					fprintf(stderr, "ERROR: --prefix is required\n");
+					return FDB_EXIT_ERROR;
+				}
+
+				f = stopAfter(finishDBMove(sourceDb, db, Key(prefix.get()), maxLagSec));
 				break;
 			case DBMoveType::ABORT: {
 				bool canInitCluster = initCluster();
@@ -4892,10 +4912,19 @@ int main(int argc, char* argv[]) {
 				if (!canInitCluster && !canInitSourceCluster) {
 					return FDB_EXIT_ERROR;
 				}
+
+				if (canInitSourceCluster && !prefix.present()) {
+					fprintf(stderr, "ERROR: --prefix is required\n");
+					return FDB_EXIT_ERROR;
+				} else if (!canInitSourceCluster && !destinationPrefix.present()) {
+					fprintf(stderr, "ERROR: --destination_prefix is required\n");
+					return FDB_EXIT_ERROR;
+				}
+
 				// TODO if both clusters are able to be initialized, what else should we consider?
 				f = stopAfter(abortDBMove(canInitSourceCluster ? sourceDb : Optional<Database>(),
 				                          canInitCluster ? db : Optional<Database>(),
-				                          canInitSourceCluster ? Key(removePrefix) : Key(addPrefix)));
+				                          canInitSourceCluster ? Key(prefix.get()) : Key(destinationPrefix.get())));
 				break;
 			}
 			case DBMoveType::CLEAN:
@@ -4903,15 +4932,27 @@ int main(int argc, char* argv[]) {
 				if (!initCluster()) {
 					return FDB_EXIT_ERROR;
 				}
+
+				if (!prefix.present()) {
+					fprintf(stderr, "ERROR: --prefix is required\n");
+					return FDB_EXIT_ERROR;
+				}
+
 				f = stopAfter(cleanupDBMove(
-				    sourceDb, Key(removePrefix), CleanupMovementSourceRequest::CleanupType::ERASE_AND_UNLOCK));
+				    sourceDb, Key(prefix.get()), CleanupMovementSourceRequest::CleanupType::ERASE_AND_UNLOCK));
 				break;
 			case DBMoveType::CLEAR_SRC:
 				if (!initSourceCluster(true)) {
 					return FDB_EXIT_ERROR;
 				}
+
+				if (!prefix.present()) {
+					fprintf(stderr, "ERROR: --prefix is required\n");
+					return FDB_EXIT_ERROR;
+				}
+
 				f = stopAfter(
-				    cleanupDBMove(sourceDb, Key(removePrefix), CleanupMovementSourceRequest::CleanupType::ERASE));
+				    cleanupDBMove(sourceDb, Key(prefix.get()), CleanupMovementSourceRequest::CleanupType::ERASE));
 				break;
 			case DBMoveType::LIST: {
 				bool canInitCluster = initCluster();
