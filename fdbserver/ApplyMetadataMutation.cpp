@@ -865,12 +865,8 @@ private:
 		if (Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get(); tagV.present()) {
 			MutationRef privatized = m;
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-<<<<<<< HEAD
-			TraceEvent(SevDebug, "SendingPrivatized", dbgid).detail("M", privatized.toString());
-=======
 			privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
 			TraceEvent(SevDebug, "SendingPrivatized_ClearTSSMapping", dbgid).detail("M", privatized.toString());
->>>>>>> f6a9b291b... Address Dan's comments by changing trace event names
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
 			toCommit->writeTypedMessage(privatized);
 		}
