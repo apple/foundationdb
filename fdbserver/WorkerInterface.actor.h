@@ -986,7 +986,9 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface interf,
 ACTOR Future<Void> backupWorker(BackupInterface bi,
                                 InitializeBackupRequest req,
                                 Reference<AsyncVar<ServerDBInfo> const> db);
-ACTOR Future<Void> tenantBalancer(TenantBalancerInterface tbi, Reference<AsyncVar<ServerDBInfo> const> db);
+ACTOR Future<Void> tenantBalancer(TenantBalancerInterface tbi,
+                                  Reference<AsyncVar<ServerDBInfo> const> db,
+                                  Reference<IClusterConnectionRecord> connRecord);
 
 void registerThreadForProfiling();
 

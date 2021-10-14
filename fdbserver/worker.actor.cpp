@@ -1816,7 +1816,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.abortMovement);
 					DUMPTOKEN(recruited.cleanupMovementSource);
 
-					Future<Void> tenantBalancerProcess = tenantBalancer(recruited, dbInfo);
+					Future<Void> tenantBalancerProcess = tenantBalancer(recruited, dbInfo, connRecord);
 					errorForwarders.add(forwardError(errors,
 					                                 Role::TENANT_BALANCER,
 					                                 recruited.id(),

@@ -149,8 +149,11 @@ ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> con
 }
 
 struct TenantBalancer {
-	TenantBalancer(TenantBalancerInterface tbi, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
-	  : tbi(tbi), dbInfo(dbInfo), actors(false), tenantBalancerMetrics("TenantBalancer", tbi.id().toString()),
+	TenantBalancer(TenantBalancerInterface tbi,
+	               Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+	               Reference<IClusterConnectionRecord> connRecord)
+	  : tbi(tbi), dbInfo(dbInfo), connRecord(connRecord), actors(false),
+	    tenantBalancerMetrics("TenantBalancer", tbi.id().toString()),
 	    moveTenantToClusterRequests("MoveTenantToClusterRequests", tenantBalancerMetrics),
 	    receiveTenantFromClusterRequests("ReceiveTenantFromClusterRequests", tenantBalancerMetrics),
 	    getActiveMovementsRequests("GetActiveMovementsRequests", tenantBalancerMetrics),
@@ -178,6 +181,7 @@ struct TenantBalancer {
 
 	TenantBalancerInterface tbi;
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
+	Reference<IClusterConnectionRecord> connRecord;
 
 	Database db;
 
@@ -458,7 +462,6 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 	++self->moveTenantToClusterRequests;
 
 	try {
-		// 1.Extract necessary data from metadata
 		state Optional<Database> destDatabase =
 		    wait(self->addExternalDatabase(req.destConnectionString, req.destConnectionString));
 		if (!destDatabase.present()) {
@@ -468,27 +471,50 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 
 		state SourceMovementRecord sourceMovementRecord(
 		    req.sourcePrefix, req.destPrefix, req.destConnectionString, destDatabase.get());
+
+		wait(self->saveOutgoingMovement(sourceMovementRecord));
+
+		state ReceiveTenantFromClusterRequest destRequest(
+		    req.sourcePrefix, req.destPrefix, self->connRecord->getConnectionString().toString());
+
+		state Future<ErrorOr<ReceiveTenantFromClusterReply>> destReply = Never();
+		state Future<Void> initialize = Void();
+
+		loop choose {
+			when(ErrorOr<ReceiveTenantFromClusterReply> reply = wait(destReply)) {
+				if (reply.isError()) {
+					throw reply.getError();
+				}
+				break;
+			}
+			when(wait(destDatabase.get()->onTenantBalancerChanged() || initialize)) {
+				initialize = Never();
+				destReply = destDatabase.get()->getTenantBalancer().present()
+				                ? destDatabase.get()->getTenantBalancer().get().receiveTenantFromCluster.tryGetReply(
+				                      destRequest)
+				                : Never();
+			}
+		}
+
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		backupRanges.push_back_deep(backupRanges.arena(), prefixRange(req.sourcePrefix));
-		// TODO we'll need to log the metadata once here and then again after we submit the backup,
-		// this is going to require having a movement state field in our record that we can update as we make progress;
 
-		// 2.Use DR to do datamovement
+		// Submit a DR to move the target range
+		bool replacePrefix = req.sourcePrefix != req.destPrefix;
 		wait(self->agent.submitBackup(self->getExternalDatabase(req.destConnectionString).get(),
 		                              KeyRef(sourceMovementRecord.getTagName()),
 		                              backupRanges,
 		                              StopWhenDone::False,
-		                              req.destPrefix,
-		                              req.sourcePrefix,
+		                              replacePrefix ? req.destPrefix : StringRef(),
+		                              replacePrefix ? req.sourcePrefix : StringRef(),
 		                              LockDB::False));
 
-		// Check if a backup agent is running
-		state bool agentRunning = wait(self->agent.checkActive(destDatabase.get()));
-
-		// 3.Do record
+		// Update the state of the movement to started
+		sourceMovementRecord.movementState = MovementState::STARTED;
 		wait(self->saveOutgoingMovement(sourceMovementRecord));
 
-		MoveTenantToClusterReply reply;
+		// Check if a DR agent is running to process the move
+		state bool agentRunning = wait(self->agent.checkActive(destDatabase.get()));
 		if (!agentRunning) {
 			throw movement_agent_not_running();
 		}
@@ -498,6 +524,7 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 		    .detail("DestinationPrefix", req.destPrefix)
 		    .detail("DestinationConnectionString", req.destConnectionString);
 
+		MoveTenantToClusterReply reply;
 		req.reply.send(reply);
 	} catch (Error& e) {
 		TraceEvent(SevDebug, "TenantBalancerMoveTenantToClusterError", self->tbi.id())
@@ -796,8 +823,10 @@ ACTOR Future<Void> tenantBalancerCore(TenantBalancer* self) {
 	}
 }
 
-ACTOR Future<Void> tenantBalancer(TenantBalancerInterface tbi, Reference<AsyncVar<ServerDBInfo> const> db) {
-	state TenantBalancer self(tbi, db);
+ACTOR Future<Void> tenantBalancer(TenantBalancerInterface tbi,
+                                  Reference<AsyncVar<ServerDBInfo> const> db,
+                                  Reference<IClusterConnectionRecord> connRecord) {
+	state TenantBalancer self(tbi, db, connRecord);
 
 	try {
 		wait(self.recover());

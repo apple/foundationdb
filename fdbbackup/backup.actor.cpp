@@ -2157,36 +2157,14 @@ ACTOR Future<Void> runAgent(Database db) {
 
 ACTOR Future<Void> submitDBMove(Database src, Database dest, Key destPrefix, Key srcPrefix) {
 	try {
-		// TODO: transaction guarantee
-		state ReceiveTenantFromClusterRequest destRequest(
-		    srcPrefix, destPrefix, src->getConnectionRecord()->getConnectionString().toString());
-
-		state Future<ErrorOr<ReceiveTenantFromClusterReply>> destReply = Never();
-		state Future<Void> initialize = Void();
-
-		loop choose {
-			when(ErrorOr<ReceiveTenantFromClusterReply> reply = wait(destReply)) {
-				if (reply.isError()) {
-					throw reply.getError();
-				}
-				break;
-			}
-			when(wait(dest->onTenantBalancerChanged() || initialize)) {
-				initialize = Never();
-				destReply = dest->getTenantBalancer().present()
-				                ? dest->getTenantBalancer().get().receiveTenantFromCluster.tryGetReply(destRequest)
-				                : Never();
-			}
-		}
-
 		state MoveTenantToClusterRequest srcRequest(
 		    srcPrefix, destPrefix, dest->getConnectionRecord()->getConnectionString().toString());
 
-		state Future<ErrorOr<MoveTenantToClusterReply>> srcReply = Never();
-		initialize = Void();
+		state Future<ErrorOr<MoveTenantToClusterReply>> replyFuture = Never();
+		state Future<Void> initialize = Void();
 
 		loop choose {
-			when(ErrorOr<MoveTenantToClusterReply> reply = wait(srcReply)) {
+			when(ErrorOr<MoveTenantToClusterReply> reply = wait(replyFuture)) {
 				if (reply.isError()) {
 					throw reply.getError();
 				}
@@ -2194,9 +2172,9 @@ ACTOR Future<Void> submitDBMove(Database src, Database dest, Key destPrefix, Key
 			}
 			when(wait(src->onTenantBalancerChanged() || initialize)) {
 				initialize = Never();
-				srcReply = src->getTenantBalancer().present()
-				               ? src->getTenantBalancer().get().moveTenantToCluster.tryGetReply(srcRequest)
-				               : Never();
+				replyFuture = src->getTenantBalancer().present()
+				                  ? src->getTenantBalancer().get().moveTenantToCluster.tryGetReply(srcRequest)
+				                  : Never();
 			}
 		}
 
