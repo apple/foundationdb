@@ -238,6 +238,7 @@ struct RegisterMasterRequest {
 	std::vector<UID> priorCommittedLogServers;
 	RecoveryState recoveryState;
 	bool recoveryStalled;
+	UID clusterId;
 
 	ReplyPromise<Void> reply;
 
@@ -261,6 +262,7 @@ struct RegisterMasterRequest {
 		           priorCommittedLogServers,
 		           recoveryState,
 		           recoveryStalled,
+		           clusterId,
 		           reply);
 	}
 };

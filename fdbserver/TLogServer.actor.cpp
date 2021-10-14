@@ -315,10 +315,6 @@ struct TLogData : NonCopyable {
 	Deque<UID> spillOrder;
 	std::map<UID, Reference<struct LogData>> id_data;
 
-	// The temporary durable cluster ID stores the cluster ID if the tlog is
-	// recruited during a recovery. The cluster ID is not persisted to disk
-	// until recovery is complete.
-	UID tmpDurableClusterId;
 	// The durable cluster ID identifies which cluster the tlogs persistent
 	// data is written from. This value is restored from disk when the tlog
 	// restarts.
@@ -2499,12 +2495,13 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			}
 
 			// Persist cluster ID once cluster has recovered.
+			auto masterClusterId = self->dbInfo->get().clusterId;
 			if (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
-			    !self->durableClusterId.isValid() && self->tmpDurableClusterId.isValid()) {
-				self->durableClusterId = self->tmpDurableClusterId;
+			    !self->durableClusterId.isValid()) {
+				ASSERT(masterClusterId.isValid());
+				self->durableClusterId = masterClusterId;
 				self->persistentData->set(
-				    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(self->tmpDurableClusterId, Unversioned())));
-				self->tmpDurableClusterId = UID();
+				    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(masterClusterId, Unversioned())));
 				wait(self->persistentData->commit());
 			}
 		}
@@ -3440,8 +3437,6 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 							// Will let commit loop durably write the cluster ID.
 							self.persistentData->set(
 							    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(req.clusterId, Unversioned())));
-						} else {
-							self.tmpDurableClusterId = req.clusterId;
 						}
 
 						if (!self.tlogCache.exists(req.recruitmentID)) {

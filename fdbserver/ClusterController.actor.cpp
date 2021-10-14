@@ -4065,7 +4065,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	    .detail("GrvProxies", req.grvProxies.size())
 	    .detail("RecoveryCount", req.recoveryCount)
 	    .detail("Stalled", req.recoveryStalled)
-	    .detail("OldestBackupEpoch", req.logSystemConfig.oldestBackupEpoch);
+	    .detail("OldestBackupEpoch", req.logSystemConfig.oldestBackupEpoch)
+	    .detail("ClusterId", req.clusterId);
 
 	// make sure the request comes from an active database
 	auto db = &self->db;
@@ -4147,6 +4148,11 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	if (dbInfo.recoveryCount != req.recoveryCount) {
 		isChanged = true;
 		dbInfo.recoveryCount = req.recoveryCount;
+	}
+
+	if (dbInfo.clusterId != req.clusterId) {
+		isChanged = true;
+		dbInfo.clusterId = req.clusterId;
 	}
 
 	if (isChanged) {

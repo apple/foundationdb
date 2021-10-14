@@ -586,6 +586,7 @@ Future<Void> sendMasterRegistration(MasterData* self,
 	masterReq.priorCommittedLogServers = priorCommittedLogServers;
 	masterReq.recoveryState = self->recoveryState;
 	masterReq.recoveryStalled = self->recruitmentStalled->get();
+	masterReq.clusterId = self->clusterId;
 	return brokenPromiseToNever(self->clusterController.registerMaster.getReply(masterReq));
 }
 
