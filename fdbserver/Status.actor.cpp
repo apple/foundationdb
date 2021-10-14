@@ -797,10 +797,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("ratekeeper", db->get().ratekeeper.get());
 	}
 
-	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
-		if (db->get().blobManager.present()) {
-			roles.addRole("blob_manager", db->get().blobManager.get());
-		}
+	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES && db->get().blobManager.present()) {
+		roles.addRole("blob_manager", db->get().blobManager.get());
 	}
 
 	for (auto& tLogSet : db->get().logSystemConfig.tLogs) {
