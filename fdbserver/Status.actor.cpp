@@ -19,6 +19,7 @@
  */
 
 #include <cinttypes>
+#include "fdbclient/BlobWorkerInterface.h"
 #include "fdbserver/Status.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -724,8 +725,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     std::vector<std::pair<TLogInterface, EventMap>> tLogs,
     std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies,
     std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
-    ServerCoordinators coordinators,
     std::vector<BlobWorkerInterface> blobWorkers,
+    ServerCoordinators coordinators,
     Database cx,
     Optional<DatabaseConfiguration> configuration,
     Optional<Key> healthyZone,
@@ -796,8 +797,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("ratekeeper", db->get().ratekeeper.get());
 	}
 
-	if (db->get().blobManager.present()) {
-		roles.addRole("blob_manager", db->get().blobManager.get());
+	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		if (db->get().blobManager.present()) {
+			roles.addRole("blob_manager", db->get().blobManager.get());
+		}
 	}
 
 	for (auto& tLogSet : db->get().logSystemConfig.tLogs) {
@@ -863,9 +866,11 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		wait(yield());
 	}
 
-	for (const auto& blobWorker : blobWorkers) {
-		roles.addRole("blob_worker", blobWorker);
-		wait(yield());
+	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		for (auto blobWorker : blobWorkers) {
+			roles.addRole("blob_worker", blobWorker);
+			wait(yield());
+		}
 	}
 
 	for (workerItr = workers.begin(); workerItr != workers.end(); ++workerItr) {
@@ -2812,6 +2817,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state std::vector<std::pair<TLogInterface, EventMap>> tLogs;
 		state std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies;
 		state std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
+		state std::vector<BlobWorkerInterface> blobWorkers;
 		state JsonBuilderObject qos;
 		state JsonBuilderObject data_overlay;
 
@@ -2884,6 +2890,11 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			    errorOr(getCommitProxiesAndMetrics(db, address_workers));
 			state Future<ErrorOr<std::vector<std::pair<GrvProxyInterface, EventMap>>>> grvProxyFuture =
 			    errorOr(getGrvProxiesAndMetrics(db, address_workers));
+			state Future<ErrorOr<std::vector<BlobWorkerInterface>>> blobWorkersFuture;
+
+			if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+				blobWorkersFuture = errorOr(timeoutError(getBlobWorkers(cx, true), 5.0));
+			}
 
 			state int minStorageReplicasRemaining = -1;
 			state int fullyReplicatedRegions = -1;
@@ -3002,7 +3013,15 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			// ...also blob workers
-			state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(cx, true));
+			if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+				ErrorOr<std::vector<BlobWorkerInterface>> _blobWorkers = wait(blobWorkersFuture);
+				if (_blobWorkers.present()) {
+					blobWorkers = _blobWorkers.get();
+				} else {
+					messages.push_back(
+					    JsonBuilder::makeMessage("blob_workers_error", "Timed out trying to retrieve blob workers."));
+				}
+			}
 
 			wait(waitForAll(warningFutures));
 		} else {
@@ -3027,8 +3046,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		                              tLogs,
 		                              commitProxies,
 		                              grvProxies,
-		                              coordinators,
 		                              blobWorkers,
+		                              coordinators,
 		                              cx,
 		                              configuration,
 		                              loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
