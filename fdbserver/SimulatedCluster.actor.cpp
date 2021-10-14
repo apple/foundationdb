@@ -68,10 +68,6 @@ namespace {
 
 const int MACHINE_REBOOT_TIME = 10;
 
-// The max number of extra blob worker machines we might (i.e. randomly) add to the simulated cluster.
-// Note that this is in addition to the two we always have.
-const int NUM_EXTRA_BW_MACHINES = 5;
-
 bool destructed = false;
 
 // Configuration details specified in workload test files that change the simulation
@@ -288,7 +284,7 @@ public:
 	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
 	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
 	// Set true to simplify simulation configs for easier debugging
-	bool simpleConfig = true;
+	bool simpleConfig = false;
 	int extraMachineCountDC = 0;
 	Optional<bool> generateFearless, buggify;
 	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
@@ -1635,14 +1631,7 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
 	if (testConfig.machineCount.present()) {
 		machine_count = testConfig.machineCount.get();
-	}
-	/// TODO REMOVE!
-	else if (testConfig.simpleConfig) {
-		printf("Setting machine count to 1\n");
-		machine_count = 1;
-	}
-	//
-	else if (generateFearless && testConfig.minimumReplication > 1) {
+	} else if (generateFearless && testConfig.minimumReplication > 1) {
 		// low latency tests in fearless configurations need 4 machines per datacenter (3 for triple replication, 1 that
 		// is down during failures).
 		machine_count = 16;
@@ -1689,7 +1678,7 @@ void SimulationConfig::setCoordinators(const TestConfig& testConfig) {
 void SimulationConfig::setProcessesPerMachine(const TestConfig& testConfig) {
 	if (testConfig.processesPerMachine.present()) {
 		processes_per_machine = testConfig.processesPerMachine.get();
-	} else if (generateFearless || testConfig.simpleConfig) { // TODO CHANGE BACK
+	} else if (generateFearless) {
 		processes_per_machine = 1;
 	} else {
 		processes_per_machine = deterministicRandom()->randomInt(1, (extraDB ? 14 : 28) / machine_count + 2);
@@ -2020,19 +2009,16 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		       coordinatorCount);
 		ASSERT_LE(dcCoordinators, machines);
 
+		// FIXME: temporarily code to test storage cache
 		// TODO: caching disabled for this merge
-		// FIXME: we hardcode some machines to specifically test storage cache and blob workers
-		int storageCacheMachines = dc == 0 ? 1 : 0;
-		int blobWorkerMachines = 0;
-		if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
-			blobWorkerMachines = 2 + deterministicRandom()->randomInt(0, NUM_EXTRA_BW_MACHINES + 1);
+		if (dc == 0) {
+			machines++;
 		}
 
-		int totalMachines = machines + storageCacheMachines + blobWorkerMachines;
-		int useSeedForMachine = deterministicRandom()->randomInt(0, totalMachines);
+		int useSeedForMachine = deterministicRandom()->randomInt(0, machines);
 		Standalone<StringRef> zoneId;
 		Standalone<StringRef> newZoneId;
-		for (int machine = 0; machine < totalMachines; machine++) {
+		for (int machine = 0; machine < machines; machine++) {
 			Standalone<StringRef> machineId(deterministicRandom()->randomUniqueID().toString());
 			if (machine == 0 || machineCount - dataCenters <= 4 || assignedMachines != 4 ||
 			    simconfig.db.regions.size() || deterministicRandom()->random01() < 0.5) {
@@ -2062,20 +2048,11 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				}
 			}
 
-			// FIXME: hack to add machines specifically to test storage cache and blob workers
+			// FIXME: temporarily code to test storage cache
 			// TODO: caching disabled for this merge
-
-			// `machines` here is the normal (non-temporary) machines that totalMachines comprises of
-			if (machine >= machines) {
-				if (storageCacheMachines > 0 && dc == 0) {
-					processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
-					nonVersatileMachines++;
-					storageCacheMachines--;
-				} else if (blobWorkerMachines > 0) { // add blob workers to every DC
-					processClass = ProcessClass(ProcessClass::BlobWorkerClass, ProcessClass::CommandLineSource);
-					nonVersatileMachines++;
-					blobWorkerMachines--;
-				}
+			if (machine == machines - 1 && dc == 0) {
+				processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
+				nonVersatileMachines++;
 			}
 
 			std::vector<IPAddress> ips;

@@ -32,10 +32,10 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
-#include "fdbserver/BlobWorker.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/WaitFailure.h"
+#include "fdbserver/ServerDBInfo.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
@@ -793,7 +793,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 	state int64_t compactBytesRead = 0;
 	state Version snapshotVersion = files.snapshotFiles.back().version;
 	BlobFileIndex snapshotF = files.snapshotFiles.back();
-	chunk.snapshotFile = BlobFilenameRef(filenameArena, snapshotF.filename, snapshotF.offset, snapshotF.length);
+	chunk.snapshotFile = BlobFilePointerRef(filenameArena, snapshotF.filename, snapshotF.offset, snapshotF.length);
 	compactBytesRead += snapshotF.length;
 	int deltaIdx = files.deltaFiles.size() - 1;
 	while (deltaIdx >= 0 && files.deltaFiles[deltaIdx].version > snapshotVersion) {
@@ -1920,7 +1920,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 			ASSERT(i >= 0);
 
 			BlobFileIndex snapshotF = chunkFiles.snapshotFiles[i];
-			chunk.snapshotFile = BlobFilenameRef(rep.arena, snapshotF.filename, snapshotF.offset, snapshotF.length);
+			chunk.snapshotFile = BlobFilePointerRef(rep.arena, snapshotF.filename, snapshotF.offset, snapshotF.length);
 			Version snapshotVersion = chunkFiles.snapshotFiles[i].version;
 
 			// handle delta files

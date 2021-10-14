@@ -1122,66 +1122,34 @@ const KeyRangeRef blobGranuleHistoryKeys(LiteralStringRef("\xff\x02/bgh/"), Lite
 const uint8_t BG_FILE_TYPE_DELTA = 'D';
 const uint8_t BG_FILE_TYPE_SNAPSHOT = 'S';
 
-// uids in blob granule file/split keys are serialized big endian so that incrementUID can create a prefix range for
-// just that UID.
-
-// TODO: could move this to UID or sometwhere else?
-UID incrementUID(UID uid) {
-	uint64_t first = uid.first();
-	uint64_t second = uid.second() + 1;
-	// handle overflow increment of second
-	if (second == 0) {
-		first++;
-		// FIXME: assume we never generate max uid, for now
-		ASSERT(first != 0);
-	}
-
-	return UID(first, second);
-}
-
-void serializeUIDBigEndian(BinaryWriter& wr, UID uid) {
-	wr << bigEndian64(uid.first());
-	wr << bigEndian64(uid.second());
-}
-
-UID deserializeUIDBigEndian(BinaryReader& reader) {
-	uint64_t first;
-	uint64_t second;
-	reader >> first;
-	reader >> second;
-	return UID(bigEndian64(first), bigEndian64(second));
-}
-
 const Key blobGranuleFileKeyFor(UID granuleID, uint8_t fileType, Version fileVersion) {
 	ASSERT(fileType == 'D' || fileType == 'S');
 	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
 	wr.serializeBytes(blobGranuleFileKeys.begin);
-	serializeUIDBigEndian(wr, granuleID);
+	wr << granuleID;
 	wr << fileType;
 	wr << bigEndian64(fileVersion);
 	return wr.toValue();
 }
 
 std::tuple<UID, uint8_t, Version> decodeBlobGranuleFileKey(KeyRef const& key) {
+	UID granuleID;
 	uint8_t fileType;
 	Version fileVersion;
 	BinaryReader reader(key.removePrefix(blobGranuleFileKeys.begin), AssumeVersion(ProtocolVersion::withBlobGranule()));
-	UID granuleID = deserializeUIDBigEndian(reader);
+	reader >> granuleID;
 	reader >> fileType;
 	reader >> fileVersion;
 	ASSERT(fileType == 'D' || fileType == 'S');
 	return std::tuple(granuleID, fileType, bigEndian64(fileVersion));
 }
 
-Key bgFilePrefixKey(UID gid) {
+const KeyRange blobGranuleFileKeyRangeFor(UID granuleID) {
 	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
 	wr.serializeBytes(blobGranuleFileKeys.begin);
-	serializeUIDBigEndian(wr, gid);
-	return wr.toValue();
-}
-
-const KeyRange blobGranuleFileKeyRangeFor(UID granuleID) {
-	return KeyRangeRef(bgFilePrefixKey(granuleID), bgFilePrefixKey(incrementUID(granuleID)));
+	wr << granuleID;
+	Key startKey = wr.toValue();
+	return KeyRangeRef(startKey, strinc(startKey));
 }
 
 const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length) {
@@ -1244,30 +1212,29 @@ std::tuple<int64_t, int64_t, UID> decodeBlobGranuleLockValue(const ValueRef& val
 const Key blobGranuleSplitKeyFor(UID const& parentGranuleID, UID const& granuleID) {
 	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
 	wr.serializeBytes(blobGranuleSplitKeys.begin);
-	serializeUIDBigEndian(wr, parentGranuleID);
-	serializeUIDBigEndian(wr, granuleID);
+	wr << parentGranuleID;
+	wr << granuleID;
 	return wr.toValue();
 }
 
 std::pair<UID, UID> decodeBlobGranuleSplitKey(KeyRef const& key) {
-
+	UID parentGranuleID;
+	UID granuleID;
 	BinaryReader reader(key.removePrefix(blobGranuleSplitKeys.begin),
 	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
 
-	UID parentGranuleID = deserializeUIDBigEndian(reader);
-	UID currentGranuleID = deserializeUIDBigEndian(reader);
-	return std::pair(parentGranuleID, currentGranuleID);
-}
-
-Key bgSplitPrefixKeyFor(UID gid) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
-	wr.serializeBytes(blobGranuleSplitKeys.begin);
-	serializeUIDBigEndian(wr, gid);
-	return wr.toValue();
+	reader >> parentGranuleID;
+	reader >> granuleID;
+	return std::pair(parentGranuleID, granuleID);
 }
 
 const KeyRange blobGranuleSplitKeyRangeFor(UID const& parentGranuleID) {
-	return KeyRangeRef(bgSplitPrefixKeyFor(parentGranuleID), bgSplitPrefixKeyFor(incrementUID(parentGranuleID)));
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobGranuleSplitKeys.begin);
+	wr << parentGranuleID;
+
+	Key startKey = wr.toValue();
+	return KeyRangeRef(startKey, strinc(startKey));
 }
 
 const Value blobGranuleSplitValueFor(BlobGranuleSplitState st) {

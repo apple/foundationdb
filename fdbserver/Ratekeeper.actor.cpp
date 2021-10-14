@@ -32,7 +32,6 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include <limits>
 
 enum limitReason_t {
 	unlimited, // TODO: rename to workload?

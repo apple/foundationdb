@@ -533,9 +533,6 @@ extern const uint8_t BG_FILE_TYPE_SNAPSHOT;
 // \xff\x02/bgf/(granuleID, {snapshot|delta}, version) = [[filename]]
 extern const KeyRangeRef blobGranuleFileKeys;
 
-// TODO could shrink the size of the mapping keyspace by using something similar to tags instead of UIDs. We'd probably
-// want to do that in V1 or it'd be a big migration.
-
 // \xff\x02/bgm/[[begin]] = [[BlobWorkerUID]]
 extern const KeyRangeRef blobGranuleMappingKeys;
 
@@ -548,7 +545,6 @@ extern const KeyRangeRef blobGranuleSplitKeys;
 // \xff\x02/bgh/(start,end,version) = { granuleID, [parentGranuleHistoryKeys] }
 extern const KeyRangeRef blobGranuleHistoryKeys;
 
-// FIXME: better way to represent file type than a string ref?
 const Key blobGranuleFileKeyFor(UID granuleID, uint8_t fileType, Version fileVersion);
 std::tuple<UID, uint8_t, Version> decodeBlobGranuleFileKey(ValueRef const& value);
 const KeyRange blobGranuleFileKeyRangeFor(UID granuleID);
