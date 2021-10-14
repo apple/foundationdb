@@ -155,16 +155,34 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 	bool doSplit;
 	int64_t epoch;
 	int64_t seqno;
+	UID granuleID;
+	Version startVersion;
+	Version latestVersion;
 
 	GranuleStatusReply() {}
-	explicit GranuleStatusReply(KeyRange range, bool doSplit, int64_t epoch, int64_t seqno)
-	  : granuleRange(range), doSplit(doSplit), epoch(epoch), seqno(seqno) {}
+	explicit GranuleStatusReply(KeyRange range,
+	                            bool doSplit,
+	                            int64_t epoch,
+	                            int64_t seqno,
+	                            UID granuleID,
+	                            Version startVersion,
+	                            Version latestVersion)
+	  : granuleRange(range), doSplit(doSplit), epoch(epoch), seqno(seqno), granuleID(granuleID),
+	    startVersion(startVersion), latestVersion(latestVersion) {}
 
 	int expectedSize() const { return sizeof(GranuleStatusReply) + granuleRange.expectedSize(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, granuleRange, doSplit, epoch, seqno);
+		serializer(ar,
+		           ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence,
+		           granuleRange,
+		           doSplit,
+		           epoch,
+		           seqno,
+		           granuleID,
+		           startVersion,
+		           latestVersion);
 	}
 };
 

@@ -1100,40 +1100,131 @@ const KeyRangeRef blobRangeKeys(LiteralStringRef("\xff\x02/blobRange/"), Literal
 const KeyRef blobManagerEpochKey = LiteralStringRef("\xff\x02/blobManagerEpoch");
 
 const Value blobManagerEpochValueFor(int64_t epoch) {
-	BinaryWriter wr(Unversioned());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
 	wr << epoch;
 	return wr.toValue();
 }
 
 int64_t decodeBlobManagerEpochValue(ValueRef const& value) {
 	int64_t epoch;
-	BinaryReader reader(value, Unversioned());
+	BinaryReader reader(value, IncludeVersion());
 	reader >> epoch;
 	return epoch;
 }
 
-// blob range file data
+// blob granule data
 const KeyRangeRef blobGranuleFileKeys(LiteralStringRef("\xff\x02/bgf/"), LiteralStringRef("\xff\x02/bgf0"));
 const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff\x02/bgm/"), LiteralStringRef("\xff\x02/bgm0"));
 const KeyRangeRef blobGranuleLockKeys(LiteralStringRef("\xff\x02/bgl/"), LiteralStringRef("\xff\x02/bgl0"));
 const KeyRangeRef blobGranuleSplitKeys(LiteralStringRef("\xff\x02/bgs/"), LiteralStringRef("\xff\x02/bgs0"));
 const KeyRangeRef blobGranuleHistoryKeys(LiteralStringRef("\xff\x02/bgh/"), LiteralStringRef("\xff\x02/bgh0"));
 
+const uint8_t BG_FILE_TYPE_DELTA = 'D';
+const uint8_t BG_FILE_TYPE_SNAPSHOT = 'S';
+
+// uids in blob granule file/split keys are serialized big endian so that incrementUID can create a prefix range for
+// just that UID.
+
+// TODO: could move this to UID or sometwhere else?
+UID incrementUID(UID uid) {
+	uint64_t first = uid.first();
+	uint64_t second = uid.second() + 1;
+	// handle overflow increment of second
+	if (second == 0) {
+		first++;
+		// FIXME: assume we never generate max uid, for now
+		ASSERT(first != 0);
+	}
+
+	return UID(first, second);
+}
+
+void serializeUIDBigEndian(BinaryWriter& wr, UID uid) {
+	wr << bigEndian64(uid.first());
+	wr << bigEndian64(uid.second());
+}
+
+UID deserializeUIDBigEndian(BinaryReader& reader) {
+	uint64_t first;
+	uint64_t second;
+	reader >> first;
+	reader >> second;
+	return UID(bigEndian64(first), bigEndian64(second));
+}
+
+const Key blobGranuleFileKeyFor(UID granuleID, uint8_t fileType, Version fileVersion) {
+	ASSERT(fileType == 'D' || fileType == 'S');
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobGranuleFileKeys.begin);
+	serializeUIDBigEndian(wr, granuleID);
+	wr << fileType;
+	wr << bigEndian64(fileVersion);
+	return wr.toValue();
+}
+
+std::tuple<UID, uint8_t, Version> decodeBlobGranuleFileKey(KeyRef const& key) {
+	uint8_t fileType;
+	Version fileVersion;
+	BinaryReader reader(key.removePrefix(blobGranuleFileKeys.begin), AssumeVersion(ProtocolVersion::withBlobGranule()));
+	UID granuleID = deserializeUIDBigEndian(reader);
+	reader >> fileType;
+	reader >> fileVersion;
+	ASSERT(fileType == 'D' || fileType == 'S');
+	return std::tuple(granuleID, fileType, bigEndian64(fileVersion));
+}
+
+Key bgFilePrefixKey(UID gid) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobGranuleFileKeys.begin);
+	serializeUIDBigEndian(wr, gid);
+	return wr.toValue();
+}
+
+const KeyRange blobGranuleFileKeyRangeFor(UID granuleID) {
+	return KeyRangeRef(bgFilePrefixKey(granuleID), bgFilePrefixKey(incrementUID(granuleID)));
+}
+
+const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	wr << filename;
+	wr << offset;
+	wr << length;
+	return wr.toValue();
+}
+
+std::tuple<Standalone<StringRef>, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value) {
+	StringRef filename;
+	int64_t offset;
+	int64_t length;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> filename;
+	reader >> offset;
+	reader >> length;
+	return std::tuple(filename, offset, length);
+}
+
 const Value blobGranuleMappingValueFor(UID const& workerID) {
-	BinaryWriter wr(Unversioned());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
 	wr << workerID;
 	return wr.toValue();
 }
 
 UID decodeBlobGranuleMappingValue(ValueRef const& value) {
 	UID workerID;
-	BinaryReader reader(value, Unversioned());
+	BinaryReader reader(value, IncludeVersion());
 	reader >> workerID;
 	return workerID;
 }
 
+const Key blobGranuleLockKeyFor(KeyRangeRef const& keyRange) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobGranuleLockKeys.begin);
+	wr << keyRange;
+	return wr.toValue();
+}
+
 const Value blobGranuleLockValueFor(int64_t epoch, int64_t seqno, UID changeFeedId) {
-	BinaryWriter wr(Unversioned());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
 	wr << epoch;
 	wr << seqno;
 	wr << changeFeedId;
@@ -1143,15 +1234,44 @@ const Value blobGranuleLockValueFor(int64_t epoch, int64_t seqno, UID changeFeed
 std::tuple<int64_t, int64_t, UID> decodeBlobGranuleLockValue(const ValueRef& value) {
 	int64_t epoch, seqno;
 	UID changeFeedId;
-	BinaryReader reader(value, Unversioned());
+	BinaryReader reader(value, IncludeVersion());
 	reader >> epoch;
 	reader >> seqno;
 	reader >> changeFeedId;
 	return std::make_tuple(epoch, seqno, changeFeedId);
 }
 
+const Key blobGranuleSplitKeyFor(UID const& parentGranuleID, UID const& granuleID) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobGranuleSplitKeys.begin);
+	serializeUIDBigEndian(wr, parentGranuleID);
+	serializeUIDBigEndian(wr, granuleID);
+	return wr.toValue();
+}
+
+std::pair<UID, UID> decodeBlobGranuleSplitKey(KeyRef const& key) {
+
+	BinaryReader reader(key.removePrefix(blobGranuleSplitKeys.begin),
+	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
+
+	UID parentGranuleID = deserializeUIDBigEndian(reader);
+	UID currentGranuleID = deserializeUIDBigEndian(reader);
+	return std::pair(parentGranuleID, currentGranuleID);
+}
+
+Key bgSplitPrefixKeyFor(UID gid) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobGranuleSplitKeys.begin);
+	serializeUIDBigEndian(wr, gid);
+	return wr.toValue();
+}
+
+const KeyRange blobGranuleSplitKeyRangeFor(UID const& parentGranuleID) {
+	return KeyRangeRef(bgSplitPrefixKeyFor(parentGranuleID), bgSplitPrefixKeyFor(incrementUID(parentGranuleID)));
+}
+
 const Value blobGranuleSplitValueFor(BlobGranuleSplitState st) {
-	BinaryWriter wr(Unversioned());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
 	wr << st;
 	return addVersionStampAtEnd(wr.toValue());
 }
@@ -1159,47 +1279,65 @@ const Value blobGranuleSplitValueFor(BlobGranuleSplitState st) {
 std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(const ValueRef& value) {
 	BlobGranuleSplitState st;
 	Version v;
-	BinaryReader reader(value, Unversioned());
+	BinaryReader reader(value, IncludeVersion());
 	reader >> st;
 	reader >> v;
 	return std::pair(st, v);
 }
 
-// const Value blobGranuleHistoryValueFor(VectorRef<KeyRangeRef> const& parentGranules);
-// VectorRef<KeyRangeRef> decodeBlobGranuleHistoryValue(ValueRef const& value);
-
-const Value blobGranuleHistoryValueFor(Standalone<VectorRef<KeyRangeRef>> const& parentGranules) {
-	// FIXME: make separate version for BG
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
-	wr << parentGranules;
+const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobGranuleHistoryKeys.begin);
+	wr << range;
+	wr << bigEndian64(version);
 	return wr.toValue();
 }
 
-Standalone<VectorRef<KeyRangeRef>> decodeBlobGranuleHistoryValue(const ValueRef& value) {
-	Standalone<VectorRef<KeyRangeRef>> parentGranules;
+std::pair<KeyRange, Version> decodeBlobGranuleHistoryKey(const KeyRef& key) {
+	KeyRangeRef keyRange;
+	Version version;
+	BinaryReader reader(key.removePrefix(blobGranuleHistoryKeys.begin),
+	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
+	reader >> keyRange;
+	reader >> version;
+	return std::make_pair(keyRange, bigEndian64(version));
+}
+
+const KeyRange blobGranuleHistoryKeyRangeFor(KeyRangeRef const& range) {
+	return KeyRangeRef(blobGranuleHistoryKeyFor(range, 0), blobGranuleHistoryKeyFor(range, MAX_VERSION));
+}
+
+const Value blobGranuleHistoryValueFor(Standalone<BlobGranuleHistoryValue> const& historyValue) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	wr << historyValue;
+	return wr.toValue();
+}
+
+Standalone<BlobGranuleHistoryValue> decodeBlobGranuleHistoryValue(const ValueRef& value) {
+	Standalone<BlobGranuleHistoryValue> historyValue;
 	BinaryReader reader(value, IncludeVersion());
-	reader >> parentGranules;
-	return parentGranules;
+	reader >> historyValue;
+	return historyValue;
 }
 
 const KeyRangeRef blobWorkerListKeys(LiteralStringRef("\xff\x02/bwList/"), LiteralStringRef("\xff\x02/bwList0"));
 
 const Key blobWorkerListKeyFor(UID workerID) {
-	BinaryWriter wr(Unversioned());
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
 	wr.serializeBytes(blobWorkerListKeys.begin);
 	wr << workerID;
 	return wr.toValue();
 }
 
-const Value blobWorkerListValue(BlobWorkerInterface const& worker) {
-	return ObjectWriter::toValue(worker, IncludeVersion());
-}
-
 UID decodeBlobWorkerListKey(KeyRef const& key) {
 	UID workerID;
-	BinaryReader reader(key.removePrefix(blobWorkerListKeys.begin), Unversioned());
+	BinaryReader reader(key.removePrefix(blobWorkerListKeys.begin), AssumeVersion(ProtocolVersion::withBlobGranule()));
 	reader >> workerID;
 	return workerID;
+}
+
+const Value blobWorkerListValue(BlobWorkerInterface const& worker) {
+	return ObjectWriter::toValue(worker, IncludeVersion(ProtocolVersion::withBlobGranule()));
 }
 
 BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {

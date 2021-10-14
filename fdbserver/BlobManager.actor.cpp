@@ -25,7 +25,6 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/Tuple.h"
 #include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/BlobWorker.actor.h"
 #include "fdbserver/Knobs.h"
@@ -573,14 +572,13 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 	}
 }
 
-static Key granuleLockKey(KeyRange granuleRange) {
-	Tuple k;
-	k.append(granuleRange.begin).append(granuleRange.end);
-	return k.getDataAsStandalone().withPrefix(blobGranuleLockKeys.begin);
-}
-
 // FIXME: propagate errors here
-ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId, KeyRange range) {
+ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
+                                   UID currentWorkerId,
+                                   KeyRange granuleRange,
+                                   UID granuleID,
+                                   Version granuleStartVersion,
+                                   Version latestVersion) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 	state Standalone<VectorRef<KeyRef>> newRanges;
 	state int64_t newLockSeqno = -1;
@@ -590,7 +588,7 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 		try {
 			// redo split if previous txn try failed to calculate it
 			if (newRanges.empty()) {
-				Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(tr, range));
+				Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(tr, granuleRange));
 				newRanges = _newRanges;
 			}
 			break;
@@ -603,14 +601,14 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 		// not large enough to split, just reassign back to worker
 		if (BM_DEBUG) {
 			printf("Not splitting existing range [%s - %s). Continuing assignment to %s\n",
-			       range.begin.printable().c_str(),
-			       range.end.printable().c_str(),
+			       granuleRange.begin.printable().c_str(),
+			       granuleRange.end.printable().c_str(),
 			       currentWorkerId.toString().c_str());
 		}
 		RangeAssignment raContinue;
 		raContinue.isAssign = true;
 		raContinue.worker = currentWorkerId;
-		raContinue.keyRange = range;
+		raContinue.keyRange = granuleRange;
 		raContinue.assign = RangeAssignmentData(true); // continue assignment and re-snapshot
 		bmData->rangesToAssign.send(raContinue);
 		return Void();
@@ -628,7 +626,7 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 			wait(checkManagerLock(tr, bmData));
 
 			// acquire lock for old granule to make sure nobody else modifies it
-			state Key lockKey = granuleLockKey(range);
+			state Key lockKey = blobGranuleLockKeyFor(granuleRange);
 			Optional<Value> lockValue = wait(tr->get(lockKey));
 			ASSERT(lockValue.present());
 			std::tuple<int64_t, int64_t, UID> prevGranuleLock = decodeBlobGranuleLockValue(lockValue.get());
@@ -638,8 +636,8 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 					       bmData->id.toString().c_str(),
 					       std::get<0>(prevGranuleLock),
 					       bmData->epoch,
-					       range.begin.printable().c_str(),
-					       range.end.printable().c_str());
+					       granuleRange.begin.printable().c_str(),
+					       granuleRange.end.printable().c_str());
 				}
 
 				if (bmData->iAmReplaced.canBeSet()) {
@@ -659,20 +657,24 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 			// acquire granule lock so nobody else can make changes to this granule.
 			tr->set(lockKey, blobGranuleLockValueFor(bmData->epoch, newLockSeqno, std::get<2>(prevGranuleLock)));
 
-			Standalone<VectorRef<KeyRangeRef>> history;
-			history.push_back(history.arena(), range);
-			Value historyValue = blobGranuleHistoryValueFor(history);
 			// set up split metadata
 			for (int i = 0; i < newRanges.size() - 1; i++) {
-				Tuple splitKey;
-				splitKey.append(range.begin).append(range.end).append(newRanges[i]);
-				tr->atomicOp(splitKey.getDataAsStandalone().withPrefix(blobGranuleSplitKeys.begin),
+				UID newGranuleID = deterministicRandom()->randomUniqueID();
+
+				Key splitKey = blobGranuleSplitKeyFor(granuleID, newGranuleID);
+
+				tr->atomicOp(splitKey,
 				             blobGranuleSplitValueFor(BlobGranuleSplitState::Started),
 				             MutationRef::SetVersionstampedValue);
 
-				Tuple historyKey;
-				historyKey.append(newRanges[i]).append(newRanges[i + 1]);
-				tr->set(historyKey.getDataAsStandalone().withPrefix(blobGranuleHistoryKeys.begin), historyValue);
+				Key historyKey = blobGranuleHistoryKeyFor(KeyRangeRef(newRanges[i], newRanges[i + 1]), latestVersion);
+
+				Standalone<BlobGranuleHistoryValue> historyValue;
+				historyValue.granuleID = newGranuleID;
+				historyValue.parentGranules.push_back(historyValue.arena(),
+				                                      std::pair(granuleRange, granuleStartVersion));
+
+				tr->set(historyKey, blobGranuleHistoryValueFor(historyValue));
 			}
 
 			wait(tr->commit());
@@ -690,8 +692,8 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 
 	if (BM_DEBUG) {
 		printf("Splitting range [%s - %s) into (%d):\n",
-		       range.begin.printable().c_str(),
-		       range.end.printable().c_str(),
+		       granuleRange.begin.printable().c_str(),
+		       granuleRange.end.printable().c_str(),
 		       newRanges.size() - 1);
 		for (int i = 0; i < newRanges.size() - 1; i++) {
 			printf("  [%s - %s)\n", newRanges[i].printable().c_str(), newRanges[i + 1].printable().c_str());
@@ -703,7 +705,7 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData, UID currentWorkerId,
 	RangeAssignment raRevoke;
 	raRevoke.isAssign = false;
 	raRevoke.worker = currentWorkerId;
-	raRevoke.keyRange = range;
+	raRevoke.keyRange = granuleRange;
 	raRevoke.revoke = RangeRevokeData(false); // not a dispose
 	bmData->rangesToAssign.send(raRevoke);
 
@@ -824,7 +826,8 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 						       rep.granuleRange.end.printable().c_str());
 					}
 					lastSeenSeqno.insert(rep.granuleRange, std::pair(rep.epoch, rep.seqno));
-					bmData->addActor.send(maybeSplitRange(bmData, bwInterf.id(), rep.granuleRange));
+					bmData->addActor.send(maybeSplitRange(
+					    bmData, bwInterf.id(), rep.granuleRange, rep.granuleID, rep.startVersion, rep.latestVersion));
 				}
 			}
 		} catch (Error& e) {

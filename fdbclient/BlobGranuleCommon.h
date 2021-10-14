@@ -103,7 +103,7 @@ struct BlobFilenameRef {
 // TODO since client request passes version, we don't need to include the version of each mutation in the response if we
 // pruned it there
 struct BlobGranuleChunkRef {
-	constexpr static FileIdentifier file_identifier = 991434;
+	constexpr static FileIdentifier file_identifier = 865198;
 	KeyRangeRef keyRange;
 	Version includedVersion;
 	Optional<BlobFilenameRef> snapshotFile; // not set if it's an incremental read
@@ -117,4 +117,16 @@ struct BlobGranuleChunkRef {
 };
 
 enum BlobGranuleSplitState { Unknown = 0, Started = 1, Assigned = 2, Done = 3 };
+
+struct BlobGranuleHistoryValue {
+	constexpr static FileIdentifier file_identifier = 991434;
+	UID granuleID;
+	VectorRef<std::pair<KeyRangeRef, Version>> parentGranules;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, granuleID, parentGranules);
+	}
+};
+
 #endif
