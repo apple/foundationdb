@@ -70,7 +70,7 @@ using namespace boost::asio::ip;
 #include <execinfo.h>
 #endif
 
-extern void processRunLoopProfilerBacktraces(bool);
+extern void processRunLoopProfilerBacktraces();
 extern std::atomic<int64_t> net2RunLoopSleeps;
 extern std::atomic<int64_t> net2RunLoopProfilingSignals;
 
@@ -1522,7 +1522,7 @@ void Net2::run() {
 		queueSize = ready.size();
 		FDB_TRACE_PROBE(run_loop_done, queueSize);
 
-		processRunLoopProfilerBacktraces(false);
+		processRunLoopProfilerBacktraces();
 		countRunLoopProfilingSignals = net2RunLoopProfilingSignals;
 
 		nnow = timer_monotonic();

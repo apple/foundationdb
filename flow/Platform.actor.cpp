@@ -3484,6 +3484,39 @@ void registerCrashHandler() {
 #endif
 }
 
+// A signal-safe non-blocking locking mechanism using std::atomic_flag. Users can attempt to acquire the lock,
+// and if the lock is already held they will fail.
+class SignalSafeTryLock {
+public:
+	SignalSafeTryLock() { lock.clear(); }
+
+	// Attempts to take the lock. Returns true if the lock was acquired or false if it was already held.
+	// If this function returns false, the caller should not release the lock.
+	bool tryTakeLock() { return !lock.test_and_set(); }
+	void releaseLock() { lock.clear(); }
+
+private:
+	std::atomic_flag lock;
+};
+
+// Attempts to acquire a SignalSafeTryLock, and if acquired releases it when destructed.
+// This is not safe to allocate in a signal handler.
+class TryLockHolder {
+public:
+	TryLockHolder(SignalSafeTryLock& lock) : lock(lock) { acquired = lock.tryTakeLock(); }
+	~TryLockHolder() {
+		if (acquired) {
+			lock.releaseLock();
+		}
+	}
+
+	bool isHoldingLock() { return acquired; }
+
+private:
+	SignalSafeTryLock& lock;
+	bool acquired;
+};
+
 #ifdef __linux__
 volatile void** net2Backtraces = nullptr;
 volatile void** otherBacktraces = nullptr;
@@ -3492,39 +3525,7 @@ volatile size_t net2BacktracesMax = 10000;
 volatile bool net2BacktracesOverflow = false;
 volatile int net2BacktracesCount = 0;
 
-// These atomic bools are meant to protect multi-threaded access to the backtrace variables.
-// There are two flags here, one for each thread. When a thread intends to access the data,
-// it will set its flag to true. Once it has done so, it will then check whether the other
-// thread has set the flag as well. If so, it abandons its attempt to use the data.
-//
-// The goal here is that we should not have two threads accessing this data at the same time.
-// It is possible if both threads access the data simultaneously, then both will be denied access.
-// A thread that is denied access will give up and try again the next time it was scheduled to do so.
-//
-// The sequence for thread A will look like:
-//
-// A1. SetFlagA
-// A2. ReadFlagB
-// A2_error: If set, ClearFlagA and return
-// A3. Access backtrace data
-// A4. ClearFlagA
-//
-// Because these use atomic operations, the sequence of these operations should not be reordered.
-// If interleaved with similar operations from Thread B, there are a few possibilities.
-//
-// 1. If thread B runs B1 and B2 after step A2 and before A4, then Thread A will have gotten to access
-//    the backtrace data and thread B will be denied at step B2.
-// 2. If thread B runs B1 after step A2 and B2 after A4, then both will be granted access to the backtrace
-//    data, but they won't be doing so simultaneously.
-// 3. If thread B runs B1 after A1 but before A2, then both will have set their flags. The first to
-//    run step 2 will fail. The other (say, B) will also fail if it runs B2 before A2_error executes,
-//    or it will succeed if A2_error executes first.
-//
-// SOMEDAY: In C++20, we could use atomic_flag for this and be guaranteed that it's lock free
-// We can't use it now because we need atomic_flag.test() for our use-case. If std::atomic<bool>
-// is not lock-free, then we can't do any backtrace accesses from the check thread.
-std::atomic<bool> checkThreadUsingBacktraces(false);
-std::atomic<bool> networkThreadUsingBacktraces(false);
+SignalSafeTryLock backtraceLock;
 
 sigset_t sigProfSet;
 void initProfiling() {
@@ -3552,7 +3553,6 @@ volatile thread_local int profilingEnabled = 1;
 volatile thread_local int64_t numProfilesDeferred = 0;
 volatile thread_local int64_t numProfilesOverflowed = 0;
 volatile thread_local int64_t numProfilesCaptured = 0;
-volatile thread_local bool profileRequested = false;
 
 int64_t getNumProfilesDeferred() {
 	return numProfilesDeferred;
@@ -3579,25 +3579,12 @@ void profileHandler(int sig) {
 	}
 
 	if (!profilingEnabled) {
-		profileRequested = true;
 		++numProfilesDeferred;
 		return;
 	}
 
-	// We need to check if this signal was raised while networkThreadUsingBacktraces was already set.
-	// If so, we don't want to clear it when we finish.
-	bool alreadyProcessing = false;
-	if (std::atomic<bool>::is_always_lock_free) {
-		alreadyProcessing = networkThreadUsingBacktraces;
-		networkThreadUsingBacktraces = true;
-
-		if (checkThreadUsingBacktraces) {
-			if (!alreadyProcessing) {
-				networkThreadUsingBacktraces = false;
-			}
-
-			return;
-		}
+	if (!backtraceLock.tryTakeLock()) {
+		return;
 	}
 
 	++net2BacktracesCount;
@@ -3605,6 +3592,7 @@ void profileHandler(int sig) {
 	if (!net2Backtraces || net2BacktracesMax - net2BacktracesOffset < 50) {
 		++numProfilesOverflowed;
 		net2BacktracesOverflow = true;
+		backtraceLock.releaseLock();
 		return;
 	}
 
@@ -3625,9 +3613,7 @@ void profileHandler(int sig) {
 	ps->length = size;
 	net2BacktracesOffset += size + 2;
 
-	if (std::atomic<bool>::is_always_lock_free && !alreadyProcessing) {
-		networkThreadUsingBacktraces = false;
-	}
+	backtraceLock.releaseLock();
 #else
 	// No slow task profiling for other platforms!
 #endif
@@ -3635,33 +3621,18 @@ void profileHandler(int sig) {
 
 void setProfilingEnabled(int enabled) {
 #ifdef __linux__
-	if (profileThread && enabled && !profilingEnabled && profileRequested) {
-		profilingEnabled = true;
-		profileRequested = false;
-		pthread_kill(pthread_self(), SIGPROF);
-	} else {
-		profilingEnabled = enabled;
-	}
+	profilingEnabled = enabled;
 #else
 	// No profiling for other platforms!
 #endif
 }
 
-void processRunLoopProfilerBacktraces(bool isCheckThread) {
+void processRunLoopProfilerBacktraces() {
 #if defined(__linux__)
 	if (FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
-		if (isCheckThread) {
-			checkThreadUsingBacktraces = true;
-			if (networkThreadUsingBacktraces) {
-				checkThreadUsingBacktraces = false;
-				return;
-			}
-		} else {
-			networkThreadUsingBacktraces = true;
-			if (checkThreadUsingBacktraces) {
-				networkThreadUsingBacktraces = false;
-				return;
-			}
+		TryLockHolder holder(backtraceLock);
+		if (!holder.isHoldingLock()) {
+			return;
 		}
 
 		sigset_t origSet;
@@ -3704,12 +3675,6 @@ void processRunLoopProfilerBacktraces(bool isCheckThread) {
 
 		// notify the run loop monitoring thread that we are making progress
 		net2RunLoopIterations.fetch_add(1);
-
-		if (isCheckThread) {
-			checkThreadUsingBacktraces = false;
-		} else {
-			networkThreadUsingBacktraces = false;
-		}
 	}
 #endif
 }
@@ -3747,22 +3712,15 @@ void* checkThread(void* arg) {
 		if (slowTask) {
 			double t = timer();
 			bool newSlowTask = lastSlowTaskSignal == 0;
+			fprintf(stderr, "In check thread slow task: %d\n", newSlowTask);
 
 			if (newSlowTask) {
 				slowTaskStart = t;
 			} else if (t - std::max(slowTaskStart, lastSlowTaskBlockedLog) > FLOW_KNOBS->SLOWTASK_BLOCKED_INTERVAL) {
+				fprintf(stderr, "Logging check thread slow task: %d\n", newSlowTask);
 				lastSlowTaskBlockedLog = t;
-				checkThreadUsingBacktraces = true;
-				if (!networkThreadUsingBacktraces) {
-					TraceEvent(SevWarnAlways, "RunLoopBlocked").detail("Duration", t - slowTaskStart);
-					if (std::atomic<bool>::is_always_lock_free) {
-						processRunLoopProfilerBacktraces(true);
-					}
-				} else {
-					TraceEvent(SevWarnAlways, "RunLoopBlockedProcessingBacktraces")
-					    .detail("Duration", t - slowTaskStart);
-				}
-				checkThreadUsingBacktraces = false;
+				TraceEvent(SevWarnAlways, "RunLoopBlocked").detail("Duration", t - slowTaskStart);
+				processRunLoopProfilerBacktraces();
 			}
 
 			if (newSlowTask || t - lastSlowTaskSignal >= slowTaskLogInterval) {
