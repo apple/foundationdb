@@ -1181,6 +1181,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			    changeFeedStream, cfKey, startVersion + 1, MAX_VERSION, metadata->keyRange);
 		}
 
+		state Version lastVersion = startVersion + 1;
 		loop {
 			// check outstanding snapshot/delta files for completion
 			if (inFlightBlobSnapshot.isValid() && inFlightBlobSnapshot.isReady()) {
@@ -1249,27 +1250,34 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			// process mutations
 			for (MutationsAndVersionRef d : mutations) {
 				state MutationsAndVersionRef deltas = d;
-				ASSERT(deltas.version >= metadata->bufferedDeltaVersion.get());
+				ASSERT(deltas.version >= lastVersion);
+				ASSERT(lastVersion > metadata->bufferedDeltaVersion.get());
+
+				// if lastVersion is complete, update buffered version and potentially write a delta file with
+				// everything up to lastVersion
+				if (deltas.version > lastVersion) {
+					metadata->bufferedDeltaVersion.set(lastVersion);
+				}
 				// Write a new delta file IF we have enough bytes, and we have all of the previous version's stuff
 				// there to ensure no versions span multiple delta files. Check this by ensuring the version of this
 				// new delta is larger than the previous largest seen version
 				if (metadata->bufferedDeltaBytes >= SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES &&
-				    deltas.version > metadata->bufferedDeltaVersion.get()) {
+				    deltas.version > lastVersion) {
 					if (BW_DEBUG) {
 						printf("Granule [%s - %s) flushing delta file after %d bytes @ %lld %lld%s\n",
 						       metadata->keyRange.begin.printable().c_str(),
 						       metadata->keyRange.end.printable().c_str(),
 						       metadata->bufferedDeltaBytes,
-						       metadata->bufferedDeltaVersion.get(),
+						       lastVersion,
 						       deltas.version,
 						       oldChangeFeedDataComplete.present() ? ". Finalizing " : "");
 					}
 					TraceEvent("BlobGranuleDeltaFile", bwData->id)
 					    .detail("Granule", metadata->keyRange)
-					    .detail("Version", metadata->bufferedDeltaVersion.get());
+					    .detail("Version", lastVersion);
 
 					// sanity check for version order
-					ASSERT(metadata->bufferedDeltaVersion.get() >= metadata->currentDeltas.back().version);
+					ASSERT(lastVersion >= metadata->currentDeltas.back().version);
 					ASSERT(metadata->pendingDeltaVersion < metadata->currentDeltas.front().version);
 
 					// launch pipelined, but wait for previous operation to complete before persisting to FDB
@@ -1288,19 +1296,16 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					                                                metadata->originalSeqno,
 					                                                metadata->deltaArena,
 					                                                metadata->currentDeltas,
-					                                                metadata->bufferedDeltaVersion.get(),
+					                                                lastVersion,
 					                                                previousDeltaFileFuture,
 					                                                oldChangeFeedDataComplete);
-					inFlightDeltaFiles.push_back(InFlightDeltaFile(
-					    dfFuture, metadata->bufferedDeltaVersion.get(), metadata->bufferedDeltaBytes));
+					inFlightDeltaFiles.push_back(
+					    InFlightDeltaFile(dfFuture, lastVersion, metadata->bufferedDeltaBytes));
 
 					oldChangeFeedDataComplete.reset();
 					// add new pending delta file
-					if (metadata->pendingDeltaVersion >= metadata->bufferedDeltaVersion.get()) {
-						printf("%lld >= %lld\n", metadata->pendingDeltaVersion, metadata->bufferedDeltaVersion.get());
-					}
-					ASSERT(metadata->pendingDeltaVersion < metadata->bufferedDeltaVersion.get());
-					metadata->pendingDeltaVersion = metadata->bufferedDeltaVersion.get();
+					ASSERT(metadata->pendingDeltaVersion < lastVersion);
+					metadata->pendingDeltaVersion = lastVersion;
 					metadata->bytesInNewDeltaFiles += metadata->bufferedDeltaBytes;
 
 					bwData->stats.mutationBytesBuffered -= metadata->bufferedDeltaBytes;
@@ -1473,8 +1478,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							rollbacksInProgress.pop_front();
 						} else {
 							// FIXME: add counter for granule rollbacks and rollbacks skipped?
-							// explicitly check last delta in currentDeltas because metadata-bufferedDeltaVersion
-							// includes empties
+							// explicitly check last delta in currentDeltas because lastVersion and bufferedDeltaVersion
+							// include empties
 							if (metadata->pendingDeltaVersion <= rollbackVersion &&
 							    (metadata->currentDeltas.empty() ||
 							     metadata->currentDeltas.back().version <= rollbackVersion)) {
@@ -1546,12 +1551,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				}
 				if (justDidRollback) {
 					break;
-				} else {
-					ASSERT(metadata->bufferedDeltaVersion.get() <= deltas.version);
-					if (metadata->bufferedDeltaVersion.get() < deltas.version) {
-						metadata->bufferedDeltaVersion.set(deltas.version);
-					}
 				}
+				lastVersion = deltas.version;
 			}
 			if (lastFromOldChangeFeed && !justDidRollback) {
 				readOldChangeFeed = false;
