@@ -2089,12 +2089,6 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 
 	commitData.resolvers = commitData.db->get().resolvers;
 	ASSERT(commitData.resolvers.size() != 0);
-	for (int i = 0; i < commitData.resolvers.size(); ++i) {
-		commitData.stats.resolverDist.push_back(
-		    Histogram::getHistogram(LiteralStringRef("CommitProxy"),
-		                            "ToResolver_" + commitData.resolvers[i].id().toString(),
-		                            Histogram::Unit::microseconds));
-	}
 
 	// Initialize keyResolvers map
 	auto rs = commitData.keyResolvers.modify(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys : allKeys);

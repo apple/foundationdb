@@ -193,7 +193,9 @@ void startFakeResolver(std::vector<Future<Void>>& actors, std::shared_ptr<TestDr
 		req.commitProxyCount = pTestDriverContext->numProxies;
 		req.resolverCount = pTestDriverContext->numResolvers;
 
-		actors.emplace_back(::resolverCore(*recruited, req));
+		// TODO: make a usable "db" for resolverCore.
+		Reference<AsyncVar<ServerDBInfo>> db;
+		actors.emplace_back(::resolverCore(*recruited, req, db));
 		pTestDriverContext->resolverInterfaces.push_back(recruited);
 	}
 }
