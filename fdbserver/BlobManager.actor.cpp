@@ -477,7 +477,6 @@ ACTOR Future<Void> checkManagerLock(Reference<ReadYourWritesTransaction> tr, Blo
 			bmData->iAmReplaced.send(Void());
 		}
 
-		// TODO different error?
 		throw granule_assignment_conflict();
 	}
 	tr->addReadConflictRange(singleKeyRange(blobManagerEpochKey));
@@ -508,7 +507,6 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 				ar.dependsOn(results.arena());
 				VectorRef<KeyRangeRef> rangesToAdd;
 				VectorRef<KeyRangeRef> rangesToRemove;
-				// TODO hack for simulation
 				updateClientBlobRanges(&bmData->knownBlobRanges, results, ar, &rangesToAdd, &rangesToRemove);
 
 				for (KeyRangeRef range : rangesToRemove) {
@@ -572,7 +570,6 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 	}
 }
 
-// FIXME: propagate errors here
 ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
                                    UID currentWorkerId,
                                    KeyRange granuleRange,
@@ -902,8 +899,7 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 	return Void();
 }
 
-// TODO this is only for chaos testing right now!! REMOVE LATER
-ACTOR Future<Void> rangeMover(BlobManagerData* bmData) {
+ACTOR Future<Void> chaosRangeMover(BlobManagerData* bmData) {
 	ASSERT(g_network->isSimulated());
 	loop {
 		wait(delay(30.0));
@@ -1135,7 +1131,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	self.addActor.send(rangeAssigner(&self));
 
 	if (BUGGIFY) {
-		self.addActor.send(rangeMover(&self));
+		self.addActor.send(chaosRangeMover(&self));
 	}
 
 	// TODO probably other things here eventually
