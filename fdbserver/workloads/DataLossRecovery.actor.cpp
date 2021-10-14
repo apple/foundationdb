@@ -66,8 +66,12 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		}
 		return _start(this, cx);
 	}
-
 	ACTOR Future<Void> _start(DataLossRecoveryWorkload* self, Database cx) {
+		wait(self->recoverFromSystemDataLoss(self, cx));
+		return Void();
+	}
+
+	ACTOR Future<Void> recoverFromSystemDataLoss(DataLossRecoveryWorkload* self, Database cx) {
 		state Key key = "TestKey"_sr;
 		state Key endKey = "TestKey0"_sr;
 		state Value oldValue = "TestValue"_sr;
@@ -76,57 +80,12 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		wait(self->writeAndVerify(self, cx, key, oldValue));
 		TraceEvent("InitialDataReady");
 
-		state Optional<StorageServerInterface> ssi = wait(self->getRandomStorageServer(cx));
-		ASSERT(ssi.present());
-
-		// Move [key, endKey) to team: {address}.
-		state std::vector<NetworkAddress> addresses;
-		addresses.push_back(ssi.get().address());
-		std::cout << "Moving." << std::endl;
-		wait(moveShard(cx->getConnectionFile(), KeyRangeRef(key, endKey), addresses));
-
-		state Transaction txn(cx);
-		loop {
-			try {
-				state Standalone<VectorRef<const char*>> adds = wait(txn.getAddressesForKey(key));
-				ASSERT(adds.size() == 1);
-				ASSERT(adds[0] == ssi.get().address().toString());
-				break;
-			} catch (Error& e) {
-				wait(txn.onError(e));
-			}
-		}
-		std::cout << "Moved to: " << adds[0] << "(" << ssi.get().uniqueID.toString() << ")" << std::endl;
-
-		wait(self->readAndVerify(self, cx, key, oldValue));
-
-		// Kill team {address}, and expect read to timeout.
-		self->killProcess(self, ssi.get().address());
-		wait(self->readAndVerify(self, cx, key, "Timeout"_sr));
-
-		// Reenable DD and exclude address as fail, so that [key, endKey) will be dropped and moved to a new team.
-		// Expect read to return 'value not found'.
-		int ignore = wait(setDDMode(cx, 1));
-		wait(self->exclude(self, cx, key, ssi.get().address()));
-		wait(self->readAndVerify(self, cx, key, Optional<Value>()));
-
-		// Write will scceed.
-		wait(self->writeAndVerify(self, cx, key, newValue));
-
-		// **********************************************************************
-
-		state Optional<StorageServerInterface> ssi2 = wait(self->getRandomStorageServer(cx));
-		ASSERT(ssi2.present());
-		ASSERT(ssi2 != ssi);
-
 		// Move [\xff, \xff\xff) to team: {ssi}.
-		addresses.clear();
-		addresses.push_back(ssi2.get().address());
-		wait(moveShard(cx->getConnectionFile(), systemKeys, addresses));
+		state StorageServerInterface ssi = wait(self->moveToRandomServer(self, cx, systemKeys));
 
-		// Kill team {address}, and expect read to timeout.
-		self->killProcess(self, ssi2.get().address());
-		std::cout << "Killed process: " << ssi2.get().address().toString() << "(" << ssi2.get().toString() << ")"
+		// Kill team {ssi}, and expect read to timeout.
+		self->killProcess(self, ssi.address());
+		std::cout << "Killed process: " << ssi.address().toString() << "(" << ssi.toString() << ")"
 		          << std::endl;
 		wait(self->readAndVerify(self, cx, keyServersKey(key), "Timeout"_sr));
 		std::cout << "Verified reading metadata timeout" << std::endl;
@@ -134,9 +93,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		wait(repairSystemData(cx->getConnectionFile()));
 		wait(delay(30));
 
-		// Optional<Value> res =
-		//     wait(self->readFirstInRange(self, cx, KeyRange(keyServersKey(key), keyServersKey(systemKeys.begin))));
-		// ASSERT(res.present());
 		state Transaction tr(cx);
 		loop {
 			try {
@@ -150,10 +106,54 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		std::cout << "Read3" << std::endl;
 
-		wait(self->exclude(self, cx, key, ssi2.get().address()));
+		wait(self->exclude(self, cx, key, ssi.address()));
 		int ignore = wait(setDDMode(cx, 1));
 
 		return Void();
+	}
+
+	ACTOR Future<StorageServerInterface> moveToRandomServer(DataLossRecoveryWorkload* self,
+	                                                        Database cx,
+	                                                        KeyRangeRef shard) {
+		TraceEvent("TestMoveShardBegin")
+		    .detail("Begin", shard.begin)
+		    .detail("End", shard.end);
+
+		loop {
+			try {
+				state Optional<StorageServerInterface> ssi = wait(self->getRandomStorageServer(cx));
+				ASSERT(ssi.present());
+
+				// Move [key, endKey) to team: {address}.
+				std::vector<NetworkAddress> addresses;
+				addresses.push_back(ssi.get().address());
+				wait(moveShard(cx->getConnectionFile(), shard, addresses));
+				break;
+			} catch (Error& e) {
+				if (e.code() != error_code_destination_servers_not_found) {
+					throw e;
+				}
+			}
+		}
+
+		state Transaction txn(cx);
+		loop {
+			try {
+				Standalone<VectorRef<const char*>> adds = wait(txn.getAddressesForKey(shard.begin));
+				ASSERT(adds.size() == 1);
+				ASSERT(adds[0] == ssi.get().address().toString());
+				break;
+			} catch (Error& e) {
+				wait(txn.onError(e));
+			}
+		}
+
+		TraceEvent("TestMoveShardEnd")
+		    .detail("Begin", shard.begin)
+		    .detail("End", shard.end)
+		    .detail("Address", ssi.get().address());
+
+		return ssi.get();
 	}
 
 	ACTOR Future<Optional<StorageServerInterface>> getRandomStorageServer(Database cx) {

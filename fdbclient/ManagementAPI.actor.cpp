@@ -2113,8 +2113,8 @@ ACTOR Future<Void> moveShard(Reference<ClusterConnectionFile> clusterFile,
 	loop {
 		choose {
 			when(wait(clusterInterface->get().present()
-			              ? brokenPromiseToNever(
-			                    clusterInterface->get().get().moveShard.getReply(MoveShardRequest(shard, addresses)))
+			              ? brokenPromiseToNever(clusterInterface->get().get().moveShard.getReply(
+			                    MoveShardRequest(shard, addresses, deterministicRandom()->randomUniqueID())))
 			              : Never())) {
 				return Void();
 			}

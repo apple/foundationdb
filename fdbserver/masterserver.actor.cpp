@@ -1838,6 +1838,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 
 static void backfillTxnStateStoreToSS(Reference<MasterData> self, CommitTransactionRef& tr, Arena& arena) {
 	std::cout << "Repair sytem data start." << std::endl;
+	TraceEvent("BackfillDerivedMetaDataBegin", self->dbgid);
 	KeyRange txnKeys = allKeys;
 	// state std::map<Tag, UID> tag_uid;
 
@@ -1852,6 +1853,7 @@ static void backfillTxnStateStoreToSS(Reference<MasterData> self, CommitTransact
 	// Fill in keyServers, serverTags, serverList, etc.
 	for (const auto& kv : data) {
 		// std::cout << "Setting key: " << kv.key.toString() << ", value: " << kv.value.toString() << std::endl;
+		TraceEvent("RecoveryPopulateSystemData", self->dbgid).detail("Key", kv.key).detail("Value", kv.value);
 		tr.set(arena, kv.key, kv.value);
 	}
 	// for (const auto& it : serverKeysMap) {

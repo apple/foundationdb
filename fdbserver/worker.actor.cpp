@@ -1591,7 +1591,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					profilerReq.reply.sendError(e);
 				}
 			}
-			when(RecruitMasterRequest req = waitNext(interf.master.getFuture())) {
+			when(state RecruitMasterRequest recruitMasterRequest = waitNext(interf.master.getFuture())) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Master;
 				MasterInterface recruited;
@@ -1608,17 +1608,27 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				DUMPTOKEN(recruited.reportLiveCommittedVersion);
 				DUMPTOKEN(recruited.notifyBackupWorkerDone);
 
+				state MasterInterface recruitedMaster = recruited;
 				// printf("Recruited as masterServer\n");
-				Future<Void> masterProcess = masterServer(recruited,
-				                                          dbInfo,
-				                                          ccInterface,
-				                                          ServerCoordinators(connFile),
-				                                          req.lifetime,
-				                                          req.forceRecovery,
-				                                          req.recoverMetadata);
+				loop {
+					try {
+						state Future<Void> masterProcess = masterServer(recruitedMaster,
+						                                                dbInfo,
+						                                                ccInterface,
+						                                                ServerCoordinators(connFile),
+						                                                recruitMasterRequest.lifetime,
+						                                                recruitMasterRequest.forceRecovery,
+						                                                recruitMasterRequest.recoverMetadata);
+						break;
+					} catch (Error& e) {
+						if (e.code() != error_code_request_maybe_delivered || !recruitMasterRequest.recoverMetadata) {
+							throw e;
+						}
+					}
+				}
 				errorForwarders.add(
-				    zombie(recruited, forwardError(errors, Role::MASTER, recruited.id(), masterProcess)));
-				req.reply.send(recruited);
+				    zombie(recruitedMaster, forwardError(errors, Role::MASTER, recruitedMaster.id(), masterProcess)));
+				recruitMasterRequest.reply.send(recruitedMaster);
 			}
 			when(InitializeDataDistributorRequest req = waitNext(interf.dataDistributor.getFuture())) {
 				LocalLineage _;

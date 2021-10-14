@@ -4761,7 +4761,7 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 	std::cout << "Dest: " << describe(dest) << std::endl;
 
 	if (dest.empty()) {
-		throw internal_error();
+		throw destination_servers_not_found();
 	}
 
 	state UID owner = deterministicRandom()->randomUniqueID();
@@ -4832,19 +4832,39 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 }
 
 ACTOR Future<Void> handleMoveShard(ClusterControllerData* self, ClusterControllerFullInterface interf) {
+	state std::unordered_set<UID> processedRequests;
 	loop {
 		state MoveShardRequest req = waitNext(interf.clientInterface.moveShard.getFuture());
 		TraceEvent("ManualMoveShardStart", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
+		    .detail("RequestID", req.id)
 		    .detail("Begin", req.shard.begin)
 		    .detail("End", req.shard.end)
 		    .detail("Addresses", describe(req.addresses));
-		try {
-			wait(moveShard(self->db.db, req.shard, req.addresses));
-			TraceEvent("ManualMoveShardFinish", self->id).log();
-			req.reply.send(Void());
-		} catch (Error& e) {
-			req.reply.sendError(e);
+
+		if (!req.id.isValid() || processedRequests.count(req.id) == 0) {
+			processedRequests.insert(req.id);
+			try {
+				wait(moveShard(self->db.db, req.shard, req.addresses));
+				TraceEvent("ManualMoveShardFinish", self->id).log();
+				req.reply.send(Void());
+			} catch (Error& e) {
+				TraceEvent("ManualMoveShardError", self->id)
+				    .detail("ClusterControllerDcId", self->clusterControllerDcId)
+				    .detail("RequestID", req.id)
+				    .detail("Begin", req.shard.begin)
+				    .detail("End", req.shard.end)
+				    .detail("Addresses", describe(req.addresses))
+				    .error(e);
+				req.reply.sendError(e);
+			}
+		} else {
+			TraceEvent("ManualMoveShardDuplicateRequestID", self->id)
+			    .detail("ClusterControllerDcId", self->clusterControllerDcId)
+			    .detail("RequestID", req.id)
+			    .detail("Begin", req.shard.begin)
+			    .detail("End", req.shard.end)
+			    .detail("Addresses", describe(req.addresses));
 		}
 	}
 }
