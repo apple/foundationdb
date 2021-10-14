@@ -576,42 +576,67 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 	try {
 		// TODO distinguish dr and data movement
 		// TODO switch to another cheaper way
-		state StatusObject statusObjCluster = wait(StatusClient::statusFetcher(self->db));
-		StatusObjectReader reader(statusObjCluster);
-		std::string context = isSrc ? "dr_backup" : "dr_backup_dest";
-		std::string path = format("layers.%s.tags", context.c_str());
-		StatusObjectReader tags;
-		if (reader.tryGet(path, tags)) {
-			for (auto itr : tags.obj()) {
-				JSONDoc tag(itr.second);
-				bool running = false;
-				tag.tryGet("running_backup", running);
-				if (running) {
-					std::string backup_state, secondsBehind;
-					tag.tryGet("backup_state", backup_state);
-					tag.tryGet("seconds_behind", secondsBehind);
-					TenantMovementInfo tenantMovementInfo;
-					tenantMovementInfo.movementLocation =
-					    isSrc ? TenantMovementInfo::Location::SOURCE : TenantMovementInfo::Location::DEST;
-					tenantMovementInfo.tenantMovementStatus = backup_state;
-					tenantMovementInfo.secondsBehind = secondsBehind;
 
-					Key sourcePrefix = Key(getPrefixFromTagName(itr.first));
-					SourceMovementRecord sourceMovementRecord = self->getOutgoingMovement(sourcePrefix);
-					tenantMovementInfo.sourcePrefix = sourcePrefix;
-					tenantMovementInfo.destPrefix = sourceMovementRecord.getDestinationPrefix();
-					tenantMovementInfo.destConnectionString = sourceMovementRecord.getDestinationDatabase()
-					                                              ->getConnectionRecord()
-					                                              ->getConnectionString()
-					                                              .toString();
-					recorder.push_back(tenantMovementInfo);
+		state StatusRequest statusRequest;
+		state Future<ErrorOr<StatusReply>> reply = Never();
+		state Future<Void> initialize = Void();
+		state Optional<StatusObject> statusObj;
+
+		loop choose {
+			when(ErrorOr<StatusReply> sr = wait(reply)) {
+				if (!sr.isError()) {
+					statusObj = sr.get().statusObj;
+				} else {
+					TraceEvent(SevDebug, "TenantBalancerDRStatusError", self->tbi.id()).error(sr.getError());
+					// Ignore error and return movements without DR status info
+				}
+
+				break;
+			}
+			when(wait(self->dbInfo->onChange() || initialize)) {
+				initialize = Never();
+				reply = self->dbInfo->get().clusterInterface.clientInterface.databaseStatus.tryGetReply(statusRequest);
+			}
+		}
+
+		// TODO: populate results from our own records (outgoing/incoming movements), add extra data from DR status
+
+		if (statusObj.present()) {
+			StatusObjectReader reader(statusObj.get());
+			std::string context = isSrc ? "dr_backup" : "dr_backup_dest";
+			std::string path = format("layers.%s.tags", context.c_str());
+			StatusObjectReader tags;
+			if (reader.tryGet(path, tags)) {
+				for (auto itr : tags.obj()) {
+					JSONDoc tag(itr.second);
+					bool running = false;
+					tag.tryGet("running_backup", running);
+					if (running) {
+						std::string backup_state, secondsBehind;
+						tag.tryGet("backup_state", backup_state);
+						tag.tryGet("seconds_behind", secondsBehind);
+						TenantMovementInfo tenantMovementInfo;
+						tenantMovementInfo.movementLocation =
+						    isSrc ? TenantMovementInfo::Location::SOURCE : TenantMovementInfo::Location::DEST;
+						tenantMovementInfo.tenantMovementStatus = backup_state;
+						tenantMovementInfo.secondsBehind = secondsBehind;
+
+						Key sourcePrefix = Key(getPrefixFromTagName(itr.first));
+						SourceMovementRecord sourceMovementRecord = self->getOutgoingMovement(sourcePrefix);
+						tenantMovementInfo.sourcePrefix = sourcePrefix;
+						tenantMovementInfo.destPrefix = sourceMovementRecord.getDestinationPrefix();
+						tenantMovementInfo.destConnectionString = sourceMovementRecord.getDestinationDatabase()
+						                                              ->getConnectionRecord()
+						                                              ->getConnectionString()
+						                                              .toString();
+						recorder.push_back(tenantMovementInfo);
+					}
 				}
 			}
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
-		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
 
