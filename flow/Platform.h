@@ -747,6 +747,9 @@ void registerCrashHandler();
 void setupRunLoopProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
 
+// get the absolute path
+std::string getExecPath();
+
 // Use _exit() or criticalError(), not exit()
 #define exit static_assert(false, "Calls to exit() are forbidden by policy");
 

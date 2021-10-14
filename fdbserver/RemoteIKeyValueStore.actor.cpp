@@ -3,10 +3,13 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 
+#include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
+#include "flow/Platform.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/network.h"
+#include "flow/Platform.h"
 
 ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterface) {
 	state ActorCollection actors(false);
@@ -106,8 +109,12 @@ private:
 
 		if (self->ikvsProcess.isReady()) {
 			// no ikvs process is running
-			state std::vector<std::string> paramList = { "bin/fdbserver", "-r", "remoteIKVS", "-p", "127.0.0.1:28374" };
-			self->ikvsProcess = spawnProcess("bin/fdbserver", paramList, 20.0, false, 0.01);
+			state std::string absExecPath = abspath(getExecPath());
+			state std::vector<std::string> paramList = {
+				absExecPath, "-r", "remoteIKVS", "-p", "127.0.0.1:28374", "--knob_min_trace_severity", "1"
+			};
+			self->ikvsProcess = spawnProcess(absExecPath, paramList, 20.0, false, 0.01);
+
 			std::cout << "creating new endpoint\n";
 			IKVSProcessInterface processInterface =
 			    wait(ikvsProcessServer.getProcessInterface.getReply(GetIKVSProcessInterfaceRequest()));
@@ -165,6 +172,7 @@ ACTOR Future<Void> runRemoteServer() {
 		try {
 			choose {
 				when(GetIKVSProcessInterfaceRequest req = waitNext(processInterface.getProcessInterface.getFuture())) {
+					TraceEvent(SevDebug, "RequestIKVSProcessInterface").detail("Status", "received request");
 					std::cout << "received response for ikvs process interface\n";
 					req.reply.send(processInterface);
 				}
