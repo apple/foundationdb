@@ -1499,7 +1499,8 @@ void seedShardServers(Arena& arena,
 
 	// We can't sort this in ptxn, because the last team is txsTeam.
 	if (!SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-		// TODO: Why are we sorted?
+		// Sorting is needed so that we can compare if teams are equal when DD
+		// initializes by loading the key servers map.
 		std::sort(servers.begin(), servers.end());
 	}
 
