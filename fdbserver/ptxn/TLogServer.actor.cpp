@@ -1168,13 +1168,15 @@ ACTOR Future<Void> lockTLogServer(
 	state std::unordered_map<TLogGroupID, Reference<TLogGroupData>>::iterator team;
 	TraceEvent("TLogLock", self->dbgid).detail("WrokerID", self->workerID);
 	state TLogLockResult result;
+	state std::vector<Future<TLogGroupLockResult>> futures;
 	for (team = self->tlogGroups.begin(); team != self->tlogGroups.end(); team++) {
 		TLogGroupID id = team->first;
 		auto tlogGroup = activeGeneration->find(id);
 		Reference<LogGenerationData> logDataActiveGeneration = tlogGroup->second;
-		TLogGroupLockResult groupResult = wait(lockTLogGroup(team->second, logDataActiveGeneration));
-		result.groupResults.emplace_back(groupResult);
+		futures.push_back(lockTLogGroup(team->second, logDataActiveGeneration));
 	}
+	state std::vector<TLogGroupLockResult> groupResults = wait(getAll(futures));
+	result.groupResults.swap(groupResults);
 	TraceEvent("TLogLock2", self->dbgid).detail("WrokerID", self->workerID);
 	reply.send(result);
 	return Void();
