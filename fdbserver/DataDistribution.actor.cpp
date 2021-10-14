@@ -661,6 +661,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	AsyncVar<bool> disableFailingLaggingServers;
 	Optional<Key> wigglingPid; // Process id of current wiggling storage server;
     Reference<AsyncVar<bool>> pauseWiggle;
+	Reference<AsyncVar<bool>> processingWiggle; // track whether wiggling relocation is being processed
 
 	// machine_info has all machines info; key must be unique across processes on the same machine
 	std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
@@ -767,12 +768,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 Reference<AsyncVar<bool>> zeroHealthyTeams,
 	                 IsPrimary primary,
 	                 Reference<AsyncVar<bool>> processingUnhealthy,
+	                 Reference<AsyncVar<bool>> processingWiggle,
 	                 PromiseStream<GetMetricsRequest> getShardMetrics,
 	                 Promise<UID> removeFailedServer,
 	                 PromiseStream<Promise<int>> getUnhealthyRelocationCount)
 	  : cx(cx), distributorId(distributorId), configuration(configuration), doBuildTeams(true),
 	    lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output), unhealthyServers(0),
-	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
+	    processingWiggle(processingWiggle), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
 	    initialFailureReactionDelay(
 	        delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
 	    initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)),
@@ -2436,22 +2438,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// teamsToBuild is calculated such that we will not build too many teams in the situation
 			// when all (or most of) teams become unhealthy temporarily and then healthy again
 			state int teamsToBuild;
-			if (teamCount < 1 || wigglingTeams == 0) {
-				// Case 1: no wiggling team or zero healthy teams, calculate as usual
-				teamsToBuild = std::max(0, std::min(desiredTeams - teamCount, maxTeams - totalTeamCount));
-			} else {
-				// Case 2: there are wiggling teams and the cluster is healthy. To avoid too many redundant team after
-				// re-include the wiggling SS, - wigglingTeams is needed here
-				teamsToBuild =
-				    std::max(0, std::min(desiredTeams - teamCount - wigglingTeams, maxTeams - totalTeamCount));
-			}
+			teamsToBuild = std::max(0, std::min(desiredTeams - teamCount, maxTeams - totalTeamCount));
 
 			TraceEvent("BuildTeamsBegin", self->distributorId)
 			    .detail("TeamsToBuild", teamsToBuild)
 			    .detail("DesiredTeams", desiredTeams)
 			    .detail("MaxTeams", maxTeams)
 			    .detail("BadServerTeams", self->badTeams.size())
-			    .detail("PerpetualWiggleTeams", wigglingTeams)
+			    .detail("PerpetualWigglingTeams", wigglingTeams)
 			    .detail("UniqueMachines", uniqueMachines)
 			    .detail("TeamSize", self->configuration.storageTeamSize)
 			    .detail("Servers", serverCount)
@@ -3039,23 +3033,28 @@ ACTOR Future<Void> updateServerMetrics(Reference<TCServerInfo> server) {
 	return Void();
 }
 
+// NOTE: this actor returns when the cluster is healthy and stable (no server is expected to be removed in a period)
+// processingWiggle and processingUnhealthy indicate that some servers are going to be removed.
 ACTOR Future<Void> waitUntilHealthy(DDTeamCollection* self, double extraDelay = 0) {
 	state int waitCount = 0;
 	loop {
-		while (self->zeroHealthyTeams->get() || self->processingUnhealthy->get()) {
+		while (self->zeroHealthyTeams->get() || self->processingUnhealthy->get() || self->processingWiggle->get()) {
 			// processingUnhealthy: true when there exists data movement
+			// processingWiggle: true when there exists data movement because we want to wiggle a SS
 			TraceEvent("WaitUntilHealthyStalled", self->distributorId)
 			    .detail("Primary", self->primary)
 			    .detail("ZeroHealthy", self->zeroHealthyTeams->get())
-			    .detail("ProcessingUnhealthy", self->processingUnhealthy->get());
-			wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange());
+			    .detail("ProcessingUnhealthy", self->processingUnhealthy->get())
+			    .detail("ProcessingPerpetualWiggle", self->processingWiggle->get());
+			wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange() ||
+			     self->processingWiggle->onChange());
 			waitCount = 0;
 		}
 		wait(delay(SERVER_KNOBS->DD_STALL_CHECK_DELAY,
 		           TaskPriority::Low)); // After the team trackers wait on the initial failure reaction delay, they
 		                                // yield. We want to make sure every tracker has had the opportunity to send
 		                                // their relocations to the queue.
-		if (!self->zeroHealthyTeams->get() && !self->processingUnhealthy->get()) {
+		if (!self->zeroHealthyTeams->get() && !self->processingUnhealthy->get() && !self->processingWiggle->get()) {
 			if (extraDelay <= 0.01 || waitCount >= 1) {
 				// Return healthy if we do not need extraDelay or when DD are healthy in at least two consecutive check
 				return Void();
@@ -4227,7 +4226,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 
 	loop {
 		if (self->wigglingPid.present()) {
-			StringRef pid = self->wigglingPid.get();
+			state StringRef pid = self->wigglingPid.get();
 			if (self->pauseWiggle->get()) {
 				TEST(true); // paused because cluster is unhealthy
 				moveFinishFuture = Never();
@@ -4244,6 +4243,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				    .detail("StorageCount", movingCount);
 			} else {
 				TEST(true); // start wiggling
+				wait(waitUntilHealthy(self));
 				auto fv = self->excludeStorageServersForWiggle(pid);
 				movingCount = fv.size();
 				moveFinishFuture = waitForAll(fv);
@@ -6116,6 +6116,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			state PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 			state PromiseStream<GetMetricsRequest> getShardMetrics;
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
+			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 			state Promise<Void> readyToStart;
 			state Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure);
 
@@ -6193,6 +6194,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                          input.getFuture(),
 			                                                          getShardMetrics,
 			                                                          processingUnhealthy,
+			                                                          processingWiggle,
 			                                                          tcis,
 			                                                          shardsAffectedByTeamFailure,
 			                                                          lock,
@@ -6221,6 +6223,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			    zeroHealthyTeams[0],
 			    IsPrimary::True,
 			    processingUnhealthy,
+			    processingWiggle,
 			    getShardMetrics,
 			    removeFailedServer,
 			    getUnhealthyRelocationCount);
@@ -6241,6 +6244,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				                                    zeroHealthyTeams[1],
 				                                    IsPrimary::False,
 				                                    processingUnhealthy,
+				                                    processingWiggle,
 				                                    getShardMetrics,
 				                                    removeFailedServer,
 				                                    getUnhealthyRelocationCount);
@@ -6734,6 +6738,7 @@ std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
 	                                                           makeReference<AsyncVar<bool>>(true),
 	                                                           IsPrimary::True,
 	                                                           makeReference<AsyncVar<bool>>(false),
+	                                                           makeReference<AsyncVar<bool>>(false),
 	                                                           PromiseStream<GetMetricsRequest>(),
 	                                                           Promise<UID>(),
 	                                                           PromiseStream<Promise<int>>()));
@@ -6776,6 +6781,7 @@ std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize,
 	                                                           Future<Void>(Void()),
 	                                                           makeReference<AsyncVar<bool>>(true),
 	                                                           IsPrimary::True,
+	                                                           makeReference<AsyncVar<bool>>(false),
 	                                                           makeReference<AsyncVar<bool>>(false),
 	                                                           PromiseStream<GetMetricsRequest>(),
 	                                                           Promise<UID>(),
