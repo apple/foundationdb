@@ -152,6 +152,9 @@ class GetGenerationQuorum {
 					wait(delayJittered(0.01 * (1 << retries)));
 					++retries;
 					self->actors.clear(false);
+					self->result.reset();
+					self->totalRepliesReceived = 0;
+					self->maxAgreement = 0;
 				} else {
 					throw e;
 				}

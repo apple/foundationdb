@@ -96,6 +96,7 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigNode/Internal/versionedMutationKeyOrdering"
 class ConfigNodeImpl {
 	UID id;
 	OnDemandStore kvStore;
+	Version priorCommitted;
 	CounterCollection cc;
 
 	// Follower counters
@@ -186,6 +187,7 @@ class ConfigNodeImpl {
 		}
 		state Version committedVersion =
 		    wait(map(getGeneration(self), [](auto const& gen) { return gen.committedVersion; }));
+		ASSERT(req.lastSeenVersion < committedVersion);
 		state Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
 		    wait(getMutations(self, req.lastSeenVersion + 1, committedVersion));
 		state Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> versionedAnnotations =
@@ -374,6 +376,7 @@ class ConfigNodeImpl {
 		}
 		Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
 		annotations.emplace_back_deep(annotations.arena(), req.generation.liveVersion, req.annotation);
+		self->priorCommitted = currentGeneration.committedVersion;
 		wait(commitMutations(self, mutations, annotations, req.generation.liveVersion));
 		req.reply.send(Void());
 		return Void();
@@ -482,6 +485,8 @@ class ConfigNodeImpl {
 			                                 versionedAnnotationKey(generation.committedVersion + 1)));
 
 			generation.committedVersion = req.version;
+			// TODO: Set prior generation to a non-zero value?
+			self->priorCommitted = 0;
 			self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(generation, IncludeVersion())));
 			wait(self->kvStore->commit());
 		}
@@ -497,6 +502,7 @@ class ConfigNodeImpl {
 			return Void();
 		}
 		ASSERT_GT(req.mutations[0].version, currentGeneration.committedVersion);
+		self->priorCommitted = currentGeneration.committedVersion;
 		wait(commitMutations(self, req.mutations, req.annotations, req.target));
 		req.reply.send(Void());
 		return Void();
@@ -504,7 +510,7 @@ class ConfigNodeImpl {
 
 	ACTOR static Future<Void> getCommittedVersion(ConfigNodeImpl* self, ConfigFollowerGetCommittedVersionRequest req) {
 		ConfigGeneration generation = wait(getGeneration(self));
-		req.reply.send(ConfigFollowerGetCommittedVersionReply{ generation.committedVersion });
+		req.reply.send(ConfigFollowerGetCommittedVersionReply{ self->priorCommitted, generation.committedVersion });
 		return Void();
 	}
 
@@ -542,8 +548,8 @@ class ConfigNodeImpl {
 
 public:
 	ConfigNodeImpl(std::string const& folder)
-	  : id(deterministicRandom()->randomUniqueID()), kvStore(folder, id, "globalconf-"), cc("ConfigNode"),
-	    compactRequests("CompactRequests", cc), rollbackRequests("RollbackRequests", cc),
+	  : id(deterministicRandom()->randomUniqueID()), kvStore(folder, id, "globalconf-"), priorCommitted(0),
+	    cc("ConfigNode"), compactRequests("CompactRequests", cc), rollbackRequests("RollbackRequests", cc),
 	    rollforwardRequests("RollforwardRequests", cc), successfulChangeRequests("SuccessfulChangeRequests", cc),
 	    failedChangeRequests("FailedChangeRequests", cc), snapshotRequests("SnapshotRequests", cc),
 	    getCommittedVersionRequests("GetCommittedVersionRequests", cc), successfulCommits("SuccessfulCommits", cc),
