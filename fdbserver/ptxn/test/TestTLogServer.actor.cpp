@@ -577,6 +577,53 @@ TEST_CASE("/fdbserver/ptxn/test/run_storage_server") {
 	return Void();
 }
 
+TEST_CASE("/fdbserver/ptxn/test/lock_tlog") {
+	// idea: lock tlog server first, and write to a random storage team, expect tlog_stopped error.
+
+	// this test should only have 1 tlog server(i.e. numTLogs=1), so that committing to any storage team would fail
+	// after locking it
+
+	state ptxn::test::TestDriverOptions options(params);
+	state std::vector<Future<Void>> actors;
+	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
+
+	state std::unordered_set<ptxn::TLogGroupID> groups;
+	state std::unordered_set<ptxn::TLogGroupID> groupLocked;
+	for (const auto& group : pContext->tLogGroups) {
+		groups.insert(group.logGroupId);
+		ptxn::test::print::print(group);
+	}
+
+	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
+	platform::createDirectory(folder);
+	// start real TLog servers
+	wait(startTLogServers(&actors, pContext, folder));
+
+	// assert all group is locked
+	ptxn::TLogLockResult result = wait(pContext->tLogInterfaces[0]->lock.getReply<ptxn::TLogLockResult>());
+	for (auto& it : result.groupResults) {
+		groupLocked.insert(it.id);
+	}
+	bool allGroupLocked = groups == groupLocked;
+	ASSERT(allGroupLocked);
+
+	// assert writing to a random stroage node would fail with tlog_stopped error.
+	ASSERT(pContext->numTLogs == 1);
+	int index = deterministicRandom()->randomInt(0, pContext->numStorageTeamIDs);
+	state bool tlogStopped = false;
+	try {
+		std::vector<Standalone<StringRef>> messages = wait(commitInject(pContext, pContext->storageTeamIDs[index], 1));
+	} catch (Error& e) {
+		if (e.code() == error_code_tlog_stopped) {
+			tlogStopped = true;
+		}
+	}
+	ASSERT(tlogStopped);
+
+	platform::eraseDirectoryRecursive(folder);
+	return Void();
+}
+
 TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	state const int NUM_COMMITS = 10;
 	state ptxn::test::TestDriverOptions options(params);
