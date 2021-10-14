@@ -246,7 +246,6 @@ struct TLogPopRequest {
 };
 
 struct TLogGroupLockResult {
-	// is this random?
 	constexpr static FileIdentifier file_identifier = 4635715;
 
 	TLogGroupID id;
