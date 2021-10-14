@@ -3605,6 +3605,7 @@ private:
 
 			data->recoveryVersionSkips.emplace_back(rollbackVersion, currentVersion - rollbackVersion);
 		} else if (m.type == MutationRef::SetValue && m.param1 == killStoragePrivateKey) {
+			TraceEvent("StorageServerWorkerRemoved", data->thisServerID).detail("Reason", "KillStorage");
 			throw worker_removed();
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) &&
 		           m.param1.substr(1).startsWith(serverTagPrefix)) {
@@ -3614,6 +3615,10 @@ private:
 			if ((m.type == MutationRef::SetValue && !data->isTss() && !matchesThisServer) ||
 			    (m.type == MutationRef::ClearRange &&
 			     ((!data->isTSSInQuarantine() && matchesThisServer) || (data->isTss() && matchesTssPair)))) {
+				TraceEvent("StorageServerWorkerRemoved", data->thisServerID)
+				    .detail("Reason", "ServerTag")
+				    .detail("TagMatches", matchesThisServer)
+				    .detail("IsTSS", data->isTss());
 				throw worker_removed();
 			}
 			if (!data->isTss() && m.type == MutationRef::ClearRange && data->ssPairID.present() &&
@@ -3800,6 +3805,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		}
 		data->tlogCursorReadsLatencyHistogram->sampleSeconds(now() - beforeTLogCursorReads);
 		if (cursor->popped() > 0) {
+			TraceEvent("StorageServerWorkerRemoved", data->thisServerID).detail("Reason", "PeekPoppedTLogData");
 			throw worker_removed();
 		}
 
@@ -5509,6 +5515,7 @@ ACTOR Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterfa
 
 			if (!pairTagValue.present()) {
 				TEST(true); // Race where tss was down, pair was removed, tss starts back up
+				TraceEvent("StorageServerWorkerRemoved", self->thisServerID).detail("Reason", "TssPairMissing");
 				throw worker_removed();
 			}
 
