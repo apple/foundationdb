@@ -1007,6 +1007,7 @@ struct HealthMetrics {
 
 	int64_t worstStorageQueue;
 	int64_t worstStorageDurabilityLag;
+	int64_t worstStorageReadQueue;
 	int64_t worstTLogQueue;
 	double tpsLimit;
 	bool batchLimited;
@@ -1014,7 +1015,8 @@ struct HealthMetrics {
 	std::map<UID, int64_t> tLogQueue;
 
 	HealthMetrics()
-	  : worstStorageQueue(0), worstStorageDurabilityLag(0), worstTLogQueue(0), tpsLimit(0.0), batchLimited(false) {}
+	  : worstStorageQueue(0), worstStorageDurabilityLag(0), worstStorageReadQueue(0), worstTLogQueue(0), tpsLimit(0.0),
+	    batchLimited(false) {}
 
 	void update(const HealthMetrics& hm, bool detailedInput, bool detailedOutput) {
 		worstStorageQueue = hm.worstStorageQueue;

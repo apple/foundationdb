@@ -549,7 +549,11 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( INITIAL_DURABILITY_LAG_MULTIPLIER,                    1.02 );
 	init( DURABILITY_LAG_REDUCTION_RATE,                      0.9999 );
 	init( DURABILITY_LAG_INCREASE_RATE,                        1.001 );
+	init( INITIAL_READ_QUEUE_MULTIPLIER,                        1.02 );
+	init( READ_QUEUE_REDUCTION_RATE,                          0.9999 );
+	init( READ_QUEUE_INCREASE_RATE,                            1.001 );
 	init( STORAGE_SERVER_LIST_FETCH_TIMEOUT,                    20.0 );
+	init( MAX_READ_QUEUE,                                  200000000 );
 
 	init( MAX_AUTO_THROTTLED_TRANSACTION_TAGS,                     5 ); if(randomize && BUGGIFY) MAX_AUTO_THROTTLED_TRANSACTION_TAGS = 1;
 	init( MAX_MANUAL_THROTTLED_TRANSACTION_TAGS,                  40 ); if(randomize && BUGGIFY) MAX_MANUAL_THROTTLED_TRANSACTION_TAGS = 1;
