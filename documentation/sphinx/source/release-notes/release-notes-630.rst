@@ -3,6 +3,7 @@
 #############
 Release Notes
 #############
+
 6.3.22
 ======
 * Add histograms to client GRV batcher. `(PR #5760) <https://github.com/apple/foundationdb/pull/5760>`_
