@@ -723,6 +723,88 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 
 } // namespace
 
+bool addressInDbAndRemoteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	const auto& dbi = dbInfo->get();
+
+	for (const auto& logSet : dbi.logSystemConfig.tLogs) {
+		if (logSet.isLocal || logSet.locality == tagLocalitySatellite) {
+			continue;
+		}
+		for (const auto& tlog : logSet.tLogs) {
+			if (tlog.present() && tlog.interf().addresses().contains(address)) {
+				return true;
+			}
+		}
+
+		for (const auto& logRouter : logSet.logRouters) {
+			if (logRouter.present() && logRouter.interf().addresses().contains(address)) {
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+bool addressesInDbAndRemoteDc(const NetworkAddressList& addresses, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	return addressInDbAndRemoteDc(addresses.address, dbInfo) ||
+	       (addresses.secondaryAddress.present() && addressInDbAndRemoteDc(addresses.secondaryAddress.get(), dbInfo));
+}
+
+namespace {
+
+TEST_CASE("/fdbserver/worker/addressInDbAndRemoteDc") {
+	// Setup a ServerDBInfo for test.
+	ServerDBInfo testDbInfo;
+	LocalityData testLocal;
+	testLocal.set(LiteralStringRef("dcid"), StringRef(std::to_string(1)));
+	testDbInfo.master.locality = testLocal;
+
+	// First, create an empty TLogInterface, and check that it shouldn't be considered as in remote DC.
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().isLocal = true;
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface<TLogInterface>());
+	ASSERT(!addressInDbAndRemoteDc(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	TLogInterface localTlog(testLocal);
+	localTlog.initEndpoints();
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(localTlog));
+	ASSERT(!addressInDbAndRemoteDc(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a remote TLog, and it should be considered as in remote DC.
+	LocalityData fakeRemote;
+	fakeRemote.set(LiteralStringRef("dcid"), StringRef(std::to_string(2)));
+	TLogInterface remoteTlog(fakeRemote);
+	remoteTlog.initEndpoints();
+
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().isLocal = false;
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(remoteTlog));
+	ASSERT(addressInDbAndRemoteDc(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a remote log router, and it should be considered as in remote DC.
+	NetworkAddress logRouterAddress(IPAddress(0x26262626), 1);
+	TLogInterface remoteLogRouter(fakeRemote);
+	remoteLogRouter.initEndpoints();
+	remoteLogRouter.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ logRouterAddress }, UID(1, 2)));
+	testDbInfo.logSystemConfig.tLogs.back().logRouters.push_back(OptionalInterface(remoteLogRouter));
+	ASSERT(addressInDbAndRemoteDc(logRouterAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a satellite tlog, and it shouldn't be considered as in remote DC.
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().locality = tagLocalitySatellite;
+	NetworkAddress satelliteTLogAddress(IPAddress(0x13131313), 1);
+	TLogInterface satelliteTLog(fakeRemote);
+	satelliteTLog.initEndpoints();
+	satelliteTLog.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ satelliteTLogAddress }, UID(1, 2)));
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(satelliteTLog));
+	ASSERT(!addressInDbAndRemoteDc(satelliteTLogAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	return Void();
+}
+
+} // namespace
+
 // The actor that actively monitors the health of local and peer servers, and reports anomaly to the cluster controller.
 ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                  WorkerInterface interf,
@@ -730,49 +812,63 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
                                  Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	loop {
 		Future<Void> nextHealthCheckDelay = Never();
-		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
-		    addressesInDbAndPrimaryDc(interf.addresses(), dbInfo) && ccInterface->get().present()) {
+		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS && ccInterface->get().present()) {
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
 			const auto& allPeers = FlowTransport::transport().getAllPeers();
 			UpdateWorkerHealthRequest req;
-			for (const auto& [address, peer] : allPeers) {
-				if (peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
-					// Ignore peers that don't have enough samples.
-					// TODO(zhewu): Currently, FlowTransport latency monitor clears ping latency samples on a regular
-					//              basis, which may affect the measurement count. Currently,
-					//              WORKER_HEALTH_MONITOR_INTERVAL is much smaller than the ping clearance interval, so
-					//              it may be ok. If this ends to be a problem, we need to consider keep track of last
-					//              ping latencies logged.
-					continue;
-				}
 
-				if (!addressInDbAndPrimaryDc(address, dbInfo)) {
-					// Ignore the servers that are not in the database's transaction system and not in the primary DC.
-					// Note that currently we are not monitor storage servers, since lagging in storage servers today
-					// already can trigger server exclusion by data distributor.
-					continue;
-				}
+			bool workerInDb = false;
+			bool workerInPrimary = false;
+			if (addressesInDbAndPrimaryDc(interf.addresses(), dbInfo)) {
+				workerInDb = true;
+				workerInPrimary = true;
+			} else if (addressesInDbAndRemoteDc(interf.addresses(), dbInfo)) {
+				workerInDb = true;
+				workerInPrimary = false;
+			}
 
-				if (peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
-				        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD ||
-				    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
-				        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
-					// This is a degraded peer.
-					TraceEvent("HealthMonitorDetectDegradedPeer")
-					    .suppressFor(30)
-					    .detail("Peer", address)
-					    .detail("Elapsed", now() - peer->lastLoggedTime)
-					    .detail("MinLatency", peer->pingLatencies.min())
-					    .detail("MaxLatency", peer->pingLatencies.max())
-					    .detail("MeanLatency", peer->pingLatencies.mean())
-					    .detail("MedianLatency", peer->pingLatencies.median())
-					    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
-					    .detail("CheckedPercentileLatency",
-					            peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
-					    .detail("Count", peer->pingLatencies.getPopulationSize())
-					    .detail("TimeoutCount", peer->timeoutCount);
+			if (workerInDb) {
+				for (const auto& [address, peer] : allPeers) {
+					if (peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
+						// Ignore peers that don't have enough samples.
+						// TODO(zhewu): Currently, FlowTransport latency monitor clears ping latency samples on a
+						// regular
+						//              basis, which may affect the measurement count. Currently,
+						//              WORKER_HEALTH_MONITOR_INTERVAL is much smaller than the ping clearance interval,
+						//              so it may be ok. If this ends to be a problem, we need to consider keep track of
+						//              last ping latencies logged.
+						continue;
+					}
 
-					req.degradedPeers.push_back(address);
+					if ((workerInPrimary && addressInDbAndPrimaryDc(address, dbInfo)) ||
+					    (!workerInPrimary && addressInDbAndRemoteDc(address, dbInfo))) {
+						// Only monitoring the servers that in the primary or remote DC's transaction systems.
+						// Note that currently we are not monitor storage servers, since lagging in storage servers
+						// today already can trigger server exclusion by data distributor.
+
+						if (peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
+						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD ||
+						    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
+						        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
+							// This is a degraded peer.
+							TraceEvent("HealthMonitorDetectDegradedPeer")
+							    .suppressFor(30)
+							    .detail("Peer", address)
+							    .detail("Elapsed", now() - peer->lastLoggedTime)
+							    .detail("MinLatency", peer->pingLatencies.min())
+							    .detail("MaxLatency", peer->pingLatencies.max())
+							    .detail("MeanLatency", peer->pingLatencies.mean())
+							    .detail("MedianLatency", peer->pingLatencies.median())
+							    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
+							    .detail(
+							        "CheckedPercentileLatency",
+							        peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
+							    .detail("Count", peer->pingLatencies.getPopulationSize())
+							    .detail("TimeoutCount", peer->timeoutCount);
+
+							req.degradedPeers.push_back(address);
+						}
+					}
 				}
 			}
 
@@ -954,7 +1050,6 @@ struct TrackRunningStorage {
 };
 
 ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValueStoreType>>* runningStorages,
-
                                                  Future<Void> prevStorageServer,
                                                  KeyValueStoreType storeType,
                                                  std::string filename,
@@ -1591,7 +1686,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					profilerReq.reply.sendError(e);
 				}
 			}
-			when(state RecruitMasterRequest recruitMasterRequest = waitNext(interf.master.getFuture())) {
+			when(RecruitMasterRequest req = waitNext(interf.master.getFuture())) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Master;
 				MasterInterface recruited;
@@ -1608,27 +1703,17 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				DUMPTOKEN(recruited.reportLiveCommittedVersion);
 				DUMPTOKEN(recruited.notifyBackupWorkerDone);
 
-				state MasterInterface recruitedMaster = recruited;
 				// printf("Recruited as masterServer\n");
-				loop {
-					try {
-						state Future<Void> masterProcess = masterServer(recruitedMaster,
-						                                                dbInfo,
-						                                                ccInterface,
-						                                                ServerCoordinators(connFile),
-						                                                recruitMasterRequest.lifetime,
-						                                                recruitMasterRequest.forceRecovery,
-						                                                recruitMasterRequest.recoverMetadata);
-						break;
-					} catch (Error& e) {
-						if (e.code() != error_code_request_maybe_delivered || !recruitMasterRequest.recoverMetadata) {
-							throw e;
-						}
-					}
-				}
+				Future<Void> masterProcess = masterServer(recruited,
+				                                          dbInfo,
+				                                          ccInterface,
+				                                          ServerCoordinators(connFile),
+				                                          req.lifetime,
+				                                          req.forceRecovery,
+				                                          req.recoverMetadata);
 				errorForwarders.add(
-				    zombie(recruitedMaster, forwardError(errors, Role::MASTER, recruitedMaster.id(), masterProcess)));
-				recruitMasterRequest.reply.send(recruitedMaster);
+				    zombie(recruited, forwardError(errors, Role::MASTER, recruited.id(), masterProcess)));
+				req.reply.send(recruited);
 			}
 			when(InitializeDataDistributorRequest req = waitNext(interf.dataDistributor.getFuture())) {
 				LocalLineage _;

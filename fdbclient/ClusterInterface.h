@@ -304,6 +304,7 @@ struct ForceRecoveryRequest {
 	}
 };
 
+// Request to move a keyrange (shard) to a new team represented as addresses.
 struct MoveShardRequest {
 	constexpr static FileIdentifier file_identifier = 2799592;
 
@@ -313,8 +314,8 @@ struct MoveShardRequest {
 	UID id;
 
 	MoveShardRequest() {}
-	MoveShardRequest(KeyRange shard, const std::vector<NetworkAddress>& addresses, UID id = UID())
-	  : shard(shard), addresses(addresses), id(std::move(id)) {}
+	MoveShardRequest(KeyRange shard, std::vector<NetworkAddress> addresses, UID id)
+	  : shard{ std::move(shard) }, addresses{ std::move(addresses) }, id{ std::move(id) } {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -322,6 +323,9 @@ struct MoveShardRequest {
 	}
 };
 
+// Request to trigger a master recovery, and during the following recovery, the system metadata will be
+// reconstructed from TLogs, and written to a new SS team.
+// This is used when metadata on SSes are lost or corrupted.
 struct RepairSystemDataRequest {
 	constexpr static FileIdentifier file_identifier = 2799593;
 

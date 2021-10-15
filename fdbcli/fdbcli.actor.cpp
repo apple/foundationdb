@@ -90,7 +90,8 @@ enum {
 	OPT_BUILD_FLAGS,
 	OPT_TRACE_FORMAT,
 	OPT_KNOB,
-	OPT_DEBUG_TLS
+	OPT_DEBUG_TLS,
+	OPT_API_VERSION,
 };
 
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -112,6 +113,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
 	                                  { OPT_KNOB, "--knob_", SO_REQ_SEP },
 	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
+	                                  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	                                  TLS_OPTION_FLAGS
@@ -428,6 +430,8 @@ static void printProgramUsage(const char* name) {
 	       "                 and then exits.\n"
 	       "  --no-status    Disables the initial status check done when starting\n"
 	       "                 the CLI.\n"
+	       "  --api-version  APIVERSION\n"
+	       "                 Specifies the version of the API for the CLI to use.\n"
 #ifndef TLS_DISABLED
 	       TLS_HELP
 #endif
@@ -1171,6 +1175,7 @@ void configureGenerator(const char* text, const char* line, std::vector<std::str
 		                   "logs=",
 		                   "resolvers=",
 		                   "perpetual_storage_wiggle=",
+		                   "perpetual_storage_wiggle_locality=",
 		                   "storage_migration_type=",
 		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
@@ -1370,6 +1375,9 @@ struct CLIOptions {
 
 	std::vector<std::pair<std::string, std::string>> knobs;
 
+	// api version, using the latest version by default
+	int api_version = FDB_API_VERSION;
+
 	CLIOptions(int argc, char* argv[]) {
 		program_name = argv[0];
 		for (int a = 0; a < argc; a++) {
@@ -1432,6 +1440,22 @@ struct CLIOptions {
 		case OPT_CONNFILE:
 			clusterFile = args.OptionArg();
 			break;
+		case OPT_API_VERSION: {
+			char* endptr;
+			api_version = strtoul((char*)args.OptionArg(), &endptr, 10);
+			if (*endptr != '\0') {
+				fprintf(stderr, "ERROR: invalid client version %s\n", args.OptionArg());
+				return 1;
+			} else if (api_version < 700 || api_version > FDB_API_VERSION) {
+				// multi-version fdbcli only available after 7.0
+				fprintf(stderr,
+				        "ERROR: api version %s is not supported. (Min: 700, Max: %d)\n",
+				        args.OptionArg(),
+				        FDB_API_VERSION);
+				return 1;
+			}
+			break;
+		}
 		case OPT_TRACE:
 			trace = true;
 			break;
@@ -1558,7 +1582,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	TraceEvent::setNetworkThread();
 
 	try {
-		localDb = Database::createDatabase(ccf, -1, IsInternal::False);
+		localDb = Database::createDatabase(ccf, opt.api_version, IsInternal::False);
 		if (!opt.exec.present()) {
 			printf("Using cluster file `%s'.\n", ccf->getFilename().c_str());
 		}
@@ -2505,8 +2529,7 @@ int main(int argc, char** argv) {
 	}
 
 	try {
-		// Note: refactoring fdbcli, in progress
-		API->selectApiVersion(FDB_API_VERSION);
+		API->selectApiVersion(opt.api_version);
 		API->setupNetwork();
 		Future<int> cliFuture = runCli(opt);
 		Future<Void> timeoutFuture = opt.exit_timeout ? timeExit(opt.exit_timeout) : Never();

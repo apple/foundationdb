@@ -3101,7 +3101,8 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 
 			auto const& keys = self->server_status.getKeys();
 			for (auto const& key : keys) {
-				server_status.emplace(key, self->server_status.get(key));
+				// Add to or update the local server_status map
+				server_status[key] = self->server_status.get(key);
 			}
 
 			TraceEvent("DDPrintSnapshotTeasmInfo", self->distributorId)
@@ -3136,13 +3137,22 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 			server = server_info.begin();
 			for (i = 0; i < server_info.size(); i++) {
 				const UID& uid = server->first;
-				TraceEvent("ServerStatus", self->distributorId)
-				    .detail("ServerUID", uid)
-				    .detail("Healthy", !get(server_status, uid).isUnhealthy())
+
+				TraceEvent e("ServerStatus", self->distributorId);
+				e.detail("ServerUID", uid)
 				    .detail("MachineIsValid", server_info[uid]->machine.isValid())
 				    .detail("MachineTeamSize",
 				            server_info[uid]->machine.isValid() ? server_info[uid]->machine->machineTeams.size() : -1)
 				    .detail("Primary", self->primary);
+
+				// ServerStatus might not be known if server was very recently added and storageServerFailureTracker()
+				// has not yet updated self->server_status
+				// If the UID is not found, do not assume the server is healthy or unhealthy
+				auto it = server_status.find(uid);
+				if (it != server_status.end()) {
+					e.detail("Healthy", !it->second.isUnhealthy());
+				}
+
 				server++;
 				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 					wait(yield());
@@ -3179,7 +3189,11 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 
 				// Healthy machine has at least one healthy server
 				for (auto& server : _machine->serversOnMachine) {
-					if (!get(server_status, server->id).isUnhealthy()) {
+					// ServerStatus might not be known if server was very recently added and
+					// storageServerFailureTracker() has not yet updated self->server_status If the UID is not found, do
+					// not assume the server is healthy
+					auto it = server_status.find(server->id);
+					if (it != server_status.end() && !it->second.isUnhealthy()) {
 						isMachineHealthy = true;
 					}
 				}
@@ -4014,16 +4028,69 @@ ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getSe
 // to a sorted PID set maintained by the data distributor. If now no storage server exists, the new Process ID is 0.
 ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection) {
 	state ReadYourWritesTransaction tr(teamCollection->cx);
-	state Value writeValue;
+	state Value writeValue = ""_sr;
 	state const Key writeKey =
 	    wigglingStorageServerKey.withSuffix(teamCollection->primary ? "/primary"_sr : "/remote"_sr);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> value = wait(tr.get(writeKey));
+			Optional<Value> locality = wait(tr.get(perpetualStorageWiggleLocalityKey));
+
 			if (teamCollection->pid2server_info.empty()) {
-				writeValue = LiteralStringRef("");
+				writeValue = ""_sr;
+			} else if (locality.present() && locality.get().toString().compare("0")) {
+				// if perpetual_storage_wiggle_locality has value and not 0(disabled).
+				state std::string localityKeyValue = locality.get().toString();
+				ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValue));
+
+				// get key and value from perpetual_storage_wiggle_locality.
+				int split = localityKeyValue.find(':');
+				state std::string localityKey = localityKeyValue.substr(0, split);
+				state std::string localityValue = localityKeyValue.substr(split + 1);
+				state Value prevValue;
+				state int serverInfoSize = teamCollection->pid2server_info.size();
+
+				Optional<Value> value = wait(tr.get(writeKey));
+				if (value.present()) {
+					prevValue = value.get();
+				} else {
+					// if value not present, check for locality match of the first entry in pid2server_info.
+					auto& info_vec = teamCollection->pid2server_info.begin()->second;
+					if (info_vec.size() && info_vec[0]->lastKnownInterface.locality.get(localityKey) == localityValue) {
+						writeValue = teamCollection->pid2server_info.begin()->first; // first entry locality matched.
+					} else {
+						prevValue = teamCollection->pid2server_info.begin()->first;
+						serverInfoSize--;
+					}
+				}
+
+				// If first entry of pid2server_info, did not match the locality.
+				if (!(writeValue.compare(LiteralStringRef("")))) {
+					auto nextIt = teamCollection->pid2server_info.upper_bound(prevValue);
+					while (true) {
+						if (nextIt == teamCollection->pid2server_info.end()) {
+							nextIt = teamCollection->pid2server_info.begin();
+						}
+
+						if (nextIt->second.size() &&
+						    nextIt->second[0]->lastKnownInterface.locality.get(localityKey) == localityValue) {
+							writeValue = nextIt->first; // locality matched
+							break;
+						}
+						serverInfoSize--;
+						if (!serverInfoSize) {
+							// None of the entries in pid2server_info matched the given locality.
+							writeValue = LiteralStringRef("");
+							TraceEvent("PerpetualNextWigglingStoragePIDNotFound", teamCollection->distributorId)
+							    .detail("WriteValue", "No process matched the given perpetualStorageWiggleLocality")
+							    .detail("PerpetualStorageWiggleLocality", localityKeyValue);
+							break;
+						}
+						nextIt++;
+					}
+				}
 			} else {
+				Optional<Value> value = wait(tr.get(writeKey));
 				Value pid = teamCollection->pid2server_info.begin()->first;
 				if (value.present()) {
 					auto nextIt = teamCollection->pid2server_info.upper_bound(value.get());
@@ -4036,6 +4103,7 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 					writeValue = pid;
 				}
 			}
+
 			tr.set(writeKey, writeValue);
 			wait(tr.commit());
 			break;

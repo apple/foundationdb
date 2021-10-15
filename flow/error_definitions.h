@@ -79,6 +79,7 @@ ERROR( wrong_connection_file, 1054, "Connection file mismatch")
 ERROR( version_already_compacted, 1055, "The requested changes have been compacted away")
 ERROR( local_config_changed, 1056, "Local configuration file has changed. Restart and apply these changes" )
 ERROR( failed_to_reach_quorum, 1057, "Failed to reach quorum from configuration database nodes. Retry sending these requests" )
+ERROR( wrong_format_version, 1058, "Format version not recognize." )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )

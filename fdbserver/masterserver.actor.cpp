@@ -802,7 +802,8 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Maste
 	loop choose {
 		when(GetReadVersionRequest req =
 		         waitNext(parent->provisionalGrvProxies[0].getConsistentReadVersion.getFuture())) {
-			if (req.flags & GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY && parent->lastEpochEnd) {
+			if ((req.flags & GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY) &&
+			    (req.flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES) && parent->lastEpochEnd) {
 				GetReadVersionReply rep;
 				rep.version = parent->lastEpochEnd;
 				rep.locked = locked;
@@ -1838,7 +1839,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 
 static void backfillTxnStateStoreToSS(Reference<MasterData> self, CommitTransactionRef& tr, Arena& arena) {
 	std::cout << "Repair sytem data start." << std::endl;
-	TraceEvent("BackfillDerivedMetaDataBegin", self->dbgid);
+	TraceEvent("BackfillTxnStateStoreData", self->dbgid);
 	KeyRange txnKeys = allKeys;
 	// state std::map<Tag, UID> tag_uid;
 

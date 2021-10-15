@@ -630,6 +630,7 @@ const KeyRangeRef configKeys(LiteralStringRef("\xff/conf/"), LiteralStringRef("\
 const KeyRef configKeysPrefix = configKeys.begin;
 
 const KeyRef perpetualStorageWiggleKey(LiteralStringRef("\xff/conf/perpetual_storage_wiggle"));
+const KeyRef perpetualStorageWiggleLocalityKey(LiteralStringRef("\xff/conf/perpetual_storage_wiggle_locality"));
 const KeyRef wigglingStorageServerKey(LiteralStringRef("\xff/storageWigglePID"));
 
 const KeyRef triggerDDTeamInfoPrintKey(LiteralStringRef("\xff/triggerDDTeamInfoPrint"));
