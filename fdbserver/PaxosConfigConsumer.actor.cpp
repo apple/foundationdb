@@ -147,6 +147,7 @@ class GetCommittedVersionQuorum {
 public:
 	explicit GetCommittedVersionQuorum(std::vector<ConfigFollowerInterface> const& cfis) : cfis(cfis) {}
 	Future<CommittedVersions> getCommittedVersion() {
+		ASSERT(!isReady()); // ensures this function is not accidentally called before resetting state
 		for (const auto& cfi : cfis) {
 			actors.push_back(getCommittedVersionActor(this, cfi));
 		}
