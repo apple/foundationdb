@@ -3312,7 +3312,7 @@ void changeServerKeys(StorageServer* data,
 	auto vr = data->newestAvailableVersion.intersectingRanges(keys);
 	std::vector<std::pair<KeyRange, Version>> changeNewestAvailable;
 	std::vector<KeyRange> removeRanges;
-	std::vector<KeyRange> clearRanges;
+	std::vector<KeyRange> newEmptyRanges;
 	for (auto r = vr.begin(); r != vr.end(); ++r) {
 		KeyRangeRef range = keys & r->range();
 		bool dataAvailable = r->value() == latestVersion || r->value() >= version;
@@ -3328,15 +3328,7 @@ void changeServerKeys(StorageServer* data,
 			TraceEvent("ChangeServerKeysAddEmptyRange", data->thisServerID)
 			    .detail("Begin", range.begin)
 			    .detail("End", range.end);
-			// MutationRef clearRange(MutationRef::ClearRange, range.begin, range.end);
-			// Version clv = data->data().getLatestVersion();
-			// clearRange = data->addMutationToMutationLog(data->addVersionToMutationLog(clv), clearRange);
-
-			// Wait (if necessary) for the latest version at which any key in keys was previously available (+1) to be
-			// durable
-
-			clearRanges.push_back(range);
-			// changeNewestAvailable.emplace_back(range, invalidVersion);
+			newEmptyRanges.push_back(range);
 			data->addShard(ShardInfo::newReadWrite(range, data));
 		} else if (!nowAssigned) {
 			if (dataAvailable) {
@@ -3386,11 +3378,12 @@ void changeServerKeys(StorageServer* data,
 		setAvailableStatus(data, *r, false);
 	}
 
-	for (auto r = clearRanges.begin(); r != clearRanges.end(); ++r) {
-		MutationRef clearRange(MutationRef::ClearRange, r->begin, r->end);
-		data->addMutation(data->data().getLatestVersion(), clearRange, *r, data->updateEagerReads);
-		data->newestAvailableVersion.insert(*r, latestVersion);
-		setAvailableStatus(data, *r, true);
+	// Clear the moving-in empty range, and set it available at the latestVersion.
+	for (const auto& range : newEmptyRanges) {
+		MutationRef clearRange(MutationRef::ClearRange, range.begin, range.end);
+		data->addMutation(data->data().getLatestVersion(), clearRange, range, data->updateEagerReads);
+		data->newestAvailableVersion.insert(range, latestVersion);
+		setAvailableStatus(data, range, true);
 	}
 	validate(data);
 }
