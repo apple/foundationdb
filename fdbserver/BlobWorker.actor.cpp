@@ -36,9 +36,8 @@
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // has to be last include
-#include "flow/flow.h"
 
-#define BW_DEBUG true
+#define BW_DEBUG false
 #define BW_REQUEST_DEBUG false
 
 // TODO add comments + documentation
@@ -534,8 +533,6 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 				Value dfValue = blobGranuleFileValueFor(fname, 0, serialized.size());
 				tr->set(dfKey, dfValue);
 
-				// FIXME: if previous granule present and delta file version >= previous change feed version, update the
-				// state here
 				if (oldGranuleComplete.present()) {
 					wait(updateGranuleSplitState(&tr->getTransaction(),
 					                             oldGranuleComplete.get().first,
@@ -577,7 +574,6 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 			throw e;
 		}
 
-		// FIXME: only delete if key doesn't exist
 		if (BW_DEBUG) {
 			printf("deleting s3 delta file %s after error %s\n", fname.c_str(), e.name());
 		}
@@ -657,7 +653,6 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 
 	wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
 	// object uploaded successfully, save it to system key space
-	// TODO add conflict range for writes?
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
 	state int numIterations = 0;
@@ -696,7 +691,6 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 			throw e;
 		}
 
-		// FIXME: only delete if key doesn't exist
 		if (BW_DEBUG) {
 			printf("deleting s3 snapshot file %s after error %s\n", fname.c_str(), e.name());
 		}
@@ -851,8 +845,6 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 			DEBUG_KEY_RANGE("BlobWorkerBlobSnapshot", version, metadata->keyRange, bwData->id);
 			return f;
 		} catch (Error& e) {
-			// TODO better error handling eventually - should retry unless the error is because another worker took
-			// over the range
 			if (BW_DEBUG) {
 				printf("Compacting snapshot from blob for [%s - %s) got error %s\n",
 				       metadata->keyRange.begin.printable().c_str(),
@@ -1415,7 +1407,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					    .detail("Version", metadata->durableDeltaVersion.get());
 					// TODO: this could read from FDB instead if it knew there was a large range clear at the end or
 					// it knew the granule was small, or something
-					// BlobFileIndex newSnapshotFile = wait(compactFromBlob(bwData, metadata, metadata->files));
 
 					// Have to copy files object so that adding to it as we start writing new delta files in
 					// parallel doesn't conflict. We could also pass the snapshot version and ignore any snapshot
@@ -1670,19 +1661,7 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 			int skipped = historyEntryStack.size() - 1 - i;
 
 			while (i >= 0) {
-				/*printf("Applying old granule [%s - %s) @ [%lld - %lld]\n",
-				       historyEntryStack[i]->range.begin.printable().c_str(),
-				       historyEntryStack[i]->range.end.printable().c_str(),
-				       historyEntryStack[i]->startVersion,
-				       historyEntryStack[i]->endVersion);*/
-
 				auto prevRanges = bwData->granuleHistory.rangeContaining(historyEntryStack[i]->range.begin);
-
-				/*printf("  prev range: [%s - %s) @ [%lld - %lld]\n",
-				       prevRanges.begin().printable().c_str(),
-				       prevRanges.end().printable().c_str(),
-				       prevRanges.value().isValid() ? prevRanges.value()->startVersion : invalidVersion,
-				       prevRanges.value().isValid() ? prevRanges.value()->endVersion : invalidVersion);*/
 
 				// sanity check
 				ASSERT(!prevRanges.value().isValid() ||
@@ -1872,7 +1851,6 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 					throw transaction_too_old();
 				}
 
-				// TODO: change back to just debug
 				if (BW_REQUEST_DEBUG) {
 					printf("[%s - %s) @ %lld time traveled back to %s [%s - %s) @ [%lld - %lld)\n",
 					       req.keyRange.begin.printable().c_str(),
@@ -2108,19 +2086,6 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			// If anything in previousGranules, need to do the handoff logic and set ret.previousChangeFeedId, and
 			// the previous durable version will come from the previous granules
 			if (info.history.present() && info.history.get().value.parentGranules.size() > 0) {
-				// TODO REMOVE
-				if (BW_DEBUG) {
-					printf("Decoded parent granules for [%s - %s)\n",
-					       req.keyRange.begin.printable().c_str(),
-					       req.keyRange.end.printable().c_str());
-					for (auto& pg : info.history.get().value.parentGranules) {
-						printf("  [%s - %s) @ %lld\n",
-						       pg.first.begin.printable().c_str(),
-						       pg.first.end.printable().c_str(),
-						       pg.second);
-					}
-				}
-
 				// TODO change this for merge
 				ASSERT(info.history.get().value.parentGranules.size() == 1);
 				state KeyRange parentGranuleRange = info.history.get().value.parentGranules[0].first;
@@ -2165,7 +2130,6 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 					ASSERT(info.parentGranule.present());
 					// only need to do snapshot if no files exist yet for this granule.
 					ASSERT(info.previousDurableVersion == invalidVersion);
-					// FIXME: store this somewhere useful for time travel reads
 					GranuleFiles prevFiles = wait(loadPreviousFiles(&tr, info.parentGranule.get().second));
 					ASSERT(!prevFiles.snapshotFiles.empty() || !prevFiles.deltaFiles.empty());
 
@@ -2477,7 +2441,6 @@ ACTOR Future<Void> handleRangeRevoke(Reference<BlobWorkerData> bwData, RevokeBlo
 	}
 }
 
-// FIXME: handle errors
 // Because change feeds send uncommitted data and explicit rollback messages, we speculatively buffer/write
 // uncommitted data. This means we must ensure the data is actually committed before "committing" those writes in
 // the blob granule. The simplest way to do this is to have the blob worker do a periodic GRV, which is guaranteed
@@ -2569,9 +2532,6 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	try {
 		loop choose {
 			when(BlobGranuleFileRequest req = waitNext(bwInterf.blobGranuleFileRequest.getFuture())) {
-				/*printf("Got blob granule request [%s - %s)\n",
-				       req.keyRange.begin.printable().c_str(),
-				       req.keyRange.end.printable().c_str());*/
 				++self->stats.readRequests;
 				++self->stats.activeReadRequests;
 				self->addActor.send(handleBlobGranuleFileRequest(self, req));
