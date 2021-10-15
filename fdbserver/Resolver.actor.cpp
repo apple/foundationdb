@@ -78,6 +78,9 @@ struct Resolver : ReferenceCounted<Resolver> {
 
 	Version debugMinRecentStateVersion = 0;
 
+	// The previous commit versions per tlog
+	std::vector<Version> tpcvVector;
+
 	CounterCollection cc;
 	Counter resolveBatchIn;
 	Counter resolveBatchStart;
@@ -94,6 +97,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 	Counter resolveBatchOut;
 	Counter metricsRequests;
 	Counter splitRequests;
+	int numLogs;
 
 	Future<Void> logger;
 
@@ -192,6 +196,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.AfterOrderer");
 
 		ResolveTransactionBatchReply& reply = proxyInfo.outstandingBatches[req.version];
+		reply.writtenTags = req.writtenTags;
 
 		std::vector<int> commitList;
 		std::vector<int> tooOldList;
@@ -281,6 +286,10 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 				reply.privateMutations.push_back(reply.arena, mutations);
 				reply.arena.dependsOn(mutations.arena());
 			}
+			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+				// merge mutation tags with sent client tags
+				toCommit.saveTags(reply.writtenTags);
+			}
 			reply.privateMutationCount = toCommit.getMutationCount();
 		}
 
@@ -340,6 +349,23 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			}
 		}
 
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			std::set<uint16_t> writtenTLogs;
+			if (reply.privateMutationCount) {
+				for (int i = 0; i < self->numLogs; i++) {
+					writtenTLogs.insert(i);
+				}
+			} else {
+				toCommit.getLocations(reply.writtenTags, writtenTLogs);
+			}
+			if (self->tpcvVector[0] == invalidVersion) {
+				std::fill(self->tpcvVector.begin(), self->tpcvVector.end(), req.prevVersion);
+			}
+			for (uint16_t tLog : writtenTLogs) {
+				reply.tpcvMap[tLog] = self->tpcvVector[tLog];
+				self->tpcvVector[tLog] = req.version;
+			}
+		}
 		self->version.set(req.version);
 		bool breachedLimit = self->totalStateBytes.get() <= SERVER_KNOBS->RESOLVER_STATE_MEMORY_LIMIT &&
 		                     self->totalStateBytes.get() + stateBytes > SERVER_KNOBS->RESOLVER_STATE_MEMORY_LIMIT;
@@ -568,6 +594,12 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 
 		// This has to be declared after the self->txnStateStore get initialized
 		transactionStateResolveContext = TransactionStateResolveContext(self, &addActor);
+
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			self->numLogs = db->get().logSystemConfig.numLogs();
+			self->tpcvVector.resize(1 + self->numLogs, 0);
+			std::fill(self->tpcvVector.begin(), self->tpcvVector.end(), invalidVersion);
+		}
 	}
 
 	loop choose {

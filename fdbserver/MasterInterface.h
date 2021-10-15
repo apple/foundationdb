@@ -156,7 +156,6 @@ struct GetCommitVersionReply {
 	Version version;
 	Version prevVersion;
 	uint64_t requestNum;
-	std::unordered_map<uint16_t, Version> tpcvMap;
 
 	GetCommitVersionReply() : resolverChangesVersion(0), version(0), prevVersion(0), requestNum(0) {}
 	explicit GetCommitVersionReply(Version version, Version prevVersion, uint64_t requestNum)
@@ -164,7 +163,7 @@ struct GetCommitVersionReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, resolverChanges, resolverChangesVersion, version, prevVersion, requestNum, tpcvMap);
+		serializer(ar, resolverChanges, resolverChangesVersion, version, prevVersion, requestNum);
 	}
 };
 
@@ -194,11 +193,10 @@ struct GetCommitVersionRequest {
 
 struct GetTLogPrevCommitVersionReply {
 	constexpr static FileIdentifier file_identifier = 16683183;
-	std::unordered_map<uint16_t, Version> tpcvMap;
 	GetTLogPrevCommitVersionReply() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tpcvMap);
+		serializer(ar);
 	}
 };
 

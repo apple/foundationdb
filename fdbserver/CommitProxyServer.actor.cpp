@@ -536,7 +536,7 @@ struct CommitBatchContext {
 
 	double commitStartTime;
 
-	std::unordered_map<uint16_t, Version> tpcvMap; // obtained from sequencer
+	std::unordered_map<uint16_t, Version> tpcvMap; // obtained from resolver
 	std::set<uint16_t> writtenTLogs; // the set of tlog locations written to in the mutation.
 	std::set<Tag> writtenTags; // final set tags written to in the batch
 	std::set<Tag> writtenTagsPreResolution; // tags written to in the batch not including any changes from the resolver.
@@ -733,12 +733,6 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		self->writtenTagsPreResolution = self->getWrittenTagsPreResolution();
-		if (self->hasMetadataMutation) {
-			int numLogs = pProxyCommitData->db->get().logSystemConfig.numLogs();
-			for (int i = 0; i < numLogs; i++) {
-				self->writtenTLogs.insert(i);
-			}
-		}
 	}
 	GetCommitVersionRequest req(span.context,
 	                            pProxyCommitData->commitVersionRequestNumber++,
@@ -748,10 +742,6 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	state double beforeGettingCommitVersion = now();
 	GetCommitVersionReply versionReply = wait(brokenPromiseToNever(
 	    pProxyCommitData->master.getCommitVersion.getReply(req, TaskPriority::ProxyMasterVersionReply)));
-
-	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-		self->tpcvMap = versionReply.tpcvMap;
-	}
 
 	pProxyCommitData->mostRecentProcessedRequestNumber = versionReply.requestNum;
 
@@ -807,6 +797,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	std::vector<Future<ResolveTransactionBatchReply>> replies;
 	for (int r = 0; r < pProxyCommitData->resolvers.size(); r++) {
 		requests.requests[r].debugID = self->debugID;
+		requests.requests[r].writtenTags = self->writtenTagsPreResolution;
 		replies.push_back(trackResolutionMetrics(pProxyCommitData->stats.resolverDist[r],
 		                                         brokenPromiseToNever(pProxyCommitData->resolvers[r].resolve.getReply(
 		                                             requests.requests[r], TaskPriority::ProxyResolverReply))));
@@ -994,6 +985,10 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		// in the same set of transactions as this proxy.
 		ResolveTransactionBatchReply& reply = self->resolution[0];
 		self->toCommit.setMutations(reply.privateMutationCount, reply.privateMutations);
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			// TraceEvent("ResolverReturn").detail("ReturnTags",reply.writtenTags).detail("TPCVsize",reply.tpcvMap.size()).detail("ReqTags",self->writtenTagsPreResolution);
+			self->tpcvMap = reply.tpcvMap;
+		}
 	}
 
 	self->lockedKey = pProxyCommitData->txnStateStore->readValue(databaseLockedKey).get();
@@ -1015,16 +1010,6 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		ASSERT(false); // ChangeCoordinatorsRequest should always throw
 	}
 
-	return Void();
-}
-
-ACTOR Future<Void> getTPCV(CommitBatchContext* self, std::set<uint16_t> writtenTLogs) {
-	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
-	GetTLogPrevCommitVersionReply rep =
-	    wait(brokenPromiseToNever(pProxyCommitData->master.getTLogPrevCommitVersion.getReply(
-	        GetTLogPrevCommitVersionRequest(writtenTLogs, self->commitVersion, self->prevVersion))));
-	// TraceEvent("GetTLogPrevCommitVersionRequest");
-	self->tpcvMap.insert(rep.tpcvMap.begin(), rep.tpcvMap.end());
 	return Void();
 }
 
@@ -1242,14 +1227,6 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		wait(Future<Void>(Never()));
 	}
 
-	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && self->metadataMutationFromProxy &&
-	    !self->hasMetadataMutation) {
-		// TraceEvent("Abort metadataMutationFromProxy");
-		for (int transactionNum = 0; transactionNum < trs.size(); transactionNum++) {
-			self->committed[transactionNum] = ConflictBatch::TransactionConflict;
-		}
-	}
-
 	// First pass
 	wait(applyMetadataToCommittedTransactions(self));
 
@@ -1257,25 +1234,6 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	wait(assignMutationsToStorageServers(self));
 
 	self->toCommit.saveTags(self->writtenTags);
-
-	if (self->writtenTags.size() && !self->metadataMutationFromProxy &&
-	    SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-		// confirm all serialized tags are sent to a tLog for which the previous commit version was obtained.
-		std::set<uint16_t> postResolutionTLogs;
-		self->toCommit.getLocations(self->writtenTags, postResolutionTLogs);
-		for (auto& t : postResolutionTLogs) {
-			if (self->writtenTLogs.find(t) == self->writtenTLogs.end()) {
-				TraceEvent(SevError, "TagHasNoPCV", pProxyCommitData->dbgid)
-				    .detail("tagsBeforeResolution", self->writtenTagsPreResolution)
-				    .detail("tagsAfterResolution", self->writtenTags)
-				    .detail("numTLogsBeforeResolution", self->writtenTLogs.size())
-				    .detail("numTLogsAfterResolution", postResolutionTLogs.size())
-				    .detail("hasMetadataMutation", self->hasMetadataMutation)
-				    .detail("metadataMutationFromProxy", self->metadataMutationFromProxy);
-				ASSERT(false);
-			}
-		}
-	}
 
 	// Serialize and backup the mutations as a single mutation
 	if ((pProxyCommitData->vecBackupKeys.size() > 1) && self->logRangeMutations.size()) {
