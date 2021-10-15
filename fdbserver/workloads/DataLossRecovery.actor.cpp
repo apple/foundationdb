@@ -32,8 +32,11 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
-std::string printValue(const Optional<Value>& value) {
-	return value.present() ? value.get().toString() : "Value Not Found.";
+std::string printValue(const ErrorOr<Optional<Value>>& value) {
+	if (value.isError()) {
+		return value.getError().name();
+	}
+	return value.get().present() ? value.get().get().toString() : "Value Not Found.";
 }
 } // namespace
 
@@ -48,7 +51,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	  : TestWorkload(wcx), startMoveKeysParallelismLock(1), finishMoveKeysParallelismLock(1), enabled(!clientId),
 	    pass(true) {}
 
-	void validationFailed(Optional<Value>& expectedValue, Optional<Value>& actualValue) {
+	void validationFailed(ErrorOr<Optional<Value>>& expectedValue, ErrorOr<Optional<Value>>& actualValue) {
 		TraceEvent(SevError, "TestFailed")
 		    .detail("ExpectedValue", printValue(expectedValue))
 		    .detail("ActualValue", printValue(actualValue));
@@ -80,7 +83,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		// Kill team {address}, and expect read to timeout.
 		self->killProcess(self, address);
-		wait(self->readAndVerify(self, cx, key, "Timeout"_sr));
+		wait(self->readAndVerify(self, cx, key, timed_out()));
 
 		// Reenable DD and exclude address as fail, so that [key, endKey) will be dropped and moved to a new team.
 		// Expect read to return 'value not found'.
@@ -97,13 +100,16 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	ACTOR Future<Void> readAndVerify(DataLossRecoveryWorkload* self,
 	                                 Database cx,
 	                                 Key key,
-	                                 Optional<Value> expectedValue) {
+	                                 ErrorOr<Optional<Value>> expectedValue) {
 		state Transaction tr(cx);
 
 		loop {
 			try {
-				state Optional<Value> res = wait(timeout(tr.get(key), 30.0, Optional<Value>("Timeout"_sr)));
-				if (res != expectedValue) {
+				state ErrorOr<Optional<Value>> res = wait(errorOr(timeoutError(tr.get(key), 30.0)));
+				const bool equal = (res.isError() && expectedValue.isError() &&
+				                    res.getError().code() == expectedValue.getError().code()) ||
+				                   (!res.isError() && !expectedValue.isError() && res.get() == expectedValue.get());
+				if (!equal) {
 					self->validationFailed(expectedValue, res);
 				}
 				break;
