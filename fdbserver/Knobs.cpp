@@ -343,6 +343,11 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( ROCKSDB_READ_VALUE_TIMEOUT,                            5.0 );
 	init( ROCKSDB_READ_VALUE_PREFIX_TIMEOUT,                     5.0 );
 	init( ROCKSDB_READ_RANGE_TIMEOUT,                            5.0 );
+	init( ROCKSDB_READ_QUEUE_WAIT,                                1. );
+	init( ROCKSDB_READ_QUEUE_HARD_MAX,                           128 );
+	init( ROCKSDB_READ_QUEUE_SOFT_MAX,                            64 );
+	init( ROCKSDB_FETCH_QUEUE_HARD_MAX,                           16 );
+	init( ROCKSDB_FETCH_QUEUE_SOFT_MAX,                            8 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
