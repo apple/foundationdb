@@ -293,7 +293,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    masterRecoveryGenerationsEventHolder(makeReference<EventCacheHolder>("MasterRecoveryGenerations")),
 	    masterRecoveryDurationEventHolder(makeReference<EventCacheHolder>("MasterRecoveryDuration")),
 	    masterRecoveryAvailableEventHolder(makeReference<EventCacheHolder>("MasterRecoveryAvailable")),
-	    recoveredConfigEventHolder(makeReference<EventCacheHolder>("RecoveredConfig")) {
+	    recoveredConfigEventHolder(makeReference<EventCacheHolder>("RecoveredConfig")),
 	    versionVectorSizeOnCVReply("VersionVectorSizeOnCVReply",
 	                               dbgid,
 	                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -1311,7 +1311,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				reply.metadataVersion = self->proxyMetadataVersion;
 				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
 				self->ssVersionVector.getDelta(req.maxVersion, reply.ssVersionVectorDelta);
-				self->versionVectorSizeOnCVReply.addMeasurement(self->ssVersionVector.size());
+				self->versionVectorSizeOnCVReply.addMeasurement(reply.ssVersionVectorDelta.size());
 				req.reply.send(reply);
 			}
 			when(ReportRawCommittedVersionRequest req =
