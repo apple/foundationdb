@@ -239,6 +239,7 @@ struct GrvProxyData {
 	Optional<LatencyBandConfig> latencyBandConfig;
 	double lastStartCommit;
 	double lastCommitLatency;
+	LatencySample versionVectorSizeOnGRVReply;
 	int updateCommitRequests;
 	NotifiedDouble lastCommitTime;
 
@@ -269,8 +270,12 @@ struct GrvProxyData {
 	             Reference<AsyncVar<ServerDBInfo> const> db)
 	  : dbgid(dbgid), stats(dbgid), master(master), getConsistentReadVersion(getConsistentReadVersion),
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db), lastStartCommit(0),
-	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), updateCommitRequests(0), lastCommitTime(0),
-	    minKnownCommittedVersion(invalidVersion) {}
+	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION),
+	    versionVectorSizeOnGRVReply("VersionVectorSizeOnGRVReply",
+	                                dbgid,
+	                                SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                                SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    updateCommitRequests(0), lastCommitTime(0), minKnownCommittedVersion(invalidVersion) {}
 };
 
 ACTOR Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
@@ -567,8 +572,8 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	GetRawCommittedVersionReply repFromMaster = wait(replyFromMasterFuture);
 	grvProxyData->minKnownCommittedVersion =
 	    std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
+	// TODO add to "status json"
 	grvProxyData->ssVersionVectorCache.applyDelta(repFromMaster.ssVersionVectorDelta);
-
 	grvProxyData->stats.grvGetCommittedVersionRpcDist->sampleSeconds(now() - grvConfirmEpochLive);
 	GetReadVersionReply rep;
 	rep.version = repFromMaster.version;
@@ -633,6 +638,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		reply.midShardSize = midShardSize;
 		reply.tagThrottleInfo.clear();
 		grvProxyData->ssVersionVectorCache.getDelta(request.maxVersion, reply.ssVersionVectorDelta);
+		grvProxyData->versionVectorSizeOnGRVReply.addMeasurement(reply.ssVersionVectorDelta.size());
 
 		if (!request.tags.empty()) {
 			auto& priorityThrottledTags = throttledTags[request.priority];

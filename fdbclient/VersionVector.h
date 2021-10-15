@@ -40,6 +40,8 @@ struct VersionVector {
 
 	Version getMaxVersion() const { return maxVersion; }
 
+	int size() const { return versions.size(); }
+
 	void setVersion(const Tag& tag, Version version) {
 		ASSERT(tag != invalidTag);
 		ASSERT(version > maxVersion);

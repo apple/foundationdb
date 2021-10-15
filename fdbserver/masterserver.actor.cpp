@@ -258,6 +258,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Counter backupWorkerDoneRequests;
 	Counter getLiveCommittedVersionRequests;
 	Counter reportLiveCommittedVersionRequests;
+	LatencySample versionVectorSizeOnCVReply;
 
 	Future<Void> logger;
 
@@ -292,7 +293,11 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    masterRecoveryGenerationsEventHolder(makeReference<EventCacheHolder>("MasterRecoveryGenerations")),
 	    masterRecoveryDurationEventHolder(makeReference<EventCacheHolder>("MasterRecoveryDuration")),
 	    masterRecoveryAvailableEventHolder(makeReference<EventCacheHolder>("MasterRecoveryAvailable")),
-	    recoveredConfigEventHolder(makeReference<EventCacheHolder>("RecoveredConfig")) {
+	    recoveredConfigEventHolder(makeReference<EventCacheHolder>("RecoveredConfig")),
+	    versionVectorSizeOnCVReply("VersionVectorSizeOnCVReply",
+	                               dbgid,
+	                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                               SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {
 		logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
 		if (forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
@@ -1313,6 +1318,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				reply.metadataVersion = self->proxyMetadataVersion;
 				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
 				self->ssVersionVector.getDelta(req.maxVersion, reply.ssVersionVectorDelta);
+				self->versionVectorSizeOnCVReply.addMeasurement(reply.ssVersionVectorDelta.size());
 				req.reply.send(reply);
 			}
 			when(ReportRawCommittedVersionRequest req =
