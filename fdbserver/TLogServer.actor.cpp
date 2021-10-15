@@ -1072,6 +1072,15 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 	for (tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
 		for (tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
 			if (logData->tag_data[tagLocality][tagId]) {
+				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+					Tag tag(tagLocality, tagId);
+					auto iter = logData->waitingTags.find(tag);
+					if (iter != logData->waitingTags.end()) {
+						auto promise = iter->second;
+						logData->waitingTags.erase(iter);
+						promise.send(Void());
+					}
+				}
 				wait(logData->tag_data[tagLocality][tagId]->eraseMessagesBefore(
 				    newPersistentDataVersion + 1, self, logData, TaskPriority::UpdateStorage));
 				wait(yield(TaskPriority::UpdateStorage));
@@ -1466,7 +1475,6 @@ void commitMessages(TLogData* self,
 				} else {
 					txsBytes += tagData->versionMessages.back().second.expectedSize();
 				}
-
 				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
 					auto iter = logData->waitingTags.find(tag);
 					if (iter != logData->waitingTags.end()) {
