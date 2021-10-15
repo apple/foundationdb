@@ -147,6 +147,7 @@ class GetCommittedVersionQuorum {
 public:
 	explicit GetCommittedVersionQuorum(std::vector<ConfigFollowerInterface> const& cfis) : cfis(cfis) {}
 	Future<CommittedVersions> getCommittedVersion() {
+		ASSERT(!isReady()); // ensures this function is not accidentally called before resetting state
 		for (const auto& cfi : cfis) {
 			actors.push_back(getCommittedVersionActor(this, cfi));
 		}
@@ -218,6 +219,7 @@ class PaxosConfigConsumerImpl {
 
 	ACTOR static Future<Void> fetchChanges(PaxosConfigConsumerImpl* self, ConfigBroadcaster* broadcaster) {
 		wait(getSnapshotAndChanges(self, broadcaster));
+		self->reset();
 		loop {
 			try {
 				state Version committedVersion = wait(getCommittedVersion(self));
