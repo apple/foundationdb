@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/LogSystem.h"
+#include "flow/serialize.h"
 
 std::string LogSet::logRouterString() {
 	std::string result;
@@ -308,6 +309,15 @@ void LogPushData::writeMessage(StringRef rawMessageWithoutLength, bool usePrevio
 	}
 }
 
+std::vector<Standalone<StringRef>> LogPushData::getAllMessages() {
+	std::vector<Standalone<StringRef>> results;
+	results.reserve(messagesWriter.size());
+	for (int loc = 0; loc < messagesWriter.size(); loc++) {
+		results.push_back(getMessages(loc));
+	}
+	return results;
+}
+
 void LogPushData::recordEmptyMessage(int loc, const Standalone<StringRef>& value) {
 	if (!isEmptyMessage[loc]) {
 		BinaryWriter w(AssumeVersion(g_network->protocolVersion()));
@@ -344,4 +354,18 @@ bool LogPushData::writeTransactionInfo(int location, uint32_t subseq) {
 	int length = wr.getLength() - offset;
 	*(uint32_t*)((uint8_t*)wr.getData() + offset) = length - sizeof(uint32_t);
 	return true;
+}
+
+void LogPushData::setMutations(uint32_t totalMutations, VectorRef<StringRef> mutations) {
+	ASSERT_EQ(subsequence, 1);
+	subsequence = totalMutations + 1; // set to next mutation number
+
+	ASSERT_EQ(messagesWriter.size(), mutations.size());
+	BinaryWriter w(AssumeVersion(g_network->protocolVersion()));
+	Standalone<StringRef> v = w.toValue();
+	const int header = v.size();
+	for (int i = 0; i < mutations.size(); i++) {
+		BinaryWriter& wr = messagesWriter[i];
+		wr.serializeBytes(mutations[i].substr(header));
+	}
 }

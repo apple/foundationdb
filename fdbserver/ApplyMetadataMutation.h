@@ -22,14 +22,51 @@
 #define FDBSERVER_APPLYMETADATAMUTATION_H
 #pragma once
 
+#include <cstddef>
+
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/ProxyCommitData.actor.h"
+#include "flow/FastRef.h"
+
+// Resolver's data for applyMetadataMutations() calls.
+struct ResolverData {
+	const UID dbgid;
+	IKeyValueStore* txnStateStore = nullptr;
+	KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr;
+	Arena arena;
+	// Whether configuration changes. If so, a recovery is forced.
+	bool& confChanges;
+	bool initialCommit = false;
+	Reference<ILogSystem> logSystem = Reference<ILogSystem>();
+	LogPushData* toCommit = nullptr;
+	Version popVersion = 0; // exclusive, usually set to commitVersion + 1
+	std::map<UID, Reference<StorageInfo>>* storageCache = nullptr;
+	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
+
+	// For initial broadcast
+	ResolverData(UID debugId, IKeyValueStore* store, KeyRangeMap<ServerCacheInfo>* info, bool& forceRecovery)
+	  : dbgid(debugId), txnStateStore(store), keyInfo(info), confChanges(forceRecovery), initialCommit(true) {}
+
+	// For transaction batches that contain metadata mutations
+	ResolverData(UID debugId,
+	             Reference<ILogSystem> logSystem,
+	             IKeyValueStore* store,
+	             KeyRangeMap<ServerCacheInfo>* info,
+	             LogPushData* toCommit,
+	             bool& forceRecovery,
+	             Version popVersion,
+	             std::map<UID, Reference<StorageInfo>>* storageCache,
+	             std::unordered_map<UID, StorageServerInterface>* tssMapping)
+	  : dbgid(debugId), txnStateStore(store), keyInfo(info), confChanges(forceRecovery), logSystem(logSystem),
+	    toCommit(toCommit), popVersion(popVersion), storageCache(storageCache), tssMapping(tssMapping) {}
+};
 
 inline bool isMetadataMutation(MutationRef const& m) {
 	// FIXME: This is conservative - not everything in system keyspace is necessarily processed by
@@ -99,5 +136,10 @@ inline bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 	}
 	return false;
 }
+
+// Resolver's version
+void applyMetadataMutations(SpanID const& spanContext,
+                            ResolverData& resolverData,
+                            const VectorRef<MutationRef>& mutations);
 
 #endif
