@@ -51,7 +51,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	  : TestWorkload(wcx), startMoveKeysParallelismLock(1), finishMoveKeysParallelismLock(1), enabled(!clientId),
 	    pass(true) {}
 
-	void validationFailed(ErrorOr<Optional<Value>>& expectedValue, ErrorOr<Optional<Value>>& actualValue) {
+	void validationFailed(ErrorOr<Optional<Value>> expectedValue, ErrorOr<Optional<Value>> actualValue) {
 		TraceEvent(SevError, "TestFailed")
 		    .detail("ExpectedValue", printValue(expectedValue))
 		    .detail("ActualValue", printValue(actualValue));
@@ -105,15 +105,16 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		loop {
 			try {
-				state ErrorOr<Optional<Value>> res = wait(errorOr(timeoutError(tr.get(key), 30.0)));
-				const bool equal = (res.isError() && expectedValue.isError() &&
-				                    res.getError().code() == expectedValue.getError().code()) ||
-				                   (!res.isError() && !expectedValue.isError() && res.get() == expectedValue.get());
+				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
+				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
-					self->validationFailed(expectedValue, res);
+					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
 				}
 				break;
 			} catch (Error& e) {
+				if (expectedValue.isError() && expectedValue.getError().code() == e.code()) {
+					break;
+				}
 				wait(tr.onError(e));
 			}
 		}
@@ -130,7 +131,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				} else {
 					tr.clear(key);
 				}
-				wait(timeout(tr.commit(), 10.0, Void()));
+				wait(timeoutError(tr.commit(), 30.0));
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
