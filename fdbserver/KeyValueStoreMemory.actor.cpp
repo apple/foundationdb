@@ -195,7 +195,7 @@ public:
 		return c;
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID, IKeyValueStore::ReadType) override {
+	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
@@ -209,8 +209,8 @@ public:
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
-	                                        Optional<UID> debugID,
-	                                        IKeyValueStore::ReadType) override {
+	                                        IKeyValueStore::ReadType,
+	                                        Optional<UID> debugID) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())

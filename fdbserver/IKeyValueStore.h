@@ -56,14 +56,14 @@ public:
 	};
 
 	virtual Future<Optional<Value>> readValue(KeyRef key,
-	                                          Optional<UID> debugID = Optional<UID>(),
-	                                          ReadType type = ReadType::NORMAL) = 0;
+	                                          ReadType type = ReadType::NORMAL,
+	                                          Optional<UID> debugID = Optional<UID>()) = 0;
 
 	// Like readValue(), but returns only the first maxLength bytes of the value if it is longer
 	virtual Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                                int maxLength,
-	                                                Optional<UID> debugID = Optional<UID>(),
-	                                                ReadType type = ReadType::NORMAL) = 0;
+	                                                ReadType type = ReadType::NORMAL,
+	                                                Optional<UID> debugID = Optional<UID>()) = 0;
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit

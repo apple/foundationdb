@@ -185,15 +185,15 @@ struct StorageServerDisk {
 		return readFirstKey(storage, KeyRangeRef(key, allKeys.end), type);
 	}
 	Future<Optional<Value>> readValue(KeyRef key,
-	                                  Optional<UID> debugID = Optional<UID>(),
-	                                  IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL) {
-		return storage->readValue(key, debugID, type);
+	                                  IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL,
+	                                  Optional<UID> debugID = Optional<UID>()) {
+		return storage->readValue(key, type, debugID);
 	}
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
-	                                        Optional<UID> debugID = Optional<UID>(),
-	                                        IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL) {
-		return storage->readValuePrefix(key, maxLength, debugID, type);
+	                                        IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL,
+	                                        Optional<UID> debugID = Optional<UID>()) {
+		return storage->readValuePrefix(key, maxLength, type, debugID);
 	}
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit = 1 << 30,
@@ -1256,7 +1256,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			path = 1;
 		} else if (!i || !i->isClearTo() || i->getEndKey() <= req.key) {
 			path = 2;
-			Optional<Value> vv = wait(data->storage.readValue(req.key, req.debugID, IKeyValueStore::ReadType::NORMAL));
+			Optional<Value> vv = wait(data->storage.readValue(req.key, IKeyValueStore::ReadType::NORMAL, req.debugID));
 			// Validate that while we were reading the data we didn't lose the version or shard
 			if (version < data->storageVersion()) {
 				TEST(true); // transaction_too_old after readValue
@@ -2387,8 +2387,8 @@ ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager)
 
 	vector<Future<Optional<Value>>> value(eager->keys.size());
 	for (int i = 0; i < value.size(); i++)
-		value[i] = data->storage.readValuePrefix(
-		    eager->keys[i].first, eager->keys[i].second, Optional<UID>(), IKeyValueStore::ReadType::EAGER);
+		value[i] =
+		    data->storage.readValuePrefix(eager->keys[i].first, eager->keys[i].second, IKeyValueStore::ReadType::EAGER);
 
 	state Future<vector<Optional<Value>>> futureValues = getAll(value);
 	state vector<Key> keyEndVal = wait(futureKeyEnds);
