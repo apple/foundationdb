@@ -1,8 +1,10 @@
 FROM amazonlinux:2.0.20210326.0 as base
 
 RUN yum install -y \
+  binutils \
   bind-utils \
   curl \
+  gdb \
   jq \
   less \
   lsof \
@@ -10,6 +12,7 @@ RUN yum install -y \
   net-tools \
   perf \
   perl \
+  procps \
   python38 \
   python3-pip \
   strace \
@@ -17,9 +20,13 @@ RUN yum install -y \
   traceroute \
   telnet \
   tcpdump \
+  unzip \
   vim
 
 #todo: nload, iperf, numademo
+
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.0.30.zip" -o "awscliv2.zip" \
+    &&  unzip awscliv2.zip && ./aws/install && rm -rf aws
 
 COPY misc/tini-amd64.sha256sum /tmp/
 COPY misc/flamegraph.sha256sum /tmp/
