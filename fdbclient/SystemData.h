@@ -562,7 +562,6 @@ UID decodeBlobGranuleMappingValue(ValueRef const& value);
 const Key blobGranuleLockKeyFor(KeyRangeRef const& granuleRange);
 
 const Value blobGranuleLockValueFor(int64_t epochNum, int64_t sequenceNum, UID changeFeedId);
-// FIXME: maybe just define a struct?
 std::tuple<int64_t, int64_t, UID> decodeBlobGranuleLockValue(ValueRef const& value);
 
 const Key blobGranuleSplitKeyFor(UID const& parentGranuleID, UID const& granuleID);
