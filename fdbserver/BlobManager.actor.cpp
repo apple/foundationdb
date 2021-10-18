@@ -227,38 +227,44 @@ struct BlobManagerData {
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesTransaction> tr, KeyRange range) {
 	// TODO is it better to just pass empty metrics to estimated?
-	// TODO handle errors here by pulling out into its own transaction instead of the main loop's transaction, and
-	// retrying
-	if (BM_DEBUG) {
-		printf("Splitting new range [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
-	}
-	StorageMetrics estimated = wait(tr->getTransaction().getStorageMetrics(range, CLIENT_KNOBS->TOO_MANY));
+	// redo split if previous txn failed to calculate it
+	loop {
+		try {
+			if (BM_DEBUG) {
+				printf(
+				    "Splitting new range [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
+			}
+			StorageMetrics estimated = wait(tr->getTransaction().getStorageMetrics(range, CLIENT_KNOBS->TOO_MANY));
 
-	if (BM_DEBUG) {
-		printf("Estimated bytes for [%s - %s): %lld\n",
-		       range.begin.printable().c_str(),
-		       range.end.printable().c_str(),
-		       estimated.bytes);
-	}
+			if (BM_DEBUG) {
+				printf("Estimated bytes for [%s - %s): %lld\n",
+				       range.begin.printable().c_str(),
+				       range.end.printable().c_str(),
+				       estimated.bytes);
+			}
 
-	if (estimated.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
-		// printf("  Splitting range\n");
-		// only split on bytes
-		StorageMetrics splitMetrics;
-		splitMetrics.bytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
-		splitMetrics.bytesPerKSecond = splitMetrics.infinity;
-		splitMetrics.iosPerKSecond = splitMetrics.infinity;
-		splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidth
+			if (estimated.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
+				// printf("  Splitting range\n");
+				// only split on bytes
+				StorageMetrics splitMetrics;
+				splitMetrics.bytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
+				splitMetrics.bytesPerKSecond = splitMetrics.infinity;
+				splitMetrics.iosPerKSecond = splitMetrics.infinity;
+				splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidth
 
-		Standalone<VectorRef<KeyRef>> keys =
-		    wait(tr->getTransaction().splitStorageMetrics(range, splitMetrics, estimated));
-		return keys;
-	} else {
-		// printf("  Not splitting range\n");
-		Standalone<VectorRef<KeyRef>> keys;
-		keys.push_back_deep(keys.arena(), range.begin);
-		keys.push_back_deep(keys.arena(), range.end);
-		return keys;
+				Standalone<VectorRef<KeyRef>> keys =
+				    wait(tr->getTransaction().splitStorageMetrics(range, splitMetrics, estimated));
+				return keys;
+			} else {
+				// printf("  Not splitting range\n");
+				Standalone<VectorRef<KeyRef>> keys;
+				keys.push_back_deep(keys.arena(), range.begin);
+				keys.push_back_deep(keys.arena(), range.end);
+				return keys;
+			}
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
 	}
 }
 
@@ -581,17 +587,9 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
 	state int64_t newLockSeqno = -1;
 
 	// first get ranges to split
-	loop {
-		try {
-			// redo split if previous txn try failed to calculate it
-			if (newRanges.empty()) {
-				Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(tr, granuleRange));
-				newRanges = _newRanges;
-			}
-			break;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
+	if (newRanges.empty()) {
+		Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(tr, granuleRange));
+		newRanges = _newRanges;
 	}
 
 	if (newRanges.size() == 2) {
