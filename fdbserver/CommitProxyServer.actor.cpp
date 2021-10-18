@@ -1481,7 +1481,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 
 	if (self->commitVersion >= pProxyCommitData->committedVersion.get()) {
 		state Optional<std::set<Tag>> writtenTags;
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
 			writtenTags = self->writtenTags;
 		}
 		wait(pProxyCommitData->master.reportLiveCommittedVersion.getReply(
