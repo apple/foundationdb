@@ -3338,9 +3338,9 @@ public:
 
 	void close() override { shutdown(this, false); }
 
-	Future<Void> getError() override { return errorPromise.getFuture(); }
+	Future<Void> getError() const override { return errorPromise.getFuture(); }
 
-	Future<Void> onClosed() override { return closedPromise.getFuture(); }
+	Future<Void> onClosed() const override { return closedPromise.getFuture(); }
 
 	StorageBytes getStorageBytes() const override {
 		ASSERT(recoverFuture.isReady());
@@ -4413,9 +4413,9 @@ public:
 
 	// All async opts on the btree are based on pager reads, writes, and commits, so
 	// we can mostly forward these next few functions to the pager
-	Future<Void> getError() { return m_pager->getError(); }
+	Future<Void> getError() const { return m_pager->getError(); }
 
-	Future<Void> onClosed() { return m_pager->onClosed(); }
+	Future<Void> onClosed() const { return m_pager->onClosed(); }
 
 	void close_impl(bool dispose) {
 		auto* pager = m_pager;
@@ -6988,7 +6988,7 @@ public:
 
 	void dispose() override { shutdown(this, true); }
 
-	Future<Void> onClosed() override { return m_closed.getFuture(); }
+	Future<Void> onClosed() const override { return m_closed.getFuture(); }
 
 	Future<Void> commit(bool sequential = false) override {
 		Future<Void> c = m_tree->commit();
@@ -7001,7 +7001,7 @@ public:
 
 	StorageBytes getStorageBytes() const override { return m_tree->getStorageBytes(); }
 
-	Future<Void> getError() override { return delayed(m_error.getFuture()); };
+	Future<Void> getError() const override { return delayed(m_error.getFuture()); };
 
 	void clear(KeyRangeRef range, const Arena* arena = 0) override {
 		debug_printf("CLEAR %s\n", printable(range).c_str());

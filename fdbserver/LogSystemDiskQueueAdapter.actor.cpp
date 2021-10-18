@@ -218,11 +218,11 @@ Future<Void> LogSystemDiskQueueAdapter::commit() {
 	return cm.acknowledge.getFuture();
 }
 
-Future<Void> LogSystemDiskQueueAdapter::getError() {
+Future<Void> LogSystemDiskQueueAdapter::getError() const {
 	return Void();
 }
 
-Future<Void> LogSystemDiskQueueAdapter::onClosed() {
+Future<Void> LogSystemDiskQueueAdapter::onClosed() const {
 	return Void();
 }
 
