@@ -388,7 +388,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-	Future<Void> getError() override { return errorPromise.getFuture(); }
+	Future<Void> getError() const override { return errorPromise.getFuture(); }
 
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
 		wait(self->readThreads->stop());
@@ -404,7 +404,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		delete self;
 	}
 
-	Future<Void> onClosed() override { return closePromise.getFuture(); }
+	Future<Void> onClosed() const override { return closePromise.getFuture(); }
 
 	void dispose() override { doClose(this, true); }
 
