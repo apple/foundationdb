@@ -43,8 +43,8 @@ public:
 	                    bool exactRecovery);
 
 	// IClosable
-	Future<Void> getError() override { return log->getError(); }
-	Future<Void> onClosed() override { return log->onClosed(); }
+	Future<Void> getError() const override { return log->getError(); }
+	Future<Void> onClosed() const override { return log->onClosed(); }
 	void dispose() override {
 		recovering.cancel();
 		log->dispose();
