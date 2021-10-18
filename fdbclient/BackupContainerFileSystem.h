@@ -79,8 +79,7 @@ public:
 	Future<Void> create() override = 0;
 	Future<bool> exists() override = 0;
 
-	// FIXME: this is kinda hacky, should refactor more of this to separate out the "deal with blob store" stuff from
-	// the backup business logic
+	// TODO: refactor this to separate out the "deal with blob store" stuff from the backup business logic
 	static Reference<BackupContainerFileSystem> openContainerFS(
 	    const std::string& url,
 	    const Optional<std::string>& encryptionKeyFileName = {});
