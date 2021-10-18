@@ -161,7 +161,7 @@ public:
 		ASSERT(isReady());
 		return replies.at(quorumVersion.getFuture().get().lastCommitted);
 	}
-	Future<Void> complete() { return waitForAll(actors); }
+	Future<Void> complete() const { return waitForAll(actors); }
 };
 
 class PaxosConfigConsumerImpl {
