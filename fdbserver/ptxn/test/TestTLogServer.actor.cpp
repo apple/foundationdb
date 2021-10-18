@@ -71,7 +71,6 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 		UID workerId = ptxn::test::randomUID();
 		StringRef fileVersionedLogDataPrefix = "log2-"_sr;
 		StringRef fileLogDataPrefix = "log-"_sr;
-		StringRef fileLogQueuePrefix = "logqueue-"_sr;
 		ptxn::InitializePtxnTLogRequest req = tLogInitializations.back();
 		const StringRef prefix = req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 		std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues;
