@@ -332,15 +332,16 @@ struct AbortMovementRequest {
 	constexpr static FileIdentifier file_identifier = 14058403;
 
 	std::string tenantName;
-	bool isSrc = true;
+	bool isSource;
 
 	ReplyPromise<AbortMovementReply> reply;
 
-	AbortMovementRequest() {}
+	AbortMovementRequest() : isSource(true) {}
+	AbortMovementRequest(std::string tenantName, bool isSource) : tenantName(tenantName), isSource(isSource) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tenantName, isSrc, reply);
+		serializer(ar, tenantName, isSource, reply);
 	}
 };
 

@@ -2318,7 +2318,7 @@ ACTOR Future<Void> finishDBMove(Database src, Database dest, Key srcPrefix, Opti
 	try {
 		// Check if exceed maxLagSeconds
 		// TODO move it to server-side
-		state Optional<TenantMovementInfo> targetDBMove = filterDBMove(src, srcPrefix);
+		state Optional<TenantMovementInfo> targetDBMove = wait(filterDBMove(src, srcPrefix));
 		if (!targetDBMove.present()) {
 			throw movement_not_found();
 		}
@@ -2330,7 +2330,7 @@ ACTOR Future<Void> finishDBMove(Database src, Database dest, Key srcPrefix, Opti
 			std::string errorMessage =
 			    end != nullptr ? "Seconds behind parsing error" : "Seconds behind string illegal";
 			fprintf(stderr, "ERROR: %s `%s'\n", errorMessage.c_str(), secondsBehindStr.c_str());
-			throw;
+			return Void();
 		}
 		if (secondsBehind > maxLagSeconds.orDefault(DBL_MAX)) {
 			printf("Current behind seconds is %s, which exceeds %d",
@@ -2411,12 +2411,10 @@ ACTOR Future<Void> abortDBMove(Optional<Database> src, Optional<Database> dest, 
 	ASSERT(src.present() || dest.present());
 
 	try {
-		state AbortMovementRequest abortMovementRequest;
-		abortMovementRequest.tenantName = targetPrefix.toString();
-		abortMovementRequest.isSrc = src.present();
+		state AbortMovementRequest abortMovementRequest(targetPrefix.toString(), src.present());
 		state Future<ErrorOr<AbortMovementReply>> abortMovementReply = Never();
 		state Future<Void> initialize = Void();
-		state Database targetDatabase = (abortMovementRequest.isSrc ? src : dest).get();
+		state Database targetDatabase = (abortMovementRequest.isSource ? src : dest).get();
 		loop choose {
 			when(ErrorOr<AbortMovementReply> reply = wait(abortMovementReply)) {
 				if (reply.isError()) {
