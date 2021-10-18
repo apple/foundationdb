@@ -36,7 +36,7 @@
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 
-#define BM_DEBUG true
+#define BM_DEBUG false
 
 // FIXME: change all BlobManagerData* to Reference<BlobManagerData> to avoid segfaults if core loop gets error
 
