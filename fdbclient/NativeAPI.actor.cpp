@@ -5785,6 +5785,7 @@ ACTOR Future<Version> getDBCachedReadVersion(DatabaseContext* cx, double request
 	// Want to check that the cached version is at most
 	// MAX_VERSION_CACHE_LAG (100ms) old compared to requestTime.
 	ASSERT(!debug_checkVersionTime(cx->cachedRv, requestTime, "CheckStaleness"));
+	wait(delay(0.001 * deterministicRandom()->random01()));
 	return cx->cachedRv;
 }
 
