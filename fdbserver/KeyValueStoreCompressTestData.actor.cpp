@@ -55,11 +55,12 @@ struct KeyValueStoreCompressTestData : IKeyValueStore {
 	virtual void clear(KeyRangeRef range, const Arena* arena = NULL) { store->clear(range, arena); }
 	virtual Future<Void> commit(bool sequential = false) { return store->commit(sequential); }
 
-	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) {
+	virtual Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) {
 		return doReadValue(store, key, debugID);
 	}
+
 	ACTOR static Future<Optional<Value>> doReadValue(IKeyValueStore* store, Key key, Optional<UID> debugID) {
-		Optional<Value> v = wait(store->readValue(key, debugID));
+		Optional<Value> v = wait(store->readValue(key, IKeyValueStore::ReadType::NORMAL, debugID));
 		if (!v.present())
 			return v;
 		return unpack(v.get());
@@ -71,9 +72,11 @@ struct KeyValueStoreCompressTestData : IKeyValueStore {
 	// reason, you will need to fix this.
 	virtual Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                                int maxLength,
-	                                                Optional<UID> debugID = Optional<UID>()) {
+	                                                IKeyValueStore::ReadType,
+	                                                Optional<UID> debugID) {
 		return doReadValuePrefix(store, key, maxLength, debugID);
 	}
+
 	ACTOR static Future<Optional<Value>> doReadValuePrefix(IKeyValueStore* store,
 	                                                       Key key,
 	                                                       int maxLength,
@@ -91,8 +94,9 @@ struct KeyValueStoreCompressTestData : IKeyValueStore {
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
 	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
-	                                                     int rowLimit = 1 << 30,
-	                                                     int byteLimit = 1 << 30) {
+	                                                     int rowLimit,
+	                                                     int byteLimit,
+	                                                     IKeyValueStore::ReadType) {
 		return doReadRange(store, keys, rowLimit, byteLimit);
 	}
 	ACTOR Future<Standalone<RangeResultRef>> doReadRange(IKeyValueStore* store,
