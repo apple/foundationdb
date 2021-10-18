@@ -4959,12 +4959,16 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				}
 
-				if (!prefix.present()) {
+				if (canInitSourceCluster && !prefix.present()) {
 					fprintf(stderr, "ERROR: --prefix is required\n");
 					return FDB_EXIT_ERROR;
 				}
-
-				f = stopAfter(statusDBMove((canInitSourceCluster ? sourceDb : db), Key(prefix.get()), jsonOutput));
+				if (canInitCluster && !destinationPrefix.present()) {
+					fprintf(stderr, "ERROR: --destination_prefix is required\n");
+					return FDB_EXIT_ERROR;
+				}
+				std::string targetPrefix = canInitSourceCluster ? prefix.get() : destinationPrefix.get();
+				f = stopAfter(statusDBMove((canInitSourceCluster ? sourceDb : db), Key(targetPrefix), jsonOutput));
 				break;
 			}
 			case DBMoveType::FINISH:
