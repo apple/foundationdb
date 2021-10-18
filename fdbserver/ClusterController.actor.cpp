@@ -3633,13 +3633,17 @@ std::map<Optional<Standalone<StringRef>>, int> getColocCounts(
     const std::vector<Optional<Standalone<StringRef>>>& pids) {
 	std::map<Optional<Standalone<StringRef>>, int> counts;
 	for (const auto& pid : pids) {
-		++counts[pid];
+		if (pid.present()) {
+			++counts[pid];
+		}
 	}
 	return counts;
 }
 
 // Checks if there exists a better process for each singleton (e.g. DD) compared
 // to the process it is currently on.
+// Note: there is a lot of extra logic here to only recruit the blob manager when gate is open.
+// When adding new singletons, just follow the ratekeeper/data distributor examples.
 void checkBetterSingletons(ClusterControllerData* self) {
 	if (!self->masterProcessId.present() ||
 	    self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
@@ -3660,17 +3664,25 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// Try to find a new process for each singleton.
 	WorkerDetails newRKWorker = findNewProcessForSingleton(self, ProcessClass::Ratekeeper, id_used);
 	WorkerDetails newDDWorker = findNewProcessForSingleton(self, ProcessClass::DataDistributor, id_used);
-	WorkerDetails newBMWorker = findNewProcessForSingleton(self, ProcessClass::BlobManager, id_used);
+
+	WorkerDetails newBMWorker;
+	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		newBMWorker = findNewProcessForSingleton(self, ProcessClass::BlobManager, id_used);
+	}
 
 	// Find best possible fitnesses for each singleton.
 	auto bestFitnessForRK = findBestFitnessForSingleton(self, newRKWorker, ProcessClass::Ratekeeper);
 	auto bestFitnessForDD = findBestFitnessForSingleton(self, newDDWorker, ProcessClass::DataDistributor);
-	auto bestFitnessForBM = findBestFitnessForSingleton(self, newBMWorker, ProcessClass::BlobManager);
+
+	ProcessClass::Fitness bestFitnessForBM;
+	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		bestFitnessForBM = findBestFitnessForSingleton(self, newBMWorker, ProcessClass::BlobManager);
+	}
 
 	auto& db = self->db.serverInfo->get();
 	auto rkSingleton = RatekeeperSingleton(db.ratekeeper);
 	auto ddSingleton = DataDistributorSingleton(db.distributor);
-	auto bmSingleton = BlobManagerSingleton(db.blobManager);
+	BlobManagerSingleton bmSingleton(db.blobManager);
 
 	// Check if the singletons are healthy.
 	// side effect: try to rerecruit the singletons to more optimal processes
@@ -3680,8 +3692,11 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	bool ddHealthy = isHealthySingleton<DataDistributorInterface>(
 	    self, newDDWorker, ddSingleton, bestFitnessForDD, self->recruitingDistributorID);
 
-	bool bmHealthy = isHealthySingleton<BlobManagerInterface>(
-	    self, newBMWorker, bmSingleton, bestFitnessForBM, self->recruitingBlobManagerID);
+	bool bmHealthy = true;
+	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		bmHealthy = isHealthySingleton<BlobManagerInterface>(
+		    self, newBMWorker, bmSingleton, bestFitnessForBM, self->recruitingBlobManagerID);
+	}
 
 	// if any of the singletons are unhealthy (rerecruited or not stable), then do not
 	// consider any further re-recruitments
@@ -3695,13 +3710,30 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// TODO: verify that we don't need to get the pid from the worker like we were doing before
 	Optional<Standalone<StringRef>> currRKProcessId = rkSingleton.interface.get().locality.processId();
 	Optional<Standalone<StringRef>> currDDProcessId = ddSingleton.interface.get().locality.processId();
-	Optional<Standalone<StringRef>> currBMProcessId = bmSingleton.interface.get().locality.processId();
 	Optional<Standalone<StringRef>> newRKProcessId = newRKWorker.interf.locality.processId();
 	Optional<Standalone<StringRef>> newDDProcessId = newDDWorker.interf.locality.processId();
-	Optional<Standalone<StringRef>> newBMProcessId = newBMWorker.interf.locality.processId();
 
-	auto currColocMap = getColocCounts({ currRKProcessId, currDDProcessId, currBMProcessId });
-	auto newColocMap = getColocCounts({ newRKProcessId, newDDProcessId, newBMProcessId });
+	Optional<Standalone<StringRef>> currBMProcessId, newBMProcessId;
+	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		currBMProcessId = bmSingleton.interface.get().locality.processId();
+		newBMProcessId = newBMWorker.interf.locality.processId();
+	}
+
+	std::vector<Optional<Standalone<StringRef>>> currPids = { currRKProcessId, currDDProcessId };
+	std::vector<Optional<Standalone<StringRef>>> newPids = { newRKProcessId, newDDProcessId };
+	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		currPids.emplace_back(currBMProcessId);
+		newPids.emplace_back(newBMProcessId);
+	}
+
+	auto currColocMap = getColocCounts(currPids);
+	auto newColocMap = getColocCounts(newPids);
+
+	// if the knob is disabled, the BM coloc counts should have no affect on the coloc counts check below
+	if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		ASSERT(currColocMap[currBMProcessId] == 0);
+		ASSERT(newColocMap[newBMProcessId] == 0);
+	}
 
 	// if the new coloc counts are collectively better (i.e. each singleton's coloc count has not increased)
 	if (newColocMap[newRKProcessId] <= currColocMap[currRKProcessId] &&
@@ -3712,7 +3744,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 			rkSingleton.recruit(self);
 		} else if (newColocMap[newDDProcessId] < currColocMap[currDDProcessId]) {
 			ddSingleton.recruit(self);
-		} else if (newColocMap[newBMProcessId] < currColocMap[currBMProcessId]) {
+		} else if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES && newColocMap[newBMProcessId] < currColocMap[currBMProcessId]) {
 			bmSingleton.recruit(self);
 		}
 	}
@@ -3727,7 +3759,10 @@ ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 
 		checkOutstandingRecruitmentRequests(self);
 		checkOutstandingStorageRequests(self);
-		checkOutstandingBlobWorkerRequests(self);
+
+		if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+			checkOutstandingBlobWorkerRequests(self);
+		}
 		checkBetterSingletons(self);
 
 		self->checkRecoveryStalled();
@@ -4265,7 +4300,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 		    self, w, currSingleton, registeringSingleton, self->recruitingRatekeeperID);
 	}
 
-	if (req.blobManagerInterf.present()) {
+	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES && req.blobManagerInterf.present()) {
 		auto currSingleton = BlobManagerSingleton(self->db.serverInfo->get().blobManager);
 		auto registeringSingleton = BlobManagerSingleton(req.blobManagerInterf);
 		haltRegisteringOrCurrentSingleton<BlobManagerInterface>(
@@ -4298,9 +4333,9 @@ ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData* self) {
 	return Void();
 }
 
-// This actor periodically gets read version and writes it to cluster with current timestamp as key. To avoid running
-// out of space, it limits the max number of entries and clears old entries on each update. This mapping is used from
-// backup and restore to get the version information for a timestamp.
+// This actor periodically gets read version and writes it to cluster with current timestamp as key. To avoid
+// running out of space, it limits the max number of entries and clears old entries on each update. This mapping is
+// used from backup and restore to get the version information for a timestamp.
 ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
 
@@ -4863,16 +4898,17 @@ ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self
 	}
 }
 
-// A background actor that periodically checks remote DC health, and `checkOutstandingRequests` if remote DC recovers.
+// A background actor that periodically checks remote DC health, and `checkOutstandingRequests` if remote DC
+// recovers.
 ACTOR Future<Void> updateRemoteDCHealth(ClusterControllerData* self) {
-	// The purpose of the initial delay is to wait for the cluster to achieve a steady state before checking remote DC
-	// health, since remote DC healthy may trigger a failover, and we don't want that to happen too frequently.
+	// The purpose of the initial delay is to wait for the cluster to achieve a steady state before checking remote
+	// DC health, since remote DC healthy may trigger a failover, and we don't want that to happen too frequently.
 	wait(delay(SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY));
 
 	self->remoteDCMonitorStarted = true;
 
-	// When the remote DC health just start, we may just recover from a health degradation. Check if we can failback if
-	// we are currently in the remote DC in the database configuration.
+	// When the remote DC health just start, we may just recover from a health degradation. Check if we can failback
+	// if we are currently in the remote DC in the database configuration.
 	if (!self->remoteTransactionSystemDegraded) {
 		checkOutstandingRequests(self);
 	}
@@ -5292,8 +5328,8 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 				}
 				TraceEvent("ClusterControllerHealthMonitor").detail("DegradedServers", degradedServerString);
 
-				// Check if the cluster controller should trigger a recovery to exclude any degraded servers from the
-				// transaction system.
+				// Check if the cluster controller should trigger a recovery to exclude any degraded servers from
+				// the transaction system.
 				if (self->shouldTriggerRecoveryDueToDegradedServers()) {
 					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_RECOVERY) {
 						if (self->recentRecoveryCountDueToHealth() < SERVER_KNOBS->CC_MAX_HEALTH_RECOVERY_COUNT) {
@@ -5317,8 +5353,8 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 						                      ? self->db.config.regions[1].dcId
 						                      : self->db.config.regions[0].dcId;
 
-						// Switch the current primary DC and remote DC in desiredDcIds, so that the remote DC becomes
-						// the new primary, and the primary DC becomes the new remote.
+						// Switch the current primary DC and remote DC in desiredDcIds, so that the remote DC
+						// becomes the new primary, and the primary DC becomes the new remote.
 						dcPriority.push_back(remoteDcId);
 						dcPriority.push_back(self->clusterControllerDcId);
 						self->desiredDcIds.set(dcPriority);
@@ -5665,16 +5701,16 @@ TEST_CASE("/fdbserver/clustercontroller/getServersWithDegradedLink") {
 	NetworkAddress badPeer3(IPAddress(0x04040404), 1);
 	NetworkAddress badPeer4(IPAddress(0x05050505), 1);
 
-	// Test that a reported degraded link should stay for sometime before being considered as a degraded link by cluster
-	// controller.
+	// Test that a reported degraded link should stay for sometime before being considered as a degraded link by
+	// cluster controller.
 	{
 		data.workerHealth[worker].degradedPeers[badPeer1] = { now(), now() };
 		ASSERT(data.getServersWithDegradedLink().empty());
 		data.workerHealth.clear();
 	}
 
-	// Test that when there is only one reported degraded link, getServersWithDegradedLink can return correct degraded
-	// server.
+	// Test that when there is only one reported degraded link, getServersWithDegradedLink can return correct
+	// degraded server.
 	{
 		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
 			                                                  now() };
@@ -5729,7 +5765,8 @@ TEST_CASE("/fdbserver/clustercontroller/getServersWithDegradedLink") {
 		data.workerHealth.clear();
 	}
 
-	// Test that if the degradation is reported both ways between A and other 4 servers, no degraded server is returned.
+	// Test that if the degradation is reported both ways between A and other 4 servers, no degraded server is
+	// returned.
 	{
 		ASSERT(SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE < 4);
 		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
