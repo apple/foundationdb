@@ -35,6 +35,7 @@
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/AnnotateActor.h"
 #include "fdbclient/Atomic.h"
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/DatabaseContext.h"

@@ -22,6 +22,8 @@
 #define FDBCLIENT_BLOBGRANULECOMMON_H
 #pragma once
 
+#include <sstream>
+
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 

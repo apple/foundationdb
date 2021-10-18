@@ -18,10 +18,14 @@
  * limitations under the License.
  */
 
+#include <tuple>
+#include <utility>
+#include <vector>
+
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
-#include "fdbrpc/simulator.h"
 #include "fdbclient/BackupContainerFileSystem.h"
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/BlobWorkerCommon.h"
 #include "fdbclient/BlobWorkerInterface.h"

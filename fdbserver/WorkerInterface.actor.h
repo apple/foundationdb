@@ -32,6 +32,7 @@
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/ResolverInterface.h"
+#include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/TesterInterface.actor.h"

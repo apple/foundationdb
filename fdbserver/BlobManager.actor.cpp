@@ -21,6 +21,7 @@
 #include <vector>
 #include <unordered_map>
 
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -33,8 +34,6 @@
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
-#include "flow/flow.h"
-#include "flow/genericactors.actor.h"
 
 #define BM_DEBUG false
 
