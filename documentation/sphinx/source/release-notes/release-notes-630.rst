@@ -6,9 +6,9 @@ Release Notes
 
 6.3.22
 ======
-* Add histograms to client GRV batcher. `(PR #5760) <https://github.com/apple/foundationdb/pull/5760>`_
-* Add FastAlloc memory utilization trace. `(PR #5759) <https://github.com/apple/foundationdb/pull/5759>`_
-* Add locality cache size to TransactionMetrics. `(PR #5771) <https://github.com/apple/foundationdb/pull/5771>`_
+* Added histograms to client GRV batcher. `(PR #5760) <https://github.com/apple/foundationdb/pull/5760>`_
+* Added FastAlloc memory utilization trace. `(PR #5759) <https://github.com/apple/foundationdb/pull/5759>`_
+* Added locality cache size to TransactionMetrics. `(PR #5771) <https://github.com/apple/foundationdb/pull/5771>`_
 
 6.3.20
 ======
