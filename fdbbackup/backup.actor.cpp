@@ -1038,8 +1038,8 @@ CSimpleOpt::SOption g_rgDBMoveCleanupOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
+	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
@@ -2160,7 +2160,7 @@ ACTOR Future<Void> runAgent(Database db) {
 	return Void();
 }
 
-ACTOR Future<Void> submitDBMove(Database src, Database dest, Key destPrefix, Key srcPrefix) {
+ACTOR Future<Void> submitDBMove(Database src, Database dest, Key srcPrefix, Key destPrefix) {
 	try {
 		state MoveTenantToClusterRequest srcRequest(
 		    srcPrefix, destPrefix, dest->getConnectionRecord()->getConnectionString().toString());
@@ -2246,6 +2246,7 @@ ACTOR Future<Void> statusDBMove(Database db, KeyRef prefix, bool json = false) {
 		if (!targetDBMove.present()) {
 			throw movement_not_found();
 		}
+		// TODO insert error msg into TenantMovementInfo, rather than reporting them below
 		std::string statusText = json ? targetDBMove.get().toJson() : targetDBMove.get().toString();
 		printf("%s\n", statusText.c_str());
 	} catch (Error& e) {
@@ -2457,10 +2458,6 @@ ACTOR Future<Void> cleanupDBMove(Database src, Key srcPrefix, CleanupMovementSou
 		state CleanupMovementSourceRequest cleanupMovementSourceRequest(srcPrefix.toString(), cleanupType);
 		state Future<ErrorOr<CleanupMovementSourceReply>> cleanupMovementSourceReply = Never();
 		state Future<Void> initialize = Void();
-		printf("Start to clear data movement on %s prefix: %s cleanupTtpe: %d .\n",
-		       src->getConnectionRecord()->getConnectionString().toString().c_str(),
-		       srcPrefix.toString().c_str(),
-		       static_cast<int>(cleanupType));
 		loop choose {
 			when(ErrorOr<CleanupMovementSourceReply> reply = wait(cleanupMovementSourceReply)) {
 				if (reply.isError()) {
@@ -2476,7 +2473,7 @@ ACTOR Future<Void> cleanupDBMove(Database src, Key srcPrefix, CleanupMovementSou
 				        : Never();
 			}
 		}
-		printf("The data movements on %s was successfully cleared .\n",
+		printf("The data movement on %s was successfully cleared up.\n",
 		       src->getConnectionRecord()->getConnectionString().toString().c_str());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -4951,10 +4948,14 @@ int main(int argc, char* argv[]) {
 
 				f = stopAfter(submitDBMove(sourceDb, db, Key(prefix.get()), Key(destinationPrefix.get())));
 				break;
-			case DBMoveType::STATUS:
-				// TODO if no specify destination cluster, no error get reported here
-				if (!initCluster()) {
-					fprintf(stderr, "ERROR: -C is required\n");
+			case DBMoveType::STATUS: {
+				bool canInitCluster = initCluster();
+				bool canInitSourceCluster = initSourceCluster(true);
+				if (!canInitCluster && !canInitSourceCluster) {
+					fprintf(stderr, "ERROR: -s or -d is required\n");
+					return FDB_EXIT_ERROR;
+				} else if (canInitCluster && canInitSourceCluster) {
+					fprintf(stderr, "ERROR: -s and -d cannot be specified simultaneously\n");
 					return FDB_EXIT_ERROR;
 				}
 
@@ -4963,8 +4964,9 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				}
 
-				f = stopAfter(statusDBMove(db, Key(prefix.get()), jsonOutput));
+				f = stopAfter(statusDBMove((canInitSourceCluster ? sourceDb : db), Key(prefix.get()), jsonOutput));
 				break;
+			}
 			case DBMoveType::FINISH:
 				if (!initCluster() || !initSourceCluster(true)) {
 					fprintf(stderr, "ERROR: -s and -d are required\n");
@@ -5001,8 +5003,8 @@ int main(int argc, char* argv[]) {
 				break;
 			}
 			case DBMoveType::CLEAN:
-				if (!initCluster()) {
-					fprintf(stderr, "ERROR: -C is required\n");
+				if (!initSourceCluster(true)) {
+					fprintf(stderr, "ERROR: -s or --source is required\n");
 					return FDB_EXIT_ERROR;
 				}
 
@@ -5021,13 +5023,13 @@ int main(int argc, char* argv[]) {
 					fprintf(stderr, "ERROR: --unlock and/or --erase are required\n");
 					return FDB_EXIT_ERROR;
 				}
-				f = stopAfter(cleanupDBMove(db, Key(prefix.get()), cleanupType));
+				f = stopAfter(cleanupDBMove(sourceDb, Key(prefix.get()), cleanupType));
 				break;
 			case DBMoveType::LIST: {
 				bool canInitCluster = initCluster();
 				bool canInitSourceCluster = initSourceCluster(true);
 				if (!canInitCluster && !canInitSourceCluster) {
-					fprintf(stderr, "ERROR: -s and -d are required\n");
+					fprintf(stderr, "ERROR: -s and/or -d are required\n");
 					return FDB_EXIT_ERROR;
 				}
 				if (canInitCluster && canInitSourceCluster) {
