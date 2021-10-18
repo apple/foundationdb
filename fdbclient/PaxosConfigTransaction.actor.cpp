@@ -40,7 +40,9 @@ class CommitQuorum {
 		if (successful >= ctis.size() / 2 + 1 && result.canBeSet()) {
 			result.send(Void());
 		} else if (failed >= ctis.size() / 2 + 1 && result.canBeSet()) {
-			result.sendError(not_committed());
+			// Rollforwards could cause a version that didn't have quorum to
+			// commit.
+			result.sendError(commit_unknown_result());
 		} else {
 			// Check if it is possible to ever receive quorum agreement
 			auto totalRequestsOutstanding = ctis.size() - (failed + successful + maybeCommitted);

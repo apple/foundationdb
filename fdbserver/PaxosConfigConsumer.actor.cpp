@@ -34,6 +34,8 @@ class GetCommittedVersionQuorum {
 	std::vector<ConfigFollowerInterface> cfis;
 	std::map<Version, std::vector<ConfigFollowerInterface>> replies;
 	std::map<Version, Version> priorVersions; // TODO: Would be nice to combine this with `replies`
+	// Last durably committed version.
+	Version lastSeenVersion;
 	size_t totalRepliesReceived{ 0 };
 	size_t maxAgreement{ 0 };
 	// Set to the <secondToLastCommitted, lastCommitted> versions a quorum of
@@ -44,22 +46,22 @@ class GetCommittedVersionQuorum {
 	// with the latest committed version as determined by the quorum. Should
 	// only be called after a committed version has been determined.
 	ACTOR static Future<Void> updateNode(GetCommittedVersionQuorum* self,
-	                                     Version secondToLastCommitted,
-	                                     Version lastCommitted,
+	                                     CommittedVersions nodeVersion,
 	                                     CommittedVersions quorumVersion,
 	                                     ConfigFollowerInterface cfi) {
-		if (lastCommitted == quorumVersion.lastCommitted) {
+		if (nodeVersion.lastCommitted == quorumVersion.lastCommitted) {
 			return Void();
 		}
-		if (lastCommitted > quorumVersion.lastCommitted) {
-			wait(cfi.rollback.getReply(ConfigFollowerRollbackRequest{ quorumVersion.lastCommitted }));
+		if (nodeVersion.lastCommitted > quorumVersion.lastCommitted) {
+			wait(retryBrokenPromise(cfi.rollback, ConfigFollowerRollbackRequest{ quorumVersion.lastCommitted }));
 		} else {
-			if (secondToLastCommitted > quorumVersion.secondToLastCommitted) {
+			if (nodeVersion.secondToLastCommitted > quorumVersion.secondToLastCommitted) {
 				// If the non-quorum node has a last committed version less
 				// than the last committed version on the quorum, but greater
 				// than the second to last committed version on the quorum, it
 				// needs to be rolled back before being rolled forward.
-				wait(cfi.rollback.getReply(ConfigFollowerRollbackRequest{ quorumVersion.secondToLastCommitted }));
+				wait(retryBrokenPromise(cfi.rollback,
+				                        ConfigFollowerRollbackRequest{ quorumVersion.secondToLastCommitted }));
 			}
 
 			// Now roll node forward to match the last committed version of the
@@ -67,18 +69,22 @@ class GetCommittedVersionQuorum {
 			// TODO: Load balance over quorum
 			state ConfigFollowerInterface quorumCfi = self->replies[quorumVersion.lastCommitted][0];
 			try {
-				ConfigFollowerGetChangesReply reply = wait(quorumCfi.getChanges.getReply(
-				    ConfigFollowerGetChangesRequest{ lastCommitted, quorumVersion.lastCommitted }));
-				wait(cfi.rollforward.getReply(ConfigFollowerRollforwardRequest{
-				    lastCommitted, quorumVersion.lastCommitted, reply.changes, reply.annotations }));
+				ConfigFollowerGetChangesReply reply = wait(retryBrokenPromise(
+				    quorumCfi.getChanges,
+				    ConfigFollowerGetChangesRequest{ nodeVersion.lastCommitted, quorumVersion.lastCommitted }));
+				wait(retryBrokenPromise(
+				    cfi.rollforward,
+				    ConfigFollowerRollforwardRequest{
+				        nodeVersion.lastCommitted, quorumVersion.lastCommitted, reply.changes, reply.annotations }));
 			} catch (Error& e) {
 				if (e.code() == error_code_version_already_compacted) {
 					TEST(true); // PaxosConfigConsumer rollforward compacted ConfigNode
-					ConfigFollowerGetSnapshotAndChangesReply reply = wait(quorumCfi.getSnapshotAndChanges.getReply(
-					    ConfigFollowerGetSnapshotAndChangesRequest{ quorumVersion.lastCommitted }));
+					ConfigFollowerGetSnapshotAndChangesReply reply = wait(
+					    retryBrokenPromise(quorumCfi.getSnapshotAndChanges,
+					                       ConfigFollowerGetSnapshotAndChangesRequest{ quorumVersion.lastCommitted }));
 					// TODO: Send the whole snapshot to `cfi`
 					ASSERT(false);
-					// return cfi.rollforward.getReply(ConfigFollowerRollforwardRequest{ lastCommitted,
+					// return retryBrokenPromise(cfi.rollforward, ConfigFollowerRollforwardRequest{ lastCommitted,
 					// quorumVersion.second, reply.changes, reply.annotations });
 				} else {
 					throw e;
@@ -95,27 +101,25 @@ class GetCommittedVersionQuorum {
 			    wait(timeoutError(cfi.getCommittedVersion.getReply(ConfigFollowerGetCommittedVersionRequest{}), 3));
 
 			++self->totalRepliesReceived;
-			state Version priorVersion = reply.secondToLastCommitted;
-			state Version version = reply.lastCommitted;
-			if (self->replies.find(version) == self->replies.end()) {
-				self->replies[version] = {};
-				self->priorVersions[version] = priorVersion;
+			state CommittedVersions committedVersions = CommittedVersions{ self->lastSeenVersion, reply.lastCommitted };
+			if (self->replies.find(committedVersions.lastCommitted) == self->replies.end()) {
+				self->priorVersions[committedVersions.lastCommitted] = self->lastSeenVersion;
 			}
-			auto& nodes = self->replies[version];
+			auto& nodes = self->replies[committedVersions.lastCommitted];
 			nodes.push_back(cfi);
 			self->maxAgreement = std::max(nodes.size(), self->maxAgreement);
 			if (nodes.size() >= self->cfis.size() / 2 + 1) {
 				// A quorum of ConfigNodes agree on the latest committed version.
 				if (self->quorumVersion.canBeSet()) {
-					self->quorumVersion.send(CommittedVersions{ priorVersion, version });
+					self->quorumVersion.send(committedVersions);
 				}
 			} else if (self->maxAgreement >= self->cfis.size() / 2 + 1) {
 				// A quorum of ConfigNodes agree on the latest committed version,
 				// but the node we just got a reply from is not one of them. We may
 				// need to roll it forward or back.
 				CommittedVersions quorumVersion = wait(self->quorumVersion.getFuture());
-				ASSERT(version != quorumVersion.lastCommitted);
-				wait(self->updateNode(self, priorVersion, version, quorumVersion, cfi));
+				ASSERT(committedVersions.lastCommitted != quorumVersion.lastCommitted);
+				wait(self->updateNode(self, committedVersions, quorumVersion, cfi));
 			} else if (self->maxAgreement + (self->cfis.size() - self->totalRepliesReceived) <
 			           (self->cfis.size() / 2 + 1)) {
 				// It is impossible to reach a quorum of ConfigNodes that agree
@@ -129,12 +133,12 @@ class GetCommittedVersionQuorum {
 				if (self->quorumVersion.canBeSet()) {
 					self->quorumVersion.send(CommittedVersions{ largestCommittedPrior, largestCommitted });
 				}
-				wait(self->updateNode(self, priorVersion, version, self->quorumVersion.getFuture().get(), cfi));
+				wait(self->updateNode(self, committedVersions, self->quorumVersion.getFuture().get(), cfi));
 			} else {
 				// Still building up responses; don't have enough data to act on
 				// yet, so wait until we do.
 				CommittedVersions quorumVersion = wait(self->quorumVersion.getFuture());
-				wait(self->updateNode(self, priorVersion, version, quorumVersion, cfi));
+				wait(self->updateNode(self, committedVersions, quorumVersion, cfi));
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_timed_out) {
@@ -145,7 +149,8 @@ class GetCommittedVersionQuorum {
 	}
 
 public:
-	explicit GetCommittedVersionQuorum(std::vector<ConfigFollowerInterface> const& cfis) : cfis(cfis) {}
+	explicit GetCommittedVersionQuorum(std::vector<ConfigFollowerInterface> const& cfis, Version lastSeenVersion)
+	  : cfis(cfis), lastSeenVersion(lastSeenVersion) {}
 	Future<CommittedVersions> getCommittedVersion() {
 		ASSERT(!isReady()); // ensures this function is not accidentally called before resetting state
 		for (const auto& cfi : cfis) {
@@ -259,7 +264,7 @@ class PaxosConfigConsumerImpl {
 		}
 	}
 
-	void reset() { getCommittedVersionQuorum = GetCommittedVersionQuorum{ cfis }; }
+	void reset() { getCommittedVersionQuorum = GetCommittedVersionQuorum{ cfis, lastSeenVersion }; }
 
 public:
 	Future<Void> consume(ConfigBroadcaster& broadcaster) {
@@ -271,7 +276,7 @@ public:
 	PaxosConfigConsumerImpl(std::vector<ConfigFollowerInterface> const& cfis,
 	                        double pollingInterval,
 	                        Optional<double> compactionInterval)
-	  : cfis(cfis), getCommittedVersionQuorum(cfis), pollingInterval(pollingInterval),
+	  : cfis(cfis), getCommittedVersionQuorum(cfis, 0), pollingInterval(pollingInterval),
 	    compactionInterval(compactionInterval), id(deterministicRandom()->randomUniqueID()) {}
 };
 
