@@ -1753,7 +1753,6 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 		    reply.arena, MutationsAndVersionRef(finalVersion, finalVersion == dequeVersion ? dequeKnownCommit : 0));
 	}
 
-	// TODO REMOVE or only do if mutation tracking is enabled
 	if (MUTATION_TRACKING_ENABLED) {
 		for (auto& mutations : reply.mutations) {
 			for (auto& m : mutations.mutations) {

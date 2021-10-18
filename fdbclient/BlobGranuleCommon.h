@@ -27,7 +27,6 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 
-// TODO should GranuleSnapshot and GranuleDeltas just be typedefs instead of subclasses?
 // file format of actual blob files
 struct GranuleSnapshot : VectorRef<KeyValueRef> {
 
@@ -48,7 +47,6 @@ struct GranuleDeltas : VectorRef<MutationsAndVersionRef> {
 	}
 };
 
-// TODO better name?
 struct BlobFilePointerRef {
 	constexpr static FileIdentifier file_identifier = 5253554;
 	StringRef filename;
