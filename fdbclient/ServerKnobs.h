@@ -716,9 +716,9 @@ public:
 	double LATENCY_METRICS_LOGGING_INTERVAL;
 
 	// blob granule stuff
-	// TODO better place to put this or wire up blob config?
-
+	// FIXME: configure url with database configuration instead of knob eventually
 	std::string BG_URL;
+
 	int BG_SNAPSHOT_FILE_TARGET_BYTES;
 	int BG_DELTA_FILE_TARGET_BYTES;
 	int BG_DELTA_BYTES_BEFORE_COMPACT;

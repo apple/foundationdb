@@ -6744,16 +6744,8 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
 				state ChangeFeedStreamReply rep = waitNext(replyStream.getFuture());
 				begin = rep.mutations.back().version + 1;
 
-				/*if (rangeID.printable() == "8696f5d434d2247e73307a158f9f2a6b" && begin >= 234494075) {
-				    printf("  NA CF %s [%s - %s) got %d at %lld\n",
-				           rangeID.printable().c_str(),
-				           range.begin.printable().c_str(),
-				           range.end.printable().c_str(),
-				           rep.mutations.size(),
-				           begin);
-				}*/
 				state int resultLoc = 0;
-				// FIXME: fix better
+				// FIXME: handle empty versions properly
 				while (resultLoc < rep.mutations.size()) {
 					if (rep.mutations[resultLoc].mutations.size() || rep.mutations[resultLoc].version + 1 == end ||
 					    (rep.mutations[resultLoc].mutations.empty() &&
@@ -7146,7 +7138,6 @@ Future<Void> DatabaseContext::popChangeFeedMutations(Key rangeID, Version versio
 
 #define BG_REQUEST_DEBUG false
 
-// FIXME: code for discovering blob granules is similar enough that it could be refactored? It's pretty simple though
 ACTOR Future<Void> getBlobGranuleRangesStreamActor(Reference<DatabaseContext> db,
                                                    PromiseStream<KeyRange> results,
                                                    KeyRange keyRange) {
@@ -7211,7 +7202,6 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 	state UID workerId;
 	loop {
 		try {
-			// FIXME NOW: handle errors, handle mapping changes
 			// FIXME: Use streaming parallelism?
 			// Read mapping and worker interfaces from DB
 			loopCounter++;
@@ -7237,7 +7227,6 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 					    tr, blobGranuleMappingKeys.begin, keyRange, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
 					blobGranuleMapping = _bgMapping;
 					if (blobGranuleMapping.more) {
-						// TODO REMOVE
 						if (BG_REQUEST_DEBUG) {
 							printf("BG Mapping for [%s - %s) too large!\n");
 						}
@@ -7365,8 +7354,6 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 			results.sendError(end_of_stream());
 			return Void();
 		} catch (Error& e) {
-			// only print this error with exponential backoff
-
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
@@ -7381,7 +7368,6 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 				results.sendError(e);
 				return Void();
 			}
-			// TODO add a wait here!
 		}
 	}
 }
@@ -7389,7 +7375,7 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 Future<Void> DatabaseContext::readBlobGranulesStream(const PromiseStream<Standalone<BlobGranuleChunkRef>>& results,
                                                      KeyRange range,
                                                      Version begin,
-                                                     Version end) {
+                                                     Optional<Version> end) {
 	if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
 		throw client_invalid_operation();
 	}

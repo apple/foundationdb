@@ -27,36 +27,6 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 
-// TODO better place for this? It's used in change feeds too
-struct MutationsAndVersionRef {
-	VectorRef<MutationRef> mutations;
-	Version version;
-	Version knownCommittedVersion;
-
-	MutationsAndVersionRef() {}
-	explicit MutationsAndVersionRef(Version version, Version knownCommittedVersion)
-	  : version(version), knownCommittedVersion(knownCommittedVersion) {}
-	MutationsAndVersionRef(VectorRef<MutationRef> mutations, Version version, Version knownCommittedVersion)
-	  : mutations(mutations), version(version), knownCommittedVersion(knownCommittedVersion) {}
-	MutationsAndVersionRef(Arena& to, VectorRef<MutationRef> mutations, Version version, Version knownCommittedVersion)
-	  : mutations(to, mutations), version(version), knownCommittedVersion(knownCommittedVersion) {}
-	MutationsAndVersionRef(Arena& to, const MutationsAndVersionRef& from)
-	  : mutations(to, from.mutations), version(from.version), knownCommittedVersion(from.knownCommittedVersion) {}
-	int expectedSize() const { return mutations.expectedSize(); }
-
-	struct OrderByVersion {
-		bool operator()(MutationsAndVersionRef const& a, MutationsAndVersionRef const& b) const {
-			return a.version < b.version;
-		}
-	};
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, mutations, version, knownCommittedVersion);
-	}
-};
-
-// TODO should GranuleSnapshot and GranuleDeltas just be typedefs instead of subclasses?
 // file format of actual blob files
 struct GranuleSnapshot : VectorRef<KeyValueRef> {
 
@@ -77,15 +47,14 @@ struct GranuleDeltas : VectorRef<MutationsAndVersionRef> {
 	}
 };
 
-// TODO better name?
-struct BlobFilenameRef {
+struct BlobFilePointerRef {
 	constexpr static FileIdentifier file_identifier = 5253554;
 	StringRef filename;
 	int64_t offset;
 	int64_t length;
 
-	BlobFilenameRef() {}
-	BlobFilenameRef(Arena& to, std::string filename, int64_t offset, int64_t length)
+	BlobFilePointerRef() {}
+	BlobFilePointerRef(Arena& to, const std::string& filename, int64_t offset, int64_t length)
 	  : filename(to, filename), offset(offset), length(length) {}
 
 	template <class Ar>
@@ -108,8 +77,8 @@ struct BlobGranuleChunkRef {
 	constexpr static FileIdentifier file_identifier = 865198;
 	KeyRangeRef keyRange;
 	Version includedVersion;
-	Optional<BlobFilenameRef> snapshotFile; // not set if it's an incremental read
-	VectorRef<BlobFilenameRef> deltaFiles;
+	Optional<BlobFilePointerRef> snapshotFile; // not set if it's an incremental read
+	VectorRef<BlobFilePointerRef> deltaFiles;
 	GranuleDeltas newDeltas;
 
 	template <class Ar>

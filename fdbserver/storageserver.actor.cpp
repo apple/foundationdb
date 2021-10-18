@@ -1657,8 +1657,6 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 
 	auto feed = data->uidChangeFeed.find(req.rangeID);
 	if (feed == data->uidChangeFeed.end()) {
-		// TODO should unknown_change_feed be replyable?
-		printf("Unknown change feed %s\n", req.rangeID.printable().c_str());
 		throw unknown_change_feed();
 	}
 	state Version dequeVersion = data->version.get();
@@ -1755,14 +1753,15 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 		    reply.arena, MutationsAndVersionRef(finalVersion, finalVersion == dequeVersion ? dequeKnownCommit : 0));
 	}
 
-	// TODO REMOVE or only do if mutation tracking is enabled
-	for (auto& mutations : reply.mutations) {
-		for (auto& m : mutations.mutations) {
-			DEBUG_MUTATION("ChangeFeedRead", mutations.version, m, data->thisServerID)
-			    .detail("ChangeFeedID", req.rangeID)
-			    .detail("ReqBegin", req.begin)
-			    .detail("ReqEnd", req.end)
-			    .detail("ReqRange", req.range);
+	if (MUTATION_TRACKING_ENABLED) {
+		for (auto& mutations : reply.mutations) {
+			for (auto& m : mutations.mutations) {
+				DEBUG_MUTATION("ChangeFeedRead", mutations.version, m, data->thisServerID)
+				    .detail("ChangeFeedID", req.rangeID)
+				    .detail("ReqBegin", req.begin)
+				    .detail("ReqEnd", req.end)
+				    .detail("ReqRange", req.range);
+			}
 		}
 	}
 
@@ -1780,7 +1779,6 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
 			feedRequest.rangeID = rangeID;
 			feedRequest.begin = begin;
 			feedRequest.end = end;
-			// FIXME: this should set request range, otherwise filterMutations won't work?..
 			state ChangeFeedReply feedReply = wait(getChangeFeedMutations(data, feedRequest));
 			begin = feedReply.mutations.back().version + 1;
 			state int resultLoc = 0;
@@ -1828,8 +1826,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			state ChangeFeedRequest feedRequest;
 			feedRequest.rangeID = req.rangeID;
 			feedRequest.begin = begin;
-			// Set to min of request end and buffered version to skip any potentially partially buffered mutations
-			feedRequest.end = std::min(req.end, data->version.get() + 1);
+			feedRequest.end = req.end;
 			feedRequest.range = req.range;
 			ChangeFeedReply feedReply = wait(getChangeFeedMutations(data, feedRequest));
 
@@ -1851,8 +1848,6 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			}
 		}
 	} catch (Error& e) {
-		// TODO REMOVE
-		printf("CF Stream %s got error %s\n", req.rangeID.printable().c_str(), e.name());
 		if (e.code() != error_code_operation_obsolete) {
 			if (!canReplyWith(e))
 				throw;
@@ -5969,7 +5964,6 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		throw internal_error();
 	} catch (Error& e) {
-		printf("SS %s crashed with error %s\n", self.thisServerID.toString().c_str(), e.name());
 		// If we die with an error before replying to the recruitment request, send the error to the recruiter
 		// (ClusterController, and from there to the DataDistributionTeamCollection)
 		if (!recruitReply.isSet())
@@ -6181,7 +6175,6 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		throw internal_error();
 	} catch (Error& e) {
-		printf("SS %s crashed with error %s\n", self.thisServerID.toString().c_str(), e.name());
 		if (recovered.canBeSet())
 			recovered.send(Void());
 		if (storageServerTerminated(self, persistentData, e))

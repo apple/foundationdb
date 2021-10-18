@@ -41,7 +41,7 @@
 #define BG_READ_DEBUG false
 
 ACTOR Future<Arena> readSnapshotFile(Reference<BackupContainerFileSystem> bstore,
-                                     BlobFilenameRef f,
+                                     BlobFilePointerRef f,
                                      KeyRangeRef keyRange,
                                      std::map<KeyRef, ValueRef>* dataMap) {
 	try {
@@ -112,7 +112,7 @@ ACTOR Future<Arena> readSnapshotFile(Reference<BackupContainerFileSystem> bstore
 }
 
 ACTOR Future<Standalone<GranuleDeltas>> readDeltaFile(Reference<BackupContainerFileSystem> bstore,
-                                                      BlobFilenameRef f,
+                                                      BlobFilePointerRef f,
                                                       KeyRangeRef keyRange,
                                                       Version readVersion) {
 	try {
@@ -302,7 +302,7 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 
 		state std::vector<Future<Standalone<GranuleDeltas>>> readDeltaFutures;
 		readDeltaFutures.reserve(chunk.deltaFiles.size());
-		for (BlobFilenameRef deltaFile : chunk.deltaFiles) {
+		for (BlobFilePointerRef deltaFile : chunk.deltaFiles) {
 			readDeltaFutures.push_back(readDeltaFile(bstore, deltaFile, keyRange, readVersion));
 			if (stats.present()) {
 				++stats.get()->s3GetReqs;

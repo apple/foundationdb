@@ -43,8 +43,6 @@
  * To catch availability issues with the blob worker, it does a request to each granule at the end of the test.
  */
 struct BlobGranuleVerifierWorkload : TestWorkload {
-	// TODO add delay on start so it can start with data
-
 	bool doSetup;
 	double minDelay;
 	double maxDelay;
@@ -237,7 +235,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			    .detail("RequestType", initialRequest ? "RealTime" : "TimeTravel")
 			    .detail("FDBSize", fdb.size())
 			    .detail("BlobSize", blob.first.size());
-			// TODO debugging details!
 
 			if (BGV_DEBUG) {
 				printf("\nMismatch for [%s - %s) @ %lld (%s). F(%d) B(%d):\n",
@@ -313,7 +310,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 		OldRead() {}
 		OldRead(KeyRange range, Version v, RangeResult oldResult) : range(range), v(v), oldResult(oldResult) {}
-		// OldRead(const OldRead& other) : range(other.range), v(other.v), oldResult(other.oldResult) {}
 	};
 
 	ACTOR Future<Void> verifyGranules(Database cx, BlobGranuleVerifierWorkload* self) {
