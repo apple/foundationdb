@@ -2225,9 +2225,11 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 }
 
 ACTOR Future<UID> getClusterId(TLogData* self) {
-	state Transaction tr(self->cx);
+	state ReadYourWritesTransaction tr(self->cx);
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> clusterId = wait(tr.get(clusterIdKey));
 			if (clusterId.present()) {
 				return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
@@ -2494,9 +2496,9 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 				logData->logSystem->set(Reference<ILogSystem>());
 			}
 
-			// Persist cluster ID once cluster has recovered.
+			// Persist cluster ID once cluster has sufficientnly recovered.
 			auto masterClusterId = self->dbInfo->get().clusterId;
-			if (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
+			if (self->dbInfo->get().recoveryState == RecoveryState::ACCEPTING_COMMITS &&
 			    !self->durableClusterId.isValid()) {
 				ASSERT(masterClusterId.isValid());
 				self->durableClusterId = masterClusterId;

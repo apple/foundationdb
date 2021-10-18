@@ -5187,9 +5187,11 @@ ACTOR Future<Void> restoreByteSample(StorageServer* data,
 
 // Reads the cluster ID from the transaction state store.
 ACTOR Future<UID> getClusterId(StorageServer* self) {
-	state Transaction tr(self->cx);
+	state ReadYourWritesTransaction tr(self->cx);
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> clusterId = wait(tr.get(clusterIdKey));
 			ASSERT(clusterId.present());
 			return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());

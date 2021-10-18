@@ -5262,10 +5262,12 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 };
 
 ACTOR Future<UID> getClusterId(DDTeamCollection* self) {
-	state Transaction tr(self->cx);
+	state ReadYourWritesTransaction tr(self->cx);
 	loop {
 		try {
-			Optional<Value> clusterId = wait(tr.get(clusterIdKey, Snapshot::False));
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> clusterId = wait(tr.get(clusterIdKey));
 			ASSERT(clusterId.present());
 			return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
 		} catch (Error& e) {
