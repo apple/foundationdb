@@ -106,7 +106,7 @@ enum class DBType { UNDEFINED = 0, START, STATUS, SWITCH, ABORT, PAUSE, RESUME }
 // New fast restore reuses the type from legacy slow restore
 enum class RestoreType { UNKNOWN, START, STATUS, ABORT, WAIT };
 
-enum class DBMoveType { UNDEFINED = 0, START, STATUS, FINISH, ABORT, CLEAN, CLEAR_SRC, LIST };
+enum class DBMoveType { UNDEFINED = 0, START, STATUS, FINISH, ABORT, CLEAN, LIST };
 
 //
 enum {
@@ -186,6 +186,10 @@ enum {
 	OPT_DEST_CLUSTER,
 	OPT_CLEANUP,
 	OPT_DSTONLY,
+
+	// DB movements
+	OPT_UNLOCK_TENANT,
+	OPT_ERASE_TENANT,
 
 	OPT_TRACE_FORMAT,
 };
@@ -1053,6 +1057,8 @@ CSimpleOpt::SOption g_rgDBMoveCleanupOptions[] = {
 	{ OPT_DELETE_DATA, "--delete_data", SO_NONE },
 	{ OPT_MIN_CLEANUP_SECONDS, "--min_cleanup_seconds", SO_REQ_SEP },
 	{ OPT_PREFIX, "--prefix", SO_REQ_SEP },
+	{ OPT_UNLOCK_TENANT, "--unlock", SO_NONE },
+	{ OPT_ERASE_TENANT, "--erase", SO_NONE },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -1765,7 +1771,6 @@ DBMoveType getDBMoveType(std::string dbMoveTypeStr) {
 		values["finish"] = DBMoveType::FINISH;
 		values["abort"] = DBMoveType::ABORT;
 		values["clean"] = DBMoveType::CLEAN;
-		values["clear"] = DBMoveType::CLEAR_SRC;
 		values["list"] = DBMoveType::LIST;
 	}
 	auto res = values.find(dbMoveTypeStr);
@@ -2222,24 +2227,27 @@ ACTOR Future<std::vector<TenantMovementInfo>> getActiveMovements(Database databa
 	}
 }
 
-ACTOR Future<Void> statusDBMove(Database src, Database dest, KeyRef srcPrefix, bool json = false) {
-	try {
-		// Get active movement list
-		state std::vector<TenantMovementInfo> activeMovements = wait(getActiveMovements(src));
+ACTOR Future<Optional<TenantMovementInfo>> filterDBMove(Database db, KeyRef prefix) {
+	// Get active movement list
+	state std::vector<TenantMovementInfo> activeMovements = wait(getActiveMovements(db));
 
-		// Filter for desired movements
-		bool foundMovement = false;
-		for (const auto& movement : activeMovements) {
-			if (movement.destConnectionString == dest->getConnectionRecord()->getConnectionString().toString()) {
-				foundMovement = true;
-				std::string statusText = json ? movement.toJson() : movement.toString();
-				printf("%s\n", statusText.c_str());
-				break;
-			}
+	// Filter for desired movements
+	for (const auto& movement : activeMovements) {
+		if (movement.sourcePrefix == prefix) {
+			return Optional<TenantMovementInfo>(movement);
 		}
-		if (!foundMovement) {
+	}
+	return Optional<TenantMovementInfo>();
+}
+
+ACTOR Future<Void> statusDBMove(Database db, KeyRef prefix, bool json = false) {
+	try {
+		state Optional<TenantMovementInfo> targetDBMove = wait(filterDBMove(db, prefix));
+		if (!targetDBMove.present()) {
 			throw movement_not_found();
 		}
+		std::string statusText = json ? targetDBMove.get().toJson() : targetDBMove.get().toString();
+		printf("%s\n", statusText.c_str());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
@@ -2268,7 +2276,7 @@ ACTOR Future<Void> listDBMove(Database db, bool isSrc) {
 		       (isSrc ? "from" : "to"),
 		       db->getConnectionRecord()->getConnectionString().toString().c_str());
 		for (const auto& movement : targetMovements) {
-			printf(movement.toString().c_str());
+			printf("%s\n", movement.toString().c_str());
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -2282,17 +2290,17 @@ ACTOR Future<Void> listDBMove(Database db, bool isSrc) {
 // list movement from src to dest
 ACTOR Future<Void> listDBMove(Database src, Database dest) {
 	try {
-		printf("%s from %s to %s\n",
-		       "List running data movement",
-		       src->getConnectionRecord()->getConnectionString().toString().c_str(),
-		       dest->getConnectionRecord()->getConnectionString().toString().c_str());
 		// Get active movement list
 		state std::vector<TenantMovementInfo> activeMovements = wait(getActiveMovements(src));
 
 		// Filter for desired movements
+		printf("%s from %s to %s\n",
+		       "List running data movement",
+		       src->getConnectionRecord()->getConnectionString().toString().c_str(),
+		       dest->getConnectionRecord()->getConnectionString().toString().c_str());
 		for (const auto& movement : activeMovements) {
-			if (movement.destConnectionString == dest->getConnectionRecord()->getConnectionString().toString()) {
-				printf(movement.toString().c_str());
+			if (movement.targetConnectionString == dest->getConnectionRecord()->getConnectionString().toString()) {
+				printf("%s\n", movement.toString().c_str());
 			}
 		}
 	} catch (Error& e) {
@@ -2306,20 +2314,75 @@ ACTOR Future<Void> listDBMove(Database src, Database dest) {
 }
 
 ACTOR Future<Void> finishDBMove(Database src, Database dest, Key srcPrefix, Optional<double> maxLagSeconds) {
-	// TODO find way to get max lag parameter
 	try {
-		FinishSourceMovementRequest finishSourceMovementRequest(srcPrefix.toString(), maxLagSeconds.orDefault(DBL_MAX));
-		state ErrorOr<FinishSourceMovementReply> finishSourceMovementReply =
-		    wait(src->getTenantBalancer().get().finishSourceMovement.tryGetReply(finishSourceMovementRequest));
-		if (finishSourceMovementReply.isError()) {
-			throw finishSourceMovementReply.getError();
+		// Check if exceed maxLagSeconds
+		// TODO move it to server-side
+		state Optional<TenantMovementInfo> targetDBMove = filterDBMove(src, srcPrefix);
+		if (!targetDBMove.present()) {
+			throw movement_not_found();
 		}
-		state FinishDestinationMovementRequest finishDestinationMovementRequest(
-		    finishSourceMovementReply.get().tenantName, finishSourceMovementReply.get().version);
-		state ErrorOr<FinishDestinationMovementReply> finishDestinationMovementReply = wait(
-		    dest->getTenantBalancer().get().finishDestinationMovement.tryGetReply(finishDestinationMovementRequest));
-		if (finishDestinationMovementReply.isError()) {
-			throw finishDestinationMovementReply.getError();
+		// TODO return double value
+		std::string secondsBehindStr = targetDBMove.get().secondsBehind;
+		char* end;
+		double secondsBehind = std::strtod(targetDBMove.get().secondsBehind.c_str(), &end);
+		if (end != nullptr || secondsBehind == 0) {
+			std::string errorMessage =
+			    end != nullptr ? "Seconds behind parsing error" : "Seconds behind string illegal";
+			fprintf(stderr, "ERROR: %s `%s'\n", errorMessage.c_str(), secondsBehindStr.c_str());
+			throw;
+		}
+		if (secondsBehind > maxLagSeconds.orDefault(DBL_MAX)) {
+			printf("Current behind seconds is %s, which exceeds %d",
+			       secondsBehindStr.c_str(),
+			       maxLagSeconds.orDefault(DBL_MAX));
+			return Void();
+		}
+		TraceEvent(SevDebug, "TenantBalancerLagSecondsCheckPass")
+		    .detail("MaxLagSeconds", maxLagSeconds.orDefault(DBL_MAX))
+		    .detail("CurrentLagSeconds", secondsBehind);
+
+		state FinishSourceMovementRequest finishSourceMovementRequest(srcPrefix.toString(),
+		                                                              maxLagSeconds.orDefault(DBL_MAX));
+		state Future<ErrorOr<FinishSourceMovementReply>> finishSourceMovementReply = Never();
+		state Future<Void> initialize = Void();
+		state std::string tenantName;
+		state Version version;
+		loop choose {
+			when(ErrorOr<FinishSourceMovementReply> reply = wait(finishSourceMovementReply)) {
+				if (finishSourceMovementReply.isError()) {
+					throw finishSourceMovementReply.getError();
+				}
+				tenantName = reply.get().tenantName;
+				version = reply.get().version;
+				break;
+			}
+			when(wait(src->onTenantBalancerChanged() || initialize)) {
+				initialize = Never();
+				finishSourceMovementReply =
+				    src->getTenantBalancer().present()
+				        ? src->getTenantBalancer().get().finishSourceMovement.tryGetReply(finishSourceMovementRequest)
+				        : Never();
+			}
+		}
+
+		state FinishDestinationMovementRequest finishDestinationMovementRequest(tenantName, version);
+		initialize = Void();
+		state Future<ErrorOr<FinishDestinationMovementReply>> finishDestinationMovementReply = Never();
+		loop choose {
+			when(ErrorOr<FinishDestinationMovementReply> reply = wait(finishDestinationMovementReply)) {
+				if (reply.isError()) {
+					throw reply.getError();
+				}
+				break;
+			}
+			when(wait(dest->onTenantBalancerChanged() || initialize)) {
+				initialize = Never();
+				finishDestinationMovementReply =
+				    dest->getTenantBalancer().present()
+				        ? dest->getTenantBalancer().get().finishDestinationMovement.tryGetReply(
+				              finishDestinationMovementRequest)
+				        : Never();
+			}
 		}
 		printf("The data movement was successfully finished.\n");
 	} catch (Error& e) {
@@ -2392,11 +2455,29 @@ ACTOR Future<Void> abortDBMove(Optional<Database> src, Optional<Database> dest, 
 ACTOR Future<Void> cleanupDBMove(Database src, Key srcPrefix, CleanupMovementSourceRequest::CleanupType cleanupType) {
 	try {
 		state CleanupMovementSourceRequest cleanupMovementSourceRequest(srcPrefix.toString(), cleanupType);
-		state ErrorOr<CleanupMovementSourceReply> cleanupMovementSourceReply =
-		    wait(src->getTenantBalancer().get().cleanupMovementSource.tryGetReply(cleanupMovementSourceRequest));
-		if (cleanupMovementSourceReply.isError()) {
-			throw cleanupMovementSourceReply.getError();
+		state Future<ErrorOr<CleanupMovementSourceReply>> cleanupMovementSourceReply = Never();
+		state Future<Void> initialize = Void();
+		printf("Start to clear data movement on %s prefix: %s cleanupTtpe: %d .\n",
+		       src->getConnectionRecord()->getConnectionString().toString().c_str(),
+		       srcPrefix.toString().c_str(),
+		       static_cast<int>(cleanupType));
+		loop choose {
+			when(ErrorOr<CleanupMovementSourceReply> reply = wait(cleanupMovementSourceReply)) {
+				if (reply.isError()) {
+					throw reply.getError();
+				}
+				break;
+			}
+			when(wait(src->onTenantBalancerChanged() || initialize)) {
+				initialize = Never();
+				cleanupMovementSourceReply =
+				    src->getTenantBalancer().present()
+				        ? src->getTenantBalancer().get().cleanupMovementSource.tryGetReply(cleanupMovementSourceRequest)
+				        : Never();
+			}
 		}
+		printf("The data movements on %s was successfully cleared .\n",
+		       src->getConnectionRecord()->getConnectionString().toString().c_str());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
@@ -3823,10 +3904,6 @@ int main(int argc, char* argv[]) {
 			case DBMoveType::CLEAN:
 				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMoveCleanupOptions, SO_O_EXACT);
 				break;
-			case DBMoveType::CLEAR_SRC:
-				// arguments: source, prefix
-				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMoveClearSrcOptions, SO_O_EXACT);
-				break;
 			case DBMoveType::LIST:
 				args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBMoveListOptions, SO_O_EXACT);
 				break;
@@ -3928,6 +4005,10 @@ int main(int argc, char* argv[]) {
 
 		BackupModifyOptions modifyOptions;
 		Optional<double> maxLagSec;
+
+		// For data movement clean subcommand
+		bool unlockTenant = false;
+		bool eraseTenant = false;
 
 		if (argc == 1) {
 			printUsage(programExe, false);
@@ -4307,6 +4388,12 @@ int main(int argc, char* argv[]) {
 				maxLagSec = parseResult;
 				break;
 			}
+			case OPT_UNLOCK_TENANT:
+				unlockTenant = true;
+				break;
+			case OPT_ERASE_TENANT:
+				eraseTenant = true;
+				break;
 			}
 		}
 
@@ -4486,6 +4573,9 @@ int main(int argc, char* argv[]) {
 		};
 
 		auto initCluster = [&](bool quiet = false) {
+			if (clusterFile.empty()) {
+				return false;
+			}
 			Optional<Database> result = connectToCluster(clusterFile, localities, quiet);
 			if (result.present()) {
 				db = result.get();
@@ -4848,6 +4938,7 @@ int main(int argc, char* argv[]) {
 			switch (dbMoveType) {
 			case DBMoveType::START:
 				if (!initCluster() || !initSourceCluster(true)) {
+					fprintf(stderr, "ERROR: -s and -d are required\n");
 					return FDB_EXIT_ERROR;
 				}
 
@@ -4861,7 +4952,9 @@ int main(int argc, char* argv[]) {
 				f = stopAfter(submitDBMove(sourceDb, db, Key(prefix.get()), Key(destinationPrefix.get())));
 				break;
 			case DBMoveType::STATUS:
-				if (!initCluster() || !initSourceCluster(true)) {
+				// TODO if no specify destination cluster, no error get reported here
+				if (!initCluster()) {
+					fprintf(stderr, "ERROR: -C is required\n");
 					return FDB_EXIT_ERROR;
 				}
 
@@ -4870,10 +4963,11 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				}
 
-				f = stopAfter(statusDBMove(sourceDb, db, Key(prefix.get()), jsonOutput));
+				f = stopAfter(statusDBMove(db, Key(prefix.get()), jsonOutput));
 				break;
 			case DBMoveType::FINISH:
 				if (!initCluster() || !initSourceCluster(true)) {
+					fprintf(stderr, "ERROR: -s and -d are required\n");
 					return FDB_EXIT_ERROR;
 				}
 
@@ -4888,6 +4982,7 @@ int main(int argc, char* argv[]) {
 				bool canInitCluster = initCluster();
 				bool canInitSourceCluster = initSourceCluster(true);
 				if (!canInitCluster && !canInitSourceCluster) {
+					fprintf(stderr, "ERROR: -s and -d are required\n");
 					return FDB_EXIT_ERROR;
 				}
 
@@ -4906,8 +5001,8 @@ int main(int argc, char* argv[]) {
 				break;
 			}
 			case DBMoveType::CLEAN:
-				// TODO combine CLEAN and CLEAR_SRC into one
 				if (!initCluster()) {
+					fprintf(stderr, "ERROR: -C is required\n");
 					return FDB_EXIT_ERROR;
 				}
 
@@ -4915,27 +5010,24 @@ int main(int argc, char* argv[]) {
 					fprintf(stderr, "ERROR: --prefix is required\n");
 					return FDB_EXIT_ERROR;
 				}
-
-				f = stopAfter(cleanupDBMove(
-				    sourceDb, Key(prefix.get()), CleanupMovementSourceRequest::CleanupType::ERASE_AND_UNLOCK));
-				break;
-			case DBMoveType::CLEAR_SRC:
-				if (!initSourceCluster(true)) {
+				CleanupMovementSourceRequest::CleanupType cleanupType;
+				if (unlockTenant && eraseTenant) {
+					cleanupType = CleanupMovementSourceRequest::CleanupType::ERASE_AND_UNLOCK;
+				} else if (unlockTenant) {
+					cleanupType = CleanupMovementSourceRequest::CleanupType::UNLOCK;
+				} else if (eraseTenant) {
+					cleanupType = CleanupMovementSourceRequest::CleanupType::ERASE;
+				} else {
+					fprintf(stderr, "ERROR: --unlock and/or --erase are required\n");
 					return FDB_EXIT_ERROR;
 				}
-
-				if (!prefix.present()) {
-					fprintf(stderr, "ERROR: --prefix is required\n");
-					return FDB_EXIT_ERROR;
-				}
-
-				f = stopAfter(
-				    cleanupDBMove(sourceDb, Key(prefix.get()), CleanupMovementSourceRequest::CleanupType::ERASE));
+				f = stopAfter(cleanupDBMove(db, Key(prefix.get()), cleanupType));
 				break;
 			case DBMoveType::LIST: {
 				bool canInitCluster = initCluster();
 				bool canInitSourceCluster = initSourceCluster(true);
 				if (!canInitCluster && !canInitSourceCluster) {
+					fprintf(stderr, "ERROR: -s and -d are required\n");
 					return FDB_EXIT_ERROR;
 				}
 				if (canInitCluster && canInitSourceCluster) {

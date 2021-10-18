@@ -523,7 +523,8 @@ public:
 	                              Key addPrefix,
 	                              Key removePrefix,
 	                              ForceAction = ForceAction::False,
-	                              bool doSwitch = true);
+	                              bool doSwitch = true,
+	                              bool doLockDatabase = true);
 
 	Future<Void> unlockBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<Void> unlockBackup(Database cx, Key tagName) {

@@ -187,14 +187,19 @@ struct TenantMovementInfo {
 	// movement status
 
 	// TODO: how to track destClusterFile?
-	std::string destConnectionString;
+	std::string targetConnectionString;
 	std::string tenantMovementStatus;
 	std::string secondsBehind;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, sourcePrefix, destPrefix, movementLocation, destConnectionString, tenantMovementStatus, secondsBehind);
+		serializer(ar,
+		           sourcePrefix,
+		           destPrefix,
+		           movementLocation,
+		           targetConnectionString,
+		           tenantMovementStatus,
+		           secondsBehind);
 	}
 
 	std::string toJson() const {
@@ -204,7 +209,14 @@ struct TenantMovementInfo {
 
 	std::string toString() const {
 		// TODO transfer the element into plain text format, after we settle down all the needed elements here
-		return "";
+		std::string sourcePrefixStr = sourcePrefix.toString();
+		std::string destinationPrefixStr = destPrefix.toString();
+		std::string movementInfo;
+		movementInfo += "sourcePrefix: " + sourcePrefixStr + " destPrefix " + destinationPrefixStr +
+		                " movementLocation " + std::to_string(static_cast<int>(movementLocation)) +
+		                " targetConnectionString " + targetConnectionString + " tenantMovementStatus " +
+		                tenantMovementStatus + " secondsBehind " + secondsBehind;
+		return movementInfo;
 	}
 };
 

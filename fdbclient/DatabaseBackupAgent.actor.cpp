@@ -2692,7 +2692,8 @@ public:
 	                                           Key addPrefix,
 	                                           Key removePrefix,
 	                                           ForceAction forceAction,
-	                                           bool doSwitch) {
+	                                           bool doSwitch,
+	                                           bool doLockDabatabse) {
 		state DatabaseBackupAgent drAgent(dest);
 		state UID destlogUid = wait(backupAgent->getLogUid(dest, tagName));
 		state EBackupState status = wait(backupAgent->getStateValue(dest, destlogUid));
@@ -2722,7 +2723,9 @@ public:
 		state Version commitVersion;
 		loop {
 			try {
-				wait(lockDatabase(&tr, logUid));
+				if (doLockDabatabse) {
+					wait(lockDatabase(&tr, logUid));
+				}
 				tr.set(backupAgent->tagNames.pack(tagName), logUidValue);
 				wait(tr.commit());
 				commitVersion = tr.getCommittedVersion();
@@ -3237,9 +3240,10 @@ Future<Void> DatabaseBackupAgent::atomicSwitchover(Database dest,
                                                    Key addPrefix,
                                                    Key removePrefix,
                                                    ForceAction forceAction,
-                                                   bool doSwitch) {
+                                                   bool doSwitch,
+                                                   bool doLockDatabase) {
 	return DatabaseBackupAgentImpl::atomicSwitchover(
-	    this, dest, tagName, backupRanges, addPrefix, removePrefix, forceAction, doSwitch);
+	    this, dest, tagName, backupRanges, addPrefix, removePrefix, forceAction, doSwitch, doLockDatabase);
 }
 
 Future<Void> DatabaseBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr,
