@@ -645,7 +645,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID, IKeyValueStore::ReadType) override {
+	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) override {
 		auto a = new Reader::ReadValueAction(key, debugID);
 		auto res = a->result.getFuture();
 		readThreads->post(a);
@@ -654,8 +654,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
-	                                        Optional<UID> debugID,
-	                                        IKeyValueStore::ReadType) override {
+	                                        IKeyValueStore::ReadType,
+	                                        Optional<UID> debugID) override {
 		auto a = new Reader::ReadValuePrefixAction(key, maxLength, debugID);
 		auto res = a->result.getFuture();
 		readThreads->post(a);

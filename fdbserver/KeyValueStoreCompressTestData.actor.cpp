@@ -56,7 +56,7 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override { store->clear(range, arena); }
 	Future<Void> commit(bool sequential = false) override { return store->commit(sequential); }
 
-	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID, IKeyValueStore::ReadType) override {
+	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) override {
 		return doReadValue(store, key, debugID);
 	}
 
@@ -66,8 +66,8 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 	// reason, you will need to fix this.
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
-	                                        Optional<UID> debugID,
-	                                        IKeyValueStore::ReadType) override {
+	                                        IKeyValueStore::ReadType,
+	                                        Optional<UID> debugID) override {
 		return doReadValuePrefix(store, key, maxLength, debugID);
 	}
 
@@ -79,7 +79,7 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 
 private:
 	ACTOR static Future<Optional<Value>> doReadValue(IKeyValueStore* store, Key key, Optional<UID> debugID) {
-		Optional<Value> v = wait(store->readValue(key, debugID));
+		Optional<Value> v = wait(store->readValue(key, IKeyValueStore::ReadType::NORMAL, debugID));
 		if (!v.present())
 			return v;
 		return unpack(v.get());
