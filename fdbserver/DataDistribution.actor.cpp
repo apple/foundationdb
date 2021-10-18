@@ -6296,7 +6296,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				// When cancelled, we cannot clear asyncronously because
 				// this will result in invalid memory access. This should only
 				// be an issue in simulation.
-				ASSERT_WE_THINK(g_network->isSimulated());
+				if (!g_network->isSimulated()) {
+					TraceEvent(SevWarnAlways, "DataDistributorCancelled");
+				}
 				shards.clear();
 			} else {
 				wait(shards.clearAsync());
