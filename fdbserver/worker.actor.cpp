@@ -729,6 +729,103 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 
 } // namespace
 
+bool addressInDbAndRemoteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	const auto& dbi = dbInfo->get();
+
+	for (const auto& logSet : dbi.logSystemConfig.tLogs) {
+		if (logSet.isLocal || logSet.locality == tagLocalitySatellite) {
+			continue;
+		}
+		for (const auto& tlog : logSet.tLogs) {
+			if (tlog.present() && tlog.interf().addresses().contains(address)) {
+				return true;
+			}
+		}
+
+		for (const auto& logRouter : logSet.logRouters) {
+			if (logRouter.present() && logRouter.interf().addresses().contains(address)) {
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+bool addressesInDbAndRemoteDc(const NetworkAddressList& addresses, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	return addressInDbAndRemoteDc(addresses.address, dbInfo) ||
+	       (addresses.secondaryAddress.present() && addressInDbAndRemoteDc(addresses.secondaryAddress.get(), dbInfo));
+}
+
+namespace {
+
+TEST_CASE("/fdbserver/worker/addressInDbAndRemoteDc") {
+	// Setup a ServerDBInfo for test.
+	ServerDBInfo testDbInfo;
+	LocalityData testLocal;
+	testLocal.set(LiteralStringRef("dcid"), StringRef(std::to_string(1)));
+	testDbInfo.master.locality = testLocal;
+
+	// First, create an empty TLogInterface, and check that it shouldn't be considered as in remote DC.
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().isLocal = true;
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface<TLogInterface>());
+	{
+		Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>(testDbInfo));
+		ASSERT(!addressInDbAndRemoteDc(g_network->getLocalAddress(), dbInfo));
+	}
+
+	TLogInterface localTlog(testLocal);
+	localTlog.initEndpoints();
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(localTlog));
+	{
+		Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>(testDbInfo));
+		ASSERT(!addressInDbAndRemoteDc(g_network->getLocalAddress(), dbInfo));
+	}
+
+	// Create a remote TLog, and it should be considered as in remote DC.
+	LocalityData fakeRemote;
+	fakeRemote.set(LiteralStringRef("dcid"), StringRef(std::to_string(2)));
+	TLogInterface remoteTlog(fakeRemote);
+	remoteTlog.initEndpoints();
+
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().isLocal = false;
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(remoteTlog));
+	{
+		Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>(testDbInfo));
+		ASSERT(addressInDbAndRemoteDc(g_network->getLocalAddress(), dbInfo));
+	}
+
+	// Create a remote log router, and it should be considered as in remote DC.
+	NetworkAddress logRouterAddress(IPAddress(0x26262626), 1);
+	TLogInterface remoteLogRouter(fakeRemote);
+	remoteLogRouter.initEndpoints();
+	remoteLogRouter.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ logRouterAddress }, UID(1, 2)));
+	testDbInfo.logSystemConfig.tLogs.back().logRouters.push_back(OptionalInterface(remoteLogRouter));
+	{
+		Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>(testDbInfo));
+		ASSERT(addressInDbAndRemoteDc(logRouterAddress, dbInfo));
+	}
+
+	// Create a satellite tlog, and it shouldn't be considered as in remote DC.
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().locality = tagLocalitySatellite;
+	NetworkAddress satelliteTLogAddress(IPAddress(0x13131313), 1);
+	TLogInterface satelliteTLog(fakeRemote);
+	satelliteTLog.initEndpoints();
+	satelliteTLog.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ satelliteTLogAddress }, UID(1, 2)));
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(satelliteTLog));
+	{
+		Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>(testDbInfo));
+		ASSERT(!addressInDbAndRemoteDc(satelliteTLogAddress, dbInfo));
+	}
+
+	return Void();
+}
+
+} // namespace
+
 // The actor that actively monitors the health of local and peer servers, and reports anomaly to the cluster controller.
 ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                  WorkerInterface interf,
@@ -736,50 +833,64 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
                                  Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                  Reference<AsyncVar<std::vector<NetworkAddress>>> degradedPeers) {
 	loop {
-		state Future<Void> nextHealthCheckDelay = Never();
-		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
-		    addressesInDbAndPrimaryDc(interf.addresses(), dbInfo)) {
+		Future<Void> nextHealthCheckDelay = Never();
+		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS && ccInterface->get().present()) {
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
 			const auto& allPeers = FlowTransport::transport().getAllPeers();
 			std::vector<NetworkAddress> currentDegradedPeers;
-			for (const auto& [address, peer] : allPeers) {
-				if (peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
-					// Ignore peers that don't have enough samples.
-					// TODO(zhewu): Currently, FlowTransport latency monitor clears ping latency samples on a regular
-					//              basis, which may affect the measurement count. Currently,
-					//              WORKER_HEALTH_MONITOR_INTERVAL is much smaller than the ping clearance interval, so
-					//              it may be ok. If this ends to be a problem, we need to consider keep track of last
-					//              ping latencies logged.
-					continue;
-				}
 
-				if (!addressInDbAndPrimaryDc(address, dbInfo)) {
-					// Ignore the servers that are not in the database's transaction system and not in the primary DC.
-					// Note that currently we are not monitor storage servers, since lagging in storage servers today
-					// already can trigger server exclusion by data distributor.
-					continue;
-				}
+			bool workerInDb = false;
+			bool workerInPrimary = false;
+			if (addressesInDbAndPrimaryDc(interf.addresses(), dbInfo)) {
+				workerInDb = true;
+				workerInPrimary = true;
+			} else if (addressesInDbAndRemoteDc(interf.addresses(), dbInfo)) {
+				workerInDb = true;
+				workerInPrimary = false;
+			}
 
-				if (peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
-				        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD ||
-				    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
-				        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
-					// This is a degraded peer.
-					TraceEvent("HealthMonitorDetectDegradedPeer")
-					    .suppressFor(30)
-					    .detail("Peer", address)
-					    .detail("Elapsed", now() - peer->lastLoggedTime)
-					    .detail("MinLatency", peer->pingLatencies.min())
-					    .detail("MaxLatency", peer->pingLatencies.max())
-					    .detail("MeanLatency", peer->pingLatencies.mean())
-					    .detail("MedianLatency", peer->pingLatencies.median())
-					    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
-					    .detail("CheckedPercentileLatency",
-					            peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
-					    .detail("Count", peer->pingLatencies.getPopulationSize())
-					    .detail("TimeoutCount", peer->timeoutCount);
+			if (workerInDb) {
+				for (const auto& [address, peer] : allPeers) {
+					if (peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
+						// Ignore peers that don't have enough samples.
+						// TODO(zhewu): Currently, FlowTransport latency monitor clears ping latency samples on a
+						// regular
+						//              basis, which may affect the measurement count. Currently,
+						//              WORKER_HEALTH_MONITOR_INTERVAL is much smaller than the ping clearance interval,
+						//              so it may be ok. If this ends to be a problem, we need to consider keep track of
+						//              last ping latencies logged.
+						continue;
+					}
 
-					currentDegradedPeers.push_back(address);
+					if ((workerInPrimary && addressInDbAndPrimaryDc(address, dbInfo)) ||
+					    (!workerInPrimary && addressInDbAndRemoteDc(address, dbInfo))) {
+						// Only monitoring the servers that in the primary or remote DC's transaction systems.
+						// Note that currently we are not monitor storage servers, since lagging in storage servers
+						// today already can trigger server exclusion by data distributor.
+
+						if (peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
+						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD ||
+						    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
+						        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
+							// This is a degraded peer.
+							TraceEvent("HealthMonitorDetectDegradedPeer")
+							    .suppressFor(30)
+							    .detail("Peer", address)
+							    .detail("Elapsed", now() - peer->lastLoggedTime)
+							    .detail("MinLatency", peer->pingLatencies.min())
+							    .detail("MaxLatency", peer->pingLatencies.max())
+							    .detail("MeanLatency", peer->pingLatencies.mean())
+							    .detail("MedianLatency", peer->pingLatencies.median())
+							    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
+							    .detail(
+							        "CheckedPercentileLatency",
+							        peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
+							    .detail("Count", peer->pingLatencies.getPopulationSize())
+							    .detail("TimeoutCount", peer->timeoutCount);
+
+							currentDegradedPeers.push_back(address);
+						}
+					}
 				}
 			}
 
