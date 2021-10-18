@@ -21,6 +21,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionKey.actor.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/ExternalDatabase.actor.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/TenantBalancerInterface.h"
 #include "fdbserver/Knobs.h"
@@ -44,17 +45,17 @@ public:
 	SourceMovementRecord(Standalone<StringRef> sourcePrefix,
 	                     Standalone<StringRef> destinationPrefix,
 	                     std::string destDatabaseName,
-	                     Database destinationDb)
+	                     Reference<ExternalDatabase> destinationDb)
 	  : id(deterministicRandom()->randomUniqueID()), sourcePrefix(sourcePrefix), destinationPrefix(destinationPrefix),
 	    destDatabaseName(destDatabaseName), destinationDb(destinationDb) {}
 
 	Standalone<StringRef> getSourcePrefix() const { return sourcePrefix; }
 	Standalone<StringRef> getDestinationPrefix() const { return destinationPrefix; }
-	Database getDestinationDatabase() const { return destinationDb; }
+	Reference<ExternalDatabase> getDestinationDatabase() const { return destinationDb; }
 	std::string getDestinationDatabaseName() const { return destDatabaseName; }
 	std::string getTagName() const { return DBMOVE_TAG_PREFIX.toString() + sourcePrefix.toString(); }
 
-	void setDestinationDatabase(Database db) { destinationDb = db; }
+	void setDestinationDatabase(Reference<ExternalDatabase> db) { destinationDb = db; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -89,7 +90,7 @@ private:
 
 	std::string destDatabaseName;
 	// TODO: leave this open, or open it at request time?
-	Database destinationDb;
+	Reference<ExternalDatabase> destinationDb;
 };
 
 class DestinationMovementRecord {
@@ -98,21 +99,21 @@ public:
 	DestinationMovementRecord(Standalone<StringRef> sourcePrefix,
 	                          Standalone<StringRef> destinationPrefix,
 	                          std::string sourceDatabaseName,
-	                          Database sourceDb)
+	                          Reference<ExternalDatabase> sourceDb)
 	  : id(deterministicRandom()->randomUniqueID()), sourcePrefix(sourcePrefix), destinationPrefix(destinationPrefix),
 	    sourceDatabaseName(sourceDatabaseName), sourceDb(sourceDb) {}
 
 	Standalone<StringRef> getSourcePrefix() const { return sourcePrefix; }
 	Standalone<StringRef> getDestinationPrefix() const { return destinationPrefix; }
-	Database getSourceDatabase() const { return sourceDb; }
+	Reference<ExternalDatabase> getSourceDatabase() const { return sourceDb; }
 	std::string getSourceDatabaseName() const { return sourceDatabaseName; }
 	std::string getTagName() const { return DBMOVE_TAG_PREFIX.toString() + sourcePrefix.toString(); }
 
-	void setSourceDatabase(Database db) { sourceDb = db; }
+	void setSourceDatabase(Reference<ExternalDatabase> db) { sourceDb = db; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, sourcePrefix, destinationPrefix);
+		serializer(ar, id, sourcePrefix, destinationPrefix, sourceDatabaseName);
 	}
 
 	Key getKey() const { return StringRef(id.toString()).withPrefix(tenantBalancerDestinationMovementPrefix); }
@@ -140,7 +141,7 @@ private:
 	Standalone<StringRef> sourcePrefix;
 	Standalone<StringRef> destinationPrefix;
 	std::string sourceDatabaseName;
-	Database sourceDb;
+	Reference<ExternalDatabase> sourceDb;
 };
 
 ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
@@ -164,14 +165,16 @@ struct TenantBalancer {
 	    finishSourceMovementRequests("FinishSourceMovementRequests", tenantBalancerMetrics),
 	    finishDestinationMovementRequests("FinishDestinationMovementRequests", tenantBalancerMetrics),
 	    abortMovementRequests("AbortMovementRequests", tenantBalancerMetrics),
-	    cleanupMovementSourceRequests("CleanupMovementSourceRequests", tenantBalancerMetrics) {
+	    cleanupMovementSourceRequests("CleanupMovementSourceRequests", tenantBalancerMetrics),
+	    externalDatabases(tbi.id(), tbi.locality) {
 		auto info = makeReference<AsyncVar<ClientDBInfo>>();
 		db = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::False, EnableLocalityLoadBalance::True);
+
+		externalDatabases.setRecordDatabase(db);
 
 		agent = DatabaseBackupAgent(db);
 
 		specialCounter(tenantBalancerMetrics, "OpenDatabases", [this]() { return externalDatabases.size(); });
-		specialCounter(tenantBalancerMetrics, "ActiveSourceMoves", [this]() { return externalDatabases.size(); });
 		specialCounter(tenantBalancerMetrics, "ActiveMovesAsSource", [this]() { return outgoingMovements.size(); });
 		specialCounter(
 		    tenantBalancerMetrics, "ActiveMovesAsDestination", [this]() { return incomingMovements.size(); });
@@ -292,82 +295,14 @@ struct TenantBalancer {
 	bool hasSourceMovement(Key prefix) const { return outgoingMovements.count(prefix) > 0; }
 	bool hasDestinationMovement(Key prefix) const { return incomingMovements.count(prefix) > 0; }
 
-	// Returns a database if name doesn't exist or the connection string matches the existing entry
-	ACTOR static Future<Optional<Database>> addExternalDatabaseImpl(TenantBalancer* self,
-	                                                                std::string name,
-	                                                                std::string connectionString) {
-		auto itr = self->externalDatabases.find(name);
-		if (itr != self->externalDatabases.end()) {
-			if (itr->second->getConnectionRecord()->getConnectionString().toString() == connectionString) {
-				TraceEvent(SevDebug, "TenantBalancerReuseDatabase", self->tbi.id())
-				    .detail("Name", name)
-				    .detail("ConnectionString", connectionString);
-
-				return itr->second;
-			}
-
-			TraceEvent("TenantBalancerExternalDatabaseMismatch", self->tbi.id())
-			    .detail("Name", name)
-			    .detail("ExistingConnectionString",
-			            itr->second->getConnectionRecord()->getConnectionString().toString())
-			    .detail("AttemptedConnectionString", connectionString);
-
-			return Optional<Database>();
-		}
-
-		state Transaction tr(self->db);
-		state Key dbKey = StringRef(name).withPrefix(tenantBalancerExternalDatabasePrefix);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-				Optional<Value> v = wait(tr.get(dbKey));
-				ASSERT(!v.present());
-
-				tr.set(dbKey, ValueRef(connectionString));
-				wait(tr.commit());
-				break;
-			} catch (Error& e) {
-				// TODO: timeouts?
-				TraceEvent(SevDebug, "TenantBalancerAddExternalDatabaseError", self->tbi.id())
-				    .error(e)
-				    .detail("Name", name)
-				    .detail("ConnectionString", connectionString);
-
-				wait(tr.onError(e));
-			}
-		}
-
-		Database externalDb = Database::createDatabase(
-		    makeReference<ClusterConnectionKey>(self->db, dbKey, ClusterConnectionString(connectionString), true),
-		    Database::API_VERSION_LATEST,
-		    IsInternal::True,
-		    self->tbi.locality);
-
-		TraceEvent("TenantBalancerAddedExternalDatabase", self->tbi.id())
-		    .detail("Name", name)
-		    .detail("ConnectionString", connectionString);
-
-		self->externalDatabases[name] = externalDb;
-		return externalDb;
-	}
-
-	Future<Optional<Database>> addExternalDatabase(std::string name, std::string connectionString) {
-		return addExternalDatabaseImpl(this, name, connectionString);
-	}
-
-	Optional<Database> getExternalDatabase(std::string name) const {
-		auto itr = externalDatabases.find(name);
-		if (itr == externalDatabases.end()) {
-			return Optional<Database>();
-		}
-
-		return itr->second;
-	}
-
 	ACTOR static Future<Void> recoverImpl(TenantBalancer* self) {
 		TraceEvent("TenantBalancerRecovering", self->tbi.id());
 		state Transaction tr(self->db);
+
+		// This holds references to all loaded external databases until they can be assigned to movement records.
+		// When this vector is destroyed, any unassigned databases will have their reference counts decremented to 0
+		// and their entries will be removed from the map automatically.
+		state std::vector<Reference<ExternalDatabase>> externalDatabasesTemporaryCache;
 
 		state Key begin = tenantBalancerKeys.begin;
 		loop {
@@ -395,12 +330,15 @@ struct TenantBalancer {
 						    .detail("DatabaseName", record.getSourceDatabaseName());
 					} else if (kv.key.startsWith(tenantBalancerExternalDatabasePrefix)) {
 						std::string name = kv.key.removePrefix(tenantBalancerExternalDatabasePrefix).toString();
-						self->externalDatabases[name] = Database::createDatabase(
+						Database db = Database::createDatabase(
 						    makeReference<ClusterConnectionKey>(
 						        self->db, kv.key, ClusterConnectionString(kv.value.toString()), true),
 						    Database::API_VERSION_LATEST,
 						    IsInternal::True,
 						    self->tbi.locality);
+
+						Reference<ExternalDatabase> externalDb = self->externalDatabases.insert(name, db, kv.key);
+						externalDatabasesTemporaryCache.push_back(externalDb);
 
 						TraceEvent(SevDebug, "TenantBalancerRecoverDatabaseConnection", self->tbi.id())
 						    .detail("Name", name)
@@ -424,21 +362,28 @@ struct TenantBalancer {
 		}
 
 		for (auto& itr : self->outgoingMovements) {
-			auto dbItr = self->externalDatabases.find(itr.second.getDestinationDatabaseName());
+			Optional<Reference<ExternalDatabase>> externalDb =
+			    self->externalDatabases.get(itr.second.getDestinationDatabaseName());
+			ASSERT(externalDb.present());
+
 			TraceEvent(SevDebug, "TenantBalancerRecoverOutgoingMovementDatabase", self->tbi.id())
 			    .detail("DatabaseName", itr.second.getDestinationDatabaseName())
 			    .detail("SourcePrefix", itr.second.getSourcePrefix());
-			ASSERT(dbItr != self->externalDatabases.end());
-			itr.second.setDestinationDatabase(dbItr->second);
+
+			itr.second.setDestinationDatabase(externalDb.get());
 		}
 
-		// TODO check why the srcDatabaseNames here are empty, which cause assert failed
-		// for (auto& itr : self->incomingMovements) {
-		// 	auto dbItr = self->externalDatabases.find(itr.second.getSourceDatabaseName());
-		// 	TraceEvent(SevDebug,"TenantBalancerRecoverIncomingMovementDatabase",
-		// self->tbi.id()).detail("databaseName",itr.second.getSourceDatabaseName()); 	ASSERT(dbItr !=
-		// self->externalDatabases.end()); 	itr.second.setSourceDatabase(dbItr->second);
-		// }
+		for (auto& itr : self->incomingMovements) {
+			Optional<Reference<ExternalDatabase>> externalDb =
+			    self->externalDatabases.get(itr.second.getSourceDatabaseName());
+			ASSERT(externalDb.present());
+
+			TraceEvent(SevDebug, "TenantBalancerRecoverIncomingMovementDatabase", self->tbi.id())
+			    .detail("DatabaseName", itr.second.getSourceDatabaseName())
+			    .detail("DestinationPrefix", itr.second.getDestinationPrefix());
+
+			itr.second.setSourceDatabase(externalDb.get());
+		}
 
 		TraceEvent("TenantBalancerRecovered", self->tbi.id());
 		return Void();
@@ -470,15 +415,15 @@ struct TenantBalancer {
 	Counter abortMovementRequests;
 	Counter cleanupMovementSourceRequests;
 
+	ExternalDatabaseMap externalDatabases;
+
 private:
-	// TODO: ref count external databases and delete when all references are gone
-	std::unordered_map<std::string, Database> externalDatabases;
 	std::map<Key, SourceMovementRecord> outgoingMovements;
 	std::map<Key, DestinationMovementRecord> incomingMovements;
 };
 
 ACTOR template <class Request>
-Future<REPLY_TYPE(Request)> sendTenantBalancerRequest(Database peerDb,
+Future<REPLY_TYPE(Request)> sendTenantBalancerRequest(Reference<ExternalDatabase> peerDb,
                                                       Request request,
                                                       RequestStream<Request> TenantBalancerInterface::*stream) {
 	state Future<ErrorOr<REPLY_TYPE(Request)>> replyFuture = Never();
@@ -491,16 +436,19 @@ Future<REPLY_TYPE(Request)> sendTenantBalancerRequest(Database peerDb,
 			}
 			return reply.get();
 		}
-		when(wait(peerDb->onTenantBalancerChanged() || initialize)) {
+		when(wait(peerDb->db->onTenantBalancerChanged() || initialize)) {
 			initialize = Never();
-			replyFuture = peerDb->getTenantBalancer().present()
-			                  ? (peerDb->getTenantBalancer().get().*stream).tryGetReply(request)
+			replyFuture = peerDb->db->getTenantBalancer().present()
+			                  ? (peerDb->db->getTenantBalancer().get().*stream).tryGetReply(request)
 			                  : Never();
 		}
 	}
 }
 
-Future<Void> abortPeer(TenantBalancer* self, Database peerDb, std::string tenantName, bool peerIsSource) {
+Future<Void> abortPeer(TenantBalancer* self,
+                       Reference<ExternalDatabase> peerDb,
+                       std::string tenantName,
+                       bool peerIsSource) {
 	return success(sendTenantBalancerRequest(
 	    peerDb, AbortMovementRequest(tenantName, peerIsSource), &TenantBalancerInterface::abortMovement));
 }
@@ -515,8 +463,8 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 	++self->moveTenantToClusterRequests;
 
 	try {
-		state Optional<Database> destDatabase =
-		    wait(self->addExternalDatabase(req.destConnectionString, req.destConnectionString));
+		state Optional<Reference<ExternalDatabase>> destDatabase =
+		    wait(self->externalDatabases.getOrCreate(req.destConnectionString, req.destConnectionString));
 		if (!destDatabase.present()) {
 			// TODO: how to handle this?
 			ASSERT(false);
@@ -539,7 +487,7 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 
 		// Submit a DR to move the target range
 		bool replacePrefix = req.sourcePrefix != req.destPrefix;
-		wait(self->agent.submitBackup(self->getExternalDatabase(req.destConnectionString).get(),
+		wait(self->agent.submitBackup(destDatabase.get()->db,
 		                              KeyRef(sourceMovementRecord.getTagName()),
 		                              backupRanges,
 		                              StopWhenDone::False,
@@ -552,7 +500,7 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 		wait(self->saveOutgoingMovement(sourceMovementRecord));
 
 		// Check if a DR agent is running to process the move
-		state bool agentRunning = wait(self->agent.checkActive(destDatabase.get()));
+		state bool agentRunning = wait(self->agent.checkActive(destDatabase.get()->db));
 		if (!agentRunning) {
 			throw movement_agent_not_running();
 		}
@@ -588,8 +536,8 @@ ACTOR Future<Void> receiveTenantFromCluster(TenantBalancer* self, ReceiveTenantF
 
 	try {
 		// 0.Extract necessary variables
-		state Optional<Database> srcDatabase =
-		    wait(self->addExternalDatabase(req.srcConnectionString, req.srcConnectionString));
+		state Optional<Reference<ExternalDatabase>> srcDatabase =
+		    wait(self->externalDatabases.getOrCreate(req.srcConnectionString, req.srcConnectionString));
 
 		if (!srcDatabase.present()) {
 			// TODO: how to handle this?
@@ -705,7 +653,7 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 						tenantMovementInfo.sourcePrefix = sourceMovementRecord.getSourcePrefix();
 						tenantMovementInfo.destPrefix = sourceMovementRecord.getDestinationPrefix();
 						tenantMovementInfo.targetConnectionString = sourceMovementRecord.getDestinationDatabase()
-						                                                ->getConnectionRecord()
+						                                                ->db->getConnectionRecord()
 						                                                ->getConnectionString()
 						                                                .toString();
 					} else {
@@ -714,7 +662,7 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 						tenantMovementInfo.sourcePrefix = destinationRecord.getSourcePrefix();
 						tenantMovementInfo.destPrefix = destinationRecord.getDestinationPrefix();
 						tenantMovementInfo.targetConnectionString = destinationRecord.getSourceDatabase()
-						                                                ->getConnectionRecord()
+						                                                ->db->getConnectionRecord()
 						                                                ->getConnectionString()
 						                                                .toString();
 					}
@@ -780,7 +728,7 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 		TraceEvent(SevDebug, "TenantBalancerFinishSourceSwitch", self->tbi.id())
 		    .detail("DestinationDatabaseName", record.getDestinationDatabaseName());
 
-		wait(self->agent.atomicSwitchover(record.getDestinationDatabase(),
+		wait(self->agent.atomicSwitchover(record.getDestinationDatabase()->db,
 		                                  KeyRef(record.getTagName()),
 		                                  backupRanges,
 		                                  StringRef(),
@@ -834,7 +782,7 @@ ACTOR Future<Void> abortMovement(TenantBalancer* self, AbortMovementRequest req)
 	++self->abortMovementRequests;
 
 	try {
-		state Database targetDB;
+		state Reference<ExternalDatabase> targetDB;
 		state std::string tagName;
 		if (req.isSource) {
 			SourceMovementRecord srcRecord = self->getOutgoingMovement(Key(req.tenantName));
@@ -851,8 +799,9 @@ ACTOR Future<Void> abortMovement(TenantBalancer* self, AbortMovementRequest req)
 		    .detail("TenantName", req.tenantName);
 		// TODO: make sure the parameters in abortBackup() are correct
 		wait(self->agent.abortBackup(
-		    targetDB, Key(tagName), PartialBackup{ false }, AbortOldBackup::False, DstOnly{ false }));
-		wait(self->agent.unlockBackup(targetDB, Key(tagName)));
+		    targetDB->db, Key(tagName), PartialBackup{ false }, AbortOldBackup::False, DstOnly{ false }));
+
+		wait(self->agent.unlockBackup(targetDB->db, Key(tagName)));
 
 		// Clear record if abort correctly
 		if (req.isSource) {
