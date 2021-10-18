@@ -866,7 +866,10 @@ private:
 			MutationRef privatized = m;
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
+<<<<<<< HEAD
 			TraceEvent(SevDebug, "SendingPrivatized_ClearTSSMapping", dbgid).detail("M", privatized.toString());
+=======
+>>>>>>> apple-upstream/master
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
 			toCommit->writeTypedMessage(privatized);
 		}
@@ -893,8 +896,11 @@ private:
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
+<<<<<<< HEAD
 					TraceEvent(SevDebug, "SendingPrivatized_ClearTSSQuarantine", dbgid)
 					    .detail("M", privatized.toString());
+=======
+>>>>>>> apple-upstream/master
 					toCommit->addTag(decodeServerTagValue(tagV.get()));
 					toCommit->writeTypedMessage(privatized);
 				}
