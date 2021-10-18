@@ -332,7 +332,9 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	// KeyValueStoreRocksDB
 	init( ROCKSDB_BACKGROUND_PARALLELISM,                          0 );
 	init( ROCKSDB_READ_PARALLELISM,                                4 );
-	init( ROCKSDB_MEMTABLE_BYTES,                  512 * 1024 * 1024 );
+	// Use a smaller memtable in simulation to avoid OOMs.
+	int64_t memtableBytes = isSimulated ? 32 * 1024 : 512 * 1024 * 1024;
+	init( ROCKSDB_MEMTABLE_BYTES,                      memtableBytes );
 	init( ROCKSDB_UNSAFE_AUTO_FSYNC,                           false );
 	init( ROCKSDB_PERIODIC_COMPACTION_SECONDS,                     0 );
 	init( ROCKSDB_PREFIX_LEN,                                      0 );
