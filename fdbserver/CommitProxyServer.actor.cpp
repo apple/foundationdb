@@ -537,11 +537,8 @@ struct CommitBatchContext {
 	double commitStartTime;
 
 	std::unordered_map<uint16_t, Version> tpcvMap; // obtained from resolver
-	std::set<uint16_t> writtenTLogs; // the set of tlog locations written to in the mutation.
 	std::set<Tag> writtenTags; // final set tags written to in the batch
 	std::set<Tag> writtenTagsPreResolution; // tags written to in the batch not including any changes from the resolver.
-	bool hasMetadataMutation = false;
-	bool metadataMutationFromProxy = false;
 
 	CommitBatchContext(ProxyCommitData*, const std::vector<CommitTransactionRequest>*, const int);
 
@@ -564,9 +561,7 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 				auto& tags = pProxyCommitData->tagsForKey(m.param1);
 				transactionTags.insert(tags.begin(), tags.end());
-				toCommit.getLocations(tags, writtenTLogs);
 				if (pProxyCommitData->cacheInfo[m.param1]) {
-					toCommit.getLocations(cacheVector, writtenTLogs);
 					transactionTags.insert(cacheTag);
 				}
 			} else if (m.type == MutationRef::ClearRange) {
@@ -579,7 +574,6 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 					ranges.begin().value().populateTags();
 					filteredTags.insert(ranges.begin().value().tags.begin(), ranges.begin().value().tags.end());
 					transactionTags.insert(ranges.begin().value().tags.begin(), ranges.begin().value().tags.end());
-					toCommit.getLocations(filteredTags, writtenTLogs);
 				} else {
 					std::set<Tag> allSources;
 					for (auto r : ranges) {
@@ -587,17 +581,14 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 						allSources.insert(r.value().tags.begin(), r.value().tags.end());
 						transactionTags.insert(r.value().tags.begin(), r.value().tags.end());
 					}
-					toCommit.getLocations(allSources, writtenTLogs);
 				}
 				if (pProxyCommitData->needsCacheTag(clearRange)) {
-					toCommit.getLocations(cacheVector, writtenTLogs);
 					transactionTags.insert(cacheTag);
 				}
 			} else {
 				UNREACHABLE();
 			}
 		}
-		hasMetadataMutation = containsMetadataMutation(trs[transactionNum].transaction.mutations);
 	}
 
 	return transactionTags;
@@ -737,8 +728,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	GetCommitVersionRequest req(span.context,
 	                            pProxyCommitData->commitVersionRequestNumber++,
 	                            pProxyCommitData->mostRecentProcessedRequestNumber,
-	                            pProxyCommitData->dbgid,
-	                            self->writtenTLogs);
+	                            pProxyCommitData->dbgid);
 	state double beforeGettingCommitVersion = now();
 	GetCommitVersionReply versionReply = wait(brokenPromiseToNever(
 	    pProxyCommitData->master.getCommitVersion.getReply(req, TaskPriority::ProxyMasterVersionReply)));
@@ -839,6 +829,9 @@ void assertResolutionStateMutationsSizeConsistent(const std::vector<ResolveTrans
 	for (int r = 1; r < resolution.size(); r++) {
 		ASSERT(resolution[r].stateMutations.size() == resolution[0].stateMutations.size());
 		ASSERT_EQ(resolution[0].privateMutationCount, resolution[r].privateMutationCount);
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			ASSERT_EQ(resolution[0].tpcvMap.size(), resolution[r].tpcvMap.size());
+		}
 		for (int s = 0; s < resolution[r].stateMutations.size(); s++) {
 			ASSERT(resolution[r].stateMutations[s].size() == resolution[0].stateMutations[s].size());
 		}
@@ -872,11 +865,6 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				                       self->forceRecovery,
 				                       /* popVersion= */ 0,
 				                       /* initialCommit */ false);
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST &&
-				    containsMetadataMutation(
-				        self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations)) {
-					self->metadataMutationFromProxy = true;
-				}
 			}
 			if (self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations.size() &&
 			    self->firstStateMutations) {
