@@ -242,6 +242,9 @@ void sample(LineageReference* lineagePtr) {
 	if (!lineagePtr->isValid()) {
 		return;
 	}
+	if (!lineagePtr->isAllocated()) {
+		lineagePtr->allocate();
+	}
 	(*lineagePtr)->modify(&NameLineage::actorName) = lineagePtr->actorName();
 	boost::asio::post(ActorLineageProfiler::instance().context(),
 	                  [lineage = LineageReference::addRef(lineagePtr->getPtr())]() {
