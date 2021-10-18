@@ -3566,12 +3566,6 @@ int64_t getNumProfilesCaptured() {
 	return numProfilesCaptured;
 }
 
-// InUseByThread1, InUseByThread2
-// Thread marks object in use, after this no one else can use it
-// Thread checks for in use, fails if being used
-// use object
-// Unmark object
-
 void profileHandler(int sig) {
 #ifdef __linux__
 	if (!profileThread) {
