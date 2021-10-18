@@ -157,10 +157,6 @@ struct GranuleHistoryEntry : NonCopyable, ReferenceCounted<GranuleHistoryEntry> 
 	  : range(range), granuleID(granuleID), startVersion(startVersion), endVersion(endVersion) {}
 };
 
-// FIXME: there is a reference cycle here. BWData has GranuleRangeMetadata objects in a map,
-// but each of those has a future to a forever-running actor which has a reference to BWData.
-// To fix this, we should only pass the necessary, specfic fields of BWData to those actors
-// rather than the reference to BWData itself.
 struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	UID id;
 	Database db;
@@ -2545,7 +2541,6 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 					if (BW_DEBUG) {
 						printf("Worker %s got new granule status endpoint\n", self->id.toString().c_str());
 					}
-					// req.reply is marked const unless you mark req as `state`?!?!?
 					// TODO: pick a reasonable byte limit instead of just piggy-backing
 					req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 					self->currentManagerStatusStream.set(req.reply);
@@ -2608,12 +2603,16 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			}
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_operation_cancelled) {
+			self->granuleMetadata.clear();
+		}
 		if (BW_DEBUG) {
 			printf("Blob worker got error %s. Exiting...\n", e.name());
 		}
 		TraceEvent("BlobWorkerDied", self->id).error(e, true);
 	}
 
+	wait(self->granuleMetadata.clearAsync());
 	return Void();
 }
 
