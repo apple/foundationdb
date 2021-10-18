@@ -157,6 +157,8 @@ public:
 
 	int getCommitOverhead() const override { return 0; }
 
+	bool isReady() const { return recovered || initialized; }
+
 private:
 	UID dbgid;
 	std::map<location, Standalone<StringRef>> q;
