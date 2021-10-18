@@ -6300,6 +6300,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					TraceEvent(SevWarnAlways, "DataDistributorCancelled");
 				}
 				shards.clear();
+				throw e;
 			} else {
 				wait(shards.clearAsync());
 			}
