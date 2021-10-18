@@ -187,16 +187,14 @@ struct ConfigFollowerRollforwardRequest {
 
 struct ConfigFollowerGetCommittedVersionReply {
 	static constexpr FileIdentifier file_identifier = 9214735;
-	Version secondToLastCommitted;
 	Version lastCommitted;
 
 	ConfigFollowerGetCommittedVersionReply() = default;
-	explicit ConfigFollowerGetCommittedVersionReply(Version secondToLastCommitted, Version lastCommitted)
-	  : secondToLastCommitted(secondToLastCommitted), lastCommitted(lastCommitted) {}
+	explicit ConfigFollowerGetCommittedVersionReply(Version lastCommitted) : lastCommitted(lastCommitted) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, secondToLastCommitted, lastCommitted);
+		serializer(ar, lastCommitted);
 	}
 };
 
