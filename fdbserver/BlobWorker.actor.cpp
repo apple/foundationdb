@@ -2605,6 +2605,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	} catch (Error& e) {
 		if (e.code() == error_code_operation_cancelled) {
 			self->granuleMetadata.clear();
+			throw;
 		}
 		if (BW_DEBUG) {
 			printf("Blob worker got error %s. Exiting...\n", e.name());
