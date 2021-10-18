@@ -764,13 +764,11 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( LATENCY_METRICS_LOGGING_INTERVAL,                     60.0 );
 
 	// Blob granlues
-	init( BG_URL,                                                 "" );
-	// TODO CHANGE BACK!!
+	init( BG_URL,                                                 "" ); // TODO: store in system key space, eventually
 	init( BG_SNAPSHOT_FILE_TARGET_BYTES,                    10000000 ); if( randomize && BUGGIFY ) { deterministicRandom()->random01() < 0.1 ? BG_SNAPSHOT_FILE_TARGET_BYTES /= 100 : BG_SNAPSHOT_FILE_TARGET_BYTES /= 10; }
 	init( BG_DELTA_BYTES_BEFORE_COMPACT, BG_SNAPSHOT_FILE_TARGET_BYTES/2 );
 	init( BG_DELTA_FILE_TARGET_BYTES,   BG_DELTA_BYTES_BEFORE_COMPACT/10 );
 
-	// TODO should discuss proper value for this
 	init( BLOB_WORKER_TIMEOUT,                                  10.0 ); if( randomize && BUGGIFY ) BLOB_WORKER_TIMEOUT = 1.0;
 
 	// clang-format on

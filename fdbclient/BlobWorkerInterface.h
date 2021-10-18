@@ -29,7 +29,7 @@
 
 struct BlobWorkerInterface {
 	constexpr static FileIdentifier file_identifier = 8358753;
-	// TODO should we just implement off the bad what the StorageServerInterface does with sequential endpoint IDs?
+	// TODO: mimic what StorageServerInterface does with sequential endpoint IDs
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct BlobGranuleFileRequest> blobGranuleFileRequest;
 	RequestStream<struct AssignBlobRangeRequest> assignBlobRangeRequest;
@@ -175,7 +175,8 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
-		           ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence,
+		           ReplyPromiseStreamReply::acknowledgeToken,
+		           ReplyPromiseStreamReply::sequence,
 		           granuleRange,
 		           doSplit,
 		           epoch,

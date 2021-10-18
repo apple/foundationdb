@@ -18,9 +18,15 @@
  * limitations under the License.
  */
 
+#include <map>
+#include <vector>
+
 #include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbclient/Atomic.h"
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
+#include "fdbclient/BlobWorkerCommon.h"
+#include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/SystemData.h" // for allKeys unit test - could remove
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -263,13 +269,13 @@ static void applyDeltas(std::map<KeyRef, ValueRef>* dataMap,
 	}
 }
 
-// TODO: improve the interface of this function so that it doesn't need 
+// TODO: improve the interface of this function so that it doesn't need
 //       to be passed the entire BlobWorkerStats object
 ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
                                           KeyRangeRef keyRange,
                                           Version readVersion,
                                           Reference<BackupContainerFileSystem> bstore,
-                                          Optional<BlobWorkerStats *> stats) {
+                                          Optional<BlobWorkerStats*> stats) {
 
 	// TODO REMOVE with V2 of protocol
 	ASSERT(readVersion == chunk.includedVersion);

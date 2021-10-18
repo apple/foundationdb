@@ -1961,7 +1961,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	ACTOR Future<bool> checkBlobWorkers(Database cx,
 	                                    DatabaseConfiguration configuration,
 	                                    ConsistencyCheckWorkload* self) {
-		// TODO: assert that there are blob workers iff the blob gate is true
 		state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(cx));
 		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 
@@ -1994,10 +1993,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			blobWorkersByAddr[bwi.stableAddress()]++;
 		}
 
+		int numBlobWorkerProcesses = 0;
 		for (const auto& worker : workers) {
 			NetworkAddress addr = worker.interf.stableAddress();
 			if (!configuration.isExcludedServer(worker.interf.addresses())) {
 				if (worker.processClass == ProcessClass::BlobWorkerClass) {
+					numBlobWorkerProcesses++;
+
 					// this is a worker with processClass == BWClass, so should have exactly one blob worker
 					if (blobWorkersByAddr[addr] == 0) {
 						TraceEvent("ConsistencyCheck_NoBWsOnBWClass")
@@ -2022,7 +2024,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 			}
 		}
-		return true;
+		return numBlobWorkerProcesses > 0;
 	}
 
 	ACTOR Future<bool> checkWorkerList(Database cx, ConsistencyCheckWorkload* self) {

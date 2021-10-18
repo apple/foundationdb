@@ -1496,8 +1496,8 @@ Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string 
 #endif
 }
 
-// Get an BackupContainerFileSystem based on a container URL string
-// FIXME: refactor to not duplicate IBackupContainer::openContaineronce this is confirmed to work. It's the exact same
+// Get a BackupContainerFileSystem based on a container URL string
+// TODO: refactor to not duplicate IBackupContainer::openContainer. It's the exact same
 // code but returning a different template type because you can't cast between them
 Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
     const std::string& url,

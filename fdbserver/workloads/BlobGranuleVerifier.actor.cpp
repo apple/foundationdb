@@ -18,6 +18,10 @@
  * limitations under the License.
  */
 
+#include <map>
+#include <utility>
+#include <vector>
+
 #include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
