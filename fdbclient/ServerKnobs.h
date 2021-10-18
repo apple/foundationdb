@@ -227,6 +227,8 @@ public:
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 
+	int IKVS_PORT;
+
 	// KeyValueStore SQLITE
 	int CLEAR_BUFFER_SIZE;
 	double READ_VALUE_TIME_ESTIMATE;

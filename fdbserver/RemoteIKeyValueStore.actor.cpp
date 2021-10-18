@@ -10,6 +10,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/network.h"
 #include "flow/Platform.h"
+#include <string>
 
 ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterface) {
 	state ActorCollection actors(false);
@@ -101,8 +102,10 @@ struct IKVSProcess {
 private:
 	// TODO: rename to initializeIKVSProcess
 	ACTOR static Future<Void> init(IKVSProcess* self) {
-
-		state NetworkAddress addr = NetworkAddress::parse("127.0.0.1:28374");
+		std::string ikvsAddrStr = "127.0.0.1:";
+		std::string ikvsPortStr = std::to_string(SERVER_KNOBS->IKVS_PORT);
+		ikvsAddrStr.append(ikvsPortStr);
+		state NetworkAddress addr = NetworkAddress::parse(ikvsAddrStr);
 		state IKVSProcessInterface ikvsProcessServer;
 		ikvsProcessServer.getProcessInterface =
 		    RequestStream<GetIKVSProcessInterfaceRequest>(Endpoint({ addr }, UID(-1, 2)));
@@ -111,10 +114,10 @@ private:
 			// no ikvs process is running
 			state std::string absExecPath = abspath(getExecPath());
 			state std::vector<std::string> paramList = {
-				absExecPath, "-r", "remoteIKVS", "-p", "127.0.0.1:28374", "--knob_min_trace_severity", "1"
+				absExecPath,        "-r",       "remoteIKVS", "-p", ikvsAddrStr, "--knob_min_trace_severity", "1",
+				"--knob_ikvs_port", ikvsPortStr
 			};
 			self->ikvsProcess = spawnProcess(absExecPath, paramList, 20.0, false, 0.01);
-
 			std::cout << "creating new endpoint\n";
 			IKVSProcessInterface processInterface =
 			    wait(ikvsProcessServer.getProcessInterface.getReply(GetIKVSProcessInterfaceRequest()));
