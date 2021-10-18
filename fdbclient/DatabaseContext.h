@@ -382,6 +382,8 @@ public:
 	Counter transactionsProcessBehind;
 	Counter transactionsThrottled;
 	Counter transactionsExpensiveClearCostEstCount;
+	Counter transactionGrvFullBatches;
+	Counter transactionGrvTimedOutBatches;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
 	    bytesPerCommit;
@@ -392,6 +394,7 @@ public:
 	int snapshotRywEnabled;
 
 	int transactionTracingEnabled;
+	double verifyCausalReadsProp = 0.0;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;
