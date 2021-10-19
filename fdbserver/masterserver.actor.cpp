@@ -1324,7 +1324,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 			}
 			when(ReportRawCommittedVersionRequest req =
 			         waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST && req.prevVersion.present() &&
+				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.prevVersion.present() &&
 				    (self->liveCommittedVersion.get() != invalidVersion) &&
 				    (self->liveCommittedVersion.get() < req.prevVersion.get())) {
 					self->addActor.send(waitForPrev(self, req));
