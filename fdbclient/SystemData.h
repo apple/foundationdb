@@ -497,8 +497,9 @@ extern const ValueRef writeRecoveryKeyTrue;
 extern const KeyRef snapshotEndVersionKey;
 
 extern const KeyRangeRef changeFeedKeys;
-const Value changeFeedValue(KeyRangeRef const& range, Version popVersion, bool stopped);
-std::tuple<KeyRange, Version, bool> decodeChangeFeedValue(ValueRef const& value);
+enum class ChangeFeedStatus { CHANGE_FEED_CREATE = 0, CHANGE_FEED_STOP = 1, CHANGE_FEED_DESTROY = 2 };
+const Value changeFeedValue(KeyRangeRef const& range, Version popVersion, ChangeFeedStatus status);
+std::tuple<KeyRange, Version, ChangeFeedStatus> decodeChangeFeedValue(ValueRef const& value);
 extern const KeyRef changeFeedPrefix;
 extern const KeyRef changeFeedPrivatePrefix;
 

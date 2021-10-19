@@ -78,7 +78,6 @@ struct StorageServerInterface {
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
 	RequestStream<struct GetKeyValuesStreamRequest> getKeyValuesStream;
-	RequestStream<struct ChangeFeedRequest> changeFeed;
 	RequestStream<struct ChangeFeedStreamRequest> changeFeedStream;
 	RequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
 	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
@@ -124,13 +123,12 @@ struct StorageServerInterface {
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
 				getKeyValuesStream =
 				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
-				changeFeed = RequestStream<struct ChangeFeedRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
 				changeFeedStream =
-				    RequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
+				    RequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
 				overlappingChangeFeeds =
-				    RequestStream<struct OverlappingChangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
+				    RequestStream<struct OverlappingChangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
 				changeFeedPop =
-				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
+				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -173,7 +171,6 @@ struct StorageServerInterface {
 		streams.push_back(getReadHotRanges.getReceiver());
 		streams.push_back(getRangeSplitPoints.getReceiver());
 		streams.push_back(getKeyValuesStream.getReceiver(TaskPriority::LoadBalancedEndpoint));
-		streams.push_back(changeFeed.getReceiver());
 		streams.push_back(changeFeedStream.getReceiver());
 		streams.push_back(overlappingChangeFeeds.getReceiver());
 		streams.push_back(changeFeedPop.getReceiver());
@@ -666,43 +663,12 @@ struct MutationsAndVersionRef {
 	}
 };
 
-struct ChangeFeedReply {
-	constexpr static FileIdentifier file_identifier = 11815134;
-	VectorRef<MutationsAndVersionRef> mutations;
-	bool cached;
-	Arena arena;
-
-	ChangeFeedReply() : cached(false) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, mutations, arena);
-	}
-};
-struct ChangeFeedRequest {
-	constexpr static FileIdentifier file_identifier = 10726174;
-	Key rangeID;
-	Version begin = 0;
-	Version end = 0;
-	KeyRange range;
-	ReplyPromise<ChangeFeedReply> reply;
-
-	ChangeFeedRequest() {}
-	explicit ChangeFeedRequest(Key const& rangeID) : rangeID(rangeID) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, rangeID, begin, end, range, reply);
-	}
-};
-
 struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 	constexpr static FileIdentifier file_identifier = 1783066;
 	Arena arena;
 	VectorRef<MutationsAndVersionRef> mutations;
 
 	ChangeFeedStreamReply() {}
-	ChangeFeedStreamReply(ChangeFeedReply r) : arena(r.arena), mutations(r.mutations) {}
 
 	int expectedSize() const { return sizeof(ChangeFeedStreamReply) + mutations.expectedSize(); }
 

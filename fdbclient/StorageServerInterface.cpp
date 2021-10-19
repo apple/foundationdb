@@ -272,26 +272,6 @@ void TSS_traceMismatch(TraceEvent& event,
 
 // change feed
 template <>
-bool TSS_doCompare(const ChangeFeedReply& src, const ChangeFeedReply& tss) {
-	ASSERT(false);
-	return true;
-}
-
-template <>
-const char* TSS_mismatchTraceName(const ChangeFeedRequest& req) {
-	ASSERT(false);
-	return "";
-}
-
-template <>
-void TSS_traceMismatch(TraceEvent& event,
-                       const ChangeFeedRequest& req,
-                       const ChangeFeedReply& src,
-                       const ChangeFeedReply& tss) {
-	ASSERT(false);
-}
-
-template <>
 bool TSS_doCompare(const OverlappingChangeFeedsReply& src, const OverlappingChangeFeedsReply& tss) {
 	ASSERT(false);
 	return true;
@@ -371,9 +351,6 @@ void TSSMetrics::recordLatency(const SplitRangeRequest& req, double ssLatency, d
 
 template <>
 void TSSMetrics::recordLatency(const GetKeyValuesStreamRequest& req, double ssLatency, double tssLatency) {}
-
-template <>
-void TSSMetrics::recordLatency(const ChangeFeedRequest& req, double ssLatency, double tssLatency) {}
 
 template <>
 void TSSMetrics::recordLatency(const OverlappingChangeFeedsRequest& req, double ssLatency, double tssLatency) {}

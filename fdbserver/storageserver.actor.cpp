@@ -318,12 +318,14 @@ struct FetchInjectionInfo {
 
 struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	std::deque<Standalone<MutationsAndVersionRef>> mutations;
-	Version storageVersion = invalidVersion;
-	Version durableVersion = invalidVersion;
-	Version emptyVersion = 0;
+	Version storageVersion = invalidVersion; // The version between the storage version and the durable version are
+	                                         // currently being written to disk
+	Version durableVersion = invalidVersion; // All versions before the durable version are durable on disk
+	Version emptyVersion = 0; // The change feed does not have any mutations before emptyVersion
 	KeyRange range;
 	Key id;
 	AsyncTrigger newMutations;
+	bool stopped = false; // A stopped change feed no longer adds new mutations, but is still queriable
 };
 
 class ServerWatchMetadata : public ReferenceCounted<ServerWatchMetadata> {
@@ -1547,7 +1549,7 @@ ACTOR Future<Void> watchValueSendReply(StorageServer* data,
 ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req) {
 	wait(delay(0));
 
-	TraceEvent("ChangeFeedPopQuery", self->thisServerID)
+	TraceEvent(SevDebug, "ChangeFeedPopQuery", self->thisServerID)
 	    .detail("RangeID", req.rangeID.printable())
 	    .detail("Version", req.version)
 	    .detail("Range", req.range.toString());
@@ -1605,9 +1607,57 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 	return Void();
 }
 
-MutationsAndVersionRef filterMutations(Arena& arena, MutationsAndVersionRef const& m, KeyRange const& range) {
+MutationsAndVersionRef filterMutationsInverted(Arena& arena, MutationsAndVersionRef const& m, KeyRange const& range) {
+	Optional<VectorRef<MutationRef>> modifiedMutations;
+	for (int i = 0; i < m.mutations.size(); i++) {
+		if (m.mutations[i].type == MutationRef::SetValue) {
+			if (modifiedMutations.present() && !range.contains(m.mutations[i].param1)) {
+				modifiedMutations.get().push_back(arena, m.mutations[i]);
+			}
+			if (!modifiedMutations.present() && range.contains(m.mutations[i].param1)) {
+				modifiedMutations = m.mutations.slice(0, i);
+				arena.dependsOn(range.arena());
+			}
+		} else {
+			ASSERT(m.mutations[i].type == MutationRef::ClearRange);
+			if (!modifiedMutations.present() &&
+			    ((m.mutations[i].param1 < range.begin && m.mutations[i].param2 > range.begin) ||
+			     (m.mutations[i].param2 > range.end && m.mutations[i].param1 < range.end))) {
+				modifiedMutations = m.mutations.slice(0, i);
+				arena.dependsOn(range.arena());
+			}
+			if (modifiedMutations.present()) {
+				if (m.mutations[i].param1 < range.begin) {
+					modifiedMutations.get().push_back(arena,
+					                                  MutationRef(MutationRef::ClearRange,
+					                                              m.mutations[i].param1,
+					                                              std::min(range.begin, m.mutations[i].param2)));
+				}
+				if (m.mutations[i].param2 > range.end) {
+					modifiedMutations.get().push_back(arena,
+					                                  MutationRef(MutationRef::ClearRange,
+					                                              std::max(range.end, m.mutations[i].param1),
+					                                              m.mutations[i].param2));
+				}
+			}
+		}
+	}
+	if (modifiedMutations.present()) {
+		return MutationsAndVersionRef(modifiedMutations.get(), m.version, m.knownCommittedVersion);
+	}
+	return m;
+}
+
+MutationsAndVersionRef filterMutations(Arena& arena,
+                                       MutationsAndVersionRef const& m,
+                                       KeyRange const& range,
+                                       bool inverted) {
 	if (m.mutations.size() == 1 && m.mutations.back().param1 == lastEpochEndPrivateKey) {
 		return m;
+	}
+
+	if (inverted) {
+		return filterMutationsInverted(arena, m, range);
 	}
 
 	Optional<VectorRef<MutationRef>> modifiedMutations;
@@ -1643,9 +1693,13 @@ MutationsAndVersionRef filterMutations(Arena& arena, MutationsAndVersionRef cons
 	return m;
 }
 
-ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, ChangeFeedRequest req) {
-	state ChangeFeedReply reply;
+ACTOR Future<ChangeFeedStreamReply> getChangeFeedMutations(StorageServer* data,
+                                                           ChangeFeedStreamRequest req,
+                                                           bool inverted) {
+	state ChangeFeedStreamReply reply;
+	state ChangeFeedStreamReply memoryReply;
 	state int remainingLimitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+	state int remainingDurableBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 	if (data->version.get() < req.begin) {
 		wait(data->version.whenAtLeast(req.begin));
@@ -1659,35 +1713,38 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 	if (feed == data->uidChangeFeed.end()) {
 		throw unknown_change_feed();
 	}
+
+	// We must copy the mutationDeque when fetching the durable bytes in case mutations are popped from memory while
+	// waiting for the results
 	state Version dequeVersion = data->version.get();
 	state Version dequeKnownCommit = data->knownCommittedVersion;
-	if (req.end <= feed->second->emptyVersion + 1) {
-	} else if (feed->second->durableVersion == invalidVersion || req.begin > feed->second->durableVersion) {
+
+	if (req.end > feed->second->emptyVersion + 1) {
 		for (auto& it : feed->second->mutations) {
 			if (it.version >= req.end || remainingLimitBytes <= 0) {
 				break;
 			}
 			if (it.version >= req.begin) {
-				reply.arena.dependsOn(it.arena());
-				auto m = filterMutations(reply.arena, it, req.range);
-				reply.mutations.push_back(reply.arena, m);
+				memoryReply.arena.dependsOn(it.arena());
+				auto m = filterMutations(memoryReply.arena, it, req.range, inverted);
+				memoryReply.mutations.push_back(memoryReply.arena, m);
 				remainingLimitBytes -= sizeof(MutationsAndVersionRef) + m.expectedSize();
 			}
 		}
-	} else {
-		state std::deque<Standalone<MutationsAndVersionRef>> mutationsDeque = feed->second->mutations;
-		state Version startingDurableVersion = feed->second->durableVersion;
+	}
 
+	if (req.end > feed->second->emptyVersion + 1 && feed->second->durableVersion != invalidVersion &&
+	    req.begin <= feed->second->durableVersion) {
 		RangeResult res = wait(data->storage.readRange(
-		    KeyRangeRef(changeFeedDurableKey(req.rangeID, req.begin), changeFeedDurableKey(req.rangeID, req.end)),
+		    KeyRangeRef(changeFeedDurableKey(req.rangeID, std::max(req.begin, feed->second->emptyVersion)),
+		                changeFeedDurableKey(req.rangeID, req.end)),
 		    1 << 30,
-		    remainingLimitBytes));
+		    remainingDurableBytes));
 
 		if (!req.range.empty()) {
 			data->checkChangeCounter(changeCounter, req.range);
 		}
 
-		bool isEmpty = res.size() == 0;
 		Version lastVersion = req.begin - 1;
 		for (auto& kv : res) {
 			Key id;
@@ -1697,58 +1754,28 @@ ACTOR Future<ChangeFeedReply> getChangeFeedMutations(StorageServer* data, Change
 			std::tie(mutations, knownCommittedVersion) = decodeChangeFeedDurableValue(kv.value);
 			reply.arena.dependsOn(mutations.arena());
 			auto m = filterMutations(
-			    reply.arena, MutationsAndVersionRef(mutations, version, knownCommittedVersion), req.range);
+			    reply.arena, MutationsAndVersionRef(mutations, version, knownCommittedVersion), req.range, inverted);
 			reply.mutations.push_back(reply.arena, m);
-			remainingLimitBytes -=
+			remainingDurableBytes -=
 			    sizeof(KeyValueRef) +
-			    kv.expectedSize(); // FIXME: this is currently tracking the size on disk rather than the reply size
-			                       // because we cannot add mutaitons from memory if there are potentially more on disk
+			    kv.expectedSize(); // This is tracking the size on disk rather than the reply size
+			                       // because we cannot add mutations from memory if there are potentially more on disk
 			lastVersion = version;
 		}
-		for (auto& it : mutationsDeque) {
-			if (it.version >= req.end || remainingLimitBytes <= 0) {
-				break;
+		if (remainingDurableBytes > 0) {
+			reply.arena.dependsOn(memoryReply.arena);
+			auto it = memoryReply.mutations.begin();
+			int totalCount = memoryReply.mutations.size();
+			while (it != memoryReply.mutations.end() && it->version <= lastVersion) {
+				++it;
+				--totalCount;
 			}
-			if (it.version > lastVersion) {
-				if (it.mutations.size()) {
-					isEmpty = false;
-				}
-				reply.arena.dependsOn(it.arena());
-				auto m = filterMutations(reply.arena, it, req.range);
-				reply.mutations.push_back(reply.arena, m);
-				remainingLimitBytes -= sizeof(MutationsAndVersionRef) + m.expectedSize();
-			}
-		}
-		if (isEmpty) {
-			auto feed = data->uidChangeFeed.find(req.rangeID);
-			if (feed != data->uidChangeFeed.end() && startingDurableVersion == feed->second->storageVersion &&
-			    req.end > startingDurableVersion) {
-				if (req.begin == 0) {
-					feed->second->durableVersion = req.end > data->storageVersion() ? invalidVersion : req.end;
-				} else {
-					RangeResult emp = wait(data->storage.readRange(
-					    KeyRangeRef(changeFeedDurableKey(req.rangeID, 0), changeFeedDurableKey(req.rangeID, req.end)),
-					    -1));
-					if (!req.range.empty()) {
-						data->checkChangeCounter(changeCounter, req.range);
-					}
-					auto feed = data->uidChangeFeed.find(req.rangeID);
-					if (feed != data->uidChangeFeed.end() && startingDurableVersion == feed->second->storageVersion) {
-						if (emp.empty()) {
-							feed->second->durableVersion = req.end > data->storageVersion() ? invalidVersion : req.end;
-						} else {
-							Key id;
-							Version version;
-							std::tie(id, version) = decodeChangeFeedDurableKey(emp[0].key);
-							feed->second->durableVersion = version;
-						}
-					}
-				}
-			}
+			reply.mutations.append(reply.arena, it, totalCount);
 		}
 	}
 	Version finalVersion = std::min(req.end - 1, dequeVersion);
-	if ((reply.mutations.empty() || reply.mutations.back().version < finalVersion) && remainingLimitBytes > 0) {
+	if ((reply.mutations.empty() || reply.mutations.back().version < finalVersion) && remainingLimitBytes > 0 &&
+	    remainingDurableBytes > 0) {
 		reply.mutations.push_back(
 		    reply.arena, MutationsAndVersionRef(finalVersion, finalVersion == dequeVersion ? dequeKnownCommit : 0));
 	}
@@ -1759,14 +1786,16 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
                                          PromiseStream<Standalone<MutationsAndVersionRef>> results,
                                          Key rangeID,
                                          Version begin,
-                                         Version end) {
+                                         Version end,
+                                         KeyRange range) {
 	try {
 		loop {
-			state ChangeFeedRequest feedRequest;
+			state ChangeFeedStreamRequest feedRequest;
 			feedRequest.rangeID = rangeID;
 			feedRequest.begin = begin;
 			feedRequest.end = end;
-			state ChangeFeedReply feedReply = wait(getChangeFeedMutations(data, feedRequest));
+			feedRequest.range = range;
+			state ChangeFeedStreamReply feedReply = wait(getChangeFeedMutations(data, feedRequest, true));
 			begin = feedReply.mutations.back().version + 1;
 			state int resultLoc = 0;
 			while (resultLoc < feedReply.mutations.size()) {
@@ -1788,22 +1817,9 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
 	}
 }
 
-ACTOR Future<Void> changeFeedQ(StorageServer* data, ChangeFeedRequest req) {
-	try {
-		ChangeFeedReply rep = wait(getChangeFeedMutations(data, req));
-		req.reply.send(rep);
-	} catch (Error& e) {
-		if (!canReplyWith(e))
-			throw;
-		req.reply.sendError(e);
-	}
-	return Void();
-}
-
 ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamRequest req)
 {
 	state Span span("SS:getChangeFeedStream"_loc, { req.spanContext });
-	state Version begin = req.begin;
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 
 	wait(delay(0, TaskPriority::DefaultEndpoint));
@@ -1811,15 +1827,11 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 	try {
 		loop {
 			wait(req.reply.onReady());
-			state ChangeFeedRequest feedRequest;
-			feedRequest.rangeID = req.rangeID;
-			feedRequest.begin = begin;
-			feedRequest.end = req.end;
-			feedRequest.range = req.range;
-			ChangeFeedReply feedReply = wait(getChangeFeedMutations(data, feedRequest));
+			ChangeFeedStreamReply _feedReply = wait(getChangeFeedMutations(data, req, false));
+			ChangeFeedStreamReply feedReply = _feedReply;
 
-			begin = feedReply.mutations.back().version + 1;
-			req.reply.send(ChangeFeedStreamReply(feedReply));
+			req.begin = feedReply.mutations.back().version + 1;
+			req.reply.send(feedReply);
 			if (feedReply.mutations.back().version == req.end - 1) {
 				req.reply.sendError(end_of_stream());
 				return Void();
@@ -1827,7 +1839,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			if (feedReply.mutations.back().mutations.empty()) {
 				auto feed = data->uidChangeFeed.find(req.rangeID);
 				if (feed == data->uidChangeFeed.end()) {
-					throw unknown_change_feed();
+					req.reply.sendError(unknown_change_feed());
+					return Void();
 				}
 				choose {
 					when(wait(delay(5.0, TaskPriority::DefaultEndpoint))) {}
@@ -2964,11 +2977,13 @@ void applyMutation(StorageServer* self,
 
 		if (!fromFetch) {
 			for (auto& it : self->keyChangeFeed[m.param1]) {
-				if (it->mutations.empty() || it->mutations.back().version != version) {
-					it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion));
+				if (!it->stopped) {
+					if (it->mutations.empty() || it->mutations.back().version != version) {
+						it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion));
+					}
+					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
+					self->currentChangeFeeds.insert(it->id);
 				}
-				it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
-				self->currentChangeFeeds.insert(it->id);
 			}
 		}
 	} else if (m.type == MutationRef::ClearRange) {
@@ -2982,11 +2997,13 @@ void applyMutation(StorageServer* self,
 			auto ranges = self->keyChangeFeed.intersectingRanges(KeyRangeRef(m.param1, m.param2));
 			for (auto& r : ranges) {
 				for (auto& it : r.value()) {
-					if (it->mutations.empty() || it->mutations.back().version != version) {
-						it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion));
+					if (!it->stopped) {
+						if (it->mutations.empty() || it->mutations.back().version != version) {
+							it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion));
+						}
+						it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
+						self->currentChangeFeeds.insert(it->id);
 					}
-					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
-					self->currentChangeFeeds.insert(it->id);
 				}
 			}
 		}
@@ -3233,7 +3250,7 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange ra
 	wait(delay(0)); // allow this actor to be cancelled by removals
 	bool existing = data->uidChangeFeed.count(rangeId);
 
-	TraceEvent("FetchChangeFeed", data->thisServerID)
+	TraceEvent(SevDebug, "FetchChangeFeed", data->thisServerID)
 	    .detail("RangeID", rangeId.printable())
 	    .detail("Range", range.toString())
 	    .detail("Existing", existing);
@@ -3249,10 +3266,11 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange ra
 		}
 		data->keyChangeFeed.coalesce(range.contents());
 		auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-		data->addMutationToMutationLog(mLV,
-		                               MutationRef(MutationRef::SetValue,
-		                                           persistChangeFeedKeys.begin.toString() + rangeId.toString(),
-		                                           changeFeedValue(range, invalidVersion, false)));
+		data->addMutationToMutationLog(
+		    mLV,
+		    MutationRef(MutationRef::SetValue,
+		                persistChangeFeedKeys.begin.toString() + rangeId.toString(),
+		                changeFeedValue(range, invalidVersion, ChangeFeedStatus::CHANGE_FEED_CREATE)));
 	} else {
 		changeFeedInfo = data->uidChangeFeed[rangeId];
 	}
@@ -3283,7 +3301,10 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange ra
 	}
 
 	state PromiseStream<Standalone<MutationsAndVersionRef>> localResults;
-	state Future<Void> localStream = localChangeFeedStream(data, localResults, rangeId, 0, fetchVersion + 2);
+
+	// Add 2 to fetch version to make sure the local stream will have more versions in the stream than the remote stream
+	// to avoid edge cases in the merge logic
+	state Future<Void> localStream = localChangeFeedStream(data, localResults, rangeId, 0, fetchVersion + 2, range);
 	state Standalone<MutationsAndVersionRef> localResult;
 
 	Standalone<MutationsAndVersionRef> _localResult = waitNext(localResults.getFuture());
@@ -3755,21 +3776,25 @@ void AddingShard::addMutation(Version version, bool fromFetch, MutationRef const
 		if (!fromFetch) {
 			if (mutation.type == MutationRef::SetValue) {
 				for (auto& it : server->keyChangeFeed[mutation.param1]) {
-					if (it->mutations.empty() || it->mutations.back().version != version) {
-						it->mutations.push_back(MutationsAndVersionRef(version, server->knownCommittedVersion));
-					}
-					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), mutation);
-					server->currentChangeFeeds.insert(it->id);
-				}
-			} else if (mutation.type == MutationRef::ClearRange) {
-				auto ranges = server->keyChangeFeed.intersectingRanges(KeyRangeRef(mutation.param1, mutation.param2));
-				for (auto& r : ranges) {
-					for (auto& it : r.value()) {
+					if (!it->stopped) {
 						if (it->mutations.empty() || it->mutations.back().version != version) {
 							it->mutations.push_back(MutationsAndVersionRef(version, server->knownCommittedVersion));
 						}
 						it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), mutation);
 						server->currentChangeFeeds.insert(it->id);
+					}
+				}
+			} else if (mutation.type == MutationRef::ClearRange) {
+				auto ranges = server->keyChangeFeed.intersectingRanges(KeyRangeRef(mutation.param1, mutation.param2));
+				for (auto& r : ranges) {
+					for (auto& it : r.value()) {
+						if (!it->stopped) {
+							if (it->mutations.empty() || it->mutations.back().version != version) {
+								it->mutations.push_back(MutationsAndVersionRef(version, server->knownCommittedVersion));
+							}
+							it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), mutation);
+							server->currentChangeFeeds.insert(it->id);
+						}
 					}
 				}
 			}
@@ -4101,19 +4126,19 @@ private:
 			data->primaryLocality = BinaryReader::fromStringRef<int8_t>(m.param2, Unversioned());
 			auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 			data->addMutationToMutationLog(mLV, MutationRef(MutationRef::SetValue, persistPrimaryLocality, m.param2));
-		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) &&
-		           m.param1.startsWith(changeFeedPrivatePrefix)) {
-			if (m.type == MutationRef::SetValue) {
-				Key changeFeedId = m.param1.removePrefix(changeFeedPrivatePrefix);
-				KeyRange changeFeedRange;
-				Version popVersion;
-				bool stopped;
-				std::tie(changeFeedRange, popVersion, stopped) = decodeChangeFeedValue(m.param2);
-				auto feed = data->uidChangeFeed.find(changeFeedId);
-				if (feed == data->uidChangeFeed.end()) {
-					TraceEvent("AddingChangeFeed", data->thisServerID)
+		} else if (m.type == MutationRef::SetValue && m.param1.startsWith(changeFeedPrivatePrefix)) {
+			Key changeFeedId = m.param1.removePrefix(changeFeedPrivatePrefix);
+			KeyRange changeFeedRange;
+			Version popVersion;
+			ChangeFeedStatus status;
+			std::tie(changeFeedRange, popVersion, status) = decodeChangeFeedValue(m.param2);
+			auto feed = data->uidChangeFeed.find(changeFeedId);
+			if (feed == data->uidChangeFeed.end()) {
+				if (status == ChangeFeedStatus::CHANGE_FEED_CREATE) {
+					TraceEvent(SevDebug, "AddingChangeFeed", data->thisServerID)
 					    .detail("RangeID", changeFeedId.printable())
-					    .detail("Range", changeFeedRange.toString());
+					    .detail("Range", changeFeedRange.toString())
+					    .detail("Version", currentVersion);
 					Reference<ChangeFeedInfo> changeFeedInfo(new ChangeFeedInfo());
 					changeFeedInfo->range = changeFeedRange;
 					changeFeedInfo->id = changeFeedId;
@@ -4131,6 +4156,27 @@ private:
 					    MutationRef(MutationRef::SetValue,
 					                persistChangeFeedKeys.begin.toString() + changeFeedId.toString(),
 					                m.param2));
+				}
+			} else {
+				if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
+					Key beginClearKey = changeFeedId.withPrefix(persistChangeFeedKeys.begin);
+					auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+					data->addMutationToMutationLog(
+					    mLV, MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
+					data->addMutationToMutationLog(mLV,
+					                               MutationRef(MutationRef::ClearRange,
+					                                           changeFeedDurableKey(feed->second->id, 0),
+					                                           changeFeedDurableKey(feed->second->id, currentVersion)));
+					auto rs = data->keyChangeFeed.modify(feed->second->range);
+					for (auto r = rs.begin(); r != rs.end(); ++r) {
+						auto& feedList = r->value();
+						for (int i = 0; i < feedList.size(); i++) {
+							if (feedList[i] == feed->second) {
+								swapAndPop(&feedList, i--);
+							}
+						}
+					}
+					data->uidChangeFeed.erase(feed);
 				} else {
 					if (popVersion != invalidVersion && popVersion - 1 > feed->second->emptyVersion) {
 						feed->second->emptyVersion = popVersion - 1;
@@ -4147,18 +4193,14 @@ private:
 							}
 						}
 					}
+					feed->second->stopped = (status == ChangeFeedStatus::CHANGE_FEED_STOP);
+					auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+					data->addMutationToMutationLog(
+					    mLV,
+					    MutationRef(MutationRef::SetValue,
+					                persistChangeFeedKeys.begin.toString() + changeFeedId.toString(),
+					                m.param2));
 				}
-			} else {
-				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-				auto beginFeed = m.param1.removePrefix(changeFeedPrivatePrefix);
-				auto endFeed = m.param2.removePrefix(changeFeedPrivatePrefix);
-				data->addMutationToMutationLog(
-				    mLV,
-				    MutationRef(MutationRef::ClearRange,
-				                persistChangeFeedKeys.begin.toString() + beginFeed.toString(),
-				                persistChangeFeedKeys.begin.toString() + endFeed.toString()));
-				data->uidChangeFeed.erase(data->uidChangeFeed.lower_bound(beginFeed),
-				                          data->uidChangeFeed.lower_bound(endFeed));
 			}
 		} else if (m.param1.substr(1).startsWith(tssMappingKeys.begin) &&
 		           (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange)) {
@@ -5118,15 +5160,22 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state int feedLoc;
 	for (feedLoc = 0; feedLoc < changeFeeds.size(); feedLoc++) {
 		Key changeFeedId = changeFeeds[feedLoc].key.removePrefix(persistChangeFeedKeys.begin);
-		KeyRange changeFeedRange = std::get<0>(decodeChangeFeedValue(changeFeeds[feedLoc].value));
-		TraceEvent("RestoringChangeFeed", data->thisServerID)
+		KeyRange changeFeedRange;
+		Version popVersion;
+		ChangeFeedStatus status;
+		std::tie(changeFeedRange, popVersion, status) = decodeChangeFeedValue(changeFeeds[feedLoc].value);
+		TraceEvent(SevDebug, "RestoringChangeFeed", data->thisServerID)
 		    .detail("RangeID", changeFeedId.printable())
-		    .detail("Range", changeFeedRange.toString());
+		    .detail("Range", changeFeedRange.toString())
+		    .detail("Status", status)
+		    .detail("PopVer", popVersion);
 		Reference<ChangeFeedInfo> changeFeedInfo(new ChangeFeedInfo());
 		changeFeedInfo->range = changeFeedRange;
 		changeFeedInfo->id = changeFeedId;
 		changeFeedInfo->durableVersion = version;
 		changeFeedInfo->storageVersion = version;
+		changeFeedInfo->emptyVersion = popVersion - 1;
+		changeFeedInfo->stopped = status == ChangeFeedStatus::CHANGE_FEED_STOP;
 		data->uidChangeFeed[changeFeedId] = changeFeedInfo;
 		auto rs = data->keyChangeFeed.modify(changeFeedRange);
 		for (auto r = rs.begin(); r != rs.end(); ++r) {
@@ -5649,13 +5698,6 @@ ACTOR Future<Void> serveWatchValueRequests(StorageServer* self, FutureStream<Wat
 	}
 }
 
-ACTOR Future<Void> serveChangeFeedRequests(StorageServer* self, FutureStream<ChangeFeedRequest> changeFeed) {
-	loop {
-		ChangeFeedRequest req = waitNext(changeFeed);
-		self->actors.add(self->readGuard(req, changeFeedQ));
-	}
-}
-
 ACTOR Future<Void> serveChangeFeedStreamRequests(StorageServer* self,
                                                  FutureStream<ChangeFeedStreamRequest> changeFeedStream) {
 	loop {
@@ -5729,7 +5771,6 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(serveGetKeyValuesStreamRequests(self, ssi.getKeyValuesStream.getFuture()));
 	self->actors.add(serveGetKeyRequests(self, ssi.getKey.getFuture()));
 	self->actors.add(serveWatchValueRequests(self, ssi.watchValue.getFuture()));
-	self->actors.add(serveChangeFeedRequests(self, ssi.changeFeed.getFuture()));
 	self->actors.add(serveChangeFeedStreamRequests(self, ssi.changeFeedStream.getFuture()));
 	self->actors.add(serveOverlappingChangeFeedsRequests(self, ssi.overlappingChangeFeeds.getFuture()));
 	self->actors.add(serveChangeFeedPopRequests(self, ssi.changeFeedPop.getFuture()));

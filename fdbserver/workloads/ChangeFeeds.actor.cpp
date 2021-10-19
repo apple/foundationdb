@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -178,16 +179,7 @@ struct ChangeFeedsWorkload : TestWorkload {
 	ACTOR Future<Void> changeFeedClient(Database cx, ChangeFeedsWorkload* self) {
 		// Enable change feeds for a key range
 		state Key rangeID = StringRef(deterministicRandom()->randomUniqueID().toString());
-		state Transaction tr(cx);
-		loop {
-			try {
-				wait(tr.registerChangeFeed(rangeID, normalKeys));
-				wait(tr.commit());
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
+		wait(updateChangeFeed(cx, rangeID, ChangeFeedStatus::CHANGE_FEED_CREATE, normalKeys));
 
 		loop {
 			wait(delay(deterministicRandom()->random01()));
