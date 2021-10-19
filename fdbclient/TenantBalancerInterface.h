@@ -214,6 +214,7 @@ struct TenantMovementInfo {
 
 	std::unordered_map<std::string, std::string> getStatusInfoMap() const {
 		std::unordered_map<std::string, std::string> statusInfoMap;
+		// TODO transfer enum to real meaning string
 		statusInfoMap["movementLocation"] = std::to_string(static_cast<int>(movementLocation));
 		statusInfoMap["sourceConnectionString"] = sourceConnectionString;
 		statusInfoMap["destinationConnectionString"] = destinationConnectionString;
@@ -221,6 +222,7 @@ struct TenantMovementInfo {
 		statusInfoMap["destPrefix"] = destPrefix.toString();
 		statusInfoMap["isSourceLocked"] = isSourceLocked;
 		statusInfoMap["isDestinationLocked"] = isDestinationLocked;
+		// TODO transfer enum to real meaning string
 		statusInfoMap["movementState"] = std::to_string(static_cast<int>(movementState));
 		statusInfoMap["mutationLag"] = std::to_string(mutationLag);
 		statusInfoMap["databaseTimingDelay"] = std::to_string(databaseTimingDelay);
@@ -230,20 +232,19 @@ struct TenantMovementInfo {
 	}
 
 	std::string toJson() const {
-		std::unordered_map<std::string, std::string> statusInfoMap = getStatusInfoMap();
+		// TODO 1. use actual type rather than string 2. Exclude values without being set
 		json_spirit::mValue statusRootValue;
 		JSONDoc statusRoot(statusRootValue);
-		for (const auto& itr : statusInfoMap) {
+		for (const auto& itr : getStatusInfoMap()) {
 			statusRoot.create(itr.first) = itr.second;
 		}
 		return json_spirit::write_string(statusRootValue);
 	}
 
 	std::string toString() const {
-		std::unordered_map<std::string, std::string> statusInfoMap = getStatusInfoMap();
 		std::string movementInfo;
-		for (const auto& itr : statusInfoMap) {
-			movementInfo += itr.first + " : " + itr.second + " ";
+		for (const auto& itr : getStatusInfoMap()) {
+			movementInfo += itr.first + " : " + itr.second + "\n";
 		}
 		return movementInfo;
 	}

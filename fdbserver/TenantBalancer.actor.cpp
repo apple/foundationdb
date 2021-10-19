@@ -36,7 +36,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // TODO: do we need any recoverable error states?
-// enum class MovementState { INITIALIZING, STARTED, READY_FOR_SWITCH, SWITCHING, COMPLETED };
 static const StringRef DBMOVE_TAG_PREFIX = "MovingData/"_sr;
 
 class SourceMovementRecord {
@@ -657,6 +656,9 @@ ACTOR Future<Void> receiveTenantFromCluster(TenantBalancer* self, ReceiveTenantF
 			// TODO: how to handle this?
 			ASSERT(false);
 		}
+		DestinationMovementRecord destinationMovementRecord(
+		    req.sourcePrefix, req.destPrefix, req.srcConnectionString, srcDatabase.get());
+		wait(self->saveIncomingMovement(destinationMovementRecord));
 
 		// 1.Lock the destination before we start the movement
 		// TODO
@@ -667,9 +669,8 @@ ACTOR Future<Void> receiveTenantFromCluster(TenantBalancer* self, ReceiveTenantF
 			throw movement_dest_prefix_not_empty();
 		}
 
-		// 3.Do record
-		DestinationMovementRecord destinationMovementRecord(
-		    req.sourcePrefix, req.destPrefix, req.srcConnectionString, srcDatabase.get());
+		// 3.Update record
+		destinationMovementRecord.movementState = MovementState::STARTED;
 		wait(self->saveIncomingMovement(destinationMovementRecord));
 
 		TraceEvent(SevDebug, "TenantBalancerReceiveTenantFromClusterComplete", self->tbi.id())
@@ -763,11 +764,10 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 		if (isSrc) {
 			for (const auto& [prefix, record] : self->getOutgoingMovements()) {
 				TenantMovementInfo tenantMovementInfo;
-				tenantMovementInfo.movementLocation =
-				    isSrc ? TenantMovementInfo::Location::SOURCE : TenantMovementInfo::Location::DEST;
+				tenantMovementInfo.movementLocation = TenantMovementInfo::Location::SOURCE;
 				tenantMovementInfo.sourceConnectionString = curConnectionString;
 				tenantMovementInfo.destinationConnectionString =
-				    record.getDestinationDatabase()->db->getConnectionRecord()->getConnectionString().toString();
+				    record.getDestinationDatabase()->getConnectionRecord()->getConnectionString().toString();
 				tenantMovementInfo.sourcePrefix = record.getSourcePrefix();
 				tenantMovementInfo.destPrefix = record.getDestinationPrefix();
 				// TODO update isSourceLocked and isDestinationLocked
@@ -782,10 +782,9 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 		} else {
 			for (const auto& [prefix, record] : self->getIncomingMovements()) {
 				TenantMovementInfo tenantMovementInfo;
-				tenantMovementInfo.movementLocation =
-				    isSrc ? TenantMovementInfo::Location::SOURCE : TenantMovementInfo::Location::DEST;
+				tenantMovementInfo.movementLocation = TenantMovementInfo::Location::DEST;
 				tenantMovementInfo.sourceConnectionString =
-				    record.getSourceDatabase()->db->getConnectionRecord()->getConnectionString().toString();
+				    record.getSourceDatabase()->getConnectionRecord()->getConnectionString().toString();
 				tenantMovementInfo.destinationConnectionString = curConnectionString;
 				tenantMovementInfo.sourcePrefix = record.getSourcePrefix();
 				tenantMovementInfo.destPrefix = record.getDestinationPrefix();
@@ -840,9 +839,9 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 		// TODO: check if maxLagSeconds is exceeded
 		state SourceMovementRecord record = self->getOutgoingMovement(Key(req.sourceTenant));
 		state std::string destinationConnectionString =
-		    record.getDestinationDatabase()->db->getConnectionRecord()->getConnectionString().toString();
-		state Optional<Reference<ExternalDatabase>> destDatabase =
-		    wait(self->externalDatabases.getOrCreate(destinationConnectionString, destinationConnectionString));
+		    record.getDestinationDatabase()->getConnectionRecord()->getConnectionString().toString();
+		state Optional<Database> destDatabase =
+		    wait(getOrInsertDatabase(self, destinationConnectionString, destinationConnectionString));
 		if (!destDatabase.present()) {
 			// TODO: how to handle this?
 			ASSERT(false);
@@ -866,7 +865,7 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 		TraceEvent(SevDebug, "TenantBalancerFinishSourceSwitch", self->tbi.id())
 		    .detail("DestinationDatabaseName", record.getDestinationDatabaseName());
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
-		wait(self->agent.atomicSwitchover(record.getDestinationDatabase()->db,
+		wait(self->agent.atomicSwitchover(record.getDestinationDatabase(),
 		                                  KeyRef(record.getTagName()),
 		                                  backupRanges,
 		                                  StringRef(),
