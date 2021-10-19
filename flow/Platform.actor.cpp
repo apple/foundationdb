@@ -3484,18 +3484,68 @@ void registerCrashHandler() {
 #endif
 }
 
+// A signal-safe non-blocking locking mechanism using std::atomic_flag. Users can attempt to acquire the lock,
+// and if the lock is already held they will fail.
+class SignalSafeTryLock {
+public:
+	SignalSafeTryLock() { lock.clear(); }
+
+	// Attempts to take the lock. Returns true if the lock was acquired or false if it was already held.
+	// If this function returns false, the caller should not release the lock.
+	bool tryTakeLock() { return !lock.test_and_set(); }
+	void releaseLock() { lock.clear(); }
+
+private:
+	std::atomic_flag lock;
+};
+
+// Attempts to acquire a SignalSafeTryLock, and if acquired releases it when destructed.
+// This is not safe to allocate in a signal handler.
+class TryLockHolder {
+public:
+	TryLockHolder(SignalSafeTryLock& lock) : lock(lock) { acquired = lock.tryTakeLock(); }
+	~TryLockHolder() {
+		if (acquired) {
+			lock.releaseLock();
+		}
+	}
+
+	bool isHoldingLock() { return acquired; }
+
+private:
+	SignalSafeTryLock& lock;
+	bool acquired;
+};
+
 #ifdef __linux__
-extern volatile void** net2backtraces;
-extern volatile size_t net2backtraces_offset;
-extern volatile size_t net2backtraces_max;
-extern volatile bool net2backtraces_overflow;
-extern volatile int net2backtraces_count;
-extern std::atomic<int64_t> net2RunLoopIterations;
-extern std::atomic<int64_t> net2RunLoopSleeps;
-extern void initProfiling();
+volatile void** net2Backtraces = nullptr;
+volatile void** otherBacktraces = nullptr;
+volatile size_t net2BacktracesOffset = 0;
+volatile size_t net2BacktracesMax = 10000;
+volatile bool net2BacktracesOverflow = false;
+volatile int net2BacktracesCount = 0;
+
+SignalSafeTryLock backtraceLock;
+
+sigset_t sigProfSet;
+void initProfiling() {
+	net2Backtraces = new volatile void*[net2BacktracesMax];
+	otherBacktraces = new volatile void*[net2BacktracesMax];
+
+	// According to folk wisdom, calling this once before setting up the signal handler makes
+	// it async signal safe in practice :-/
+	backtrace(const_cast<void**>(otherBacktraces), net2BacktracesMax);
+
+	sigemptyset(&sigProfSet);
+	sigaddset(&sigProfSet, SIGPROF);
+}
 
 std::atomic<double> checkThreadTime;
 #endif
+
+std::atomic<int64_t> net2RunLoopIterations(0);
+std::atomic<int64_t> net2RunLoopProfilingSignals(0);
+std::atomic<int64_t> net2RunLoopSleeps(0);
 
 volatile thread_local bool profileThread = false;
 volatile thread_local int profilingEnabled = 1;
@@ -3503,7 +3553,6 @@ volatile thread_local int profilingEnabled = 1;
 volatile thread_local int64_t numProfilesDeferred = 0;
 volatile thread_local int64_t numProfilesOverflowed = 0;
 volatile thread_local int64_t numProfilesCaptured = 0;
-volatile thread_local bool profileRequested = false;
 
 int64_t getNumProfilesDeferred() {
 	return numProfilesDeferred;
@@ -3524,16 +3573,20 @@ void profileHandler(int sig) {
 	}
 
 	if (!profilingEnabled) {
-		profileRequested = true;
 		++numProfilesDeferred;
 		return;
 	}
 
-	++net2backtraces_count;
+	if (!backtraceLock.tryTakeLock()) {
+		return;
+	}
 
-	if (!net2backtraces || net2backtraces_max - net2backtraces_offset < 50) {
+	++net2BacktracesCount;
+
+	if (!net2Backtraces || net2BacktracesMax - net2BacktracesOffset < 50) {
 		++numProfilesOverflowed;
-		net2backtraces_overflow = true;
+		net2BacktracesOverflow = true;
+		backtraceLock.releaseLock();
 		return;
 	}
 
@@ -3542,18 +3595,19 @@ void profileHandler(int sig) {
 	// We are casting away the volatile-ness of the backtrace array, but we believe that should be reasonably safe in
 	// the signal handler
 	ProfilingSample* ps =
-	    const_cast<ProfilingSample*>((volatile ProfilingSample*)(net2backtraces + net2backtraces_offset));
+	    const_cast<ProfilingSample*>((volatile ProfilingSample*)(net2Backtraces + net2BacktracesOffset));
 
 	// We can only read the check thread time in a signal handler if the atomic is lock free.
 	// We can't get the time from a timer() call because it's not signal safe.
 	ps->timestamp = checkThreadTime.is_lock_free() ? checkThreadTime.load() : 0;
 
 	// SOMEDAY: should we limit the maximum number of frames from backtrace beyond just available space?
-	size_t size = backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
+	size_t size = backtrace(ps->frames, net2BacktracesMax - net2BacktracesOffset - 2);
 
 	ps->length = size;
+	net2BacktracesOffset += size + 2;
 
-	net2backtraces_offset += size + 2;
+	backtraceLock.releaseLock();
 #else
 	// No slow task profiling for other platforms!
 #endif
@@ -3561,15 +3615,61 @@ void profileHandler(int sig) {
 
 void setProfilingEnabled(int enabled) {
 #ifdef __linux__
-	if (profileThread && enabled && !profilingEnabled && profileRequested) {
-		profilingEnabled = true;
-		profileRequested = false;
-		pthread_kill(pthread_self(), SIGPROF);
-	} else {
-		profilingEnabled = enabled;
-	}
+	profilingEnabled = enabled;
 #else
 	// No profiling for other platforms!
+#endif
+}
+
+void processRunLoopProfilerBacktraces() {
+#if defined(__linux__)
+	if (FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
+		TryLockHolder holder(backtraceLock);
+		if (!holder.isHoldingLock()) {
+			return;
+		}
+
+		sigset_t origSet;
+		pthread_sigmask(SIG_BLOCK, &sigProfSet, &origSet);
+
+		size_t otherOffset = net2BacktracesOffset;
+		bool wasOverflow = net2BacktracesOverflow;
+		int signalCount = net2BacktracesCount;
+
+		net2RunLoopProfilingSignals += signalCount;
+
+		if (otherOffset) {
+			volatile void** _traces = net2Backtraces;
+			net2Backtraces = otherBacktraces;
+			otherBacktraces = _traces;
+
+			net2BacktracesOffset = 0;
+		}
+
+		net2BacktracesOverflow = false;
+		net2BacktracesCount = 0;
+
+		pthread_sigmask(SIG_SETMASK, &origSet, nullptr);
+
+		if (wasOverflow) {
+			TraceEvent("Net2RunLoopProfilerOverflow")
+			    .detail("SignalsReceived", signalCount)
+			    .detail("BackTraceHarvested", otherOffset != 0);
+		}
+		if (otherOffset) {
+			size_t iterOffset = 0;
+			while (iterOffset < otherOffset) {
+				ProfilingSample* ps = (ProfilingSample*)(otherBacktraces + iterOffset);
+				TraceEvent(SevWarn, "Net2RunLoopTrace")
+				    .detailf("TraceTime", "%.6f", ps->timestamp)
+				    .detail("Trace", platform::format_backtrace(ps->frames, ps->length));
+				iterOffset += ps->length + 2;
+			}
+		}
+
+		// notify the run loop monitoring thread that we are making progress
+		net2RunLoopIterations.fetch_add(1);
+	}
 #endif
 }
 
@@ -3581,8 +3681,10 @@ void* checkThread(void* arg) {
 	int64_t lastRunLoopIterations = net2RunLoopIterations.load();
 	int64_t lastRunLoopSleeps = net2RunLoopSleeps.load();
 
+	double slowTaskStart = 0;
 	double lastSlowTaskSignal = 0;
 	double lastSaturatedSignal = 0;
+	double lastSlowTaskBlockedLog = 0;
 
 	const double minSlowTaskLogInterval =
 	    std::max(FLOW_KNOBS->SLOWTASK_PROFILING_LOG_INTERVAL, FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
@@ -3603,7 +3705,19 @@ void* checkThread(void* arg) {
 
 		if (slowTask) {
 			double t = timer();
-			if (lastSlowTaskSignal == 0 || t - lastSlowTaskSignal >= slowTaskLogInterval) {
+			bool newSlowTask = lastSlowTaskSignal == 0;
+			fprintf(stderr, "In check thread slow task: %d\n", newSlowTask);
+
+			if (newSlowTask) {
+				slowTaskStart = t;
+			} else if (t - std::max(slowTaskStart, lastSlowTaskBlockedLog) > FLOW_KNOBS->SLOWTASK_BLOCKED_INTERVAL) {
+				fprintf(stderr, "Logging check thread slow task: %d\n", newSlowTask);
+				lastSlowTaskBlockedLog = t;
+				TraceEvent(SevWarnAlways, "RunLoopBlocked").detail("Duration", t - slowTaskStart);
+				processRunLoopProfilerBacktraces();
+			}
+
+			if (newSlowTask || t - lastSlowTaskSignal >= slowTaskLogInterval) {
 				if (lastSlowTaskSignal > 0) {
 					slowTaskLogInterval = std::min(FLOW_KNOBS->SLOWTASK_PROFILING_MAX_LOG_INTERVAL,
 					                               FLOW_KNOBS->SLOWTASK_PROFILING_LOG_BACKOFF * slowTaskLogInterval);
@@ -3614,6 +3728,7 @@ void* checkThread(void* arg) {
 				pthread_kill(mainThread, SIGPROF);
 			}
 		} else {
+			slowTaskStart = 0;
 			lastSlowTaskSignal = 0;
 			lastRunLoopIterations = currentRunLoopIterations;
 			slowTaskLogInterval = minSlowTaskLogInterval;

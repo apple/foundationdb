@@ -68,31 +68,11 @@ using namespace boost::asio::ip;
 
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
-
-std::atomic<int64_t> net2RunLoopIterations(0);
-std::atomic<int64_t> net2RunLoopSleeps(0);
-
-volatile size_t net2backtraces_max = 10000;
-volatile void** volatile net2backtraces = nullptr;
-volatile size_t net2backtraces_offset = 0;
-volatile bool net2backtraces_overflow = false;
-volatile int net2backtraces_count = 0;
-
-volatile void** other_backtraces = nullptr;
-sigset_t sigprof_set;
-
-void initProfiling() {
-	net2backtraces = new volatile void*[net2backtraces_max];
-	other_backtraces = new volatile void*[net2backtraces_max];
-
-	// According to folk wisdom, calling this once before setting up the signal handler makes
-	// it async signal safe in practice :-/
-	backtrace(const_cast<void**>(other_backtraces), net2backtraces_max);
-
-	sigemptyset(&sigprof_set);
-	sigaddset(&sigprof_set, SIGPROF);
-}
 #endif
+
+extern void processRunLoopProfilerBacktraces();
+extern std::atomic<int64_t> net2RunLoopSleeps;
+extern std::atomic<int64_t> net2RunLoopProfilingSignals;
 
 DESCR struct SlowTask {
 	int64_t clocks; // clocks
@@ -1542,50 +1522,9 @@ void Net2::run() {
 		queueSize = ready.size();
 		FDB_TRACE_PROBE(run_loop_done, queueSize);
 
-#if defined(__linux__)
-		if (FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
-			sigset_t orig_set;
-			pthread_sigmask(SIG_BLOCK, &sigprof_set, &orig_set);
+		processRunLoopProfilerBacktraces();
+		countRunLoopProfilingSignals = net2RunLoopProfilingSignals;
 
-			size_t other_offset = net2backtraces_offset;
-			bool was_overflow = net2backtraces_overflow;
-			int signal_count = net2backtraces_count;
-
-			countRunLoopProfilingSignals += signal_count;
-
-			if (other_offset) {
-				volatile void** _traces = net2backtraces;
-				net2backtraces = other_backtraces;
-				other_backtraces = _traces;
-
-				net2backtraces_offset = 0;
-			}
-
-			net2backtraces_overflow = false;
-			net2backtraces_count = 0;
-
-			pthread_sigmask(SIG_SETMASK, &orig_set, nullptr);
-
-			if (was_overflow) {
-				TraceEvent("Net2RunLoopProfilerOverflow")
-				    .detail("SignalsReceived", signal_count)
-				    .detail("BackTraceHarvested", other_offset != 0);
-			}
-			if (other_offset) {
-				size_t iter_offset = 0;
-				while (iter_offset < other_offset) {
-					ProfilingSample* ps = (ProfilingSample*)(other_backtraces + iter_offset);
-					TraceEvent(SevWarn, "Net2RunLoopTrace")
-					    .detailf("TraceTime", "%.6f", ps->timestamp)
-					    .detail("Trace", platform::format_backtrace(ps->frames, ps->length));
-					iter_offset += ps->length + 2;
-				}
-			}
-
-			// notify the run loop monitoring thread that we are making progress
-			net2RunLoopIterations.fetch_add(1);
-		}
-#endif
 		nnow = timer_monotonic();
 
 		if ((nnow - now) > FLOW_KNOBS->SLOW_LOOP_CUTOFF &&
