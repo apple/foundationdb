@@ -384,10 +384,12 @@ public:
 	int outstandingWatches;
 	int maxOutstandingWatches;
 
+	// GRV Cache
 	// Database-level read version cache storing the most recent successful GRV as well as the time it was requested.
 	NotifiedDouble lastTimedGrv;
 	Version cachedRv;
 	void updateCachedRV(double t, Version v);
+	double lastTimedRkThrottle;
 
 	int snapshotRywEnabled;
 

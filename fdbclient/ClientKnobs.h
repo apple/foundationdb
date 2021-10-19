@@ -118,6 +118,7 @@ public:
 	int MUTATION_BLOCK_SIZE;
 	double MAX_VERSION_CACHE_LAG;
 	bool DEBUG_USE_GRV_CACHE; // Turn on to have all GRVs request to use the cache
+	double GRV_CACHE_RK_COOLDOWN; // Required number of seconds to pass after throttling to re-allow cache use
 
 	// Taskbucket
 	double TASKBUCKET_LOGGING_DELAY;

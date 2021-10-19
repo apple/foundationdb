@@ -110,7 +110,6 @@ struct CycleWorkload : TestWorkload {
 				}
 				while (true) {
 					try {
-						tr.setOption(FDBTransactionOptions::USE_GRV_CACHE);
 						// Reverse next and next^2 node
 						Optional<Value> v = wait(tr.get(self->key(r)));
 						if (!v.present())
@@ -126,6 +125,7 @@ struct CycleWorkload : TestWorkload {
 						int r4 = self->fromValue(v3.get());
 
 						tr.clear(self->key(r)); //< Shouldn't have an effect, but will break with wrong ordering
+						tr.setOption(FDBTransactionOptions::USE_GRV_CACHE);
 						tr.set(self->key(r), self->value(r3));
 						tr.set(self->key(r2), self->value(r4));
 						tr.set(self->key(r3), self->value(r2));

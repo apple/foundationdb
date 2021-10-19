@@ -566,6 +566,12 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 
 	grvProxyData->stats.grvGetCommittedVersionRpcDist->sampleSeconds(now() - grvConfirmEpochLive);
 	GetReadVersionReply rep;
+	rep.ratekeeperThrottling = false;
+	// borrowed logic from line 410-411 about hitting limit
+	if (grvProxyData->stats.txnRequestIn.getValue() - grvProxyData->stats.txnRequestOut.getValue() >
+	    SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE) {
+		rep.ratekeeperThrottling = true;
+	}
 	rep.version = repFromMaster.version;
 	rep.locked = repFromMaster.locked;
 	rep.metadataVersion = repFromMaster.metadataVersion;

@@ -1198,9 +1198,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), outstandingWatches(0),
-    lastTimedGrv(0.0), cachedRv(0), transactionTracingEnabled(true), taskID(taskID), clientInfo(clientInfo),
-    clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0),
-    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    lastTimedGrv(0.0), cachedRv(0), lastTimedRkThrottle(0.0), transactionTracingEnabled(true), taskID(taskID),
+    clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion),
+    mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
@@ -5724,6 +5724,10 @@ ACTOR Future<Version> extractReadVersion(Location location,
 	GetReadVersionReply rep = wait(f);
 	double latency = now() - startTime;
 	cx->updateCachedRV(startTime, rep.version);
+	// use startTime instead??
+	if (rep.ratekeeperThrottling) {
+		cx->lastTimedRkThrottle = now();
+	}
 	cx->GRVLatencies.addSample(latency);
 	if (trLogInfo)
 		trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(
@@ -5785,13 +5789,20 @@ ACTOR Future<Version> getDBCachedReadVersion(DatabaseContext* cx, double request
 	// Want to check that the cached version is at most
 	// MAX_VERSION_CACHE_LAG (100ms) old compared to requestTime.
 	ASSERT(!debug_checkVersionTime(cx->cachedRv, requestTime, "CheckStaleness"));
-	wait(delay(0.001 * deterministicRandom()->random01()));
 	return cx->cachedRv;
+}
+
+bool rkThrottlingCooledDown(DatabaseContext* cx) {
+	if (cx->lastTimedRkThrottle == 0.0) {
+		return true;
+	}
+	return (now() - cx->lastTimedRkThrottle > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
 }
 
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	if (!readVersion.isValid()) {
-		if (!options.skipGrvCache && (CLIENT_KNOBS->DEBUG_USE_GRV_CACHE || options.useGrvCache)) {
+		if (!options.skipGrvCache && rkThrottlingCooledDown(getDatabase().getPtr()) &&
+		    (CLIENT_KNOBS->DEBUG_USE_GRV_CACHE || options.useGrvCache)) {
 			// Upon our first request to use cached RVs, start the background updater
 			if (!cx->grvUpdateHandler.isValid()) {
 				cx->grvUpdateHandler = backgroundGrvUpdater(getDatabase().getPtr());
