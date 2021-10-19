@@ -81,7 +81,9 @@ enum Arguments {
 	ARG_TXNTAGGING,
 	ARG_TXNTAGGINGPREFIX,
 	ARG_STREAMING_MODE,
-	ARG_CLIENT_THREADS_PER_VERSION
+	ARG_CLIENT_THREADS_PER_VERSION,
+	ARG_DISABLE_RYW,
+	ARG_JSON_REPORT
 };
 
 enum TPSChangeTypes { TPS_SIN, TPS_SQUARE, TPS_PULSE };
@@ -103,9 +105,10 @@ typedef struct {
 #define LOGGROUP_MAX 256
 #define KNOB_MAX 256
 #define TAGPREFIXLENGTH_MAX 8
+#define NUM_CLUSTERS_MAX 3
+#define NUM_DATABASES_MAX 10
 
 /* benchmark parameters */
-#define MAX_NUM_CLUSTERS 3
 typedef struct {
 	int api_version;
 	int json;
@@ -126,7 +129,7 @@ typedef struct {
 	int commit_get;
 	int verbose;
 	mako_txnspec_t txnspec;
-	char cluster_files[MAX_NUM_CLUSTERS][PATH_MAX];
+	char cluster_files[NUM_CLUSTERS_MAX][PATH_MAX];
 	int num_fdb_clusters;
 	int num_databases;
 	char log_group[LOGGROUP_MAX];
@@ -140,7 +143,9 @@ typedef struct {
 	int txntagging;
 	char txntagging_prefix[TAGPREFIXLENGTH_MAX];
 	FDBStreamingMode streaming_mode;
-	int64_t client_threads_per_version;
+	uint32_t client_threads_per_version;
+	int disable_ryw;
+	char json_output_path[PATH_MAX];
 } mako_args_t;
 
 /* shared memory */
@@ -173,13 +178,12 @@ typedef struct {
 } mako_stats_t;
 
 /* per-process information */
-#define MAX_NUM_DATABASES 10
 typedef struct {
 	int worker_id;
 	pid_t parent_id;
 	mako_args_t* args;
 	mako_shmhdr_t* shm;
-	FDBDatabase* databases[MAX_NUM_DATABASES];
+	FDBDatabase* databases[NUM_DATABASES_MAX];
 } process_info_t;
 
 /* args for threads */
