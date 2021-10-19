@@ -296,6 +296,9 @@ struct TenantBalancer {
 
 		return runTenantBalancerTransaction<Void>(
 		    db, tbi.id(), "ClearExternalDatabase", [key](Reference<ReadYourWritesTransaction> tr) {
+			    // This conflict range prevents a race if this transaction gets canceled and a new
+			    // value is inserted while the commit is in flight.
+			    tr->addReadConflictRange(singleKeyRange(key));
 			    tr->clear(key);
 			    return tr->commit();
 		    });
@@ -530,6 +533,8 @@ ACTOR Future<Optional<Database>> getOrInsertDatabase(TenantBalancer* self,
 		}
 		return Optional<Database>();
 	}
+
+	self->externalDatabases.cancelCleanup(name);
 
 	state Key dbKey = KeyRef(name).withPrefix(tenantBalancerExternalDatabasePrefix);
 	Key dbKeyCapture = dbKey;

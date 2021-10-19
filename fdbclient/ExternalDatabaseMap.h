@@ -87,6 +87,15 @@ public:
 		}
 	}
 
+	void cancelCleanup(std::string name) {
+		auto itr = dbMap.find(name);
+		if (itr != dbMap.end()) {
+			ASSERT(itr->second.cleanup.isValid());
+			itr->second.cleanup.cancel();
+			dbMap.erase(itr);
+		}
+	}
+
 	size_t size() const { return dbMap.size(); }
 
 private:
