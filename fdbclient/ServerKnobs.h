@@ -689,6 +689,8 @@ public:
 	bool FASTRESTORE_EXPENSIVE_VALIDATION; // when set true, performance will be heavily affected
 	double FASTRESTORE_WRITE_BW_MB; // target aggregated write bandwidth from all appliers
 	double FASTRESTORE_RATE_UPDATE_SECONDS; // how long to update appliers target write rate
+	bool FASTRESTORE_DUMP_INSERT_RANGE_VERSION; // Dump all the range version after insertion. This is for debugging
+	                                            // purpose.
 
 	int REDWOOD_DEFAULT_PAGE_SIZE; // Page size for new Redwood files
 	int REDWOOD_DEFAULT_EXTENT_SIZE; // Extent size for new Redwood files
