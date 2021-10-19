@@ -21,7 +21,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionKey.actor.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/ExternalDatabase.actor.h"
+#include "fdbclient/ExternalDatabaseMap.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/TenantBalancerInterface.h"
 #include "fdbserver/Knobs.h"
@@ -45,17 +45,17 @@ public:
 	SourceMovementRecord(Standalone<StringRef> sourcePrefix,
 	                     Standalone<StringRef> destinationPrefix,
 	                     std::string destDatabaseName,
-	                     Reference<ExternalDatabase> destinationDb)
+	                     Database destinationDb)
 	  : id(deterministicRandom()->randomUniqueID()), sourcePrefix(sourcePrefix), destinationPrefix(destinationPrefix),
 	    destDatabaseName(destDatabaseName), destinationDb(destinationDb) {}
 
 	Standalone<StringRef> getSourcePrefix() const { return sourcePrefix; }
 	Standalone<StringRef> getDestinationPrefix() const { return destinationPrefix; }
-	Reference<ExternalDatabase> getDestinationDatabase() const { return destinationDb; }
+	Database getDestinationDatabase() const { return destinationDb; }
 	std::string getDestinationDatabaseName() const { return destDatabaseName; }
 	std::string getTagName() const { return DBMOVE_TAG_PREFIX.toString() + sourcePrefix.toString(); }
 
-	void setDestinationDatabase(Reference<ExternalDatabase> db) { destinationDb = db; }
+	void setDestinationDatabase(Database db) { destinationDb = db; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -90,7 +90,7 @@ private:
 
 	std::string destDatabaseName;
 	// TODO: leave this open, or open it at request time?
-	Reference<ExternalDatabase> destinationDb;
+	Database destinationDb;
 };
 
 class DestinationMovementRecord {
@@ -99,17 +99,17 @@ public:
 	DestinationMovementRecord(Standalone<StringRef> sourcePrefix,
 	                          Standalone<StringRef> destinationPrefix,
 	                          std::string sourceDatabaseName,
-	                          Reference<ExternalDatabase> sourceDb)
+	                          Database sourceDb)
 	  : id(deterministicRandom()->randomUniqueID()), sourcePrefix(sourcePrefix), destinationPrefix(destinationPrefix),
 	    sourceDatabaseName(sourceDatabaseName), sourceDb(sourceDb) {}
 
 	Standalone<StringRef> getSourcePrefix() const { return sourcePrefix; }
 	Standalone<StringRef> getDestinationPrefix() const { return destinationPrefix; }
-	Reference<ExternalDatabase> getSourceDatabase() const { return sourceDb; }
+	Database getSourceDatabase() const { return sourceDb; }
 	std::string getSourceDatabaseName() const { return sourceDatabaseName; }
 	std::string getTagName() const { return DBMOVE_TAG_PREFIX.toString() + sourcePrefix.toString(); }
 
-	void setSourceDatabase(Reference<ExternalDatabase> db) { sourceDb = db; }
+	void setSourceDatabase(Database db) { sourceDb = db; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -141,7 +141,7 @@ private:
 	Standalone<StringRef> sourcePrefix;
 	Standalone<StringRef> destinationPrefix;
 	std::string sourceDatabaseName;
-	Reference<ExternalDatabase> sourceDb;
+	Database sourceDb;
 };
 
 ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
@@ -150,6 +150,40 @@ ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> con
 		ClientDBInfo clientInfo = dbInfo->get().client;
 		info->set(clientInfo);
 		wait(dbInfo->onChange());
+	}
+}
+
+ACTOR Future<Void> checkTenantBalancerOwnership(UID id, Reference<ReadYourWritesTransaction> tr) {
+	Optional<Value> value = wait(tr->get(tenantBalancerActiveProcessKey));
+	if (!value.present() || value.get().toString() != id.toString()) {
+		TraceEvent("TenantBalancerLostOwnership", id).detail("CurrentOwner", value.get());
+		throw tenant_balancer_terminated();
+	}
+
+	return Void();
+}
+
+ACTOR template <class Result>
+Future<Result> runTenantBalancerTransaction(Database db,
+                                            UID id,
+                                            std::string context,
+                                            std::function<Future<Result>(Reference<ReadYourWritesTransaction>)> func) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	state int count = 0;
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			wait(checkTenantBalancerOwnership(id, tr));
+			Result r = wait(func(tr));
+			return r;
+		} catch (Error& e) {
+			TraceEvent(SevDebug, "TenantBalancerTransactionError", id)
+			    .detail("Context", context)
+			    .detail("ErrorCount", ++count);
+
+			wait(tr->onError(e));
+		}
 	}
 }
 
@@ -165,12 +199,9 @@ struct TenantBalancer {
 	    finishSourceMovementRequests("FinishSourceMovementRequests", tenantBalancerMetrics),
 	    finishDestinationMovementRequests("FinishDestinationMovementRequests", tenantBalancerMetrics),
 	    abortMovementRequests("AbortMovementRequests", tenantBalancerMetrics),
-	    cleanupMovementSourceRequests("CleanupMovementSourceRequests", tenantBalancerMetrics),
-	    externalDatabases(tbi.id(), tbi.locality) {
+	    cleanupMovementSourceRequests("CleanupMovementSourceRequests", tenantBalancerMetrics) {
 		auto info = makeReference<AsyncVar<ClientDBInfo>>();
 		db = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::False, EnableLocalityLoadBalance::True);
-
-		externalDatabases.setRecordDatabase(db);
 
 		agent = DatabaseBackupAgent(db);
 
@@ -215,32 +246,23 @@ struct TenantBalancer {
 		return itr->second;
 	}
 
-	ACTOR template <class Record>
-	static Future<Void> persistMovementRecord(TenantBalancer* self, Record record) {
-		state Transaction tr(self->db);
-		state Key key = record.getKey();
-		state Value value = record.toValue();
+	template <class Record>
+	Future<Void> persistMovementRecord(Record record) {
+		Key key = record.getKey();
+		Value value = record.toValue();
 
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.set(key, value);
-				wait(tr.commit());
-				return Void();
-			} catch (Error& e) {
-				TraceEvent(SevDebug, "TenantBalancerPersistMovementRecordError", self->tbi.id())
-				    .error(e)
-				    .detail("SourcePrefix", record.getSourcePrefix())
-				    .detail("DestinationPrefix", record.getDestinationPrefix());
-
-				wait(tr.onError(e));
-			}
-		}
+		return runTenantBalancerTransaction<Void>(
+		    db, tbi.id(), "PersistMovementRecord", [key, value](Reference<ReadYourWritesTransaction> tr) {
+			    tr->set(key, value);
+			    return tr->commit();
+		    });
 	}
 
 	Future<Void> saveOutgoingMovement(SourceMovementRecord const& record) {
-		return map(persistMovementRecord(this, record), [this, record](Void _) {
+		return map(persistMovementRecord(record), [this, record](Void _) {
 			outgoingMovements[record.getSourcePrefix()] = record;
+			externalDatabases.addDatabaseRef(record.getDestinationDatabaseName());
+
 			TraceEvent(SevDebug, "SaveOutgoingMovementSuccess", tbi.id())
 			    .detail("SourcePrefix", record.getSourcePrefix());
 			return Void();
@@ -248,46 +270,55 @@ struct TenantBalancer {
 	}
 
 	Future<Void> saveIncomingMovement(DestinationMovementRecord const& record) {
-		return map(persistMovementRecord(this, record), [this, record](Void _) {
+		return map(persistMovementRecord(record), [this, record](Void _) {
 			incomingMovements[record.getDestinationPrefix()] = record;
+			externalDatabases.addDatabaseRef(record.getSourceDatabaseName());
+
 			TraceEvent(SevDebug, "SaveIncomingMovementSuccess", tbi.id())
 			    .detail("DestinationPrefix", record.getDestinationPrefix());
 			return Void();
 		});
 	}
 
-	ACTOR template <class Record>
-	static Future<Void> clearMovementRecord(TenantBalancer* self, Record record) {
-		state Transaction tr(self->db);
-		state Key key = record.getKey();
+	template <class Record>
+	Future<Void> clearMovementRecord(Record record) {
+		Key key = record.getKey();
 
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.clear(key);
-				wait(tr.commit());
-				return Void();
-			} catch (Error& e) {
-				TraceEvent(SevDebug, "TenantBalancerClearMovementRecordError", self->tbi.id())
-				    .error(e)
-				    .detail("SourcePrefix", record.getSourcePrefix())
-				    .detail("DestinationPrefix", record.getDestinationPrefix());
+		return runTenantBalancerTransaction<Void>(
+		    db, tbi.id(), "ClearMovementRecord", [key](Reference<ReadYourWritesTransaction> tr) {
+			    tr->clear(key);
+			    return tr->commit();
+		    });
+	}
 
-				wait(tr.onError(e));
-			}
-		}
+	Future<Void> clearExternalDatabase(std::string databaseName) {
+		Key key = KeyRef(databaseName).withPrefix(tenantBalancerExternalDatabasePrefix);
+
+		return runTenantBalancerTransaction<Void>(
+		    db, tbi.id(), "ClearExternalDatabase", [key](Reference<ReadYourWritesTransaction> tr) {
+			    tr->clear(key);
+			    return tr->commit();
+		    });
 	}
 
 	Future<Void> clearOutgoingMovement(SourceMovementRecord const& record) {
-		return map(clearMovementRecord(this, record), [this, record](Void _) {
+		return map(clearMovementRecord(record), [this, record](Void _) {
 			outgoingMovements.erase(record.getSourcePrefix());
+			if (externalDatabases.delDatabaseRef(record.getDestinationDatabaseName()) == 0) {
+				externalDatabases.markDeleted(record.getDestinationDatabaseName(),
+				                              clearExternalDatabase(record.getDestinationDatabaseName()));
+			}
 			return Void();
 		});
 	}
 
 	Future<Void> clearIncomingMovement(DestinationMovementRecord const& record) {
-		return map(clearMovementRecord(this, record), [this, record](Void _) {
+		return map(clearMovementRecord(record), [this, record](Void _) {
 			incomingMovements.erase(record.getDestinationPrefix());
+			if (externalDatabases.delDatabaseRef(record.getSourceDatabaseName()) == 0) {
+				externalDatabases.markDeleted(record.getSourceDatabaseName(),
+				                              clearExternalDatabase(record.getSourceDatabaseName()));
+			}
 			return Void();
 		});
 	}
@@ -297,20 +328,18 @@ struct TenantBalancer {
 
 	ACTOR static Future<Void> recoverImpl(TenantBalancer* self) {
 		TraceEvent("TenantBalancerRecovering", self->tbi.id());
-		state Transaction tr(self->db);
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
 
-		// This holds references to all loaded external databases until they can be assigned to movement records.
-		// When this vector is destroyed, any unassigned databases will have their reference counts decremented to 0
-		// and their entries will be removed from the map automatically.
-		state std::vector<Reference<ExternalDatabase>> externalDatabasesTemporaryCache;
+		state std::set<std::string> unusedDatabases;
 
 		state Key begin = tenantBalancerKeys.begin;
 		loop {
 			try {
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-
-				// TODO: prevent simultaneous modifications to tenant balancer space?
-				Standalone<RangeResultRef> result = wait(tr.getRange(KeyRangeRef(begin, tenantBalancerKeys.end), 1000));
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(checkTenantBalancerOwnership(self->tbi.id(), tr));
+				Standalone<RangeResultRef> result =
+				    wait(tr->getRange(KeyRangeRef(begin, tenantBalancerKeys.end), 1000));
 				for (auto kv : result) {
 					if (kv.key.startsWith(tenantBalancerSourceMovementPrefix)) {
 						SourceMovementRecord record = SourceMovementRecord::fromValue(kv.value);
@@ -337,33 +366,32 @@ struct TenantBalancer {
 						    IsInternal::True,
 						    self->tbi.locality);
 
-						Reference<ExternalDatabase> externalDb = self->externalDatabases.insert(name, db, kv.key);
-						externalDatabasesTemporaryCache.push_back(externalDb);
+						self->externalDatabases.insert(name, db);
+						unusedDatabases.insert(name);
 
 						TraceEvent(SevDebug, "TenantBalancerRecoverDatabaseConnection", self->tbi.id())
 						    .detail("Name", name)
 						    .detail("ConnectionString", kv.value);
 					} else {
-						ASSERT(false);
+						ASSERT(kv.key == tenantBalancerActiveProcessKey);
 					}
 				}
 
 				if (result.more) {
 					ASSERT(result.size() > 0);
 					begin = keyAfter(result.rbegin()->key);
-					tr.fullReset();
+					tr->reset();
 				} else {
 					break;
 				}
 			} catch (Error& e) {
 				TraceEvent(SevDebug, "TenantBalancerRecoveryError", self->tbi.id()).error(e);
-				wait(tr.onError(e));
+				wait(tr->onError(e));
 			}
 		}
 
 		for (auto& itr : self->outgoingMovements) {
-			Optional<Reference<ExternalDatabase>> externalDb =
-			    self->externalDatabases.get(itr.second.getDestinationDatabaseName());
+			Optional<Database> externalDb = self->externalDatabases.get(itr.second.getDestinationDatabaseName());
 			ASSERT(externalDb.present());
 
 			TraceEvent(SevDebug, "TenantBalancerRecoverOutgoingMovementDatabase", self->tbi.id())
@@ -371,11 +399,12 @@ struct TenantBalancer {
 			    .detail("SourcePrefix", itr.second.getSourcePrefix());
 
 			itr.second.setDestinationDatabase(externalDb.get());
+			self->externalDatabases.addDatabaseRef(itr.second.getDestinationDatabaseName());
+			unusedDatabases.erase(itr.second.getDestinationDatabaseName());
 		}
 
 		for (auto& itr : self->incomingMovements) {
-			Optional<Reference<ExternalDatabase>> externalDb =
-			    self->externalDatabases.get(itr.second.getSourceDatabaseName());
+			Optional<Database> externalDb = self->externalDatabases.get(itr.second.getSourceDatabaseName());
 			ASSERT(externalDb.present());
 
 			TraceEvent(SevDebug, "TenantBalancerRecoverIncomingMovementDatabase", self->tbi.id())
@@ -383,6 +412,14 @@ struct TenantBalancer {
 			    .detail("DestinationPrefix", itr.second.getDestinationPrefix());
 
 			itr.second.setSourceDatabase(externalDb.get());
+			self->externalDatabases.addDatabaseRef(itr.second.getSourceDatabaseName());
+			unusedDatabases.erase(itr.second.getSourceDatabaseName());
+		}
+
+		for (auto dbName : unusedDatabases) {
+			TraceEvent(SevDebug, "TenantBalancerRecoveredUnusedDatabase", self->tbi.id())
+			    .detail("DatabaseName", dbName);
+			self->externalDatabases.markDeleted(dbName, self->clearExternalDatabase(dbName));
 		}
 
 		TraceEvent("TenantBalancerRecovered", self->tbi.id());
@@ -390,6 +427,27 @@ struct TenantBalancer {
 	}
 
 	Future<Void> recover() { return recoverImpl(this); }
+
+	ACTOR static Future<Void> takeTenantBalancerOwnershipImpl(TenantBalancer* self) {
+		state Transaction tr(self->db);
+
+		TraceEvent("TenantBalancerTakeOwnership", self->tbi.id());
+
+		loop {
+			try {
+				tr.set(tenantBalancerActiveProcessKey, StringRef(self->tbi.id().toString()));
+				wait(tr.commit());
+
+				TraceEvent("TenantBalancerTookOwnership", self->tbi.id());
+				return Void();
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "TenantBalancerTakeOwnershipError", self->tbi.id()).error(e);
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	Future<Void> takeTenantBalancerOwnership() { return takeTenantBalancerOwnershipImpl(this); }
 
 	ACTOR static Future<bool> isTenantEmpty(Reference<ReadYourWritesTransaction> tr, Key prefix) {
 		state RangeResult rangeResult = wait(tr->getRange(prefixRange(prefix), 1));
@@ -423,7 +481,7 @@ private:
 };
 
 ACTOR template <class Request>
-Future<REPLY_TYPE(Request)> sendTenantBalancerRequest(Reference<ExternalDatabase> peerDb,
+Future<REPLY_TYPE(Request)> sendTenantBalancerRequest(Database peerDb,
                                                       Request request,
                                                       RequestStream<Request> TenantBalancerInterface::*stream) {
 	state Future<ErrorOr<REPLY_TYPE(Request)>> replyFuture = Never();
@@ -436,21 +494,74 @@ Future<REPLY_TYPE(Request)> sendTenantBalancerRequest(Reference<ExternalDatabase
 			}
 			return reply.get();
 		}
-		when(wait(peerDb->db->onTenantBalancerChanged() || initialize)) {
+		when(wait(peerDb->onTenantBalancerChanged() || initialize)) {
 			initialize = Never();
-			replyFuture = peerDb->db->getTenantBalancer().present()
-			                  ? (peerDb->db->getTenantBalancer().get().*stream).tryGetReply(request)
+			replyFuture = peerDb->getTenantBalancer().present()
+			                  ? (peerDb->getTenantBalancer().get().*stream).tryGetReply(request)
 			                  : Never();
 		}
 	}
 }
 
-Future<Void> abortPeer(TenantBalancer* self,
-                       Reference<ExternalDatabase> peerDb,
-                       std::string tenantName,
-                       bool peerIsSource) {
+Future<Void> abortPeer(TenantBalancer* self, Database peerDb, std::string tenantName, bool peerIsSource) {
 	return success(sendTenantBalancerRequest(
 	    peerDb, AbortMovementRequest(tenantName, peerIsSource), &TenantBalancerInterface::abortMovement));
+}
+
+ACTOR Future<bool> insertDbKey(Reference<ReadYourWritesTransaction> tr, Key dbKey, Value dbValue) {
+	Optional<Value> existingValue = wait(tr->get(dbKey));
+	if (existingValue.present() && existingValue.get() != dbValue) {
+		return false;
+	}
+
+	tr->set(dbKey, dbValue);
+	wait(tr->commit());
+
+	return true;
+}
+
+ACTOR Future<Optional<Database>> getOrInsertDatabase(TenantBalancer* self,
+                                                     std::string name,
+                                                     std::string connectionString) {
+	Optional<Database> existingDb = self->externalDatabases.get(name);
+	if (existingDb.present()) {
+		if (existingDb.get()->getConnectionRecord()->getConnectionString().toString() == connectionString) {
+			return existingDb;
+		}
+		return Optional<Database>();
+	}
+
+	state Key dbKey = KeyRef(name).withPrefix(tenantBalancerExternalDatabasePrefix);
+	Key dbKeyCapture = dbKey;
+	Value dbValue = ValueRef(connectionString);
+
+	bool inserted =
+	    wait(runTenantBalancerTransaction<bool>(self->db,
+	                                            self->tbi.id(),
+	                                            "GetOrInsertDatabase",
+	                                            [dbKeyCapture, dbValue](Reference<ReadYourWritesTransaction> tr) {
+		                                            return insertDbKey(tr, dbKeyCapture, dbValue);
+	                                            }));
+
+	if (!inserted) {
+		return Optional<Database>();
+	}
+
+	Database db = Database::createDatabase(
+	    makeReference<ClusterConnectionKey>(self->db, dbKey, ClusterConnectionString(connectionString), true),
+	    Database::API_VERSION_LATEST,
+	    IsInternal::True,
+	    self->tbi.locality);
+
+	if (!self->externalDatabases.insert(name, db)) {
+		Optional<Database> collision = self->externalDatabases.get(name);
+		ASSERT(collision.present() &&
+		       collision.get()->getConnectionRecord()->getConnectionString().toString() == connectionString);
+
+		return collision.get();
+	}
+
+	return db;
 }
 
 // src
@@ -463,8 +574,8 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 	++self->moveTenantToClusterRequests;
 
 	try {
-		state Optional<Reference<ExternalDatabase>> destDatabase =
-		    wait(self->externalDatabases.getOrCreate(req.destConnectionString, req.destConnectionString));
+		state Optional<Database> destDatabase =
+		    wait(getOrInsertDatabase(self, req.destConnectionString, req.destConnectionString));
 		if (!destDatabase.present()) {
 			// TODO: how to handle this?
 			ASSERT(false);
@@ -487,7 +598,7 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 
 		// Submit a DR to move the target range
 		bool replacePrefix = req.sourcePrefix != req.destPrefix;
-		wait(self->agent.submitBackup(destDatabase.get()->db,
+		wait(self->agent.submitBackup(destDatabase.get(),
 		                              KeyRef(sourceMovementRecord.getTagName()),
 		                              backupRanges,
 		                              StopWhenDone::False,
@@ -500,7 +611,7 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 		wait(self->saveOutgoingMovement(sourceMovementRecord));
 
 		// Check if a DR agent is running to process the move
-		state bool agentRunning = wait(self->agent.checkActive(destDatabase.get()->db));
+		state bool agentRunning = wait(self->agent.checkActive(destDatabase.get()));
 		if (!agentRunning) {
 			throw movement_agent_not_running();
 		}
@@ -535,10 +646,8 @@ ACTOR Future<Void> receiveTenantFromCluster(TenantBalancer* self, ReceiveTenantF
 	++self->receiveTenantFromClusterRequests;
 
 	try {
-		// 0.Extract necessary variables
-		state Optional<Reference<ExternalDatabase>> srcDatabase =
-		    wait(self->externalDatabases.getOrCreate(req.srcConnectionString, req.srcConnectionString));
-
+		state Optional<Database> srcDatabase =
+		    wait(getOrInsertDatabase(self, req.srcConnectionString, req.srcConnectionString));
 		if (!srcDatabase.present()) {
 			// TODO: how to handle this?
 			ASSERT(false);
@@ -653,7 +762,7 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 						tenantMovementInfo.sourcePrefix = sourceMovementRecord.getSourcePrefix();
 						tenantMovementInfo.destPrefix = sourceMovementRecord.getDestinationPrefix();
 						tenantMovementInfo.targetConnectionString = sourceMovementRecord.getDestinationDatabase()
-						                                                ->db->getConnectionRecord()
+						                                                ->getConnectionRecord()
 						                                                ->getConnectionString()
 						                                                .toString();
 					} else {
@@ -662,7 +771,7 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 						tenantMovementInfo.sourcePrefix = destinationRecord.getSourcePrefix();
 						tenantMovementInfo.destPrefix = destinationRecord.getDestinationPrefix();
 						tenantMovementInfo.targetConnectionString = destinationRecord.getSourceDatabase()
-						                                                ->db->getConnectionRecord()
+						                                                ->getConnectionRecord()
 						                                                ->getConnectionString()
 						                                                .toString();
 					}
@@ -695,17 +804,12 @@ ACTOR Future<Void> getActiveMovements(TenantBalancer* self, GetActiveMovementsRe
 	return Void();
 }
 
-ACTOR Future<Version> lockSourceTenant(TenantBalancer* self, std::string tenant) {
-	state Transaction tr(self->db);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Version v = wait(tr.getReadVersion());
-			return v;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
+Future<Version> lockSourceTenant(TenantBalancer* self, std::string tenant) {
+	return runTenantBalancerTransaction<Version>(
+	    self->db, self->tbi.id(), "LockSourceTenant", [](Reference<ReadYourWritesTransaction> tr) {
+		    tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		    return tr->getReadVersion();
+	    });
 }
 
 ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMovementRequest req) {
@@ -728,7 +832,7 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 		TraceEvent(SevDebug, "TenantBalancerFinishSourceSwitch", self->tbi.id())
 		    .detail("DestinationDatabaseName", record.getDestinationDatabaseName());
 
-		wait(self->agent.atomicSwitchover(record.getDestinationDatabase()->db,
+		wait(self->agent.atomicSwitchover(record.getDestinationDatabase(),
 		                                  KeyRef(record.getTagName()),
 		                                  backupRanges,
 		                                  StringRef(),
@@ -782,7 +886,7 @@ ACTOR Future<Void> abortMovement(TenantBalancer* self, AbortMovementRequest req)
 	++self->abortMovementRequests;
 
 	try {
-		state Reference<ExternalDatabase> targetDB;
+		state Database targetDB;
 		state std::string tagName;
 		if (req.isSource) {
 			SourceMovementRecord srcRecord = self->getOutgoingMovement(Key(req.tenantName));
@@ -799,9 +903,9 @@ ACTOR Future<Void> abortMovement(TenantBalancer* self, AbortMovementRequest req)
 		    .detail("TenantName", req.tenantName);
 		// TODO: make sure the parameters in abortBackup() are correct
 		wait(self->agent.abortBackup(
-		    targetDB->db, Key(tagName), PartialBackup{ false }, AbortOldBackup::False, DstOnly{ false }));
+		    targetDB, Key(tagName), PartialBackup{ false }, AbortOldBackup::False, DstOnly{ false }));
 
-		wait(self->agent.unlockBackup(targetDB->db, Key(tagName)));
+		wait(self->agent.unlockBackup(targetDB, Key(tagName)));
 
 		// Clear record if abort correctly
 		if (req.isSource) {
@@ -885,6 +989,7 @@ ACTOR Future<Void> tenantBalancer(TenantBalancerInterface tbi,
 	state TenantBalancer self(tbi, db, connRecord);
 
 	try {
+		wait(self.takeTenantBalancerOwnership());
 		wait(self.recover());
 		wait(tenantBalancerCore(&self));
 		throw internal_error();

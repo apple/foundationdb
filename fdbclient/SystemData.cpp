@@ -1054,6 +1054,7 @@ const KeyRef tenantBalancerDestinationMovementPrefix = tenantBalancerDestination
 const KeyRangeRef tenantBalancerExternalDatabaseKeys("\xff\x02/tenantBalancer/externalDatabase/"_sr,
                                                      "\xff\x02/tenantBalancer/externalDatabase0"_sr);
 const KeyRef tenantBalancerExternalDatabasePrefix = tenantBalancerExternalDatabaseKeys.begin;
+const KeyRef tenantBalancerActiveProcessKey = "\xff\x02/tenantBalancer/activeTenantBalancer"_sr;
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {

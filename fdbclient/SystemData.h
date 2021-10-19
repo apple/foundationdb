@@ -517,6 +517,7 @@ extern const KeyRangeRef tenantBalancerDestinationMovementKeys;
 extern const KeyRef tenantBalancerDestinationMovementPrefix;
 extern const KeyRangeRef tenantBalancerExternalDatabaseKeys;
 extern const KeyRef tenantBalancerExternalDatabasePrefix;
+extern const KeyRef tenantBalancerActiveProcessKey;
 
 #pragma clang diagnostic pop
 

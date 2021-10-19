@@ -45,7 +45,7 @@ set(FDBCLIENT_SRCS
   DatabaseConfiguration.h
   DatabaseContext.h
   EventTypes.actor.h
-  ExternalDatabase.actor.h
+  ExternalDatabaseMap.h
   FDBOptions.h
   FDBTypes.cpp
   FDBTypes.h
