@@ -2300,7 +2300,7 @@ ACTOR Future<Void> listDBMove(Database src, Database dest) {
 		       src->getConnectionRecord()->getConnectionString().toString().c_str(),
 		       dest->getConnectionRecord()->getConnectionString().toString().c_str());
 		for (const auto& movement : activeMovements) {
-			if (movement.targetConnectionString == dest->getConnectionRecord()->getConnectionString().toString()) {
+			if (movement.destinationConnectionString == dest->getConnectionRecord()->getConnectionString().toString()) {
 				printf("%s\n", movement.toString().c_str());
 			}
 		}
@@ -2322,20 +2322,9 @@ ACTOR Future<Void> finishDBMove(Database src, Database dest, Key srcPrefix, Opti
 		if (!targetDBMove.present()) {
 			throw movement_not_found();
 		}
-		// TODO return double value
-		std::string secondsBehindStr = targetDBMove.get().secondsBehind;
-		char* end;
-		double secondsBehind = std::strtod(targetDBMove.get().secondsBehind.c_str(), &end);
-		if (end != nullptr || secondsBehind == 0) {
-			std::string errorMessage =
-			    end != nullptr ? "Seconds behind parsing error" : "Seconds behind string illegal";
-			fprintf(stderr, "ERROR: %s `%s'\n", errorMessage.c_str(), secondsBehindStr.c_str());
-			return Void();
-		}
+		double secondsBehind = targetDBMove.get().mutationLag;
 		if (secondsBehind > maxLagSeconds.orDefault(DBL_MAX)) {
-			printf("Current behind seconds is %s, which exceeds %d",
-			       secondsBehindStr.c_str(),
-			       maxLagSeconds.orDefault(DBL_MAX));
+			printf("Current behind seconds is %d, which exceeds %d", secondsBehind, maxLagSeconds.orDefault(DBL_MAX));
 			return Void();
 		}
 		TraceEvent(SevDebug, "TenantBalancerLagSecondsCheckPass")
