@@ -142,7 +142,7 @@ typedef struct {
 	int txntagging;
 	char txntagging_prefix[TAGPREFIXLENGTH_MAX];
 	FDBStreamingMode streaming_mode;
-	int64_t client_threads_per_version;
+	uint32_t client_threads_per_version;
 	int disable_ryw;
 } mako_args_t;
 

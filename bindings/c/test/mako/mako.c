@@ -1296,7 +1296,7 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 
 	if (args->client_threads_per_version > 0) {
 		err = fdb_network_set_option(
-		    FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, (uint8_t*)&args->client_threads_per_version, sizeof(int64_t));
+		    FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, (uint8_t*)&args->client_threads_per_version, sizeof(uint32_t));
 		if (err) {
 			fprintf(stderr,
 			        "ERROR: fdb_network_set_option (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) (%d): %s\n",
@@ -1472,6 +1472,7 @@ int init_args(mako_args_t* args) {
 	for (i = 0; i < MAX_OP; i++) {
 		args->txnspec.ops[i][OP_COUNT] = 0;
 	}
+	args->client_threads_per_version = 0;
 	args->disable_ryw = 0;
 	return 0;
 }
