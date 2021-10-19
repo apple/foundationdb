@@ -35,33 +35,40 @@
 #include <vector>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// TODO: do we need any recoverable error states?
 static const StringRef DBMOVE_TAG_PREFIX = "MovingData/"_sr;
 
-class SourceMovementRecord {
+class MovementRecord {
 public:
-	SourceMovementRecord() {}
-	SourceMovementRecord(Standalone<StringRef> sourcePrefix,
-	                     Standalone<StringRef> destinationPrefix,
-	                     std::string destDatabaseName,
-	                     Database destinationDb)
+	MovementRecord() {}
+	MovementRecord(Standalone<StringRef> sourcePrefix,
+	               Standalone<StringRef> destinationPrefix,
+	               std::string peerDatabaseName,
+	               Database peerDatabase)
 	  : id(deterministicRandom()->randomUniqueID()), sourcePrefix(sourcePrefix), destinationPrefix(destinationPrefix),
-	    destDatabaseName(destDatabaseName), destinationDb(destinationDb) {}
+	    peerDatabaseName(peerDatabaseName), peerDatabase(peerDatabase) {}
 
 	Standalone<StringRef> getSourcePrefix() const { return sourcePrefix; }
 	Standalone<StringRef> getDestinationPrefix() const { return destinationPrefix; }
-	Database getDestinationDatabase() const { return destinationDb; }
-	std::string getDestinationDatabaseName() const { return destDatabaseName; }
+	Database getPeerDatabase() const { return peerDatabase; }
+	std::string getPeerDatabaseName() const { return peerDatabaseName; }
+
+	// TODO: tag name will not be unique on dest; make unique by including both prefixes
 	std::string getTagName() const { return DBMOVE_TAG_PREFIX.toString() + sourcePrefix.toString(); }
 
-	void setDestinationDatabase(Database db) { destinationDb = db; }
+	void setPeerDatabase(Database db) { peerDatabase = db; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, sourcePrefix, destinationPrefix, destDatabaseName);
+		serializer(ar, id, sourcePrefix, destinationPrefix, peerDatabaseName);
 	}
 
-	Key getKey() const { return StringRef(id.toString()).withPrefix(tenantBalancerSourceMovementPrefix); }
+	Key getKey(bool isSource) const {
+		if (isSource) {
+			return StringRef(id.toString()).withPrefix(tenantBalancerSourceMovementPrefix);
+		} else {
+			return StringRef(id.toString()).withPrefix(tenantBalancerDestinationMovementPrefix);
+		}
+	}
 
 	Value toValue() const {
 		BinaryWriter wr(IncludeVersion());
@@ -69,8 +76,8 @@ public:
 		return wr.toValue();
 	}
 
-	static SourceMovementRecord fromValue(Value value) {
-		SourceMovementRecord record;
+	static MovementRecord fromValue(Value value) {
+		MovementRecord record;
 		BinaryReader rd(value, IncludeVersion());
 		rd >> record;
 
@@ -87,60 +94,9 @@ private:
 	Standalone<StringRef> sourcePrefix;
 	Standalone<StringRef> destinationPrefix;
 
-	std::string destDatabaseName;
+	std::string peerDatabaseName;
 	// TODO: leave this open, or open it at request time?
-	Database destinationDb;
-};
-
-class DestinationMovementRecord {
-public:
-	DestinationMovementRecord() {}
-	DestinationMovementRecord(Standalone<StringRef> sourcePrefix,
-	                          Standalone<StringRef> destinationPrefix,
-	                          std::string sourceDatabaseName,
-	                          Database sourceDb)
-	  : id(deterministicRandom()->randomUniqueID()), sourcePrefix(sourcePrefix), destinationPrefix(destinationPrefix),
-	    sourceDatabaseName(sourceDatabaseName), sourceDb(sourceDb) {}
-
-	Standalone<StringRef> getSourcePrefix() const { return sourcePrefix; }
-	Standalone<StringRef> getDestinationPrefix() const { return destinationPrefix; }
-	Database getSourceDatabase() const { return sourceDb; }
-	std::string getSourceDatabaseName() const { return sourceDatabaseName; }
-	std::string getTagName() const { return DBMOVE_TAG_PREFIX.toString() + sourcePrefix.toString(); }
-
-	void setSourceDatabase(Database db) { sourceDb = db; }
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, id, sourcePrefix, destinationPrefix, sourceDatabaseName);
-	}
-
-	Key getKey() const { return StringRef(id.toString()).withPrefix(tenantBalancerDestinationMovementPrefix); }
-
-	Value toValue() const {
-		BinaryWriter wr(IncludeVersion());
-		wr << *this;
-		return wr.toValue();
-	}
-
-	static DestinationMovementRecord fromValue(Value value) {
-		DestinationMovementRecord record;
-		BinaryReader rd(value, IncludeVersion());
-		rd >> record;
-
-		return record;
-	}
-
-	MovementState movementState = MovementState::INITIALIZING;
-	Version switchVersion = invalidVersion;
-
-private:
-	// Private variables are not intended to be modified by requests
-	UID id;
-	Standalone<StringRef> sourcePrefix;
-	Standalone<StringRef> destinationPrefix;
-	std::string sourceDatabaseName;
-	Database sourceDb;
+	Database peerDatabase;
 };
 
 ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
@@ -225,7 +181,7 @@ struct TenantBalancer {
 	ActorCollection actors;
 	DatabaseBackupAgent agent;
 
-	SourceMovementRecord getOutgoingMovement(Key prefix) const {
+	MovementRecord getOutgoingMovement(Key prefix) const {
 		auto itr = outgoingMovements.find(prefix);
 		if (itr == outgoingMovements.end()) {
 			TraceEvent(SevWarn, "TenantBalancerGetOutgoingMovementError").detail("MissPrefix", prefix);
@@ -235,7 +191,7 @@ struct TenantBalancer {
 		return itr->second;
 	}
 
-	DestinationMovementRecord getIncomingMovement(Key prefix) const {
+	MovementRecord getIncomingMovement(Key prefix) const {
 		auto itr = incomingMovements.find(prefix);
 		if (itr == incomingMovements.end()) {
 			TraceEvent(SevWarn, "TenantBalancerGetIncomingMovementError").detail("MissPrefix", prefix);
@@ -245,9 +201,8 @@ struct TenantBalancer {
 		return itr->second;
 	}
 
-	template <class Record>
-	Future<Void> persistMovementRecord(Record record) {
-		Key key = record.getKey();
+	Future<Void> persistMovementRecord(MovementRecord record, bool isSource) {
+		Key key = record.getKey(isSource);
 		Value value = record.toValue();
 
 		return runTenantBalancerTransaction<Void>(
@@ -257,10 +212,10 @@ struct TenantBalancer {
 		    });
 	}
 
-	Future<Void> saveOutgoingMovement(SourceMovementRecord const& record) {
-		return map(persistMovementRecord(record), [this, record](Void _) {
+	Future<Void> saveOutgoingMovement(MovementRecord const& record) {
+		return map(persistMovementRecord(record, true), [this, record](Void _) {
 			outgoingMovements[record.getSourcePrefix()] = record;
-			externalDatabases.addDatabaseRef(record.getDestinationDatabaseName());
+			externalDatabases.addDatabaseRef(record.getPeerDatabaseName());
 
 			TraceEvent(SevDebug, "SaveOutgoingMovementSuccess", tbi.id())
 			    .detail("SourcePrefix", record.getSourcePrefix());
@@ -268,10 +223,10 @@ struct TenantBalancer {
 		});
 	}
 
-	Future<Void> saveIncomingMovement(DestinationMovementRecord const& record) {
-		return map(persistMovementRecord(record), [this, record](Void _) {
+	Future<Void> saveIncomingMovement(MovementRecord const& record) {
+		return map(persistMovementRecord(record, false), [this, record](Void _) {
 			incomingMovements[record.getDestinationPrefix()] = record;
-			externalDatabases.addDatabaseRef(record.getSourceDatabaseName());
+			externalDatabases.addDatabaseRef(record.getPeerDatabaseName());
 
 			TraceEvent(SevDebug, "SaveIncomingMovementSuccess", tbi.id())
 			    .detail("DestinationPrefix", record.getDestinationPrefix());
@@ -279,9 +234,8 @@ struct TenantBalancer {
 		});
 	}
 
-	template <class Record>
-	Future<Void> clearMovementRecord(Record record) {
-		Key key = record.getKey();
+	Future<Void> clearMovementRecord(MovementRecord record, bool isSource) {
+		Key key = record.getKey(isSource);
 
 		return runTenantBalancerTransaction<Void>(
 		    db, tbi.id(), "ClearMovementRecord", [key](Reference<ReadYourWritesTransaction> tr) {
@@ -303,23 +257,23 @@ struct TenantBalancer {
 		    });
 	}
 
-	Future<Void> clearOutgoingMovement(SourceMovementRecord const& record) {
-		return map(clearMovementRecord(record), [this, record](Void _) {
+	Future<Void> clearOutgoingMovement(MovementRecord const& record) {
+		return map(clearMovementRecord(record, true), [this, record](Void _) {
 			outgoingMovements.erase(record.getSourcePrefix());
-			if (externalDatabases.delDatabaseRef(record.getDestinationDatabaseName()) == 0) {
-				externalDatabases.markDeleted(record.getDestinationDatabaseName(),
-				                              clearExternalDatabase(record.getDestinationDatabaseName()));
+			if (externalDatabases.delDatabaseRef(record.getPeerDatabaseName()) == 0) {
+				externalDatabases.markDeleted(record.getPeerDatabaseName(),
+				                              clearExternalDatabase(record.getPeerDatabaseName()));
 			}
 			return Void();
 		});
 	}
 
-	Future<Void> clearIncomingMovement(DestinationMovementRecord const& record) {
-		return map(clearMovementRecord(record), [this, record](Void _) {
+	Future<Void> clearIncomingMovement(MovementRecord const& record) {
+		return map(clearMovementRecord(record, false), [this, record](Void _) {
 			incomingMovements.erase(record.getDestinationPrefix());
-			if (externalDatabases.delDatabaseRef(record.getSourceDatabaseName()) == 0) {
-				externalDatabases.markDeleted(record.getSourceDatabaseName(),
-				                              clearExternalDatabase(record.getSourceDatabaseName()));
+			if (externalDatabases.delDatabaseRef(record.getPeerDatabaseName()) == 0) {
+				externalDatabases.markDeleted(record.getPeerDatabaseName(),
+				                              clearExternalDatabase(record.getPeerDatabaseName()));
 			}
 			return Void();
 		});
@@ -344,21 +298,21 @@ struct TenantBalancer {
 				    wait(tr->getRange(KeyRangeRef(begin, tenantBalancerKeys.end), 1000));
 				for (auto kv : result) {
 					if (kv.key.startsWith(tenantBalancerSourceMovementPrefix)) {
-						SourceMovementRecord record = SourceMovementRecord::fromValue(kv.value);
+						MovementRecord record = MovementRecord::fromValue(kv.value);
 						self->outgoingMovements[record.getSourcePrefix()] = record;
 
 						TraceEvent(SevDebug, "TenantBalancerRecoverSourceMove", self->tbi.id())
 						    .detail("SourcePrefix", record.getSourcePrefix())
 						    .detail("DestinationPrefix", record.getDestinationPrefix())
-						    .detail("DatabaseName", record.getDestinationDatabaseName());
+						    .detail("DatabaseName", record.getPeerDatabaseName());
 					} else if (kv.key.startsWith(tenantBalancerDestinationMovementPrefix)) {
-						DestinationMovementRecord record = DestinationMovementRecord::fromValue(kv.value);
+						MovementRecord record = MovementRecord::fromValue(kv.value);
 
 						self->incomingMovements[record.getSourcePrefix()] = record;
 						TraceEvent(SevDebug, "TenantBalancerRecoverDestinationMove", self->tbi.id())
 						    .detail("SourcePrefix", record.getSourcePrefix())
 						    .detail("DestinationPrefix", record.getDestinationPrefix())
-						    .detail("DatabaseName", record.getSourceDatabaseName());
+						    .detail("DatabaseName", record.getPeerDatabaseName());
 					} else if (kv.key.startsWith(tenantBalancerExternalDatabasePrefix)) {
 						std::string name = kv.key.removePrefix(tenantBalancerExternalDatabasePrefix).toString();
 						Database db = Database::createDatabase(
@@ -393,29 +347,29 @@ struct TenantBalancer {
 		}
 
 		for (auto& itr : self->outgoingMovements) {
-			Optional<Database> externalDb = self->externalDatabases.get(itr.second.getDestinationDatabaseName());
+			Optional<Database> externalDb = self->externalDatabases.get(itr.second.getPeerDatabaseName());
 			ASSERT(externalDb.present());
 
 			TraceEvent(SevDebug, "TenantBalancerRecoverOutgoingMovementDatabase", self->tbi.id())
-			    .detail("DatabaseName", itr.second.getDestinationDatabaseName())
+			    .detail("DatabaseName", itr.second.getPeerDatabaseName())
 			    .detail("SourcePrefix", itr.second.getSourcePrefix());
 
-			itr.second.setDestinationDatabase(externalDb.get());
-			self->externalDatabases.addDatabaseRef(itr.second.getDestinationDatabaseName());
-			unusedDatabases.erase(itr.second.getDestinationDatabaseName());
+			itr.second.setPeerDatabase(externalDb.get());
+			self->externalDatabases.addDatabaseRef(itr.second.getPeerDatabaseName());
+			unusedDatabases.erase(itr.second.getPeerDatabaseName());
 		}
 
 		for (auto& itr : self->incomingMovements) {
-			Optional<Database> externalDb = self->externalDatabases.get(itr.second.getSourceDatabaseName());
+			Optional<Database> externalDb = self->externalDatabases.get(itr.second.getPeerDatabaseName());
 			ASSERT(externalDb.present());
 
 			TraceEvent(SevDebug, "TenantBalancerRecoverIncomingMovementDatabase", self->tbi.id())
-			    .detail("DatabaseName", itr.second.getSourceDatabaseName())
+			    .detail("DatabaseName", itr.second.getPeerDatabaseName())
 			    .detail("DestinationPrefix", itr.second.getDestinationPrefix());
 
-			itr.second.setSourceDatabase(externalDb.get());
-			self->externalDatabases.addDatabaseRef(itr.second.getSourceDatabaseName());
-			unusedDatabases.erase(itr.second.getSourceDatabaseName());
+			itr.second.setPeerDatabase(externalDb.get());
+			self->externalDatabases.addDatabaseRef(itr.second.getPeerDatabaseName());
+			unusedDatabases.erase(itr.second.getPeerDatabaseName());
 		}
 
 		for (auto dbName : unusedDatabases) {
@@ -461,9 +415,8 @@ struct TenantBalancer {
 		                         [=](Reference<ReadYourWritesTransaction> tr) { return isTenantEmpty(tr, prefix); });
 	}
 
-	std::map<Key, SourceMovementRecord> getOutgoingMovements() const { return outgoingMovements; }
-
-	std::map<Key, DestinationMovementRecord> getIncomingMovements() const { return incomingMovements; }
+	std::map<Key, MovementRecord> getOutgoingMovements() const { return outgoingMovements; }
+	std::map<Key, MovementRecord> getIncomingMovements() const { return incomingMovements; }
 
 	CounterCollection tenantBalancerMetrics;
 
@@ -478,8 +431,8 @@ struct TenantBalancer {
 	ExternalDatabaseMap externalDatabases;
 
 private:
-	std::map<Key, SourceMovementRecord> outgoingMovements;
-	std::map<Key, DestinationMovementRecord> incomingMovements;
+	std::map<Key, MovementRecord> outgoingMovements;
+	std::map<Key, MovementRecord> incomingMovements;
 };
 
 ACTOR template <class Request>
@@ -585,7 +538,7 @@ ACTOR Future<Void> moveTenantToCluster(TenantBalancer* self, MoveTenantToCluster
 			ASSERT(false);
 		}
 
-		state SourceMovementRecord sourceMovementRecord(
+		state MovementRecord sourceMovementRecord(
 		    req.sourcePrefix, req.destPrefix, req.destConnectionString, destDatabase.get());
 
 		wait(self->saveOutgoingMovement(sourceMovementRecord));
@@ -656,7 +609,8 @@ ACTOR Future<Void> receiveTenantFromCluster(TenantBalancer* self, ReceiveTenantF
 			// TODO: how to handle this?
 			ASSERT(false);
 		}
-		DestinationMovementRecord destinationMovementRecord(
+
+		state MovementRecord destinationMovementRecord(
 		    req.sourcePrefix, req.destPrefix, req.srcConnectionString, srcDatabase.get());
 		wait(self->saveIncomingMovement(destinationMovementRecord));
 
@@ -767,7 +721,7 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 				tenantMovementInfo.movementLocation = TenantMovementInfo::Location::SOURCE;
 				tenantMovementInfo.sourceConnectionString = curConnectionString;
 				tenantMovementInfo.destinationConnectionString =
-				    record.getDestinationDatabase()->getConnectionRecord()->getConnectionString().toString();
+				    record.getPeerDatabase()->getConnectionRecord()->getConnectionString().toString();
 				tenantMovementInfo.sourcePrefix = record.getSourcePrefix();
 				tenantMovementInfo.destPrefix = record.getDestinationPrefix();
 				// TODO update isSourceLocked and isDestinationLocked
@@ -784,7 +738,7 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 				TenantMovementInfo tenantMovementInfo;
 				tenantMovementInfo.movementLocation = TenantMovementInfo::Location::DEST;
 				tenantMovementInfo.sourceConnectionString =
-				    record.getSourceDatabase()->getConnectionRecord()->getConnectionString().toString();
+				    record.getPeerDatabase()->getConnectionRecord()->getConnectionString().toString();
 				tenantMovementInfo.destinationConnectionString = curConnectionString;
 				tenantMovementInfo.sourcePrefix = record.getSourcePrefix();
 				tenantMovementInfo.destPrefix = record.getDestinationPrefix();
@@ -837,9 +791,9 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 	try {
 		// TODO: check that the DR is ready to switch
 		// TODO: check if maxLagSeconds is exceeded
-		state SourceMovementRecord record = self->getOutgoingMovement(Key(req.sourceTenant));
+		state MovementRecord record = self->getOutgoingMovement(Key(req.sourceTenant));
 		state std::string destinationConnectionString =
-		    record.getDestinationDatabase()->getConnectionRecord()->getConnectionString().toString();
+		    record.getPeerDatabase()->getConnectionRecord()->getConnectionString().toString();
 		state Optional<Database> destDatabase =
 		    wait(getOrInsertDatabase(self, destinationConnectionString, destinationConnectionString));
 		if (!destDatabase.present()) {
@@ -863,9 +817,9 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 
 		// Use DR to finish this movement
 		TraceEvent(SevDebug, "TenantBalancerFinishSourceSwitch", self->tbi.id())
-		    .detail("DestinationDatabaseName", record.getDestinationDatabaseName());
+		    .detail("DestinationDatabaseName", record.getPeerDatabaseName());
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
-		wait(self->agent.atomicSwitchover(record.getDestinationDatabase(),
+		wait(self->agent.atomicSwitchover(record.getPeerDatabase(),
 		                                  KeyRef(record.getTagName()),
 		                                  backupRanges,
 		                                  StringRef(),
@@ -879,7 +833,7 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 		record.movementState = MovementState::COMPLETED;
 		wait(self->saveOutgoingMovement(record));
 
-		wait(abortPeer(self, record.getDestinationDatabase(), req.sourceTenant, false));
+		wait(abortPeer(self, record.getPeerDatabase(), req.sourceTenant, false));
 
 		FinishSourceMovementReply reply;
 		req.reply.send(reply);
@@ -894,7 +848,7 @@ ACTOR Future<Void> finishDestinationMovement(TenantBalancer* self, FinishDestina
 	++self->finishDestinationMovementRequests;
 
 	try {
-		state DestinationMovementRecord record = self->getIncomingMovement(Key(req.destinationTenant));
+		state MovementRecord record = self->getIncomingMovement(Key(req.destinationTenant));
 		record.movementState = MovementState::SWITCHING;
 		record.switchVersion = req.version;
 		wait(self->saveIncomingMovement(record));
@@ -922,12 +876,12 @@ ACTOR Future<Void> abortMovement(TenantBalancer* self, AbortMovementRequest req)
 		state Database targetDB;
 		state std::string tagName;
 		if (req.isSource) {
-			SourceMovementRecord srcRecord = self->getOutgoingMovement(Key(req.tenantName));
-			targetDB = srcRecord.getDestinationDatabase();
+			MovementRecord srcRecord = self->getOutgoingMovement(Key(req.tenantName));
+			targetDB = srcRecord.getPeerDatabase();
 			tagName = srcRecord.getTagName();
 		} else {
-			DestinationMovementRecord destRecord = self->getIncomingMovement(Key(req.tenantName));
-			targetDB = destRecord.getSourceDatabase();
+			MovementRecord destRecord = self->getIncomingMovement(Key(req.tenantName));
+			targetDB = destRecord.getPeerDatabase();
 			tagName = destRecord.getTagName();
 		}
 		TraceEvent(SevDebug,
