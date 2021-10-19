@@ -638,7 +638,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	if (g_network->isSimulated())
 		wait(delay(5.0));
 
-	// Wait for database to fully recover
+	TraceEvent("QuietDatabaseWaitingOnFullRecovery").log();
 	while (dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
 		wait(dbInfo->onChange());
 	}
