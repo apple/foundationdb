@@ -3611,6 +3611,9 @@ void* checkThread(void* arg) {
 				slowTaskStart = t;
 			} else if (t - std::max(slowTaskStart, lastSlowTaskBlockedLog) > FLOW_KNOBS->SLOWTASK_BLOCKED_INTERVAL) {
 				lastSlowTaskBlockedLog = t;
+				// When this gets logged, it will be with a current timestamp (using timer()). If the network thread
+				// unblocks, it will log any slow task related events at an earlier timestamp. That means the order of
+				// events during this sequence will not match their timestamp order.
 				TraceEvent(SevWarnAlways, "RunLoopBlocked").detail("Duration", t - slowTaskStart);
 			}
 
