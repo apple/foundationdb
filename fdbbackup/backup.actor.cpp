@@ -977,8 +977,6 @@ CSimpleOpt::SOption g_rgDBMoveFinishOptions[] = {
 #endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
 	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
-	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
-	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
@@ -2266,18 +2264,18 @@ ACTOR Future<Void> listDBMove(Database db, bool isSrc) {
 		state std::vector<TenantMovementInfo> activeMovements = wait(getActiveMovements(db));
 
 		// Filter for desired movements
-		std::vector<TenantMovementInfo> targetMovements;
-		for (const auto& movement : activeMovements) {
-			if ((movement.movementLocation == TenantMovementInfo::Location::SOURCE) == isSrc) {
-				targetMovements.push_back(movement);
-			}
-		}
 		printf("%s %s %s\n",
 		       "List running data movement",
 		       (isSrc ? "from" : "to"),
 		       db->getConnectionRecord()->getConnectionString().toString().c_str());
-		for (const auto& movement : targetMovements) {
-			printf("%s\n", movement.toString().c_str());
+		for (const auto& movement : activeMovements) {
+			if ((movement.movementLocation == TenantMovementInfo::Location::SOURCE) == isSrc) {
+				printf("source prefix: %s destination prefix: %s peer cluster: %s movement state: %s\n",
+				       movement.sourcePrefix.toString().c_str(),
+				       movement.destPrefix.toString().c_str(),
+				       (isSrc ? movement.sourceConnectionString : movement.destinationConnectionString).c_str(),
+				       std::to_string(static_cast<int>(movement.movementState)).c_str());
+			}
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -2299,9 +2297,14 @@ ACTOR Future<Void> listDBMove(Database src, Database dest) {
 		       "List running data movement",
 		       src->getConnectionRecord()->getConnectionString().toString().c_str(),
 		       dest->getConnectionRecord()->getConnectionString().toString().c_str());
+		std::string targetConnectionString = dest->getConnectionRecord()->getConnectionString().toString();
 		for (const auto& movement : activeMovements) {
-			if (movement.destinationConnectionString == dest->getConnectionRecord()->getConnectionString().toString()) {
-				printf("%s\n", movement.toString().c_str());
+			if (movement.destinationConnectionString == targetConnectionString) {
+				printf("source prefix: %s destination prefix: %s peer cluster: %s movement state: %s\n",
+				       movement.sourcePrefix.toString().c_str(),
+				       movement.destPrefix.toString().c_str(),
+				       targetConnectionString.c_str(),
+				       std::to_string(static_cast<int>(movement.movementState)).c_str());
 			}
 		}
 	} catch (Error& e) {
@@ -2314,7 +2317,7 @@ ACTOR Future<Void> listDBMove(Database src, Database dest) {
 	return Void();
 }
 
-ACTOR Future<Void> finishDBMove(Database src, Database dest, Key srcPrefix, Optional<double> maxLagSeconds) {
+ACTOR Future<Void> finishDBMove(Database src, Key srcPrefix, Optional<double> maxLagSeconds) {
 	try {
 		// Check if exceed maxLagSeconds
 		// TODO move it to server-side
@@ -2331,19 +2334,16 @@ ACTOR Future<Void> finishDBMove(Database src, Database dest, Key srcPrefix, Opti
 		    .detail("MaxLagSeconds", maxLagSeconds.orDefault(DBL_MAX))
 		    .detail("CurrentLagSeconds", secondsBehind);
 
+		// Send request to source cluster
 		state FinishSourceMovementRequest finishSourceMovementRequest(srcPrefix.toString(),
 		                                                              maxLagSeconds.orDefault(DBL_MAX));
 		state Future<ErrorOr<FinishSourceMovementReply>> finishSourceMovementReply = Never();
 		state Future<Void> initialize = Void();
-		state std::string tenantName;
-		state Version version;
 		loop choose {
 			when(ErrorOr<FinishSourceMovementReply> reply = wait(finishSourceMovementReply)) {
 				if (finishSourceMovementReply.isError()) {
 					throw finishSourceMovementReply.getError();
 				}
-				tenantName = reply.get().tenantName;
-				version = reply.get().version;
 				break;
 			}
 			when(wait(src->onTenantBalancerChanged() || initialize)) {
@@ -2351,26 +2351,6 @@ ACTOR Future<Void> finishDBMove(Database src, Database dest, Key srcPrefix, Opti
 				finishSourceMovementReply =
 				    src->getTenantBalancer().present()
 				        ? src->getTenantBalancer().get().finishSourceMovement.tryGetReply(finishSourceMovementRequest)
-				        : Never();
-			}
-		}
-
-		state FinishDestinationMovementRequest finishDestinationMovementRequest(tenantName, version);
-		initialize = Void();
-		state Future<ErrorOr<FinishDestinationMovementReply>> finishDestinationMovementReply = Never();
-		loop choose {
-			when(ErrorOr<FinishDestinationMovementReply> reply = wait(finishDestinationMovementReply)) {
-				if (reply.isError()) {
-					throw reply.getError();
-				}
-				break;
-			}
-			when(wait(dest->onTenantBalancerChanged() || initialize)) {
-				initialize = Never();
-				finishDestinationMovementReply =
-				    dest->getTenantBalancer().present()
-				        ? dest->getTenantBalancer().get().finishDestinationMovement.tryGetReply(
-				              finishDestinationMovementRequest)
 				        : Never();
 			}
 		}
@@ -2396,14 +2376,19 @@ ACTOR Future<Void> finishDBMove(Database src, Database dest, Key srcPrefix, Opti
 	return Void();
 }
 
-ACTOR Future<Void> abortDBMove(Optional<Database> src, Optional<Database> dest, Key targetPrefix) {
+ACTOR Future<Void> abortDBMove(Optional<Database> src,
+                               Optional<Database> dest,
+                               Optional<Key> sourcePrefix,
+                               Optional<Key> destinationPrefix) {
 	ASSERT(src.present() || dest.present());
 
 	try {
-		state AbortMovementRequest abortMovementRequest(targetPrefix.toString(), src.present());
+		bool isSource = src.present();
+		Key targetPrefix = isSource ? sourcePrefix.get() : destinationPrefix.get();
+		state AbortMovementRequest abortMovementRequest(targetPrefix.toString(), isSource);
 		state Future<ErrorOr<AbortMovementReply>> abortMovementReply = Never();
 		state Future<Void> initialize = Void();
-		state Database targetDatabase = (abortMovementRequest.isSource ? src : dest).get();
+		state Database targetDatabase = (isSource ? src : dest).get();
 		loop choose {
 			when(ErrorOr<AbortMovementReply> reply = wait(abortMovementReply)) {
 				if (reply.isError()) {
@@ -4959,8 +4944,8 @@ int main(int argc, char* argv[]) {
 				break;
 			}
 			case DBMoveType::FINISH:
-				if (!initCluster() || !initSourceCluster(true)) {
-					fprintf(stderr, "ERROR: -s and -d are required\n");
+				if (!initSourceCluster(true)) {
+					fprintf(stderr, "ERROR: -s is required\n");
 					return FDB_EXIT_ERROR;
 				}
 
@@ -4969,28 +4954,30 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				}
 
-				f = stopAfter(finishDBMove(sourceDb, db, Key(prefix.get()), maxLagSec));
+				f = stopAfter(finishDBMove(sourceDb, Key(prefix.get()), maxLagSec));
 				break;
 			case DBMoveType::ABORT: {
 				bool canInitCluster = initCluster();
 				bool canInitSourceCluster = initSourceCluster(true);
 				if (!canInitCluster && !canInitSourceCluster) {
-					fprintf(stderr, "ERROR: -s and -d are required\n");
+					fprintf(stderr, "ERROR: -s or -d is required\n");
 					return FDB_EXIT_ERROR;
 				}
 
 				if (canInitSourceCluster && !prefix.present()) {
 					fprintf(stderr, "ERROR: --prefix is required\n");
 					return FDB_EXIT_ERROR;
-				} else if (!canInitSourceCluster && !destinationPrefix.present()) {
+				} else if (!canInitCluster && !destinationPrefix.present()) {
 					fprintf(stderr, "ERROR: --destination_prefix is required\n");
 					return FDB_EXIT_ERROR;
 				}
 
 				// TODO if both clusters are able to be initialized, what else should we consider?
-				f = stopAfter(abortDBMove(canInitSourceCluster ? sourceDb : Optional<Database>(),
-				                          canInitCluster ? db : Optional<Database>(),
-				                          canInitSourceCluster ? Key(prefix.get()) : Key(destinationPrefix.get())));
+				f = stopAfter(
+				    abortDBMove(canInitSourceCluster ? sourceDb : Optional<Database>(),
+				                canInitCluster ? db : Optional<Database>(),
+				                canInitSourceCluster ? Optional<Key>(Key(prefix.get())) : Optional<Key>(),
+				                canInitCluster ? Optional<Key>(Key(destinationPrefix.get())) : Optional<Key>()));
 				break;
 			}
 			case DBMoveType::CLEAN:

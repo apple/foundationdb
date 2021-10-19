@@ -36,7 +36,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // TODO: do we need any recoverable error states?
-enum class MovementState { INITIALIZING, STARTED, READY_FOR_SWITCH, SWITCHING, COMPLETED };
+// enum class MovementState { INITIALIZING, STARTED, READY_FOR_SWITCH, SWITCHING, COMPLETED };
 static const StringRef DBMOVE_TAG_PREFIX = "MovingData/"_sr;
 
 class SourceMovementRecord {
@@ -767,16 +767,16 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 				    isSrc ? TenantMovementInfo::Location::SOURCE : TenantMovementInfo::Location::DEST;
 				tenantMovementInfo.sourceConnectionString = curConnectionString;
 				tenantMovementInfo.destinationConnectionString =
-				    record.getDestinationDatabase()->getConnectionRecord()->getConnectionString().toString();
+				    record.getDestinationDatabase()->db->getConnectionRecord()->getConnectionString().toString();
 				tenantMovementInfo.sourcePrefix = record.getSourcePrefix();
 				tenantMovementInfo.destPrefix = record.getDestinationPrefix();
-				// TODO
-				// tenantMovementInfo.isSourceLocked =
-				// tenantMovementInfo.isDestinationLocked =
-				// tenantMovementInfo.movementState =
+				// TODO update isSourceLocked and isDestinationLocked
+				tenantMovementInfo.isSourceLocked = false;
+				tenantMovementInfo.isDestinationLocked = false;
+				tenantMovementInfo.movementState = record.movementState;
 				tenantMovementInfo.mutationLag = prefixToDRInfo[prefix.toString()].first;
-				// databaseTimingDelay
-				// switchVersion
+				// TODO assign databaseTimingDelay
+				tenantMovementInfo.switchVersion = record.switchVersion;
 				// errorMessage
 			}
 		} else {
@@ -785,17 +785,17 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 				tenantMovementInfo.movementLocation =
 				    isSrc ? TenantMovementInfo::Location::SOURCE : TenantMovementInfo::Location::DEST;
 				tenantMovementInfo.sourceConnectionString =
-				    record.getSourceDatabase()->getConnectionRecord()->getConnectionString().toString();
+				    record.getSourceDatabase()->db->getConnectionRecord()->getConnectionString().toString();
 				tenantMovementInfo.destinationConnectionString = curConnectionString;
 				tenantMovementInfo.sourcePrefix = record.getSourcePrefix();
 				tenantMovementInfo.destPrefix = record.getDestinationPrefix();
-				// TODO
-				// tenantMovementInfo.isSourceLocked =
-				// tenantMovementInfo.isDestinationLocked =
-				// tenantMovementInfo.movementState =
+				// TODO update isSourceLocked and isDestinationLocked
+				tenantMovementInfo.isSourceLocked = false;
+				tenantMovementInfo.isDestinationLocked = false;
+				tenantMovementInfo.movementState = record.movementState;
 				tenantMovementInfo.mutationLag = prefixToDRInfo[prefix.toString()].first;
-				// databaseTimingDelay
-				// switchVersion
+				// TODO assign databaseTimingDelay
+				tenantMovementInfo.switchVersion = record.switchVersion;
 				// errorMessage
 			}
 		}
@@ -838,21 +838,35 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 	try {
 		// TODO: check that the DR is ready to switch
 		// TODO: check if maxLagSeconds is exceeded
-
-		state Version version = wait(lockSourceTenant(self, req.sourceTenant));
 		state SourceMovementRecord record = self->getOutgoingMovement(Key(req.sourceTenant));
+		state std::string destinationConnectionString =
+		    record.getDestinationDatabase()->db->getConnectionRecord()->getConnectionString().toString();
+		state Optional<Reference<ExternalDatabase>> destDatabase =
+		    wait(self->externalDatabases.getOrCreate(destinationConnectionString, destinationConnectionString));
+		if (!destDatabase.present()) {
+			// TODO: how to handle this?
+			ASSERT(false);
+		}
+
+		// Send a request to the destination database to finish this move
+		ReceiveTenantFromClusterReply replyFromDestinationDatabase = wait(sendTenantBalancerRequest(
+		    destDatabase.get(),
+		    ReceiveTenantFromClusterRequest(record.getSourcePrefix(),
+		                                    record.getDestinationPrefix(),
+		                                    self->connRecord->getConnectionString().toString()),
+		    &TenantBalancerInterface::receiveTenantFromCluster));
+
+		// Update movement record
+		state Version version = wait(lockSourceTenant(self, req.sourceTenant));
 		record.switchVersion = version;
 		record.movementState = MovementState::SWITCHING;
-
 		wait(self->saveOutgoingMovement(record));
 
-		Standalone<VectorRef<KeyRangeRef>> backupRanges;
-
-		// TODO check if maxLagSeconds is exceeded
+		// Use DR to finish this movement
 		TraceEvent(SevDebug, "TenantBalancerFinishSourceSwitch", self->tbi.id())
 		    .detail("DestinationDatabaseName", record.getDestinationDatabaseName());
-
-		wait(self->agent.atomicSwitchover(record.getDestinationDatabase(),
+		Standalone<VectorRef<KeyRangeRef>> backupRanges;
+		wait(self->agent.atomicSwitchover(record.getDestinationDatabase()->db,
 		                                  KeyRef(record.getTagName()),
 		                                  backupRanges,
 		                                  StringRef(),

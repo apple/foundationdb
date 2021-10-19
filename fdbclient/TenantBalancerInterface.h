@@ -26,8 +26,11 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbclient/json_spirit/json_spirit_writer_template.h"
+#include "fdbclient/JSONDoc.h"
 
-extern enum class MovementState;
+// extern enum class MovementState;
+enum class MovementState { INITIALIZING, STARTED, READY_FOR_SWITCH, SWITCHING, COMPLETED };
 
 struct TenantBalancerInterface {
 	constexpr static FileIdentifier file_identifier = 6185894;
@@ -209,7 +212,7 @@ struct TenantMovementInfo {
 		           errorMessage);
 	}
 
-	std::unordered_map<std::string, std::string> getStatusInfoMap() {
+	std::unordered_map<std::string, std::string> getStatusInfoMap() const {
 		std::unordered_map<std::string, std::string> statusInfoMap;
 		statusInfoMap["movementLocation"] = std::to_string(static_cast<int>(movementLocation));
 		statusInfoMap["sourceConnectionString"] = sourceConnectionString;
