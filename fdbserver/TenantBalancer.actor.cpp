@@ -663,7 +663,9 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 			}
 		}
 
-		// TODO: populate results from our own records (outgoing/incoming movements), add extra data from DR status
+		// Extract DR information
+		std::unordered_map<std::string, std::pair<double, std::string>>
+		    prefixToDRInfo; // prefix -> {secondsBehind, backupStatus}
 		if (statusObj.present()) {
 			StatusObjectReader reader(statusObj.get());
 			std::string context = isSrc ? "dr_backup" : "dr_backup_dest";
@@ -677,49 +679,62 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 					if (!running) {
 						continue;
 					}
-					Key prefix = Key(getPrefixFromTagName(itr.first));
-					if (isSrc && !self->hasSourceMovement(prefix)) {
-						TraceEvent(SevDebug, "TenantBalancerIllegalSourceRecord", self->tbi.id())
-						    .detail("Prefix", prefix);
-						// TODO determine if it's a DR record or a mistake
-						continue;
-					}
-					if (!isSrc && !self->hasDestinationMovement(prefix)) {
-						TraceEvent(SevDebug, "TenantBalancerIllegalDestinationRecord", self->tbi.id())
-						    .detail("Prefix", prefix);
-						// TODO determine if it's a DR record or a mistake
-						continue;
-					}
-					TenantMovementInfo tenantMovementInfo;
 					std::string backup_state, secondsBehind;
 					tag.tryGet("backup_state", backup_state);
 					tag.tryGet("seconds_behind", secondsBehind);
-					tenantMovementInfo.tenantMovementStatus = backup_state;
-					tenantMovementInfo.secondsBehind = secondsBehind;
-
-					tenantMovementInfo.movementLocation =
-					    isSrc ? TenantMovementInfo::Location::SOURCE : TenantMovementInfo::Location::DEST;
-					if (isSrc) {
-						TraceEvent(SevDebug, "TenantBalancerAddSourceRecord").detail("Prefix", prefix);
-						SourceMovementRecord sourceMovementRecord = self->getOutgoingMovement(prefix);
-						tenantMovementInfo.sourcePrefix = sourceMovementRecord.getSourcePrefix();
-						tenantMovementInfo.destPrefix = sourceMovementRecord.getDestinationPrefix();
-						tenantMovementInfo.targetConnectionString = sourceMovementRecord.getDestinationDatabase()
-						                                                ->getConnectionRecord()
-						                                                ->getConnectionString()
-						                                                .toString();
-					} else {
-						TraceEvent(SevDebug, "TenantBalancerAddDestinationRecord").detail("Prefix", prefix);
-						DestinationMovementRecord destinationRecord = self->getIncomingMovement(prefix);
-						tenantMovementInfo.sourcePrefix = destinationRecord.getSourcePrefix();
-						tenantMovementInfo.destPrefix = destinationRecord.getDestinationPrefix();
-						tenantMovementInfo.targetConnectionString = destinationRecord.getSourceDatabase()
-						                                                ->getConnectionRecord()
-						                                                ->getConnectionString()
-						                                                .toString();
+					char* end = nullptr;
+					double mulationLag = strtod(secondsBehind.c_str(), &end);
+					if (end != nullptr) {
+						TraceEvent(SevWarn, "SecondsBehindIllegal", self->tbi.id())
+						    .detail("TagName", itr.first)
+						    .detail("SecondsBehind", secondsBehind);
+						continue;
 					}
-					recorder.push_back(tenantMovementInfo);
+					prefixToDRInfo[getPrefixFromTagName(itr.first)] = { mulationLag, backup_state };
 				}
+			}
+		}
+
+		// Iterate movement records
+		std::string curConnectionString = self->db->getConnectionRecord()->getConnectionString().toString();
+		// TODO combine these two similar logics to one?
+		if (isSrc) {
+			for (const auto& [prefix, record] : self->getOutgoingMovements()) {
+				TenantMovementInfo tenantMovementInfo;
+				tenantMovementInfo.movementLocation =
+				    isSrc ? TenantMovementInfo::Location::SOURCE : TenantMovementInfo::Location::DEST;
+				tenantMovementInfo.sourceConnectionString = curConnectionString;
+				tenantMovementInfo.destinationConnectionString =
+				    record.getDestinationDatabase()->getConnectionRecord()->getConnectionString().toString();
+				tenantMovementInfo.sourcePrefix = record.getSourcePrefix();
+				tenantMovementInfo.destPrefix = record.getDestinationPrefix();
+				// TODO
+				// tenantMovementInfo.isSourceLocked =
+				// tenantMovementInfo.isDestinationLocked =
+				// tenantMovementInfo.movementState =
+				tenantMovementInfo.mutationLag = prefixToDRInfo[prefix.toString()].first;
+				// databaseTimingDelay
+				// switchVersion
+				// errorMessage
+			}
+		} else {
+			for (const auto& [prefix, record] : self->getIncomingMovements()) {
+				TenantMovementInfo tenantMovementInfo;
+				tenantMovementInfo.movementLocation =
+				    isSrc ? TenantMovementInfo::Location::SOURCE : TenantMovementInfo::Location::DEST;
+				tenantMovementInfo.sourceConnectionString =
+				    record.getSourceDatabase()->getConnectionRecord()->getConnectionString().toString();
+				tenantMovementInfo.destinationConnectionString = curConnectionString;
+				tenantMovementInfo.sourcePrefix = record.getSourcePrefix();
+				tenantMovementInfo.destPrefix = record.getDestinationPrefix();
+				// TODO
+				// tenantMovementInfo.isSourceLocked =
+				// tenantMovementInfo.isDestinationLocked =
+				// tenantMovementInfo.movementState =
+				tenantMovementInfo.mutationLag = prefixToDRInfo[prefix.toString()].first;
+				// databaseTimingDelay
+				// switchVersion
+				// errorMessage
 			}
 		}
 	} catch (Error& e) {

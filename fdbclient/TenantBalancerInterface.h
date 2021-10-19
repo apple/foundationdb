@@ -27,6 +27,8 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 
+extern enum class MovementState;
+
 struct TenantBalancerInterface {
 	constexpr static FileIdentifier file_identifier = 6185894;
 
@@ -175,47 +177,71 @@ struct TenantMovementInfo {
 	constexpr static FileIdentifier file_identifier = 16510400;
 	enum class Location { SOURCE, DEST } uint8_t;
 
+	Location movementLocation;
+	std::string sourceConnectionString;
+	std::string destinationConnectionString;
 	KeyRef sourcePrefix;
 	KeyRef destPrefix;
-
-	Location movementLocation;
-
-	// TODO:
-	// source cluster info
-	// dest cluster info
-	// DR info?
-	// movement status
-
-	// TODO: how to track destClusterFile?
-	std::string targetConnectionString;
-	std::string tenantMovementStatus;
-	std::string secondsBehind;
+	bool isSourceLocked; // Whether the prefix is locked on the source
+	bool isDestinationLocked; // Whether the prefix is locked on the destination
+	MovementState movementState;
+	double mutationLag; // The number of seconds of lag between the current mutation on the source and the mutations
+	                    // being applied to the destination
+	int64_t databaseTimingDelay; // The number of versions that the destination cluster is behind the source cluster,
+	                             // converted to seconds
+	Version switchVersion;
+	std::string errorMessage;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
+		           movementLocation,
+		           sourceConnectionString,
+		           destinationConnectionString,
 		           sourcePrefix,
 		           destPrefix,
-		           movementLocation,
-		           targetConnectionString,
-		           tenantMovementStatus,
-		           secondsBehind);
+		           isSourceLocked,
+		           isDestinationLocked,
+		           movementState,
+		           mutationLag,
+		           databaseTimingDelay,
+		           switchVersion,
+		           errorMessage);
+	}
+
+	std::unordered_map<std::string, std::string> getStatusInfoMap() {
+		std::unordered_map<std::string, std::string> statusInfoMap;
+		statusInfoMap["movementLocation"] = std::to_string(static_cast<int>(movementLocation));
+		statusInfoMap["sourceConnectionString"] = sourceConnectionString;
+		statusInfoMap["destinationConnectionString"] = destinationConnectionString;
+		statusInfoMap["sourcePrefix"] = sourcePrefix.toString();
+		statusInfoMap["destPrefix"] = destPrefix.toString();
+		statusInfoMap["isSourceLocked"] = isSourceLocked;
+		statusInfoMap["isDestinationLocked"] = isDestinationLocked;
+		statusInfoMap["movementState"] = std::to_string(static_cast<int>(movementState));
+		statusInfoMap["mutationLag"] = std::to_string(mutationLag);
+		statusInfoMap["databaseTimingDelay"] = std::to_string(databaseTimingDelay);
+		statusInfoMap["switchVersion"] = std::to_string(switchVersion);
+		statusInfoMap["errorMessage"] = errorMessage;
+		return statusInfoMap;
 	}
 
 	std::string toJson() const {
-		// TODO transfer the element into json format, after we settle down all the needed elements here
-		return "";
+		std::unordered_map<std::string, std::string> statusInfoMap = getStatusInfoMap();
+		json_spirit::mValue statusRootValue;
+		JSONDoc statusRoot(statusRootValue);
+		for (const auto& itr : statusInfoMap) {
+			statusRoot.create(itr.first) = itr.second;
+		}
+		return json_spirit::write_string(statusRootValue);
 	}
 
 	std::string toString() const {
-		// TODO transfer the element into plain text format, after we settle down all the needed elements here
-		std::string sourcePrefixStr = sourcePrefix.toString();
-		std::string destinationPrefixStr = destPrefix.toString();
+		std::unordered_map<std::string, std::string> statusInfoMap = getStatusInfoMap();
 		std::string movementInfo;
-		movementInfo += "sourcePrefix: " + sourcePrefixStr + " destPrefix " + destinationPrefixStr +
-		                " movementLocation " + std::to_string(static_cast<int>(movementLocation)) +
-		                " targetConnectionString " + targetConnectionString + " tenantMovementStatus " +
-		                tenantMovementStatus + " secondsBehind " + secondsBehind;
+		for (const auto& itr : statusInfoMap) {
+			movementInfo += itr.first + " : " + itr.second + " ";
+		}
 		return movementInfo;
 	}
 };
