@@ -265,7 +265,8 @@ CommandFactory configureFactory(
         "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|"
         "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
         "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|storage_migration_type={disabled|gradual|"
-        "aggressive}",
+        "aggressive}|consistency_scan_enabled={0|1}|consistency_scan_rate=<SCAN_MAX_RATE>|consistency_scan_interval=<"
+        "SCAN_INTERVAL>",
         "change the database configuration",
         "The `new' option, if present, initializes a new database with the given configuration rather than changing "
         "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
@@ -293,6 +294,11 @@ CommandFactory configureFactory(
         "perpetual_storage_wiggle=<WIGGLE_SPEED>: Set the value speed (a.k.a., the number of processes that the Data "
         "Distributor should wiggle at a time). Currently, only 0 and 1 are supported. The value 0 means to disable the "
         "perpetual storage wiggle.\n\n"
+        "consistency_scan_enabled if set to 1, means a new process role will be recruited to scan all shards of "
+        "the database to validate data consistency.\n\n"
+        "consistency_scan_rate=<SCAN_RATE>: Specifies the max date scan rate to be used by the consistecy checker.\n\n"
+        "consistency_scan_interval=<SCAN_INTERVAL>: Specifies the overall interval in days to finish the entire scan of"
+        "all database shards.\n\n"
         "See the FoundationDB Administration Guide for more information."));
 
 } // namespace fdb_cli

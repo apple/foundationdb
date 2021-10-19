@@ -30,6 +30,7 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/RatekeeperInterface.h"
+#include "fdbserver/ConsistencyCheckerInterface.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -52,6 +53,7 @@ struct WorkerInterface {
 	RequestStream<struct InitializeGrvProxyRequest> grvProxy;
 	RequestStream<struct InitializeDataDistributorRequest> dataDistributor;
 	RequestStream<struct InitializeRatekeeperRequest> ratekeeper;
+	RequestStream<struct InitializeConsistencyCheckerRequest> consistencyChecker;
 	RequestStream<struct InitializeResolverRequest> resolver;
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
@@ -105,6 +107,7 @@ struct WorkerInterface {
 		           grvProxy,
 		           dataDistributor,
 		           ratekeeper,
+		           consistencyChecker,
 		           resolver,
 		           storage,
 		           logRouter,
@@ -375,6 +378,7 @@ struct RegisterWorkerRequest {
 	Generation generation;
 	Optional<DataDistributorInterface> distributorInterf;
 	Optional<RatekeeperInterface> ratekeeperInterf;
+	Optional<ConsistencyCheckerInterface> consistencyCheckerInterf;
 	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise<RegisterWorkerReply> reply;
@@ -391,12 +395,14 @@ struct RegisterWorkerRequest {
 	                      Generation generation,
 	                      Optional<DataDistributorInterface> ddInterf,
 	                      Optional<RatekeeperInterface> rkInterf,
+	                      Optional<ConsistencyCheckerInterface> ckInterf,
 	                      bool degraded,
 	                      Version lastSeenKnobVersion,
 	                      ConfigClassSet knobConfigClassSet)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
-	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded),
-	    lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet) {}
+	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf),
+	    consistencyCheckerInterf(ckInterf), degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion),
+	    knobConfigClassSet(knobConfigClassSet) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -408,6 +414,7 @@ struct RegisterWorkerRequest {
 		           generation,
 		           distributorInterf,
 		           ratekeeperInterf,
+		           consistencyCheckerInterf,
 		           issues,
 		           incompatiblePeers,
 		           reply,
@@ -610,6 +617,23 @@ struct InitializeRatekeeperRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reqId, reply);
+	}
+};
+
+struct InitializeConsistencyCheckerRequest {
+	constexpr static FileIdentifier file_identifier = 3104275;
+	UID reqId;
+	bool state;
+	double maxRate;
+	double targetInterval;
+	ReplyPromise<ConsistencyCheckerInterface> reply;
+
+	InitializeConsistencyCheckerRequest() {}
+	explicit InitializeConsistencyCheckerRequest(UID uid, bool state, double maxRate, double targetInterval)
+	  : reqId(uid), state(state), maxRate(maxRate), targetInterval(targetInterval) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reqId, state, maxRate, targetInterval, reply);
 	}
 };
 
@@ -816,6 +840,7 @@ struct Role {
 	static const Role STORAGE_CACHE;
 	static const Role COORDINATOR;
 	static const Role BACKUP;
+	static const Role CONSISTENCYCHECKER;
 
 	std::string roleName;
 	std::string abbreviation;
@@ -849,6 +874,8 @@ struct Role {
 			return BACKUP;
 		case ProcessClass::Worker:
 			return WORKER;
+		case ProcessClass::ConsistencyChecker:
+			return CONSISTENCYCHECKER;
 		case ProcessClass::NoRole:
 		default:
 			ASSERT(false);
@@ -958,6 +985,8 @@ ACTOR Future<Void> logRouter(TLogInterface interf,
                              Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
+ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+									  double maxRate, double targetInterval);
 ACTOR Future<Void> storageCacheServer(StorageServerInterface interf,
                                       uint16_t id,
                                       Reference<AsyncVar<ServerDBInfo> const> db);

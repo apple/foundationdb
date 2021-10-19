@@ -249,6 +249,11 @@ struct DatabaseConfiguration {
 	// Storage Migration Type
 	StorageMigrationType storageMigrationType;
 
+	// Shard Consistency Scan config
+	bool consistencyScanEnabled;
+	double consistencyScanMaxRate;
+	double consistencyScanInterval;
+
 	// Excluded servers (no state should be here)
 	bool isExcludedServer(NetworkAddressList) const;
 	bool isExcludedLocality(const LocalityData& locality) const;

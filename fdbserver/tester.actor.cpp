@@ -1638,6 +1638,10 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("rateLimitMax"), StringRef(rateLimitMax)));
 		options.push_back_deep(options.arena(),
 		                       KeyValueRef(LiteralStringRef("shuffleShards"), LiteralStringRef("true")));
+		// Add unit test options as test spec options
+		for (auto& kv : testOptions.params) {
+			options.push_back_deep(options.arena(), KeyValueRef(kv.first, kv.second));
+		}
 		spec.options.push_back_deep(spec.options.arena(), options);
 		testSpecs.push_back(spec);
 	} else if (whatToRun == TEST_TYPE_UNIT_TESTS) {

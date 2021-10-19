@@ -30,6 +30,7 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/RatekeeperInterface.h"
+#include "fdbserver/ConsistencyCheckerInterface.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LatencyBandConfig.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -47,6 +48,7 @@ struct ServerDBInfo {
 	Optional<DataDistributorInterface> distributor; // The best guess of current data distributor.
 	MasterInterface master; // The best guess as to the most recent master, which might still be recovering
 	Optional<RatekeeperInterface> ratekeeper;
+	Optional<ConsistencyCheckerInterface> consistencyChecker;
 	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount
 	    recoveryCount; // A recovery count from DBCoreState.  A successful master recovery increments it twice;
@@ -78,6 +80,7 @@ struct ServerDBInfo {
 		           distributor,
 		           master,
 		           ratekeeper,
+		           consistencyChecker,
 		           resolvers,
 		           recoveryCount,
 		           recoveryState,

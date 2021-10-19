@@ -795,6 +795,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("ratekeeper", db->get().ratekeeper.get());
 	}
 
+	if (db->get().consistencyChecker.present()) {
+		roles.addRole("consistency_checker", db->get().consistencyChecker.get());
+	}
+
 	for (auto& tLogSet : db->get().logSystemConfig.tLogs) {
 		for (auto& it : tLogSet.logRouters) {
 			if (it.present()) {
@@ -2698,6 +2702,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	state WorkerDetails mWorker; // Master worker
 	state WorkerDetails ddWorker; // DataDistributor worker
 	state WorkerDetails rkWorker; // Ratekeeper worker
+	state WorkerDetails ckWorker; // ConsistencyChecker worker
 
 	try {
 		// Get the master Worker interface
@@ -2733,6 +2738,19 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			    JsonString::makeMessage("unreachable_ratekeeper_worker", "Unable to locate the ratekeeper worker."));
 		} else {
 			rkWorker = _rkWorker.get();
+		}
+
+		// Get the ConsistencyChecker worker interface
+		Optional<WorkerDetails> _ckWorker;
+		if (db->get().consistencyChecker.present()) {
+			_ckWorker = getWorker(workers, db->get().consistencyChecker.get().address());
+		}
+
+		if (!db->get().consistencyChecker.present() || !_ckWorker.present()) {
+			messages.push_back(JsonString::makeMessage("unreachable_consistencyChecker_worker",
+			                                           "Unable to locate the consistencyChecker worker."));
+		} else {
+			ckWorker = _ckWorker.get();
 		}
 
 		// Get latest events for various event types from ALL workers

@@ -633,6 +633,8 @@ const KeyRef wigglingStorageServerKey(LiteralStringRef("\xff/storageWigglePID"))
 
 const KeyRef triggerDDTeamInfoPrintKey(LiteralStringRef("\xff/triggerDDTeamInfoPrint"));
 
+const KeyRef consistencyCheckProgressKey(LiteralStringRef("\xff/consistencyCheckProgressKey"));
+
 const KeyRangeRef excludedServersKeys(LiteralStringRef("\xff/conf/excluded/"), LiteralStringRef("\xff/conf/excluded0"));
 const KeyRef excludedServersPrefix = excludedServersKeys.begin;
 const KeyRef excludedServersVersionKey = LiteralStringRef("\xff/conf/excluded");

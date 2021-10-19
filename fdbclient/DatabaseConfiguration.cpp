@@ -46,11 +46,20 @@ void DatabaseConfiguration::resetInternal() {
 	backupWorkerEnabled = false;
 	perpetualStorageWiggleSpeed = 0;
 	storageMigrationType = StorageMigrationType::DEFAULT;
+	// TODO: NEELAM: should we have defaults?
+	consistencyScanEnabled = false;
+	consistencyScanMaxRate = 0;
+	consistencyScanInterval = 0;
 }
 
 void parse(int* i, ValueRef const& v) {
 	// FIXME: Sanity checking
 	*i = atoi(v.toString().c_str());
+}
+
+void parse(double* i, ValueRef const& v) {
+	// FIXME: Sanity checking
+	*i = atof(v.toString().c_str());
 }
 
 void parseReplicationPolicy(Reference<IReplicationPolicy>* policy, ValueRef const& v) {
@@ -201,6 +210,10 @@ bool DatabaseConfiguration::isValid() const {
 	      // We cannot specify regions with three_datacenter replication
 	      (perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1) &&
 	      storageMigrationType != StorageMigrationType::UNSET)) {
+
+		//} &&
+		  //TODO: NEELAM: check
+	//  (consistencyScanEnabled && consistencyScanMaxRate > 0))) {
 		return false;
 	}
 	std::set<Key> dcIds;
@@ -392,6 +405,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
 	result["perpetual_storage_wiggle"] = perpetualStorageWiggleSpeed;
 	result["storage_migration_type"] = storageMigrationType.toString();
+	result["consistency_scan_enabled"] = consistencyScanEnabled;
+	result["consistency_scan_rate"] = consistencyScanMaxRate;
+	result["consistency_scan_interval"] = consistencyScanInterval;
 	return result;
 }
 
@@ -548,6 +564,13 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == LiteralStringRef("storage_migration_type")) {
 		parse((&type), value);
 		storageMigrationType = (StorageMigrationType::MigrationType)type;
+	} else if (ck == LiteralStringRef("consistency_scan_enabled")) {
+		parse((&type), value);
+		consistencyScanEnabled = (type != 0);
+	} else if (ck == LiteralStringRef("consistency_scan_rate")) {
+		parse(&consistencyScanMaxRate, value);
+	} else if (ck == LiteralStringRef("consistency_scan_interval")) {
+		parse(&consistencyScanInterval, value);
 	} else {
 		return false;
 	}

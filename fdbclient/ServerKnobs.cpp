@@ -461,12 +461,14 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ATTEMPT_RECRUITMENT_DELAY,                           0.035 );
 	init( WAIT_FOR_DISTRIBUTOR_JOIN_DELAY,                       1.0 );
 	init( WAIT_FOR_RATEKEEPER_JOIN_DELAY,                        1.0 );
+	init( WAIT_FOR_CONSISTENCYCHECKER_JOIN_DELAY,                1.0 ); // TODO: NEELAM
 	init( WORKER_FAILURE_TIME,                                   1.0 ); if( randomize && BUGGIFY ) WORKER_FAILURE_TIME = 10.0;
 	init( CHECK_OUTSTANDING_INTERVAL,                            0.5 ); if( randomize && BUGGIFY ) CHECK_OUTSTANDING_INTERVAL = 0.001;
 	init( VERSION_LAG_METRIC_INTERVAL,                           0.5 ); if( randomize && BUGGIFY ) VERSION_LAG_METRIC_INTERVAL = 10.0;
 	init( MAX_VERSION_DIFFERENCE,           20 * VERSIONS_PER_SECOND );
 	init( FORCE_RECOVERY_CHECK_DELAY,                            5.0 );
 	init( RATEKEEPER_FAILURE_TIME,                               1.0 );
+	init( CONSISTENCYCHECKER_FAILURE_TIME,                       1.0 );
 	init( REPLACE_INTERFACE_DELAY,                              60.0 );
 	init( REPLACE_INTERFACE_CHECK_DELAY,                         5.0 );
 	init( COORDINATOR_REGISTER_INTERVAL,                         5.0 );

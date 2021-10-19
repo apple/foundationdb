@@ -1173,7 +1173,10 @@ void configureGenerator(const char* text, const char* line, std::vector<std::str
 		                   "resolvers=",
 		                   "perpetual_storage_wiggle=",
 		                   "storage_migration_type=",
-		                   nullptr };
+		                   "consistency_scan_enabled=",
+		                   "consistency_scan_rate=",
+		                   "consistency_scan_interval=",
+						   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
 

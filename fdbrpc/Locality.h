@@ -43,6 +43,7 @@ struct ProcessClass {
 		DataDistributorClass,
 		CoordinatorClass,
 		RatekeeperClass,
+		ConsistencyCheckerClass,
 		StorageCacheClass,
 		BackupClass,
 		GrvProxyClass,
@@ -69,6 +70,7 @@ struct ProcessClass {
 		ClusterController,
 		DataDistributor,
 		Ratekeeper,
+		ConsistencyChecker,
 		StorageCache,
 		Backup,
 		Worker, // used for actor lineage tracking
@@ -104,6 +106,7 @@ public:
 		else if (s=="data_distributor") _class = DataDistributorClass;
 		else if (s=="coordinator") _class = CoordinatorClass;
 		else if (s=="ratekeeper") _class = RatekeeperClass;
+		else if (s=="consistency_checker") _class = ConsistencyCheckerClass;
 		else if (s=="storage_cache") _class = StorageCacheClass;
 		else if (s=="backup") _class = BackupClass;
 		else _class = InvalidClass;
@@ -131,6 +134,7 @@ public:
 		else if (classStr=="data_distributor") _class = DataDistributorClass;
 		else if (classStr=="coordinator") _class = CoordinatorClass;
 		else if (classStr=="ratekeeper") _class = RatekeeperClass;
+		else if (classStr=="consistency_checker") _class = ConsistencyCheckerClass;
 		else if (classStr=="storage_cache") _class = StorageCacheClass;
 		else if (classStr=="backup") _class = BackupClass;
 		else _class = InvalidClass;
@@ -168,6 +172,7 @@ public:
 			case DataDistributorClass: return "data_distributor";
 			case CoordinatorClass: return "coordinator";
 			case RatekeeperClass: return "ratekeeper";
+			case ConsistencyCheckerClass: return "consistency_checker";
 			case StorageCacheClass: return "storage_cache";
 			case BackupClass: return "backup";
 			default: return "invalid";

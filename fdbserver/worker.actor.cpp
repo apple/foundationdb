@@ -517,6 +517,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
                                       ProcessClass initialClass,
                                       Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
                                       Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
+                                      Reference<AsyncVar<Optional<ConsistencyCheckerInterface>> const> ckInterf,
                                       Reference<AsyncVar<bool> const> degraded,
                                       Reference<ClusterConnectionFile> connFile,
                                       Reference<AsyncVar<std::set<std::string>> const> issues,
@@ -539,6 +540,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		                              requestGeneration++,
 		                              ddInterf->get(),
 		                              rkInterf->get(),
+		                              ckInterf->get(),
 		                              degraded->get(),
 		                              localConfig->lastSeenVersion(),
 		                              localConfig->configClassSet());
@@ -596,6 +598,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			when(wait(ccInterface->onChange())) { break; }
 			when(wait(ddInterf->onChange())) { break; }
 			when(wait(rkInterf->onChange())) { break; }
+			when(wait(ckInterf->onChange())) { break; }
 			when(wait(degraded->onChange())) { break; }
 			when(wait(FlowTransport::transport().onIncompatibleChanged())) { break; }
 			when(wait(issues->onChange())) { break; }
@@ -616,6 +619,10 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 	}
 
 	if (dbi.ratekeeper.present() && dbi.ratekeeper.get().address() == address) {
+		return true;
+	}
+
+	if (dbi.consistencyChecker.present() && dbi.consistencyChecker.get().address() == address) {
 		return true;
 	}
 
@@ -1232,6 +1239,8 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
 	    new AsyncVar<Optional<DataDistributorInterface>>());
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf(new AsyncVar<Optional<RatekeeperInterface>>());
+	state Reference<AsyncVar<Optional<ConsistencyCheckerInterface>>> ckInterf(
+	    new AsyncVar<Optional<ConsistencyCheckerInterface>>());
 	state Future<Void> handleErrors = workerHandleErrors(errors.getFuture()); // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
@@ -1493,6 +1502,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 		                                       initialClass,
 		                                       ddInterf,
 		                                       rkInterf,
+		                                       ckInterf,
 		                                       degraded,
 		                                       connFile,
 		                                       issues,
@@ -1642,6 +1652,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Ratekeeper;
 				RatekeeperInterface recruited(locality, req.reqId);
+				TraceEvent("Ratekeeper_InitRequest", req.reqId).log();
 				recruited.initEndpoints();
 
 				if (rkInterf->get().present()) {
@@ -1663,6 +1674,33 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					rkInterf->set(Optional<RatekeeperInterface>(recruited));
 				}
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
+				req.reply.send(recruited);
+			}
+			when(InitializeConsistencyCheckerRequest req = waitNext(interf.consistencyChecker.getFuture())) {
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::ConsistencyChecker;
+				TraceEvent("ConsistencyChecker_InitRequest", req.reqId).log();
+				ConsistencyCheckerInterface recruited(locality, req.reqId);
+				recruited.initEndpoints();
+
+				if (ckInterf->get().present()) {
+					recruited = ckInterf->get().get();
+					TEST(true); // Recruited while already a consistencychecker. // TODO: NEELAM: what does that mean?
+				} else {
+					startRole(Role::CONSISTENCYCHECKER, recruited.id(), interf.id());
+					DUMPTOKEN(recruited.waitFailure);
+					DUMPTOKEN(recruited.haltConsistencyChecker);
+
+					Future<Void> consistencyCheckerProcess =
+					    consistencyChecker(recruited, dbInfo, req.maxRate, req.targetInterval);
+					errorForwarders.add(forwardError(errors, Role::CONSISTENCYCHECKER,
+					                                   recruited.id(),
+					                                   setWhenDoneOrError(consistencyCheckerProcess,
+					                                                      ckInterf,
+					                                                      Optional<ConsistencyCheckerInterface>())));
+					ckInterf->set(Optional<ConsistencyCheckerInterface>(recruited));
+				}
+				TraceEvent("ConsistencyChecker_InitRequest", req.reqId).detail("ConsistencyCheckerId", recruited.id());
 				req.reply.send(recruited);
 			}
 			when(InitializeBackupRequest req = waitNext(interf.backup.getFuture())) {
@@ -2492,3 +2530,4 @@ const Role Role::RATEKEEPER("Ratekeeper", "RK");
 const Role Role::STORAGE_CACHE("StorageCache", "SC");
 const Role Role::COORDINATOR("Coordinator", "CD");
 const Role Role::BACKUP("Backup", "BK");
+const Role Role::CONSISTENCYCHECKER("ConsistencyChecker", "CK");
