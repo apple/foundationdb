@@ -105,15 +105,19 @@ struct TenantBalancerInterface {
 struct MoveTenantToClusterReply {
 	constexpr static FileIdentifier file_identifier = 3708530;
 
+	UID movementId;
+
 	// This is the tenant that was chosen for locking the prefix
 	// SOMEDAY: when it is possible that we can specify existing tenants to move, this may look different
-	std::string tenantName;
+	std::string destinationTenantName;
 
 	MoveTenantToClusterReply() {}
+	MoveTenantToClusterReply(UID movementId, std::string destinationTenantName)
+	  : movementId(movementId), destinationTenantName(destinationTenantName) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tenantName);
+		serializer(ar, movementId, destinationTenantName);
 	}
 };
 
@@ -147,6 +151,7 @@ struct ReceiveTenantFromClusterReply {
 	std::string tenantName;
 
 	ReceiveTenantFromClusterReply() {}
+	ReceiveTenantFromClusterReply(std::string tenantName) : tenantName(tenantName) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -158,21 +163,26 @@ struct ReceiveTenantFromClusterRequest {
 	constexpr static FileIdentifier file_identifier = 340512;
 	Arena arena;
 
+	UID movementId;
+
 	KeyRef sourcePrefix;
 	KeyRef destPrefix;
 
-	// TODO: source cluster info
 	std::string srcConnectionString;
 
 	ReplyPromise<ReceiveTenantFromClusterReply> reply;
 
 	ReceiveTenantFromClusterRequest() {}
-	ReceiveTenantFromClusterRequest(KeyRef sourcePrefix, KeyRef destPrefix, std::string srcConnectionString)
-	  : sourcePrefix(arena, sourcePrefix), destPrefix(arena, destPrefix), srcConnectionString(srcConnectionString) {}
+	ReceiveTenantFromClusterRequest(UID movementId,
+	                                KeyRef sourcePrefix,
+	                                KeyRef destPrefix,
+	                                std::string srcConnectionString)
+	  : movementId(movementId), sourcePrefix(arena, sourcePrefix), destPrefix(arena, destPrefix),
+	    srcConnectionString(srcConnectionString) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sourcePrefix, destPrefix, srcConnectionString, reply, arena);
+		serializer(ar, movementId, sourcePrefix, destPrefix, srcConnectionString, reply, arena);
 	}
 };
 
@@ -180,6 +190,7 @@ struct TenantMovementInfo {
 	constexpr static FileIdentifier file_identifier = 16510400;
 	enum class Location { SOURCE, DEST } uint8_t;
 
+	UID movementId;
 	Location movementLocation;
 	std::string sourceConnectionString;
 	std::string destinationConnectionString;
@@ -198,6 +209,7 @@ struct TenantMovementInfo {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
+		           movementId,
 		           movementLocation,
 		           sourceConnectionString,
 		           destinationConnectionString,
@@ -215,6 +227,7 @@ struct TenantMovementInfo {
 	std::unordered_map<std::string, std::string> getStatusInfoMap() const {
 		std::unordered_map<std::string, std::string> statusInfoMap;
 		// TODO transfer enum to real meaning string
+		statusInfoMap["movementID"] = movementId.toString();
 		statusInfoMap["movementLocation"] = std::to_string(static_cast<int>(movementLocation));
 		statusInfoMap["sourceConnectionString"] = sourceConnectionString;
 		statusInfoMap["destinationConnectionString"] = destinationConnectionString;
@@ -281,25 +294,25 @@ struct GetActiveMovementsRequest {
 struct FinishSourceMovementReply {
 	constexpr static FileIdentifier file_identifier = 6276738;
 
-	// New name of locked tenant
-	std::string tenantName;
+	// Name of locked tenant on source
+	std::string sourceTenantName;
 
 	Version version;
 
 	FinishSourceMovementReply() : version(invalidVersion) {}
-	FinishSourceMovementReply(Version version) : version(version) {}
+	FinishSourceMovementReply(std::string sourceTenantName, Version version)
+	  : sourceTenantName(sourceTenantName), version(version) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tenantName, version);
+		serializer(ar, sourceTenantName, version);
 	}
 };
 
 struct FinishSourceMovementRequest {
 	constexpr static FileIdentifier file_identifier = 10934711;
 
-	std::string sourceTenant; // Or prefix?
-	// TODO: dest cluster info
+	std::string sourceTenant;
 	double maxLagSeconds;
 
 	ReplyPromise<FinishSourceMovementReply> reply;
@@ -330,25 +343,24 @@ struct FinishDestinationMovementReply {
 struct FinishDestinationMovementRequest {
 	constexpr static FileIdentifier file_identifier = 12331642;
 
-	std::string destinationTenant; // Or prefix?
+	UID movementId;
+	std::string destinationTenant;
 	Version version;
 
 	ReplyPromise<FinishDestinationMovementReply> reply;
 
 	FinishDestinationMovementRequest() : version(invalidVersion) {}
-	FinishDestinationMovementRequest(std::string destinationTenant, Version version)
-	  : destinationTenant(destinationTenant), version(version) {}
+	FinishDestinationMovementRequest(UID movementId, std::string destinationTenant, Version version)
+	  : movementId(movementId), destinationTenant(destinationTenant), version(version) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, destinationTenant, version, reply);
+		serializer(ar, movementId, destinationTenant, version, reply);
 	}
 };
 
 struct AbortMovementReply {
 	constexpr static FileIdentifier file_identifier = 14761140;
-
-	// TODO: do we need any info from this reply?
 
 	AbortMovementReply() {}
 
@@ -361,6 +373,7 @@ struct AbortMovementReply {
 struct AbortMovementRequest {
 	constexpr static FileIdentifier file_identifier = 14058403;
 
+	Optional<UID> movementId;
 	std::string tenantName;
 	bool isSource;
 
@@ -368,10 +381,12 @@ struct AbortMovementRequest {
 
 	AbortMovementRequest() : isSource(true) {}
 	AbortMovementRequest(std::string tenantName, bool isSource) : tenantName(tenantName), isSource(isSource) {}
+	AbortMovementRequest(UID movementId, std::string tenantName, bool isSource)
+	  : movementId(movementId), tenantName(tenantName), isSource(isSource) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tenantName, isSource, reply);
+		serializer(ar, movementId, tenantName, isSource, reply);
 	}
 };
 
