@@ -8,9 +8,6 @@
 #include "flow/Error.h"
 #include "flow/Platform.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include "flow/network.h"
-#include "flow/Platform.h"
-#include <string>
 
 ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterface) {
 	state ActorCollection actors(false);

@@ -190,13 +190,13 @@ struct IKVSReadValuePrefixRequest {
 struct IKVSReadRangeRequest {
 	constexpr static FileIdentifier file_identifier = 5918394;
 	KeyRangeRef keys;
-	int rowLimit = 1 << 30;
-	int byteLimit = 1 << 30;
+	int rowLimit;
+	int byteLimit;
 	ReplyPromise<RangeResult> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, reply);
+		serializer(ar, keys, rowLimit, byteLimit, reply);
 	}
 };
 
@@ -311,7 +311,8 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 
 	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) override {
 		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote read range");
-		return interf.readRange.getReply(IKVSReadRangeRequest{ keys, rowLimit, byteLimit });
+		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit };
+		return interf.readRange.getReply(req);
 	}
 
 	StorageBytes getStorageBytes() const override {

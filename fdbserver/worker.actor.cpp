@@ -1327,8 +1327,13 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
 				// add a knob in fdbserver/Knobs.h for the last argument
-				IKeyValueStore* kv =
-				    openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, false, validateDataFiles, true);
+				IKeyValueStore* kv = openKVStore(s.storeType,
+				                                 s.filename,
+				                                 s.storeID,
+				                                 memoryLimit,
+				                                 false,
+				                                 validateDataFiles,
+				                                 SERVER_KNOBS->REMOTE_KV_STORE);
 				Future<Void> kvClosed = kv->onClosed();
 				filesClosed.add(kvClosed);
 
@@ -1399,8 +1404,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				}
 				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder);
 				TraceEvent(SevDebug, "openRemoteKVStore").detail("storeType", "TlogData");
-				IKeyValueStore* kv =
-				    openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles, false, true);
+				IKeyValueStore* kv = openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles);
 				const DiskQueueVersion dqv =
 				    s.tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
 				const int64_t diskQueueWarnSize =
@@ -1723,7 +1727,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					std::string filename =
 					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
 					TraceEvent(SevDebug, "openRemoteKVStore").detail("storeType", "3");
-					IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit, false, false);
+					IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit);
 					const DiskQueueVersion dqv =
 					    tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
 					IDiskQueue* queue = openDiskQueue(
@@ -1805,8 +1809,13 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					                   recruited.id());
 
 					TraceEvent(SevDebug, "openRemoteKVStore").detail("storeType", "4");
-					IKeyValueStore* data =
-					    openKVStore(req.storeType, filename, recruited.id(), memoryLimit, false, false, true);
+					IKeyValueStore* data = openKVStore(req.storeType,
+					                                   filename,
+					                                   recruited.id(),
+					                                   memoryLimit,
+					                                   false,
+					                                   false,
+					                                   SERVER_KNOBS->REMOTE_KV_STORE);
 
 					TraceEvent(SevDebug, "openRemoteKVStoreComplete").detail("storeType", "4");
 					Future<Void> kvClosed = data->onClosed();
