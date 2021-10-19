@@ -829,6 +829,7 @@ private:
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		state std::string filename = self->filename;
+		state Future<Void> shutdown = success(currentProcess->shutdownSignal.getFuture());
 
 		wait(g_simulator.onMachine(currentProcess));
 		try {
@@ -846,7 +847,7 @@ private:
 					outstandingModifications.push_back(itr->value());
 
 			// Ignore errors here so that all modifications can finish
-			wait(waitForAllReady(outstandingModifications));
+			wait(waitForAllReady(outstandingModifications) || shutdown);
 
 			// Make sure we aren't in the process of killing the file
 			if (self->killed.isSet())
