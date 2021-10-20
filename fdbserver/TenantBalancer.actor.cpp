@@ -837,8 +837,7 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 		std::string curConnectionString = self->db->getConnectionRecord()->getConnectionString().toString();
 		for (const auto& [prefix, record] : (isSrc ? self->getOutgoingMovements() : self->getIncomingMovements())) {
 			TenantMovementInfo tenantMovementInfo;
-			tenantMovementInfo.movementLocation =
-			    isSrc ? TenantMovementInfo::Location::SOURCE : TenantMovementInfo::Location::DEST;
+			tenantMovementInfo.movementLocation = isSrc ? MovementLocation::SOURCE : MovementLocation::DEST;
 			tenantMovementInfo.sourceConnectionString =
 			    isSrc ? curConnectionString
 			          : record.getPeerDatabase()->getConnectionRecord()->getConnectionString().toString();
@@ -865,16 +864,14 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 }
 
 inline bool canPassFilter(GetActiveMovementsRequest req, const TenantMovementInfo& status) {
-	bool isLocationSame = (req.locationFilter == GetActiveMovementsRequest::Location::REQ_SOURCE) ==
-	                      (status.movementLocation == TenantMovementInfo::Location::SOURCE);
-	if (req.locationFilter != GetActiveMovementsRequest::Location::UNSET && !isLocationSame) {
+	if (req.locationFilter.present() && req.locationFilter.get() != status.movementLocation) {
 		return false;
 	}
-	if (!req.sourcePrefixFilter.empty() && req.sourcePrefixFilter != status.sourcePrefix.toString()) {
+	if (req.prefixFilter.present() && req.prefixFilter != status.sourcePrefix.toString()) {
 		return false;
 	}
-	if (!req.destinationConnectionStringFilter.empty() &&
-	    req.destinationConnectionStringFilter != status.destinationConnectionString) {
+	if (req.peerDatabaseConnectionStringFilter.present() &&
+	    req.peerDatabaseConnectionStringFilter != status.destinationConnectionString) {
 		return false;
 	}
 	return true;

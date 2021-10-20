@@ -31,6 +31,7 @@
 
 // extern enum class MovementState;
 enum class MovementState { INITIALIZING, STARTED, READY_FOR_SWITCH, SWITCHING, COMPLETED, ERROR };
+enum class MovementLocation { SOURCE, DEST };
 
 struct TenantBalancerInterface {
 	constexpr static FileIdentifier file_identifier = 6185894;
@@ -190,10 +191,9 @@ struct ReceiveTenantFromClusterRequest {
 
 struct TenantMovementInfo {
 	constexpr static FileIdentifier file_identifier = 16510400;
-	enum class Location { SOURCE, DEST } uint8_t;
 
 	UID movementId;
-	Location movementLocation;
+	MovementLocation movementLocation;
 	std::string sourceConnectionString;
 	std::string destinationConnectionString;
 	KeyRef sourcePrefix;
@@ -283,21 +283,25 @@ struct GetActiveMovementsRequest {
 	constexpr static FileIdentifier file_identifier = 11980148;
 	Arena arena;
 
-	enum class Location { UNSET = 0, REQ_SOURCE, REQ_DESTINATION } uint8_t;
-
 	// Filter criteria
 	// TODO switch to other flixible ways
-	std::string sourcePrefixFilter;
-	std::string destinationConnectionStringFilter;
-	Location locationFilter = Location::UNSET;
+	Optional<std::string> prefixFilter;
+	Optional<std::string> peerDatabaseConnectionStringFilter;
+	Optional<MovementLocation> locationFilter;
 
 	// TODO: optional source and dest cluster selectors
 	ReplyPromise<GetActiveMovementsReply> reply;
 
 	GetActiveMovementsRequest() {}
+	GetActiveMovementsRequest(Optional<std::string> prefixFilter,
+	                          Optional<std::string> peerDatabaseConnectionStringFilter,
+	                          Optional<MovementLocation> locationFilter)
+	  : prefixFilter(prefixFilter), peerDatabaseConnectionStringFilter(peerDatabaseConnectionStringFilter),
+	    locationFilter(locationFilter) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sourcePrefixFilter, destinationConnectionStringFilter, locationFilter, reply);
+		serializer(ar, prefixFilter, peerDatabaseConnectionStringFilter, locationFilter, reply);
 	}
 };
 

@@ -2208,17 +2208,9 @@ ACTOR Future<std::vector<TenantMovementInfo>> getActiveMovements(
     Database database,
     Optional<std::string> sourcePrefixFilter,
     Optional<std::string> destinationConnectionStringFilter,
-    Optional<GetActiveMovementsRequest::Location> locationFilter) {
-	state GetActiveMovementsRequest getActiveMovementsRequest;
-	if (sourcePrefixFilter.present()) {
-		getActiveMovementsRequest.sourcePrefixFilter = sourcePrefixFilter.get();
-	}
-	if (destinationConnectionStringFilter.present()) {
-		getActiveMovementsRequest.destinationConnectionStringFilter = destinationConnectionStringFilter.get();
-	}
-	if (locationFilter.present()) {
-		getActiveMovementsRequest.locationFilter = locationFilter.get();
-	}
+    Optional<MovementLocation> locationFilter) {
+	state GetActiveMovementsRequest getActiveMovementsRequest(
+	    sourcePrefixFilter, destinationConnectionStringFilter, locationFilter);
 	state Future<ErrorOr<GetActiveMovementsReply>> getActiveMovementsReply = Never();
 	state Future<Void> initialize = Void();
 	loop choose {
@@ -2240,11 +2232,8 @@ ACTOR Future<std::vector<TenantMovementInfo>> getActiveMovements(
 
 ACTOR Future<Void> statusDBMove(Database db, KeyRef prefix, bool json = false) {
 	try {
-		state std::vector<TenantMovementInfo> targetDBMoveRes =
-		    wait(getActiveMovements(db,
-		                            Optional<std::string>(prefix.toString()),
-		                            Optional<std::string>(),
-		                            Optional<GetActiveMovementsRequest::Location>()));
+		state std::vector<TenantMovementInfo> targetDBMoveRes = wait(getActiveMovements(
+		    db, Optional<std::string>(prefix.toString()), Optional<std::string>(), Optional<MovementLocation>()));
 		if (targetDBMoveRes.size() != 1) {
 			throw movement_not_found();
 		}
@@ -2265,7 +2254,7 @@ ACTOR Future<Void> statusDBMove(Database db, KeyRef prefix, bool json = false) {
 ACTOR Future<Void> fetchAndDisplayDBMove(Database db,
                                          Optional<std::string> sourcePrefixFilter,
                                          Optional<std::string> destinationConnectionStringFilter,
-                                         Optional<GetActiveMovementsRequest::Location> locationFilter) {
+                                         Optional<MovementLocation> locationFilter) {
 	try {
 		// Get active movement list
 		state std::vector<TenantMovementInfo> activeMovements =
@@ -2273,10 +2262,7 @@ ACTOR Future<Void> fetchAndDisplayDBMove(Database db,
 
 		printf("%s %s %s\n",
 		       "List running data movement",
-		       (locationFilter.orDefault(GetActiveMovementsRequest::Location::UNSET) ==
-		                GetActiveMovementsRequest::Location::REQ_SOURCE
-		            ? "from"
-		            : "to"),
+		       (locationFilter.orDefault(MovementLocation::SOURCE) == MovementLocation::SOURCE ? "from" : "to"),
 		       db->getConnectionRecord()->getConnectionString().toString().c_str());
 		for (const auto& movement : activeMovements) {
 			printf("source prefix: %s destination prefix: %s source cluster: %s destination cluster: %s movement "
@@ -2298,33 +2284,26 @@ ACTOR Future<Void> fetchAndDisplayDBMove(Database db,
 
 // list movement from src, or to dest, depending on isSrc
 ACTOR Future<Void> listDBMove(Database db, bool isSrc) {
-	GetActiveMovementsRequest::Location locationFilter =
-	    isSrc ? GetActiveMovementsRequest::Location::REQ_SOURCE : GetActiveMovementsRequest::Location::REQ_DESTINATION;
-	wait(fetchAndDisplayDBMove(db,
-	                           Optional<std::string>(),
-	                           Optional<std::string>(),
-	                           Optional<GetActiveMovementsRequest::Location>(locationFilter)));
+	MovementLocation locationFilter = isSrc ? MovementLocation::SOURCE : MovementLocation::DEST;
+	wait(fetchAndDisplayDBMove(
+	    db, Optional<std::string>(), Optional<std::string>(), Optional<MovementLocation>(locationFilter)));
 	return Void();
 }
 
 // list movement from src to dest
 ACTOR Future<Void> listDBMove(Database src, Database dest) {
 	std::string targetConnectionString = dest->getConnectionRecord()->getConnectionString().toString();
-	wait(fetchAndDisplayDBMove(src,
-	                           Optional<std::string>(),
-	                           Optional<std::string>(targetConnectionString),
-	                           Optional<GetActiveMovementsRequest::Location>()));
+	wait(fetchAndDisplayDBMove(
+	    src, Optional<std::string>(), Optional<std::string>(targetConnectionString), Optional<MovementLocation>()));
 	return Void();
 }
 
 ACTOR Future<Void> finishDBMove(Database src, Key srcPrefix, Optional<double> maxLagSeconds) {
 	try {
 		// Check if exceed maxLagSeconds
-		state std::vector<TenantMovementInfo> targetDBMoveRes =
-		    wait(getActiveMovements(src,
-		                            Optional<std::string>(srcPrefix.toString()),
-		                            Optional<std::string>(),
-		                            Optional<GetActiveMovementsRequest::Location>()));
+		// TODO move it to server-side
+		state std::vector<TenantMovementInfo> targetDBMoveRes = wait(getActiveMovements(
+		    src, Optional<std::string>(srcPrefix.toString()), Optional<std::string>(), Optional<MovementLocation>()));
 		if (targetDBMoveRes.size() != 1) {
 			throw movement_not_found();
 		}
