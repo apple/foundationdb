@@ -517,14 +517,16 @@ public:
 		    db, [=](Reference<ReadYourWritesTransaction> tr) { return clearPrefix(tr, db, removePrefix); });
 	}
 
+	Future<Version> getCommitVersion(Database dest, Key tagName, ForceAction forceAction, bool doLockDabatabse);
+
+	Future<Void> flushBackup(DatabaseBackupAgent* sourceBackupAgent, Database dest, Key tagName, Version commitVersion);
+
 	Future<Void> atomicSwitchover(Database dest,
 	                              Key tagName,
 	                              Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                              Key addPrefix,
 	                              Key removePrefix,
-	                              ForceAction = ForceAction::False,
-	                              bool doSwitch = true,
-	                              bool doLockDatabase = true);
+	                              ForceAction = ForceAction::False);
 
 	Future<Void> unlockBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<Void> unlockBackup(Database cx, Key tagName) {

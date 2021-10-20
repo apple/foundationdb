@@ -889,7 +889,7 @@ ACTOR Future<std::vector<TenantMovementInfo>> getFilteredMovements(
 		state std::vector<TenantMovementInfo> statusAsSrc = wait(fetchDBMove(self, true));
 		recorder.insert(recorder.end(), statusAsSrc.begin(), statusAsSrc.end());
 	}
-	if (!locationFilter.present() || locationFilter.get() == MovementLocation::DEST){
+	if (!locationFilter.present() || locationFilter.get() == MovementLocation::DEST) {
 		state std::vector<TenantMovementInfo> statusAsDest = wait(fetchDBMove(self, false));
 		recorder.insert(recorder.end(), statusAsDest.begin(), statusAsDest.end());
 	}
@@ -933,6 +933,7 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 
 	try {
 		// TODO: check that the DR is ready to switch
+
 		// Check if maxLagSeconds is exceeded
 		state std::vector<TenantMovementInfo> filteredMovements = wait(getFilteredMovements(
 		    self, Optional<std::string>(req.sourceTenant), Optional<std::string>(), Optional<MovementLocation>()));
@@ -941,11 +942,14 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 		}
 		TenantMovementInfo targetMovementInfo = filteredMovements[0];
 		if (targetMovementInfo.mutationLag > req.maxLagSeconds) {
-			TraceEvent(SevDebug, "TenantBalancerLagSecondsCheckPass")
+			TraceEvent(SevDebug, "TenantBalancerLagSecondsCheckFailed")
 			    .detail("MaxLagSeconds", req.maxLagSeconds)
 			    .detail("CurrentLagSeconds", targetMovementInfo.mutationLag);
 			return Void();
 		}
+		TraceEvent(SevDebug, "TenantBalancerLagCheckPass")
+		    .detail("MaxLagSeconds", req.maxLagSeconds)
+		    .detail("CurrentLagSeconds", targetMovementInfo.mutationLag);
 
 		state MovementRecord record = self->getOutgoingMovement(Key(req.sourceTenant));
 		state std::string destinationConnectionString =
@@ -959,27 +963,20 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 
 		// Update movement record
 		state Version version = wait(lockSourceTenant(self, req.sourceTenant));
-		// TODO: get a locked tenant
+		// TODO: get a locked tenant and lock the tenant
 		state std::string lockedTenant = "";
 		record.switchVersion = version;
 		record.movementState = MovementState::SWITCHING;
 		wait(self->saveOutgoingMovement(record));
 
-		// Use DR to finish this movement
-		TraceEvent(SevDebug, "TenantBalancerFinishSourceSwitch", self->tbi.id())
-		    .detail("DestinationDatabaseName", record.getPeerDatabaseName());
-
-		Standalone<VectorRef<KeyRangeRef>> backupRanges;
-		wait(self->agent.atomicSwitchover(record.getPeerDatabase(),
-		                                  KeyRef(record.getTagName()),
-		                                  backupRanges,
-		                                  StringRef(),
-		                                  StringRef(),
-		                                  ForceAction{ true },
-		                                  false,
-		                                  false));
-
-		// TODO: issue finish request to destination
+		// TODO should we use read version or commit version?
+		state Version commitVersion = wait(
+		    self->agent.getCommitVersion(destDatabase.get(), Key(record.getTagName()), ForceAction{ true }, false));
+		state FinishDestinationMovementReply destinationReply = wait(sendTenantBalancerRequest(
+		    record.getPeerDatabase(),
+		    FinishDestinationMovementRequest(
+		        record.getMovementId(), record.getDestinationPrefix().toString(), commitVersion),
+		    &TenantBalancerInterface::finishDestinationMovement));
 
 		record.movementState = MovementState::COMPLETED;
 		wait(self->saveOutgoingMovement(record));
@@ -1009,8 +1006,8 @@ ACTOR Future<Void> finishDestinationMovement(TenantBalancer* self, FinishDestina
 		record.switchVersion = req.version;
 		wait(self->saveIncomingMovement(record));
 
-		// TODO: wait for DR to flush
-
+		DatabaseBackupAgent sourceBackupAgent(record.getPeerDatabase());
+		wait(self->agent.flushBackup(&sourceBackupAgent, self->db, Key(record.getTagName()), req.version));
 		// TODO: unlock DR prefix
 
 		record.movementState = MovementState::COMPLETED;
