@@ -2385,6 +2385,31 @@ ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData, BlobWork
 	}
 }
 
+ACTOR Future<Void> deregisterBlobWorker(Reference<BlobWorkerData> bwData, BlobWorkerInterface interf) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
+	loop {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		try {
+			Key blobWorkerListKey = blobWorkerListKeyFor(interf.id());
+			tr->addReadConflictRange(singleKeyRange(blobWorkerListKey));
+			tr->clear(blobWorkerListKey);
+
+			wait(tr->commit());
+
+			if (BW_DEBUG) {
+				printf("Deregistered blob worker %s\n", interf.id().toString().c_str());
+			}
+			return Void();
+		} catch (Error& e) {
+			if (BW_DEBUG) {
+				printf("Deregistering blob worker %s got error %s\n", interf.id().toString().c_str(), e.name());
+			}
+			wait(tr->onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
                                      AssignBlobRangeRequest req,
                                      bool isSelfReassign) {
@@ -2552,7 +2577,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			}
 			when(AssignBlobRangeRequest _req = waitNext(bwInterf.assignBlobRangeRequest.getFuture())) {
 				++self->stats.rangeAssignmentRequests;
-				--self->stats.numRangesAssigned;
+				++self->stats.numRangesAssigned;
 				state AssignBlobRangeRequest assignReq = _req;
 				if (BW_DEBUG) {
 					printf("Worker %s assigned range [%s - %s) @ (%lld, %lld):\n  continue=%s\n",
