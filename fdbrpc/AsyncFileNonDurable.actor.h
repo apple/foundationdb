@@ -184,6 +184,8 @@ private:
 	ActorCollection
 	    reponses; // cannot call getResult on this actor collection, since the actors will be on different processes
 
+	Future<Void> shutdown;
+
 	AsyncFileNonDurable(const std::string& filename,
 	                    const std::string& initialFilename,
 	                    Reference<IAsyncFile> file,
@@ -203,6 +205,19 @@ private:
 
 		killMode = (KillMode)deterministicRandom()->randomInt(1, 3);
 		//TraceEvent("AsyncFileNonDurable_CreateEnd", id).detail("Filename", filename).backtrace();
+
+		shutdown = doShutdown(this);
+	}
+
+	ACTOR Future<Void> doShutdown(AsyncFileNonDurable* self) {
+		wait(success(g_simulator.getCurrentProcess()->shutdownSignal.getFuture()));
+		for (auto itr = self->pendingModifications.ranges().begin(); itr != self->pendingModifications.ranges().end();
+		     ++itr) {
+			if (itr->value().isValid() && !itr->value().isReady()) {
+				itr->value().cancel();
+			}
+		}
+		return Void();
 	}
 
 public:
@@ -390,8 +405,9 @@ private:
 		}
 
 		// Add the modification if we are doing a write or truncate
-		if (insertModification)
+		if (insertModification && !g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady()) {
 			pendingModifications.insert(modification, value);
+		}
 
 		return modificationFutures;
 	}
