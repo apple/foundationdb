@@ -863,41 +863,50 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 	return recorder;
 }
 
-inline bool canPassFilter(GetActiveMovementsRequest req, const TenantMovementInfo& status) {
-	if (req.locationFilter.present() && req.locationFilter.get() != status.movementLocation) {
-		return false;
+void filterActiveMove(const std::vector<TenantMovementInfo>& originStatus,
+                      std::vector<TenantMovementInfo>& targetStatus,
+                      Optional<std::string> prefixFilter,
+                      Optional<std::string> peerDatabaseConnectionStringFilter) {
+	for (const auto& status : originStatus) {
+		if (prefixFilter.present() && prefixFilter != status.sourcePrefix.toString()) {
+			continue;
+		}
+		if (peerDatabaseConnectionStringFilter.present() &&
+		    peerDatabaseConnectionStringFilter != status.destinationConnectionString) {
+			continue;
+		}
+		targetStatus.push_back(status);
 	}
-	if (req.prefixFilter.present() && req.prefixFilter != status.sourcePrefix.toString()) {
-		return false;
-	}
-	if (req.peerDatabaseConnectionStringFilter.present() &&
-	    req.peerDatabaseConnectionStringFilter != status.destinationConnectionString) {
-		return false;
-	}
-	return true;
 }
 
-void filterActiveMove(GetActiveMovementsRequest req,
-                      const std::vector<TenantMovementInfo>& originStatus,
-                      std::vector<TenantMovementInfo>& targetStatus) {
-	for (const auto& status : originStatus) {
-		if (canPassFilter(req, status)) {
-			targetStatus.push_back(status);
-		}
+ACTOR Future<std::vector<TenantMovementInfo>> getFilteredMovements(
+    TenantBalancer* self,
+    Optional<std::string> prefixFilter,
+    Optional<std::string> peerDatabaseConnectionStringFilter,
+    Optional<MovementLocation> locationFilter) {
+	state std::vector<TenantMovementInfo> recorder;
+	if (!locationFilter.present() || locationFilter.get() == MovementLocation::SOURCE) {
+		state std::vector<TenantMovementInfo> statusAsSrc = wait(fetchDBMove(self, true));
+		recorder.insert(recorder.end(), statusAsSrc.begin(), statusAsSrc.end());
 	}
+	if (!locationFilter.present() || locationFilter.get() == MovementLocation::DEST){
+		state std::vector<TenantMovementInfo> statusAsDest = wait(fetchDBMove(self, false));
+		recorder.insert(recorder.end(), statusAsDest.begin(), statusAsDest.end());
+	}
+	std::vector<TenantMovementInfo> resultAfterFilter;
+	filterActiveMove(recorder, resultAfterFilter, prefixFilter, peerDatabaseConnectionStringFilter);
+	return recorder;
 }
 
 ACTOR Future<Void> getActiveMovements(TenantBalancer* self, GetActiveMovementsRequest req) {
 	++self->getActiveMovementsRequests;
 
 	try {
-		// srcPrefix, destConnStr, location
-		state std::vector<TenantMovementInfo> statusAsSrc = wait(fetchDBMove(self, true));
-		state std::vector<TenantMovementInfo> statusAsDest = wait(fetchDBMove(self, false));
+		state std::vector<TenantMovementInfo> status = wait(
+		    getFilteredMovements(self, req.prefixFilter, req.peerDatabaseConnectionStringFilter, req.locationFilter));
 
 		GetActiveMovementsReply reply;
-		filterActiveMove(req, statusAsSrc, reply.activeMovements);
-		filterActiveMove(req, statusAsDest, reply.activeMovements);
+		reply.activeMovements.insert(reply.activeMovements.end(), status.begin(), status.end());
 		req.reply.send(reply);
 	} catch (Error& e) {
 		req.reply.sendError(e);
@@ -924,7 +933,20 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 
 	try {
 		// TODO: check that the DR is ready to switch
-		// TODO: check if maxLagSeconds is exceeded
+		// Check if maxLagSeconds is exceeded
+		state std::vector<TenantMovementInfo> filteredMovements = wait(getFilteredMovements(
+		    self, Optional<std::string>(req.sourceTenant), Optional<std::string>(), Optional<MovementLocation>()));
+		if (filteredMovements.size() != 1) {
+			throw movement_not_found();
+		}
+		TenantMovementInfo targetMovementInfo = filteredMovements[0];
+		if (targetMovementInfo.mutationLag > req.maxLagSeconds) {
+			TraceEvent(SevDebug, "TenantBalancerLagSecondsCheckPass")
+			    .detail("MaxLagSeconds", req.maxLagSeconds)
+			    .detail("CurrentLagSeconds", targetMovementInfo.mutationLag);
+			return Void();
+		}
+
 		state MovementRecord record = self->getOutgoingMovement(Key(req.sourceTenant));
 		state std::string destinationConnectionString =
 		    record.getPeerDatabase()->getConnectionRecord()->getConnectionString().toString();

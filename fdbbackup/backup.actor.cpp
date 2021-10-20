@@ -2252,13 +2252,13 @@ ACTOR Future<Void> statusDBMove(Database db, KeyRef prefix, bool json = false) {
 }
 
 ACTOR Future<Void> fetchAndDisplayDBMove(Database db,
-                                         Optional<std::string> sourcePrefixFilter,
-                                         Optional<std::string> destinationConnectionStringFilter,
+                                         Optional<std::string> prefixFilter,
+                                         Optional<std::string> peerDatabaseConnectionStringFilter,
                                          Optional<MovementLocation> locationFilter) {
 	try {
 		// Get active movement list
 		state std::vector<TenantMovementInfo> activeMovements =
-		    wait(getActiveMovements(db, sourcePrefixFilter, destinationConnectionStringFilter, locationFilter));
+		    wait(getActiveMovements(db, prefixFilter, peerDatabaseConnectionStringFilter, locationFilter));
 
 		printf("%s %s %s\n",
 		       "List running data movement",
@@ -2300,23 +2300,6 @@ ACTOR Future<Void> listDBMove(Database src, Database dest) {
 
 ACTOR Future<Void> finishDBMove(Database src, Key srcPrefix, Optional<double> maxLagSeconds) {
 	try {
-		// Check if exceed maxLagSeconds
-		// TODO move it to server-side
-		state std::vector<TenantMovementInfo> targetDBMoveRes = wait(getActiveMovements(
-		    src, Optional<std::string>(srcPrefix.toString()), Optional<std::string>(), Optional<MovementLocation>()));
-		if (targetDBMoveRes.size() != 1) {
-			throw movement_not_found();
-		}
-		TenantMovementInfo targetDBMove = targetDBMoveRes[0];
-		double secondsBehind = targetDBMove.mutationLag;
-		if (secondsBehind > maxLagSeconds.orDefault(DBL_MAX)) {
-			printf("Current behind seconds is %d, which exceeds %d", secondsBehind, maxLagSeconds.orDefault(DBL_MAX));
-			return Void();
-		}
-		TraceEvent(SevDebug, "TenantBalancerLagSecondsCheckPass")
-		    .detail("MaxLagSeconds", maxLagSeconds.orDefault(DBL_MAX))
-		    .detail("CurrentLagSeconds", secondsBehind);
-
 		// Send request to source cluster
 		state FinishSourceMovementRequest finishSourceMovementRequest(srcPrefix.toString(),
 		                                                              maxLagSeconds.orDefault(DBL_MAX));
