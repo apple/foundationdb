@@ -96,7 +96,7 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 		return true;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	static void checkDiskFailureInjectionResult(Future<Void> res, WorkerInterface worker) {
 		if (res.isError()) {

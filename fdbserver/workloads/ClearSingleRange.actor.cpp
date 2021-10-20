@@ -43,14 +43,15 @@ struct ClearSingleRange : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<Void> fdbClientClearRange(Database db, ClearSingleRange* self) {
 		state Transaction tr(db);
 		try {
-			TraceEvent("ClearSingleRange").
-				detail("Begin", printable(self->begin)).
-				detail("End", printable(self->end)).detail("StartDelay", self->startDelay);
+			TraceEvent("ClearSingleRange")
+			    .detail("Begin", printable(self->begin))
+			    .detail("End", printable(self->end))
+			    .detail("StartDelay", self->startDelay);
 			tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 			wait(delay(self->startDelay));
 			tr.clear(KeyRangeRef(self->begin, self->end));
