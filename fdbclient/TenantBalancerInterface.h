@@ -283,13 +283,21 @@ struct GetActiveMovementsRequest {
 	constexpr static FileIdentifier file_identifier = 11980148;
 	Arena arena;
 
+	enum class Location { UNSET = 0, REQ_SOURCE, REQ_DESTINATION } uint8_t;
+
+	// Filter criteria
+	// TODO switch to other flixible ways
+	std::string sourcePrefixFilter;
+	std::string destinationConnectionStringFilter;
+	Location locationFilter = Location::UNSET;
+
 	// TODO: optional source and dest cluster selectors
 	ReplyPromise<GetActiveMovementsReply> reply;
 
 	GetActiveMovementsRequest() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply);
+		serializer(ar, sourcePrefixFilter, destinationConnectionStringFilter, locationFilter, reply);
 	}
 };
 

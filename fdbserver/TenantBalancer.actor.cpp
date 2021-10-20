@@ -835,45 +835,26 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 
 		// Iterate movement records
 		std::string curConnectionString = self->db->getConnectionRecord()->getConnectionString().toString();
-		// TODO combine these two similar logics to one?
-		if (isSrc) {
-			for (const auto& [prefix, record] : self->getOutgoingMovements()) {
-				TenantMovementInfo tenantMovementInfo;
-				tenantMovementInfo.movementId = record.getMovementId();
-				tenantMovementInfo.movementLocation = TenantMovementInfo::Location::SOURCE;
-				tenantMovementInfo.sourceConnectionString = curConnectionString;
-				tenantMovementInfo.destinationConnectionString =
-				    record.getPeerDatabase()->getConnectionRecord()->getConnectionString().toString();
-				tenantMovementInfo.sourcePrefix = record.getSourcePrefix();
-				tenantMovementInfo.destPrefix = record.getDestinationPrefix();
-				// TODO update isSourceLocked and isDestinationLocked
-				tenantMovementInfo.isSourceLocked = false;
-				tenantMovementInfo.isDestinationLocked = false;
-				tenantMovementInfo.movementState = record.movementState;
-				tenantMovementInfo.mutationLag = prefixToDRInfo[prefix.toString()].first;
-				// TODO assign databaseTimingDelay
-				tenantMovementInfo.switchVersion = record.switchVersion;
-				// errorMessage
-			}
-		} else {
-			for (const auto& [prefix, record] : self->getIncomingMovements()) {
-				TenantMovementInfo tenantMovementInfo;
-				tenantMovementInfo.movementId = record.getMovementId();
-				tenantMovementInfo.movementLocation = TenantMovementInfo::Location::DEST;
-				tenantMovementInfo.sourceConnectionString =
-				    record.getPeerDatabase()->getConnectionRecord()->getConnectionString().toString();
-				tenantMovementInfo.destinationConnectionString = curConnectionString;
-				tenantMovementInfo.sourcePrefix = record.getSourcePrefix();
-				tenantMovementInfo.destPrefix = record.getDestinationPrefix();
-				// TODO update isSourceLocked and isDestinationLocked
-				tenantMovementInfo.isSourceLocked = false;
-				tenantMovementInfo.isDestinationLocked = false;
-				tenantMovementInfo.movementState = record.movementState;
-				tenantMovementInfo.mutationLag = prefixToDRInfo[prefix.toString()].first;
-				// TODO assign databaseTimingDelay
-				tenantMovementInfo.switchVersion = record.switchVersion;
-				// errorMessage
-			}
+		for (const auto& [prefix, record] : (isSrc ? self->getOutgoingMovements() : self->getIncomingMovements())) {
+			TenantMovementInfo tenantMovementInfo;
+			tenantMovementInfo.movementLocation =
+			    isSrc ? TenantMovementInfo::Location::SOURCE : TenantMovementInfo::Location::DEST;
+			tenantMovementInfo.sourceConnectionString =
+			    isSrc ? curConnectionString
+			          : record.getPeerDatabase()->getConnectionRecord()->getConnectionString().toString();
+			tenantMovementInfo.destinationConnectionString =
+			    !isSrc ? curConnectionString
+			           : record.getPeerDatabase()->getConnectionRecord()->getConnectionString().toString();
+			tenantMovementInfo.sourcePrefix = record.getSourcePrefix();
+			tenantMovementInfo.destPrefix = record.getDestinationPrefix();
+			// TODO update isSourceLocked and isDestinationLocked
+			tenantMovementInfo.isSourceLocked = false;
+			tenantMovementInfo.isDestinationLocked = false;
+			tenantMovementInfo.movementState = record.movementState;
+			tenantMovementInfo.mutationLag = prefixToDRInfo[prefix.toString()].first;
+			// TODO assign databaseTimingDelay
+			tenantMovementInfo.switchVersion = record.switchVersion;
+			// errorMessage
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -883,15 +864,43 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 	return recorder;
 }
 
+inline bool canPassFilter(GetActiveMovementsRequest req, const TenantMovementInfo& status) {
+	bool isLocationSame = (req.locationFilter == GetActiveMovementsRequest::Location::REQ_SOURCE) ==
+	                      (status.movementLocation == TenantMovementInfo::Location::SOURCE);
+	if (req.locationFilter != GetActiveMovementsRequest::Location::UNSET && !isLocationSame) {
+		return false;
+	}
+	if (!req.sourcePrefixFilter.empty() && req.sourcePrefixFilter != status.sourcePrefix.toString()) {
+		return false;
+	}
+	if (!req.destinationConnectionStringFilter.empty() &&
+	    req.destinationConnectionStringFilter != status.destinationConnectionString) {
+		return false;
+	}
+	return true;
+}
+
+void filterActiveMove(GetActiveMovementsRequest req,
+                      const std::vector<TenantMovementInfo>& originStatus,
+                      std::vector<TenantMovementInfo>& targetStatus) {
+	for (const auto& status : originStatus) {
+		if (canPassFilter(req, status)) {
+			targetStatus.push_back(status);
+		}
+	}
+}
+
 ACTOR Future<Void> getActiveMovements(TenantBalancer* self, GetActiveMovementsRequest req) {
 	++self->getActiveMovementsRequests;
 
 	try {
+		// srcPrefix, destConnStr, location
 		state std::vector<TenantMovementInfo> statusAsSrc = wait(fetchDBMove(self, true));
 		state std::vector<TenantMovementInfo> statusAsDest = wait(fetchDBMove(self, false));
+
 		GetActiveMovementsReply reply;
-		reply.activeMovements.insert(reply.activeMovements.end(), statusAsSrc.begin(), statusAsSrc.end());
-		reply.activeMovements.insert(reply.activeMovements.end(), statusAsDest.begin(), statusAsDest.end());
+		filterActiveMove(req, statusAsSrc, reply.activeMovements);
+		filterActiveMove(req, statusAsDest, reply.activeMovements);
 		req.reply.send(reply);
 	} catch (Error& e) {
 		req.reply.sendError(e);

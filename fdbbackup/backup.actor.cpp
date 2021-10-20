@@ -2204,8 +2204,21 @@ ACTOR Future<Void> submitDBMove(Database src, Database dest, Key srcPrefix, Key 
 	return Void();
 }
 
-ACTOR Future<std::vector<TenantMovementInfo>> getActiveMovements(Database database) {
+ACTOR Future<std::vector<TenantMovementInfo>> getActiveMovements(
+    Database database,
+    Optional<std::string> sourcePrefixFilter,
+    Optional<std::string> destinationConnectionStringFilter,
+    Optional<GetActiveMovementsRequest::Location> locationFilter) {
 	state GetActiveMovementsRequest getActiveMovementsRequest;
+	if (sourcePrefixFilter.present()) {
+		getActiveMovementsRequest.sourcePrefixFilter = sourcePrefixFilter.get();
+	}
+	if (destinationConnectionStringFilter.present()) {
+		getActiveMovementsRequest.destinationConnectionStringFilter = destinationConnectionStringFilter.get();
+	}
+	if (locationFilter.present()) {
+		getActiveMovementsRequest.locationFilter = locationFilter.get();
+	}
 	state Future<ErrorOr<GetActiveMovementsReply>> getActiveMovementsReply = Never();
 	state Future<Void> initialize = Void();
 	loop choose {
@@ -2225,27 +2238,19 @@ ACTOR Future<std::vector<TenantMovementInfo>> getActiveMovements(Database databa
 	}
 }
 
-ACTOR Future<Optional<TenantMovementInfo>> filterDBMove(Database db, KeyRef prefix) {
-	// Get active movement list
-	state std::vector<TenantMovementInfo> activeMovements = wait(getActiveMovements(db));
-
-	// Filter for desired movements
-	for (const auto& movement : activeMovements) {
-		if (movement.sourcePrefix == prefix) {
-			return Optional<TenantMovementInfo>(movement);
-		}
-	}
-	return Optional<TenantMovementInfo>();
-}
-
 ACTOR Future<Void> statusDBMove(Database db, KeyRef prefix, bool json = false) {
 	try {
-		state Optional<TenantMovementInfo> targetDBMove = wait(filterDBMove(db, prefix));
-		if (!targetDBMove.present()) {
+		state std::vector<TenantMovementInfo> targetDBMoveRes =
+		    wait(getActiveMovements(db,
+		                            Optional<std::string>(prefix.toString()),
+		                            Optional<std::string>(),
+		                            Optional<GetActiveMovementsRequest::Location>()));
+		if (targetDBMoveRes.size() != 1) {
 			throw movement_not_found();
 		}
+		TenantMovementInfo targetDBMove = targetDBMoveRes[0];
 		// TODO insert error msg into TenantMovementInfo, rather than reporting them below
-		std::string statusText = json ? targetDBMove.get().toJson() : targetDBMove.get().toString();
+		std::string statusText = json ? targetDBMove.toJson() : targetDBMove.toString();
 		printf("%s\n", statusText.c_str());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -2257,25 +2262,30 @@ ACTOR Future<Void> statusDBMove(Database db, KeyRef prefix, bool json = false) {
 	return Void();
 }
 
-// list movement from src, or to dest, depending on isSrc
-ACTOR Future<Void> listDBMove(Database db, bool isSrc) {
+ACTOR Future<Void> fetchAndDisplayDBMove(Database db,
+                                         Optional<std::string> sourcePrefixFilter,
+                                         Optional<std::string> destinationConnectionStringFilter,
+                                         Optional<GetActiveMovementsRequest::Location> locationFilter) {
 	try {
 		// Get active movement list
-		state std::vector<TenantMovementInfo> activeMovements = wait(getActiveMovements(db));
+		state std::vector<TenantMovementInfo> activeMovements =
+		    wait(getActiveMovements(db, sourcePrefixFilter, destinationConnectionStringFilter, locationFilter));
 
-		// Filter for desired movements
 		printf("%s %s %s\n",
 		       "List running data movement",
-		       (isSrc ? "from" : "to"),
+		       (locationFilter.orDefault(GetActiveMovementsRequest::Location::UNSET) ==
+		                GetActiveMovementsRequest::Location::REQ_SOURCE
+		            ? "from"
+		            : "to"),
 		       db->getConnectionRecord()->getConnectionString().toString().c_str());
 		for (const auto& movement : activeMovements) {
-			if ((movement.movementLocation == TenantMovementInfo::Location::SOURCE) == isSrc) {
-				printf("source prefix: %s destination prefix: %s peer cluster: %s movement state: %s\n",
-				       movement.sourcePrefix.toString().c_str(),
-				       movement.destPrefix.toString().c_str(),
-				       (isSrc ? movement.sourceConnectionString : movement.destinationConnectionString).c_str(),
-				       std::to_string(static_cast<int>(movement.movementState)).c_str());
-			}
+			printf("source prefix: %s destination prefix: %s source cluster: %s destination cluster: %s movement "
+			       "state: %s\n",
+			       movement.sourcePrefix.toString().c_str(),
+			       movement.destPrefix.toString().c_str(),
+			       movement.sourceConnectionString.c_str(),
+			       movement.destinationConnectionString.c_str(),
+			       std::to_string(static_cast<int>(movement.movementState)).c_str());
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -2286,46 +2296,40 @@ ACTOR Future<Void> listDBMove(Database db, bool isSrc) {
 	return Void();
 }
 
+// list movement from src, or to dest, depending on isSrc
+ACTOR Future<Void> listDBMove(Database db, bool isSrc) {
+	GetActiveMovementsRequest::Location locationFilter =
+	    isSrc ? GetActiveMovementsRequest::Location::REQ_SOURCE : GetActiveMovementsRequest::Location::REQ_DESTINATION;
+	wait(fetchAndDisplayDBMove(db,
+	                           Optional<std::string>(),
+	                           Optional<std::string>(),
+	                           Optional<GetActiveMovementsRequest::Location>(locationFilter)));
+	return Void();
+}
+
 // list movement from src to dest
 ACTOR Future<Void> listDBMove(Database src, Database dest) {
-	try {
-		// Get active movement list
-		state std::vector<TenantMovementInfo> activeMovements = wait(getActiveMovements(src));
-
-		// Filter for desired movements
-		printf("%s from %s to %s\n",
-		       "List running data movement",
-		       src->getConnectionRecord()->getConnectionString().toString().c_str(),
-		       dest->getConnectionRecord()->getConnectionString().toString().c_str());
-		std::string targetConnectionString = dest->getConnectionRecord()->getConnectionString().toString();
-		for (const auto& movement : activeMovements) {
-			if (movement.destinationConnectionString == targetConnectionString) {
-				printf("source prefix: %s destination prefix: %s peer cluster: %s movement state: %s\n",
-				       movement.sourcePrefix.toString().c_str(),
-				       movement.destPrefix.toString().c_str(),
-				       targetConnectionString.c_str(),
-				       std::to_string(static_cast<int>(movement.movementState)).c_str());
-			}
-		}
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
-			throw;
-		fprintf(stderr, "ERROR: %s\n", e.what());
-		throw;
-	}
-
+	std::string targetConnectionString = dest->getConnectionRecord()->getConnectionString().toString();
+	wait(fetchAndDisplayDBMove(src,
+	                           Optional<std::string>(),
+	                           Optional<std::string>(targetConnectionString),
+	                           Optional<GetActiveMovementsRequest::Location>()));
 	return Void();
 }
 
 ACTOR Future<Void> finishDBMove(Database src, Key srcPrefix, Optional<double> maxLagSeconds) {
 	try {
 		// Check if exceed maxLagSeconds
-		// TODO move it to server-side
-		state Optional<TenantMovementInfo> targetDBMove = wait(filterDBMove(src, srcPrefix));
-		if (!targetDBMove.present()) {
+		state std::vector<TenantMovementInfo> targetDBMoveRes =
+		    wait(getActiveMovements(src,
+		                            Optional<std::string>(srcPrefix.toString()),
+		                            Optional<std::string>(),
+		                            Optional<GetActiveMovementsRequest::Location>()));
+		if (targetDBMoveRes.size() != 1) {
 			throw movement_not_found();
 		}
-		double secondsBehind = targetDBMove.get().mutationLag;
+		TenantMovementInfo targetDBMove = targetDBMoveRes[0];
+		double secondsBehind = targetDBMove.mutationLag;
 		if (secondsBehind > maxLagSeconds.orDefault(DBL_MAX)) {
 			printf("Current behind seconds is %d, which exceeds %d", secondsBehind, maxLagSeconds.orDefault(DBL_MAX));
 			return Void();
