@@ -211,9 +211,11 @@ private:
 
 	ACTOR Future<Void> doShutdown(AsyncFileNonDurable* self) {
 		wait(success(g_simulator.getCurrentProcess()->shutdownSignal.getFuture()));
+		TraceEvent("ZZZZShutDown").detail("Name", g_simulator.getCurrentProcess()->name).detail("File", self->filename);
 		for (auto itr = self->pendingModifications.ranges().begin(); itr != self->pendingModifications.ranges().end();
 		     ++itr) {
 			if (itr->value().isValid() && !itr->value().isReady()) {
+				TraceEvent("ZZZZCancel").detail("Range", itr->begin()).detail("File", self->filename);
 				itr->value().cancel();
 			}
 		}
@@ -388,6 +390,7 @@ private:
 		return f;
 	}
 
+	
 	// Gets existing modifications that overlap the specified range.  Optionally inserts a new modification into the map
 	std::vector<Future<Void>> getModificationsAndInsert(int64_t offset,
 	                                                    int64_t length,
@@ -406,6 +409,7 @@ private:
 
 		// Add the modification if we are doing a write or truncate
 		if (insertModification && !g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady()) {
+			TraceEvent("ZZZZZZStillADD").detail("Name", g_simulator.getCurrentProcess()->name).detail("Begin", modification.begin).detail("InputBegin", offset);
 			pendingModifications.insert(modification, value);
 		}
 
@@ -483,14 +487,20 @@ private:
 
 		state Future<bool> startSyncFuture = self->startSyncPromise.getFuture();
 
+		TraceEvent("ZZZZZDoWrite1").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Offset", offset).detail("Length", length).detail("File", self->filename);
+
 		try {
 			//TraceEvent("AsyncFileNonDurable_Write", self->id).detail("Delay", delayDuration).detail("Filename", self->filename).detail("WriteLength", length).detail("Offset", offset);
 			wait(checkKilled(self, "Write"));
+
+			TraceEvent("ZZZZZDoWrite2").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Offset", offset).detail("Length", length).detail("File", self->filename);
 
 			Future<Void> writeEnded = wait(ownFuture);
 			std::vector<Future<Void>> priorModifications =
 			    self->getModificationsAndInsert(offset, length, true, writeEnded);
 			self->minSizeAfterPendingModifications = std::max(self->minSizeAfterPendingModifications, offset + length);
+
+			TraceEvent("ZZZZZDoWrite3").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Offset", offset).detail("Length", length).detail("File", self->filename);
 
 			if (BUGGIFY_WITH_PROB(0.001) && !g_simulator.speedUpSimulation)
 				priorModifications.push_back(
@@ -500,24 +510,30 @@ private:
 				priorModifications.push_back(waitUntilDiskReady(self->diskParameters, length) ||
 				                             self->killed.getFuture());
 
+			TraceEvent("ZZZZZDoWrite4").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Offset", offset).detail("Length", length).detail("File", self->filename);
+
 			wait(waitForAll(priorModifications));
 
 			self->approximateSize = std::max(self->approximateSize, length + offset);
+			TraceEvent("ZZZZZDoWrite5").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Offset", offset).detail("Length", length).detail("File", self->filename);
 
 			self->reponses.add(sendOnProcess(currentProcess, writeStarted, currentTaskID));
 		} catch (Error& e) {
+			TraceEvent("ZZZZZDoWriteCancel").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Offset", offset).detail("Length", length).detail("File", self->filename).error(e, true);
 			self->reponses.add(sendErrorOnProcess(currentProcess, writeStarted, e, currentTaskID));
 			throw;
 		}
 
 		//TraceEvent("AsyncFileNonDurable_WriteDoneWithPreviousMods", self->id).detail("Delay", delayDuration).detail("Filename", self->filename).detail("WriteLength", length).detail("Offset", offset);
-
+	TraceEvent("ZZZZZDoWrite6").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Offset", offset).detail("Length", length).detail("File", self->filename);
 		// Wait a random amount of time or until a sync/kill is issued
 		state bool saveDurable = true;
 		choose {
 			when(wait(delay(delayDuration))) {}
 			when(bool durable = wait(startSyncFuture)) { saveDurable = durable; }
 		}
+
+		TraceEvent("ZZZZZDoWrite7").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Offset", offset).detail("Length", length).detail("File", self->filename);
 
 		debugFileCheck("AsyncFileNonDurableWriteAfterWait", self->filename, dataCopy.begin(), offset, length);
 
@@ -635,7 +651,10 @@ private:
 			writeOffset += pageLength;
 		}
 
+		TraceEvent("ZZZZZDoWrite8").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Offset", offset).detail("Length", length).detail("File", self->filename);
+
 		wait(waitForAll(writeFutures));
+		TraceEvent("ZZZZZDoWrite9").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Offset", offset).detail("Length", length).detail("File", self->filename);
 		//TraceEvent("AsyncFileNonDurable_WriteDone", self->id).detail("Delay", delayDuration).detail("Filename", self->filename).detail("WriteLength", length).detail("Offset", offset);
 		return Void();
 	}
@@ -654,11 +673,18 @@ private:
 		    g_simulator.speedUpSimulation ? 0.0001 : (deterministicRandom()->random01() * self->maxWriteDelay);
 		state Future<bool> startSyncFuture = self->startSyncPromise.getFuture();
 
+		TraceEvent("ZZZZZDoTruncate1").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Size", size).detail("File", self->filename);
+
+		state Future<Void> ended;
+
 		try {
 			//TraceEvent("AsyncFileNonDurable_Truncate", self->id).detail("Delay", delayDuration).detail("Filename", self->filename);
 			wait(checkKilled(self, "Truncate"));
 
+			TraceEvent("ZZZZZDoTruncate2").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Size", size).detail("File", self->filename);
+
 			state Future<Void> truncateEnded = wait(ownFuture);
+			ended = truncateEnded;
 
 			// Need to know the size of the file directly before this truncate
 			// takes effect to see what range it modifies.
@@ -667,10 +693,14 @@ private:
 			}
 			ASSERT(self->minSizeAfterPendingModificationsIsExact);
 			int64_t beginModifiedRange = std::min(size, self->minSizeAfterPendingModifications);
-			self->minSizeAfterPendingModifications = size;
+			self->minSizeAfterPendingModifications = beginModifiedRange;
+
+			TraceEvent("ZZZZZDoTruncate3").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Size", size).detail("File", self->filename).detail("Ended", ended.isReady());
 
 			std::vector<Future<Void>> priorModifications =
 			    self->getModificationsAndInsert(beginModifiedRange, /*through end of file*/ -1, true, truncateEnded);
+			
+			TraceEvent("ZZZZZDoTruncate31").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Size", size).detail("File", self->filename).detail("Ended", ended.isReady());
 
 			if (BUGGIFY_WITH_PROB(0.001))
 				priorModifications.push_back(
@@ -681,13 +711,20 @@ private:
 
 			wait(waitForAll(priorModifications));
 
+			TraceEvent("ZZZZZDoTruncate4").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Size", size).detail("File", self->filename).detail("Ended", ended.isReady());
+
 			self->approximateSize = size;
 
 			self->reponses.add(sendOnProcess(currentProcess, truncateStarted, currentTaskID));
+
+			TraceEvent("ZZZZZDoTruncate5").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Size", size).detail("File", self->filename).detail("Ended", ended.isReady());
 		} catch (Error& e) {
+			TraceEvent("ZZZZZGetError").error(e, true).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Size", size).detail("File", self->filename);
 			self->reponses.add(sendErrorOnProcess(currentProcess, truncateStarted, e, currentTaskID));
 			throw;
 		}
+
+		TraceEvent("ZZZZZDoTruncate6").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Size", size).detail("File", self->filename).detail("Ended", ended.isReady());
 
 		// Wait a random amount of time or until a sync/kill is issued
 		state bool saveDurable = true;
@@ -696,9 +733,20 @@ private:
 			when(bool durable = wait(startSyncFuture)) { saveDurable = durable; }
 		}
 
+		TraceEvent("ZZZZZDoTruncate7").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Size", size).detail("File", self->filename).detail("Ended", ended.isReady());
+
+		for (auto itr = self->pendingModifications.ranges().begin(); itr != self->pendingModifications.ranges().end();
+		     ++itr) {
+			if (itr->value().isValid() && !itr->value().isReady()) {
+				TraceEvent("ZZZZZStillPending").detail("Range", itr->begin()).detail("File", self->filename);
+			}
+		}
+
 		if (g_network->check_yield(TaskPriority::DefaultYield)) {
 			wait(delay(0, TaskPriority::DefaultYield));
 		}
+
+		TraceEvent("ZZZZZDoTruncate8").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Size", size).detail("File", self->filename).detail("Ended", ended.isReady());
 
 		// If performing a durable truncate, then pass it through to the file.  Otherwise, pass it through with a 1/2
 		// chance
@@ -708,6 +756,8 @@ private:
 			TraceEvent("AsyncFileNonDurable_DroppedTruncate", self->id).detail("Size", size);
 			TEST(true); // AsyncFileNonDurable dropped truncate
 		}
+
+		TraceEvent("ZZZZZDoTruncate9").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Size", size).detail("Ended", ended.isReady());
 
 		return Void();
 	}
@@ -746,10 +796,12 @@ private:
 		Future<Void> allModifications = waitForAll(outstandingModifications);
 		// Clear out the pending modifications map of all completed modifications
 		self->pendingModifications.insert(RangeMapRange<uint64_t>(0, -1), Void());
-		for (auto itr = stillPendingModifications.begin(); itr != stillPendingModifications.end(); ++itr)
+		for (auto itr = stillPendingModifications.begin(); itr != stillPendingModifications.end(); ++itr) {
+			TraceEvent("ZZZZZNewModification").detail("Mmm", g_simulator.getCurrentProcess()->name).detail("Begin", (*itr).begin).detail("Shutdown", g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady());
 			self->pendingModifications.insert(
 			    *itr, success(allModifications)); // waitForAll cannot wait on the same future more than once, so wrap
 			                                      // the future with success
+		}
 
 		// Signal all modifications to end their delay and reset the startSyncPromise
 		Promise<bool> startSyncPromise = self->startSyncPromise;
