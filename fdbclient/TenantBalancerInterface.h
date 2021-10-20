@@ -207,6 +207,7 @@ struct TenantMovementInfo {
 	                             // converted to seconds
 	Version switchVersion;
 	std::string errorMessage;
+	std::string databaseBackupStatus;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -223,7 +224,8 @@ struct TenantMovementInfo {
 		           mutationLag,
 		           databaseTimingDelay,
 		           switchVersion,
-		           errorMessage);
+		           errorMessage,
+		           databaseBackupStatus);
 	}
 
 	std::unordered_map<std::string, std::string> getStatusInfoMap() const {
@@ -243,6 +245,7 @@ struct TenantMovementInfo {
 		statusInfoMap["databaseTimingDelay"] = std::to_string(databaseTimingDelay);
 		statusInfoMap["switchVersion"] = std::to_string(switchVersion);
 		statusInfoMap["errorMessage"] = errorMessage;
+		statusInfoMap["databaseBackupStatus"] = databaseBackupStatus;
 		return statusInfoMap;
 	}
 

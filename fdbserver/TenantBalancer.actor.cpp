@@ -851,6 +851,7 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 			tenantMovementInfo.isDestinationLocked = false;
 			tenantMovementInfo.movementState = record.movementState;
 			tenantMovementInfo.mutationLag = prefixToDRInfo[prefix.toString()].first;
+			tenantMovementInfo.databaseBackupStatus = prefixToDRInfo[prefix.toString()].second;
 			// TODO assign databaseTimingDelay
 			tenantMovementInfo.switchVersion = record.switchVersion;
 			// errorMessage
@@ -932,26 +933,36 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 	++self->finishSourceMovementRequests;
 
 	try {
-		// TODO: check that the DR is ready to switch
-
-		// Check if maxLagSeconds is exceeded
+		state MovementRecord record = self->getOutgoingMovement(Key(req.sourceTenant));
 		state std::vector<TenantMovementInfo> filteredMovements = wait(getFilteredMovements(
 		    self, Optional<std::string>(req.sourceTenant), Optional<std::string>(), Optional<MovementLocation>()));
 		if (filteredMovements.size() != 1) {
 			throw movement_not_found();
 		}
 		TenantMovementInfo targetMovementInfo = filteredMovements[0];
+
+		// Check that the DR is ready to switch
+		if (targetMovementInfo.databaseBackupStatus == "has errored") {
+			record.movementState = MovementState::ERROR;
+			wait(self->saveOutgoingMovement(record));
+			TraceEvent(SevWarn, "TenantBalancerBackupError").detail("Tenant", req.sourceTenant);
+			return Void();
+		}
+		if (targetMovementInfo.databaseBackupStatus == "is differential") {
+			TraceEvent(SevWarn, "TenantBalancerBackupReplicaUncompleted").detail("Tenant", req.sourceTenant);
+			return Void();
+		}
 		if (targetMovementInfo.mutationLag > req.maxLagSeconds) {
-			TraceEvent(SevDebug, "TenantBalancerLagSecondsCheckFailed")
+			TraceEvent(SevWarn, "TenantBalancerLagSecondsCheckFailed")
 			    .detail("MaxLagSeconds", req.maxLagSeconds)
 			    .detail("CurrentLagSeconds", targetMovementInfo.mutationLag);
 			return Void();
 		}
-		TraceEvent(SevDebug, "TenantBalancerLagCheckPass")
+		TraceEvent(SevDebug, "TenantBalancerFinishReady")
+		    .detail("Tenant", req.sourceTenant)
 		    .detail("MaxLagSeconds", req.maxLagSeconds)
 		    .detail("CurrentLagSeconds", targetMovementInfo.mutationLag);
 
-		state MovementRecord record = self->getOutgoingMovement(Key(req.sourceTenant));
 		state std::string destinationConnectionString =
 		    record.getPeerDatabase()->getConnectionRecord()->getConnectionString().toString();
 		state Optional<Database> destDatabase =
@@ -960,12 +971,11 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 			// TODO: how to handle this?
 			ASSERT(false);
 		}
-
-		// Update movement record
 		state Version version = wait(lockSourceTenant(self, req.sourceTenant));
 		// TODO: get a locked tenant and lock the tenant
 		state std::string lockedTenant = "";
 		record.switchVersion = version;
+		// Update movement record
 		record.movementState = MovementState::SWITCHING;
 		wait(self->saveOutgoingMovement(record));
 
