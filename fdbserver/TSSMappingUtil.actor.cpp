@@ -23,50 +23,53 @@
 #include "fdbserver/TSSMappingUtil.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Void> readTSSMappingRYW(Reference<ReadYourWritesTransaction> tr, std::map<UID, StorageServerInterface>* tssMapping) {
-    KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
-    state std::vector<std::pair<UID, UID>> uidMapping = wait(tssMapDB.getRange(tr, UID(), Optional<UID>(), CLIENT_KNOBS->TOO_MANY));
-    ASSERT(uidMapping.size() < CLIENT_KNOBS->TOO_MANY);
+ACTOR Future<Void> readTSSMappingRYW(Reference<ReadYourWritesTransaction> tr,
+                                     std::map<UID, StorageServerInterface>* tssMapping) {
+	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
+	state std::vector<std::pair<UID, UID>> uidMapping =
+	    wait(tssMapDB.getRange(tr, UID(), Optional<UID>(), CLIENT_KNOBS->TOO_MANY));
+	ASSERT(uidMapping.size() < CLIENT_KNOBS->TOO_MANY);
 
-    state std::map<UID, StorageServerInterface> mapping;
-    for (auto& it : uidMapping) {
-        state UID ssId = it.first;
-        Optional<Value> v = wait(tr->get(serverListKeyFor(it.second)));
-        (*tssMapping)[ssId] = decodeServerListValue(v.get());
-    }
-    return Void();
+	state std::map<UID, StorageServerInterface> mapping;
+	for (auto& it : uidMapping) {
+		state UID ssId = it.first;
+		Optional<Value> v = wait(tr->get(serverListKeyFor(it.second)));
+		(*tssMapping)[ssId] = decodeServerListValue(v.get());
+	}
+	return Void();
 }
 
 ACTOR Future<Void> readTSSMapping(Transaction* tr, std::map<UID, StorageServerInterface>* tssMapping) {
-    state RangeResult mappingList = wait(tr->getRange(tssMappingKeys, CLIENT_KNOBS->TOO_MANY));
-    ASSERT(!mappingList.more && mappingList.size() < CLIENT_KNOBS->TOO_MANY);
+	state RangeResult mappingList = wait(tr->getRange(tssMappingKeys, CLIENT_KNOBS->TOO_MANY));
+	ASSERT(!mappingList.more && mappingList.size() < CLIENT_KNOBS->TOO_MANY);
 
-    for (auto& it : mappingList) {
-        state UID ssId = Codec<UID>::unpack(Tuple::unpack(it.key.removePrefix(tssMappingKeys.begin)));
-        UID tssId = Codec<UID>::unpack(Tuple::unpack(it.value));
-        Optional<Value> v = wait(tr->get(serverListKeyFor(tssId)));
-        (*tssMapping)[ssId] = decodeServerListValue(v.get());
-    }
-    return Void();
+	for (auto& it : mappingList) {
+		state UID ssId = Codec<UID>::unpack(Tuple::unpack(it.key.removePrefix(tssMappingKeys.begin)));
+		UID tssId = Codec<UID>::unpack(Tuple::unpack(it.value));
+		Optional<Value> v = wait(tr->get(serverListKeyFor(tssId)));
+		(*tssMapping)[ssId] = decodeServerListValue(v.get());
+	}
+	return Void();
 }
 
-ACTOR Future<Void> removeTSSPairsFromCluster(Database cx, vector<std::pair<UID, UID>> pairsToRemove) {
-    state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-    state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
-    loop {
-        try {
-            tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-            tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-            for (auto& tssPair : pairsToRemove) {
-                // DO NOT remove server list key - that'll break a bunch of stuff. DD will eventually call removeStorageServer
-                tr->clear(serverTagKeyFor(tssPair.second));
-                tssMapDB.erase(tr, tssPair.first);
-            }
-            wait(tr->commit());
-            break;
-        } catch (Error& e) {
-            wait(tr->onError(e));
-        }
-    }
-    return Void();
+ACTOR Future<Void> removeTSSPairsFromCluster(Database cx, std::vector<std::pair<UID, UID>> pairsToRemove) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			for (auto& tssPair : pairsToRemove) {
+				// DO NOT remove server list key - that'll break a bunch of stuff. DD will eventually call
+				// removeStorageServer
+				tr->clear(serverTagKeyFor(tssPair.second));
+				tssMapDB.erase(tr, tssPair.first);
+			}
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+	return Void();
 }

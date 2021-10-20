@@ -107,7 +107,7 @@ private:
 	std::vector<TraceEventFields> eventBuffer;
 	int loggedLength;
 	int bufferLength;
-	bool opened;
+	std::atomic<bool> opened;
 	int64_t preopenOverflowCount;
 	std::string basename;
 	std::string logGroup;
@@ -388,6 +388,17 @@ public:
 		eventBuffer.push_back(fields);
 		bufferLength += fields.sizeBytes();
 
+		// If we have queued up a large number of events in simulation, then throw an error. This makes it easier to
+		// diagnose cases where we get stuck in a loop logging trace events that eventually runs out of memory.
+		// Without this we would never see any trace events from that loop, and it would be more difficult to identify
+		// where the process is actually stuck.
+		if (g_network && g_network->isSimulated() && bufferLength > 1e8) {
+			// Setting this to 0 avoids a recurse from the assertion trace event and also prevents a situation where
+			// we roll the trace log only to log the single assertion event when using --crash.
+			bufferLength = 0;
+			ASSERT(false);
+		}
+
 		if (trackError) {
 			latestEventCache.setLatestError(fields);
 		}
@@ -659,15 +670,15 @@ bool traceClockSource(std::string& source) {
 
 std::string toString(ErrorKind errorKind) {
 	switch (errorKind) {
-		case ErrorKind::Unset:
-			return "Unset";
-		case ErrorKind::DiskIssue:
-			return "DiskIssue";
-		case ErrorKind::BugDetected:
-			return "BugDetected";
-		default:
-			UNSTOPPABLE_ASSERT(false);
-			return "";
+	case ErrorKind::Unset:
+		return "Unset";
+	case ErrorKind::DiskIssue:
+		return "DiskIssue";
+	case ErrorKind::BugDetected:
+		return "BugDetected";
+	default:
+		UNSTOPPABLE_ASSERT(false);
+		return "";
 	}
 }
 
@@ -921,7 +932,7 @@ bool TraceEvent::init() {
 		detail("Severity", int(severity));
 		if (severity >= SevError) {
 			detail("ErrorKind", errorKind);
-			errorKindIndex = fields.size()-1;
+			errorKindIndex = fields.size() - 1;
 		}
 		detail("Time", "0.000000");
 		timeIndex = fields.size() - 1;
@@ -1110,7 +1121,7 @@ TraceEvent& TraceEvent::suppressFor(double duration, bool logSuppressedEventCoun
 	return *this;
 }
 
-TraceEvent &TraceEvent::setErrorKind(ErrorKind errorKind) {
+TraceEvent& TraceEvent::setErrorKind(ErrorKind errorKind) {
 	this->errorKind = errorKind;
 	return *this;
 }

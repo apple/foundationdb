@@ -43,8 +43,6 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-using namespace std;
-
 WorkloadContext::WorkloadContext() {}
 
 WorkloadContext::WorkloadContext(const WorkloadContext& r)
@@ -217,10 +215,10 @@ bool getOption(VectorRef<KeyValueRef> options, Key key, bool defaultValue) {
 	return false; // Assure that compiler is fine with the function
 }
 
-vector<std::string> getOption(VectorRef<KeyValueRef> options, Key key, vector<std::string> defaultValue) {
+std::vector<std::string> getOption(VectorRef<KeyValueRef> options, Key key, std::vector<std::string> defaultValue) {
 	for (int i = 0; i < options.size(); i++)
 		if (options[i].key == key) {
-			vector<std::string> v;
+			std::vector<std::string> v;
 			int begin = 0;
 			for (int c = 0; c < options[i].value.size(); c++)
 				if (options[i].value[c] == ',') {
@@ -258,7 +256,7 @@ Standalone<VectorRef<KeyValueRef>> checkAllOptionsConsumed(VectorRef<KeyValueRef
 }
 
 struct CompoundWorkload : TestWorkload {
-	vector<TestWorkload*> workloads;
+	std::vector<TestWorkload*> workloads;
 
 	CompoundWorkload(WorkloadContext& wcx) : TestWorkload(wcx) {}
 	CompoundWorkload* add(TestWorkload* w) {
@@ -277,29 +275,29 @@ struct CompoundWorkload : TestWorkload {
 		return d;
 	}
 	Future<Void> setup(Database const& cx) override {
-		vector<Future<Void>> all;
+		std::vector<Future<Void>> all;
 		all.reserve(workloads.size());
 		for (int w = 0; w < workloads.size(); w++)
 			all.push_back(workloads[w]->setup(cx));
 		return waitForAll(all);
 	}
 	Future<Void> start(Database const& cx) override {
-		vector<Future<Void>> all;
+		std::vector<Future<Void>> all;
 		all.reserve(workloads.size());
 		for (int w = 0; w < workloads.size(); w++)
 			all.push_back(workloads[w]->start(cx));
 		return waitForAll(all);
 	}
 	Future<bool> check(Database const& cx) override {
-		vector<Future<bool>> all;
+		std::vector<Future<bool>> all;
 		all.reserve(workloads.size());
 		for (int w = 0; w < workloads.size(); w++)
 			all.push_back(workloads[w]->check(cx));
 		return allTrue(all);
 	}
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		for (int w = 0; w < workloads.size(); w++) {
-			vector<PerfMetric> p;
+			std::vector<PerfMetric> p;
 			workloads[w]->getMetrics(p);
 			for (int i = 0; i < p.size(); i++)
 				m.push_back(p[i].withPrefix(workloads[w]->description() + "."));
@@ -315,7 +313,7 @@ struct CompoundWorkload : TestWorkload {
 
 TestWorkload* getWorkloadIface(WorkloadRequest work,
                                VectorRef<KeyValueRef> options,
-                               Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+                               Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	Value testName = getOption(options, LiteralStringRef("testName"), LiteralStringRef("no-test-specified"));
 	WorkloadContext wcx;
 	wcx.clientId = work.clientId;
@@ -350,7 +348,7 @@ TestWorkload* getWorkloadIface(WorkloadRequest work,
 	return workload;
 }
 
-TestWorkload* getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+TestWorkload* getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	if (work.options.size() < 1) {
 		TraceEvent(SevError, "TestCreationError").detail("Reason", "No options provided");
 		fprintf(stderr, "ERROR: No options were provided for workload.\n");
@@ -460,7 +458,7 @@ ACTOR Future<Void> pingDatabase(Database cx) {
 
 ACTOR Future<Void> testDatabaseLiveness(Database cx,
                                         double databasePingDelay,
-                                        string context,
+                                        std::string context,
                                         double startDelay = 0.0) {
 	wait(delay(startDelay));
 	loop {
@@ -496,7 +494,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
                                     WorkloadInterface workIface,
                                     TestWorkload* workload,
                                     double databasePingDelay) {
-	state unique_ptr<TestWorkload> delw(workload);
+	state std::unique_ptr<TestWorkload> delw(workload);
 	state Optional<ErrorOr<Void>> setupResult;
 	state Optional<ErrorOr<Void>> startResult;
 	state Optional<ErrorOr<CheckReply>> checkResult;
@@ -578,10 +576,10 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 
 			sendResult(checkReq, checkResult);
 		}
-		when(ReplyPromise<vector<PerfMetric>> req = waitNext(workIface.metrics.getFuture())) {
-			state ReplyPromise<vector<PerfMetric>> s_req = req;
+		when(ReplyPromise<std::vector<PerfMetric>> req = waitNext(workIface.metrics.getFuture())) {
+			state ReplyPromise<std::vector<PerfMetric>> s_req = req;
 			try {
-				vector<PerfMetric> m;
+				std::vector<PerfMetric> m;
 				workload->getMetrics(m);
 				TraceEvent("WorkloadSendMetrics", workIface.id()).detail("Count", m.size());
 				req.send(m);
@@ -602,7 +600,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 
 ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
                                         Reference<ClusterConnectionFile> ccf,
-                                        Reference<AsyncVar<struct ServerDBInfo>> dbInfo,
+                                        Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
                                         LocalityData locality) {
 	state WorkloadInterface workIface;
 	state bool replied = false;
@@ -661,7 +659,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 
 ACTOR Future<Void> testerServerCore(TesterInterface interf,
                                     Reference<ClusterConnectionFile> ccf,
-                                    Reference<AsyncVar<struct ServerDBInfo>> dbInfo,
+                                    Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
                                     LocalityData locality) {
 	state PromiseStream<Future<Void>> addWorkload;
 	state Future<Void> workerFatalError = actorCollection(addWorkload.getFuture());
@@ -700,10 +698,10 @@ Future<Void> dumpDatabase(Database const& cx, std::string const& outputFilename,
 int passCount = 0;
 int failCount = 0;
 
-vector<PerfMetric> aggregateMetrics(vector<vector<PerfMetric>> metrics) {
-	std::map<std::string, vector<PerfMetric>> metricMap;
+std::vector<PerfMetric> aggregateMetrics(std::vector<std::vector<PerfMetric>> metrics) {
+	std::map<std::string, std::vector<PerfMetric>> metricMap;
 	for (int i = 0; i < metrics.size(); i++) {
-		vector<PerfMetric> workloadMetrics = metrics[i];
+		std::vector<PerfMetric> workloadMetrics = metrics[i];
 		TraceEvent("MetricsReturned").detail("Count", workloadMetrics.size());
 		for (int m = 0; m < workloadMetrics.size(); m++) {
 			printf("Metric (%d, %d): %s, %f, %s\n",
@@ -720,8 +718,8 @@ vector<PerfMetric> aggregateMetrics(vector<vector<PerfMetric>> metrics) {
 	    .detail("Value", (double)metrics.size())
 	    .detail("Formatted", format("%d", metrics.size()).c_str());
 
-	vector<PerfMetric> result;
-	std::map<std::string, vector<PerfMetric>>::iterator it;
+	std::vector<PerfMetric> result;
+	std::map<std::string, std::vector<PerfMetric>>::iterator it;
 	for (it = metricMap.begin(); it != metricMap.end(); it++) {
 		auto& vec = it->second;
 		if (!vec.size())
@@ -731,12 +729,12 @@ vector<PerfMetric> aggregateMetrics(vector<vector<PerfMetric>> metrics) {
 			sum += vec[i].value();
 		if (vec[0].averaged() && vec.size())
 			sum /= vec.size();
-		result.push_back(PerfMetric(vec[0].name(), sum, false, vec[0].format_code()));
+		result.emplace_back(vec[0].name(), sum, Averaged::False, vec[0].format_code());
 	}
 	return result;
 }
 
-void logMetrics(vector<PerfMetric> metrics) {
+void logMetrics(std::vector<PerfMetric> metrics) {
 	for (int idx = 0; idx < metrics.size(); idx++)
 		TraceEvent("Metric")
 		    .detail("Name", metrics[idx].name())
@@ -761,8 +759,8 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<Tester
 	    .detail("Phases", spec.phases)
 	    .detail("TestTimeout", spec.timeout);
 
-	state vector<Future<WorkloadInterface>> workRequests;
-	state vector<vector<PerfMetric>> metricsResults;
+	state std::vector<Future<WorkloadInterface>> workRequests;
+	state std::vector<std::vector<PerfMetric>> metricsResults;
 
 	state int i = 0;
 	state int success = 0;
@@ -781,7 +779,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<Tester
 		workRequests.push_back(testers[i].recruitments.getReply(req));
 	}
 
-	state vector<WorkloadInterface> workloads = wait(getAll(workRequests));
+	state std::vector<WorkloadInterface> workloads = wait(getAll(workRequests));
 	state double waitForFailureTime = g_network->isSimulated() ? 24 * 60 * 60 : 60;
 	if (g_network->isSimulated() && spec.simCheckRelocationDuration)
 		debug_setCheckRelocationDuration(true);
@@ -837,13 +835,13 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<Tester
 	}
 
 	if (spec.phases & TestWorkload::METRICS) {
-		state std::vector<Future<ErrorOr<vector<PerfMetric>>>> metricTasks;
+		state std::vector<Future<ErrorOr<std::vector<PerfMetric>>>> metricTasks;
 		printf("fetching metrics (%s)...\n", printable(spec.title).c_str());
 		TraceEvent("TestFetchingMetrics").detail("WorkloadTitle", spec.title);
 		metricTasks.reserve(workloads.size());
 		for (int i = 0; i < workloads.size(); i++)
 			metricTasks.push_back(
-			    workloads[i].metrics.template getReplyUnlessFailedFor<vector<PerfMetric>>(waitForFailureTime, 0));
+			    workloads[i].metrics.template getReplyUnlessFailedFor<std::vector<PerfMetric>>(waitForFailureTime, 0));
 		wait(waitForAll(metricTasks));
 		throwIfError(metricTasks, "MetricFailedForWorkload" + printable(spec.title));
 		for (int i = 0; i < metricTasks.size(); i++) {
@@ -1193,9 +1191,9 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  } },
 };
 
-vector<TestSpec> readTests(ifstream& ifs) {
+std::vector<TestSpec> readTests(std::ifstream& ifs) {
 	TestSpec spec;
-	vector<TestSpec> result;
+	std::vector<TestSpec> result;
 	Standalone<VectorRef<KeyValueRef>> workloadOptions;
 	std::string cline;
 	bool beforeFirstTest = true;
@@ -1203,16 +1201,16 @@ vector<TestSpec> readTests(ifstream& ifs) {
 
 	while (ifs.good()) {
 		getline(ifs, cline);
-		string line = removeWhitespace(string(cline));
+		std::string line = removeWhitespace(cline);
 		if (!line.size() || line.find(';') == 0)
 			continue;
 
 		size_t found = line.find('=');
-		if (found == string::npos)
+		if (found == std::string::npos)
 			// hmmm, not good
 			continue;
-		string attrib = removeWhitespace(line.substr(0, found));
-		string value = removeWhitespace(line.substr(found + 1));
+		std::string attrib = removeWhitespace(line.substr(0, found));
+		std::string value = removeWhitespace(line.substr(found + 1));
 
 		if (attrib == "testTitle") {
 			beforeFirstTest = false;
@@ -1388,8 +1386,8 @@ ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterContro
  */
 ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc,
                             Reference<AsyncVar<Optional<struct ClusterInterface>>> ci,
-                            vector<TesterInterface> testers,
-                            vector<TestSpec> tests,
+                            std::vector<TesterInterface> testers,
+                            std::vector<TestSpec> tests,
                             StringRef startingConfiguration,
                             LocalityData locality) {
 	state Database cx;
@@ -1537,7 +1535,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
  */
 ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc,
                             Reference<AsyncVar<Optional<struct ClusterInterface>>> ci,
-                            vector<TestSpec> tests,
+                            std::vector<TestSpec> tests,
                             test_location_t at,
                             int minTestersExpected,
                             StringRef startingConfiguration,
@@ -1545,11 +1543,11 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	state int flags = (at == TEST_ON_SERVERS ? 0 : GetWorkersRequest::TESTER_CLASS_ONLY) |
 	                  GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY;
 	state Future<Void> testerTimeout = delay(600.0); // wait 600 sec for testers to show up
-	state vector<WorkerDetails> workers;
+	state std::vector<WorkerDetails> workers;
 
 	loop {
 		choose {
-			when(vector<WorkerDetails> w =
+			when(std::vector<WorkerDetails> w =
 			         wait(cc->get().present()
 			                  ? brokenPromiseToNever(cc->get().get().getWorkers.getReply(GetWorkersRequest(flags)))
 			                  : Never())) {
@@ -1567,7 +1565,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 	}
 
-	vector<TesterInterface> ts;
+	std::vector<TesterInterface> ts;
 	ts.reserve(workers.size());
 	for (int i = 0; i < workers.size(); i++)
 		ts.push_back(workers[i].interf.testerInterface);
@@ -1610,10 +1608,10 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
                             StringRef startingConfiguration,
                             LocalityData locality,
                             UnitTestParameters testOptions) {
-	state vector<TestSpec> testSpecs;
+	state std::vector<TestSpec> testSpecs;
 	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
 	auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
-	vector<Future<Void>> actors;
+	std::vector<Future<Void>> actors;
 	if (connFile) {
 		actors.push_back(reportErrors(monitorLeader(connFile, cc), "MonitorLeader"));
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
@@ -1659,8 +1657,8 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 		spec.options.push_back_deep(spec.options.arena(), options);
 		testSpecs.push_back(spec);
 	} else {
-		ifstream ifs;
-		ifs.open(fileName.c_str(), ifstream::in);
+		std::ifstream ifs;
+		ifs.open(fileName.c_str(), std::ifstream::in);
 		if (!ifs.good()) {
 			TraceEvent(SevError, "TestHarnessFail")
 			    .detail("Reason", "file open failed")
@@ -1687,7 +1685,7 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 	Future<Void> tests;
 	if (at == TEST_HERE) {
 		auto db = makeReference<AsyncVar<ServerDBInfo>>();
-		vector<TesterInterface> iTesters(1);
+		std::vector<TesterInterface> iTesters(1);
 		actors.push_back(
 		    reportErrors(monitorServerDBInfo(cc, LocalityData(), db), "MonitorServerDBInfo")); // FIXME: Locality
 		actors.push_back(reportErrors(testerServerCore(iTesters[0], connFile, db, locality), "TesterServerCore"));

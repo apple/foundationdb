@@ -30,7 +30,7 @@ struct FileSystemWorkload : TestWorkload {
 	bool discardEdgeMeasurements, performingWrites, loggingQueries;
 	std::string operationName;
 
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter queries, writes;
 	ContinuousSample<double> latencies;
 	ContinuousSample<double> writeLatencies;
@@ -74,16 +74,16 @@ struct FileSystemWorkload : TestWorkload {
 		return true;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		double duration = testDuration * (discardEdgeMeasurements ? 0.75 : 1.0);
-		m.push_back(PerfMetric("Measured Duration", duration, true));
-		m.push_back(PerfMetric("Transactions/sec", queries.getValue() / duration, false));
-		m.push_back(PerfMetric("Writes/sec", writes.getValue() / duration, false));
-		m.push_back(PerfMetric("Mean Latency (ms)", 1000 * latencies.mean(), true));
-		m.push_back(PerfMetric("Median Latency (ms, averaged)", 1000 * latencies.median(), true));
-		m.push_back(PerfMetric("90% Latency (ms, averaged)", 1000 * latencies.percentile(0.90), true));
-		m.push_back(PerfMetric("98% Latency (ms, averaged)", 1000 * latencies.percentile(0.98), true));
-		m.push_back(PerfMetric("Median Write Latency (ms, averaged)", 1000 * writeLatencies.median(), true));
+		m.emplace_back("Measured Duration", duration, Averaged::True);
+		m.emplace_back("Transactions/sec", queries.getValue() / duration, Averaged::False);
+		m.emplace_back("Writes/sec", writes.getValue() / duration, Averaged::False);
+		m.emplace_back("Mean Latency (ms)", 1000 * latencies.mean(), Averaged::True);
+		m.emplace_back("Median Latency (ms, averaged)", 1000 * latencies.median(), Averaged::True);
+		m.emplace_back("90% Latency (ms, averaged)", 1000 * latencies.percentile(0.90), Averaged::True);
+		m.emplace_back("98% Latency (ms, averaged)", 1000 * latencies.percentile(0.98), Averaged::True);
+		m.emplace_back("Median Write Latency (ms, averaged)", 1000 * writeLatencies.median(), Averaged::True);
 	}
 
 	Key keyForFileID(uint64_t id) { return StringRef(format("/files/id/%016llx", id)); }
@@ -140,7 +140,7 @@ struct FileSystemWorkload : TestWorkload {
 
 	ACTOR Future<Void> nodeSetup(Database cx, FileSystemWorkload* self) {
 		state int i;
-		state vector<int> order;
+		state std::vector<int> order;
 		state int nodesToSetUp = self->fileCount / self->clientCount + 1;
 		state int startingNode = nodesToSetUp * self->clientId;
 		state int batchCount = 5;
@@ -148,7 +148,7 @@ struct FileSystemWorkload : TestWorkload {
 			order.push_back(o * batchCount);
 		deterministicRandom()->randomShuffle(order);
 		for (i = 0; i < order.size();) {
-			vector<Future<Void>> fs;
+			std::vector<Future<Void>> fs;
 			for (int j = 0; j < 100 && i < order.size(); j++) {
 				fs.push_back(self->setupRange(
 				    cx,

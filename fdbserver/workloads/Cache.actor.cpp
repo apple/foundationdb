@@ -14,13 +14,13 @@ struct CacheWorkload : TestWorkload {
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
 			// Call management API to cache keys under the given prefix
-			return addCachedRange(cx, prefixRange(keyPrefix));
+			return ManagementAPI::addCachedRange(cx.getReference(), prefixRange(keyPrefix));
 		}
 		return Void();
 	}
 	Future<Void> start(Database const& cx) override { return Void(); }
 	Future<bool> check(Database const& cx) override { return true; }
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<CacheWorkload> CacheWorkloadFactory("Cache");

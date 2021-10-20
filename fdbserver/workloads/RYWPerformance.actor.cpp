@@ -298,7 +298,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	Key keyForIndex(uint64_t index) {
 		Key result = makeString(keyBytes);

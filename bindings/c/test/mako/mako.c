@@ -152,18 +152,17 @@ void* fdb_network_thread(void* args) {
 }
 
 int genprefix(char* str, char* prefix, int prefixlen, int prefixpadding, int rows, int len) {
-        const int rowdigit = digits(rows);
-        const int paddinglen = len - (prefixlen + rowdigit) - 1;
-        int offset = 0;
-        if (prefixpadding) {
-                memset(str, 'x', paddinglen);
-                offset += paddinglen;
-        }
-        memcpy(str + offset, prefix, prefixlen);
-        str[len - 1] = '\0';
-        return offset + prefixlen;
+	const int rowdigit = digits(rows);
+	const int paddinglen = len - (prefixlen + rowdigit) - 1;
+	int offset = 0;
+	if (prefixpadding) {
+		memset(str, 'x', paddinglen);
+		offset += paddinglen;
+	}
+	memcpy(str + offset, prefix, prefixlen);
+	str[len - 1] = '\0';
+	return offset + prefixlen;
 }
-
 
 /* cleanup database */
 int cleanup(FDBTransaction* transaction, mako_args_t* args) {
@@ -189,10 +188,19 @@ int cleanup(FDBTransaction* transaction, mako_args_t* args) {
 	free(prefixstr);
 	len += 1;
 
+retryTxn:
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_start);
+
 	fdb_transaction_clear_range(transaction, (uint8_t*)beginstr, len + 1, (uint8_t*)endstr, len + 1);
-	if (commit_transaction(transaction) != FDB_SUCCESS)
+	switch (commit_transaction(transaction)) {
+	case (FDB_SUCCESS):
+		break;
+	case (FDB_ERROR_RETRY):
+		fdb_transaction_reset(transaction);
+		goto retryTxn;
+	default:
 		goto failExit;
+	}
 
 	fdb_transaction_reset(transaction);
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_end);
@@ -308,11 +316,19 @@ int populate(FDBTransaction* transaction,
 
 		/* commit every 100 inserts (default) */
 		if (i % args->txnspec.ops[OP_INSERT][OP_COUNT] == 0) {
+		retryTxn:
 			if (stats->xacts % args->sampling == 0) {
 				clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
 			}
-			if (commit_transaction(transaction) != FDB_SUCCESS)
+
+			switch (commit_transaction(transaction)) {
+			case (FDB_SUCCESS):
+				break;
+			case (FDB_ERROR_RETRY):
+				goto retryTxn;
+			default:
 				goto failExit;
+			}
 
 			/* xact latency stats */
 			if (stats->xacts % args->sampling == 0) {
@@ -337,20 +353,41 @@ int populate(FDBTransaction* transaction,
 			xacts++; /* for throttling */
 		}
 	}
-
-	if (stats->xacts % args->sampling == 0) {
-		clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
-	}
-	if (commit_transaction(transaction) != FDB_SUCCESS)
-		goto failExit;
-
-	/* xact latency stats */
-	if (stats->xacts % args->sampling == 0) {
-		clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
-		update_op_lat_stats(
-		    &timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block, elem_size, is_memory_allocated);
-		update_op_lat_stats(
-		    &timer_per_xact_start, &timer_per_xact_end, OP_TRANSACTION, stats, block, elem_size, is_memory_allocated);
+	time_t start_time_sec, current_time_sec;
+	time(&start_time_sec);
+	int is_committed = false;
+	// will hit FDB_ERROR_RETRY if running mako with multi-version client
+	while (!is_committed) {
+		if (stats->xacts % args->sampling == 0) {
+			clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
+		}
+		int rc;
+		if ((rc = commit_transaction(transaction) != FDB_SUCCESS)) {
+			if (rc == FDB_ERROR_RETRY) {
+				time(&current_time_sec);
+				if (difftime(current_time_sec, start_time_sec) > 5) {
+					goto failExit;
+				} else {
+					continue;
+				}
+			} else {
+				goto failExit;
+			}
+		}
+		is_committed = true;
+		/* xact latency stats */
+		if (stats->xacts % args->sampling == 0) {
+			clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
+			update_op_lat_stats(
+			    &timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block, elem_size, is_memory_allocated);
+			update_op_lat_stats(&timer_per_xact_start,
+			                    &timer_per_xact_end,
+			                    OP_TRANSACTION,
+			                    stats,
+			                    block,
+			                    elem_size,
+			                    is_memory_allocated);
+		}
 	}
 
 	clock_gettime(CLOCK_MONOTONIC, &timer_end);
@@ -555,7 +592,13 @@ retryTxn:
 					if (keyend > args->rows - 1) {
 						keyend = args->rows - 1;
 					}
-				  genkey(keystr2, KEYPREFIX, KEYPREFIXLEN, args->prefixpadding, keyend, args->rows, args->key_length + 1);
+					genkey(keystr2,
+					       KEYPREFIX,
+					       KEYPREFIXLEN,
+					       args->prefixpadding,
+					       keyend,
+					       args->rows,
+					       args->key_length + 1);
 				}
 
 				if (stats->xacts % args->sampling == 0) {
@@ -1209,7 +1252,8 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 
 	/* Set client Log group */
 	if (strlen(args->log_group) != 0) {
-		err = fdb_network_set_option(FDB_NET_OPTION_TRACE_LOG_GROUP, (uint8_t*)args->log_group, strlen(args->log_group));
+		err =
+		    fdb_network_set_option(FDB_NET_OPTION_TRACE_LOG_GROUP, (uint8_t*)args->log_group, strlen(args->log_group));
 		if (err) {
 			fprintf(stderr, "ERROR: fdb_network_set_option(FDB_NET_OPTION_TRACE_LOG_GROUP): %s\n", fdb_get_error(err));
 		}
@@ -1286,7 +1330,9 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 #else /* >= 610 */
 	fdb_create_database(args->cluster_file, &process.database);
 #endif
-
+	if (args->disable_ryw) {
+		fdb_database_set_option(process.database, FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, (uint8_t*)NULL, 0);
+	}
 	fprintf(debugme, "DEBUG: creating %d worker threads\n", args->num_threads);
 	worker_threads = (pthread_t*)calloc(sizeof(pthread_t), args->num_threads);
 	if (!worker_threads) {
@@ -1400,6 +1446,7 @@ int init_args(mako_args_t* args) {
 	for (i = 0; i < MAX_OP; i++) {
 		args->txnspec.ops[i][OP_COUNT] = 0;
 	}
+	args->disable_ryw = 0;
 	return 0;
 }
 
@@ -1564,6 +1611,7 @@ void usage() {
 	printf("%-24s %s\n", "    --knobs=KNOBS", "Set client knobs");
 	printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
 	printf("%-24s %s\n", "    --streaming", "Streaming mode: all (default), iterator, small, medium, large, serial");
+	printf("%-24s %s\n", "    --disable_ryw", "Disable snapshot read-your-writes");
 }
 
 /* parse benchmark paramters */
@@ -1609,6 +1657,7 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "txntagging", required_argument, NULL, ARG_TXNTAGGING },
 			                                    { "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
 			                                    { "version", no_argument, NULL, ARG_VERSION },
+			                                    { "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
 			                                    { NULL, 0, NULL, 0 }
 		};
 		idx = 0;
@@ -1756,14 +1805,16 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 				args->txntagging = 1000;
 			}
 			break;
-		case ARG_TXNTAGGINGPREFIX: {
+		case ARG_TXNTAGGINGPREFIX:
 			if (strlen(optarg) > TAGPREFIXLENGTH_MAX) {
 				fprintf(stderr, "Error: the length of txntagging_prefix is larger than %d\n", TAGPREFIXLENGTH_MAX);
 				exit(0);
 			}
 			memcpy(args->txntagging_prefix, optarg, strlen(optarg));
 			break;
-		}
+		case ARG_DISABLE_RYW:
+			args->disable_ryw = 1;
+			break;
 		}
 	}
 

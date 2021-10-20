@@ -212,7 +212,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		    std::string(deterministicRandom()->randomInt(valueSizeRange.first, valueSizeRange.second + 1), 'x'));
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		// m.push_back( transactions.getMetric() );
 		// m.push_back( retries.getMetric() );
 	}

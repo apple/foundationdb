@@ -63,7 +63,7 @@ Source IP:port     0         string   The IP and port of the machine where the s
 Trace ID           1         uint64   The 64-bit identifier of the trace. All spans in a trace share the same trace ID.
 Span ID            2         uint64   The 64-bit identifier of the span. All spans have a unique identifier.
 Start timestamp    3         double   The timestamp when the operation represented by the span began.
-End timestamp      4         double   The timestamp when the operation represented by the span ended.
+Duration           4         double   The duration in seconds of the operation represented by the span.
 Operation name     5         string   The name of the operation the span represents.
 Tags               6         map      User defined tags, added manually to specify additional information.
 Parent span IDs    7         vector   (Optional) A list of span IDs representing parents of this span.
@@ -95,3 +95,13 @@ Tracing can be enabled or disabled for individual transactions. The special key
 space exposes an API to set a custom trace ID for a transaction, or to disable
 tracing for the transaction. See the special key space :ref:`tracing module
 documentation <special-key-space-tracing-module>` to learn more.
+
+^^^^^^^^^^^^^^
+Trace sampling
+^^^^^^^^^^^^^^
+
+By default, all traces are recorded. If tracing is producing too much data,
+adjust the trace sample rate with the ``TRACING_SAMPLE_RATE`` knob. Set the
+knob to 0.0 to record no traces, to 1.0 to record all traces, or somewhere in
+the middle. Traces are sampled as a unit. All individual spans in the trace
+will be included in the sample.

@@ -26,6 +26,49 @@
 #include <stdarg.h>
 #include <cinttypes>
 
+std::atomic<bool> startSampling = false;
+LineageReference rootLineage;
+thread_local LineageReference* currentLineage = &rootLineage;
+
+LineagePropertiesBase::~LineagePropertiesBase() {}
+
+#ifdef ENABLE_SAMPLING
+ActorLineage::ActorLineage() : properties(), parent(*currentLineage) {}
+#else
+ActorLineage::ActorLineage() : properties() {}
+#endif
+
+ActorLineage::~ActorLineage() {
+	for (auto property : properties) {
+		delete property.properties;
+	}
+}
+
+#ifdef ENABLE_SAMPLING
+LineageReference getCurrentLineage() {
+	if (!currentLineage->isValid() || !currentLineage->isAllocated()) {
+		currentLineage->allocate();
+	}
+	return *currentLineage;
+}
+
+void sample(LineageReference* lineagePtr);
+
+void replaceLineage(LineageReference* lineage) {
+	if (!startSampling) {
+		currentLineage = lineage;
+	} else {
+		startSampling = false;
+		sample(currentLineage);
+		currentLineage = lineage;
+	}
+}
+#endif
+
+using namespace std::literals;
+
+const std::string_view StackLineage::name = "StackLineage"sv;
+
 #if (defined(__linux__) || defined(__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER)
 // For benchmarking; need a version of rte_memcpy that doesn't live in the same compilation unit as the test.
 void* rte_memcpy_noinline(void* __restrict __dest, const void* __restrict __src, size_t __n) {

@@ -23,7 +23,7 @@
 #include "fdbclient/SystemData.h"
 #include "flow/UnitTest.h"
 
-#define init(knob, value) initKnob(knob, value, #knob)
+#define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
 
 ClientKnobs::ClientKnobs(Randomize randomize) {
 	initialize(randomize);
@@ -247,6 +247,10 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( TAG_THROTTLE_SMOOTHING_WINDOW,            2.0 );
 	init( TAG_THROTTLE_RECHECK_INTERVAL,            5.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_RECHECK_INTERVAL = 0.0;
 	init( TAG_THROTTLE_EXPIRATION_INTERVAL,        60.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_EXPIRATION_INTERVAL = 1.0;
+
+	// busyness reporting
+	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
+	init( BUSYNESS_SPIKE_SATURATED_THRESHOLD,     0.500 );
 
 	// clang-format on
 }

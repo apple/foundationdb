@@ -182,10 +182,10 @@ public:
 
 	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation(const KeyRef&, Reverse isBackward = Reverse::False);
 	bool getCachedLocations(const KeyRangeRef&,
-	                        vector<std::pair<KeyRange, Reference<LocationInfo>>>&,
+	                        std::vector<std::pair<KeyRange, Reference<LocationInfo>>>&,
 	                        int limit,
 	                        Reverse reverse);
-	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const vector<struct StorageServerInterface>&);
+	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const std::vector<struct StorageServerInterface>&);
 	void invalidateCache(const KeyRef&, Reverse isBackward = Reverse::False);
 	void invalidateCache(const KeyRangeRef&);
 
@@ -375,6 +375,8 @@ public:
 	Counter transactionsProcessBehind;
 	Counter transactionsThrottled;
 	Counter transactionsExpensiveClearCostEstCount;
+	Counter transactionGrvFullBatches;
+	Counter transactionGrvTimedOutBatches;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
 	    bytesPerCommit;
@@ -385,6 +387,7 @@ public:
 	int snapshotRywEnabled;
 
 	int transactionTracingEnabled;
+	double verifyCausalReadsProp = 0.0;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;
@@ -436,6 +439,10 @@ public:
 	// Removes the storage server and its TSS pair from the TSS mapping (if present).
 	// Requests to the storage server will no longer be duplicated to its pair TSS.
 	void removeTssMapping(StorageServerInterface const& ssi);
+
+	// used in template functions to create a transaction
+	using TransactionT = ReadYourWritesTransaction;
+	Reference<TransactionT> createTransaction();
 
 private:
 	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;

@@ -41,6 +41,7 @@ public:
 	                                  // often, so that versions always advance smoothly
 
 	// TLogs
+	bool PEEK_USING_STREAMING;
 	double TLOG_TIMEOUT; // tlog OR commit proxy failure - master's reaction time
 	double TLOG_SLOW_REJOIN_WARN_TIMEOUT_SECS; // Warns if a tlog takes too long to rejoin
 	double RECOVERY_TLOG_SMART_QUORUM_DELAY; // smaller might be better for bug amplification
@@ -276,6 +277,9 @@ public:
 	int ROCKSDB_PREFIX_LEN;
 	int64_t ROCKSDB_BLOCK_CACHE_SIZE;
 	double ROCKSDB_METRICS_DELAY;
+	double ROCKSDB_READ_VALUE_TIMEOUT;
+	double ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
+	double ROCKSDB_READ_RANGE_TIMEOUT;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -374,6 +378,7 @@ public:
 	double SIM_SHUTDOWN_TIMEOUT;
 	double SHUTDOWN_TIMEOUT;
 	double MASTER_SPIN_DELAY;
+	double CC_PRUNE_CLIENTS_INTERVAL;
 	double CC_CHANGE_DELAY;
 	double CC_CLASS_DELAY;
 	double WAIT_FOR_GOOD_RECRUITMENT_DELAY;
@@ -386,6 +391,10 @@ public:
 	double INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
 	double VERSION_LAG_METRIC_INTERVAL;
 	int64_t MAX_VERSION_DIFFERENCE;
+	double INITIAL_UPDATE_CROSS_DC_INFO_DELAY; // The intial delay in a new Cluster Controller just started to refresh
+	                                           // the info of remote DC, such as remote DC health, and whether we need
+	                                           // to take remote DC health info when making failover decision.
+	double CHECK_REMOTE_HEALTH_INTERVAL; // Remote DC health refresh interval.
 	double FORCE_RECOVERY_CHECK_DELAY;
 	double RATEKEEPER_FAILURE_TIME;
 	double REPLACE_INTERFACE_DELAY;
@@ -408,7 +417,13 @@ public:
 	double CC_TRACKING_HEALTH_RECOVERY_INTERVAL; // The number of recovery count should not exceed
 	                                             // CC_MAX_HEALTH_RECOVERY_COUNT within
 	                                             // CC_TRACKING_HEALTH_RECOVERY_INTERVAL.
-	int CC_MAX_HEALTH_RECOVERY_COUNT;
+	int CC_MAX_HEALTH_RECOVERY_COUNT; // The max number of recoveries can be triggered due to worker health within
+	                                  // CC_TRACKING_HEALTH_RECOVERY_INTERVAL
+	bool CC_HEALTH_TRIGGER_FAILOVER; // Whether to enable health triggered failover in CC.
+	int CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION; // The minimum number of degraded servers that can trigger a
+	                                               // failover.
+	int CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION; // The maximum number of degraded servers that can trigger a
+	                                               // failover.
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
@@ -565,6 +580,7 @@ public:
 	double FETCH_KEYS_TOO_LONG_TIME_CRITERIA;
 	double MAX_STORAGE_COMMIT_TIME;
 	int64_t RANGESTREAM_LIMIT_BYTES;
+	bool ENABLE_CLEAR_RANGE_EAGER_READS;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -692,7 +708,8 @@ public:
 	int64_t REDWOOD_REMAP_CLEANUP_WINDOW; // Remap remover lag interval in which to coalesce page writes
 	double REDWOOD_REMAP_CLEANUP_LAG; // Maximum allowed remap remover lag behind the cleanup window as a multiple of
 	                                  // the window size
-	double REDWOOD_LOGGING_INTERVAL;
+	double REDWOOD_METRICS_INTERVAL;
+	double REDWOOD_HISTOGRAM_INTERVAL;
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;

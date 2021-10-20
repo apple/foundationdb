@@ -25,7 +25,7 @@
 #include "flow/UnitTest.h"
 #include <inttypes.h>
 
-UID WLTOKEN_NETWORKTEST(-1, 2);
+constexpr int WLTOKEN_NETWORKTEST = WLTOKEN_FIRST_AVAILABLE;
 
 struct LatencyStats {
 	using sample = double;
@@ -55,7 +55,8 @@ struct LatencyStats {
 	double stddev() { return sqrt(x2 / n - (x / n) * (x / n)); }
 };
 
-NetworkTestInterface::NetworkTestInterface(NetworkAddress remote) : test(Endpoint({ remote }, WLTOKEN_NETWORKTEST)) {}
+NetworkTestInterface::NetworkTestInterface(NetworkAddress remote)
+  : test(Endpoint::wellKnown({ remote }, WLTOKEN_NETWORKTEST)) {}
 
 NetworkTestInterface::NetworkTestInterface(INetwork* local) {
 	test.makeWellKnownEndpoint(WLTOKEN_NETWORKTEST, TaskPriority::DefaultEndpoint);
@@ -93,8 +94,8 @@ ACTOR Future<Void> networkTestServer() {
 }
 
 ACTOR Future<Void> networkTestStreamingServer() {
-	state NetworkTestInterface interf( g_network );
-	state Future<Void> logging = delay( 1.0 );
+	state NetworkTestInterface interf(g_network);
+	state Future<Void> logging = delay(1.0);
 	state double lastTime = now();
 	state int sent = 0;
 	state LatencyStats latency;
@@ -113,7 +114,7 @@ ACTOR Future<Void> networkTestStreamingServer() {
 					latency.tock(sample);
 					sent++;
 				}
-				when( wait( logging ) ) {
+				when(wait(logging)) {
 					auto spd = sent / (now() - lastTime);
 					if (FLOW_KNOBS->NETWORK_TEST_SCRIPT_MODE) {
 						fprintf(stderr, "%f\t%.3f\t%.3f\n", spd, latency.mean() * 1e6, latency.stddev() * 1e6);
@@ -123,11 +124,11 @@ ACTOR Future<Void> networkTestStreamingServer() {
 					latency.reset();
 					lastTime = now();
 					sent = 0;
-					logging = delay( 1.0 );
+					logging = delay(1.0);
 				}
 			}
-		} catch (Error &e) {
-			if(e.code() != error_code_operation_obsolete) {
+		} catch (Error& e) {
+			if (e.code() != error_code_operation_obsolete) {
 				throw e;
 			}
 		}
@@ -170,8 +171,10 @@ ACTOR Future<Void> testClient(std::vector<NetworkTestInterface> interfs,
 	return Void();
 }
 
-ACTOR Future<Void> testClientStream(std::vector<NetworkTestInterface> interfs, int* sent, int* completed,
-                              LatencyStats* latency) {
+ACTOR Future<Void> testClientStream(std::vector<NetworkTestInterface> interfs,
+                                    int* sent,
+                                    int* completed,
+                                    LatencyStats* latency) {
 	state std::string request_payload(FLOW_KNOBS->NETWORK_TEST_REQUEST_SIZE, '.');
 	state LatencyStats::sample sample;
 

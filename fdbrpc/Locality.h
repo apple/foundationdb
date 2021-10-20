@@ -73,6 +73,7 @@ struct ProcessClass {
 		StorageCache,
 		Backup,
 		VersionIndexer,
+		Worker, // used for actor lineage tracking
 		NoRole
 	};
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };

@@ -33,6 +33,7 @@ void forceLinkStreamCipherTests();
 #endif
 void forceLinkParallelStreamTests();
 void forceLinkSimExternalConnectionTests();
+void forceLinkMutationLogReaderTests();
 void forceLinkIThreadPoolTests();
 
 struct UnitTestWorkload : TestWorkload {
@@ -77,6 +78,7 @@ struct UnitTestWorkload : TestWorkload {
 #endif
 		forceLinkParallelStreamTests();
 		forceLinkSimExternalConnectionTests();
+		forceLinkMutationLogReaderTests();
 		forceLinkIThreadPoolTests();
 	}
 
@@ -91,7 +93,7 @@ struct UnitTestWorkload : TestWorkload {
 		return Void();
 	}
 	Future<bool> check(Database const& cx) override { return testsFailed.getValue() == 0; }
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(testsAvailable.getMetric());
 		m.push_back(testsExecuted.getMetric());
 		m.push_back(testsFailed.getMetric());
@@ -108,7 +110,15 @@ struct UnitTestWorkload : TestWorkload {
 				tests.push_back(test);
 			}
 		}
+
 		fprintf(stdout, "Found %zu tests\n", tests.size());
+
+		if (tests.size() == 0) {
+			TraceEvent(SevError, "NoMatchingUnitTests").detail("TestPattern", self->testPattern);
+			++self->testsFailed;
+			return Void();
+		}
+
 		deterministicRandom()->randomShuffle(tests);
 		if (self->testRunLimit > 0 && tests.size() > self->testRunLimit)
 			tests.resize(self->testRunLimit);

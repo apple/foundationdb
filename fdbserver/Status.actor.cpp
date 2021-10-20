@@ -119,7 +119,7 @@ ACTOR static Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> la
     std::vector<WorkerDetails> workers,
     std::string eventName) {
 	try {
-		state vector<Future<ErrorOr<TraceEventFields>>> eventTraces;
+		state std::vector<Future<ErrorOr<TraceEventFields>>> eventTraces;
 		for (int c = 0; c < workers.size(); c++) {
 			EventLogRequest req =
 			    eventName.size() > 0 ? EventLogRequest(Standalone<StringRef>(eventName)) : EventLogRequest();
@@ -271,7 +271,7 @@ static JsonBuilderObject getError(const TraceEventFields& errorFields) {
 }
 
 static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
-                                              vector<WorkerDetails> workers,
+                                              std::vector<WorkerDetails> workers,
                                               Optional<DatabaseConfiguration> configuration,
                                               std::set<std::string>* incomplete_reasons) {
 	JsonBuilderObject machineMap;
@@ -720,10 +720,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     WorkerEvents traceFileOpenErrors,
     WorkerEvents programStarts,
     std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
-    vector<std::pair<StorageServerInterface, EventMap>> storageServers,
-    vector<std::pair<TLogInterface, EventMap>> tLogs,
-    vector<std::pair<CommitProxyInterface, EventMap>> commitProxies,
-    vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
+    std::vector<std::pair<StorageServerInterface, EventMap>> storageServers,
+    std::vector<std::pair<TLogInterface, EventMap>> tLogs,
+    std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies,
+    std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
     ServerCoordinators coordinators,
     Database cx,
     Optional<DatabaseConfiguration> configuration,
@@ -1621,7 +1621,7 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 			}
 			statusObj["excluded_servers"] = excludedServersArr;
 		}
-		vector<ClientLeaderRegInterface> coordinatorLeaderServers = coordinators.clientLeaderServers;
+		std::vector<ClientLeaderRegInterface> coordinatorLeaderServers = coordinators.clientLeaderServers;
 		int count = coordinatorLeaderServers.size();
 		statusObj["coordinators_count"] = count;
 	} catch (Error&) {
@@ -1797,11 +1797,11 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 }
 
 ACTOR template <class iface>
-static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(
-    vector<iface> servers,
+static Future<std::vector<std::pair<iface, EventMap>>> getServerMetrics(
+    std::vector<iface> servers,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
     std::vector<std::string> eventNames) {
-	state vector<Future<Optional<TraceEventFields>>> futures;
+	state std::vector<Future<Optional<TraceEventFields>>> futures;
 	for (auto s : servers) {
 		for (auto name : eventNames) {
 			futures.push_back(latestEventOnWorker(address_workers[s.address()], s.id().toString() + "/" + name));
@@ -1810,7 +1810,7 @@ static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(
 
 	wait(waitForAll(futures));
 
-	vector<std::pair<iface, EventMap>> results;
+	std::vector<std::pair<iface, EventMap>> results;
 	auto futureItr = futures.begin();
 
 	for (int i = 0; i < servers.size(); i++) {
@@ -1828,18 +1828,18 @@ static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(
 }
 
 ACTOR template <class iface>
-static Future<vector<TraceEventFields>> getServerBusiestWriteTags(
-    vector<iface> servers,
+static Future<std::vector<TraceEventFields>> getServerBusiestWriteTags(
+    std::vector<iface> servers,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
     WorkerDetails rkWorker) {
-	state vector<Future<Optional<TraceEventFields>>> futures;
+	state std::vector<Future<Optional<TraceEventFields>>> futures;
 	futures.reserve(servers.size());
 	for (const auto& s : servers) {
 		futures.push_back(latestEventOnWorker(rkWorker.interf, s.id().toString() + "/BusiestWriteTag"));
 	}
 	wait(waitForAll(futures));
 
-	vector<TraceEventFields> result(servers.size());
+	std::vector<TraceEventFields> result(servers.size());
 	for (int i = 0; i < servers.size(); ++i) {
 		if (futures[i].get().present()) {
 			result[i] = futures[i].get().get();
@@ -1848,13 +1848,13 @@ static Future<vector<TraceEventFields>> getServerBusiestWriteTags(
 	return result;
 }
 
-ACTOR static Future<vector<std::pair<StorageServerInterface, EventMap>>> getStorageServersAndMetrics(
+ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> getStorageServersAndMetrics(
     Database cx,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
     WorkerDetails rkWorker) {
-	state vector<StorageServerInterface> servers = wait(timeoutError(getStorageServers(cx, true), 5.0));
-	state vector<std::pair<StorageServerInterface, EventMap>> results;
-	state vector<TraceEventFields> busiestWriteTags;
+	state std::vector<StorageServerInterface> servers = wait(timeoutError(getStorageServers(cx, true), 5.0));
+	state std::vector<std::pair<StorageServerInterface, EventMap>> results;
+	state std::vector<TraceEventFields> busiestWriteTags;
 	wait(store(results,
 	           getServerMetrics(servers,
 	                            address_workers,
@@ -1870,21 +1870,21 @@ ACTOR static Future<vector<std::pair<StorageServerInterface, EventMap>>> getStor
 	return results;
 }
 
-ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetrics(
+ACTOR static Future<std::vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	vector<TLogInterface> servers = db->get().logSystemConfig.allPresentLogs();
-	vector<std::pair<TLogInterface, EventMap>> results =
+	std::vector<TLogInterface> servers = db->get().logSystemConfig.allPresentLogs();
+	std::vector<std::pair<TLogInterface, EventMap>> results =
 	    wait(getServerMetrics(servers, address_workers, std::vector<std::string>{ "TLogMetrics" }));
 
 	return results;
 }
 
 // Returns list of tuples of grv proxy interfaces and their latency metrics
-ACTOR static Future<vector<std::pair<CommitProxyInterface, EventMap>>> getCommitProxiesAndMetrics(
+ACTOR static Future<std::vector<std::pair<CommitProxyInterface, EventMap>>> getCommitProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	vector<std::pair<CommitProxyInterface, EventMap>> results = wait(getServerMetrics(
+	std::vector<std::pair<CommitProxyInterface, EventMap>> results = wait(getServerMetrics(
 	    db->get().client.commitProxies,
 	    address_workers,
 	    std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands", "CommitBatchingWindowSize" }));
@@ -1892,10 +1892,10 @@ ACTOR static Future<vector<std::pair<CommitProxyInterface, EventMap>>> getCommit
 	return results;
 }
 
-ACTOR static Future<vector<std::pair<GrvProxyInterface, EventMap>>> getGrvProxiesAndMetrics(
+ACTOR static Future<std::vector<std::pair<GrvProxyInterface, EventMap>>> getGrvProxiesAndMetrics(
     Reference<AsyncVar<ServerDBInfo>> db,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	vector<std::pair<GrvProxyInterface, EventMap>> results = wait(
+	std::vector<std::pair<GrvProxyInterface, EventMap>> results = wait(
 	    getServerMetrics(db->get().client.grvProxies,
 	                     address_workers,
 	                     std::vector<std::string>{ "GRVLatencyMetrics", "GRVLatencyBands", "GRVBatchLatencyMetrics" }));
@@ -1904,7 +1904,8 @@ ACTOR static Future<vector<std::pair<GrvProxyInterface, EventMap>>> getGrvProxie
 
 // Returns the number of zones eligble for recruiting new tLogs after zone failures, to maintain the current replication
 // factor.
-static int getExtraTLogEligibleZones(const vector<WorkerDetails>& workers, const DatabaseConfiguration& configuration) {
+static int getExtraTLogEligibleZones(const std::vector<WorkerDetails>& workers,
+                                     const DatabaseConfiguration& configuration) {
 	std::set<StringRef> allZones;
 	std::map<Key, std::set<StringRef>> dcId_zone;
 	for (auto const& worker : workers) {
@@ -1977,13 +1978,13 @@ JsonBuilderObject getPerfLimit(TraceEventFields const& ratekeeper, double transP
 
 ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
     Reference<AsyncVar<ServerDBInfo>> db,
-    vector<WorkerDetails> workers,
+    std::vector<WorkerDetails> workers,
     WorkerDetails mWorker,
     WorkerDetails rkWorker,
     JsonBuilderObject* qos,
     JsonBuilderObject* data_overlay,
     std::set<std::string>* incomplete_reasons,
-    Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture) {
+    Future<ErrorOr<std::vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture) {
 	state JsonBuilderObject statusObj;
 	state JsonBuilderObject operationsObj;
 	state JsonBuilderObject bytesObj;
@@ -1991,8 +1992,8 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 
 	// Writes and conflicts
 	try {
-		state vector<Future<TraceEventFields>> commitProxyStatFutures;
-		state vector<Future<TraceEventFields>> grvProxyStatFutures;
+		state std::vector<Future<TraceEventFields>> commitProxyStatFutures;
+		state std::vector<Future<TraceEventFields>> grvProxyStatFutures;
 		std::map<NetworkAddress, WorkerDetails> workersMap;
 		for (auto const& w : workers) {
 			workersMap[w.interf.address()] = w;
@@ -2015,8 +2016,8 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 			else
 				throw all_alternatives_failed(); // We need data from all proxies for this result to be trustworthy
 		}
-		state vector<TraceEventFields> commitProxyStats = wait(getAll(commitProxyStatFutures));
-		state vector<TraceEventFields> grvProxyStats = wait(getAll(grvProxyStatFutures));
+		state std::vector<TraceEventFields> commitProxyStats = wait(getAll(commitProxyStatFutures));
+		state std::vector<TraceEventFields> grvProxyStats = wait(getAll(grvProxyStatFutures));
 
 		StatusCounter txnStartOut;
 		StatusCounter txnSystemPriorityStartOut;
@@ -2155,7 +2156,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 
 	// Reads
 	try {
-		ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>> storageServers = wait(storageServerFuture);
+		ErrorOr<std::vector<std::pair<StorageServerInterface, EventMap>>> storageServers = wait(storageServerFuture);
 		if (!storageServers.present()) {
 			throw storageServers.getError();
 		}
@@ -2211,14 +2212,14 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 
 ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
     WorkerEvents pMetrics,
-    Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture,
-    Future<ErrorOr<vector<std::pair<TLogInterface, EventMap>>>> tlogFuture,
+    Future<ErrorOr<std::vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture,
+    Future<ErrorOr<std::vector<std::pair<TLogInterface, EventMap>>>> tlogFuture,
     std::set<std::string>* incomplete_reasons) {
 	state JsonBuilderObject statusObj;
 	try {
 		state JsonBuilderObject cacheStatistics;
 
-		ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>> storageServers = wait(storageServerFuture);
+		ErrorOr<std::vector<std::pair<StorageServerInterface, EventMap>>> storageServers = wait(storageServerFuture);
 
 		if (!storageServers.present()) {
 			throw storageServers.getError();
@@ -2241,7 +2242,7 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
 		cacheStatistics["storage_hit_rate"] =
 		    (storageCacheMissesHz == 0) ? 1.0 : storageCacheHitsHz / (storageCacheHitsHz + storageCacheMissesHz);
 
-		ErrorOr<vector<std::pair<TLogInterface, EventMap>>> tlogServers = wait(tlogFuture);
+		ErrorOr<std::vector<std::pair<TLogInterface, EventMap>>> tlogServers = wait(tlogFuture);
 
 		if (!tlogServers.present()) {
 			throw tlogServers.getError();
@@ -2683,7 +2684,7 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 ACTOR Future<StatusReply> clusterGetStatus(
     Reference<AsyncVar<ServerDBInfo>> db,
     Database cx,
-    vector<WorkerDetails> workers,
+    std::vector<WorkerDetails> workers,
     std::vector<ProcessIssues> workerIssues,
     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatus,
     ServerCoordinators coordinators,
@@ -2797,10 +2798,10 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		state std::map<std::string, std::vector<JsonBuilderObject>> processIssues =
 		    getProcessIssuesAsMessages(workerIssues);
-		state vector<std::pair<StorageServerInterface, EventMap>> storageServers;
-		state vector<std::pair<TLogInterface, EventMap>> tLogs;
-		state vector<std::pair<CommitProxyInterface, EventMap>> commitProxies;
-		state vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
+		state std::vector<std::pair<StorageServerInterface, EventMap>> storageServers;
+		state std::vector<std::pair<TLogInterface, EventMap>> tLogs;
+		state std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies;
+		state std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
 		state JsonBuilderObject qos;
 		state JsonBuilderObject data_overlay;
 
@@ -2865,13 +2866,13 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				address_workers[worker.interf.address()] = worker.interf;
 			}
 
-			state Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture =
+			state Future<ErrorOr<std::vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture =
 			    errorOr(getStorageServersAndMetrics(cx, address_workers, rkWorker));
-			state Future<ErrorOr<vector<std::pair<TLogInterface, EventMap>>>> tLogFuture =
+			state Future<ErrorOr<std::vector<std::pair<TLogInterface, EventMap>>>> tLogFuture =
 			    errorOr(getTLogsAndMetrics(db, address_workers));
-			state Future<ErrorOr<vector<std::pair<CommitProxyInterface, EventMap>>>> commitProxyFuture =
+			state Future<ErrorOr<std::vector<std::pair<CommitProxyInterface, EventMap>>>> commitProxyFuture =
 			    errorOr(getCommitProxiesAndMetrics(db, address_workers));
-			state Future<ErrorOr<vector<std::pair<GrvProxyInterface, EventMap>>>> grvProxyFuture =
+			state Future<ErrorOr<std::vector<std::pair<GrvProxyInterface, EventMap>>>> grvProxyFuture =
 			    errorOr(getGrvProxiesAndMetrics(db, address_workers));
 
 			state int minStorageReplicasRemaining = -1;
@@ -2921,10 +2922,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["workload"] = workerStatuses[1];
 
 			statusObj["layers"] = workerStatuses[2];
+			/*
 			if (configBroadcaster) {
-				// TODO: Read from coordinators for more up-to-date config database status?
-				statusObj["configuration_database"] = configBroadcaster->getStatus();
+			    // TODO: Read from coordinators for more up-to-date config database status?
+			    statusObj["configuration_database"] = configBroadcaster->getStatus();
 			}
+			*/
 
 			// Add qos section if it was populated
 			if (!qos.empty())
@@ -2952,7 +2955,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			// Need storage servers now for processStatusFetcher() below.
-			ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>> _storageServers = wait(storageServerFuture);
+			ErrorOr<std::vector<std::pair<StorageServerInterface, EventMap>>> _storageServers =
+			    wait(storageServerFuture);
 			if (_storageServers.present()) {
 				storageServers = _storageServers.get();
 			} else {
@@ -2961,7 +2965,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			// ...also tlogs
-			ErrorOr<vector<std::pair<TLogInterface, EventMap>>> _tLogs = wait(tLogFuture);
+			ErrorOr<std::vector<std::pair<TLogInterface, EventMap>>> _tLogs = wait(tLogFuture);
 			if (_tLogs.present()) {
 				tLogs = _tLogs.get();
 			} else {
@@ -2970,7 +2974,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			// ...also commit proxies
-			ErrorOr<vector<std::pair<CommitProxyInterface, EventMap>>> _commitProxies = wait(commitProxyFuture);
+			ErrorOr<std::vector<std::pair<CommitProxyInterface, EventMap>>> _commitProxies = wait(commitProxyFuture);
 			if (_commitProxies.present()) {
 				commitProxies = _commitProxies.get();
 			} else {
@@ -2979,7 +2983,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			// ...also grv proxies
-			ErrorOr<vector<std::pair<GrvProxyInterface, EventMap>>> _grvProxies = wait(grvProxyFuture);
+			ErrorOr<std::vector<std::pair<GrvProxyInterface, EventMap>>> _grvProxies = wait(grvProxyFuture);
 			if (_grvProxies.present()) {
 				grvProxies = _grvProxies.get();
 			} else {

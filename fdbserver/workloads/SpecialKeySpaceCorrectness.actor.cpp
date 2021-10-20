@@ -685,7 +685,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
 				ASSERT(self->getRangeResultInOrder(result));
 				// check correctness of classType of each process
-				vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
+				std::vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
 				if (workers.size()) {
 					for (const auto& worker : workers) {
 						Key addr =
@@ -754,7 +754,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				ASSERT(!class_source_result.more && class_source_result.size() < CLIENT_KNOBS->TOO_MANY);
 				ASSERT(self->getRangeResultInOrder(class_source_result));
 				// check correctness of classType of each process
-				vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
+				std::vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
 				if (workers.size()) {
 					for (const auto& worker : workers) {
 						Key addr =
@@ -809,7 +809,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			try {
 				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				// lock the database
-				tx->set(SpecialKeySpace::getManagementApiCommandPrefix("lock"), LiteralStringRef(""));
+				UID uid = deterministicRandom()->randomUniqueID();
+				tx->set(SpecialKeySpace::getManagementApiCommandPrefix("lock"), uid.toString());
 				// commit
 				wait(tx->commit());
 				break;
@@ -827,6 +828,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					// special_key_space_management_api_error_msg schema validation
 					ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
 					ASSERT(valueObj["command"].get_str() == "lock" && !valueObj["retriable"].get_bool());
+					break;
+				} else if (e.code() == error_code_database_locked) {
+					// Database is already locked. This can happen if a previous attempt
+					// failed with unknown_result.
 					break;
 				} else {
 					wait(tx->onError(e));
@@ -939,10 +944,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// test change coordinators and cluster description
 		// we randomly pick one process(not coordinator) and add it, in this case, it should always succeed
 		{
-			// choose a new description if configuration allows transactions across differently named clusters
-			state std::string new_cluster_description = SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT
-			                                                ? deterministicRandom()->randomAlphaNumeric(8)
-			                                                : cs.clusterKeyName().toString();
+			state std::string new_cluster_description;
 			state std::string new_coordinator_process;
 			state std::vector<std::string> old_coordinators_processes;
 			state bool possible_to_add_coordinator;
@@ -951,6 +953,14 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			        .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"));
 			loop {
 				try {
+					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					Optional<Value> ccStrValue = wait(tx->get(coordinatorsKey));
+					ASSERT(ccStrValue.present()); // Otherwise, database is in a bad state
+					ClusterConnectionString ccStr(ccStrValue.get().toString());
+					// choose a new description if configuration allows transactions across differently named clusters
+					new_cluster_description = SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT
+					                              ? deterministicRandom()->randomAlphaNumeric(8)
+					                              : ccStr.clusterKeyName().toString();
 					// get current coordinators
 					Optional<Value> processes_key =
 					    wait(tx->get(LiteralStringRef("processes")
@@ -959,7 +969,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					boost::split(
 					    old_coordinators_processes, processes_key.get().toString(), [](char c) { return c == ','; });
 					// pick up one non-coordinator process if possible
-					vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
+					std::vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
 					TraceEvent(SevDebug, "CoordinatorsManualChange")
 					    .detail("OldCoordinators", describe(old_coordinators_processes))
 					    .detail("WorkerSize", workers.size());
