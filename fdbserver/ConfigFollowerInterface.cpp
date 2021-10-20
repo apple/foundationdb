@@ -27,7 +27,6 @@ void ConfigFollowerInterface::setupWellKnownEndpoints() {
 	                                            TaskPriority::Coordination);
 	getChanges.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETCHANGES, TaskPriority::Coordination);
 	compact.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_COMPACT, TaskPriority::Coordination);
-	rollback.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_ROLLBACK, TaskPriority::Coordination);
 	rollforward.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_ROLLFORWARD, TaskPriority::Coordination);
 	getCommittedVersion.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETCOMMITTEDVERSION, TaskPriority::Coordination);
 }
@@ -39,7 +38,6 @@ ConfigFollowerInterface::ConfigFollowerInterface(NetworkAddress const& remote)
     getSnapshotAndChanges(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_GETSNAPSHOTANDCHANGES)),
     getChanges(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCHANGES)),
     compact(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_COMPACT)),
-    rollback(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_ROLLBACK)),
     rollforward(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_ROLLFORWARD)),
     getCommittedVersion(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCOMMITTEDVERSION)) {}
 

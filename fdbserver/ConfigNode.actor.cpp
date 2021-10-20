@@ -472,31 +472,29 @@ class ConfigNodeImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> rollback(ConfigNodeImpl* self, ConfigFollowerRollbackRequest req) {
-		state ConfigGeneration generation = wait(getGeneration(self));
-		if (req.version < generation.committedVersion) {
-			Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
-			    wait(getMutations(self, req.version + 1, generation.committedVersion));
-			self->kvStore->clear(KeyRangeRef(versionedMutationKey(req.version + 1, 0),
-			                                 versionedMutationKey(generation.committedVersion + 1, 0)));
-			self->kvStore->clear(KeyRangeRef(versionedAnnotationKey(req.version + 1),
-			                                 versionedAnnotationKey(generation.committedVersion + 1)));
-
-			generation.committedVersion = req.version;
-			self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(generation, IncludeVersion())));
-			wait(self->kvStore->commit());
-		}
-		req.reply.send(Void());
-		return Void();
-	}
-
 	ACTOR static Future<Void> rollforward(ConfigNodeImpl* self, ConfigFollowerRollforwardRequest req) {
-		ConfigGeneration currentGeneration = wait(getGeneration(self));
+		state ConfigGeneration currentGeneration = wait(getGeneration(self));
 		if (req.lastKnownCommitted != currentGeneration.committedVersion) {
 			++self->failedCommits;
 			req.reply.sendError(not_committed());
 			return Void();
 		}
+		// Rollback to prior known committed version to erase any commits not
+		// made on a quorum.
+		if (req.rollback.present() && req.rollback.get() < currentGeneration.committedVersion) {
+			Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
+			    wait(getMutations(self, req.rollback.get() + 1, currentGeneration.committedVersion));
+			self->kvStore->clear(KeyRangeRef(versionedMutationKey(req.rollback.get() + 1, 0),
+			                                 versionedMutationKey(currentGeneration.committedVersion + 1, 0)));
+			self->kvStore->clear(KeyRangeRef(versionedAnnotationKey(req.rollback.get() + 1),
+			                                 versionedAnnotationKey(currentGeneration.committedVersion + 1)));
+
+			currentGeneration.committedVersion = req.rollback.get();
+			// The mutation commit loop below should persist the new generation
+			// to disk, so we don't need to do it here.
+		}
+		// Now rollforward by applying all mutations between last known
+		// committed version and rollforward version.
 		ASSERT_GT(req.mutations[0].version, currentGeneration.committedVersion);
 		wait(commitMutations(self, req.mutations, req.annotations, req.target));
 		req.reply.send(Void());
@@ -523,10 +521,6 @@ class ConfigNodeImpl {
 				when(ConfigFollowerCompactRequest req = waitNext(cfi->compact.getFuture())) {
 					++self->compactRequests;
 					wait(compact(self, req));
-				}
-				when(ConfigFollowerRollbackRequest req = waitNext(cfi->rollback.getFuture())) {
-					++self->rollbackRequests;
-					wait(rollback(self, req));
 				}
 				when(ConfigFollowerRollforwardRequest req = waitNext(cfi->rollforward.getFuture())) {
 					++self->rollforwardRequests;

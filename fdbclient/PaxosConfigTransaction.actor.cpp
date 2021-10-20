@@ -41,7 +41,7 @@ class CommitQuorum {
 			result.send(Void());
 		} else if (failed >= ctis.size() / 2 + 1 && result.canBeSet()) {
 			// Rollforwards could cause a version that didn't have quorum to
-			// commit.
+			// commit, so send commit_unknown_result instead of commit_failed.
 			result.sendError(commit_unknown_result());
 		} else {
 			// Check if it is possible to ever receive quorum agreement

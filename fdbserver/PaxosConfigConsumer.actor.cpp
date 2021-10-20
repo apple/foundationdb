@@ -24,6 +24,14 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+namespace {
+
+// Maximum time to wait for a response from a ConfigNode when asking for the
+// latest committed version.
+const double getCommittedVersionTimeout = 3;
+
+} // namespace
+
 struct CommittedVersions {
 	Version secondToLastCommitted;
 	Version lastCommitted;
@@ -33,7 +41,7 @@ class GetCommittedVersionQuorum {
 	std::vector<Future<Void>> actors;
 	std::vector<ConfigFollowerInterface> cfis;
 	std::map<Version, std::vector<ConfigFollowerInterface>> replies;
-	std::map<Version, Version> priorVersions; // TODO: Would be nice to combine this with `replies`
+	std::map<Version, Version> priorVersions;
 	// Last durably committed version.
 	Version lastSeenVersion;
 	size_t totalRepliesReceived{ 0 };
@@ -41,6 +49,8 @@ class GetCommittedVersionQuorum {
 	// Set to the <secondToLastCommitted, lastCommitted> versions a quorum of
 	// ConfigNodes agree on, otherwise unset.
 	Promise<CommittedVersions> quorumVersion;
+	// Stores the largest committed version out of all responses.
+	Version largestCommitted{ 0 };
 
 	// Sends rollback/rollforward messages to any nodes that are not up to date
 	// with the latest committed version as determined by the quorum. Should
@@ -49,43 +59,48 @@ class GetCommittedVersionQuorum {
 	                                     CommittedVersions nodeVersion,
 	                                     CommittedVersions quorumVersion,
 	                                     ConfigFollowerInterface cfi) {
-		if (nodeVersion.lastCommitted == quorumVersion.lastCommitted) {
+		ASSERT(nodeVersion.lastCommitted <= self->largestCommitted);
+		if (nodeVersion.lastCommitted == self->largestCommitted) {
 			return Void();
 		}
-		if (nodeVersion.lastCommitted > quorumVersion.lastCommitted) {
-			wait(retryBrokenPromise(cfi.rollback, ConfigFollowerRollbackRequest{ quorumVersion.lastCommitted }));
-		} else {
-			if (nodeVersion.secondToLastCommitted > quorumVersion.secondToLastCommitted) {
-				// If the non-quorum node has a last committed version less
-				// than the last committed version on the quorum, but greater
-				// than the second to last committed version on the quorum, it
-				// needs to be rolled back before being rolled forward.
-				wait(retryBrokenPromise(cfi.rollback,
-				                        ConfigFollowerRollbackRequest{ quorumVersion.secondToLastCommitted }));
+		if (nodeVersion.lastCommitted < self->largestCommitted) {
+			state Optional<Version> rollback;
+			if (nodeVersion.lastCommitted > quorumVersion.secondToLastCommitted) {
+				// If a non-quorum node has a last committed version less than
+				// the last committed version on the quorum, but greater than
+				// the second to last committed version on the quorum, it has
+				// committed changes the quorum does not agree with. Therefore,
+				// it needs to be rolled back before being rolled forward.
+				rollback = quorumVersion.secondToLastCommitted;
 			}
 
-			// Now roll node forward to match the last committed version of the
-			// quorum.
+			// Now roll node forward to match the largest committed version of
+			// the replies.
 			// TODO: Load balance over quorum
-			state ConfigFollowerInterface quorumCfi = self->replies[quorumVersion.lastCommitted][0];
+			state ConfigFollowerInterface quorumCfi = self->replies[self->largestCommitted][0];
 			try {
 				ConfigFollowerGetChangesReply reply = wait(retryBrokenPromise(
 				    quorumCfi.getChanges,
-				    ConfigFollowerGetChangesRequest{ nodeVersion.lastCommitted, quorumVersion.lastCommitted }));
-				wait(retryBrokenPromise(
-				    cfi.rollforward,
-				    ConfigFollowerRollforwardRequest{
-				        nodeVersion.lastCommitted, quorumVersion.lastCommitted, reply.changes, reply.annotations }));
+				    ConfigFollowerGetChangesRequest{ nodeVersion.lastCommitted, self->largestCommitted }));
+				wait(retryBrokenPromise(cfi.rollforward,
+				                        ConfigFollowerRollforwardRequest{ rollback,
+				                                                          nodeVersion.lastCommitted,
+				                                                          self->largestCommitted,
+				                                                          reply.changes,
+				                                                          reply.annotations }));
 			} catch (Error& e) {
 				if (e.code() == error_code_version_already_compacted) {
 					TEST(true); // PaxosConfigConsumer rollforward compacted ConfigNode
 					ConfigFollowerGetSnapshotAndChangesReply reply = wait(
 					    retryBrokenPromise(quorumCfi.getSnapshotAndChanges,
-					                       ConfigFollowerGetSnapshotAndChangesRequest{ quorumVersion.lastCommitted }));
+					                       ConfigFollowerGetSnapshotAndChangesRequest{self->largestCommitted}));
 					// TODO: Send the whole snapshot to `cfi`
 					ASSERT(false);
-					// return retryBrokenPromise(cfi.rollforward, ConfigFollowerRollforwardRequest{ lastCommitted,
-					// quorumVersion.second, reply.changes, reply.annotations });
+				} else if (e.code() == error_code_not_committed) {
+					// Seeing this trace is not necessarily a problem. There
+					// are legitimate scenarios where a ConfigNode could return
+					// not_committed in response to a rollforward request.
+					TraceEvent(SevInfo, "ConfigNodeRollforwardError").error(e);
 				} else {
 					throw e;
 				}
@@ -98,11 +113,13 @@ class GetCommittedVersionQuorum {
 		try {
 			// TODO: Timeout value should be a variable/field
 			ConfigFollowerGetCommittedVersionReply reply =
-			    wait(timeoutError(cfi.getCommittedVersion.getReply(ConfigFollowerGetCommittedVersionRequest{}), 3));
+			    wait(timeoutError(cfi.getCommittedVersion.getReply(ConfigFollowerGetCommittedVersionRequest{}),
+			                      getCommittedVersionTimeout));
 
 			++self->totalRepliesReceived;
+			self->largestCommitted = std::max(self->largestCommitted, reply.lastCommitted);
 			state CommittedVersions committedVersions = CommittedVersions{ self->lastSeenVersion, reply.lastCommitted };
-			if (self->replies.find(committedVersions.lastCommitted) == self->replies.end()) {
+			if (self->priorVersions.find(committedVersions.lastCommitted) == self->priorVersions.end()) {
 				self->priorVersions[committedVersions.lastCommitted] = self->lastSeenVersion;
 			}
 			auto& nodes = self->replies[committedVersions.lastCommitted];
@@ -113,6 +130,14 @@ class GetCommittedVersionQuorum {
 				if (self->quorumVersion.canBeSet()) {
 					self->quorumVersion.send(committedVersions);
 				}
+				// TODO: We need to wait for all the responses to come in
+				// before calling updateNode here. For example, imagine a
+				// scenario with ConfigNodes at versions 1, 1, 2. If responses
+				// were received from the two ConfigNodes at version 1 first,
+				// the quorum version would be set at 1 and updateNode would be
+				// called using version 1. However, in this scenario, these two
+				// ConfigNodes should actually be rolled forward to version 2.
+				wait(self->updateNode(self, committedVersions, self->quorumVersion.getFuture().get(), cfi));
 			} else if (self->maxAgreement >= self->cfis.size() / 2 + 1) {
 				// A quorum of ConfigNodes agree on the latest committed version,
 				// but the node we just got a reply from is not one of them. We may
@@ -141,8 +166,17 @@ class GetCommittedVersionQuorum {
 				wait(self->updateNode(self, committedVersions, quorumVersion, cfi));
 			}
 		} catch (Error& e) {
+			// Count a timeout as a reply.
+			++self->totalRepliesReceived;
 			if (e.code() != error_code_timed_out) {
 				throw;
+			} else if (self->totalRepliesReceived == self->cfis.size() && !self->quorumVersion.isSet()) {
+				// Make sure to trigger the quorumVersion if a timeout
+				// occurred, the quorum version hasn't been set, and there are
+				// no more incoming responses. Note that this means that it is
+				// impossible to reach a quorum, so send back the largest
+				// committed version seen.
+				self->quorumVersion.send(CommittedVersions{ self->lastSeenVersion, self->largestCommitted });
 			}
 		}
 		return Void();
@@ -228,7 +262,14 @@ class PaxosConfigConsumerImpl {
 		loop {
 			try {
 				state Version committedVersion = wait(getCommittedVersion(self));
-				ASSERT_GE(committedVersion, self->lastSeenVersion);
+				// Because the committed version returned can be a value not
+				// accepted by a quorum, it is possible to read a committed
+				// version less than the last seen committed version.
+				// Specifically, if a new consumer starts and reads a snapshot
+				// with ConfigNodes at versions 0, 1, 2, it will return a
+				// committed version of 2. Later, if the configuration of the
+				// ConfigNodes changes to 1, 1, 2, the committed version
+				// returned would be 1.
 				if (committedVersion > self->lastSeenVersion) {
 					// TODO: Load balance
 					ConfigFollowerGetChangesReply reply =
@@ -258,7 +299,6 @@ class PaxosConfigConsumerImpl {
 					throw e;
 				}
 			}
-
 			wait(self->getCommittedVersionQuorum.complete());
 			self->reset();
 		}
