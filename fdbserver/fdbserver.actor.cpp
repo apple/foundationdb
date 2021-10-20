@@ -527,7 +527,7 @@ Future<Void> startSystemMonitor(std::string dataFolder,
 	    SystemMonitorMachineState(dataFolder, dcId, zoneId, machineId, g_network->getLocalAddress().ip));
 
 	systemMonitor();
-	return recurring(&systemMonitor, 5.0, TaskPriority::FlushTrace);
+	return recurring(&systemMonitor, SERVER_KNOBS->SYSTEM_MONITOR_FREQUENCY, TaskPriority::FlushTrace);
 }
 
 void testIndexedSet();

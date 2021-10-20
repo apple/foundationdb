@@ -501,6 +501,8 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( MAX_REBOOT_TIME,                                       5.0 ); if( longReboots ) MAX_REBOOT_TIME = 20.0;
 	init( LOG_DIRECTORY,                                          ".");  // Will be set to the command line flag.
 	init( SERVER_MEM_LIMIT,                                8LL << 30 );
+	init( SYSTEM_MONITOR_FREQUENCY,                               5.0 ); if( randomize && BUGGIFY ) SYSTEM_MONITOR_FREQUENCY = 10.0;
+
 
 	//Ratekeeper
 	bool slowRatekeeper = randomize && BUGGIFY;
