@@ -73,13 +73,14 @@ class SampleSender : public std::enable_shared_from_this<SampleSender<Protocol, 
 	}
 
 	void send(boost::asio::ip::tcp::socket& socket, std::shared_ptr<Buf> const& buf) {
-		boost::asio::async_write(socket,
-		                         boost::asio::const_buffer(buf->data, buf->size),
-		                         [buf, this](auto const& ec, size_t) { this->sendCompletionHandler(ec); });
+		boost::system::error_code ec;
+		socket.send(boost::asio::const_buffer(buf->data, buf->size), 0, ec);
+		this->sendCompletionHandler(ec);
 	}
 	void send(boost::asio::ip::udp::socket& socket, std::shared_ptr<Buf> const& buf) {
-		socket.async_send(boost::asio::const_buffer(buf->data, buf->size),
-		                  [buf, this](auto const& ec, size_t) { this->sendCompletionHandler(ec); });
+		boost::system::error_code ec;
+		socket.send(boost::asio::const_buffer(buf->data, buf->size), 0, ec);
+		this->sendCompletionHandler(ec);
 	}
 
 	void sendNext() {

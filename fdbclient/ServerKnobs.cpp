@@ -454,6 +454,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SIM_SHUTDOWN_TIMEOUT,                                   10 );
 	init( SHUTDOWN_TIMEOUT,                                      600 ); if( randomize && BUGGIFY ) SHUTDOWN_TIMEOUT = 60.0;
 	init( MASTER_SPIN_DELAY,                                     1.0 ); if( randomize && BUGGIFY ) MASTER_SPIN_DELAY = 10.0;
+	init( CC_PRUNE_CLIENTS_INTERVAL,                            60.0 );
 	init( CC_CHANGE_DELAY,                                       0.1 );
 	init( CC_CLASS_DELAY,                                       0.01 );
 	init( WAIT_FOR_GOOD_RECRUITMENT_DELAY,                       1.0 );

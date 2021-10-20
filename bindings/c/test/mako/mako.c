@@ -1066,7 +1066,8 @@ void* worker_thread(void* thread_args) {
 	int worker_id = ((thread_args_t*)thread_args)->process->worker_id;
 	int thread_id = ((thread_args_t*)thread_args)->thread_id;
 	mako_args_t* args = ((thread_args_t*)thread_args)->process->args;
-	FDBDatabase* database = ((thread_args_t*)thread_args)->process->database;
+	size_t database_index = ((thread_args_t*)thread_args)->database_index;
+	FDBDatabase* database = ((thread_args_t*)thread_args)->process->databases[database_index];
 	fdb_error_t err;
 	int rc;
 	FDBTransaction* transaction;
@@ -1100,11 +1101,12 @@ void* worker_thread(void* thread_args) {
 	}
 
 	fprintf(debugme,
-	        "DEBUG: worker_id:%d (%d) thread_id:%d (%d) (tid:%lld)\n",
+	        "DEBUG: worker_id:%d (%d) thread_id:%d (%d) database_index:%d (tid:%lld)\n",
 	        worker_id,
 	        args->num_processes,
 	        thread_id,
 	        args->num_threads,
+	        database_index,
 	        (uint64_t)pthread_self());
 
 	if (args->tpsmax) {
@@ -1232,6 +1234,7 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 	fprintf(debugme, "DEBUG: worker %d started\n", worker_id);
 
 	/* Everything starts from here */
+
 	err = fdb_select_api_version(args->api_version);
 	if (err) {
 		fprintf(stderr, "ERROR: Failed at %s:%d (%s)\n", __FILE__, __LINE__, fdb_get_error(err));
@@ -1292,6 +1295,17 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 		}
 	}
 
+	if (args->client_threads_per_version > 0) {
+		err = fdb_network_set_option(
+		    FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, (uint8_t*)&args->client_threads_per_version, sizeof(uint32_t));
+		if (err) {
+			fprintf(stderr,
+			        "ERROR: fdb_network_set_option (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) (%d): %s\n",
+			        (uint8_t*)&args->client_threads_per_version,
+			        fdb_get_error(err));
+		}
+	}
+
 	/* Network thread must be setup before doing anything */
 	fprintf(debugme, "DEBUG: fdb_setup_network\n");
 	err = fdb_setup_network();
@@ -1329,11 +1343,16 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 	fdb_future_destroy(f);
 
 #else /* >= 610 */
-	fdb_create_database(args->cluster_file, &process.database);
-#endif
-	if (args->disable_ryw) {
-		fdb_database_set_option(process.database, FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, (uint8_t*)NULL, 0);
+	for (size_t i = 0; i < args->num_databases; i++) {
+		size_t cluster_index = args->num_fdb_clusters <= 1 ? 0 : i % args->num_fdb_clusters;
+		fdb_create_database(args->cluster_files[cluster_index], &process.databases[i]);
+		fprintf(debugme, "DEBUG: creating database at cluster %s\n", args->cluster_files[cluster_index]);
+		if (args->disable_ryw) {
+			fdb_database_set_option(process.databases[i], FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, (uint8_t*)NULL, 0);
+		}
 	}
+#endif
+
 	fprintf(debugme, "DEBUG: creating %d worker threads\n", args->num_threads);
 	worker_threads = (pthread_t*)calloc(sizeof(pthread_t), args->num_threads);
 	if (!worker_threads) {
@@ -1350,6 +1369,8 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 
 	for (i = 0; i < args->num_threads; i++) {
 		thread_args[i].thread_id = i;
+		thread_args[i].database_index = i % args->num_databases;
+
 		for (int op = 0; op < MAX_OP; op++) {
 			if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 				thread_args[i].block[op] = (lat_block_t*)malloc(sizeof(lat_block_t));
@@ -1389,7 +1410,10 @@ failExit:
 		free(thread_args);
 
 	/* clean up database and cluster */
-	fdb_database_destroy(process.database);
+	for (size_t i = 0; i < args->num_databases; i++) {
+		fdb_database_destroy(process.databases[i]);
+	}
+
 #if FDB_API_VERSION < 610
 	fdb_cluster_destroy(cluster);
 #endif
@@ -1415,6 +1439,8 @@ int init_args(mako_args_t* args) {
 	if (!args)
 		return -1;
 	memset(args, 0, sizeof(mako_args_t)); /* zero-out everything */
+	args->num_fdb_clusters = 0;
+	args->num_databases = 1;
 	args->api_version = fdb_get_max_api_version();
 	args->json = 0;
 	args->num_processes = 1;
@@ -1447,6 +1473,7 @@ int init_args(mako_args_t* args) {
 	for (i = 0; i < MAX_OP; i++) {
 		args->txnspec.ops[i][OP_COUNT] = 0;
 	}
+	args->client_threads_per_version = 0;
 	args->disable_ryw = 0;
 	args->json_output_path[0] = '\0';
 	return 0;
@@ -1581,6 +1608,7 @@ void usage() {
 	printf("%-24s %s\n", "-v, --verbose", "Specify verbosity");
 	printf("%-24s %s\n", "-a, --api_version=API_VERSION", "Specify API_VERSION to use");
 	printf("%-24s %s\n", "-c, --cluster=FILE", "Specify FDB cluster file");
+	printf("%-24s %s\n", "-d, --num_databases=NUM_DATABASES", "Specify number of databases");
 	printf("%-24s %s\n", "-p, --procs=PROCS", "Specify number of worker processes");
 	printf("%-24s %s\n", "-t, --threads=THREADS", "Specify number of worker threads");
 	printf("%-24s %s\n", "-r, --rows=ROWS", "Specify number of records");
@@ -1659,14 +1687,16 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "txntagging", required_argument, NULL, ARG_TXNTAGGING },
 			                                    { "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
 			                                    { "version", no_argument, NULL, ARG_VERSION },
+												{ "client_threads_per_version", required_argument, NULL, ARG_CLIENT_THREADS_PER_VERSION },
 			                                    { "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
 			                                    { "json_report", optional_argument, NULL, ARG_JSON_REPORT },
 			                                    { NULL, 0, NULL, 0 }
 		};
 		idx = 0;
 		c = getopt_long(argc, argv, short_options, long_options, &idx);
-		if (c < 0)
+		if (c < 0) {
 			break;
+		}
 		switch (c) {
 		case '?':
 		case 'h':
@@ -1675,8 +1705,17 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 		case 'a':
 			args->api_version = atoi(optarg);
 			break;
-		case 'c':
-			strcpy(args->cluster_file, optarg);
+		case 'c': {
+			const char delim[] = ",";
+			char* cluster_file = strtok(optarg, delim);
+			while (cluster_file != NULL) {
+				strcpy(args->cluster_files[args->num_fdb_clusters++], cluster_file);
+				cluster_file = strtok(NULL, delim);
+			}
+			break;
+		}
+		case 'd':
+			args->num_databases = atoi(optarg);
 			break;
 		case 'p':
 			args->num_processes = atoi(optarg);
@@ -1815,6 +1854,9 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			}
 			memcpy(args->txntagging_prefix, optarg, strlen(optarg));
 			break;
+		case ARG_CLIENT_THREADS_PER_VERSION:
+			args->client_threads_per_version = atoi(optarg);
+			break;
 		case ARG_DISABLE_RYW:
 			args->disable_ryw = 1;
 			break;
@@ -1904,6 +1946,28 @@ int validate_args(mako_args_t* args) {
 	}
 	if (args->value_length < 0) {
 		fprintf(stderr, "ERROR: --vallen must be a positive integer\n");
+		return -1;
+	}
+	if (args->num_fdb_clusters > NUM_CLUSTERS_MAX) {
+		fprintf(stderr, "ERROR: Mako is not supported to do work to more than %d clusters\n", NUM_CLUSTERS_MAX);
+		return -1;
+	}
+	if (args->num_databases > NUM_DATABASES_MAX) {
+		fprintf(stderr, "ERROR: Mako is not supported to do work to more than %d databases\n", NUM_DATABASES_MAX);
+		return -1;
+	}
+	if (args->num_databases < args->num_fdb_clusters) {
+		fprintf(stderr,
+		        "ERROR: --num_databases (%d) must be >= number of clusters(%d)\n",
+		        args->num_databases,
+		        args->num_fdb_clusters);
+		return -1;
+	}
+	if (args->num_threads < args->num_databases) {
+		fprintf(stderr,
+		        "ERROR: --threads (%d) must be >= number of databases (%d)\n",
+		        args->num_threads,
+		        args->num_databases);
 		return -1;
 	}
 	if (args->key_length < 4 /* "mako" */ + digits(args->rows)) {
