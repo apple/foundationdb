@@ -2525,7 +2525,7 @@ int stats_process_main(mako_args_t* args,
 		fprintf(fp, "\"value_length\": %d,", args->value_length);
 		fprintf(fp, "\"commit_get\": %d,", args->commit_get);
 		fprintf(fp, "\"verbose\": %d,", args->verbose);
-		fprintf(fp, "\"cluster_file\": \"%s\",", args->cluster_file);
+		fprintf(fp, "\"cluster_file\": \"%s\",", args->cluster_files);
 		fprintf(fp, "\"log_group\": \"%s\",", args->log_group);
 		fprintf(fp, "\"prefixpadding\": %d,", args->prefixpadding);
 		fprintf(fp, "\"trace\": %d,", args->trace);
