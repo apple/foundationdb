@@ -2337,9 +2337,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		wait(delay(0, g_network->getCurrentTask()));
 		// make team builder don't build team during the interval between excluding the wiggled process and recruited a
 		// new SS to avoid redundant teams
-		while (self->waitUntilRecruited.get()) {
+		while (self->pauseWiggle && !self->pauseWiggle->get() && self->waitUntilRecruited.get()) {
 			choose {
-				when(wait(self->waitUntilRecruited.onChange())) {}
+				when(wait(self->waitUntilRecruited.onChange() || self->pauseWiggle->onChange())) {}
 				when(wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY, g_network->getCurrentTask()))) { break; }
 			}
 		}
@@ -4025,7 +4025,7 @@ ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
 					// there must not have other teams to place wiggled data
 					takeRest = teamCollection->server_info.size() <= teamCollection->configuration.storageTeamSize ||
 					           teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize;
-					teamCollection->doBuildTeams = true;
+					teamCollection->restartRecruiting.trigger();
 					if (takeRest &&
 					    teamCollection->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
 						TraceEvent(SevWarn, "PerpetualWiggleSleep", teamCollection->distributorId)
