@@ -1772,7 +1772,10 @@ ACTOR Future<ChangeFeedStreamReply> getChangeFeedMutations(StorageServer* data,
 			}
 			reply.mutations.append(reply.arena, it, totalCount);
 		}
+	} else {
+		reply = memoryReply;
 	}
+
 	Version finalVersion = std::min(req.end - 1, dequeVersion);
 	if ((reply.mutations.empty() || reply.mutations.back().version < finalVersion) && remainingLimitBytes > 0 &&
 	    remainingDurableBytes > 0) {
