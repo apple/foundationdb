@@ -184,8 +184,6 @@ private:
 	ActorCollection
 	    reponses; // cannot call getResult on this actor collection, since the actors will be on different processes
 
-	Future<Void> shutdown;
-
 	AsyncFileNonDurable(const std::string& filename,
 	                    const std::string& initialFilename,
 	                    Reference<IAsyncFile> file,
@@ -205,21 +203,6 @@ private:
 
 		killMode = (KillMode)deterministicRandom()->randomInt(1, 3);
 		//TraceEvent("AsyncFileNonDurable_CreateEnd", id).detail("Filename", filename).backtrace();
-
-		shutdown = doShutdown(this);
-	}
-
-	ACTOR Future<Void> doShutdown(AsyncFileNonDurable* self) {
-		wait(success(g_simulator.getCurrentProcess()->shutdownSignal.getFuture()));
-		TraceEvent("ZZZZShutDown").detail("Name", g_simulator.getCurrentProcess()->name).detail("File", self->filename);
-		for (auto itr = self->pendingModifications.ranges().begin(); itr != self->pendingModifications.ranges().end();
-		     ++itr) {
-			if (itr->value().isValid() && !itr->value().isReady()) {
-				TraceEvent("ZZZZCancel").detail("Range", itr->begin()).detail("File", self->filename);
-				itr->value().cancel();
-			}
-		}
-		return Void();
 	}
 
 public:
@@ -468,6 +451,16 @@ private:
 		}
 	}
 
+
+	ACTOR Future<Void> doShutdown(AsyncFileNonDurable* self, ISimulator::ProcessInfo* currentProcess, Future<Void> opFuture, std::string op, int kk) {
+		wait(success(currentProcess->shutdownSignal.getFuture()));
+		TraceEvent("ZZZZShutDown").detail("Name", currentProcess->name).detail("File", self->filename).detail("Op", op).detail("OffsetOrSize", kk);
+		if (opFuture.isValid() && !opFuture.isReady()) {
+			opFuture.cancel();
+		}
+		return Void();
+	}
+
 	// Delays writes a random amount of time before passing them through to the underlying file.
 	// If a kill interrupts the delay, then the output could be the correct write, part of the write,
 	// or none of the write.  It may also corrupt parts of sectors which have not been written correctly
@@ -480,6 +473,9 @@ private:
 		state Standalone<StringRef> dataCopy(StringRef((uint8_t*)data, length));
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
+
+		state Future<Void> shutdown;
+
 		wait(g_simulator.onMachine(currentProcess));
 
 		state double delayDuration =
@@ -496,6 +492,7 @@ private:
 			TraceEvent("ZZZZZDoWrite2").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Offset", offset).detail("Length", length).detail("File", self->filename);
 
 			Future<Void> writeEnded = wait(ownFuture);
+			shutdown = self->doShutdown(self, currentProcess, writeEnded, "Write", offset);
 			std::vector<Future<Void>> priorModifications =
 			    self->getModificationsAndInsert(offset, length, true, writeEnded);
 			self->minSizeAfterPendingModifications = std::max(self->minSizeAfterPendingModifications, offset + length);
@@ -676,6 +673,7 @@ private:
 		TraceEvent("ZZZZZDoTruncate1").detail("Name", currentProcess->name).detail("Shutdown", currentProcess->shutdownSignal.getFuture().isReady()).detail("Size", size).detail("File", self->filename);
 
 		state Future<Void> ended;
+		state Future<Void> shutdown;
 
 		try {
 			//TraceEvent("AsyncFileNonDurable_Truncate", self->id).detail("Delay", delayDuration).detail("Filename", self->filename);
@@ -685,6 +683,8 @@ private:
 
 			state Future<Void> truncateEnded = wait(ownFuture);
 			ended = truncateEnded;
+
+			shutdown = self->doShutdown(self, currentProcess, truncateEnded, "Truncate", size);
 
 			// Need to know the size of the file directly before this truncate
 			// takes effect to see what range it modifies.
