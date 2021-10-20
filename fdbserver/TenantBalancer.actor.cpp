@@ -867,13 +867,18 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 void filterActiveMove(const std::vector<TenantMovementInfo>& originStatus,
                       std::vector<TenantMovementInfo>& targetStatus,
                       Optional<std::string> prefixFilter,
-                      Optional<std::string> peerDatabaseConnectionStringFilter) {
+                      Optional<std::string> peerDatabaseConnectionStringFilter,
+                      Optional<MovementLocation> locationFilter) {
+	bool isSource = locationFilter.orDefault(MovementLocation::SOURCE) == MovementLocation::SOURCE;
 	for (const auto& status : originStatus) {
-		if (prefixFilter.present() && prefixFilter != status.sourcePrefix.toString()) {
+		const auto& targetPrefix = isSource ? status.sourcePrefix : status.destPrefix;
+		if (prefixFilter.present() && prefixFilter != targetPrefix.toString()) {
 			continue;
 		}
+		const auto& targetDatabaseConnectionString =
+		    isSource ? status.destinationConnectionString : status.sourceConnectionString;
 		if (peerDatabaseConnectionStringFilter.present() &&
-		    peerDatabaseConnectionStringFilter != status.destinationConnectionString) {
+		    targetDatabaseConnectionString != status.destinationConnectionString) {
 			continue;
 		}
 		targetStatus.push_back(status);
@@ -895,7 +900,7 @@ ACTOR Future<std::vector<TenantMovementInfo>> getFilteredMovements(
 		recorder.insert(recorder.end(), statusAsDest.begin(), statusAsDest.end());
 	}
 	std::vector<TenantMovementInfo> resultAfterFilter;
-	filterActiveMove(recorder, resultAfterFilter, prefixFilter, peerDatabaseConnectionStringFilter);
+	filterActiveMove(recorder, resultAfterFilter, prefixFilter, peerDatabaseConnectionStringFilter, locationFilter);
 	return recorder;
 }
 
@@ -939,24 +944,24 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 		if (filteredMovements.size() != 1) {
 			throw movement_not_found();
 		}
-		TenantMovementInfo targetMovementInfo = filteredMovements[0];
+		state TenantMovementInfo targetMovementInfo = filteredMovements[0];
 
 		// Check that the DR is ready to switch
 		if (targetMovementInfo.databaseBackupStatus == "has errored") {
 			record.movementState = MovementState::ERROR;
 			wait(self->saveOutgoingMovement(record));
 			TraceEvent(SevWarn, "TenantBalancerBackupError").detail("Tenant", req.sourceTenant);
-			return Void();
+			throw movement_not_ready_finish();
 		}
-		if (targetMovementInfo.databaseBackupStatus == "is differential") {
+		if (targetMovementInfo.databaseBackupStatus != "is differential") {
 			TraceEvent(SevWarn, "TenantBalancerBackupReplicaUncompleted").detail("Tenant", req.sourceTenant);
-			return Void();
+			throw movement_not_ready_finish();
 		}
 		if (targetMovementInfo.mutationLag > req.maxLagSeconds) {
 			TraceEvent(SevWarn, "TenantBalancerLagSecondsCheckFailed")
 			    .detail("MaxLagSeconds", req.maxLagSeconds)
 			    .detail("CurrentLagSeconds", targetMovementInfo.mutationLag);
-			return Void();
+			throw movement_not_ready_finish();
 		}
 		TraceEvent(SevDebug, "TenantBalancerFinishReady")
 		    .detail("Tenant", req.sourceTenant)
@@ -972,20 +977,16 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 			ASSERT(false);
 		}
 		state Version version = wait(lockSourceTenant(self, req.sourceTenant));
-		// TODO: get a locked tenant and lock the tenant
+		// TODO: get a locked tenant
 		state std::string lockedTenant = "";
 		record.switchVersion = version;
 		// Update movement record
 		record.movementState = MovementState::SWITCHING;
 		wait(self->saveOutgoingMovement(record));
 
-		// TODO should we use read version or commit version?
-		state Version commitVersion = wait(
-		    self->agent.getCommitVersion(destDatabase.get(), Key(record.getTagName()), ForceAction{ true }, false));
 		state FinishDestinationMovementReply destinationReply = wait(sendTenantBalancerRequest(
 		    record.getPeerDatabase(),
-		    FinishDestinationMovementRequest(
-		        record.getMovementId(), record.getDestinationPrefix().toString(), commitVersion),
+		    FinishDestinationMovementRequest(record.getMovementId(), record.getDestinationPrefix().toString(), version),
 		    &TenantBalancerInterface::finishDestinationMovement));
 
 		record.movementState = MovementState::COMPLETED;
@@ -1017,7 +1018,7 @@ ACTOR Future<Void> finishDestinationMovement(TenantBalancer* self, FinishDestina
 		wait(self->saveIncomingMovement(record));
 
 		DatabaseBackupAgent sourceBackupAgent(record.getPeerDatabase());
-		wait(self->agent.flushBackup(&sourceBackupAgent, self->db, Key(record.getTagName()), req.version));
+		wait(sourceBackupAgent.flushBackup(self->db, Key(record.getTagName()), req.version));
 		// TODO: unlock DR prefix
 
 		record.movementState = MovementState::COMPLETED;

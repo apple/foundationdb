@@ -2206,11 +2206,11 @@ ACTOR Future<Void> submitDBMove(Database src, Database dest, Key srcPrefix, Key 
 
 ACTOR Future<std::vector<TenantMovementInfo>> getActiveMovements(
     Database database,
-    Optional<std::string> sourcePrefixFilter,
-    Optional<std::string> destinationConnectionStringFilter,
+    Optional<std::string> prefixFilter,
+    Optional<std::string> peerDatabaseConnectionStringFilter,
     Optional<MovementLocation> locationFilter) {
 	state GetActiveMovementsRequest getActiveMovementsRequest(
-	    sourcePrefixFilter, destinationConnectionStringFilter, locationFilter);
+	    prefixFilter, peerDatabaseConnectionStringFilter, locationFilter);
 	state Future<ErrorOr<GetActiveMovementsReply>> getActiveMovementsReply = Never();
 	state Future<Void> initialize = Void();
 	loop choose {
@@ -2293,8 +2293,10 @@ ACTOR Future<Void> listDBMove(Database db, bool isSrc) {
 // list movement from src to dest
 ACTOR Future<Void> listDBMove(Database src, Database dest) {
 	std::string targetConnectionString = dest->getConnectionRecord()->getConnectionString().toString();
-	wait(fetchAndDisplayDBMove(
-	    src, Optional<std::string>(), Optional<std::string>(targetConnectionString), Optional<MovementLocation>()));
+	wait(fetchAndDisplayDBMove(src,
+	                           Optional<std::string>(),
+	                           Optional<std::string>(targetConnectionString),
+	                           Optional<MovementLocation>(MovementLocation::SOURCE)));
 	return Void();
 }
 

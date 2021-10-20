@@ -287,7 +287,6 @@ struct GetActiveMovementsRequest {
 	Arena arena;
 
 	// Filter criteria
-	// TODO switch to other flixible ways
 	Optional<std::string> prefixFilter;
 	Optional<std::string> peerDatabaseConnectionStringFilter;
 	Optional<MovementLocation> locationFilter;

@@ -242,6 +242,7 @@ ERROR( movement_in_progress, 2391, "The specified range is already being moved")
 ERROR( movement_dest_prefix_not_empty, 2392, "The prefix in destination database is not empty")
 ERROR( movement_agent_not_running, 2393, "No agent is running to complete the data movement")
 ERROR( movement_id_mismatch, 2394, "Another movement is running with this prefix")
+ERROR( movement_not_ready_finish, 2395, "The movement is not ready to finish")
 
 ERROR( key_not_found, 2400, "Expected key is missing")
 ERROR( json_malformed, 2401, "JSON string was malformed")

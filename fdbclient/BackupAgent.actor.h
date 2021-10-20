@@ -517,9 +517,7 @@ public:
 		    db, [=](Reference<ReadYourWritesTransaction> tr) { return clearPrefix(tr, db, removePrefix); });
 	}
 
-	Future<Version> getCommitVersion(Database dest, Key tagName, ForceAction forceAction, bool doLockDabatabse);
-
-	Future<Void> flushBackup(DatabaseBackupAgent* sourceBackupAgent, Database dest, Key tagName, Version commitVersion);
+	Future<Void> flushBackup(Database dest, Key tagName, Version commitVersion);
 
 	Future<Void> atomicSwitchover(Database dest,
 	                              Key tagName,
