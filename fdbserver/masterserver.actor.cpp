@@ -250,8 +250,6 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	// up-to-date in the presence of key range splits/merges.
 	VersionVector ssVersionVector;
 
-	// The previous commit versions per tlog
-	std::vector<Version> tpcvVector;
 	CounterCollection cc;
 	Counter changeCoordinatorsRequests;
 	Counter getCommitVersionRequests;
@@ -1189,9 +1187,6 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 			self->lastVersionTime = now();
 			self->version = self->recoveryTransactionVersion;
 			rep.prevVersion = self->lastEpochEnd;
-			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				std::fill(self->tpcvVector.begin(), self->tpcvVector.end(), self->lastEpochEnd);
-			}
 
 		} else {
 			double t1 = now();
@@ -1227,13 +1222,6 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		                               proxyItr->second.replies.upper_bound(req.mostRecentProcessedRequestNum));
 		proxyItr->second.replies[req.requestNum] = rep;
 		ASSERT(rep.prevVersion >= 0);
-
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			for (uint16_t tLog : req.writtenTLogs) {
-				rep.tpcvMap[tLog] = self->tpcvVector[tLog];
-				self->tpcvVector[tLog] = rep.version;
-			}
-		}
 
 		req.reply.send(rep);
 
@@ -1282,24 +1270,6 @@ ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVer
 	return Void();
 }
 
-ACTOR Future<Void> waitForTLogPrev(Reference<MasterData> self, GetTLogPrevCommitVersionRequest req) {
-	// TraceEvent("WaitForTLogPrev").detail("Prev",req.prev).detail("CommitVersion",req.commitVersion).detail("PrevTLogVersion",self->prevTLogVersion.get());
-	if (self->prevTLogVersion.get() != invalidVersion) {
-		wait(self->prevTLogVersion.whenAtLeast(req.prev));
-	} else {
-		std::fill(self->tpcvVector.begin(), self->tpcvVector.end(), self->lastEpochEnd);
-	}
-
-	GetTLogPrevCommitVersionReply reply;
-	for (uint16_t tLog : req.writtenTLogs) {
-		reply.tpcvMap[tLog] = self->tpcvVector[tLog];
-		self->tpcvVector[tLog] = req.commitVersion;
-	}
-	self->prevTLogVersion.set(req.commitVersion);
-	req.reply.send(reply);
-	return Void();
-}
-
 ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 	loop {
 		choose {
@@ -1332,10 +1302,6 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 					updateLiveCommittedVersion(self, req);
 					req.reply.send(Void());
 				}
-			}
-			when(GetTLogPrevCommitVersionRequest req =
-			         waitNext(self->myInterface.getTLogPrevCommitVersion.getFuture())) {
-				self->addActor.send(waitForTLogPrev(self, req));
 			}
 		}
 	}
@@ -1974,10 +1940,6 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial
 	                                                     // window of the resolver(s)
 
-	// resize the TPCV vector to the number of tlogs and initialize to first transaction
-	int numLogs = self->dbInfo->get().logSystemConfig.numLogs();
-	self->tpcvVector.resize(1 + numLogs, 0);
-
 	TraceEvent("MasterRecoveryCommit", self->dbgid).log();
 	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send(self->logSystem->onError());
@@ -2117,9 +2079,6 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 						wait(delay(5));
 					throw worker_removed();
 				}
-				// resize the TPCV vector to the number of tlogs and initialize to first transaction
-				int numLogs = self->dbInfo->get().logSystemConfig.numLogs();
-				self->tpcvVector.resize(1 + numLogs, 0);
 			}
 			when(BackupWorkerDoneRequest req = waitNext(mi.notifyBackupWorkerDone.getFuture())) {
 				if (self->logSystem.isValid() && self->logSystem->removeBackupWorker(req)) {

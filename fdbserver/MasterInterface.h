@@ -44,7 +44,6 @@ struct MasterInterface {
 	RequestStream<struct GetRawCommittedVersionRequest> getLiveCommittedVersion;
 	// Report a proxy's committed version.
 	RequestStream<struct ReportRawCommittedVersionRequest> reportLiveCommittedVersion;
-	RequestStream<struct GetTLogPrevCommitVersionRequest> getTLogPrevCommitVersion;
 
 	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
 	NetworkAddressList addresses() const { return changeCoordinators.getEndpoint().addresses; }
@@ -68,8 +67,6 @@ struct MasterInterface {
 			    RequestStream<struct GetRawCommittedVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(5));
 			reportLiveCommittedVersion = RequestStream<struct ReportRawCommittedVersionRequest>(
 			    waitFailure.getEndpoint().getAdjustedEndpoint(6));
-			getTLogPrevCommitVersion =
-			    RequestStream<struct GetTLogPrevCommitVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(7));
 		}
 	}
 
@@ -82,7 +79,6 @@ struct MasterInterface {
 		streams.push_back(notifyBackupWorkerDone.getReceiver());
 		streams.push_back(getLiveCommittedVersion.getReceiver(TaskPriority::GetLiveCommittedVersion));
 		streams.push_back(reportLiveCommittedVersion.getReceiver(TaskPriority::ReportLiveCommittedVersion));
-		streams.push_back(getTLogPrevCommitVersion.getReceiver(TaskPriority::GetTLogPrevCommitVersion));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -156,7 +152,6 @@ struct GetCommitVersionReply {
 	Version version;
 	Version prevVersion;
 	uint64_t requestNum;
-	std::unordered_map<uint16_t, Version> tpcvMap;
 
 	GetCommitVersionReply() : resolverChangesVersion(0), version(0), prevVersion(0), requestNum(0) {}
 	explicit GetCommitVersionReply(Version version, Version prevVersion, uint64_t requestNum)
@@ -164,7 +159,7 @@ struct GetCommitVersionReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, resolverChanges, resolverChangesVersion, version, prevVersion, requestNum, tpcvMap);
+		serializer(ar, resolverChanges, resolverChangesVersion, version, prevVersion, requestNum);
 	}
 };
 
@@ -174,46 +169,28 @@ struct GetCommitVersionRequest {
 	uint64_t requestNum;
 	uint64_t mostRecentProcessedRequestNum;
 	UID requestingProxy;
-	std::set<uint16_t> writtenTLogs;
 	ReplyPromise<GetCommitVersionReply> reply;
 
 	GetCommitVersionRequest() {}
 	GetCommitVersionRequest(SpanID spanContext,
 	                        uint64_t requestNum,
 	                        uint64_t mostRecentProcessedRequestNum,
-	                        UID requestingProxy,
-	                        std::set<uint16_t>& writtenTLogs)
+	                        UID requestingProxy)
 	  : spanContext(spanContext), requestNum(requestNum), mostRecentProcessedRequestNum(mostRecentProcessedRequestNum),
-	    requestingProxy(requestingProxy), writtenTLogs(writtenTLogs) {}
+	    requestingProxy(requestingProxy) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, writtenTLogs, reply, spanContext);
+		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, reply, spanContext);
 	}
 };
 
 struct GetTLogPrevCommitVersionReply {
 	constexpr static FileIdentifier file_identifier = 16683183;
-	std::unordered_map<uint16_t, Version> tpcvMap;
 	GetTLogPrevCommitVersionReply() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tpcvMap);
-	}
-};
-
-struct GetTLogPrevCommitVersionRequest {
-	constexpr static FileIdentifier file_identifier = 16683184;
-	std::set<uint16_t> writtenTLogs;
-	Version commitVersion;
-	Version prev;
-	ReplyPromise<GetTLogPrevCommitVersionReply> reply;
-	GetTLogPrevCommitVersionRequest() {}
-	GetTLogPrevCommitVersionRequest(std::set<uint16_t>& writtenTLogs, Version commitVersion, Version prev)
-	  : writtenTLogs(writtenTLogs), commitVersion(commitVersion), prev(prev) {}
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, writtenTLogs, commitVersion, prev, reply);
+		serializer(ar);
 	}
 };
 

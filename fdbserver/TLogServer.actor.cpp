@@ -2148,9 +2148,7 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 	}
 
 	logData->minKnownCommittedVersion = std::max(logData->minKnownCommittedVersion, req.minKnownCommittedVersion);
-
 	wait(logData->version.whenAtLeast(req.prevVersion));
-
 	// Calling check_yield instead of yield to avoid a destruction ordering problem in simulation
 	if (g_network->check_yield(g_network->getCurrentTask())) {
 		wait(delay(0, g_network->getCurrentTask()));
@@ -2198,7 +2196,6 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		if (self->diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES) {
 			self->largeDiskQueueCommitBytes.set(true);
 		}
-
 		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 		logData->version.set(req.version);
 
