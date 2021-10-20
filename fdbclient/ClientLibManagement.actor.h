@@ -33,27 +33,27 @@
 
 namespace ClientLibManagement {
 
-enum ClientLibStatus {
-	CLIENTLIB_DISABLED = 0,
-	CLIENTLIB_AVAILABLE, // 1
-	CLIENTLIB_UPLOADING, // 2
-	CLIENTLIB_DELETING, // 3
-	CLIENTLIB_STATUS_COUNT // must be the last one
+enum class ClientLibStatus {
+	DISABLED = 0,
+	AVAILABLE, // 1
+	UPLOADING, // 2
+	DELETING, // 3
+	COUNT // must be the last one
 };
 
-enum ClientLibPlatform {
-	CLIENTLIB_UNKNOWN_PLATFORM = 0,
-	CLIENTLIB_X86_64_LINUX,
-	CLIENTLIB_X86_64_WINDOWS,
-	CLIENTLIB_X86_64_MACOS,
-	CLIENTLIB_PLATFORM_COUNT // must be the last one
+enum class ClientLibPlatform {
+	UNKNOWN = 0,
+	X86_64_LINUX,
+	X86_64_WINDOWS,
+	X86_64_MACOS,
+	COUNT // must be the last one
 };
 
 // Currently we support only one,
 // but we may want to change it in the future
-enum ClientLibChecksumAlg {
-	CLIENTLIB_CHECKSUM_ALG_MD5 = 0,
-	CLIENTLIB_CHECKSUM_ALG_COUNT // must be the last one
+enum class ClientLibChecksumAlg {
+	MD5 = 0,
+	COUNT // must be the last one
 };
 
 inline const std::string CLIENTLIB_ATTR_PLATFORM{ "platform" };
@@ -75,7 +75,7 @@ struct ClientLibFilter {
 	bool matchPlatform = false;
 	bool matchCompatibleAPI = false;
 	bool matchNewerPackageVersion = false;
-	ClientLibPlatform platformVal = CLIENTLIB_UNKNOWN_PLATFORM;
+	ClientLibPlatform platformVal = ClientLibPlatform::UNKNOWN;
 	int apiVersion = 0;
 	int numericPkgVersion = 0;
 
@@ -110,28 +110,29 @@ const std::string& getChecksumAlgName(ClientLibChecksumAlg checksumAlg);
 ClientLibChecksumAlg getChecksumAlgByName(std::string_view checksumAlgName);
 
 // encodes MD5 result to a hexadecimal string to be provided in the checksum attribute
-Standalone<StringRef> MD5SumToHexString(MD5_CTX& sum);
+Standalone<StringRef> md5SumToHexString(MD5_CTX& sum);
 
 // Upload a client library binary from a file and associated metadata JSON
 // to the system keyspace of the database
-ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, StringRef libFilePath);
+ACTOR Future<Void> uploadClientLibrary(Database db,
+                                       Standalone<StringRef> metadataString,
+                                       Standalone<StringRef> libFilePath);
 
 // Determine clientLibId from the relevant attributes of the metadata JSON
-void getClientLibIdFromMetadataJson(StringRef metadataString, std::string& clientLibId);
+Standalone<StringRef> getClientLibIdFromMetadataJson(StringRef metadataString);
 
 // Download a client library binary from the system keyspace of the database
 // and save it at the given file path
-ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, StringRef libFilePath);
+ACTOR Future<Void> downloadClientLibrary(Database db,
+                                         Standalone<StringRef> clientLibId,
+                                         Standalone<StringRef> libFilePath);
 
 // Delete the client library binary from to the system keyspace of the database
-ACTOR Future<Void> deleteClientLibrary(Database db, StringRef clientLibId);
+ACTOR Future<Void> deleteClientLibrary(Database db, Standalone<StringRef> clientLibId);
 
 // List client libraries available on the cluster, with the specified filter
 // Returns metadata JSON of each library
 ACTOR Future<Standalone<VectorRef<StringRef>>> listClientLibraries(Database db, ClientLibFilter filter);
-
-// List available client libraries that are compatible with the current client
-Future<Standalone<VectorRef<StringRef>>> listAvailableCompatibleClientLibraries(Database db, int apiVersion);
 
 } // namespace ClientLibManagement
 

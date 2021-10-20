@@ -43,16 +43,20 @@ struct ClientLibBinaryInfo {
 	Standalone<StringRef> sumBytes;
 };
 
+#define ASSERT_INDEX_IN_RANGE(idx, arr) ASSERT(idx >= 0 && idx < sizeof(arr) / sizeof(arr[0]))
+
 const std::string& getStatusName(ClientLibStatus status) {
 	static const std::string statusNames[] = { "disabled", "available", "uploading", "deleting" };
-	return statusNames[status];
+	int idx = static_cast<int>(status);
+	ASSERT_INDEX_IN_RANGE(idx, statusNames);
+	return statusNames[idx];
 }
 
 ClientLibStatus getStatusByName(std::string_view statusName) {
 	static std::map<std::string_view, ClientLibStatus> statusByName;
 	// initialize the map on demand
 	if (statusByName.empty()) {
-		for (int i = 0; i < CLIENTLIB_STATUS_COUNT; i++) {
+		for (int i = 0; i < static_cast<int>(ClientLibStatus::COUNT); i++) {
 			ClientLibStatus status = static_cast<ClientLibStatus>(i);
 			statusByName[getStatusName(status)] = status;
 		}
@@ -68,14 +72,16 @@ ClientLibStatus getStatusByName(std::string_view statusName) {
 
 const std::string& getPlatformName(ClientLibPlatform platform) {
 	static const std::string platformNames[] = { "unknown", "x84_64-linux", "x86_64-windows", "x86_64-macos" };
-	return platformNames[platform];
+	int idx = static_cast<int>(platform);
+	ASSERT_INDEX_IN_RANGE(idx, platformNames);
+	return platformNames[idx];
 }
 
 ClientLibPlatform getPlatformByName(std::string_view platformName) {
 	static std::map<std::string_view, ClientLibPlatform> platformByName;
 	// initialize the map on demand
 	if (platformByName.empty()) {
-		for (int i = 0; i < CLIENTLIB_PLATFORM_COUNT; i++) {
+		for (int i = 0; i < static_cast<int>(ClientLibStatus::COUNT); i++) {
 			ClientLibPlatform platform = static_cast<ClientLibPlatform>(i);
 			platformByName[getPlatformName(platform)] = platform;
 		}
@@ -91,14 +97,16 @@ ClientLibPlatform getPlatformByName(std::string_view platformName) {
 
 const std::string& getChecksumAlgName(ClientLibChecksumAlg checksumAlg) {
 	static const std::string checksumAlgNames[] = { "md5" };
-	return checksumAlgNames[checksumAlg];
+	int idx = static_cast<int>(checksumAlg);
+	ASSERT_INDEX_IN_RANGE(idx, checksumAlgNames);
+	return checksumAlgNames[idx];
 }
 
 ClientLibChecksumAlg getChecksumAlgByName(std::string_view checksumAlgName) {
 	static std::map<std::string_view, ClientLibChecksumAlg> checksumAlgByName;
 	// initialize the map on demand
 	if (checksumAlgByName.empty()) {
-		for (int i = 0; i < CLIENTLIB_CHECKSUM_ALG_COUNT; i++) {
+		for (int i = 0; i < (int)ClientLibChecksumAlg::COUNT; i++) {
 			ClientLibChecksumAlg checksumAlg = static_cast<ClientLibChecksumAlg>(i);
 			checksumAlgByName[getChecksumAlgName(checksumAlg)] = checksumAlg;
 		}
@@ -115,7 +123,7 @@ ClientLibChecksumAlg getChecksumAlgByName(std::string_view checksumAlgName) {
 namespace {
 
 bool isValidTargetStatus(ClientLibStatus status) {
-	return status == CLIENTLIB_AVAILABLE || status == CLIENTLIB_DISABLED;
+	return status == ClientLibStatus::AVAILABLE || status == ClientLibStatus::DISABLED;
 }
 
 void parseMetadataJson(StringRef metadataString, json_spirit::mObject& metadataJson) {
@@ -157,8 +165,10 @@ bool validVersionPartNum(int num) {
 
 int getNumericVersionEncoding(const std::string& versionStr) {
 	int major, minor, patch;
-	int numScanned = sscanf(versionStr.c_str(), "%d.%d.%d", &major, &minor, &patch);
-	if (numScanned != 3 || !validVersionPartNum(major) || !validVersionPartNum(minor) || !validVersionPartNum(patch)) {
+	int charsScanned;
+	int numScanned = sscanf(versionStr.c_str(), "%d.%d.%d%n", &major, &minor, &patch, &charsScanned);
+	if (numScanned != 3 || !validVersionPartNum(major) || !validVersionPartNum(minor) || !validVersionPartNum(patch) ||
+	    charsScanned != versionStr.size()) {
 		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
 		    .detail("Error", format("Invalid version string %s", versionStr.c_str()));
 		throw client_lib_invalid_metadata();
@@ -166,22 +176,22 @@ int getNumericVersionEncoding(const std::string& versionStr) {
 	return ((major * 1000) + minor) * 1000 + patch;
 }
 
-void getIdFromMetadataJson(const json_spirit::mObject& metadataJson, std::string& clientLibId) {
+Standalone<StringRef> getIdFromMetadataJson(const json_spirit::mObject& metadataJson) {
 	std::ostringstream libIdBuilder;
 	libIdBuilder << getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_PLATFORM) << "/";
 	libIdBuilder << format("%09d", getNumericVersionEncoding(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_VERSION)))
 	             << "/";
 	libIdBuilder << getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_TYPE) << "/";
 	libIdBuilder << getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_CHECKSUM);
-	clientLibId = libIdBuilder.str();
+	return Standalone<StringRef>(libIdBuilder.str());
 }
 
-Key metadataKeyFromId(const std::string& clientLibId) {
-	return StringRef(clientLibId).withPrefix(clientLibMetadataPrefix);
+Key metadataKeyFromId(StringRef clientLibId) {
+	return clientLibId.withPrefix(clientLibMetadataPrefix);
 }
 
-Key chunkKeyPrefixFromId(const std::string& clientLibId) {
-	return StringRef(clientLibId).withPrefix(clientLibBinaryPrefix).withSuffix(LiteralStringRef("/"));
+Key chunkKeyPrefixFromId(StringRef clientLibId) {
+	return clientLibId.withPrefix(clientLibBinaryPrefix).withSuffix(LiteralStringRef("/"));
 }
 
 KeyRef chunkKeyFromNo(StringRef clientLibBinPrefix, size_t chunkNo, Arena& arena) {
@@ -191,16 +201,16 @@ KeyRef chunkKeyFromNo(StringRef clientLibBinPrefix, size_t chunkNo, Arena& arena
 ClientLibPlatform getCurrentClientPlatform() {
 #ifdef __x86_64__
 #if defined(_WIN32)
-	return CLIENTLIB_X86_64_WINDOWS;
+	return ClientLibPlatform::X86_64_WINDOWS;
 #elif defined(__linux__)
-	return CLIENTLIB_X86_64_LINUX;
+	return ClientLibPlatform::X86_64_LINUX;
 #elif defined(__FreeBSD__) || defined(__APPLE__)
-	return CLIENTLIB_X86_64_MACOS;
+	return ClientLibPlatform::X86_64_MACOS;
 #else
-	return CLIENTLIB_UNKNOWN_PLATFORM;
+	return ClientLibPlatform::UNKNOWN;
 #endif
 #else // not __x86_64__
-	return CLIENTLIB_UNKNOWN_PLATFORM;
+	return ClientLibPlatform::UNKNOWN;
 #endif
 }
 
@@ -217,7 +227,7 @@ Standalone<StringRef> byteArrayToHexString(StringRef input) {
 
 } // namespace
 
-Standalone<StringRef> MD5SumToHexString(MD5_CTX& sum) {
+Standalone<StringRef> md5SumToHexString(MD5_CTX& sum) {
 	Standalone<StringRef> sumBytes = makeString(16);
 	::MD5_Final(mutateString(sumBytes), &sum);
 	return byteArrayToHexString(sumBytes);
@@ -229,10 +239,10 @@ ClientLibFilter& ClientLibFilter::filterNewerPackageVersion(const std::string& v
 	return *this;
 }
 
-void getClientLibIdFromMetadataJson(StringRef metadataString, std::string& clientLibId) {
+Standalone<StringRef> getClientLibIdFromMetadataJson(StringRef metadataString) {
 	json_spirit::mObject parsedMetadata;
 	parseMetadataJson(metadataString, parsedMetadata);
-	getIdFromMetadataJson(parsedMetadata, clientLibId);
+	return getIdFromMetadataJson(parsedMetadata);
 }
 
 namespace {
@@ -253,8 +263,9 @@ ACTOR Future<Void> uploadClientLibBinary(Database db,
 	state size_t firstChunkNo;
 
 	if (transactionSize % chunkSize != 0) {
-		TraceEvent(SevError, "ClientLibraryInvalidConfig")
-		    .detail("Reason", format("Invalid chunk size configuration, falling back to %d", _PAGE_SIZE));
+		TraceEvent(SevWarnAlways, "ClientLibraryInvalidConfig")
+		    .detail("Reason",
+		            format("Invalid chunk size configuration (%d), falling back to %d", chunkSize, _PAGE_SIZE));
 		chunkSize = _PAGE_SIZE;
 	}
 
@@ -303,7 +314,7 @@ ACTOR Future<Void> uploadClientLibBinary(Database db,
 	binInfo->totalBytes = fileOffset;
 	binInfo->chunkCnt = chunkNo;
 	binInfo->chunkSize = chunkSize;
-	binInfo->sumBytes = MD5SumToHexString(sum);
+	binInfo->sumBytes = md5SumToHexString(sum);
 	return Void();
 }
 
@@ -354,9 +365,11 @@ ACTOR Future<Void> deleteClientLibMetadataEntry(Database db, Key clientLibMetaKe
 
 } // namespace
 
-ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, StringRef libFilePath) {
+ACTOR Future<Void> uploadClientLibrary(Database db,
+                                       Standalone<StringRef> metadataString,
+                                       Standalone<StringRef> libFilePath) {
 	state json_spirit::mObject metadataJson;
-	state std::string clientLibId;
+	state Standalone<StringRef> clientLibId;
 	state Key clientLibMetaKey;
 	state Key clientLibBinPrefix;
 	state std::string jsStr;
@@ -380,7 +393,7 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 		throw client_lib_invalid_metadata();
 	}
 
-	getIdFromMetadataJson(metadataJson, clientLibId);
+	clientLibId = getIdFromMetadataJson(metadataJson);
 	clientLibMetaKey = metadataKeyFromId(clientLibId);
 	clientLibBinPrefix = chunkKeyPrefixFromId(clientLibId);
 
@@ -401,7 +414,7 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 	getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_PROTOCOL);
 	getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_API_VERSION);
 
-	metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(CLIENTLIB_UPLOADING);
+	metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(ClientLibStatus::UPLOADING);
 	jsStr = json_spirit::write_string(json_spirit::mValue(metadataJson));
 
 	/*
@@ -426,9 +439,6 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
-			if (e.code() == error_code_client_lib_already_exists) {
-				throw;
-			}
 			wait(tr.onError(e));
 		}
 	}
@@ -481,9 +491,11 @@ ACTOR Future<Void> uploadClientLibrary(Database db, StringRef metadataString, St
 	return Void();
 }
 
-ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, StringRef libFilePath) {
-	state Key clientLibMetaKey = metadataKeyFromId(clientLibId.toString());
-	state Key chunkKeyPrefix = chunkKeyPrefixFromId(clientLibId.toString());
+ACTOR Future<Void> downloadClientLibrary(Database db,
+                                         Standalone<StringRef> clientLibId,
+                                         Standalone<StringRef> libFilePath) {
+	state Key clientLibMetaKey = metadataKeyFromId(clientLibId);
+	state Key chunkKeyPrefix = chunkKeyPrefixFromId(clientLibId);
 	state int transactionSize = getAlignedUpperBound(CLIENT_KNOBS->MVC_CLIENTLIB_TRANSACTION_SIZE, _PAGE_SIZE);
 	state json_spirit::mObject metadataJson;
 	state std::string checkSum;
@@ -518,15 +530,12 @@ ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, Str
 			parseMetadataJson(metadataOpt.get(), metadataJson);
 			break;
 		} catch (Error& e) {
-			if (e.code() == error_code_client_lib_not_found) {
-				throw;
-			}
 			wait(tr.onError(e));
 		}
 	}
 
 	// Allow downloading only libraries in the available state
-	if (getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS)) != CLIENTLIB_AVAILABLE) {
+	if (getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS)) != ClientLibStatus::AVAILABLE) {
 		throw client_lib_not_available();
 	}
 
@@ -540,7 +549,20 @@ ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, Str
 	chunkCount = getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_CHUNK_COUNT);
 	binarySize = getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_SIZE);
 	expectedChunkSize = getMetadataIntAttr(metadataJson, CLIENTLIB_ATTR_CHUNK_SIZE);
-	ASSERT(transactionSize % expectedChunkSize == 0);
+
+	if (transactionSize % expectedChunkSize != 0) {
+		// Make sure the transaction size alignes both by chunk size and the page size
+		int fixedSize = getAlignedUpperBound(transactionSize, std::lcm((int)expectedChunkSize, _PAGE_SIZE));
+		TraceEvent(SevWarnAlways, "ClientLibraryInvalidConfig")
+		    .detail("Reason",
+		            format("Configured transaction size %d does not align "
+		                   "with the stored chunk size%zu, falling back to %d",
+		                   transactionSize,
+		                   expectedChunkSize,
+		                   fixedSize));
+		// make sure transactionSize assiz
+		transactionSize = fixedSize;
+	}
 	fileOffset = 0;
 	chunkNo = 0;
 
@@ -591,9 +613,6 @@ ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, Str
 				}
 				break;
 			} catch (Error& e) {
-				if (e.code() == error_code_client_lib_invalid_binary) {
-					throw;
-				}
 				wait(tr.onError(e));
 			}
 		}
@@ -612,7 +631,7 @@ ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, Str
 		throw client_lib_invalid_binary();
 	}
 
-	Standalone<StringRef> sumBytesStr = MD5SumToHexString(sum);
+	Standalone<StringRef> sumBytesStr = md5SumToHexString(sum);
 	if (sumBytesStr != StringRef(checkSum)) {
 		TraceEvent(SevWarnAlways, "ClientLibraryChecksumMismatch")
 		    .detail("Expected", checkSum)
@@ -627,7 +646,7 @@ ACTOR Future<Void> downloadClientLibrary(Database db, StringRef clientLibId, Str
 	return Void();
 }
 
-ACTOR Future<Void> deleteClientLibrary(Database db, StringRef clientLibId) {
+ACTOR Future<Void> deleteClientLibrary(Database db, Standalone<StringRef> clientLibId) {
 	state Key clientLibMetaKey = metadataKeyFromId(clientLibId.toString());
 	state Key chunkKeyPrefix = chunkKeyPrefixFromId(clientLibId.toString());
 	state json_spirit::mObject metadataJson;
@@ -649,15 +668,12 @@ ACTOR Future<Void> deleteClientLibrary(Database db, StringRef clientLibId) {
 				throw client_lib_not_found();
 			}
 			parseMetadataJson(metadataOpt.get(), metadataJson);
-			metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(CLIENTLIB_DELETING);
+			metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(ClientLibStatus::DELETING);
 			jsStr = json_spirit::write_string(json_spirit::mValue(metadataJson));
 			tr.set(clientLibMetaKey, ValueRef(jsStr));
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
-			if (e.code() == error_code_client_lib_not_found) {
-				throw;
-			}
 			wait(tr.onError(e));
 		}
 	}
@@ -679,8 +695,8 @@ void applyClientLibFilter(const ClientLibFilter& filter,
 		try {
 			json_spirit::mObject metadataJson;
 			parseMetadataJson(v, metadataJson);
-			if (filter.matchAvailableOnly &&
-			    getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS)) != CLIENTLIB_AVAILABLE) {
+			if (filter.matchAvailableOnly && getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS)) !=
+			                                     ClientLibStatus::AVAILABLE) {
 				continue;
 			}
 			if (filter.matchCompatibleAPI &&
@@ -724,7 +740,7 @@ ACTOR Future<Standalone<VectorRef<StringRef>>> listClientLibraries(Database db, 
 					fromKey = fromKey.withSuffix(format("%09d", filter.numericPkgVersion + 1));
 				}
 				toKey = prefixWithPlatform.withSuffix(LiteralStringRef("0"));
-				scanRange = KeyRangeRef(StringRef(fromKey), toKey);
+				scanRange = KeyRangeRef(fromKey, toKey);
 			} else {
 				scanRange = clientLibMetadataKeys;
 			}
@@ -742,12 +758,6 @@ ACTOR Future<Standalone<VectorRef<StringRef>>> listClientLibraries(Database db, 
 		}
 	}
 	return result;
-}
-
-Future<Standalone<VectorRef<StringRef>>> listCompatibleClientLibraries(Database db, int apiVersion) {
-	return listClientLibraries(
-	    db,
-	    ClientLibFilter().filterAvailable().filterCompatibleAPI(apiVersion).filterPlatform(getCurrentClientPlatform()));
 }
 
 } // namespace ClientLibManagement

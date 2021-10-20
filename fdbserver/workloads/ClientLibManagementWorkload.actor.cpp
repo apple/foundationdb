@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 
 	size_t testFileSize = 0;
 	RandomByteGenerator rbg;
-	std::string uploadedClientLibId;
+	Standalone<StringRef> uploadedClientLibId;
 	json_spirit::mObject uploadedMetadataJson;
 	Standalone<StringRef> generatedChecksum;
 	std::string generatedFileName;
@@ -91,7 +91,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		}
 		wait(file->sync());
 
-		self->generatedChecksum = MD5SumToHexString(sum);
+		self->generatedChecksum = md5SumToHexString(sum);
 
 		return Void();
 	}
@@ -138,7 +138,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 
 		for (auto& testMetadataStr : invalidMetadataStrs) {
 			metadataStr = StringRef(testMetadataStr);
-			wait(testExpectedError(uploadClientLibrary(cx, metadataStr, self->generatedFileName),
+			wait(testExpectedError(uploadClientLibrary(cx, metadataStr, StringRef(self->generatedFileName)),
 			                       "uploadClientLibrary with invalid metadata",
 			                       client_lib_invalid_metadata(),
 			                       &self->success,
@@ -164,8 +164,8 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		state Standalone<StringRef> metadataStr;
 		validClientLibMetadataSample(self->uploadedMetadataJson);
 		metadataStr = StringRef(json_spirit::write_string(json_spirit::mValue(self->uploadedMetadataJson)));
-		getClientLibIdFromMetadataJson(metadataStr, self->uploadedClientLibId);
-		wait(testExpectedError(uploadClientLibrary(cx, metadataStr, self->generatedFileName),
+		self->uploadedClientLibId = getClientLibIdFromMetadataJson(metadataStr);
+		wait(testExpectedError(uploadClientLibrary(cx, metadataStr, StringRef(self->generatedFileName)),
 		                       "uploadClientLibrary wrong checksum",
 		                       client_lib_invalid_binary(),
 		                       &self->success));
@@ -181,11 +181,11 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		// avoid clientLibId clashes, when multiple clients try to upload the same file
 		self->uploadedMetadataJson[CLIENTLIB_ATTR_TYPE] = format("devbuild%d", self->clientId);
 		metadataStr = StringRef(json_spirit::write_string(json_spirit::mValue(self->uploadedMetadataJson)));
-		getClientLibIdFromMetadataJson(metadataStr, self->uploadedClientLibId);
+		self->uploadedClientLibId = getClientLibIdFromMetadataJson(metadataStr);
 
 		// Test two concurrent uploads of the same library, one of the must fail and another succeed
 		for (int i1 = 0; i1 < 2; i1++) {
-			Future<Void> uploadActor = uploadClientLibrary(cx, metadataStr, self->generatedFileName);
+			Future<Void> uploadActor = uploadClientLibrary(cx, metadataStr, StringRef(self->generatedFileName));
 			concurrentUploads.push_back(errorOr(uploadActor));
 		}
 
@@ -214,15 +214,15 @@ struct ClientLibManagementWorkload : public TestWorkload {
 
 	ACTOR static Future<Void> testClientLibDownloadNotExisting(ClientLibManagementWorkload* self, Database cx) {
 		// Generate a random valid clientLibId
-		state std::string clientLibId;
+		state Standalone<StringRef> clientLibId;
 		state std::string destFileName;
 		json_spirit::mObject metadataJson;
 		validClientLibMetadataSample(metadataJson);
 		Standalone<StringRef> metadataStr = StringRef(json_spirit::write_string(json_spirit::mValue(metadataJson)));
-		getClientLibIdFromMetadataJson(metadataStr, clientLibId);
+		clientLibId = getClientLibIdFromMetadataJson(metadataStr);
 
 		destFileName = format("clientLibDownload%d", self->clientId);
-		wait(testExpectedError(downloadClientLibrary(cx, clientLibId, destFileName),
+		wait(testExpectedError(downloadClientLibrary(cx, StringRef(clientLibId), StringRef(destFileName)),
 		                       "download not existing client library",
 		                       client_lib_not_found(),
 		                       &self->success));
@@ -274,8 +274,8 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		wait(testUploadedClientLibInList(self, cx, filter, false, "Filter available, newer API"));
 		filter = ClientLibFilter().filterCompatibleAPI(uploadedApiVersion).filterPlatform(uploadedPlatform);
 		wait(testUploadedClientLibInList(self, cx, filter, true, "Filter the same API, the same platform"));
-		ASSERT(uploadedPlatform != CLIENTLIB_X86_64_WINDOWS);
-		filter = ClientLibFilter().filterAvailable().filterPlatform(CLIENTLIB_X86_64_WINDOWS);
+		ASSERT(uploadedPlatform != ClientLibPlatform::X86_64_WINDOWS);
+		filter = ClientLibFilter().filterAvailable().filterPlatform(ClientLibPlatform::X86_64_WINDOWS);
 		wait(testUploadedClientLibInList(self, cx, filter, false, "Filter available, different platform"));
 		filter = ClientLibFilter().filterAvailable().filterNewerPackageVersion(uploadedVersion);
 		wait(testUploadedClientLibInList(self, cx, filter, false, "Filter available, the same version"));
@@ -304,8 +304,8 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		Standalone<VectorRef<StringRef>> allLibs = wait(listClientLibraries(cx, filter));
 		bool found = false;
 		for (StringRef metadataJson : allLibs) {
-			std::string clientLibId;
-			getClientLibIdFromMetadataJson(metadataJson, clientLibId);
+			Standalone<StringRef> clientLibId;
+			clientLibId = getClientLibIdFromMetadataJson(metadataJson);
 			if (clientLibId == self->uploadedClientLibId) {
 				found = true;
 			}
@@ -340,12 +340,12 @@ struct ClientLibManagementWorkload : public TestWorkload {
 
 	static void validClientLibMetadataSample(json_spirit::mObject& metadataJson) {
 		metadataJson.clear();
-		metadataJson[CLIENTLIB_ATTR_PLATFORM] = getPlatformName(CLIENTLIB_X86_64_LINUX);
+		metadataJson[CLIENTLIB_ATTR_PLATFORM] = getPlatformName(ClientLibPlatform::X86_64_LINUX);
 		metadataJson[CLIENTLIB_ATTR_VERSION] = "7.1.0";
 		metadataJson[CLIENTLIB_ATTR_GIT_HASH] = randomHexadecimalStr(40);
 		metadataJson[CLIENTLIB_ATTR_TYPE] = "debug";
 		metadataJson[CLIENTLIB_ATTR_CHECKSUM] = randomHexadecimalStr(32);
-		metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(CLIENTLIB_AVAILABLE);
+		metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(ClientLibStatus::AVAILABLE);
 		metadataJson[CLIENTLIB_ATTR_API_VERSION] = 710;
 		metadataJson[CLIENTLIB_ATTR_PROTOCOL] = "fdb00b07001001";
 		metadataJson[CLIENTLIB_ATTR_CHECKSUM_ALG] = "md5";
@@ -360,7 +360,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		ASSERT(actualError.isValid());
 		if (expectedError.code() != actualError.code()) {
 			TraceEvent evt(SevError, "TestErrorCodeFailed", id);
-			evt.detail("TestDesc", testDescr);
+			evt.detail("TestDescription", testDescr);
 			evt.detail("ExpectedError", expectedError.code());
 			evt.error(actualError);
 			for (auto& p : details) {

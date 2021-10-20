@@ -237,14 +237,15 @@ Future<Void> quietDatabase(Database const& cx,
  *
  * In case of a failure, logs an corresponding error in the trace with the given
  * description and details, sets the given success flag to false (optional)
- * and throws the given exception (optional).
+ * and throws the given exception (optional). Note that in case of a successful
+ * test execution, the success flag is kept unchanged.
  */
 Future<Void> testExpectedError(Future<Void> test,
                                const char* testDescr,
-                               Error expectedError = Error(),
-                               bool* successFlag = nullptr,
+                               Optional<Error> expectedError = Optional<Error>(),
+                               Optional<bool*> successFlag = Optional<bool*>(),
                                std::map<std::string, std::string> details = {},
-                               Error throwOnError = Error(),
+                               Optional<Error> throwOnError = Optional<Error>(),
                                UID id = UID());
 
 #include "flow/unactorcompiler.h"

@@ -1707,10 +1707,10 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 namespace {
 ACTOR Future<Void> testExpectedErrorImpl(Future<Void> test,
                                          const char* testDescr,
-                                         Error expectedError,
-                                         bool* successFlag,
+                                         Optional<Error> expectedError,
+                                         Optional<bool*> successFlag,
                                          std::map<std::string, std::string> details,
-                                         Error throwOnError,
+                                         Optional<Error> throwOnError,
                                          UID id) {
 	state Error actualError;
 	try {
@@ -1721,19 +1721,21 @@ ACTOR Future<Void> testExpectedErrorImpl(Future<Void> test,
 		}
 		actualError = e;
 		// The test failed as expected
-		if (!expectedError.isValid() || actualError.code() == expectedError.code()) {
+		if (!expectedError.present() || actualError.code() == expectedError.get().code()) {
 			return Void();
 		}
 	}
 
 	// The test has failed
-	if (successFlag != nullptr) {
-		*successFlag = false;
+	if (successFlag.present()) {
+		*(successFlag.get()) = false;
 	}
 	TraceEvent evt(SevError, "TestErrorFailed", id);
-	evt.detail("TestDescr", testDescr);
-	evt.detail("ExpectedError", expectedError.name());
-	evt.detail("ExpectedErrorCode", expectedError.code());
+	evt.detail("TestDescription", testDescr);
+	if (expectedError.present()) {
+		evt.detail("ExpectedError", expectedError.get().name());
+		evt.detail("ExpectedErrorCode", expectedError.get().code());
+	}
 	if (actualError.isValid()) {
 		evt.detail("ActualError", actualError.name());
 		evt.detail("ActualErrorCode", actualError.code());
@@ -1743,8 +1745,8 @@ ACTOR Future<Void> testExpectedErrorImpl(Future<Void> test,
 	for (auto& p : details) {
 		evt.detail(p.first.c_str(), p.second);
 	}
-	if (throwOnError.isValid()) {
-		throw throwOnError;
+	if (throwOnError.present()) {
+		throw throwOnError.get();
 	}
 	return Void();
 }
@@ -1752,10 +1754,10 @@ ACTOR Future<Void> testExpectedErrorImpl(Future<Void> test,
 
 Future<Void> testExpectedError(Future<Void> test,
                                const char* testDescr,
-                               Error expectedError,
-                               bool* successFlag,
+                               Optional<Error> expectedError,
+                               Optional<bool*> successFlag,
                                std::map<std::string, std::string> details,
-                               Error throwOnError,
+                               Optional<Error> throwOnError,
                                UID id) {
 	return testExpectedErrorImpl(test, testDescr, expectedError, successFlag, details, throwOnError, id);
 }
