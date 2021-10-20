@@ -30,7 +30,7 @@
 #include "fdbclient/JSONDoc.h"
 
 // extern enum class MovementState;
-enum class MovementState { INITIALIZING, STARTED, READY_FOR_SWITCH, SWITCHING, COMPLETED };
+enum class MovementState { INITIALIZING, STARTED, READY_FOR_SWITCH, SWITCHING, COMPLETED, ERROR };
 
 struct TenantBalancerInterface {
 	constexpr static FileIdentifier file_identifier = 6185894;
@@ -61,6 +61,8 @@ struct TenantBalancerInterface {
 	explicit TenantBalancerInterface(const struct LocalityData& locality, UID uniqueId)
 	  : locality(locality), uniqueId(uniqueId) {}
 	TenantBalancerInterface() : uniqueId(deterministicRandom()->randomUniqueID()) {}
+
+	static std::string movementStateToString(MovementState state);
 
 	NetworkAddress address() const { return moveTenantToCluster.getEndpoint().getPrimaryAddress(); }
 	NetworkAddress stableAddress() const { return moveTenantToCluster.getEndpoint().getStableAddress(); }
