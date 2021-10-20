@@ -377,7 +377,8 @@ private:
 	std::vector<Future<Void>> getModificationsAndInsert(int64_t offset,
 	                                                    int64_t length,
 	                                                    bool insertModification = false,
-	                                                    Future<Void> value = Void()) {
+	                                                    Future<Void> value = Void(),
+	                                                    ISimulator::ProcessInfo* currentProcess = nullptr) {
 		auto modification = RangeMapRange<uint64_t>(offset, length >= 0 ? offset + length : uint64_t(-1));
 		auto priorModifications = pendingModifications.intersectingRanges(modification);
 
@@ -389,8 +390,8 @@ private:
 			}
 		}
 
-		// Add the modification if we are doing a write or truncate
-		if (insertModification)
+		// Add the modification if we are doing a write or truncate, and the process hasn't been shut down yet.
+		if (insertModification && (currentProcess == nullptr || !currentProcess->shutdownSignal.getFuture().isReady()))
 			pendingModifications.insert(modification, value);
 
 		return modificationFutures;
@@ -408,6 +409,15 @@ private:
 			throw io_error().asInjectedFault();
 		}
 
+		return Void();
+	}
+
+	// Background actor to cancel the operation associcated with `opFuture` upon process shutdown.
+	ACTOR Future<Void> doShutdown(ISimulator::ProcessInfo* currentProcess, Future<Void> opFuture) {
+		wait(success(currentProcess->shutdownSignal.getFuture()));
+		if (opFuture.isValid() && !opFuture.isReady()) {
+			opFuture.cancel();
+		}
 		return Void();
 	}
 
@@ -460,6 +470,8 @@ private:
 		state Standalone<StringRef> dataCopy(StringRef((uint8_t*)data, length));
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
+		state Future<Void> shutdown;
+
 		wait(g_simulator.onMachine(currentProcess));
 
 		state double delayDuration =
@@ -472,8 +484,9 @@ private:
 			wait(checkKilled(self, "Write"));
 
 			Future<Void> writeEnded = wait(ownFuture);
+			shutdown = self->doShutdown(currentProcess, writeEnded);
 			std::vector<Future<Void>> priorModifications =
-			    self->getModificationsAndInsert(offset, length, true, writeEnded);
+			    self->getModificationsAndInsert(offset, length, true, writeEnded, currentProcess);
 			self->minSizeAfterPendingModifications = std::max(self->minSizeAfterPendingModifications, offset + length);
 
 			if (BUGGIFY_WITH_PROB(0.001) && !g_simulator.speedUpSimulation)
@@ -632,6 +645,7 @@ private:
 	                            int64_t size) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
+		state Future<Void> shutdown;
 		wait(g_simulator.onMachine(currentProcess));
 
 		state double delayDuration =
@@ -643,6 +657,7 @@ private:
 			wait(checkKilled(self, "Truncate"));
 
 			state Future<Void> truncateEnded = wait(ownFuture);
+			shutdown = self->doShutdown(currentProcess, truncateEnded);
 
 			// Need to know the size of the file directly before this truncate
 			// takes effect to see what range it modifies.
@@ -653,8 +668,8 @@ private:
 			int64_t beginModifiedRange = std::min(size, self->minSizeAfterPendingModifications);
 			self->minSizeAfterPendingModifications = size;
 
-			std::vector<Future<Void>> priorModifications =
-			    self->getModificationsAndInsert(beginModifiedRange, /*through end of file*/ -1, true, truncateEnded);
+			std::vector<Future<Void>> priorModifications = self->getModificationsAndInsert(
+			    beginModifiedRange, /*through end of file*/ -1, true, truncateEnded, currentProcess);
 
 			if (BUGGIFY_WITH_PROB(0.001))
 				priorModifications.push_back(
