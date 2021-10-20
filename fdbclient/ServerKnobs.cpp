@@ -347,6 +347,15 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_READ_VALUE_TIMEOUT,                            5.0 );
 	init( ROCKSDB_READ_VALUE_PREFIX_TIMEOUT,                     5.0 );
 	init( ROCKSDB_READ_RANGE_TIMEOUT,                            5.0 );
+	init( ROCKSDB_AVOID_FLUSH_DURING_SHUTDOWN,                 false );
+	init( ROCKSDB_COMPACTION_READAHEAD_SIZE,                      -1 ); // if -1, rocksdb default value is used.
+	init( ROCKSDB_WRITE_BUFFER_SIZE,                              -1 ); // if -1, rocksdb default value is used.
+	init( ROCKSDB_COMPRESSION,                                    -1 ); // if -1, rocksdb default value is used.
+	init( ROCKSDB_COMPRESSION_MAX_DICT_BYTES,                     -1 ); // if -1, rocksdb default value is used.
+	init( ROCKSDB_BLOCK_SIZE,                                     -1 ); // if -1, rocksdb default value is used.
+	init( ROCKSDB_WHOLE_KEY_FILTERING,                         false );
+	init( ROCKSDB_FORMAT_VERSION,                                  5 );
+	init( ROCKSDB_CHECKSUM,                                	      -1 ); // if -1, rocksdb default value is used.
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;

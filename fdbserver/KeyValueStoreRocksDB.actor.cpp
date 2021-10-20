@@ -46,8 +46,17 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	rocksdb::ColumnFamilyOptions options;
 	options.level_compaction_dynamic_level_bytes = true;
 	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
+	if (SERVER_KNOBS->ROCKSDB_WRITE_BUFFER_SIZE != -1) {
+		options.write_buffer_size = SERVER_KNOBS->ROCKSDB_WRITE_BUFFER_SIZE;
+	}
+	if (SERVER_KNOBS->ROCKSDB_COMPRESSION_MAX_DICT_BYTES != -1) {
+		options.compression_opts.max_dict_bytes = SERVER_KNOBS->ROCKSDB_COMPRESSION_MAX_DICT_BYTES;
+	}
 	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
 		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
+	}
+	if (SERVER_KNOBS->ROCKSDB_COMPRESSION != -1) {
+		options.compression = (rocksdb::CompressionType)SERVER_KNOBS->ROCKSDB_COMPRESSION;
 	}
 	// Compact sstables when there's too much deleted stuff.
 	options.table_properties_collector_factories = { rocksdb::NewCompactOnDeletionCollectorFactory(128, 1) };
@@ -58,6 +67,10 @@ rocksdb::Options getOptions() {
 	rocksdb::Options options({}, getCFOptions());
 	options.avoid_unnecessary_blocking_io = true;
 	options.create_if_missing = true;
+	options.avoid_flush_during_shutdown = SERVER_KNOBS->ROCKSDB_AVOID_FLUSH_DURING_SHUTDOWN;
+	if (SERVER_KNOBS->ROCKSDB_COMPACTION_READAHEAD_SIZE != -1) {
+		options.compaction_readahead_size = SERVER_KNOBS->ROCKSDB_COMPACTION_READAHEAD_SIZE;
+	}
 	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
 		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
 	}
@@ -79,7 +92,7 @@ rocksdb::Options getOptions() {
 		// filters use a generally faster and more accurate Bloom filter
 		// implementation, with a different schema.
 		// https://github.com/facebook/rocksdb/blob/b77569f18bfc77fb1d8a0b3218f6ecf571bc4988/include/rocksdb/table.h#L391
-		bbOpts.format_version = 5;
+		bbOpts.format_version = SERVER_KNOBS->ROCKSDB_FORMAT_VERSION;
 
 		// Create and apply a bloom filter using the 10 bits
 		// which should yield a ~1% false positive rate:
@@ -88,11 +101,17 @@ rocksdb::Options getOptions() {
 
 		// The whole key blooms are only used for point lookups.
 		// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#prefix-vs-whole-key
-		bbOpts.whole_key_filtering = false;
+		bbOpts.whole_key_filtering = SERVER_KNOBS->ROCKSDB_WHOLE_KEY_FILTERING;
 	}
 
 	if (SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE > 0) {
 		bbOpts.block_cache = rocksdb::NewLRUCache(SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE);
+	}
+	if (SERVER_KNOBS->ROCKSDB_BLOCK_SIZE != -1) {
+		bbOpts.block_size = SERVER_KNOBS->ROCKSDB_BLOCK_SIZE;
+	}
+	if (SERVER_KNOBS->ROCKSDB_CHECKSUM != -1) {
+		bbOpts.checksum = (rocksdb::ChecksumType)SERVER_KNOBS->ROCKSDB_CHECKSUM;
 	}
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
