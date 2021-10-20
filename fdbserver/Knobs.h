@@ -585,6 +585,7 @@ public:
 	double PEER_LATENCY_DEGRADATION_PERCENTILE; // The percentile latency used to check peer health.
 	double PEER_LATENCY_DEGRADATION_THRESHOLD; // The latency threshold to consider a peer degraded.
 	double PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD; // The percentage of timeout to consider a peer degraded.
+	double SYSTEM_MONITOR_FREQUENCY; // interval between two system monitor metrics
 
 	// Test harness
 	double WORKER_POLL_DELAY;
