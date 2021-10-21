@@ -258,7 +258,7 @@ public:
 	                                 Version end = std::numeric_limits<Version>::max(),
 	                                 KeyRange range = allKeys);
 
-	Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
+	Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(StringRef rangeID, Version version);
 
 	// private:

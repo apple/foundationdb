@@ -6915,7 +6915,7 @@ Future<Void> DatabaseContext::getChangeFeedStream(
 	return getChangeFeedStreamActor(Reference<DatabaseContext>::addRef(this), results, rangeID, begin, end, range);
 }
 
-ACTOR Future<std::vector<std::pair<Key, KeyRange>>> singleLocationOverlappingChangeFeeds(
+ACTOR Future<std::vector<OverlappingChangeFeedEntry>> singleLocationOverlappingChangeFeeds(
     Database cx,
     Reference<LocationInfo> location,
     KeyRangeRef range,
@@ -6934,13 +6934,13 @@ ACTOR Future<std::vector<std::pair<Key, KeyRange>>> singleLocationOverlappingCha
 	return rep.rangeIds;
 }
 
-bool compareChangeFeedResult(const std::pair<Key, KeyRange>& i, const std::pair<Key, KeyRange>& j) {
-	return i.first < j.first;
+bool compareChangeFeedResult(const OverlappingChangeFeedEntry& i, const OverlappingChangeFeedEntry& j) {
+	return i.rangeId < j.rangeId;
 }
 
-ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingChangeFeedsActor(Reference<DatabaseContext> db,
-                                                                                   KeyRangeRef range,
-                                                                                   Version minVersion) {
+ACTOR Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeedsActor(Reference<DatabaseContext> db,
+                                                                                     KeyRangeRef range,
+                                                                                     Version minVersion) {
 	state Database cx(db);
 	state Transaction tr(cx);
 	state Span span("NAPI:GetOverlappingChangeFeeds"_loc);
@@ -6963,14 +6963,14 @@ ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingChangeFeedsAct
 				throw all_alternatives_failed();
 			}
 
-			state std::vector<Future<std::vector<std::pair<Key, KeyRange>>>> allOverlappingRequests;
+			state std::vector<Future<std::vector<OverlappingChangeFeedEntry>>> allOverlappingRequests;
 			for (auto& it : locations) {
 				allOverlappingRequests.push_back(
 				    singleLocationOverlappingChangeFeeds(cx, it.second, it.first & range, minVersion));
 			}
 			wait(waitForAll(allOverlappingRequests));
 
-			std::vector<std::pair<Key, KeyRange>> result;
+			std::vector<OverlappingChangeFeedEntry> result;
 			for (auto& it : allOverlappingRequests) {
 				result.insert(result.end(), it.get().begin(), it.get().end());
 			}
@@ -6988,8 +6988,8 @@ ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingChangeFeedsAct
 	}
 }
 
-Future<std::vector<std::pair<Key, KeyRange>>> DatabaseContext::getOverlappingChangeFeeds(KeyRangeRef range,
-                                                                                         Version minVersion) {
+Future<std::vector<OverlappingChangeFeedEntry>> DatabaseContext::getOverlappingChangeFeeds(KeyRangeRef range,
+                                                                                           Version minVersion) {
 	return getOverlappingChangeFeedsActor(Reference<DatabaseContext>::addRef(this), range, minVersion);
 }
 

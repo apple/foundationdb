@@ -1592,17 +1592,16 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 	}
 
 	auto ranges = data->keyChangeFeed.intersectingRanges(req.range);
-	std::map<Key, KeyRange> rangeIds;
+	std::map<Key, std::pair<KeyRange, bool>> rangeIds;
 	for (auto r : ranges) {
 		for (auto& it : r.value()) {
-			rangeIds[it->id] = it->range;
+			rangeIds[it->id] = std::make_pair(it->range, it->stopped);
 		}
 	}
-	std::vector<std::pair<Key, KeyRange>> result;
+	OverlappingChangeFeedsReply reply;
 	for (auto& it : rangeIds) {
-		result.push_back(std::make_pair(it.first, it.second));
+		reply.rangeIds.push_back(OverlappingChangeFeedEntry(it.first, it.second.first, it.second.second));
 	}
-	OverlappingChangeFeedsReply reply(std::vector<std::pair<Key, KeyRange>>(rangeIds.begin(), rangeIds.end()));
 	req.reply.send(reply);
 	return Void();
 }
@@ -3248,7 +3247,11 @@ static const KeyRangeRef persistChangeFeedKeys =
     KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "RF/"), LiteralStringRef(PERSIST_PREFIX "RF0"));
 // data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
 
-ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange range, Version fetchVersion) {
+ACTOR Future<Void> fetchChangeFeed(StorageServer* data,
+                                   Key rangeId,
+                                   KeyRange range,
+                                   bool stopped,
+                                   Version fetchVersion) {
 	state Reference<ChangeFeedInfo> changeFeedInfo;
 	wait(delay(0)); // allow this actor to be cancelled by removals
 	bool existing = data->uidChangeFeed.count(rangeId);
@@ -3262,6 +3265,7 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange ra
 		changeFeedInfo = Reference<ChangeFeedInfo>(new ChangeFeedInfo());
 		changeFeedInfo->range = range;
 		changeFeedInfo->id = rangeId;
+		changeFeedInfo->stopped = stopped;
 		data->uidChangeFeed[rangeId] = changeFeedInfo;
 		auto rs = data->keyChangeFeed.modify(range);
 		for (auto r = rs.begin(); r != rs.end(); ++r) {
@@ -3291,6 +3295,8 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange ra
 						data->storage.writeKeyValue(
 						    KeyValueRef(changeFeedDurableKey(rangeId, it.version),
 						                changeFeedDurableValue(it.mutations, it.knownCommittedVersion)));
+						changeFeedInfo->storageVersion = std::max(changeFeedInfo->durableVersion, it.version);
+						changeFeedInfo->durableVersion = changeFeedInfo->storageVersion;
 					}
 				}
 				wait(yield());
@@ -3323,6 +3329,9 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange ra
 						    KeyValueRef(changeFeedDurableKey(rangeId, remoteResult[remoteLoc].version),
 						                changeFeedDurableValue(remoteResult[remoteLoc].mutations,
 						                                       remoteResult[remoteLoc].knownCommittedVersion)));
+						changeFeedInfo->storageVersion =
+						    std::max(changeFeedInfo->durableVersion, remoteResult[remoteLoc].version);
+						changeFeedInfo->durableVersion = changeFeedInfo->storageVersion;
 					}
 					remoteLoc++;
 				} else if (remoteResult[remoteLoc].version == localResult.version) {
@@ -3334,6 +3343,9 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange ra
 						    KeyValueRef(changeFeedDurableKey(rangeId, remoteResult[remoteLoc].version),
 						                changeFeedDurableValue(remoteResult[remoteLoc].mutations,
 						                                       remoteResult[remoteLoc].knownCommittedVersion)));
+						changeFeedInfo->storageVersion =
+						    std::max(changeFeedInfo->durableVersion, remoteResult[remoteLoc].version);
+						changeFeedInfo->durableVersion = changeFeedInfo->storageVersion;
 					}
 					remoteLoc++;
 					Standalone<MutationsAndVersionRef> _localResult = waitNext(localResults.getFuture());
@@ -3359,10 +3371,10 @@ ACTOR Future<Void> dispatchChangeFeeds(StorageServer* data, UID fetchKeysID, Key
 	state PromiseStream<Key> removals;
 	data->changeFeedRemovals[fetchKeysID] = removals;
 	try {
-		state std::vector<std::pair<Key, KeyRange>> feeds =
+		state std::vector<OverlappingChangeFeedEntry> feeds =
 		    wait(data->cx->getOverlappingChangeFeeds(keys, fetchVersion + 1));
 		for (auto& feed : feeds) {
-			feedFetches[feed.first] = fetchChangeFeed(data, feed.first, feed.second, fetchVersion);
+			feedFetches[feed.rangeId] = fetchChangeFeed(data, feed.rangeId, feed.range, feed.stopped, fetchVersion);
 		}
 
 		loop {

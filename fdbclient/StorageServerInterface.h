@@ -712,14 +712,33 @@ struct ChangeFeedPopRequest {
 	}
 };
 
+struct OverlappingChangeFeedEntry {
+	Key rangeId;
+	KeyRange range;
+	bool stopped = false;
+
+	bool operator==(const OverlappingChangeFeedEntry& r) const {
+		return rangeId == r.rangeId && range == r.range && stopped == r.stopped;
+	}
+
+	OverlappingChangeFeedEntry() {}
+	OverlappingChangeFeedEntry(Key const& rangeId, KeyRange const& range, bool stopped)
+	  : rangeId(rangeId), range(range), stopped(stopped) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rangeId, range, stopped);
+	}
+};
+
 struct OverlappingChangeFeedsReply {
 	constexpr static FileIdentifier file_identifier = 11815134;
-	std::vector<std::pair<Key, KeyRange>> rangeIds;
+	std::vector<OverlappingChangeFeedEntry> rangeIds;
 	bool cached;
 	Arena arena;
 
 	OverlappingChangeFeedsReply() : cached(false) {}
-	explicit OverlappingChangeFeedsReply(std::vector<std::pair<Key, KeyRange>> const& rangeIds)
+	explicit OverlappingChangeFeedsReply(std::vector<OverlappingChangeFeedEntry> const& rangeIds)
 	  : rangeIds(rangeIds), cached(false) {}
 
 	template <class Ar>
@@ -727,6 +746,7 @@ struct OverlappingChangeFeedsReply {
 		serializer(ar, rangeIds, arena);
 	}
 };
+
 struct OverlappingChangeFeedsRequest {
 	constexpr static FileIdentifier file_identifier = 10726174;
 	KeyRange range;
