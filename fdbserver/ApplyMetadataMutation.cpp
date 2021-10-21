@@ -833,6 +833,7 @@ private:
 		if (Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get(); tagV.present()) {
 			MutationRef privatized = m;
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+			privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
 			toCommit->writeTypedMessage(privatized);
 		}
@@ -858,6 +859,7 @@ private:
 
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+					privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
 					toCommit->addTag(decodeServerTagValue(tagV.get()));
 					toCommit->writeTypedMessage(privatized);
 				}

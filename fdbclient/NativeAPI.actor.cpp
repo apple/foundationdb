@@ -402,7 +402,8 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 		    .detail("MaxMutationsPerCommit", cx->mutationsPerCommit.max())
 		    .detail("MeanBytesPerCommit", cx->bytesPerCommit.mean())
 		    .detail("MedianBytesPerCommit", cx->bytesPerCommit.median())
-		    .detail("MaxBytesPerCommit", cx->bytesPerCommit.max());
+		    .detail("MaxBytesPerCommit", cx->bytesPerCommit.max())
+		    .detail("NumLocalityCacheEntries", cx->locationCache.size());
 
 		cx->latencies.clear();
 		cx->readLatencies.clear();
@@ -669,19 +670,82 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 	}
 }
 
-ACTOR static Future<Void> monitorProxiesChange(Reference<AsyncVar<ClientDBInfo> const> clientDBInfo,
+ACTOR Future<Void> assertFailure(GrvProxyInterface remote, Future<ErrorOr<GetReadVersionReply>> reply) {
+	try {
+		ErrorOr<GetReadVersionReply> res = wait(reply);
+		if (!res.isError()) {
+			TraceEvent(SevError, "GotStaleReadVersion")
+			    .detail("Remote", remote.getConsistentReadVersion.getEndpoint().addresses.address.toString())
+			    .detail("Provisional", remote.provisional)
+			    .detail("ReadVersion", res.get().version);
+			ASSERT_WE_THINK(false);
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		// we want this to fail -- so getting here is good, we'll just ignore the error.
+	}
+	return Void();
+}
+
+Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
+                                      std::vector<GrvProxyInterface> newProxies) {
+	Span span(deterministicRandom()->randomUniqueID(), "VerifyCausalReadRisky"_loc);
+	std::vector<Future<Void>> replies;
+	replies.reserve(oldProxies.size());
+	GetReadVersionRequest req(
+	    span.context, 1, TransactionPriority::IMMEDIATE, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY);
+	TraceEvent evt("AttemptGRVFromOldProxies");
+	evt.detail("NumOldProxies", oldProxies.size()).detail("NumNewProxies", newProxies.size());
+	auto traceProxies = [&](std::vector<GrvProxyInterface>& proxies, std::string const& key) {
+		for (int i = 0; i < proxies.size(); ++i) {
+			auto k = key + std::to_string(i);
+			evt.detail(k.c_str(), proxies[i].id());
+		}
+	};
+	traceProxies(oldProxies, "OldProxy"s);
+	traceProxies(newProxies, "NewProxy"s);
+	evt.log();
+	for (auto& i : oldProxies) {
+		req.reply = ReplyPromise<GetReadVersionReply>();
+		replies.push_back(assertFailure(i, i.getConsistentReadVersion.tryGetReply(req)));
+	}
+	return waitForAll(replies);
+}
+
+ACTOR static Future<Void> monitorProxiesChange(DatabaseContext* cx,
+                                               Reference<AsyncVar<ClientDBInfo> const> clientDBInfo,
                                                AsyncTrigger* triggerVar) {
 	state std::vector<CommitProxyInterface> curCommitProxies;
 	state std::vector<GrvProxyInterface> curGrvProxies;
+	state ActorCollection actors(false);
 	curCommitProxies = clientDBInfo->get().commitProxies;
 	curGrvProxies = clientDBInfo->get().grvProxies;
 
 	loop {
-		wait(clientDBInfo->onChange());
-		if (clientDBInfo->get().commitProxies != curCommitProxies || clientDBInfo->get().grvProxies != curGrvProxies) {
-			curCommitProxies = clientDBInfo->get().commitProxies;
-			curGrvProxies = clientDBInfo->get().grvProxies;
-			triggerVar->trigger();
+		choose {
+			when(wait(clientDBInfo->onChange())) {
+				if (clientDBInfo->get().commitProxies != curCommitProxies ||
+				    clientDBInfo->get().grvProxies != curGrvProxies) {
+					// This condition is a bit complicated. Here we want to verify that we're unable to receive a read
+					// version from a proxy of an old generation after a successful recovery. The conditions are:
+					// 1. We only do this with a configured probability.
+					// 2. If the old set of Grv proxies is empty, there's nothing to do
+					// 3. If the new set of Grv proxies is empty, it means the recovery is not complete. So if an old
+					//    Grv proxy still gives out read versions, this would be correct behavior.
+					// 4. If we see a provisional proxy, it means the recovery didn't complete yet, so the same as (3)
+					//    applies.
+					if (deterministicRandom()->random01() < cx->verifyCausalReadsProp && !curGrvProxies.empty() &&
+					    !clientDBInfo->get().grvProxies.empty() && !clientDBInfo->get().grvProxies[0].provisional) {
+						actors.add(attemptGRVFromOldProxies(curGrvProxies, clientDBInfo->get().grvProxies));
+					}
+					curCommitProxies = clientDBInfo->get().commitProxies;
+					curGrvProxies = clientDBInfo->get().grvProxies;
+					triggerVar->trigger();
+				}
+			}
+			when(wait(actors.getResult())) { UNSTOPPABLE_ASSERT(false); }
 		}
 	}
 }
@@ -1142,11 +1206,13 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
     transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc),
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), latencies(1000), readLatencies(1000),
-    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), outstandingWatches(0),
-    transactionTracingEnabled(true), taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor),
-    coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
-    detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
+    transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
+    latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
+    bytesPerCommit(1000), outstandingWatches(0), transactionTracingEnabled(true), taskID(taskID),
+    clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion),
+    mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size())
@@ -1165,7 +1231,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	getValueSubmitted.init(LiteralStringRef("NativeAPI.GetValueSubmitted"));
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
-	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
+	monitorProxiesInfoChange = monitorProxiesChange(this, clientInfo, &proxiesChangeTrigger);
 	tssMismatchHandler = handleTssMismatches(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
@@ -1394,9 +1460,10 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
     transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc),
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), latencies(1000), readLatencies(1000),
-    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
-    transactionTracingEnabled(true), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT) {}
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
+    transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
+    latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
+    bytesPerCommit(1000), transactionTracingEnabled(true), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT) {}
 
 // Static constructor used by server processes to create a DatabaseContext
 // For internal (fdbserver) use only
@@ -1606,6 +1673,9 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 		case FDBDatabaseOptions::USE_CONFIG_DATABASE:
 			validateOptionValueNotPresent(value);
 			useConfigDatabase = true;
+			break;
+		case FDBDatabaseOptions::TEST_CAUSAL_READ_RISKY:
+			verifyCausalReadsProp = double(extractIntOption(value, 0, 100)) / 100.0;
 			break;
 		default:
 			break;
@@ -2094,6 +2164,7 @@ void stopNetwork() {
 	if (!g_network)
 		throw network_not_setup();
 
+	TraceEvent("ClientStopNetwork");
 	g_network->stop();
 	closeTraceFile();
 }
@@ -4130,11 +4201,14 @@ void debugAddTags(Transaction* tr) {
 }
 
 SpanID generateSpanID(int transactionTracingEnabled) {
-	uint64_t tid = deterministicRandom()->randomUInt64();
+	uint64_t txnId = deterministicRandom()->randomUInt64();
 	if (transactionTracingEnabled > 0) {
-		return SpanID(tid, deterministicRandom()->randomUInt64());
+		uint64_t tokenId = deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE
+		                       ? deterministicRandom()->randomUInt64()
+		                       : 0;
+		return SpanID(txnId, tokenId);
 	} else {
-		return SpanID(tid, 0);
+		return SpanID(txnId, 0);
 	}
 }
 
@@ -5577,6 +5651,20 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 	state Future<Void> timeout;
 	state Optional<UID> debugID;
 	state bool send_batch;
+	state Reference<Histogram> batchSizeDist = Histogram::getHistogram(LiteralStringRef("GrvBatcher"),
+	                                                                   LiteralStringRef("ClientGrvBatchSize"),
+	                                                                   Histogram::Unit::countLinear,
+	                                                                   0,
+	                                                                   CLIENT_KNOBS->MAX_BATCH_SIZE * 2);
+	state Reference<Histogram> batchIntervalDist =
+	    Histogram::getHistogram(LiteralStringRef("GrvBatcher"),
+	                            LiteralStringRef("ClientGrvBatchInterval"),
+	                            Histogram::Unit::microseconds,
+	                            0,
+	                            CLIENT_KNOBS->GRV_BATCH_TIMEOUT * 1000000 * 2);
+	state Reference<Histogram> grvReplyLatencyDist = Histogram::getHistogram(
+	    LiteralStringRef("GrvBatcher"), LiteralStringRef("ClientGrvReplyLatency"), Histogram::Unit::microseconds);
+	state double lastRequestTime = now();
 
 	state TransactionTagMap<uint32_t> tags;
 
@@ -5601,22 +5689,34 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 					++tags[tag];
 				}
 
-				if (requests.size() == CLIENT_KNOBS->MAX_BATCH_SIZE)
+				if (requests.size() == CLIENT_KNOBS->MAX_BATCH_SIZE) {
 					send_batch = true;
-				else if (!timeout.isValid())
+					++cx->transactionGrvFullBatches;
+				} else if (!timeout.isValid()) {
 					timeout = delay(batchTime, TaskPriority::GetConsistentReadVersion);
+				}
 			}
-			when(wait(timeout.isValid() ? timeout : Never())) { send_batch = true; }
+			when(wait(timeout.isValid() ? timeout : Never())) {
+				send_batch = true;
+				++cx->transactionGrvTimedOutBatches;
+			}
 			// dynamic batching monitors reply latencies
 			when(double reply_latency = waitNext(replyTimes.getFuture())) {
 				double target_latency = reply_latency * 0.5;
 				batchTime = std::min(0.1 * target_latency + 0.9 * batchTime, CLIENT_KNOBS->GRV_BATCH_TIMEOUT);
+				grvReplyLatencyDist->sampleSeconds(reply_latency);
 			}
 			when(wait(collection)) {} // for errors
 		}
 		if (send_batch) {
 			int count = requests.size();
 			ASSERT(count);
+
+			batchSizeDist->sampleRecordCounter(count);
+			auto requestTime = now();
+			batchIntervalDist->sampleSeconds(requestTime - lastRequestTime);
+			lastRequestTime = requestTime;
+
 			// dynamic batching
 			Promise<GetReadVersionReply> GRVReply;
 			requests.push_back(GRVReply);
@@ -5766,7 +5866,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		}
 
 		Location location = "NAPI:getReadVersion"_loc;
-		UID spanContext = deterministicRandom()->randomUniqueID();
+		UID spanContext = generateSpanID(cx->transactionTracingEnabled);
 		auto const req = DatabaseContext::VersionRequest(spanContext, options.tags, info.debugID);
 		batcher.stream.send(req);
 		startTime = now();
@@ -6129,7 +6229,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Databa
                                                                           StorageMetrics permittedError,
                                                                           int shardLimit,
                                                                           int expectedShardCount) {
-	state Span span("NAPI:WaitStorageMetrics"_loc);
+	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingEnabled));
 	loop {
 		std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
 		    wait(getKeyRangeLocations(cx,
