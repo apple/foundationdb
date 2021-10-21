@@ -133,6 +133,8 @@ public:
 		int logGenerations;
 		bool cachePopulated;
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
+		Future<Void> clientCounter;
+		int clientCount;
 
 		DBInfo()
 		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
@@ -143,7 +145,9 @@ public:
 		                               EnableLocalityLoadBalance::True,
 		                               TaskPriority::DefaultEndpoint,
 		                               LockAware::True)), // SOMEDAY: Locality!
-		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false) {}
+		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false), clientCount(0) {
+			clientCounter = countClients(this);
+		}
 
 		void setDistributor(const DataDistributorInterface& interf) {
 			auto newInfo = serverInfo->get();
@@ -171,6 +175,22 @@ public:
 				newInfo.ratekeeper = Optional<RatekeeperInterface>();
 			}
 			serverInfo->set(newInfo);
+		}
+
+		ACTOR static Future<Void> countClients(DBInfo* self) {
+			loop {
+				wait(delay(SERVER_KNOBS->CC_PRUNE_CLIENTS_INTERVAL));
+
+				self->clientCount = 0;
+				for (auto itr = self->clientStatus.begin(); itr != self->clientStatus.end();) {
+					if (now() - itr->second.first < 2 * SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL) {
+						self->clientCount += itr->second.second.clientCount;
+						++itr;
+					} else {
+						itr = self->clientStatus.erase(itr);
+					}
+				}
+			}
 		}
 	};
 
@@ -3174,6 +3194,8 @@ public:
 		serverInfo.myLocality = locality;
 		db.serverInfo->set(serverInfo);
 		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+
+		specialCounter(clusterControllerMetrics, "ClientCount", [this]() { return db.clientCount; });
 	}
 
 	~ClusterControllerData() {
