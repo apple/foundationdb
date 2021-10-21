@@ -28,7 +28,11 @@ ClusterConnectionKey::ClusterConnectionKey(Database db,
                                            Key connectionStringKey,
                                            ClusterConnectionString const& contents,
                                            ConnectionStringNeedsPersisted needsToBePersisted)
-  : IClusterConnectionRecord(needsToBePersisted), db(db), cs(contents), connectionStringKey(connectionStringKey) {}
+  : IClusterConnectionRecord(needsToBePersisted), db(db), cs(contents), connectionStringKey(connectionStringKey) {
+	if (!needsToBePersisted) {
+		lastPersistedConnectionString = ValueRef(contents.toString());
+	}
+}
 
 // Loads and parses the connection string at the specified key, throwing errors if the file cannot be read or the
 // format is invalid.
@@ -112,18 +116,41 @@ Reference<IClusterConnectionRecord> ClusterConnectionKey::makeIntermediateRecord
 // Returns a string representation of this cluster connection record. This will include the type of record and the
 // key where the record is stored.
 std::string ClusterConnectionKey::toString() const {
-	return "Key: " + printable(connectionStringKey);
+	return "fdbkey://" + printable(connectionStringKey);
 }
 
 ACTOR Future<bool> ClusterConnectionKey::persistImpl(Reference<ClusterConnectionKey> self) {
 	self->setPersisted();
+	state Value newConnectionString = ValueRef(self->cs.toString());
 
 	try {
 		state Transaction tr(self->db);
 		loop {
 			try {
-				tr.set(self->connectionStringKey, StringRef(self->cs.toString()));
+				Optional<Value> existingConnectionString = wait(tr.get(self->connectionStringKey));
+				// Someone has already updated the connection string to what we want
+				if (existingConnectionString.present() && existingConnectionString.get() == newConnectionString) {
+					self->lastPersistedConnectionString = newConnectionString;
+					return true;
+				}
+				// Someone has updated the connection string to something we didn't expect, in which case we leave it
+				// alone. It's possible this could result in the stored string getting stuck if the connection string
+				// changes twice and only the first change is recorded. If the process that wrote the first change dies
+				// and no other process attempts to write the intermediate state, then only a newly opened connection
+				// key would be able to update the state.
+				else if (existingConnectionString.present() &&
+				         existingConnectionString != self->lastPersistedConnectionString) {
+					TraceEvent(SevWarnAlways, "UnableToChangeConnectionKeyDueToMismatch")
+					    .detail("ConnectionKey", self->connectionStringKey)
+					    .detail("NewConnectionString", newConnectionString)
+					    .detail("ExpectedStoredConnectionString", self->lastPersistedConnectionString)
+					    .detail("ActualStoredConnectionString", existingConnectionString);
+					return false;
+				}
+				tr.set(self->connectionStringKey, newConnectionString);
 				wait(tr.commit());
+
+				self->lastPersistedConnectionString = newConnectionString;
 				return true;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -133,7 +160,7 @@ ACTOR Future<bool> ClusterConnectionKey::persistImpl(Reference<ClusterConnection
 		TraceEvent(SevWarnAlways, "UnableToChangeConnectionKey")
 		    .error(e)
 		    .detail("ConnectionKey", self->connectionStringKey)
-		    .detail("ConnStr", self->cs.toString());
+		    .detail("ConnectionString", self->cs.toString());
 	}
 
 	return false;
