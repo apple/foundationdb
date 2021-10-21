@@ -869,17 +869,30 @@ void filterActiveMove(const std::vector<TenantMovementInfo>& originStatus,
                       Optional<std::string> prefixFilter,
                       Optional<std::string> peerDatabaseConnectionStringFilter,
                       Optional<MovementLocation> locationFilter) {
-	bool isSource = locationFilter.orDefault(MovementLocation::SOURCE) == MovementLocation::SOURCE;
 	for (const auto& status : originStatus) {
-		const auto& targetPrefix = isSource ? status.sourcePrefix : status.destPrefix;
-		if (prefixFilter.present() && prefixFilter != targetPrefix.toString()) {
-			continue;
+		bool canPass = false;
+		if (prefixFilter.present()) {
+			if( (!locationFilter.present() || locationFilter.get() == MovementLocation::SOURCE) && prefixFilter.get() == status.sourcePrefix){
+				canPass = true;
+			}
+			if( (!locationFilter.present() || locationFilter.get() == MovementLocation::DEST) && prefixFilter.get() == status.destPrefix){
+				canPass = true;
+			}
+			if(!canPass){
+				continue;
+			}
 		}
-		const auto& targetDatabaseConnectionString =
-		    isSource ? status.destinationConnectionString : status.sourceConnectionString;
-		if (peerDatabaseConnectionStringFilter.present() &&
-		    targetDatabaseConnectionString != status.destinationConnectionString) {
-			continue;
+		canPass = false;
+		if (peerDatabaseConnectionStringFilter.present()) {
+			if( (!locationFilter.present() || locationFilter.get() == MovementLocation::SOURCE) && peerDatabaseConnectionStringFilter.get() == status.destinationConnectionString){
+				canPass = true;
+			}
+			if( (!locationFilter.present() || locationFilter.get() == MovementLocation::DEST) && peerDatabaseConnectionStringFilter.get() == status.sourceConnectionString){
+				canPass = true;
+			}
+			if(!canPass){
+				continue;
+			}
 		}
 		targetStatus.push_back(status);
 	}
@@ -951,17 +964,17 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 			record.movementState = MovementState::ERROR;
 			wait(self->saveOutgoingMovement(record));
 			TraceEvent(SevWarn, "TenantBalancerBackupError").detail("Tenant", req.sourceTenant);
-			throw movement_not_ready_finish();
+			throw movement_error();
 		}
 		if (targetMovementInfo.databaseBackupStatus != "is differential") {
 			TraceEvent(SevWarn, "TenantBalancerBackupReplicaUncompleted").detail("Tenant", req.sourceTenant);
-			throw movement_not_ready_finish();
+			throw movement_not_ready_to_finish();
 		}
 		if (targetMovementInfo.mutationLag > req.maxLagSeconds) {
 			TraceEvent(SevWarn, "TenantBalancerLagSecondsCheckFailed")
 			    .detail("MaxLagSeconds", req.maxLagSeconds)
 			    .detail("CurrentLagSeconds", targetMovementInfo.mutationLag);
-			throw movement_not_ready_finish();
+			throw movement_lag_too_large();
 		}
 		TraceEvent(SevDebug, "TenantBalancerFinishReady")
 		    .detail("Tenant", req.sourceTenant)
