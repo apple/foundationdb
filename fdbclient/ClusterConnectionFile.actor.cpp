@@ -93,6 +93,9 @@ Reference<IClusterConnectionRecord> ClusterConnectionFile::makeIntermediateRecor
 // Returns a string representation of this cluster connection record. This will include the type of record and the
 // filename of the cluster file.
 std::string ClusterConnectionFile::toString() const {
+	// This is a fairly naive attempt to generate a URI-like string. It will not account for characters like spaces, it
+	// may use backslashes in windows paths, etc.
+	// SOMEDAY: we should encode this string as a proper URI.
 	return "file://" + filename;
 }
 
