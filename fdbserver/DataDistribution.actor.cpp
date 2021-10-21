@@ -614,6 +614,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	bool lastBuildTeamsFailed;
 	Future<Void> teamBuilder;
 	AsyncTrigger restartTeamBuilder;
+	AsyncVar<bool> waitUntilRecruited; // make teambuilder wait until one new SS is recruited
 
 	MoveKeysLock lock;
 	PromiseStream<RelocateShard> output;
@@ -2335,9 +2336,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		state int uniqueMachines = 0;
 		state std::set<Optional<Standalone<StringRef>>> machines;
 
-		if (self->healthyTeamCount) {
-			// wait to see whether restartTeamBuilder is triggered
-			wait(delay(0, g_network->getCurrentTask()));
+		// wait to see whether restartTeamBuilder is triggered
+		wait(delay(0, g_network->getCurrentTask()));
+		// make team builder don't build team during the interval between excluding the wiggled process and recruited a
+		// new SS to avoid redundant teams
+		while (self->pauseWiggle && !self->pauseWiggle->get() && self->waitUntilRecruited.get()) {
+			choose {
+				when(wait(self->waitUntilRecruited.onChange() || self->pauseWiggle->onChange())) {}
+				when(wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY, g_network->getCurrentTask()))) { break; }
+			}
 		}
 
 		for (auto i = self->server_info.begin(); i != self->server_info.end(); ++i) {
@@ -4028,7 +4035,7 @@ ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
 					// there must not have other teams to place wiggled data
 					takeRest = teamCollection->server_info.size() <= teamCollection->configuration.storageTeamSize ||
 					           teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize;
-					teamCollection->doBuildTeams = true;
+					teamCollection->restartRecruiting.trigger();
 					if (takeRest &&
 					    teamCollection->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
 						TraceEvent(SevWarn, "PerpetualWiggleSleep", teamCollection->distributorId)
@@ -4165,6 +4172,9 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				ASSERT(self->wigglingPid.present());
 				StringRef pid = self->wigglingPid.get();
 				TEST(pid != LiteralStringRef("")); // finish wiggling this process
+
+				self->waitUntilRecruited.set(true);
+				self->restartTeamBuilder.trigger();
 
 				moveFinishFuture = Never();
 				self->includeStorageServersForWiggle();
@@ -5253,6 +5263,7 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 					                self->serverTrackerErrorOut,
 					                newServer.get().addedVersion,
 					                ddEnabledState);
+					self->waitUntilRecruited.set(false);
 					// signal all done after adding tss to tracking info
 					tssState->markComplete();
 				}
