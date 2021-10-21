@@ -4665,7 +4665,8 @@ ACTOR Future<Void> storageServerTracker(
 			std::vector<Promise<Void>> wakeUpTrackers;
 			for (const auto& i : self->server_and_tss_info) {
 				if (i.second.getPtr() != server &&
-				    i.second->lastKnownInterface.address() == server->lastKnownInterface.address()) {
+				    (i.second->lastKnownInterface.address() == server->lastKnownInterface.address() &&
+				     i.second->lastKnownInterface.locality == server->lastKnownInterface.locality)) {
 					auto& statusInfo = self->server_status.get(i.first);
 					TraceEvent("SameAddress", self->distributorId)
 					    .detail("Failed", statusInfo.isFailed)
