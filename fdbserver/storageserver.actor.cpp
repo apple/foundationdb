@@ -84,6 +84,7 @@ bool canReplyWith(Error e) {
 	case error_code_process_behind:
 	case error_code_watch_cancelled:
 	case error_code_unknown_change_feed:
+	case error_code_server_overloaded:
 		// case error_code_all_alternatives_failed:
 		return true;
 	default:
