@@ -242,7 +242,7 @@ ERROR( movement_in_progress, 2391, "The specified range is already being moved")
 ERROR( movement_dest_prefix_not_empty, 2392, "The prefix in destination database is not empty")
 ERROR( movement_agent_not_running, 2393, "No agent is running to complete the data movement")
 ERROR( movement_id_mismatch, 2394, "Another movement is running with this prefix")
-ERROR( movement_not_ready_to_finish, 2395, "The movement is not a complete copy and is not ready to finish")
+ERROR( movement_not_ready_for_operation, 2395, "The movement is not ready to run the requested operation")
 ERROR( movement_error, 2396, "Movement error")
 ERROR( movement_lag_too_large, 2397, "Movement lag time is too large")
 

@@ -64,6 +64,7 @@ struct TenantBalancerInterface {
 	TenantBalancerInterface() : uniqueId(deterministicRandom()->randomUniqueID()) {}
 
 	static std::string movementStateToString(MovementState state);
+	static std::string movementLocationToString(MovementLocation location);
 
 	NetworkAddress address() const { return moveTenantToCluster.getEndpoint().getPrimaryAddress(); }
 	NetworkAddress stableAddress() const { return moveTenantToCluster.getEndpoint().getStableAddress(); }
@@ -287,7 +288,7 @@ struct GetActiveMovementsRequest {
 	Arena arena;
 
 	// Filter criteria
-	Optional<std::string> prefixFilter;
+	Optional<Key> prefixFilter;
 	Optional<std::string> peerDatabaseConnectionStringFilter;
 	Optional<MovementLocation> locationFilter;
 
@@ -295,7 +296,7 @@ struct GetActiveMovementsRequest {
 	ReplyPromise<GetActiveMovementsReply> reply;
 
 	GetActiveMovementsRequest() {}
-	GetActiveMovementsRequest(Optional<std::string> prefixFilter,
+	GetActiveMovementsRequest(Optional<Key> prefixFilter,
 	                          Optional<std::string> peerDatabaseConnectionStringFilter,
 	                          Optional<MovementLocation> locationFilter)
 	  : prefixFilter(prefixFilter), peerDatabaseConnectionStringFilter(peerDatabaseConnectionStringFilter),
@@ -328,18 +329,18 @@ struct FinishSourceMovementReply {
 struct FinishSourceMovementRequest {
 	constexpr static FileIdentifier file_identifier = 10934711;
 
-	std::string sourceTenant;
+	Key sourcePrefix;
 	double maxLagSeconds;
 
 	ReplyPromise<FinishSourceMovementReply> reply;
 
 	FinishSourceMovementRequest() {}
-	FinishSourceMovementRequest(std::string sourceTenant, double maxLagSeconds)
-	  : sourceTenant(sourceTenant), maxLagSeconds(maxLagSeconds) {}
+	FinishSourceMovementRequest(Key sourcePrefix, double maxLagSeconds)
+	  : sourcePrefix(sourcePrefix), maxLagSeconds(maxLagSeconds) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sourceTenant, maxLagSeconds, reply);
+		serializer(ar, sourcePrefix, maxLagSeconds, reply);
 	}
 };
 
@@ -360,18 +361,18 @@ struct FinishDestinationMovementRequest {
 	constexpr static FileIdentifier file_identifier = 12331642;
 
 	UID movementId;
-	std::string destinationTenant;
+	Key destinationPrefix;
 	Version version;
 
 	ReplyPromise<FinishDestinationMovementReply> reply;
 
 	FinishDestinationMovementRequest() : version(invalidVersion) {}
-	FinishDestinationMovementRequest(UID movementId, std::string destinationTenant, Version version)
-	  : movementId(movementId), destinationTenant(destinationTenant), version(version) {}
+	FinishDestinationMovementRequest(UID movementId, Key destinationPrefix, Version version)
+	  : movementId(movementId), destinationPrefix(destinationPrefix), version(version) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, movementId, destinationTenant, version, reply);
+		serializer(ar, movementId, destinationPrefix, version, reply);
 	}
 };
 
@@ -390,19 +391,20 @@ struct AbortMovementRequest {
 	constexpr static FileIdentifier file_identifier = 14058403;
 
 	Optional<UID> movementId;
-	std::string tenantName;
-	bool isSource;
+	Key prefix;
+	MovementLocation movementLocation;
 
 	ReplyPromise<AbortMovementReply> reply;
 
-	AbortMovementRequest() : isSource(true) {}
-	AbortMovementRequest(std::string tenantName, bool isSource) : tenantName(tenantName), isSource(isSource) {}
-	AbortMovementRequest(UID movementId, std::string tenantName, bool isSource)
-	  : movementId(movementId), tenantName(tenantName), isSource(isSource) {}
+	AbortMovementRequest() : movementLocation(MovementLocation::SOURCE) {}
+	AbortMovementRequest(Key prefix, MovementLocation movementLocation)
+	  : prefix(prefix), movementLocation(movementLocation) {}
+	AbortMovementRequest(UID movementId, Key prefix, MovementLocation movementLocation)
+	  : movementId(movementId), prefix(prefix), movementLocation(movementLocation) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, movementId, tenantName, isSource, reply);
+		serializer(ar, movementId, prefix, movementLocation, reply);
 	}
 };
 
@@ -424,18 +426,17 @@ struct CleanupMovementSourceRequest {
 
 	enum class CleanupType { UNLOCK, ERASE, ERASE_AND_UNLOCK } uint8_t;
 
-	std::string tenantName;
+	Key prefix;
 	CleanupType cleanupType;
 
 	ReplyPromise<CleanupMovementSourceReply> reply;
 
 	CleanupMovementSourceRequest() : cleanupType(CleanupType::UNLOCK) {}
-	CleanupMovementSourceRequest(std::string tenantName, CleanupType cleanupType)
-	  : tenantName(tenantName), cleanupType(cleanupType) {}
+	CleanupMovementSourceRequest(Key prefix, CleanupType cleanupType) : prefix(prefix), cleanupType(cleanupType) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tenantName, cleanupType, reply);
+		serializer(ar, prefix, cleanupType, reply);
 	}
 };
 

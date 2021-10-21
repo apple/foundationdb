@@ -2206,7 +2206,7 @@ ACTOR Future<Void> submitDBMove(Database src, Database dest, Key srcPrefix, Key 
 
 ACTOR Future<std::vector<TenantMovementInfo>> getActiveMovements(
     Database database,
-    Optional<std::string> prefixFilter,
+    Optional<Key> prefixFilter,
     Optional<std::string> peerDatabaseConnectionStringFilter,
     Optional<MovementLocation> locationFilter) {
 	state GetActiveMovementsRequest getActiveMovementsRequest(
@@ -2230,10 +2230,10 @@ ACTOR Future<std::vector<TenantMovementInfo>> getActiveMovements(
 	}
 }
 
-ACTOR Future<Void> statusDBMove(Database db, KeyRef prefix, bool json = false) {
+ACTOR Future<Void> statusDBMove(Database db, Key prefix, bool json = false) {
 	try {
-		state std::vector<TenantMovementInfo> targetDBMoveRes = wait(getActiveMovements(
-		    db, Optional<std::string>(prefix.toString()), Optional<std::string>(), Optional<MovementLocation>()));
+		state std::vector<TenantMovementInfo> targetDBMoveRes =
+		    wait(getActiveMovements(db, prefix, Optional<std::string>(), Optional<MovementLocation>()));
 		if (targetDBMoveRes.size() != 1) {
 			throw movement_not_found();
 		}
@@ -2252,7 +2252,7 @@ ACTOR Future<Void> statusDBMove(Database db, KeyRef prefix, bool json = false) {
 }
 
 ACTOR Future<Void> fetchAndDisplayDBMove(Database db,
-                                         Optional<std::string> prefixFilter,
+                                         Optional<Key> prefixFilter,
                                          Optional<std::string> peerDatabaseConnectionStringFilter,
                                          Optional<MovementLocation> locationFilter) {
 	try {
@@ -2286,7 +2286,7 @@ ACTOR Future<Void> fetchAndDisplayDBMove(Database db,
 ACTOR Future<Void> listDBMove(Database db, bool isSrc) {
 	MovementLocation locationFilter = isSrc ? MovementLocation::SOURCE : MovementLocation::DEST;
 	wait(fetchAndDisplayDBMove(
-	    db, Optional<std::string>(), Optional<std::string>(), Optional<MovementLocation>(locationFilter)));
+	    db, Optional<Key>(), Optional<std::string>(), Optional<MovementLocation>(locationFilter)));
 	return Void();
 }
 
@@ -2294,7 +2294,7 @@ ACTOR Future<Void> listDBMove(Database db, bool isSrc) {
 ACTOR Future<Void> listDBMove(Database src, Database dest) {
 	std::string targetConnectionString = dest->getConnectionRecord()->getConnectionString().toString();
 	wait(fetchAndDisplayDBMove(src,
-	                           Optional<std::string>(),
+	                           Optional<Key>(),
 	                           Optional<std::string>(targetConnectionString),
 	                           Optional<MovementLocation>(MovementLocation::SOURCE)));
 	return Void();
@@ -2303,8 +2303,7 @@ ACTOR Future<Void> listDBMove(Database src, Database dest) {
 ACTOR Future<Void> finishDBMove(Database src, Key srcPrefix, Optional<double> maxLagSeconds) {
 	try {
 		// Send request to source cluster
-		state FinishSourceMovementRequest finishSourceMovementRequest(srcPrefix.toString(),
-		                                                              maxLagSeconds.orDefault(DBL_MAX));
+		state FinishSourceMovementRequest finishSourceMovementRequest(srcPrefix, maxLagSeconds.orDefault(DBL_MAX));
 		state Future<ErrorOr<FinishSourceMovementReply>> finishSourceMovementReply = Never();
 		state Future<Void> initialize = Void();
 		loop choose {
@@ -2353,7 +2352,8 @@ ACTOR Future<Void> abortDBMove(Optional<Database> src,
 	try {
 		bool isSource = src.present();
 		Key targetPrefix = isSource ? sourcePrefix.get() : destinationPrefix.get();
-		state AbortMovementRequest abortMovementRequest(targetPrefix.toString(), isSource);
+		state AbortMovementRequest abortMovementRequest(targetPrefix,
+		                                                isSource ? MovementLocation::SOURCE : MovementLocation::DEST);
 		state Future<ErrorOr<AbortMovementReply>> abortMovementReply = Never();
 		state Future<Void> initialize = Void();
 		state Database targetDatabase = (isSource ? src : dest).get();
@@ -2395,7 +2395,7 @@ ACTOR Future<Void> abortDBMove(Optional<Database> src,
 
 ACTOR Future<Void> cleanupDBMove(Database src, Key srcPrefix, CleanupMovementSourceRequest::CleanupType cleanupType) {
 	try {
-		state CleanupMovementSourceRequest cleanupMovementSourceRequest(srcPrefix.toString(), cleanupType);
+		state CleanupMovementSourceRequest cleanupMovementSourceRequest(srcPrefix, cleanupType);
 		state Future<ErrorOr<CleanupMovementSourceReply>> cleanupMovementSourceReply = Never();
 		state Future<Void> initialize = Void();
 		loop choose {
