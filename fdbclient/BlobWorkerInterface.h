@@ -135,6 +135,7 @@ struct AssignBlobRangeRequest {
 
 	// For an initial assignment, reassignent, split, or merge, continueAssignment==false.
 	bool continueAssignment;
+	bool specialAssignment;
 
 	ReplyPromise<AssignBlobRangeReply> reply;
 
@@ -142,7 +143,7 @@ struct AssignBlobRangeRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, managerEpoch, managerSeqno, continueAssignment, reply, arena);
+		serializer(ar, keyRange, managerEpoch, managerSeqno, continueAssignment, specialAssignment, reply, arena);
 	}
 };
 

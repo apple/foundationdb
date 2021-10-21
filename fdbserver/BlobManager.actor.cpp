@@ -35,7 +35,7 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-#define BM_DEBUG false
+#define BM_DEBUG true
 
 // FIXME: change all BlobManagerData* to Reference<BlobManagerData> to avoid segfaults if core loop gets error
 
@@ -166,10 +166,13 @@ void getRanges(std::vector<std::pair<KeyRangeRef, bool>>& results, KeyRangeMap<b
 }
 
 struct RangeAssignmentData {
+	// TODO: put these in an enum
 	bool continueAssignment;
+	bool specialAssignment;
 
-	RangeAssignmentData() : continueAssignment(false) {}
-	RangeAssignmentData(bool continueAssignment) : continueAssignment(continueAssignment) {}
+	RangeAssignmentData() : continueAssignment(false), specialAssignment(false) {}
+	RangeAssignmentData(bool continueAssignment, bool specialAssignment = false)
+	  : continueAssignment(continueAssignment), specialAssignment(specialAssignment) {}
 };
 
 struct RangeRevokeData {
@@ -206,8 +209,10 @@ struct BlobManagerData {
 	KeyRangeMap<UID> workerAssignments;
 	KeyRangeMap<bool> knownBlobRanges;
 
+	AsyncTrigger startRecruiting;
 	Debouncer restartRecruiting;
 	std::set<NetworkAddress> recruitingLocalities; // the addrs of the workers being recruited on
+	AsyncVar<int> recruitingStream;
 
 	int64_t epoch = -1;
 	int64_t seqNo = 1;
@@ -220,7 +225,7 @@ struct BlobManagerData {
 
 	BlobManagerData(UID id, Database db)
 	  : id(id), db(db), knownBlobRanges(false, normalKeys.end),
-	    restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY) {}
+	    restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), recruitingStream(0) {}
 	~BlobManagerData() { printf("Destroying blob manager data for %s\n", id.toString().c_str()); }
 };
 
@@ -269,9 +274,16 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 
 // Picks a worker with the fewest number of already assigned ranges.
 // If there is a tie, picks one such worker at random.
-static UID pickWorkerForAssign(BlobManagerData* bmData) {
-	int minGranulesAssigned = INT_MAX;
-	std::vector<UID> eligibleWorkers;
+ACTOR Future<UID> pickWorkerForAssign(BlobManagerData* bmData) {
+	state int minGranulesAssigned = INT_MAX;
+	state std::vector<UID> eligibleWorkers;
+
+	printf("workerStats.size()=%d, recruitingStream=%d\n", bmData->workerStats.size(), bmData->recruitingStream.get());
+	while (bmData->workerStats.size() == 0) {
+		printf("looping waiting for workerstats\n");
+		wait(bmData->recruitingStream.onChange());
+	}
+	printf("workerStats.size()=%d\n", bmData->workerStats.size());
 
 	for (auto const& worker : bmData->workerStats) {
 		UID currId = worker.first;
@@ -322,6 +334,7 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 			req.managerEpoch = bmData->epoch;
 			req.managerSeqno = seqNo;
 			req.continueAssignment = assignment.assign.get().continueAssignment;
+			req.specialAssignment = assignment.assign.get().specialAssignment;
 
 			// if that worker isn't alive anymore, add the range back into the stream
 			if (bmData->workersById.count(workerID) == 0) {
@@ -375,7 +388,10 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 			bmData->rangesToAssign.send(revokeOld);
 
 			// send assignment back to queue as is, clearing designated worker if present
-			assignment.worker.reset();
+			if (assignment.assign.get().specialAssignment && assignment.worker.get() != UID()) {
+			} else {
+				assignment.worker.reset();
+			}
 			bmData->rangesToAssign.send(assignment);
 			// FIXME: improvement would be to add history of failed workers to assignment so it can try other ones first
 		} else {
@@ -409,12 +425,12 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 		if (BUGGIFY_WITH_PROB(0.05)) {
 			wait(delay(deterministicRandom()->random01()));
 		}
-		RangeAssignment assignment = waitNext(bmData->rangesToAssign.getFuture());
-		int64_t seqNo = bmData->seqNo;
+		state RangeAssignment assignment = waitNext(bmData->rangesToAssign.getFuture());
+		state int64_t seqNo = bmData->seqNo;
 		bmData->seqNo++;
 
 		// modify the in-memory assignment data structures, and send request off to worker
-		UID workerId;
+		state UID workerId;
 		if (assignment.isAssign) {
 			// Ensure range isn't currently assigned anywhere, and there is only 1 intersecting range
 			auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
@@ -424,19 +440,26 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 					ASSERT(assignment.worker.present());
 					ASSERT(it.value() == assignment.worker.get());
 				} else {
-					ASSERT(it.value() == UID());
+					// ASSERT(it.value() == UID());
 				}
 				count++;
 			}
 			ASSERT(count == 1);
 
-			workerId = assignment.worker.present() ? assignment.worker.get() : pickWorkerForAssign(bmData);
+			if (assignment.worker.present() && assignment.worker.get().isValid()) {
+				workerId = assignment.worker.get();
+			} else {
+				UID _workerId = wait(pickWorkerForAssign(bmData));
+				workerId = _workerId;
+			}
 			bmData->workerAssignments.insert(assignment.keyRange, workerId);
 
+			/*
 			ASSERT(bmData->workerStats.count(workerId));
 			if (!assignment.assign.get().continueAssignment) {
-				bmData->workerStats[workerId].numGranulesAssigned += 1;
+			    bmData->workerStats[workerId].numGranulesAssigned += 1;
 			}
+			*/
 
 			// FIXME: if range is assign, have some sort of semaphore for outstanding assignments so we don't assign
 			// a ton ranges at once and blow up FDB with reading initial snapshots.
@@ -716,7 +739,7 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
 	return Void();
 }
 
-ACTOR Future<Void> deregisterBlobWorker(BlobManagerData* bmData, const BlobWorkerInterface& interf) {
+ACTOR Future<Void> deregisterBlobWorker(BlobManagerData* bmData, BlobWorkerInterface interf) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -741,7 +764,7 @@ ACTOR Future<Void> deregisterBlobWorker(BlobManagerData* bmData, const BlobWorke
 	}
 }
 
-void killBlobWorker(BlobManagerData* bmData, const BlobWorkerInterface& bwInterf) {
+ACTOR Future<Void> killBlobWorker(BlobManagerData* bmData, BlobWorkerInterface bwInterf) {
 	UID bwId = bwInterf.id();
 
 	// Remove blob worker from stats map so that when we try to find a worker to takeover the range,
@@ -750,6 +773,8 @@ void killBlobWorker(BlobManagerData* bmData, const BlobWorkerInterface& bwInterf
 	// when we try to recruit new blob workers.
 	bmData->workerStats.erase(bwId);
 	bmData->workersById.erase(bwId);
+	Future<Void> deregister = deregisterBlobWorker(bmData, bwInterf);
+	bmData->restartRecruiting.trigger();
 
 	// for every range owned by this blob worker, we want to
 	// - send a revoke request for that range
@@ -783,7 +808,8 @@ void killBlobWorker(BlobManagerData* bmData, const BlobWorkerInterface& bwInterf
 	bmData->addActor.send(
 	    brokenPromiseToNever(bwInterf.haltBlobWorker.getReply(HaltBlobWorkerRequest(bmData->epoch, bmData->id))));
 
-	wait(deregisterBlobWorker(bmData, bwInterf));
+	wait(deregister);
+	return Void();
 }
 
 ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerInterface bwInterf) {
@@ -852,6 +878,10 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 				}
 			}
 		} catch (Error& e) {
+			printf("BM %s got error %s while monitoring BW %s---------------\n",
+			       bmData->id.toString().c_str(),
+			       e.name(),
+			       bwInterf.id().toString().c_str());
 			if (e.code() == error_code_operation_cancelled) {
 				throw e;
 			}
@@ -880,6 +910,7 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 
 ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterface bwInterf) {
 	try {
+		printf("adding waitFailure for BW %s\n", bwInterf.id().toString().c_str());
 		state Future<Void> waitFailure = waitFailureClient(bwInterf.waitFailure, SERVER_KNOBS->BLOB_WORKER_TIMEOUT);
 		state Future<Void> monitorStatus = monitorBlobWorkerStatus(bmData, bwInterf);
 
@@ -910,13 +941,13 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 	}
 
 	// kill the blob worker
-	killBlobWorker(bmData, bwInterf);
+	wait(killBlobWorker(bmData, bwInterf));
 
 	// Trigger recruitment for a new blob worker
 	if (BM_DEBUG) {
 		printf("Restarting recruitment to replace dead BW %s\n", bwInterf.id().toString().c_str());
 	}
-	bmData->restartRecruiting.trigger();
+	// bmData->restartRecruiting.trigger();
 
 	if (BM_DEBUG) {
 		printf("No longer monitoring BW %s\n", bwInterf.id().toString().c_str());
@@ -925,6 +956,7 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 }
 
 ACTOR Future<Void> ackExistingBlobWorkers(BlobManagerData* bmData) {
+	printf("acking\n");
 	// get list of last known blob workers
 	// note: the list will include every blob worker that the old manager knew about
 	// but it might also contain blob workers that died while the new manager was being recruited
@@ -937,15 +969,19 @@ ACTOR Future<Void> ackExistingBlobWorkers(BlobManagerData* bmData) {
 
 		// if the worker died when the new BM was being recruited, the monitor will fail and we
 		// will clean up the dead blob worker (and recruit new ones in place)
+		printf("adding monitor for BW %s\n", worker.id().toString().c_str());
 		bmData->addActor.send(monitorBlobWorker(bmData, worker));
 	}
+	bmData->startRecruiting.trigger();
 
-	// TODO: anyway we can guarantee the monitor ran so that we have a complete set of alive BWs?
+	// TODO: is there anyway we can guarantee the monitor ran so that we have a complete set of alive BWs?
+	// A not so great way of doing this is timeouts
 	// At this point, bmData->workersById is a complete list of blob workers
 
+	printf("after adding monitors\n");
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 
-	// TODO: if blob manager dies, and while another is being recruited, a blob worker dies, we need to handle sending
+	// If blob manager dies, and while another is being recruited, a blob worker dies, we need to handle sending
 	// the ranges for the dead blob worker to new workers. For every range persisted in the DB, send an assign request
 	// to the worker that it was intended for. If the worker indeed had it, its a noop. If the worker didn't have it,
 	// it'll persist it. If the worker is dead, i.e. it died while a new BM was being recruited, (easy check: just check
@@ -986,60 +1022,102 @@ ACTOR Future<Void> ackExistingBlobWorkers(BlobManagerData* bmData) {
 	state RangeResult blobGranuleSplits;
 	// get assignments
 	loop {
-		tr->reset();
 		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			//	tr->reset();
 			wait(checkManagerLock(tr, bmData));
-			RangeResult _results = wait(krmGetRanges(tr,
-			                                         blobGranuleMappingKeys.begin,
-			                                         KeyRange(normalKeys),
-			                                         GetRangeLimits::ROW_LIMIT_UNLIMITED,
-			                                         GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+			RangeResult _results = wait(krmGetRanges(
+			    tr, blobGranuleMappingKeys.begin, KeyRange(normalKeys), 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
 			blobGranuleMappings = _results;
 			if (blobGranuleMappings.more) {
+				// TODO: accumulate resutls
 			}
 
-			wait(tr->commit());
+			wait(tr->commit()); // TODO: don't need commit
+			break;
 		} catch (Error& e) {
 			wait(tr->onError(e));
 		}
 	}
+
+	for (int rangeIdx = 0; rangeIdx < blobGranuleMappings.size() - 1; rangeIdx++) {
+		Key granuleStartKey = blobGranuleMappings[rangeIdx].key;
+		Key granuleEndKey = blobGranuleMappings[rangeIdx + 1].key;
+		if (blobGranuleMappings[rangeIdx].value.size()) {
+			UID existingOwner = decodeBlobGranuleMappingValue(blobGranuleMappings[rangeIdx].value);
+			UID newOwner = bmData->workersById.count(existingOwner) ? existingOwner : UID();
+			printf("about to insert [%s-%s] into workerassignments\n",
+			       granuleStartKey.printable().c_str(),
+			       granuleStartKey.printable().c_str());
+			bmData->workerAssignments.insert(KeyRangeRef(granuleStartKey, granuleEndKey), newOwner);
+		}
+	}
+
 	// get splits
+	tr->reset();
 	loop {
-		tr->reset();
 		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			wait(checkManagerLock(tr, bmData));
-			RangeResult _results = wait(krmGetRanges(tr,
-			                                         blobGranuleMappingKeys.begin,
-			                                         KeyRange(normalKeys),
-			                                         GetRangeLimits::ROW_LIMIT_UNLIMITED,
-			                                         GetRangeLimits::BYTE_LIMIT_UNLIMITED));
-			results = _results;
-			if (results.more) {
+			// tr->reset();
+			RangeResult _results =
+			    wait(tr->getRange(KeyRangeRef(blobGranuleSplitKeys.begin, blobGranuleSplitKeys.end), 10000));
+
+			blobGranuleSplits = _results;
+			if (blobGranuleSplits.more) {
+				// TODO: accumulate resutls
 			}
 
-			wait(tr->commit());
+			wait(tr->commit()); // don't need commit
+			break;
 		} catch (Error& e) {
 			wait(tr->onError(e));
 		}
 	}
-	for (auto range : blobGranuleMappings) {
-		bmData->workerAssignments.insert(range.key, decodeBlobGranuleMappingValue(range.value));
-	}
-	for (auto range : blobGranuleSplits) {
-		if bmData
-			->workerAssignments.insert(range.key, decodeBlobGranuleMappingValue(range.value));
+
+	for (auto split : blobGranuleSplits) {
+		UID parentGranuleID, granuleID; //
+		BlobGranuleSplitState splitState; // enum
+		Version version; // version at which split happened
+		if (split.expectedSize() == 0) {
+			continue;
+		}
+		std::tie(parentGranuleID, granuleID) = decodeBlobGranuleSplitKey(split.key);
+		std::tie(splitState, version) = decodeBlobGranuleSplitValue(split.value);
+		const KeyRange range = blobGranuleSplitKeyRangeFor(parentGranuleID);
+		UID owner = UID();
+		// TODO: need actual owner otherwise retry logic will be messed up. we might have sent the
+		// req to a worker who didn't finish it yet and so the assignment is not in granuleAssignments
+		// and if we try to assign to someone else, there will be two workers owning the same range which is
+		// problematic. Is this problematic though? One of the seqno's will becomes stale!
+		// bmData->workerAssignments.insert(range, UID());
+		if (splitState <= BlobGranuleSplitState::Started) {
+			printf("about to insert [%s-%s] into workerassignments\n",
+			       range.begin.printable().c_str(),
+			       range.end.printable().c_str());
+			bmData->workerAssignments.insert(range, UID());
+		}
 	}
 
-	/*
-	   for (range : bmData->workerAssignments) {
-	   if (workersbyId.count(range.value)) {
-	     } else {
-	       range.value = UID();
+	if (bmData->workerAssignments.size() == 1) {
+		return Void();
+	}
 
-	     }
-	   }
-	   send assign with worker = range.workerId
-	*/
+	for (auto& range : bmData->workerAssignments.ranges()) {
+		printf("assigning range [%s-%s]\n",
+		       range.range().begin.printable().c_str(),
+		       range.range().end.printable().c_str());
+		// what should we do if we get here and the worker was alive, but between now and the assignment, the
+		// worker dies. what's the retry logic going to be?
+		RangeAssignment raAssign;
+		raAssign.isAssign = true;
+		raAssign.worker = range.value();
+		raAssign.keyRange = range.range();
+		raAssign.assign = RangeAssignmentData(false, true); // special assignment
+		bmData->rangesToAssign.send(raAssign);
+	}
 
 	return Void();
 }
@@ -1069,8 +1147,8 @@ ACTOR Future<Void> chaosRangeMover(BlobManagerData* bmData) {
 						       randomRange.value().toString().c_str());
 					}
 
-					// FIXME: with low probability, could immediately revoke it from the new assignment and move it back
-					// right after to test that race
+					// FIXME: with low probability, could immediately revoke it from the new assignment and move
+					// it back right after to test that race
 
 					RangeAssignment revokeOld;
 					revokeOld.isAssign = false;
@@ -1113,6 +1191,8 @@ int numExistingBWOnAddr(BlobManagerData* self, const AddressExclusion& addr) {
 ACTOR Future<Void> initializeBlobWorker(BlobManagerData* self, RecruitBlobWorkerReply candidateWorker) {
 	const NetworkAddress& netAddr = candidateWorker.worker.stableAddress();
 	AddressExclusion workerAddr(netAddr.ip, netAddr.port);
+	self->recruitingStream.set(self->recruitingStream.get() + 1);
+
 	// Ask the candidateWorker to initialize a BW only if the worker does not have a pending request
 	if (numExistingBWOnAddr(self, workerAddr) == 0 &&
 	    self->recruitingLocalities.count(candidateWorker.worker.stableAddress()) == 0) {
@@ -1157,6 +1237,7 @@ ACTOR Future<Void> initializeBlobWorker(BlobManagerData* self, RecruitBlobWorker
 		if (newBlobWorker.present()) {
 			BlobWorkerInterface bwi = newBlobWorker.get().interf;
 
+			printf("Adding worker %s to BM Records\n", bwi.id().toString().c_str());
 			self->workersById[bwi.id()] = bwi;
 			self->workerStats[bwi.id()] = BlobWorkerStats();
 			self->addActor.send(monitorBlobWorker(self, bwi));
@@ -1176,6 +1257,7 @@ ACTOR Future<Void> initializeBlobWorker(BlobManagerData* self, RecruitBlobWorker
 	}
 
 	// try to recruit more blob workers
+	self->recruitingStream.set(self->recruitingStream.get() - 1);
 	self->restartRecruiting.trigger();
 	return Void();
 }
@@ -1187,6 +1269,9 @@ ACTOR Future<Void> blobWorkerRecruiter(
 	state Future<RecruitBlobWorkerReply> fCandidateWorker;
 	state RecruitBlobWorkerRequest lastRequest;
 
+	loop choose {
+		when(wait(self->startRecruiting.onTrigger())) { break; }
+	}
 	loop {
 		try {
 			state RecruitBlobWorkerRequest recruitReq;
@@ -1203,6 +1288,11 @@ ACTOR Future<Void> blobWorkerRecruiter(
 				recruitReq.excludeAddresses.emplace_back(AddressExclusion(addr.ip, addr.port));
 			}
 
+			printf("Recruiting now. Excluding: \n");
+			for (auto addr : recruitReq.excludeAddresses) {
+				printf("   - %s\n", addr.toString().c_str());
+			}
+
 			TraceEvent("BMRecruiting").detail("State", "Sending request to CC");
 
 			if (!fCandidateWorker.isValid() || fCandidateWorker.isReady() ||
@@ -1214,8 +1304,10 @@ ACTOR Future<Void> blobWorkerRecruiter(
 			}
 
 			choose {
-				// when we get back a worker we can use, we will try to initialize a blob worker onto that process
+				// when we get back a worker we can use, we will try to initialize a blob worker onto that
+				// process
 				when(RecruitBlobWorkerReply candidateWorker = wait(fCandidateWorker)) {
+					printf("About to initialize BW\n");
 					self->addActor.send(initializeBlobWorker(self, candidateWorker));
 				}
 
@@ -1267,14 +1359,15 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		printf("Blob manager acquired lock at epoch %lld\n", epoch);
 	}
 
-	// needed to pick up changes to dbinfo in case new CC comes along
 	auto recruitBlobWorker = IAsyncListener<RequestStream<RecruitBlobWorkerRequest>>::create(
 	    dbInfo, [](auto const& info) { return info.clusterInterface.recruitBlobWorker; });
+
+	self.addActor.send(blobWorkerRecruiter(&self, recruitBlobWorker));
 
 	// we need to acknowledge existing blob workers before recruiting any new ones
 	wait(ackExistingBlobWorkers(&self));
 
-	self.addActor.send(blobWorkerRecruiter(&self, recruitBlobWorker));
+	// self.addActor.send(blobWorkerRecruiter(&self, recruitBlobWorker));
 	self.addActor.send(monitorClientRanges(&self));
 	self.addActor.send(rangeAssigner(&self));
 
@@ -1319,8 +1412,8 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 // DB has [B - D). It should show up coalesced in knownBlobRanges, and [C - D) should be removed.
 // DB has [A - D). It should show up coalesced in knownBlobRanges, and [A - B) should be removed.
 // DB has [A - B) and [C - D). They should show up in knownBlobRanges, and [B - C) should be in removed.
-// DB has [B - C). It should show up in knownBlobRanges, [B - C) should be in added, and [A - B) and [C - D) should
-// be in removed.
+// DB has [B - C). It should show up in knownBlobRanges, [B - C) should be in added, and [A - B) and [C - D)
+// should be in removed.
 TEST_CASE("/blobmanager/updateranges") {
 	KeyRangeMap<bool> knownBlobRanges(false, normalKeys.end);
 	Arena ar;

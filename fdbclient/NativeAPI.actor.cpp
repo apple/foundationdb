@@ -7109,7 +7109,7 @@ Future<Void> DatabaseContext::popChangeFeedMutations(Key rangeID, Version versio
 	return popChangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, version);
 }
 
-#define BG_REQUEST_DEBUG false
+#define BG_REQUEST_DEBUG true
 
 ACTOR Future<Void> getBlobGranuleRangesStreamActor(Reference<DatabaseContext> db,
                                                    PromiseStream<KeyRange> results,
@@ -7242,7 +7242,10 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 
 						if (!cx->blobWorker_interf.count(workerId)) {
 							Optional<Value> workerInterface = wait(tr->get(blobWorkerListKeyFor(workerId)));
-							ASSERT(workerInterface.present());
+							if (!workerInterface.present()) {
+								throw wrong_shard_server();
+							}
+							// ASSERT(workerInterface.present());
 							cx->blobWorker_interf[workerId] = decodeBlobWorkerListValue(workerInterface.get());
 							if (BG_REQUEST_DEBUG) {
 								printf("    decoded worker interface for %s\n", workerId.toString().c_str());

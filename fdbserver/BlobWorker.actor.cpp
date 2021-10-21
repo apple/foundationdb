@@ -42,8 +42,8 @@
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-#define BW_DEBUG false
-#define BW_REQUEST_DEBUG false
+#define BW_DEBUG true
+#define BW_REQUEST_DEBUG true
 
 // TODO add comments + documentation
 struct BlobFileIndex {
@@ -2220,7 +2220,8 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
                                    int64_t seqno,
                                    bool active,
                                    bool disposeOnCleanup,
-                                   bool selfReassign) {
+                                   bool selfReassign,
+                                   bool specialAssignment = false) {
 	if (BW_DEBUG) {
 		printf("%s range for [%s - %s): %s @ (%lld, %lld)\n",
 		       selfReassign ? "Re-assigning" : "Changing",
@@ -2253,6 +2254,16 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 			}
 		}
 		bool thisAssignmentNewer = newerRangeAssignment(r.value(), epoch, seqno);
+
+		// if this granule already has it, and this was a specialassignment (i.e. a new blob maanger is trying to
+		// reassign granules), then just continue
+		if (specialAssignment && r.begin() == keyRange.begin && r.end() == keyRange.end) {
+			r.value().lastEpoch = epoch;
+			r.value().lastSeqno = seqno;
+			alreadyAssigned = true;
+			break;
+		}
+
 		if (r.value().lastEpoch == epoch && r.value().lastSeqno == seqno) {
 			ASSERT(r.begin() == keyRange.begin);
 			ASSERT(r.end() == keyRange.end);
@@ -2318,7 +2329,6 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 		bwData->granuleMetadata.insert(it.first, it.second);
 	}
 
-	printf("returning from changeblobrange");
 	wait(waitForAll(futures));
 	return true;
 }
@@ -2385,31 +2395,6 @@ ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData, BlobWork
 	}
 }
 
-ACTOR Future<Void> deregisterBlobWorker(Reference<BlobWorkerData> bwData, BlobWorkerInterface interf) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
-	loop {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		try {
-			Key blobWorkerListKey = blobWorkerListKeyFor(interf.id());
-			tr->addReadConflictRange(singleKeyRange(blobWorkerListKey));
-			tr->clear(blobWorkerListKey);
-
-			wait(tr->commit());
-
-			if (BW_DEBUG) {
-				printf("Deregistered blob worker %s\n", interf.id().toString().c_str());
-			}
-			return Void();
-		} catch (Error& e) {
-			if (BW_DEBUG) {
-				printf("Deregistering blob worker %s got error %s\n", interf.id().toString().c_str(), e.name());
-			}
-			wait(tr->onError(e));
-		}
-	}
-}
-
 ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
                                      AssignBlobRangeRequest req,
                                      bool isSelfReassign) {
@@ -2417,8 +2402,14 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 		if (req.continueAssignment) {
 			resumeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno);
 		} else {
-			bool shouldStart = wait(
-			    changeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno, true, false, isSelfReassign));
+			bool shouldStart = wait(changeBlobRange(bwData,
+			                                        req.keyRange,
+			                                        req.managerEpoch,
+			                                        req.managerSeqno,
+			                                        true,
+			                                        false,
+			                                        isSelfReassign,
+			                                        req.specialAssignment));
 
 			if (shouldStart) {
 				auto m = bwData->granuleMetadata.rangeContaining(req.keyRange.begin);
