@@ -186,7 +186,15 @@ class ConfigNodeImpl {
 		}
 		state Version committedVersion =
 		    wait(map(getGeneration(self), [](auto const& gen) { return gen.committedVersion; }));
-		ASSERT(req.lastSeenVersion < committedVersion);
+		// TODO: Reenable this when running the ConfigIncrement workload with reboot=false
+		// if (committedVersion < req.mostRecentVersion) {
+		// 	// Handle a very rare case where a ConfigNode loses data between
+		// 	// responding with a committed version and responding to the
+		// 	// subsequent get changes request.
+		// 	TEST(true); // ConfigNode data loss occurred on a minority of coordinators
+		// 	req.reply.sendError(process_behind()); // Reuse the process_behind error
+		// 	return Void();
+		// }
 		state Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
 		    wait(getMutations(self, req.lastSeenVersion + 1, committedVersion));
 		state Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> versionedAnnotations =
