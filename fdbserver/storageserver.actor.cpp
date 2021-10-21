@@ -3263,7 +3263,7 @@ void ShardInfo::addMutation(Version version, MutationRef const& mutation) {
 	}
 }
 
-enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE };
+enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY };
 const char* changeServerKeysContextName[] = { "Update", "Restore" };
 
 void changeServerKeys(StorageServer* data,
@@ -3331,6 +3331,7 @@ void changeServerKeys(StorageServer* data,
 	auto vr = data->newestAvailableVersion.intersectingRanges(keys);
 	std::vector<std::pair<KeyRange, Version>> changeNewestAvailable;
 	std::vector<KeyRange> removeRanges;
+	std::vector<KeyRange> newEmptyRanges;
 	for (auto r = vr.begin(); r != vr.end(); ++r) {
 		KeyRangeRef range = keys & r->range();
 		bool dataAvailable = r->value() == latestVersion || r->value() >= version;
@@ -3341,7 +3342,14 @@ void changeServerKeys(StorageServer* data,
 		//     .detail("NowAssigned", nowAssigned)
 		//     .detail("NewestAvailable", r->value())
 		//     .detail("ShardState0", data->shards[range.begin]->debugDescribeState());
-		if (!nowAssigned) {
+		if (context == CSK_ASSIGN_EMPTY && !dataAvailable) {
+			ASSERT(nowAssigned);
+			TraceEvent("ChangeServerKeysAddEmptyRange", data->thisServerID)
+			    .detail("Begin", range.begin)
+			    .detail("End", range.end);
+			newEmptyRanges.push_back(range);
+			data->addShard(ShardInfo::newReadWrite(range, data));
+		} else if (!nowAssigned) {
 			if (dataAvailable) {
 				ASSERT(r->value() ==
 				       latestVersion); // Not that we care, but this used to be checked instead of dataAvailable
@@ -3354,7 +3362,7 @@ void changeServerKeys(StorageServer* data,
 		} else if (!dataAvailable) {
 			// SOMEDAY: Avoid restarting adding/transferred shards
 			if (version == 0) { // bypass fetchkeys; shard is known empty at version 0
-				TraceEvent("ChangeServerKeysAddEmptyRange", data->thisServerID)
+				TraceEvent("ChangeServerKeysInitialRange", data->thisServerID)
 				    .detail("Begin", range.begin)
 				    .detail("End", range.end);
 				changeNewestAvailable.emplace_back(range, latestVersion);
@@ -3387,6 +3395,14 @@ void changeServerKeys(StorageServer* data,
 	for (auto r = removeRanges.begin(); r != removeRanges.end(); ++r) {
 		removeDataRange(data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->shards, *r);
 		setAvailableStatus(data, *r, false);
+	}
+
+	// Clear the moving-in empty range, and set it available at the latestVersion.
+	for (const auto& range : newEmptyRanges) {
+		MutationRef clearRange(MutationRef::ClearRange, range.begin, range.end);
+		data->addMutation(data->data().getLatestVersion(), clearRange, range, data->updateEagerReads);
+		data->newestAvailableVersion.insert(range, latestVersion);
+		setAvailableStatus(data, range, true);
 	}
 	validate(data);
 }
@@ -3532,8 +3548,8 @@ private:
 				// the data for change.version-1 (changes from versions < change.version)
 				// If emptyRange, treat the shard as empty, see removeKeysFromFailedServer() for more details about this
 				// scenario.
-				const Version shardVersion = (emptyRange && nowAssigned) ? 0 : currentVersion - 1;
-				changeServerKeys(data, keys, nowAssigned, shardVersion, CSK_UPDATE);
+				const ChangeServerKeysContext context = emptyRange ? CSK_ASSIGN_EMPTY : CSK_UPDATE;
+				changeServerKeys(data, keys, nowAssigned, currentVersion - 1, context);
 			}
 
 			processedStartKey = false;
@@ -5022,7 +5038,7 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 			level = SevWarnAlways;
 		}
 
-		TraceEvent(level, "FetchKeyCurrentStatus")
+		TraceEvent(level, "FetchKeysCurrentStatus", self->thisServerID)
 		    .detail("Timestamp", now())
 		    .detail("LongestRunningTime", longestRunningFetchKeys.first)
 		    .detail("StartKey", longestRunningFetchKeys.second.begin)
