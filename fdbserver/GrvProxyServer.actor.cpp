@@ -566,12 +566,6 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 
 	grvProxyData->stats.grvGetCommittedVersionRpcDist->sampleSeconds(now() - grvConfirmEpochLive);
 	GetReadVersionReply rep;
-	rep.ratekeeperThrottling = false;
-	// borrowed logic from line 410-411 about hitting limit
-	if (grvProxyData->stats.txnRequestIn.getValue() - grvProxyData->stats.txnRequestOut.getValue() >
-	    SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE) {
-		rep.ratekeeperThrottling = true;
-	}
 	rep.version = repFromMaster.version;
 	rep.locked = repFromMaster.locked;
 	rep.metadataVersion = repFromMaster.metadataVersion;
@@ -654,6 +648,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 			}
 		}
 
+		reply.timeThrottled = request.reqProcessEnd - request.reqProcessStart;
 		request.reply.send(reply);
 		++stats->txnRequestOut;
 	}
@@ -819,10 +814,20 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 
 			if (req.priority < TransactionPriority::DEFAULT &&
 			    !batchRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
+				if (req.reqProcessStart == 0.0) {
+					req.reqProcessStart = g_network->timer();
+				}
 				break;
 			} else if (req.priority < TransactionPriority::IMMEDIATE &&
 			           !normalRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
+				if (req.reqProcessStart == 0.0) {
+					req.reqProcessStart = g_network->timer();
+				}
 				break;
+			}
+			// If not previously set, this is the first time this transaction is being processed.
+			if (req.reqProcessStart == 0.0) {
+				req.reqProcessStart = g_network->timer();
 			}
 
 			if (req.debugID.present()) {
@@ -846,6 +851,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 				--grvProxyData->stats.batchGRVQueueSize;
 			}
 
+			req.reqProcessEnd = g_network->timer();
 			start[req.flags & 1].push_back(std::move(req));
 			static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
 			transactionQueue->pop_front();

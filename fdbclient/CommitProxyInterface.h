@@ -195,7 +195,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 	int64_t midShardSize = 0;
-	bool ratekeeperThrottling;
+	double timeThrottled;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 
@@ -210,7 +210,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           metadataVersion,
 		           tagThrottleInfo,
 		           midShardSize,
-		           ratekeeperThrottling);
+		           timeThrottled);
 	}
 };
 
@@ -233,21 +233,22 @@ struct GetReadVersionRequest : TimedRequest {
 	uint32_t transactionCount;
 	uint32_t flags;
 	TransactionPriority priority;
+	double reqProcessStart, reqProcessEnd;
 
 	TransactionTagMap<uint32_t> tags;
 
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
 
-	GetReadVersionRequest() : transactionCount(1), flags(0) {}
+	GetReadVersionRequest() : transactionCount(1), flags(0), reqProcessStart(0.0), reqProcessEnd(0.0) {}
 	GetReadVersionRequest(SpanID spanContext,
 	                      uint32_t transactionCount,
 	                      TransactionPriority priority,
 	                      uint32_t flags = 0,
 	                      TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(),
 	                      Optional<UID> debugID = Optional<UID>())
-	  : spanContext(spanContext), transactionCount(transactionCount), flags(flags), priority(priority), tags(tags),
-	    debugID(debugID) {
+	  : spanContext(spanContext), transactionCount(transactionCount), flags(flags), priority(priority),
+	    reqProcessStart(0.0), reqProcessEnd(0.0), tags(tags), debugID(debugID) {
 		flags = flags & ~FLAG_PRIORITY_MASK;
 		switch (priority) {
 		case TransactionPriority::BATCH:
@@ -268,7 +269,7 @@ struct GetReadVersionRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext);
+		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext, reqProcessStart, reqProcessEnd);
 
 		if (ar.isDeserializing) {
 			if ((flags & PRIORITY_SYSTEM_IMMEDIATE) == PRIORITY_SYSTEM_IMMEDIATE) {

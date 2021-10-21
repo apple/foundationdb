@@ -5724,8 +5724,10 @@ ACTOR Future<Version> extractReadVersion(Location location,
 	GetReadVersionReply rep = wait(f);
 	double latency = now() - startTime;
 	cx->updateCachedRV(startTime, rep.version);
-	// use startTime instead??
-	if (rep.ratekeeperThrottling) {
+	// use startTime instead?
+	// maybe this also requires tracking number of loops processed in queue?
+	// TraceEvent("DebugTimeThrottled").detail("TimeThrottled", rep.timeThrottled);
+	if (rep.timeThrottled > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD) {
 		cx->lastTimedRkThrottle = now();
 	}
 	cx->GRVLatencies.addSample(latency);

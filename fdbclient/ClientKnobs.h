@@ -119,6 +119,8 @@ public:
 	double MAX_VERSION_CACHE_LAG;
 	bool DEBUG_USE_GRV_CACHE; // Turn on to have all GRVs request to use the cache
 	double GRV_CACHE_RK_COOLDOWN; // Required number of seconds to pass after throttling to re-allow cache use
+	double GRV_SUSTAINED_THROTTLING_THRESHOLD; // Adjust what amount of time is considered "sustained" throttling on
+	                                           // proxy for a GRV
 
 	// Taskbucket
 	double TASKBUCKET_LOGGING_DELAY;
