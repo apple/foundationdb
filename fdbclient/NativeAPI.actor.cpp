@@ -6777,6 +6777,7 @@ ACTOR Future<KeyRange> getChangeFeedRange(Reference<DatabaseContext> db, Databas
 			Version readVer = wait(tr.getReadVersion());
 			if (readVer < begin) {
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				tr.reset();
 			} else {
 				Optional<Value> val = wait(tr.get(rangeIDKey));
 				if (!val.present()) {
