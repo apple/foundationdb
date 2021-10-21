@@ -1705,7 +1705,7 @@ ACTOR Future<ChangeFeedStreamReply> getChangeFeedMutations(StorageServer* data,
 		wait(data->version.whenAtLeast(req.begin));
 	}
 	state uint64_t changeCounter = data->shardChangeCounter;
-	if (!req.range.empty() && !data->isReadable(req.range)) {
+	if (!inverted && !data->isReadable(req.range)) {
 		throw wrong_shard_server();
 	}
 
