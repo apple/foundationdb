@@ -896,37 +896,20 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 
 void filterActiveMove(const std::vector<TenantMovementInfo>& originStatus,
                       std::vector<TenantMovementInfo>& targetStatus,
-                      Optional<Key> prefixFilter,
-                      Optional<std::string> peerDatabaseConnectionStringFilter,
-                      Optional<MovementLocation> locationFilter) {
+                      Optional<std::string> prefixFilter,
+                      Optional<std::string> peerDatabaseConnectionStringFilter) {
 	for (const auto& status : originStatus) {
-		bool canPass = false;
-		if (prefixFilter.present()) {
-			if ((!locationFilter.present() || locationFilter.get() == MovementLocation::SOURCE) &&
-			    prefixFilter.get() == status.sourcePrefix) {
-				canPass = true;
-			}
-			if ((!locationFilter.present() || locationFilter.get() == MovementLocation::DEST) &&
-			    prefixFilter.get() == status.destPrefix) {
-				canPass = true;
-			}
-			if (!canPass) {
-				continue;
-			}
+		const std::string& localPrefix =
+		    (status.movementLocation == MovementLocation::SOURCE ? status.sourcePrefix : status.destPrefix).toString();
+		if (prefixFilter.present() && prefixFilter.get() != localPrefix) {
+			continue;
 		}
-		canPass = false;
-		if (peerDatabaseConnectionStringFilter.present()) {
-			if ((!locationFilter.present() || locationFilter.get() == MovementLocation::SOURCE) &&
-			    peerDatabaseConnectionStringFilter.get() == status.destinationConnectionString) {
-				canPass = true;
-			}
-			if ((!locationFilter.present() || locationFilter.get() == MovementLocation::DEST) &&
-			    peerDatabaseConnectionStringFilter.get() == status.sourceConnectionString) {
-				canPass = true;
-			}
-			if (!canPass) {
-				continue;
-			}
+		const std::string& remoteDatabaseConnectionString = status.movementLocation == MovementLocation::SOURCE
+		                                                        ? status.destinationConnectionString
+		                                                        : status.sourceConnectionString;
+		if (peerDatabaseConnectionStringFilter.present() &&
+		    peerDatabaseConnectionStringFilter.get() != remoteDatabaseConnectionString) {
+			continue;
 		}
 		targetStatus.push_back(status);
 	}
@@ -947,7 +930,7 @@ ACTOR Future<std::vector<TenantMovementInfo>> getFilteredMovements(
 		recorder.insert(recorder.end(), statusAsDest.begin(), statusAsDest.end());
 	}
 	std::vector<TenantMovementInfo> resultAfterFilter;
-	filterActiveMove(recorder, resultAfterFilter, prefixFilter, peerDatabaseConnectionStringFilter, locationFilter);
+	filterActiveMove(recorder, resultAfterFilter, prefixFilter, peerDatabaseConnectionStringFilter);
 	return recorder;
 }
 
