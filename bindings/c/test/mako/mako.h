@@ -81,6 +81,7 @@ enum Arguments {
 	ARG_TXNTAGGING,
 	ARG_TXNTAGGINGPREFIX,
 	ARG_STREAMING_MODE,
+	ARG_CLIENT_THREADS_PER_VERSION,
 	ARG_DISABLE_RYW
 };
 
@@ -103,6 +104,8 @@ typedef struct {
 #define LOGGROUP_MAX 256
 #define KNOB_MAX 256
 #define TAGPREFIXLENGTH_MAX 8
+#define NUM_CLUSTERS_MAX 3
+#define NUM_DATABASES_MAX 10
 
 /* benchmark parameters */
 typedef struct {
@@ -125,7 +128,9 @@ typedef struct {
 	int commit_get;
 	int verbose;
 	mako_txnspec_t txnspec;
-	char cluster_file[PATH_MAX];
+	char cluster_files[NUM_CLUSTERS_MAX][PATH_MAX];
+	int num_fdb_clusters;
+	int num_databases;
 	char log_group[LOGGROUP_MAX];
 	int prefixpadding;
 	int trace;
@@ -137,6 +142,7 @@ typedef struct {
 	int txntagging;
 	char txntagging_prefix[TAGPREFIXLENGTH_MAX];
 	FDBStreamingMode streaming_mode;
+	uint32_t client_threads_per_version;
 	int disable_ryw;
 } mako_args_t;
 
@@ -173,14 +179,15 @@ typedef struct {
 typedef struct {
 	int worker_id;
 	pid_t parent_id;
-	FDBDatabase* database;
 	mako_args_t* args;
 	mako_shmhdr_t* shm;
+	FDBDatabase* databases[NUM_DATABASES_MAX];
 } process_info_t;
 
 /* args for threads */
 typedef struct {
 	int thread_id;
+	int database_index; // index of the database to do work to
 	int elem_size[MAX_OP]; /* stores the multiple of LAT_BLOCK_SIZE to check the memory allocation of each operation */
 	bool is_memory_allocated[MAX_OP]; /* flag specified for each operation, whether the memory was allocated to that
 	                                     specific operation */
