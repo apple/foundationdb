@@ -37,7 +37,6 @@ enum class ClientLibStatus {
 	DISABLED = 0,
 	AVAILABLE, // 1
 	UPLOADING, // 2
-	DELETING, // 3
 	COUNT // must be the last one
 };
 
