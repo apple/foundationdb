@@ -93,9 +93,9 @@ class GetCommittedVersionQuorum {
 			} catch (Error& e) {
 				if (e.code() == error_code_version_already_compacted) {
 					TEST(true); // PaxosConfigConsumer rollforward compacted ConfigNode
-					ConfigFollowerGetSnapshotAndChangesReply reply = wait(
-					    retryBrokenPromise(quorumCfi.getSnapshotAndChanges,
-					                       ConfigFollowerGetSnapshotAndChangesRequest{self->largestCommitted}));
+					ConfigFollowerGetSnapshotAndChangesReply reply =
+					    wait(retryBrokenPromise(quorumCfi.getSnapshotAndChanges,
+					                            ConfigFollowerGetSnapshotAndChangesRequest{ self->largestCommitted }));
 					// TODO: Send the whole snapshot to `cfi`
 					ASSERT(false);
 				} else if (e.code() == error_code_not_committed) {
