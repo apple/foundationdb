@@ -6030,7 +6030,10 @@ public:
 		m_tree->set(keyValue);
 	}
 
-	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) {
+	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
+	                                             int rowLimit,
+	                                             int byteLimit,
+	                                             IKeyValueStore::ReadType) override {
 		debug_printf("READRANGE %s\n", printable(keys).c_str());
 		return catchError(readRange_impl(this, keys, rowLimit, byteLimit));
 	}
@@ -6136,7 +6139,7 @@ public:
 		return Optional<Value>();
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) {
+	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) {
 		return catchError(readValue_impl(this, key, debugID));
 	}
 
@@ -6162,7 +6165,10 @@ public:
 		return Optional<Value>();
 	}
 
-	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID = Optional<UID>()) {
+	Future<Optional<Value>> readValuePrefix(KeyRef key,
+	                                        int maxLength,
+	                                        IKeyValueStore::ReadType,
+	                                        Optional<UID> debugID) {
 		return catchError(readValuePrefix_impl(this, key, maxLength, debugID));
 	}
 

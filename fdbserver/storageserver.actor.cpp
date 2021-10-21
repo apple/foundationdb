@@ -184,15 +184,25 @@ struct StorageServerDisk {
 	Future<Void> commit() { return storage->commit(); }
 
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
-	Future<Key> readNextKeyInclusive(KeyRef key) { return readFirstKey(storage, KeyRangeRef(key, allKeys.end)); }
-	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) {
-		return storage->readValue(key, debugID);
+	Future<Key> readNextKeyInclusive(KeyRef key, IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL) {
+		return readFirstKey(storage, KeyRangeRef(key, allKeys.end), type);
 	}
-	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID = Optional<UID>()) {
-		return storage->readValuePrefix(key, maxLength, debugID);
+	Future<Optional<Value>> readValue(KeyRef key,
+	                                  IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL,
+	                                  Optional<UID> debugID = Optional<UID>()) {
+		return storage->readValue(key, type, debugID);
 	}
-	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) {
-		return storage->readRange(keys, rowLimit, byteLimit);
+	Future<Optional<Value>> readValuePrefix(KeyRef key,
+	                                        int maxLength,
+	                                        IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL,
+	                                        Optional<UID> debugID = Optional<UID>()) {
+		return storage->readValuePrefix(key, maxLength, type, debugID);
+	}
+	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
+	                                             int rowLimit = 1 << 30,
+	                                             int byteLimit = 1 << 30,
+	                                             IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL) {
+		return storage->readRange(keys, rowLimit, byteLimit, type);
 	}
 
 	KeyValueStoreType getKeyValueStoreType() { return storage->getType(); }
@@ -205,8 +215,8 @@ private:
 
 	void writeMutations(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
 
-	ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage, KeyRangeRef range) {
-		Standalone<RangeResultRef> r = wait(storage->readRange(range, 1));
+	ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage, KeyRangeRef range, IKeyValueStore::ReadType type) {
+		Standalone<RangeResultRef> r = wait(storage->readRange(range, 1, 1 << 30, type));
 		if (r.size())
 			return r[0].key;
 		else
@@ -1121,7 +1131,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			path = 1;
 		} else if (!i || !i->isClearTo() || i->getEndKey() <= req.key) {
 			path = 2;
-			Optional<Value> vv = wait(data->storage.readValue(req.key, req.debugID));
+			Optional<Value> vv = wait(data->storage.readValue(req.key, IKeyValueStore::ReadType::NORMAL, req.debugID));
 			// Validate that while we were reading the data we didn't lose the version or shard
 			if (version < data->storageVersion()) {
 				TEST(true); // transaction_too_old after readValue
@@ -1416,7 +1426,8 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
                                           Version version,
                                           KeyRange range,
                                           int limit,
-                                          int* pLimitBytes) {
+                                          int* pLimitBytes,
+                                          IKeyValueStore::ReadType type) {
 	state GetKeyValuesReply result;
 	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
 	state StorageServer::VersionedData::iterator vCurrent = view.end();
@@ -1476,7 +1487,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			// Read the data on disk up to vCurrent (or the end of the range)
 			readEnd = vCurrent ? std::min(vCurrent.key(), range.end) : range.end;
 			Standalone<RangeResultRef> atStorageVersion =
-			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes));
+			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
 
 			ASSERT(atStorageVersion.size() <= limit);
 			if (data->storageVersion() > version)
@@ -1557,7 +1568,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			readBegin = vCurrent ? std::max(vCurrent->isClearTo() ? vCurrent->getEndKey() : vCurrent.key(), range.begin)
 			                     : range.begin;
 			Standalone<RangeResultRef> atStorageVersion =
-			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes));
+			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
 
 			ASSERT(atStorageVersion.size() <= -limit);
 			if (data->storageVersion() > version)
@@ -1609,7 +1620,12 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 //	return sel.getKey() >= range.begin && (sel.isBackward() ? sel.getKey() <= range.end : sel.getKey() < range.end);
 //}
 
-ACTOR Future<Key> findKey(StorageServer* data, KeySelectorRef sel, Version version, KeyRange range, int* pOffset)
+ACTOR Future<Key> findKey(StorageServer* data,
+                          KeySelectorRef sel,
+                          Version version,
+                          KeyRange range,
+                          int* pOffset,
+                          IKeyValueStore::ReadType type)
 // Attempts to find the key indicated by sel in the data at version, within range.
 // Precondition: selectorInRange(sel, range)
 // If it is found, offset is set to 0 and a key is returned which falls inside range.
@@ -1643,7 +1659,9 @@ ACTOR Future<Key> findKey(StorageServer* data, KeySelectorRef sel, Version versi
 	              version,
 	              forward ? KeyRangeRef(sel.getKey(), range.end) : KeyRangeRef(range.begin, keyAfter(sel.getKey())),
 	              (distance + skipEqualKey) * sign,
-	              &maxBytes));
+	              &maxBytes,
+	              type));
+
 	state bool more = rep.more && rep.data.size() != distance + skipEqualKey;
 
 	// If we get only one result in the reverse direction as a result of the data being too large, we could get stuck in
@@ -1652,7 +1670,7 @@ ACTOR Future<Key> findKey(StorageServer* data, KeySelectorRef sel, Version versi
 		TEST(true); // Reverse key selector returned only one result in range read
 		maxBytes = std::numeric_limits<int>::max();
 		GetKeyValuesReply rep2 =
-		    wait(readRange(data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes));
+		    wait(readRange(data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes, type));
 		rep = rep2;
 		more = rep.more && rep.data.size() != distance + skipEqualKey;
 		ASSERT(rep.data.size() == 2 || !more);
@@ -1716,6 +1734,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 // selector offset prevents all data from being read in one range read
 {
 	state int64_t resultSize = 0;
+	state IKeyValueStore::ReadType type =
+	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
 
 	++data->counters.getRangeQueries;
 	++data->counters.allQueries;
@@ -1745,13 +1765,13 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterVersion");
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
-		//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
+		// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
 		//"None").detail("In", "getKeyValues>getShardKeyRange"); throw e; }
 
 		if (!selectorInRange(req.end, shard) && !(req.end.isFirstGreaterOrEqual() && req.end.getKey() == shard.end)) {
 			//			TraceEvent("WrongShardServer1", data->thisServerID).detail("Begin",
-			//req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
-			//shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
+			// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
+			// shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
 			throw wrong_shard_server();
 		}
 
@@ -1759,9 +1779,10 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		state int offset2;
 		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
 		                               ? Future<Key>(req.begin.getKey())
-		                               : findKey(data, req.begin, version, shard, &offset1);
-		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual() ? Future<Key>(req.end.getKey())
-		                                                         : findKey(data, req.end, version, shard, &offset2);
+		                               : findKey(data, req.begin, version, shard, &offset1, type);
+		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
+		                             ? Future<Key>(req.end.getKey())
+		                             : findKey(data, req.end, version, shard, &offset2, type);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 		if (req.debugID.present())
@@ -1801,7 +1822,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			state int remainingLimitBytes = req.limitBytes;
 
 			GetKeyValuesReply _r =
-			    wait(readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes));
+			    wait(readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, type));
 			GetKeyValuesReply r = _r;
 
 			if (req.debugID.present())
@@ -1891,7 +1912,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		state KeyRange shard = getShardKeyRange(data, req.sel);
 
 		state int offset;
-		Key k = wait(findKey(data, req.sel, version, shard, &offset));
+		Key k = wait(findKey(data, req.sel, version, shard, &offset, IKeyValueStore::ReadType::NORMAL));
 
 		data->checkChangeCounter(
 		    changeCounter, KeyRangeRef(std::min<KeyRef>(req.sel.getKey(), k), std::max<KeyRef>(req.sel.getKey(), k)));
@@ -1982,7 +2003,7 @@ ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager)
 	if (SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS) {
 		vector<Future<Key>> keyEnd(eager->keyBegin.size());
 		for (int i = 0; i < keyEnd.size(); i++)
-			keyEnd[i] = data->storage.readNextKeyInclusive(eager->keyBegin[i]);
+			keyEnd[i] = data->storage.readNextKeyInclusive(eager->keyBegin[i], IKeyValueStore::ReadType::EAGER);
 
 		state Future<vector<Key>> futureKeyEnds = getAll(keyEnd);
 		state vector<Key> keyEndVal = wait(futureKeyEnds);
@@ -1991,7 +2012,8 @@ ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager)
 
 	vector<Future<Optional<Value>>> value(eager->keys.size());
 	for (int i = 0; i < value.size(); i++)
-		value[i] = data->storage.readValuePrefix(eager->keys[i].first, eager->keys[i].second);
+		value[i] =
+		    data->storage.readValuePrefix(eager->keys[i].first, eager->keys[i].second, IKeyValueStore::ReadType::EAGER);
 
 	state Future<vector<Optional<Value>>> futureValues = getAll(value);
 	vector<Optional<Value>> optionalValues = wait(futureValues);
@@ -3465,8 +3487,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				data->sourceTLogID = curSourceTLogID;
 
 				TraceEvent("StorageServerSourceTLogID", data->thisServerID)
-					.detail("SourceTLogID", data->sourceTLogID.present() ? data->sourceTLogID.get().toString() : "unknown")
-					.trackLatest(data->thisServerID.toString() + "/StorageServerSourceTLogID");
+				    .detail("SourceTLogID",
+				            data->sourceTLogID.present() ? data->sourceTLogID.get().toString() : "unknown")
+				    .trackLatest(data->thisServerID.toString() + "/StorageServerSourceTLogID");
 			}
 
 			data->noRecentUpdates.set(false);
@@ -3494,10 +3517,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			//TraceEvent("StorageServerUpdated", data->thisServerID).detail("Ver", ver).detail("DataVersion", data->version.get())
 			//	.detail("LastTLogVersion", data->lastTLogVersion).detail("NewOldest",
-			//data->oldestVersion.get()).detail("DesiredOldest",data->desiredOldestVersion.get())
+			// data->oldestVersion.get()).detail("DesiredOldest",data->desiredOldestVersion.get())
 			//	.detail("MaxVersionInMemory", maxVersionsInMemory).detail("Proposed",
-			//proposedOldestVersion).detail("PrimaryLocality", data->primaryLocality).detail("Tag",
-			//data->tag.toString());
+			// proposedOldestVersion).detail("PrimaryLocality", data->primaryLocality).detail("Tag",
+			// data->tag.toString());
 
 			while (!data->recoveryVersionSkips.empty() &&
 			       proposedOldestVersion > data->recoveryVersionSkips.front().first) {

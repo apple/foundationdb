@@ -195,7 +195,7 @@ public:
 		return c;
 	}
 
-	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) {
+	virtual Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
@@ -209,7 +209,8 @@ public:
 
 	virtual Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                                int maxLength,
-	                                                Optional<UID> debugID = Optional<UID>()) {
+	                                                IKeyValueStore::ReadType,
+	                                                Optional<UID> debugID) {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
@@ -229,8 +230,9 @@ public:
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
 	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
-	                                                     int rowLimit = 1 << 30,
-	                                                     int byteLimit = 1 << 30) {
+	                                                     int rowLimit,
+	                                                     int byteLimit,
+	                                                     IKeyValueStore::ReadType) {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
@@ -827,18 +829,18 @@ private:
 
 	ACTOR static Future<Optional<Value>> waitAndReadValue(KeyValueStoreMemory* self, Key key) {
 		wait(self->recovering);
-		return self->readValue(key).get();
+		return static_cast<IKeyValueStore*>(self)->readValue(key).get();
 	}
 	ACTOR static Future<Optional<Value>> waitAndReadValuePrefix(KeyValueStoreMemory* self, Key key, int maxLength) {
 		wait(self->recovering);
-		return self->readValuePrefix(key, maxLength).get();
+		return static_cast<IKeyValueStore*>(self)->readValuePrefix(key, maxLength).get();
 	}
 	ACTOR static Future<Standalone<RangeResultRef>> waitAndReadRange(KeyValueStoreMemory* self,
 	                                                                 KeyRange keys,
 	                                                                 int rowLimit,
 	                                                                 int byteLimit) {
 		wait(self->recovering);
-		return self->readRange(keys, rowLimit, byteLimit).get();
+		return static_cast<IKeyValueStore*>(self)->readRange(keys, rowLimit, byteLimit).get();
 	}
 	ACTOR static Future<Void> waitAndCommit(KeyValueStoreMemory* self, bool sequential) {
 		wait(self->recovering);

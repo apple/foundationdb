@@ -1403,7 +1403,7 @@ void SQLiteDB::open(bool writable) {
 			walFile = file_not_found();
 			renameFile(walpath, walpath + "-old-" + deterministicRandom()->randomUniqueID().toString());
 			ASSERT_WE_THINK(false); //< This code should not be hit in FoundationDB at the moment, because worker looks
-			                        //for databases to open by listing .fdb files, not .fdb-wal files
+			                        // for databases to open by listing .fdb files, not .fdb-wal files
 			// TEST(true);  // Replace a partially constructed or destructed DB
 		}
 
@@ -1569,11 +1569,15 @@ public:
 	virtual void clear(KeyRangeRef range, const Arena* arena = NULL);
 	virtual Future<Void> commit(bool sequential = false);
 
-	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID);
-	virtual Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID);
+	virtual Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID);
+	virtual Future<Optional<Value>> readValuePrefix(KeyRef key,
+	                                                int maxLength,
+	                                                IKeyValueStore::ReadType,
+	                                                Optional<UID> debugID);
 	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys,
-	                                                     int rowLimit = 1 << 30,
-	                                                     int byteLimit = 1 << 30);
+	                                                     int rowLimit,
+	                                                     int byteLimit,
+	                                                     IKeyValueStore::ReadType);
 
 	KeyValueStoreSQLite(std::string const& filename,
 	                    UID logID,
@@ -1750,8 +1754,8 @@ private:
 			kvs->walFile = conn.walFile;
 
 			// If a wal file fails during the commit process before finishing a checkpoint, then it is possible that our
-			// wal file will be non-empty when we reload it.  We execute a checkpoint here to remedy that situation. This
-			// call must come before before creating a cursor because it will fail if there are any outstanding
+			// wal file will be non-empty when we reload it.  We execute a checkpoint here to remedy that situation.
+			// This call must come before before creating a cursor because it will fail if there are any outstanding
 			// transactions.
 			fullCheckpoint();
 
@@ -2185,21 +2189,28 @@ Future<Void> KeyValueStoreSQLite::commit(bool sequential) {
 	writeThread->post(p);
 	return f;
 }
-Future<Optional<Value>> KeyValueStoreSQLite::readValue(KeyRef key, Optional<UID> debugID) {
+Future<Optional<Value>> KeyValueStoreSQLite::readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) {
 	++readsRequested;
 	auto p = new Reader::ReadValueAction(key, debugID);
 	auto f = p->result.getFuture();
 	readThreads->post(p);
 	return f;
 }
-Future<Optional<Value>> KeyValueStoreSQLite::readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID) {
+Future<Optional<Value>> KeyValueStoreSQLite::readValuePrefix(KeyRef key,
+                                                             int maxLength,
+                                                             IKeyValueStore::ReadType,
+                                                             Optional<UID> debugID) {
 	++readsRequested;
 	auto p = new Reader::ReadValuePrefixAction(key, maxLength, debugID);
 	auto f = p->result.getFuture();
 	readThreads->post(p);
 	return f;
 }
-Future<Standalone<RangeResultRef>> KeyValueStoreSQLite::readRange(KeyRangeRef keys, int rowLimit, int byteLimit) {
+
+Future<Standalone<RangeResultRef>> KeyValueStoreSQLite::readRange(KeyRangeRef keys,
+                                                                  int rowLimit,
+                                                                  int byteLimit,
+                                                                  IKeyValueStore::ReadType) {
 	++readsRequested;
 	auto p = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 	auto f = p->result.getFuture();
