@@ -6814,8 +6814,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 
 			if (locations.size() >= CLIENT_KNOBS->CHANGE_FEED_LOCATION_LIMIT) {
 				ASSERT_WE_THINK(false);
-				results.sendError(change_feed_too_large());
-				return Void();
+				throw unknown_change_feed();
 			}
 
 			state std::vector<int> chosenLocations(locations.size());

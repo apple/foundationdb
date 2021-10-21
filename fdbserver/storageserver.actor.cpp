@@ -3296,7 +3296,7 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange ra
 				wait(yield());
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_end_of_stream && e.code() != error_code_unsupported_operation) {
+			if (e.code() != error_code_end_of_stream && e.code() != error_code_change_feed_not_registered) {
 				throw;
 			}
 			return Void();
@@ -3346,7 +3346,7 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data, Key rangeId, KeyRange ra
 			wait(yield());
 		}
 	} catch (Error& e) {
-		if (e.code() != error_code_end_of_stream && e.code() != error_code_unsupported_operation) {
+		if (e.code() != error_code_end_of_stream && e.code() != error_code_change_feed_not_registered) {
 			throw;
 		}
 	}

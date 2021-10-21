@@ -80,7 +80,6 @@ ERROR( local_config_changed, 1056, "Local configuration file has changed. Restar
 ERROR( failed_to_reach_quorum, 1057, "Failed to reach quorum from configuration database nodes. Retry sending these requests" )
 ERROR( unknown_change_feed, 1058, "Change feed not found" )
 ERROR( change_feed_not_registered, 1059, "Change feed not registered" )
-ERROR( change_feed_too_large, 1060, "Change feed overlaps too many shards" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
