@@ -581,7 +581,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-	Future<Void> getError() override { return errorPromise.getFuture(); }
+	Future<Void> getError() const override { return errorPromise.getFuture(); }
 
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
 		// The metrics future retains a reference to the DB, so stop it before we delete it.
@@ -600,7 +600,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		delete self;
 	}
 
-	Future<Void> onClosed() override { return closePromise.getFuture(); }
+	Future<Void> onClosed() const override { return closePromise.getFuture(); }
 
 	void dispose() override { doClose(this, true); }
 
@@ -645,21 +645,24 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID) override {
+	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) override {
 		auto a = new Reader::ReadValueAction(key, debugID);
 		auto res = a->result.getFuture();
 		readThreads->post(a);
 		return res;
 	}
 
-	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID) override {
+	Future<Optional<Value>> readValuePrefix(KeyRef key,
+	                                        int maxLength,
+	                                        IKeyValueStore::ReadType,
+	                                        Optional<UID> debugID) override {
 		auto a = new Reader::ReadValuePrefixAction(key, maxLength, debugID);
 		auto res = a->result.getFuture();
 		readThreads->post(a);
 		return res;
 	}
 
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit) override {
+	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, IKeyValueStore::ReadType) override {
 		auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 		auto res = a->result.getFuture();
 		readThreads->post(a);

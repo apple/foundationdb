@@ -2073,6 +2073,90 @@ ACTOR Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UI
 	return Void();
 }
 
+ACTOR Future<Void> updateChangeFeed(Transaction* tr, Key rangeID, ChangeFeedStatus status, KeyRange range) {
+	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+	Optional<Value> val = wait(tr->get(rangeIDKey));
+	if (status == ChangeFeedStatus::CHANGE_FEED_CREATE) {
+		if (!val.present()) {
+			tr->set(rangeIDKey, changeFeedValue(range, invalidVersion, status));
+		} else if (std::get<0>(decodeChangeFeedValue(val.get())) != range) {
+			throw unsupported_operation();
+		}
+	} else if (status == ChangeFeedStatus::CHANGE_FEED_STOP) {
+		if (val.present()) {
+			tr->set(rangeIDKey,
+			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
+			                        std::get<1>(decodeChangeFeedValue(val.get())),
+			                        status));
+		} else {
+			throw unsupported_operation();
+		}
+	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
+		if (val.present()) {
+			tr->set(rangeIDKey,
+			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
+			                        std::get<1>(decodeChangeFeedValue(val.get())),
+			                        status));
+			tr->clear(rangeIDKey);
+		} else {
+			throw unsupported_operation();
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> updateChangeFeed(Reference<ReadYourWritesTransaction> tr,
+                                    Key rangeID,
+                                    ChangeFeedStatus status,
+                                    KeyRange range) {
+	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+	Optional<Value> val = wait(tr->get(rangeIDKey));
+	if (status == ChangeFeedStatus::CHANGE_FEED_CREATE) {
+		if (!val.present()) {
+			tr->set(rangeIDKey, changeFeedValue(range, invalidVersion, status));
+		} else if (std::get<0>(decodeChangeFeedValue(val.get())) != range) {
+			throw unsupported_operation();
+		}
+	} else if (status == ChangeFeedStatus::CHANGE_FEED_STOP) {
+		if (val.present()) {
+			tr->set(rangeIDKey,
+			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
+			                        std::get<1>(decodeChangeFeedValue(val.get())),
+			                        status));
+		} else {
+			throw unsupported_operation();
+		}
+	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
+		if (val.present()) {
+			tr->set(rangeIDKey,
+			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
+			                        std::get<1>(decodeChangeFeedValue(val.get())),
+			                        status));
+			tr->clear(rangeIDKey);
+		} else {
+			throw unsupported_operation();
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> updateChangeFeed(Database cx, Key rangeID, ChangeFeedStatus status, KeyRange range) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			wait(updateChangeFeed(&tr, rangeID, status, range));
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> advanceVersion(Database cx, Version v) {
 	state Transaction tr(cx);
 	loop {

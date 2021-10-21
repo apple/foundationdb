@@ -30,6 +30,7 @@
 #include "fdbclient/BlobWorkerCommon.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbserver/Knobs.h"
@@ -428,8 +429,9 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 				       currentGranuleID.toString().c_str(),
 				       parentGranuleID.toString().c_str());
 			}
+
+			wait(updateChangeFeed(tr, KeyRef(parentGranuleID.toString()), ChangeFeedStatus::CHANGE_FEED_DESTROY));
 			Key oldGranuleLockKey = blobGranuleLockKeyFor(parentGranuleRange);
-			tr->destroyChangeFeed(KeyRef(parentGranuleID.toString()));
 			tr->clear(singleKeyRange(oldGranuleLockKey));
 			tr->clear(currentRange);
 		} else {
@@ -440,8 +442,9 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 					       currentGranuleID.toString().c_str(),
 					       parentGranuleID.toString().c_str());
 				}
-				// FIXME: enable once implemented
-				// tr.stopChangeFeed(KeyRef(prevChangeFeedId.toString()));
+				// FIXME: enable
+				// wait(updateChangeFeed(tr, KeyRef(parentGranuleID.toString()),
+				// ChangeFeedStatus::CHANGE_FEED_DESTROY));
 			}
 			tr->atomicOp(myStateKey, blobGranuleSplitValueFor(newState), MutationRef::SetVersionstampedValue);
 		}
@@ -2075,7 +2078,8 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 					// if this granule is not derived from a split or merge, create the granule id here
 					info.granuleID = deterministicRandom()->randomUniqueID();
 				}
-				wait(tr.registerChangeFeed(StringRef(info.granuleID.toString()), req.keyRange));
+				wait(updateChangeFeed(
+				    &tr, StringRef(info.granuleID.toString()), ChangeFeedStatus::CHANGE_FEED_CREATE, req.keyRange));
 				info.doSnapshot = true;
 				info.previousDurableVersion = invalidVersion;
 			}

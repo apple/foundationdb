@@ -522,8 +522,6 @@ void initHelp() {
 	helpMap["writemode"] = CommandHelp("writemode <on|off>",
 	                                   "enables or disables sets and clears",
 	                                   "Setting or clearing keys from the CLI is not recommended.");
-	helpMap["changefeed"] =
-	    CommandHelp("changefeed <register|destroy|get|stream|pop|list> <RANGEID> <BEGIN> <END>", "", "");
 }
 
 void printVersion() {
@@ -636,58 +634,6 @@ ACTOR Future<Void> commitTransaction(Reference<ITransaction> tr) {
 	else
 		printf("Nothing to commit\n");
 	return Void();
-}
-
-ACTOR Future<Void> changeFeedList(Database db) {
-	state ReadYourWritesTransaction tr(db);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-			RangeResult result = wait(tr.getRange(changeFeedKeys, CLIENT_KNOBS->TOO_MANY));
-			// shouldn't have many quarantined TSSes
-			ASSERT(!result.more);
-			printf("Found %d range feeds%s\n", result.size(), result.size() == 0 ? "." : ":");
-			for (auto& it : result) {
-				auto range = std::get<0>(decodeChangeFeedValue(it.value));
-				printf("  %s: %s - %s\n",
-				       it.key.removePrefix(changeFeedPrefix).toString().c_str(),
-				       range.begin.toString().c_str(),
-				       range.end.toString().c_str());
-			}
-			return Void();
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
-// copy to standalones for krm
-ACTOR Future<Void> setBlobRange(Database db, Key startKey, Key endKey, Value value) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
-
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-			// FIXME: check that the set range is currently inactive, and that a revoked range is currently its own
-			// range in the map and fully set.
-
-			tr->set(blobRangeChangeKey, deterministicRandom()->randomUniqueID().toString());
-			// This is not coalescing because we want to keep each range logically separate.
-			wait(krmSetRange(tr, blobRangeKeys.begin, KeyRange(KeyRangeRef(startKey, endKey)), value));
-			wait(tr->commit());
-			printf("Successfully updated blob range [%s - %s) to %s\n",
-			       startKey.printable().c_str(),
-			       endKey.printable().c_str(),
-			       value.printable().c_str());
-			return Void();
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
 }
 
 // FIXME: Factor address parsing from coordinators, include, exclude
@@ -1867,194 +1813,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "changefeed")) {
-					if (tokens.size() == 1) {
-						printUsage(tokens[0]);
-						is_error = true;
-						continue;
-					}
-					if (tokencmp(tokens[1], "list")) {
-						if (tokens.size() != 2) {
-							printUsage(tokens[0]);
-							is_error = true;
-							continue;
-						}
-						wait(changeFeedList(localDb));
-						continue;
-					} else if (tokencmp(tokens[1], "register")) {
-						if (tokens.size() != 5) {
-							printUsage(tokens[0]);
-							is_error = true;
-							continue;
-						}
-						trx = Transaction(localDb);
-						loop {
-							try {
-								wait(trx.registerChangeFeed(tokens[2], KeyRangeRef(tokens[3], tokens[4])));
-								wait(trx.commit());
-								break;
-							} catch (Error& e) {
-								wait(trx.onError(e));
-							}
-						}
-					} else if (tokencmp(tokens[1], "destroy")) {
-						if (tokens.size() != 3) {
-							printUsage(tokens[0]);
-							is_error = true;
-							continue;
-						}
-						trx = Transaction(localDb);
-						loop {
-							try {
-								trx.destroyChangeFeed(tokens[2]);
-								wait(trx.commit());
-								break;
-							} catch (Error& e) {
-								wait(trx.onError(e));
-							}
-						}
-					} else if (tokencmp(tokens[1], "get")) {
-						if (tokens.size() < 3 || tokens.size() > 5) {
-							printUsage(tokens[0]);
-							is_error = true;
-							continue;
-						}
-						Version begin = 0;
-						Version end = std::numeric_limits<Version>::max();
-						if (tokens.size() > 3) {
-							int n = 0;
-							if (sscanf(tokens[3].toString().c_str(), "%ld%n", &begin, &n) != 1 ||
-							    n != tokens[3].size()) {
-								printUsage(tokens[0]);
-								is_error = true;
-								continue;
-							}
-						}
-						if (tokens.size() > 4) {
-							int n = 0;
-							if (sscanf(tokens[4].toString().c_str(), "%ld%n", &end, &n) != 1 || n != tokens[4].size()) {
-								printUsage(tokens[0]);
-								is_error = true;
-								continue;
-							}
-						}
-						Standalone<VectorRef<MutationsAndVersionRef>> res =
-						    wait(localDb->getChangeFeedMutations(tokens[2], begin, end));
-						printf("\n");
-						for (auto& it : res) {
-							for (auto& it2 : it.mutations) {
-								printf("%lld %s\n", it.version, it2.toString().c_str());
-							}
-						}
-					} else if (tokencmp(tokens[1], "stream")) {
-						if (tokens.size() < 3 || tokens.size() > 5) {
-							printUsage(tokens[0]);
-							is_error = true;
-							continue;
-						}
-						Version begin = 0;
-						Version end = std::numeric_limits<Version>::max();
-						if (tokens.size() > 3) {
-							int n = 0;
-							if (sscanf(tokens[3].toString().c_str(), "%ld%n", &begin, &n) != 1 ||
-							    n != tokens[3].size()) {
-								printUsage(tokens[0]);
-								is_error = true;
-								continue;
-							}
-						}
-						if (tokens.size() > 4) {
-							int n = 0;
-							if (sscanf(tokens[4].toString().c_str(), "%ld%n", &end, &n) != 1 || n != tokens[4].size()) {
-								printUsage(tokens[0]);
-								is_error = true;
-								continue;
-							}
-						}
-						if (warn.isValid()) {
-							warn.cancel();
-						}
-						state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> feedResults;
-						state Future<Void> feed = localDb->getChangeFeedStream(feedResults, tokens[2], begin, end);
-						printf("\n");
-						try {
-							state Future<Void> feedInterrupt = LineNoise::onKeyboardInterrupt();
-							loop {
-								choose {
-									when(Standalone<VectorRef<MutationsAndVersionRef>> res =
-									         waitNext(feedResults.getFuture())) {
-										for (auto& it : res) {
-											for (auto& it2 : it.mutations) {
-												printf("%lld %s\n", it.version, it2.toString().c_str());
-											}
-										}
-									}
-									when(wait(feedInterrupt)) {
-										feedInterrupt = Future<Void>();
-										feed.cancel();
-										feedResults = PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>();
-										break;
-									}
-								}
-							}
-							continue;
-						} catch (Error& e) {
-							if (e.code() == error_code_end_of_stream) {
-								continue;
-							}
-							throw;
-						}
-					} else if (tokencmp(tokens[1], "pop")) {
-						if (tokens.size() != 4) {
-							printUsage(tokens[0]);
-							is_error = true;
-							continue;
-						}
-						Version v;
-						int n = 0;
-						if (sscanf(tokens[3].toString().c_str(), "%ld%n", &v, &n) != 1 || n != tokens[3].size()) {
-							printUsage(tokens[0]);
-							is_error = true;
-						} else {
-							wait(localDb->popChangeFeedMutations(tokens[2], v));
-						}
-					}
-					continue;
-				}
-
-				// enables blob writing for the given range
-				if (tokencmp(tokens[0], "blobrange")) {
-					if (tokens.size() != 4) {
-						printf("Usage: blobrange <start|stop> <startkey> <endkey>");
-						is_error = true;
-					} else if (tokens[3] > LiteralStringRef("\xff")) {
-						// TODO is this something we want?
-						printf("Cannot blobbify system keyspace! Problematic End Key: %s\n",
-						       tokens[3].printable().c_str());
-						is_error = true;
-					} else if (tokens[2] >= tokens[3]) {
-						printf("Invalid blob range [%s - %s)\n",
-						       tokens[2].printable().c_str(),
-						       tokens[3].printable().c_str());
-					} else {
-						if (tokencmp(tokens[1], "start")) {
-							printf("Starting blobbify range for [%s - %s)\n",
-							       tokens[2].printable().c_str(),
-							       tokens[3].printable().c_str());
-							wait(setBlobRange(db, tokens[2], tokens[3], LiteralStringRef("1")));
-						} else if (tokencmp(tokens[1], "stop")) {
-							printf("Stopping blobbify range for [%s - %s)\n",
-							       tokens[2].printable().c_str(),
-							       tokens[3].printable().c_str());
-							wait(setBlobRange(db, tokens[2], tokens[3], StringRef()));
-						} else {
-							printf("Usage: blobrange <start|stop> <startkey> <endkey>");
-							is_error = true;
-						}
-					}
-					continue;
-				}
-
 				if (tokencmp(tokens[0], "tssq")) {
 					bool _result = wait(makeInterruptable(tssqCommandActor(db, tokens)));
 					if (!_result)
@@ -2117,6 +1875,20 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "lock")) {
 					bool _result = wait(makeInterruptable(lockCommandActor(db, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "changefeed")) {
+					bool _result = wait(makeInterruptable(changeFeedCommandActor(localDb, tokens, warn)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "blobrange")) {
+					bool _result = wait(makeInterruptable(blobRangeCommandActor(localDb, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;

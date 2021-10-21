@@ -207,6 +207,13 @@ ACTOR Future<Void> unlockDatabase(Database cx, UID id);
 ACTOR Future<Void> checkDatabaseLock(Transaction* tr, UID id);
 ACTOR Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id);
 
+ACTOR Future<Void> updateChangeFeed(Transaction* tr, Key rangeID, ChangeFeedStatus status, KeyRange range = KeyRange());
+ACTOR Future<Void> updateChangeFeed(Reference<ReadYourWritesTransaction> tr,
+                                    Key rangeID,
+                                    ChangeFeedStatus status,
+                                    KeyRange range = KeyRange());
+ACTOR Future<Void> updateChangeFeed(Database cx, Key rangeID, ChangeFeedStatus status, KeyRange range = KeyRange());
+
 ACTOR Future<Void> advanceVersion(Database cx, Version v);
 
 ACTOR Future<int> setDDMode(Database cx, int mode);

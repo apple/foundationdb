@@ -75,6 +75,9 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( VALUE_SIZE_LIMIT,                        1e5 );
 	init( SPLIT_KEY_SIZE_LIMIT,                    KEY_SIZE_LIMIT/2 );  if( randomize && BUGGIFY ) SPLIT_KEY_SIZE_LIMIT = KEY_SIZE_LIMIT - 31;//serverKeysPrefixFor(UID()).size() - 1;
 	init( METADATA_VERSION_CACHE_SIZE,            1000 );
+	init( CHANGE_FEED_LOCATION_LIMIT,            10000 );
+	init( CHANGE_FEED_CACHE_SIZE,               100000 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_SIZE = 1;
+	init( CHANGE_FEED_POP_TIMEOUT,                 5.0 );
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && BUGGIFY ) GRV_BATCH_TIMEOUT = 0.1;

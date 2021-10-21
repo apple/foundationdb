@@ -545,6 +545,11 @@ public:
 	LineageReference() : Reference<ActorLineage>(nullptr), actorName_(""), allocated_(false) {}
 	explicit LineageReference(ActorLineage* ptr) : Reference<ActorLineage>(ptr), actorName_(""), allocated_(false) {}
 	LineageReference(const LineageReference& r) : Reference<ActorLineage>(r), actorName_(""), allocated_(false) {}
+	LineageReference(LineageReference&& r)
+	  : Reference<ActorLineage>(std::forward<LineageReference>(r)), actorName_(r.actorName_), allocated_(r.allocated_) {
+		r.actorName_ = "";
+		r.allocated_ = false;
+	}
 
 	void setActorName(const char* name) { actorName_ = name; }
 	const char* actorName() { return actorName_; }

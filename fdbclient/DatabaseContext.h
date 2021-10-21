@@ -252,19 +252,13 @@ public:
 	// Management API, create snapshot
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
-	Future<Standalone<VectorRef<MutationsAndVersionRef>>> getChangeFeedMutations(
-	    Key rangeID,
-	    Version begin = 0,
-	    Version end = std::numeric_limits<Version>::max(),
-	    KeyRange range = allKeys);
-
 	Future<Void> getChangeFeedStream(const PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>& results,
 	                                 Key rangeID,
 	                                 Version begin = 0,
 	                                 Version end = std::numeric_limits<Version>::max(),
 	                                 KeyRange range = allKeys);
 
-	Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
+	Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
 
 	Future<Void> getBlobGranuleRangesStream(const PromiseStream<KeyRange>& results, KeyRange range);
@@ -349,6 +343,8 @@ public:
 	std::unordered_map<UID, StorageServerInterface> tssMapping;
 	// map from tssid -> metrics for that tss pair
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
+	// map from changeFeedId -> changeFeedRange
+	std::unordered_map<Key, KeyRange> changeFeedCache;
 
 	UID dbId;
 	IsInternal internal; // Only contexts created through the C client and fdbcli are non-internal

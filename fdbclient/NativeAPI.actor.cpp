@@ -403,7 +403,8 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 		    .detail("MaxMutationsPerCommit", cx->mutationsPerCommit.max())
 		    .detail("MeanBytesPerCommit", cx->bytesPerCommit.mean())
 		    .detail("MedianBytesPerCommit", cx->bytesPerCommit.median())
-		    .detail("MaxBytesPerCommit", cx->bytesPerCommit.max());
+		    .detail("MaxBytesPerCommit", cx->bytesPerCommit.max())
+		    .detail("NumLocalityCacheEntries", cx->locationCache.size());
 
 		cx->latencies.clear();
 		cx->readLatencies.clear();
@@ -2164,6 +2165,7 @@ void stopNetwork() {
 	if (!g_network)
 		throw network_not_setup();
 
+	TraceEvent("ClientStopNetwork");
 	g_network->stop();
 	closeTraceFile();
 }
@@ -4200,11 +4202,14 @@ void debugAddTags(Transaction* tr) {
 }
 
 SpanID generateSpanID(int transactionTracingEnabled) {
-	uint64_t tid = deterministicRandom()->randomUInt64();
+	uint64_t txnId = deterministicRandom()->randomUInt64();
 	if (transactionTracingEnabled > 0) {
-		return SpanID(tid, deterministicRandom()->randomUInt64());
+		uint64_t tokenId = deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE
+		                       ? deterministicRandom()->randomUInt64()
+		                       : 0;
+		return SpanID(txnId, tokenId);
 	} else {
-		return SpanID(tid, 0);
+		return SpanID(txnId, 0);
 	}
 }
 
@@ -4427,25 +4432,6 @@ Future<Standalone<VectorRef<const char*>>> Transaction::getAddressesForKey(const
 	auto ver = getReadVersion();
 
 	return getAddressesForKeyActor(key, ver, cx, info, options);
-}
-
-ACTOR Future<Void> registerChangeFeedActor(Transaction* tr, Key rangeID, KeyRange range) {
-	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
-	Optional<Value> val = wait(tr->get(rangeIDKey));
-	if (!val.present()) {
-		tr->set(rangeIDKey, changeFeedValue(range, invalidVersion, false));
-	} else if (std::get<0>(decodeChangeFeedValue(val.get())) != range) {
-		throw unsupported_operation();
-	}
-	return Void();
-}
-
-Future<Void> Transaction::registerChangeFeed(const Key& rangeID, const KeyRange& range) {
-	return registerChangeFeedActor(this, rangeID, range);
-}
-
-void Transaction::destroyChangeFeed(const Key& rangeID) {
-	clear(rangeID.withPrefix(changeFeedPrefix));
 }
 
 ACTOR Future<Key> getKeyAndConflictRange(Database cx,
@@ -5881,7 +5867,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		}
 
 		Location location = "NAPI:getReadVersion"_loc;
-		UID spanContext = deterministicRandom()->randomUniqueID();
+		UID spanContext = generateSpanID(cx->transactionTracingEnabled);
 		auto const req = DatabaseContext::VersionRequest(spanContext, options.tags, info.debugID);
 		batcher.stream.send(req);
 		startTime = now();
@@ -6244,7 +6230,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Databa
                                                                           StorageMetrics permittedError,
                                                                           int shardLimit,
                                                                           int expectedShardCount) {
-	state Span span("NAPI:WaitStorageMetrics"_loc);
+	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingEnabled));
 	loop {
 		std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
 		    wait(getKeyRangeLocations(cx,
@@ -6673,56 +6659,6 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
 }
 
-ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> getChangeFeedMutationsActor(Reference<DatabaseContext> db,
-                                                                                        Key rangeID,
-                                                                                        Version begin,
-                                                                                        Version end,
-                                                                                        KeyRange range) {
-	// FIXME: this function is out of date!
-	state Database cx(db);
-	state Transaction tr(cx);
-	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
-	state Span span("NAPI:GetChangeFeedMutations"_loc);
-	Optional<Value> val = wait(tr.get(rangeIDKey));
-	if (!val.present()) {
-		throw unsupported_operation();
-	}
-	state KeyRange keys = std::get<0>(decodeChangeFeedValue(val.get())) & range;
-	state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
-	    wait(getKeyRangeLocations(cx,
-	                              keys,
-	                              100,
-	                              Reverse::False,
-	                              &StorageServerInterface::changeFeed,
-	                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
-
-	if (locations.size() > 1) {
-		throw unsupported_operation();
-	}
-
-	state ChangeFeedRequest req;
-	req.rangeID = rangeID;
-	req.begin = begin;
-	req.end = end;
-	req.range = keys;
-
-	ChangeFeedReply rep = wait(loadBalance(cx.getPtr(),
-	                                       locations[0].second,
-	                                       &StorageServerInterface::changeFeed,
-	                                       req,
-	                                       TaskPriority::DefaultPromiseEndpoint,
-	                                       AtMostOnce::False,
-	                                       cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
-	return Standalone<VectorRef<MutationsAndVersionRef>>(rep.mutations, rep.arena);
-}
-
-Future<Standalone<VectorRef<MutationsAndVersionRef>>> DatabaseContext::getChangeFeedMutations(Key rangeID,
-                                                                                              Version begin,
-                                                                                              Version end,
-                                                                                              KeyRange range) {
-	return getChangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, begin, end, range);
-}
-
 ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
                                           PromiseStream<Standalone<MutationsAndVersionRef>> results,
                                           Key rangeID,
@@ -6832,6 +6768,39 @@ ACTOR Future<Void> mergeChangeFeedStream(std::vector<std::pair<StorageServerInte
 	throw end_of_stream();
 }
 
+ACTOR Future<KeyRange> getChangeFeedRange(Reference<DatabaseContext> db, Database cx, Key rangeID, Version begin = 0) {
+	state Transaction tr(cx);
+	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
+
+	auto cacheLoc = db->changeFeedCache.find(rangeID);
+	if (cacheLoc != db->changeFeedCache.end()) {
+		return cacheLoc->second;
+	}
+
+	loop {
+		try {
+			Version readVer = wait(tr.getReadVersion());
+			if (readVer < begin) {
+				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				tr.reset();
+			} else {
+				Optional<Value> val = wait(tr.get(rangeIDKey));
+				if (!val.present()) {
+					throw change_feed_not_registered();
+				}
+				if (db->changeFeedCache.size() > CLIENT_KNOBS->CHANGE_FEED_CACHE_SIZE) {
+					db->changeFeedCache.clear();
+				}
+				KeyRange range = std::get<0>(decodeChangeFeedValue(val.get()));
+				db->changeFeedCache[rangeID] = range;
+				return range;
+			}
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
                                             PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> results,
                                             Key rangeID,
@@ -6839,44 +6808,24 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
                                             Version end,
                                             KeyRange range) {
 	state Database cx(db);
-	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
 	state Span span("NAPI:GetChangeFeedStream"_loc);
-	state KeyRange keys;
 
 	loop {
-		state Transaction tr(cx);
-		loop {
-			try {
-				Version readVer = wait(tr.getReadVersion());
-				if (readVer < begin) {
-					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
-				} else {
-					Optional<Value> val = wait(tr.get(rangeIDKey));
-					if (!val.present()) {
-						results.sendError(unsupported_operation());
-						return Void();
-					}
-					keys = std::get<0>(decodeChangeFeedValue(val.get())) & range;
-					break;
-				}
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-
+		state KeyRange keys;
 		try {
+			KeyRange fullRange = wait(getChangeFeedRange(db, cx, rangeID, begin));
+			keys = fullRange & range;
 			state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
 			    wait(getKeyRangeLocations(cx,
 			                              keys,
-			                              1000,
+			                              CLIENT_KNOBS->CHANGE_FEED_LOCATION_LIMIT,
 			                              Reverse::False,
-			                              &StorageServerInterface::changeFeed,
+			                              &StorageServerInterface::changeFeedStream,
 			                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
 
-			if (locations.size() >= 1000) {
-				ASSERT(false);
-				results.sendError(unsupported_operation());
-				return Void();
+			if (locations.size() >= CLIENT_KNOBS->CHANGE_FEED_LOCATION_LIMIT) {
+				ASSERT_WE_THINK(false);
+				throw unknown_change_feed();
 			}
 
 			state std::vector<int> chosenLocations(locations.size());
@@ -6957,6 +6906,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_unknown_change_feed ||
 			    e.code() == error_code_broken_promise) {
+				db->changeFeedCache.erase(rangeID);
 				cx->invalidateCache(keys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
 			} else {
@@ -6976,7 +6926,7 @@ Future<Void> DatabaseContext::getChangeFeedStream(
 	return getChangeFeedStreamActor(Reference<DatabaseContext>::addRef(this), results, rangeID, begin, end, range);
 }
 
-ACTOR Future<std::vector<std::pair<Key, KeyRange>>> singleLocationOverlappingChangeFeeds(
+ACTOR Future<std::vector<OverlappingChangeFeedEntry>> singleLocationOverlappingChangeFeeds(
     Database cx,
     Reference<LocationInfo> location,
     KeyRangeRef range,
@@ -6995,13 +6945,13 @@ ACTOR Future<std::vector<std::pair<Key, KeyRange>>> singleLocationOverlappingCha
 	return rep.rangeIds;
 }
 
-bool compareChangeFeedResult(const std::pair<Key, KeyRange>& i, const std::pair<Key, KeyRange>& j) {
-	return i.first < j.first;
+bool compareChangeFeedResult(const OverlappingChangeFeedEntry& i, const OverlappingChangeFeedEntry& j) {
+	return i.rangeId < j.rangeId;
 }
 
-ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingChangeFeedsActor(Reference<DatabaseContext> db,
-                                                                                   KeyRangeRef range,
-                                                                                   Version minVersion) {
+ACTOR Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeedsActor(Reference<DatabaseContext> db,
+                                                                                     KeyRangeRef range,
+                                                                                     Version minVersion) {
 	state Database cx(db);
 	state Transaction tr(cx);
 	state Span span("NAPI:GetOverlappingChangeFeeds"_loc);
@@ -7011,23 +6961,27 @@ ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingChangeFeedsAct
 			state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
 			    wait(getKeyRangeLocations(cx,
 			                              range,
-			                              1000,
+			                              CLIENT_KNOBS->CHANGE_FEED_LOCATION_LIMIT,
 			                              Reverse::False,
 			                              &StorageServerInterface::overlappingChangeFeeds,
 			                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
 
-			if (locations.size() >= 1000) {
-				throw unsupported_operation();
+			if (locations.size() >= CLIENT_KNOBS->CHANGE_FEED_LOCATION_LIMIT) {
+				TraceEvent(SevError, "OverlappingRangeTooLarge")
+				    .detail("Range", range)
+				    .detail("Limit", CLIENT_KNOBS->CHANGE_FEED_LOCATION_LIMIT);
+				wait(delay(1.0));
+				throw all_alternatives_failed();
 			}
 
-			state std::vector<Future<std::vector<std::pair<Key, KeyRange>>>> allOverlappingRequests;
+			state std::vector<Future<std::vector<OverlappingChangeFeedEntry>>> allOverlappingRequests;
 			for (auto& it : locations) {
 				allOverlappingRequests.push_back(
 				    singleLocationOverlappingChangeFeeds(cx, it.second, it.first & range, minVersion));
 			}
 			wait(waitForAll(allOverlappingRequests));
 
-			std::vector<std::pair<Key, KeyRange>> result;
+			std::vector<OverlappingChangeFeedEntry> result;
 			for (auto& it : allOverlappingRequests) {
 				result.insert(result.end(), it.get().begin(), it.get().end());
 			}
@@ -7045,8 +6999,8 @@ ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getOverlappingChangeFeedsAct
 	}
 }
 
-Future<std::vector<std::pair<Key, KeyRange>>> DatabaseContext::getOverlappingChangeFeeds(KeyRangeRef range,
-                                                                                         Version minVersion) {
+Future<std::vector<OverlappingChangeFeedEntry>> DatabaseContext::getOverlappingChangeFeeds(KeyRangeRef range,
+                                                                                           Version minVersion) {
 	return getOverlappingChangeFeedsActor(Reference<DatabaseContext>::addRef(this), range, minVersion);
 }
 
@@ -7059,13 +7013,13 @@ ACTOR static Future<Void> popChangeFeedBackup(Database cx, Key rangeID, Version 
 			if (val.present()) {
 				KeyRange range;
 				Version popVersion;
-				bool stopped;
-				std::tie(range, popVersion, stopped) = decodeChangeFeedValue(val.get());
+				ChangeFeedStatus status;
+				std::tie(range, popVersion, status) = decodeChangeFeedValue(val.get());
 				if (version > popVersion) {
-					tr.set(rangeIDKey, changeFeedValue(range, invalidVersion, stopped));
+					tr.set(rangeIDKey, changeFeedValue(range, version, status));
 				}
 			} else {
-				throw unsupported_operation();
+				throw change_feed_not_registered();
 			}
 			wait(tr.commit());
 			return Void();
@@ -7080,29 +7034,33 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
 	state Span span("NAPI:PopChangeFeedMutations"_loc);
 
-	state Transaction tr(cx);
-	state KeyRange keys;
-	loop {
-		try {
-			Optional<Value> val = wait(tr.get(rangeIDKey));
-			if (!val.present()) {
-				throw unsupported_operation();
-			}
-			keys = std::get<0>(decodeChangeFeedValue(val.get()));
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
+	state KeyRange keys = wait(getChangeFeedRange(db, cx, rangeID));
+
 	state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
 	    wait(getKeyRangeLocations(cx,
 	                              keys,
 	                              3,
 	                              Reverse::False,
-	                              &StorageServerInterface::changeFeed,
+	                              &StorageServerInterface::changeFeedPop,
 	                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
 
 	if (locations.size() > 2) {
+		wait(popChangeFeedBackup(cx, rangeID, version));
+		return Void();
+	}
+
+	bool foundFailed = false;
+	for (int i = 0; i < locations.size() && !foundFailed; i++) {
+		for (int j = 0; j < locations[i].second->size() && !foundFailed; j++) {
+			if (IFailureMonitor::failureMonitor()
+			        .getState(locations[i].second->get(j, &StorageServerInterface::changeFeedPop).getEndpoint())
+			        .isFailed()) {
+				foundFailed = true;
+			}
+		}
+	}
+
+	if (foundFailed) {
 		wait(popChangeFeedBackup(cx, rangeID, version));
 		return Void();
 	}
@@ -7119,13 +7077,16 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 	try {
 		choose {
 			when(wait(waitForAll(popRequests))) {}
-			when(wait(delay(5.0))) { wait(popChangeFeedBackup(cx, rangeID, version)); }
+			when(wait(delay(CLIENT_KNOBS->CHANGE_FEED_POP_TIMEOUT))) {
+				wait(popChangeFeedBackup(cx, rangeID, version));
+			}
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_unknown_change_feed && e.code() != error_code_wrong_shard_server &&
 		    e.code() != error_code_all_alternatives_failed) {
 			throw;
 		}
+		db->changeFeedCache.erase(rangeID);
 		cx->invalidateCache(keys);
 		wait(popChangeFeedBackup(cx, rangeID, version));
 	}
