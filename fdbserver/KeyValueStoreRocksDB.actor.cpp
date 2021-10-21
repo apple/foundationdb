@@ -9,6 +9,7 @@
 #include <rocksdb/table.h>
 #include <rocksdb/version.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
+#include <rocksdb/utilities/checkpoint.h>
 #include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
@@ -734,6 +735,38 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/Reopen") {
 	wait(closed);
 
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
+	return Void();
+}
+
+TEST_CASE("/rocks/fileops") {
+	state std::string cwd = platform::getWorkingDirectory() + "/";
+	std::cout << "Working directory: " << cwd << std::endl;
+	state std::string rocksDBTestDir = "rocksdb-kvstore-reopen-test-db";
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+
+	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	kvStore->set({ LiteralStringRef("foo"), LiteralStringRef("bar") });
+	wait(kvStore->commit(false));
+
+	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
+	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+
+	RocksDBKeyValueStore::DB db = ((RocksDBKeyValueStore*)kvStore)->db;
+	ASSERT(db != nullptr);
+
+	platform::eraseDirectoryRecursive("checkpoint");
+	std::string checkpointDir = cwd + "checkpoint";
+	rocksdb::Checkpoint* checkpoint;
+	rocksdb::Status s = rocksdb::Checkpoint::Create(db, &checkpoint);
+	ASSERT(s.ok());
+	s = checkpoint->CreateCheckpoint(checkpointDir);
+	ASSERT(s.ok());
+	std::vector<std::string> files = platform::listFiles(checkpointDir);
+	for (auto& file : files) {
+		std::cout << file << std::endl;
+	}
 	return Void();
 }
 
