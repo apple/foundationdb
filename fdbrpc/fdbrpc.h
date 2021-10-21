@@ -441,13 +441,12 @@ public:
 
 	template <class E>
 	void sendError(const E& exc) const {
-		if (queue->isRemoteEndpoint() && !queue->sentError) {
-			if (queue->acknowledgements.failures.isError()) {
-				throw queue->acknowledgements.failures.getError();
+		if (queue->isRemoteEndpoint()) {
+			if (!queue->sentError && !queue->acknowledgements.failures.isError()) {
+				queue->sentError = true;
+				FlowTransport::transport().sendUnreliable(
+				    SerializeSource<ErrorOr<EnsureTable<T>>>(exc), getEndpoint(), false);
 			}
-			queue->sentError = true;
-			FlowTransport::transport().sendUnreliable(
-			    SerializeSource<ErrorOr<EnsureTable<T>>>(exc), getEndpoint(), false);
 		} else {
 			queue->sendError(exc);
 			if (errors && errors->canBeSet()) {
