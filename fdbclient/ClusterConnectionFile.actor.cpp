@@ -93,7 +93,7 @@ Reference<IClusterConnectionRecord> ClusterConnectionFile::makeIntermediateRecor
 // Returns a string representation of this cluster connection record. This will include the type of record and the
 // filename of the cluster file.
 std::string ClusterConnectionFile::toString() const {
-	return "File: " + filename;
+	return "file://" + filename;
 }
 
 // returns <resolved name, was default file>
@@ -158,7 +158,7 @@ Future<bool> ClusterConnectionFile::persist() {
 				// ultimately be written
 				TraceEvent(SevWarnAlways, "ClusterFileChangedAfterReplace")
 				    .detail("Filename", filename)
-				    .detail("ConnStr", cs.toString());
+				    .detail("ConnectionString", cs.toString());
 				return false;
 			}
 
@@ -167,7 +167,7 @@ Future<bool> ClusterConnectionFile::persist() {
 			TraceEvent(SevWarnAlways, "UnableToChangeConnectionFile")
 			    .error(e)
 			    .detail("Filename", filename)
-			    .detail("ConnStr", cs.toString());
+			    .detail("ConnectionString", cs.toString());
 		}
 	}
 

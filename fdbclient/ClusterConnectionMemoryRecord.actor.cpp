@@ -59,7 +59,7 @@ Reference<IClusterConnectionRecord> ClusterConnectionMemoryRecord::makeIntermedi
 // Returns a string representation of this cluster connection record. This will include the type and id of the
 // record.
 std::string ClusterConnectionMemoryRecord::toString() const {
-	return "Memory: " + id.toString();
+	return "memory://" + id.toString();
 }
 
 // This is a no-op for memory records. Returns true to indicate success.

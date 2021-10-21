@@ -90,6 +90,7 @@ private:
 	Database db;
 	ClusterConnectionString cs;
 	Key connectionStringKey;
+	Optional<Value> lastPersistedConnectionString;
 };
 
 #include "flow/unactorcompiler.h"
