@@ -7,6 +7,7 @@ Release Notes
 * Added histograms to client GRV batcher. `(PR #5760) <https://github.com/apple/foundationdb/pull/5760>`_
 * Added FastAlloc memory utilization trace. `(PR #5759) <https://github.com/apple/foundationdb/pull/5759>`_
 * Added locality cache size to TransactionMetrics. `(PR #5771) <https://github.com/apple/foundationdb/pull/5771>`_
+* Added a new feature that allows FDB to failover to remote DC when the primary is experiencing massive grey failure. This feature is turned off by default. `(PR #5774) <https://github.com/apple/foundationdb/pull/5774>`_
 
 6.3.21
 ======
