@@ -235,7 +235,7 @@ private:
 			TraceEvent(SevDebug, "SendingPrivatized_ServerTag", dbgid).detail("M", "LogProtocolMessage");
 			toCommit->addTag(tag);
 			toCommit->writeTypedMessage(LogProtocolMessage(), true);
-			TraceEvent(SevDebug, "SendingPrivatized_ServerTag", dbgid).detail("M", privatized.toString());
+			TraceEvent(SevDebug, "SendingPrivatized_ServerTag", dbgid).detail("M", privatized);
 			toCommit->addTag(tag);
 			toCommit->writeTypedMessage(privatized);
 		}
@@ -296,7 +296,7 @@ private:
 		// This is done to make the cache servers aware of the cached key-ranges
 		MutationRef privatized = m;
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-		TraceEvent(SevDebug, "SendingPrivatized_CacheTag", dbgid).detail("M", privatized.toString());
+		TraceEvent(SevDebug, "SendingPrivatized_CacheTag", dbgid).detail("M", privatized);
 		toCommit->addTag(cacheTag);
 		toCommit->writeTypedMessage(privatized);
 	}
@@ -401,7 +401,7 @@ private:
 
 			Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get();
 			if (tagV.present()) {
-				TraceEvent(SevDebug, "SendingPrivatized_TSSID", dbgid).detail("M", privatized.toString());
+				TraceEvent(SevDebug, "SendingPrivatized_TSSID", dbgid).detail("M", privatized);
 				toCommit->addTag(decodeServerTagValue(tagV.get()));
 				toCommit->writeTypedMessage(privatized);
 			}
@@ -431,7 +431,7 @@ private:
 		if (tagV.present()) {
 			MutationRef privatized = m;
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-			TraceEvent(SevDebug, "SendingPrivatized_TSSQuarantine", dbgid).detail("M", privatized.toString());
+			TraceEvent(SevDebug, "SendingPrivatized_TSSQuarantine", dbgid).detail("M", privatized);
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
 			toCommit->writeTypedMessage(privatized);
 		}
@@ -555,7 +555,7 @@ private:
 
 		MutationRef privatized = m;
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-		TraceEvent(SevDebug, "SendingPrivatized_GlobalKeys", dbgid).detail("M", m.toString());
+		TraceEvent(SevDebug, "SendingPrivatized_GlobalKeys", dbgid).detail("M", privatized);
 		toCommit->addTags(allTags);
 		toCommit->writeTypedMessage(privatized);
 	}
@@ -682,7 +682,7 @@ private:
 					privatized.param1 = kv.key.withPrefix(systemKeys.begin, arena);
 					privatized.param2 = keyAfter(kv.key, arena).withPrefix(systemKeys.begin, arena);
 
-					TraceEvent(SevDebug, "SendingPrivatized_ClearServerTag", dbgid).detail("M", privatized.toString());
+					TraceEvent(SevDebug, "SendingPrivatized_ClearServerTag", dbgid).detail("M", privatized);
 
 					toCommit->addTag(decodeServerTagValue(kv.value));
 					toCommit->writeTypedMessage(privatized);
@@ -707,7 +707,7 @@ private:
 								    keyAfter(maybeTssRange.begin, arena).withPrefix(systemKeys.begin, arena);
 
 								TraceEvent(SevDebug, "SendingPrivatized_TSSClearServerTag", dbgid)
-								    .detail("M", privatized.toString());
+								    .detail("M", privatized);
 								toCommit->addTag(decodeServerTagValue(tagV.get()));
 								toCommit->writeTypedMessage(privatized);
 							}
@@ -892,7 +892,7 @@ private:
 			MutationRef privatized = m;
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
-			TraceEvent(SevDebug, "SendingPrivatized_ClearTSSMapping", dbgid).detail("M", privatized.toString());
+			TraceEvent(SevDebug, "SendingPrivatized_ClearTSSMapping", dbgid).detail("M", privatized);
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
 			toCommit->writeTypedMessage(privatized);
 		}
@@ -919,8 +919,7 @@ private:
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
-					TraceEvent(SevDebug, "SendingPrivatized_ClearTSSQuarantine", dbgid)
-					    .detail("M", privatized.toString());
+					TraceEvent(SevDebug, "SendingPrivatized_ClearTSSQuarantine", dbgid).detail("M", privatized);
 					toCommit->addTag(decodeServerTagValue(tagV.get()));
 					toCommit->writeTypedMessage(privatized);
 				}
@@ -1015,8 +1014,8 @@ private:
 
 			// Add the tags to both begin and end mutations
 			TraceEvent(SevDebug, "SendingPrivatized_CachedKeyRange", dbgid)
-			    .detail("MBegin", mutationBegin.toString())
-			    .detail("MEnd", mutationEnd.toString());
+			    .detail("MBegin", mutationBegin)
+			    .detail("MEnd", mutationEnd);
 			toCommit->addTags(allTags);
 			toCommit->writeTypedMessage(mutationBegin);
 			toCommit->addTags(allTags);
