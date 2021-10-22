@@ -56,6 +56,8 @@ struct TenantBalancerInterface {
 	RequestStream<struct FinishSourceMovementRequest> finishSourceMovement;
 	RequestStream<struct FinishDestinationMovementRequest> finishDestinationMovement;
 
+	RequestStream<struct RecoverMovementRequest> recoverMovement;
+
 	RequestStream<struct AbortMovementRequest> abortMovement;
 	RequestStream<struct CleanupMovementSourceRequest> cleanupMovementSource;
 
@@ -86,6 +88,7 @@ struct TenantBalancerInterface {
 		           getActiveMovements,
 		           finishSourceMovement,
 		           finishDestinationMovement,
+		           recoverMovement,
 		           abortMovement,
 		           cleanupMovementSource);
 	}
@@ -100,6 +103,7 @@ struct TenantBalancerInterface {
 		streams.push_back(getActiveMovements.getReceiver());
 		streams.push_back(finishSourceMovement.getReceiver());
 		streams.push_back(finishDestinationMovement.getReceiver());
+		streams.push_back(recoverMovement.getReceiver());
 		streams.push_back(abortMovement.getReceiver());
 		streams.push_back(cleanupMovementSource.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
@@ -373,6 +377,34 @@ struct FinishDestinationMovementRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, movementId, destinationPrefix, version, reply);
+	}
+};
+
+struct RecoverMovementReply {
+	constexpr static FileIdentifier file_identifier = 15462077;
+
+	RecoverMovementReply() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar);
+	}
+};
+
+struct RecoverMovementRequest {
+	constexpr static FileIdentifier file_identifier = 12114009;
+
+	UID movementId;
+	Key prefix;
+
+	ReplyPromise<RecoverMovementReply> reply;
+
+	RecoverMovementRequest() {}
+	RecoverMovementRequest(UID movementId, Key prefix) : movementId(movementId), prefix(prefix) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, movementId, prefix, reply);
 	}
 };
 

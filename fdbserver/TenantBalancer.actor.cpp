@@ -203,6 +203,7 @@ struct TenantBalancer {
 	    getActiveMovementsRequests("GetActiveMovementsRequests", tenantBalancerMetrics),
 	    finishSourceMovementRequests("FinishSourceMovementRequests", tenantBalancerMetrics),
 	    finishDestinationMovementRequests("FinishDestinationMovementRequests", tenantBalancerMetrics),
+	    recoverMovementRequests("RecoverMovementRequests", tenantBalancerMetrics),
 	    abortMovementRequests("AbortMovementRequests", tenantBalancerMetrics),
 	    cleanupMovementSourceRequests("CleanupMovementSourceRequests", tenantBalancerMetrics) {
 		auto info = makeReference<AsyncVar<ClientDBInfo>>();
@@ -346,8 +347,13 @@ struct TenantBalancer {
 	bool hasSourceMovement(Key prefix) const { return outgoingMovements.count(prefix) > 0; }
 	bool hasDestinationMovement(Key prefix) const { return incomingMovements.count(prefix) > 0; }
 
-	ACTOR static Future<Void> recoverSourceMovement(TenantBalancer* self, MovementRecord* record);
-	ACTOR static Future<Void> recoverDestinationMovement(TenantBalancer* self, MovementRecord* record);
+	ACTOR static Future<ErrorOr<Void>> recoverSourceMovement(TenantBalancer* self, MovementRecord* record);
+	ACTOR static Future<ErrorOr<Void>> recoverDestinationMovement(TenantBalancer* self, MovementRecord* record);
+
+	Future<ErrorOr<Void>> recoverSourceMovement(MovementRecord& record) { return recoverSourceMovement(this, &record); }
+	Future<ErrorOr<Void>> recoverDestinationMovement(MovementRecord& record) {
+		return recoverDestinationMovement(this, &record);
+	}
 
 	ACTOR static Future<Void> recoverImpl(TenantBalancer* self) {
 		TraceEvent("TenantBalancerRecovering", self->tbi.id());
@@ -415,6 +421,7 @@ struct TenantBalancer {
 			}
 		}
 
+		state std::vector<Future<ErrorOr<Void>>> movementRecoveries;
 		state std::map<Key, MovementRecord>::iterator movementItr = self->outgoingMovements.begin();
 		while (movementItr != self->outgoingMovements.end()) {
 			Optional<Database> externalDb = self->externalDatabases.get(movementItr->second.getPeerDatabaseName());
@@ -432,22 +439,7 @@ struct TenantBalancer {
 			self->externalDatabases.addDatabaseRef(movementItr->second.getPeerDatabaseName());
 			unusedDatabases.erase(movementItr->second.getPeerDatabaseName());
 
-			try {
-				wait(recoverSourceMovement(self, &movementItr->second));
-			} catch (Error& e) {
-				TraceEvent(SevWarn, "TenantBalancerRecoverMovementError", self->tbi.id())
-				    .error(e)
-				    .detail("MovementId", movementItr->second.getMovementId())
-				    .detail("MovementState",
-				            TenantBalancerInterface::movementStateToString(movementItr->second.movementState))
-				    .detail("SourcePrefix", movementItr->second.getSourcePrefix())
-				    .detail("DestinationPrefix", movementItr->second.getDestinationPrefix());
-
-				// TODO: store error string in movement record
-				movementItr->second.movementState = MovementState::ERROR;
-				wait(self->saveMovementRecord(movementItr->second));
-			}
-
+			movementRecoveries.push_back(recoverSourceMovement(self, &movementItr->second));
 			++movementItr;
 		}
 
@@ -468,20 +460,7 @@ struct TenantBalancer {
 			self->externalDatabases.addDatabaseRef(movementItr->second.getPeerDatabaseName());
 			unusedDatabases.erase(movementItr->second.getPeerDatabaseName());
 
-			try {
-				wait(recoverDestinationMovement(self, &movementItr->second));
-			} catch (Error& e) {
-				TraceEvent(SevWarn, "TenantBalancerRecoverMovementError", self->tbi.id())
-				    .error(e)
-				    .detail("MovementId", movementItr->second.getMovementId())
-				    .detail("DatabaseName", movementItr->second.getPeerDatabaseName())
-				    .detail("SourcePrefix", movementItr->second.getSourcePrefix())
-				    .detail("DestinationPrefix", movementItr->second.getDestinationPrefix());
-
-				movementItr->second.movementState = MovementState::ERROR;
-				wait(self->saveMovementRecord(movementItr->second));
-			}
-
+			movementRecoveries.push_back(self->recoverDestinationMovement(movementItr->second));
 			++movementItr;
 		}
 
@@ -490,6 +469,8 @@ struct TenantBalancer {
 			    .detail("DatabaseName", dbName);
 			self->externalDatabases.markDeleted(dbName, self->clearExternalDatabase(dbName));
 		}
+
+		wait(waitForAll(movementRecoveries));
 
 		TraceEvent("TenantBalancerRecovered", self->tbi.id());
 		return Void();
@@ -538,6 +519,7 @@ struct TenantBalancer {
 	Counter getActiveMovementsRequests;
 	Counter finishSourceMovementRequests;
 	Counter finishDestinationMovementRequests;
+	Counter recoverMovementRequests;
 	Counter abortMovementRequests;
 	Counter cleanupMovementSourceRequests;
 
@@ -579,6 +561,22 @@ Future<Void> abortPeer(TenantBalancer* self, MovementRecord const& record) {
 	                         record.getMovementLocation() == MovementLocation::SOURCE ? MovementLocation::DEST
 	                                                                                  : MovementLocation::SOURCE),
 	    &TenantBalancerInterface::abortMovement));
+}
+
+ACTOR Future<Void> abortDr(TenantBalancer* self, MovementRecord const* record) {
+	if (record->getMovementLocation() == MovementLocation::SOURCE) {
+		wait(self->agent.abortBackup(record->getPeerDatabase(),
+		                             record->getTagName(),
+		                             PartialBackup{ false },
+		                             AbortOldBackup::False,
+		                             DstOnly{ false }));
+	} else {
+		DatabaseBackupAgent sourceAgent(record->getPeerDatabase());
+		wait(sourceAgent.abortBackup(
+		    self->db, record->getTagName(), PartialBackup{ false }, AbortOldBackup::False, DstOnly{ false }));
+	}
+
+	return Void();
 }
 
 ACTOR Future<EBackupState> getDrState(TenantBalancer* self,
@@ -1022,13 +1020,24 @@ Future<Version> lockSourceTenant(TenantBalancer* self, Key prefix) {
 	    });
 }
 
-Future<Void> sendFinishRequestToDestination(TenantBalancer* self, MovementRecord* record) {
-	// TODO when finish is ready
+ACTOR Future<Void> sendFinishRequestToDestination(TenantBalancer* self, MovementRecord* record) {
+	FinishDestinationMovementReply destinationReply = wait(
+	    sendTenantBalancerRequest(record->getPeerDatabase(),
+	                              FinishDestinationMovementRequest(
+	                                  record->getMovementId(), record->getDestinationPrefix(), record->switchVersion),
+	                              &TenantBalancerInterface::finishDestinationMovement));
+
+	record->movementState = MovementState::COMPLETED;
+	wait(self->saveMovementRecord(*record));
+	wait(abortPeer(self, *record));
+
 	return Void();
 }
 
 ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMovementRequest req) {
 	++self->finishSourceMovementRequests;
+
+	// TODO: handle a new finish request if one is in flight
 
 	TraceEvent(SevDebug, "TenantBalancerFinishSourceMovement", self->tbi.id())
 	    .detail("SourcePrefix", req.sourcePrefix)
@@ -1089,16 +1098,7 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 		// Update movement record
 		record.movementState = MovementState::SWITCHING;
 		wait(self->saveMovementRecord(record));
-
-		FinishDestinationMovementReply destinationReply = wait(sendTenantBalancerRequest(
-		    record.getPeerDatabase(),
-		    FinishDestinationMovementRequest(record.getMovementId(), record.getDestinationPrefix(), version),
-		    &TenantBalancerInterface::finishDestinationMovement));
-
-		record.movementState = MovementState::COMPLETED;
-		wait(self->saveMovementRecord(record));
-
-		wait(abortPeer(self, record));
+		wait(sendFinishRequestToDestination(self, &record));
 
 		TraceEvent(SevDebug, "TenantBalancerFinishSourceMovementComplete", self->tbi.id())
 		    .detail("MovementId", record.getMovementId())
@@ -1121,45 +1121,6 @@ ACTOR Future<Void> finishSourceMovement(TenantBalancer* self, FinishSourceMoveme
 	return Void();
 }
 
-ACTOR Future<Void> flushMovement(TenantBalancer* self, MovementRecord* record) {
-	DatabaseBackupAgent sourceBackupAgent(record->getPeerDatabase());
-	wait(sourceBackupAgent.flushBackup(self->db, record->getTagName(), record->switchVersion));
-	// TODO: unlock DR prefix
-
-	record->movementState = MovementState::COMPLETED;
-	wait(self->saveMovementRecord(*record));
-
-	return Void();
-}
-
-ACTOR Future<Void> flushAndNotifySourceCluster(TenantBalancer* self, MovementRecord* record) {
-	EBackupState backupState = wait(getDrState(self, record->getTagName()));
-
-	if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL) {
-		wait(flushMovement(self, record));
-	} else if (backupState == EBackupState::STATE_COMPLETED) {
-		// Do nothing
-	} else {
-		bool locked = false;
-		if (locked) {
-			// TODO: If destination is locked, we are in an unexpected state and the movement should be aborted
-			wait(abortPeer(self, *record));
-			TraceEvent(SevWarn, "TenantBalancerRecoverMovementUnexpectedDRState", self->tbi.id())
-			    .detail("MovementId", record->getMovementId())
-			    .detail("MovementLocation",
-			            TenantBalancerInterface::movementLocationToString(record->getMovementLocation()))
-			    .detail("SourcePrefix", record->getSourcePrefix())
-			    .detail("DestinationPrefix", record->getDestinationPrefix());
-
-			throw movement_error();
-		}
-	}
-
-	// TODO: Notify source of completion
-
-	return Void();
-}
-
 ACTOR Future<Void> finishDestinationMovement(TenantBalancer* self, FinishDestinationMovementRequest req) {
 	++self->finishDestinationMovementRequests;
 
@@ -1170,9 +1131,43 @@ ACTOR Future<Void> finishDestinationMovement(TenantBalancer* self, FinishDestina
 
 	try {
 		state MovementRecord record = self->getIncomingMovement(Key(req.destinationPrefix), req.movementId);
-		record.movementState = MovementState::SWITCHING;
-		record.switchVersion = req.version;
-		wait(self->saveMovementRecord(record));
+
+		if (record.movementState == MovementState::STARTED) {
+			EBackupState backupState = wait(getDrState(self, record.getTagName()));
+			if (backupState != EBackupState::STATE_RUNNING_DIFFERENTIAL) {
+				TraceEvent(SevWarn, "TenantBalancerInvalidFinishDestinationMovementRequest", self->tbi.id())
+				    .detail("MovementId", record.getMovementId())
+				    .detail("SourcePrefix", record.getSourcePrefix())
+				    .detail("DestinationPrefix", record.getDestinationPrefix())
+				    .detail("MovementState", TenantBalancerInterface::movementStateToString(record.movementState))
+				    .detail("BackupState", DatabaseBackupAgent::getStateName(backupState));
+
+				throw movement_error();
+			}
+
+			record.movementState = MovementState::SWITCHING;
+			record.switchVersion = req.version;
+			wait(self->saveMovementRecord(record));
+		}
+
+		if (record.movementState == MovementState::SWITCHING) {
+			DatabaseBackupAgent sourceBackupAgent(record.getPeerDatabase());
+			wait(sourceBackupAgent.flushBackup(self->db, record.getTagName(), record.switchVersion));
+			// TODO: unlock DR prefix
+
+			record.movementState = MovementState::COMPLETED;
+			wait(self->saveMovementRecord(record));
+		}
+
+		if (record.movementState != MovementState::COMPLETED) {
+			TraceEvent(SevWarn, "TenantBalancerFinishDestinationMovementFailed", self->tbi.id())
+			    .detail("MovementId", record.getMovementId())
+			    .detail("SourcePrefix", record.getSourcePrefix())
+			    .detail("DestinationPrefix", record.getDestinationPrefix())
+			    .detail("MovementState", TenantBalancerInterface::movementStateToString(record.movementState));
+
+			throw movement_error();
+		}
 
 		TraceEvent(SevDebug, "TenantBalancerFinishDestinationMovementComplete", self->tbi.id())
 		    .detail("MovementId", record.getMovementId())
@@ -1197,17 +1192,34 @@ ACTOR Future<Void> finishDestinationMovement(TenantBalancer* self, FinishDestina
 	return Void();
 }
 
-ACTOR Future<Void> abortDr(TenantBalancer* self, MovementRecord const* record) {
-	if (record->getMovementLocation() == MovementLocation::SOURCE) {
-		wait(self->agent.abortBackup(record->getPeerDatabase(),
-		                             record->getTagName(),
-		                             PartialBackup{ false },
-		                             AbortOldBackup::False,
-		                             DstOnly{ false }));
-	} else {
-		DatabaseBackupAgent sourceAgent(record->getPeerDatabase());
-		wait(sourceAgent.abortBackup(
-		    self->db, record->getTagName(), PartialBackup{ false }, AbortOldBackup::False, DstOnly{ false }));
+ACTOR Future<Void> recoverMovement(TenantBalancer* self, RecoverMovementRequest req) {
+	++self->recoverMovementRequests;
+
+	TraceEvent(SevDebug, "TenantBalancerRecoverMovement", self->tbi.id())
+	    .detail("MovementId", req.movementId)
+	    .detail("Prefix", req.prefix);
+
+	try {
+		state MovementRecord record = self->getMovement(MovementLocation::SOURCE, req.prefix, req.movementId);
+		ErrorOr<Void> result = wait(self->recoverSourceMovement(record));
+
+		if (!result.isError()) {
+			TraceEvent(SevDebug, "TenantBalancerRecoverMovementComplete", self->tbi.id())
+			    .detail("MovementId", req.movementId)
+			    .detail("Prefix", req.prefix);
+
+			RecoverMovementReply reply;
+			req.reply.send(reply);
+		} else {
+			req.reply.sendError(result.getError());
+		}
+	} catch (Error& e) {
+		TraceEvent(SevDebug, "TenantBalancerRecoverMovementError", self->tbi.id())
+		    .error(e)
+		    .detail("MovementId", req.movementId)
+		    .detail("Prefix", req.prefix);
+
+		req.reply.sendError(e);
 	}
 
 	return Void();
@@ -1324,7 +1336,7 @@ ACTOR Future<Void> abortMovementDueToFailedDr(TenantBalancer* self, MovementReco
 	    .detail("SourcePrefix", record->getSourcePrefix())
 	    .detail("DestinationPrefix", record->getDestinationPrefix());
 
-	wait(abortPeer(self, *record));
+	wait(abortPeer(self, *record) && abortDr(self, record));
 
 	record->movementState = MovementState::ERROR;
 	wait(self->saveMovementRecord(*record));
@@ -1332,63 +1344,81 @@ ACTOR Future<Void> abortMovementDueToFailedDr(TenantBalancer* self, MovementReco
 	return Void();
 }
 
-ACTOR Future<Void> TenantBalancer::recoverSourceMovement(TenantBalancer* self, MovementRecord* record) {
-	bool activeDr = wait(checkForActiveDr(self, record->getTagName()));
+ACTOR Future<ErrorOr<Void>> TenantBalancer::recoverSourceMovement(TenantBalancer* self, MovementRecord* record) {
+	try {
+		bool activeDr = wait(checkForActiveDr(self, record->getTagName()));
 
-	if (record->movementState == MovementState::INITIALIZING) {
-		// If DR is already running, then we can just move to the started phase.
-		if (activeDr) {
-			record->movementState = MovementState::STARTED;
-			wait(self->saveMovementRecord(*record));
+		if (record->movementState == MovementState::INITIALIZING) {
+			// If DR is already running, then we can just move to the started phase.
+			if (activeDr) {
+				record->movementState = MovementState::STARTED;
+				wait(self->saveMovementRecord(*record));
+			}
+			// Otherwise, attempt to start the movement
+			else {
+				ReceiveTenantFromClusterReply reply = wait(startSourceMovement(self, record));
+			}
+		} else if (record->movementState == MovementState::STARTED) {
+			if (!activeDr) {
+				wait(abortMovementDueToFailedDr(self, record));
+			}
+		} else if (record->movementState == MovementState::READY_FOR_SWITCH) {
+			// TODO: unlock the source
+			if (!activeDr) {
+				wait(abortMovementDueToFailedDr(self, record));
+			}
+		} else if (record->movementState == MovementState::SWITCHING) {
+			wait(sendFinishRequestToDestination(self, record));
+		} else if (record->movementState == MovementState::COMPLETED) {
+			wait(abortPeer(self, *record));
+		} else if (record->movementState == MovementState::ERROR) {
+			// Do nothing
+		} else {
+			ASSERT(false);
 		}
-		// Otherwise, attempt to start the movement
-		else {
-			ReceiveTenantFromClusterReply reply = wait(startSourceMovement(self, record));
-		}
-	} else if (record->movementState == MovementState::STARTED) {
-		if (!activeDr) {
-			wait(abortMovementDueToFailedDr(self, record));
-		}
-	} else if (record->movementState == MovementState::READY_FOR_SWITCH) {
-		// TODO: unlock the source
-		if (!activeDr) {
-			wait(abortMovementDueToFailedDr(self, record));
-		}
-	} else if (record->movementState == MovementState::SWITCHING) {
-		wait(sendFinishRequestToDestination(self, record));
-	} else if (record->movementState == MovementState::COMPLETED) {
-		wait(abortPeer(self, *record));
-	} else if (record->movementState == MovementState::ERROR) {
-		// Do nothing
-	} else {
-		ASSERT(false);
+	} catch (Error& e) {
+		state Error err = e;
+		TraceEvent(SevWarn, "TenantBalancerRecoverSourceMovementError", self->tbi.id())
+		    .error(e)
+		    .detail("MovementId", record->getMovementId())
+		    .detail("MovementState", TenantBalancerInterface::movementStateToString(record->movementState))
+		    .detail("SourcePrefix", record->getSourcePrefix())
+		    .detail("DestinationPrefix", record->getDestinationPrefix());
+
+		// TODO: store error string in movement record
+		record->movementState = MovementState::ERROR;
+		wait(self->saveMovementRecord(*record));
+
+		return err;
 	}
 
 	return Void();
 }
 
-ACTOR Future<Void> TenantBalancer::recoverDestinationMovement(TenantBalancer* self, MovementRecord* record) {
-	bool activeDr = wait(checkForActiveDr(self, record->getTagName()));
-
-	if (record->movementState == MovementState::INITIALIZING) {
-		// Do nothing
-	} else if (record->movementState == MovementState::STARTED) {
-		// Do nothing
-	} else if (record->movementState == MovementState::READY_FOR_SWITCH) {
-		if (!activeDr) {
-			wait(abortMovementDueToFailedDr(self, record));
+ACTOR Future<ErrorOr<Void>> TenantBalancer::recoverDestinationMovement(TenantBalancer* self, MovementRecord* record) {
+	try {
+		choose {
+			when(wait(delay(SERVER_KNOBS->TENANT_BALANCER_MOVEMENT_RECOVERY_TIMEOUT))) { throw timed_out(); }
+			when(RecoverMovementReply reply = wait(sendTenantBalancerRequest(
+			         record->getPeerDatabase(),
+			         RecoverMovementRequest(record->getMovementId(), record->getSourcePrefix()),
+			         &TenantBalancerInterface::recoverMovement))) {
+				return Void();
+			}
 		}
-	} else if (record->movementState == MovementState::SWITCHING) {
-		wait(flushAndNotifySourceCluster(self, record));
-	} else if (record->movementState == MovementState::COMPLETED) {
-		wait(flushAndNotifySourceCluster(self, record));
-	} else if (record->movementState == MovementState::ERROR) {
-		// Do nothing
-	} else {
-		ASSERT(false);
-	}
+	} catch (Error& e) {
+		state Error err = e;
+		TraceEvent(SevWarn, "TenantBalancerRecoverDestinationMovementError", self->tbi.id())
+		    .error(e)
+		    .detail("MovementId", record->getMovementId())
+		    .detail("DatabaseName", record->getPeerDatabaseName())
+		    .detail("SourcePrefix", record->getSourcePrefix())
+		    .detail("DestinationPrefix", record->getDestinationPrefix());
 
-	return Void();
+		record->movementState = MovementState::ERROR;
+		wait(self->saveMovementRecord(*record));
+		return err;
+	}
 }
 
 ACTOR Future<Void> tenantBalancerCore(TenantBalancer* self) {
@@ -1408,6 +1438,9 @@ ACTOR Future<Void> tenantBalancerCore(TenantBalancer* self) {
 		}
 		when(FinishDestinationMovementRequest req = waitNext(self->tbi.finishDestinationMovement.getFuture())) {
 			self->actors.add(finishDestinationMovement(self, req));
+		}
+		when(RecoverMovementRequest req = waitNext(self->tbi.recoverMovement.getFuture())) {
+			self->actors.add(recoverMovement(self, req));
 		}
 		when(AbortMovementRequest req = waitNext(self->tbi.abortMovement.getFuture())) {
 			self->actors.add(abortMovement(self, req));

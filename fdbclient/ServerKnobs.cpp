@@ -766,6 +766,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( LATENCY_SAMPLE_SIZE,                                100000 );
 	init( LATENCY_METRICS_LOGGING_INTERVAL,                     60.0 );
 
+	// Tenant balancer
+	init( TENANT_BALANCER_MOVEMENT_RECOVERY_TIMEOUT,            30.0 );
+
 	// clang-format on
 
 	if (clientKnobs) {

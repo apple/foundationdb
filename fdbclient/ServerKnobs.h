@@ -719,6 +719,9 @@ public:
 	int LATENCY_SAMPLE_SIZE;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
 
+	// Tenant Balancer
+	double TENANT_BALANCER_MOVEMENT_RECOVERY_TIMEOUT;
+
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);
 };
