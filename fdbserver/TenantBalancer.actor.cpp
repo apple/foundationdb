@@ -103,8 +103,27 @@ public:
 	Database getPeerDatabase() const { return peerDatabase; }
 	std::string getPeerDatabaseName() const { return peerDatabaseName; }
 
-	// TODO: tag name will not be unique on dest; make unique by including both prefixes
-	std::string getTagName() const { return DBMOVE_TAG_PREFIX.toString() + sourcePrefix.toString(); }
+	Standalone<StringRef> getTagName() const {
+		Standalone<StringRef> tagName =
+		    makeString(DBMOVE_TAG_PREFIX.size() + sourcePrefix.size() + destinationPrefix.size() + 1);
+
+		uint8_t* buf = mutateString(tagName);
+		int index = 0;
+		if (DBMOVE_TAG_PREFIX.size() > 0) {
+			memcpy(buf, DBMOVE_TAG_PREFIX.begin(), DBMOVE_TAG_PREFIX.size());
+			index += DBMOVE_TAG_PREFIX.size();
+		}
+		if (sourcePrefix.size() > 0) {
+			memcpy(buf + index, sourcePrefix.begin(), sourcePrefix.size());
+			index += sourcePrefix.size();
+		}
+		buf[index++] = '/';
+		if (destinationPrefix.size() > 0) {
+			memcpy(buf + index, destinationPrefix.begin(), destinationPrefix.size());
+		}
+
+		return tagName;
+	}
 
 	void setPeerDatabase(Database db) { peerDatabase = db; }
 
@@ -581,7 +600,7 @@ Future<Void> abortPeer(TenantBalancer* self, MovementRecord const& record) {
 	    &TenantBalancerInterface::abortMovement));
 }
 
-Future<bool> checkForActiveDr(std::string tag) {
+Future<bool> checkForActiveDr(Standalone<StringRef> tag) {
 	return true;
 }
 
@@ -660,7 +679,7 @@ ACTOR Future<ReceiveTenantFromClusterReply> startSourceMovement(TenantBalancer* 
 	bool replacePrefix = record->getSourcePrefix() != record->getDestinationPrefix();
 
 	wait(self->agent.submitBackup(record->getPeerDatabase(),
-	                              KeyRef(record->getTagName()),
+	                              record->getTagName(),
 	                              backupRanges,
 	                              StopWhenDone::False,
 	                              replacePrefix ? record->getDestinationPrefix() : StringRef(),
@@ -798,10 +817,19 @@ ACTOR Future<Void> receiveTenantFromCluster(TenantBalancer* self, ReceiveTenantF
 	return Void();
 }
 
-std::string getPrefixFromTagName(std::string tagName) {
-	auto startIdx = tagName.find('/');
-	// TODO think about concerns with conversion between string and key
-	return startIdx == tagName.npos ? tagName : tagName.substr(startIdx + 1);
+Optional<std::pair<std::string, std::string>> getPrefixesFromTagName(std::string tagName) {
+	auto sourceStartIndex = tagName.find('/');
+	if (sourceStartIndex == std::string::npos) {
+		return Optional<std::pair<std::string, std::string>>();
+	}
+
+	auto sourceEndIndex = tagName.find('/', ++sourceStartIndex);
+	if (sourceEndIndex == std::string::npos) {
+		return Optional<std::pair<std::string, std::string>>();
+	}
+
+	return std::make_pair(tagName.substr(sourceStartIndex, sourceEndIndex - sourceStartIndex),
+	                      tagName.substr(sourceEndIndex + 1));
 }
 
 ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, bool isSrc) {
@@ -858,7 +886,11 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 						    .detail("SecondsBehind", secondsBehind);
 						continue;
 					}
-					prefixToDRInfo[getPrefixFromTagName(itr.first)] = { mutationLag, backup_state };
+
+					Optional<std::pair<std::string, std::string>> prefixes = getPrefixesFromTagName(itr.first);
+					if (prefixes.present()) {
+						prefixToDRInfo[prefixes.get().first] = { mutationLag, backup_state };
+					}
 				}
 			}
 		}
@@ -896,7 +928,7 @@ ACTOR Future<std::vector<TenantMovementInfo>> fetchDBMove(TenantBalancer* self, 
 
 void filterActiveMove(const std::vector<TenantMovementInfo>& originStatus,
                       std::vector<TenantMovementInfo>& targetStatus,
-                      Optional<std::string> prefixFilter,
+                      Optional<Key> prefixFilter,
                       Optional<std::string> peerDatabaseConnectionStringFilter) {
 	for (const auto& status : originStatus) {
 		const std::string& localPrefix =
@@ -1104,7 +1136,7 @@ ACTOR Future<Void> finishDestinationMovement(TenantBalancer* self, FinishDestina
 		wait(self->saveMovementRecord(record));
 
 		DatabaseBackupAgent sourceBackupAgent(record.getPeerDatabase());
-		wait(sourceBackupAgent.flushBackup(self->db, Key(record.getTagName()), req.version));
+		wait(sourceBackupAgent.flushBackup(self->db, record.getTagName(), req.version));
 		// TODO: unlock DR prefix
 
 		record.movementState = MovementState::COMPLETED;
@@ -1142,17 +1174,19 @@ ACTOR Future<Void> abortMovement(TenantBalancer* self, AbortMovementRequest req)
 	    .detail("Prefix", req.prefix);
 
 	try {
-		state Database targetDB;
-		state std::string tagName;
-
 		state MovementRecord record = self->getMovement(req.movementLocation, req.prefix, req.movementId);
 
-		// TODO: make sure the parameters in abortBackup() are correct
-		wait(self->agent.abortBackup(
-		    targetDB, Key(tagName), PartialBackup{ false }, AbortOldBackup::False, DstOnly{ false }));
-
-		// TODO: do we need this?
-		wait(self->agent.unlockBackup(targetDB, Key(tagName)));
+		if (record.getMovementLocation() == MovementLocation::SOURCE) {
+			wait(self->agent.abortBackup(record.getPeerDatabase(),
+			                             record.getTagName(),
+			                             PartialBackup{ false },
+			                             AbortOldBackup::False,
+			                             DstOnly{ false }));
+		} else {
+			DatabaseBackupAgent sourceAgent(record.getPeerDatabase());
+			wait(sourceAgent.abortBackup(
+			    self->db, record.getTagName(), PartialBackup{ false }, AbortOldBackup::False, DstOnly{ false }));
+		}
 
 		wait(self->clearMovementRecord(record));
 
