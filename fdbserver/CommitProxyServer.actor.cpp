@@ -1120,8 +1120,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 
 					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)
 					    .detail("Dbgid", pProxyCommitData->dbgid)
-					    .detail("To", allSources)
-					    .detail("Mutation", m);
+					    .detail("To", allSources);
 					self->toCommit.addTags(allSources);
 				}
 
@@ -1221,8 +1220,6 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	// Second pass
 	wait(assignMutationsToStorageServers(self));
 
-	self->toCommit.saveTags(self->writtenTags);
-
 	// Serialize and backup the mutations as a single mutation
 	if ((pProxyCommitData->vecBackupKeys.size() > 1) && self->logRangeMutations.size()) {
 		wait(addBackupMutations(pProxyCommitData,
@@ -1232,6 +1229,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		                        &self->computeDuration,
 		                        &self->computeStart));
 	}
+
+	self->toCommit.saveTags(self->writtenTags);
 
 	pProxyCommitData->stats.mutations += self->mutationCount;
 	pProxyCommitData->stats.mutationBytes += self->mutationBytes;
