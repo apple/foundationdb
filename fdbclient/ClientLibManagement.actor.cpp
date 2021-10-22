@@ -23,6 +23,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ClientKnobs.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/Platform.h"
@@ -130,6 +131,15 @@ bool isValidTargetStatus(ClientLibStatus status) {
 bool isAvailableForDownload(ClientLibStatus status) {
 	return status == ClientLibStatus::AVAILABLE || status == ClientLibStatus::DOWNLOAD ||
 	       status == ClientLibStatus::ACTIVE;
+}
+
+void updateClientLibChangeCounter(Transaction& tr, ClientLibStatus status) {
+	static const int64_t counterIncVal = 1;
+	if (status == ClientLibStatus::DOWNLOAD || status == ClientLibStatus::ACTIVE) {
+		tr.atomicOp(clientLibChangeCounterKey,
+		            StringRef(reinterpret_cast<const uint8_t*>(&counterIncVal), sizeof(counterIncVal)),
+		            MutationRef::AddValue);
+	}
 }
 
 json_spirit::mObject parseMetadataJson(StringRef metadataString) {
@@ -438,6 +448,7 @@ ACTOR Future<Void> uploadClientLibrary(Database db,
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.set(clientLibMetaKey, ValueRef(jsStr));
+			updateClientLibChangeCounter(tr, targetStatus);
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -647,8 +658,8 @@ void applyClientLibFilter(const ClientLibFilter& filter,
 	for (const auto& [k, v] : scanResults) {
 		try {
 			json_spirit::mObject metadataJson = parseMetadataJson(v);
-			if (filter.matchAvailableOnly && getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS)) !=
-			                                     ClientLibStatus::AVAILABLE) {
+			if (filter.matchAvailableOnly &&
+			    !isAvailableForDownload(getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS)))) {
 				continue;
 			}
 			if (filter.matchCompatibleAPI &&
@@ -713,8 +724,8 @@ ACTOR Future<Standalone<VectorRef<StringRef>>> listClientLibraries(Database db, 
 	return result;
 }
 
-ACTOR Future<ClientLibStatus> getClientLibraryStatus(Database db, StringRef clientLibId) {
-	state Key clientLibMetaKey = metadataKeyFromId(clientLibId.toString());
+ACTOR Future<ClientLibStatus> getClientLibraryStatus(Database db, Standalone<StringRef> clientLibId) {
+	state Key clientLibMetaKey = metadataKeyFromId(clientLibId);
 	state Transaction tr(db);
 	loop {
 		try {
@@ -732,10 +743,13 @@ ACTOR Future<ClientLibStatus> getClientLibraryStatus(Database db, StringRef clie
 	}
 }
 
-ACTOR Future<Void> changeClientLibraryStatus(Database db, StringRef clientLibId, ClientLibStatus newStatus) {
-	state Key clientLibMetaKey = metadataKeyFromId(clientLibId.toString());
+ACTOR Future<Void> changeClientLibraryStatus(Database db,
+                                             Standalone<StringRef> clientLibId,
+                                             ClientLibStatus newStatus) {
+	state Key clientLibMetaKey = metadataKeyFromId(clientLibId);
 	state json_spirit::mObject metadataJson;
 	state std::string jsStr;
+	state Transaction tr;
 
 	if (!isValidTargetStatus(newStatus)) {
 		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
@@ -745,7 +759,7 @@ ACTOR Future<Void> changeClientLibraryStatus(Database db, StringRef clientLibId,
 	}
 
 	loop {
-		state Transaction tr(db);
+		tr = Transaction(db);
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			Optional<Value> metadataOpt = wait(tr.get(clientLibMetaKey));
@@ -754,9 +768,16 @@ ACTOR Future<Void> changeClientLibraryStatus(Database db, StringRef clientLibId,
 				throw client_lib_not_found();
 			}
 			metadataJson = parseMetadataJson(metadataOpt.get());
+			ClientLibStatus prevStatus = getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS));
+			if (prevStatus == newStatus) {
+				return Void();
+			}
 			metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(newStatus);
 			jsStr = json_spirit::write_string(json_spirit::mValue(metadataJson));
 			tr.set(clientLibMetaKey, ValueRef(jsStr));
+
+			updateClientLibChangeCounter(tr, newStatus);
+
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {

@@ -109,6 +109,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		wait(testClientLibDownloadNotExisting(self, cx));
 		wait(testChangeClientLibStatusErrors(self, cx));
 		wait(testDisableClientLib(self, cx));
+		wait(testChangeStateToDownload(self, cx));
 		wait(testDeleteClientLib(self, cx));
 		wait(testUploadedClientLibInList(self, cx, ClientLibFilter(), false, "No filter, after delete"));
 		return Void();
@@ -178,10 +179,13 @@ struct ClientLibManagementWorkload : public TestWorkload {
 	ACTOR static Future<Void> testUploadClientLib(ClientLibManagementWorkload* self, Database cx) {
 		state Standalone<StringRef> metadataStr;
 		state std::vector<Future<ErrorOr<Void>>> concurrentUploads;
+		state Future<Void> clientLibChanged = cx->onClientLibStatusChanged();
+
 		validClientLibMetadataSample(self->uploadedMetadataJson);
 		self->uploadedMetadataJson[CLIENTLIB_ATTR_CHECKSUM] = self->generatedChecksum.toString();
 		// avoid clientLibId clashes, when multiple clients try to upload the same file
 		self->uploadedMetadataJson[CLIENTLIB_ATTR_TYPE] = format("devbuild%d", self->clientId);
+		self->uploadedMetadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(ClientLibStatus::ACTIVE);
 		metadataStr = StringRef(json_spirit::write_string(json_spirit::mValue(self->uploadedMetadataJson)));
 		self->uploadedClientLibId = getClientLibIdFromMetadataJson(metadataStr);
 
@@ -211,6 +215,13 @@ struct ClientLibManagementWorkload : public TestWorkload {
 			TraceEvent(SevError, "ClientLibConflictingUpload").log();
 			self->success = false;
 		}
+
+		Optional<Void> notificationWait = wait(timeout(clientLibChanged, 100.0));
+		if (!notificationWait.present()) {
+			TraceEvent(SevError, "ClientLibChangeNotificationFailed").log();
+			self->success = false;
+		}
+
 		return Void();
 	}
 
@@ -355,6 +366,30 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		                       "Downloading disabled client library",
 		                       client_lib_not_available(),
 		                       &self->success));
+		return Void();
+	}
+
+	ACTOR static Future<Void> testChangeStateToDownload(ClientLibManagementWorkload* self, Database cx) {
+		state std::string destFileName = format("clientLibDownload%d", self->clientId);
+		state Future<Void> clientLibChanged = cx->onClientLibStatusChanged();
+
+		// Set disabled status on the uploaded library
+		wait(changeClientLibraryStatus(cx, self->uploadedClientLibId, ClientLibStatus::DOWNLOAD));
+		state ClientLibStatus newStatus = wait(getClientLibraryStatus(cx, self->uploadedClientLibId));
+		if (newStatus != ClientLibStatus::DOWNLOAD) {
+			TraceEvent(SevError, "ClientLibChangeStatusFailed")
+			    .detail("Reason", "Unexpected status")
+			    .detail("Expected", ClientLibStatus::DOWNLOAD)
+			    .detail("Actual", newStatus);
+			self->success = false;
+		}
+
+		Optional<Void> notificationWait = wait(timeout(clientLibChanged, 100.0));
+		if (!notificationWait.present()) {
+			TraceEvent(SevError, "ClientLibChangeNotificationFailed").log();
+			self->success = false;
+		}
+
 		return Void();
 	}
 

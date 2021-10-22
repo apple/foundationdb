@@ -136,10 +136,10 @@ ACTOR Future<Void> deleteClientLibrary(Database db, Standalone<StringRef> client
 ACTOR Future<Standalone<VectorRef<StringRef>>> listClientLibraries(Database db, ClientLibFilter filter);
 
 // Get the current status of an uploaded client library
-ACTOR Future<ClientLibStatus> getClientLibraryStatus(Database db, StringRef clientLibId);
+ACTOR Future<ClientLibStatus> getClientLibraryStatus(Database db, Standalone<StringRef> clientLibId);
 
 // Change client library metadata status
-ACTOR Future<Void> changeClientLibraryStatus(Database db, StringRef clientLibId, ClientLibStatus newStatus);
+ACTOR Future<Void> changeClientLibraryStatus(Database db, Standalone<StringRef> clientLibId, ClientLibStatus newStatus);
 
 } // namespace ClientLibManagement
 
