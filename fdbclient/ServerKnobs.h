@@ -614,6 +614,9 @@ public:
 	double FORWARD_REQUEST_TOO_OLD; // Do not forward requests older than this setting
 	double COORDINATOR_LEADER_CONNECTION_TIMEOUT;
 
+	// Dynamic Knobs (implementation)
+	double GET_COMMITTED_VERSION_TIMEOUT;
+
 	// Buggification
 	double BUGGIFIED_EVENTUAL_CONSISTENCY;
 	bool BUGGIFY_ALL_COORDINATION;

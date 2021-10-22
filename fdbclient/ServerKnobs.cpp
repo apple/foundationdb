@@ -671,6 +671,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENABLE_CROSS_CLUSTER_SUPPORT,                         true ); if( randomize && BUGGIFY ) ENABLE_CROSS_CLUSTER_SUPPORT = false;
 	init( COORDINATOR_LEADER_CONNECTION_TIMEOUT,                20.0 );
 
+	// Dynamic Knobs (implementation)
+	init( GET_COMMITTED_VERSION_TIMEOUT,                         3.0 ); // Maximum time the consumer should wait for a response from a ConfigNode when asking for the latest committed version.
+
 	// Buggification
 	init( BUGGIFIED_EVENTUAL_CONSISTENCY,                        1.0 );
 	init( BUGGIFY_ALL_COORDINATION,                            false ); if( randomize && BUGGIFY ) BUGGIFY_ALL_COORDINATION = true;
