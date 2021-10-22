@@ -789,9 +789,12 @@ public:
 		Counter wrongShardServer;
 		Counter fetchedVersions;
 		Counter fetchesFromLogs;
+		Counter fetchesFromVersionIndexer;
+		Counter versionIndexerIncrements;
 
 		LatencySample readLatencySample;
 		LatencyBands readLatencyBands;
+		LatencyBands versionIndexerLatencyBand;
 
 		Counters(StorageServer* self)
 		  : cc("StorageServer", self->thisServerID.toString()), allQueries("QueryQueue", cc),
@@ -808,11 +811,16 @@ public:
 		    fetchWaitingCount("FetchWaitingCount", cc), fetchExecutingMS("FetchExecutingMS", cc),
 		    fetchExecutingCount("FetchExecutingCount", cc), readsRejected("ReadsRejected", cc),
 		    wrongShardServer("WrongShardServer", cc), fetchedVersions("FetchedVersions", cc),
-		    fetchesFromLogs("FetchesFromLogs", cc), readLatencySample("ReadLatencyMetrics",
-		                                                              self->thisServerID,
-		                                                              SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                                                              SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
+		    fetchesFromLogs("FetchesFromLogs", cc), fetchesFromVersionIndexer("FetchesFromVersionIndexer", cc),
+		    versionIndexerIncrements("VersionIndexerIncrements", cc),
+		    readLatencySample("ReadLatencyMetrics",
+		                      self->thisServerID,
+		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
+		    versionIndexerLatencyBand("VersionIndexerLatencyBand",
+		                              self->thisServerID,
+		                              SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
 			specialCounter(cc, "StorageVersion", [self]() { return self->storageVersion(); });
@@ -1195,8 +1203,16 @@ void updateProcessStats(StorageServer* self) {
 
 ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanID spanContext) {
 	state Span span("SS.WaitForVersion"_loc, { spanContext });
+	state double beginWait = now();
 	choose {
 		when(wait(data->version.whenAtLeast(version))) {
+			auto waitTime = now() - beginWait;
+			if (waitTime > 0.01) {
+				TraceEvent(SevWarn, "LongWaitDelay", data->thisServerID)
+				    .detail("Version", version)
+				    .detail("MyVersion", data->version.get())
+				    .detail("ServerID", data->thisServerID);
+			}
 			// FIXME: A bunch of these can block with or without the following delay 0.
 			// wait( delay(0) );  // don't do a whole bunch of these at once
 			if (version < data->oldestVersion.get())
@@ -3779,6 +3795,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					SpanContextMessage scm;
 					cloneReader >> scm;
 				} else {
+					ASSERT(data->logProtocol.isValid());
+					ASSERT(cloneReader.protocolVersion().isValid());
 					MutationRef msg;
 					cloneReader >> msg;
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
@@ -5044,23 +5062,33 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 	state VersionIndexerPeekReply reply;
 	state int i = 0;
 	state Version prevVersion;
+	state double beginTime;
 	for (auto& vInterface : self->db->get().versionIndexers) {
 		interfaces.emplace_back(new ReferencedInterface<VersionIndexerInterface>(vInterface));
 	}
 	multi = Reference<MultiInterface<ReferencedInterface<VersionIndexerInterface>>>(
 	    new MultiInterface<ReferencedInterface<VersionIndexerInterface>>(interfaces));
+	TraceEvent("VersionIndexerPeekerStart", self->thisServerID).detail("NumVersionIndexer", interfaces.size());
 	loop {
 		VersionIndexerPeekRequest request;
 		request.lastKnownVersion = self->version.get();
 		request.tag = self->tag;
+		beginTime = now();
 		VersionIndexerPeekReply _reply =
 		    wait(brokenPromiseToNever(loadBalance(multi, &VersionIndexerInterface::peek, request)));
+		self->counters.versionIndexerLatencyBand.addMeasurement(now() - beginTime);
+		++self->counters.fetchesFromVersionIndexer;
 		reply = _reply;
 		prevVersion = reply.previousVersion;
 		wait(self->version.whenAtLeast(prevVersion));
-		for (; i < reply.versions.size(); ++i) {
+		for (i = 0; i < reply.versions.size(); ++i) {
 			if (self->version.get() == prevVersion && !reply.versions[i].second) {
+				TraceEvent("SetVersionThroughIndexer", self->thisServerID)
+				    .detail("TagLocality", self->tag.locality)
+				    .detail("TagID", self->tag.id)
+				    .detail("Version", reply.versions[i].first);
 				self->version.set(reply.versions[i].first);
+				++self->counters.versionIndexerIncrements;
 				prevVersion = reply.versions[i].first;
 			} else if (self->version.get() < reply.versions[i].first) {
 				wait(self->version.whenAtLeast(reply.versions[i].first));
@@ -5073,6 +5101,8 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 ACTOR Future<Void> versionIndexerPeeker(StorageServer* self) {
 	loop {
 		Future<Void> impl = Never();
+		ASSERT_WE_THINK(self->db->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
+		                !self->db->get().versionIndexers.empty());
 		if (self->db.isValid() && !self->db->get().versionIndexers.empty()) {
 			impl = versionIndexerPeekerImpl(self);
 		}

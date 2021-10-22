@@ -493,8 +493,6 @@ struct CommitBatchContext {
 
 	void setupTraceBatch();
 
-	std::set<Tag> writtenTags;
-
 private:
 	void evaluateBatchSize();
 };
@@ -958,10 +956,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 
 				DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid).detail("To", tags);
 				self->toCommit.addTags(tags);
-				self->writtenTags.insert(tags.begin(), tags.end());
 				if (pProxyCommitData->cacheInfo[m.param1]) {
 					self->toCommit.addTag(cacheTag);
-					self->writtenTags.insert(cacheTag);
 				}
 				self->toCommit.writeTypedMessage(m);
 			} else if (m.type == MutationRef::ClearRange) {
@@ -977,7 +973,6 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					ranges.begin().value().populateTags();
 					const auto& tags = ranges.begin().value().tags;
 					self->toCommit.addTags(tags);
-					self->writtenTags.insert(tags.begin(), tags.end());
 
 					// check whether clear is sampled
 					if (checkSample && !trCost->get().clearIdxCosts.empty() &&
@@ -1013,12 +1008,10 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					    .detail("To", allSources);
 
 					self->toCommit.addTags(allSources);
-					self->writtenTags.insert(allSources.begin(), allSources.end());
 				}
 
 				if (pProxyCommitData->needsCacheTag(clearRange)) {
 					self->toCommit.addTag(cacheTag);
-					self->writtenTags.insert(cacheTag);
 				}
 				self->toCommit.writeTypedMessage(m);
 			} else {
@@ -1077,8 +1070,9 @@ Future<Void> informVersionIndexers(CommitBatchContext* self) {
 	req.version = self->commitVersion;
 	req.previousVersion = self->prevVersion;
 	req.committedVersion = self->pProxyCommitData->committedVersion.get();
-	req.tags.reserve(self->writtenTags.size());
-	req.tags.insert(req.tags.end(), self->writtenTags.begin(), self->writtenTags.end());
+	const auto& tags = self->toCommit.getWrittenTags();
+	req.tags.reserve(tags.size());
+	req.tags.insert(req.tags.end(), tags.begin(), tags.end());
 	std::vector<Future<Void>> resp;
 	const auto& versionIndexers = self->pProxyCommitData->db->get().versionIndexers;
 	resp.reserve(versionIndexers.size());

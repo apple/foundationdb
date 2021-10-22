@@ -270,9 +270,9 @@ void LogSet::getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, 
 
 void LogPushData::addTxsTag() {
 	if (logSystem->getTLogVersion() >= TLogVersion::V4) {
-		next_message_tags.push_back(logSystem->getRandomTxsTag());
+		addTag(logSystem->getRandomTxsTag());
 	} else {
-		next_message_tags.push_back(txsTag);
+		addTag(txsTag);
 	}
 }
 

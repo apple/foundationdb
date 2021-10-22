@@ -750,11 +750,15 @@ struct LogPushData : NonCopyable {
 	void addTxsTag();
 
 	// addTag() adds a tag for the *next* message to be added
-	void addTag(Tag tag) { next_message_tags.push_back(tag); }
+	void addTag(Tag tag) {
+		next_message_tags.push_back(tag);
+		writtenTags.insert(tag);
+	}
 
 	template <class T>
 	void addTags(T tags) {
 		next_message_tags.insert(next_message_tags.end(), tags.begin(), tags.end());
+		writtenTags.insert(tags.begin(), tags.end());
 	}
 
 	// Add transaction info to be written before the first mutation in the transaction.
@@ -775,8 +779,11 @@ struct LogPushData : NonCopyable {
 	// MUST be called after getMessages() and recordEmptyMessage().
 	float getEmptyMessageRatio() const;
 
+	const std::unordered_set<Tag>& getWrittenTags() const { return writtenTags; }
+
 private:
 	Reference<ILogSystem> logSystem;
+	std::unordered_set<Tag> writtenTags;
 	std::vector<Tag> next_message_tags;
 	std::vector<Tag> prev_tags;
 	std::vector<BinaryWriter> messagesWriter;
