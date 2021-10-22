@@ -579,12 +579,19 @@ Future<Void> abortPeer(TenantBalancer* self, MovementRecord const& record) {
 	    &TenantBalancerInterface::abortMovement));
 }
 
+ACTOR Future<EBackupState> getDrState(TenantBalancer* self,
+                                      Standalone<StringRef> tag,
+                                      Reference<ReadYourWritesTransaction> tr) {
+	UID logUid = wait(self->agent.getLogUid(tr, tag));
+	EBackupState backupState = wait(self->agent.getStateValue(tr, logUid));
+	return backupState;
+}
+
 ACTOR Future<EBackupState> getDrState(TenantBalancer* self, Standalone<StringRef> tag) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
 	loop {
 		try {
-			UID logUid = wait(self->agent.getLogUid(tr, tag));
-			EBackupState backupState = wait(self->agent.getStateValue(tr, logUid));
+			EBackupState backupState = wait(getDrState(self, tag, tr));
 			return backupState;
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "TenantBalancerGetDRStateError", self->tbi.id()).error(e).detail("Tag", tag);
