@@ -3288,7 +3288,7 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 		// To avoid removing machine teams too fast, which is unlikely happen though
 		wait(delay(SERVER_KNOBS->TR_REMOVE_MACHINE_TEAM_DELAY, TaskPriority::DataDistribution));
 
-		if (self->pauseWiggle && self->pauseWiggle->get()) {
+		if (self->pauseWiggle && !self->pauseWiggle->get()) {
 			wait(
 			    waitUntilHealthy(self,
 			                     SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY + SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY,
@@ -3419,7 +3419,7 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 		// To avoid removing server teams too fast, which is unlikely happen though
 		wait(delay(removeServerTeamDelay, TaskPriority::DataDistribution));
 
-		if (self->pauseWiggle && self->pauseWiggle->get()) {
+		if (self->pauseWiggle && !self->pauseWiggle->get()) {
 			wait(
 			    waitUntilHealthy(self,
 			                     SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY + SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY,
