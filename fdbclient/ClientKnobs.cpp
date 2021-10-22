@@ -253,7 +253,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	// multi-version client control
 	init( MVC_CLIENTLIB_CHUNK_SIZE,              8*1024 );
-	init( MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION,  32 );
+	init( MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION,      32 );
 
 	// clang-format on
 }
