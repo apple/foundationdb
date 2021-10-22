@@ -2983,10 +2983,11 @@ ACTOR Future<Void> updateServerMetrics(Reference<TCServerInfo> server) {
 
 // NOTE: this actor returns when the cluster is healthy and stable (no server is expected to be removed in a period)
 // processingWiggle and processingUnhealthy indicate that some servers are going to be removed.
-ACTOR Future<Void> waitUntilHealthy(DDTeamCollection* self, double extraDelay = 0) {
+ACTOR Future<Void> waitUntilHealthy(DDTeamCollection* self, double extraDelay = 0, bool waitWiggle = false) {
 	state int waitCount = 0;
 	loop {
-		while (self->zeroHealthyTeams->get() || self->processingUnhealthy->get() || self->processingWiggle->get()) {
+		while (self->zeroHealthyTeams->get() || self->processingUnhealthy->get() ||
+		       (waitWiggle && self->processingWiggle->get())) {
 			// processingUnhealthy: true when there exists data movement
 			// processingWiggle: true when there exists data movement because we want to wiggle a SS
 			TraceEvent("WaitUntilHealthyStalled", self->distributorId)
@@ -3002,7 +3003,8 @@ ACTOR Future<Void> waitUntilHealthy(DDTeamCollection* self, double extraDelay = 
 		           TaskPriority::Low)); // After the team trackers wait on the initial failure reaction delay, they
 		                                // yield. We want to make sure every tracker has had the opportunity to send
 		                                // their relocations to the queue.
-		if (!self->zeroHealthyTeams->get() && !self->processingUnhealthy->get() && !self->processingWiggle->get()) {
+		if (!self->zeroHealthyTeams->get() && !self->processingUnhealthy->get() &&
+		    (!waitWiggle || !self->processingWiggle->get())) {
 			if (extraDelay <= 0.01 || waitCount >= 1) {
 				// Return healthy if we do not need extraDelay or when DD are healthy in at least two consecutive check
 				return Void();
@@ -3287,10 +3289,12 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 		wait(delay(SERVER_KNOBS->TR_REMOVE_MACHINE_TEAM_DELAY, TaskPriority::DataDistribution));
 
 		if (self->pauseWiggle && self->pauseWiggle->get()) {
-			wait(waitUntilHealthy(
-			    self, SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY + SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY));
+			wait(
+			    waitUntilHealthy(self,
+			                     SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY + SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY,
+			                     SERVER_KNOBS->PERPETUAL_WIGGLE_DISABLE_REMOVER));
 		} else {
-			wait(waitUntilHealthy(self, SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY));
+			wait(waitUntilHealthy(self, SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY, false));
 		}
 		// Wait for the badTeamRemover() to avoid the potential race between adding the bad team (add the team tracker)
 		// and remove bad team (cancel the team tracker).
@@ -3416,8 +3420,10 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 		wait(delay(removeServerTeamDelay, TaskPriority::DataDistribution));
 
 		if (self->pauseWiggle && self->pauseWiggle->get()) {
-			wait(waitUntilHealthy(
-			    self, SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY + SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY));
+			wait(
+			    waitUntilHealthy(self,
+			                     SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY + SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY,
+			                     SERVER_KNOBS->PERPETUAL_WIGGLE_DISABLE_REMOVER));
 		} else {
 			wait(waitUntilHealthy(self, SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY));
 		}
@@ -4035,7 +4041,6 @@ ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
 					// there must not have other teams to place wiggled data
 					takeRest = teamCollection->server_info.size() <= teamCollection->configuration.storageTeamSize ||
 					           teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize;
-					teamCollection->restartRecruiting.trigger();
 					if (takeRest &&
 					    teamCollection->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
 						TraceEvent(SevWarn, "PerpetualWiggleSleep", teamCollection->distributorId)

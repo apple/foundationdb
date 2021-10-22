@@ -1,5 +1,5 @@
 /*
- * Knobs.h
+ * ServerKnobs.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,18 +18,18 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_KNOBS_H
-#define FDBSERVER_KNOBS_H
 #pragma once
 
+#include "flow/BooleanParam.h"
 #include "flow/Knobs.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbclient/Knobs.h"
+#include "fdbrpc/Locality.h"
+#include "fdbclient/ClientKnobs.h"
 
 // Disk queue
-static const int _PAGE_SIZE = 4096;
+static constexpr int _PAGE_SIZE = 4096;
 
-class ServerKnobs : public Knobs {
+class ServerKnobs : public KnobsImpl<ServerKnobs> {
 public:
 	// Versions
 	int64_t VERSIONS_PER_SECOND;
@@ -41,6 +41,7 @@ public:
 	                                  // often, so that versions always advance smoothly
 
 	// TLogs
+	bool PEEK_USING_STREAMING;
 	double TLOG_TIMEOUT; // tlog OR commit proxy failure - master's reaction time
 	double TLOG_SLOW_REJOIN_WARN_TIMEOUT_SECS; // Warns if a tlog takes too long to rejoin
 	double RECOVERY_TLOG_SMART_QUORUM_DELAY; // smaller might be better for bug amplification
@@ -275,6 +276,10 @@ public:
 	int64_t ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	int ROCKSDB_PREFIX_LEN;
 	int64_t ROCKSDB_BLOCK_CACHE_SIZE;
+	double ROCKSDB_METRICS_DELAY;
+	double ROCKSDB_READ_VALUE_TIMEOUT;
+	double ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
+	double ROCKSDB_READ_RANGE_TIMEOUT;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -298,6 +303,7 @@ public:
 	double START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET;
 	int START_TRANSACTION_MAX_QUEUE_SIZE;
 	int KEY_LOCATION_MAX_QUEUE_SIZE;
+	double COMMIT_PROXY_LIVENESS_TIMEOUT;
 
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE;
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_MIN;
@@ -384,6 +390,10 @@ public:
 	double INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
 	double VERSION_LAG_METRIC_INTERVAL;
 	int64_t MAX_VERSION_DIFFERENCE;
+	double INITIAL_UPDATE_CROSS_DC_INFO_DELAY; // The intial delay in a new Cluster Controller just started to refresh
+	                                           // the info of remote DC, such as remote DC health, and whether we need
+	                                           // to take remote DC health info when making failover decision.
+	double CHECK_REMOTE_HEALTH_INTERVAL; // Remote DC health refresh interval.
 	double FORCE_RECOVERY_CHECK_DELAY;
 	double RATEKEEPER_FAILURE_TIME;
 	double REPLACE_INTERFACE_DELAY;
@@ -406,7 +416,13 @@ public:
 	double CC_TRACKING_HEALTH_RECOVERY_INTERVAL; // The number of recovery count should not exceed
 	                                             // CC_MAX_HEALTH_RECOVERY_COUNT within
 	                                             // CC_TRACKING_HEALTH_RECOVERY_INTERVAL.
-	int CC_MAX_HEALTH_RECOVERY_COUNT;
+	int CC_MAX_HEALTH_RECOVERY_COUNT; // The max number of recoveries can be triggered due to worker health within
+	                                  // CC_TRACKING_HEALTH_RECOVERY_INTERVAL
+	bool CC_HEALTH_TRIGGER_FAILOVER; // Whether to enable health triggered failover in CC.
+	int CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION; // The minimum number of degraded servers that can trigger a
+	                                               // failover.
+	int CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION; // The maximum number of degraded servers that can trigger a
+	                                               // failover.
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
@@ -562,6 +578,7 @@ public:
 	double FETCH_KEYS_TOO_LONG_TIME_CRITERIA;
 	double MAX_STORAGE_COMMIT_TIME;
 	int64_t RANGESTREAM_LIMIT_BYTES;
+	bool ENABLE_CLEAR_RANGE_EAGER_READS;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -570,7 +587,7 @@ public:
 	// Worker
 	double WORKER_LOGGING_INTERVAL;
 	double HEAP_PROFILER_INTERVAL;
-	double REGISTER_WORKER_REQUEST_TIMEOUT;
+	double UNKNOWN_CC_TIMEOUT;
 	double DEGRADED_RESET_INTERVAL;
 	double DEGRADED_WARNING_LIMIT;
 	double DEGRADED_WARNING_RESET_DELAY;
@@ -592,6 +609,10 @@ public:
 
 	// Coordination
 	double COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL;
+	bool ENABLE_CROSS_CLUSTER_SUPPORT; // Allow a coordinator to serve requests whose connection string does not match
+	                                   // the local descriptor
+	double FORWARD_REQUEST_TOO_OLD; // Do not forward requests older than this setting
+	double COORDINATOR_LEADER_CONNECTION_TIMEOUT;
 
 	// Buggification
 	double BUGGIFIED_EVENTUAL_CONSISTENCY;
@@ -685,17 +706,13 @@ public:
 	int64_t REDWOOD_REMAP_CLEANUP_WINDOW; // Remap remover lag interval in which to coalesce page writes
 	double REDWOOD_REMAP_CLEANUP_LAG; // Maximum allowed remap remover lag behind the cleanup window as a multiple of
 	                                  // the window size
-	double REDWOOD_LOGGING_INTERVAL;
+	double REDWOOD_METRICS_INTERVAL;
+	double REDWOOD_HISTOGRAM_INTERVAL;
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
 
-	ServerKnobs();
-	void initialize(bool randomize = false, ClientKnobs* clientKnobs = nullptr, bool isSimulated = false);
+	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
+	void initialize(Randomize, ClientKnobs*, IsSimulated);
 };
-
-extern std::unique_ptr<ServerKnobs> globalServerKnobs;
-extern ServerKnobs const* SERVER_KNOBS;
-
-#endif

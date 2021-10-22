@@ -214,6 +214,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( INITIAL_FAILURE_REACTION_DELAY,                       30.0 ); if( randomize && BUGGIFY ) INITIAL_FAILURE_REACTION_DELAY = 0.0;
 	init( CHECK_TEAM_DELAY,                                     30.0 );
 	init( PERPETUAL_WIGGLE_DELAY,                               50.0 );
+	init( PERPETUAL_WIGGLE_DISABLE_REMOVER,                     true );
 	init( LOG_ON_COMPLETION_DELAY,         DD_QUEUE_LOGGING_INTERVAL );
 	init( BEST_TEAM_MAX_TEAM_TRIES,                               10 );
 	init( BEST_TEAM_OPTION_COUNT,                                  4 );
