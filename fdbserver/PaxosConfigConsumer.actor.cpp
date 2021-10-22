@@ -22,15 +22,8 @@
 
 #include <map>
 
+#include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-
-namespace {
-
-// Maximum time to wait for a response from a ConfigNode when asking for the
-// latest committed version.
-const double getCommittedVersionTimeout = 3;
-
-} // namespace
 
 struct CommittedVersions {
 	Version secondToLastCommitted;
@@ -98,10 +91,11 @@ class GetCommittedVersionQuorum {
 					                            ConfigFollowerGetSnapshotAndChangesRequest{ self->largestCommitted }));
 					// TODO: Send the whole snapshot to `cfi`
 					ASSERT(false);
-				} else if (e.code() == error_code_not_committed) {
+				} else if (e.code() == error_code_transaction_too_old) {
 					// Seeing this trace is not necessarily a problem. There
 					// are legitimate scenarios where a ConfigNode could return
-					// not_committed in response to a rollforward request.
+					// transaction_too_old in response to a rollforward
+					// request.
 					TraceEvent(SevInfo, "ConfigNodeRollforwardError").error(e);
 				} else {
 					throw e;
@@ -115,7 +109,7 @@ class GetCommittedVersionQuorum {
 		try {
 			ConfigFollowerGetCommittedVersionReply reply =
 			    wait(timeoutError(cfi.getCommittedVersion.getReply(ConfigFollowerGetCommittedVersionRequest{}),
-			                      getCommittedVersionTimeout));
+			                      SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
 
 			++self->totalRepliesReceived;
 			self->largestCommitted = std::max(self->largestCommitted, reply.lastCommitted);
@@ -262,7 +256,7 @@ class PaxosConfigConsumerImpl {
 
 	ACTOR static Future<Void> fetchChanges(PaxosConfigConsumerImpl* self, ConfigBroadcaster* broadcaster) {
 		wait(getSnapshotAndChanges(self, broadcaster));
-		self->reset();
+		self->resetCommittedVersionQuorum();
 		loop {
 			try {
 				state Version committedVersion = wait(getCommittedVersion(self));
@@ -307,11 +301,13 @@ class PaxosConfigConsumerImpl {
 				}
 			}
 			wait(self->getCommittedVersionQuorum.complete());
-			self->reset();
+			self->resetCommittedVersionQuorum();
 		}
 	}
 
-	void reset() { getCommittedVersionQuorum = GetCommittedVersionQuorum{ cfis, lastSeenVersion }; }
+	void resetCommittedVersionQuorum() {
+		getCommittedVersionQuorum = GetCommittedVersionQuorum{ cfis, lastSeenVersion };
+	}
 
 public:
 	Future<Void> consume(ConfigBroadcaster& broadcaster) {

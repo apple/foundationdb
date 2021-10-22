@@ -481,21 +481,33 @@ class ConfigNodeImpl {
 	}
 
 	ACTOR static Future<Void> rollforward(ConfigNodeImpl* self, ConfigFollowerRollforwardRequest req) {
+		Version lastCompactedVersion = wait(getLastCompactedVersion(self));
+		if (req.lastKnownCommitted < lastCompactedVersion) {
+			req.reply.sendError(version_already_compacted());
+			return Void();
+		}
 		state ConfigGeneration currentGeneration = wait(getGeneration(self));
 		if (req.lastKnownCommitted != currentGeneration.committedVersion) {
-			++self->failedCommits;
-			req.reply.sendError(not_committed());
+			req.reply.sendError(transaction_too_old());
 			return Void();
 		}
 		// Rollback to prior known committed version to erase any commits not
 		// made on a quorum.
 		if (req.rollback.present() && req.rollback.get() < currentGeneration.committedVersion) {
-			Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
-			    wait(getMutations(self, req.rollback.get() + 1, currentGeneration.committedVersion));
-			self->kvStore->clear(KeyRangeRef(versionedMutationKey(req.rollback.get() + 1, 0),
-			                                 versionedMutationKey(currentGeneration.committedVersion + 1, 0)));
-			self->kvStore->clear(KeyRangeRef(versionedAnnotationKey(req.rollback.get() + 1),
-			                                 versionedAnnotationKey(currentGeneration.committedVersion + 1)));
+			state KeyRangeRef mutationClearRange =
+			    KeyRangeRef(versionedMutationKey(req.rollback.get() + 1, 0),
+			                versionedMutationKey(currentGeneration.committedVersion + 1, 0));
+			state KeyRangeRef annotationClearRange =
+			    KeyRangeRef(versionedAnnotationKey(req.rollback.get() + 1),
+			                versionedAnnotationKey(currentGeneration.committedVersion + 1));
+			if (g_network->isSimulated()) {
+				RangeResult mutationRange = wait(self->kvStore->readRange(mutationClearRange));
+				ASSERT(mutationRange.size() == 1);
+				RangeResult annotationRange = wait(self->kvStore->readRange(mutationClearRange));
+				ASSERT(annotationRange.size() == 1);
+			}
+			self->kvStore->clear(mutationClearRange);
+			self->kvStore->clear(annotationClearRange);
 
 			currentGeneration.committedVersion = req.rollback.get();
 			// The mutation commit loop below should persist the new generation
