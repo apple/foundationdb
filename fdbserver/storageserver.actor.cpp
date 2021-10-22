@@ -3266,41 +3266,12 @@ static const KeyRangeRef persistChangeFeedKeys =
     KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "RF/"), LiteralStringRef(PERSIST_PREFIX "RF0"));
 // data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
 
-ACTOR Future<Void> fetchChangeFeed(StorageServer* data,
-                                   Key rangeId,
-                                   KeyRange range,
-                                   bool stopped,
-                                   Version fetchVersion) {
-	state Reference<ChangeFeedInfo> changeFeedInfo;
-	wait(delay(0)); // allow this actor to be cancelled by removals
-	bool existing = data->uidChangeFeed.count(rangeId);
-
-	TraceEvent(SevDebug, "FetchChangeFeed", data->thisServerID)
-	    .detail("RangeID", rangeId.printable())
-	    .detail("Range", range.toString())
-	    .detail("Existing", existing);
-
-	if (!existing) {
-		changeFeedInfo = Reference<ChangeFeedInfo>(new ChangeFeedInfo());
-		changeFeedInfo->range = range;
-		changeFeedInfo->id = rangeId;
-		changeFeedInfo->stopped = stopped;
-		data->uidChangeFeed[rangeId] = changeFeedInfo;
-		auto rs = data->keyChangeFeed.modify(range);
-		for (auto r = rs.begin(); r != rs.end(); ++r) {
-			r->value().push_back(changeFeedInfo);
-		}
-		data->keyChangeFeed.coalesce(range.contents());
-		auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-		data->addMutationToMutationLog(
-		    mLV,
-		    MutationRef(MutationRef::SetValue,
-		                persistChangeFeedKeys.begin.toString() + rangeId.toString(),
-		                changeFeedValue(range, invalidVersion, ChangeFeedStatus::CHANGE_FEED_CREATE)));
-	} else {
-		changeFeedInfo = data->uidChangeFeed[rangeId];
-	}
-
+ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
+                                          Reference<ChangeFeedInfo> changeFeedInfo,
+                                          Key rangeId,
+                                          KeyRange range,
+                                          Version fetchVersion,
+                                          bool existing) {
 	state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> feedResults;
 	state Future<Void> feed = data->cx->getChangeFeedStream(
 	    feedResults, rangeId, 0, existing ? fetchVersion + 1 : data->version.get() + 1, range);
@@ -3321,7 +3292,7 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data,
 				wait(yield());
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_end_of_stream && e.code() != error_code_change_feed_not_registered) {
+			if (e.code() != error_code_end_of_stream) {
 				throw;
 			}
 			return Void();
@@ -3377,11 +3348,59 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data,
 			wait(yield());
 		}
 	} catch (Error& e) {
-		if (e.code() != error_code_end_of_stream && e.code() != error_code_change_feed_not_registered) {
+		if (e.code() != error_code_end_of_stream) {
 			throw;
 		}
 	}
 	return Void();
+}
+
+ACTOR Future<Void> fetchChangeFeed(StorageServer* data,
+                                   Key rangeId,
+                                   KeyRange range,
+                                   bool stopped,
+                                   Version fetchVersion) {
+	state Reference<ChangeFeedInfo> changeFeedInfo;
+	wait(delay(0)); // allow this actor to be cancelled by removals
+	state bool existing = data->uidChangeFeed.count(rangeId);
+
+	TraceEvent(SevDebug, "FetchChangeFeed", data->thisServerID)
+	    .detail("RangeID", rangeId.printable())
+	    .detail("Range", range.toString())
+	    .detail("Existing", existing);
+
+	if (!existing) {
+		changeFeedInfo = Reference<ChangeFeedInfo>(new ChangeFeedInfo());
+		changeFeedInfo->range = range;
+		changeFeedInfo->id = rangeId;
+		changeFeedInfo->stopped = stopped;
+		data->uidChangeFeed[rangeId] = changeFeedInfo;
+		auto rs = data->keyChangeFeed.modify(range);
+		for (auto r = rs.begin(); r != rs.end(); ++r) {
+			r->value().push_back(changeFeedInfo);
+		}
+		data->keyChangeFeed.coalesce(range.contents());
+		auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+		data->addMutationToMutationLog(
+		    mLV,
+		    MutationRef(MutationRef::SetValue,
+		                persistChangeFeedKeys.begin.toString() + rangeId.toString(),
+		                changeFeedValue(range, invalidVersion, ChangeFeedStatus::CHANGE_FEED_CREATE)));
+	} else {
+		changeFeedInfo = data->uidChangeFeed[rangeId];
+	}
+
+	loop {
+		try {
+			wait(fetchChangeFeedApplier(data, changeFeedInfo, rangeId, range, fetchVersion, existing));
+			return Void();
+		} catch (Error& e) {
+			if (e.code() != error_code_change_feed_not_registered) {
+				throw;
+			}
+		}
+		wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+	}
 }
 
 ACTOR Future<Void> dispatchChangeFeeds(StorageServer* data, UID fetchKeysID, KeyRange keys, Version fetchVersion) {
