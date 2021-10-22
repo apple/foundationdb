@@ -3795,8 +3795,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					SpanContextMessage scm;
 					cloneReader >> scm;
 				} else {
-					ASSERT(data->logProtocol.isValid());
-					ASSERT(cloneReader.protocolVersion().isValid());
 					MutationRef msg;
 					cloneReader >> msg;
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
