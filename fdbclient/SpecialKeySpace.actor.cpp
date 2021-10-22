@@ -1591,7 +1591,6 @@ CoordinatorsImpl::CoordinatorsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {
 Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
 	RangeResult result;
 	KeyRef prefix(getKeyRange().begin);
-	// TODO: Do we need to reload the file?
 	auto cs = ryw->getDatabase()->getConnectionRecord()->getConnectionString();
 	auto coordinator_processes = cs.coordinators();
 	Key cluster_decription_key = prefix.withSuffix(LiteralStringRef("cluster_description"));

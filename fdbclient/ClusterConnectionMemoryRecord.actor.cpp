@@ -22,44 +22,47 @@
 #include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+// Returns the connection string currently held in this object.
 ClusterConnectionString const& ClusterConnectionMemoryRecord::getConnectionString() const {
 	return cs;
 }
 
-Future<bool> ClusterConnectionMemoryRecord::upToDate(ClusterConnectionString& fileConnectionString) {
-	return true;
-}
-
-Future<bool> ClusterConnectionMemoryRecord::persist() {
-	return true;
-}
-
+// Sets the connections string held by this object.
 Future<Void> ClusterConnectionMemoryRecord::setConnectionString(ClusterConnectionString const& conn) {
 	cs = conn;
 	return Void();
 }
 
+// Returns the connection string currently held in this object (there is no persistent storage).
 Future<ClusterConnectionString> ClusterConnectionMemoryRecord::getStoredConnectionString() {
 	return cs;
 }
 
-Standalone<StringRef> ClusterConnectionMemoryRecord::getLocation() const {
-	return StringRef(format("Memory: %s", id.toString().c_str()));
+// Because the memory record is not persisted, it is always up to date and this returns true. The connection string
+// is returned via the reference parameter connectionString.
+Future<bool> ClusterConnectionMemoryRecord::upToDate(ClusterConnectionString& fileConnectionString) {
+	fileConnectionString = cs;
+	return true;
 }
 
+// Returns the ID of the memory record.
+std::string ClusterConnectionMemoryRecord::getLocation() const {
+	return id.toString();
+}
+
+// Returns a copy of this object with a modified connection string.
 Reference<IClusterConnectionRecord> ClusterConnectionMemoryRecord::makeIntermediateRecord(
     ClusterConnectionString const& connectionString) const {
 	return makeReference<ClusterConnectionMemoryRecord>(connectionString);
 }
 
-bool ClusterConnectionMemoryRecord::isValid() const {
-	return valid;
+// Returns a string representation of this cluster connection record. This will include the type and id of the
+// record.
+std::string ClusterConnectionMemoryRecord::toString() const {
+	return "memory://" + id.toString();
 }
 
-std::string ClusterConnectionMemoryRecord::toString() const {
-	if (isValid()) {
-		return "Memory: " + id.toString();
-	} else {
-		return "Memory: <unset>";
-	}
+// This is a no-op for memory records. Returns true to indicate success.
+Future<bool> ClusterConnectionMemoryRecord::persist() {
+	return true;
 }

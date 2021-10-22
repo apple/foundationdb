@@ -3674,7 +3674,7 @@ Optional<Database> connectToCluster(std::string const& clusterFile,
 	} catch (Error& e) {
 		if (!quiet) {
 			fprintf(stderr, "ERROR: %s\n", e.what());
-			fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
+			fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", ccf->getLocation().c_str());
 		}
 		return db;
 	}

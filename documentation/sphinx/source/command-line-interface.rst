@@ -164,6 +164,10 @@ If the ``failed`` keyword is specified, the address is marked as failed and adde
 
 For more information on excluding servers, see :ref:`removing-machines-from-a-cluster`.
 
+Warning about potential dataloss ``failed`` option: if a server is the last one in some team(s), excluding it with ``failed`` will lose all data in the team(s), and hence ``failed`` should only be set when the server(s) have permanently failed.
+
+In the case all servers of a team have failed permanently, excluding all the servers will clean up the corresponding keyrange, and fix the invalid metadata. The keyrange will be assigned to a new team as an empty shard.
+
 exit
 ----
 

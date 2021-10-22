@@ -25,49 +25,51 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+// An implementation of IClusterConnectionRecord backed by a file.
 class ClusterConnectionFile : public IClusterConnectionRecord, ReferenceCounted<ClusterConnectionFile>, NonCopyable {
 public:
-	ClusterConnectionFile() : IClusterConnectionRecord(false) {}
-	// Loads and parses the file at 'path', throwing errors if the file cannot be read or the format is invalid.
-	//
-	// The format of the file is: description:id@[addrs]+
-	//  The description and id together are called the "key"
-	//
-	// The following is enforced about the format of the file:
-	//  - The key must contain one (and only one) ':' character
-	//  - The description contains only allowed characters (a-z, A-Z, 0-9, _)
-	//  - The ID contains only allowed characters (a-z, A-Z, 0-9)
-	//  - At least one address is specified
-	//  - There is no address present more than once
-	explicit ClusterConnectionFile(std::string const& path);
+	// Loads and parses the file at 'filename', throwing errors if the file cannot be read or the format is invalid.
+	explicit ClusterConnectionFile(std::string const& filename);
+
+	// Creates a cluster file with a given connection string and saves it to the specified file.
 	explicit ClusterConnectionFile(std::string const& filename, ClusterConnectionString const& contents);
 
-	// returns <resolved name, was default file>
-	static std::pair<std::string, bool> lookupClusterFileName(std::string const& filename);
-	// get a human readable error message describing the error returned from the constructor
-	static std::string getErrorString(std::pair<std::string, bool> const& resolvedFile, Error const& e);
-
+	// Returns the connection string currently held in this object. This may not match the string on disk if it hasn't
+	// been persisted or if the file has been modified externally.
 	ClusterConnectionString const& getConnectionString() const override;
+
+	// Sets the connections string held by this object and persists it.
 	Future<Void> setConnectionString(ClusterConnectionString const&) override;
+
+	// Get the connection string stored in the file.
 	Future<ClusterConnectionString> getStoredConnectionString() override;
 
-	std::string const& getFilename() const {
-		ASSERT(filename.size());
-		return filename;
-	}
+	// Checks whether the connection string in the file matches the connection string stored in memory. The cluster
+	// string stored in the file is returned via the reference parameter connectionString.
 	Future<bool> upToDate(ClusterConnectionString& fileConnectionString) override;
 
-	Standalone<StringRef> getLocation() const override;
+	// Returns the specified path of the cluster file.
+	std::string getLocation() const override;
+
+	// Creates a copy of this object with a modified connection string but that isn't persisted.
 	Reference<IClusterConnectionRecord> makeIntermediateRecord(
 	    ClusterConnectionString const& connectionString) const override;
 
-	bool isValid() const override;
+	// Returns a string representation of this cluster connection record. This will include the type of record and the
+	// filename of the cluster file.
 	std::string toString() const override;
 
 	void addref() override { ReferenceCounted<ClusterConnectionFile>::addref(); }
 	void delref() override { ReferenceCounted<ClusterConnectionFile>::delref(); }
 
+	// returns <resolved name, was default file>
+	static std::pair<std::string, bool> lookupClusterFileName(std::string const& filename);
+
+	// get a human readable error message describing the error returned from the constructor
+	static std::string getErrorString(std::pair<std::string, bool> const& resolvedFile, Error const& e);
+
 protected:
+	// Writes the connection string to the cluster file
 	Future<bool> persist() override;
 
 private:

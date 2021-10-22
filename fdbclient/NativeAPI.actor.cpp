@@ -1400,7 +1400,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		        [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 			        try {
 				        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
-					        Optional<Value> output = ryw->getDatabase()->getConnectionRecord()->getLocation();
+					        Optional<Value> output =
+					            StringRef(ryw->getDatabase()->getConnectionRecord()->getLocation());
 					        return output;
 				        }
 			        } catch (Error& e) {
@@ -2167,6 +2168,7 @@ void stopNetwork() {
 	if (!g_network)
 		throw network_not_setup();
 
+	TraceEvent("ClientStopNetwork");
 	g_network->stop();
 	closeTraceFile();
 }

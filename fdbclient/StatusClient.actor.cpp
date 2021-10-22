@@ -383,7 +383,7 @@ ACTOR Future<StatusObject> clientStatusFetcher(Reference<IClusterConnectionRecor
 		messages->push_back(makeMessage("status_incomplete_coordinators", "Could not fetch coordinator info."));
 
 	StatusObject statusObjClusterFile;
-	statusObjClusterFile["path"] = connRecord->getLocation().toString();
+	statusObjClusterFile["path"] = connRecord->getLocation();
 	statusObjClusterFile["up_to_date"] = contentsUpToDate;
 	statusObj["cluster_file"] = statusObjClusterFile;
 

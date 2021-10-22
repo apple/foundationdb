@@ -22,6 +22,84 @@
 #include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+// Loads and parses the file at 'filename', throwing errors if the file cannot be read or the format is invalid.
+ClusterConnectionFile::ClusterConnectionFile(std::string const& filename)
+  : IClusterConnectionRecord(ConnectionStringNeedsPersisted::False) {
+	if (!fileExists(filename)) {
+		throw no_cluster_file_found();
+	}
+
+	cs = ClusterConnectionString(readFileBytes(filename, MAX_CLUSTER_FILE_BYTES));
+	this->filename = filename;
+}
+
+// Creates a cluster file with a given connection string and saves it to the specified file.
+ClusterConnectionFile::ClusterConnectionFile(std::string const& filename, ClusterConnectionString const& contents)
+  : IClusterConnectionRecord(ConnectionStringNeedsPersisted::True) {
+	this->filename = filename;
+	cs = contents;
+}
+
+// Returns the connection string currently held in this object. This may not match the string on disk if it hasn't
+// been persisted or if the file has been modified externally.
+ClusterConnectionString const& ClusterConnectionFile::getConnectionString() const {
+	return cs;
+}
+
+// Sets the connections string held by this object and persists it.
+Future<Void> ClusterConnectionFile::setConnectionString(ClusterConnectionString const& conn) {
+	ASSERT(filename.size());
+	cs = conn;
+	return success(persist());
+}
+
+// Get the connection string stored in the file.
+Future<ClusterConnectionString> ClusterConnectionFile::getStoredConnectionString() {
+	try {
+		return ClusterConnectionFile(filename).cs;
+	} catch (Error& e) {
+		return e;
+	}
+}
+
+// Checks whether the connection string in the file matches the connection string stored in memory. The cluster
+// string stored in the file is returned via the reference parameter connectionString.
+Future<bool> ClusterConnectionFile::upToDate(ClusterConnectionString& fileConnectionString) {
+	try {
+		// the cluster file hasn't been created yet so there's nothing to check
+		if (needsToBePersisted())
+			return true;
+
+		ClusterConnectionFile temp(filename);
+		fileConnectionString = temp.getConnectionString();
+		return fileConnectionString.toString() == cs.toString();
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "ClusterFileError").error(e).detail("Filename", filename);
+		return false; // Swallow the error and report that the file is out of date
+	}
+}
+
+// Returns the specified path of the cluster file.
+std::string ClusterConnectionFile::getLocation() const {
+	return filename;
+}
+
+// Creates a copy of this object with a modified connection string but that isn't persisted.
+Reference<IClusterConnectionRecord> ClusterConnectionFile::makeIntermediateRecord(
+    ClusterConnectionString const& connectionString) const {
+	return makeReference<ClusterConnectionFile>(filename, connectionString);
+}
+
+// Returns a string representation of this cluster connection record. This will include the type of record and the
+// filename of the cluster file.
+std::string ClusterConnectionFile::toString() const {
+	// This is a fairly naive attempt to generate a URI-like string. It will not account for characters like spaces, it
+	// may use backslashes in windows paths, etc.
+	// SOMEDAY: we should encode this string as a proper URI.
+	return "file://" + filename;
+}
+
+// returns <resolved name, was default file>
 std::pair<std::string, bool> ClusterConnectionFile::lookupClusterFileName(std::string const& filename) {
 	if (filename.length())
 		return std::make_pair(filename, false);
@@ -40,6 +118,7 @@ std::pair<std::string, bool> ClusterConnectionFile::lookupClusterFileName(std::s
 	return std::make_pair(f, isDefaultFile);
 }
 
+// get a human readable error message describing the error returned from the constructor
 std::string ClusterConnectionFile::getErrorString(std::pair<std::string, bool> const& resolvedClusterFile,
                                                   Error const& e) {
 	bool isDefault = resolvedClusterFile.second;
@@ -61,40 +140,7 @@ std::string ClusterConnectionFile::getErrorString(std::pair<std::string, bool> c
 	}
 }
 
-ClusterConnectionFile::ClusterConnectionFile(std::string const& filename) : IClusterConnectionRecord(false) {
-	if (!fileExists(filename)) {
-		throw no_cluster_file_found();
-	}
-
-	cs = ClusterConnectionString(readFileBytes(filename, MAX_CLUSTER_FILE_BYTES));
-	this->filename = filename;
-}
-
-ClusterConnectionFile::ClusterConnectionFile(std::string const& filename, ClusterConnectionString const& contents)
-  : IClusterConnectionRecord(true) {
-	this->filename = filename;
-	cs = contents;
-}
-
-ClusterConnectionString const& ClusterConnectionFile::getConnectionString() const {
-	return cs;
-}
-
-Future<bool> ClusterConnectionFile::upToDate(ClusterConnectionString& fileConnectionString) {
-	try {
-		// the cluster file hasn't been created yet so there's nothing to check
-		if (needsToBePersisted())
-			return true;
-
-		ClusterConnectionFile temp(filename);
-		fileConnectionString = temp.getConnectionString();
-		return fileConnectionString.toString() == cs.toString();
-	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "ClusterFileError").error(e).detail("Filename", filename);
-		return false; // Swallow the error and report that the file is out of date
-	}
-}
-
+// Writes the connection string to the cluster file
 Future<bool> ClusterConnectionFile::persist() {
 	setPersisted();
 
@@ -115,7 +161,7 @@ Future<bool> ClusterConnectionFile::persist() {
 				// ultimately be written
 				TraceEvent(SevWarnAlways, "ClusterFileChangedAfterReplace")
 				    .detail("Filename", filename)
-				    .detail("ConnStr", cs.toString());
+				    .detail("ConnectionString", cs.toString());
 				return false;
 			}
 
@@ -124,40 +170,9 @@ Future<bool> ClusterConnectionFile::persist() {
 			TraceEvent(SevWarnAlways, "UnableToChangeConnectionFile")
 			    .error(e)
 			    .detail("Filename", filename)
-			    .detail("ConnStr", cs.toString());
+			    .detail("ConnectionString", cs.toString());
 		}
 	}
 
 	return false;
-}
-
-Future<Void> ClusterConnectionFile::setConnectionString(ClusterConnectionString const& conn) {
-	ASSERT(filename.size());
-	cs = conn;
-	return success(persist());
-}
-
-Future<ClusterConnectionString> ClusterConnectionFile::getStoredConnectionString() {
-	return ClusterConnectionFile(filename).cs;
-}
-
-Standalone<StringRef> ClusterConnectionFile::getLocation() const {
-	return StringRef(filename);
-}
-
-Reference<IClusterConnectionRecord> ClusterConnectionFile::makeIntermediateRecord(
-    ClusterConnectionString const& connectionString) const {
-	return makeReference<ClusterConnectionFile>(filename, connectionString);
-}
-
-bool ClusterConnectionFile::isValid() const {
-	return filename.size() != 0;
-}
-
-std::string ClusterConnectionFile::toString() const {
-	if (isValid()) {
-		return "File: " + filename;
-	} else {
-		return "File: <unset>";
-	}
 }

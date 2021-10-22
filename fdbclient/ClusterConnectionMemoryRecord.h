@@ -24,39 +24,51 @@
 
 #include "fdbclient/CoordinationInterface.h"
 
+// An implementation of IClusterConnectionRecord that is stored in memory only and not persisted.
 class ClusterConnectionMemoryRecord : public IClusterConnectionRecord,
                                       ReferenceCounted<ClusterConnectionMemoryRecord>,
                                       NonCopyable {
 public:
-	ClusterConnectionMemoryRecord()
-	  : IClusterConnectionRecord(false), id(deterministicRandom()->randomUniqueID()), valid(false) {}
-
+	// Creates a cluster file with a given connection string.
 	explicit ClusterConnectionMemoryRecord(ClusterConnectionString const& cs)
-	  : IClusterConnectionRecord(false), id(deterministicRandom()->randomUniqueID()), cs(cs), valid(true) {}
+	  : IClusterConnectionRecord(ConnectionStringNeedsPersisted::False), id(deterministicRandom()->randomUniqueID()),
+	    cs(cs) {}
 
+	// Returns the connection string currently held in this object.
 	ClusterConnectionString const& getConnectionString() const override;
+
+	// Sets the connections string held by this object.
 	Future<Void> setConnectionString(ClusterConnectionString const&) override;
+
+	// Returns the connection string currently held in this object (there is no persistent storage).
 	Future<ClusterConnectionString> getStoredConnectionString() override;
 
+	// Because the memory record is not persisted, it is always up to date and this returns true. The connection string
+	// is returned via the reference parameter connectionString.
 	Future<bool> upToDate(ClusterConnectionString& fileConnectionString) override;
 
-	Standalone<StringRef> getLocation() const override;
+	// Returns a location string for the memory record that includes its ID.
+	std::string getLocation() const override;
+
+	// Returns a copy of this object with a modified connection string.
 	Reference<IClusterConnectionRecord> makeIntermediateRecord(
 	    ClusterConnectionString const& connectionString) const override;
 
-	bool isValid() const override;
+	// Returns a string representation of this cluster connection record. This will include the type and id of the
+	// record.
 	std::string toString() const override;
 
 	void addref() override { ReferenceCounted<ClusterConnectionMemoryRecord>::addref(); }
 	void delref() override { ReferenceCounted<ClusterConnectionMemoryRecord>::delref(); }
 
 protected:
+	// This is a no-op for memory records. Returns true to indicate success.
 	Future<bool> persist() override;
 
 private:
+	// A unique ID for the record
 	UID id;
 	ClusterConnectionString cs;
-	bool valid;
 };
 
 #endif

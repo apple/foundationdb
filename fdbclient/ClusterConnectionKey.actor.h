@@ -32,35 +32,51 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+// An implementation of IClusterConnectionRecord backed by a key in a FoundationDB database.
 class ClusterConnectionKey : public IClusterConnectionRecord, ReferenceCounted<ClusterConnectionKey>, NonCopyable {
 public:
-	ClusterConnectionKey() : IClusterConnectionRecord(false), valid(false), allowSystemKeys(false) {}
+	// Creates a cluster connection record with a given connection string and saves it to the specified key. Needs to be
+	// persisted should be set to true unless this ClusterConnectionKey is being created with the value read from the
+	// key.
 	ClusterConnectionKey(Database db,
 	                     Key connectionStringKey,
 	                     ClusterConnectionString const& contents,
-	                     bool allowSystemKeys = false);
+	                     ConnectionStringNeedsPersisted needsToBePersisted = ConnectionStringNeedsPersisted::True);
 
-	ACTOR static Future<ClusterConnectionKey> loadClusterConnectionKey(Database db,
-	                                                                   Key connectionStringKey,
-	                                                                   bool allowSystemKeys = false);
+	// Loads and parses the connection string at the specified key, throwing errors if the file cannot be read or the
+	// format is invalid.
+	ACTOR static Future<Reference<ClusterConnectionKey>> loadClusterConnectionKey(Database db, Key connectionStringKey);
 
+	// Returns the connection string currently held in this object. This may not match the string in the database if it
+	// hasn't been persisted or if the key has been modified externally.
 	ClusterConnectionString const& getConnectionString() const override;
+
+	// Sets the connections string held by this object and persists it.
 	Future<Void> setConnectionString(ClusterConnectionString const&) override;
+
+	// Get the connection string stored in the database.
 	Future<ClusterConnectionString> getStoredConnectionString() override;
 
+	// Checks whether the connection string in the database matches the connection string stored in memory. The cluster
+	// string stored in the database is returned via the reference parameter connectionString.
 	Future<bool> upToDate(ClusterConnectionString& connectionString) override;
 
-	Standalone<StringRef> getLocation() const override;
+	// Returns the key where the connection string is stored.
+	std::string getLocation() const override;
+
+	// Creates a copy of this object with a modified connection string but that isn't persisted.
 	Reference<IClusterConnectionRecord> makeIntermediateRecord(
 	    ClusterConnectionString const& connectionString) const override;
 
-	bool isValid() const override;
+	// Returns a string representation of this cluster connection record. This will include the type of record and the
+	// key where the record is stored.
 	std::string toString() const override;
 
 	void addref() override { ReferenceCounted<ClusterConnectionKey>::addref(); }
 	void delref() override { ReferenceCounted<ClusterConnectionKey>::delref(); }
 
 protected:
+	// Writes the connection string to the database
 	Future<bool> persist() override;
 
 private:
@@ -69,11 +85,12 @@ private:
 	                                       ClusterConnectionString* connectionString);
 	ACTOR static Future<bool> persistImpl(Reference<ClusterConnectionKey> self);
 
+	// The database where the connection key is stored. Note that this does not need to be the same database as the one
+	// that the connection string would connect to.
 	Database db;
 	ClusterConnectionString cs;
 	Key connectionStringKey;
-	bool valid;
-	bool allowSystemKeys;
+	Optional<Value> lastPersistedConnectionString;
 };
 
 #include "flow/unactorcompiler.h"

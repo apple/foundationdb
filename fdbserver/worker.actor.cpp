@@ -533,13 +533,13 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 	state Future<Void> cacheErrorsFuture;
 	state Optional<double> incorrectTime;
 	loop {
-		state ClusterConnectionString fileConnectionString;
-		state bool upToDate;
+		state ClusterConnectionString storedConnectionString;
+		state bool upToDate = true;
 		if (connRecord) {
-			bool upToDateResult = wait(connRecord->upToDate(fileConnectionString));
+			bool upToDateResult = wait(connRecord->upToDate(storedConnectionString));
 			upToDate = upToDateResult;
 		}
-		if (!connRecord || upToDate) {
+		if (upToDate) {
 			incorrectTime = Optional<double>();
 		}
 
@@ -565,14 +565,13 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			if (!incorrectTime.present()) {
 				incorrectTime = now();
 			}
-			if (connRecord->isValid()) {
-				// Don't log a SevWarnAlways initially to account for transient issues (e.g. someone else changing
-				// the file right before us)
-				TraceEvent(now() - incorrectTime.get() > 300 ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
-				    .detail("ClusterFile", connRecord->toString())
-				    .detail("ConnectionStringFromFile", fileConnectionString.toString())
-				    .detail("CurrentConnectionString", connectionString);
-			}
+
+			// Don't log a SevWarnAlways initially to account for transient issues (e.g. someone else changing
+			// the file right before us)
+			TraceEvent(now() - incorrectTime.get() > 300 ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
+			    .detail("ClusterFile", connRecord->toString())
+			    .detail("StoredConnectionString", storedConnectionString.toString())
+			    .detail("CurrentConnectionString", connectionString);
 		}
 		auto peers = FlowTransport::transport().getIncompatiblePeers();
 		for (auto it = peers->begin(); it != peers->end();) {
@@ -2367,7 +2366,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 					if (!info.hasConnected) {
 						TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection")
 						    .detail("ClusterFile", connRecord->toString())
-						    .detail("ConnectionStringFromFile", connRecord->getConnectionString().toString())
+						    .detail("StoredConnectionString", connRecord->getConnectionString().toString())
 						    .detail("CurrentConnectionString",
 						            info.intermediateConnRecord->getConnectionString().toString());
 					}

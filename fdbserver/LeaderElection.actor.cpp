@@ -138,7 +138,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 				if (!hasConnected) {
 					TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection")
 					    .detail("ClusterFile", coordinators.ccr->toString())
-					    .detail("ConnectionStringFromFile", coordinators.ccr->getConnectionString().toString())
+					    .detail("StoredConnectionString", coordinators.ccr->getConnectionString().toString())
 					    .detail("CurrentConnectionString", leader.get().first.serializedInfo.toString());
 				}
 				coordinators.ccr->setConnectionString(

@@ -50,6 +50,8 @@ std::string trim(std::string const& connectionString) {
 
 } // namespace
 
+FDB_DEFINE_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
+
 Future<bool> IClusterConnectionRecord::upToDate() {
 	ClusterConnectionString temp;
 	return upToDate(temp);
@@ -413,7 +415,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterCon
 				if (!info.hasConnected) {
 					TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection")
 					    .detail("ClusterFile", connRecord->toString())
-					    .detail("ConnectionStringFromFile", connRecord->getConnectionString().toString())
+					    .detail("StoredConnectionString", connRecord->getConnectionString().toString())
 					    .detail("CurrentConnectionString",
 					            info.intermediateConnRecord->getConnectionString().toString());
 				}
@@ -681,24 +683,22 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 		req.supportedVersions = supportedVersions->get();
 		req.traceLogGroup = traceLogGroup;
 
-		state ClusterConnectionString fileConnectionString;
+		state ClusterConnectionString storedConnectionString;
 		if (connRecord) {
-			bool upToDate = wait(connRecord->upToDate(fileConnectionString));
+			bool upToDate = wait(connRecord->upToDate(storedConnectionString));
 			if (!upToDate) {
 				req.issues.push_back_deep(req.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
 				std::string connectionString = connRecord->getConnectionString().toString();
 				if (!incorrectTime.present()) {
 					incorrectTime = now();
 				}
-				if (connRecord->isValid()) {
-					// Don't log a SevWarnAlways initially to account for transient issues (e.g. someone else changing
-					// the file right before us)
-					TraceEvent(now() - incorrectTime.get() > 300 ? SevWarnAlways : SevWarn,
-					           "IncorrectClusterFileContents")
-					    .detail("ClusterFile", connRecord->toString())
-					    .detail("ConnectionStringFromFile", fileConnectionString.toString())
-					    .detail("CurrentConnectionString", connectionString);
-				}
+
+				// Don't log a SevWarnAlways initially to account for transient issues (e.g. someone else changing
+				// the file right before us)
+				TraceEvent(now() - incorrectTime.get() > 300 ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
+				    .detail("ClusterFile", connRecord->toString())
+				    .detail("StoredConnectionString", storedConnectionString.toString())
+				    .detail("CurrentConnectionString", connectionString);
 			} else {
 				incorrectTime = Optional<double>();
 			}
@@ -721,7 +721,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 				if (!info.hasConnected) {
 					TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection")
 					    .detail("ClusterFile", connRecord->toString())
-					    .detail("ConnectionStringFromFile", connRecord->getConnectionString().toString())
+					    .detail("StoredConnectionString", connRecord->getConnectionString().toString())
 					    .detail("CurrentConnectionString",
 					            info.intermediateConnRecord->getConnectionString().toString());
 				}

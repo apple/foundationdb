@@ -383,8 +383,10 @@ struct TenantBalancer {
 					} else if (kv.key.startsWith(tenantBalancerExternalDatabasePrefix)) {
 						std::string name = kv.key.removePrefix(tenantBalancerExternalDatabasePrefix).toString();
 						Database db = Database::createDatabase(
-						    makeReference<ClusterConnectionKey>(
-						        self->db, kv.key, ClusterConnectionString(kv.value.toString()), true),
+						    makeReference<ClusterConnectionKey>(self->db,
+						                                        kv.key,
+						                                        ClusterConnectionString(kv.value.toString()),
+						                                        ConnectionStringNeedsPersisted::False),
 						    Database::API_VERSION_LATEST,
 						    IsInternal::True,
 						    self->tbi.locality);
@@ -648,7 +650,7 @@ ACTOR Future<Optional<Database>> getOrInsertDatabase(TenantBalancer* self,
 	}
 
 	Database db = Database::createDatabase(
-	    makeReference<ClusterConnectionKey>(self->db, dbKey, ClusterConnectionString(connectionString), true),
+	    makeReference<ClusterConnectionKey>(self->db, dbKey, ClusterConnectionString(connectionString)),
 	    Database::API_VERSION_LATEST,
 	    IsInternal::True,
 	    self->tbi.locality);
