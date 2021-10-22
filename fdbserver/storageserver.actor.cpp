@@ -5086,6 +5086,9 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 				    .detail("TagID", self->tag.id)
 				    .detail("Version", reply.versions[i].first);
 				self->version.set(reply.versions[i].first);
+				// TODO: This is necessery because of an assertion, we should check whether we could
+				// just remove that assertion
+				self->mutableData().createNewVersion(reply.versions[i].first);
 				++self->counters.versionIndexerIncrements;
 				prevVersion = reply.versions[i].first;
 			} else if (self->version.get() < reply.versions[i].first) {
