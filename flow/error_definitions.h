@@ -245,6 +245,7 @@ ERROR( movement_id_mismatch, 2394, "Another movement is running with this prefix
 ERROR( movement_not_ready_for_operation, 2395, "The movement is not ready to run the requested operation")
 ERROR( movement_error, 2396, "Movement error")
 ERROR( movement_lag_too_large, 2397, "Movement lag time is too large")
+ERROR( movement_repeated, 2398, "Movement is repeated and cannot be submitted again")
 
 ERROR( key_not_found, 2400, "Expected key is missing")
 ERROR( json_malformed, 2401, "JSON string was malformed")

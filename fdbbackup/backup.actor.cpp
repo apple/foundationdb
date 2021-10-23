@@ -77,6 +77,7 @@
 #include "fdbclient/BuildFlags.h"
 
 #include "flow/SimpleOpt.h"
+#include "fdbclient/TenantBalancerInterface.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Type of program being executed
@@ -2204,6 +2205,47 @@ ACTOR Future<Void> submitDBMove(Database src, Database dest, Key srcPrefix, Key 
 	return Void();
 }
 
+ACTOR Future<TenantMovementStatus> getMovementStatus(Database database,
+                                                     Optional<Key> prefixFilter,
+                                                     Optional<std::string> peerDatabaseConnectionStringFilter,
+                                                     Optional<MovementLocation> locationFilter) {
+	state GetMovementStatusRequest getMovementStatusRequest(
+	    prefixFilter, peerDatabaseConnectionStringFilter, locationFilter);
+	state Future<ErrorOr<GetMovementStatusReply>> getMovementStatusReply = Never();
+	state Future<Void> initialize = Void();
+	loop choose {
+		when(ErrorOr<GetMovementStatusReply> reply = wait(getMovementStatusReply)) {
+			if (reply.isError()) {
+				throw reply.getError();
+			}
+			return reply.get().targetStatus;
+		}
+		when(wait(database->onTenantBalancerChanged() || initialize)) {
+			initialize = Never();
+			getMovementStatusReply =
+			    database->getTenantBalancer().present()
+			        ? database->getTenantBalancer().get().getMovementStatus.tryGetReply(getMovementStatusRequest)
+			        : Never();
+		}
+	}
+}
+
+ACTOR Future<Void> statusDBMove(Database db, Key prefix, bool json = false) {
+	try {
+		state TenantMovementStatus status =
+		    wait(getMovementStatus(db, prefix, Optional<std::string>(), Optional<MovementLocation>()));
+		std::string statusText = json ? status.toJson() : status.toString();
+		printf("%s\n", statusText.c_str());
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		fprintf(stderr, "ERROR: %s\n", e.what());
+		throw;
+	}
+
+	return Void();
+}
+
 ACTOR Future<std::vector<TenantMovementInfo>> getActiveMovements(
     Database database,
     Optional<Key> prefixFilter,
@@ -2230,27 +2272,6 @@ ACTOR Future<std::vector<TenantMovementInfo>> getActiveMovements(
 	}
 }
 
-ACTOR Future<Void> statusDBMove(Database db, Key prefix, bool json = false) {
-	try {
-		state std::vector<TenantMovementInfo> targetDBMoveRes =
-		    wait(getActiveMovements(db, prefix, Optional<std::string>(), Optional<MovementLocation>()));
-		if (targetDBMoveRes.size() != 1) {
-			throw movement_not_found();
-		}
-		TenantMovementInfo targetDBMove = targetDBMoveRes[0];
-		// TODO insert error msg into TenantMovementInfo, rather than reporting them below
-		std::string statusText = json ? targetDBMove.toJson() : targetDBMove.toString();
-		printf("%s\n", statusText.c_str());
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled)
-			throw;
-		fprintf(stderr, "ERROR: %s\n", e.what());
-		throw;
-	}
-
-	return Void();
-}
-
 ACTOR Future<Void> fetchAndDisplayDBMove(Database db,
                                          Optional<Key> prefixFilter,
                                          Optional<std::string> peerDatabaseConnectionStringFilter,
@@ -2260,18 +2281,11 @@ ACTOR Future<Void> fetchAndDisplayDBMove(Database db,
 		state std::vector<TenantMovementInfo> activeMovements =
 		    wait(getActiveMovements(db, prefixFilter, peerDatabaseConnectionStringFilter, locationFilter));
 
-		printf("%s %s %s\n",
-		       "List running data movement",
+		printf("List running data movement %s %s\n",
 		       (locationFilter.orDefault(MovementLocation::SOURCE) == MovementLocation::SOURCE ? "from" : "to"),
 		       db->getConnectionRecord()->getConnectionString().toString().c_str());
 		for (const auto& movement : activeMovements) {
-			printf("source prefix: %s destination prefix: %s source cluster: %s destination cluster: %s movement "
-			       "state: %s\n",
-			       movement.sourcePrefix.toString().c_str(),
-			       movement.destPrefix.toString().c_str(),
-			       movement.sourceConnectionString.c_str(),
-			       movement.destinationConnectionString.c_str(),
-			       std::to_string(static_cast<int>(movement.movementState)).c_str());
+			printf(movement.toString().c_str());
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)

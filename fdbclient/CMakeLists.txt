@@ -125,6 +125,7 @@ set(FDBCLIENT_SRCS
   TagThrottle.actor.h
   TaskBucket.actor.cpp
   TaskBucket.h
+  TenantBalancerInterface.cpp
   TenantBalancerInterface.h
   TestKnobCollection.cpp
   TestKnobCollection.h

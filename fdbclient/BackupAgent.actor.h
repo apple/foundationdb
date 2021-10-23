@@ -376,19 +376,9 @@ struct DatabaseBackupStatus {
 	RangeResult errorValues;
 	Optional<Value> paused;
 	const char* errorName = nullptr;
-	double secondsBehind = 0;
+	double secondsBehind = -1;
 
-	std::unordered_map<int, std::string> stateMap;
-
-	DatabaseBackupStatus() {
-		std::vector<std::string> stateStr{ "STATE_ERRORED",   "STATE_SUBMITTED",
-			                               "STATE_RUNNING",   "STATE_RUNNING_DIFFERENTIAL",
-			                               "STATE_COMPLETED", "STATE_NEVERRAN",
-			                               "STATE_ABORTED",   "STATE_PARTIALLY_ABORTED" };
-		for (int i = 0; i < stateStr.size(); ++i) {
-			stateMap[i] = stateStr[i];
-		}
-	}
+	DatabaseBackupStatus() {}
 
 	std::string toString() {
 		std::string statusText;
@@ -469,7 +459,7 @@ struct DatabaseBackupStatus {
 		statusRoot.create("dest_prefix") = destPrefix.toString();
 
 		// extract status info
-		statusRoot.create("status") = stateMap[static_cast<int>(backupState)];
+		statusRoot.create("status") = BackupAgentBase::getStateText(backupState);
 
 		// extract lag info
 		statusRoot.create("lag_seconds") = secondsBehind;
