@@ -119,8 +119,9 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	AssignBlobRangeRequest originalReq;
 
 	void resume() {
-		ASSERT(resumeSnapshot.canBeSet());
-		resumeSnapshot.send(Void());
+		if (resumeSnapshot.canBeSet()) {
+			resumeSnapshot.send(Void());
+		}
 	}
 };
 
@@ -133,6 +134,13 @@ struct GranuleRangeMetadata {
 	Future<GranuleStartState> assignFuture;
 	Future<Void> fileUpdaterFuture;
 	Future<Void> historyLoaderFuture;
+
+	void cancel() {
+		// assignFuture.cancel();
+		// fileUpdaterFuture.cancel();
+		// historyLoaderFuture.cancel();
+		activeMetadata.clear();
+	}
 
 	GranuleRangeMetadata() : lastEpoch(0), lastSeqno(0) {}
 	GranuleRangeMetadata(int64_t epoch, int64_t seqno, Reference<GranuleMetadata> activeMetadata)
@@ -1025,6 +1033,8 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 
 		// delete all deltas in rollback range, but we can optimize here to just skip the uncommitted mutations
 		// directly and immediately pop the rollback out of inProgress
+		// TODO: bufferedDeltaVersion is of type Notified so you must set it to something greater than the previous val
+		//       This does not hold true for rollback versions.
 		metadata->bufferedDeltaVersion.set(rollbackVersion);
 		cfRollbackVersion = mutationVersion;
 	}
@@ -1385,10 +1395,17 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							}
 						}
 
+						// TODO: figure out why the status stream on change isn't working
+						// We could just do something like statusEpoch, save down the original status stream
+						// and compare it to the current one
+						if (statusEpoch < bwData->currentManagerEpoch) {
+							break;
+						}
+
 						choose {
+							when(wait(bwData->currentManagerStatusStream.onChange())) {}
 							when(wait(metadata->resumeSnapshot.getFuture())) { break; }
 							when(wait(delay(1.0))) {}
-							when(wait(bwData->currentManagerStatusStream.onChange())) {}
 						}
 
 						if (BW_DEBUG) {
@@ -1575,6 +1592,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 		if (e.code() == error_code_granule_assignment_conflict) {
 			TraceEvent(SevInfo, "GranuleAssignmentConflict", bwData->id).detail("Granule", metadata->keyRange);
+			return Void();
 		} else {
 			++bwData->stats.granuleUpdateErrors;
 			if (BW_DEBUG) {
@@ -1687,8 +1705,11 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 		metadata->historyLoaded.send(Void());
 		return Void();
 	} catch (Error& e) {
-		if (e.code() == error_code_operation_cancelled || e.code() == error_code_granule_assignment_conflict) {
+		if (e.code() == error_code_operation_cancelled) {
 			throw e;
+		}
+		if (e.code() == error_code_granule_assignment_conflict) {
+			return Void();
 		}
 		if (BW_DEBUG) {
 			printf("Loading blob granule history got unexpected error %s\n", e.name());
@@ -1978,6 +1999,11 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 		req.reply.send(rep);
 		--bwData->stats.activeReadRequests;
 	} catch (Error& e) {
+		if (e.code() == error_code_operation_cancelled) {
+			req.reply.sendError(wrong_shard_server());
+			throw;
+		}
+
 		if (e.code() == error_code_wrong_shard_server) {
 			++bwData->stats.wrongShardServer;
 		}
@@ -2006,7 +2032,7 @@ ACTOR Future<Optional<GranuleHistory>> getLatestGranuleHistory(Transaction* tr, 
 }
 
 ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, AssignBlobRangeRequest req) {
-	ASSERT(!req.continueAssignment);
+	ASSERT(req.type != AssignRequestType::Continue);
 	state Transaction tr(bwData->db);
 	state Key lockKey = blobGranuleLockKeyFor(req.keyRange);
 
@@ -2221,7 +2247,11 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
                                    bool active,
                                    bool disposeOnCleanup,
                                    bool selfReassign,
-                                   bool specialAssignment = false) {
+                                   Optional<AssignRequestType> assignType = Optional<AssignRequestType>()) {
+	// since changeBlobRange is used for assigns and revokes,
+	// we assert that assign type is specified iff this is an
+	ASSERT(active == assignType.present());
+
 	if (BW_DEBUG) {
 		printf("%s range for [%s - %s): %s @ (%lld, %lld)\n",
 		       selfReassign ? "Re-assigning" : "Changing",
@@ -2254,15 +2284,19 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 			}
 		}
 		bool thisAssignmentNewer = newerRangeAssignment(r.value(), epoch, seqno);
+		printf("thisAssignmentNewer=%s\n", thisAssignmentNewer ? "true" : "false");
 
 		// if this granule already has it, and this was a specialassignment (i.e. a new blob maanger is trying to
 		// reassign granules), then just continue
-		if (specialAssignment && r.begin() == keyRange.begin && r.end() == keyRange.end) {
+		if (active && assignType.get() == AssignRequestType::Reassign && r.begin() == keyRange.begin &&
+		    r.end() == keyRange.end) {
 			r.value().lastEpoch = epoch;
 			r.value().lastSeqno = seqno;
 			alreadyAssigned = true;
 			break;
 		}
+
+		printf("last: (%d, %d). now: (%d, %d)\n", r.value().lastEpoch, r.value().lastSeqno, epoch, seqno);
 
 		if (r.value().lastEpoch == epoch && r.value().lastSeqno == seqno) {
 			ASSERT(r.begin() == keyRange.begin);
@@ -2290,10 +2324,16 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 				       r.value().lastEpoch,
 				       r.value().lastSeqno);
 			}
-			r.value().activeMetadata.clear();
+			r.value().cancel();
 		} else if (!thisAssignmentNewer) {
 			// this assignment is outdated, re-insert it over the current range
+			// TODO: do we really want to do this?? if its an outdated assignment, shouldnt
+			// we not include it anymore
 			newerRanges.push_back(std::pair(r.range(), r.value()));
+			/*
+			alreadyAssigned = true;
+			break;
+			*/
 		}
 	}
 
@@ -2330,7 +2370,7 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 	}
 
 	wait(waitForAll(futures));
-	return true;
+	return newerRanges.size() == 0;
 }
 
 static bool resumeBlobRange(Reference<BlobWorkerData> bwData, KeyRange keyRange, int64_t epoch, int64_t seqno) {
@@ -2399,22 +2439,19 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
                                      AssignBlobRangeRequest req,
                                      bool isSelfReassign) {
 	try {
-		if (req.continueAssignment) {
+		if (req.type == AssignRequestType::Continue) {
 			resumeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno);
 		} else {
-			bool shouldStart = wait(changeBlobRange(bwData,
-			                                        req.keyRange,
-			                                        req.managerEpoch,
-			                                        req.managerSeqno,
-			                                        true,
-			                                        false,
-			                                        isSelfReassign,
-			                                        req.specialAssignment));
+
+			bool shouldStart = wait(changeBlobRange(
+			    bwData, req.keyRange, req.managerEpoch, req.managerSeqno, true, false, isSelfReassign, req.type));
 
 			if (shouldStart) {
 				auto m = bwData->granuleMetadata.rangeContaining(req.keyRange.begin);
 				ASSERT(m.begin() == req.keyRange.begin && m.end() == req.keyRange.end);
-				wait(start(bwData, &m.value(), req));
+				if (m.value().activeMetadata.isValid()) {
+					wait(start(bwData, &m.value(), req));
+				}
 			}
 		}
 		if (!isSelfReassign) {
@@ -2424,15 +2461,23 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 		return Void();
 	} catch (Error& e) {
 		if (BW_DEBUG) {
-			printf("AssignRange [%s - %s) got error %s\n",
+			printf("AssignRange [%s - %s) in BW %s got error %s\n",
 			       req.keyRange.begin.printable().c_str(),
 			       req.keyRange.end.printable().c_str(),
+			       bwData->id.toString().c_str(),
 			       e.name());
 		}
 
 		if (!isSelfReassign) {
+			if (e.code() == error_code_granule_assignment_conflict) {
+				req.reply.sendError(e);
+				bwData->stats.numRangesAssigned--;
+				return Void();
+			}
+
 			if (canReplyWith(e)) {
 				req.reply.sendError(e);
+				// TODO: should we just return here rather than throw and kill BW
 			}
 		}
 
@@ -2577,7 +2622,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 					       assignReq.keyRange.end.printable().c_str(),
 					       assignReq.managerEpoch,
 					       assignReq.managerSeqno,
-					       assignReq.continueAssignment ? "T" : "F");
+					       assignReq.type == AssignRequestType::Continue ? "T" : "F");
 				}
 
 				if (self->managerEpochOk(assignReq.managerEpoch)) {

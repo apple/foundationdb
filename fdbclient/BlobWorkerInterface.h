@@ -124,6 +124,13 @@ struct RevokeBlobRangeRequest {
 	}
 };
 
+/*
+ * Continue: when a worker should continue handling a granule that was evaluated for a split
+ * Reassign: when a new blob manager takes over, it sends Reassign requests to workers to redistribute granules
+ * Normal: Neither continue nor reassign
+ */
+enum AssignRequestType { Normal = 0, Continue = 1, Reassign = 2 };
+
 struct AssignBlobRangeRequest {
 	constexpr static FileIdentifier file_identifier = 905381;
 	Arena arena;
@@ -133,9 +140,7 @@ struct AssignBlobRangeRequest {
 	// If continueAssignment is true, this is just to instruct the worker that it *still* owns the range, so it should
 	// re-snapshot it and continue.
 
-	// For an initial assignment, reassignent, split, or merge, continueAssignment==false.
-	bool continueAssignment;
-	bool specialAssignment;
+	AssignRequestType type;
 
 	ReplyPromise<AssignBlobRangeReply> reply;
 
@@ -143,7 +148,7 @@ struct AssignBlobRangeRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, managerEpoch, managerSeqno, continueAssignment, specialAssignment, reply, arena);
+		serializer(ar, keyRange, managerEpoch, managerSeqno, type, reply, arena);
 	}
 };
 

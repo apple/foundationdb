@@ -7245,7 +7245,6 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 							if (!workerInterface.present()) {
 								throw wrong_shard_server();
 							}
-							// ASSERT(workerInterface.present());
 							cx->blobWorker_interf[workerId] = decodeBlobWorkerListValue(workerInterface.get());
 							if (BG_REQUEST_DEBUG) {
 								printf("    decoded worker interface for %s\n", workerId.toString().c_str());
