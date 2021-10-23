@@ -59,6 +59,7 @@ std::string TenantMovementInfo::toString() const {
 	infoMap["peerConnectionString"] = peerConnectionString;
 	infoMap["sourcePrefix"] = sourcePrefix.toString();
 	infoMap["destinationPrefix"] = destinationPrefix.toString();
+	infoMap["movementState"] = TenantBalancerInterface::movementStateToString(movementState);
 	std::string movementInfo;
 	for (const auto& itr : infoMap) {
 		movementInfo += itr.first + " : " + itr.second + "\n";
@@ -70,9 +71,7 @@ std::string TenantMovementStatus::toString() const {
 	std::unordered_map<std::string, std::string> statusInfoMap;
 	statusInfoMap["isSourceLocked"] = std::to_string(isSourceLocked);
 	statusInfoMap["isDestinationLocked"] = std::to_string(isDestinationLocked);
-	statusInfoMap["movementState"] = TenantBalancerInterface::movementStateToString(movementState);
 	statusInfoMap["databaseTimingDelay"] = std::to_string(databaseTimingDelay);
-	statusInfoMap["databaseBackupStatus"] = databaseBackupStatus;
 	if (mutationLag.present()) {
 		statusInfoMap["mutationLag"] = std::to_string(mutationLag.get());
 	}
@@ -98,13 +97,13 @@ std::string TenantMovementStatus::toJson() const {
 	statusRoot.create("peerConnectionString") = tenantMovementInfo.peerConnectionString;
 	statusRoot.create("sourcePrefix") = tenantMovementInfo.sourcePrefix.toString();
 	statusRoot.create("destinationPrefix") = tenantMovementInfo.destinationPrefix.toString();
+	statusRoot.create("movementState") =
+	    TenantBalancerInterface::movementStateToString(tenantMovementInfo.movementState);
 
 	// Insert movement status into JSON
 	statusRoot.create("isSourceLocked") = isSourceLocked;
 	statusRoot.create("isDestinationLocked") = isDestinationLocked;
-	statusRoot.create("movementState") = TenantBalancerInterface::movementStateToString(movementState);
 	statusRoot.create("databaseTimingDelay") = databaseTimingDelay;
-	statusRoot.create("databaseBackupStatus") = databaseBackupStatus;
 	if (mutationLag.present()) {
 		statusRoot.create("mutationLag") = mutationLag.get();
 	}

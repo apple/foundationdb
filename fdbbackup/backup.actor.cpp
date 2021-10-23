@@ -2205,12 +2205,8 @@ ACTOR Future<Void> submitDBMove(Database src, Database dest, Key srcPrefix, Key 
 	return Void();
 }
 
-ACTOR Future<TenantMovementStatus> getMovementStatus(Database database,
-                                                     Optional<Key> prefixFilter,
-                                                     Optional<std::string> peerDatabaseConnectionStringFilter,
-                                                     Optional<MovementLocation> locationFilter) {
-	state GetMovementStatusRequest getMovementStatusRequest(
-	    prefixFilter, peerDatabaseConnectionStringFilter, locationFilter);
+ACTOR Future<TenantMovementStatus> getMovementStatus(Database database, Key prefix, MovementLocation movementLocation) {
+	state GetMovementStatusRequest getMovementStatusRequest(prefix, movementLocation);
 	state Future<ErrorOr<GetMovementStatusReply>> getMovementStatusReply = Never();
 	state Future<Void> initialize = Void();
 	loop choose {
@@ -2218,7 +2214,7 @@ ACTOR Future<TenantMovementStatus> getMovementStatus(Database database,
 			if (reply.isError()) {
 				throw reply.getError();
 			}
-			return reply.get().targetStatus;
+			return reply.get().movementStatus;
 		}
 		when(wait(database->onTenantBalancerChanged() || initialize)) {
 			initialize = Never();
@@ -2230,10 +2226,9 @@ ACTOR Future<TenantMovementStatus> getMovementStatus(Database database,
 	}
 }
 
-ACTOR Future<Void> statusDBMove(Database db, Key prefix, bool json = false) {
+ACTOR Future<Void> statusDBMove(Database db, Key prefix, MovementLocation movementLocation, bool json = false) {
 	try {
-		state TenantMovementStatus status =
-		    wait(getMovementStatus(db, prefix, Optional<std::string>(), Optional<MovementLocation>()));
+		state TenantMovementStatus status = wait(getMovementStatus(db, prefix, movementLocation));
 		std::string statusText = json ? status.toJson() : status.toString();
 		printf("%s\n", statusText.c_str());
 	} catch (Error& e) {
@@ -4921,8 +4916,13 @@ int main(int argc, char* argv[]) {
 					fprintf(stderr, "ERROR: --destination_prefix is required\n");
 					return FDB_EXIT_ERROR;
 				}
-				std::string targetPrefix = canInitSourceCluster ? prefix.get() : destinationPrefix.get();
-				f = stopAfter(statusDBMove((canInitSourceCluster ? sourceDb : db), Key(targetPrefix), jsonOutput));
+				if (canInitSourceCluster) {
+					f = stopAfter(
+					    statusDBMove(sourceDb, StringRef(prefix.get()), MovementLocation::SOURCE, jsonOutput));
+				} else {
+					f = stopAfter(
+					    statusDBMove(db, StringRef(destinationPrefix.get()), MovementLocation::DEST, jsonOutput));
+				}
 				break;
 			}
 			case DBMoveType::FINISH:

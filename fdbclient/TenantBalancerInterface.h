@@ -203,17 +203,22 @@ struct TenantMovementInfo {
 	std::string peerConnectionString;
 	KeyRef sourcePrefix;
 	KeyRef destinationPrefix;
+	MovementState movementState;
 
 	TenantMovementInfo() {}
-	TenantMovementInfo(UID movementId, std::string peerConnectionString, KeyRef sourcePrefix, KeyRef destinationPrefix)
+	TenantMovementInfo(UID movementId,
+	                   std::string peerConnectionString,
+	                   KeyRef sourcePrefix,
+	                   KeyRef destinationPrefix,
+	                   MovementState movementState)
 	  : movementId(movementId), peerConnectionString(peerConnectionString), sourcePrefix(sourcePrefix),
-	    destinationPrefix(destinationPrefix) {}
+	    destinationPrefix(destinationPrefix), movementState(movementState) {}
 
 	std::string toString() const;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, movementId, peerConnectionString, sourcePrefix, destinationPrefix);
+		serializer(ar, movementId, peerConnectionString, sourcePrefix, destinationPrefix, movementState);
 	}
 };
 
@@ -223,9 +228,7 @@ struct TenantMovementStatus {
 	TenantMovementInfo tenantMovementInfo;
 	bool isSourceLocked; // Whether the prefix is locked on the source
 	bool isDestinationLocked; // Whether the prefix is locked on the destination
-	MovementState movementState;
 	int64_t databaseTimingDelay;
-	std::string databaseBackupStatus; // Status of the DR
 	Optional<double> mutationLag; // The number of seconds of lag between the current mutation on the source and the
 	                              // mutations being applied to the destination
 	Optional<Version> switchVersion;
@@ -238,42 +241,33 @@ struct TenantMovementStatus {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar,
-		           isSourceLocked,
-		           isDestinationLocked,
-		           movementState,
-		           mutationLag,
-		           databaseTimingDelay,
-		           switchVersion,
-		           errorMessage,
-		           databaseBackupStatus);
+		serializer(
+		    ar, isSourceLocked, isDestinationLocked, mutationLag, databaseTimingDelay, switchVersion, errorMessage);
 	}
 };
 
 struct GetActiveMovementsReply {
 	constexpr static FileIdentifier file_identifier = 2320458;
-	Arena arena;
 
 	std::vector<TenantMovementInfo> activeMovements;
 
 	GetActiveMovementsReply() {}
+	GetActiveMovementsReply(std::vector<TenantMovementInfo> activeMovements) : activeMovements(activeMovements) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, activeMovements, arena);
+		serializer(ar, activeMovements);
 	}
 };
 
 struct GetActiveMovementsRequest {
 	constexpr static FileIdentifier file_identifier = 11980148;
-	Arena arena;
 
 	// Filter criteria
 	Optional<Key> prefixFilter;
 	Optional<std::string> peerDatabaseConnectionStringFilter;
 	Optional<MovementLocation> locationFilter;
 
-	// TODO: optional source and dest cluster selectors
 	ReplyPromise<GetActiveMovementsReply> reply;
 
 	GetActiveMovementsRequest() {}
@@ -290,41 +284,34 @@ struct GetActiveMovementsRequest {
 };
 
 struct GetMovementStatusReply {
-	constexpr static FileIdentifier file_identifier = 2320458;
-	Arena arena;
+	constexpr static FileIdentifier file_identifier = 4693499;
 
-	TenantMovementStatus targetStatus;
+	TenantMovementStatus movementStatus;
 
 	GetMovementStatusReply() {}
+	GetMovementStatusReply(TenantMovementStatus movementStatus) : movementStatus(movementStatus) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, targetStatus, arena);
+		serializer(ar, movementStatus);
 	}
 };
 
 struct GetMovementStatusRequest {
-	constexpr static FileIdentifier file_identifier = 11980148;
-	Arena arena;
+	constexpr static FileIdentifier file_identifier = 11494877;
 
-	// Filter criteria
-	Optional<Key> prefixFilter;
-	Optional<std::string> peerDatabaseConnectionStringFilter;
-	Optional<MovementLocation> locationFilter;
+	Key prefix;
+	MovementLocation movementLocation;
 
-	// TODO: optional source and dest cluster selectors
 	ReplyPromise<GetMovementStatusReply> reply;
 
 	GetMovementStatusRequest() {}
-	GetMovementStatusRequest(Optional<Key> prefixFilter,
-	                         Optional<std::string> peerDatabaseConnectionStringFilter,
-	                         Optional<MovementLocation> locationFilter)
-	  : prefixFilter(prefixFilter), peerDatabaseConnectionStringFilter(peerDatabaseConnectionStringFilter),
-	    locationFilter(locationFilter) {}
+	GetMovementStatusRequest(Key prefix, MovementLocation movementLocation)
+	  : prefix(prefix), movementLocation(movementLocation) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, prefixFilter, peerDatabaseConnectionStringFilter, locationFilter, reply);
+		serializer(ar, prefix, movementLocation, reply);
 	}
 };
 
