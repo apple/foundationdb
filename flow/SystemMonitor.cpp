@@ -37,6 +37,10 @@ void initializeSystemMonitorMachineState(SystemMonitorMachineState machineState)
 	::machineState.monitorStartTime = now();
 }
 
+double machineStartTime() {
+	return ::machineState.monitorStartTime;
+}
+
 void systemMonitor() {
 	static StatisticsState statState = StatisticsState();
 	customSystemMonitor("ProcessMetrics", &statState, true);
@@ -156,6 +160,39 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState* sta
 			    .detail("DCID", machineState.dcId)
 			    .detail("ZoneID", machineState.zoneId)
 			    .detail("MachineID", machineState.machineId);
+
+			uint64_t total_memory = 0;
+			total_memory += FastAllocator<16>::getTotalMemory();
+			total_memory += FastAllocator<32>::getTotalMemory();
+			total_memory += FastAllocator<64>::getTotalMemory();
+			total_memory += FastAllocator<96>::getTotalMemory();
+			total_memory += FastAllocator<128>::getTotalMemory();
+			total_memory += FastAllocator<256>::getTotalMemory();
+			total_memory += FastAllocator<512>::getTotalMemory();
+			total_memory += FastAllocator<1024>::getTotalMemory();
+			total_memory += FastAllocator<2048>::getTotalMemory();
+			total_memory += FastAllocator<4096>::getTotalMemory();
+			total_memory += FastAllocator<8192>::getTotalMemory();
+
+			uint64_t unused_memory = 0;
+			unused_memory += FastAllocator<16>::getApproximateMemoryUnused();
+			unused_memory += FastAllocator<32>::getApproximateMemoryUnused();
+			unused_memory += FastAllocator<64>::getApproximateMemoryUnused();
+			unused_memory += FastAllocator<96>::getApproximateMemoryUnused();
+			unused_memory += FastAllocator<128>::getApproximateMemoryUnused();
+			unused_memory += FastAllocator<256>::getApproximateMemoryUnused();
+			unused_memory += FastAllocator<512>::getApproximateMemoryUnused();
+			unused_memory += FastAllocator<1024>::getApproximateMemoryUnused();
+			unused_memory += FastAllocator<2048>::getApproximateMemoryUnused();
+			unused_memory += FastAllocator<4096>::getApproximateMemoryUnused();
+			unused_memory += FastAllocator<8192>::getApproximateMemoryUnused();
+
+			if (total_memory > 0) {
+				TraceEvent("FastAllocMemoryUsage")
+				    .detail("TotalMemory", total_memory)
+				    .detail("UnusedMemory", unused_memory)
+				    .detail("Utilization", format("%f%%", (total_memory - unused_memory) * 100.0 / total_memory));
+			}
 
 			TraceEvent n("NetworkMetrics");
 			n.detail("Elapsed", currentStats.elapsed)

@@ -955,7 +955,6 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	} else {
 		set_config("perpetual_storage_wiggle=1");
 	}
-	// 	set_config("perpetual_storage_wiggle=1");
 
 	if (simple) {
 		db.desiredTLogCount = 1;
@@ -1250,6 +1249,8 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 		}
 	}
 
+	machine_count += datacenters * testConfig.extraMachineCountDC;
+
 	// because we protect a majority of coordinators from being killed, it is better to run with low numbers of
 	// coordinators to prevent too many processes from being protected
 	coordinators = (testConfig.minimumRegions <= 1 && BUGGIFY)
@@ -1271,7 +1272,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 
 	// reduce tss to half of extra non-seed servers that can be recruited in usable regions.
 	tssCount =
-	    std::max(0, std::min(tssCount, (db.usableRegions * (machine_count / datacenters) - replication_type) / 2));
+	    std::max(0, std::min(tssCount, db.usableRegions * ((machine_count / datacenters) - db.storageTeamSize) / 2));
 
 	if (tssCount > 0) {
 		std::string confStr = format("tss_count:=%d tss_storage_engine:=%d", tssCount, db.storageServerStoreType);
@@ -1320,7 +1321,11 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		if (kv.second.type() == json_spirit::int_type) {
 			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int());
 		} else if (kv.second.type() == json_spirit::str_type) {
-			startingConfigString += kv.second.get_str();
+			if ("storage_migration_type" == kv.first) {
+				startingConfigString += kv.first + "=" + kv.second.get_str();
+			} else {
+				startingConfigString += kv.second.get_str();
+			}
 		} else if (kv.second.type() == json_spirit::array_type) {
 			startingConfigString += kv.first + "=" +
 			                        json_spirit::write_string(json_spirit::mValue(kv.second.get_array()),
@@ -1501,6 +1506,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 
 	bool requiresExtraDBMachines = testConfig.extraDB && g_simulator.extraDB->toString() != conn.toString();
 	int assignedMachines = 0, nonVersatileMachines = 0;
+	bool gradualMigrationPossible = true;
 	std::vector<ProcessClass::ClassType> processClassesSubSet = { ProcessClass::UnsetClass,
 		                                                          ProcessClass::StatelessClass };
 	for (int dc = 0; dc < dataCenters; dc++) {
@@ -1509,6 +1515,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		std::vector<UID> machineIdentities;
 		int machines = machineCount / dataCenters +
 		               (dc < machineCount % dataCenters); // add remainder of machines to first datacenter
+		int possible_ss = 0;
 		int dcCoordinators = coordinatorCount / dataCenters + (dc < coordinatorCount % dataCenters);
 		printf("Datacenter %d: %d/%d machines, %d/%d coordinators\n",
 		       dc,
@@ -1549,8 +1556,12 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 3),
 					                            ProcessClass::CommandLineSource); // Unset, Storage, or Transaction
 				if (processClass ==
-				    ProcessClass::StatelessClass) // *can't* be assigned to other roles, even in an emergency
+				    ProcessClass::StatelessClass) { // *can't* be assigned to other roles, even in an emergency
 					nonVersatileMachines++;
+				}
+				if (processClass == ProcessClass::UnsetClass || processClass == ProcessClass::StorageClass) {
+					possible_ss++;
+				}
 			}
 
 			// FIXME: temporarily code to test storage cache
@@ -1616,6 +1627,10 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 
 			assignedMachines++;
 		}
+
+		if (possible_ss - simconfig.db.desiredTSSCount / simconfig.db.usableRegions <= simconfig.db.storageTeamSize) {
+			gradualMigrationPossible = false;
+		}
 	}
 
 	g_simulator.desiredCoordinators = coordinatorCount;
@@ -1662,6 +1677,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	// save some state that we only need when restarting the simulator.
 	g_simulator.connectionString = conn.toString();
 	g_simulator.testerCount = testerCount;
+	g_simulator.allowStorageMigrationTypeChange = gradualMigrationPossible;
 
 	TraceEvent("SimulatedClusterStarted")
 	    .detail("DataCenters", dataCenters)
@@ -1670,6 +1686,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	    .detail("SSLEnabled", sslEnabled)
 	    .detail("SSLOnly", sslOnly)
 	    .detail("ClassesAssigned", assignClasses)
+	    .detail("GradualMigrationPossible", gradualMigrationPossible)
 	    .detail("StartingConfiguration", pStartingConfiguration->toString());
 }
 
@@ -1736,6 +1753,9 @@ void checkTestConf(const char* testFile, TestConfig* testConfig) {
 		}
 		if (attrib == "disableTss") {
 			testConfig->disableTss = strcmp(value.c_str(), "true") == 0;
+		}
+		if (attrib == "extraMachineCountDC") {
+			testConfig->extraMachineCountDC = std::stoi(value);
 		}
 	}
 
