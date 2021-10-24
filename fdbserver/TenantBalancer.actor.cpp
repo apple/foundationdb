@@ -74,7 +74,11 @@ public:
 	Database getPeerDatabase() const { return peerDatabase; }
 	std::string getPeerDatabaseName() const { return peerDatabaseName; }
 
-	Standalone<StringRef> getTagName() const { return DBMOVE_TAG_PREFIX.withSuffix(id.toString()); }
+	static Standalone<StringRef> getTagName(UID movementId) {
+		return DBMOVE_TAG_PREFIX.withSuffix(movementId.toString());
+	}
+
+	Standalone<StringRef> getTagName() const { return getTagName(id); }
 
 	void setPeerDatabase(Database db) { peerDatabase = db; }
 
@@ -491,8 +495,8 @@ struct TenantBalancer {
 		                         [=](Reference<ReadYourWritesTransaction> tr) { return isTenantEmpty(tr, prefix); });
 	}
 
-	std::map<Key, MovementRecord> getOutgoingMovements() const { return outgoingMovements; }
-	std::map<Key, MovementRecord> getIncomingMovements() const { return incomingMovements; }
+	std::map<Key, MovementRecord> const& getOutgoingMovements() const { return outgoingMovements; }
+	std::map<Key, MovementRecord> const& getIncomingMovements() const { return incomingMovements; }
 
 	CounterCollection tenantBalancerMetrics;
 
@@ -601,27 +605,49 @@ ACTOR Future<bool> insertDbKey(Reference<ReadYourWritesTransaction> tr, Key dbKe
 	return true;
 }
 
+// Returns a new movement state based on the current movement state and DR state. If the movement state is an error,
+// also includes an error message. In the event that the movement state should not change, return an empty Optional.
+Optional<std::pair<MovementState, std::string>> drStateToMovementState(MovementState startingMovementState,
+                                                                       EBackupState drState) {
+	if (startingMovementState == MovementState::STARTED && drState == EBackupState::STATE_RUNNING_DIFFERENTIAL) {
+		startingMovementState = MovementState::READY_FOR_SWITCH;
+		return std::make_pair(MovementState::READY_FOR_SWITCH, "");
+	} else if (startingMovementState != MovementState::COMPLETED &&
+	           (drState == EBackupState::STATE_ABORTED || drState == EBackupState::STATE_PARTIALLY_ABORTED)) {
+		return std::make_pair(MovementState::ERROR, "The DR scheduled to move this data has been aborted.");
+	} else if (drState == EBackupState::STATE_ERRORED) {
+		return std::make_pair(MovementState::ERROR, "The DR scheduled to move this data has failed.");
+	} else if (startingMovementState != MovementState::INITIALIZING && drState == EBackupState::STATE_NEVERRAN) {
+		return std::make_pair(MovementState::ERROR, "The DR scheduled to move this data is missing.");
+	}
+
+	return Optional<std::pair<MovementState, std::string>>();
+}
+
 bool updateMovementRecordWithDrState(TenantBalancer* self,
                                      MovementRecord* record,
                                      DatabaseBackupStatus const* drStatus) {
-	if (record->movementState == MovementState::STARTED &&
-	    drStatus->backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL) {
-		record->movementState = MovementState::READY_FOR_SWITCH;
-		return true;
-	} else if (record->movementState != MovementState::COMPLETED &&
-	           (drStatus->backupState == EBackupState::STATE_ABORTED ||
-	            drStatus->backupState == EBackupState::STATE_PARTIALLY_ABORTED)) {
-		record->setMovementError("The DR scheduled to move this data has been aborted.");
-		return true;
-	} else if (drStatus->backupState == EBackupState::STATE_ERRORED) {
-		record->setMovementError(
-		    format("The DR scheduled to move this data has encountered an error: %s", drStatus->errorName));
-		return true;
-	} else if (record->movementState != MovementState::INITIALIZING &&
-	           drStatus->backupState == EBackupState::STATE_NEVERRAN) {
-		record->setMovementError("The DR scheduled to move this data is missing.");
-		return true;
+	Optional<std::pair<MovementState, std::string>> newMovementState =
+	    drStateToMovementState(record->movementState, drStatus->backupState);
+
+	if (!newMovementState.present()) {
+		return false;
 	}
+
+	if (newMovementState.get().first == MovementState::ERROR) {
+		if (drStatus->backupState == EBackupState::STATE_ERRORED) {
+			record->setMovementError(
+			    format("%s: %s.",
+			           newMovementState.get().second.substr(0, newMovementState.get().second.size() - 1).c_str(),
+			           drStatus->errorName));
+		} else {
+			record->setMovementError(newMovementState.get().second);
+		}
+	} else {
+		record->movementState = newMovementState.get().first;
+	}
+
+	return true;
 }
 
 ACTOR Future<Optional<Database>> getOrInsertDatabase(TenantBalancer* self,
@@ -852,27 +878,27 @@ ACTOR Future<Void> receiveTenantFromCluster(TenantBalancer* self, ReceiveTenantF
 	return Void();
 }
 
-void filterActiveMoves(TenantBalancer* self,
-                       std::vector<TenantMovementInfo>& targetStatus,
+void filterActiveMoves(std::map<Key, MovementRecord> const& movements,
+                       std::vector<TenantMovementInfo>& filteredMovements,
                        Optional<Key> prefixFilter,
-                       Optional<std::string> peerDatabaseConnectionStringFilter,
-                       bool isSource) {
-	for (const auto& [_, record] : (isSource ? self->getOutgoingMovements() : self->getIncomingMovements())) {
-		if (prefixFilter.present() && prefixFilter.get() != record.getLocalPrefix()) {
-			continue;
+                       Optional<std::string> peerDatabaseConnectionStringFilter) {
+	auto itr = prefixFilter.present() ? movements.find(prefixFilter.get()) : movements.cbegin();
+	while (itr != movements.cend()) {
+		if (!peerDatabaseConnectionStringFilter.present() ||
+		    peerDatabaseConnectionStringFilter.get() ==
+		        itr->second.getPeerDatabase()->getConnectionRecord()->getConnectionString().toString()) {
+			filteredMovements.emplace_back(
+			    itr->second.getMovementId(),
+			    itr->second.getPeerDatabase()->getConnectionRecord()->getConnectionString().toString(),
+			    itr->second.getSourcePrefix(),
+			    itr->second.getDestinationPrefix(),
+			    itr->second.movementState);
 		}
-		if (peerDatabaseConnectionStringFilter.present() &&
-		    peerDatabaseConnectionStringFilter.get() != record.getPeerDatabaseName()) {
-			continue;
+		if (prefixFilter.present()) {
+			break;
 		}
 
-		// TODO: update movement state with DR state
-
-		targetStatus.emplace_back(record.getMovementId(),
-		                          record.getPeerDatabaseName(),
-		                          record.getSourcePrefix(),
-		                          record.getDestinationPrefix(),
-		                          record.movementState);
+		++itr;
 	}
 }
 
@@ -880,14 +906,18 @@ std::vector<TenantMovementInfo> getFilteredMovements(TenantBalancer* self,
                                                      Optional<Key> prefixFilter,
                                                      Optional<std::string> peerDatabaseConnectionStringFilter,
                                                      Optional<MovementLocation> locationFilter) {
-	std::vector<TenantMovementInfo> status;
+	std::vector<TenantMovementInfo> filteredMovements;
+
 	if (!locationFilter.present() || locationFilter.get() == MovementLocation::SOURCE) {
-		filterActiveMoves(self, status, prefixFilter, peerDatabaseConnectionStringFilter, true);
+		filterActiveMoves(
+		    self->getOutgoingMovements(), filteredMovements, prefixFilter, peerDatabaseConnectionStringFilter);
 	}
 	if (!locationFilter.present() || locationFilter.get() == MovementLocation::DEST) {
-		filterActiveMoves(self, status, prefixFilter, peerDatabaseConnectionStringFilter, false);
+		filterActiveMoves(
+		    self->getIncomingMovements(), filteredMovements, prefixFilter, peerDatabaseConnectionStringFilter);
 	}
-	return status;
+
+	return filteredMovements;
 }
 
 ACTOR Future<Void> getActiveMovements(TenantBalancer* self, GetActiveMovementsRequest req) {
@@ -902,8 +932,43 @@ ACTOR Future<Void> getActiveMovements(TenantBalancer* self, GetActiveMovementsRe
 	    .detail("PeerClusterFilter", req.peerDatabaseConnectionStringFilter);
 
 	try {
-		std::vector<TenantMovementInfo> status =
+		state std::vector<TenantMovementInfo> filteredMovements =
 		    getFilteredMovements(self, req.prefixFilter, req.peerDatabaseConnectionStringFilter, req.locationFilter);
+
+		state int startMovement = 0;
+		while (startMovement < filteredMovements.size()) {
+			state std::vector<Future<EBackupState>> backupStateFutures;
+			state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
+			state int numMovements = std::min<int>(filteredMovements.size() - startMovement,
+			                                       SERVER_KNOBS->TENANT_BALANCER_MOVEMENT_LOOKUPS_PER_TRANSACTION);
+			loop {
+				try {
+					for (int i = 0; i < numMovements; ++i) {
+						backupStateFutures.push_back(getDrState(
+						    self, MovementRecord::getTagName(filteredMovements[startMovement + i].movementId), tr));
+					}
+
+					wait(waitForAll(backupStateFutures));
+					break;
+				} catch (Error& e) {
+					TraceEvent(SevDebug, "TenantBalancerGetActiveMovementsDrStateError", self->tbi.id())
+					    .error(e)
+					    .detail("NumMovements", filteredMovements.size());
+
+					wait(tr->onError(e));
+				}
+			}
+
+			for (int i = startMovement; i < numMovements; ++i) {
+				Optional<std::pair<MovementState, std::string>> newMovementState =
+				    drStateToMovementState(filteredMovements[i].movementState, backupStateFutures[i].get());
+				if (newMovementState.present()) {
+					filteredMovements[i].movementState = newMovementState.get().first;
+				}
+			}
+
+			startMovement += numMovements;
+		}
 
 		TraceEvent(SevDebug, "TenantBalancerGetActiveMovementsComplete", self->tbi.id())
 		    .detail("PrefixFilter", req.prefixFilter)
@@ -913,7 +978,7 @@ ACTOR Future<Void> getActiveMovements(TenantBalancer* self, GetActiveMovementsRe
 		                : "[not set]")
 		    .detail("PeerClusterFilter", req.peerDatabaseConnectionStringFilter);
 
-		GetActiveMovementsReply reply(status);
+		GetActiveMovementsReply reply(filteredMovements);
 		req.reply.send(reply);
 	} catch (Error& e) {
 		TraceEvent(SevDebug, "TenantBalancerGetActiveMovementsError", self->tbi.id())

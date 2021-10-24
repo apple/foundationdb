@@ -768,6 +768,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	// Tenant balancer
 	init( TENANT_BALANCER_MOVEMENT_RECOVERY_TIMEOUT,            30.0 );
+	init( TENANT_BALANCER_MOVEMENT_LOOKUPS_PER_TRANSACTION,     1000 );
 
 	// clang-format on
 

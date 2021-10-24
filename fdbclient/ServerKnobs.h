@@ -721,6 +721,7 @@ public:
 
 	// Tenant Balancer
 	double TENANT_BALANCER_MOVEMENT_RECOVERY_TIMEOUT;
+	int TENANT_BALANCER_MOVEMENT_LOOKUPS_PER_TRANSACTION;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);
