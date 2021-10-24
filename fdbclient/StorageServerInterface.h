@@ -637,8 +637,8 @@ struct SplitRangeRequest {
 
 struct MutationsAndVersionRef {
 	VectorRef<MutationRef> mutations;
-	Version version;
-	Version knownCommittedVersion;
+	Version version = invalidVersion;
+	Version knownCommittedVersion = invalidVersion;
 
 	MutationsAndVersionRef() {}
 	explicit MutationsAndVersionRef(Version version, Version knownCommittedVersion)

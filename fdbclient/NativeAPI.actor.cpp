@@ -6746,7 +6746,12 @@ ACTOR Future<Void> mergeChangeFeedStream(std::vector<std::pair<StorageServerInte
 			}
 			checkVersion = nextStream.next.version;
 		}
-		nextOut.push_back_deep(nextOut.arena(), nextStream.next);
+		if (nextOut.size() && nextStream.next.version == nextOut.back().version) {
+			nextOut.back().mutations.append_deep(
+			    nextOut.arena(), nextStream.next.mutations.begin(), nextStream.next.mutations.size());
+		} else {
+			nextOut.push_back_deep(nextOut.arena(), nextStream.next);
+		}
 		try {
 			Standalone<MutationsAndVersionRef> res = waitNext(nextStream.results.getFuture());
 			nextStream.next = res;
