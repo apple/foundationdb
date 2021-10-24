@@ -265,6 +265,9 @@ public:
 	// Writes an already serialized message to a given storage team.
 	void write(const StringRef&, const StorageTeamID&);
 
+	// Writes a LogProtocolMessage to a given storage team.
+	void write(const LogProtocolMessage&, const StorageTeamID&);
+
 	// Writes a mutation to multiple storage teams.
 	// storageTeams is a container that supports input iterator, and contains all storage team IDs that should receive
 	// the mutation.

@@ -296,16 +296,6 @@ void LogPushData::addTransactionInfo(SpanID const& context) {
 	writtenLocations.clear();
 }
 
-void LogPushData::writeToStorageTeams(TLogGroupCollectionRef tLogGroupCollection,
-                                      const std::set<ptxn::StorageTeamID>& storageTeams,
-                                      MutationRef m) {
-	for (const auto& team : storageTeams) {
-		auto groupID = tLogGroupCollection->assignStorageTeam(team)->id();
-		ASSERT(pGroupMessageBuilders->count(groupID));
-		(*pGroupMessageBuilders)[groupID]->write(m, team);
-	}
-}
-
 void LogPushData::writeMessage(StringRef rawMessageWithoutLength, bool usePreviousLocations) {
 	if (!usePreviousLocations) {
 		prev_tags.clear();

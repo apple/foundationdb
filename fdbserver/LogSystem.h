@@ -772,9 +772,17 @@ struct LogPushData : NonCopyable {
 	// Add transaction info to be written before the first mutation in the transaction.
 	void addTransactionInfo(SpanID const& context);
 
+	// T can be either a MutationRef or a LogProtocolMessage
+	template <class T>
 	void writeToStorageTeams(TLogGroupCollectionRef tLogGroupCollection,
 	                         const std::set<ptxn::StorageTeamID>& storageTeams,
-	                         MutationRef m);
+	                         T m) {
+		for (const auto& team : storageTeams) {
+			auto groupID = tLogGroupCollection->assignStorageTeam(team)->id();
+			ASSERT(pGroupMessageBuilders->count(groupID));
+			(*pGroupMessageBuilders)[groupID]->write(m, team);
+		}
+	}
 
 	void writeMessage(StringRef rawMessageWithoutLength, bool usePreviousLocations);
 

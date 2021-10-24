@@ -213,6 +213,11 @@ void ProxySubsequencedMessageSerializer::write(const StringRef& serialized, cons
 	serializers.at(storageTeamID).write(subsequence++, serialized);
 }
 
+void ProxySubsequencedMessageSerializer::write(const LogProtocolMessage& msg, const StorageTeamID& storageTeamID) {
+	prepareWriteMessage(storageTeamID);
+	serializers.at(storageTeamID).write(subsequence++, msg);
+}
+
 Standalone<StringRef> ProxySubsequencedMessageSerializer::getSerialized(const StorageTeamID& storageTeamID) {
 	auto& serializer = serializers.at(storageTeamID);
 
