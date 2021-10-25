@@ -64,6 +64,21 @@ Version getVersionFromVersionedMutationKey(KeyRef versionedMutationKey) {
 	return fromBigEndian64(bigEndianResult);
 }
 
+template <typename T>
+void assertCommitted(RangeResult const& range, VectorRef<T> versionedConfigs, std::function<Version(KeyRef)> fn) {
+	if (range.size() == 0) {
+		return;
+	}
+	// Verify every versioned value read from disk (minus the last one which
+	// may not be committed on a quorum) exists in the rollforward changes.
+	for (auto it = range.begin(); it != std::prev(range.end()); ++it) {
+		Version version = fn(it->key);
+		auto resultIt = std::find_if(
+		    versionedConfigs.begin(), versionedConfigs.end(), [version](T const& o) { return o.version == version; });
+		ASSERT(resultIt != versionedConfigs.end());
+	}
+}
+
 } // namespace
 
 TEST_CASE("/fdbserver/ConfigDB/ConfigNode/Internal/versionedMutationKeys") {
@@ -494,20 +509,20 @@ class ConfigNodeImpl {
 		// Rollback to prior known committed version to erase any commits not
 		// made on a quorum.
 		if (req.rollback.present() && req.rollback.get() < currentGeneration.committedVersion) {
-			state KeyRangeRef mutationClearRange =
-			    KeyRangeRef(versionedMutationKey(req.rollback.get() + 1, 0),
-			                versionedMutationKey(currentGeneration.committedVersion + 1, 0));
-			state KeyRangeRef annotationClearRange =
-			    KeyRangeRef(versionedAnnotationKey(req.rollback.get() + 1),
-			                versionedAnnotationKey(currentGeneration.committedVersion + 1));
 			if (g_network->isSimulated()) {
-				RangeResult mutationRange = wait(self->kvStore->readRange(mutationClearRange));
-				ASSERT(mutationRange.size() == 1);
-				RangeResult annotationRange = wait(self->kvStore->readRange(mutationClearRange));
-				ASSERT(annotationRange.size() == 1);
+				RangeResult mutationRange = wait(self->kvStore->readRange(
+				    KeyRangeRef(versionedMutationKey(req.rollback.get() + 1, 0),
+				                versionedMutationKey(currentGeneration.committedVersion + 1, 0))));
+				// assertCommitted(mutationRange, req.mutations, getVersionFromVersionedMutationKey);
+				RangeResult annotationRange = wait(self->kvStore->readRange(
+				    KeyRangeRef(versionedAnnotationKey(req.rollback.get() + 1),
+				                versionedAnnotationKey(currentGeneration.committedVersion + 1))));
+				// assertCommitted(annotationRange, req.annotations, getVersionFromVersionedAnnotationKey);
 			}
-			self->kvStore->clear(mutationClearRange);
-			self->kvStore->clear(annotationClearRange);
+			self->kvStore->clear(KeyRangeRef(versionedMutationKey(req.rollback.get() + 1, 0),
+			                                 versionedMutationKey(currentGeneration.committedVersion + 1, 0)));
+			self->kvStore->clear(KeyRangeRef(versionedAnnotationKey(req.rollback.get() + 1),
+			                                 versionedAnnotationKey(currentGeneration.committedVersion + 1)));
 
 			currentGeneration.committedVersion = req.rollback.get();
 			// The mutation commit loop below should persist the new generation
