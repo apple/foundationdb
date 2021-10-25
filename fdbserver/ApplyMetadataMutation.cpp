@@ -31,6 +31,7 @@
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystem.h"
 #include "flow/Arena.h"
+#include "flow/Error.h"
 #include <iostream>
 #include <utility>
 
@@ -91,7 +92,12 @@ public:
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
 	    tssMapping(&proxyCommitData_.tssMapping), initialCommit(initialCommit_),
 	    tLogGroupCollection(proxyCommitData_.tLogGroupCollection), tagToServer(&proxyCommitData_.tagToServer),
-	    ssToStorageTeam(&proxyCommitData_.ssToStorageTeam) {}
+	    ssToStorageTeam(&proxyCommitData_.ssToStorageTeam) {
+		for (const auto [ss, team] : proxyCommitData_.ssToStorageTeam) {
+			TraceEvent("SSTeam", dbgid).detail("SS", ss).detail("Team", team);
+			allTeams.insert(team);
+		}
+	}
 
 private:
 	// The following variables are incoming parameters
@@ -149,6 +155,9 @@ private:
 	std::map<Tag, UID>* tagToServer = nullptr;
 	std::unordered_map<UID, ptxn::StorageTeamID>* ssToStorageTeam = nullptr;
 
+	// All SSes' own teams, populated from ssToStorageTeam mapping.
+	std::set<ptxn::StorageTeamID> allTeams;
+
 private:
 	bool dummyConfChange = false;
 
@@ -162,8 +171,12 @@ private:
 
 		auto team_it = ssToStorageTeam->find(ss_it->second);
 		if (team_it == ssToStorageTeam->end()) {
-			ASSERT(false);
-			return Optional<ptxn::StorageTeamID>();
+			// This is a new storage server, assign its own team
+			ptxn::StorageTeamID team(tag.locality, tag.id);
+			ssToStorageTeam->emplace(ss_it->second, team);
+			allTeams.insert(team);
+			TraceEvent("AddTeam", dbgid).detail("SS", ss_it->second).detail("Team", team);
+			return team;
 		}
 
 		return team_it->second;
@@ -271,27 +284,31 @@ private:
 	}
 
 	void checkSetStorageTeamIDKeyPrefix(MutationRef m) {
+		ASSERT_WE_THINK(tLogGroupCollection.isValid());
+		ASSERT_WE_THINK(SERVER_KNOBS->TLOG_NEW_INTERFACE);
 		if (!m.param1.startsWith(storageTeamIdKeyPrefix)) {
 			return;
 		}
 
-		ASSERT_WE_THINK(tLogGroupCollection.isValid());
 		auto teamid = storageTeamIdKeyDecode(m.param1);
 		auto team = decodeStorageTeams(m.param2);
-		ssToStorageTeam->emplace(team[0], teamid);
+		TraceEvent("AddSSTeam", dbgid).detail("SS", team[0]).detail("Team", teamid);
+		// ssToStorageTeam->emplace(team[0], teamid);
 
-		if (SERVER_KNOBS->TLOG_NEW_INTERFACE && tLogGroupCollection->tryAddStorageTeam(teamid, team)) {
+		if (tLogGroupCollection->tryAddStorageTeam(teamid, team)) {
 			auto group = tLogGroupCollection->assignStorageTeam(teamid);
 			// TODO: This may be unnessary, as ApplyMetadataMutation case for this key-range
 			//     should do the assignment.
 			txnStateStore->set(
 			    KeyValueRef(storageTeamIdToTLogGroupKey(teamid), BinaryWriter::toValue(group->id(), Unversioned())));
-			ASSERT(team.size() == 1);
+			// ASSERT(team.size() == 1);
 		}
 
 		// Storage Team ID to Storage Server List
 		if (!initialCommit) {
-			txnStateStore->set(KeyValueRef(m.param1, m.param2));
+			// TODO: read m.param1 from txnStateStore and decodes existing teams.
+			// Then add the new team into the list.
+			// txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		}
 	}
 
@@ -324,8 +341,9 @@ private:
 			TraceEvent("ServerTag", dbgid).detail("Server", id).detail("Tag", tag.toString());
 
 			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-				//TODO (Vishesh) Add LogProtocolMesssage?
-				toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
+				auto team = tagToTeam(tag).get();
+				toCommit->writeToStorageTeams(tLogGroupCollection, { team }, LogProtocolMessage());
+				toCommit->writeToStorageTeams(tLogGroupCollection, { team }, privatized);
 			} else {
 				toCommit->addTag(tag);
 				toCommit->writeTypedMessage(LogProtocolMessage(), true);
@@ -635,8 +653,10 @@ private:
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 
 		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-			// TODO: Support alltags
-			toCommit->writeToStorageTeams(tLogGroupCollection, { ptxn::txsTeam }, privatized);
+			if (m.param1 == lastEpochEndKey) {
+				toCommit->writeToStorageTeams(tLogGroupCollection, allTeams, LogProtocolMessage());
+			}
+			toCommit->writeToStorageTeams(tLogGroupCollection, allTeams, privatized);
 		} else {
 			toCommit->addTags(allTags);
 			toCommit->writeTypedMessage(privatized);
@@ -1087,6 +1107,7 @@ private:
 
 			// Now get all the storage server tags for the cached key-ranges
 			std::set<Tag> allTags;
+			std::set<ptxn::StorageTeamID> teams;
 			auto ranges = keyInfo->intersectingRanges(KeyRangeRef(keyBegin, keyEnd));
 			for (auto it : ranges) {
 				auto& r = it.value();
@@ -1096,13 +1117,13 @@ private:
 				for (auto info : r.dest_info) {
 					allTags.insert(info->tag);
 				}
+				teams.insert(r.storageTeams.begin(), r.storageTeams.end());
 			}
 
 			// Add the tags to both begin and end mutations
 			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-				// TODO: Support alltags
-				toCommit->writeToStorageTeams(tLogGroupCollection, { ptxn::txsTeam }, mutationBegin);
-				toCommit->writeToStorageTeams(tLogGroupCollection, { ptxn::txsTeam }, mutationEnd);
+				toCommit->writeToStorageTeams(tLogGroupCollection, teams, mutationBegin);
+				toCommit->writeToStorageTeams(tLogGroupCollection, teams, mutationEnd);
 			} else {
 				toCommit->addTags(allTags);
 				toCommit->writeTypedMessage(mutationBegin);

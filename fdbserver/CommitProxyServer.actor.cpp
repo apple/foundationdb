@@ -806,7 +806,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	self->previousCommitVersionByGroup.swap(self->resolution[0].previousCommitVersions);
 	for (auto& it : self->previousCommitVersionByGroup) {
 		if (self->pGroupMessageBuilders.count(it.first) == 0) {
-			std::cout << "Adding to group: " << it.first.toString() << std::endl;
+			// std::cout << "Adding to group: " << it.first.toString() << std::endl;
 			self->pGroupMessageBuilders[it.first] =
 			    std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(self->commitVersion);
 		}
@@ -2133,7 +2133,6 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 					}
 
 					state MutationsVec mutations;
-					state std::unordered_map<UID, ptxn::StorageTeamID> storageServerToStorageTeam;
 					state std::vector<std::pair<Key, Value>> keyServers;
 
 					 // TODO: Remove this, which is here to fix invalid memory access.
@@ -2156,7 +2155,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 						((KeyRangeRef&)txnKeys) = KeyRangeRef(keyAfter(data.back().key, txnKeys.arena()), txnKeys.end);
 
 						for (auto& kv : data) {
-							// Collects keyServers and storageServerToStorageTeam mapping that will be later used to
+							// Collects keyServers and ssToStorageTeam mapping that will be later used to
 							// populate the ServerCacheInfo.
 							if (kv.key.startsWith(keyServersPrefix)) {
 								keyServers.emplace_back(kv.key.removePrefix(keyServersPrefix), kv.value);
@@ -2166,14 +2165,15 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 								    decodeStorageServerToTeamIdValue(kv.value);
 								// For demo purpose, each storage server can only belong to single storage team.
 								ASSERT(storageTeamIDs.size() == 1);
-								storageServerToStorageTeam.emplace(k, *storageTeamIDs.begin());
+								// The first team of a storage server is its own team.
+								commitData.ssToStorageTeam.emplace(k, *storageTeamIDs.begin());
 							} else {
 								mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);
 							}
 						}
 					}
 
-					// Populate ServerCacheInfo for each shard. `storageServerToStorageTeam` should be populated with
+					// Populate ServerCacheInfo for each shard. `commitData.ssToStorageTeam` should be populated with
 					// mappings by now.
 					std::vector<std::pair<MapPair<Key, ServerCacheInfo>, int>> keyInfoData;
 					vector<UID> src, dest;
@@ -2198,8 +2198,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 
 							if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 								// Add storage teams of storage servers
-								ASSERT(storageServerToStorageTeam.count(id));
-								ASSERT(storageServerToStorageTeam[id] == srcDstTeams[0]);
+								ASSERT(commitData.ssToStorageTeam.count(id));
+								ASSERT(commitData.ssToStorageTeam[id] == srcDstTeams[0]);
 								info.storageTeams.insert(srcDstTeams[0]);
 							}
 						}
@@ -2212,8 +2212,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 							info.dest_info.push_back(storageInfo);
 							if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 								// Add storage teams of storage servers
-								ASSERT(storageServerToStorageTeam.count(id));
-								ASSERT(storageServerToStorageTeam[id] == srcDstTeams[1]);
+								ASSERT(commitData.ssToStorageTeam.count(id));
+								ASSERT(commitData.ssToStorageTeam[id] == srcDstTeams[1]);
 								info.storageTeams.insert(srcDstTeams[1]);
 							}
 						}
@@ -2254,7 +2254,6 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 
 					// Cleanup.
 					mutations.clear();
-					storageServerToStorageTeam.clear();
 					keyServers.clear();
 					txnStateResults.clear();
 					TraceEvent("ProxyCommitDataDone", commitData.dbgid);

@@ -1482,7 +1482,7 @@ ACTOR Future<Void> moveKeys(Database cx,
 void seedShardServers(Arena& arena,
                       CommitTransactionRef& tr,
                       std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>> servers,
-                      const std::vector<StringRef>& keySplits_) {
+                      const std::vector<StringRef>& keySplits) {
 	std::map<Optional<Value>, Tag> dcId_locality;
 	std::map<UID, Tag> server_tag;
 	int8_t nextLocality = 0;
@@ -1497,12 +1497,9 @@ void seedShardServers(Arena& arena,
 		t.id++;
 	}
 
-	// We can't sort this in ptxn, because the last team is txsTeam.
-	if (!SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-		// Sorting is needed so that we can compare if teams are equal when DD
-		// initializes by loading the key servers map.
-		std::sort(servers.begin(), servers.end());
-	}
+	// Sorting is needed so that we can compare if teams are equal when DD
+	// initializes by loading the key servers map.
+	std::sort(servers.begin(), servers.end());
 
 	// This isn't strictly necessary, but make sure this is the first transaction
 	tr.read_snapshot = 0;
@@ -1560,14 +1557,12 @@ void seedShardServers(Arena& arena,
 		           : keyServersValue(RangeResult(), { serverSrcUID[serverIndex] }, serverTeamIDs[serverIndex]);
 	};
 
-	auto keySplits = keySplits_;
-	keySplits.push_back("\xff"_sr);
 	const int numServers = servers.size();
 	const int numKeyRanges = keySplits.size() + 1;
 
 	ASSERT(numKeyRanges > 1);
 
-	// TODO: when numKeyRanges < numServers, txsTeam is not assigned to the last SS.
+	// TODO: allow numKeyRanges != numServers
 	ASSERT(numKeyRanges == numServers);
 
 	int serverIndex = 0;
