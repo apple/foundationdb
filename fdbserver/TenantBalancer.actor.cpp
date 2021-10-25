@@ -169,6 +169,7 @@ Future<Result> runTenantBalancerTransaction(Database db,
 			return r;
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "TenantBalancerTransactionError", id)
+			    .error(e)
 			    .detail("Context", context)
 			    .detail("ErrorCount", ++count);
 
@@ -465,20 +466,22 @@ struct TenantBalancer {
 	Future<Void> recover() { return recoverImpl(this); }
 
 	ACTOR static Future<Void> takeTenantBalancerOwnershipImpl(TenantBalancer* self) {
-		state Transaction tr(self->db);
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
 
 		TraceEvent("TenantBalancerTakeOwnership", self->tbi.id());
 
 		loop {
 			try {
-				tr.set(tenantBalancerActiveProcessKey, StringRef(self->tbi.id().toString()));
-				wait(tr.commit());
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr->set(tenantBalancerActiveProcessKey, StringRef(self->tbi.id().toString()));
+				wait(tr->commit());
 
 				TraceEvent("TenantBalancerTookOwnership", self->tbi.id());
 				return Void();
 			} catch (Error& e) {
 				TraceEvent(SevDebug, "TenantBalancerTakeOwnershipError", self->tbi.id()).error(e);
-				wait(tr.onError(e));
+				wait(tr->onError(e));
 			}
 		}
 	}

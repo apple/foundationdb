@@ -1333,7 +1333,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			                      "getValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
 
 		state uint64_t changeCounter = data->shardChangeCounter;
-		std::vector<KeyRef> lockedPrefixes = checkTenant(data, version, req.tenant, req.key);
+		std::vector<KeyRef> lockedPrefixes; // = checkTenant(data, version, req.tenant, req.key);
 
 		if (!data->shards[req.key]->isReadable()) {
 			//TraceEvent("WrongShardServer", data->thisServerID).detail("Key", req.key).detail("Version", version).detail("In", "getValueQ");
