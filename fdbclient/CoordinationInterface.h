@@ -137,6 +137,8 @@ protected:
 	// Clears the flag needs persisted flag.
 	void setPersisted();
 
+	ClusterConnectionString cs;
+
 private:
 	// A flag that indicates whether this connection record needs to be persisted when it succesfully establishes a
 	// connection.

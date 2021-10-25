@@ -73,7 +73,6 @@ protected:
 	Future<bool> persist() override;
 
 private:
-	ClusterConnectionString cs;
 	std::string filename;
 };
 

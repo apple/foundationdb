@@ -30,9 +30,10 @@ class ClusterConnectionMemoryRecord : public IClusterConnectionRecord,
                                       NonCopyable {
 public:
 	// Creates a cluster file with a given connection string.
-	explicit ClusterConnectionMemoryRecord(ClusterConnectionString const& cs)
-	  : IClusterConnectionRecord(ConnectionStringNeedsPersisted::False), id(deterministicRandom()->randomUniqueID()),
-	    cs(cs) {}
+	explicit ClusterConnectionMemoryRecord(ClusterConnectionString const& contents)
+	  : IClusterConnectionRecord(ConnectionStringNeedsPersisted::False), id(deterministicRandom()->randomUniqueID()) {
+		cs = contents;
+	}
 
 	// Returns the connection string currently held in this object.
 	ClusterConnectionString const& getConnectionString() const override;
@@ -68,7 +69,6 @@ protected:
 private:
 	// A unique ID for the record
 	UID id;
-	ClusterConnectionString cs;
 };
 
 #endif
