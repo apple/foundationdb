@@ -6747,8 +6747,11 @@ ACTOR Future<Void> mergeChangeFeedStream(std::vector<std::pair<StorageServerInte
 			checkVersion = nextStream.next.version;
 		}
 		if (nextOut.size() && nextStream.next.version == nextOut.back().version) {
-			nextOut.back().mutations.append_deep(
-			    nextOut.arena(), nextStream.next.mutations.begin(), nextStream.next.mutations.size());
+			if (nextStream.next.mutations.size() &&
+			    nextStream.next.mutations.front().param1 != lastEpochEndPrivateKey) {
+				nextOut.back().mutations.append_deep(
+				    nextOut.arena(), nextStream.next.mutations.begin(), nextStream.next.mutations.size());
+			}
 		} else {
 			nextOut.push_back_deep(nextOut.arena(), nextStream.next);
 		}
