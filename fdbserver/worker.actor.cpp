@@ -2120,9 +2120,10 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 	}
 }
 
-ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration(Reference<ClusterConnectionFile> connFile,
-                                                                   Reference<AsyncVar<Value>> result,
-                                                                   MonitorLeaderInfo info) {
+ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGeneration(
+    Reference<ClusterConnectionFile> connFile,
+    Reference<AsyncVar<Value>> result,
+    MonitorLeaderInfo info) {
 	state ClusterConnectionString ccf = info.intermediateConnFile->getConnectionString();
 	state vector<NetworkAddress> addrs = ccf.coordinators();
 	state ElectionResultRequest request;
@@ -2182,32 +2183,34 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration(Reference<Clu
 	}
 }
 
-ACTOR Future<Void> monitorLeaderRemotelyInternal(Reference<ClusterConnectionFile> connFile,
-                                                 Reference<AsyncVar<Value>> outSerializedLeaderInfo) {
+ACTOR Future<Void> monitorLeaderWithDelayedCandidacyImplInternal(Reference<ClusterConnectionFile> connFile,
+                                                                 Reference<AsyncVar<Value>> outSerializedLeaderInfo) {
 	state MonitorLeaderInfo info(connFile);
 	loop {
-		MonitorLeaderInfo _info = wait(monitorLeaderRemotelyOneGeneration(connFile, outSerializedLeaderInfo, info));
+		MonitorLeaderInfo _info =
+		    wait(monitorLeaderWithDelayedCandidacyImplOneGeneration(connFile, outSerializedLeaderInfo, info));
 		info = _info;
 	}
 }
 
 template <class LeaderInterface>
-Future<Void> monitorLeaderRemotely(Reference<ClusterConnectionFile> const& connFile,
-                                   Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
+Future<Void> monitorLeaderWithDelayedCandidacyImpl(
+    Reference<ClusterConnectionFile> const& connFile,
+    Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
 	LeaderDeserializer<LeaderInterface> deserializer;
 	Reference<AsyncVar<Value>> serializedInfo(new AsyncVar<Value>);
-	Future<Void> m = monitorLeaderRemotelyInternal(connFile, serializedInfo);
+	Future<Void> m = monitorLeaderWithDelayedCandidacyImplInternal(connFile, serializedInfo);
 	return m || deserializer(serializedInfo, outKnownLeader);
 }
 
-ACTOR Future<Void> monitorLeaderRemotelyWithDelayedCandidacy(
+ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
     Reference<ClusterConnectionFile> connFile,
     Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
     Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
     Future<Void> recoveredDiskFiles,
     LocalityData locality,
     Reference<AsyncVar<ServerDBInfo>> dbInfo) {
-	state Future<Void> monitor = monitorLeaderRemotely(connFile, currentCC);
+	state Future<Void> monitor = monitorLeaderWithDelayedCandidacyImpl(connFile, currentCC);
 	state Future<Void> timeout;
 
 	wait(recoveredDiskFiles);
@@ -2292,7 +2295,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> connFile,
 		} else if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::WorstFit &&
 		           SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS > 0) {
 			actors.push_back(
-			    reportErrors(monitorLeaderRemotelyWithDelayedCandidacy(
+			    reportErrors(monitorLeaderWithDelayedCandidacy(
 			                     connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, dbInfo),
 			                 "ClusterController"));
 		} else {
