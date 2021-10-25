@@ -925,14 +925,19 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		// Prefer a healthy team not containing excludeServer.
 		if (candidates.size() > 0) {
-			return teams[deterministicRandom()->randomInt(0, candidates.size())]->getServerIDs();
-		}
-
-		// The backup choice is a team with at least one server besides excludeServer, in this
-		// case, the team  will be possibily relocated to a healthy destination later by DD.
-		if (backup.size() > 0) {
-			std::vector<UID> res = teams[deterministicRandom()->randomInt(0, backup.size())]->getServerIDs();
-			std::remove(res.begin(), res.end(), excludeServer);
+			return teams[candidates[deterministicRandom()->randomInt(0, candidates.size())]]->getServerIDs();
+		} else if (backup.size() > 0) {
+			// The backup choice is a team with at least one server besides excludeServer, in this
+			// case, the team  will be possibily relocated to a healthy destination later by DD.
+			std::vector<UID> servers =
+			    teams[backup[deterministicRandom()->randomInt(0, backup.size())]]->getServerIDs();
+			std::vector<UID> res;
+			for (const UID& id : servers) {
+				if (id != excludeServer) {
+					res.push_back(id);
+				}
+			}
+			TraceEvent("FoundNonoptimalTeamForDroppedShard", excludeServer).detail("Team", describe(res));
 			return res;
 		}
 
@@ -6328,7 +6333,18 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			self->teamCollection = nullptr;
 			primaryTeamCollection = Reference<DDTeamCollection>();
 			remoteTeamCollection = Reference<DDTeamCollection>();
-			wait(shards.clearAsync());
+			if (err.code() == error_code_actor_cancelled) {
+				// When cancelled, we cannot clear asyncronously because
+				// this will result in invalid memory access. This should only
+				// be an issue in simulation.
+				if (!g_network->isSimulated()) {
+					TraceEvent(SevWarnAlways, "DataDistributorCancelled");
+				}
+				shards.clear();
+				throw e;
+			} else {
+				wait(shards.clearAsync());
+			}
 			TraceEvent("DataDistributorTeamCollectionsDestroyed").error(err);
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				TraceEvent("RemoveFailedServer", removeFailedServer.getFuture().get()).error(err);

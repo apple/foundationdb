@@ -406,11 +406,11 @@ ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 	return Void();
 }
 
-ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> connFile,
+ACTOR Future<Void> restoreWorker(Reference<IClusterConnectionRecord> connRecord,
                                  LocalityData locality,
                                  std::string coordFolder) {
 	try {
-		Database cx = Database::createDatabase(connFile, Database::API_VERSION_LATEST, IsInternal::True, locality);
+		Database cx = Database::createDatabase(connRecord, Database::API_VERSION_LATEST, IsInternal::True, locality);
 		wait(reportErrors(_restoreWorker(cx, locality), "RestoreWorker"));
 	} catch (Error& e) {
 		TraceEvent("FastRestoreWorker").detail("Error", e.what());

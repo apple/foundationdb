@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1065,7 +1066,8 @@ void* worker_thread(void* thread_args) {
 	int worker_id = ((thread_args_t*)thread_args)->process->worker_id;
 	int thread_id = ((thread_args_t*)thread_args)->thread_id;
 	mako_args_t* args = ((thread_args_t*)thread_args)->process->args;
-	FDBDatabase* database = ((thread_args_t*)thread_args)->process->database;
+	size_t database_index = ((thread_args_t*)thread_args)->database_index;
+	FDBDatabase* database = ((thread_args_t*)thread_args)->process->databases[database_index];
 	fdb_error_t err;
 	int rc;
 	FDBTransaction* transaction;
@@ -1099,11 +1101,12 @@ void* worker_thread(void* thread_args) {
 	}
 
 	fprintf(debugme,
-	        "DEBUG: worker_id:%d (%d) thread_id:%d (%d) (tid:%lld)\n",
+	        "DEBUG: worker_id:%d (%d) thread_id:%d (%d) database_index:%d (tid:%lld)\n",
 	        worker_id,
 	        args->num_processes,
 	        thread_id,
 	        args->num_threads,
+	        database_index,
 	        (uint64_t)pthread_self());
 
 	if (args->tpsmax) {
@@ -1231,6 +1234,7 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 	fprintf(debugme, "DEBUG: worker %d started\n", worker_id);
 
 	/* Everything starts from here */
+
 	err = fdb_select_api_version(args->api_version);
 	if (err) {
 		fprintf(stderr, "ERROR: Failed at %s:%d (%s)\n", __FILE__, __LINE__, fdb_get_error(err));
@@ -1291,6 +1295,17 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 		}
 	}
 
+	if (args->client_threads_per_version > 0) {
+		err = fdb_network_set_option(
+		    FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, (uint8_t*)&args->client_threads_per_version, sizeof(uint32_t));
+		if (err) {
+			fprintf(stderr,
+			        "ERROR: fdb_network_set_option (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) (%d): %s\n",
+			        (uint8_t*)&args->client_threads_per_version,
+			        fdb_get_error(err));
+		}
+	}
+
 	/* Network thread must be setup before doing anything */
 	fprintf(debugme, "DEBUG: fdb_setup_network\n");
 	err = fdb_setup_network();
@@ -1328,11 +1343,16 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 	fdb_future_destroy(f);
 
 #else /* >= 610 */
-	fdb_create_database(args->cluster_file, &process.database);
-#endif
-	if (args->disable_ryw) {
-		fdb_database_set_option(process.database, FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, (uint8_t*)NULL, 0);
+	for (size_t i = 0; i < args->num_databases; i++) {
+		size_t cluster_index = args->num_fdb_clusters <= 1 ? 0 : i % args->num_fdb_clusters;
+		fdb_create_database(args->cluster_files[cluster_index], &process.databases[i]);
+		fprintf(debugme, "DEBUG: creating database at cluster %s\n", args->cluster_files[cluster_index]);
+		if (args->disable_ryw) {
+			fdb_database_set_option(process.databases[i], FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, (uint8_t*)NULL, 0);
+		}
 	}
+#endif
+
 	fprintf(debugme, "DEBUG: creating %d worker threads\n", args->num_threads);
 	worker_threads = (pthread_t*)calloc(sizeof(pthread_t), args->num_threads);
 	if (!worker_threads) {
@@ -1349,6 +1369,8 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 
 	for (i = 0; i < args->num_threads; i++) {
 		thread_args[i].thread_id = i;
+		thread_args[i].database_index = i % args->num_databases;
+
 		for (int op = 0; op < MAX_OP; op++) {
 			if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 				thread_args[i].block[op] = (lat_block_t*)malloc(sizeof(lat_block_t));
@@ -1388,7 +1410,10 @@ failExit:
 		free(thread_args);
 
 	/* clean up database and cluster */
-	fdb_database_destroy(process.database);
+	for (size_t i = 0; i < args->num_databases; i++) {
+		fdb_database_destroy(process.databases[i]);
+	}
+
 #if FDB_API_VERSION < 610
 	fdb_cluster_destroy(cluster);
 #endif
@@ -1414,6 +1439,8 @@ int init_args(mako_args_t* args) {
 	if (!args)
 		return -1;
 	memset(args, 0, sizeof(mako_args_t)); /* zero-out everything */
+	args->num_fdb_clusters = 0;
+	args->num_databases = 1;
 	args->api_version = fdb_get_max_api_version();
 	args->json = 0;
 	args->num_processes = 1;
@@ -1446,7 +1473,9 @@ int init_args(mako_args_t* args) {
 	for (i = 0; i < MAX_OP; i++) {
 		args->txnspec.ops[i][OP_COUNT] = 0;
 	}
+	args->client_threads_per_version = 0;
 	args->disable_ryw = 0;
+	args->json_output_path[0] = '\0';
 	return 0;
 }
 
@@ -1579,6 +1608,7 @@ void usage() {
 	printf("%-24s %s\n", "-v, --verbose", "Specify verbosity");
 	printf("%-24s %s\n", "-a, --api_version=API_VERSION", "Specify API_VERSION to use");
 	printf("%-24s %s\n", "-c, --cluster=FILE", "Specify FDB cluster file");
+	printf("%-24s %s\n", "-d, --num_databases=NUM_DATABASES", "Specify number of databases");
 	printf("%-24s %s\n", "-p, --procs=PROCS", "Specify number of worker processes");
 	printf("%-24s %s\n", "-t, --threads=THREADS", "Specify number of worker threads");
 	printf("%-24s %s\n", "-r, --rows=ROWS", "Specify number of records");
@@ -1612,6 +1642,7 @@ void usage() {
 	printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
 	printf("%-24s %s\n", "    --streaming", "Streaming mode: all (default), iterator, small, medium, large, serial");
 	printf("%-24s %s\n", "    --disable_ryw", "Disable snapshot read-your-writes");
+	printf("%-24s %s\n", "    --json_report=PATH", "Output stats to the specified json file (Default: mako.json)");
 }
 
 /* parse benchmark paramters */
@@ -1620,50 +1651,53 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 	int c;
 	int idx;
 	while (1) {
-		const char* short_options = "a:c:p:t:r:s:i:x:v:m:hjz";
-		static struct option long_options[] = { /* name, has_arg, flag, val */
-			                                    { "api_version", required_argument, NULL, 'a' },
-			                                    { "cluster", required_argument, NULL, 'c' },
-			                                    { "procs", required_argument, NULL, 'p' },
-			                                    { "threads", required_argument, NULL, 't' },
-			                                    { "rows", required_argument, NULL, 'r' },
-			                                    { "seconds", required_argument, NULL, 's' },
-			                                    { "iteration", required_argument, NULL, 'i' },
-			                                    { "keylen", required_argument, NULL, ARG_KEYLEN },
-			                                    { "vallen", required_argument, NULL, ARG_VALLEN },
-			                                    { "transaction", required_argument, NULL, 'x' },
-			                                    { "tps", required_argument, NULL, ARG_TPS },
-			                                    { "tpsmax", required_argument, NULL, ARG_TPSMAX },
-			                                    { "tpsmin", required_argument, NULL, ARG_TPSMIN },
-			                                    { "tpsinterval", required_argument, NULL, ARG_TPSINTERVAL },
-			                                    { "tpschange", required_argument, NULL, ARG_TPSCHANGE },
-			                                    { "sampling", required_argument, NULL, ARG_SAMPLING },
-			                                    { "verbose", required_argument, NULL, 'v' },
-			                                    { "mode", required_argument, NULL, 'm' },
-			                                    { "knobs", required_argument, NULL, ARG_KNOBS },
-			                                    { "loggroup", required_argument, NULL, ARG_LOGGROUP },
-			                                    { "tracepath", required_argument, NULL, ARG_TRACEPATH },
-			                                    { "trace_format", required_argument, NULL, ARG_TRACEFORMAT },
-			                                    { "streaming", required_argument, NULL, ARG_STREAMING_MODE },
-			                                    { "txntrace", required_argument, NULL, ARG_TXNTRACE },
-			                                    /* no args */
-			                                    { "help", no_argument, NULL, 'h' },
-			                                    { "json", no_argument, NULL, 'j' },
-			                                    { "zipf", no_argument, NULL, 'z' },
-			                                    { "commitget", no_argument, NULL, ARG_COMMITGET },
-			                                    { "flatbuffers", no_argument, NULL, ARG_FLATBUFFERS },
-			                                    { "prefix_padding", no_argument, NULL, ARG_PREFIXPADDING },
-			                                    { "trace", no_argument, NULL, ARG_TRACE },
-			                                    { "txntagging", required_argument, NULL, ARG_TXNTAGGING },
-			                                    { "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
-			                                    { "version", no_argument, NULL, ARG_VERSION },
-			                                    { "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
-			                                    { NULL, 0, NULL, 0 }
+		const char* short_options = "a:c:p:t:r:s:i:x:v:m:hz";
+		static struct option long_options[] = {
+			/* name, has_arg, flag, val */
+			{ "api_version", required_argument, NULL, 'a' },
+			{ "cluster", required_argument, NULL, 'c' },
+			{ "procs", required_argument, NULL, 'p' },
+			{ "threads", required_argument, NULL, 't' },
+			{ "rows", required_argument, NULL, 'r' },
+			{ "seconds", required_argument, NULL, 's' },
+			{ "iteration", required_argument, NULL, 'i' },
+			{ "keylen", required_argument, NULL, ARG_KEYLEN },
+			{ "vallen", required_argument, NULL, ARG_VALLEN },
+			{ "transaction", required_argument, NULL, 'x' },
+			{ "tps", required_argument, NULL, ARG_TPS },
+			{ "tpsmax", required_argument, NULL, ARG_TPSMAX },
+			{ "tpsmin", required_argument, NULL, ARG_TPSMIN },
+			{ "tpsinterval", required_argument, NULL, ARG_TPSINTERVAL },
+			{ "tpschange", required_argument, NULL, ARG_TPSCHANGE },
+			{ "sampling", required_argument, NULL, ARG_SAMPLING },
+			{ "verbose", required_argument, NULL, 'v' },
+			{ "mode", required_argument, NULL, 'm' },
+			{ "knobs", required_argument, NULL, ARG_KNOBS },
+			{ "loggroup", required_argument, NULL, ARG_LOGGROUP },
+			{ "tracepath", required_argument, NULL, ARG_TRACEPATH },
+			{ "trace_format", required_argument, NULL, ARG_TRACEFORMAT },
+			{ "streaming", required_argument, NULL, ARG_STREAMING_MODE },
+			{ "txntrace", required_argument, NULL, ARG_TXNTRACE },
+			/* no args */
+			{ "help", no_argument, NULL, 'h' },
+			{ "zipf", no_argument, NULL, 'z' },
+			{ "commitget", no_argument, NULL, ARG_COMMITGET },
+			{ "flatbuffers", no_argument, NULL, ARG_FLATBUFFERS },
+			{ "prefix_padding", no_argument, NULL, ARG_PREFIXPADDING },
+			{ "trace", no_argument, NULL, ARG_TRACE },
+			{ "txntagging", required_argument, NULL, ARG_TXNTAGGING },
+			{ "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
+			{ "version", no_argument, NULL, ARG_VERSION },
+			{ "client_threads_per_version", required_argument, NULL, ARG_CLIENT_THREADS_PER_VERSION },
+			{ "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
+			{ "json_report", optional_argument, NULL, ARG_JSON_REPORT },
+			{ NULL, 0, NULL, 0 }
 		};
 		idx = 0;
 		c = getopt_long(argc, argv, short_options, long_options, &idx);
-		if (c < 0)
+		if (c < 0) {
 			break;
+		}
 		switch (c) {
 		case '?':
 		case 'h':
@@ -1672,8 +1706,17 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 		case 'a':
 			args->api_version = atoi(optarg);
 			break;
-		case 'c':
-			strcpy(args->cluster_file, optarg);
+		case 'c': {
+			const char delim[] = ",";
+			char* cluster_file = strtok(optarg, delim);
+			while (cluster_file != NULL) {
+				strcpy(args->cluster_files[args->num_fdb_clusters++], cluster_file);
+				cluster_file = strtok(NULL, delim);
+			}
+			break;
+		}
+		case 'd':
+			args->num_databases = atoi(optarg);
 			break;
 		case 'p':
 			args->num_processes = atoi(optarg);
@@ -1812,8 +1855,21 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			}
 			memcpy(args->txntagging_prefix, optarg, strlen(optarg));
 			break;
+		case ARG_CLIENT_THREADS_PER_VERSION:
+			args->client_threads_per_version = atoi(optarg);
+			break;
 		case ARG_DISABLE_RYW:
 			args->disable_ryw = 1;
+			break;
+		case ARG_JSON_REPORT:
+			if (optarg == NULL && (argv[optind] == NULL || (argv[optind] != NULL && argv[optind][0] == '-'))) {
+				// if --report_json is the last option and no file is specified
+				// or --report_json is followed by another option
+				char default_file[] = "mako.json";
+				strncpy(args->json_output_path, default_file, strlen(default_file));
+			} else {
+				strncpy(args->json_output_path, optarg, strlen(optarg) + 1);
+			}
 			break;
 		}
 	}
@@ -1841,6 +1897,41 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 	return 0;
 }
 
+char* get_ops_name(int ops_code) {
+	switch (ops_code) {
+	case OP_GETREADVERSION:
+		return "GRV";
+	case OP_GET:
+		return "GET";
+	case OP_GETRANGE:
+		return "GETRANGE";
+	case OP_SGET:
+		return "SGET";
+	case OP_SGETRANGE:
+		return "SGETRANGE";
+	case OP_UPDATE:
+		return "UPDATE";
+	case OP_INSERT:
+		return "INSERT";
+	case OP_INSERTRANGE:
+		return "INSERTRANGE";
+	case OP_CLEAR:
+		return "CLEAR";
+	case OP_SETCLEAR:
+		return "SETCLEAR";
+	case OP_CLEARRANGE:
+		return "CLEARRANGE";
+	case OP_SETCLEARRANGE:
+		return "SETCLEARRANGE";
+	case OP_COMMIT:
+		return "COMMIT";
+	case OP_TRANSACTION:
+		return "TRANSACTION";
+	default:
+		return "";
+	}
+}
+
 int validate_args(mako_args_t* args) {
 	if (args->mode == MODE_INVALID) {
 		fprintf(stderr, "ERROR: --mode has to be set\n");
@@ -1856,6 +1947,28 @@ int validate_args(mako_args_t* args) {
 	}
 	if (args->value_length < 0) {
 		fprintf(stderr, "ERROR: --vallen must be a positive integer\n");
+		return -1;
+	}
+	if (args->num_fdb_clusters > NUM_CLUSTERS_MAX) {
+		fprintf(stderr, "ERROR: Mako is not supported to do work to more than %d clusters\n", NUM_CLUSTERS_MAX);
+		return -1;
+	}
+	if (args->num_databases > NUM_DATABASES_MAX) {
+		fprintf(stderr, "ERROR: Mako is not supported to do work to more than %d databases\n", NUM_DATABASES_MAX);
+		return -1;
+	}
+	if (args->num_databases < args->num_fdb_clusters) {
+		fprintf(stderr,
+		        "ERROR: --num_databases (%d) must be >= number of clusters(%d)\n",
+		        args->num_databases,
+		        args->num_fdb_clusters);
+		return -1;
+	}
+	if (args->num_threads < args->num_databases) {
+		fprintf(stderr,
+		        "ERROR: --threads (%d) must be >= number of databases (%d)\n",
+		        args->num_threads,
+		        args->num_databases);
 		return -1;
 	}
 	if (args->key_length < 4 /* "mako" */ + digits(args->rows)) {
@@ -1888,7 +2001,7 @@ int validate_args(mako_args_t* args) {
 #define STATS_TITLE_WIDTH 12
 #define STATS_FIELD_WIDTH 12
 
-void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, struct timespec* prev) {
+void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, struct timespec* prev, FILE* fp) {
 	int i, j;
 	int op;
 	int print_err;
@@ -1901,7 +2014,7 @@ void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, s
 	uint64_t totalxacts = 0;
 	static uint64_t conflicts_prev = 0;
 	uint64_t conflicts = 0;
-	double durationns = (now->tv_sec - prev->tv_sec) * 1000000000.0 + (now->tv_nsec - prev->tv_nsec);
+	double duration_nsec = (now->tv_sec - prev->tv_sec) * 1000000000.0 + (now->tv_nsec - prev->tv_nsec);
 
 	for (i = 0; i < args->num_processes; i++) {
 		for (j = 0; j < args->num_threads; j++) {
@@ -1913,10 +2026,18 @@ void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, s
 			}
 		}
 	}
+
+	if (fp) {
+		fwrite("{", 1, 1, fp);
+	}
 	printf("%" STR(STATS_TITLE_WIDTH) "s ", "OPS");
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0) {
-			printf("%" STR(STATS_FIELD_WIDTH) "lld ", ops_total[op] - ops_total_prev[op]);
+			uint64_t ops_total_diff = ops_total[op] - ops_total_prev[op];
+			printf("%" STR(STATS_FIELD_WIDTH) "lld ", ops_total_diff);
+			if (fp) {
+				fprintf(fp, "\"%s\": %lld,", get_ops_name(op), ops_total_diff);
+			}
 			errors_diff[op] = errors_total[op] - errors_total_prev[op];
 			print_err = (errors_diff[op] > 0);
 			ops_total_prev[op] = ops_total[op];
@@ -1924,11 +2045,19 @@ void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, s
 		}
 	}
 	/* TPS */
-	printf("%" STR(STATS_FIELD_WIDTH) ".2f ", (totalxacts - totalxacts_prev) * 1000000000.0 / durationns);
+	double tps = (totalxacts - totalxacts_prev) * 1000000000.0 / duration_nsec;
+	printf("%" STR(STATS_FIELD_WIDTH) ".2f ", tps);
+	if (fp) {
+		fprintf(fp, "\"tps\": %.2f,", tps);
+	}
 	totalxacts_prev = totalxacts;
 
 	/* Conflicts */
-	printf("%" STR(STATS_FIELD_WIDTH) ".2f\n", (conflicts - conflicts_prev) * 1000000000.0 / durationns);
+	double conflicts_diff = (conflicts - conflicts_prev) * 1000000000.0 / duration_nsec;
+	printf("%" STR(STATS_FIELD_WIDTH) ".2f\n", conflicts_diff);
+	if (fp) {
+		fprintf(fp, "\"conflictsPerSec\": %.2f},", conflicts_diff);
+	}
 	conflicts_prev = conflicts;
 
 	if (print_err) {
@@ -1936,10 +2065,14 @@ void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, s
 		for (op = 0; op < MAX_OP; op++) {
 			if (args->txnspec.ops[op][OP_COUNT] > 0) {
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", errors_diff[op]);
+				if (fp) {
+					fprintf(fp, "\"errors\": %.2f", conflicts_diff);
+				}
 			}
 		}
 		printf("\n");
 	}
+
 	return;
 }
 
@@ -1953,44 +2086,7 @@ void print_stats_header(mako_args_t* args, bool show_commit, bool is_first_heade
 			printf(" ");
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0) {
-			switch (op) {
-			case OP_GETREADVERSION:
-				printf("%" STR(STATS_FIELD_WIDTH) "s ", "GRV");
-				break;
-			case OP_GET:
-				printf("%" STR(STATS_FIELD_WIDTH) "s ", "GET");
-				break;
-			case OP_GETRANGE:
-				printf("%" STR(STATS_FIELD_WIDTH) "s ", "GETRANGE");
-				break;
-			case OP_SGET:
-				printf("%" STR(STATS_FIELD_WIDTH) "s ", "SGET");
-				break;
-			case OP_SGETRANGE:
-				printf("%" STR(STATS_FIELD_WIDTH) "s ", "SGETRANGE");
-				break;
-			case OP_UPDATE:
-				printf("%" STR(STATS_FIELD_WIDTH) "s ", "UPDATE");
-				break;
-			case OP_INSERT:
-				printf("%" STR(STATS_FIELD_WIDTH) "s ", "INSERT");
-				break;
-			case OP_INSERTRANGE:
-				printf("%" STR(STATS_FIELD_WIDTH) "s ", "INSERTRANGE");
-				break;
-			case OP_CLEAR:
-				printf("%" STR(STATS_FIELD_WIDTH) "s ", "CLEAR");
-				break;
-			case OP_SETCLEAR:
-				printf("%" STR(STATS_FIELD_WIDTH) "s ", "SETCLEAR");
-				break;
-			case OP_CLEARRANGE:
-				printf("%" STR(STATS_FIELD_WIDTH) "s ", "CLEARRANGE");
-				break;
-			case OP_SETCLEARRANGE:
-				printf("%" STR(STATS_FIELD_WIDTH) "s ", "SETCLRRANGE");
-				break;
-			}
+			printf("%" STR(STATS_FIELD_WIDTH) "s ", get_ops_name(op));
 		}
 	}
 
@@ -2043,7 +2139,8 @@ void print_report(mako_args_t* args,
                   mako_stats_t* stats,
                   struct timespec* timer_now,
                   struct timespec* timer_start,
-                  pid_t* pid_main) {
+                  pid_t* pid_main,
+                  FILE* fp) {
 	int i, j, k, op, index;
 	uint64_t totalxacts = 0;
 	uint64_t conflicts = 0;
@@ -2055,7 +2152,7 @@ void print_report(mako_args_t* args,
 	uint64_t lat_samples[MAX_OP] = { 0 };
 	uint64_t lat_max[MAX_OP] = { 0 };
 
-	uint64_t durationns =
+	uint64_t duration_nsec =
 	    (timer_now->tv_sec - timer_start->tv_sec) * 1000000000 + (timer_now->tv_nsec - timer_start->tv_nsec);
 
 	for (op = 0; op < MAX_OP; op++) {
@@ -2089,7 +2186,8 @@ void print_report(mako_args_t* args,
 	}
 
 	/* overall stats */
-	printf("\n====== Total Duration %6.3f sec ======\n\n", (double)durationns / 1000000000);
+	double total_duration = duration_nsec * 1.0 / 1000000000;
+	printf("\n====== Total Duration %6.3f sec ======\n\n", total_duration);
 	printf("Total Processes:  %8d\n", args->num_processes);
 	printf("Total Threads:    %8d\n", args->num_threads);
 	if (args->tpsmax == args->tpsmin)
@@ -2114,31 +2212,61 @@ void print_report(mako_args_t* args,
 	printf("Total Xacts:      %8lld\n", totalxacts);
 	printf("Total Conflicts:  %8lld\n", conflicts);
 	printf("Total Errors:     %8lld\n", totalerrors);
-	printf("Overall TPS:      %8lld\n\n", totalxacts * 1000000000 / durationns);
+	printf("Overall TPS:      %8lld\n\n", totalxacts * 1000000000 / duration_nsec);
+
+	if (fp) {
+		fprintf(fp, "\"results\": {");
+		fprintf(fp, "\"totalDuration\": %6.3f,", total_duration);
+		fprintf(fp, "\"totalProcesses\": %d,", args->num_processes);
+		fprintf(fp, "\"totalThreads\": %d,", args->num_threads);
+		fprintf(fp, "\"targetTPS\": %d,", args->tpsmax);
+		fprintf(fp, "\"totalXacts\": %lld,", totalxacts);
+		fprintf(fp, "\"totalConflicts\": %lld,", conflicts);
+		fprintf(fp, "\"totalErrors\": %lld,", totalerrors);
+		fprintf(fp, "\"overallTPS\": %lld,", totalxacts * 1000000000 / duration_nsec);
+	}
 
 	/* per-op stats */
 	print_stats_header(args, true, true, false);
 
 	/* OPS */
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Total OPS");
+	if (fp) {
+		fprintf(fp, "\"totalOps\": {");
+	}
 	for (op = 0; op < MAX_OP; op++) {
 		if ((args->txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) || op == OP_COMMIT) {
 			printf("%" STR(STATS_FIELD_WIDTH) "lld ", ops_total[op]);
+			if (fp) {
+				fprintf(fp, "\"%s\": %lld,", get_ops_name(op), ops_total[op]);
+			}
 		}
 	}
 
 	/* TPS */
-	printf("%" STR(STATS_FIELD_WIDTH) ".2f ", totalxacts * 1000000000.0 / durationns);
+	double tps = totalxacts * 1000000000.0 / duration_nsec;
+	printf("%" STR(STATS_FIELD_WIDTH) ".2f ", tps);
 
 	/* Conflicts */
-	printf("%" STR(STATS_FIELD_WIDTH) ".2f\n", conflicts * 1000000000.0 / durationns);
+	double conflicts_rate = conflicts * 1000000000.0 / duration_nsec;
+	printf("%" STR(STATS_FIELD_WIDTH) ".2f\n", conflicts_rate);
+
+	if (fp) {
+		fprintf(fp, "}, \"tps\": %.2f, \"conflictsPerSec\": %.2f, \"errors\": {", tps, conflicts_rate);
+	}
 
 	/* Errors */
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Errors");
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) {
 			printf("%" STR(STATS_FIELD_WIDTH) "lld ", errors_total[op]);
+			if (fp) {
+				fprintf(fp, "\"%s\": %lld,", get_ops_name(op), errors_total[op]);
+			}
 		}
+	}
+	if (fp) {
+		fprintf(fp, "}, \"numSamples\": {");
 	}
 	printf("\n\n");
 
@@ -2154,11 +2282,17 @@ void print_report(mako_args_t* args,
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
 			}
+			if (fp) {
+				fprintf(fp, "\"%s\": %lld,", get_ops_name(op), lat_samples[op]);
+			}
 		}
 	}
 	printf("\n");
 
 	/* Min Latency */
+	if (fp) {
+		fprintf(fp, "}, \"minLatency\": {");
+	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Min");
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
@@ -2166,17 +2300,26 @@ void print_report(mako_args_t* args,
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", lat_min[op]);
+				if (fp) {
+					fprintf(fp, "\"%s\": %lld,", get_ops_name(op), lat_min[op]);
+				}
 			}
 		}
 	}
 	printf("\n");
 
 	/* Avg Latency */
+	if (fp) {
+		fprintf(fp, "}, \"avgLatency\": {");
+	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Avg");
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (lat_total[op]) {
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", lat_total[op] / lat_samples[op]);
+				if (fp) {
+					fprintf(fp, "\"%s\": %lld,", get_ops_name(op), lat_total[op] / lat_samples[op]);
+				}
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
 			}
@@ -2185,6 +2328,9 @@ void print_report(mako_args_t* args,
 	printf("\n");
 
 	/* Max Latency */
+	if (fp) {
+		fprintf(fp, "}, \"maxLatency\": {");
+	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Max");
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
@@ -2192,6 +2338,9 @@ void print_report(mako_args_t* args,
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", lat_max[op]);
+				if (fp) {
+					fprintf(fp, "\"%s\": %lld,", get_ops_name(op), lat_max[op]);
+				}
 			}
 		}
 	}
@@ -2202,6 +2351,9 @@ void print_report(mako_args_t* args,
 	int point_99_9pct, point_99pct, point_95pct;
 
 	/* Median Latency */
+	if (fp) {
+		fprintf(fp, "}, \"medianLatency\": {");
+	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Median");
 	int num_points[MAX_OP] = { 0 };
 	for (op = 0; op < MAX_OP; op++) {
@@ -2238,6 +2390,9 @@ void print_report(mako_args_t* args,
 					median = (dataPoints[op][num_points[op] / 2] + dataPoints[op][num_points[op] / 2 - 1]) >> 1;
 				}
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", median);
+				if (fp) {
+					fprintf(fp, "\"%s\": %lld,", get_ops_name(op), median);
+				}
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
 			}
@@ -2246,6 +2401,9 @@ void print_report(mako_args_t* args,
 	printf("\n");
 
 	/* 95%ile Latency */
+	if (fp) {
+		fprintf(fp, "}, \"p95Latency\": {");
+	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "95.0 pctile");
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
@@ -2256,6 +2414,9 @@ void print_report(mako_args_t* args,
 			if (lat_total[op]) {
 				point_95pct = ((float)(num_points[op]) * 0.95) - 1;
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", dataPoints[op][point_95pct]);
+				if (fp) {
+					fprintf(fp, "\"%s\": %lld,", get_ops_name(op), dataPoints[op][point_95pct]);
+				}
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
 			}
@@ -2264,6 +2425,9 @@ void print_report(mako_args_t* args,
 	printf("\n");
 
 	/* 99%ile Latency */
+	if (fp) {
+		fprintf(fp, "}, \"p99Latency\": {");
+	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "99.0 pctile");
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
@@ -2274,6 +2438,9 @@ void print_report(mako_args_t* args,
 			if (lat_total[op]) {
 				point_99pct = ((float)(num_points[op]) * 0.99) - 1;
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", dataPoints[op][point_99pct]);
+				if (fp) {
+					fprintf(fp, "\"%s\": %lld,", get_ops_name(op), dataPoints[op][point_99pct]);
+				}
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
 			}
@@ -2282,6 +2449,9 @@ void print_report(mako_args_t* args,
 	printf("\n");
 
 	/* 99.9%ile Latency */
+	if (fp) {
+		fprintf(fp, "}, \"p99.9Latency\": {");
+	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "99.9 pctile");
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
@@ -2292,12 +2462,18 @@ void print_report(mako_args_t* args,
 			if (lat_total[op]) {
 				point_99_9pct = ((float)(num_points[op]) * 0.999) - 1;
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", dataPoints[op][point_99_9pct]);
+				if (fp) {
+					fprintf(fp, "\"%s\": %lld,", get_ops_name(op), dataPoints[op][point_99_9pct]);
+				}
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
 			}
 		}
 	}
 	printf("\n");
+	if (fp) {
+		fprintf(fp, "}}");
+	}
 
 	char command_remove[NAME_MAX] = { '\0' };
 	sprintf(command_remove, "rm -rf %s%d", TEMP_DATA_STORE, *pid_main);
@@ -2327,6 +2503,44 @@ int stats_process_main(mako_args_t* args,
 
 	if (args->verbose >= VERBOSE_DEFAULT)
 		print_stats_header(args, false, true, false);
+
+	FILE* fp = NULL;
+	if (args->json_output_path[0] != '\0') {
+		fp = fopen(args->json_output_path, "w");
+		fprintf(fp, "{\"makoArgs\": {");
+		fprintf(fp, "\"api_version\": %d,", args->api_version);
+		fprintf(fp, "\"json\": %d,", args->json);
+		fprintf(fp, "\"num_processes\": %d,", args->num_processes);
+		fprintf(fp, "\"num_threads\": %d,", args->num_threads);
+		fprintf(fp, "\"mode\": %d,", args->mode);
+		fprintf(fp, "\"rows\": %d,", args->rows);
+		fprintf(fp, "\"seconds\": %d,", args->seconds);
+		fprintf(fp, "\"iteration\": %d,", args->iteration);
+		fprintf(fp, "\"tpsmax\": %d,", args->tpsmax);
+		fprintf(fp, "\"tpsmin\": %d,", args->tpsmin);
+		fprintf(fp, "\"tpsinterval\": %d,", args->tpsinterval);
+		fprintf(fp, "\"tpschange\": %d,", args->tpschange);
+		fprintf(fp, "\"sampling\": %d,", args->sampling);
+		fprintf(fp, "\"key_length\": %d,", args->key_length);
+		fprintf(fp, "\"value_length\": %d,", args->value_length);
+		fprintf(fp, "\"commit_get\": %d,", args->commit_get);
+		fprintf(fp, "\"verbose\": %d,", args->verbose);
+		fprintf(fp, "\"cluster_file\": \"%s\",", args->cluster_files);
+		fprintf(fp, "\"log_group\": \"%s\",", args->log_group);
+		fprintf(fp, "\"prefixpadding\": %d,", args->prefixpadding);
+		fprintf(fp, "\"trace\": %d,", args->trace);
+		fprintf(fp, "\"tracepath\": \"%s\",", args->tracepath);
+		fprintf(fp, "\"traceformat\": %d,", args->traceformat);
+		fprintf(fp, "\"knobs\": \"%s\",", args->knobs);
+		fprintf(fp, "\"flatbuffers\": %d,", args->flatbuffers);
+		fprintf(fp, "\"txntrace\": %d,", args->txntrace);
+		fprintf(fp, "\"txntagging\": %d,", args->txntagging);
+		fprintf(fp, "\"txntagging_prefix\": \"%s\",", args->txntagging_prefix);
+		fprintf(fp, "\"streaming_mode\": %d,", args->streaming_mode);
+		fprintf(fp, "\"disable_ryw\": %d,", args->disable_ryw);
+		fprintf(fp, "\"json_output_path\": \"%s\",", args->json_output_path);
+		fprintf(fp, "},\"samples\": [");
+	}
 
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &timer_start);
 	timer_prev.tv_sec = timer_start.tv_sec;
@@ -2369,10 +2583,14 @@ int stats_process_main(mako_args_t* args,
 			}
 
 			if (args->verbose >= VERBOSE_DEFAULT)
-				print_stats(args, stats, &timer_now, &timer_prev);
+				print_stats(args, stats, &timer_now, &timer_prev, fp);
 			timer_prev.tv_sec = timer_now.tv_sec;
 			timer_prev.tv_nsec = timer_now.tv_nsec;
 		}
+	}
+
+	if (fp) {
+		fprintf(fp, "],");
 	}
 
 	/* print report */
@@ -2381,7 +2599,12 @@ int stats_process_main(mako_args_t* args,
 		while (*stopcount < args->num_threads * args->num_processes) {
 			usleep(10000); /* 10ms */
 		}
-		print_report(args, stats, &timer_now, &timer_start, pid_main);
+		print_report(args, stats, &timer_now, &timer_start, pid_main, fp);
+	}
+
+	if (fp) {
+		fprintf(fp, "}");
+		fclose(fp);
 	}
 
 	return 0;
