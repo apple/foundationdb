@@ -252,6 +252,15 @@ public:
 	// Management API, create snapshot
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
+	Future<Void> getChangeFeedStream(const PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>& results,
+	                                 Key rangeID,
+	                                 Version begin = 0,
+	                                 Version end = std::numeric_limits<Version>::max(),
+	                                 KeyRange range = allKeys);
+
+	Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
+	Future<Void> popChangeFeedMutations(StringRef rangeID, Version version);
+
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
 	                         Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
@@ -327,6 +336,8 @@ public:
 	std::unordered_map<UID, StorageServerInterface> tssMapping;
 	// map from tssid -> metrics for that tss pair
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
+	// map from changeFeedId -> changeFeedRange
+	std::unordered_map<Key, KeyRange> changeFeedCache;
 
 	UID dbId;
 	IsInternal internal; // Only contexts created through the C client and fdbcli are non-internal

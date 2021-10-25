@@ -270,6 +270,27 @@ void TSS_traceMismatch(TraceEvent& event,
 	ASSERT(false);
 }
 
+// change feed
+template <>
+bool TSS_doCompare(const OverlappingChangeFeedsReply& src, const OverlappingChangeFeedsReply& tss) {
+	ASSERT(false);
+	return true;
+}
+
+template <>
+const char* TSS_mismatchTraceName(const OverlappingChangeFeedsRequest& req) {
+	ASSERT(false);
+	return "";
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const OverlappingChangeFeedsRequest& req,
+                       const OverlappingChangeFeedsReply& src,
+                       const OverlappingChangeFeedsReply& tss) {
+	ASSERT(false);
+}
+
 // template specializations for metrics replies that should never be called because these requests aren't duplicated
 
 // storage metrics
@@ -330,6 +351,9 @@ void TSSMetrics::recordLatency(const SplitRangeRequest& req, double ssLatency, d
 
 template <>
 void TSSMetrics::recordLatency(const GetKeyValuesStreamRequest& req, double ssLatency, double tssLatency) {}
+
+template <>
+void TSSMetrics::recordLatency(const OverlappingChangeFeedsRequest& req, double ssLatency, double tssLatency) {}
 
 // -------------------
 

@@ -1032,6 +1032,62 @@ const KeyRef writeRecoveryKey = LiteralStringRef("\xff/writeRecovery");
 const ValueRef writeRecoveryKeyTrue = LiteralStringRef("1");
 const KeyRef snapshotEndVersionKey = LiteralStringRef("\xff/snapshotEndVersion");
 
+const KeyRangeRef changeFeedKeys(LiteralStringRef("\xff\x02/feed/"), LiteralStringRef("\xff\x02/feed0"));
+const KeyRef changeFeedPrefix = changeFeedKeys.begin;
+const KeyRef changeFeedPrivatePrefix = LiteralStringRef("\xff\xff\x02/feed/");
+
+const Value changeFeedValue(KeyRangeRef const& range, Version popVersion, ChangeFeedStatus status) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
+	wr << range;
+	wr << popVersion;
+	wr << status;
+	return wr.toValue();
+}
+
+std::tuple<KeyRange, Version, ChangeFeedStatus> decodeChangeFeedValue(ValueRef const& value) {
+	KeyRange range;
+	Version version;
+	ChangeFeedStatus status;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> range;
+	reader >> version;
+	reader >> status;
+	return std::make_tuple(range, version, status);
+}
+
+const KeyRangeRef changeFeedDurableKeys(LiteralStringRef("\xff\xff/cf/"), LiteralStringRef("\xff\xff/cf0"));
+const KeyRef changeFeedDurablePrefix = changeFeedDurableKeys.begin;
+
+const Value changeFeedDurableKey(Key const& feed, Version version) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withChangeFeed()));
+	wr.serializeBytes(changeFeedDurablePrefix);
+	wr << feed;
+	wr << bigEndian64(version);
+	return wr.toValue();
+}
+std::pair<Key, Version> decodeChangeFeedDurableKey(ValueRef const& key) {
+	Key feed;
+	Version version;
+	BinaryReader reader(key.removePrefix(changeFeedDurablePrefix), AssumeVersion(ProtocolVersion::withChangeFeed()));
+	reader >> feed;
+	reader >> version;
+	return std::make_pair(feed, bigEndian64(version));
+}
+const Value changeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations, Version knownCommittedVersion) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
+	wr << mutations;
+	wr << knownCommittedVersion;
+	return wr.toValue();
+}
+std::pair<Standalone<VectorRef<MutationRef>>, Version> decodeChangeFeedDurableValue(ValueRef const& value) {
+	Standalone<VectorRef<MutationRef>> mutations;
+	Version knownCommittedVersion;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> mutations;
+	reader >> knownCommittedVersion;
+	return std::make_pair(mutations, knownCommittedVersion);
+}
+
 const KeyRef configTransactionDescriptionKey = "\xff\xff/description"_sr;
 const KeyRange globalConfigKnobKeys = singleKeyRange("\xff\xff/globalKnobs"_sr);
 const KeyRangeRef configKnobKeys("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);

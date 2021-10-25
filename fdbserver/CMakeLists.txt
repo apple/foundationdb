@@ -169,6 +169,7 @@ set(FDBSERVER_SRCS
   workloads/ConsistencyCheck.actor.cpp
   workloads/CpuProfiler.actor.cpp
   workloads/Cycle.actor.cpp
+  workloads/ChangeFeeds.actor.cpp
   workloads/DataDistributionMetrics.actor.cpp
   workloads/DataLossRecovery.actor.cpp
   workloads/DDBalance.actor.cpp

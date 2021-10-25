@@ -36,6 +36,7 @@
 #include "fdbclient/Schemas.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Tuple.h"
 
@@ -1556,6 +1557,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state Database localDb;
 	state Reference<IDatabase> db;
 	state Reference<ITransaction> tr;
+	state Transaction trx;
 
 	state bool writeMode = false;
 
@@ -1874,6 +1876,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "lock")) {
 					bool _result = wait(makeInterruptable(lockCommandActor(db, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "changefeed")) {
+					bool _result = wait(makeInterruptable(changeFeedCommandActor(localDb, tokens, warn)));
 					if (!_result)
 						is_error = true;
 					continue;

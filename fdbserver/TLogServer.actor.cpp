@@ -1867,10 +1867,13 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	reply.end = endVersion;
 	reply.onlySpilled = onlySpilled;
 
-	//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("Tag", reqTag.toString()).
-	//	detail("BeginVer", reqBegin).detail("EndVer", reply.end).
-	//	detail("MsgBytes", reply.messages.expectedSize()).
-	//	detail("ForAddress", replyPromise.getEndpoint().getPrimaryAddress());
+	// TraceEvent("TlogPeek", self->dbgid)
+	//    .detail("LogId", logData->logId)
+	//    .detail("Tag", req.tag.toString())
+	//    .detail("BeginVer", req.begin)
+	//    .detail("EndVer", reply.end)
+	//    .detail("MsgBytes", reply.messages.expectedSize())
+	//    .detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
 
 	if (reqSequence.present()) {
 		auto& trackerData = logData->peekTracker[peekId];
