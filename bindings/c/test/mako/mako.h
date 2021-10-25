@@ -81,8 +81,9 @@ enum Arguments {
 	ARG_TXNTAGGING,
 	ARG_TXNTAGGINGPREFIX,
 	ARG_STREAMING_MODE,
+	ARG_DISABLE_RYW,
 	ARG_CLIENT_THREADS_PER_VERSION,
-	ARG_DISABLE_RYW
+	ARG_JSON_REPORT
 };
 
 enum TPSChangeTypes { TPS_SIN, TPS_SQUARE, TPS_PULSE };
@@ -144,6 +145,7 @@ typedef struct {
 	FDBStreamingMode streaming_mode;
 	uint32_t client_threads_per_version;
 	int disable_ryw;
+	char json_output_path[PATH_MAX];
 } mako_args_t;
 
 /* shared memory */

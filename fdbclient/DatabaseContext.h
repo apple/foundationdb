@@ -167,7 +167,7 @@ public:
 
 	// Constructs a new copy of this DatabaseContext from the parameters of this DatabaseContext
 	Database clone() const {
-		return Database(new DatabaseContext(connectionFile,
+		return Database(new DatabaseContext(connectionRecord,
 		                                    clientInfo,
 		                                    coordinator,
 		                                    clientInfoMonitor,
@@ -231,16 +231,16 @@ public:
 
 	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a
 	                            // leader. The cluster file therefore is valid, but the database might be unavailable.
-	Reference<ClusterConnectionFile> getConnectionFile();
+	Reference<IClusterConnectionRecord> getConnectionRecord();
 
 	// Switch the database to use the new connection file, and recreate all pending watches for committed transactions.
 	//
 	// Meant to be used as part of a 'hot standby' solution to switch to the standby. A correct switch will involve
 	// advancing the version on the new cluster sufficiently far that any transaction begun with a read version from the
 	// old cluster will fail to commit. Assuming the above version-advancing is done properly, a call to
-	// switchConnectionFile guarantees that any read with a version from the old cluster will not be attempted on the
+	// switchConnectionRecord guarantees that any read with a version from the old cluster will not be attempted on the
 	// new cluster.
-	Future<Void> switchConnectionFile(Reference<ClusterConnectionFile> standby);
+	Future<Void> switchConnectionRecord(Reference<IClusterConnectionRecord> standby);
 	Future<Void> connectionFileChanged();
 	IsSwitchable switchable{ false };
 
@@ -268,7 +268,7 @@ public:
 	                                    Optional<Version> end);
 
 	// private:
-	explicit DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
+	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
 	                         Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
 	                         Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
 	                         Future<Void> clientInfoMonitor,
@@ -285,7 +285,7 @@ public:
 	void expireThrottles();
 
 	// Key DB-specific information
-	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
+	Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord;
 	AsyncTrigger proxiesChangeTrigger;
 	Future<Void> monitorProxiesInfoChange;
 	Future<Void> monitorTssInfoChange;

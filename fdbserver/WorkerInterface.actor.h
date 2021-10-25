@@ -960,7 +960,7 @@ ACTOR Future<Void> extractClusterInterface(
     Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>> const> in,
     Reference<AsyncVar<Optional<struct ClusterInterface>>> out);
 
-ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf,
+ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> ccr,
                         LocalityData localities,
                         ProcessClass processClass,
                         std::string dataFolder,
@@ -974,7 +974,7 @@ ACTOR Future<Void> fdbd(Reference<ClusterConnectionFile> ccf,
                         std::map<std::string, std::string> manualKnobOverrides,
                         ConfigDBType configDBType);
 
-ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> ccf,
+ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
@@ -1002,8 +1002,8 @@ ACTOR Future<Void> storageServer(
     Reference<AsyncVar<ServerDBInfo> const> db,
     std::string folder,
     Promise<Void> recovered,
-    Reference<ClusterConnectionFile>
-        connFile); // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
+    Reference<IClusterConnectionRecord>
+        connRecord); // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,

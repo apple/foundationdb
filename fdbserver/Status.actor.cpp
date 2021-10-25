@@ -819,7 +819,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		}
 	}
 
-	for (auto& coordinator : coordinators.ccf->getConnectionString().coordinators()) {
+	for (auto& coordinator : coordinators.ccr->getConnectionString().coordinators()) {
 		roles.addCoordinatorRole(coordinator);
 	}
 
@@ -2436,7 +2436,7 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 		workerZones[worker.interf.address()] = worker.interf.locality.zoneId().orDefault(LiteralStringRef(""));
 	}
 	std::map<StringRef, int> coordinatorZoneCounts;
-	for (auto& coordinator : coordinators.ccf->getConnectionString().coordinators()) {
+	for (auto& coordinator : coordinators.ccr->getConnectionString().coordinators()) {
 		auto zone = workerZones[coordinator];
 		coordinatorZoneCounts[zone] += 1;
 	}
@@ -2820,7 +2820,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state JsonBuilderObject data_overlay;
 
 		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
-		statusObj["connection_string"] = coordinators.ccf->getConnectionString().toString();
+		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
 		statusObj["bounce_impact"] = getBounceImpactInfo(statusCode);
 
 		state Optional<DatabaseConfiguration> configuration;

@@ -37,6 +37,7 @@
 #include "fdbclient/Atomic.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/ClusterInterface.h"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
@@ -377,8 +378,9 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 
 		ev.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
 		    .detail("Cluster",
-		            cx->getConnectionFile() ? cx->getConnectionFile()->getConnectionString().clusterKeyName().toString()
-		                                    : "")
+		            cx->getConnectionRecord()
+		                ? cx->getConnectionRecord()->getConnectionString().clusterKeyName().toString()
+		                : "")
 		    .detail("Internal", cx->internal);
 
 		cx->cc.logToTraceEvent(ev);
@@ -1028,14 +1030,14 @@ void DatabaseContext::registerSpecialKeySpaceModule(SpecialKeySpace::MODULE modu
 	specialKeySpaceModules.push_back(std::move(impl));
 }
 
-ACTOR Future<RangeResult> getWorkerInterfaces(Reference<ClusterConnectionFile> clusterFile);
+ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
 ACTOR Future<Optional<Value>> getJSON(Database db);
 
 struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeReadImpl {
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
-		if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
+		if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
 			Key prefix = Key(getKeyRange().begin);
-			return map(getWorkerInterfaces(ryw->getDatabase()->getConnectionFile()),
+			return map(getWorkerInterfaces(ryw->getDatabase()->getConnectionRecord()),
 			           [prefix = prefix, kr = KeyRange(kr)](const RangeResult& in) {
 				           RangeResult result;
 				           for (const auto& [k_, v] : in) {
@@ -1167,7 +1169,7 @@ Future<RangeResult> HealthMetricsRangeImpl::getRange(ReadYourWritesTransaction* 
 	return healthMetricsGetRangeActor(ryw, kr);
 }
 
-DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
+DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
                                  Reference<AsyncVar<ClientDBInfo>> clientInfo,
                                  Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
                                  Future<Void> clientInfoMonitor,
@@ -1178,7 +1180,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
                                  IsInternal internal,
                                  int apiVersion,
                                  IsSwitchable switchable)
-  : lockAware(lockAware), switchable(switchable), connectionFile(connectionFile), proxyProvisional(false),
+  : lockAware(lockAware), switchable(switchable), connectionRecord(connectionRecord), proxyProvisional(false),
     clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), internal(internal),
     cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc),
     transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
@@ -1384,7 +1386,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		    std::make_unique<SingleSpecialKeyImpl>(LiteralStringRef("\xff\xff/status/json"),
 		                                           [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 			                                           if (ryw->getDatabase().getPtr() &&
-			                                               ryw->getDatabase()->getConnectionFile()) {
+			                                               ryw->getDatabase()->getConnectionRecord()) {
 				                                           ++ryw->getDatabase()->transactionStatusRequests;
 				                                           return getJSON(ryw->getDatabase());
 			                                           } else {
@@ -1398,8 +1400,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		        LiteralStringRef("\xff\xff/cluster_file_path"),
 		        [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 			        try {
-				        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
-					        Optional<Value> output = StringRef(ryw->getDatabase()->getConnectionFile()->getFilename());
+				        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
+					        Optional<Value> output =
+					            StringRef(ryw->getDatabase()->getConnectionRecord()->getLocation());
 					        return output;
 				        }
 			        } catch (Error& e) {
@@ -1415,8 +1418,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		        LiteralStringRef("\xff\xff/connection_string"),
 		        [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 			        try {
-				        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
-					        Reference<ClusterConnectionFile> f = ryw->getDatabase()->getConnectionFile();
+				        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
+					        Reference<IClusterConnectionRecord> f = ryw->getDatabase()->getConnectionRecord();
 					        Optional<Value> output = StringRef(f->getConnectionString().toString());
 					        return output;
 				        }
@@ -1476,7 +1479,7 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
                                  LockAware lockAware,
                                  int apiVersion,
                                  IsSwitchable switchable) {
-	return Database(new DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>>(),
+	return Database(new DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>>(),
 	                                    clientInfo,
 	                                    makeReference<AsyncVar<Optional<ClientLeaderRegInterface>>>(),
 	                                    clientInfoMonitor,
@@ -1700,11 +1703,12 @@ Future<Void> DatabaseContext::onConnected() {
 	return connected;
 }
 
-ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFile> connFile, DatabaseContext* self) {
+ACTOR static Future<Void> switchConnectionRecordImpl(Reference<IClusterConnectionRecord> connRecord,
+                                                     DatabaseContext* self) {
 	TEST(true); // Switch connection file
-	TraceEvent("SwitchConnectionFile")
-	    .detail("ConnectionFile", connFile->canGetFilename() ? connFile->getFilename() : "")
-	    .detail("ConnectionString", connFile->getConnectionString().toString());
+	TraceEvent("SwitchConnectionRecord")
+	    .detail("ClusterFile", connRecord->toString())
+	    .detail("ConnectionString", connRecord->getConnectionString().toString());
 
 	// Reset state from former cluster.
 	self->commitProxies.clear();
@@ -1717,38 +1721,38 @@ ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFi
 	clearedClientInfo.grvProxies.clear();
 	clearedClientInfo.id = deterministicRandom()->randomUniqueID();
 	self->clientInfo->set(clearedClientInfo);
-	self->connectionFile->set(connFile);
+	self->connectionRecord->set(connRecord);
 
 	state Database db(Reference<DatabaseContext>::addRef(self));
 	state Transaction tr(db);
 	loop {
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		try {
-			TraceEvent("SwitchConnectionFileAttemptingGRV").log();
+			TraceEvent("SwitchConnectionRecordAttemptingGRV").log();
 			Version v = wait(tr.getReadVersion());
-			TraceEvent("SwitchConnectionFileGotRV")
+			TraceEvent("SwitchConnectionRecordGotRV")
 			    .detail("ReadVersion", v)
 			    .detail("MinAcceptableReadVersion", self->minAcceptableReadVersion);
 			ASSERT(self->minAcceptableReadVersion != std::numeric_limits<Version>::max());
 			self->connectionFileChangedTrigger.trigger();
 			return Void();
 		} catch (Error& e) {
-			TraceEvent("SwitchConnectionFileError").detail("Error", e.what());
+			TraceEvent("SwitchConnectionRecordError").detail("Error", e.what());
 			wait(tr.onError(e));
 		}
 	}
 }
 
-Reference<ClusterConnectionFile> DatabaseContext::getConnectionFile() {
-	if (connectionFile) {
-		return connectionFile->get();
+Reference<IClusterConnectionRecord> DatabaseContext::getConnectionRecord() {
+	if (connectionRecord) {
+		return connectionRecord->get();
 	}
-	return Reference<ClusterConnectionFile>();
+	return Reference<IClusterConnectionRecord>();
 }
 
-Future<Void> DatabaseContext::switchConnectionFile(Reference<ClusterConnectionFile> standby) {
+Future<Void> DatabaseContext::switchConnectionRecord(Reference<IClusterConnectionRecord> standby) {
 	ASSERT(switchable);
-	return switchConnectionFileImpl(standby, this);
+	return switchConnectionRecordImpl(standby, this);
 }
 
 Future<Void> DatabaseContext::connectionFileChanged() {
@@ -1773,7 +1777,7 @@ extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& c
 // Creates a database object that represents a connection to a cluster
 // This constructor uses a preallocated DatabaseContext that may have been created
 // on another thread
-Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
+Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord,
                                   int apiVersion,
                                   IsInternal internal,
                                   LocalityData const& clientLocality,
@@ -1781,13 +1785,13 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 	if (!g_network)
 		throw network_not_setup();
 
-	if (connFile) {
+	if (connRecord) {
 		if (networkOptions.traceDirectory.present() && !traceFileIsOpen()) {
 			g_network->initMetrics();
 			FlowTransport::transport().initMetrics();
 			initTraceEventMetrics();
 
-			auto publicIP = determinePublicIPAutomatically(connFile->getConnectionString());
+			auto publicIP = determinePublicIPAutomatically(connRecord->getConnectionString());
 			selectTraceFormatter(networkOptions.traceFormat);
 			selectTraceClockSource(networkOptions.traceClockSource);
 			openTraceFile(NetworkAddress(publicIP, ::getpid()),
@@ -1803,8 +1807,8 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 			    .detail("SourceVersion", getSourceVersion())
 			    .detail("Version", FDB_VT_VERSION)
 			    .detail("PackageName", FDB_VT_PACKAGE_NAME)
-			    .detail("ClusterFile", connFile->getFilename().c_str())
-			    .detail("ConnectionString", connFile->getConnectionString().toString())
+			    .detail("ClusterFile", connRecord->toString())
+			    .detail("ConnectionString", connRecord->getConnectionString().toString())
 			    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 			    .detail("ApiVersion", apiVersion)
 			    .detailf("ImageOffset", "%p", platform::getImageOffset())
@@ -1821,9 +1825,9 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 
 	auto clientInfo = makeReference<AsyncVar<ClientDBInfo>>();
 	auto coordinator = makeReference<AsyncVar<Optional<ClientLeaderRegInterface>>>();
-	auto connectionFile = makeReference<AsyncVar<Reference<ClusterConnectionFile>>>();
-	connectionFile->set(connFile);
-	Future<Void> clientInfoMonitor = monitorProxies(connectionFile,
+	auto connectionRecord = makeReference<AsyncVar<Reference<IClusterConnectionRecord>>>();
+	connectionRecord->set(connRecord);
+	Future<Void> clientInfoMonitor = monitorProxies(connectionRecord,
 	                                                clientInfo,
 	                                                coordinator,
 	                                                networkOptions.supportedVersions,
@@ -1831,7 +1835,7 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 
 	DatabaseContext* db;
 	if (preallocatedDb) {
-		db = new (preallocatedDb) DatabaseContext(connectionFile,
+		db = new (preallocatedDb) DatabaseContext(connectionRecord,
 		                                          clientInfo,
 		                                          coordinator,
 		                                          clientInfoMonitor,
@@ -1843,7 +1847,7 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 		                                          apiVersion,
 		                                          IsSwitchable::True);
 	} else {
-		db = new DatabaseContext(connectionFile,
+		db = new DatabaseContext(connectionRecord,
 		                         clientInfo,
 		                         coordinator,
 		                         clientInfoMonitor,
@@ -1868,9 +1872,9 @@ Database Database::createDatabase(std::string connFileName,
                                   int apiVersion,
                                   IsInternal internal,
                                   LocalityData const& clientLocality) {
-	Reference<ClusterConnectionFile> rccf = Reference<ClusterConnectionFile>(
+	Reference<IClusterConnectionRecord> rccr = Reference<IClusterConnectionRecord>(
 	    new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFileName).first));
-	return Database::createDatabase(rccf, apiVersion, internal, clientLocality);
+	return Database::createDatabase(rccr, apiVersion, internal, clientLocality);
 }
 
 Reference<WatchMetadata> DatabaseContext::getWatchMetadata(KeyRef key) const {
@@ -2832,7 +2836,7 @@ ACTOR Future<Version> watchValue(Future<Version> version,
 				                          TaskPriority::DefaultPromiseEndpoint))) {
 					resp = r;
 				}
-				when(wait(cx->connectionFile ? cx->connectionFile->onChange() : Never())) { wait(Never()); }
+				when(wait(cx->connectionRecord ? cx->connectionRecord->onChange() : Never())) { wait(Never()); }
 			}
 			if (info.debugID.present()) {
 				g_traceBatch.addEvent("WatchValueDebug",
@@ -6538,7 +6542,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 		throw;
 	}
 	TraceEvent("ExclusionSafetyCheckCoordinators").log();
-	state ClientCoordinators coordinatorList(cx->getConnectionFile());
+	state ClientCoordinators coordinatorList(cx->getConnectionRecord());
 	state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 	leaderServers.reserve(coordinatorList.clientLeaderServers.size());
 	for (int i = 0; i < coordinatorList.clientLeaderServers.size(); i++) {
@@ -6617,9 +6621,9 @@ ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef add
 		duration = 0;
 	// fetch the addresses of all workers
 	state std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interface;
-	if (!cx->getConnectionFile())
+	if (!cx->getConnectionRecord())
 		return 0;
-	RangeResult kvs = wait(getWorkerInterfaces(cx->getConnectionFile()));
+	RangeResult kvs = wait(getWorkerInterfaces(cx->getConnectionRecord()));
 	ASSERT(!kvs.more);
 	// Note: reuse this knob from fdbcli, change it if necessary
 	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
@@ -6641,7 +6645,7 @@ Future<int64_t> DatabaseContext::rebootWorker(StringRef addr, bool check, int du
 }
 
 Future<Void> DatabaseContext::forceRecoveryWithDataLoss(StringRef dcId) {
-	return forceRecovery(getConnectionFile(), dcId);
+	return forceRecovery(getConnectionRecord(), dcId);
 }
 
 ACTOR static Future<Void> createSnapshotActor(DatabaseContext* cx, UID snapUID, StringRef snapCmd) {
@@ -6751,7 +6755,15 @@ ACTOR Future<Void> mergeChangeFeedStream(std::vector<std::pair<StorageServerInte
 			}
 			checkVersion = nextStream.next.version;
 		}
-		nextOut.push_back_deep(nextOut.arena(), nextStream.next);
+		if (nextOut.size() && nextStream.next.version == nextOut.back().version) {
+			if (nextStream.next.mutations.size() &&
+			    nextStream.next.mutations.front().param1 != lastEpochEndPrivateKey) {
+				nextOut.back().mutations.append_deep(
+				    nextOut.arena(), nextStream.next.mutations.begin(), nextStream.next.mutations.size());
+			}
+		} else {
+			nextOut.push_back_deep(nextOut.arena(), nextStream.next);
+		}
 		try {
 			Standalone<MutationsAndVersionRef> res = waitNext(nextStream.results.getFuture());
 			nextStream.next = res;

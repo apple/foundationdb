@@ -31,6 +31,12 @@ set(FDBCLIENT_SRCS
   ClientKnobs.h
   ClientLogEvents.h
   ClientWorkerInterface.h
+  ClusterConnectionFile.actor.cpp
+  ClusterConnectionFile.h
+  ClusterConnectionKey.actor.cpp
+  ClusterConnectionKey.actor.h
+  ClusterConnectionMemoryRecord.actor.cpp
+  ClusterConnectionMemoryRecord.h
   ClusterInterface.h
   CommitProxyInterface.h
   CommitTransaction.h
