@@ -36,6 +36,7 @@
 #include "fdbclient/AnnotateActor.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/ClusterInterface.h"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
@@ -376,8 +377,9 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 
 		ev.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
 		    .detail("Cluster",
-		            cx->getConnectionFile() ? cx->getConnectionFile()->getConnectionString().clusterKeyName().toString()
-		                                    : "")
+		            cx->getConnectionRecord()
+		                ? cx->getConnectionRecord()->getConnectionString().clusterKeyName().toString()
+		                : "")
 		    .detail("Internal", cx->internal);
 
 		cx->cc.logToTraceEvent(ev);
@@ -402,7 +404,8 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 		    .detail("MaxMutationsPerCommit", cx->mutationsPerCommit.max())
 		    .detail("MeanBytesPerCommit", cx->bytesPerCommit.mean())
 		    .detail("MedianBytesPerCommit", cx->bytesPerCommit.median())
-		    .detail("MaxBytesPerCommit", cx->bytesPerCommit.max());
+		    .detail("MaxBytesPerCommit", cx->bytesPerCommit.max())
+		    .detail("NumLocalityCacheEntries", cx->locationCache.size());
 
 		cx->latencies.clear();
 		cx->readLatencies.clear();
@@ -669,19 +672,82 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 	}
 }
 
-ACTOR static Future<Void> monitorProxiesChange(Reference<AsyncVar<ClientDBInfo> const> clientDBInfo,
+ACTOR Future<Void> assertFailure(GrvProxyInterface remote, Future<ErrorOr<GetReadVersionReply>> reply) {
+	try {
+		ErrorOr<GetReadVersionReply> res = wait(reply);
+		if (!res.isError()) {
+			TraceEvent(SevError, "GotStaleReadVersion")
+			    .detail("Remote", remote.getConsistentReadVersion.getEndpoint().addresses.address.toString())
+			    .detail("Provisional", remote.provisional)
+			    .detail("ReadVersion", res.get().version);
+			ASSERT_WE_THINK(false);
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		// we want this to fail -- so getting here is good, we'll just ignore the error.
+	}
+	return Void();
+}
+
+Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
+                                      std::vector<GrvProxyInterface> newProxies) {
+	Span span(deterministicRandom()->randomUniqueID(), "VerifyCausalReadRisky"_loc);
+	std::vector<Future<Void>> replies;
+	replies.reserve(oldProxies.size());
+	GetReadVersionRequest req(
+	    span.context, 1, TransactionPriority::IMMEDIATE, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY);
+	TraceEvent evt("AttemptGRVFromOldProxies");
+	evt.detail("NumOldProxies", oldProxies.size()).detail("NumNewProxies", newProxies.size());
+	auto traceProxies = [&](std::vector<GrvProxyInterface>& proxies, std::string const& key) {
+		for (int i = 0; i < proxies.size(); ++i) {
+			auto k = key + std::to_string(i);
+			evt.detail(k.c_str(), proxies[i].id());
+		}
+	};
+	traceProxies(oldProxies, "OldProxy"s);
+	traceProxies(newProxies, "NewProxy"s);
+	evt.log();
+	for (auto& i : oldProxies) {
+		req.reply = ReplyPromise<GetReadVersionReply>();
+		replies.push_back(assertFailure(i, i.getConsistentReadVersion.tryGetReply(req)));
+	}
+	return waitForAll(replies);
+}
+
+ACTOR static Future<Void> monitorProxiesChange(DatabaseContext* cx,
+                                               Reference<AsyncVar<ClientDBInfo> const> clientDBInfo,
                                                AsyncTrigger* triggerVar) {
 	state std::vector<CommitProxyInterface> curCommitProxies;
 	state std::vector<GrvProxyInterface> curGrvProxies;
+	state ActorCollection actors(false);
 	curCommitProxies = clientDBInfo->get().commitProxies;
 	curGrvProxies = clientDBInfo->get().grvProxies;
 
 	loop {
-		wait(clientDBInfo->onChange());
-		if (clientDBInfo->get().commitProxies != curCommitProxies || clientDBInfo->get().grvProxies != curGrvProxies) {
-			curCommitProxies = clientDBInfo->get().commitProxies;
-			curGrvProxies = clientDBInfo->get().grvProxies;
-			triggerVar->trigger();
+		choose {
+			when(wait(clientDBInfo->onChange())) {
+				if (clientDBInfo->get().commitProxies != curCommitProxies ||
+				    clientDBInfo->get().grvProxies != curGrvProxies) {
+					// This condition is a bit complicated. Here we want to verify that we're unable to receive a read
+					// version from a proxy of an old generation after a successful recovery. The conditions are:
+					// 1. We only do this with a configured probability.
+					// 2. If the old set of Grv proxies is empty, there's nothing to do
+					// 3. If the new set of Grv proxies is empty, it means the recovery is not complete. So if an old
+					//    Grv proxy still gives out read versions, this would be correct behavior.
+					// 4. If we see a provisional proxy, it means the recovery didn't complete yet, so the same as (3)
+					//    applies.
+					if (deterministicRandom()->random01() < cx->verifyCausalReadsProp && !curGrvProxies.empty() &&
+					    !clientDBInfo->get().grvProxies.empty() && !clientDBInfo->get().grvProxies[0].provisional) {
+						actors.add(attemptGRVFromOldProxies(curGrvProxies, clientDBInfo->get().grvProxies));
+					}
+					curCommitProxies = clientDBInfo->get().commitProxies;
+					curGrvProxies = clientDBInfo->get().grvProxies;
+					triggerVar->trigger();
+				}
+			}
+			when(wait(actors.getResult())) { UNSTOPPABLE_ASSERT(false); }
 		}
 	}
 }
@@ -963,14 +1029,14 @@ void DatabaseContext::registerSpecialKeySpaceModule(SpecialKeySpace::MODULE modu
 	specialKeySpaceModules.push_back(std::move(impl));
 }
 
-ACTOR Future<RangeResult> getWorkerInterfaces(Reference<ClusterConnectionFile> clusterFile);
+ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
 ACTOR Future<Optional<Value>> getJSON(Database db);
 
 struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeReadImpl {
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
-		if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
+		if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
 			Key prefix = Key(getKeyRange().begin);
-			return map(getWorkerInterfaces(ryw->getDatabase()->getConnectionFile()),
+			return map(getWorkerInterfaces(ryw->getDatabase()->getConnectionRecord()),
 			           [prefix = prefix, kr = KeyRange(kr)](const RangeResult& in) {
 				           RangeResult result;
 				           for (const auto& [k_, v] : in) {
@@ -1102,7 +1168,7 @@ Future<RangeResult> HealthMetricsRangeImpl::getRange(ReadYourWritesTransaction* 
 	return healthMetricsGetRangeActor(ryw, kr);
 }
 
-DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
+DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
                                  Reference<AsyncVar<ClientDBInfo>> clientInfo,
                                  Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
                                  Future<Void> clientInfoMonitor,
@@ -1113,7 +1179,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
                                  IsInternal internal,
                                  int apiVersion,
                                  IsSwitchable switchable)
-  : lockAware(lockAware), switchable(switchable), connectionFile(connectionFile), proxyProvisional(false),
+  : lockAware(lockAware), switchable(switchable), connectionRecord(connectionRecord), proxyProvisional(false),
     clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), internal(internal),
     cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc),
     transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
@@ -1167,7 +1233,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	getValueSubmitted.init(LiteralStringRef("NativeAPI.GetValueSubmitted"));
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
-	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
+	monitorProxiesInfoChange = monitorProxiesChange(this, clientInfo, &proxiesChangeTrigger);
 	tssMismatchHandler = handleTssMismatches(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
@@ -1319,7 +1385,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		    std::make_unique<SingleSpecialKeyImpl>(LiteralStringRef("\xff\xff/status/json"),
 		                                           [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 			                                           if (ryw->getDatabase().getPtr() &&
-			                                               ryw->getDatabase()->getConnectionFile()) {
+			                                               ryw->getDatabase()->getConnectionRecord()) {
 				                                           ++ryw->getDatabase()->transactionStatusRequests;
 				                                           return getJSON(ryw->getDatabase());
 			                                           } else {
@@ -1333,8 +1399,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		        LiteralStringRef("\xff\xff/cluster_file_path"),
 		        [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 			        try {
-				        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
-					        Optional<Value> output = StringRef(ryw->getDatabase()->getConnectionFile()->getFilename());
+				        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
+					        Optional<Value> output =
+					            StringRef(ryw->getDatabase()->getConnectionRecord()->getLocation());
 					        return output;
 				        }
 			        } catch (Error& e) {
@@ -1350,8 +1417,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		        LiteralStringRef("\xff\xff/connection_string"),
 		        [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 			        try {
-				        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
-					        Reference<ClusterConnectionFile> f = ryw->getDatabase()->getConnectionFile();
+				        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
+					        Reference<IClusterConnectionRecord> f = ryw->getDatabase()->getConnectionRecord();
 					        Optional<Value> output = StringRef(f->getConnectionString().toString());
 					        return output;
 				        }
@@ -1411,7 +1478,7 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
                                  LockAware lockAware,
                                  int apiVersion,
                                  IsSwitchable switchable) {
-	return Database(new DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>>(),
+	return Database(new DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>>(),
 	                                    clientInfo,
 	                                    makeReference<AsyncVar<Optional<ClientLeaderRegInterface>>>(),
 	                                    clientInfoMonitor,
@@ -1610,6 +1677,9 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 			validateOptionValueNotPresent(value);
 			useConfigDatabase = true;
 			break;
+		case FDBDatabaseOptions::TEST_CAUSAL_READ_RISKY:
+			verifyCausalReadsProp = double(extractIntOption(value, 0, 100)) / 100.0;
+			break;
 		default:
 			break;
 		}
@@ -1632,11 +1702,12 @@ Future<Void> DatabaseContext::onConnected() {
 	return connected;
 }
 
-ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFile> connFile, DatabaseContext* self) {
+ACTOR static Future<Void> switchConnectionRecordImpl(Reference<IClusterConnectionRecord> connRecord,
+                                                     DatabaseContext* self) {
 	TEST(true); // Switch connection file
-	TraceEvent("SwitchConnectionFile")
-	    .detail("ConnectionFile", connFile->canGetFilename() ? connFile->getFilename() : "")
-	    .detail("ConnectionString", connFile->getConnectionString().toString());
+	TraceEvent("SwitchConnectionRecord")
+	    .detail("ClusterFile", connRecord->toString())
+	    .detail("ConnectionString", connRecord->getConnectionString().toString());
 
 	// Reset state from former cluster.
 	self->commitProxies.clear();
@@ -1649,38 +1720,38 @@ ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFi
 	clearedClientInfo.grvProxies.clear();
 	clearedClientInfo.id = deterministicRandom()->randomUniqueID();
 	self->clientInfo->set(clearedClientInfo);
-	self->connectionFile->set(connFile);
+	self->connectionRecord->set(connRecord);
 
 	state Database db(Reference<DatabaseContext>::addRef(self));
 	state Transaction tr(db);
 	loop {
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		try {
-			TraceEvent("SwitchConnectionFileAttemptingGRV").log();
+			TraceEvent("SwitchConnectionRecordAttemptingGRV").log();
 			Version v = wait(tr.getReadVersion());
-			TraceEvent("SwitchConnectionFileGotRV")
+			TraceEvent("SwitchConnectionRecordGotRV")
 			    .detail("ReadVersion", v)
 			    .detail("MinAcceptableReadVersion", self->minAcceptableReadVersion);
 			ASSERT(self->minAcceptableReadVersion != std::numeric_limits<Version>::max());
 			self->connectionFileChangedTrigger.trigger();
 			return Void();
 		} catch (Error& e) {
-			TraceEvent("SwitchConnectionFileError").detail("Error", e.what());
+			TraceEvent("SwitchConnectionRecordError").detail("Error", e.what());
 			wait(tr.onError(e));
 		}
 	}
 }
 
-Reference<ClusterConnectionFile> DatabaseContext::getConnectionFile() {
-	if (connectionFile) {
-		return connectionFile->get();
+Reference<IClusterConnectionRecord> DatabaseContext::getConnectionRecord() {
+	if (connectionRecord) {
+		return connectionRecord->get();
 	}
-	return Reference<ClusterConnectionFile>();
+	return Reference<IClusterConnectionRecord>();
 }
 
-Future<Void> DatabaseContext::switchConnectionFile(Reference<ClusterConnectionFile> standby) {
+Future<Void> DatabaseContext::switchConnectionRecord(Reference<IClusterConnectionRecord> standby) {
 	ASSERT(switchable);
-	return switchConnectionFileImpl(standby, this);
+	return switchConnectionRecordImpl(standby, this);
 }
 
 Future<Void> DatabaseContext::connectionFileChanged() {
@@ -1705,7 +1776,7 @@ extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& c
 // Creates a database object that represents a connection to a cluster
 // This constructor uses a preallocated DatabaseContext that may have been created
 // on another thread
-Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
+Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord,
                                   int apiVersion,
                                   IsInternal internal,
                                   LocalityData const& clientLocality,
@@ -1713,13 +1784,13 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 	if (!g_network)
 		throw network_not_setup();
 
-	if (connFile) {
+	if (connRecord) {
 		if (networkOptions.traceDirectory.present() && !traceFileIsOpen()) {
 			g_network->initMetrics();
 			FlowTransport::transport().initMetrics();
 			initTraceEventMetrics();
 
-			auto publicIP = determinePublicIPAutomatically(connFile->getConnectionString());
+			auto publicIP = determinePublicIPAutomatically(connRecord->getConnectionString());
 			selectTraceFormatter(networkOptions.traceFormat);
 			selectTraceClockSource(networkOptions.traceClockSource);
 			openTraceFile(NetworkAddress(publicIP, ::getpid()),
@@ -1735,8 +1806,8 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 			    .detail("SourceVersion", getSourceVersion())
 			    .detail("Version", FDB_VT_VERSION)
 			    .detail("PackageName", FDB_VT_PACKAGE_NAME)
-			    .detail("ClusterFile", connFile->getFilename().c_str())
-			    .detail("ConnectionString", connFile->getConnectionString().toString())
+			    .detail("ClusterFile", connRecord->toString())
+			    .detail("ConnectionString", connRecord->getConnectionString().toString())
 			    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 			    .detail("ApiVersion", apiVersion)
 			    .detailf("ImageOffset", "%p", platform::getImageOffset())
@@ -1753,9 +1824,9 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 
 	auto clientInfo = makeReference<AsyncVar<ClientDBInfo>>();
 	auto coordinator = makeReference<AsyncVar<Optional<ClientLeaderRegInterface>>>();
-	auto connectionFile = makeReference<AsyncVar<Reference<ClusterConnectionFile>>>();
-	connectionFile->set(connFile);
-	Future<Void> clientInfoMonitor = monitorProxies(connectionFile,
+	auto connectionRecord = makeReference<AsyncVar<Reference<IClusterConnectionRecord>>>();
+	connectionRecord->set(connRecord);
+	Future<Void> clientInfoMonitor = monitorProxies(connectionRecord,
 	                                                clientInfo,
 	                                                coordinator,
 	                                                networkOptions.supportedVersions,
@@ -1763,7 +1834,7 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 
 	DatabaseContext* db;
 	if (preallocatedDb) {
-		db = new (preallocatedDb) DatabaseContext(connectionFile,
+		db = new (preallocatedDb) DatabaseContext(connectionRecord,
 		                                          clientInfo,
 		                                          coordinator,
 		                                          clientInfoMonitor,
@@ -1775,7 +1846,7 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 		                                          apiVersion,
 		                                          IsSwitchable::True);
 	} else {
-		db = new DatabaseContext(connectionFile,
+		db = new DatabaseContext(connectionRecord,
 		                         clientInfo,
 		                         coordinator,
 		                         clientInfoMonitor,
@@ -1800,9 +1871,9 @@ Database Database::createDatabase(std::string connFileName,
                                   int apiVersion,
                                   IsInternal internal,
                                   LocalityData const& clientLocality) {
-	Reference<ClusterConnectionFile> rccf = Reference<ClusterConnectionFile>(
+	Reference<IClusterConnectionRecord> rccr = Reference<IClusterConnectionRecord>(
 	    new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFileName).first));
-	return Database::createDatabase(rccf, apiVersion, internal, clientLocality);
+	return Database::createDatabase(rccr, apiVersion, internal, clientLocality);
 }
 
 Reference<WatchMetadata> DatabaseContext::getWatchMetadata(KeyRef key) const {
@@ -2097,6 +2168,7 @@ void stopNetwork() {
 	if (!g_network)
 		throw network_not_setup();
 
+	TraceEvent("ClientStopNetwork");
 	g_network->stop();
 	closeTraceFile();
 }
@@ -2763,7 +2835,7 @@ ACTOR Future<Version> watchValue(Future<Version> version,
 				                          TaskPriority::DefaultPromiseEndpoint))) {
 					resp = r;
 				}
-				when(wait(cx->connectionFile ? cx->connectionFile->onChange() : Never())) { wait(Never()); }
+				when(wait(cx->connectionRecord ? cx->connectionRecord->onChange() : Never())) { wait(Never()); }
 			}
 			if (info.debugID.present()) {
 				g_traceBatch.addEvent("WatchValueDebug",
@@ -4133,11 +4205,14 @@ void debugAddTags(Transaction* tr) {
 }
 
 SpanID generateSpanID(int transactionTracingEnabled) {
-	uint64_t tid = deterministicRandom()->randomUInt64();
+	uint64_t txnId = deterministicRandom()->randomUInt64();
 	if (transactionTracingEnabled > 0) {
-		return SpanID(tid, deterministicRandom()->randomUInt64());
+		uint64_t tokenId = deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE
+		                       ? deterministicRandom()->randomUInt64()
+		                       : 0;
+		return SpanID(txnId, tokenId);
 	} else {
-		return SpanID(tid, 0);
+		return SpanID(txnId, 0);
 	}
 }
 
@@ -5795,7 +5870,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		}
 
 		Location location = "NAPI:getReadVersion"_loc;
-		UID spanContext = deterministicRandom()->randomUniqueID();
+		UID spanContext = generateSpanID(cx->transactionTracingEnabled);
 		auto const req = DatabaseContext::VersionRequest(spanContext, options.tags, info.debugID);
 		batcher.stream.send(req);
 		startTime = now();
@@ -6158,7 +6233,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Databa
                                                                           StorageMetrics permittedError,
                                                                           int shardLimit,
                                                                           int expectedShardCount) {
-	state Span span("NAPI:WaitStorageMetrics"_loc);
+	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingEnabled));
 	loop {
 		std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
 		    wait(getKeyRangeLocations(cx,
@@ -6466,7 +6541,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 		throw;
 	}
 	TraceEvent("ExclusionSafetyCheckCoordinators").log();
-	state ClientCoordinators coordinatorList(cx->getConnectionFile());
+	state ClientCoordinators coordinatorList(cx->getConnectionRecord());
 	state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 	leaderServers.reserve(coordinatorList.clientLeaderServers.size());
 	for (int i = 0; i < coordinatorList.clientLeaderServers.size(); i++) {
@@ -6545,9 +6620,9 @@ ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef add
 		duration = 0;
 	// fetch the addresses of all workers
 	state std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interface;
-	if (!cx->getConnectionFile())
+	if (!cx->getConnectionRecord())
 		return 0;
-	RangeResult kvs = wait(getWorkerInterfaces(cx->getConnectionFile()));
+	RangeResult kvs = wait(getWorkerInterfaces(cx->getConnectionRecord()));
 	ASSERT(!kvs.more);
 	// Note: reuse this knob from fdbcli, change it if necessary
 	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
@@ -6569,7 +6644,7 @@ Future<int64_t> DatabaseContext::rebootWorker(StringRef addr, bool check, int du
 }
 
 Future<Void> DatabaseContext::forceRecoveryWithDataLoss(StringRef dcId) {
-	return forceRecovery(getConnectionFile(), dcId);
+	return forceRecovery(getConnectionRecord(), dcId);
 }
 
 ACTOR static Future<Void> createSnapshotActor(DatabaseContext* cx, UID snapUID, StringRef snapCmd) {

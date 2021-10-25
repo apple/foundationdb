@@ -377,6 +377,7 @@ public:
 	double SIM_SHUTDOWN_TIMEOUT;
 	double SHUTDOWN_TIMEOUT;
 	double MASTER_SPIN_DELAY;
+	double CC_PRUNE_CLIENTS_INTERVAL;
 	double CC_CHANGE_DELAY;
 	double CC_CLASS_DELAY;
 	double WAIT_FOR_GOOD_RECRUITMENT_DELAY;
@@ -470,6 +471,8 @@ public:
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER_BATCH;
 	int64_t SPRING_BYTES_STORAGE_SERVER_BATCH;
 	int64_t STORAGE_HARD_LIMIT_BYTES;
+	int64_t STORAGE_HARD_LIMIT_BYTES_OVERAGE;
+	int64_t STORAGE_HARD_LIMIT_VERSION_OVERAGE;
 	int64_t STORAGE_DURABILITY_LAG_HARD_MAX;
 	int64_t STORAGE_DURABILITY_LAG_SOFT_MAX;
 
@@ -688,6 +691,8 @@ public:
 	bool FASTRESTORE_EXPENSIVE_VALIDATION; // when set true, performance will be heavily affected
 	double FASTRESTORE_WRITE_BW_MB; // target aggregated write bandwidth from all appliers
 	double FASTRESTORE_RATE_UPDATE_SECONDS; // how long to update appliers target write rate
+	bool FASTRESTORE_DUMP_INSERT_RANGE_VERSION; // Dump all the range version after insertion. This is for debugging
+	                                            // purpose.
 
 	int REDWOOD_DEFAULT_PAGE_SIZE; // Page size for new Redwood files
 	int REDWOOD_DEFAULT_EXTENT_SIZE; // Extent size for new Redwood files

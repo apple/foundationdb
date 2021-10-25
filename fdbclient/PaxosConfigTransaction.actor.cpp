@@ -58,6 +58,11 @@ class CommitQuorum {
 			wait(retryBrokenPromise(cti.commit, self->getCommitRequest(generation)));
 			++self->successful;
 		} catch (Error& e) {
+			// self might be destroyed if this actor is canceled
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+
 			if (e.code() == error_code_not_committed) {
 				++self->failed;
 			} else {
@@ -312,7 +317,7 @@ public:
 	Future<Void> commit() { return commit(this); }
 
 	PaxosConfigTransactionImpl(Database const& cx) : cx(cx) {
-		auto coordinators = cx->getConnectionFile()->getConnectionString().coordinators();
+		auto coordinators = cx->getConnectionRecord()->getConnectionString().coordinators();
 		ctis.reserve(coordinators.size());
 		for (const auto& coordinator : coordinators) {
 			ctis.emplace_back(coordinator);

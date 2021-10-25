@@ -649,7 +649,8 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Maste
 	loop choose {
 		when(GetReadVersionRequest req =
 		         waitNext(parent->provisionalGrvProxies[0].getConsistentReadVersion.getFuture())) {
-			if (req.flags & GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY && parent->lastEpochEnd) {
+			if ((req.flags & GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY) &&
+			    (req.flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES) && parent->lastEpochEnd) {
 				GetReadVersionReply rep;
 				rep.version = parent->lastEpochEnd;
 				rep.locked = locked;
@@ -1866,7 +1867,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	tr.set(
 	    recoveryCommitRequest.arena, primaryLocalityKey, BinaryWriter::toValue(self->primaryLocality, Unversioned()));
 	tr.set(recoveryCommitRequest.arena, backupVersionKey, backupVersionValue);
-	tr.set(recoveryCommitRequest.arena, coordinatorsKey, self->coordinators.ccf->getConnectionString().toString());
+	tr.set(recoveryCommitRequest.arena, coordinatorsKey, self->coordinators.ccr->getConnectionString().toString());
 	tr.set(recoveryCommitRequest.arena, logsKey, self->logSystem->getLogsValue());
 	tr.set(recoveryCommitRequest.arena,
 	       primaryDatacenterKey,

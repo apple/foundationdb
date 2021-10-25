@@ -269,17 +269,16 @@ public:
 	// The snapshot shall be usable until setOldVersion() is called with a version > v.
 	virtual Reference<IPagerSnapshot> getReadSnapshot(Version v) = 0;
 
-	// Atomically make durable all pending page writes, page frees, and update the metadata string.
-	virtual Future<Void> commit() = 0;
+	// Atomically make durable all pending page writes, page frees, and update the metadata string,
+	// setting the committed version to v
+	// v must be >= the highest versioned page write.
+	virtual Future<Void> commit(Version v) = 0;
 
 	// Get the latest meta key set or committed
 	virtual Key getMetaKey() const = 0;
 
 	// Set the metakey which will be stored in the next commit
 	virtual void setMetaKey(KeyRef metaKey) = 0;
-
-	// Sets the next commit version
-	virtual void setCommitVersion(Version v) = 0;
 
 	virtual StorageBytes getStorageBytes() const = 0;
 
@@ -294,16 +293,16 @@ public:
 	virtual Future<Void> init() = 0;
 
 	// Returns latest committed version
-	virtual Version getLatestVersion() const = 0;
+	virtual Version getLastCommittedVersion() const = 0;
 
 	// Returns the oldest readable version as of the most recent committed version
-	virtual Version getOldestVersion() const = 0;
+	virtual Version getOldestReadableVersion() const = 0;
 
 	// Sets the oldest readable version to be put into affect at the next commit.
 	// The pager can reuse pages that were freed at a version less than v.
 	// If any snapshots are in use at a version less than v, the pager can either forcefully
 	// invalidate them or keep their versions around until the snapshots are no longer in use.
-	virtual void setOldestVersion(Version v) = 0;
+	virtual void setOldestReadableVersion(Version v) = 0;
 
 protected:
 	~IPager2() {} // Destruction should be done using close()/dispose() from the IClosable interface
