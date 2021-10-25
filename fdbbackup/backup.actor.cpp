@@ -4949,7 +4949,7 @@ int main(int argc, char* argv[]) {
 				if (canInitSourceCluster && !prefix.present()) {
 					fprintf(stderr, "ERROR: --prefix is required\n");
 					return FDB_EXIT_ERROR;
-				} else if (!canInitCluster && !destinationPrefix.present()) {
+				} else if (canInitCluster && !destinationPrefix.present()) {
 					fprintf(stderr, "ERROR: --destination_prefix is required\n");
 					return FDB_EXIT_ERROR;
 				}
