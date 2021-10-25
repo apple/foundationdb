@@ -288,7 +288,7 @@ public:
 	int extraMachineCountDC = 0;
 	Optional<bool> generateFearless, buggify;
 	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
-	    stderrSeverity, machineCount, processesPerMachine, coordinators;
+	    stderrSeverity, machineCount, processesPerMachine, coordinators, desiredVersionIndexers;
 	Optional<std::string> config;
 
 	ConfigDBType getConfigDBType() const { return configDBType; }
@@ -329,6 +329,7 @@ public:
 		    .add("generateFearless", &generateFearless)
 		    .add("datacenters", &datacenters)
 		    .add("desiredTLogCount", &desiredTLogCount)
+		    .add("desiredVersionIndexers", &desiredVersionIndexers)
 		    .add("commitProxyCount", &commitProxyCount)
 		    .add("grvProxyCount", &grvProxyCount)
 		    .add("resolverCount", &resolverCount)
@@ -1239,6 +1240,9 @@ void SimulationConfig::setRandomConfig() {
 	if (deterministicRandom()->random01() < 0.25) {
 		db.resolverCount = deterministicRandom()->randomInt(1, 7);
 	}
+	if (deterministicRandom()->random01() < 0.25) {
+		db.versionIndexerCount = deterministicRandom()->randomInt(1, 7);
+	}
 	// TraceEvent("SimulatedConfigRandom")
 	// 	.detail("DesiredTLogCount", db.desiredTLogCount)
 	// 	.detail("CommitProxyCount", db.commitProxyCount)
@@ -1279,6 +1283,9 @@ void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
 	}
 	if (testConfig.resolverCount.present()) {
 		db.resolverCount = testConfig.resolverCount.get();
+	}
+	if (testConfig.desiredVersionIndexers.present()) {
+		db.versionIndexerCount = testConfig.desiredVersionIndexers.get();
 	}
 }
 

@@ -714,6 +714,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "repopulate_anti_quorum":1,
          "storage_replicas":1,
          "resolvers":1,
+         "version_indexers":1,
          "storage_replication_policy":"(zoneid^3x1)",
          "logs":2,
          "log_version":2,

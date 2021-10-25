@@ -5059,7 +5059,7 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 	state Reference<MultiInterface<ReferencedInterface<VersionIndexerInterface>>> multi;
 	state VersionIndexerPeekReply reply;
 	state int i = 0;
-	state Version prevVersion;
+	state Version prevVersion, toSet = invalidVersion;
 	state double beginTime;
 	for (auto& vInterface : self->db->get().versionIndexers) {
 		interfaces.emplace_back(new ReferencedInterface<VersionIndexerInterface>(vInterface));
@@ -5079,7 +5079,6 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 		reply = _reply;
 		prevVersion = reply.previousVersion;
 		wait(self->version.whenAtLeast(prevVersion));
-		Version toSet = invalidVersion;
 		for (i = 0; i < reply.versions.size(); ++i) {
 			if (self->version.get() == prevVersion && !reply.versions[i].second) {
 				toSet = reply.versions[i].first;
@@ -5087,10 +5086,10 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 				prevVersion = reply.versions[i].first;
 			} else if (self->version.get() < reply.versions[i].first) {
 				if (toSet != invalidVersion) {
-					self->version.set(reply.versions[i].first);
+					self->version.set(toSet);
 					// TODO: This is necessery because of an assertion, we should check whether we could
 					// just remove that assertion
-					self->mutableData().createNewVersion(reply.versions[i].first);
+					self->mutableData().createNewVersion(toSet);
 					toSet = invalidVersion;
 				}
 				wait(self->version.whenAtLeast(reply.versions[i].first));
@@ -5098,10 +5097,10 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 			}
 		}
 		if (toSet != invalidVersion) {
-			self->version.set(reply.versions[i].first);
+			self->version.set(toSet);
 			// TODO: This is necessery because of an assertion, we should check whether we could
 			// just remove that assertion
-			self->mutableData().createNewVersion(reply.versions[i].first);
+			self->mutableData().createNewVersion(toSet);
 			toSet = invalidVersion;
 		}
 	}
