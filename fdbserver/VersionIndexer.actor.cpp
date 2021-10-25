@@ -98,16 +98,6 @@ ACTOR Future<Void> versionPeek(VersionIndexerState* self, VersionIndexerPeekRequ
 	for (; iter != self->versionWindow.end(); ++iter) {
 		auto i = std::lower_bound(iter->tags.begin(), iter->tags.end(), req.tag);
 		bool hasMutations = i != iter->tags.end() && *i == req.tag;
-		TraceEvent evt("VersionIndexerPeekReplyVersion", self->id);
-		evt.detail("Version", iter->version).detail("ForTag", req.tag).detail("TagNotFound", i == iter->tags.end());
-		if (i != iter->tags.end()) {
-			evt.detail("FoundTag", *i);
-		}
-		for (int i = 0; i < iter->tags.size(); ++i) {
-			auto locality = format("Locality%d", i);
-			auto id = format("ID%d", i);
-			evt.detail(locality.c_str(), iter->tags[i].locality).detail(id.c_str(), iter->tags[i].id);
-		}
 		reply.versions.emplace_back(iter->version, hasMutations);
 	}
 	req.reply.send(std::move(reply));
@@ -145,13 +135,6 @@ ACTOR Future<Void> addVersion(VersionIndexerState* self, VersionIndexerCommitReq
 		entry.version = req.version;
 		entry.tags = std::move(req.tags);
 		std::sort(entry.tags.begin(), entry.tags.end());
-		TraceEvent evt("VersionIndexerAddingVersion");
-		evt.detail("Version", entry.version);
-		for (int i = 0; i < entry.tags.size(); ++i) {
-			auto locality = format("Locality%d", i);
-			auto id = format("ID%d", i);
-			evt.detail(locality.c_str(), entry.tags[i].locality).detail(id.c_str(), entry.tags[i].id);
-		}
 		self->versionWindow.emplace_back(std::move(entry));
 		self->version.set(req.version);
 		self->stats.windowEnd = req.version;

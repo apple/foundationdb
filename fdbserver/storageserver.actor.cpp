@@ -5079,22 +5079,30 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 		reply = _reply;
 		prevVersion = reply.previousVersion;
 		wait(self->version.whenAtLeast(prevVersion));
+		Version toSet = invalidVersion;
 		for (i = 0; i < reply.versions.size(); ++i) {
 			if (self->version.get() == prevVersion && !reply.versions[i].second) {
-				TraceEvent("SetVersionThroughIndexer", self->thisServerID)
-				    .detail("TagLocality", self->tag.locality)
-				    .detail("TagID", self->tag.id)
-				    .detail("Version", reply.versions[i].first);
-				self->version.set(reply.versions[i].first);
-				// TODO: This is necessery because of an assertion, we should check whether we could
-				// just remove that assertion
-				self->mutableData().createNewVersion(reply.versions[i].first);
+				toSet = reply.versions[i].first;
 				++self->counters.versionIndexerIncrements;
 				prevVersion = reply.versions[i].first;
 			} else if (self->version.get() < reply.versions[i].first) {
+				if (toSet != invalidVersion) {
+					self->version.set(reply.versions[i].first);
+					// TODO: This is necessery because of an assertion, we should check whether we could
+					// just remove that assertion
+					self->mutableData().createNewVersion(reply.versions[i].first);
+					toSet = invalidVersion;
+				}
 				wait(self->version.whenAtLeast(reply.versions[i].first));
 				prevVersion = reply.versions[i].first;
 			}
+		}
+		if (toSet != invalidVersion) {
+			self->version.set(reply.versions[i].first);
+			// TODO: This is necessery because of an assertion, we should check whether we could
+			// just remove that assertion
+			self->mutableData().createNewVersion(reply.versions[i].first);
+			toSet = invalidVersion;
 		}
 	}
 }
