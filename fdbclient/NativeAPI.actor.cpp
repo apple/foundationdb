@@ -66,6 +66,7 @@
 #include "flow/DeterministicRandom.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
+#include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Knobs.h"
@@ -5726,8 +5727,9 @@ ACTOR Future<Version> extractReadVersion(Location location,
 	cx->updateCachedRV(startTime, rep.version);
 	// use startTime instead?
 	// maybe this also requires tracking number of loops processed in queue?
-	// TraceEvent("DebugTimeThrottled").detail("TimeThrottled", rep.timeThrottled);
-	if (rep.timeThrottled > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD) {
+	TraceEvent(SevDebug, "DebugGrvTimeThrottled").detail("TimeThrottled", rep.timeThrottled);
+	if (rep.timeThrottled > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD &&
+	    priority != TransactionPriority::IMMEDIATE) {
 		cx->lastTimedRkThrottle = now();
 	}
 	cx->GRVLatencies.addSample(latency);
@@ -5798,6 +5800,9 @@ bool rkThrottlingCooledDown(DatabaseContext* cx) {
 	if (cx->lastTimedRkThrottle == 0.0) {
 		return true;
 	}
+	TraceEvent(SevDebug, "DebugGrvRkCd")
+	    .detail("TimeElapsed", now() - cx->lastTimedRkThrottle)
+	    .detail("CooldownTime", CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
 	return (now() - cx->lastTimedRkThrottle > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
 }
 
@@ -5805,6 +5810,9 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	if (!readVersion.isValid()) {
 		if (!options.skipGrvCache && rkThrottlingCooledDown(getDatabase().getPtr()) &&
 		    (CLIENT_KNOBS->DEBUG_USE_GRV_CACHE || options.useGrvCache)) {
+			TraceEvent(SevDebug, "DebugGrvUseCache")
+			    .detail("LastRV", cx->cachedRv)
+			    .detail("LastTime", cx->lastTimedGrv.get());
 			// Upon our first request to use cached RVs, start the background updater
 			if (!cx->grvUpdateHandler.isValid()) {
 				cx->grvUpdateHandler = backgroundGrvUpdater(getDatabase().getPtr());

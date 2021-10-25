@@ -116,7 +116,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( MAX_VERSION_CACHE_LAG,                    0.1 );
 	init( DEBUG_USE_GRV_CACHE,                    false );
 	init( GRV_CACHE_RK_COOLDOWN,                    5.0 );
-	init( GRV_SUSTAINED_THROTTLING_THRESHOLD,       1.0 );
+	init( GRV_SUSTAINED_THROTTLING_THRESHOLD,      0.01 );
 
 	// TaskBucket
 	init( TASKBUCKET_LOGGING_DELAY,                5.0 );
