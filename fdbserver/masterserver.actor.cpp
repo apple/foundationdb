@@ -455,10 +455,6 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 			// XXX: each storage server belongs to a unique team
 			isr.storageTeamId = teamId = deterministicRandom()->randomUniqueID();
-			if (idx == recruits.storageServers.size() - 1) {
-				// The last team should be txsTeam, responsible for \xff keyspace
-				isr.storageTeamId = teamId = ptxn::txsTeam;
-			}
 		}
 
 		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));

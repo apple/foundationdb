@@ -108,7 +108,7 @@ const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
 bool serverHasKey(ValueRef storedValue);
 
-// Creates a map from teamId to list of storage servers in that team.
+// A map from teamId to a list of storage servers in that team.
 extern const KeyRef storageTeamIdKeyPrefix;
 extern const KeyRangeRef storageTeamIdKeyRange;
 const Key storageTeamIdKey(ptxn::StorageTeamID teamId);
@@ -122,8 +122,9 @@ extern const KeyRangeRef storageTeamIdToTLogGroupRange;
 const ptxn::StorageTeamID decodeStorageTeamIdToTLogGroupKey(const KeyRef& k);
 const Key storageTeamIdToTLogGroupKey(ptxn::StorageTeamID teamId);
 
-// Create a map from storage server ID to list of teams associated with that
-// team.
+// A map from a storage server ID to a list of teams associated with that SS.
+// The first team in the list is that storage server's own team, i.e., no
+// other storage servers are in that team.
 extern const KeyRef storageServerToTeamIdKeyPrefix;
 const Key storageServerToTeamIdKey(UID serverId);
 UID decodeStorageServerToTeamIdKey(Key k);

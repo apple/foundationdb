@@ -189,6 +189,7 @@ struct ProxyCommitData {
 	Reference<TLogGroupCollection> tLogGroupCollection;
 
 	std::map<Tag, UID> tagToServer;
+	// Each storage server's own team.
 	std::unordered_map<UID, ptxn::StorageTeamID> ssToStorageTeam;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
