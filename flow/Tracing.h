@@ -44,12 +44,13 @@ struct Span {
 			this->context = SpanID((*parents.begin()).first(), traceId);
 		}
 	}
-	Span(Location location, std::initializer_list<SpanID> const& parents = {}) {
-		uint64_t tokenId = deterministicRandom()->random01() < FLOW_KNOBS->TRACING_SAMPLE_RATE
-		                       ? deterministicRandom()->randomUInt64()
-		                       : 0;
-		Span(UID(deterministicRandom()->randomUInt64(), tokenId), location, parents);
-	}
+	Span(Location location, std::initializer_list<SpanID> const& parents = {})
+	  : Span(UID(deterministicRandom()->randomUInt64(),
+	             deterministicRandom()->random01() < FLOW_KNOBS->TRACING_SAMPLE_RATE
+	                 ? deterministicRandom()->randomUInt64()
+	                 : 0),
+	         location,
+	         parents) {}
 	Span(Location location, SpanID context) : Span(location, { context }) {}
 	Span(const Span&) = delete;
 	Span(Span&& o) {
@@ -78,13 +79,12 @@ struct Span {
 
 	void addParent(SpanID span) {
 		if (parents.size() == 0) {
-			uint64_t traceId = (*parents.begin()).second() > 0 ? context.second() : 0;
 			// Use first parent to set trace ID. This is non-ideal for spans
 			// with multiple parents, because the trace ID will associate the
 			// span with only one trace. A workaround is to look at the parent
 			// relationships instead of the trace ID. Another option in the
 			// future is to keep a list of trace IDs.
-			context = SpanID(span.first(), traceId);
+			context = SpanID(span.first(), context.second());
 		}
 		parents.push_back(arena, span);
 	}
