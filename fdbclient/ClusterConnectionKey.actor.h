@@ -88,7 +88,6 @@ private:
 	// The database where the connection key is stored. Note that this does not need to be the same database as the one
 	// that the connection string would connect to.
 	Database db;
-	ClusterConnectionString cs;
 	Key connectionStringKey;
 	Optional<Value> lastPersistedConnectionString;
 };

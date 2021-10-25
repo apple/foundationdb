@@ -28,10 +28,11 @@ ClusterConnectionKey::ClusterConnectionKey(Database db,
                                            Key connectionStringKey,
                                            ClusterConnectionString const& contents,
                                            ConnectionStringNeedsPersisted needsToBePersisted)
-  : IClusterConnectionRecord(needsToBePersisted), db(db), cs(contents), connectionStringKey(connectionStringKey) {
+  : IClusterConnectionRecord(needsToBePersisted), db(db), connectionStringKey(connectionStringKey) {
 	if (!needsToBePersisted) {
 		lastPersistedConnectionString = ValueRef(contents.toString());
 	}
+	cs = contents;
 }
 
 // Loads and parses the connection string at the specified key, throwing errors if the file cannot be read or the
