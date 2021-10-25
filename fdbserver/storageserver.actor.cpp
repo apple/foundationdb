@@ -1832,8 +1832,7 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
 	}
 }
 
-ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamRequest req)
-{
+ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamRequest req) {
 	state Span span("SS:getChangeFeedStream"_loc, { req.spanContext });
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 
