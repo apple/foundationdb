@@ -60,6 +60,7 @@ struct NetworkOptions {
 	uint64_t traceMaxLogsSize;
 	std::string traceLogGroup;
 	std::string traceFormat;
+	std::string tracePartialFileSuffix;
 	Optional<bool> logClientInfo;
 	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
 	bool slowTaskProfilingEnabled;

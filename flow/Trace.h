@@ -550,7 +550,8 @@ void openTraceFile(const NetworkAddress& na,
                    uint64_t maxLogsSize,
                    std::string directory = ".",
                    std::string baseOfBase = "trace",
-                   std::string logGroup = "default");
+                   std::string logGroup = "default",
+                   std::string tracePartialFileSuffix = "");
 void initTraceEventMetrics();
 void closeTraceFile();
 bool traceFileIsOpen();
