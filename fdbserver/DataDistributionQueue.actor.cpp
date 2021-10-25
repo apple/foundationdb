@@ -1135,6 +1135,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			                                         self->teamCollections.size() > 1,
 			                                         relocateShardInterval.pairID,
 			                                         ddEnabledState);
+			// TODO(jingyu): remove after we can correctly manage new teams
+			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) doMoveKeys = Never();
+
 			state Future<Void> pollHealth =
 			    signalledTransferComplete ? Never()
 			                              : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
