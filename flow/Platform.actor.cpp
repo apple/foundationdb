@@ -3568,8 +3568,10 @@ void* checkThread(void* arg) {
 	int64_t lastRunLoopIterations = net2RunLoopIterations.load();
 	int64_t lastRunLoopSleeps = net2RunLoopSleeps.load();
 
+	double slowTaskStart = 0;
 	double lastSlowTaskSignal = 0;
 	double lastSaturatedSignal = 0;
+	double lastSlowTaskBlockedLog = 0;
 
 	const double minSlowTaskLogInterval =
 	    std::max(FLOW_KNOBS->SLOWTASK_PROFILING_LOG_INTERVAL, FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
@@ -3590,7 +3592,19 @@ void* checkThread(void* arg) {
 
 		if (slowTask) {
 			double t = timer();
-			if (lastSlowTaskSignal == 0 || t - lastSlowTaskSignal >= slowTaskLogInterval) {
+			bool newSlowTask = lastSlowTaskSignal == 0;
+
+			if (newSlowTask) {
+				slowTaskStart = t;
+			} else if (t - std::max(slowTaskStart, lastSlowTaskBlockedLog) > FLOW_KNOBS->SLOWTASK_BLOCKED_INTERVAL) {
+				lastSlowTaskBlockedLog = t;
+				// When this gets logged, it will be with a current timestamp (using timer()). If the network thread
+				// unblocks, it will log any slow task related events at an earlier timestamp. That means the order of
+				// events during this sequence will not match their timestamp order.
+				TraceEvent(SevWarnAlways, "RunLoopBlocked").detail("Duration", t - slowTaskStart);
+			}
+
+			if (newSlowTask || t - lastSlowTaskSignal >= slowTaskLogInterval) {
 				if (lastSlowTaskSignal > 0) {
 					slowTaskLogInterval = std::min(FLOW_KNOBS->SLOWTASK_PROFILING_MAX_LOG_INTERVAL,
 					                               FLOW_KNOBS->SLOWTASK_PROFILING_LOG_BACKOFF * slowTaskLogInterval);
@@ -3601,6 +3615,7 @@ void* checkThread(void* arg) {
 				pthread_kill(mainThread, SIGPROF);
 			}
 		} else {
+			slowTaskStart = 0;
 			lastSlowTaskSignal = 0;
 			lastRunLoopIterations = currentRunLoopIterations;
 			slowTaskLogInterval = minSlowTaskLogInterval;
