@@ -488,7 +488,7 @@ ACTOR Future<Void> checkManagerLock(Reference<ReadYourWritesTransaction> tr, Blo
 	return Void();
 }
 
-// FIXME: this does all logic in one transaction. Adding a giant range to an existing database to hybridize would spread
+// FIXME: this does all logic in one transaction. Adding a giant range to an existing database to blobify would
 // require doing a ton of storage metrics calls, which we should split up across multiple transactions likely.
 ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 	loop {
