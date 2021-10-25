@@ -3470,7 +3470,11 @@ private:
 			UID serverTagKey = decodeServerTagKey(m.param1.substr(1));
 			bool matchesThisServer = serverTagKey == data->thisServerID;
 			bool matchesTssPair = data->isTss() ? serverTagKey == data->tssPairID.get() : false;
-			if ((m.type == MutationRef::SetValue && !data->isTss() && !matchesThisServer) ||
+			// Remove SS if another SS is now assigned our tag, or this server was removed by deleting our tag entry
+			// Since TSS don't have tags, they check for their pair's tag. If a TSS is in quarantine, it will stick
+			// around until its pair is removed or it is finished quarantine.
+			if ((m.type == MutationRef::SetValue &&
+			     ((!data->isTss() && !matchesThisServer) || (data->isTss() && !matchesTssPair))) ||
 			    (m.type == MutationRef::ClearRange &&
 			     ((!data->isTSSInQuarantine() && matchesThisServer) || (data->isTss() && matchesTssPair)))) {
 				throw worker_removed();
@@ -3507,10 +3511,10 @@ private:
 				ASSERT(ssId == data->thisServerID);
 				if (m.type == MutationRef::SetValue) {
 					TEST(true); // Putting TSS in quarantine
-					TraceEvent(SevWarn, "TSSQuarantineStart", data->thisServerID);
+					TraceEvent(SevWarn, "TSSQuarantineStart", data->thisServerID).log();
 					data->startTssQuarantine();
 				} else {
-					TraceEvent(SevWarn, "TSSQuarantineStop", data->thisServerID);
+					TraceEvent(SevWarn, "TSSQuarantineStop", data->thisServerID).log();
 					// dipose of this TSS
 					throw worker_removed();
 				}
