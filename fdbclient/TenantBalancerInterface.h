@@ -201,15 +201,15 @@ struct TenantMovementInfo {
 
 	UID movementId;
 	std::string peerConnectionString;
-	KeyRef sourcePrefix;
-	KeyRef destinationPrefix;
+	Key sourcePrefix;
+	Key destinationPrefix;
 	MovementState movementState;
 
 	TenantMovementInfo() {}
 	TenantMovementInfo(UID movementId,
 	                   std::string peerConnectionString,
-	                   KeyRef sourcePrefix,
-	                   KeyRef destinationPrefix,
+	                   Key sourcePrefix,
+	                   Key destinationPrefix,
 	                   MovementState movementState)
 	  : movementId(movementId), peerConnectionString(peerConnectionString), sourcePrefix(sourcePrefix),
 	    destinationPrefix(destinationPrefix), movementState(movementState) {}

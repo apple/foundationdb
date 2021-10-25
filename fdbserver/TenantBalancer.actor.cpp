@@ -146,7 +146,7 @@ ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> con
 ACTOR Future<Void> checkTenantBalancerOwnership(UID id, Reference<ReadYourWritesTransaction> tr) {
 	Optional<Value> value = wait(tr->get(tenantBalancerActiveProcessKey));
 	if (!value.present() || value.get().toString() != id.toString()) {
-		TraceEvent("TenantBalancerLostOwnership", id).detail("CurrentOwner", value.get());
+		TraceEvent("TenantBalancerLostOwnership", id).detail("CurrentOwner", value);
 		throw tenant_balancer_terminated();
 	}
 
