@@ -171,6 +171,9 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 	                                      beginVersion,
 	                                      0,
 	                                      0,
+										  {},
+										  {},
+										  std::map<ptxn::StorageTeamID, vector<Tag>>(),
 	                                      debugID);
 	ptxn::test::print::print(commitRequest);
 
@@ -370,6 +373,9 @@ ACTOR Future<std::vector<Standalone<StringRef>>> commitInject(std::shared_ptr<pt
 		                      currVersion,
 		                      0,
 		                      0,
+							  std::set<ptxn::StorageTeamID>{},
+							  std::set<ptxn::StorageTeamID>{},
+							  std::map<ptxn::StorageTeamID, vector<Tag>>(),
 		                      Optional<UID>());
 		writtenMessages.emplace_back(getLogEntryContent(requests.back(), pInterface->id()));
 		prevVersion = currVersion;

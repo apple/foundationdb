@@ -1320,6 +1320,16 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		std::vector<Future<Version>> pushResults;
 		pushResults.reserve(self->pGroupMessageBuilders.size());
 		for (auto& [groupId, _] : self->pGroupMessageBuilders) {
+			std::set<ptxn::StorageTeamID> addedTeams;
+			std::set<ptxn::StorageTeamID> removedTeams;
+
+			for (auto& [team, added] : pProxyCommitData->changedTeams[groupId]) {
+				if (added)
+					addedTeams.insert(team);
+				else
+					removedTeams.insert(team);
+			}
+
 			pushResults.push_back(pProxyCommitData->logSystem->push(self->previousCommitVersionByGroup[groupId],
 			                                                        self->commitVersion,
 			                                                        pProxyCommitData->committedVersion.get(),
@@ -1327,7 +1337,9 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			                                                        self->toCommit,
 			                                                        span.context,
 			                                                        self->debugID,
-			                                                        groupId));
+			                                                        groupId,
+																	addedTeams,
+																	removedTeams));
 		}
 
 		std::function<Version(const std::vector<Version>&)> reduce =

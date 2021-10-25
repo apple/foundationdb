@@ -192,6 +192,9 @@ struct ProxyCommitData {
 	// Each storage server's own team.
 	std::unordered_map<UID, ptxn::StorageTeamID> ssToStorageTeam;
 
+	// List of added/removed storage teams in given TLogGroup.
+	std::unordered_map<UID, std::vector<std::pair<ptxn::StorageTeamID, bool>>> changedTeams;
+
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
 	// signify they must be repopulated. We do not repopulate them immediately to avoid a slow task.

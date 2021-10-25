@@ -185,14 +185,17 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                                                       NetworkAddress addr,
 	                                                       Future<TLogCommitReply> in);
 
-	Future<Version> pushTLogGroup(Version prevVersion,
-	                              Version version,
-	                              Version knownCommittedVersion,
-	                              Version minKnownCommittedVersion,
-	                              LogPushData& data,
-	                              SpanID const& spanContext,
-	                              Optional<UID> debugID,
-	                              ptxn::TLogGroupID tLogGroup);
+	Future<Version> pushTLogGroup(
+	    Version prevVersion,
+	    Version version,
+	    Version knownCommittedVersion,
+	    Version minKnownCommittedVersion,
+	    LogPushData& data,
+	    SpanID const& spanContext,
+	    Optional<UID> debugID,
+	    ptxn::TLogGroupID tLogGroup,
+	    const std::set<ptxn::StorageTeamID>& addedTeams,
+	    const std::set<ptxn::StorageTeamID>& removedTeams);
 
 	Future<Version> push(Version prevVersion,
 	                     Version version,
@@ -201,7 +204,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                     LogPushData& data,
 	                     SpanID const& spanContext,
 	                     Optional<UID> debugID,
-	                     Optional<ptxn::TLogGroupID> tLogGroup) final;
+	                     Optional<ptxn::TLogGroupID> tLogGroup,
+	                     const std::set<ptxn::StorageTeamID>& addedTeams = {},
+	                     const std::set<ptxn::StorageTeamID>& removedTeams = {}) final;
 
 	Reference<IPeekCursor> peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore);
 

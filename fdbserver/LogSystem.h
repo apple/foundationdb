@@ -26,6 +26,7 @@
 #include <unordered_map>
 
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationPolicy.h"
@@ -119,7 +120,6 @@ private:
 
 struct ILogSystem {
 	// Represents a particular (possibly provisional) epoch of the log subsystem
-
 	struct IPeekCursor {
 		// clones the peek cursor, however you cannot call getMore() on the cloned cursor.
 		virtual Reference<IPeekCursor> cloneNoMore() = 0;
@@ -525,7 +525,10 @@ struct ILogSystem {
 	                             struct LogPushData& data,
 	                             SpanID const& spanContext,
 	                             Optional<UID> debugID = Optional<UID>(),
-	                             Optional<ptxn::TLogGroupID> tLogGroup = Optional<ptxn::TLogGroupID>()) = 0;
+	                             Optional<ptxn::TLogGroupID> tLogGroup = Optional<ptxn::TLogGroupID>(),
+	                             const std::set<ptxn::StorageTeamID>& addedTeams = {},
+	                             const std::set<ptxn::StorageTeamID>& removedTeams = {}) = 0;
+
 	// Waits for the version number of the bundle (in this epoch) to be prevVersion (i.e. for all pushes ordered
 	// earlier) Puts the given messages into the bundle, each with the given tags, and with message versions (version,
 	// 0) - (version, N) Changes the version number of the bundle to be version (unblocking the next push) Returns when

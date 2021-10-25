@@ -104,6 +104,13 @@ struct TLogCommitRequest {
 	Version knownCommittedVersion;
 	Version minKnownCommittedVersion;
 
+	// Team changes within group.
+	std::set<ptxn::StorageTeamID> addedTeams;
+	std::set<ptxn::StorageTeamID> removedTeams;
+
+	// Maps storage team ID to the list of tags within that team.x
+	std::map<ptxn::StorageTeamID, std::vector<Tag>> teamToTags;
+
 	// Debug ID
 	Optional<UID> debugID;
 
@@ -119,10 +126,14 @@ struct TLogCommitRequest {
 	                  const Version version_,
 	                  const Version knownCommittedVersion_,
 	                  const Version minKnownCommittedVersion_,
+	                  const std::set<ptxn::StorageTeamID>& addedTeams_,
+	                  const std::set<ptxn::StorageTeamID>& removedTeams_,
+	                  std::map<ptxn::StorageTeamID, vector<Tag>> teamToTags_,
 	                  const Optional<UID>& debugID_)
 	  : spanID(spanID_), tLogGroupID(tLogGroupID_), arena(arena_), messages(std::move(messages_)),
 	    prevVersion(prevVersion_), version(version_), knownCommittedVersion(knownCommittedVersion_),
-	    minKnownCommittedVersion(minKnownCommittedVersion_), debugID(debugID_) {}
+	    minKnownCommittedVersion(minKnownCommittedVersion_), addedTeams(addedTeams_), removedTeams(removedTeams_),
+	    teamToTags(teamToTags_), debugID(debugID_) {}
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
@@ -136,6 +147,9 @@ struct TLogCommitRequest {
 		           knownCommittedVersion,
 		           minKnownCommittedVersion,
 		           debugID,
+		           addedTeams,
+		           removedTeams,
+				   teamToTags,
 		           reply);
 	}
 };

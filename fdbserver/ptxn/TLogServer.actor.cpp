@@ -538,6 +538,12 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 		return storageTeamData[team] = makeReference<StorageTeamData>(team, tags);
 	}
 
+	// only callable after getStorageTeamData returns a null reference
+	void removeStorageTeam(StorageTeamID team) {
+		storageTeamData.erase(team);
+		storageTeams.erase(team);
+	}
+
 	explicit LogGenerationData(Reference<TLogGroupData> tlogGroupData,
 	                           TLogInterface_PassivelyPull interf,
 	                           UID recruitmentID,
@@ -1225,13 +1231,25 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 				req.reply.sendError(tlog_group_not_found());
 				continue;
 			}
+
 			Reference<LogGenerationData> logData = tlogGroup->second;
 			TEST(logData->stopped); // TLogCommitRequest while stopped
 			if (logData->stopped) {
 				req.reply.sendError(tlog_stopped());
-			} else {
-				self->addActors.send(tLogCommit(logData->tlogGroupData, req, logData));
+				continue;
 			}
+
+			// Update storage teams.
+			for (auto t : req.addedTeams) {
+				logData->storageTeams.emplace(t, req.teamToTags.find(t)->second);
+				logData->createStorageTeamData(t, logData->storageTeams[t]);
+			}
+
+			for (auto& t : req.removedTeams) {
+				logData->removeStorageTeam(t);
+			}
+
+			self->addActors.send(tLogCommit(logData->tlogGroupData, req, logData));
 		}
 		when(TLogPeekRequest req = waitNext(tli.peek.getFuture())) {
 			auto tlogGroup = activeGeneration->find(req.tLogGroupID);
@@ -1350,7 +1368,7 @@ bool tlogTerminated(Reference<TLogGroupData> self,
                     Error const& e) {
 	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise just
 	// close it.
-	
+
 	// assign an empty PromiseSteam to self->sharedActors would delete the referenfce of the internal queue in PromiseSteam
 	// thus the actors can be cancenlled in the case there is no more references of the old queue
 	self->sharedActors = PromiseStream<Future<Void>>();

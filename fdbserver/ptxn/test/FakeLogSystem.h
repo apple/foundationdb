@@ -63,7 +63,10 @@ public:
 	                             struct LogPushData& data,
 	                             const SpanID& spanContext,
 	                             Optional<UID> debugID,
-	                             Optional<ptxn::TLogGroupID> tLogGroup) override;
+	                             Optional<ptxn::TLogGroupID> tLogGroup,
+	                             const std::set<ptxn::StorageTeamID>& addedTeams = {},
+	                             const std::set<ptxn::StorageTeamID>& removedTeams = {}) override;
+
 	virtual Reference<IPeekCursor> peek(UID dbgid,
 	                                    Version begin,
 	                                    Optional<Version> end,
