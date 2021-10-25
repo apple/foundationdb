@@ -3248,12 +3248,12 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 					std::vector<Tag> tags;
 					tags.push_back(logData->remoteTag);
 					wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, req.recoverAt, true) ||
-					     logData->removed);
+					     logData->removed || logData->stopCommit.onTrigger());
 				} else if (!req.recoverTags.empty()) {
 					ASSERT(logData->unrecoveredBefore > req.knownCommittedVersion);
 					wait(pullAsyncData(
 					         self, logData, req.recoverTags, req.knownCommittedVersion + 1, req.recoverAt, false) ||
-					     logData->removed);
+					     logData->removed || logData->stopCommit.onTrigger());
 				}
 				pulledRecoveryVersions = true;
 				logData->knownCommittedVersion = req.recoverAt;
