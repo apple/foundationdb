@@ -20,6 +20,7 @@
 
 #include "fdbserver/PaxosConfigConsumer.h"
 
+#include <algorithm>
 #include <map>
 
 #include "fdbserver/Knobs.h"
@@ -65,6 +66,11 @@ class GetCommittedVersionQuorum {
 				// committed changes the quorum does not agree with. Therefore,
 				// it needs to be rolled back before being rolled forward.
 				rollback = quorumVersion.secondToLastCommitted;
+			} else if (nodeVersion.lastCommitted < quorumVersion.secondToLastCommitted) {
+				// On the other hand, if the node is on an older committed
+				// version, it's possible the version it is on was never made
+				// durable. To be safe, roll it back by one version.
+				rollback = std::max(nodeVersion.lastCommitted - 1, Version{ 0 });
 			}
 
 			// Now roll node forward to match the largest committed version of
@@ -74,9 +80,9 @@ class GetCommittedVersionQuorum {
 			// the quorum.
 			state ConfigFollowerInterface quorumCfi = self->replies[self->largestCommitted][0];
 			try {
+				auto lastSeenVersion = rollback.present() ? rollback.get() : nodeVersion.lastCommitted;
 				ConfigFollowerGetChangesReply reply = wait(retryBrokenPromise(
-				    quorumCfi.getChanges,
-				    ConfigFollowerGetChangesRequest{ nodeVersion.lastCommitted, self->largestCommitted }));
+				    quorumCfi.getChanges, ConfigFollowerGetChangesRequest{ lastSeenVersion, self->largestCommitted }));
 				wait(retryBrokenPromise(cfi.rollforward,
 				                        ConfigFollowerRollforwardRequest{ rollback,
 				                                                          nodeVersion.lastCommitted,
@@ -89,8 +95,12 @@ class GetCommittedVersionQuorum {
 					ConfigFollowerGetSnapshotAndChangesReply reply =
 					    wait(retryBrokenPromise(quorumCfi.getSnapshotAndChanges,
 					                            ConfigFollowerGetSnapshotAndChangesRequest{ self->largestCommitted }));
-					// TODO: Send the whole snapshot to `cfi`
-					ASSERT(false);
+					wait(retryBrokenPromise(cfi.rollforward,
+					                        ConfigFollowerRollforwardRequest{ rollback,
+					                                                          nodeVersion.lastCommitted,
+					                                                          self->largestCommitted,
+					                                                          reply.changes,
+					                                                          reply.annotations }));
 				} else if (e.code() == error_code_transaction_too_old) {
 					// Seeing this trace is not necessarily a problem. There
 					// are legitimate scenarios where a ConfigNode could return
@@ -295,6 +305,7 @@ class PaxosConfigConsumerImpl {
 			} catch (Error& e) {
 				if (e.code() == error_code_version_already_compacted) {
 					TEST(true); // PaxosConfigConsumer get version_already_compacted error
+					self->resetCommittedVersionQuorum();
 					wait(getSnapshotAndChanges(self, broadcaster));
 				} else {
 					throw e;
