@@ -28,13 +28,6 @@
 
 class ServerCoordinators;
 
-template <class LeaderInterface>
-Future<Void> tryBecomeLeader(ServerCoordinators const& coordinators,
-                             LeaderInterface const& proposedInterface,
-                             Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader,
-                             bool hasConnected,
-                             Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo);
-
 // Participates in the given coordination group's leader election process, nominating the given
 // LeaderInterface (presumed to be a local interface) as leader.  The leader election process is
 // "sticky" - once a leader becomes leader, as long as its communications with other processes are
@@ -43,9 +36,15 @@ Future<Void> tryBecomeLeader(ServerCoordinators const& coordinators,
 // set to the proposedInterface, and then if it is displaced by another leader, the return value will
 // eventually be set.  If the return value is cancelled, the candidacy or leadership of the proposedInterface
 // will eventually end.
+template <class LeaderInterface>
+Future<Void> tryBecomeLeader(ServerCoordinators const& coordinators,
+                             LeaderInterface const& proposedInterface,
+                             Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader,
+                             bool hasConnected,
+                             Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo);
 
-Future<Void> changeLeaderCoordinators(ServerCoordinators const& coordinators, Value const& forwardingInfo);
 // Inform all the coordinators that they have been replaced with a new connection string
+Future<Void> changeLeaderCoordinators(ServerCoordinators const& coordinators, Value const& forwardingInfo);
 
 #ifndef __INTEL_COMPILER
 #pragma region Implementation
