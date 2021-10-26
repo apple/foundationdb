@@ -18,7 +18,9 @@
  * limitations under the License.
  */
 
+// TODO this should really be renamed "TSSComparison.cpp"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/BlobWorkerInterface.h"
 #include "flow/crc32c.h" // for crc32c_append, to checksum values in tss trace events
 
 // Includes template specializations for all tss operations on storage server types.
@@ -314,6 +316,26 @@ void TSS_traceMismatch(TraceEvent& event,
 	ASSERT(false);
 }
 
+template <>
+bool TSS_doCompare(const BlobGranuleFileReply& src, const BlobGranuleFileReply& tss) {
+	ASSERT(false);
+	return true;
+}
+
+template <>
+const char* TSS_mismatchTraceName(const BlobGranuleFileRequest& req) {
+	ASSERT(false);
+	return "";
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const BlobGranuleFileRequest& req,
+                       const BlobGranuleFileReply& src,
+                       const BlobGranuleFileReply& tss) {
+	ASSERT(false);
+}
+
 // only record metrics for data reads
 
 template <>
@@ -354,6 +376,10 @@ void TSSMetrics::recordLatency(const GetKeyValuesStreamRequest& req, double ssLa
 
 template <>
 void TSSMetrics::recordLatency(const OverlappingChangeFeedsRequest& req, double ssLatency, double tssLatency) {}
+
+// this isn't even to storage servers
+template <>
+void TSSMetrics::recordLatency(const BlobGranuleFileRequest& req, double ssLatency, double tssLatency) {}
 
 // -------------------
 

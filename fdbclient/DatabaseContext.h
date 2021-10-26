@@ -259,7 +259,13 @@ public:
 	                                 KeyRange range = allKeys);
 
 	Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
-	Future<Void> popChangeFeedMutations(StringRef rangeID, Version version);
+	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
+
+	Future<Void> getBlobGranuleRangesStream(const PromiseStream<KeyRange>& results, KeyRange range);
+	Future<Void> readBlobGranulesStream(const PromiseStream<Standalone<BlobGranuleChunkRef>>& results,
+	                                    KeyRange range,
+	                                    Version begin,
+	                                    Optional<Version> end);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
@@ -331,6 +337,7 @@ public:
 	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 
 	std::map<UID, StorageServerInfo*> server_interf;
+	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
 
 	// map from ssid -> tss interface
 	std::unordered_map<UID, StorageServerInterface> tssMapping;

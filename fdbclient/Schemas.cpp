@@ -53,7 +53,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "grv_proxy",
                   "master",
                   "test",
-                  "storage_cache"
+                  "storage_cache",
+                  "blob_worker"
                ]
             },
             "degraded":true,
@@ -94,6 +95,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "cluster_controller",
                         "data_distributor",
                         "ratekeeper",
+                        "blob_manager",
+                        "blob_worker",
                         "storage_cache",
                         "router",
                         "coordinator"
@@ -492,6 +495,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "unreachable_master_worker",
                   "unreachable_dataDistributor_worker",
                   "unreachable_ratekeeper_worker",
+                  "unreachable_blobManager_worker",
                   "unreadable_configuration",
                   "full_replication_timeout",
                   "client_issues",

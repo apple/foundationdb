@@ -1794,6 +1794,19 @@ ACTOR Future<ChangeFeedStreamReply> getChangeFeedMutations(StorageServer* data,
 		reply.mutations.push_back(
 		    reply.arena, MutationsAndVersionRef(finalVersion, finalVersion == dequeVersion ? dequeKnownCommit : 0));
 	}
+
+	if (MUTATION_TRACKING_ENABLED) {
+		for (auto& mutations : reply.mutations) {
+			for (auto& m : mutations.mutations) {
+				DEBUG_MUTATION("ChangeFeedRead", mutations.version, m, data->thisServerID)
+				    .detail("ChangeFeedID", req.rangeID)
+				    .detail("ReqBegin", req.begin)
+				    .detail("ReqEnd", req.end)
+				    .detail("ReqRange", req.range);
+			}
+		}
+	}
+
 	return reply;
 }
 
@@ -3006,6 +3019,10 @@ void applyMutation(StorageServer* self,
 					}
 					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
 					self->currentChangeFeeds.insert(it->id);
+
+					DEBUG_MUTATION("ChangeFeedWriteSet", version, m, self->thisServerID)
+					    .detail("Range", it->range)
+					    .detail("ChangeFeedID", it->id);
 				}
 			}
 		}
@@ -3026,6 +3043,9 @@ void applyMutation(StorageServer* self,
 						}
 						it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
 						self->currentChangeFeeds.insert(it->id);
+						DEBUG_MUTATION("ChangeFeedWriteClear", version, m, self->thisServerID)
+						    .detail("Range", it->range)
+						    .detail("ChangeFeedID", it->id);
 					}
 				}
 			}

@@ -66,6 +66,8 @@
                    and then exits.
     --no-status    Disables the initial status check done when starting
                    the CLI.
+    --api-version  APIVERSION
+                   Specifies the version of the API for the CLI to use.
     --tls_certificate_file CERTFILE
                    The path of a file containing the TLS certificate and CA
                    chain.
@@ -109,6 +111,8 @@
                    and then exits.
     --no-status    Disables the initial status check done when starting
                    the CLI.
+    --api-version  APIVERSION
+                   Specifies the version of the API for the CLI to use.
     --tls_certificate_file CERTFILE
                    The path of a file containing the TLS certificate and CA
                    chain.
@@ -152,6 +156,8 @@
                    and then exits.
     --no-status    Disables the initial status check done when starting
                    the CLI.
+    --api-version  APIVERSION
+                   Specifies the version of the API for the CLI to use.
     --tls_certificate_file CERTFILE
                    The path of a file containing the TLS certificate and CA
                    chain.
@@ -195,6 +201,8 @@
                    and then exits.
     --no-status    Disables the initial status check done when starting
                    the CLI.
+    --api-version  APIVERSION
+                   Specifies the version of the API for the CLI to use.
     --tls_certificate_file CERTFILE
                    The path of a file containing the TLS certificate and CA
                    chain.
