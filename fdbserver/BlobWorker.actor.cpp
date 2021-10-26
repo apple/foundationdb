@@ -181,10 +181,6 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	// FIXME: expire from map after a delay when granule is revoked and the history is no longer needed
 	KeyRangeMap<Reference<GranuleHistoryEntry>> granuleHistory;
 
-	AsyncVar<int> pendingDeltaFileCommitChecks;
-	AsyncVar<Version> knownCommittedVersion;
-	uint64_t knownCommittedCheckCount = 0;
-
 	PromiseStream<AssignBlobRangeRequest> granuleUpdateErrors;
 
 	BlobWorkerData(UID id, Database db) : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
@@ -435,18 +431,18 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 			tr->clear(singleKeyRange(oldGranuleLockKey));
 			tr->clear(currentRange);
 		} else {
+			tr->atomicOp(myStateKey, blobGranuleSplitValueFor(newState), MutationRef::SetVersionstampedValue);
 			if (newState == BlobGranuleSplitState::Assigned && currentState == BlobGranuleSplitState::Started &&
 			    totalStarted == 1) {
+				// We are the last one to change from Start -> Assigned, so we can stop the parent change feed.
 				if (BW_DEBUG) {
-					printf("%s WOULD BE stopping change feed for old granule %s\n",
+					printf("%s stopping change feed for old granule %s\n",
 					       currentGranuleID.toString().c_str(),
 					       parentGranuleID.toString().c_str());
 				}
-				// FIXME: enable
-				// wait(updateChangeFeed(tr, KeyRef(parentGranuleID.toString()),
-				// ChangeFeedStatus::CHANGE_FEED_DESTROY));
+
+				wait(updateChangeFeed(tr, KeyRef(parentGranuleID.toString()), ChangeFeedStatus::CHANGE_FEED_STOP));
 			}
-			tr->atomicOp(myStateKey, blobGranuleSplitValueFor(newState), MutationRef::SetVersionstampedValue);
 		}
 	} else if (BW_DEBUG) {
 		printf("Ignoring granule %s split state from %s %d -> %d\n",
@@ -484,14 +480,9 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
                                            GranuleDeltas deltasToWrite,
                                            Version currentDeltaVersion,
                                            Future<BlobFileIndex> previousDeltaFileFuture,
+                                           NotifiedVersion* granuleCommittedVersion,
                                            Optional<std::pair<KeyRange, UID>> oldGranuleComplete) {
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
-	// potentially kick off delta file commit check, if our version isn't already known to be committed
-	state uint64_t checkCount = -1;
-	if (bwData->knownCommittedVersion.get() < currentDeltaVersion) {
-		bwData->pendingDeltaFileCommitChecks.set(bwData->pendingDeltaFileCommitChecks.get() + 1);
-		checkCount = bwData->knownCommittedCheckCount;
-	}
 
 	// TODO some sort of directory structure would be useful?
 	state std::string fname = deterministicRandom()->randomUniqueID().toString() + "_T" +
@@ -514,13 +505,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	state int numIterations = 0;
 	try {
 		// before updating FDB, wait for the delta file version to be committed and previous delta files to finish
-		while (bwData->knownCommittedVersion.get() < currentDeltaVersion) {
-			if (bwData->knownCommittedCheckCount != checkCount) {
-				checkCount = bwData->knownCommittedCheckCount;
-				// a check happened between the start and now, and the version is still lower. Kick off another one.
-				bwData->pendingDeltaFileCommitChecks.set(bwData->pendingDeltaFileCommitChecks.get() + 1);
-			}
-			wait(bwData->knownCommittedVersion.onChange());
+		if (currentDeltaVersion > granuleCommittedVersion->get()) {
+			wait(granuleCommittedVersion->whenAtLeast(currentDeltaVersion));
 		}
 		BlobFileIndex prev = wait(previousDeltaFileFuture);
 		wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
@@ -859,46 +845,6 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 	}
 }
 
-// When reading from a prior change feed, the prior change feed may contain mutations that don't belong in the new
-// granule. And, we only want to read the prior change feed up to the start of the new change feed.
-static bool filterOldMutations(const KeyRange& range,
-                               const Standalone<VectorRef<MutationsAndVersionRef>>* oldMutations,
-                               Standalone<VectorRef<MutationsAndVersionRef>>* mutations,
-                               Version maxVersion) {
-	Standalone<VectorRef<MutationsAndVersionRef>> filteredMutations;
-	mutations->arena().dependsOn(range.arena());
-	mutations->arena().dependsOn(oldMutations->arena());
-	for (auto& delta : *oldMutations) {
-		if (delta.version >= maxVersion) {
-			return true;
-		}
-		MutationsAndVersionRef filteredDelta;
-		filteredDelta.version = delta.version;
-		for (auto& m : delta.mutations) {
-			ASSERT(m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange);
-			if (m.type == MutationRef::SetValue) {
-				if (m.param1 >= range.begin && m.param1 < range.end) {
-					filteredDelta.mutations.push_back(mutations->arena(), m);
-				}
-			} else {
-				if (m.param2 >= range.begin && m.param1 < range.end) {
-					// clamp clear range down to sub-range
-					MutationRef m2 = m;
-					if (range.begin > m.param1) {
-						m2.param1 = range.begin;
-					}
-					if (range.end < m.param2) {
-						m2.param2 = range.end;
-					}
-					filteredDelta.mutations.push_back(mutations->arena(), m2);
-				}
-			}
-		}
-		mutations->push_back(mutations->arena(), filteredDelta);
-	}
-	return false;
-}
-
 ACTOR Future<Void> handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
                                             Reference<GranuleMetadata> metadata,
                                             BlobFileIndex completedDeltaFile,
@@ -1062,10 +1008,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 	state Future<Void> changeFeedFuture;
 	state GranuleStartState startState;
 	state bool readOldChangeFeed;
-	state bool lastFromOldChangeFeed = false;
 	state Optional<std::pair<KeyRange, UID>> oldChangeFeedDataComplete;
 	state Key cfKey;
 	state Optional<Key> oldCFKey;
+	state NotifiedVersion committedVersion;
 
 	state std::deque<std::pair<Version, Version>> rollbacksInProgress;
 	state std::deque<std::pair<Version, Version>> rollbacksCompleted;
@@ -1153,23 +1099,19 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		metadata->durableDeltaVersion.set(startVersion);
 		metadata->pendingDeltaVersion = startVersion;
 		metadata->bufferedDeltaVersion.set(startVersion);
+		committedVersion.set(startVersion);
 
 		ASSERT(metadata->readable.canBeSet());
 		metadata->readable.send(Void());
 
-		if (startState.parentGranule.present()) {
-			// FIXME: once we have empty versions, only include up to startState.changeFeedStartVersion in the read
-			// stream. Then we can just stop the old stream when we get end_of_stream from this and not handle the
-			// mutation version truncation stuff
-
-			// FIXME: filtering on key range != change feed range doesn't work
+		if (startState.parentGranule.present() && startVersion < startState.changeFeedStartVersion) {
+			// read from parent change feed up until our new change feed is started
 			readOldChangeFeed = true;
-			oldChangeFeedFuture =
-			    bwData->db->getChangeFeedStream(oldChangeFeedStream,
-			                                    oldCFKey.get(),
-			                                    startVersion + 1,
-			                                    MAX_VERSION,
-			                                    startState.parentGranule.get().first /*metadata->keyRange*/);
+			oldChangeFeedFuture = bwData->db->getChangeFeedStream(oldChangeFeedStream,
+			                                                      oldCFKey.get(),
+			                                                      startVersion + 1,
+			                                                      startState.changeFeedStartVersion,
+			                                                      metadata->keyRange);
 		} else {
 			readOldChangeFeed = false;
 			changeFeedFuture = bwData->db->getChangeFeedStream(
@@ -1219,27 +1161,37 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			}
 
 			state Standalone<VectorRef<MutationsAndVersionRef>> mutations;
-			if (readOldChangeFeed) {
-				Standalone<VectorRef<MutationsAndVersionRef>> oldMutations = waitNext(oldChangeFeedStream.getFuture());
-				// TODO filter old mutations won't be necessary, SS does it already
-				if (filterOldMutations(
-				        metadata->keyRange, &oldMutations, &mutations, startState.changeFeedStartVersion)) {
-					// if old change feed has caught up with where new one would start, finish last one and start new
-					// one
-
-					Key cfKey = StringRef(startState.granuleID.toString());
-					changeFeedFuture = bwData->db->getChangeFeedStream(
-					    changeFeedStream, cfKey, startState.changeFeedStartVersion, MAX_VERSION, metadata->keyRange);
-					oldChangeFeedFuture.cancel();
-					lastFromOldChangeFeed = true;
-
-					// now that old change feed is cancelled, clear out any mutations still in buffer by replacing
-					// promise stream
-					oldChangeFeedStream = PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>();
+			try {
+				if (readOldChangeFeed) {
+					// TODO efficient way to store next in mutations?
+					Standalone<VectorRef<MutationsAndVersionRef>> oldMutations =
+					    waitNext(oldChangeFeedStream.getFuture());
+					mutations = oldMutations;
+				} else {
+					Standalone<VectorRef<MutationsAndVersionRef>> newMutations = waitNext(changeFeedStream.getFuture());
+					mutations = newMutations;
 				}
-			} else {
-				Standalone<VectorRef<MutationsAndVersionRef>> newMutations = waitNext(changeFeedStream.getFuture());
-				mutations = newMutations;
+			} catch (Error& e) {
+				// only error we should expect here is when we finish consuming old change feed
+				if (e.code() != error_code_end_of_stream) {
+					throw;
+				}
+				ASSERT(readOldChangeFeed);
+
+				readOldChangeFeed = false;
+				// set this so next delta file write updates granule split metadata to done
+				ASSERT(startState.parentGranule.present());
+				oldChangeFeedDataComplete = startState.parentGranule.get();
+				if (BW_DEBUG) {
+					printf("Granule [%s - %s) switching to new change feed %s @ %lld\n",
+					       metadata->keyRange.begin.printable().c_str(),
+					       metadata->keyRange.end.printable().c_str(),
+					       startState.granuleID.toString().c_str(),
+					       metadata->bufferedDeltaVersion.get());
+				}
+
+				changeFeedFuture = bwData->db->getChangeFeedStream(
+				    changeFeedStream, cfKey, startState.changeFeedStartVersion, MAX_VERSION, metadata->keyRange);
 			}
 
 			// process mutations
@@ -1253,6 +1205,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				if (deltas.version > lastVersion) {
 					metadata->bufferedDeltaVersion.set(lastVersion);
 				}
+				Version knownNoRollbacksPast = std::min(lastVersion, deltas.knownCommittedVersion);
+				if (knownNoRollbacksPast > committedVersion.get()) {
+					committedVersion.set(knownNoRollbacksPast);
+				}
+
 				// Write a new delta file IF we have enough bytes, and we have all of the previous version's stuff
 				// there to ensure no versions span multiple delta files. Check this by ensuring the version of this
 				// new delta is larger than the previous largest seen version
@@ -1293,6 +1250,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					                                                metadata->currentDeltas,
 					                                                lastVersion,
 					                                                previousDeltaFileFuture,
+					                                                &committedVersion,
 					                                                oldChangeFeedDataComplete);
 					inFlightDeltaFiles.push_back(
 					    InFlightDeltaFile(dfFuture, lastVersion, metadata->bufferedDeltaBytes));
@@ -1502,17 +1460,22 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 								                                              rollbacksInProgress,
 								                                              rollbacksCompleted);
 
-								// reset change feeds to cfRollbackVersion
+								// Reset change feeds to cfRollbackVersion
 								if (readOldChangeFeed) {
+									// It shouldn't be possible to roll back across the parent/child feed boundary,
+									// because the transaction creating the child change feed had to commit before we
+									// got here.
+									ASSERT(cfRollbackVersion < startState.changeFeedStartVersion);
 									oldChangeFeedStream =
 									    PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>();
-									oldChangeFeedFuture = bwData->db->getChangeFeedStream(
-									    oldChangeFeedStream,
-									    oldCFKey.get(),
-									    cfRollbackVersion + 1,
-									    MAX_VERSION,
-									    startState.parentGranule.get().first /*metadata->keyRange*/);
+									oldChangeFeedFuture =
+									    bwData->db->getChangeFeedStream(oldChangeFeedStream,
+									                                    oldCFKey.get(),
+									                                    cfRollbackVersion + 1,
+									                                    startState.changeFeedStartVersion,
+									                                    metadata->keyRange);
 								} else {
+									ASSERT(cfRollbackVersion > startState.changeFeedStartVersion);
 									changeFeedStream = PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>();
 									changeFeedFuture = bwData->db->getChangeFeedStream(changeFeedStream,
 									                                                   cfKey,
@@ -1547,20 +1510,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					break;
 				}
 				lastVersion = deltas.version;
-			}
-			if (lastFromOldChangeFeed && !justDidRollback) {
-				readOldChangeFeed = false;
-				lastFromOldChangeFeed = false;
-				// set this so next delta file write updates granule split metadata to done
-				ASSERT(startState.parentGranule.present());
-				oldChangeFeedDataComplete = startState.parentGranule.get();
-				if (BW_DEBUG) {
-					printf("Granule [%s - %s) switching to new change feed %s @ %lld\n",
-					       metadata->keyRange.begin.printable().c_str(),
-					       metadata->keyRange.end.printable().c_str(),
-					       startState.granuleID.toString().c_str(),
-					       metadata->bufferedDeltaVersion.get());
-				}
 			}
 			justDidRollback = false;
 		}
@@ -2445,40 +2394,6 @@ ACTOR Future<Void> handleRangeRevoke(Reference<BlobWorkerData> bwData, RevokeBlo
 	}
 }
 
-// Because change feeds send uncommitted data and explicit rollback messages, we speculatively buffer/write
-// uncommitted data. This means we must ensure the data is actually committed before "committing" those writes in
-// the blob granule. The simplest way to do this is to have the blob worker do a periodic GRV, which is guaranteed
-// to be an earlier committed version.
-ACTOR Future<Void> runCommitVersionChecks(Reference<BlobWorkerData> bwData) {
-	state Transaction tr(bwData->db);
-	loop {
-		// only do grvs to get committed version if we need it to persist delta files
-		while (bwData->pendingDeltaFileCommitChecks.get() == 0) {
-			wait(bwData->pendingDeltaFileCommitChecks.onChange());
-		}
-
-		// batch potentially multiple delta files into one GRV, and also rate limit GRVs for this worker
-		wait(delay(0.1)); // TODO KNOB?
-
-		state int checksToResolve = bwData->pendingDeltaFileCommitChecks.get();
-
-		tr.reset();
-		try {
-			Version readVersion = wait(tr.getReadVersion());
-
-			ASSERT(readVersion >= bwData->knownCommittedVersion.get());
-			if (readVersion > bwData->knownCommittedVersion.get()) {
-				++bwData->knownCommittedCheckCount;
-				bwData->knownCommittedVersion.set(readVersion);
-				bwData->pendingDeltaFileCommitChecks.set(bwData->pendingDeltaFileCommitChecks.get() - checksToResolve);
-			}
-			++bwData->stats.commitVersionChecks;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
                               ReplyPromise<InitializeBlobWorkerReply> recruitReply,
                               Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
@@ -2531,7 +2446,6 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	recruitReply.send(rep);
 
 	self->addActor.send(waitFailureServer(bwInterf.waitFailure.getFuture()));
-	self->addActor.send(runCommitVersionChecks(self));
 
 	try {
 		loop choose {
