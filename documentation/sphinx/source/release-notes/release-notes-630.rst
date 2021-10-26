@@ -71,6 +71,7 @@ Release Notes
 * Added the ``bypass_unreadable`` transaction option which allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. `(PR #4774) <https://github.com/apple/foundationdb/pull/4774>`_
 * Fix several packaging issues. The osx package should now install successfully, and the structure of the RPM and DEB packages should match that of 6.2. `(PR #4810) <https://github.com/apple/foundationdb/pull/4810>`_
 * Fix an accounting error that could potentially result in inaccuracies in priority busyness metrics. `(PR #4824) <https://github.com/apple/foundationdb/pull/4824>`_
+* Added ``KVFetched`` to the storage metrics to show how many key-value pairs are updated by data movements. `(PR #4907) <https://github.com/apple/foundationdb/pull/4907>`_
 
 6.3.13
 ======
