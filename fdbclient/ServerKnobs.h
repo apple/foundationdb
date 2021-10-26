@@ -105,6 +105,7 @@ public:
 	bool TLOG_SERVER_TEAM_PARTITIONED;
 	bool TLOG_NEW_INTERFACE;
 	bool BROADCAST_TLOG_GROUPS;
+	bool PTXN_DISABLE_DD; // Temporary disable DD for PTXN project development
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;

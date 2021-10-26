@@ -105,7 +105,8 @@ void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsS
 	init( TLOG_POP_BATCH_SIZE,                                  1000 ); if ( randomize && BUGGIFY ) TLOG_POP_BATCH_SIZE = 10;
 	init( TLOG_SERVER_TEAM_PARTITIONED,                        false );
 	init( TLOG_NEW_INTERFACE,                                  false );
-	init( BROADCAST_TLOG_GROUPS,                               true );
+	init( BROADCAST_TLOG_GROUPS,                                true );
+	init( PTXN_DISABLE_DD,                                     false );
 
 	// disk snapshot max timeout, to be put in TLog, storage and coordinator nodes
 	init( MAX_FORKED_PROCESS_OUTPUT,                            1024 );

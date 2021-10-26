@@ -5540,8 +5540,10 @@ ACTOR Future<Void> dataDistributionTeamCollection(Reference<DDTeamCollection> te
 
 		// The following actors (e.g. storageRecruiter) do not need to be assigned to a variable because
 		// they are always running.
-		// TODO(jingyu): uncomment when reenabling DD
-		// self->addActor.send(storageRecruiter(self, db, ddEnabledState));
+		// TODO(jingyu): reenable storageRecruiter for PTXN
+		if (!SERVER_KNOBS->PTXN_DISABLE_DD) {
+			self->addActor.send(storageRecruiter(self, db, ddEnabledState));
+		}
 		self->addActor.send(monitorStorageServerRecruitment(self));
 		self->addActor.send(waitServerListChange(self, serverRemoved.getFuture(), ddEnabledState));
 		self->addActor.send(trackExcludedServers(self));
@@ -6072,8 +6074,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			    &normalDDQueueErrors()));
 
 			actors.push_back(printSnapshotTeamsInfo(primaryTeamCollection));
-			// TODO(jingyu): uncomment when reenabling DD
-			// actors.push_back(yieldPromiseStream(output.getFuture(), input));
+			// TODO(jingyu): reenable storageRecruiter for PTXN
+			if (!SERVER_KNOBS->PTXN_DISABLE_DD) {
+				actors.push_back(yieldPromiseStream(output.getFuture(), input));
+			}
 
 			wait(waitForAll(actors));
 			return Void();
