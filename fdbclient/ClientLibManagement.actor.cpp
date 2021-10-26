@@ -81,7 +81,7 @@ ClientLibPlatform getPlatformByName(std::string_view platformName) {
 	static std::map<std::string_view, ClientLibPlatform> platformByName;
 	// initialize the map on demand
 	if (platformByName.empty()) {
-		for (int i = 0; i < static_cast<int>(ClientLibStatus::COUNT); i++) {
+		for (int i = 0; i < static_cast<int>(ClientLibPlatform::COUNT); i++) {
 			ClientLibPlatform platform = static_cast<ClientLibPlatform>(i);
 			platformByName[getPlatformName(platform)] = platform;
 		}
