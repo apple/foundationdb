@@ -247,7 +247,7 @@ public:
 	virtual bool isAvailable() const = 0;
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
-	ProtocolVersion protocolVersion() override = 0;
+	ProtocolVersion protocolVersion() const override = 0;
 	void addRole(NetworkAddress const& address, std::string const& role) {
 		roleAddresses[address][role]++;
 		TraceEvent("RoleAdd")

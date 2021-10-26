@@ -471,6 +471,8 @@ public:
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER_BATCH;
 	int64_t SPRING_BYTES_STORAGE_SERVER_BATCH;
 	int64_t STORAGE_HARD_LIMIT_BYTES;
+	int64_t STORAGE_HARD_LIMIT_BYTES_OVERAGE;
+	int64_t STORAGE_HARD_LIMIT_VERSION_OVERAGE;
 	int64_t STORAGE_DURABILITY_LAG_HARD_MAX;
 	int64_t STORAGE_DURABILITY_LAG_SOFT_MAX;
 
@@ -613,6 +615,9 @@ public:
 	                                   // the local descriptor
 	double FORWARD_REQUEST_TOO_OLD; // Do not forward requests older than this setting
 	double COORDINATOR_LEADER_CONNECTION_TIMEOUT;
+
+	// Dynamic Knobs (implementation)
+	double GET_COMMITTED_VERSION_TIMEOUT;
 
 	// Buggification
 	double BUGGIFIED_EVENTUAL_CONSISTENCY;

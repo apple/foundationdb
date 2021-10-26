@@ -577,7 +577,7 @@ public:
 	virtual ActorLineageSet& getActorLineageSet() = 0;
 #endif
 
-	virtual ProtocolVersion protocolVersion() = 0;
+	virtual ProtocolVersion protocolVersion() const = 0;
 
 	// Shorthand for transport().getLocalAddress()
 	static NetworkAddress getLocalAddress() {
