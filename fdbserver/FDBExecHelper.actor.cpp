@@ -1,3 +1,5 @@
+#include "flow/genericactors.actor.h"
+#include <string>
 #if !defined(_WIN32) && !defined(__APPLE__) && !defined(__INTEL_COMPILER)
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
@@ -9,6 +11,14 @@
 #include "flow/flow.h"
 #include "fdbclient/versions.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/RemoteIKeyValueStore.actor.h"
+#include "fdbrpc/simulator.h"
+#include "fdbclient/WellKnownEndpoints.h"
+#include "flow/Platform.h"
+#include "flow/network.h"
+#include "fdbrpc/Net2FileSystem.h"
+#include "fdbserver/CoroFlow.h"
+#include "flow/TLSConfig.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ExecCmdValueString::ExecCmdValueString(StringRef pCmdValueString) {
@@ -70,12 +80,85 @@ void ExecCmdValueString::dbgPrint() const {
 	return;
 }
 
+ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
+                                 double maxWaitTime,
+                                 bool isSync,
+                                 double maxSimDelayTime) {
+	state ISimulator::ProcessInfo* self = g_pSimulator->getCurrentProcess();
+	state ISimulator::ProcessInfo* child;
+	state int result = 0;
+	// short port = 8716;
+	child = g_pSimulator->newProcess("remote ikvs process",
+	                                 self->address.ip,
+	                                 SERVER_KNOBS->IKVS_PORT,
+	                                 false,
+	                                 1,
+	                                 self->locality,
+	                                 ProcessClass(ProcessClass::UnsetClass, ProcessClass::AutoSource),
+	                                 self->dataFolder,
+	                                 self->coordinationFolder,
+	                                 self->protocolVersion);
+	wait(g_pSimulator->onProcess(child));
+	state Future<ISimulator::KillType> onShutdown = child->onShutdown();
+	state Future<ISimulator::KillType> parentShutdown = self->onShutdown();
+
+	try {
+		// TODO: parse paramList
+		TraceEvent(SevDebug, "SpawnedChildProcess").detail("IP", child->toString());
+		std::string role = "";
+		for (int i = 0; i < paramList.size(); i++) {
+			if (paramList.size() > i + 1 && paramList[i] == "-r") {
+				role = paramList[i + 1];
+			}
+		}
+		if (role == "remoteIKVS") {
+			FlowTransport::createInstance(false, 1, WLTOKEN_IKVS_RESERVED_COUNT);
+			FlowTransport::transport().bind(child->address, child->address);
+			Sim2FileSystem::newFileSystem();
+			Future<Void> f = runRemoteServer();
+
+			choose {
+				when(wait(success(onShutdown) || f)) { TraceEvent(SevDebug, "ChildProcessKilled").log(); }
+				when(wait(success(parentShutdown))) {
+					TraceEvent(SevDebug, "ParentProcessKilled").log();
+					g_pSimulator->killProcess(child, ISimulator::KillInstantly);
+				}
+			}
+			// wait(success(onShutdown) || f);
+		} else {
+			ASSERT(false);
+		}
+	} catch (Error& e) {
+		TraceEvent(e.code() == error_code_actor_cancelled ? SevInfo : SevError, "RemoteIKVSDied").error(e, true);
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		if (e.code() == error_code_io_timeout && !onShutdown.isReady()) {
+			TraceEvent(SevDebug, "SpawnedProcessRebooting").log();
+			onShutdown = ISimulator::RebootProcess;
+		}
+		if (onShutdown.isReady() && onShutdown.isError()) {
+			TraceEvent(SevDebug, "SpawnedProcessError").log();
+			throw onShutdown.getError();
+		}
+		result = -1;
+	}
+	wait(g_pSimulator->onProcess(self));
+	g_pSimulator->destroyProcess(child);
+	TraceEvent(SevDebug, "BackOnParentProcess").detail("Result", std::to_string(result));
+	return result;
+}
+
 #if defined(_WIN32) || defined(__APPLE__) || defined(__INTEL_COMPILER)
 ACTOR Future<int> spawnProcess(std::string binPath,
                                std::vector<std::string> paramList,
                                double maxWaitTime,
                                bool isSync,
                                double maxSimDelayTime) {
+	if (g_network->isSimulated() && getExecPath() == binPath) {
+		int res = wait(spawnSimulated(paramList, maxWaitTime, isSync, maxSimDelayTime));
+		return res;
+	}
 	wait(delay(0.0));
 	return 0;
 }
@@ -97,7 +180,9 @@ static auto fork_child(const std::string& path, std::vector<char*>& paramList) {
 		dup2(writeFD, 1); // stdout
 		dup2(writeFD, 2); // stderr
 		close(writeFD);
-		execv(&path[0], &paramList[0]);
+		int execNo = execv(&path[0], &paramList[0]);
+		std::cout << "execv: " << execNo << std::endl;
+		std::cout << "errno: " << errno << std::endl;
 		_exit(EXIT_FAILURE);
 	}
 	close(writeFD);
@@ -105,6 +190,8 @@ static auto fork_child(const std::string& path, std::vector<char*>& paramList) {
 }
 
 static void setupTraceWithOutput(TraceEvent& event, size_t bytesRead, char* outputBuffer) {
+	std::cout << "Output bytesRead: " << bytesRead << std::endl;
+	std::cout << "output buffer: " << std::string(outputBuffer) << std::endl;
 	if (bytesRead == 0)
 		return;
 	ASSERT(bytesRead <= SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT);
@@ -120,6 +207,10 @@ ACTOR Future<int> spawnProcess(std::string path,
                                double maxWaitTime,
                                bool isSync,
                                double maxSimDelayTime) {
+	if (g_network->isSimulated() && getExecPath() == path) {
+		int res = wait(spawnSimulated(args, maxWaitTime, isSync, maxSimDelayTime));
+		return res;
+	}
 	// for async calls in simulator, always delay by a deterministic amount of time and then
 	// do the call synchronously, otherwise the predictability of the simulator breaks
 	if (!isSync && g_network->isSimulated()) {
@@ -184,8 +275,8 @@ ACTOR Future<int> spawnProcess(std::string path,
 					break;
 				bytesRead += bytes;
 			}
-			TraceEvent(SevDebug, "SpawnPID").detail("PID", pid);
-			TraceEvent(SevDebug, "errorPID").detail("errno", err);
+			// TraceEvent(SevDebug, "SpawnPID").detail("PID", pid);
+			// TraceEvent(SevDebug, "errorPID").detail("errno", err);
 			if (err < 0) {
 				TraceEvent event(SevWarnAlways, "SpawnProcessFailure");
 				setupTraceWithOutput(event, bytesRead, outputBuffer);
@@ -207,7 +298,7 @@ ACTOR Future<int> spawnProcess(std::string path,
 			} else {
 				// child process completed
 				if (!(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-					TraceEvent event(SevWarnAlways, "SpawnProcessFailurePostComplete");
+					TraceEvent event(SevWarnAlways, "SpawnProcessFailure");
 					setupTraceWithOutput(event, bytesRead, outputBuffer);
 					event.detail("Reason", "Command failed")
 					    .detail("Cmd", path)
