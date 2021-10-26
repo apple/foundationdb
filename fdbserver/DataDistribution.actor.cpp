@@ -3370,7 +3370,7 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 		wait(delay(SERVER_KNOBS->TR_REMOVE_MACHINE_TEAM_DELAY, TaskPriority::DataDistribution));
 
 		if (SERVER_KNOBS->PERPETUAL_WIGGLE_DISABLE_REMOVER && self->pauseWiggle) {
-			while(!self->pauseWiggle->get()) {
+			while (!self->pauseWiggle->get()) {
 				wait(self->pauseWiggle->onChange());
 			}
 		} else {
@@ -3500,7 +3500,7 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 		wait(delay(removeServerTeamDelay, TaskPriority::DataDistribution));
 
 		if (SERVER_KNOBS->PERPETUAL_WIGGLE_DISABLE_REMOVER && self->pauseWiggle) {
-			while(!self->pauseWiggle->get()) {
+			while (!self->pauseWiggle->get()) {
 				wait(self->pauseWiggle->onChange());
 			}
 		} else {
