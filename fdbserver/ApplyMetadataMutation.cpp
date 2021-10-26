@@ -32,6 +32,7 @@
 #include "fdbserver/LogSystem.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
+#include "flow/Trace.h"
 #include <iostream>
 #include <utility>
 
@@ -94,7 +95,7 @@ public:
 	    tLogGroupCollection(proxyCommitData_.tLogGroupCollection), tagToServer(&proxyCommitData_.tagToServer),
 	    ssToStorageTeam(&proxyCommitData_.ssToStorageTeam) {
 		for (const auto [ss, team] : proxyCommitData_.ssToStorageTeam) {
-			TraceEvent("SSTeam", dbgid).detail("SS", ss).detail("Team", team);
+			TraceEvent(SevDebug, "SSTeam", dbgid).detail("SS", ss).detail("Team", team);
 			allTeams.insert(team);
 		}
 	}
@@ -284,11 +285,10 @@ private:
 	}
 
 	void checkSetStorageTeamIDKeyPrefix(MutationRef m) {
-		ASSERT_WE_THINK(tLogGroupCollection.isValid());
-		ASSERT_WE_THINK(SERVER_KNOBS->TLOG_NEW_INTERFACE);
-		if (!m.param1.startsWith(storageTeamIdKeyPrefix)) {
+		if (!m.param1.startsWith(storageTeamIdKeyPrefix) || !SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 			return;
 		}
+		ASSERT_WE_THINK(tLogGroupCollection.isValid());
 
 		auto teamid = storageTeamIdKeyDecode(m.param1);
 		auto team = decodeStorageTeams(m.param2);
