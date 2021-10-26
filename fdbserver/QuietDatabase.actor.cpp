@@ -19,6 +19,7 @@
  */
 
 #include <cinttypes>
+#include "fdbclient/SystemData.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Trace.h"
@@ -222,6 +223,30 @@ ACTOR Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
 	}
 
 	return std::make_pair(maxQueueSize, maxPoppedVersionLag);
+}
+
+// Returns a vector of blob worker interfaces which have been persisted under the system key space
+ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx, bool use_system_priority = false) {
+	state Transaction tr(cx);
+	loop {
+		if (use_system_priority) {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		}
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			RangeResult blobWorkersList = wait(tr.getRange(blobWorkerListKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!blobWorkersList.more && blobWorkersList.size() < CLIENT_KNOBS->TOO_MANY);
+
+			std::vector<BlobWorkerInterface> blobWorkers;
+			blobWorkers.reserve(blobWorkersList.size());
+			for (int i = 0; i < blobWorkersList.size(); i++) {
+				blobWorkers.push_back(decodeBlobWorkerListValue(blobWorkersList[i].value));
+			}
+			return blobWorkers;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 }
 
 ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx, bool use_system_priority = false) {

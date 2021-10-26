@@ -154,6 +154,8 @@ public:
 				return false;
 			case ProcessClass::RatekeeperClass:
 				return false;
+			case ProcessClass::BlobManagerClass:
+				return false;
 			case ProcessClass::StorageCacheClass:
 				return false;
 			case ProcessClass::BackupClass:

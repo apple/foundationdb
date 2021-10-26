@@ -635,34 +635,6 @@ struct SplitRangeRequest {
 	}
 };
 
-struct MutationsAndVersionRef {
-	VectorRef<MutationRef> mutations;
-	Version version = invalidVersion;
-	Version knownCommittedVersion = invalidVersion;
-
-	MutationsAndVersionRef() {}
-	explicit MutationsAndVersionRef(Version version, Version knownCommittedVersion)
-	  : version(version), knownCommittedVersion(knownCommittedVersion) {}
-	MutationsAndVersionRef(VectorRef<MutationRef> mutations, Version version, Version knownCommittedVersion)
-	  : mutations(mutations), version(version), knownCommittedVersion(knownCommittedVersion) {}
-	MutationsAndVersionRef(Arena& to, VectorRef<MutationRef> mutations, Version version, Version knownCommittedVersion)
-	  : mutations(to, mutations), version(version), knownCommittedVersion(knownCommittedVersion) {}
-	MutationsAndVersionRef(Arena& to, const MutationsAndVersionRef& from)
-	  : mutations(to, from.mutations), version(from.version), knownCommittedVersion(from.knownCommittedVersion) {}
-	int expectedSize() const { return mutations.expectedSize(); }
-
-	struct OrderByVersion {
-		bool operator()(MutationsAndVersionRef const& a, MutationsAndVersionRef const& b) const {
-			return a.version < b.version;
-		}
-	};
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, mutations, version, knownCommittedVersion);
-	}
-};
-
 struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 	constexpr static FileIdentifier file_identifier = 1783066;
 	Arena arena;

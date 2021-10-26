@@ -1668,7 +1668,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 			// Don't put dangerous commands in the command history
 			if (line.find("writemode") == std::string::npos && line.find("expensive_data_check") == std::string::npos &&
-			    line.find("unlock") == std::string::npos)
+			    line.find("unlock") == std::string::npos && line.find("blobrange") == std::string::npos)
 				linenoise.historyAdd(line);
 		}
 
@@ -1883,6 +1883,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "changefeed")) {
 					bool _result = wait(makeInterruptable(changeFeedCommandActor(localDb, tokens, warn)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "blobrange")) {
+					bool _result = wait(makeInterruptable(blobRangeCommandActor(localDb, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
