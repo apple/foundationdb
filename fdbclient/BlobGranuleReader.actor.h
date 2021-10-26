@@ -40,7 +40,7 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
                                           KeyRangeRef keyRange,
                                           Version readVersion,
                                           Reference<BackupContainerFileSystem> bstore,
-                                          Optional<BlobWorkerStats *> stats=Optional<BlobWorkerStats *>());
+                                          Optional<BlobWorkerStats*> stats = Optional<BlobWorkerStats*>());
 
 ACTOR Future<Void> readBlobGranules(BlobGranuleFileRequest request,
                                     BlobGranuleFileReply reply,
