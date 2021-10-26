@@ -70,7 +70,7 @@ ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf, Refe
 
 	try {
 		loop choose {
-			// TODO: NEELAM: run consistency check workload - how to pass in the DBConfig params
+			// Run consistency check workload. Pass in the DBConfig params as testParams
 			when(wait(runTests(Reference<ClusterConnectionFile>(new ClusterConnectionFile()),
 							   TEST_TYPE_CONSISTENCY_CHECK,
 							   TEST_HERE,

@@ -1612,14 +1612,15 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
 	auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
 	std::vector<Future<Void>> actors;
-	if (connFile) {
+	TraceEvent("TestHarnessStart").log();
+	if (connFile && whatToRun != TEST_TYPE_CONSISTENCY_CHECK) {
 		actors.push_back(reportErrors(monitorLeader(connFile, cc), "MonitorLeader"));
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
 	}
-
 	if (whatToRun == TEST_TYPE_CONSISTENCY_CHECK) {
 		TestSpec spec;
 		Standalone<VectorRef<KeyValueRef>> options;
+		TraceEvent(SevDebug, "TestHarnessConsistencyCheck").detail("File", fileName.c_str());
 		spec.title = LiteralStringRef("ConsistencyCheck");
 		spec.databasePingDelay = 0;
 		spec.timeout = 0;
@@ -1690,6 +1691,7 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 	if (at == TEST_HERE) {
 		auto db = makeReference<AsyncVar<ServerDBInfo>>();
 		std::vector<TesterInterface> iTesters(1);
+		TraceEvent(SevDebug, "TestHarnessRun").detail("File", fileName.c_str());
 		actors.push_back(
 		    reportErrors(monitorServerDBInfo(cc, LocalityData(), db), "MonitorServerDBInfo")); // FIXME: Locality
 		actors.push_back(reportErrors(testerServerCore(iTesters[0], connFile, db, locality), "TesterServerCore"));
@@ -1706,4 +1708,6 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 			throw internal_error();
 		}
 	}
+	//return Void();
+
 }

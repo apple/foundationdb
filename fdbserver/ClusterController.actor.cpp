@@ -3543,7 +3543,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	    self, newDDWorker, ddSingleton, bestFitnessForDD, self->recruitingDistributorID);
 
 	bool ckHealthy = isHealthySingleton<ConsistencyCheckerInterface>(
-	    self, newRKWorker, ckSingleton, bestFitnessForCK, self->recruitingConsistencyCheckerID);
+	    self, newCKWorker, ckSingleton, bestFitnessForCK, self->recruitingConsistencyCheckerID);
 
 	// if any of the singletons are unhealthy (rerecruited or not stable), then do not
 	// consider any further re-recruitments
@@ -4999,14 +4999,14 @@ ACTOR Future<Void> monitorConsistencyChecker(ClusterControllerData* self) {
 
 	TraceEvent("CCMonitorConsistencyChecker", self->id).log();
 	loop {
-		if (self->db.serverInfo->get().consistencyChecker.present() && !self->db.config.consistencyScanEnabled &&
-		    !self->recruitConsistencyChecker.get()) {
+		if (self->db.serverInfo->get().consistencyChecker.present() /*&& !self->db.config.consistencyScanEnabled */
+		    && !self->recruitConsistencyChecker.get()) {
 			// TODO: NEELAM: check
-			if (!self->db.config.consistencyScanEnabled) {
-				const auto& consistencyChecker = self->db.serverInfo->get().consistencyChecker;
-				ConsistencyCheckerSingleton(consistencyChecker)
-				    .halt(self, consistencyChecker.get().locality.processId());
-			}
+			// if (!self->db.config.consistencyScanEnabled) {
+			//	const auto& consistencyChecker = self->db.serverInfo->get().consistencyChecker;
+			//	ConsistencyCheckerSingleton(consistencyChecker)
+			//	    .halt(self, consistencyChecker.get().locality.processId());
+			//}
 			choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().consistencyChecker.get().waitFailure,
 				                            SERVER_KNOBS->CONSISTENCYCHECKER_FAILURE_TIME))) {
@@ -5018,7 +5018,7 @@ ACTOR Future<Void> monitorConsistencyChecker(ClusterControllerData* self) {
 				when(wait(self->recruitConsistencyChecker.onChange())) {}
 				// when(wait(self->db.config.consistencyScanEnabled.onChange())) {}
 			}
-		} else {
+		} else if (self->db.config.consistencyScanEnabled) {
 			TraceEvent("CCMonitorConsistencyCheckerStarting", self->id).log();
 			wait(startConsistencyChecker(self));
 		}

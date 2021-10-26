@@ -1125,21 +1125,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> setConsistencyCheckProgress(Database cx, Key key) {
-		state ReadYourWritesTransaction tr(cx);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.set(consistencyCheckProgressKey, key);
-				wait(tr.commit());
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-		return Void();
-	}
 	// Checks that the data in each shard is the same on each storage server that it resides on.  Also performs some
 	// sanity checks on the sizes of shards and storage servers. Returns false if there is a failure
 	ACTOR Future<bool> checkDataConsistency(Database cx,
@@ -1171,7 +1156,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Reference<IRateControl> rateLimiter = Reference<IRateControl>(new SpeedLimit(rateLimitForThisRound, 1));
 		state double rateLimiterStartTime = now();
 		state int64_t bytesReadInthisRound = 0;
-		state bool resume = true;
 
 		state double dbSize = 100e12;
 		if (g_network->isSimulated()) {
@@ -1180,20 +1164,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			dbSize = _dbSize;
 		}
 
-		// TODO: NEELAM: See if we remembered progress from a previous run
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		Optional<Value> value = wait(tr.get(consistencyCheckProgressKey));
-		KeyRef prevReadKey;
-		if (value.present()) {
-			prevReadKey = value.get();
-		}
-
 		state std::vector<KeyRangeRef> ranges;
 
 		for (int k = 0; k < keyLocations.size() - 1; k++) {
-			// TODO: NEELAM
-			if (resume && keyLocations[k].key < prevReadKey)
-				continue;
 			KeyRangeRef range(keyLocations[k].key, keyLocations[k + 1].key);
 			ranges.push_back(range);
 		}
@@ -1504,14 +1477,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 											self->testFailure("Data inconsistent", true);
 											return false;
 										}
-									}
-									// Remember the last key of the range we just verified
-									ErrorOr<GetKeyValuesReply> rangeResult =
-									    keyValueFutures[keyValueFutures.size() - 1].get();
-
-									if (rangeResult.present() && !rangeResult.get().error.present()) {
-										state GetKeyValuesReply curr = rangeResult.get();
-										setConsistencyCheckProgress(cx, curr.data[curr.data.size() - 1].key);
 									}
 								}
 							}
