@@ -256,6 +256,9 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Counter backupWorkerDoneRequests;
 	Counter getLiveCommittedVersionRequests;
 	Counter reportLiveCommittedVersionRequests;
+	// This counter gives an estimate of the number of non-empty peeks that storage servers
+	// should do from tlogs (in the worst case, ignoring blocking peek timeouts).
+	Counter versionVectorTagUpdates;
 	LatencySample versionVectorSizeOnCVReply;
 
 	Future<Void> logger;
@@ -287,6 +290,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
+	    versionVectorTagUpdates("VersionVectorTagUpdates", cc),
 	    versionVectorSizeOnCVReply("VersionVectorSizeOnCVReply",
 	                               dbgid,
 	                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -1250,10 +1254,15 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 
 void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
 	self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
+
 	if (req.version > self->liveCommittedVersion.get()) {
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
 			// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
 			self->ssVersionVector.setVersion(req.writtenTags.get(), req.version);
+
+			if (req.writtenTags.present()) {
+				self->versionVectorTagUpdates += req.writtenTags.get().size();
+			}
 		}
 		self->databaseLocked = req.locked;
 		self->proxyMetadataVersion = req.metadataVersion;

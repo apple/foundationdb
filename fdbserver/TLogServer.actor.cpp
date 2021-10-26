@@ -547,7 +547,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Counter bytesDurable;
 	Counter blockingPeeks;
 	Counter blockingPeekTimeouts;
+	Counter emptyPeeks;
+	Counter nonEmptyPeeks;
 	std::map<Tag, LatencySample> blockingPeekLatencies;
+	std::map<Tag, LatencySample> peekVersionCounts; // NOTE: Doesn't capture versions peeked from disk
 
 	UID logId;
 	ProtocolVersion protocolVersion;
@@ -630,7 +633,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	    durableKnownCommittedVersion(0), minKnownCommittedVersion(0), queuePoppedVersion(0), minPoppedTagVersion(0),
 	    minPoppedTag(invalidTag), unpoppedRecoveredTags(0), cc("TLog", interf.id().toString()),
 	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), blockingPeeks("BlockingPeeks", cc),
-	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), logId(interf.id()), protocolVersion(protocolVersion),
+	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), emptyPeeks("EmptyPeeks", cc),
+	    nonEmptyPeeks("NonEmptyPeeks", cc), logId(interf.id()), protocolVersion(protocolVersion),
 	    newPersistentDataVersion(invalidVersion), tLogData(tLogData), unrecoveredBefore(1), recoveredAt(1),
 	    logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag), isPrimary(isPrimary),
 	    logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0), locality(tagLocalityInvalid),
@@ -1575,6 +1579,7 @@ void peekMessagesFromMemory(Reference<LogData> self,
 	                           std::make_pair(begin, LengthPrefixedStringRef()),
 	                           [](const auto& l, const auto& r) -> bool { return l.first < r.first; });
 
+	int versionCount = 0;
 	Version currentVersion = -1;
 	for (; it != deque.end(); ++it) {
 		if (it->first != currentVersion) {
@@ -1596,6 +1601,24 @@ void peekMessagesFromMemory(Reference<LogData> self,
 		DEBUG_TAGS_AND_MESSAGE(
 		    "TLogPeek", currentVersion, StringRef((uint8_t*)data + offset, messages.getLength() - offset), self->logId)
 		    .detail("PeekTag", tag);
+		versionCount++;
+	}
+
+	// Update counters.
+	if (!versionCount) {
+		++self->emptyPeeks;
+	} else {
+		++self->nonEmptyPeeks;
+
+		// TODO (version vector) check if this should be included in "status details" json
+		if (self->peekVersionCounts.find(tag) == self->peekVersionCounts.end()) {
+			UID ssID = nondeterministicRandom()->randomUniqueID();
+			std::string s = "PeekVersionCounts " + tag.toString();
+			self->peekVersionCounts.try_emplace(
+			    tag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE);
+		}
+		LatencySample& sample = self->peekVersionCounts.at(tag);
+		sample.addMeasurement(versionCount);
 	}
 }
 
