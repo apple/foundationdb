@@ -1996,25 +1996,24 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		int numBlobWorkerProcesses = 0;
 		for (const auto& worker : workers) {
 			NetworkAddress addr = worker.interf.stableAddress();
+			bool inCCDc = worker.interf.locality.dcId() == ccDcId;
 			if (!configuration.isExcludedServer(worker.interf.addresses())) {
 				if (worker.processClass == ProcessClass::BlobWorkerClass) {
 					numBlobWorkerProcesses++;
 
-					// this is a worker with processClass == BWClass, so should have exactly one blob worker
-					if (blobWorkersByAddr[addr] == 0) {
-						TraceEvent("ConsistencyCheck_NoBWsOnBWClass")
+					// this is a worker with processClass == BWClass, so should have exactly one blob worker if it's in
+					// the same DC
+					int desiredBlobWorkersOnAddr = inCCDc ? 1 : 0;
+
+					if (blobWorkersByAddr[addr] != desiredBlobWorkersOnAddr) {
+						TraceEvent("ConsistencyCheck_WrongBWCountOnBWClass")
 						    .detail("Address", addr)
-						    .detail("NumBlobWorkersOnAddr", blobWorkersByAddr[addr]);
+						    .detail("NumBlobWorkersOnAddr", blobWorkersByAddr[addr])
+						    .detail("DesiredBlobWorkersOnAddr", desiredBlobWorkersOnAddr)
+						    .detail("BwDcId", worker.interf.locality.dcId())
+						    .detail("CcDcId", ccDcId);
 						return false;
 					}
-					/* TODO: replace above code with this once blob manager recovery is handled
-					if (blobWorkersByAddr[addr] != 1) {
-					    TraceEvent("ConsistencyCheck_NoBWOrManyBWsOnBWClass")
-					        .detail("Address", addr)
-					        .detail("NumBlobWorkersOnAddr", blobWorkersByAddr[addr]);
-					    return false;
-					}
-					*/
 				} else {
 					// this is a worker with processClass != BWClass, so there should be no BWs on it
 					if (blobWorkersByAddr[addr] > 0) {
