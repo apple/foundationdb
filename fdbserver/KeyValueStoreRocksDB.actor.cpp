@@ -1,5 +1,10 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
+#include "fdbclient/SystemData.h"
+#include "fdbserver/CoroFlow.h"
+#include "flow/IThreadPool.h"
+#include "flow/ThreadHelper.actor.h"
+#include "flow/flow.h"
 #include <rocksdb/cache.h>
 #include <rocksdb/db.h>
 #include <rocksdb/filter_policy.h>
@@ -7,13 +12,10 @@
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
-#include <rocksdb/version.h>
-#include <rocksdb/utilities/table_properties_collectors.h>
+#include <rocksdb/types.h>
 #include <rocksdb/utilities/checkpoint.h>
-#include "fdbserver/CoroFlow.h"
-#include "flow/flow.h"
-#include "flow/IThreadPool.h"
-#include "flow/ThreadHelper.actor.h"
+#include <rocksdb/utilities/table_properties_collectors.h>
+#include <rocksdb/version.h>
 
 #include <memory>
 #include <tuple>
@@ -753,20 +755,49 @@ TEST_CASE("/rocks/fileops") {
 	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
 	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
 
-	RocksDBKeyValueStore::DB db = ((RocksDBKeyValueStore*)kvStore)->db;
+	state RocksDBKeyValueStore::DB db = ((RocksDBKeyValueStore*)kvStore)->db;
 	ASSERT(db != nullptr);
+
+	rocksdb::SequenceNumber seq = db->GetLatestSequenceNumber();
+
+	std::cout << "Sequence Number: " << (uint64_t)seq << std::endl;
 
 	platform::eraseDirectoryRecursive("checkpoint");
 	std::string checkpointDir = cwd + "checkpoint";
 	rocksdb::Checkpoint* checkpoint;
 	rocksdb::Status s = rocksdb::Checkpoint::Create(db, &checkpoint);
 	ASSERT(s.ok());
-	s = checkpoint->CreateCheckpoint(checkpointDir);
+	uint64_t checkpointSeq = -1;
+	s = checkpoint->CreateCheckpoint(checkpointDir, /*log_size_for_flush=*/0, &checkpointSeq);
+	std::cout << "Checkpoint Sequence Number: " << checkpointSeq << std::endl;
 	ASSERT(s.ok());
+	// std::vector<std::string> files = platform::listFiles(checkpointDir, "sst");
 	std::vector<std::string> files = platform::listFiles(checkpointDir);
+	state std::vector<std::string> checkpointFiles;
 	for (auto& file : files) {
-		std::cout << file << std::endl;
+		std::string path = checkpointDir + "/" + file;
+		std::cout << path << std::endl;
+		checkpointFiles.push_back(path);
 	}
+
+	kvStore->clear(allKeys);	
+	wait(kvStore->commit(false));
+
+	// state std::string rocksDBTestDir2 = "rocksdb-kvstore-reopen-test-db2";
+	// state IKeyValueStore* kvStore2 = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	// wait(kvStore2->init());
+	// RocksDBKeyValueStore::DB db2 = ((RocksDBKeyValueStore*)kvStore2)->db;
+	// ASSERT(db2 != nullptr);
+	Optional<Value> val1 = wait(kvStore->readValue(LiteralStringRef("foo")));
+	ASSERT(Optional<Value>() == val1);
+
+	rocksdb::IngestExternalFileOptions ifo;
+	rocksdb::Status s = db->IngestExternalFile(checkpointFiles, ifo);
+	std::cout << s.ToString() << std::endl;
+
+	Optional<Value> val2 = wait(kvStore->readValue(LiteralStringRef("foo")));
+	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val2);
+
 	return Void();
 }
 

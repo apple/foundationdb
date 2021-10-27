@@ -150,22 +150,9 @@ struct ConfigFollowerCompactRequest {
 	}
 };
 
-struct ConfigFollowerRollbackRequest {
-	static constexpr FileIdentifier file_identifier = 765456;
-	Version version{ 0 };
-	ReplyPromise<Void> reply;
-
-	ConfigFollowerRollbackRequest() = default;
-	explicit ConfigFollowerRollbackRequest(Version version) : version(version) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, version, reply);
-	}
-};
-
 struct ConfigFollowerRollforwardRequest {
 	static constexpr FileIdentifier file_identifier = 678894;
+	Optional<Version> rollback;
 	Version lastKnownCommitted{ 0 };
 	Version target{ 0 };
 	Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
@@ -173,28 +160,30 @@ struct ConfigFollowerRollforwardRequest {
 	ReplyPromise<Void> reply;
 
 	ConfigFollowerRollforwardRequest() = default;
-	explicit ConfigFollowerRollforwardRequest(Version lastKnownCommitted,
+	explicit ConfigFollowerRollforwardRequest(Optional<Version> rollback,
+	                                          Version lastKnownCommitted,
 	                                          Version target,
 	                                          Standalone<VectorRef<VersionedConfigMutationRef>> mutations,
 	                                          Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations)
-	  : lastKnownCommitted(lastKnownCommitted), target(target), mutations(mutations), annotations(annotations) {}
+	  : rollback(rollback), lastKnownCommitted(lastKnownCommitted), target(target), mutations(mutations),
+	    annotations(annotations) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, lastKnownCommitted, target, mutations, annotations, reply);
+		serializer(ar, rollback, lastKnownCommitted, target, mutations, annotations, reply);
 	}
 };
 
 struct ConfigFollowerGetCommittedVersionReply {
 	static constexpr FileIdentifier file_identifier = 9214735;
-	Version version;
+	Version lastCommitted;
 
 	ConfigFollowerGetCommittedVersionReply() = default;
-	explicit ConfigFollowerGetCommittedVersionReply(Version version) : version(version) {}
+	explicit ConfigFollowerGetCommittedVersionReply(Version lastCommitted) : lastCommitted(lastCommitted) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version);
+		serializer(ar, lastCommitted);
 	}
 };
 
@@ -220,7 +209,6 @@ public:
 	RequestStream<ConfigFollowerGetSnapshotAndChangesRequest> getSnapshotAndChanges;
 	RequestStream<ConfigFollowerGetChangesRequest> getChanges;
 	RequestStream<ConfigFollowerCompactRequest> compact;
-	RequestStream<ConfigFollowerRollbackRequest> rollback;
 	RequestStream<ConfigFollowerRollforwardRequest> rollforward;
 	RequestStream<ConfigFollowerGetCommittedVersionRequest> getCommittedVersion;
 
@@ -233,6 +221,6 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, _id, getSnapshotAndChanges, getChanges, compact, rollback, rollforward, getCommittedVersion);
+		serializer(ar, _id, getSnapshotAndChanges, getChanges, compact, rollforward, getCommittedVersion);
 	}
 };

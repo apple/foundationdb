@@ -214,7 +214,7 @@ struct ForwardRequest {
 
 class ServerCoordinators : public ClientCoordinators {
 public:
-	explicit ServerCoordinators(Reference<ClusterConnectionFile>);
+	explicit ServerCoordinators(Reference<IClusterConnectionRecord>);
 
 	std::vector<LeaderElectionRegInterface> leaderElectionServers;
 	std::vector<GenerationRegInterface> stateServers;
@@ -222,7 +222,7 @@ public:
 };
 
 Future<Void> coordinationServer(std::string const& dataFolder,
-                                Reference<ClusterConnectionFile> const& ccf,
+                                Reference<IClusterConnectionRecord> const& ccf,
                                 ConfigDBType const&);
 
 #endif
