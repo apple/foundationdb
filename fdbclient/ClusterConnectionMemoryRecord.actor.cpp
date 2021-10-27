@@ -22,11 +22,6 @@
 #include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-// Returns the connection string currently held in this object.
-ClusterConnectionString const& ClusterConnectionMemoryRecord::getConnectionString() const {
-	return cs;
-}
-
 // Sets the connections string held by this object.
 Future<Void> ClusterConnectionMemoryRecord::setConnectionString(ClusterConnectionString const& conn) {
 	cs = conn;

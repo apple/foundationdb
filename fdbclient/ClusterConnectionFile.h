@@ -34,10 +34,6 @@ public:
 	// Creates a cluster file with a given connection string and saves it to the specified file.
 	explicit ClusterConnectionFile(std::string const& filename, ClusterConnectionString const& contents);
 
-	// Returns the connection string currently held in this object. This may not match the string on disk if it hasn't
-	// been persisted or if the file has been modified externally.
-	ClusterConnectionString const& getConnectionString() const override;
-
 	// Sets the connections string held by this object and persists it.
 	Future<Void> setConnectionString(ClusterConnectionString const&) override;
 
