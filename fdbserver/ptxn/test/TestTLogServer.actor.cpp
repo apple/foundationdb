@@ -612,7 +612,7 @@ TEST_CASE("/fdbserver/ptxn/test/lock_tlog") {
 			break;
 		}
 	}
-
+	ASSERT(index < pContext->numStorageTeamIDs);
 	state bool tlogStopped = false;
 	try {
 		std::vector<Standalone<StringRef>> messages = wait(commitInject(pContext, pContext->storageTeamIDs[index], 1));
