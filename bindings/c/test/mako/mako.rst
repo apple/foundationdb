@@ -39,7 +39,11 @@ Arguments
   | - ``run``:  Run the benchmark
 
 - | ``-c | --cluster <cluster file>``
-  | FDB cluster file (Required)
+  | FDB cluster files (Required, comma-separated)
+
+- | ``-d | --num_databases <num_databases>``
+  | Number of database objects (Default: 1)
+  | If more than 1 cluster is provided, this value should be >= number of cluster
 
 - | ``-a | --api_version <api_version>``
   | FDB API version to use (Default: Latest)
@@ -109,6 +113,13 @@ Arguments
   | - 1 – Default
   | - 2 – Annoying
   | - 3 – Very Annoying (a.k.a. DEBUG)
+
+- | ``--disable_ryw``
+  | Disable snapshot read-your-writes
+
+- | ``--json_report`` defaults to ``mako.json``
+  | ``--json_report=PATH``
+  | Output stats to the specified json file
 
 
 Transaction Specification
