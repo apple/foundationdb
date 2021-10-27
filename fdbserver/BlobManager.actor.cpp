@@ -430,7 +430,7 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 			// Ensure range isn't currently assigned anywhere, and there is only 1 intersecting range
 			auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
 			int count = 0;
-			for (auto& it : currentAssignments) {
+			for (auto i = currentAssignments.begin(); i != currentAssignments.end(); ++i) {
 				/* TODO: rethink asserts here
 				if (assignment.assign.get().type == AssignRequestType::Continue) {
 				    ASSERT(assignment.worker.present());
