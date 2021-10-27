@@ -272,14 +272,14 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 // Picks a worker with the fewest number of already assigned ranges.
 // If there is a tie, picks one such worker at random.
 ACTOR Future<UID> pickWorkerForAssign(BlobManagerData* bmData) {
-	state int minGranulesAssigned = INT_MAX;
-	state std::vector<UID> eligibleWorkers;
-
 	// wait until there are BWs to pick from
 	while (bmData->workerStats.size() == 0) {
 		bmData->restartRecruiting.trigger();
 		wait(bmData->recruitingStream.onChange());
 	}
+
+	int minGranulesAssigned = INT_MAX;
+	std::vector<UID> eligibleWorkers;
 
 	for (auto const& worker : bmData->workerStats) {
 		UID currId = worker.first;
@@ -431,7 +431,7 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 			auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
 			int count = 0;
 			for (auto& it : currentAssignments) {
-				/* TODO: rething asserts here
+				/* TODO: rethink asserts here
 				if (assignment.assign.get().type == AssignRequestType::Continue) {
 				    ASSERT(assignment.worker.present());
 				    ASSERT(it.value() == assignment.worker.get());
@@ -924,7 +924,6 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 
 ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterface bwInterf) {
 	try {
-		printf("adding waitFailure for BW %s\n", bwInterf.id().toString().c_str());
 		state Future<Void> waitFailure = waitFailureClient(bwInterf.waitFailure, SERVER_KNOBS->BLOB_WORKER_TIMEOUT);
 		state Future<Void> monitorStatus = monitorBlobWorkerStatus(bmData, bwInterf);
 
@@ -967,7 +966,7 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 	return Void();
 }
 
-ACTOR Future<Void> ackExistingBlobWorkers(BlobManagerData* bmData) {
+ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 	// skip this entire algorithm for the first blob manager
 	if (bmData->epoch == 1) {
 		bmData->startRecruiting.trigger();
@@ -1017,74 +1016,76 @@ ACTOR Future<Void> ackExistingBlobWorkers(BlobManagerData* bmData) {
 	//    begin persisting it. The worker that had the same range before will now be at a lower seqno.
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
-	state RangeResult blobGranuleMappings;
-	state RangeResult blobGranuleSplits;
 
 	// Step 1. Get the latest known mapping of granules to blob workers (i.e. assignments)
+	state KeyRef beginKey = normalKeys.begin;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			wait(checkManagerLock(tr, bmData));
 
-			RangeResult _results = wait(krmGetRanges(
-			    tr, blobGranuleMappingKeys.begin, KeyRange(normalKeys), 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
-			blobGranuleMappings = _results;
+			// TODO: replace row limit with knob
+			KeyRange nextRange(KeyRangeRef(beginKey, normalKeys.end));
+			RangeResult results = wait(
+			    krmGetRanges(tr, blobGranuleMappingKeys.begin, nextRange, 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
 
-			if (blobGranuleMappings.more) {
-				// TODO: accumulate resutls
+			// Add the mappings to our in memory key range map
+			for (int rangeIdx = 0; rangeIdx < results.size() - 1; rangeIdx++) {
+				Key granuleStartKey = results[rangeIdx].key;
+				Key granuleEndKey = results[rangeIdx + 1].key;
+				if (results[rangeIdx].value.size()) {
+					// note: if the old owner is dead, we handle this in rangeAssigner
+					UID existingOwner = decodeBlobGranuleMappingValue(results[rangeIdx].value);
+					bmData->workerAssignments.insert(KeyRangeRef(granuleStartKey, granuleEndKey), existingOwner);
+				}
 			}
-			break;
+
+			if (!results.more) {
+				break;
+			}
+
+			beginKey = results.readThrough.get();
 		} catch (Error& e) {
 			wait(tr->onError(e));
-		}
-	}
-
-	// Step 1. Add the mappings to our in memory key range map
-	for (int rangeIdx = 0; rangeIdx < blobGranuleMappings.size() - 1; rangeIdx++) {
-		Key granuleStartKey = blobGranuleMappings[rangeIdx].key;
-		Key granuleEndKey = blobGranuleMappings[rangeIdx + 1].key;
-		if (blobGranuleMappings[rangeIdx].value.size()) {
-			// note: if the old owner is dead, we handle this in rangeAssigner
-			UID existingOwner = decodeBlobGranuleMappingValue(blobGranuleMappings[rangeIdx].value);
-			bmData->workerAssignments.insert(KeyRangeRef(granuleStartKey, granuleEndKey), existingOwner);
 		}
 	}
 
 	// Step 2. Get the latest known split intentions
 	tr->reset();
+	beginKey = blobGranuleSplitKeys.begin;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			wait(checkManagerLock(tr, bmData));
 
-			RangeResult _results =
-			    wait(tr->getRange(KeyRangeRef(blobGranuleSplitKeys.begin, blobGranuleSplitKeys.end), 10000));
-			blobGranuleSplits = _results;
+			// TODO: replace row limit with knob
+			RangeResult results = wait(tr->getRange(KeyRangeRef(beginKey, blobGranuleSplitKeys.end), 10000));
 
-			if (blobGranuleSplits.more) {
-				// TODO: accumulate resutls
+			// Add the granules for the started split intentions to the in-memory key range map
+			for (auto split : results) {
+				UID parentGranuleID, granuleID;
+				BlobGranuleSplitState splitState;
+				Version version;
+				if (split.expectedSize() == 0) {
+					continue;
+				}
+				std::tie(parentGranuleID, granuleID) = decodeBlobGranuleSplitKey(split.key);
+				std::tie(splitState, version) = decodeBlobGranuleSplitValue(split.value);
+				const KeyRange range = blobGranuleSplitKeyRangeFor(parentGranuleID);
+				if (splitState <= BlobGranuleSplitState::Started) {
+					bmData->workerAssignments.insert(range, UID());
+				}
 			}
-			break;
+
+			if (!results.more) {
+				break;
+			}
+
+			beginKey = results.readThrough.get();
 		} catch (Error& e) {
 			wait(tr->onError(e));
-		}
-	}
-
-	// Step 2. Add the granules for the started split intentions to the in-memory key range map
-	for (auto split : blobGranuleSplits) {
-		UID parentGranuleID, granuleID;
-		BlobGranuleSplitState splitState;
-		Version version;
-		if (split.expectedSize() == 0) {
-			continue;
-		}
-		std::tie(parentGranuleID, granuleID) = decodeBlobGranuleSplitKey(split.key);
-		std::tie(splitState, version) = decodeBlobGranuleSplitValue(split.value);
-		const KeyRange range = blobGranuleSplitKeyRangeFor(parentGranuleID);
-		if (splitState <= BlobGranuleSplitState::Started) {
-			bmData->workerAssignments.insert(range, UID());
 		}
 	}
 
@@ -1338,8 +1339,9 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	    dbInfo, [](auto const& info) { return info.clusterInterface.recruitBlobWorker; });
 	self.addActor.send(blobWorkerRecruiter(&self, recruitBlobWorker));
 
-	// we need to acknowledge existing blob workers and their assignments before recruiting any new ones
-	wait(ackExistingBlobWorkers(&self));
+	// we need to recover the old blob manager's state (e.g. granule assignments) before
+	// before the new blob manager does anything
+	wait(recoverBlobManager(&self));
 
 	self.addActor.send(monitorClientRanges(&self));
 	self.addActor.send(rangeAssigner(&self));

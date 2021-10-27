@@ -2280,6 +2280,7 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 				if (BW_DEBUG) {
 					printf("Cancelling activeMetadata\n");
 				}
+				bwData->stats.numRangesAssigned--;
 				r.value().activeMetadata->cancelled.send(Void());
 			}
 		}
@@ -2326,14 +2327,8 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 			}
 			r.value().cancel();
 		} else if (!thisAssignmentNewer) {
-			// this assignment is outdated, re-insert it over the current range
-			// TODO: do we really want to do this?? if its an outdated assignment, shouldnt
-			// we not include it anymore
+			// re-insert the known newer range over this existing range
 			newerRanges.push_back(std::pair(r.range(), r.value()));
-			/*
-			alreadyAssigned = true;
-			break;
-			*/
 		}
 	}
 
@@ -2442,11 +2437,11 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 		if (req.type == AssignRequestType::Continue) {
 			resumeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno);
 		} else {
-
 			bool shouldStart = wait(changeBlobRange(
 			    bwData, req.keyRange, req.managerEpoch, req.managerSeqno, true, false, isSelfReassign, req.type));
 
 			if (shouldStart) {
+				bwData->stats.numRangesAssigned++;
 				auto m = bwData->granuleMetadata.rangeContaining(req.keyRange.begin);
 				ASSERT(m.begin() == req.keyRange.begin && m.end() == req.keyRange.end);
 				if (m.value().activeMetadata.isValid()) {
@@ -2613,7 +2608,6 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			}
 			when(AssignBlobRangeRequest _req = waitNext(bwInterf.assignBlobRangeRequest.getFuture())) {
 				++self->stats.rangeAssignmentRequests;
-				++self->stats.numRangesAssigned;
 				state AssignBlobRangeRequest assignReq = _req;
 				if (BW_DEBUG) {
 					printf("Worker %s assigned range [%s - %s) @ (%lld, %lld):\n  continue=%s\n",
@@ -2633,7 +2627,6 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			}
 			when(RevokeBlobRangeRequest _req = waitNext(bwInterf.revokeBlobRangeRequest.getFuture())) {
 				state RevokeBlobRangeRequest revokeReq = _req;
-				--self->stats.numRangesAssigned;
 				if (BW_DEBUG) {
 					printf("Worker %s revoked range [%s - %s) @ (%lld, %lld):\n  dispose=%s\n",
 					       self->id.toString().c_str(),

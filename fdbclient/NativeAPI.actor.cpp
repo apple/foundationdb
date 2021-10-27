@@ -7242,6 +7242,9 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 
 						if (!cx->blobWorker_interf.count(workerId)) {
 							Optional<Value> workerInterface = wait(tr->get(blobWorkerListKeyFor(workerId)));
+							// from the time the mapping was read from the db, the associated blob worker
+							// could have died and so its interface wouldn't be present as part of the blobWorkerList
+							// we persist in the db. So throw wrong_shard_server to get the new mapping
 							if (!workerInterface.present()) {
 								throw wrong_shard_server();
 							}
