@@ -78,6 +78,8 @@ set(FDBCLIENT_SRCS
   MonitorLeader.actor.cpp
   MonitorLeader.h
   MultiVersionAssignmentVars.h
+  ClientLibManagement.actor.cpp
+  ClientLibManagement.actor.h
   MultiVersionTransaction.actor.cpp
   MultiVersionTransaction.h
   MutationList.h

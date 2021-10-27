@@ -245,6 +245,10 @@ public:
 	double BUSYNESS_SPIKE_START_THRESHOLD;
 	double BUSYNESS_SPIKE_SATURATED_THRESHOLD;
 
+	// multi-version client control
+	int MVC_CLIENTLIB_CHUNK_SIZE;
+	int MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION;
+
 	// blob granules
 	bool ENABLE_BLOB_GRANULES;
 
