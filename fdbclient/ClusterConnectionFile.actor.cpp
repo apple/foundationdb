@@ -40,12 +40,6 @@ ClusterConnectionFile::ClusterConnectionFile(std::string const& filename, Cluste
 	cs = contents;
 }
 
-// Returns the connection string currently held in this object. This may not match the string on disk if it hasn't
-// been persisted or if the file has been modified externally.
-ClusterConnectionString const& ClusterConnectionFile::getConnectionString() const {
-	return cs;
-}
-
 // Sets the connections string held by this object and persists it.
 Future<Void> ClusterConnectionFile::setConnectionString(ClusterConnectionString const& conn) {
 	ASSERT(filename.size());
