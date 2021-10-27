@@ -1,3 +1,5 @@
+storageEngineExcludeTypes=3
+
 testTitle=ClientTransactionProfilingCorrectness
 clearAfterTest=false
 runSetup=true

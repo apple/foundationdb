@@ -1,4 +1,5 @@
 extraDB=3
+storageEngineExcludeTypes=3
 
 testTitle=DrUpgrade
 runSetup=false
