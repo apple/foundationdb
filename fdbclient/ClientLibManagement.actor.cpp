@@ -261,7 +261,9 @@ ACTOR Future<Void> uploadClientLibBinary(Database db,
 	state Transaction tr;
 	state size_t firstChunkNo;
 
-	// Disabling AIO, because it supports only page-aligned writes
+	// Disabling AIO, because it currently supports only page-aligned writes, but the size of a client library
+	// is not necessariliy page-aligned, need to investigate if it is a limitation of AIO or just the way
+	// we are wrapping it
 	state Reference<IAsyncFile> fClientLib = wait(IAsyncFileSystem::filesystem()->open(
 	    libFilePath.toString(), IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO, 0));
 
@@ -269,6 +271,7 @@ ACTOR Future<Void> uploadClientLibBinary(Database db,
 
 	loop {
 		arena = Arena();
+		// Use page-aligned buffers for enabling possible future use with AIO
 		buf = makeAlignedString(_PAGE_SIZE, transactionSize, arena);
 		state int bytesRead = wait(fClientLib->read(mutateString(buf), transactionSize, fileOffset));
 		fileOffset += bytesRead;
@@ -490,7 +493,9 @@ ACTOR Future<Void> downloadClientLibrary(Database db,
 		throw client_lib_not_available();
 	}
 
-	// Disabling AIO, because it supports only page-aligned writes
+	// Disabling AIO, because it currently supports only page-aligned writes, but the size of a client library
+	// is not necessariliy page-aligned, need to investigate if it is a limitation of AIO or just the way
+	// we are wrapping it
 	int64_t flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE |
 	                IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
 	state Reference<IAsyncFile> fClientLib =
@@ -507,6 +512,7 @@ ACTOR Future<Void> downloadClientLibrary(Database db,
 	::MD5_Init(&sum);
 
 	arena = Arena();
+	// Use page-aligned buffers for enabling possible future use with AIO
 	buf = makeAlignedString(_PAGE_SIZE, transactionSize, arena);
 
 	loop {

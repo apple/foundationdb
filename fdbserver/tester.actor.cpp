@@ -1742,6 +1742,15 @@ ACTOR Future<Void> testExpectedErrorImpl(Future<Void> test,
 	} else {
 		evt.detail("Reason", "Unexpected success");
 	}
+
+	// Make sure that no duplicate details were provided
+	ASSERT(details.count("TestDescription") == 0);
+	ASSERT(details.count("ExpectedError") == 0);
+	ASSERT(details.count("ExpectedErrorCode") == 0);
+	ASSERT(details.count("ActualError") == 0);
+	ASSERT(details.count("ActualErrorCode") == 0);
+	ASSERT(details.count("Reason") == 0);
+
 	for (auto& p : details) {
 		evt.detail(p.first.c_str(), p.second);
 	}
