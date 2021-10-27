@@ -2018,7 +2018,10 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		// FIXME: we hardcode some machines to specifically test storage cache and blob workers
 		// TODO: caching disabled for this merge
 		int storageCacheMachines = dc == 0 ? 1 : 0;
-		int blobWorkerMachines = 2 + deterministicRandom()->randomInt(0, NUM_EXTRA_BW_MACHINES + 1);
+		int blobWorkerMachines = 0;
+		if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+			blobWorkerMachines = 2 + deterministicRandom()->randomInt(0, NUM_EXTRA_BW_MACHINES + 1);
+		}
 
 		int totalMachines = machines + storageCacheMachines + blobWorkerMachines;
 		int useSeedForMachine = deterministicRandom()->randomInt(0, totalMachines);

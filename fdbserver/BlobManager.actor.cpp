@@ -35,7 +35,7 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-#define BM_DEBUG true
+#define BM_DEBUG false
 
 // FIXME: change all BlobManagerData* to Reference<BlobManagerData> to avoid segfaults if core loop gets error
 

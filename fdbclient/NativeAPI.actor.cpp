@@ -7109,7 +7109,7 @@ Future<Void> DatabaseContext::popChangeFeedMutations(Key rangeID, Version versio
 	return popChangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, version);
 }
 
-#define BG_REQUEST_DEBUG true
+#define BG_REQUEST_DEBUG false
 
 ACTOR Future<Void> getBlobGranuleRangesStreamActor(Reference<DatabaseContext> db,
                                                    PromiseStream<KeyRange> results,

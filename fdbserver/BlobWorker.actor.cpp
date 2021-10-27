@@ -43,7 +43,7 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 #define BW_DEBUG true
-#define BW_REQUEST_DEBUG true
+#define BW_REQUEST_DEBUG false
 
 // TODO add comments + documentation
 struct BlobFileIndex {
@@ -564,6 +564,9 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 			throw e;
 		}
 
+		// FIXME: this could also fail due to actor cancelled. Since we are speculatively writing here, we should clean
+		// stuff up more aggressively
+
 		// if commit failed the first time due to granule assignment conflict (which is non-retryable),
 		// then the file key was persisted and we should delete it. Otherwise, the commit failed
 		// for some other reason and the key wasn't persisted, so we should just propogate the error
@@ -681,6 +684,9 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 			throw e;
 		}
 
+		// FIXME: this could also fail due to actor cancelled. Since we are speculatively writing here, we should clean
+		// stuff up more aggressively
+
 		// if commit failed the first time due to granule assignment conflict (which is non-retryable),
 		// then the file key was persisted and we should delete it. Otherwise, the commit failed
 		// for some other reason and the key wasn't persisted, so we should just propogate the error
@@ -772,7 +778,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
                                             Reference<GranuleMetadata> metadata,
                                             UID granuleID,
-                                            GranuleFiles files) {
+                                            Version version) {
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 	if (BW_DEBUG) {
 		printf("Compacting snapshot from blob for [%s - %s)\n",
@@ -780,29 +786,34 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		       metadata->keyRange.end.printable().c_str());
 	}
 
-	ASSERT(!files.snapshotFiles.empty());
-	ASSERT(!files.deltaFiles.empty());
-	state Version version = files.deltaFiles.back().version;
+	ASSERT(!metadata->files.snapshotFiles.empty());
+	ASSERT(!metadata->files.deltaFiles.empty());
 
 	state Arena filenameArena;
 	state BlobGranuleChunkRef chunk;
 
 	state int64_t compactBytesRead = 0;
-	state Version snapshotVersion = files.snapshotFiles.back().version;
-	BlobFileIndex snapshotF = files.snapshotFiles.back();
+	state Version snapshotVersion = metadata->files.snapshotFiles.back().version;
+	BlobFileIndex snapshotF = metadata->files.snapshotFiles.back();
+
+	ASSERT(snapshotVersion < version);
+
 	chunk.snapshotFile = BlobFilePointerRef(filenameArena, snapshotF.filename, snapshotF.offset, snapshotF.length);
 	compactBytesRead += snapshotF.length;
-	int deltaIdx = files.deltaFiles.size() - 1;
-	while (deltaIdx >= 0 && files.deltaFiles[deltaIdx].version > snapshotVersion) {
+	int deltaIdx = metadata->files.deltaFiles.size() - 1;
+	while (deltaIdx >= 0 && metadata->files.deltaFiles[deltaIdx].version > snapshotVersion) {
 		deltaIdx--;
 	}
 	deltaIdx++;
-	while (deltaIdx < files.deltaFiles.size()) {
-		BlobFileIndex deltaF = files.deltaFiles[deltaIdx];
+	Version lastDeltaVersion = invalidVersion;
+	while (deltaIdx < metadata->files.deltaFiles.size() && metadata->files.deltaFiles[deltaIdx].version <= version) {
+		BlobFileIndex deltaF = metadata->files.deltaFiles[deltaIdx];
 		chunk.deltaFiles.emplace_back_deep(filenameArena, deltaF.filename, deltaF.offset, deltaF.length);
 		compactBytesRead += deltaF.length;
+		lastDeltaVersion = metadata->files.deltaFiles[deltaIdx].version;
 		deltaIdx++;
 	}
+	ASSERT(lastDeltaVersion == version);
 	chunk.includedVersion = version;
 
 	if (BW_DEBUG) {
@@ -853,6 +864,87 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 	}
 }
 
+ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bwData,
+                                                    Reference<GranuleMetadata> metadata,
+                                                    UID granuleID,
+                                                    Version historyVersion,
+                                                    Future<BlobFileIndex> lastDeltaBeforeSnapshot) {
+
+	BlobFileIndex lastDeltaIdx = wait(lastDeltaBeforeSnapshot);
+	state Version reSnapshotVersion = lastDeltaIdx.version;
+	wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
+
+	if (BW_DEBUG) {
+		printf("Granule [%s - %s) checking with BM for re-snapshot after %d bytes\n",
+		       metadata->keyRange.begin.printable().c_str(),
+		       metadata->keyRange.end.printable().c_str(),
+		       metadata->bytesInNewDeltaFiles);
+	}
+
+	TraceEvent("BlobGranuleSnapshotCheck", bwData->id)
+	    .detail("Granule", metadata->keyRange)
+	    .detail("Version", reSnapshotVersion);
+
+	// Save these from the start so repeated requests are idempotent
+	// Need to retry in case response is dropped or manager changes. Eventually, a manager will
+	// either reassign the range with continue=true, or will revoke the range. But, we will keep the
+	// range open at this version for reads until that assignment change happens
+	metadata->resumeSnapshot.reset();
+	state int64_t statusEpoch = metadata->continueEpoch;
+	state int64_t statusSeqno = metadata->continueSeqno;
+	loop {
+		loop {
+			try {
+				wait(bwData->currentManagerStatusStream.get().onReady());
+				bwData->currentManagerStatusStream.get().send(GranuleStatusReply(
+				    metadata->keyRange, true, statusEpoch, statusSeqno, granuleID, historyVersion, reSnapshotVersion));
+				break;
+			} catch (Error& e) {
+				wait(bwData->currentManagerStatusStream.onChange());
+			}
+		}
+
+		// TODO: figure out why the status stream on change isn't working
+		// We could just do something like statusEpoch, save down the original status stream
+		// and compare it to the current one
+		if (statusEpoch < bwData->currentManagerEpoch) {
+			break;
+		}
+
+		choose {
+			when(wait(bwData->currentManagerStatusStream.onChange())) {}
+			when(wait(metadata->resumeSnapshot.getFuture())) { break; }
+			when(wait(delay(1.0))) {}
+		}
+
+		if (BW_DEBUG) {
+			printf("Granule [%s - %s)\n, hasn't heard back from BM in BW %s, re-sending status\n",
+			       metadata->keyRange.begin.printable().c_str(),
+			       metadata->keyRange.end.printable().c_str(),
+			       bwData->id.toString().c_str());
+		}
+	}
+
+	if (BW_DEBUG) {
+		printf("Granule [%s - %s) re-snapshotting after %d bytes\n",
+		       metadata->keyRange.begin.printable().c_str(),
+		       metadata->keyRange.end.printable().c_str(),
+		       metadata->bytesInNewDeltaFiles);
+	}
+	TraceEvent("BlobGranuleSnapshotFile", bwData->id)
+	    .detail("Granule", metadata->keyRange)
+	    .detail("Version", metadata->durableDeltaVersion.get());
+	// TODO: this could read from FDB instead if it knew there was a large range clear at the end or
+	// it knew the granule was small, or something
+
+	// wait for file updater to make sure that last delta file is in the metadata before
+	while (metadata->files.deltaFiles.back().version < reSnapshotVersion) {
+		wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+	}
+	BlobFileIndex reSnapshotIdx = wait(compactFromBlob(bwData, metadata, granuleID, reSnapshotVersion));
+	return reSnapshotIdx;
+}
+
 ACTOR Future<Void> handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
                                             Reference<GranuleMetadata> metadata,
                                             BlobFileIndex completedDeltaFile,
@@ -894,47 +986,65 @@ static bool granuleCanRetry(const Error& e) {
 	};
 }
 
-struct InFlightDeltaFile {
+struct InFlightFile {
 	Future<BlobFileIndex> future;
 	Version version;
 	uint64_t bytes;
+	bool snapshot;
 
-	InFlightDeltaFile(Future<BlobFileIndex> future, Version version, uint64_t bytes)
-	  : future(future), version(version), bytes(bytes) {}
+	InFlightFile(Future<BlobFileIndex> future, Version version, uint64_t bytes, bool snapshot)
+	  : future(future), version(version), bytes(bytes), snapshot(snapshot) {}
 };
 
 static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
                                  Version mutationVersion,
                                  Version rollbackVersion,
-                                 std::deque<InFlightDeltaFile>& inFlightDeltaFiles,
+                                 std::deque<InFlightFile>& inFlightFiles,
                                  std::deque<std::pair<Version, Version>>& rollbacksInProgress,
                                  std::deque<std::pair<Version, Version>>& rollbacksCompleted) {
 	Version cfRollbackVersion;
 	if (metadata->pendingDeltaVersion > rollbackVersion) {
-		// if we already started writing mutations to a delta file with version > rollbackVersion,
+		// if we already started writing mutations to a delta or snapshot file with version > rollbackVersion,
 		// we need to rescind those delta file writes
-		ASSERT(!inFlightDeltaFiles.empty());
+		ASSERT(!inFlightFiles.empty());
 		cfRollbackVersion = metadata->durableDeltaVersion.get();
+		metadata->pendingSnapshotVersion = metadata->durableSnapshotVersion.get();
 		int toPop = 0;
-		for (auto& df : inFlightDeltaFiles) {
-			if (df.version > rollbackVersion) {
-				df.future.cancel();
-				metadata->bytesInNewDeltaFiles -= df.bytes;
-				toPop++;
-				if (BW_DEBUG) {
-					printf("[%s - %s) rollback cancelling delta file @ %lld\n",
-					       metadata->keyRange.begin.printable().c_str(),
-					       metadata->keyRange.end.printable().c_str(),
-					       df.version);
+		bool pendingSnapshot = false;
+		for (auto& f : inFlightFiles) {
+			if (f.snapshot) {
+				if (f.version > rollbackVersion) {
+					f.future.cancel();
+				} else {
+					metadata->pendingSnapshotVersion = f.version;
+					metadata->bytesInNewDeltaFiles = 0;
+					pendingSnapshot = true;
 				}
 			} else {
-				ASSERT(df.version > cfRollbackVersion);
-				cfRollbackVersion = df.version;
+				if (f.version > rollbackVersion) {
+					f.future.cancel();
+					if (!pendingSnapshot) {
+						metadata->bytesInNewDeltaFiles -= f.bytes;
+					}
+					toPop++;
+					if (BW_DEBUG) {
+						printf("[%s - %s) rollback cancelling delta file @ %lld\n",
+						       metadata->keyRange.begin.printable().c_str(),
+						       metadata->keyRange.end.printable().c_str(),
+						       f.version);
+					}
+				} else {
+					ASSERT(f.version > cfRollbackVersion);
+					cfRollbackVersion = f.version;
+					if (pendingSnapshot) {
+						metadata->bytesInNewDeltaFiles += f.bytes;
+					}
+				}
 			}
 		}
 		ASSERT(toPop > 0);
 		while (toPop > 0) {
-			inFlightDeltaFiles.pop_back();
+			inFlightFiles.pop_back();
 			toPop--;
 		}
 		metadata->pendingDeltaVersion = cfRollbackVersion;
@@ -949,7 +1059,9 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 		metadata->deltaArena = Arena();
 		metadata->currentDeltas = GranuleDeltas();
 		metadata->bufferedDeltaBytes = 0;
-		metadata->bufferedDeltaVersion.set(cfRollbackVersion);
+		// Create new notified version so it doesn't go backwards. Do this before signaling the rollback counter so that
+		// the callers pick this new one up for the next waitForVersion
+		metadata->bufferedDeltaVersion = NotifiedVersion(cfRollbackVersion);
 
 	} else {
 		// No pending delta files to discard, just in-memory mutations
@@ -1012,8 +1124,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
                                           Future<GranuleStartState> assignFuture) {
 	state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> oldChangeFeedStream;
 	state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> changeFeedStream;
-	state Future<BlobFileIndex> inFlightBlobSnapshot;
-	state std::deque<InFlightDeltaFile> inFlightDeltaFiles;
+	state std::deque<InFlightFile> inFlightFiles;
 	state Future<Void> oldChangeFeedFuture;
 	state Future<Void> changeFeedFuture;
 	state GranuleStartState startState;
@@ -1060,8 +1171,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		state Version startVersion;
 		state BlobFileIndex newSnapshotFile;
 
-		inFlightBlobSnapshot = Future<BlobFileIndex>(); // not valid!
-
 		// if this is a reassign, calculate how close to a snapshot the previous owner was
 		if (startState.existingFiles.present()) {
 			GranuleFiles files = startState.existingFiles.get();
@@ -1084,9 +1193,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			metadata->durableSnapshotVersion.set(metadata->pendingSnapshotVersion);
 		} else {
 			if (startState.blobFilesToSnapshot.present()) {
-				inFlightBlobSnapshot =
-				    compactFromBlob(bwData, metadata, startState.granuleID, startState.blobFilesToSnapshot.get());
 				startVersion = startState.previousDurableVersion;
+				Future<BlobFileIndex> inFlightBlobSnapshot =
+				    compactFromBlob(bwData, metadata, startState.granuleID, startVersion);
+				inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, startVersion, 0, true));
+
 				metadata->durableSnapshotVersion.set(startState.blobFilesToSnapshot.get().snapshotFiles.back().version);
 			} else {
 				ASSERT(startState.previousDurableVersion == invalidVersion);
@@ -1128,38 +1239,27 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			    changeFeedStream, cfKey, startVersion + 1, MAX_VERSION, metadata->keyRange);
 		}
 
-		state Version lastVersion = startVersion + 1;
 		loop {
 			// check outstanding snapshot/delta files for completion
-			if (inFlightBlobSnapshot.isValid() && inFlightBlobSnapshot.isReady()) {
-				BlobFileIndex completedSnapshot = wait(inFlightBlobSnapshot);
-				metadata->files.snapshotFiles.push_back(completedSnapshot);
-				metadata->durableSnapshotVersion.set(completedSnapshot.version);
-				inFlightBlobSnapshot = Future<BlobFileIndex>(); // not valid!
-				if (BW_DEBUG) {
-					printf("Async Blob Snapshot completed for [%s - %s)\n",
-					       metadata->keyRange.begin.printable().c_str(),
-					       metadata->keyRange.end.printable().c_str());
-				}
-
-				wait(yield(TaskPriority::BlobWorkerUpdateStorage));
-			}
-			if (!inFlightBlobSnapshot.isValid()) {
-				while (inFlightDeltaFiles.size() > 0) {
-					if (inFlightDeltaFiles.front().future.isReady()) {
-						BlobFileIndex completedDeltaFile = wait(inFlightDeltaFiles.front().future);
+			while (inFlightFiles.size() > 0) {
+				if (inFlightFiles.front().future.isReady()) {
+					BlobFileIndex completedFile = wait(inFlightFiles.front().future);
+					if (inFlightFiles.front().snapshot) {
+						metadata->files.snapshotFiles.push_back(completedFile);
+						metadata->durableSnapshotVersion.set(completedFile.version);
+					} else {
 						wait(handleCompletedDeltaFile(bwData,
 						                              metadata,
-						                              completedDeltaFile,
+						                              completedFile,
 						                              cfKey,
 						                              startState.changeFeedStartVersion,
 						                              rollbacksCompleted));
-
-						inFlightDeltaFiles.pop_front();
-						wait(yield(TaskPriority::BlobWorkerUpdateStorage));
-					} else {
-						break;
 					}
+
+					inFlightFiles.pop_front();
+					wait(yield(TaskPriority::BlobWorkerUpdateStorage));
+				} else {
+					break;
 				}
 			}
 
@@ -1167,6 +1267,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			if (BUGGIFY_WITH_PROB(0.001)) {
 				wait(delay(deterministicRandom()->random01(), TaskPriority::BlobWorkerReadChangeFeed));
 			} else {
+				// FIXME: if we're already BlobWorkerReadChangeFeed, don't do a delay?
 				wait(delay(0, TaskPriority::BlobWorkerReadChangeFeed));
 			}
 
@@ -1207,224 +1308,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			// process mutations
 			for (MutationsAndVersionRef d : mutations) {
 				state MutationsAndVersionRef deltas = d;
-				ASSERT(deltas.version >= lastVersion);
-				ASSERT(lastVersion > metadata->bufferedDeltaVersion.get());
 
-				// if lastVersion is complete, update buffered version and potentially write a delta file with
-				// everything up to lastVersion
-				if (deltas.version > lastVersion) {
-					metadata->bufferedDeltaVersion.set(lastVersion);
-				}
-				Version knownNoRollbacksPast = std::min(lastVersion, deltas.knownCommittedVersion);
-				if (knownNoRollbacksPast > committedVersion.get()) {
-					committedVersion.set(knownNoRollbacksPast);
-				}
-
-				// Write a new delta file IF we have enough bytes, and we have all of the previous version's stuff
-				// there to ensure no versions span multiple delta files. Check this by ensuring the version of this
-				// new delta is larger than the previous largest seen version
-				if (metadata->bufferedDeltaBytes >= SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES &&
-				    deltas.version > lastVersion) {
-					if (BW_DEBUG) {
-						printf("Granule [%s - %s) flushing delta file after %d bytes @ %lld %lld%s\n",
-						       metadata->keyRange.begin.printable().c_str(),
-						       metadata->keyRange.end.printable().c_str(),
-						       metadata->bufferedDeltaBytes,
-						       lastVersion,
-						       deltas.version,
-						       oldChangeFeedDataComplete.present() ? ". Finalizing " : "");
-					}
-					TraceEvent("BlobGranuleDeltaFile", bwData->id)
-					    .detail("Granule", metadata->keyRange)
-					    .detail("Version", lastVersion);
-
-					// sanity check for version order
-					ASSERT(lastVersion >= metadata->currentDeltas.back().version);
-					ASSERT(metadata->pendingDeltaVersion < metadata->currentDeltas.front().version);
-
-					// launch pipelined, but wait for previous operation to complete before persisting to FDB
-					Future<BlobFileIndex> previousDeltaFileFuture;
-					if (inFlightBlobSnapshot.isValid() && inFlightDeltaFiles.empty()) {
-						previousDeltaFileFuture = inFlightBlobSnapshot;
-					} else if (!inFlightDeltaFiles.empty()) {
-						previousDeltaFileFuture = inFlightDeltaFiles.back().future;
-					} else {
-						previousDeltaFileFuture = Future<BlobFileIndex>(BlobFileIndex());
-					}
-					Future<BlobFileIndex> dfFuture = writeDeltaFile(bwData,
-					                                                metadata->keyRange,
-					                                                startState.granuleID,
-					                                                metadata->originalEpoch,
-					                                                metadata->originalSeqno,
-					                                                metadata->deltaArena,
-					                                                metadata->currentDeltas,
-					                                                lastVersion,
-					                                                previousDeltaFileFuture,
-					                                                &committedVersion,
-					                                                oldChangeFeedDataComplete);
-					inFlightDeltaFiles.push_back(
-					    InFlightDeltaFile(dfFuture, lastVersion, metadata->bufferedDeltaBytes));
-
-					oldChangeFeedDataComplete.reset();
-					// add new pending delta file
-					ASSERT(metadata->pendingDeltaVersion < lastVersion);
-					metadata->pendingDeltaVersion = lastVersion;
-					metadata->bytesInNewDeltaFiles += metadata->bufferedDeltaBytes;
-
-					bwData->stats.mutationBytesBuffered -= metadata->bufferedDeltaBytes;
-
-					// reset current deltas
-					metadata->deltaArena = Arena();
-					metadata->currentDeltas = GranuleDeltas();
-					metadata->bufferedDeltaBytes = 0;
-
-					// if we just wrote a delta file, check if we need to compact here.
-					// exhaust old change feed before compacting - otherwise we could end up with an endlessly
-					// growing list of previous change feeds in the worst case.
-					snapshotEligible = true;
-				}
-
-				// FIXME: if we're still reading from old change feed, we should probably compact if we're making a
-				// bunch of extra delta files at some point, even if we don't consider it for a split yet
-				if (snapshotEligible && metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT &&
-				    !readOldChangeFeed) {
-					if (BW_DEBUG && (inFlightBlobSnapshot.isValid() || !inFlightDeltaFiles.empty())) {
-						printf("Granule [%s - %s) ready to re-snapshot, waiting for outstanding %d snapshot and %d "
-						       "deltas to "
-						       "finish\n",
-						       metadata->keyRange.begin.printable().c_str(),
-						       metadata->keyRange.end.printable().c_str(),
-						       inFlightBlobSnapshot.isValid() ? 1 : 0,
-						       inFlightDeltaFiles.size());
-					}
-					// wait for all in flight snapshot/delta files
-					if (inFlightBlobSnapshot.isValid()) {
-						BlobFileIndex completedSnapshot = wait(inFlightBlobSnapshot);
-						metadata->files.snapshotFiles.push_back(completedSnapshot);
-						metadata->durableSnapshotVersion.set(completedSnapshot.version);
-						inFlightBlobSnapshot = Future<BlobFileIndex>(); // not valid!
-						wait(yield(TaskPriority::BlobWorkerUpdateStorage));
-					}
-					for (auto& it : inFlightDeltaFiles) {
-						BlobFileIndex completedDeltaFile = wait(it.future);
-						wait(handleCompletedDeltaFile(bwData,
-						                              metadata,
-						                              completedDeltaFile,
-						                              cfKey,
-						                              startState.changeFeedStartVersion,
-						                              rollbacksCompleted));
-						wait(yield(TaskPriority::BlobWorkerUpdateStorage));
-					}
-					inFlightDeltaFiles.clear();
-
-					if (BW_DEBUG) {
-						printf("Granule [%s - %s) checking with BM for re-snapshot after %d bytes\n",
-						       metadata->keyRange.begin.printable().c_str(),
-						       metadata->keyRange.end.printable().c_str(),
-						       metadata->bytesInNewDeltaFiles);
-					}
-
-					TraceEvent("BlobGranuleSnapshotCheck", bwData->id)
-					    .detail("Granule", metadata->keyRange)
-					    .detail("Version", metadata->durableDeltaVersion.get());
-
-					// Save these from the start so repeated requests are idempotent
-					// Need to retry in case response is dropped or manager changes. Eventually, a manager will
-					// either reassign the range with continue=true, or will revoke the range. But, we will keep the
-					// range open at this version for reads until that assignment change happens
-					metadata->resumeSnapshot.reset();
-					state int64_t statusEpoch = metadata->continueEpoch;
-					state int64_t statusSeqno = metadata->continueSeqno;
-					loop {
-						loop {
-							try {
-								wait(bwData->currentManagerStatusStream.get().onReady());
-								bwData->currentManagerStatusStream.get().send(
-								    GranuleStatusReply(metadata->keyRange,
-								                       true,
-								                       statusEpoch,
-								                       statusSeqno,
-								                       startState.granuleID,
-								                       startState.history.get().version,
-								                       metadata->durableDeltaVersion.get()));
-								break;
-							} catch (Error& e) {
-								wait(bwData->currentManagerStatusStream.onChange());
-							}
-						}
-
-						// TODO: figure out why the status stream on change isn't working
-						// We could just do something like statusEpoch, save down the original status stream
-						// and compare it to the current one
-						if (statusEpoch < bwData->currentManagerEpoch) {
-							break;
-						}
-
-						choose {
-							when(wait(bwData->currentManagerStatusStream.onChange())) {}
-							when(wait(metadata->resumeSnapshot.getFuture())) { break; }
-							when(wait(delay(1.0))) {}
-						}
-
-						if (BW_DEBUG) {
-							printf("Granule [%s - %s)\n, hasn't heard back from BM in BW %s, re-sending status\n",
-							       metadata->keyRange.begin.printable().c_str(),
-							       metadata->keyRange.end.printable().c_str(),
-							       bwData->id.toString().c_str());
-						}
-					}
-
-					if (BW_DEBUG) {
-						printf("Granule [%s - %s) re-snapshotting after %d bytes\n",
-						       metadata->keyRange.begin.printable().c_str(),
-						       metadata->keyRange.end.printable().c_str(),
-						       metadata->bytesInNewDeltaFiles);
-					}
-					TraceEvent("BlobGranuleSnapshotFile", bwData->id)
-					    .detail("Granule", metadata->keyRange)
-					    .detail("Version", metadata->durableDeltaVersion.get());
-					// TODO: this could read from FDB instead if it knew there was a large range clear at the end or
-					// it knew the granule was small, or something
-
-					// Have to copy files object so that adding to it as we start writing new delta files in
-					// parallel doesn't conflict. We could also pass the snapshot version and ignore any snapshot
-					// files >= version and any delta files > version, but that's more complicated
-					inFlightBlobSnapshot = compactFromBlob(bwData, metadata, startState.granuleID, metadata->files);
-					metadata->pendingSnapshotVersion = metadata->durableDeltaVersion.get();
-
-					// reset metadata
-					metadata->bytesInNewDeltaFiles = 0;
-				} else if (snapshotEligible &&
-				           metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) {
-					// if we're in the old change feed case and can't snapshot but we have enough data to, don't
-					// queue too many delta files in parallel
-					while (inFlightDeltaFiles.size() > 10) {
-						if (BW_DEBUG) {
-							printf("[%s - %s) Waiting on delta file b/c old change feed\n",
-							       metadata->keyRange.begin.printable().c_str(),
-							       metadata->keyRange.end.printable().c_str());
-						}
-						BlobFileIndex completedDeltaFile = wait(inFlightDeltaFiles.front().future);
-						if (BW_DEBUG) {
-							printf("  [%s - %s) Got completed delta file\n",
-							       metadata->keyRange.begin.printable().c_str(),
-							       metadata->keyRange.end.printable().c_str());
-						}
-						wait(handleCompletedDeltaFile(bwData,
-						                              metadata,
-						                              completedDeltaFile,
-						                              cfKey,
-						                              startState.changeFeedStartVersion,
-						                              rollbacksCompleted));
-						wait(yield(TaskPriority::BlobWorkerUpdateStorage));
-						inFlightDeltaFiles.pop_front();
-					}
-				}
-				snapshotEligible = false;
-
-				wait(yield(TaskPriority::BlobWorkerReadChangeFeed));
-
-				// finally, after we optionally write delta and snapshot files, add new mutations to buffer
+				// buffer mutations at this version. There should not be multiple MutationsAndVersionRef with the same
+				// version
+				ASSERT(deltas.version > metadata->bufferedDeltaVersion.get());
 				if (!deltas.mutations.empty()) {
 					if (deltas.mutations.size() == 1 && deltas.mutations.back().param1 == lastEpochEndPrivateKey) {
 						// Note rollbackVerision is durable, [rollbackVersion+1 - deltas.version] needs to be tossed
@@ -1435,8 +1322,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						BinaryReader br(deltas.mutations[0].param2, Unversioned());
 						br >> rollbackVersion;
 
-						// FIXME: THIS IS FALSE!! delta can commit by getting committed version out of band, without
-						// seeing rollback mutation.
 						ASSERT(rollbackVersion >= metadata->durableDeltaVersion.get());
 
 						if (!rollbacksInProgress.empty()) {
@@ -1473,7 +1358,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 								Version cfRollbackVersion = doGranuleRollback(metadata,
 								                                              deltas.version,
 								                                              rollbackVersion,
-								                                              inFlightDeltaFiles,
+								                                              inFlightFiles,
 								                                              rollbacksInProgress,
 								                                              rollbacksCompleted);
 
@@ -1526,7 +1411,123 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				if (justDidRollback) {
 					break;
 				}
-				lastVersion = deltas.version;
+
+				// update buffered version and committed version
+				metadata->bufferedDeltaVersion.set(deltas.version);
+				Version knownNoRollbacksPast = std::min(deltas.version, deltas.knownCommittedVersion);
+				if (knownNoRollbacksPast > committedVersion.get()) {
+					committedVersion.set(knownNoRollbacksPast);
+				}
+
+				// Write a new delta file IF we have enough bytes
+				if (metadata->bufferedDeltaBytes >= SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES) {
+					if (BW_DEBUG) {
+						printf("Granule [%s - %s) flushing delta file after %d bytes @ %lld %lld%s\n",
+						       metadata->keyRange.begin.printable().c_str(),
+						       metadata->keyRange.end.printable().c_str(),
+						       metadata->bufferedDeltaBytes,
+						       deltas.version,
+						       deltas.version,
+						       oldChangeFeedDataComplete.present() ? ". Finalizing " : "");
+					}
+					TraceEvent("BlobGranuleDeltaFile", bwData->id)
+					    .detail("Granule", metadata->keyRange)
+					    .detail("Version", deltas.version);
+
+					// sanity check for version order
+					ASSERT(deltas.version >= metadata->currentDeltas.back().version);
+					ASSERT(metadata->pendingDeltaVersion < metadata->currentDeltas.front().version);
+
+					// launch pipelined, but wait for previous operation to complete before persisting to FDB
+					Future<BlobFileIndex> previousFuture;
+					if (!inFlightFiles.empty()) {
+						previousFuture = inFlightFiles.back().future;
+					} else {
+						previousFuture = Future<BlobFileIndex>(BlobFileIndex());
+					}
+					Future<BlobFileIndex> dfFuture = writeDeltaFile(bwData,
+					                                                metadata->keyRange,
+					                                                startState.granuleID,
+					                                                metadata->originalEpoch,
+					                                                metadata->originalSeqno,
+					                                                metadata->deltaArena,
+					                                                metadata->currentDeltas,
+					                                                deltas.version,
+					                                                previousFuture,
+					                                                &committedVersion,
+					                                                oldChangeFeedDataComplete);
+					inFlightFiles.push_back(
+					    InFlightFile(dfFuture, deltas.version, metadata->bufferedDeltaBytes, false));
+
+					oldChangeFeedDataComplete.reset();
+					// add new pending delta file
+					ASSERT(metadata->pendingDeltaVersion < deltas.version);
+					metadata->pendingDeltaVersion = deltas.version;
+					metadata->bytesInNewDeltaFiles += metadata->bufferedDeltaBytes;
+
+					bwData->stats.mutationBytesBuffered -= metadata->bufferedDeltaBytes;
+
+					// reset current deltas
+					metadata->deltaArena = Arena();
+					metadata->currentDeltas = GranuleDeltas();
+					metadata->bufferedDeltaBytes = 0;
+
+					// if we just wrote a delta file, check if we need to compact here.
+					// exhaust old change feed before compacting - otherwise we could end up with an endlessly
+					// growing list of previous change feeds in the worst case.
+					snapshotEligible = true;
+				}
+
+				// FIXME: if we're still reading from old change feed, we should probably compact if we're making a
+				// bunch of extra delta files at some point, even if we don't consider it for a split yet
+
+				// If we have enough delta files, try to re-snapshot
+				if (snapshotEligible && metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT &&
+				    !readOldChangeFeed) {
+					if (BW_DEBUG && !inFlightFiles.empty()) {
+						printf("Granule [%s - %s) ready to re-snapshot, waiting for %d outstanding files to finish\n",
+						       metadata->keyRange.begin.printable().c_str(),
+						       metadata->keyRange.end.printable().c_str(),
+						       inFlightFiles.size());
+					}
+
+					// Speculatively assume we will get the range back. This is both a performance optimization, and
+					// necessary to keep consuming committed versions from the change feed so that we can realize our
+					// last delta file is committed and write it
+
+					Future<BlobFileIndex> previousFuture;
+					if (!inFlightFiles.empty()) {
+						previousFuture = inFlightFiles.back().future;
+						ASSERT(!inFlightFiles.back().snapshot);
+					} else {
+						previousFuture = Future<BlobFileIndex>(BlobFileIndex());
+					}
+					Future<BlobFileIndex> inFlightBlobSnapshot = checkSplitAndReSnapshot(
+					    bwData, metadata, startState.granuleID, startState.history.get().version, previousFuture);
+					inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, metadata->pendingDeltaVersion, 0, true));
+
+					metadata->pendingSnapshotVersion = metadata->pendingDeltaVersion;
+
+					// reset metadata
+					metadata->bytesInNewDeltaFiles = 0;
+				} else if (snapshotEligible &&
+				           metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) {
+					// if we're in the old change feed case and can't snapshot but we have enough data to, don't
+					// queue too many files in parallel, and slow down change feed consuming to let file writing catch
+					// up
+					if (inFlightFiles.size() > 10) {
+						if (BW_DEBUG) {
+							printf("[%s - %s) Waiting on delta file b/c old change feed\n",
+							       metadata->keyRange.begin.printable().c_str(),
+							       metadata->keyRange.end.printable().c_str());
+						}
+						choose {
+							when(BlobFileIndex completedDeltaFile = wait(inFlightFiles.front().future)) {}
+							when(wait(delay(0.1))) {}
+						}
+					}
+				}
+				snapshotEligible = false;
 			}
 			justDidRollback = false;
 		}
@@ -1555,8 +1556,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			if (granuleCanRetry(e)) {
 				// explicitly cancel all outstanding write futures BEFORE updating promise stream, to ensure they
 				// can't update files after the re-assigned granule acquires the lock
-				inFlightBlobSnapshot.cancel();
-				for (auto& f : inFlightDeltaFiles) {
+				for (auto& f : inFlightFiles) {
 					f.future.cancel();
 				}
 
@@ -1724,15 +1724,15 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 		wait(metadata->durableDeltaVersion.whenAtLeast(pendingDeltaV));
 	}
 
-	// This isn't strictly needed, but if we're in the process of re-snapshotting, we'd likely rather return that
-	// snapshot file than the previous snapshot file and all its delta files.
+	// This isn't strictly needed, but if we're in the process of re-snapshotting, we'd likely rather
+	// return that snapshot file than the previous snapshot file and all its delta files.
 	if (pendingSnapshotV > metadata->durableSnapshotVersion.get()) {
 		wait(metadata->durableSnapshotVersion.whenAtLeast(pendingSnapshotV));
 	}
 
-	// There is a race here - we wait for pending delta files before this to finish, but while we do, we kick off
-	// another delta file and roll the mutations. In that case, we must return the new delta file instead of in
-	// memory mutations, so we wait for that delta file to complete
+	// There is a race here - we wait for pending delta files before this to finish, but while we do, we
+	// kick off another delta file and roll the mutations. In that case, we must return the new delta
+	// file instead of in memory mutations, so we wait for that delta file to complete
 
 	if (metadata->pendingDeltaVersion != pendingDeltaV) {
 		wait(metadata->durableDeltaVersion.whenAtLeast(pendingDeltaV + 1));
@@ -1749,7 +1749,8 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 		state std::vector<Reference<GranuleMetadata>> granules;
 
 		auto checkRanges = bwData->granuleMetadata.intersectingRanges(req.keyRange);
-		// check for gaps as errors and copy references to granule metadata before yielding or doing any work
+		// check for gaps as errors and copy references to granule metadata before yielding or doing any
+		// work
 		KeyRef lastRangeEnd = req.keyRange.begin;
 
 		for (auto& r : checkRanges) {
@@ -1786,8 +1787,8 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 		for (auto m : granules) {
 			if (readThrough >= m->keyRange.end) {
 				// previous read did time travel that already included this granule
-				// FIXME: this will get more complicated with merges where this could potentially include partial
-				// boundaries. For now with only splits we can skip the whole range
+				// FIXME: this will get more complicated with merges where this could potentially
+				// include partial boundaries. For now with only splits we can skip the whole range
 				continue;
 			}
 			ASSERT(readThrough == m->keyRange.begin);
@@ -1811,7 +1812,8 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 					wait(metadata->historyLoaded.getFuture());
 				}
 
-				// FIXME: doesn't work once we add granule merging, could be multiple ranges and/or multiple parents
+				// FIXME: doesn't work once we add granule merging, could be multiple ranges and/or
+				// multiple parents
 				Reference<GranuleHistoryEntry> cur = bwData->granuleHistory.rangeContaining(req.keyRange.begin).value();
 				// FIXME: use skip pointers here
 				while (cur.isValid() && req.readVersion < cur->startVersion) {
@@ -1820,7 +1822,8 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 
 				if (!cur.isValid()) {
 					// this request predates blob data
-					// FIXME: probably want a dedicated exception like blob_range_too_old or something instead
+					// FIXME: probably want a dedicated exception like blob_range_too_old or something
+					// instead
 					throw transaction_too_old();
 				}
 
@@ -1853,7 +1856,8 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 						// didn't yield, so no need to check rollback stuff
 						break;
 					}
-					// rollback resets all of the version information, so we have to redo wait for version on rollback
+					// rollback resets all of the version information, so we have to redo wait for
+					// version on rollback
 					state int rollbackCount = metadata->rollbackCount.get();
 					choose {
 						when(wait(waitForVersionFuture)) {}
@@ -1888,8 +1892,8 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 			while (i >= 0 && chunkFiles.snapshotFiles[i].version > req.readVersion) {
 				i--;
 			}
-			// because of granule history, we should always be able to find the desired snapshot version, and have
-			// thrown transaction_too_old earlier if not possible.
+			// because of granule history, we should always be able to find the desired snapshot
+			// version, and have thrown transaction_too_old earlier if not possible.
 			ASSERT(i >= 0);
 
 			BlobFileIndex snapshotF = chunkFiles.snapshotFiles[i];
@@ -1905,8 +1909,8 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 				i--;
 			}
 			if (i < lastDeltaFileIdx) {
-				// we skipped one file at the end with a larger read version, this will actually contain our query
-				// version, so add it back.
+				// we skipped one file at the end with a larger read version, this will actually contain
+				// our query version, so add it back.
 				i++;
 			}
 			// only include delta files after the snapshot file
@@ -1925,7 +1929,8 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 			}
 
 			// new deltas (if version is larger than version of last delta file)
-			// FIXME: do trivial key bounds here if key range is not fully contained in request key range
+			// FIXME: do trivial key bounds here if key range is not fully contained in request key
+			// range
 
 			if (req.readVersion > metadata->durableDeltaVersion.get()) {
 				ASSERT(metadata->durableDeltaVersion.get() == metadata->pendingDeltaVersion);
@@ -2021,8 +2026,8 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				info.doSnapshot = false;
 
 				if (!info.history.present()) {
-					// the only time history can be not present if a lock already exists is if it's a new granule and it
-					// died before it could persist the initial snapshot from FDB
+					// the only time history can be not present if a lock already exists is if it's a
+					// new granule and it died before it could persist the initial snapshot from FDB
 					ASSERT(info.existingFiles.get().snapshotFiles.empty());
 				}
 
@@ -2036,17 +2041,17 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 					info.previousDurableVersion = info.existingFiles.get().deltaFiles.back().version;
 				}
 
-				// for the non-splitting cases, this doesn't need to be 100% accurate, it just needs to be
-				// smaller than the next delta file write.
+				// for the non-splitting cases, this doesn't need to be 100% accurate, it just needs to
+				// be smaller than the next delta file write.
 				info.changeFeedStartVersion = info.previousDurableVersion;
 			} else {
 				// else we are first, no need to check for owner conflict
-				// FIXME: use actual 16 bytes of UID instead of converting it to 32 character string and then that
-				// to bytes
+				// FIXME: use actual 16 bytes of UID instead of converting it to 32 character string and
+				// then that to bytes
 
 				if (info.history.present()) {
-					// if this granule is derived from a split or merge, this history entry is already present (written
-					// by the blob manager)
+					// if this granule is derived from a split or merge, this history entry is already
+					// present (written by the blob manager)
 					info.granuleID = info.history.get().value.granuleID;
 				} else {
 					// FIXME: could avoid max uid for granule ids here
@@ -2062,8 +2067,9 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			tr.set(lockKey, blobGranuleLockValueFor(req.managerEpoch, req.managerSeqno, info.granuleID));
 			wait(krmSetRange(&tr, blobGranuleMappingKeys.begin, req.keyRange, blobGranuleMappingValueFor(bwData->id)));
 
-			// If anything in previousGranules, need to do the handoff logic and set ret.previousChangeFeedId, and
-			// the previous durable version will come from the previous granules
+			// If anything in previousGranules, need to do the handoff logic and set
+			// ret.previousChangeFeedId, and the previous durable version will come from the previous
+			// granules
 			if (info.history.present() && info.history.get().value.parentGranules.size() > 0) {
 				// TODO change this for merge
 				ASSERT(info.history.get().value.parentGranules.size() == 1);
@@ -2096,8 +2102,8 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 						                             info.parentGranule.get().second,
 						                             info.granuleID,
 						                             BlobGranuleSplitState::Assigned));
-						// change feed was created as part of this transaction, changeFeedStartVersion will be
-						// set later
+						// change feed was created as part of this transaction, changeFeedStartVersion
+						// will be set later
 					} else {
 						// this sub-granule is done splitting, no need for split logic.
 						ASSERT(granuleSplitState.first == BlobGranuleSplitState::Done);
@@ -2175,20 +2181,22 @@ static bool newerRangeAssignment(GranuleRangeMetadata oldMetadata, int64_t epoch
 // TODO unit test this assignment, particularly out-of-order insertions!
 
 // The contract from the blob manager is:
-// If a key range [A, B) was assigned to the worker at seqno S1, no part of the keyspace that intersects [A, B] may
-// be re-assigned to the worker until the range has been revoked from this worker. This revoking can either happen
-// by the blob manager willingly relinquishing the range, or by the blob manager reassigning it somewhere else. This
-// means that if the worker gets an assignment for any range that intersects [A, B) at S3, there must have been a
-// revoke message for [A, B) with seqno S3 where S1 < S2 < S3, that was delivered out of order. This means that if
-// there are any intersecting but not fully overlapping ranges with a new range assignment, they had already been
-// revoked. So the worker will mark them as revoked, but leave the sequence number as S1, so that when the actual
-// revoke message comes in, it is a no-op, but updates the sequence number. Similarly, if a worker gets an assign
-// message for any range that already has a higher sequence number, that range was either revoked, or revoked and
-// then re-assigned. Either way, this assignment is no longer valid.
+// If a key range [A, B) was assigned to the worker at seqno S1, no part of the keyspace that intersects
+// [A, B] may be re-assigned to the worker until the range has been revoked from this worker. This
+// revoking can either happen by the blob manager willingly relinquishing the range, or by the blob
+// manager reassigning it somewhere else. This means that if the worker gets an assignment for any range
+// that intersects [A, B) at S3, there must have been a revoke message for [A, B) with seqno S3 where S1
+// < S2 < S3, that was delivered out of order. This means that if there are any intersecting but not
+// fully overlapping ranges with a new range assignment, they had already been revoked. So the worker
+// will mark them as revoked, but leave the sequence number as S1, so that when the actual revoke
+// message comes in, it is a no-op, but updates the sequence number. Similarly, if a worker gets an
+// assign message for any range that already has a higher sequence number, that range was either
+// revoked, or revoked and then re-assigned. Either way, this assignment is no longer valid.
 
-// Returns future to wait on to ensure prior work of other granules is done before responding to the manager with a
-// successful assignment And if the change produced a new granule that needs to start doing work, returns the new
-// granule so that the caller can start() it with the appropriate starting state.
+// Returns future to wait on to ensure prior work of other granules is done before responding to the
+// manager with a successful assignment And if the change produced a new granule that needs to start
+// doing work, returns the new granule so that the caller can start() it with the appropriate starting
+// state.
 ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
                                    KeyRange keyRange,
                                    int64_t epoch,
@@ -2212,10 +2220,10 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 	}
 
 	// For each range that intersects this update:
-	// If the identical range already exists at the same assignment sequence number and it is not a self-reassign,
-	// this is a noop. Otherwise, this will consist of a series of ranges that are either older, or newer. For each
-	// older range, cancel it if it is active. Insert the current range. Re-insert all newer ranges over the current
-	// range.
+	// If the identical range already exists at the same assignment sequence number and it is not a
+	// self-reassign, this is a noop. Otherwise, this will consist of a series of ranges that are either
+	// older, or newer. For each older range, cancel it if it is active. Insert the current range.
+	// Re-insert all newer ranges over the current range.
 
 	state std::vector<Future<Void>> futures;
 
@@ -2236,8 +2244,8 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 		bool thisAssignmentNewer = newerRangeAssignment(r.value(), epoch, seqno);
 		printf("thisAssignmentNewer=%s\n", thisAssignmentNewer ? "true" : "false");
 
-		// if this granule already has it, and this was a specialassignment (i.e. a new blob maanger is trying to
-		// reassign granules), then just continue
+		// if this granule already has it, and this was a specialassignment (i.e. a new blob maanger is
+		// trying to reassign granules), then just continue
 		if (active && assignType.get() == AssignRequestType::Reassign && r.begin() == keyRange.begin &&
 		    r.end() == keyRange.end) {
 			r.value().lastEpoch = epoch;
@@ -2326,7 +2334,8 @@ static bool resumeBlobRange(Reference<BlobWorkerData> bwData, KeyRange keyRange,
 	    !existingRange.value().activeMetadata.isValid()) {
 
 		if (BW_DEBUG) {
-			printf("BW %s got out of date resume range for [%s - %s) @ (%lld, %lld). Currently  [%s - %s) @ (%lld, "
+			printf("BW %s got out of date resume range for [%s - %s) @ (%lld, %lld). Currently  [%s - "
+			       "%s) @ (%lld, "
 			       "%lld): %s\n",
 			       bwData->id.toString().c_str(),
 			       existingRange.begin().printable().c_str(),
