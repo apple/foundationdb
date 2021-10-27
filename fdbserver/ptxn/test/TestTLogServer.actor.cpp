@@ -605,10 +605,14 @@ TEST_CASE("/fdbserver/ptxn/test/lock_tlog") {
 	bool allGroupLocked = groups == groupLocked;
 	ASSERT(allGroupLocked);
 
-	int index = deterministicRandom()->randomInt(0, pContext->numStorageTeamIDs);
-	while (pContext->getTLogLeaderByStorageTeamID(pContext->storageTeamIDs[index]) != pContext->tLogInterfaces[0]) {
-		index = deterministicRandom()->randomInt(0, pContext->numStorageTeamIDs);
+	int index = 0;
+	for (; index < pContext->numStorageTeamIDs; index++) {
+		// find the first storage team affiliated to tlog[0]
+		if(pContext->getTLogLeaderByStorageTeamID(pContext->storageTeamIDs[index]) == pContext->tLogInterfaces[0]) {
+			break;
+		}
 	}
+
 	state bool tlogStopped = false;
 	try {
 		std::vector<Standalone<StringRef>> messages = wait(commitInject(pContext, pContext->storageTeamIDs[index], 1));
