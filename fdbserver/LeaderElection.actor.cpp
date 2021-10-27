@@ -24,8 +24,6 @@
 #include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-Optional<std::pair<LeaderInfo, bool>> getLeader(const vector<Optional<LeaderInfo>>& nominees);
-
 ACTOR Future<Void> submitCandidacy(Key key,
                                    LeaderElectionRegInterface coord,
                                    LeaderInfo myInfo,
