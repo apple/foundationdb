@@ -577,10 +577,9 @@ TEST_CASE("/fdbserver/ptxn/test/run_storage_server") {
 }
 
 TEST_CASE("/fdbserver/ptxn/test/lock_tlog") {
-	// idea: lock tlog server first, and write to a random storage team, expect tlog_stopped error.
-
-	// this test should only have 1 tlog server(i.e. numTLogs=1), so that committing to any storage team would fail
-	// after locking it
+	// idea: 1. lock tlog server first
+	//       2. write to a random storage team affiliated to the locked tlog
+	//       3. expect tlog_stopped error.
 
 	state ptxn::test::TestDriverOptions options(params);
 	state std::vector<Future<Void>> actors;
@@ -606,9 +605,14 @@ TEST_CASE("/fdbserver/ptxn/test/lock_tlog") {
 	bool allGroupLocked = groups == groupLocked;
 	ASSERT(allGroupLocked);
 
-	// assert writing to a random stroage node would fail with tlog_stopped error.
-	ASSERT(pContext->numTLogs == 1);
-	int index = deterministicRandom()->randomInt(0, pContext->numStorageTeamIDs);
+	int index = 0;
+	for (; index < pContext->numStorageTeamIDs; index++) {
+		// find the first storage team affiliated to tlog[0]
+		if(pContext->getTLogLeaderByStorageTeamID(pContext->storageTeamIDs[index]) == pContext->tLogInterfaces[0]) {
+			break;
+		}
+	}
+	ASSERT(index < pContext->numStorageTeamIDs);
 	state bool tlogStopped = false;
 	try {
 		std::vector<Standalone<StringRef>> messages = wait(commitInject(pContext, pContext->storageTeamIDs[index], 1));
