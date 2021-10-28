@@ -2,6 +2,7 @@ set(FDBCLI_SRCS
   fdbcli.actor.cpp
   fdbcli.actor.h
   AdvanceVersionCommand.actor.cpp
+  BlobRangeCommand.actor.cpp
   CacheRangeCommand.actor.cpp
   ConfigureCommand.actor.cpp
   ConsistencyCheckCommand.actor.cpp
@@ -16,6 +17,7 @@ set(FDBCLI_SRCS
   IncludeCommand.actor.cpp
   KillCommand.actor.cpp
   LockCommand.actor.cpp
+  ChangeFeedCommand.actor.cpp
   MaintenanceCommand.actor.cpp
   ProfileCommand.actor.cpp
   SetClassCommand.actor.cpp

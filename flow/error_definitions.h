@@ -78,7 +78,10 @@ ERROR( wrong_connection_file, 1054, "Connection file mismatch")
 ERROR( version_already_compacted, 1055, "The requested changes have been compacted away")
 ERROR( local_config_changed, 1056, "Local configuration file has changed. Restart and apply these changes" )
 ERROR( failed_to_reach_quorum, 1057, "Failed to reach quorum from configuration database nodes. Retry sending these requests" )
-ERROR( wrong_format_version, 1058, "Format version not recognize." )
+ERROR( wrong_format_version, 1058, "Format version not recognized" )
+ERROR( unknown_change_feed, 1059, "Change feed not found" )
+ERROR( change_feed_not_registered, 1060, "Change feed not registered" )
+ERROR( granule_assignment_conflict, 1061, "Conflicting attempts to assign blob granules" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -175,6 +178,11 @@ ERROR( special_keys_write_disabled, 2114, "Special Key space is not allowed to w
 ERROR( special_keys_no_write_module_found, 2115, "Special key space key or keyrange in set or clear does not intersect a module" )
 ERROR( special_keys_cross_module_clear, 2116, "Special key space clear crosses modules" )
 ERROR( special_keys_api_failure, 2117, "Api call through special keys failed. For more information, call get on special key 0xff0xff/error_message to get a json string of the error message." )
+ERROR( client_lib_invalid_metadata, 2118, "Invalid client library metadata." )
+ERROR( client_lib_already_exists, 2119, "Client library with same identifier already exists on the cluster." )
+ERROR( client_lib_not_found, 2120, "Client library for the given identifier not found." )
+ERROR( client_lib_not_available, 2121, "Client library exists, but is not available for download." )
+ERROR( client_lib_invalid_binary, 2122, "Invalid client library binary." )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

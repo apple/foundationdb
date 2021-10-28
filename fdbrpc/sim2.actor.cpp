@@ -1071,7 +1071,6 @@ public:
 	bool isAddressOnThisHost(NetworkAddress const& addr) const override {
 		return addr.ip == getCurrentProcess()->address.ip;
 	}
-	virtual bool isAddressOnThisHost(NetworkAddress const& addr) { return addr.ip == getCurrentProcess()->address.ip; }
 
 	ACTOR static Future<Void> deleteFileImpl(Sim2* self, std::string filename, bool mustBeDurable) {
 		// This is a _rudimentary_ simulation of the untrustworthiness of non-durable deletes and the possibility of
@@ -2107,7 +2106,7 @@ public:
 		return delay(0, taskID, process->machine->machineProcess);
 	}
 
-	ProtocolVersion protocolVersion() override { return getCurrentProcess()->protocolVersion; }
+	ProtocolVersion protocolVersion() const override { return getCurrentProcess()->protocolVersion; }
 
 	// time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	// time should only be modified from the main thread.

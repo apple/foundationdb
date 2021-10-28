@@ -95,10 +95,14 @@ enum class TaskPriority {
 	DataDistribution = 3502,
 	DataDistributionLow = 3501,
 	DataDistributionVeryLow = 3500,
+	BlobManager = 3490,
 	DiskWrite = 3010,
 	UpdateStorage = 3000,
 	CompactCache = 2900,
 	TLogSpilledPeekReply = 2800,
+	BlobWorkerReadChangeFeed = 2720,
+	BlobWorkerUpdateFDB = 2710,
+	BlobWorkerUpdateStorage = 2700,
 	FetchKeys = 2500,
 	RestoreApplierWriteDB = 2310,
 	RestoreApplierReceiveMutations = 2300,
@@ -580,7 +584,7 @@ public:
 	virtual ActorLineageSet& getActorLineageSet() = 0;
 #endif
 
-	virtual ProtocolVersion protocolVersion() = 0;
+	virtual ProtocolVersion protocolVersion() const = 0;
 
 	// Shorthand for transport().getLocalAddress()
 	static NetworkAddress getLocalAddress() {

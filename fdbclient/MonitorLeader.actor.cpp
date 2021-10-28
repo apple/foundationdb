@@ -18,8 +18,10 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/genericactors.actor.h"
@@ -48,124 +50,31 @@ std::string trim(std::string const& connectionString) {
 
 } // namespace
 
-std::pair<std::string, bool> ClusterConnectionFile::lookupClusterFileName(std::string const& filename) {
-	if (filename.length())
-		return std::make_pair(filename, false);
+FDB_DEFINE_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
 
-	std::string f;
-	bool isDefaultFile = true;
-	if (platform::getEnvironmentVar(CLUSTER_FILE_ENV_VAR_NAME, f)) {
-		// If this is set but points to a file that does not
-		// exist, we will not fallback to any other methods
-		isDefaultFile = false;
-	} else if (fileExists("fdb.cluster"))
-		f = "fdb.cluster";
-	else
-		f = platform::getDefaultClusterFilePath();
-
-	return std::make_pair(f, isDefaultFile);
-}
-
-std::string ClusterConnectionFile::getErrorString(std::pair<std::string, bool> const& resolvedClusterFile,
-                                                  Error const& e) {
-	bool isDefault = resolvedClusterFile.second;
-	if (e.code() == error_code_connection_string_invalid) {
-		return format("Invalid cluster file `%s': %d %s", resolvedClusterFile.first.c_str(), e.code(), e.what());
-	} else if (e.code() == error_code_no_cluster_file_found) {
-		if (isDefault)
-			return format("Unable to read cluster file `./fdb.cluster' or `%s' and %s unset: %d %s",
-			              platform::getDefaultClusterFilePath().c_str(),
-			              CLUSTER_FILE_ENV_VAR_NAME,
-			              e.code(),
-			              e.what());
-		else
-			return format(
-			    "Unable to read cluster file `%s': %d %s", resolvedClusterFile.first.c_str(), e.code(), e.what());
-	} else {
-		return format(
-		    "Unexpected error loading cluster file `%s': %d %s", resolvedClusterFile.first.c_str(), e.code(), e.what());
-	}
-}
-
-ClusterConnectionFile::ClusterConnectionFile(std::string const& filename) {
-	if (!fileExists(filename)) {
-		throw no_cluster_file_found();
-	}
-
-	cs = ClusterConnectionString(readFileBytes(filename, MAX_CLUSTER_FILE_BYTES));
-	this->filename = filename;
-	setConn = false;
-}
-
-ClusterConnectionFile::ClusterConnectionFile(std::string const& filename, ClusterConnectionString const& contents) {
-	this->filename = filename;
-	cs = contents;
-	setConn = true;
-}
-
-ClusterConnectionString const& ClusterConnectionFile::getConnectionString() const {
+// Returns the connection string currently held in this object. This may not match the stored record if it hasn't
+// been persisted or if the persistent storage for the record has been modified externally.
+ClusterConnectionString const& IClusterConnectionRecord::getConnectionString() const {
 	return cs;
 }
 
-void ClusterConnectionFile::notifyConnected() {
-	if (setConn) {
-		this->writeFile();
-	}
-}
-
-bool ClusterConnectionFile::fileContentsUpToDate() const {
+Future<bool> IClusterConnectionRecord::upToDate() {
 	ClusterConnectionString temp;
-	return fileContentsUpToDate(temp);
+	return upToDate(temp);
 }
 
-bool ClusterConnectionFile::fileContentsUpToDate(ClusterConnectionString& fileConnectionString) const {
-	try {
-		// the cluster file hasn't been created yet so there's nothing to check
-		if (setConn)
-			return true;
-
-		ClusterConnectionFile temp(filename);
-		fileConnectionString = temp.getConnectionString();
-		return fileConnectionString.toString() == cs.toString();
-	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "ClusterFileError").error(e).detail("Filename", filename);
-		return false; // Swallow the error and report that the file is out of date
+void IClusterConnectionRecord::notifyConnected() {
+	if (connectionStringNeedsPersisted) {
+		this->persist();
 	}
 }
 
-bool ClusterConnectionFile::writeFile() {
-	setConn = false;
-	if (filename.size()) {
-		try {
-			atomicReplace(filename,
-			              "# DO NOT EDIT!\n# This file is auto-generated, it is not to be edited by hand\n" +
-			                  cs.toString().append("\n"));
-			if (!fileContentsUpToDate()) {
-				// This should only happen in rare scenarios where multiple processes are updating the same file to
-				// different values simultaneously In that case, we don't have any guarantees about which file will
-				// ultimately be written
-				TraceEvent(SevWarnAlways, "ClusterFileChangedAfterReplace")
-				    .detail("Filename", filename)
-				    .detail("ConnStr", cs.toString());
-				return false;
-			}
-
-			return true;
-		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "UnableToChangeConnectionFile")
-			    .error(e)
-			    .detail("Filename", filename)
-			    .detail("ConnStr", cs.toString());
-		}
-	}
-
-	return false;
+bool IClusterConnectionRecord::needsToBePersisted() const {
+	return connectionStringNeedsPersisted;
 }
 
-void ClusterConnectionFile::setConnectionString(ClusterConnectionString const& conn) {
-	ASSERT(filename.size());
-	cs = conn;
-	writeFile();
+void IClusterConnectionRecord::setPersisted() {
+	connectionStringNeedsPersisted = false;
 }
 
 std::string ClusterConnectionString::getErrorString(std::string const& source, Error const& e) {
@@ -367,8 +276,8 @@ std::string ClusterConnectionString::toString() const {
 	return s;
 }
 
-ClientCoordinators::ClientCoordinators(Reference<ClusterConnectionFile> ccf) : ccf(ccf) {
-	ClusterConnectionString cs = ccf->getConnectionString();
+ClientCoordinators::ClientCoordinators(Reference<IClusterConnectionRecord> ccr) : ccr(ccr) {
+	ClusterConnectionString cs = ccr->getConnectionString();
 	for (auto s = cs.coordinators().begin(); s != cs.coordinators().end(); ++s)
 		clientLeaderServers.push_back(ClientLeaderRegInterface(*s));
 	clusterKey = cs.clusterKey();
@@ -379,7 +288,7 @@ ClientCoordinators::ClientCoordinators(Key clusterKey, std::vector<NetworkAddres
 	for (const auto& coord : coordinators) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(coord));
 	}
-	ccf = makeReference<ClusterConnectionFile>(ClusterConnectionString(coordinators, clusterKey));
+	ccr = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(coordinators, clusterKey));
 }
 
 ClientLeaderRegInterface::ClientLeaderRegInterface(NetworkAddress remote)
@@ -476,10 +385,10 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<Leade
 }
 
 // Leader is the process that will be elected by coordinators as the cluster controller
-ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<ClusterConnectionFile> connFile,
+ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterConnectionRecord> connRecord,
                                                            Reference<AsyncVar<Value>> outSerializedLeaderInfo,
                                                            MonitorLeaderInfo info) {
-	state ClientCoordinators coordinators(info.intermediateConnFile);
+	state ClientCoordinators coordinators(info.intermediateConnRecord);
 	state AsyncTrigger nomineeChange;
 	state std::vector<Optional<LeaderInfo>> nominees;
 	state Future<Void> allActors;
@@ -502,25 +411,26 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<ClusterConn
 			if (leader.get().first.forward) {
 				TraceEvent("MonitorLeaderForwarding")
 				    .detail("NewConnStr", leader.get().first.serializedInfo.toString())
-				    .detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString())
+				    .detail("OldConnStr", info.intermediateConnRecord->getConnectionString().toString())
 				    .trackLatest("MonitorLeaderForwarding");
-				info.intermediateConnFile = makeReference<ClusterConnectionFile>(
-				    connFile->getFilename(), ClusterConnectionString(leader.get().first.serializedInfo.toString()));
+				info.intermediateConnRecord = connRecord->makeIntermediateRecord(
+				    ClusterConnectionString(leader.get().first.serializedInfo.toString()));
 				return info;
 			}
-			if (connFile != info.intermediateConnFile) {
+			if (connRecord != info.intermediateConnRecord) {
 				if (!info.hasConnected) {
 					TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection")
-					    .detail("Filename", connFile->getFilename())
-					    .detail("ConnectionStringFromFile", connFile->getConnectionString().toString())
-					    .detail("CurrentConnectionString", info.intermediateConnFile->getConnectionString().toString());
+					    .detail("ClusterFile", connRecord->toString())
+					    .detail("StoredConnectionString", connRecord->getConnectionString().toString())
+					    .detail("CurrentConnectionString",
+					            info.intermediateConnRecord->getConnectionString().toString());
 				}
-				connFile->setConnectionString(info.intermediateConnFile->getConnectionString());
-				info.intermediateConnFile = connFile;
+				connRecord->setConnectionString(info.intermediateConnRecord->getConnectionString());
+				info.intermediateConnRecord = connRecord;
 			}
 
 			info.hasConnected = true;
-			connFile->notifyConnected();
+			connRecord->notifyConnected();
 
 			outSerializedLeaderInfo->set(leader.get().first.serializedInfo);
 		}
@@ -528,11 +438,11 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<ClusterConn
 	}
 }
 
-ACTOR Future<Void> monitorLeaderInternal(Reference<ClusterConnectionFile> connFile,
+ACTOR Future<Void> monitorLeaderInternal(Reference<IClusterConnectionRecord> connRecord,
                                          Reference<AsyncVar<Value>> outSerializedLeaderInfo) {
-	state MonitorLeaderInfo info(connFile);
+	state MonitorLeaderInfo info(connRecord);
 	loop {
-		MonitorLeaderInfo _info = wait(monitorLeaderOneGeneration(connFile, outSerializedLeaderInfo, info));
+		MonitorLeaderInfo _info = wait(monitorLeaderOneGeneration(connRecord, outSerializedLeaderInfo, info));
 		info = _info;
 	}
 }
@@ -750,13 +660,13 @@ void shrinkProxyList(ClientDBInfo& ni,
 }
 
 ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
-    Reference<ClusterConnectionFile> connFile,
+    Reference<IClusterConnectionRecord> connRecord,
     Reference<AsyncVar<ClientDBInfo>> clientInfo,
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
     MonitorLeaderInfo info,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
     Key traceLogGroup) {
-	state ClusterConnectionString cs = info.intermediateConnFile->getConnectionString();
+	state ClusterConnectionString cs = info.intermediateConnRecord->getConnectionString();
 	state std::vector<NetworkAddress> addrs = cs.coordinators();
 	state int idx = 0;
 	state int successIndex = 0;
@@ -779,20 +689,24 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 		req.supportedVersions = supportedVersions->get();
 		req.traceLogGroup = traceLogGroup;
 
-		ClusterConnectionString fileConnectionString;
-		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
-			req.issues.push_back_deep(req.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
-			std::string connectionString = connFile->getConnectionString().toString();
-			if (!incorrectTime.present()) {
-				incorrectTime = now();
-			}
-			if (connFile->canGetFilename()) {
-				// Don't log a SevWarnAlways initially to account for transient issues (e.g. someone else changing the
-				// file right before us)
+		state ClusterConnectionString storedConnectionString;
+		if (connRecord) {
+			bool upToDate = wait(connRecord->upToDate(storedConnectionString));
+			if (!upToDate) {
+				req.issues.push_back_deep(req.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
+				std::string connectionString = connRecord->getConnectionString().toString();
+				if (!incorrectTime.present()) {
+					incorrectTime = now();
+				}
+
+				// Don't log a SevWarnAlways initially to account for transient issues (e.g. someone else changing
+				// the file right before us)
 				TraceEvent(now() - incorrectTime.get() > 300 ? SevWarnAlways : SevWarn, "IncorrectClusterFileContents")
-				    .detail("Filename", connFile->getFilename())
-				    .detail("ConnectionStringFromFile", fileConnectionString.toString())
+				    .detail("ClusterFile", connRecord->toString())
+				    .detail("StoredConnectionString", storedConnectionString.toString())
 				    .detail("CurrentConnectionString", connectionString);
+			} else {
+				incorrectTime = Optional<double>();
 			}
 		} else {
 			incorrectTime = Optional<double>();
@@ -804,24 +718,25 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			if (rep.get().read().forward.present()) {
 				TraceEvent("MonitorProxiesForwarding")
 				    .detail("NewConnStr", rep.get().read().forward.get().toString())
-				    .detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString());
-				info.intermediateConnFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(
-				    connFile->getFilename(), ClusterConnectionString(rep.get().read().forward.get().toString())));
+				    .detail("OldConnStr", info.intermediateConnRecord->getConnectionString().toString());
+				info.intermediateConnRecord = connRecord->makeIntermediateRecord(
+				    ClusterConnectionString(rep.get().read().forward.get().toString()));
 				return info;
 			}
-			if (connFile != info.intermediateConnFile) {
+			if (connRecord != info.intermediateConnRecord) {
 				if (!info.hasConnected) {
 					TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection")
-					    .detail("Filename", connFile->getFilename())
-					    .detail("ConnectionStringFromFile", connFile->getConnectionString().toString())
-					    .detail("CurrentConnectionString", info.intermediateConnFile->getConnectionString().toString());
+					    .detail("ClusterFile", connRecord->toString())
+					    .detail("StoredConnectionString", connRecord->getConnectionString().toString())
+					    .detail("CurrentConnectionString",
+					            info.intermediateConnRecord->getConnectionString().toString());
 				}
-				connFile->setConnectionString(info.intermediateConnFile->getConnectionString());
-				info.intermediateConnFile = connFile;
+				connRecord->setConnectionString(info.intermediateConnRecord->getConnectionString());
+				info.intermediateConnRecord = connRecord;
 			}
 
 			info.hasConnected = true;
-			connFile->notifyConnected();
+			connRecord->notifyConnected();
 
 			auto& ni = rep.get().mutate();
 			shrinkProxyList(ni, lastCommitProxyUIDs, lastCommitProxies, lastGrvProxyUIDs, lastGrvProxies);
@@ -838,21 +753,21 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 }
 
 ACTOR Future<Void> monitorProxies(
-    Reference<AsyncVar<Reference<ClusterConnectionFile>>> connFile,
+    Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connRecord,
     Reference<AsyncVar<ClientDBInfo>> clientInfo,
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
     Key traceLogGroup) {
-	state MonitorLeaderInfo info(connFile->get());
+	state MonitorLeaderInfo info(connRecord->get());
 	loop {
 		choose {
 			when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(
-			         connFile->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup))) {
+			         connRecord->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup))) {
 				info = _info;
 			}
-			when(wait(connFile->onChange())) {
+			when(wait(connRecord->onChange())) {
 				info.hasConnected = false;
-				info.intermediateConnFile = connFile->get();
+				info.intermediateConnRecord = connRecord->get();
 			}
 		}
 	}

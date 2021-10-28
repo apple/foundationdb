@@ -20,6 +20,7 @@
 
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -38,7 +39,7 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 
-		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
+		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
 		extraDB = Database::createDatabase(extraFile, -1);
 	}
 
