@@ -1259,10 +1259,7 @@ void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVe
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
 			// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
 			self->ssVersionVector.setVersion(req.writtenTags.get(), req.version);
-
-			if (req.writtenTags.present()) {
-				self->versionVectorTagUpdates += req.writtenTags.get().size();
-			}
+			self->versionVectorTagUpdates += req.writtenTags.get().size();
 		}
 		self->databaseLocked = req.locked;
 		self->proxyMetadataVersion = req.metadataVersion;
