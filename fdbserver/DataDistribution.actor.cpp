@@ -47,7 +47,7 @@
 #include "flow/serialize.h"
 
 class TCTeamInfo;
-struct TCMachineInfo;
+class TCMachineInfo;
 class TCMachineTeamInfo;
 
 namespace {
