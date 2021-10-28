@@ -851,7 +851,8 @@ struct ISerializeSource {
 };
 
 template <class T, class V>
-struct MakeSerializeSource : ISerializeSource {
+class MakeSerializeSource : public ISerializeSource {
+public:
 	using value_type = V;
 	void serializePacketWriter(PacketWriter& w) const override {
 		ObjectWriter writer([&](size_t size) { return w.writeBytes(size); }, AssumeVersion(w.protocolVersion()));
