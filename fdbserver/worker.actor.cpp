@@ -1517,6 +1517,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 		}
 
 		TraceEvent("RecoveriesComplete", interf.id());
+		printf("RecoveriesComplete\n");
 
 		loop choose {
 			when(UpdateServerDBInfoRequest req = waitNext(interf.updateServerDBInfo.getFuture())) {
@@ -1652,6 +1653,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Ratekeeper;
 				RatekeeperInterface recruited(locality, req.reqId);
+				printf("Ratekeeper_InitRequest\n");
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).log();
 				recruited.initEndpoints();
 
@@ -1674,6 +1676,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					rkInterf->set(Optional<RatekeeperInterface>(recruited));
 				}
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
+				printf("Ratekeeper_InitRequestDone\n");
 				req.reply.send(recruited);
 			}
 			when(InitializeConsistencyCheckerRequest req = waitNext(interf.consistencyChecker.getFuture())) {
