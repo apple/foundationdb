@@ -292,7 +292,6 @@ else()
       -Wno-undefined-var-template
       -Wno-unknown-pragmas
       -Wno-unknown-warning-option
-      -Wno-unused-function
       -Wno-unused-parameter
       )
     if (USE_CCACHE)

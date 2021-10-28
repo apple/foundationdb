@@ -1223,7 +1223,7 @@ void SimulationConfig::set_config(std::string config) {
 		db.set(kv.first, kv.second);
 }
 
-StringRef StringRefOf(const char* s) {
+[[maybe_unused]] StringRef StringRefOf(const char* s) {
 	return StringRef((uint8_t*)s, strlen(s));
 }
 
@@ -2188,7 +2188,7 @@ bool rocksDBEnabled = false;
 #endif
 
 // Populates the TestConfig fields according to what is found in the test file.
-void checkTestConf(const char* testFile, TestConfig* testConfig) {}
+[[maybe_unused]] void checkTestConf(const char* testFile, TestConfig* testConfig) {}
 
 } // namespace
 
