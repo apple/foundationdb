@@ -134,7 +134,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/CycleAndLock.toml)
   add_fdb_test(TEST_FILES fast/CycleTest.toml)
   add_fdb_test(TEST_FILES fast/ChangeFeeds.toml)
-  add_fdb_test(TEST_FILES fast/DataLossRecovery.toml IGNORE) # TODO Re-enable once failures are fixed
+  add_fdb_test(TEST_FILES fast/DataLossRecovery.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackup.toml)
