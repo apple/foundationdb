@@ -1,4 +1,4 @@
-storageEngineExcludeTypes=-1,-2
+storageEngineExcludeTypes=-1,-2,3
 maxTLogVersion=6
 disableTss=true
 testTitle=Clogged

@@ -1,0 +1,11 @@
+buggify=off
+storageEngineExcludeTypes=3
+
+; verify all keys are even numbered
+testTitle=SnapTestVerify
+    testName=SnapTest
+    numSnaps=1
+    maxSnapDelay=3.0
+    testID=3
+    restartInfoLocation=simfdb/restartInfo.ini
+    enableDD=true

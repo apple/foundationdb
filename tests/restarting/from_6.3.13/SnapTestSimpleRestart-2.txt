@@ -1,0 +1,10 @@
+buggify=off
+storageEngineExcludeTypes=3
+
+; verify all keys are even numbered
+testTitle=SnapSimpleVerify
+testName=SnapTest
+    numSnaps=1
+    maxSnapDelay=3.0
+    testID=3
+    enableDD=true

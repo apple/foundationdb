@@ -1,0 +1,8 @@
+storageEngineExcludeTypes=3
+
+testTitle=StorefrontTest
+runSetup=false
+testName=Storefront
+actorsPerClient=50
+itemCount=100000
+maxOrderSize=4
