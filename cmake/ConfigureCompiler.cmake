@@ -287,7 +287,6 @@ else()
       -Wno-format
       -Wno-sign-compare
       -Wno-undefined-var-template
-      -Wno-unknown-pragmas
       -Wno-unknown-warning-option
       -Wno-unused-parameter
       )

@@ -268,7 +268,9 @@ inline void load(Archive& ar, std::map<K, V>& value) {
 	ASSERT(ar.protocolVersion().isValid());
 }
 
+#ifdef _MSC_VER
 #pragma intrinsic(memcpy)
+#endif
 
 #if VALGRIND
 static bool valgrindCheck(const void* data, int bytes, const char* context) {
