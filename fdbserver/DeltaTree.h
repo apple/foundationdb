@@ -94,7 +94,7 @@ static int __lessOrEqualPowerOfTwo(unsigned int n) {
 }
 */
 
-static int perfectSubtreeSplitPoint(int subtree_size) {
+static inline int perfectSubtreeSplitPoint(int subtree_size) {
 	// return the inorder index of the root node in a subtree of the given size
 	// consistent with the resulting binary search tree being "perfect" (having minimal height
 	// and all missing nodes as far right as possible).
@@ -103,7 +103,7 @@ static int perfectSubtreeSplitPoint(int subtree_size) {
 	return std::min(s * 2 + 1, subtree_size - s - 1);
 }
 
-static int perfectSubtreeSplitPointCached(int subtree_size) {
+static inline int perfectSubtreeSplitPointCached(int subtree_size) {
 	static uint16_t* points = nullptr;
 	static const int max = 500;
 	if (points == nullptr) {
