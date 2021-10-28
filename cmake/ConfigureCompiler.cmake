@@ -286,7 +286,6 @@ else()
       -Wno-delete-non-virtual-dtor
       -Wno-format
       -Wno-sign-compare
-      -Wno-tautological-pointer-compare
       -Wno-undefined-var-template
       -Wno-unknown-pragmas
       -Wno-unknown-warning-option
