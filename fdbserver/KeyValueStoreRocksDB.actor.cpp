@@ -10,6 +10,11 @@
 #include <rocksdb/filter_policy.h>
 #include <rocksdb/options.h>
 #include <rocksdb/slice_transform.h>
+#include <rocksdb/sst_file_reader.h>
+#include <rocksdb/sst_file_writer.h>
+#include <rocksdb/slice.h>
+#include <rocksdb/env.h>
+#include <rocksdb/options.h>
 #include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
 #include <rocksdb/types.h>
@@ -772,7 +777,7 @@ TEST_CASE("/rocks/fileops") {
 	std::cout << "Checkpoint Sequence Number: " << checkpointSeq << std::endl;
 	ASSERT(s.ok());
 	// std::vector<std::string> files = platform::listFiles(checkpointDir, "sst");
-	std::vector<std::string> files = platform::listFiles(checkpointDir);
+	std::vector<std::string> files = platform::listFiles(checkpointDir, "sst");
 	state std::vector<std::string> checkpointFiles;
 	for (auto& file : files) {
 		std::string path = checkpointDir + "/" + file;
@@ -780,14 +785,29 @@ TEST_CASE("/rocks/fileops") {
 		checkpointFiles.push_back(path);
 	}
 
-	kvStore->clear(allKeys);	
+	kvStore->clear(allKeys);
 	wait(kvStore->commit(false));
 
+	rocksdb::Options options;
+	rocksdb::ReadOptions ropts;
+	for (const std::string& file : checkpointFiles) {
+		std::cout << "File: " << file << std::endl;
+		rocksdb::SstFileReader reader(options);
+		ASSERT(reader.Open(file).ok());
+		ASSERT(reader.VerifyChecksum().ok());
+		std::unique_ptr<rocksdb::Iterator> iter(reader.NewIterator(ropts));
+		iter->SeekToFirst();
+		while (iter->Valid()) {
+			std::cout << "Key: " << iter->key().ToString() << ", Value: " << iter->value().ToString() << std::endl;
+			iter->Next();
+		}
+	}
+	// SstFileWriter sst_file_writer(EnvOptions(), options);
+
 	// state std::string rocksDBTestDir2 = "rocksdb-kvstore-reopen-test-db2";
-	// state IKeyValueStore* kvStore2 = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	// wait(kvStore2->init());
-	// RocksDBKeyValueStore::DB db2 = ((RocksDBKeyValueStore*)kvStore2)->db;
-	// ASSERT(db2 != nullptr);
+	// state IKeyValueStore* kvStore2 = new RocksDBKeyValueStore(rocksDBTestDir,
+	// deterministicRandom()->randomUniqueID()); wait(kvStore2->init()); RocksDBKeyValueStore::DB db2 =
+	// ((RocksDBKeyValueStore*)kvStore2)->db; ASSERT(db2 != nullptr);
 	Optional<Value> val1 = wait(kvStore->readValue(LiteralStringRef("foo")));
 	ASSERT(Optional<Value>() == val1);
 
