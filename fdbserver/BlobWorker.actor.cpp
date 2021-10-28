@@ -148,7 +148,7 @@ struct GranuleRangeMetadata {
 	  : lastEpoch(epoch), lastSeqno(seqno), activeMetadata(activeMetadata) {}
 
 	// TODO REMOVE
-	~GranuleRangeMetadata() { printf("Destroying granule metadata\n"); }
+	// ~GranuleRangeMetadata() { printf("Destroying granule metadata\n"); }
 };
 
 // represents a previous version of a granule, and optionally the files that compose it
@@ -438,7 +438,8 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 				       parentGranuleID.toString().c_str());
 			}
 
-			wait(updateChangeFeed(tr, KeyRef(parentGranuleID.toString()), ChangeFeedStatus::CHANGE_FEED_DESTROY));
+			// FIXME: appears change feed destroy isn't working! ADD BACK
+			// wait(updateChangeFeed(tr, KeyRef(parentGranuleID.toString()), ChangeFeedStatus::CHANGE_FEED_DESTROY));
 			Key oldGranuleLockKey = blobGranuleLockKeyFor(parentGranuleRange);
 			tr->clear(singleKeyRange(oldGranuleLockKey));
 			tr->clear(currentRange);
@@ -874,7 +875,6 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bwData,
                                                     Reference<GranuleMetadata> metadata,
                                                     UID granuleID,
-                                                    Version historyVersion,
                                                     int64_t bytesInNewDeltaFiles,
                                                     Future<BlobFileIndex> lastDeltaBeforeSnapshot) {
 
@@ -904,8 +904,13 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 		loop {
 			try {
 				wait(bwData->currentManagerStatusStream.get().onReady());
-				bwData->currentManagerStatusStream.get().send(GranuleStatusReply(
-				    metadata->keyRange, true, statusEpoch, statusSeqno, granuleID, historyVersion, reSnapshotVersion));
+				bwData->currentManagerStatusStream.get().send(GranuleStatusReply(metadata->keyRange,
+				                                                                 true,
+				                                                                 statusEpoch,
+				                                                                 statusSeqno,
+				                                                                 granuleID,
+				                                                                 metadata->initialSnapshotVersion,
+				                                                                 reSnapshotVersion));
 				break;
 			} catch (Error& e) {
 				wait(bwData->currentManagerStatusStream.onChange());
@@ -1220,10 +1225,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				metadata->files.snapshotFiles.push_back(newSnapshotFile);
 				metadata->durableSnapshotVersion.set(startVersion);
 
-				// construct fake history entry so we can store start version for splitting later
-				startState.history =
-				    GranuleHistory(metadata->keyRange, startVersion, Standalone<BlobGranuleHistoryValue>());
-
 				wait(yield(TaskPriority::BlobWorkerUpdateStorage));
 			}
 			metadata->initialSnapshotVersion = startVersion;
@@ -1298,9 +1299,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					Standalone<VectorRef<MutationsAndVersionRef>> oldMutations =
 					    waitNext(oldChangeFeedStream.getFuture());
 					mutations = oldMutations;
+					ASSERT(mutations.back().version < startState.changeFeedStartVersion);
 				} else {
 					Standalone<VectorRef<MutationsAndVersionRef>> newMutations = waitNext(changeFeedStream.getFuture());
 					mutations = newMutations;
+					ASSERT(mutations.front().version >= startState.changeFeedStartVersion);
 				}
 			} catch (Error& e) {
 				// only error we should expect here is when we finish consuming old change feed
@@ -1528,15 +1531,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						previousFuture = inFlightFiles.back().future;
 						ASSERT(!inFlightFiles.back().snapshot);
 					} else {
-						previousFuture = Future<BlobFileIndex>(BlobFileIndex());
+						previousFuture = Future<BlobFileIndex>(metadata->files.deltaFiles.back());
 					}
-					Future<BlobFileIndex> inFlightBlobSnapshot =
-					    checkSplitAndReSnapshot(bwData,
-					                            metadata,
-					                            startState.granuleID,
-					                            startState.history.get().version,
-					                            metadata->bytesInNewDeltaFiles,
-					                            previousFuture);
+					Future<BlobFileIndex> inFlightBlobSnapshot = checkSplitAndReSnapshot(
+					    bwData, metadata, startState.granuleID, metadata->bytesInNewDeltaFiles, previousFuture);
 					inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, metadata->pendingDeltaVersion, 0, true));
 					pendingSnapshots++;
 
@@ -1892,14 +1890,21 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 			if (metadata->initialSnapshotVersion > req.readVersion) {
 				// this is a time travel query, find previous granule
 				if (metadata->historyLoaded.canBeSet()) {
-					wait(metadata->historyLoaded.getFuture());
+					choose {
+						when(wait(metadata->historyLoaded.getFuture())) {}
+						when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
+					}
 				}
 
 				// FIXME: doesn't work once we add granule merging, could be multiple ranges and/or
 				// multiple parents
 				Reference<GranuleHistoryEntry> cur = bwData->granuleHistory.rangeContaining(req.keyRange.begin).value();
 				// FIXME: use skip pointers here
+				Version expectedEndVersion = metadata->initialSnapshotVersion;
 				while (cur.isValid() && req.readVersion < cur->startVersion) {
+					// assert version of history is contiguous
+					ASSERT(cur->endVersion == expectedEndVersion);
+					expectedEndVersion = cur->startVersion;
 					cur = cur->parentGranule;
 				}
 
@@ -1909,6 +1914,9 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 					// instead
 					throw transaction_too_old();
 				}
+
+				ASSERT(cur->endVersion > req.readVersion);
+				ASSERT(cur->startVersion <= req.readVersion);
 
 				if (BW_REQUEST_DEBUG) {
 					printf("[%s - %s) @ %lld time traveled back to %s [%s - %s) @ [%lld - %lld)\n",
@@ -1935,6 +1943,22 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 
 				ASSERT(!chunkFiles.snapshotFiles.empty());
 				ASSERT(!chunkFiles.deltaFiles.empty());
+				// TODO remove eventually, for help debugging asserts
+				if (chunkFiles.deltaFiles.back().version <= req.readVersion ||
+				    chunkFiles.snapshotFiles.front().version > req.readVersion) {
+					printf("Time Travel read version %lld out of bounds!\n  current granule initial version: %lld\n  "
+					       "snapshot files (%d):\n",
+					       req.readVersion,
+					       metadata->initialSnapshotVersion,
+					       chunkFiles.snapshotFiles.size());
+					for (auto& f : chunkFiles.snapshotFiles) {
+						printf("    %lld\n", f.version);
+					}
+					printf("  delta files (%d):\n", chunkFiles.deltaFiles.size());
+					for (auto& f : chunkFiles.deltaFiles) {
+						printf("    %lld\n", f.version);
+					}
+				}
 				ASSERT(chunkFiles.deltaFiles.back().version > req.readVersion);
 				ASSERT(chunkFiles.snapshotFiles.front().version <= req.readVersion);
 			} else {
@@ -2201,7 +2225,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 
 					if (granuleSplitState.first == BlobGranuleSplitState::Assigned) {
 						// was already assigned, use change feed start version
-						ASSERT(granuleSplitState.second != invalidVersion);
+						ASSERT(granuleSplitState.second > 0);
 						info.changeFeedStartVersion = granuleSplitState.second;
 					} else if (granuleSplitState.first == BlobGranuleSplitState::Started) {
 						wait(updateGranuleSplitState(&tr,
@@ -2644,13 +2668,13 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				++self->stats.rangeAssignmentRequests;
 				state AssignBlobRangeRequest assignReq = _req;
 				if (BW_DEBUG) {
-					printf("Worker %s assigned range [%s - %s) @ (%lld, %lld):\n  continue=%s\n",
+					printf("Worker %s assigned range [%s - %s) @ (%lld, %lld):\n  type=%d\n",
 					       self->id.toString().c_str(),
 					       assignReq.keyRange.begin.printable().c_str(),
 					       assignReq.keyRange.end.printable().c_str(),
 					       assignReq.managerEpoch,
 					       assignReq.managerSeqno,
-					       assignReq.type == AssignRequestType::Continue ? "T" : "F");
+					       assignReq.type);
 				}
 
 				if (self->managerEpochOk(assignReq.managerEpoch)) {

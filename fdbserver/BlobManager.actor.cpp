@@ -35,7 +35,7 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-#define BM_DEBUG false
+#define BM_DEBUG true
 
 // FIXME: change all BlobManagerData* to Reference<BlobManagerData> to avoid segfaults if core loop gets error
 
@@ -695,6 +695,11 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
 				historyValue.parentGranules.push_back(historyValue.arena(),
 				                                      std::pair(granuleRange, granuleStartVersion));
 
+				/*printf("Creating history entry [%s - %s) - [%lld - %lld)\n",
+				       newRanges[i].printable().c_str(),
+				       newRanges[i + 1].printable().c_str(),
+				       granuleStartVersion,
+				       latestVersion);*/
 				tr->set(historyKey, blobGranuleHistoryValueFor(historyValue));
 			}
 
@@ -1035,6 +1040,11 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 				Key granuleStartKey = results[rangeIdx].key;
 				Key granuleEndKey = results[rangeIdx + 1].key;
 				if (results[rangeIdx].value.size()) {
+					if (granuleStartKey == allKeys.begin && granuleEndKey == allKeys.end) {
+						// in this case, a second manager started before the first manager assigned any ranges. This
+						// gets the only range as [ - \xff\xff), so we clamp it to [ - \xff)
+						granuleEndKey = normalKeys.end;
+					}
 					// note: if the old owner is dead, we handle this in rangeAssigner
 					UID existingOwner = decodeBlobGranuleMappingValue(results[rangeIdx].value);
 					bmData->workerAssignments.insert(KeyRangeRef(granuleStartKey, granuleEndKey), existingOwner);
