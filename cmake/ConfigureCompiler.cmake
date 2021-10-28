@@ -293,7 +293,6 @@ else()
       -Wno-unknown-pragmas
       -Wno-unknown-warning-option
       -Wno-unused-function
-      -Wno-unused-local-typedef
       -Wno-unused-parameter
       )
     if (USE_CCACHE)
