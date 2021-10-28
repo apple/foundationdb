@@ -59,7 +59,9 @@ struct WriteDuringReadWorkload : TestWorkload {
 		maximumTotalData = getOption(options, LiteralStringRef("maximumTotalData"), 3e6);
 		minNode = getOption(options, LiteralStringRef("minNode"), 0);
 		useSystemKeys = getOption(options, LiteralStringRef("useSystemKeys"), deterministicRandom()->random01() < 0.5);
-		adjacentKeys = deterministicRandom()->random01() < 0.5;
+		// TODO CHANGE BACK!!
+		// adjacentKeys = deterministicRandom()->random01() < 0.5;
+		adjacentKeys = false;
 		initialKeyDensity = deterministicRandom()->random01(); // This fraction of keys are present before the first
 		                                                       // transaction (and after an unknown result)
 		valueSizeRange = std::make_pair(

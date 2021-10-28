@@ -1840,7 +1840,7 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevError, "LocalChangeFeedError", data->thisServerID).error(e);
+		TraceEvent(SevError, "LocalChangeFeedError", data->thisServerID).detail("CFID", rangeID.printable()).error(e);
 		throw;
 	}
 }
@@ -4255,6 +4255,10 @@ private:
 				}
 			} else {
 				if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
+					TraceEvent(SevDebug, "DestroyingChangeFeed", data->thisServerID)
+					    .detail("RangeID", changeFeedId.printable())
+					    .detail("Range", changeFeedRange.toString())
+					    .detail("Version", currentVersion);
 					Key beginClearKey = changeFeedId.withPrefix(persistChangeFeedKeys.begin);
 					auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 					data->addMutationToMutationLog(
@@ -4274,6 +4278,13 @@ private:
 					}
 					data->uidChangeFeed.erase(feed);
 				} else {
+					// must be pop or stop
+					if (status == ChangeFeedStatus::CHANGE_FEED_STOP) {
+						TraceEvent(SevDebug, "StoppingChangeFeed", data->thisServerID)
+						    .detail("RangeID", changeFeedId.printable())
+						    .detail("Range", changeFeedRange.toString())
+						    .detail("Version", currentVersion);
+					}
 					if (popVersion != invalidVersion && popVersion - 1 > feed->second->emptyVersion) {
 						feed->second->emptyVersion = popVersion - 1;
 						while (!feed->second->mutations.empty() &&

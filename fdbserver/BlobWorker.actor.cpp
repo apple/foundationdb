@@ -1258,6 +1258,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				if (inFlightFiles.front().future.isReady()) {
 					BlobFileIndex completedFile = wait(inFlightFiles.front().future);
 					if (inFlightFiles.front().snapshot) {
+						if (metadata->files.deltaFiles.empty()) {
+							ASSERT(completedFile.version == metadata->initialSnapshotVersion);
+						} else {
+							ASSERT(completedFile.version == metadata->files.deltaFiles.back().version);
+						}
+
 						metadata->files.snapshotFiles.push_back(completedFile);
 						metadata->durableSnapshotVersion.set(completedFile.version);
 						pendingSnapshots--;
@@ -1564,6 +1570,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							// TODO don't duplicate code
 							BlobFileIndex completedFile = wait(inFlightFiles.front().future);
 							if (inFlightFiles.front().snapshot) {
+								if (metadata->files.deltaFiles.empty()) {
+									ASSERT(completedFile.version == metadata->initialSnapshotVersion);
+								} else {
+									ASSERT(completedFile.version == metadata->files.deltaFiles.back().version);
+								}
 								metadata->files.snapshotFiles.push_back(completedFile);
 								metadata->durableSnapshotVersion.set(completedFile.version);
 								pendingSnapshots--;
