@@ -926,7 +926,7 @@ public:
 			}
 		}
 
-		ASSERT(resultSet.size() <= desired);
+		ASSERT(resultSet.size() >= required && resultSet.size() <= desired);
 
 		for (auto& result : resultSet) {
 			id_used[result.interf.locality.processId()]++;
