@@ -1297,7 +1297,7 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 
 	if (args->client_threads_per_version > 0) {
 		err = fdb_network_set_option(
-		    FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, (uint8_t*)&args->client_threads_per_version, sizeof(uint32_t));
+		    FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, (uint8_t*)&args->client_threads_per_version, sizeof(int64_t));
 		if (err) {
 			fprintf(stderr,
 			        "ERROR: fdb_network_set_option (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) (%d): %s\n",
@@ -1656,46 +1656,47 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 	int idx;
 	while (1) {
 		const char* short_options = "a:c:d:p:t:r:s:i:x:v:m:hz";
-		static struct option long_options[] = { /* name, has_arg, flag, val */
-			                                    { "api_version", required_argument, NULL, 'a' },
-			                                    { "cluster", required_argument, NULL, 'c' },
-												{ "num_databases", optional_argument, NULL, 'd' },
-			                                    { "procs", required_argument, NULL, 'p' },
-			                                    { "threads", required_argument, NULL, 't' },
-			                                    { "rows", required_argument, NULL, 'r' },
-			                                    { "seconds", required_argument, NULL, 's' },
-			                                    { "iteration", required_argument, NULL, 'i' },
-			                                    { "keylen", required_argument, NULL, ARG_KEYLEN },
-			                                    { "vallen", required_argument, NULL, ARG_VALLEN },
-			                                    { "transaction", required_argument, NULL, 'x' },
-			                                    { "tps", required_argument, NULL, ARG_TPS },
-			                                    { "tpsmax", required_argument, NULL, ARG_TPSMAX },
-			                                    { "tpsmin", required_argument, NULL, ARG_TPSMIN },
-			                                    { "tpsinterval", required_argument, NULL, ARG_TPSINTERVAL },
-			                                    { "tpschange", required_argument, NULL, ARG_TPSCHANGE },
-			                                    { "sampling", required_argument, NULL, ARG_SAMPLING },
-			                                    { "verbose", required_argument, NULL, 'v' },
-			                                    { "mode", required_argument, NULL, 'm' },
-			                                    { "knobs", required_argument, NULL, ARG_KNOBS },
-			                                    { "loggroup", required_argument, NULL, ARG_LOGGROUP },
-			                                    { "tracepath", required_argument, NULL, ARG_TRACEPATH },
-			                                    { "trace_format", required_argument, NULL, ARG_TRACEFORMAT },
-			                                    { "streaming", required_argument, NULL, ARG_STREAMING_MODE },
-			                                    { "txntrace", required_argument, NULL, ARG_TXNTRACE },
-			                                    /* no args */
-			                                    { "help", no_argument, NULL, 'h' },
-			                                    { "zipf", no_argument, NULL, 'z' },
-			                                    { "commitget", no_argument, NULL, ARG_COMMITGET },
-			                                    { "flatbuffers", no_argument, NULL, ARG_FLATBUFFERS },
-			                                    { "prefix_padding", no_argument, NULL, ARG_PREFIXPADDING },
-			                                    { "trace", no_argument, NULL, ARG_TRACE },
-			                                    { "txntagging", required_argument, NULL, ARG_TXNTAGGING },
-			                                    { "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
-			                                    { "version", no_argument, NULL, ARG_VERSION },
-												{ "client_threads_per_version", required_argument, NULL, ARG_CLIENT_THREADS_PER_VERSION },
-			                                    { "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
-			                                    { "json_report", optional_argument, NULL, ARG_JSON_REPORT },
-			                                    { NULL, 0, NULL, 0 }
+		static struct option long_options[] = {
+			/* name, has_arg, flag, val */
+			{ "api_version", required_argument, NULL, 'a' },
+			{ "cluster", required_argument, NULL, 'c' },
+			{ "num_databases", optional_argument, NULL, 'd' },
+			{ "procs", required_argument, NULL, 'p' },
+			{ "threads", required_argument, NULL, 't' },
+			{ "rows", required_argument, NULL, 'r' },
+			{ "seconds", required_argument, NULL, 's' },
+			{ "iteration", required_argument, NULL, 'i' },
+			{ "keylen", required_argument, NULL, ARG_KEYLEN },
+			{ "vallen", required_argument, NULL, ARG_VALLEN },
+			{ "transaction", required_argument, NULL, 'x' },
+			{ "tps", required_argument, NULL, ARG_TPS },
+			{ "tpsmax", required_argument, NULL, ARG_TPSMAX },
+			{ "tpsmin", required_argument, NULL, ARG_TPSMIN },
+			{ "tpsinterval", required_argument, NULL, ARG_TPSINTERVAL },
+			{ "tpschange", required_argument, NULL, ARG_TPSCHANGE },
+			{ "sampling", required_argument, NULL, ARG_SAMPLING },
+			{ "verbose", required_argument, NULL, 'v' },
+			{ "mode", required_argument, NULL, 'm' },
+			{ "knobs", required_argument, NULL, ARG_KNOBS },
+			{ "loggroup", required_argument, NULL, ARG_LOGGROUP },
+			{ "tracepath", required_argument, NULL, ARG_TRACEPATH },
+			{ "trace_format", required_argument, NULL, ARG_TRACEFORMAT },
+			{ "streaming", required_argument, NULL, ARG_STREAMING_MODE },
+			{ "txntrace", required_argument, NULL, ARG_TXNTRACE },
+			/* no args */
+			{ "help", no_argument, NULL, 'h' },
+			{ "zipf", no_argument, NULL, 'z' },
+			{ "commitget", no_argument, NULL, ARG_COMMITGET },
+			{ "flatbuffers", no_argument, NULL, ARG_FLATBUFFERS },
+			{ "prefix_padding", no_argument, NULL, ARG_PREFIXPADDING },
+			{ "trace", no_argument, NULL, ARG_TRACE },
+			{ "txntagging", required_argument, NULL, ARG_TXNTAGGING },
+			{ "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
+			{ "version", no_argument, NULL, ARG_VERSION },
+			{ "client_threads_per_version", required_argument, NULL, ARG_CLIENT_THREADS_PER_VERSION },
+			{ "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
+			{ "json_report", optional_argument, NULL, ARG_JSON_REPORT },
+			{ NULL, 0, NULL, 0 }
 		};
 		idx = 0;
 		c = getopt_long(argc, argv, short_options, long_options, &idx);
