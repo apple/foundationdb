@@ -102,6 +102,7 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	NotifiedVersion durableDeltaVersion; // largest version persisted in s3/fdb
 	NotifiedVersion durableSnapshotVersion; // same as delta vars, except for snapshots
 	Version pendingSnapshotVersion = 0;
+	Version initialSnapshotVersion = invalidVersion;
 
 	AsyncVar<int> rollbackCount;
 
@@ -136,15 +137,18 @@ struct GranuleRangeMetadata {
 	Future<Void> historyLoaderFuture;
 
 	void cancel() {
-		// assignFuture.cancel();
-		// fileUpdaterFuture.cancel();
-		// historyLoaderFuture.cancel();
+		if (activeMetadata->cancelled.canBeSet()) {
+			activeMetadata->cancelled.send(Void());
+		}
 		activeMetadata.clear();
 	}
 
 	GranuleRangeMetadata() : lastEpoch(0), lastSeqno(0) {}
 	GranuleRangeMetadata(int64_t epoch, int64_t seqno, Reference<GranuleMetadata> activeMetadata)
 	  : lastEpoch(epoch), lastSeqno(seqno), activeMetadata(activeMetadata) {}
+
+	// TODO REMOVE
+	~GranuleRangeMetadata() { printf("Destroying granule metadata\n"); }
 };
 
 // represents a previous version of a granule, and optionally the files that compose it
@@ -1197,6 +1201,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			ASSERT(!metadata->files.snapshotFiles.empty());
 			metadata->pendingSnapshotVersion = metadata->files.snapshotFiles.back().version;
 			metadata->durableSnapshotVersion.set(metadata->pendingSnapshotVersion);
+			metadata->initialSnapshotVersion = metadata->files.snapshotFiles.front().version;
 		} else {
 			if (startState.blobFilesToSnapshot.present()) {
 				startVersion = startState.previousDurableVersion;
@@ -1221,6 +1226,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 				wait(yield(TaskPriority::BlobWorkerUpdateStorage));
 			}
+			metadata->initialSnapshotVersion = startVersion;
 			metadata->pendingSnapshotVersion = startVersion;
 		}
 
@@ -1598,6 +1604,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			justDidRollback = false;
 		}
 	} catch (Error& e) {
+		// TODO REMOVE
+		printf("BGUF got error %s\n", e.name());
 		if (e.code() == error_code_operation_cancelled) {
 			throw;
 		}
@@ -1781,7 +1789,7 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 		wait(metadata->bufferedDeltaVersion.whenAtLeast(v));
 	}
 
-	// wait for any pending delta and snapshot files as of the momemt the change feed version caught up.
+	// wait for any pending delta and snapshot files as of the moment the change feed version caught up.
 	state Version pendingDeltaV = metadata->pendingDeltaVersion;
 	state Version pendingSnapshotV = metadata->pendingSnapshotVersion;
 
@@ -1870,9 +1878,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 			state KeyRange chunkRange;
 			state GranuleFiles chunkFiles;
 
-			if ((!metadata->files.snapshotFiles.empty() &&
-			     metadata->files.snapshotFiles.front().version > req.readVersion) ||
-			    (metadata->files.snapshotFiles.empty() && metadata->pendingSnapshotVersion > req.readVersion)) {
+			if (metadata->initialSnapshotVersion > req.readVersion) {
 				// this is a time travel query, find previous granule
 				if (metadata->historyLoaded.canBeSet()) {
 					wait(metadata->historyLoaded.getFuture());
@@ -1911,15 +1917,21 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 					cur->files = loadHistoryFiles(bwData, cur->granuleID);
 				}
 
-				GranuleFiles _f = wait(cur->files);
-				chunkFiles = _f;
+				choose {
+					when(GranuleFiles _f = wait(cur->files)) { chunkFiles = _f; }
+					when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
+				}
 
+				ASSERT(!chunkFiles.snapshotFiles.empty());
+				ASSERT(!chunkFiles.deltaFiles.empty());
+				ASSERT(chunkFiles.deltaFiles.back().version > req.readVersion);
+				ASSERT(chunkFiles.snapshotFiles.front().version <= req.readVersion);
 			} else {
 				// this is an active granule query
 				loop {
 					Future<Void> waitForVersionFuture = waitForVersion(metadata, req.readVersion);
 					if (waitForVersionFuture.isReady()) {
-						// didn't yield, so no need to check rollback stuff
+						// didn't wait, so no need to check rollback stuff
 						break;
 					}
 					// rollback resets all of the version information, so we have to redo wait for
@@ -1945,6 +1957,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 			}
 
 			// granule is up to date, do read
+			ASSERT(metadata->cancelled.canBeSet());
 
 			BlobGranuleChunkRef chunk;
 			// TODO change in V2
@@ -1960,6 +1973,15 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 			}
 			// because of granule history, we should always be able to find the desired snapshot
 			// version, and have thrown transaction_too_old earlier if not possible.
+			if (i < 0) {
+				printf("req @ %lld >= initial snapshot %lld but can't find snapshot in (%d) files:\n",
+				       req.readVersion,
+				       metadata->initialSnapshotVersion,
+				       chunkFiles.snapshotFiles.size());
+				for (auto& f : chunkFiles.snapshotFiles) {
+					printf("  %lld", f.version);
+				}
+			}
 			ASSERT(i >= 0);
 
 			BlobFileIndex snapshotF = chunkFiles.snapshotFiles[i];
@@ -1999,6 +2021,14 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 			// range
 
 			if (req.readVersion > metadata->durableDeltaVersion.get()) {
+				if (metadata->durableDeltaVersion.get() != metadata->pendingDeltaVersion) {
+					printf("real-time read [%s - %s) @ %lld doesn't have mutations!! durable=%lld, pending=%lld\n",
+					       metadata->keyRange.begin.printable().c_str(),
+					       metadata->keyRange.end.printable().c_str(),
+					       req.readVersion,
+					       metadata->durableDeltaVersion.get(),
+					       metadata->pendingDeltaVersion);
+				}
 				ASSERT(metadata->durableDeltaVersion.get() == metadata->pendingDeltaVersion);
 				rep.arena.dependsOn(metadata->deltaArena);
 				for (auto& delta : metadata->currentDeltas) {
@@ -2298,15 +2328,16 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 	auto ranges = bwData->granuleMetadata.intersectingRanges(keyRange);
 	bool alreadyAssigned = false;
 	for (auto& r : ranges) {
-		if (!active) {
-			if (r.value().activeMetadata.isValid() && r.value().activeMetadata->cancelled.canBeSet()) {
-				if (BW_DEBUG) {
-					printf("Cancelling activeMetadata\n");
-				}
-				bwData->stats.numRangesAssigned--;
-				r.value().activeMetadata->cancelled.send(Void());
-			}
-		}
+		// I don't think we need this?
+		/*if (!active) {
+		    if (r.value().activeMetadata.isValid() && r.value().activeMetadata->cancelled.canBeSet()) {
+		        if (BW_DEBUG) {
+		            printf("Cancelling activeMetadata\n");
+		        }
+		        bwData->stats.numRangesAssigned--;
+		        r.value().activeMetadata->cancelled.send(Void());
+		    }
+		}*/
 		bool thisAssignmentNewer = newerRangeAssignment(r.value(), epoch, seqno);
 		printf("thisAssignmentNewer=%s\n", thisAssignmentNewer ? "true" : "false");
 
@@ -2347,6 +2378,9 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 				       r.end().printable().c_str(),
 				       r.value().lastEpoch,
 				       r.value().lastSeqno);
+			}
+			if (!active) {
+				bwData->stats.numRangesAssigned--;
 			}
 			r.value().cancel();
 		} else if (!thisAssignmentNewer) {
