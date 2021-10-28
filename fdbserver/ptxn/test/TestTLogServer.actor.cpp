@@ -59,6 +59,15 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
                                     std::shared_ptr<ptxn::test::TestDriverContext> pContext,
                                     std::string folder) {
 	state std::vector<ptxn::InitializePtxnTLogRequest> tLogInitializations;
+	state std::vector<std::vector<ptxn::TLogGroup>> groupsPerTLog(pContext->numTLogs);
+	state std::unordered_map<ptxn::TLogGroupID, int> groupToLeaderId;
+	for (int i = 0, index = 0; i < pContext->numTLogGroups; ++i) {
+		ptxn::TLogGroup& tLogGroup = pContext->tLogGroups[i];
+		groupsPerTLog[index].push_back(tLogGroup);
+		groupToLeaderId[tLogGroup.logGroupId] = index;
+		++index;
+		index %= pContext->numTLogs;
+	}
 	state int i = 0;
 	for (; i < pContext->numTLogs; i++) {
 		PromiseStream<ptxn::InitializePtxnTLogRequest> initializeTLog;
@@ -66,7 +75,7 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 		tLogInitializations.emplace_back();
 		tLogInitializations.back().isPrimary = true;
 		tLogInitializations.back().storeType = KeyValueStoreType::MEMORY;
-		tLogInitializations.back().tlogGroups = pContext->tLogGroups;
+		tLogInitializations.back().tlogGroups =  groupsPerTLog[i];
 		UID tlogId = ptxn::test::randomUID();
 		UID workerId = ptxn::test::randomUID();
 		StringRef fileVersionedLogDataPrefix = "log2-"_sr;
@@ -74,7 +83,7 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 		ptxn::InitializePtxnTLogRequest req = tLogInitializations.back();
 		const StringRef prefix = req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 		std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues;
-		for (ptxn::TLogGroup& tlogGroup : pContext->tLogGroups) {
+		for (ptxn::TLogGroup& tlogGroup : groupsPerTLog[i]) {
 			std::string filename =
 			    filenameFromId(req.storeType, folder, prefix.toString() + "test", tlogGroup.logGroupId);
 			IKeyValueStore* data = keyValueStoreMemory(joinPath(folder, "loggroup"), tlogGroup.logGroupId, 500e6);
@@ -113,7 +122,7 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 	}
 	// Update the TLogGroupID to interface mapping
 	for (auto& [tLogGroupID, tLogGroupLeader] : pContext->tLogGroupLeaders) {
-		tLogGroupLeader = ptxn::test::randomlyPick(pContext->tLogInterfaces);
+		tLogGroupLeader = pContext->tLogInterfaces[groupToLeaderId[tLogGroupID]];
 	}
 	return Void();
 }
@@ -643,6 +652,17 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	platform::createDirectory(folder);
 
 	state std::vector<ptxn::InitializePtxnTLogRequest> tLogInitializations;
+	state std::unordered_map<ptxn::TLogGroupID, IDiskQueue*> qs;
+	state std::vector<std::vector<ptxn::TLogGroup>> groupsPerTLog(pContext->numTLogs);
+	state std::unordered_map<ptxn::TLogGroupID, int> groupToLeaderId;
+	for (int i = 0, index = 0; i < pContext->numTLogGroups; ++i) {
+		ptxn::TLogGroup& tLogGroup = pContext->tLogGroups[i];
+		groupsPerTLog[index].push_back(tLogGroup);
+		groupToLeaderId[tLogGroup.logGroupId] = index;
+		++index;
+		index %= pContext->numTLogs;
+	}
+
 	state int i = 0;
 	for (; i < pContext->numTLogs; i++) {
 		PromiseStream<ptxn::InitializePtxnTLogRequest> initializeTLog;
@@ -650,7 +670,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 		tLogInitializations.emplace_back();
 		tLogInitializations.back().isPrimary = true;
 		tLogInitializations.back().storeType = KeyValueStoreType::MEMORY;
-		tLogInitializations.back().tlogGroups = pContext->tLogGroups;
+		tLogInitializations.back().tlogGroups = groupsPerTLog[i];
 		UID tlogId = ptxn::test::randomUID();
 		UID workerId = ptxn::test::randomUID();
 		StringRef fileVersionedLogDataPrefix = "log2-"_sr;
@@ -658,9 +678,8 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 		ptxn::InitializePtxnTLogRequest req = tLogInitializations.back();
 		const StringRef prefix = req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 
-		state std::unordered_map<ptxn::TLogGroupID, IDiskQueue*> qs;
 		std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues;
-		for (ptxn::TLogGroup& tlogGroup : pContext->tLogGroups) {
+		for (ptxn::TLogGroup& tlogGroup : groupsPerTLog[i]) {
 			std::string filename =
 			    filenameFromId(req.storeType, folder, prefix.toString() + "test", tlogGroup.logGroupId);
 			IKeyValueStore* data = openKVStore(req.storeType, filename, tlogGroup.logGroupId, 500e6);
@@ -694,6 +713,10 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	std::vector<ptxn::TLogInterface_PassivelyPull> interfaces = wait(getAll(interfaceFutures));
 	for (i = 0; i < pContext->numTLogs; i++) {
 		*(pContext->tLogInterfaces[i]) = interfaces[i];
+	}
+
+	for (auto& [tLogGroupID, tLogGroupLeader] : pContext->tLogGroupLeaders) {
+		tLogGroupLeader = pContext->tLogInterfaces[groupToLeaderId[tLogGroupID]];
 	}
 
 	state std::vector<Standalone<StringRef>> expectedMessages =
