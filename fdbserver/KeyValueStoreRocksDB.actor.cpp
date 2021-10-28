@@ -778,11 +778,11 @@ TEST_CASE("/rocks/fileops") {
 	ASSERT(s.ok());
 	// std::vector<std::string> files = platform::listFiles(checkpointDir, "sst");
 	std::vector<std::string> files = platform::listFiles(checkpointDir, "sst");
-	state std::vector<std::string> checkpointFiles;
+	state std::vector<std::pair<std::string, std::string>> sstFiles;
 	for (auto& file : files) {
-		std::string path = checkpointDir + "/" + file;
+		std::string path = checkpointDir + "/" + file, pPath = checkpointDir + "/processed" + file;
 		std::cout << path << std::endl;
-		checkpointFiles.push_back(path);
+		sstFiles.push_back(std::pair(path, pPath));
 	}
 
 	kvStore->clear(allKeys);
@@ -790,19 +790,24 @@ TEST_CASE("/rocks/fileops") {
 
 	rocksdb::Options options;
 	rocksdb::ReadOptions ropts;
-	for (const std::string& file : checkpointFiles) {
-		std::cout << "File: " << file << std::endl;
+	state std::vector<std::string> importFiles;
+	for (const auto& [ file, pFile ] : sstFiles) {
+		std::cout << "File: " << file << ", pFile: " << pFile << std::endl;
 		rocksdb::SstFileReader reader(options);
+		rocksdb::SstFileWriter writer(rocksdb::EnvOptions(), options);
+		ASSERT(writer.Open(pFile).ok());
 		ASSERT(reader.Open(file).ok());
 		ASSERT(reader.VerifyChecksum().ok());
 		std::unique_ptr<rocksdb::Iterator> iter(reader.NewIterator(ropts));
 		iter->SeekToFirst();
 		while (iter->Valid()) {
 			std::cout << "Key: " << iter->key().ToString() << ", Value: " << iter->value().ToString() << std::endl;
+			writer.Put(iter->key(), iter->value());
 			iter->Next();
 		}
+		ASSERT(writer.Finish().ok());
+		importFiles.push_back(pFile);
 	}
-	// SstFileWriter sst_file_writer(EnvOptions(), options);
 
 	// state std::string rocksDBTestDir2 = "rocksdb-kvstore-reopen-test-db2";
 	// state IKeyValueStore* kvStore2 = new RocksDBKeyValueStore(rocksDBTestDir,
@@ -812,7 +817,7 @@ TEST_CASE("/rocks/fileops") {
 	ASSERT(Optional<Value>() == val1);
 
 	rocksdb::IngestExternalFileOptions ifo;
-	rocksdb::Status s = db->IngestExternalFile(checkpointFiles, ifo);
+	rocksdb::Status s = db->IngestExternalFile(importFiles, ifo);
 	std::cout << s.ToString() << std::endl;
 
 	Optional<Value> val2 = wait(kvStore->readValue(LiteralStringRef("foo")));
