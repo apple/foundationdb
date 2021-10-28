@@ -286,7 +286,6 @@ else()
       -Wno-delete-non-virtual-dtor
       -Wno-format
       -Wno-mismatched-tags
-      -Wno-missing-field-initializers
       -Wno-sign-compare
       -Wno-tautological-pointer-compare
       -Wno-undefined-var-template

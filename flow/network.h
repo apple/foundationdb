@@ -283,7 +283,7 @@ struct hash<NetworkAddress> {
 
 struct NetworkAddressList {
 	NetworkAddress address;
-	Optional<NetworkAddress> secondaryAddress;
+	Optional<NetworkAddress> secondaryAddress{};
 
 	bool operator==(NetworkAddressList const& r) const {
 		return address == r.address && secondaryAddress == r.secondaryAddress;
