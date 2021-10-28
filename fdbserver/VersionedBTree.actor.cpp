@@ -3873,8 +3873,8 @@ struct SplitStringRef {
 
 	struct const_iterator {
 		const uint8_t* ptr;
-		const uint8_t* end;
-		const uint8_t* next;
+		const uint8_t* end{ nullptr };
+		const uint8_t* next{ nullptr };
 
 		inline bool operator==(const const_iterator& rhs) const { return ptr == rhs.ptr; }
 		inline bool operator!=(const const_iterator& rhs) const { return !(*this == rhs); }
