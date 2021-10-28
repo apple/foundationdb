@@ -21,9 +21,10 @@
 #ifndef FDBSERVER_DATADISTRIBUTORINTERFACE_H
 #define FDBSERVER_DATADISTRIBUTORINTERFACE_H
 
-#include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/Locality.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbrpc/Locality.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbserver/Knobs.h"
 
 struct DataDistributorInterface {
 	constexpr static FileIdentifier file_identifier = 12383874;
@@ -34,6 +35,7 @@ struct DataDistributorInterface {
 	RequestStream<struct DistributorSnapRequest> distributorSnapReq;
 	RequestStream<struct DistributorExclusionSafetyCheckRequest> distributorExclCheckReq;
 	RequestStream<struct GetDataDistributorMetricsRequest> dataDistributorMetrics;
+	RequestStream<struct FindTeamRequest> dataDistributorFindTeam;
 
 	DataDistributorInterface() {}
 	explicit DataDistributorInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
@@ -53,7 +55,8 @@ struct DataDistributorInterface {
 		           myId,
 		           distributorSnapReq,
 		           distributorExclCheckReq,
-		           dataDistributorMetrics);
+		           dataDistributorMetrics,
+				   datadistributorFindTeam);
 	}
 };
 
@@ -144,6 +147,31 @@ struct DistributorExclusionSafetyCheckRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, exclusions, reply);
+	}
+};
+
+struct FindTeamReply {
+	constexpr static FileIdentifier file_identifier = 13804341;
+	std::vector<UID> servers;
+
+	FindTeamReply() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, servers);
+	}
+};
+
+struct FindTeamRequest {
+	int64_t desiredSpace;
+	ReplyPromise<FindTeamReply> reply;
+
+	FindTeamRequest() : desiredSpace((int64_t)SERVER_KNOBS->MAX_SHARD_BYTES) {}
+	explicit FindTeamRequest(int64_t desiredSpace) : desiredSpace(desiredSpace) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, desiredSpace, reply);
 	}
 };
 

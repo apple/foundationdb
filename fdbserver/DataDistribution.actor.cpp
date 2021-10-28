@@ -6587,6 +6587,40 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 	return Void();
 }
 
+ACTOR Future<Void> ddFindTeam(FindTeamRequest req,
+                                          Reference<DataDistributorData> self,
+                                          Database cx) {
+	TraceEvent("DDExclusionSafetyCheckBegin", self->ddId).log();
+	std::vector<StorageServerInterface> ssis = wait(getStorageServers(cx));
+	DistributorExclusionSafetyCheckReply reply(true);
+	if (!self->teamCollection) {
+		TraceEvent("DDExclusionSafetyCheckTeamCollectionInvalid", self->ddId).log();
+		reply.safe = false;
+		req.reply.send(reply);
+		return Void();
+	}
+	// If there is only 1 team, unsafe to mark failed: team building can get stuck due to lack of servers left
+	if (self->teamCollection->teams.size() <= 1) {
+		TraceEvent("DDExclusionSafetyCheckNotEnoughTeams", self->ddId).log();
+		reply.safe = false;
+		req.reply.send(reply);
+		return Void();
+	}
+	std::vector<UID> excludeServerIDs;
+	// Go through storage server interfaces and translate Address -> server ID (UID)
+	for (const AddressExclusion& excl : req.exclusions) {
+		for (const auto& ssi : ssis) {
+			if (excl.excludes(ssi.address()) ||
+			    (ssi.secondaryAddress().present() && excl.excludes(ssi.secondaryAddress().get()))) {
+				excludeServerIDs.push_back(ssi.id());
+			}
+		}
+	}
+	reply.safe = _exclusionSafetyCheck(excludeServerIDs, self->teamCollection);
+	TraceEvent("DDExclusionSafetyCheckFinish", self->ddId).log();
+	req.reply.send(reply);
+	return Void();
+}
 ACTOR Future<Void> waitFailCacheServer(Database* db, StorageServerInterface ssi) {
 	state Transaction tr(*db);
 	state Key key = storageCacheServerKey(ssi.id());
@@ -6709,6 +6743,11 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			when(DistributorExclusionSafetyCheckRequest exclCheckReq =
 			         waitNext(di.distributorExclCheckReq.getFuture())) {
 				actors.add(ddExclusionSafetyCheck(exclCheckReq, self, cx));
+			}
+			when(FindTeamRequest req = waitNext(di.dataDistributorFindTeam.getFuture())) {
+				req.reply.send(Void());
+				TraceEvent("DataDistributorHalted", di.id()).detail("ReqID", req.requesterID);
+				break;
 			}
 		}
 	} catch (Error& err) {
