@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+getent group foundationdb >/dev/null || addgroup --system foundationdb
+getent passwd foundationdb >/dev/null || adduser --system --disabled-login --ingroup foundationdb --no-create-home --home /var/lib/foundationdb --gecos "FoundationDB" --shell /bin/false foundationdb
+
+mkdir -p /var/lib/foundationdb/data /var/log/foundationdb
+chown -R foundationdb:foundationdb /var/lib/foundationdb /var/log/foundationdb
+chmod -R 0750 /var/lib/foundationdb/data /var/log/foundationdb
+
+update-alternatives --install /usr/sbin/fdbserver fdbserver /usr/lib/foundationdb-@PROJECT_VERSION@/sbin/fdbserver @ALTERNATIVES_PRIORITY@ \
+    --slave /usr/lib/foundationdb/fdbmonitor fdbmonitor /usr/lib/foundationdb-@PROJECT_VERSION@/sbin/fdbmonitor \
+    --slave /etc/init.d/foundationdb foundationdb.service /usr/lib/foundationdb-@PROJECT_VERSION@/etc/init.d/foundationdb
+
+if mkdir /etc/foundationdb
+then
+    description=`LC_CTYPE=C tr -dc A-Za-z0-9 < /dev/urandom | head -c 8`
+    random_str=`LC_CTYPE=C tr -dc A-Za-z0-9 < /dev/urandom | head -c 8`
+    echo $description:$random_str@127.0.0.1:4500 > /etc/foundationdb/fdb.cluster
+    cp /usr/lib/foundationdb-@PROJECT_VERSION@/etc/foundationdb/foundationdb.conf /etc/foundationdb/foundationdb.conf
+    chown -R foundationdb:foundationdb /etc/foundationdb
+    chmod 775 /etc/foundationdb
+    chmod 0664 /etc/foundationdb/fdb.cluster
+    /etc/init.d/foundationdb start
+    /usr/bin/fdbcli -C /etc/foundationdb/fdb.cluster --exec "configure new single memory; status" --timeout 20
+fi

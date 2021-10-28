@@ -68,6 +68,7 @@ struct NetworkOptions {
 	std::string traceFormat;
 	std::string traceClockSource;
 	std::string traceFileIdentifier;
+	std::string tracePartialFileSuffix;
 	Optional<bool> logClientInfo;
 	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
 	bool runLoopProfilingEnabled;
@@ -82,7 +83,7 @@ public:
 	// Creates a database object that represents a connection to a cluster
 	// This constructor uses a preallocated DatabaseContext that may have been created
 	// on another thread
-	static Database createDatabase(Reference<ClusterConnectionFile> connFile,
+	static Database createDatabase(Reference<IClusterConnectionRecord> connRecord,
 	                               int apiVersion,
 	                               IsInternal internal = IsInternal::True,
 	                               LocalityData const& clientLocality = LocalityData(),
@@ -105,6 +106,7 @@ public:
 	inline DatabaseContext* getPtr() const { return db.getPtr(); }
 	inline DatabaseContext* extractPtr() { return db.extractPtr(); }
 	DatabaseContext* operator->() const { return db.getPtr(); }
+	Reference<DatabaseContext> getReference() const { return db; }
 
 	const UniqueOrderedOptionList<FDBTransactionOptions>& getTransactionDefaults() const;
 
@@ -178,6 +180,9 @@ struct TransactionInfo {
 	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
+
+	// Only available so that Transaction can have a default constructor, for use in state variables
+	TransactionInfo() : taskID(), spanID(), useProvisionalProxies() {}
 
 	explicit TransactionInfo(TaskPriority taskID, SpanID spanID)
 	  : taskID(taskID), spanID(spanID), useProvisionalProxies(false) {}
@@ -406,7 +411,7 @@ public:
 	void setTransactionID(uint64_t id);
 	void setToken(uint64_t token);
 
-	const vector<Future<std::pair<Key, Key>>>& getExtraReadConflictRanges() const { return extraConflictRanges; }
+	const std::vector<Future<std::pair<Key, Key>>>& getExtraReadConflictRanges() const { return extraConflictRanges; }
 	Standalone<VectorRef<KeyRangeRef>> readConflictRanges() const {
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.read_conflict_ranges, tr.arena);
 	}
@@ -423,7 +428,7 @@ private:
 	CommitTransactionRequest tr;
 	Future<Version> readVersion;
 	Promise<Optional<Value>> metadataVersion;
-	vector<Future<std::pair<Key, Key>>> extraConflictRanges;
+	std::vector<Future<std::pair<Key, Key>>> extraConflictRanges;
 	Promise<Void> commitResult;
 	Future<Void> committing;
 };
@@ -444,7 +449,7 @@ int64_t extractIntOption(Optional<StringRef> value,
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
-ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions);
+ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);
 
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
 	return bytes / std::max(1, CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR) + 1;

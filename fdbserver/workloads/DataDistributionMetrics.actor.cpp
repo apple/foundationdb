@@ -190,9 +190,9 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 
-	void getMetrics(vector<PerfMetric>& m) override {
-		m.push_back(PerfMetric("NumShards", numShards, true));
-		m.push_back(PerfMetric("AvgBytes", avgBytes, true));
+	void getMetrics(std::vector<PerfMetric>& m) override {
+		m.emplace_back("NumShards", numShards, Averaged::True);
+		m.emplace_back("AvgBytes", avgBytes, Averaged::True);
 		m.push_back(commits.getMetric());
 	}
 };

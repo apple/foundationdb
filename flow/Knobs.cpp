@@ -34,7 +34,7 @@ FlowKnobs::FlowKnobs(Randomize randomize, IsSimulated isSimulated) {
 FlowKnobs bootstrapGlobalFlowKnobs(Randomize::False, IsSimulated::False);
 FlowKnobs const* FLOW_KNOBS = &bootstrapGlobalFlowKnobs;
 
-#define init(knob, value) initKnob(knob, value, #knob)
+#define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
 
 // clang-format off
 void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
@@ -57,6 +57,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( SLOWTASK_PROFILING_LOG_INTERVAL,                       0 ); // A value of 0 means use RUN_LOOP_PROFILING_INTERVAL
 	init( SLOWTASK_PROFILING_MAX_LOG_INTERVAL,                 1.0 );
 	init( SLOWTASK_PROFILING_LOG_BACKOFF,                      2.0 );
+	init( SLOWTASK_BLOCKED_INTERVAL,                          60.0 );
 	init( SATURATION_PROFILING_LOG_INTERVAL,                   0.5 ); // A value of 0 means use RUN_LOOP_PROFILING_INTERVAL
 	init( SATURATION_PROFILING_MAX_LOG_INTERVAL,               5.0 );
 	init( SATURATION_PROFILING_LOG_BACKOFF,                    2.0 );
@@ -67,7 +68,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( HUGE_ARENA_LOGGING_INTERVAL,                         5.0 );
 
 	init( WRITE_TRACING_ENABLED,                              true ); if( randomize && BUGGIFY ) WRITE_TRACING_ENABLED = false;
-	init( TRACING_UDP_LISTENER_PORT,                          8889 ); // Only applicable if TracerType is set to a network option.
+	init( TRACING_SAMPLE_RATE,                                 1.0 ); // Fraction of traces (not spans) to sample (0 means ignore all traces)
+	init( TRACING_UDP_LISTENER_PORT,                          8889 ); // Only applicable if TracerType is set to a network option
 
 	//connectionMonitor
 	init( CONNECTION_MONITOR_LOOP_TIME,   isSimulated ? 0.75 : 1.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_LOOP_TIME = 6.0;
@@ -266,50 +268,36 @@ static std::string toLower(std::string const& name) {
 	return lower_name;
 }
 
-template <class T>
-static T parseIntegral(std::string const& value) {
-	T v;
-	int n = 0;
-	if (StringRef(value).startsWith(LiteralStringRef("0x"))) {
-		if (sscanf(value.c_str(), "0x%" SCNx64 "%n", &v, &n) != 1 || n != value.size())
-			throw invalid_option_value();
-	} else {
-		if (sscanf(value.c_str(), "%" SCNd64 "%n", &v, &n) != 1 || n != value.size())
-			throw invalid_option_value();
-	}
-	return v;
-}
-
 ParsedKnobValue Knobs::parseKnobValue(std::string const& knob, std::string const& value) const {
-	if (double_knobs.count(knob)) {
-		double v;
-		int n = 0;
-		if (sscanf(value.c_str(), "%lf%n", &v, &n) != 1 || n != value.size())
-			throw invalid_option_value();
-		return v;
-	} else if (bool_knobs.count(knob)) {
-		if (toLower(value) == "true") {
-			return true;
-		} else if (toLower(value) == "false") {
-			return false;
-		} else {
-			return parseIntegral<bool>(value);
+	try {
+		if (double_knobs.count(knob)) {
+			return std::stod(value);
+		} else if (bool_knobs.count(knob)) {
+			if (toLower(value) == "true") {
+				return true;
+			} else if (toLower(value) == "false") {
+				return false;
+			} else {
+				return (std::stoi(value) != 0);
+			}
+		} else if (int64_knobs.count(knob)) {
+			return static_cast<int64_t>(std::stol(value, nullptr, 0));
+		} else if (int_knobs.count(knob)) {
+			return std::stoi(value, nullptr, 0);
+		} else if (string_knobs.count(knob)) {
+			return value;
 		}
-	} else if (int64_knobs.count(knob)) {
-		return parseIntegral<int64_t>(value);
-	} else if (int_knobs.count(knob)) {
-		return parseIntegral<int>(value);
-	} else if (string_knobs.count(knob)) {
-		return value;
+		return NoKnobFound{};
+	} catch (...) {
+		throw invalid_option_value();
 	}
-	return NoKnobFound{};
 }
 
 bool Knobs::setKnob(std::string const& knob, int value) {
 	if (!int_knobs.count(knob)) {
 		return false;
 	}
-	*int_knobs[knob] = value;
+	*int_knobs[knob].value = value;
 	explicitlySetKnobs.insert(toLower(knob));
 	return true;
 }
@@ -318,7 +306,7 @@ bool Knobs::setKnob(std::string const& knob, int64_t value) {
 	if (!int64_knobs.count(knob)) {
 		return false;
 	}
-	*int64_knobs[knob] = value;
+	*int64_knobs[knob].value = value;
 	explicitlySetKnobs.insert(toLower(knob));
 	return true;
 }
@@ -327,7 +315,7 @@ bool Knobs::setKnob(std::string const& knob, bool value) {
 	if (!bool_knobs.count(knob)) {
 		return false;
 	}
-	*bool_knobs[knob] = value;
+	*bool_knobs[knob].value = value;
 	explicitlySetKnobs.insert(toLower(knob));
 	return true;
 }
@@ -336,7 +324,7 @@ bool Knobs::setKnob(std::string const& knob, double value) {
 	if (!double_knobs.count(knob)) {
 		return false;
 	}
-	*double_knobs[knob] = value;
+	*double_knobs[knob].value = value;
 	explicitlySetKnobs.insert(toLower(knob));
 	return true;
 }
@@ -345,55 +333,85 @@ bool Knobs::setKnob(std::string const& knob, std::string const& value) {
 	if (!string_knobs.count(knob)) {
 		return false;
 	}
-	*string_knobs[knob] = value;
+	*string_knobs[knob].value = value;
 	explicitlySetKnobs.insert(toLower(knob));
 	return true;
 }
 
-void Knobs::initKnob(double& knob, double value, std::string const& name) {
+bool Knobs::isAtomic(std::string const& knob) const {
+	if (double_knobs.count(knob)) {
+		return double_knobs.find(knob)->second.atomic == Atomic::YES;
+	} else if (int64_knobs.count(knob)) {
+		return int64_knobs.find(knob)->second.atomic == Atomic::YES;
+	} else if (int_knobs.count(knob)) {
+		return int_knobs.find(knob)->second.atomic == Atomic::YES;
+	} else if (string_knobs.count(knob)) {
+		return string_knobs.find(knob)->second.atomic == Atomic::YES;
+	} else if (bool_knobs.count(knob)) {
+		return bool_knobs.find(knob)->second.atomic == Atomic::YES;
+	}
+	return false;
+}
+
+void Knobs::initKnob(double& knob, double value, std::string const& name, Atomic atomic) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
-		double_knobs[toLower(name)] = &knob;
+		double_knobs[toLower(name)] = KnobValue<double>{ &knob, atomic };
 	}
 }
 
-void Knobs::initKnob(int64_t& knob, int64_t value, std::string const& name) {
+void Knobs::initKnob(int64_t& knob, int64_t value, std::string const& name, Atomic atomic) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
-		int64_knobs[toLower(name)] = &knob;
+		int64_knobs[toLower(name)] = KnobValue<int64_t>{ &knob, atomic };
 	}
 }
 
-void Knobs::initKnob(int& knob, int value, std::string const& name) {
+void Knobs::initKnob(int& knob, int value, std::string const& name, Atomic atomic) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
-		int_knobs[toLower(name)] = &knob;
+		int_knobs[toLower(name)] = KnobValue<int>{ &knob, atomic };
 	}
 }
 
-void Knobs::initKnob(std::string& knob, const std::string& value, const std::string& name) {
+void Knobs::initKnob(std::string& knob, const std::string& value, const std::string& name, Atomic atomic) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
-		string_knobs[toLower(name)] = &knob;
+		string_knobs[toLower(name)] = KnobValue<std::string>{ &knob, atomic };
 	}
 }
 
-void Knobs::initKnob(bool& knob, bool value, std::string const& name) {
+void Knobs::initKnob(bool& knob, bool value, std::string const& name, Atomic atomic) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
-		bool_knobs[toLower(name)] = &knob;
+		bool_knobs[toLower(name)] = KnobValue<bool>{ &knob, atomic };
 	}
 }
 
 void Knobs::trace() const {
 	for (auto& k : double_knobs)
-		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
+		TraceEvent("Knob")
+		    .detail("Name", k.first.c_str())
+		    .detail("Value", *k.second.value)
+		    .detail("Atomic", k.second.atomic);
 	for (auto& k : int_knobs)
-		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
+		TraceEvent("Knob")
+		    .detail("Name", k.first.c_str())
+		    .detail("Value", *k.second.value)
+		    .detail("Atomic", k.second.atomic);
 	for (auto& k : int64_knobs)
-		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
+		TraceEvent("Knob")
+		    .detail("Name", k.first.c_str())
+		    .detail("Value", *k.second.value)
+		    .detail("Atomic", k.second.atomic);
 	for (auto& k : string_knobs)
-		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
+		TraceEvent("Knob")
+		    .detail("Name", k.first.c_str())
+		    .detail("Value", *k.second.value)
+		    .detail("Atomic", k.second.atomic);
 	for (auto& k : bool_knobs)
-		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
+		TraceEvent("Knob")
+		    .detail("Name", k.first.c_str())
+		    .detail("Value", *k.second.value)
+		    .detail("Atomic", k.second.atomic);
 }

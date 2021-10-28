@@ -107,7 +107,7 @@ private:
 	std::vector<TraceEventFields> eventBuffer;
 	int loggedLength;
 	int bufferLength;
-	bool opened;
+	std::atomic<bool> opened;
 	int64_t preopenOverflowCount;
 	std::string basename;
 	std::string logGroup;
@@ -115,6 +115,7 @@ private:
 	std::string directory;
 	std::string processName;
 	Optional<NetworkAddress> localAddress;
+	std::string tracePartialFileSuffix;
 
 	Reference<IThreadPool> writer;
 	uint64_t rollsize;
@@ -288,13 +289,15 @@ public:
 	          std::string const& timestamp,
 	          uint64_t rs,
 	          uint64_t maxLogsSize,
-	          Optional<NetworkAddress> na) {
+	          Optional<NetworkAddress> na,
+	          std::string const& tracePartialFileSuffix) {
 		ASSERT(!writer && !opened);
 
 		this->directory = directory;
 		this->processName = processName;
 		this->logGroup = logGroup;
 		this->localAddress = na;
+		this->tracePartialFileSuffix = tracePartialFileSuffix;
 
 		basename = format("%s/%s.%s.%s",
 		                  directory.c_str(),
@@ -306,6 +309,7 @@ public:
 		    processName,
 		    basename,
 		    formatter->getExtension(),
+		    tracePartialFileSuffix,
 		    maxLogsSize,
 		    [this]() { barriers->triggerAll(); },
 		    issues));
@@ -383,6 +387,17 @@ public:
 		ASSERT(!isOpen() || fields.isAnnotated());
 		eventBuffer.push_back(fields);
 		bufferLength += fields.sizeBytes();
+
+		// If we have queued up a large number of events in simulation, then throw an error. This makes it easier to
+		// diagnose cases where we get stuck in a loop logging trace events that eventually runs out of memory.
+		// Without this we would never see any trace events from that loop, and it would be more difficult to identify
+		// where the process is actually stuck.
+		if (g_network && g_network->isSimulated() && bufferLength > 1e8) {
+			// Setting this to 0 avoids a recurse from the assertion trace event and also prevents a situation where
+			// we roll the trace log only to log the single assertion event when using --crash.
+			bufferLength = 0;
+			ASSERT(false);
+		}
 
 		if (trackError) {
 			latestEventCache.setLatestError(fields);
@@ -655,15 +670,15 @@ bool traceClockSource(std::string& source) {
 
 std::string toString(ErrorKind errorKind) {
 	switch (errorKind) {
-		case ErrorKind::Unset:
-			return "Unset";
-		case ErrorKind::DiskIssue:
-			return "DiskIssue";
-		case ErrorKind::BugDetected:
-			return "BugDetected";
-		default:
-			UNSTOPPABLE_ASSERT(false);
-			return "";
+	case ErrorKind::Unset:
+		return "Unset";
+	case ErrorKind::DiskIssue:
+		return "DiskIssue";
+	case ErrorKind::BugDetected:
+		return "BugDetected";
+	default:
+		UNSTOPPABLE_ASSERT(false);
+		return "";
 	}
 }
 
@@ -715,7 +730,8 @@ void openTraceFile(const NetworkAddress& na,
                    std::string directory,
                    std::string baseOfBase,
                    std::string logGroup,
-                   std::string identifier) {
+                   std::string identifier,
+                   std::string tracePartialFileSuffix) {
 	if (g_traceLog.isOpen())
 		return;
 
@@ -739,7 +755,8 @@ void openTraceFile(const NetworkAddress& na,
 	                format("%lld", time(nullptr)),
 	                rollsize,
 	                maxLogsSize,
-	                !g_network->isSimulated() ? na : Optional<NetworkAddress>());
+	                !g_network->isSimulated() ? na : Optional<NetworkAddress>(),
+	                tracePartialFileSuffix);
 
 	uncancellable(recurring(&flushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskPriority::FlushTrace));
 	g_traceBatch.dump();
@@ -915,7 +932,7 @@ bool TraceEvent::init() {
 		detail("Severity", int(severity));
 		if (severity >= SevError) {
 			detail("ErrorKind", errorKind);
-			errorKindIndex = fields.size()-1;
+			errorKindIndex = fields.size() - 1;
 		}
 		detail("Time", "0.000000");
 		timeIndex = fields.size() - 1;
@@ -1104,7 +1121,7 @@ TraceEvent& TraceEvent::suppressFor(double duration, bool logSuppressedEventCoun
 	return *this;
 }
 
-TraceEvent &TraceEvent::setErrorKind(ErrorKind errorKind) {
+TraceEvent& TraceEvent::setErrorKind(ErrorKind errorKind) {
 	this->errorKind = errorKind;
 	return *this;
 }

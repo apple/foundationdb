@@ -197,13 +197,17 @@ public:
 		globals[id] = v;
 	}
 
-	ProtocolVersion protocolVersion() override { return currentProtocolVersion; }
+	ProtocolVersion protocolVersion() const override { return currentProtocolVersion; }
 
 	std::vector<flowGlobalType> globals;
 
 	const TLSConfig& getTLSConfig() const override { return tlsConfig; }
 
 	bool checkRunnable() override;
+
+#ifdef ENABLE_SAMPLING
+	ActorLineageSet& getActorLineageSet() override;
+#endif
 
 	bool useThreadPool;
 
@@ -227,10 +231,16 @@ public:
 	TaskPriority currentTaskID;
 	uint64_t tasksIssued;
 	TDMetricCollection tdmetrics;
-	double currentTime;
+	// we read now() from a different thread. On Intel, reading a double is atomic anyways, but on other platforms it's
+	// not. For portability this should be atomic
+	std::atomic<double> currentTime;
 	// May be accessed off the network thread, e.g. by onMainThread
 	std::atomic<bool> stopped;
 	mutable std::map<IPAddress, bool> addressOnHostCache;
+
+#ifdef ENABLE_SAMPLING
+	ActorLineageSet actorLineageSet;
+#endif
 
 	std::atomic<bool> started;
 
@@ -1381,6 +1391,12 @@ bool Net2::checkRunnable() {
 	return !started.exchange(true);
 }
 
+#ifdef ENABLE_SAMPLING
+ActorLineageSet& Net2::getActorLineageSet() {
+	return actorLineageSet;
+}
+#endif
+
 void Net2::run() {
 	TraceEvent::setNetworkThread();
 	TraceEvent("Net2Running").log();
@@ -2103,7 +2119,7 @@ void net2_test(){
 
 	double before = timer();
 
-	vector<TestGVR> reqs;
+	std::vector<TestGVR> reqs;
 	reqs.reserve( 10000 );
 
 	int totalBytes = 0;

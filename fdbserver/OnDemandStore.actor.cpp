@@ -37,9 +37,7 @@ OnDemandStore::OnDemandStore(std::string const& folder, UID myID, std::string co
   : folder(folder), myID(myID), store(nullptr), prefix(prefix) {}
 
 OnDemandStore::~OnDemandStore() {
-	if (store) {
-		store->close();
-	}
+	close();
 }
 
 IKeyValueStore* OnDemandStore::get() {
@@ -60,4 +58,21 @@ IKeyValueStore* OnDemandStore::operator->() {
 
 Future<Void> OnDemandStore::getError() const {
 	return onErr(err.getFuture());
+}
+
+Future<Void> OnDemandStore::onClosed() const {
+	return store->onClosed();
+}
+
+void OnDemandStore::dispose() {
+	if (store) {
+		store->dispose();
+		store = nullptr;
+	}
+}
+void OnDemandStore::close() {
+	if (store) {
+		store->close();
+		store = nullptr;
+	}
 }

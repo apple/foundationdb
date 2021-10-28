@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -81,7 +82,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 		useExtraDB = g_simulator.extraDB != nullptr;
 		if (useExtraDB) {
-			auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
+			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
 			extraDB = Database::createDatabase(extraFile, -1);
 			useSystemKeys = false;
 		}
@@ -116,7 +117,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return success; }
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(transactions.getMetric());
 		m.push_back(retries.getMetric());
 	}
@@ -734,9 +735,10 @@ ACTOR Future<Void> randomTransaction(Database cx, WriteDuringReadWorkload* self,
 	state bool readAheadDisabled = deterministicRandom()->random01() < 0.5;
 	state bool snapshotRYWDisabled = deterministicRandom()->random01() < 0.5;
 	state bool useBatchPriority = deterministicRandom()->random01() < 0.5;
-	state int64_t timebomb = (FLOW_KNOBS->MAX_BUGGIFIED_DELAY == 0.0 && deterministicRandom()->random01() < 0.01)
-	                             ? deterministicRandom()->randomInt64(1, 6000)
-	                             : 0; // timebomb check can fail incorrectly if simulation injects delay longer than the timebomb
+	state int64_t timebomb =
+	    (FLOW_KNOBS->MAX_BUGGIFIED_DELAY == 0.0 && deterministicRandom()->random01() < 0.01)
+	        ? deterministicRandom()->randomInt64(1, 6000)
+	        : 0; // timebomb check can fail incorrectly if simulation injects delay longer than the timebomb
 	state std::vector<Future<Void>> operations;
 	state ActorCollection commits(false);
 	state std::vector<Future<Void>> watches;

@@ -17,7 +17,6 @@ import shutil
 import io
 import random
 
-
 _logger = None
 
 def init_logging(loglevel, logdir):
@@ -81,7 +80,12 @@ class LogParser:
     def applyAddr2line(self, obj):
         addresses = self.sanitizeBacktrace(obj)
         assert addresses is not None
-        fdbbin = os.path.join(basedir, 'bin', 'fdbserver')
+        config = ''
+        binaryExt = ''
+        if sys.platform == 'win32':
+            #config = options.config
+            binaryExt = '.exe'
+        fdbbin = os.path.realpath(os.path.join(basedir, 'bin', 'Release', 'fdbserver' + binaryExt))
         try:
             resolved = subprocess.check_output(
                     ('addr2line -e %s -C -f -i' % fdbbin).split() + addresses.split()).splitlines()
@@ -299,7 +303,12 @@ class RestartTestPolicy:
         return self._second_binary
 
 def run_simulation_test(basedir, options):
-    fdbserver = os.path.join(basedir, 'bin', 'fdbserver')
+    config = ''
+    binaryExt = ''
+    if sys.platform == 'win32':
+        config = options.config
+        binaryExt = '.exe'
+    fdbserver = os.path.realpath(os.path.join(basedir, 'bin', config, 'fdbserver' + binaryExt))
     pargs = [fdbserver,
              '-r', options.testtype]
     seed = 0
@@ -429,6 +438,8 @@ if __name__ == '__main__':
                         help='Path to the old binary to use for upgrade tests')
     parser.add_argument('-S', '--symbolicate', action='store_true', default=False,
                         help='Symbolicate backtraces in trace events')
+    parser.add_argument('--config', default=None,
+                        help='Configuration type to test')
     parser.add_argument('--crash', action='store_true', default=False,
                         help='Test ASSERT failures should crash the test')
     parser.add_argument('--aggregate-traces', default='NONE',

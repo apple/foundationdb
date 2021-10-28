@@ -32,7 +32,7 @@ struct WatchAndWaitWorkload : TestWorkload {
 	int keyBytes;
 	double testDuration;
 	bool triggerWatches;
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter triggers, retries;
 
 	WatchAndWaitWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), triggers("Triggers"), retries("Retries") {
@@ -80,9 +80,9 @@ struct WatchAndWaitWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		double duration = testDuration;
-		m.push_back(PerfMetric("Triggers/sec", triggers.getValue() / duration, false));
+		m.emplace_back("Triggers/sec", triggers.getValue() / duration, Averaged::False);
 		m.push_back(triggers.getMetric());
 		m.push_back(retries.getMetric());
 	}

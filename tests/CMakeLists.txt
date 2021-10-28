@@ -15,13 +15,18 @@ set(TEST_EXCLUDE ".^" CACHE STRING "Exclude all tests matching the given regex")
 # to test upgrades
 if(WITH_PYTHON)
   find_program(OLD_FDBSERVER_BINARY
-    fdbserver
+    fdbserver fdbserver.exe
     HINTS /opt/foundationdb/old /usr/sbin /usr/libexec /usr/local/sbin /usr/local/libexec)
   if(OLD_FDBSERVER_BINARY)
     message(STATUS "Use old fdb at ${OLD_FDBSERVER_BINARY}")
   else()
-    set(fdbserver_location ${CMAKE_BINARY_DIR}/bin/fdbserver)
-    set(OLD_FDBSERVER_BINARY ${fdbserver_location} CACHE FILEPATH "Old fdbserver binary" FORCE)
+    if(WIN32)
+      set(fdbserver_location ${CMAKE_BINARY_DIR}/bin/@CTEST_CONFIGURATION_TYPE@/fdbserver.exe)
+      set(OLD_FDBSERVER_BINARY ${fdbserver_location} CACHE FILEPATH "Old fdbserver binary" FORCE)
+    else()
+      set(fdbserver_location ${CMAKE_BINARY_DIR}/bin/fdbserver)
+      set(OLD_FDBSERVER_BINARY ${fdbserver_location} CACHE FILEPATH "Old fdbserver binary" FORCE)
+    endif()
     message(WARNING "\
   No old fdbserver binary found - using ${fdbserver_location} \
   It is recommended to install the current stable version from https://www.foundationdb.org/download/ \
@@ -44,6 +49,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES BackupContainers.txt IGNORE)
   add_fdb_test(TEST_FILES BandwidthThrottle.txt IGNORE)
   add_fdb_test(TEST_FILES BigInsert.txt IGNORE)
+  add_fdb_test(TEST_FILES BlobGranuleReaderUnit.txt IGNORE)
+  add_fdb_test(TEST_FILES BlobManagerUnit.txt IGNORE)
   add_fdb_test(TEST_FILES ConsistencyCheck.txt IGNORE)
   add_fdb_test(TEST_FILES DDMetricsExclude.txt IGNORE)
   add_fdb_test(TEST_FILES DataDistributionMetrics.txt IGNORE)
@@ -109,6 +116,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES pt.TXT IGNORE)
   add_fdb_test(TEST_FILES randomSelector.txt IGNORE)
   add_fdb_test(TEST_FILES selectorCorrectness.txt IGNORE)
+  add_fdb_test(TEST_FILES IThreadPool.txt IGNORE)
   add_fdb_test(TEST_FILES fast/AtomicBackupCorrectness.toml)
   add_fdb_test(TEST_FILES fast/AtomicBackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/AtomicOps.toml)
@@ -125,6 +133,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/ConstrainedRandomSelector.toml)
   add_fdb_test(TEST_FILES fast/CycleAndLock.toml)
   add_fdb_test(TEST_FILES fast/CycleTest.toml)
+  add_fdb_test(TEST_FILES fast/ChangeFeeds.toml)
+  add_fdb_test(TEST_FILES fast/DataLossRecovery.toml IGNORE) # TODO Re-enable once failures are fixed
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackup.toml)
@@ -139,6 +149,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/LowLatencySingleClog.toml IGNORE)
   add_fdb_test(TEST_FILES fast/MemoryLifetime.toml)
   add_fdb_test(TEST_FILES fast/MoveKeysCycle.toml)
+  add_fdb_test(TEST_FILES fast/MutationLogReaderCorrectness.toml)
   add_fdb_test(TEST_FILES fast/ProtocolVersion.toml)
   add_fdb_test(TEST_FILES fast/RandomSelector.toml)
   add_fdb_test(TEST_FILES fast/RandomUnitTests.toml)
@@ -149,6 +160,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/SidebandWithStatus.toml)
   add_fdb_test(TEST_FILES fast/SimpleAtomicAdd.toml)
   add_fdb_test(TEST_FILES fast/SpecialKeySpaceCorrectness.toml)
+  add_fdb_test(TEST_FILES fast/StreamingRangeRead.toml)
   add_fdb_test(TEST_FILES fast/SwizzledRollbackSideband.toml)
   add_fdb_test(TEST_FILES fast/SystemRebootTestCycle.toml)
   add_fdb_test(TEST_FILES fast/TaskBucketCorrectness.toml)
@@ -164,6 +176,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)
   add_fdb_test(TEST_FILES rare/CloggedCycleWithKills.toml)
+  add_fdb_test(TEST_FILES rare/ConfigIncrement.toml)
   add_fdb_test(TEST_FILES rare/ConflictRangeCheck.toml)
   add_fdb_test(TEST_FILES rare/ConflictRangeRYOWCheck.toml)
   add_fdb_test(TEST_FILES rare/CycleRollbackClogged.toml)
@@ -175,6 +188,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/LargeApiCorrectnessStatus.toml)
   add_fdb_test(TEST_FILES rare/RYWDisable.toml)
   add_fdb_test(TEST_FILES rare/RandomReadWriteTest.toml)
+  add_fdb_test(TEST_FILES rare/SpecificUnitTests.toml)
   add_fdb_test(TEST_FILES rare/SwizzledLargeApiCorrectness.toml)
   add_fdb_test(TEST_FILES rare/RedwoodCorrectnessBTree.toml)
   add_fdb_test(TEST_FILES rare/Throttling.toml)
@@ -188,43 +202,72 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.0.0/ConfigureTestRestart-1.txt
                restarting/from_7.0.0/ConfigureTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_5.0.0/CycleTestRestart-1.txt
-               restarting/from_5.0.0/CycleTestRestart-2.txt)
+    TEST_FILES restarting/from_5.0.0_until_6.3.0/CycleTestRestart-1.txt
+               restarting/from_5.0.0_until_6.3.0/CycleTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_5.0.0/StorefrontTestRestart-1.txt
-               restarting/from_5.0.0/StorefrontTestRestart-2.txt)
+    TEST_FILES restarting/from_5.0.0_until_6.3.0/StorefrontTestRestart-1.txt
+               restarting/from_5.0.0_until_6.3.0/StorefrontTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.33/SnapTestAttrition-1.txt
-               restarting/from_6.2.33/SnapTestAttrition-2.txt)
+    TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapTestAttrition-1.txt
+               restarting/from_6.2.33_until_6.3.0/SnapTestAttrition-2.txt IGNORE) # TODO re-enable once snap test failures are fixed!
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.33/SnapTestSimpleRestart-1.txt
-               restarting/from_6.2.33/SnapTestSimpleRestart-2.txt)
+    TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapTestSimpleRestart-1.txt
+               restarting/from_6.2.33_until_6.3.0/SnapTestSimpleRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.33/SnapTestRestart-1.txt
-               restarting/from_6.2.33/SnapTestRestart-2.txt)
+    TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapTestRestart-1.txt
+               restarting/from_6.2.33_until_6.3.0/SnapTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.33/SnapCycleRestart-1.txt
-               restarting/from_6.2.33/SnapCycleRestart-2.txt)
+    TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapCycleRestart-1.txt
+               restarting/from_6.2.33_until_6.3.0/SnapCycleRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_5.1.7/DrUpgradeRestart-1.txt
-               restarting/from_5.1.7/DrUpgradeRestart-2.txt)
+    TEST_FILES restarting/from_5.1.7_until_6.3.0/DrUpgradeRestart-1.txt
+               restarting/from_5.1.7_until_6.3.0/DrUpgradeRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_5.2.0/ClientTransactionProfilingCorrectness-1.txt
-               restarting/from_5.2.0/ClientTransactionProfilingCorrectness-2.txt)
+    TEST_FILES restarting/from_5.2.0_until_6.3.0/ClientTransactionProfilingCorrectness-1.txt
+               restarting/from_5.2.0_until_6.3.0/ClientTransactionProfilingCorrectness-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13/ClientTransactionProfilingCorrectness-1.txt
+               restarting/from_6.3.13/ClientTransactionProfilingCorrectness-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13/CycleTestRestart-1.txt
+               restarting/from_6.3.13/CycleTestRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13/DrUpgradeRestart-1.txt
+               restarting/from_6.3.13/DrUpgradeRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13/SnapCycleRestart-1.txt
+               restarting/from_6.3.13/SnapCycleRestart-2.txt IGNORE) # TODO re-enable once snap test failures are fixed!
+  add_fdb_test( 
+    TEST_FILES restarting/from_6.3.13/SnapTestAttrition-1.txt
+               restarting/from_6.3.13/SnapTestAttrition-2.txt IGNORE) # TODO re-enable once snap test failures are fixed!
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13/SnapTestRestart-1.txt
+               restarting/from_6.3.13/SnapTestRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13/SnapTestSimpleRestart-1.txt
+               restarting/from_6.3.13/SnapTestSimpleRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13/StorefrontTestRestart-1.txt
+               restarting/from_6.3.13/StorefrontTestRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
                restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/to_6.3.10/CycleTestRestart-1.txt
-               restarting/to_6.3.10/CycleTestRestart-2.txt)
+    TEST_FILES restarting/to_7.0.0/CycleTestRestart-1.txt
+               restarting/to_7.0.0/CycleTestRestart-2.txt)
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.toml)
+  add_fdb_test(TEST_FILES fast/BlobGranuleCorrectness.toml IGNORE)
+  add_fdb_test(TEST_FILES slow/BlobGranuleCorrectnessLarge.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/BlobGranuleCorrectnessClean.toml IGNORE)
+  add_fdb_test(TEST_FILES slow/BlobGranuleCorrectnessLargeClean.toml IGNORE)
   add_fdb_test(TEST_FILES slow/ClogWithRollbacks.toml)
   add_fdb_test(TEST_FILES slow/CloggedCycleTest.toml)
   add_fdb_test(TEST_FILES slow/CloggedStorefront.toml)
   add_fdb_test(TEST_FILES slow/CommitBug.toml)
   add_fdb_test(TEST_FILES slow/ConfigureTest.toml)
+  add_fdb_test(TEST_FILES slow/ConfigureStorageMigrationTest.toml)
   add_fdb_test(TEST_FILES slow/CycleRollbackPlain.toml)
   add_fdb_test(TEST_FILES slow/DDBalanceAndRemove.toml)
   add_fdb_test(TEST_FILES slow/DDBalanceAndRemoveStatus.toml)

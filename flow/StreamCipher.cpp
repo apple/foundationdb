@@ -55,7 +55,8 @@ void StreamCipher::Key::initializeKey(RawKeyType&& arr) {
 
 void StreamCipher::Key::initializeRandomTestKey() {
 	ASSERT(g_network->isSimulated());
-	if (globalKey) return;
+	if (globalKey)
+		return;
 	globalKey = std::make_unique<Key>(ConstructorTag{});
 	generateRandomData(globalKey->arr.data(), globalKey->arr.size());
 }
@@ -90,6 +91,7 @@ EncryptionStreamCipher::EncryptionStreamCipher(const StreamCipher::Key& key, con
 }
 
 StringRef EncryptionStreamCipher::encrypt(unsigned char const* plaintext, int len, Arena& arena) {
+	TEST(true); // Encrypting data with StreamCipher
 	auto ciphertext = new (arena) unsigned char[len + AES_BLOCK_SIZE];
 	int bytes{ 0 };
 	EVP_EncryptUpdate(cipher.getCtx(), ciphertext, &bytes, plaintext, len);
@@ -110,6 +112,7 @@ DecryptionStreamCipher::DecryptionStreamCipher(const StreamCipher::Key& key, con
 }
 
 StringRef DecryptionStreamCipher::decrypt(unsigned char const* ciphertext, int len, Arena& arena) {
+	TEST(true); // Decrypting data with StreamCipher
 	auto plaintext = new (arena) unsigned char[len];
 	int bytesDecrypted{ 0 };
 	EVP_DecryptUpdate(cipher.getCtx(), plaintext, &bytesDecrypted, ciphertext, len);

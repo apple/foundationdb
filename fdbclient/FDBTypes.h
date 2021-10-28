@@ -41,8 +41,8 @@ typedef UID SpanID;
 enum {
 	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0), txsTag (id=1), or cacheTag (id=2)
 	tagLocalityLogRouter = -2,
-	tagLocalityRemoteLog = -3, // tag created by log router for remote tLogs
-	tagLocalityUpgraded = -4,
+	tagLocalityRemoteLog = -3, // tag created by log router for remote (aka. not in Primary DC) tLogs
+	tagLocalityUpgraded = -4, // tlogs with old log format
 	tagLocalitySatellite = -5,
 	tagLocalityLogRouterMapped = -6, // The pseudo tag used by log routers to pop the real LogRouter tag (i.e., -2)
 	tagLocalityTxs = -7,
@@ -864,6 +864,14 @@ struct StorageBytes {
 		              used / 1e6,
 		              temp / 1e6);
 	}
+
+	void toTraceEvent(TraceEvent& e) const {
+		e.detail("StorageBytesUsed", used)
+		    .detail("StorageBytesTemp", temp)
+		    .detail("StorageBytesTotal", total)
+		    .detail("StorageBytesFree", free)
+		    .detail("StorageBytesAvailable", available);
+	}
 };
 struct LogMessageVersion {
 	// Each message pushed into the log system has a unique, totally ordered LogMessageVersion
@@ -1124,6 +1132,49 @@ inline const char* transactionPriorityToString(TransactionPriority priority, boo
 
 	ASSERT(false);
 	throw internal_error();
+}
+
+struct StorageMigrationType {
+	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
+	// just before END.
+	enum MigrationType { DEFAULT = 1, UNSET = 0, DISABLED = 1, AGGRESSIVE = 2, GRADUAL = 3, END = 4 };
+
+	StorageMigrationType() : type(UNSET) {}
+	StorageMigrationType(MigrationType type) : type(type) {
+		if ((uint32_t)type >= END) {
+			this->type = UNSET;
+		}
+	}
+	operator MigrationType() const { return MigrationType(type); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, type);
+	}
+
+	std::string toString() const {
+		switch (type) {
+		case DISABLED:
+			return "disabled";
+		case AGGRESSIVE:
+			return "aggressive";
+		case GRADUAL:
+			return "gradual";
+		case UNSET:
+			return "unset";
+		default:
+			ASSERT(false);
+		}
+		return "";
+	}
+
+	uint32_t type;
+};
+
+inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
+	int pos = locality.find(':');
+	// locality should be either 0 or in the format '<non_empty_string>:<non_empty_string>'
+	return ((pos > 0 && pos < locality.size() - 1) || locality == "0");
 }
 
 #endif

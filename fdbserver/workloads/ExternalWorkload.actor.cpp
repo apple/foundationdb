@@ -220,14 +220,14 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		                    GenericPromise<bool>(new FDBPromiseImpl(promise)));
 		return f;
 	}
-	void getMetrics(vector<PerfMetric>& out) override {
+	void getMetrics(std::vector<PerfMetric>& out) override {
 		if (!success) {
 			return;
 		}
 		std::vector<FDBPerfMetric> metrics;
 		workloadImpl->getMetrics(metrics);
 		for (const auto& m : metrics) {
-			out.emplace_back(m.name, m.value, m.averaged, m.format_code);
+			out.emplace_back(m.name, m.value, Averaged{ m.averaged }, m.format_code);
 		}
 	}
 

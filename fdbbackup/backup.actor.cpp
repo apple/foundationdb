@@ -37,6 +37,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/RunTransaction.actor.h"
@@ -52,8 +53,6 @@
 #include <string>
 #include <iostream>
 #include <ctime>
-using std::cout;
-using std::endl;
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -1209,9 +1208,11 @@ static void printFastRestoreUsage(bool devhelp) {
 static void printDBAgentUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("Usage: %s [OPTIONS]\n\n", exeDatabaseAgent.toString().c_str());
-	printf("  -d CONNFILE    The path of a file containing the connection string for the\n"
+	printf("  -d, --destination CONNFILE\n"
+	       "                 The path of a file containing the connection string for the\n"
 	       "                 destination FoundationDB cluster.\n");
-	printf("  -s CONNFILE    The path of a file containing the connection string for the\n"
+	printf("  -s, --source CONNFILE\n"
+	       "                 The path of a file containing the connection string for the\n"
 	       "                 source FoundationDB cluster.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
 	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
@@ -1223,7 +1224,7 @@ static void printDBAgentUsage(bool devhelp) {
 	printf("  --trace_format FORMAT\n"
 	       "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 	       "                 Has no effect unless --log is specified.\n");
-	printf("  -m SIZE, --memory SIZE\n"
+	printf("  -m, --memory SIZE\n"
 	       "                 Memory limit. The default value is 8GiB. When specified\n"
 	       "                 without a unit, MiB is assumed.\n");
 #ifndef TLS_DISABLED
@@ -1667,7 +1668,7 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
 				readMore = true;
 		} catch (Error& e) {
 			// If doc can't be parsed or isn't alive, delete it.
-			TraceEvent(SevWarn, "RemovedDeadBackupLayerStatus").detail("Key", docs[i].key);
+			TraceEvent(SevWarn, "RemovedDeadBackupLayerStatus").detail("Key", docs[i].key).error(e, true);
 			tr->clear(docs[i].key);
 			// If limit is 1 then read more.
 			if (limit == 1)
@@ -3073,6 +3074,36 @@ Version parseVersion(const char* str) {
 extern uint8_t* g_extra_memory;
 #endif
 
+// Creates a connection to a cluster. Optionally prints an error if the connection fails.
+Optional<Database> connectToCluster(std::string const& clusterFile,
+                                    LocalityData const& localities,
+                                    bool quiet = false) {
+	auto resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(clusterFile);
+	Reference<ClusterConnectionFile> ccf;
+
+	Optional<Database> db;
+
+	try {
+		ccf = makeReference<ClusterConnectionFile>(resolvedClusterFile.first);
+	} catch (Error& e) {
+		if (!quiet)
+			fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
+		return db;
+	}
+
+	try {
+		db = Database::createDatabase(ccf, -1, IsInternal::True, localities);
+	} catch (Error& e) {
+		if (!quiet) {
+			fprintf(stderr, "ERROR: %s\n", e.what());
+			fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", ccf->getLocation().c_str());
+		}
+		return db;
+	}
+
+	return db;
+};
+
 int main(int argc, char* argv[]) {
 	platformInit();
 
@@ -3785,9 +3816,7 @@ int main(int argc, char* argv[]) {
 		std::set_new_handler(&platform::outOfMemory);
 		setMemoryQuota(memLimit);
 
-		Reference<ClusterConnectionFile> ccf;
 		Database db;
-		Reference<ClusterConnectionFile> sourceCcf;
 		Database sourceDb;
 		FileBackupAgent ba;
 		Key tag;
@@ -3830,43 +3859,29 @@ int main(int argc, char* argv[]) {
 		};
 
 		auto initCluster = [&](bool quiet = false) {
-			auto resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(clusterFile);
-			try {
-				ccf = makeReference<ClusterConnectionFile>(resolvedClusterFile.first);
-			} catch (Error& e) {
-				if (!quiet)
-					fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
-				return false;
+			Optional<Database> result = connectToCluster(clusterFile, localities, quiet);
+			if (result.present()) {
+				db = result.get();
 			}
 
-			try {
-				db = Database::createDatabase(ccf, -1, IsInternal::True, localities);
-			} catch (Error& e) {
-				fprintf(stderr, "ERROR: %s\n", e.what());
-				fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
-				return false;
-			}
-
-			return true;
+			return result.present();
 		};
 
-		if (sourceClusterFile.size()) {
-			auto resolvedSourceClusterFile = ClusterConnectionFile::lookupClusterFileName(sourceClusterFile);
-			try {
-				sourceCcf = makeReference<ClusterConnectionFile>(resolvedSourceClusterFile.first);
-			} catch (Error& e) {
-				fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedSourceClusterFile, e).c_str());
-				return FDB_EXIT_ERROR;
+		auto initSourceCluster = [&](bool required, bool quiet = false) {
+			if (!sourceClusterFile.size() && required) {
+				if (!quiet) {
+					fprintf(stderr, "ERROR: source cluster file is required\n");
+				}
+				return false;
 			}
 
-			try {
-				sourceDb = Database::createDatabase(sourceCcf, -1, IsInternal::True, localities);
-			} catch (Error& e) {
-				fprintf(stderr, "ERROR: %s\n", e.what());
-				fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", sourceCcf->getFilename().c_str());
-				return FDB_EXIT_ERROR;
+			Optional<Database> result = connectToCluster(sourceClusterFile, localities, quiet);
+			if (result.present()) {
+				sourceDb = result.get();
 			}
-		}
+
+			return result.present();
+		};
 
 		switch (programExe) {
 		case ProgramExe::AGENT:
@@ -4166,13 +4181,15 @@ int main(int argc, char* argv[]) {
 			}
 			break;
 		case ProgramExe::DR_AGENT:
-			if (!initCluster())
+			if (!initCluster() || !initSourceCluster(true)) {
 				return FDB_EXIT_ERROR;
+			}
 			f = stopAfter(runDBAgent(sourceDb, db));
 			break;
 		case ProgramExe::DB_BACKUP:
-			if (!initCluster())
+			if (!initCluster() || !initSourceCluster(dbType != DBType::ABORT || !dstOnly)) {
 				return FDB_EXIT_ERROR;
+			}
 			switch (dbType) {
 			case DBType::START:
 				f = stopAfter(submitDBBackup(sourceDb, db, backupKeys, tagName));
@@ -4217,14 +4234,14 @@ int main(int argc, char* argv[]) {
 
 #ifdef ALLOC_INSTRUMENTATION
 		{
-			cout << "Page Counts: " << FastAllocator<16>::pageCount << " " << FastAllocator<32>::pageCount << " "
-			     << FastAllocator<64>::pageCount << " " << FastAllocator<128>::pageCount << " "
-			     << FastAllocator<256>::pageCount << " " << FastAllocator<512>::pageCount << " "
-			     << FastAllocator<1024>::pageCount << " " << FastAllocator<2048>::pageCount << " "
-			     << FastAllocator<4096>::pageCount << " " << FastAllocator<8192>::pageCount << " "
-			     << FastAllocator<16384>::pageCount << endl;
+			std::cout << "Page Counts: " << FastAllocator<16>::pageCount << " " << FastAllocator<32>::pageCount << " "
+			          << FastAllocator<64>::pageCount << " " << FastAllocator<128>::pageCount << " "
+			          << FastAllocator<256>::pageCount << " " << FastAllocator<512>::pageCount << " "
+			          << FastAllocator<1024>::pageCount << " " << FastAllocator<2048>::pageCount << " "
+			          << FastAllocator<4096>::pageCount << " " << FastAllocator<8192>::pageCount << " "
+			          << FastAllocator<16384>::pageCount << std::endl;
 
-			vector<std::pair<std::string, const char*>> typeNames;
+			std::vector<std::pair<std::string, const char*>> typeNames;
 			for (auto i = allocInstr.begin(); i != allocInstr.end(); ++i) {
 				std::string s;
 

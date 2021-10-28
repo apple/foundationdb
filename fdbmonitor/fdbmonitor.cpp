@@ -700,7 +700,12 @@ void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, 
 			fflush(stdout);
 		}
 		execv(cmd->argv[0], (char* const*)cmd->argv);
-		fprintf(stderr, "Unable to launch %s for %s\n", cmd->argv[0], cmd->ssection.c_str());
+		fprintf(stderr,
+		        "Unable to launch %s for %s (execv error %d: %s)\n",
+		        cmd->argv[0],
+		        cmd->ssection.c_str(),
+		        errno,
+		        strerror(errno));
 		_exit(0);
 	}
 

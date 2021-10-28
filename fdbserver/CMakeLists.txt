@@ -5,12 +5,17 @@ set(FDBSERVER_SRCS
   BackupProgress.actor.cpp
   BackupProgress.actor.h
   BackupWorker.actor.cpp
+  BlobManager.actor.cpp
+  BlobManagerInterface.h
+  BlobWorker.actor.cpp
   ClusterController.actor.cpp
   ConfigBroadcaster.actor.cpp
   ConfigBroadcaster.h
   ConfigDatabaseUnitTests.actor.cpp
   ConfigFollowerInterface.cpp
   ConfigFollowerInterface.h
+  ConfigNode.actor.cpp
+  ConfigNode.h
   ConflictSet.h
   CoordinatedState.actor.cpp
   CoordinatedState.h
@@ -28,8 +33,6 @@ set(FDBSERVER_SRCS
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
   GrvProxyServer.actor.cpp
-  IConfigDatabaseNode.cpp
-  IConfigDatabaseNode.h
   IConfigConsumer.cpp
   IConfigConsumer.h
   IDiskQueue.h
@@ -49,7 +52,9 @@ set(FDBSERVER_SRCS
   LocalConfiguration.h
   LogProtocolMessage.h
   LogRouter.actor.cpp
+  LogSystem.cpp
   LogSystem.h
+  LogSystemConfig.cpp
   LogSystemConfig.h
   LogSystemDiskQueueAdapter.actor.cpp
   LogSystemDiskQueueAdapter.h
@@ -72,8 +77,6 @@ set(FDBSERVER_SRCS
   OnDemandStore.h
   PaxosConfigConsumer.actor.cpp
   PaxosConfigConsumer.h
-  PaxosConfigDatabaseNode.actor.cpp
-  PaxosConfigDatabaseNode.h
   ProxyCommitData.actor.h
   pubsub.actor.cpp
   pubsub.h
@@ -101,11 +104,13 @@ set(FDBSERVER_SRCS
   RestoreWorkerInterface.actor.h
   Resolver.actor.cpp
   ResolverInterface.h
+  RoleLineage.actor.h
+  RoleLineage.actor.cpp
   ServerDBInfo.actor.h
   ServerDBInfo.h
+  SigStack.cpp
   SimpleConfigConsumer.actor.cpp
   SimpleConfigConsumer.h
-  SimpleConfigDatabaseNode.actor.cpp
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
@@ -117,6 +122,7 @@ set(FDBSERVER_SRCS
   StorageMetrics.h
   storageserver.actor.cpp
   TagPartitionedLogSystem.actor.cpp
+  TagPartitionedLogSystem.actor.h
   template_fdb.h
   tester.actor.cpp
   TesterInterface.actor.h
@@ -147,15 +153,18 @@ set(FDBSERVER_SRCS
   workloads/BackupCorrectness.actor.cpp
   workloads/BackupAndParallelRestoreCorrectness.actor.cpp
   workloads/ClogSingleConnection.actor.cpp
+  workloads/ConfigIncrement.actor.cpp
   workloads/BackupToBlob.actor.cpp
   workloads/BackupToDBAbort.actor.cpp
   workloads/BackupToDBCorrectness.actor.cpp
   workloads/BackupToDBUpgrade.actor.cpp
   workloads/BlobStoreWorkload.h
+  workloads/BlobGranuleVerifier.actor.cpp
   workloads/BulkLoad.actor.cpp
   workloads/BulkSetup.actor.h
   workloads/Cache.actor.cpp
   workloads/ChangeConfig.actor.cpp
+  workloads/ClientLibManagementWorkload.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
   workloads/TriggerRecovery.actor.cpp
   workloads/SuspendProcesses.actor.cpp
@@ -165,7 +174,9 @@ set(FDBSERVER_SRCS
   workloads/ConsistencyCheck.actor.cpp
   workloads/CpuProfiler.actor.cpp
   workloads/Cycle.actor.cpp
+  workloads/ChangeFeeds.actor.cpp
   workloads/DataDistributionMetrics.actor.cpp
+  workloads/DataLossRecovery.actor.cpp
   workloads/DDBalance.actor.cpp
   workloads/DDMetrics.actor.cpp
   workloads/DDMetricsExclude.actor.cpp
@@ -197,6 +208,7 @@ set(FDBSERVER_SRCS
   workloads/MemoryKeyValueStore.h
   workloads/MemoryLifetime.actor.cpp
   workloads/MetricLogging.actor.cpp
+  workloads/MutationLogReaderCorrectness.actor.cpp
   workloads/ParallelRestore.actor.cpp
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp
@@ -226,6 +238,7 @@ set(FDBSERVER_SRCS
   workloads/SlowTaskWorkload.actor.cpp
   workloads/SnapTest.actor.cpp
   workloads/SpecialKeySpaceCorrectness.actor.cpp
+  workloads/StreamingRangeRead.actor.cpp
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
   workloads/StreamingRead.actor.cpp
@@ -307,6 +320,7 @@ else()
 endif()
 
 target_link_libraries(fdbserver PRIVATE toml11_target jemalloc)
+# target_compile_definitions(fdbserver PRIVATE -DENABLE_SAMPLING)
 
 if (GPERFTOOLS_FOUND)
   target_link_libraries(fdbserver PRIVATE gperftools)

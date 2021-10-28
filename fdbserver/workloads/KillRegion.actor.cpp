@@ -53,11 +53,11 @@ struct KillRegionWorkload : TestWorkload {
 		return Void();
 	}
 	Future<bool> check(Database const& cx) override { return true; }
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<Void> _setup(KillRegionWorkload* self, Database cx) {
 		TraceEvent("ForceRecovery_DisablePrimaryBegin").log();
-		wait(success(changeConfig(cx, g_simulator.disablePrimary, true)));
+		wait(success(ManagementAPI::changeConfig(cx.getReference(), g_simulator.disablePrimary, true)));
 		TraceEvent("ForceRecovery_WaitForRemote").log();
 		wait(waitForPrimaryDC(cx, LiteralStringRef("1")));
 		TraceEvent("ForceRecovery_DisablePrimaryComplete").log();
@@ -75,15 +75,17 @@ struct KillRegionWorkload : TestWorkload {
 		ASSERT(g_network->isSimulated());
 		if (deterministicRandom()->random01() < 0.5) {
 			TraceEvent("ForceRecovery_DisableRemoteBegin").log();
-			wait(success(changeConfig(cx, g_simulator.disableRemote, true)));
+			wait(success(ManagementAPI::changeConfig(cx.getReference(), g_simulator.disableRemote, true)));
 			TraceEvent("ForceRecovery_WaitForPrimary").log();
 			wait(waitForPrimaryDC(cx, LiteralStringRef("0")));
 			TraceEvent("ForceRecovery_DisableRemoteComplete").log();
-			wait(success(changeConfig(cx, g_simulator.originalRegions, true)));
+			wait(success(ManagementAPI::changeConfig(cx.getReference(), g_simulator.originalRegions, true)));
 		}
 		TraceEvent("ForceRecovery_Wait").log();
 		wait(delay(deterministicRandom()->random01() * self->testDuration));
 
+		// FIXME: killDataCenter breaks simulation if forceKill=false, since some processes can survive and
+		// partially complete a recovery
 		g_simulator.killDataCenter(LiteralStringRef("0"),
 		                           deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
 		                                                                   : ISimulator::RebootAndDelete,
@@ -99,7 +101,7 @@ struct KillRegionWorkload : TestWorkload {
 
 		TraceEvent("ForceRecovery_Begin").log();
 
-		wait(forceRecovery(cx->getConnectionFile(), LiteralStringRef("1")));
+		wait(forceRecovery(cx->getConnectionRecord(), LiteralStringRef("1")));
 
 		TraceEvent("ForceRecovery_UsableRegions").log();
 
@@ -110,13 +112,14 @@ struct KillRegionWorkload : TestWorkload {
 		if (conf.usableRegions > 1) {
 			loop {
 				// only needed if force recovery was unnecessary and we killed the secondary
-				wait(success(changeConfig(cx, g_simulator.disablePrimary + " repopulate_anti_quorum=1", true)));
+				wait(success(ManagementAPI::changeConfig(
+				    cx.getReference(), g_simulator.disablePrimary + " repopulate_anti_quorum=1", true)));
 				choose {
 					when(wait(waitForStorageRecovered(self))) { break; }
 					when(wait(delay(300.0))) {}
 				}
 			}
-			wait(success(changeConfig(cx, "usable_regions=1", true)));
+			wait(success(ManagementAPI::changeConfig(cx.getReference(), "usable_regions=1", true)));
 		}
 
 		TraceEvent("ForceRecovery_Complete").log();

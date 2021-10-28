@@ -20,12 +20,13 @@
 
 #include "fdbclient/ConfigTransactionInterface.h"
 #include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/SystemData.h"
 #include "flow/IRandom.h"
 
 ConfigTransactionInterface::ConfigTransactionInterface() : _id(deterministicRandom()->randomUniqueID()) {}
 
 void ConfigTransactionInterface::setupWellKnownEndpoints() {
-	getVersion.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GETVERSION, TaskPriority::Coordination);
+	getGeneration.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GETGENERATION, TaskPriority::Coordination);
 	get.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GET, TaskPriority::Coordination);
 	getClasses.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GETCLASSES, TaskPriority::Coordination);
 	getKnobs.makeWellKnownEndpoint(WLTOKEN_CONFIGTXN_GETKNOBS, TaskPriority::Coordination);
@@ -33,10 +34,11 @@ void ConfigTransactionInterface::setupWellKnownEndpoints() {
 }
 
 ConfigTransactionInterface::ConfigTransactionInterface(NetworkAddress const& remote)
-  : getVersion(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GETVERSION)), get(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GET)),
-    getClasses(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GETCLASSES)),
-    getKnobs(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GETKNOBS)), commit(Endpoint({ remote }, WLTOKEN_CONFIGTXN_COMMIT)) {
-}
+  : getGeneration(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGTXN_GETGENERATION)),
+    get(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGTXN_GET)),
+    getClasses(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGTXN_GETCLASSES)),
+    getKnobs(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGTXN_GETKNOBS)),
+    commit(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGTXN_COMMIT)) {}
 
 bool ConfigTransactionInterface::operator==(ConfigTransactionInterface const& rhs) const {
 	return _id == rhs._id;
@@ -44,4 +46,28 @@ bool ConfigTransactionInterface::operator==(ConfigTransactionInterface const& rh
 
 bool ConfigTransactionInterface::operator!=(ConfigTransactionInterface const& rhs) const {
 	return !(*this == rhs);
+}
+
+bool ConfigGeneration::operator==(ConfigGeneration const& rhs) const {
+	return liveVersion == rhs.liveVersion && committedVersion == rhs.committedVersion;
+}
+
+bool ConfigGeneration::operator!=(ConfigGeneration const& rhs) const {
+	return !(*this == rhs);
+}
+
+bool ConfigGeneration::operator<(ConfigGeneration const& rhs) const {
+	if (committedVersion != rhs.committedVersion) {
+		return committedVersion < rhs.committedVersion;
+	} else {
+		return liveVersion < rhs.liveVersion;
+	}
+}
+
+bool ConfigGeneration::operator>(ConfigGeneration const& rhs) const {
+	if (committedVersion != rhs.committedVersion) {
+		return committedVersion > rhs.committedVersion;
+	} else {
+		return liveVersion > rhs.liveVersion;
+	}
 }

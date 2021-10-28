@@ -64,43 +64,17 @@ ACTOR Future<Void> printHealthyZone(Reference<IDatabase> db) {
 	}
 }
 
-// clear ongoing maintenance, let clearSSFailureZoneString = true to enable data distribution for storage
-ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
-                                    bool printWarning = false,
-                                    bool clearSSFailureZoneString = false) {
-	state Reference<ITransaction> tr = db->createTransaction();
-	TraceEvent("ClearHealthyZone").detail("ClearSSFailureZoneString", clearSSFailureZoneString);
-	loop {
-		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		try {
-			// hold the returned standalone object's memory
-			state ThreadFuture<RangeResult> resultFuture =
-			    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			RangeResult res = wait(safeThreadFutureToFuture(resultFuture));
-			ASSERT(res.size() <= 1);
-			if (!clearSSFailureZoneString && res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
-				if (printWarning) {
-					fprintf(stderr,
-					        "ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
-					        "server failures. Use 'datadistribution on' to reenable data distribution.\n");
-				}
-				return false;
-			}
+} // namespace
 
-			tr->clear(fdb_cli::maintenanceSpecialKeyRange);
-			wait(safeThreadFutureToFuture(tr->commit()));
-			return true;
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
-		}
-	}
-}
+namespace fdb_cli {
+
+const KeyRangeRef maintenanceSpecialKeyRange = KeyRangeRef(LiteralStringRef("\xff\xff/management/maintenance/"),
+                                                           LiteralStringRef("\xff\xff/management/maintenance0"));
+// The special key, if present, means data distribution is disabled for storage failures;
+const KeyRef ignoreSSFailureSpecialKey = LiteralStringRef("\xff\xff/management/maintenance/IgnoreSSFailures");
 
 // add a zone to maintenance and specify the maintenance duration
-ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db,
-                                  StringRef zoneId,
-                                  double seconds,
-                                  bool printWarning = false) {
+ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning) {
 	state Reference<ITransaction> tr = db->createTransaction();
 	TraceEvent("SetHealthyZone").detail("Zone", zoneId).detail("DurationSeconds", seconds);
 	loop {
@@ -129,14 +103,35 @@ ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db,
 	}
 }
 
-} // namespace
+// clear ongoing maintenance, let clearSSFailureZoneString = true to enable data distribution for storage
+ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db, bool printWarning, bool clearSSFailureZoneString) {
+	state Reference<ITransaction> tr = db->createTransaction();
+	TraceEvent("ClearHealthyZone").detail("ClearSSFailureZoneString", clearSSFailureZoneString);
+	loop {
+		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		try {
+			// hold the returned standalone object's memory
+			state ThreadFuture<RangeResult> resultFuture =
+			    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+			RangeResult res = wait(safeThreadFutureToFuture(resultFuture));
+			ASSERT(res.size() <= 1);
+			if (!clearSSFailureZoneString && res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
+				if (printWarning) {
+					fprintf(stderr,
+					        "ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
+					        "server failures. Use 'datadistribution on' to reenable data distribution.\n");
+				}
+				return false;
+			}
 
-namespace fdb_cli {
-
-const KeyRangeRef maintenanceSpecialKeyRange = KeyRangeRef(LiteralStringRef("\xff\xff/management/maintenance/"),
-                                                           LiteralStringRef("\xff\xff/management/maintenance0"));
-// The special key, if present, means data distribution is disabled for storage failures;
-const KeyRef ignoreSSFailureSpecialKey = LiteralStringRef("\xff\xff/management/maintenance/IgnoreSSFailures");
+			tr->clear(fdb_cli::maintenanceSpecialKeyRange);
+			wait(safeThreadFutureToFuture(tr->commit()));
+			return true;
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
 
 ACTOR Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	state bool result = true;

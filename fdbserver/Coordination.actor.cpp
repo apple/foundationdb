@@ -20,7 +20,7 @@
 
 #include "fdbclient/ConfigTransactionInterface.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbserver/IConfigDatabaseNode.h"
+#include "fdbserver/ConfigNode.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/OnDemandStore.h"
@@ -74,7 +74,8 @@ struct GenerationRegVal {
 };
 
 GenerationRegInterface::GenerationRegInterface(NetworkAddress remote)
-  : read(Endpoint({ remote }, WLTOKEN_GENERATIONREG_READ)), write(Endpoint({ remote }, WLTOKEN_GENERATIONREG_WRITE)) {}
+  : read(Endpoint::wellKnown({ remote }, WLTOKEN_GENERATIONREG_READ)),
+    write(Endpoint::wellKnown({ remote }, WLTOKEN_GENERATIONREG_WRITE)) {}
 
 GenerationRegInterface::GenerationRegInterface(INetwork* local) {
 	read.makeWellKnownEndpoint(WLTOKEN_GENERATIONREG_READ, TaskPriority::Coordination);
@@ -82,10 +83,10 @@ GenerationRegInterface::GenerationRegInterface(INetwork* local) {
 }
 
 LeaderElectionRegInterface::LeaderElectionRegInterface(NetworkAddress remote)
-  : ClientLeaderRegInterface(remote), candidacy(Endpoint({ remote }, WLTOKEN_LEADERELECTIONREG_CANDIDACY)),
-    electionResult(Endpoint({ remote }, WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT)),
-    leaderHeartbeat(Endpoint({ remote }, WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT)),
-    forward(Endpoint({ remote }, WLTOKEN_LEADERELECTIONREG_FORWARD)) {}
+  : ClientLeaderRegInterface(remote), candidacy(Endpoint::wellKnown({ remote }, WLTOKEN_LEADERELECTIONREG_CANDIDACY)),
+    electionResult(Endpoint::wellKnown({ remote }, WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT)),
+    leaderHeartbeat(Endpoint::wellKnown({ remote }, WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT)),
+    forward(Endpoint::wellKnown({ remote }, WLTOKEN_LEADERELECTIONREG_FORWARD)) {}
 
 LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local) : ClientLeaderRegInterface(local) {
 	candidacy.makeWellKnownEndpoint(WLTOKEN_LEADERELECTIONREG_CANDIDACY, TaskPriority::Coordination);
@@ -94,8 +95,8 @@ LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local) : Client
 	forward.makeWellKnownEndpoint(WLTOKEN_LEADERELECTIONREG_FORWARD, TaskPriority::Coordination);
 }
 
-ServerCoordinators::ServerCoordinators(Reference<ClusterConnectionFile> cf) : ClientCoordinators(cf) {
-	ClusterConnectionString cs = ccf->getConnectionString();
+ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr) : ClientCoordinators(ccr) {
+	ClusterConnectionString cs = ccr->getConnectionString();
 	for (auto s = cs.coordinators().begin(); s != cs.coordinators().end(); ++s) {
 		leaderElectionServers.emplace_back(*s);
 		stateServers.emplace_back(*s);
@@ -299,8 +300,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				req.reply.send(clientData.clientInfo->get());
 			} else {
 				if (!leaderMon.isValid()) {
-					leaderMon =
-					    monitorLeaderForProxies(req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
+					leaderMon = monitorLeaderAndGetClientInfo(
+					    req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
 				}
 				actors.add(
 				    openDatabase(&clientData, &clientCount, hasConnectedClients, req, canConnectToLeader.checkStuck()));
@@ -312,7 +313,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				req.reply.send(currentElectedLeader->get());
 			} else {
 				if (!leaderMon.isValid()) {
-					leaderMon = monitorLeaderForProxies(req.key, req.coordinators, &clientData, currentElectedLeader);
+					leaderMon =
+					    monitorLeaderAndGetClientInfo(req.key, req.coordinators, &clientData, currentElectedLeader);
 				}
 				actors.add(remoteMonitorLeader(&clientCount, hasConnectedClients, currentElectedLeader, req));
 			}
@@ -586,7 +588,7 @@ StringRef getClusterDescriptor(Key key) {
 ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
                                 OnDemandStore* pStore,
                                 UID id,
-                                Reference<ClusterConnectionFile> ccf) {
+                                Reference<IClusterConnectionRecord> ccr) {
 	state LeaderRegisterCollection regs(pStore);
 	state ActorCollection forwarders(false);
 
@@ -607,12 +609,12 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 				info.forward = forward.get().serializedInfo;
 				req.reply.send(CachedSerialization<ClientDBInfo>(info));
 			} else {
-				StringRef clusterName = ccf->getConnectionString().clusterKeyName();
+				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT &&
 				    getClusterDescriptor(req.clusterKey).compare(clusterName)) {
-					TraceEvent(SevWarn, "CCFMismatch")
+					TraceEvent(SevWarn, "CCRMismatch")
 					    .detail("RequestType", "OpenDatabaseCoordRequest")
-					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("LocalCS", ccr->getConnectionString().toString())
 					    .detail("IncomingClusterKey", req.clusterKey)
 					    .detail("IncomingCoordinators", describeList(req.coordinators, req.coordinators.size()));
 					req.reply.sendError(wrong_connection_file());
@@ -626,13 +628,13 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 			if (forward.present()) {
 				req.reply.send(forward.get());
 			} else {
-				StringRef clusterName = ccf->getConnectionString().clusterKeyName();
+				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
-					TraceEvent(SevWarn, "CCFMismatch")
+					TraceEvent(SevWarn, "CCRMismatch")
 					    .detail("RequestType", "ElectionResultRequest")
-					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("LocalCS", ccr->getConnectionString().toString())
 					    .detail("IncomingClusterKey", req.key)
-					    .detail("ClusterKey", ccf->getConnectionString().clusterKey())
+					    .detail("ClusterKey", ccr->getConnectionString().clusterKey())
 					    .detail("IncomingCoordinators", describeList(req.coordinators, req.coordinators.size()));
 					req.reply.sendError(wrong_connection_file());
 				} else {
@@ -645,13 +647,13 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 			if (forward.present())
 				req.reply.send(forward.get());
 			else {
-				StringRef clusterName = ccf->getConnectionString().clusterKeyName();
+				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
-					TraceEvent(SevWarn, "CCFMismatch")
+					TraceEvent(SevWarn, "CCRMismatch")
 					    .detail("RequestType", "GetLeaderRequest")
-					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("LocalCS", ccr->getConnectionString().toString())
 					    .detail("IncomingClusterKey", req.key)
-					    .detail("ClusterKey", ccf->getConnectionString().clusterKey());
+					    .detail("ClusterKey", ccr->getConnectionString().clusterKey());
 					req.reply.sendError(wrong_connection_file());
 				} else {
 					regs.getInterface(req.key, id).getLeader.send(req);
@@ -663,11 +665,11 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 			if (forward.present())
 				req.reply.send(forward.get());
 			else {
-				StringRef clusterName = ccf->getConnectionString().clusterKeyName();
+				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
-					TraceEvent(SevWarn, "CCFMismatch")
+					TraceEvent(SevWarn, "CCRMismatch")
 					    .detail("RequestType", "CandidacyRequest")
-					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("LocalCS", ccr->getConnectionString().toString())
 					    .detail("IncomingClusterKey", req.key);
 					req.reply.sendError(wrong_connection_file());
 				} else {
@@ -680,11 +682,11 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 			if (forward.present())
 				req.reply.send(LeaderHeartbeatReply{ false });
 			else {
-				StringRef clusterName = ccf->getConnectionString().clusterKeyName();
+				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
-					TraceEvent(SevWarn, "CCFMismatch")
+					TraceEvent(SevWarn, "CCRMismatch")
 					    .detail("RequestType", "LeaderHeartbeatRequest")
-					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("LocalCS", ccr->getConnectionString().toString())
 					    .detail("IncomingClusterKey", req.key);
 					req.reply.sendError(wrong_connection_file());
 				} else {
@@ -697,11 +699,11 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 			if (forward.present())
 				req.reply.send(Void());
 			else {
-				StringRef clusterName = ccf->getConnectionString().clusterKeyName();
+				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
-					TraceEvent(SevWarn, "CCFMismatch")
+					TraceEvent(SevWarn, "CCRMismatch")
 					    .detail("RequestType", "ForwardRequest")
-					    .detail("LocalCS", ccf->getConnectionString().toString())
+					    .detail("LocalCS", ccr->getConnectionString().toString())
 					    .detail("IncomingClusterKey", req.key);
 					req.reply.sendError(wrong_connection_file());
 				} else {
@@ -719,34 +721,30 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 }
 
 ACTOR Future<Void> coordinationServer(std::string dataFolder,
-                                      Reference<ClusterConnectionFile> ccf,
-                                      UseConfigDB useConfigDB) {
+                                      Reference<IClusterConnectionRecord> ccr,
+                                      ConfigDBType configDBType) {
 	state UID myID = deterministicRandom()->randomUniqueID();
 	state LeaderElectionRegInterface myLeaderInterface(g_network);
 	state GenerationRegInterface myInterface(g_network);
 	state OnDemandStore store(dataFolder, myID, "coordination-");
 	state ConfigTransactionInterface configTransactionInterface;
 	state ConfigFollowerInterface configFollowerInterface;
-	state Reference<IConfigDatabaseNode> configDatabaseNode;
+	state Reference<ConfigNode> configNode;
 	state Future<Void> configDatabaseServer = Never();
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())
 	    .detail("Folder", dataFolder);
 
-	if (useConfigDB != UseConfigDB::DISABLED) {
+	if (configDBType != ConfigDBType::DISABLED) {
 		configTransactionInterface.setupWellKnownEndpoints();
 		configFollowerInterface.setupWellKnownEndpoints();
-		if (useConfigDB == UseConfigDB::SIMPLE) {
-			configDatabaseNode = IConfigDatabaseNode::createSimple(dataFolder);
-		} else {
-			configDatabaseNode = IConfigDatabaseNode::createPaxos(dataFolder);
-		}
+		configNode = makeReference<ConfigNode>(dataFolder);
 		configDatabaseServer =
-		    configDatabaseNode->serve(configTransactionInterface) || configDatabaseNode->serve(configFollowerInterface);
+		    configNode->serve(configTransactionInterface) || configNode->serve(configFollowerInterface);
 	}
 
 	try {
-		wait(localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store, myID, ccf) ||
+		wait(localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store, myID, ccr) ||
 		     store.getError() || configDatabaseServer);
 		throw internal_error();
 	} catch (Error& e) {

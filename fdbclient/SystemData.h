@@ -25,6 +25,7 @@
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this depdendency
 #include "fdbclient/StorageServerInterface.h"
 
 // Don't warn on constants being defined in this file.
@@ -43,7 +44,7 @@ extern const KeyRangeRef specialKeys; // [FF][FF] to [FF][FF][FF], some client f
                                       // using these special keys, see pr#2662
 extern const KeyRef afterAllKeys;
 
-//    "\xff/keyServers/[[begin]]" := "[[vector<serverID>, vector<serverID>]|[vector<Tag>, vector<Tag>]]"
+//    "\xff/keyServers/[[begin]]" := "[[vector<serverID>, std::vector<serverID>]|[vector<Tag>, std::vector<Tag>]]"
 //	An internal mapping of where shards are located in the database. [[begin]] is the start of the shard range
 //	and the result is a list of serverIDs or Tags where these shards are located. These values can be changed
 //	as data movement occurs.
@@ -89,7 +90,7 @@ void decodeStorageCacheValue(const ValueRef& value, std::vector<uint16_t>& serve
 //	as the key, the value indicates whether the shard does or does not exist on the server.
 //	These values can be changed as data movement occurs.
 extern const KeyRef serverKeysPrefix;
-extern const ValueRef serverKeysTrue, serverKeysFalse;
+extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
 const Key serverKeysKey(UID serverID, const KeyRef& keys);
 const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
@@ -210,6 +211,7 @@ extern const KeyRangeRef configKeys;
 extern const KeyRef configKeysPrefix;
 
 extern const KeyRef perpetualStorageWiggleKey;
+extern const KeyRef perpetualStorageWiggleLocalityKey;
 extern const KeyRef wigglingStorageServerKey;
 // Change the value of this key to anything and that will trigger detailed data distribution team info log.
 extern const KeyRef triggerDDTeamInfoPrintKey;
@@ -330,9 +332,9 @@ extern const KeyRef logsKey;
 //	Used during backup/recovery to restrict version requirements
 extern const KeyRef minRequiredCommitVersionKey;
 
-const Value logsValue(const vector<std::pair<UID, NetworkAddress>>& logs,
-                      const vector<std::pair<UID, NetworkAddress>>& oldLogs);
-std::pair<vector<std::pair<UID, NetworkAddress>>, vector<std::pair<UID, NetworkAddress>>> decodeLogsValue(
+const Value logsValue(const std::vector<std::pair<UID, NetworkAddress>>& logs,
+                      const std::vector<std::pair<UID, NetworkAddress>>& oldLogs);
+std::pair<std::vector<std::pair<UID, NetworkAddress>>, std::vector<std::pair<UID, NetworkAddress>>> decodeLogsValue(
     const ValueRef& value);
 
 // The "global keys" are sent to each storage server any time they are changed
@@ -478,6 +480,14 @@ extern const KeyRef rebalanceDDIgnoreKey;
 const Value healthyZoneValue(StringRef const& zoneId, Version version);
 std::pair<Key, Version> decodeHealthyZoneValue(ValueRef const&);
 
+// Key ranges reserved for storing client library binaries and respective
+// json documents with the metadata describing the libaries
+extern const KeyRangeRef clientLibMetadataKeys;
+extern const KeyRef clientLibMetadataPrefix;
+
+extern const KeyRangeRef clientLibBinaryKeys;
+extern const KeyRef clientLibBinaryPrefix;
+
 // All mutations done to this range are blindly copied into txnStateStore.
 // Used to create artifically large txnStateStore instances in testing.
 extern const KeyRangeRef testOnlyTxnStateStorePrefixRange;
@@ -495,11 +505,92 @@ extern const ValueRef writeRecoveryKeyTrue;
 //	Allows incremental restore to read and set starting version for consistency.
 extern const KeyRef snapshotEndVersionKey;
 
+extern const KeyRangeRef changeFeedKeys;
+enum class ChangeFeedStatus { CHANGE_FEED_CREATE = 0, CHANGE_FEED_STOP = 1, CHANGE_FEED_DESTROY = 2 };
+const Value changeFeedValue(KeyRangeRef const& range, Version popVersion, ChangeFeedStatus status);
+std::tuple<KeyRange, Version, ChangeFeedStatus> decodeChangeFeedValue(ValueRef const& value);
+extern const KeyRef changeFeedPrefix;
+extern const KeyRef changeFeedPrivatePrefix;
+
+extern const KeyRangeRef changeFeedDurableKeys;
+extern const KeyRef changeFeedDurablePrefix;
+
+const Value changeFeedDurableKey(Key const& feed, Version version);
+std::pair<Key, Version> decodeChangeFeedDurableKey(ValueRef const& key);
+const Value changeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations, Version knownCommittedVersion);
+std::pair<Standalone<VectorRef<MutationRef>>, Version> decodeChangeFeedDurableValue(ValueRef const& value);
+
 // Configuration database special keys
 extern const KeyRef configTransactionDescriptionKey;
 extern const KeyRange globalConfigKnobKeys;
 extern const KeyRangeRef configKnobKeys;
 extern const KeyRangeRef configClassKeys;
+
+// blob range special keys
+extern const KeyRef blobRangeChangeKey;
+extern const KeyRangeRef blobRangeKeys;
+extern const KeyRef blobManagerEpochKey;
+
+const Value blobManagerEpochValueFor(int64_t epoch);
+int64_t decodeBlobManagerEpochValue(ValueRef const& value);
+
+// blob granule keys
+
+extern const uint8_t BG_FILE_TYPE_DELTA;
+extern const uint8_t BG_FILE_TYPE_SNAPSHOT;
+
+// \xff\x02/bgf/(granuleID, {snapshot|delta}, version) = [[filename]]
+extern const KeyRangeRef blobGranuleFileKeys;
+
+// \xff\x02/bgm/[[begin]] = [[BlobWorkerUID]]
+extern const KeyRangeRef blobGranuleMappingKeys;
+
+// \xff\x02/bgl/(begin,end) = (epoch, seqno, granuleID)
+extern const KeyRangeRef blobGranuleLockKeys;
+
+// \xff\x02/bgs/(parentGranuleID, granuleID) = state
+extern const KeyRangeRef blobGranuleSplitKeys;
+
+// \xff\x02/bgh/(start,end,version) = { granuleID, [parentGranuleHistoryKeys] }
+extern const KeyRangeRef blobGranuleHistoryKeys;
+
+const Key blobGranuleFileKeyFor(UID granuleID, uint8_t fileType, Version fileVersion);
+std::tuple<UID, uint8_t, Version> decodeBlobGranuleFileKey(ValueRef const& value);
+const KeyRange blobGranuleFileKeyRangeFor(UID granuleID);
+
+const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length);
+std::tuple<Standalone<StringRef>, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value);
+
+const Value blobGranuleMappingValueFor(UID const& workerID);
+UID decodeBlobGranuleMappingValue(ValueRef const& value);
+
+const Key blobGranuleLockKeyFor(KeyRangeRef const& granuleRange);
+
+const Value blobGranuleLockValueFor(int64_t epochNum, int64_t sequenceNum, UID changeFeedId);
+std::tuple<int64_t, int64_t, UID> decodeBlobGranuleLockValue(ValueRef const& value);
+
+const Key blobGranuleSplitKeyFor(UID const& parentGranuleID, UID const& granuleID);
+std::pair<UID, UID> decodeBlobGranuleSplitKey(KeyRef const& key);
+const KeyRange blobGranuleSplitKeyRangeFor(UID const& parentGranuleID);
+
+// these are versionstamped
+const Value blobGranuleSplitValueFor(BlobGranuleSplitState st);
+std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(ValueRef const& value);
+
+const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version);
+std::pair<KeyRange, Version> decodeBlobGranuleHistoryKey(KeyRef const& value);
+const KeyRange blobGranuleHistoryKeyRangeFor(KeyRangeRef const& range);
+
+const Value blobGranuleHistoryValueFor(Standalone<BlobGranuleHistoryValue> const& historyValue);
+Standalone<BlobGranuleHistoryValue> decodeBlobGranuleHistoryValue(ValueRef const& value);
+
+// \xff/bwl/[[BlobWorkerID]] = [[BlobWorkerInterface]]
+extern const KeyRangeRef blobWorkerListKeys;
+
+const Key blobWorkerListKeyFor(UID workerID);
+UID decodeBlobWorkerListKey(KeyRef const& key);
+const Value blobWorkerListValue(BlobWorkerInterface const& interface);
+BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 
 #pragma clang diagnostic pop
 

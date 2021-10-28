@@ -35,11 +35,14 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 
+#include "fdbclient/ActorLineageProfiler.h"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbmonitor/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
@@ -67,6 +70,7 @@
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/Tracing.h"
+#include "flow/WriteOnlySet.h"
 #include "flow/UnitTest.h"
 #include "flow/FaultInjection.h"
 
@@ -86,6 +90,8 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+using namespace std::literals;
+
 // clang-format off
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
@@ -93,7 +99,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION,
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -173,13 +179,14 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_METRICSPREFIX,         "--metrics_prefix",            SO_REQ_SEP },
 	{ OPT_IO_TRUST_SECONDS,      "--io_trust_seconds",          SO_REQ_SEP },
 	{ OPT_IO_TRUST_WARN_ONLY,    "--io_trust_warn_only",        SO_NONE },
-	{ OPT_TRACE_FORMAT      ,    "--trace_format",              SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT,          "--trace_format",              SO_REQ_SEP },
 	{ OPT_WHITELIST_BINPATH,     "--whitelist_binpath",         SO_REQ_SEP },
 	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob_credential_file",      SO_REQ_SEP },
 	{ OPT_CONFIG_PATH,           "--config_path",               SO_REQ_SEP },
 	{ OPT_USE_TEST_CONFIG_DB,    "--use_test_config_db",        SO_NONE },
 	{ OPT_FAULT_INJECTION,       "-fi",                         SO_REQ_SEP },
 	{ OPT_FAULT_INJECTION,       "--fault_injection",           SO_REQ_SEP },
+	{ OPT_PROFILER,	             "--profiler_",                 SO_REQ_SEP},
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -212,7 +219,7 @@ bool enableFailures = true;
 
 #define test_assert(x)                                                                                                 \
 	if (!(x)) {                                                                                                        \
-		cout << "Test failed: " #x << endl;                                                                            \
+		std::cout << "Test failed: " #x << std::endl;                                                                  \
 		return false;                                                                                                  \
 	}
 
@@ -622,6 +629,11 @@ static void printUsage(const char* name, bool devhelp) {
 	                 " Machine class (valid options are storage, transaction,"
 	                 " resolution, grv_proxy, commit_proxy, master, test, unset, stateless, log, router,"
 	                 " and cluster_controller).");
+	printOptionUsage("--profiler_",
+	                 "Set an actor profiler option. Supported options are:\n"
+	                 "  collector -- None or FluentD (FluentD requires collector_endpoint to be set)\n"
+	                 "  collector_endpoint -- IP:PORT of the fluentd server\n"
+	                 "  collector_protocol -- UDP or TCP (default is UDP)");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -793,9 +805,10 @@ Optional<bool> checkBuggifyOverride(const char* testFile) {
 
 // Takes a vector of public and listen address strings given via command line, and returns vector of NetworkAddress
 // objects.
-std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const ClusterConnectionFile& connectionFile,
-                                                                        const vector<std::string>& publicAddressStrs,
-                                                                        vector<std::string>& listenAddressStrs) {
+std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
+    const IClusterConnectionRecord& connectionRecord,
+    const std::vector<std::string>& publicAddressStrs,
+    std::vector<std::string>& listenAddressStrs) {
 	if (listenAddressStrs.size() > 0 && publicAddressStrs.size() != listenAddressStrs.size()) {
 		fprintf(stderr,
 		        "ERROR: Listen addresses (if provided) should be equal to the number of public addresses in order.\n");
@@ -811,7 +824,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 	NetworkAddressList publicNetworkAddresses;
 	NetworkAddressList listenNetworkAddresses;
 
-	auto& coordinators = connectionFile.getConnectionString().coordinators();
+	auto& coordinators = connectionRecord.getConnectionString().coordinators();
 	ASSERT(coordinators.size() > 0);
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
@@ -821,7 +834,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 		if (autoPublicAddress) {
 			try {
 				const NetworkAddress& parsedAddress = NetworkAddress::parse("0.0.0.0:" + publicAddressStr.substr(5));
-				const IPAddress publicIP = determinePublicIPAutomatically(connectionFile.getConnectionString());
+				const IPAddress publicIP = determinePublicIPAutomatically(connectionRecord.getConnectionString());
 				currentPublicAddress = NetworkAddress(publicIP, parsedAddress.port, true, parsedAddress.isTLS());
 			} catch (Error& e) {
 				fprintf(stderr,
@@ -984,11 +997,13 @@ struct CLIOptions {
 	const char* blobCredsFromENV = nullptr;
 
 	std::string configPath;
-	UseConfigDB useConfigDB{ UseConfigDB::DISABLED };
+	ConfigDBType configDBType{ ConfigDBType::DISABLED };
 
-	Reference<ClusterConnectionFile> connectionFile;
+	Reference<IClusterConnectionRecord> connectionFile;
 	Standalone<StringRef> machineId;
 	UnitTestParameters testParams;
+
+	std::map<std::string, std::string> profilerConfig;
 
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
@@ -1064,6 +1079,18 @@ private:
 				manualKnobOverrides[syn] = args.OptionArg();
 				break;
 			}
+			case OPT_PROFILER: {
+				std::string syn = args.OptionSyntax();
+				std::string_view key = syn;
+				auto prefix = "--profiler_"sv;
+				if (key.find(prefix) != 0) {
+					fprintf(stderr, "ERROR: unable to parse profiler option '%s'\n", syn.c_str());
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				key.remove_prefix(prefix.size());
+				profilerConfig.emplace(key, args.OptionArg());
+				break;
+			};
 			case OPT_UNITTESTPARAM: {
 				std::string syn = args.OptionSyntax();
 				if (!StringRef(syn).startsWith(LiteralStringRef("--test_"))) {
@@ -1455,7 +1482,7 @@ private:
 				configPath = args.OptionArg();
 				break;
 			case OPT_USE_TEST_CONFIG_DB:
-				useConfigDB = UseConfigDB::SIMPLE;
+				configDBType = ConfigDBType::SIMPLE;
 				break;
 
 #ifndef TLS_DISABLED
@@ -1479,6 +1506,13 @@ private:
 				break;
 #endif
 			}
+		}
+
+		try {
+			ProfilerConfig::instance().reset(profilerConfig);
+		} catch (ConfigError& e) {
+			printf("Error seting up profiler: %s", e.description.c_str());
+			flushAndExit(FDB_EXIT_ERROR);
 		}
 
 		if (seedConnString.length() && seedConnFile.length()) {
@@ -1621,6 +1655,11 @@ private:
 } // namespace
 
 int main(int argc, char* argv[]) {
+	// TODO: Remove later, this is just to force the statics to be initialized
+	// otherwise the unit test won't run
+#ifdef ENABLE_SAMPLING
+	ActorLineageSet _;
+#endif
 	try {
 		platformInit();
 
@@ -1643,6 +1682,14 @@ int main(int argc, char* argv[]) {
 
 		const auto opts = CLIOptions::parseArgs(argc, argv);
 		const auto role = opts.role;
+
+#ifdef _WIN32
+		// For now, ignore all tests for Windows
+		if (role == ServerRole::Simulation || role == ServerRole::UnitTests || role == ServerRole::Test) {
+			printf("Windows tests are not supported yet\n");
+			flushAndExit(FDB_EXIT_SUCCESS);
+		}
+#endif
 
 		if (role == ServerRole::Simulation)
 			printf("Random seed is %u...\n", opts.randomSeed);
@@ -1735,7 +1782,7 @@ int main(int argc, char* argv[]) {
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 			g_network->addStopCallback(Net2FileSystem::stop);
-			FlowTransport::createInstance(false, 1);
+			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
 
 			const bool expectsPublicAddress =
 			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::Restore);
@@ -1803,7 +1850,7 @@ int main(int argc, char* argv[]) {
 		    .detail("FileSystem", opts.fileSystemPath)
 		    .detail("DataFolder", opts.dataFolder)
 		    .detail("WorkingDirectory", cwd)
-		    .detail("ClusterFile", opts.connectionFile ? opts.connectionFile->getFilename().c_str() : "")
+		    .detail("ClusterFile", opts.connectionFile ? opts.connectionFile->toString() : "")
 		    .detail("ConnectionString",
 		            opts.connectionFile ? opts.connectionFile->getConnectionString().toString() : "")
 		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
@@ -1811,7 +1858,7 @@ int main(int argc, char* argv[]) {
 		    .detail("CommandLine", opts.commandLine)
 		    .setMaxFieldLength(0)
 		    .detail("BuggifyEnabled", opts.buggifyEnabled)
-			.detail("FaultInjectionEnabled", opts.faultInjectionEnabled)
+		    .detail("FaultInjectionEnabled", opts.faultInjectionEnabled)
 		    .detail("MemoryLimit", opts.memLimit)
 		    .trackLatest("ProgramStart");
 
@@ -1974,7 +2021,7 @@ int main(int argc, char* argv[]) {
 				if (!dataFolder.size())
 					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
-				vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
+				std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 				actors.push_back(restoreWorker(opts.connectionFile, opts.localities, dataFolder));
 				f = stopAfter(waitForAll(actors));
 				printf("Fast restore worker started\n");
@@ -1989,7 +2036,7 @@ int main(int argc, char* argv[]) {
 				if (!dataFolder.size())
 					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
-				vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
+				std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 				actors.push_back(fdbd(opts.connectionFile,
 				                      opts.localities,
 				                      opts.processClass,
@@ -2002,7 +2049,7 @@ int main(int argc, char* argv[]) {
 				                      opts.whitelistBinPaths,
 				                      opts.configPath,
 				                      opts.manualKnobOverrides,
-				                      opts.useConfigDB));
+				                      opts.configDBType));
 				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
@@ -2115,13 +2162,13 @@ int main(int argc, char* argv[]) {
 		        printf("  #%lld %p\n", (*a)->creationIndex, (*a));
 		}*/
 
-		/*cout << Actor::allActors.size() << " surviving actors:" << endl;
+		/*cout << Actor::allActors.size() << " surviving actors:" << std::endl;
 		std::map<std::string,int> actorCount;
 		for(int i=0; i<Actor::allActors.size(); i++)
 		    ++actorCount[Actor::allActors[i]->getName()];
 		for(auto i = actorCount.rbegin(); !(i == actorCount.rend()); ++i)
-		    cout << "  " << i->second << " " << i->first << endl;*/
-		//	cout << "  " << Actor::allActors[i]->getName() << endl;
+		    std::cout << "  " << i->second << " " << i->first << std::endl;*/
+		//	std::cout << "  " << Actor::allActors[i]->getName() << std::endl;
 
 		if (role == ServerRole::Simulation) {
 			unsigned long sevErrorEventsLogged = TraceEvent::CountEventsLoggedAt(SevError);
@@ -2142,7 +2189,7 @@ int main(int argc, char* argv[]) {
 			          << FastAllocator<4096>::pageCount << " " << FastAllocator<8192>::pageCount << " "
 			          << FastAllocator<16384>::pageCount << std::endl;
 
-			vector<std::pair<std::string, const char*>> typeNames;
+			std::vector<std::pair<std::string, const char*>> typeNames;
 			for (auto i = allocInstr.begin(); i != allocInstr.end(); ++i) {
 				std::string s;
 

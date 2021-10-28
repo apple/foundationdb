@@ -154,6 +154,8 @@ public:
 				return false;
 			case ProcessClass::RatekeeperClass:
 				return false;
+			case ProcessClass::BlobManagerClass:
+				return false;
 			case ProcessClass::StorageCacheClass:
 				return false;
 			case ProcessClass::BackupClass:
@@ -247,7 +249,7 @@ public:
 	virtual bool isAvailable() const = 0;
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
-	ProtocolVersion protocolVersion() override = 0;
+	ProtocolVersion protocolVersion() const override = 0;
 	void addRole(NetworkAddress const& address, std::string const& role) {
 		roleAddresses[address][role]++;
 		TraceEvent("RoleAdd")
@@ -409,6 +411,7 @@ public:
 	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;
 	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
 	TSSMode tssMode;
+	ConfigDBType configDBType;
 
 	// Used by workloads that perform reconfigurations
 	int testerCount;
@@ -423,6 +426,8 @@ public:
 
 	bool hasDiffProtocolProcess; // true if simulator is testing a process with a different version
 	bool setDiffProtocol; // true if a process with a different protocol version has been started
+
+	bool allowStorageMigrationTypeChange = false;
 
 	flowGlobalType global(int id) const final { return getCurrentProcess()->global(id); };
 	void setGlobal(size_t id, flowGlobalType v) final { getCurrentProcess()->setGlobal(id, v); };
@@ -480,6 +485,10 @@ public:
 
 	Future<std::time_t> lastWriteTime(const std::string& filename) override;
 
+#ifdef ENABLE_SAMPLING
+	ActorLineageSet& getActorLineageSet() override;
+#endif
+
 	Future<Void> renameFile(std::string const& from, std::string const& to) override;
 
 	Sim2FileSystem() {}
@@ -487,6 +496,10 @@ public:
 	~Sim2FileSystem() override {}
 
 	static void newFileSystem();
+
+#ifdef ENABLE_SAMPLING
+	ActorLineageSet actorLineageSet;
+#endif
 };
 
 #endif

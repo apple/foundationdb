@@ -715,7 +715,7 @@ struct TPCC : TestWorkload {
 		int endWID = startWID + self->warehousesPerClient;
 		state int w_id;
 		state int d_id;
-		state vector<Future<Void>> emulatedUsers;
+		state std::vector<Future<Void>> emulatedUsers;
 		for (w_id = startWID; w_id < endWID; ++w_id) {
 			for (d_id = 0; d_id < 10; ++d_id) {
 				emulatedUsers.push_back(timeout(emulatedUser(self, cx, w_id, d_id), self->testDuration, Void()));
@@ -728,94 +728,95 @@ struct TPCC : TestWorkload {
 	Future<bool> check(Database const& cx) override {
 		return (transactionsPerMinute() > expectedTransactionsPerMinute);
 	}
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		double multiplier = static_cast<double>(clientCount) / static_cast<double>(clientsUsed);
 
-		m.push_back(PerfMetric("Transactions Per Minute", transactionsPerMinute(), false));
+		m.emplace_back("Transactions Per Minute", transactionsPerMinute(), Averaged::False);
 
-		m.push_back(PerfMetric("Successful StockLevel Transactions", metrics.successfulStockLevelTransactions, false));
-		m.push_back(PerfMetric("Successful Delivery Transactions", metrics.successfulDeliveryTransactions, false));
-		m.push_back(
-		    PerfMetric("Successful OrderStatus Transactions", metrics.successfulOrderStatusTransactions, false));
-		m.push_back(PerfMetric("Successful Payment Transactions", metrics.successfulPaymentTransactions, false));
-		m.push_back(PerfMetric("Successful NewOrder Transactions", metrics.successfulNewOrderTransactions, false));
+		m.emplace_back("Successful StockLevel Transactions", metrics.successfulStockLevelTransactions, Averaged::False);
+		m.emplace_back("Successful Delivery Transactions", metrics.successfulDeliveryTransactions, Averaged::False);
+		m.emplace_back(
+		    "Successful OrderStatus Transactions", metrics.successfulOrderStatusTransactions, Averaged::False);
+		m.emplace_back("Successful Payment Transactions", metrics.successfulPaymentTransactions, Averaged::False);
+		m.emplace_back("Successful NewOrder Transactions", metrics.successfulNewOrderTransactions, Averaged::False);
 
-		m.push_back(PerfMetric("Failed StockLevel Transactions", metrics.failedStockLevelTransactions, false));
-		m.push_back(PerfMetric("Failed Delivery Transactions", metrics.failedDeliveryTransactions, false));
-		m.push_back(PerfMetric("Failed OrderStatus Transactions", metrics.failedOrderStatusTransactions, false));
-		m.push_back(PerfMetric("Failed Payment Transactions", metrics.failedPaymentTransactions, false));
-		m.push_back(PerfMetric("Failed NewOrder Transactions", metrics.failedNewOrderTransactions, false));
+		m.emplace_back("Failed StockLevel Transactions", metrics.failedStockLevelTransactions, Averaged::False);
+		m.emplace_back("Failed Delivery Transactions", metrics.failedDeliveryTransactions, Averaged::False);
+		m.emplace_back("Failed OrderStatus Transactions", metrics.failedOrderStatusTransactions, Averaged::False);
+		m.emplace_back("Failed Payment Transactions", metrics.failedPaymentTransactions, Averaged::False);
+		m.emplace_back("Failed NewOrder Transactions", metrics.failedNewOrderTransactions, Averaged::False);
 
-		m.push_back(PerfMetric("Mean StockLevel Latency",
-		                       (clientId < clientsUsed) ? (multiplier * metrics.stockLevelResponseTime /
-		                                                   metrics.successfulStockLevelTransactions)
-		                                                : 0.0,
-		                       true));
-		m.push_back(PerfMetric("Mean Delivery Latency",
-		                       (clientId < clientsUsed) ? (multiplier * metrics.deliveryResponseTime /
-		                                                   metrics.successfulDeliveryTransactions)
-		                                                : 0.0,
-		                       true));
-		m.push_back(PerfMetric("Mean OrderStatus Repsonse Time",
-		                       (clientId < clientsUsed) ? (multiplier * metrics.orderStatusResponseTime /
-		                                                   metrics.successfulOrderStatusTransactions)
-		                                                : 0.0,
-		                       true));
-		m.push_back(PerfMetric("Mean Payment Latency",
-		                       (clientId < clientsUsed)
-		                           ? (multiplier * metrics.paymentResponseTime / metrics.successfulPaymentTransactions)
-		                           : 0.0,
-		                       true));
-		m.push_back(PerfMetric("Mean NewOrder Latency",
-		                       (clientId < clientsUsed) ? (multiplier * metrics.newOrderResponseTime /
-		                                                   metrics.successfulNewOrderTransactions)
-		                                                : 0.0,
-		                       true));
+		m.emplace_back("Mean StockLevel Latency",
+		               (clientId < clientsUsed)
+		                   ? (multiplier * metrics.stockLevelResponseTime / metrics.successfulStockLevelTransactions)
+		                   : 0.0,
+		               Averaged::True);
+		m.emplace_back("Mean Delivery Latency",
+		               (clientId < clientsUsed)
+		                   ? (multiplier * metrics.deliveryResponseTime / metrics.successfulDeliveryTransactions)
+		                   : 0.0,
+		               Averaged::True);
+		m.emplace_back("Mean OrderStatus Repsonse Time",
+		               (clientId < clientsUsed)
+		                   ? (multiplier * metrics.orderStatusResponseTime / metrics.successfulOrderStatusTransactions)
+		                   : 0.0,
+		               Averaged::True);
+		m.emplace_back("Mean Payment Latency",
+		               (clientId < clientsUsed)
+		                   ? (multiplier * metrics.paymentResponseTime / metrics.successfulPaymentTransactions)
+		                   : 0.0,
+		               Averaged::True);
+		m.emplace_back("Mean NewOrder Latency",
+		               (clientId < clientsUsed)
+		                   ? (multiplier * metrics.newOrderResponseTime / metrics.successfulNewOrderTransactions)
+		                   : 0.0,
+		               Averaged::True);
 
 		metrics.sort();
 
-		m.push_back(PerfMetric(
-		    "Median StockLevel Latency", multiplier * TPCCMetrics::median(metrics.stockLevelLatencies), true));
-		m.push_back(
-		    PerfMetric("Median Delivery Latency", multiplier * TPCCMetrics::median(metrics.deliveryLatencies), true));
-		m.push_back(PerfMetric(
-		    "Median OrderStatus Latency", multiplier * TPCCMetrics::median(metrics.orderStatusLatencies), true));
-		m.push_back(
-		    PerfMetric("Median Payment Latency", multiplier * TPCCMetrics::median(metrics.paymentLatencies), true));
-		m.push_back(
-		    PerfMetric("Median NewOrder Latency", multiplier * TPCCMetrics::median(metrics.newOrderLatencies), true));
+		m.emplace_back(
+		    "Median StockLevel Latency", multiplier * TPCCMetrics::median(metrics.stockLevelLatencies), Averaged::True);
+		m.emplace_back(
+		    "Median Delivery Latency", multiplier * TPCCMetrics::median(metrics.deliveryLatencies), Averaged::True);
+		m.emplace_back("Median OrderStatus Latency",
+		               multiplier * TPCCMetrics::median(metrics.orderStatusLatencies),
+		               Averaged::True);
+		m.emplace_back(
+		    "Median Payment Latency", multiplier * TPCCMetrics::median(metrics.paymentLatencies), Averaged::True);
+		m.emplace_back(
+		    "Median NewOrder Latency", multiplier * TPCCMetrics::median(metrics.newOrderLatencies), Averaged::True);
 
-		m.push_back(PerfMetric("90th Percentile StockLevel Latency",
-		                       multiplier * TPCCMetrics::percentile_90(metrics.stockLevelLatencies),
-		                       true));
-		m.push_back(PerfMetric("90th Percentile Delivery Latency",
-		                       multiplier * TPCCMetrics::percentile_90(metrics.deliveryLatencies),
-		                       true));
-		m.push_back(PerfMetric("90th Percentile OrderStatus Latency",
-		                       multiplier * TPCCMetrics::percentile_90(metrics.orderStatusLatencies),
-		                       true));
-		m.push_back(PerfMetric("90th Percentile Payment Latency",
-		                       multiplier * TPCCMetrics::percentile_90(metrics.paymentLatencies),
-		                       true));
-		m.push_back(PerfMetric("90th Percentile NewOrder Latency",
-		                       multiplier * TPCCMetrics::percentile_90(metrics.newOrderLatencies),
-		                       true));
+		m.emplace_back("90th Percentile StockLevel Latency",
+		               multiplier * TPCCMetrics::percentile_90(metrics.stockLevelLatencies),
+		               Averaged::True);
+		m.emplace_back("90th Percentile Delivery Latency",
+		               multiplier * TPCCMetrics::percentile_90(metrics.deliveryLatencies),
+		               Averaged::True);
+		m.emplace_back("90th Percentile OrderStatus Latency",
+		               multiplier * TPCCMetrics::percentile_90(metrics.orderStatusLatencies),
+		               Averaged::True);
+		m.emplace_back("90th Percentile Payment Latency",
+		               multiplier * TPCCMetrics::percentile_90(metrics.paymentLatencies),
+		               Averaged::True);
+		m.emplace_back("90th Percentile NewOrder Latency",
+		               multiplier * TPCCMetrics::percentile_90(metrics.newOrderLatencies),
+		               Averaged::True);
 
-		m.push_back(PerfMetric("99th Percentile StockLevel Latency",
-		                       multiplier * TPCCMetrics::percentile_99(metrics.stockLevelLatencies),
-		                       true));
-		m.push_back(PerfMetric("99th Percentile Delivery Latency",
-		                       multiplier * TPCCMetrics::percentile_99(metrics.deliveryLatencies),
-		                       true));
-		m.push_back(PerfMetric("99th Percentile OrderStatus Latency",
-		                       multiplier * TPCCMetrics::percentile_99(metrics.orderStatusLatencies),
-		                       true));
-		m.push_back(PerfMetric("99th Percentile Payment Latency",
-		                       multiplier * TPCCMetrics::percentile_99(metrics.paymentLatencies),
-		                       true));
-		m.push_back(PerfMetric("99th Percentile NewOrder Latency",
-		                       multiplier * TPCCMetrics::percentile_99(metrics.newOrderLatencies),
-		                       true));
+		m.emplace_back("99th Percentile StockLevel Latency",
+		               multiplier * TPCCMetrics::percentile_99(metrics.stockLevelLatencies),
+		               Averaged::True);
+		m.emplace_back("99th Percentile Delivery Latency",
+		               multiplier * TPCCMetrics::percentile_99(metrics.deliveryLatencies),
+		               Averaged::True);
+		m.emplace_back("99th Percentile OrderStatus Latency",
+		               multiplier * TPCCMetrics::percentile_99(metrics.orderStatusLatencies),
+		               Averaged::True);
+		m.emplace_back("99th Percentile Payment Latency",
+		               multiplier * TPCCMetrics::percentile_99(metrics.paymentLatencies),
+		               Averaged::True);
+		m.emplace_back("99th Percentile NewOrder Latency",
+		               multiplier * TPCCMetrics::percentile_99(metrics.newOrderLatencies),
+		               Averaged::True);
 	}
 };
 

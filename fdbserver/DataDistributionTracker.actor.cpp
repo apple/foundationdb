@@ -24,6 +24,8 @@
 #include "fdbserver/Knobs.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/ActorCollection.h"
+#include "flow/FastRef.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // The used bandwidth of a shard. The higher the value is, the busier the shard is.
@@ -393,8 +395,8 @@ ACTOR Future<int64_t> getFirstSize(Reference<AsyncVar<Optional<ShardMetrics>>> s
 }
 
 ACTOR Future<Void> changeSizes(DataDistributionTracker* self, KeyRange keys, int64_t oldShardsEndingSize) {
-	state vector<Future<int64_t>> sizes;
-	state vector<Future<int64_t>> systemSizes;
+	state std::vector<Future<int64_t>> sizes;
+	state std::vector<Future<int64_t>> systemSizes;
 	for (auto it : self->shards.intersectingRanges(keys)) {
 		Future<int64_t> thisSize = getFirstSize(it->value().stats);
 		sizes.push_back(thisSize);
@@ -858,7 +860,7 @@ ACTOR Future<Void> fetchShardMetrics(DataDistributionTracker* self, GetMetricsRe
 		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT, TaskPriority::DataDistribution))) {
 			TEST(true); // DD_SHARD_METRICS_TIMEOUT
 			StorageMetrics largeMetrics;
-			largeMetrics.bytes = SERVER_KNOBS->MAX_SHARD_BYTES;
+			largeMetrics.bytes = getMaxShardSize(self->dbSizeEstimate->get());
 			req.reply.send(largeMetrics);
 		}
 	}
@@ -933,6 +935,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	                                   *trackerCancelled);
 	state Future<Void> loggingTrigger = Void();
 	state Future<Void> readHotDetect = readHotDetector(&self);
+	state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
 	try {
 		wait(trackInitialShards(&self, initData));
 		initData = Reference<InitialDataDistribution>();
@@ -946,7 +949,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 				    .detail("Shards", self.shards.size())
 				    .detail("TotalSizeBytes", self.dbSizeEstimate->get())
 				    .detail("SystemSizeBytes", self.systemSizeEstimate)
-				    .trackLatest("DDTrackerStats");
+				    .trackLatest(ddTrackerStatsEventHolder->trackingKey);
 
 				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 			}
@@ -964,8 +967,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	}
 }
 
-vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor(Team team) {
-	vector<KeyRange> r;
+std::vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor(Team team) {
+	std::vector<KeyRange> r;
 	for (auto it = team_shards.lower_bound(std::pair<Team, KeyRange>(team, KeyRangeRef()));
 	     it != team_shards.end() && it->first == team;
 	     ++it)
@@ -983,7 +986,7 @@ int ShardsAffectedByTeamFailure::getNumberOfShards(UID ssID) const {
 	return it == storageServerShards.end() ? 0 : it->second;
 }
 
-std::pair<vector<ShardsAffectedByTeamFailure::Team>, vector<ShardsAffectedByTeamFailure::Team>>
+std::pair<std::vector<ShardsAffectedByTeamFailure::Team>, std::vector<ShardsAffectedByTeamFailure::Team>>
 ShardsAffectedByTeamFailure::getTeamsFor(KeyRangeRef keys) {
 	return shard_teams[keys.begin];
 }
@@ -1107,7 +1110,7 @@ void ShardsAffectedByTeamFailure::check() {
 		}
 		auto rs = shard_teams.ranges();
 		for (auto i = rs.begin(); i != rs.end(); ++i)
-			for (vector<Team>::iterator t = i->value().first.begin(); t != i->value().first.end(); ++t)
+			for (std::vector<Team>::iterator t = i->value().first.begin(); t != i->value().first.end(); ++t)
 				if (!team_shards.count(std::make_pair(*t, i->range()))) {
 					std::string teamDesc, shards;
 					for (int k = 0; k < t->servers.size(); k++)

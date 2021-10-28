@@ -23,8 +23,9 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/simulator.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/TagThrottle.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/RatekeeperInterface.h"
@@ -97,6 +98,8 @@ struct StorageQueueInfo {
 	double busiestReadTagFractionalBusyness = 0, busiestWriteTagFractionalBusyness = 0;
 	double busiestReadTagRate = 0, busiestWriteTagRate = 0;
 
+	Reference<EventCacheHolder> busiestWriteTagEventHolder;
+
 	// refresh periodically
 	TransactionTagMap<TransactionCommitCostEstimation> tagCostEst;
 	uint64_t totalWriteCosts = 0;
@@ -107,7 +110,8 @@ struct StorageQueueInfo {
 	    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
 	    smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    limitReason(limitReason_t::unlimited) {
+	    limitReason(limitReason_t::unlimited),
+	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(id.toString() + "/BusiestWriteTag")) {
 		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 		lastReply.instanceID = -1;
 	}
@@ -507,6 +511,8 @@ struct RatekeeperLimits {
 	TransactionPriority priority;
 	std::string context;
 
+	Reference<EventCacheHolder> rkUpdateEventCacheHolder;
+
 	RatekeeperLimits(TransactionPriority priority,
 	                 std::string context,
 	                 int64_t storageTargetBytes,
@@ -524,9 +530,12 @@ struct RatekeeperLimits {
 	        SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions are expected to not
 	                                                           // be durable on the storage servers
 	    lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()), priority(priority),
-	    context(context) {}
+	    context(context), rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}
 };
 
+namespace RatekeeperActorCpp {
+
+// Differentiate from GrvProxyInfo in DatabaseContext.h
 struct GrvProxyInfo {
 	int64_t totalTransactions;
 	int64_t batchTransactions;
@@ -540,6 +549,8 @@ struct GrvProxyInfo {
 	}
 };
 
+} // namespace RatekeeperActorCpp
+
 struct RatekeeperData {
 	UID id;
 	Database db;
@@ -547,7 +558,7 @@ struct RatekeeperData {
 	Map<UID, StorageQueueInfo> storageQueueInfo;
 	Map<UID, TLogQueueInfo> tlogQueueInfo;
 
-	std::map<UID, GrvProxyInfo> grvProxyInfo;
+	std::map<UID, RatekeeperActorCpp::GrvProxyInfo> grvProxyInfo;
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
 	HealthMetrics healthMetrics;
 	DatabaseConfiguration configuration;
@@ -595,8 +606,8 @@ struct RatekeeperData {
 	                SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
 	                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
 	    autoThrottlingEnabled(false) {
-		expiredTagThrottleCleanup =
-		    recurring([this]() { ThrottleApi::expire(this->db); }, SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
+		expiredTagThrottleCleanup = recurring([this]() { ThrottleApi::expire(this->db.getReference()); },
+		                                      SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
 	}
 };
 
@@ -744,7 +755,8 @@ ACTOR Future<Void> monitorServerListChange(
 				    .detail("Latency", now() - self->lastSSListFetchedTimestamp);
 			}
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			vector<std::pair<StorageServerInterface, ProcessClass>> results = wait(getServerListAndProcessClasses(&tr));
+			std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
+			    wait(getServerListAndProcessClasses(&tr));
 			self->lastSSListFetchedTimestamp = now();
 
 			std::map<UID, StorageServerInterface> newServers;
@@ -917,7 +929,7 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData* self) {
 		    .detail("TagCost", maxCost.getCostSum())
 		    .detail("TotalCost", it->value.totalWriteCosts)
 		    .detail("Reported", it->value.busiestWriteTag.present())
-		    .trackLatest(it->key.toString() + "/BusiestWriteTag");
+		    .trackLatest(it->value.busiestWriteTagEventHolder->trackingKey);
 
 		// reset statistics
 		it->value.tagCostEst.clear();
@@ -942,7 +954,8 @@ void tryAutoThrottleTag(RatekeeperData* self,
 			TagSet tags;
 			tags.addTag(tag);
 
-			self->addActor.send(ThrottleApi::throttleTags(self->db,
+			Reference<DatabaseContext> db = Reference<DatabaseContext>::addRef(self->db.getPtr());
+			self->addActor.send(ThrottleApi::throttleTags(db,
 			                                              tags,
 			                                              clientRate.get(),
 			                                              SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION,
@@ -1337,7 +1350,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	limits->reasonMetric = limitReason;
 
 	if (deterministicRandom()->random01() < 0.1) {
-		std::string name = "RkUpdate" + limits->context;
+		const std::string& name = limits->rkUpdateEventCacheHolder.getPtr()->trackingKey;
 		TraceEvent(name.c_str(), self->id)
 		    .detail("TPSLimit", limits->tpsLimit)
 		    .detail("Reason", limitReason)

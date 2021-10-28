@@ -533,6 +533,7 @@ Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr,
                           CheckBackupUID = CheckBackupUID::False,
                           Version backupUid = 0);
 Key getApplyKey(Version version, Key backupUid);
+Key getLogKey(Version version, Key backupUid);
 Version getLogKeyVersion(Key key);
 std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key);
 Future<Void> logError(Database cx, Key keyErrors, const std::string& message);
@@ -717,11 +718,22 @@ protected:
 
 template <>
 inline Tuple Codec<Reference<IBackupContainer>>::pack(Reference<IBackupContainer> const& bc) {
-	return Tuple().append(StringRef(bc->getURL()));
+	Tuple tuple;
+	tuple.append(StringRef(bc->getURL()));
+	if (bc->getEncryptionKeyFileName().present()) {
+		tuple.append(bc->getEncryptionKeyFileName().get());
+	}
+	return tuple;
 }
 template <>
 inline Reference<IBackupContainer> Codec<Reference<IBackupContainer>>::unpack(Tuple const& val) {
-	return IBackupContainer::openContainer(val.getString(0).toString());
+	ASSERT(val.size() == 1 || val.size() == 2);
+	auto url = val.getString(0).toString();
+	Optional<std::string> encryptionKeyFileName;
+	if (val.size() == 2) {
+		encryptionKeyFileName = val.getString(1).toString();
+	}
+	return IBackupContainer::openContainer(url, encryptionKeyFileName);
 }
 
 class BackupConfig : public KeyBackedConfig {
@@ -969,6 +981,11 @@ namespace fileBackup {
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
                                                                       int len);
+
+// Reads a mutation log block from file and parses into batch mutation blocks for further parsing.
+ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Reference<IAsyncFile> file,
+                                                                            int64_t offset,
+                                                                            int len);
 
 // Return a block of contiguous padding bytes "\0xff" for backup files, growing if needed.
 Value makePadding(int size);
