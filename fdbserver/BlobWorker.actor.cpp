@@ -778,6 +778,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
                                             Reference<GranuleMetadata> metadata,
                                             UID granuleID,
+                                            GranuleFiles files,
                                             Version version) {
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 	if (BW_DEBUG) {
@@ -786,31 +787,33 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		       metadata->keyRange.end.printable().c_str());
 	}
 
-	ASSERT(!metadata->files.snapshotFiles.empty());
-	ASSERT(!metadata->files.deltaFiles.empty());
+	// FIXME: don't use metadata->files
+
+	ASSERT(!files.snapshotFiles.empty());
+	ASSERT(!files.deltaFiles.empty());
 
 	state Arena filenameArena;
 	state BlobGranuleChunkRef chunk;
 
 	state int64_t compactBytesRead = 0;
-	state Version snapshotVersion = metadata->files.snapshotFiles.back().version;
-	BlobFileIndex snapshotF = metadata->files.snapshotFiles.back();
+	state Version snapshotVersion = files.snapshotFiles.back().version;
+	BlobFileIndex snapshotF = files.snapshotFiles.back();
 
 	ASSERT(snapshotVersion < version);
 
 	chunk.snapshotFile = BlobFilePointerRef(filenameArena, snapshotF.filename, snapshotF.offset, snapshotF.length);
 	compactBytesRead += snapshotF.length;
-	int deltaIdx = metadata->files.deltaFiles.size() - 1;
-	while (deltaIdx >= 0 && metadata->files.deltaFiles[deltaIdx].version > snapshotVersion) {
+	int deltaIdx = files.deltaFiles.size() - 1;
+	while (deltaIdx >= 0 && files.deltaFiles[deltaIdx].version > snapshotVersion) {
 		deltaIdx--;
 	}
 	deltaIdx++;
 	Version lastDeltaVersion = invalidVersion;
-	while (deltaIdx < metadata->files.deltaFiles.size() && metadata->files.deltaFiles[deltaIdx].version <= version) {
-		BlobFileIndex deltaF = metadata->files.deltaFiles[deltaIdx];
+	while (deltaIdx < files.deltaFiles.size() && files.deltaFiles[deltaIdx].version <= version) {
+		BlobFileIndex deltaF = files.deltaFiles[deltaIdx];
 		chunk.deltaFiles.emplace_back_deep(filenameArena, deltaF.filename, deltaF.offset, deltaF.length);
 		compactBytesRead += deltaF.length;
-		lastDeltaVersion = metadata->files.deltaFiles[deltaIdx].version;
+		lastDeltaVersion = files.deltaFiles[deltaIdx].version;
 		deltaIdx++;
 	}
 	ASSERT(lastDeltaVersion == version);
@@ -868,6 +871,7 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
                                                     Reference<GranuleMetadata> metadata,
                                                     UID granuleID,
                                                     Version historyVersion,
+                                                    int64_t bytesInNewDeltaFiles,
                                                     Future<BlobFileIndex> lastDeltaBeforeSnapshot) {
 
 	BlobFileIndex lastDeltaIdx = wait(lastDeltaBeforeSnapshot);
@@ -878,7 +882,7 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 		printf("Granule [%s - %s) checking with BM for re-snapshot after %d bytes\n",
 		       metadata->keyRange.begin.printable().c_str(),
 		       metadata->keyRange.end.printable().c_str(),
-		       metadata->bytesInNewDeltaFiles);
+		       bytesInNewDeltaFiles);
 	}
 
 	TraceEvent("BlobGranuleSnapshotCheck", bwData->id)
@@ -929,7 +933,7 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 		printf("Granule [%s - %s) re-snapshotting after %d bytes\n",
 		       metadata->keyRange.begin.printable().c_str(),
 		       metadata->keyRange.end.printable().c_str(),
-		       metadata->bytesInNewDeltaFiles);
+		       bytesInNewDeltaFiles);
 	}
 	TraceEvent("BlobGranuleSnapshotFile", bwData->id)
 	    .detail("Granule", metadata->keyRange)
@@ -938,10 +942,11 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 	// it knew the granule was small, or something
 
 	// wait for file updater to make sure that last delta file is in the metadata before
-	while (metadata->files.deltaFiles.back().version < reSnapshotVersion) {
+	while (metadata->files.deltaFiles.empty() || metadata->files.deltaFiles.back().version < reSnapshotVersion) {
 		wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 	}
-	BlobFileIndex reSnapshotIdx = wait(compactFromBlob(bwData, metadata, granuleID, reSnapshotVersion));
+	BlobFileIndex reSnapshotIdx =
+	    wait(compactFromBlob(bwData, metadata, granuleID, metadata->files, reSnapshotVersion));
 	return reSnapshotIdx;
 }
 
@@ -1133,6 +1138,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 	state Key cfKey;
 	state Optional<Key> oldCFKey;
 	state NotifiedVersion committedVersion;
+	state int pendingSnapshots = 0;
 
 	state std::deque<std::pair<Version, Version>> rollbacksInProgress;
 	state std::deque<std::pair<Version, Version>> rollbacksCompleted;
@@ -1194,9 +1200,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		} else {
 			if (startState.blobFilesToSnapshot.present()) {
 				startVersion = startState.previousDurableVersion;
-				Future<BlobFileIndex> inFlightBlobSnapshot =
-				    compactFromBlob(bwData, metadata, startState.granuleID, startVersion);
+				Future<BlobFileIndex> inFlightBlobSnapshot = compactFromBlob(
+				    bwData, metadata, startState.granuleID, startState.blobFilesToSnapshot.get(), startVersion);
 				inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, startVersion, 0, true));
+				pendingSnapshots++;
 
 				metadata->durableSnapshotVersion.set(startState.blobFilesToSnapshot.get().snapshotFiles.back().version);
 			} else {
@@ -1247,6 +1254,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					if (inFlightFiles.front().snapshot) {
 						metadata->files.snapshotFiles.push_back(completedFile);
 						metadata->durableSnapshotVersion.set(completedFile.version);
+						pendingSnapshots--;
 					} else {
 						wait(handleCompletedDeltaFile(bwData,
 						                              metadata,
@@ -1416,6 +1424,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				metadata->bufferedDeltaVersion.set(deltas.version);
 				Version knownNoRollbacksPast = std::min(deltas.version, deltas.knownCommittedVersion);
 				if (knownNoRollbacksPast > committedVersion.get()) {
+					// This is the only place it is safe to set committedVersion, as it has to come from the mutation
+					// stream, or we could have a situation where the blob worker has consumed an uncommitted mutation,
+					// but not its rollback, from the change feed, and could thus think the uncommitted mutation is
+					// committed because it saw a higher committed version than the mutation's version.
 					committedVersion.set(knownNoRollbacksPast);
 				}
 
@@ -1485,9 +1497,13 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				if (snapshotEligible && metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT &&
 				    !readOldChangeFeed) {
 					if (BW_DEBUG && !inFlightFiles.empty()) {
-						printf("Granule [%s - %s) ready to re-snapshot, waiting for %d outstanding files to finish\n",
+						printf("Granule [%s - %s) ready to re-snapshot after %lld > %lld bytes, waiting for %d "
+						       "outstanding "
+						       "files to finish\n",
 						       metadata->keyRange.begin.printable().c_str(),
 						       metadata->keyRange.end.printable().c_str(),
+						       metadata->bytesInNewDeltaFiles,
+						       SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT,
 						       inFlightFiles.size());
 					}
 
@@ -1502,14 +1518,64 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					} else {
 						previousFuture = Future<BlobFileIndex>(BlobFileIndex());
 					}
-					Future<BlobFileIndex> inFlightBlobSnapshot = checkSplitAndReSnapshot(
-					    bwData, metadata, startState.granuleID, startState.history.get().version, previousFuture);
+					Future<BlobFileIndex> inFlightBlobSnapshot =
+					    checkSplitAndReSnapshot(bwData,
+					                            metadata,
+					                            startState.granuleID,
+					                            startState.history.get().version,
+					                            metadata->bytesInNewDeltaFiles,
+					                            previousFuture);
 					inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, metadata->pendingDeltaVersion, 0, true));
+					pendingSnapshots++;
 
 					metadata->pendingSnapshotVersion = metadata->pendingDeltaVersion;
 
 					// reset metadata
 					metadata->bytesInNewDeltaFiles = 0;
+
+					// If we have more than one snapshot file and that file is unblocked (committedVersion >=
+					// snapshotVersion), wait for it to finish
+
+					if (pendingSnapshots > 1) {
+						state int waitIdx = 0;
+						int idx = 0;
+						for (auto& f : inFlightFiles) {
+							if (f.snapshot && f.version < metadata->pendingSnapshotVersion &&
+							    f.version <= committedVersion.get()) {
+								if (BW_DEBUG) {
+									printf(
+									    "[%s - %s) Waiting on previous snapshot file @ %lld <= known committed %lld\n",
+									    metadata->keyRange.begin.printable().c_str(),
+									    metadata->keyRange.end.printable().c_str(),
+									    f.version,
+									    committedVersion.get());
+								}
+								waitIdx = idx + 1;
+							}
+							idx++;
+						}
+						while (waitIdx > 0) {
+							// TODO don't duplicate code
+							BlobFileIndex completedFile = wait(inFlightFiles.front().future);
+							if (inFlightFiles.front().snapshot) {
+								metadata->files.snapshotFiles.push_back(completedFile);
+								metadata->durableSnapshotVersion.set(completedFile.version);
+								pendingSnapshots--;
+							} else {
+								wait(handleCompletedDeltaFile(bwData,
+								                              metadata,
+								                              completedFile,
+								                              cfKey,
+								                              startState.changeFeedStartVersion,
+								                              rollbacksCompleted));
+							}
+
+							inFlightFiles.pop_front();
+							waitIdx--;
+							wait(yield(TaskPriority::BlobWorkerUpdateStorage));
+						}
+					}
+
 				} else if (snapshotEligible &&
 				           metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) {
 					// if we're in the old change feed case and can't snapshot but we have enough data to, don't
