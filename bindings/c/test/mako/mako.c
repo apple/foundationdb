@@ -1651,11 +1651,12 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 	int c;
 	int idx;
 	while (1) {
-		const char* short_options = "a:c:p:t:r:s:i:x:v:m:hz";
+		const char* short_options = "a:c:d:p:t:r:s:i:x:v:m:hz";
 		static struct option long_options[] = {
 			/* name, has_arg, flag, val */
 			{ "api_version", required_argument, NULL, 'a' },
 			{ "cluster", required_argument, NULL, 'c' },
+			{ "num_databases", optional_argument, NULL, 'd' },
 			{ "procs", required_argument, NULL, 'p' },
 			{ "threads", required_argument, NULL, 't' },
 			{ "rows", required_argument, NULL, 'r' },
@@ -2525,7 +2526,7 @@ int stats_process_main(mako_args_t* args,
 		fprintf(fp, "\"value_length\": %d,", args->value_length);
 		fprintf(fp, "\"commit_get\": %d,", args->commit_get);
 		fprintf(fp, "\"verbose\": %d,", args->verbose);
-		fprintf(fp, "\"cluster_file\": \"%s\",", args->cluster_files);
+		fprintf(fp, "\"cluster_files\": \"%s\",", args->cluster_files);
 		fprintf(fp, "\"log_group\": \"%s\",", args->log_group);
 		fprintf(fp, "\"prefixpadding\": %d,", args->prefixpadding);
 		fprintf(fp, "\"trace\": %d,", args->trace);

@@ -231,8 +231,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( CONSISTENCY_CHECK_RATE_LIMIT_MAX,        50e6 ); // Limit in per sec
 	init( CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,	7 * 24 * 60 * 60 ); // 7 days
-	
-	//fdbcli		
+
+	//fdbcli
 	init( CLI_CONNECT_PARALLELISM,                  400 );
 	init( CLI_CONNECT_TIMEOUT,                     10.0 );
 
@@ -254,7 +254,11 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
 	init( BUSYNESS_SPIKE_SATURATED_THRESHOLD,     0.500 );
 
-	// blob granules 
+	// multi-version client control
+	init( MVC_CLIENTLIB_CHUNK_SIZE,              8*1024 );
+	init( MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION,      32 );
+
+	// blob granules
 	init( ENABLE_BLOB_GRANULES,                   false );
 
 	// clang-format on

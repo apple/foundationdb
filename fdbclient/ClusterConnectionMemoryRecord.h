@@ -35,9 +35,6 @@ public:
 		cs = contents;
 	}
 
-	// Returns the connection string currently held in this object.
-	ClusterConnectionString const& getConnectionString() const override;
-
 	// Sets the connections string held by this object.
 	Future<Void> setConnectionString(ClusterConnectionString const&) override;
 

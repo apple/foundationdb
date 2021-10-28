@@ -480,6 +480,14 @@ extern const KeyRef rebalanceDDIgnoreKey;
 const Value healthyZoneValue(StringRef const& zoneId, Version version);
 std::pair<Key, Version> decodeHealthyZoneValue(ValueRef const&);
 
+// Key ranges reserved for storing client library binaries and respective
+// json documents with the metadata describing the libaries
+extern const KeyRangeRef clientLibMetadataKeys;
+extern const KeyRef clientLibMetadataPrefix;
+
+extern const KeyRangeRef clientLibBinaryKeys;
+extern const KeyRef clientLibBinaryPrefix;
+
 // All mutations done to this range are blindly copied into txnStateStore.
 // Used to create artifically large txnStateStore instances in testing.
 extern const KeyRangeRef testOnlyTxnStateStorePrefixRange;
