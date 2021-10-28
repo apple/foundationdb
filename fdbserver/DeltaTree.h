@@ -349,7 +349,7 @@ public:
 		}
 	};
 
-	struct Cursor;
+	class Cursor;
 
 	// A Mirror is an accessor for a DeltaTree which allows insertion and reading.  Both operations are done
 	// using cursors which point to and share nodes in an tree that is built on-demand and mirrors the compressed
@@ -515,7 +515,8 @@ public:
 
 	// Cursor provides a way to seek into a DeltaTree and iterate over its contents
 	// All Cursors from a Mirror share the same decoded node 'cache' (tree of DecodedNodes)
-	struct Cursor {
+	class Cursor {
+	public:
 		Cursor() : mirror(nullptr), node(nullptr) {}
 
 		Cursor(Mirror* r) : mirror(r), node(mirror->root) {}

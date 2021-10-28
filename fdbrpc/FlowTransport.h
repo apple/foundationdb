@@ -134,7 +134,7 @@ public:
 	}
 };
 
-struct TransportData;
+class TransportData;
 
 struct Peer : public ReferenceCounted<Peer> {
 	TransportData* transport;

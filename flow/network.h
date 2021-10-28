@@ -407,7 +407,7 @@ public:
 };
 
 // forward declare SendBuffer, declared in serialize.h
-struct SendBuffer;
+class SendBuffer;
 
 class IConnection {
 public:
