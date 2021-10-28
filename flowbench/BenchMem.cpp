@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#include <cstring>
+#include <memory>
+
 #include "benchmark/benchmark.h"
 
 static void bench_memcmp(benchmark::State& state) {
