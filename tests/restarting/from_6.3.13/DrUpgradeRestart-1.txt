@@ -1,5 +1,5 @@
-extraDB=3
 storageEngineExcludeTypes=3
+extraDB=3
 
 testTitle=DrUpgrade
 clearAfterTest=false

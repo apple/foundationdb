@@ -104,43 +104,48 @@ def maintenance(logger):
 
 @enable_logging()
 def setclass(logger):
+    # get all processes' network addresses
     output1 = run_fdbcli_command('setclass')
-    class_type_line_1 = output1.split('\n')[-1]
-    logger.debug(class_type_line_1)
-    # check process' network address
-    assert '127.0.0.1' in class_type_line_1
-    network_address = ':'.join(class_type_line_1.split(':')[:2])
-    logger.debug("Network address: {}".format(network_address))
-    # check class type
-    assert 'unset' in class_type_line_1
-    # check class source
-    assert 'command_line' in class_type_line_1
+    logger.debug(output1)
+    # except the first line, each line is one process
+    process_types = output1.split('\n')[1:]
+    assert len(process_types) == args.process_number
+    addresses = []
+    for line in process_types:
+        assert '127.0.0.1' in line
+        # check class type
+        assert 'unset' in line
+        # check class source
+        assert 'command_line' in line
+        # check process' network address
+        network_address = ':'.join(line.split(':')[:2])
+        logger.debug("Network address: {}".format(network_address))
+        addresses.append(network_address)
+    random_address = random.choice(addresses)
+    logger.debug("Randomly selected address: {}".format(random_address))
     # set class to a random valid type
-    class_types = ['storage', 'storage', 'transaction', 'resolution',
+    class_types = ['storage', 'transaction', 'resolution',
                    'commit_proxy', 'grv_proxy', 'master', 'stateless', 'log',
                    'router', 'cluster_controller', 'fast_restore', 'data_distributor',
                    'coordinator', 'ratekeeper', 'storage_cache', 'backup'
                    ]
     random_class_type = random.choice(class_types)
     logger.debug("Change to type: {}".format(random_class_type))
-    run_fdbcli_command('setclass', network_address, random_class_type)
+    run_fdbcli_command('setclass', random_address, random_class_type)
     # check the set successful
     output2 = run_fdbcli_command('setclass')
-    class_type_line_2 = output2.split('\n')[-1]
-    logger.debug(class_type_line_2)
+    logger.debug(output2)
+    assert random_address in output2
+    process_types = output2.split('\n')[1:]
     # check process' network address
-    assert network_address in class_type_line_2
-    # check class type changed to the specified value
-    assert random_class_type in class_type_line_2
-    # check class source
-    assert 'set_class' in class_type_line_2
-    # set back to default
-    run_fdbcli_command('setclass', network_address, 'default')
-    # everything should be back to the same as before
-    output3 = run_fdbcli_command('setclass')
-    class_type_line_3 = output3.split('\n')[-1]
-    logger.debug(class_type_line_3)
-    assert class_type_line_3 == class_type_line_1
+    for line in process_types:
+        if random_address in line:
+            # check class type changed to the specified value
+            assert random_class_type in line
+            # check class source
+            assert 'set_class' in line
+    # set back to unset
+    run_fdbcli_command('setclass', random_address, 'unset')
 
 
 @enable_logging()
@@ -475,6 +480,36 @@ def wait_for_database_available(logger):
         time.sleep(1)
 
 
+@enable_logging()
+def profile(logger):
+    # profile list should return the same list as kill
+    addresses = get_fdb_process_addresses(logger)
+    output1 = run_fdbcli_command('profile', 'list')
+    assert output1.split('\n') == addresses
+    # check default output
+    default_profile_client_get_output = 'Client profiling rate is set to default and size limit is set to default.'
+    output2 = run_fdbcli_command('profile', 'client', 'get')
+    assert output2 == default_profile_client_get_output
+    # set rate and size limit
+    run_fdbcli_command('profile', 'client', 'set', '0.5', '1GB')
+    output3 = run_fdbcli_command('profile', 'client', 'get')
+    logger.debug(output3)
+    output3_list = output3.split(' ')
+    assert float(output3_list[6]) == 0.5
+    # size limit should be 1GB
+    assert output3_list[-1] == '1000000000.'
+    # change back to default value and check
+    run_fdbcli_command('profile', 'client', 'set', 'default', 'default')
+    assert run_fdbcli_command('profile', 'client', 'get') == default_profile_client_get_output
+
+
+@enable_logging()
+def triggerddteaminfolog(logger):
+    # this command is straightforward and only has one code path
+    output = run_fdbcli_command('triggerddteaminfolog')
+    assert output == 'Triggered team info logging in data distribution.'
+
+
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter,
                             description="""
@@ -512,11 +547,13 @@ if __name__ == '__main__':
         kill()
         lockAndUnlock()
         maintenance()
-        setclass()
+        profile()
         suspend()
         transaction()
         throttle()
+        triggerddteaminfolog()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()
         exclude()
+        setclass()

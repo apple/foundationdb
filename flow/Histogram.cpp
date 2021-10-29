@@ -87,8 +87,8 @@ Histogram* HistogramRegistry::lookupHistogram(std::string const& name) {
 
 void HistogramRegistry::logReport(double elapsed) {
 	for (auto& i : histograms) {
+		// Reset all buckets in writeToLog function
 		i.second->writeToLog(elapsed);
-		i.second->clear();
 	}
 }
 
@@ -129,17 +129,18 @@ void Histogram::writeToLog(double elapsed) {
 			totalCount += buckets[i];
 			switch (unit) {
 			case Unit::microseconds:
-				e.detail(format("LessThan%u.%03u", value / 1000, value % 1000), buckets[i]);
+				e.detail(format("LessThan%u.%03u", int(value / 1000), int(value % 1000)), buckets[i]);
 				break;
 			case Unit::bytes:
 			case Unit::bytes_per_second:
-				e.detail(format("LessThan%u", value), buckets[i]);
+				e.detail(format("LessThan%" PRIu64, value), buckets[i]);
 				break;
-			case Unit::percentage:
+			case Unit::percentageLinear:
 				e.detail(format("LessThan%f", (i + 1) * 0.04), buckets[i]);
 				break;
-			case Unit::count:
-				e.detail(format("LessThan%f", (i + 1) * ((upperBound - lowerBound) / 31.0)), buckets[i]);
+			case Unit::countLinear:
+				value = uint64_t((i + 1) * ((upperBound - lowerBound) / 31.0));
+				e.detail(format("LessThan%" PRIu64, value), buckets[i]);
 				break;
 			case Unit::MAXHISTOGRAMUNIT:
 				e.detail(format("Default%u", i), buckets[i]);
@@ -150,6 +151,7 @@ void Histogram::writeToLog(double elapsed) {
 		}
 	}
 	e.detail("TotalCount", totalCount);
+	clear();
 }
 
 std::string Histogram::drawHistogram() {

@@ -124,7 +124,7 @@ struct ProxyStats {
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-      maxComputeNS(0), minComputeNS(1e12),
+	    maxComputeNS(0), minComputeNS(1e12),
 	    commitBatchQueuingDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
 	                                                   LiteralStringRef("CommitBatchQueuing"),
 	                                                   Histogram::Unit::microseconds)),

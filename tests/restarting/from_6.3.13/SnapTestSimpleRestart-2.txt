@@ -1,5 +1,4 @@
 buggify=off
-storageEngineExcludeTypes=3
 
 ; verify all keys are even numbered
 testTitle=SnapSimpleVerify

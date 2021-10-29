@@ -45,8 +45,7 @@ ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::createFromExistingDatabas
 }
 
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
-	auto type =
-		isConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
+	auto type = isConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
 	return Reference<ITransaction>(new ThreadSafeTransaction(db, type));
 }
 

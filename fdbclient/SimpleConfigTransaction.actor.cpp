@@ -43,7 +43,7 @@ class SimpleConfigTransactionImpl {
 		}
 		ConfigTransactionGetGenerationRequest req;
 		ConfigTransactionGetGenerationReply reply =
-		    wait(self->cti.getGeneration.getReply(ConfigTransactionGetGenerationRequest{}));
+		    wait(retryBrokenPromise(self->cti.getGeneration, ConfigTransactionGetGenerationRequest{}));
 		if (self->dID.present()) {
 			TraceEvent("SimpleConfigTransactionGotReadVersion", self->dID.get())
 			    .detail("Version", reply.generation.liveVersion);
@@ -63,7 +63,7 @@ class SimpleConfigTransactionImpl {
 			    .detail("KnobName", configKey.knobName);
 		}
 		ConfigTransactionGetReply reply =
-		    wait(self->cti.get.getReply(ConfigTransactionGetRequest{ generation, configKey }));
+		    wait(retryBrokenPromise(self->cti.get, ConfigTransactionGetRequest{ generation, configKey }));
 		if (self->dID.present()) {
 			TraceEvent("SimpleConfigTransactionGotValue", self->dID.get())
 			    .detail("Value", reply.value.get().toString());
@@ -81,7 +81,7 @@ class SimpleConfigTransactionImpl {
 		}
 		ConfigGeneration generation = wait(self->getGenerationFuture);
 		ConfigTransactionGetConfigClassesReply reply =
-		    wait(self->cti.getClasses.getReply(ConfigTransactionGetConfigClassesRequest{ generation }));
+		    wait(retryBrokenPromise(self->cti.getClasses, ConfigTransactionGetConfigClassesRequest{ generation }));
 		RangeResult result;
 		for (const auto& configClass : reply.configClasses) {
 			result.push_back_deep(result.arena(), KeyValueRef(configClass, ""_sr));
@@ -95,7 +95,7 @@ class SimpleConfigTransactionImpl {
 		}
 		ConfigGeneration generation = wait(self->getGenerationFuture);
 		ConfigTransactionGetKnobsReply reply =
-		    wait(self->cti.getKnobs.getReply(ConfigTransactionGetKnobsRequest{ generation, configClass }));
+		    wait(retryBrokenPromise(self->cti.getKnobs, ConfigTransactionGetKnobsRequest{ generation, configClass }));
 		RangeResult result;
 		for (const auto& knobName : reply.knobNames) {
 			result.push_back_deep(result.arena(), KeyValueRef(knobName, ""_sr));
@@ -109,9 +109,19 @@ class SimpleConfigTransactionImpl {
 		}
 		wait(store(self->toCommit.generation, self->getGenerationFuture));
 		self->toCommit.annotation.timestamp = now();
-		wait(self->cti.commit.getReply(self->toCommit));
+		wait(retryBrokenPromise(self->cti.commit, self->toCommit));
 		self->committed = true;
 		return Void();
+	}
+
+	ACTOR static Future<Void> onError(SimpleConfigTransactionImpl* self, Error e) {
+		// TODO: Improve this:
+		if (e.code() == error_code_transaction_too_old || e.code() == error_code_not_committed) {
+			wait(delay((1 << self->numRetries++) * 0.01 * deterministicRandom()->random01()));
+			self->reset();
+			return Void();
+		}
+		throw e;
 	}
 
 public:
@@ -123,9 +133,14 @@ public:
 
 	SimpleConfigTransactionImpl(ConfigTransactionInterface const& cti) : cti(cti) {}
 
-	void set(KeyRef key, ValueRef value) { toCommit.set(key, value); }
+	void set(KeyRef key, ValueRef value) {
+		toCommit.mutations.push_back_deep(toCommit.arena,
+		                                  IKnobCollection::createSetMutation(toCommit.arena, key, value));
+	}
 
-	void clear(KeyRef key) { toCommit.clear(key); }
+	void clear(KeyRef key) {
+		toCommit.mutations.push_back_deep(toCommit.arena, IKnobCollection::createClearMutation(toCommit.arena, key));
+	}
 
 	Future<Optional<Value>> get(KeyRef key) { return get(this, key); }
 
@@ -144,14 +159,7 @@ public:
 
 	Future<Void> commit() { return commit(this); }
 
-	Future<Void> onError(Error const& e) {
-		// TODO: Improve this:
-		if (e.code() == error_code_transaction_too_old) {
-			reset();
-			return delay((1 << numRetries++) * 0.01 * deterministicRandom()->random01());
-		}
-		throw e;
-	}
+	Future<Void> onError(Error const& e) { return onError(this, e); }
 
 	Future<Version> getReadVersion() {
 		if (!getGenerationFuture.isValid())
@@ -183,9 +191,7 @@ public:
 
 	size_t getApproximateSize() const { return toCommit.expectedSize(); }
 
-	void debugTransaction(UID dID) {
-		this->dID = dID;
-	}
+	void debugTransaction(UID dID) { this->dID = dID; }
 
 	void checkDeferredError(Error const& deferredError) const {
 		if (deferredError.code() != invalid_error_code) {

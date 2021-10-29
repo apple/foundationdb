@@ -149,9 +149,9 @@ public:
 	/**
 	 * Replaces the variable with \p lineage. \p lineage is permitted to be an invalid pointer.
 	 *
-	 * \ret Whether the reference count of the replaced object was decremented. Note that if the reference being replaced
-	 *      is invalid, this function will always return false. If \ref delref wasn't called and the reference was valid,
-	 *      it will be called later. Note that at the time the return value is checked, \ref delref might already have
+	 * \ret Whether the reference count of the replaced object was decremented. Note that if the reference being
+	 * replaced is invalid, this function will always return false. If \ref delref wasn't called and the reference was
+	 * valid, it will be called later. Note that at the time the return value is checked, \ref delref might already have
 	 *      been called.
 	 */
 	bool replace(const Reference<T>& element);

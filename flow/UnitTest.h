@@ -103,7 +103,7 @@ struct UnitTestCollection {
 extern UnitTestCollection g_unittests;
 
 // Set this to `true` to disable RNG state checking after simulation runs.
- extern bool noUnseed;
+extern bool noUnseed;
 
 #define APPEND(a, b) a##b
 

@@ -1292,7 +1292,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		DEBUG_MUTATION("ShardGetValue",
 		               version,
 		               MutationRef(MutationRef::DebugKey, req.key, v.present() ? v.get() : LiteralStringRef("<null>")),
-					   data->thisServerID);
+		               data->thisServerID);
 		DEBUG_MUTATION("ShardGetPath",
 		               version,
 		               MutationRef(MutationRef::DebugKey,
@@ -1300,7 +1300,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		                           path == 0   ? LiteralStringRef("0")
 		                           : path == 1 ? LiteralStringRef("1")
 		                                       : LiteralStringRef("2")),
-					   data->thisServerID);
+		               data->thisServerID);
 
 		/*
 		StorageMetrics m;
@@ -1409,7 +1409,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanID parent
 			    MutationRef(MutationRef::DebugKey,
 			                metadata->key,
 			                reply.value.present() ? StringRef(reply.value.get()) : LiteralStringRef("<null>")),
-				data->thisServerID);
+			    data->thisServerID);
 
 			if (metadata->debugID.present())
 				g_traceBatch.addEvent(
@@ -2958,9 +2958,12 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					    .detail("More", this_block.more);
 
 					DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys, data->thisServerID);
-					if(MUTATION_TRACKING_ENABLED) {
+					if (MUTATION_TRACKING_ENABLED) {
 						for (auto k = this_block.begin(); k != this_block.end(); ++k) {
-							DEBUG_MUTATION("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value), data->thisServerID);
+							DEBUG_MUTATION("fetch",
+							               fetchVersion,
+							               MutationRef(MutationRef::SetValue, k->key, k->value),
+							               data->thisServerID);
 						}
 					}
 
@@ -3125,7 +3128,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		for (auto b = batch->changes.begin() + startSize; b != batch->changes.end(); ++b) {
 			ASSERT(b->version >= checkv);
 			checkv = b->version;
-			if(MUTATION_TRACKING_ENABLED) {
+			if (MUTATION_TRACKING_ENABLED) {
 				for (auto& m : b->mutations) {
 					DEBUG_MUTATION("fetchKeysFinalCommitInject", batch->changes[0].version, m, data->thisServerID);
 				}

@@ -36,7 +36,8 @@
  */
 
 // Reads the current cluster TSS mapping as part of the RYW transaction
-ACTOR Future<Void> readTSSMappingRYW(Reference<ReadYourWritesTransaction> tr, std::map<UID, StorageServerInterface>* tssMapping);
+ACTOR Future<Void> readTSSMappingRYW(Reference<ReadYourWritesTransaction> tr,
+                                     std::map<UID, StorageServerInterface>* tssMapping);
 
 // Reads the current cluster TSS mapping as part of the given Transaction
 ACTOR Future<Void> readTSSMapping(Transaction* tr, std::map<UID, StorageServerInterface>* tssMapping);

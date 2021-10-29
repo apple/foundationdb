@@ -277,7 +277,7 @@ class TestConfig {
 				sscanf(value.c_str(), "%d", &maxTLogVersion);
 			}
 			if (attrib == "disableTss") {
-				sscanf(value.c_str(), "%d", &disableTss);
+				disableTss = strcmp(value.c_str(), "true") == 0;
 			}
 			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;

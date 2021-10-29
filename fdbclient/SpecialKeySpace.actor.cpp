@@ -1290,7 +1290,8 @@ ACTOR Future<RangeResult> getLockedKeyActor(ReadYourWritesTransaction* ryw, KeyR
 	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
 	RangeResult result;
 	if (val.present()) {
-		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, val.get()));
+		UID uid = UID::fromString(BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()).toString());
+		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, Value(uid.toString())));
 	}
 	return result;
 }
@@ -1313,11 +1314,10 @@ Future<RangeResult> LockDatabaseImpl::getRange(ReadYourWritesTransaction* ryw, K
 	}
 }
 
-ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransaction* ryw) {
+ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransaction* ryw, UID uid) {
 	state Optional<std::string> msg;
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
-	UID uid = deterministicRandom()->randomUniqueID();
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != uid) {
 		// check database not locked
@@ -1348,7 +1348,15 @@ ACTOR Future<Optional<std::string>> unlockDatabaseCommitActor(ReadYourWritesTran
 Future<Optional<std::string>> LockDatabaseImpl::commit(ReadYourWritesTransaction* ryw) {
 	auto lockId = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("lock")].second;
 	if (lockId.present()) {
-		return lockDatabaseCommitActor(ryw);
+		std::string uidStr = lockId.get().toString();
+		UID uid;
+		try {
+			uid = UID::fromString(uidStr);
+		} catch (Error& e) {
+			return Optional<std::string>(
+			    ManagementAPIError::toJsonString(false, "lock", "Invalid UID hex string: " + uidStr));
+		}
+		return lockDatabaseCommitActor(ryw, uid);
 	} else {
 		return unlockDatabaseCommitActor(ryw);
 	}
@@ -2122,8 +2130,11 @@ ACTOR static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransac
 		dt = datetime;
 
 		for (const auto& [waitState, data] : sample.data) {
-			if (seq < seqStart) { continue; }
-			else if (seq >= seqEnd) { break; }
+			if (seq < seqStart) {
+				continue;
+			} else if (seq >= seqEnd) {
+				break;
+			}
 
 			std::ostringstream streamKey;
 			if (SpecialKeySpace::getActorLineageApiCommandRange("state").contains(kr)) {
