@@ -64,7 +64,9 @@ extern const KeyRef consistencyCheckSpecialKey;
 // maintenance
 extern const KeyRangeRef maintenanceSpecialKeyRange;
 extern const KeyRef ignoreSSFailureSpecialKey;
-
+// setclass
+extern const KeyRangeRef processClassSourceSpecialKeyRange;
+extern const KeyRangeRef processClassTypeSpecialKeyRange;
 // help functions (Copied from fdbcli.actor.cpp)
 
 // compare StringRef with the given c string
@@ -81,6 +83,8 @@ ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std:
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // maintenance command
 ACTOR Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// setclass command
+ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // snapshot command
 ACTOR Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // throttle command

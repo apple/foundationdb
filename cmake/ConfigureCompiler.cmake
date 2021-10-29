@@ -261,10 +261,6 @@ else()
 
   if (CLANG)
     add_compile_options()
-    # Clang has link errors unless `atomic` is specifically requested.
-    if(NOT APPLE)
-      #add_link_options(-latomic)
-    endif()
     if (APPLE OR USE_LIBCXX)
       add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
       if (NOT APPLE)

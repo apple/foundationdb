@@ -512,6 +512,26 @@ Future<Version> TagPartitionedLogSystem::pushTLogGroup(Version prevVersion,
 	return minVersionWhenReady(waitForAll(quorumResults), allReplies);
 }
 
+ACTOR static Future<TLogCommitReply> recordPushMetrics(Reference<ConnectionResetInfo> self,
+                                                       Reference<Histogram> dist,
+                                                       NetworkAddress addr,
+                                                       Future<TLogCommitReply> in) {
+	state double startTime = now();
+	TLogCommitReply t = wait(in);
+	if (now() - self->lastReset > SERVER_KNOBS->PUSH_RESET_INTERVAL) {
+		if (now() - startTime > SERVER_KNOBS->PUSH_MAX_LATENCY) {
+			if (self->resetCheck.isReady()) {
+				self->resetCheck = pushResetChecker(self, addr);
+			}
+			self->slowReplies++;
+		} else {
+			self->fastReplies++;
+		}
+	}
+	dist->sampleSeconds(now() - startTime);
+	return t;
+}
+
 Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
                                               Version version,
                                               Version knownCommittedVersion,
@@ -544,12 +564,21 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 					it->connectionResetTrackers.push_back(makeReference<ConnectionResetInfo>());
 				}
 			}
+			if (it->tlogPushDistTrackers.empty()) {
+				for (int i = 0; i < it->logServers.size(); i++) {
+					it->tlogPushDistTrackers.push_back(
+					    Histogram::getHistogram("ToTlog_" + it->logServers[i]->get().interf().uniqueID.toString(),
+					                            it->logServers[i]->get().interf().address().toString(),
+					                            Histogram::Unit::microseconds));
+				}
+			}
 			vector<Future<Void>> tLogCommitResults;
 			for (int loc = 0; loc < it->logServers.size(); loc++) {
 				Standalone<StringRef> msg = data.getMessages(location);
 				data.recordEmptyMessage(location, msg);
 				allReplies.push_back(recordPushMetrics(
 				    it->connectionResetTrackers[loc],
+					it->tlogPushDistTrackers[loc],
 				    it->logServers[loc]->get().interf().address(),
 				    it->logServers[loc]->get().interf().commit.getReply(TLogCommitRequest(spanContext,
 				                                                                          msg.arena(),
