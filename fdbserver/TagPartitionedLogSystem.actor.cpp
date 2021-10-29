@@ -462,7 +462,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 
 		ASSERT(failed.size() >= 1);
 		wait(quorum(changes, 1) || tagError<Void>(quorum(failed, 1), tlog_failed()) ||
-		     tagError<Void>(quorum(backupFailed, 1), master_backup_worker_failed()));
+		     tagError<Void>(quorum(backupFailed, 1), backup_worker_failed()));
 	}
 }
 

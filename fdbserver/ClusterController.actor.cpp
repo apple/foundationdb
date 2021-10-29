@@ -29,7 +29,6 @@
 #include "flow/SystemMonitor.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/Notified.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/BackupProgress.actor.h"
@@ -3316,20 +3315,6 @@ static std::set<int> const& normalClusterRecoveryErrors() {
 	return s;
 }
 
-struct CommitProxyVersionReplies {
-	std::map<uint64_t, GetCommitVersionReply> replies;
-	NotifiedVersion latestRequestNum;
-
-	CommitProxyVersionReplies(CommitProxyVersionReplies&& r) noexcept
-	  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}
-	void operator=(CommitProxyVersionReplies&& r) noexcept {
-		replies = std::move(r.replies);
-		latestRequestNum = std::move(r.latestRequestNum);
-	}
-
-	CommitProxyVersionReplies() : latestRequestNum(0) {}
-};
-
 ACTOR Future<Void> masterTerminateOnConflict(UID dbgid,
                                              Promise<Void> fullyRecovered,
                                              Future<Void> onConflict,
@@ -3581,7 +3566,7 @@ ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
 		// controller.
 		std::map<Optional<Standalone<StringRef>>, int> id_used;
 		id_used[cluster->clusterControllerProcessId]++;
-		state WorkerFitnessInfo masterWorker = cluster->getWorkerForRoleInDatacenter(
+		masterWorker = cluster->getWorkerForRoleInDatacenter(
 		    cluster->clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db->config, id_used);
 		if ((masterWorker.worker.processClass.machineClassFitness(ProcessClass::Master) >
 		         SERVER_KNOBS->EXPECTED_MASTER_FITNESS ||
@@ -3591,14 +3576,14 @@ ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
 			    .detail("Fitness", masterWorker.worker.processClass.machineClassFitness(ProcessClass::Master));
 			wait(delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
 			continue;
-			}
-			RecruitMasterRequest rmq;
+		}
+		    RecruitMasterRequest rmq;
 			rmq.lifetime = db->serverInfo->get().masterLifetime;
 			rmq.forceRecovery = db->forceRecovery;
 
 			cluster->masterProcessId = masterWorker.worker.interf.locality.processId();
 			cluster->db.unfinishedRecoveries++;
-			state Future<ErrorOr<MasterInterface>> fNewMaster = masterWorker.worker.interf.master.tryGetReply(rmq);
+			fNewMaster = masterWorker.worker.interf.master.tryGetReply(rmq);
 			wait(ready(fNewMaster) || db->forceMasterFailure.onTrigger());
 			if (fNewMaster.isReady() && fNewMaster.get().present()) {
 				TraceEvent("CCWDB", cluster->id).detail("Recruited", fNewMaster.get().get().id());
@@ -3623,7 +3608,7 @@ ACTOR Future<Void> clusterRecruitFromConfiguration(ClusterControllerData* self, 
 	TEST(true); // ClusterController RecruitTLogsRequest
 	loop {
 		try {
-			auto rep = self->findWorkersForConfiguration(req->req);
+			req->rep = self->findWorkersForConfiguration(req->req);
 			return Void();
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers && self->goodRecruitmentTime.isReady()) {
@@ -5503,10 +5488,10 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			if (ClusterControllerRecovery::normalClusterRecoveryErrors().count(err.code())) {
 				TraceEvent(SevWarn, "ClusterRecoveryRetrying", cluster->id).error(err);
 			} else {
-				bool ok = e.code() == error_code_no_more_servers;
-				TraceEvent(ok ? SevWarn : SevError, "ClusterWatchDatabaseRetrying", cluster->id).error(e);
+				bool ok = err.code() == error_code_no_more_servers;
+				TraceEvent(ok ? SevWarn : SevError, "ClusterWatchDatabaseRetrying", cluster->id).error(err);
 				if (!ok)
-					throw e;
+					throw err;
 			}
 			wait(delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
 		}

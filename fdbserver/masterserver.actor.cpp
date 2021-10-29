@@ -101,7 +101,6 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	const ClusterControllerFullInterface
 	    clusterController; // If the cluster controller changes, this master will die, so this is immutable.
 
-	ReusableCoordinatedState cstate;
 	Promise<Void> cstateUpdated;
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	int64_t registrationCount; // Number of different MasterRegistrationRequests sent to clusterController
@@ -148,11 +147,10 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    lastCommitTime(0), liveCommittedVersion(invalidVersion), databaseLocked(false),
 	    minKnownCommittedVersion(invalidVersion), hasConfiguration(false), coordinators(coordinators),
 	    version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr), memoryLimit(2e9), dbId(dbId),
-	    myInterface(myInterface), clusterController(clusterController), cstate(coordinators, addActor, dbgid),
-	    dbInfo(dbInfo), registrationCount(0), addActor(addActor),
-	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery), neverCreated(false),
-	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), cc("Master", dbgid.toString()),
-	    changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
+	    myInterface(myInterface), clusterController(clusterController), dbInfo(dbInfo), registrationCount(0),
+	    addActor(addActor), recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery),
+	    neverCreated(false), safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid),
+	    cc("Master", dbgid.toString()), changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),

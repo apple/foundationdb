@@ -28,6 +28,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbserver/TLogInterface.h"
+#include "fdbclient/Notified.h"
 
 typedef uint64_t DBRecoveryCount;
 
@@ -211,6 +212,20 @@ struct LifetimeToken {
 	void serialize(Ar& ar) {
 		serializer(ar, ccID, count);
 	}
+};
+
+struct CommitProxyVersionReplies {
+	std::map<uint64_t, GetCommitVersionReply> replies;
+	NotifiedVersion latestRequestNum;
+
+	CommitProxyVersionReplies(CommitProxyVersionReplies&& r) noexcept
+	  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}
+	void operator=(CommitProxyVersionReplies&& r) noexcept {
+		replies = std::move(r.replies);
+		latestRequestNum = std::move(r.latestRequestNum);
+	}
+
+	CommitProxyVersionReplies() : latestRequestNum(0) {}
 };
 
 #endif
