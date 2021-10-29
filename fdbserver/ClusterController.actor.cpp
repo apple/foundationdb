@@ -5011,7 +5011,8 @@ ACTOR Future<Void> handleRepairSystemData(ClusterControllerData* self, ClusterCo
 		// state MasterInterface oldMaster = self->db.serverInfo->get().master;
 		loop {
 			wait(self->db.serverInfo->onChange());
-			if (self->db.serverInfo->get().master.id() != oldMasterID) {
+			if (self->db.serverInfo->get().master.id() != oldMasterID &&
+			    self->db.serverInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 				break;
 			}
 		}

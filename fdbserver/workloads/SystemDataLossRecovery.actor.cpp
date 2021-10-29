@@ -97,8 +97,8 @@ struct SystemDataLossRecoveryWorkload : TestWorkload {
 			try {
 				Optional<Value> res = wait(timeoutError(tr.get(keyServersKeys.begin), 30.0));
 				// RangeResult res = wait(tr.getRange(systemKeys, 1));
-				if (res.present())
-					break;
+				ASSERT(res.present());
+                break;
 				// if (!res.empty()) {
 				// 	break;
 				// }
