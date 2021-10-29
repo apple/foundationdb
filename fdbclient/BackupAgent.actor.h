@@ -368,8 +368,8 @@ public:
 	DatabaseBackupAgent(DatabaseBackupAgent&& r) noexcept
 	  : subspace(std::move(r.subspace)), states(std::move(r.states)), config(std::move(r.config)),
 	    errors(std::move(r.errors)), ranges(std::move(r.ranges)), tagNames(std::move(r.tagNames)),
-	    taskBucket(std::move(r.taskBucket)), futureBucket(std::move(r.futureBucket)),
-	    sourceStates(std::move(r.sourceStates)), sourceTagNames(std::move(r.sourceTagNames)) {}
+	    sourceStates(std::move(r.sourceStates)), sourceTagNames(std::move(r.sourceTagNames)),
+	    taskBucket(std::move(r.taskBucket)), futureBucket(std::move(r.futureBucket)) {}
 
 	void operator=(DatabaseBackupAgent&& r) noexcept {
 		subspace = std::move(r.subspace);
@@ -969,6 +969,11 @@ namespace fileBackup {
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
                                                                       int len);
+
+// Reads a mutation log block from file and parses into batch mutation blocks for further parsing.
+ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Reference<IAsyncFile> file,
+                                                                            int64_t offset,
+                                                                            int len);
 
 // Return a block of contiguous padding bytes "\0xff" for backup files, growing if needed.
 Value makePadding(int size);

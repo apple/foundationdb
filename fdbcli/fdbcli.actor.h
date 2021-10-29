@@ -83,6 +83,8 @@ ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db
 ACTOR Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // snapshot command
 ACTOR Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// throttle command
+ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 
 } // namespace fdb_cli
 

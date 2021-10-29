@@ -11,6 +11,8 @@ set(FDBSERVER_SRCS
   ConfigDatabaseUnitTests.actor.cpp
   ConfigFollowerInterface.cpp
   ConfigFollowerInterface.h
+  ConfigNode.actor.cpp
+  ConfigNode.h
   ConflictSet.h
   CoordinatedState.actor.cpp
   CoordinatedState.h
@@ -28,8 +30,6 @@ set(FDBSERVER_SRCS
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
   GrvProxyServer.actor.cpp
-  IConfigDatabaseNode.cpp
-  IConfigDatabaseNode.h
   IConfigConsumer.cpp
   IConfigConsumer.h
   IDiskQueue.h
@@ -74,8 +74,6 @@ set(FDBSERVER_SRCS
   OnDemandStore.h
   PaxosConfigConsumer.actor.cpp
   PaxosConfigConsumer.h
-  PaxosConfigDatabaseNode.actor.cpp
-  PaxosConfigDatabaseNode.h
   ProxyCommitData.actor.h
   pubsub.actor.cpp
   pubsub.h
@@ -107,7 +105,6 @@ set(FDBSERVER_SRCS
   ServerDBInfo.h
   SimpleConfigConsumer.actor.cpp
   SimpleConfigConsumer.h
-  SimpleConfigDatabaseNode.actor.cpp
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp

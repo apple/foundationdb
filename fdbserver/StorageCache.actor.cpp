@@ -224,14 +224,14 @@ public:
 		// LatencyBands readLatencyBands;
 
 		Counters(StorageCacheData* self)
-		  : cc("StorageCacheServer", self->thisServerID.toString()), getKeyQueries("GetKeyQueries", cc),
-		    getValueQueries("GetValueQueries", cc), getRangeQueries("GetRangeQueries", cc),
-		    allQueries("QueryQueue", cc), finishedQueries("FinishedQueries", cc), rowsQueried("RowsQueried", cc),
-		    bytesQueried("BytesQueried", cc), bytesInput("BytesInput", cc), bytesFetched("BytesFetched", cc),
-		    mutationBytes("MutationBytes", cc), mutations("Mutations", cc), setMutations("SetMutations", cc),
-		    clearRangeMutations("ClearRangeMutations", cc), atomicMutations("AtomicMutations", cc),
-		    updateBatches("UpdateBatches", cc), updateVersions("UpdateVersions", cc), loops("Loops", cc),
-		    readsRejected("ReadsRejected", cc) {
+		  : cc("StorageCacheServer", self->thisServerID.toString()), allQueries("QueryQueue", cc),
+		    getKeyQueries("GetKeyQueries", cc), getValueQueries("GetValueQueries", cc),
+		    getRangeQueries("GetRangeQueries", cc), finishedQueries("FinishedQueries", cc),
+		    rowsQueried("RowsQueried", cc), bytesQueried("BytesQueried", cc), bytesInput("BytesInput", cc),
+		    bytesFetched("BytesFetched", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc),
+		    setMutations("SetMutations", cc), clearRangeMutations("ClearRangeMutations", cc),
+		    atomicMutations("AtomicMutations", cc), updateBatches("UpdateBatches", cc),
+		    updateVersions("UpdateVersions", cc), loops("Loops", cc), readsRejected("ReadsRejected", cc) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
 			specialCounter(cc, "VersionLag", [self]() { return self->versionLag; });
@@ -1542,7 +1542,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 };
 
 AddingCacheRange::AddingCacheRange(StorageCacheData* server, KeyRangeRef const& keys)
-  : server(server), keys(keys), transferredVersion(invalidVersion), phase(WaitPrevious) {
+  : keys(keys), server(server), transferredVersion(invalidVersion), phase(WaitPrevious) {
 	fetchClient = fetchKeys(server, this);
 }
 
@@ -1704,9 +1704,9 @@ void cacheWarmup(StorageCacheData* data, const KeyRangeRef& keys, bool nowAssign
 class StorageCacheUpdater {
 public:
 	StorageCacheUpdater()
-	  : fromVersion(invalidVersion), currentVersion(invalidVersion), processedCacheStartKey(false) {}
+	  : currentVersion(invalidVersion), fromVersion(invalidVersion), processedCacheStartKey(false) {}
 	StorageCacheUpdater(Version currentVersion)
-	  : fromVersion(currentVersion), currentVersion(currentVersion), processedCacheStartKey(false) {}
+	  : currentVersion(invalidVersion), fromVersion(currentVersion), processedCacheStartKey(false) {}
 
 	void applyMutation(StorageCacheData* data, MutationRef const& m, Version ver) {
 		//TraceEvent("SCNewVersion", data->thisServerID).detail("VerWas", data->mutableData().latestVersion).detail("ChVer", ver);

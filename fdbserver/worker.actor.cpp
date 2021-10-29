@@ -617,12 +617,29 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 		}
 	}
 
+
+	for (const auto& grvProxy : dbi.client.grvProxies) {
+		if (grvProxy.addresses().contains(address)) {
+			return true;
+		}
+	}
+
+	for (const auto& commitProxy : dbi.client.commitProxies) {
+		if (commitProxy.addresses().contains(address)) {
+			return true;
+		}
+	}
+
 	auto localityIsInPrimaryDc = [&dbInfo](const LocalityData& locality) {
 		return locality.dcId() == dbInfo->get().master.locality.dcId();
 	};
 
 	for (const auto& logSet : dbi.logSystemConfig.tLogs) {
 		for (const auto& tlog : logSet.tLogs) {
+			if (!tlog.present()) {
+				continue;
+			}
+
 			if (!localityIsInPrimaryDc(tlog.interf().filteredLocality)) {
 				continue;
 			}
@@ -655,13 +672,17 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	testDbInfo.master.changeCoordinators =
 	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ testAddress }, UID(1, 2)));
 
-	// First, create a remote TLog. Although the remote TLog also uses the local address, it shouldn't be considered as
+	// First, create an empty TLogInterface, and check that it shouldn't be considered as in primary DC.
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface<TLogInterface>());
+	ASSERT(!addressInDbAndPrimaryDc(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a remote TLog. Although the remote TLog also uses the local address, it shouldn't be considered as
 	// in primary DC given the remote locality.
 	LocalityData fakeRemote;
 	fakeRemote.set(LiteralStringRef("dcid"), StringRef(std::to_string(2)));
 	TLogInterface remoteTlog(fakeRemote);
 	remoteTlog.initEndpoints();
-	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
 	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(remoteTlog));
 	ASSERT(!addressInDbAndPrimaryDc(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
@@ -671,9 +692,22 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(localTlog));
 	ASSERT(addressInDbAndPrimaryDc(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
-	// Last, use the master's address to test, which should be considered as in local DC.
+	// Use the master's address to test, which should be considered as in local DC.
 	testDbInfo.logSystemConfig.tLogs.clear();
 	ASSERT(addressInDbAndPrimaryDc(testAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Last, tests that proxies included in the ClientDbInfo are considered as local.
+	NetworkAddress grvProxyAddress(IPAddress(0x26262626), 1);
+	GrvProxyInterface grvProxyInterf;
+	grvProxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
+	testDbInfo.client.grvProxies.push_back(grvProxyInterf);
+	ASSERT(addressInDbAndPrimaryDc(grvProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	NetworkAddress commitProxyAddress(IPAddress(0x37373737), 1);
+	CommitProxyInterface commitProxyInterf;
+	commitProxyInterf.commit = RequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
+	testDbInfo.client.commitProxies.push_back(commitProxyInterf);
+	ASSERT(addressInDbAndPrimaryDc(commitProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
 	return Void();
 }

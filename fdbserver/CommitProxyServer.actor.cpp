@@ -528,9 +528,7 @@ CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
 
     localBatchNumber(++pProxyCommitData->localCommitBatchesStarted), toCommit(pProxyCommitData->logSystem),
 
-    committed(trs.size()),
-
-    span("MP:commitBatch"_loc) {
+    span("MP:commitBatch"_loc), committed(trs.size()) {
 
 	evaluateBatchSize();
 

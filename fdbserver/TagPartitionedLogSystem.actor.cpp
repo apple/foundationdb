@@ -102,8 +102,8 @@ TLogSet::TLogSet(const LogSet& rhs)
 }
 
 OldTLogConf::OldTLogConf(const OldLogData& oldLogData)
-  : logRouterTags(oldLogData.logRouterTags), txsTags(oldLogData.txsTags), epochBegin(oldLogData.epochBegin),
-    epochEnd(oldLogData.epochEnd), pseudoLocalities(oldLogData.pseudoLocalities), epoch(oldLogData.epoch) {
+  : epochBegin(oldLogData.epochBegin), epochEnd(oldLogData.epochEnd), logRouterTags(oldLogData.logRouterTags),
+    txsTags(oldLogData.txsTags), pseudoLocalities(oldLogData.pseudoLocalities), epoch(oldLogData.epoch) {
 	for (const Reference<LogSet>& logSet : oldLogData.tLogs) {
 		tLogs.emplace_back(*logSet);
 	}

@@ -234,6 +234,8 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 
 	Future<class Void> delay(double seconds, TaskPriority taskID) override { return nextTick.getFuture(); }
 
+	Future<class Void> orderedDelay(double seconds, TaskPriority taskID) override { return nextTick.getFuture(); }
+
 	Future<class Void> yield(TaskPriority taskID) override {
 		if (check_yield(taskID))
 			return delay(0, taskID);
@@ -1386,7 +1388,7 @@ TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
 struct Tracker {
 	int copied;
 	bool moved;
-	Tracker(int copied = 0) : moved(false), copied(copied) {}
+	Tracker(int copied = 0) : copied(copied), moved(false) {}
 	Tracker(Tracker&& other) : Tracker(other.copied) {
 		ASSERT(!other.moved);
 		other.moved = true;

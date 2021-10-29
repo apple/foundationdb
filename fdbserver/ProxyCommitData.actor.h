@@ -92,16 +92,16 @@ struct ProxyStats {
 	                    Version* pVersion,
 	                    NotifiedVersion* pCommittedVersion,
 	                    int64_t* commitBatchesMemBytesCountPtr)
-	  : cc("ProxyStats", id.toString()), maxComputeNS(0), minComputeNS(1e12), txnCommitIn("TxnCommitIn", cc),
+	  : cc("ProxyStats", id.toString()), txnCommitIn("TxnCommitIn", cc),
 	    txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc),
 	    txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
 	    txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnCommitErrors("TxnCommitErrors", cc),
-	    txnConflicts("TxnConflicts", cc), commitBatchIn("CommitBatchIn", cc),
-	    txnRejectedForQueuedTooLong("TxnRejectedForQueuedTooLong", cc), commitBatchOut("CommitBatchOut", cc),
-	    mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
+	    txnConflicts("TxnConflicts", cc), txnRejectedForQueuedTooLong("TxnRejectedForQueuedTooLong", cc),
+	    commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc),
+	    mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
 	    keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc),
-	    keyServerLocationErrors("KeyServerLocationErrors", cc), lastCommitVersionAssigned(0),
-	    txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
+	    keyServerLocationErrors("KeyServerLocationErrors", cc),
+	    txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), lastCommitVersionAssigned(0),
 	    commitLatencySample("CommitLatencyMetrics",
 	                        id,
 	                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -114,7 +114,8 @@ struct ProxyStats {
 	    commitBatchingWindowSize("CommitBatchingWindowSize",
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {
+	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    maxComputeNS(0), minComputeNS(1e12) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this]() { return this->lastCommitVersionAssigned; });
 		specialCounter(cc, "Version", [pVersion]() { return *pVersion; });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion]() { return pCommittedVersion->get(); });
@@ -250,14 +251,14 @@ struct ProxyCommitData {
 	                RequestStream<CommitTransactionRequest> commit,
 	                Reference<AsyncVar<ServerDBInfo> const> db,
 	                bool firstProxy)
-	  : dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
-	    logAdapter(nullptr), txnStateStore(nullptr), popRemoteTxs(false), committedVersion(recoveryTransactionVersion),
-	    version(0), minKnownCommittedVersion(0), lastVersionTime(0), commitVersionRequestNumber(1),
-	    mostRecentProcessedRequestNumber(0), getConsistentReadVersion(getConsistentReadVersion), commit(commit),
-	    lastCoalesceTime(0), localCommitBatchesStarted(0), locked(false),
-	    commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), firstProxy(firstProxy),
+	  : dbgid(dbgid), commitBatchesMemBytesCount(0),
+	    stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master), logAdapter(nullptr),
+	    txnStateStore(nullptr), committedVersion(recoveryTransactionVersion), minKnownCommittedVersion(0), version(0),
+	    lastVersionTime(0), commitVersionRequestNumber(1), mostRecentProcessedRequestNumber(0), firstProxy(firstProxy),
+	    lastCoalesceTime(0), locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN),
+	    localCommitBatchesStarted(0), getConsistentReadVersion(getConsistentReadVersion), commit(commit),
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
-	    singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0),
+	    singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), lastTxsPop(0), popRemoteTxs(false),
 	    lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0),
 	    lastMasterReset(now()), lastResolverReset(now()), tLogGroupCollection(makeReference<TLogGroupCollection>(db)) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);

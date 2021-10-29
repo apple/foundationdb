@@ -1,5 +1,5 @@
 /*
- * PaxosConfigDatabaseNode.h
+ * ConfigNode.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,17 +20,19 @@
 
 #pragma once
 
-#include "fdbserver/IConfigDatabaseNode.h"
+#include <string>
 
-/*
- * Fault-tolerant configuration database node implementation
- */
-class PaxosConfigDatabaseNode : public IConfigDatabaseNode {
-	std::unique_ptr<class PaxosConfigDatabaseNodeImpl> impl;
+#include "fdbclient/ConfigTransactionInterface.h"
+#include "fdbserver/ConfigFollowerInterface.h"
+
+class ConfigNode : public ReferenceCounted<ConfigNode> {
+	std::unique_ptr<class ConfigNodeImpl> _impl;
+	ConfigNodeImpl const& impl() const { return *_impl; }
+	ConfigNodeImpl& impl() { return *_impl; }
 
 public:
-	PaxosConfigDatabaseNode(std::string const& folder);
-	~PaxosConfigDatabaseNode();
-	Future<Void> serve(ConfigTransactionInterface const&) override;
-	Future<Void> serve(ConfigFollowerInterface const&) override;
+	ConfigNode(std::string const& folder);
+	~ConfigNode();
+	Future<Void> serve(ConfigTransactionInterface const&);
+	Future<Void> serve(ConfigFollowerInterface const&);
 };

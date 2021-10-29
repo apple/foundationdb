@@ -158,7 +158,7 @@ struct GetCommitVersionReply {
 
 	GetCommitVersionReply() : resolverChangesVersion(0), version(0), prevVersion(0), requestNum(0) {}
 	explicit GetCommitVersionReply(Version version, Version prevVersion, uint64_t requestNum)
-	  : version(version), prevVersion(prevVersion), resolverChangesVersion(0), requestNum(requestNum) {}
+	  : resolverChangesVersion(0), version(version), prevVersion(prevVersion), requestNum(requestNum) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

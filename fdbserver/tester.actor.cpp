@@ -48,8 +48,8 @@ using namespace std;
 WorkloadContext::WorkloadContext() {}
 
 WorkloadContext::WorkloadContext(const WorkloadContext& r)
-  : options(r.options), clientId(r.clientId), clientCount(r.clientCount), dbInfo(r.dbInfo),
-    sharedRandomNumber(r.sharedRandomNumber) {}
+  : options(r.options), clientId(r.clientId), clientCount(r.clientCount), sharedRandomNumber(r.sharedRandomNumber),
+    dbInfo(r.dbInfo) {}
 
 WorkloadContext::~WorkloadContext() {}
 
@@ -1481,7 +1481,9 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 
 		if (perpetualWiggleEnabled) { // restore the enabled perpetual storage wiggle setting
+			printf("Set perpetual_storage_wiggle=1 ...\n");
 			wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
+			printf("Set perpetual_storage_wiggle=1 Done.\n");
 		}
 	}
 
