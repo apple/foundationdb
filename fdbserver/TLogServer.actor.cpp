@@ -547,7 +547,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Counter bytesDurable;
 	Counter blockingPeeks;
 	Counter blockingPeekTimeouts;
+	Counter emptyPeeks;
+	Counter nonEmptyPeeks;
 	std::map<Tag, LatencySample> blockingPeekLatencies;
+	std::map<Tag, LatencySample> peekVersionCounts;
 
 	UID logId;
 	ProtocolVersion protocolVersion;
@@ -630,7 +633,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	    durableKnownCommittedVersion(0), minKnownCommittedVersion(0), queuePoppedVersion(0), minPoppedTagVersion(0),
 	    minPoppedTag(invalidTag), unpoppedRecoveredTags(0), cc("TLog", interf.id().toString()),
 	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), blockingPeeks("BlockingPeeks", cc),
-	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), logId(interf.id()), protocolVersion(protocolVersion),
+	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), emptyPeeks("EmptyPeeks", cc),
+	    nonEmptyPeeks("NonEmptyPeeks", cc), logId(interf.id()), protocolVersion(protocolVersion),
 	    newPersistentDataVersion(invalidVersion), tLogData(tLogData), unrecoveredBefore(1), recoveredAt(1),
 	    logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag), isPrimary(isPrimary),
 	    logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0), locality(tagLocalityInvalid),
@@ -1563,9 +1567,11 @@ void peekMessagesFromMemory(Reference<LogData> self,
                             Tag tag,
                             Version begin,
                             BinaryWriter& messages,
-                            Version& endVersion) {
+                            Version& endVersion,
+                            uint32_t& peekCount) {
 	ASSERT(!messages.getLength());
 
+	peekCount = 0;
 	auto& deque = getVersionMessages(self, tag);
 	//TraceEvent("TLogPeekMem", self->dbgid).detail("Tag", req.tag1).detail("PDS", self->persistentDataSequence).detail("PDDS", self->persistentDataDurableSequence).detail("Oldest", map1.empty() ? 0 : map1.begin()->key ).detail("OldestMsgCount", map1.empty() ? 0 : map1.begin()->value.size());
 
@@ -1586,6 +1592,7 @@ void peekMessagesFromMemory(Reference<LogData> self,
 
 			currentVersion = it->first;
 			messages << VERSION_HEADER << currentVersion;
+			peekCount++;
 		}
 
 		// We need the 4 byte length prefix to be a TagsAndMessage format, but that prefix is added as part of StringRef
@@ -1636,6 +1643,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	state int sequence = -1;
 	state UID peekId;
 	state double queueStart = now();
+	state uint32_t peekCount = 0; // total number of versions peeked
 
 	if (reqTag.locality == tagLocalityTxs && reqTag.id >= logData->txsTags && logData->txsTags > 0) {
 		reqTag.id = reqTag.id % logData->txsTags;
@@ -1784,6 +1792,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	}
 	state Version endVersion = logData->version.get() + 1;
 	state bool onlySpilled = false;
+	state uint32_t memPeekCount = 0; // number of versions peeked from memory
 
 	// grab messages from disk
 	//TraceEvent("TLogPeekMessages", self->dbgid).detail("ReqBeginEpoch", reqBegin.epoch).detail("ReqBeginSeq", reqBegin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", reqTag1).detail("Tag2", reqTag2);
@@ -1797,7 +1806,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		if (reqOnlySpilled) {
 			endVersion = logData->persistentDataDurableVersion + 1;
 		} else {
-			peekMessagesFromMemory(logData, reqTag, reqBegin, messages2, endVersion);
+			peekMessagesFromMemory(logData, reqTag, reqBegin, messages2, endVersion, memPeekCount);
 		}
 
 		if (logData->shouldSpillByValue(reqTag)) {
@@ -1811,6 +1820,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				auto ver = decodeTagMessagesKey(kv.key);
 				messages << VERSION_HEADER << ver;
 				messages.serializeBytes(kv.value);
+				peekCount++;
 			}
 
 			if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
@@ -1818,6 +1828,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				onlySpilled = true;
 			} else {
 				messages.serializeBytes(messages2.toValue());
+				peekCount += memPeekCount;
 			}
 		} else {
 			// FIXME: Limit to approximately DESIRED_TOTATL_BYTES somehow.
@@ -1894,6 +1905,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 					    .detail("PeekTag", reqTag);
 				}
 
+				peekCount++;
 				lastRefMessageVersion = entry.version;
 				index++;
 			}
@@ -1906,13 +1918,15 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				onlySpilled = true;
 			} else {
 				messages.serializeBytes(messages2.toValue());
+				peekCount += memPeekCount;
 			}
 		}
 	} else {
 		if (reqOnlySpilled) {
 			endVersion = logData->persistentDataDurableVersion + 1;
 		} else {
-			peekMessagesFromMemory(logData, reqTag, reqBegin, messages, endVersion);
+			peekMessagesFromMemory(logData, reqTag, reqBegin, messages, endVersion, memPeekCount);
+			peekCount += memPeekCount;
 		}
 
 		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", replyPromise.getEndpoint().getPrimaryAddress()).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
@@ -1924,6 +1938,23 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	reply.messages = StringRef(reply.arena, messages.toValue());
 	reply.end = endVersion;
 	reply.onlySpilled = onlySpilled;
+
+	// Update metrics
+	if (reply.messages.size() == 0) {
+		++logData->emptyPeeks;
+	} else {
+		++logData->nonEmptyPeeks;
+
+		// TODO (version vector) check if this should be included in "status details" json
+		if (logData->peekVersionCounts.find(reqTag) == logData->peekVersionCounts.end()) {
+			UID ssID = nondeterministicRandom()->randomUniqueID();
+			std::string s = "PeekVersionCounts-" + reqTag.toString();
+			logData->peekVersionCounts.try_emplace(
+			    reqTag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE);
+		}
+		LatencySample& sample = logData->peekVersionCounts.at(reqTag);
+		sample.addMeasurement(peekCount);
+	}
 
 	// TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("Tag", reqTag.toString()).
 	// 	detail("BeginVer", reqBegin).detail("EndVer", reply.end).
