@@ -67,7 +67,7 @@ struct VersionIndexerPeekReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, committedVersion, versions);
+		serializer(ar, committedVersion, previousVersion, versions);
 	}
 };
 

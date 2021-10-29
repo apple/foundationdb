@@ -315,6 +315,9 @@ StringRef to_string(ProcessClass::ClusterRole role) {
 	case ProcessClass::VersionIndexer:
 		return "VersionIndexer"_sr;
 		break;
+	case ProcessClass::Worker:
+		return "Worker"_sr;
+		break;
 	case ProcessClass::NoRole:
 		return "NoRole"_sr;
 		break;

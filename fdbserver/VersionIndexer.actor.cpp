@@ -98,8 +98,17 @@ ACTOR Future<Void> versionPeek(VersionIndexerState* self, VersionIndexerPeekRequ
 	for (; iter != self->versionWindow.end(); ++iter) {
 		auto i = std::lower_bound(iter->tags.begin(), iter->tags.end(), req.tag);
 		bool hasMutations = i != iter->tags.end() && *i == req.tag;
+		ASSERT(iter->version > req.lastKnownVersion);
 		reply.versions.emplace_back(iter->version, hasMutations);
 	}
+	//TraceEvent evt(SevDebug, "VersionIndexerPeek", self->id);
+	// evt.detail("Tag", req.tag).detail("PrevVersion", reply.previousVersion);
+	// for (int i = 0; i < reply.versions.size(); ++i) {
+	//	auto kVer = format("Version%d", i);
+	//	auto kVal = format("HasData%d", i);
+	//	evt.detail(kVer.c_str(), reply.versions[i].first);
+	//	evt.detail(kVal.c_str(), reply.versions[i].second);
+	// }
 	req.reply.send(std::move(reply));
 	return Void();
 }
@@ -111,7 +120,7 @@ void truncateWindow(VersionIndexerState* self) {
 		searchEntry.version = self->versionWindow.front().version + SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
 		auto iter = std::lower_bound(self->versionWindow.begin(), self->versionWindow.end(), searchEntry);
 		self->previousVersion = iter->version;
-		self->versionWindow.erase(self->versionWindow.begin(), iter);
+		self->versionWindow.erase(self->versionWindow.begin(), ++iter);
 	}
 }
 
@@ -135,6 +144,17 @@ ACTOR Future<Void> addVersion(VersionIndexerState* self, VersionIndexerCommitReq
 		entry.version = req.version;
 		entry.tags = std::move(req.tags);
 		std::sort(entry.tags.begin(), entry.tags.end());
+		//TraceEvent evt(SevDebug, "VersionIndexerAddVersion", self->id);
+		// evt.detail("Version", req.version)
+		//     .detail("PrevVersion", req.previousVersion)
+		//     .detail("IndexerVersion", self->version.get())
+		//     .detail("NumTags", entry.tags.size())
+		//     .detail("FirstCommit", firstCommit);
+		// for (int i = 0; i < entry.tags.size(); ++i) {
+		//	auto k = format("Tag%d", i);
+		//	evt.detail(k.c_str(), entry.tags[i]);
+		// }
+		// evt.log();
 		self->versionWindow.emplace_back(std::move(entry));
 		self->version.set(req.version);
 		self->stats.windowEnd = req.version;

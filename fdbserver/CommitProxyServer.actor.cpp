@@ -1069,7 +1069,7 @@ Future<Void> informVersionIndexers(CommitBatchContext* self) {
 	VersionIndexerCommitRequest req;
 	req.version = self->commitVersion;
 	req.previousVersion = self->prevVersion;
-	req.committedVersion = self->pProxyCommitData->committedVersion.get();
+	req.committedVersion = self->pProxyCommitData->minKnownCommittedVersion;
 	const auto& tags = self->toCommit.getWrittenTags();
 	req.tags.reserve(tags.size());
 	req.tags.insert(req.tags.end(), tags.begin(), tags.end());
@@ -1077,6 +1077,7 @@ Future<Void> informVersionIndexers(CommitBatchContext* self) {
 	const auto& versionIndexers = self->pProxyCommitData->db->get().versionIndexers;
 	resp.reserve(versionIndexers.size());
 	for (const auto& vi : versionIndexers) {
+		req.reply = ReplyPromise<Void>();
 		resp.emplace_back(vi.commit.getReply(req));
 	}
 	return waitForAll(resp);
@@ -1917,7 +1918,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		std::vector<UID> src, dest;
 		ServerCacheInfo info;
 		// NOTE: An ACTOR will be compiled into several classes, the this pointer is from one of them.
-		auto updateTagInfo = [this](const std::vector<UID>& uids,
+		auto updateTagInfo = [=](const std::vector<UID>& uids,
 		                            std::vector<Tag>& tags,
 		                            std::vector<Reference<StorageInfo>>& storageInfoItems) {
 			for (const auto& id : uids) {
