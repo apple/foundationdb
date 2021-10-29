@@ -29,6 +29,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TransactionLineage.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
@@ -1068,10 +1069,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					pProxyCommitData->singleKeyMutationEvent->log();
 				}
 
-				DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)
-				    .detail("Dbgid", pProxyCommitData->dbgid)
-				    .detail("To", tags)
-				    .detail("Mutation", m);
+				DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid)
+				    .detail("To", tags);
 				self->toCommit.addTags(tags);
 				if (pProxyCommitData->cacheInfo[m.param1]) {
 					self->toCommit.addTag(cacheTag);
@@ -1088,10 +1087,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				std::set<ptxn::StorageTeamID> storageTeams; // write m to these storage teams
 				if (firstRange == ranges.end()) {
 					// Fast path
-					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)
-					    .detail("Dbgid", pProxyCommitData->dbgid)
-					    .detail("To", ranges.begin().value().tags)
-					    .detail("Mutation", m);
+					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid)
+					    .detail("To", ranges.begin().value().tags);
 
 					ranges.begin().value().populateTags();
 					self->toCommit.addTags(ranges.begin().value().tags);
@@ -1130,10 +1127,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 							trCost->get().clearIdxCosts.pop_front();
 						}
 					}
-					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)
-					    .detail("Dbgid", pProxyCommitData->dbgid)
-					    .detail("To", allSources)
-					    .detail("Mutation", m);
+					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid)
+					    .detail("To", allSources);
 
 					self->toCommit.addTags(allSources);
 				}
@@ -1579,6 +1574,7 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	// WARNING: this code is run at a high priority (until the first delay(0)), so it needs to do as little work as
 	// possible
 	state CommitBatch::CommitBatchContext context(self, trs, currentBatchMemBytesCount);
+	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::Commit;
 
 	// Active load balancing runs at a very high priority (to obtain accurate estimate of memory used by commit batches)
 	// so we need to downgrade here
@@ -1629,6 +1625,8 @@ void maybeAddTssMapping(GetKeyServerLocationsReply& reply,
 
 ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsRequest req, ProxyCommitData* commitData) {
 	// We can't respond to these requests until we have valid txnStateStore
+	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyServersLocations;
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
@@ -1704,7 +1702,7 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 	// We can't respond to these requests until we have valid txnStateStore
 	wait(commitData->validState.getFuture());
 
-	TraceEvent("ProxyReadyForReads", proxy.id());
+	TraceEvent("ProxyReadyForReads", proxy.id()).log();
 
 	loop {
 		GetStorageServerRejoinInfoRequest req = waitNext(proxy.getStorageServerRejoinInfo.getFuture());
@@ -2154,7 +2152,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 					state KeyRange txnKeys = allKeys;
 					RangeResult UIDtoTagMap = commitData.txnStateStore->readRange(serverTagKeys).get();
 					state std::map<Tag, UID> tag_uid;
-					for (const KeyValueRef kv : UIDtoTagMap) {
+					for (const KeyValueRef& kv : UIDtoTagMap) {
 						tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
 					}
 

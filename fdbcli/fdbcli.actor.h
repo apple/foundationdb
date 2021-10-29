@@ -61,27 +61,43 @@ struct CommandFactory {
 extern const KeyRef advanceVersionSpecialKey;
 // consistencycheck
 extern const KeyRef consistencyCheckSpecialKey;
+// datadistribution
+extern const KeyRef ddModeSpecialKey;
+extern const KeyRef ddIgnoreRebalanceSpecialKey;
 // maintenance
 extern const KeyRangeRef maintenanceSpecialKeyRange;
 extern const KeyRef ignoreSSFailureSpecialKey;
 // setclass
 extern const KeyRangeRef processClassSourceSpecialKeyRange;
 extern const KeyRangeRef processClassTypeSpecialKeyRange;
+// Other special keys
+inline const KeyRef errorMsgSpecialKey = LiteralStringRef("\xff\xff/error_message");
 // help functions (Copied from fdbcli.actor.cpp)
 
 // compare StringRef with the given c string
 bool tokencmp(StringRef token, const char* command);
 // print the usage of the specified command
 void printUsage(StringRef command);
+// Pre: tr failed with special_keys_api_failure error
+// Read the error message special key and return the message
+ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
 
 // All fdbcli commands (alphabetically)
 // advanceversion command
 ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// cache_range command
+ACTOR Future<bool> cacheRangeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // consistency command
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens);
+// datadistribution command
+ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // maintenance command
+ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);
+ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
+                                    bool printWarning = false,
+                                    bool clearSSFailureZoneString = false);
 ACTOR Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // setclass command
 ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);

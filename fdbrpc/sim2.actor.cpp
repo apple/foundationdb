@@ -31,6 +31,7 @@
 #include "flow/IThreadPool.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Util.h"
+#include "flow/WriteOnlySet.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
@@ -984,6 +985,12 @@ public:
 
 	bool checkRunnable() override { return net2->checkRunnable(); }
 
+#ifdef ENABLE_SAMPLING
+	ActorLineageSet& getActorLineageSet() override {
+		return actorLineageSet;
+	}
+#endif
+
 	void stop() override { isStopped = true; }
 	void addStopCallback(std::function<void()> fn) override { stopCallbacks.emplace_back(std::move(fn)); }
 	bool isSimulated() const override { return true; }
@@ -1893,7 +1900,7 @@ public:
 
 		KillType ktResult, ktMin = kt;
 		for (auto& datacenterMachine : datacenterMachines) {
-			if (deterministicRandom()->random01() < 0.99) {
+			if (deterministicRandom()->random01() < 0.99 || forceKill) {
 				killMachine(datacenterMachine.first, kt, true, &ktResult);
 				if (ktResult != kt) {
 					TraceEvent(SevWarn, "KillDCFail")
@@ -2124,6 +2131,10 @@ public:
 	// Whether or not yield has returned true during the current iteration of the run loop
 	bool yielded;
 	int yield_limit; // how many more times yield may return false before next returning true
+
+#ifdef ENABLE_SAMPLING
+	ActorLineageSet actorLineageSet;
+#endif
 };
 
 class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
@@ -2515,6 +2526,12 @@ Future<std::time_t> Sim2FileSystem::lastWriteTime(const std::string& filename) {
 	}
 	return fileWrites[filename];
 }
+
+#ifdef ENABLE_SAMPLING
+ActorLineageSet& Sim2FileSystem::getActorLineageSet() {
+	return actorLineageSet;
+}
+#endif
 
 void Sim2FileSystem::newFileSystem() {
 	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Sim2FileSystem());

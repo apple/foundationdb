@@ -44,7 +44,8 @@ public:
 		PAXOS_CONFIG,
 	};
 
-	static ISingleThreadTransaction* allocateOnForeignThread(Type type);
+	static ISingleThreadTransaction* allocateOnForeignThread(Type);
+	static Reference<ISingleThreadTransaction> create(Type, Database const&);
 	virtual void setDatabase(Database const&) = 0;
 
 	virtual void setVersion(Version v) = 0;

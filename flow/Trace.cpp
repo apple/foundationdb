@@ -107,7 +107,7 @@ private:
 	std::vector<TraceEventFields> eventBuffer;
 	int loggedLength;
 	int bufferLength;
-	bool opened;
+	std::atomic<bool> opened;
 	int64_t preopenOverflowCount;
 	std::string basename;
 	std::string logGroup;

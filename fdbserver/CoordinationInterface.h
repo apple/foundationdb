@@ -234,6 +234,6 @@ public:
 
 Future<Void> coordinationServer(std::string const& dataFolder,
                                 Reference<ClusterConnectionFile> const& ccf,
-                                UseConfigDB const& useConfigDB);
+                                ConfigDBType const&);
 
 #endif

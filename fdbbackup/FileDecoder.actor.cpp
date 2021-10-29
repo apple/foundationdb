@@ -506,7 +506,7 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 		wait(process_file(container, logs[idx], uid, params));
 		idx++;
 	}
-	TraceEvent("DecodeDone", uid);
+	TraceEvent("DecodeDone", uid).log();
 	return Void();
 }
 

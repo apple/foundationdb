@@ -23,14 +23,13 @@
 #include <memory>
 
 #include "fdbclient/IConfigTransaction.h"
+#include "fdbclient/PImpl.h"
 
 /*
  * Fault-tolerant configuration transaction implementation
  */
 class PaxosConfigTransaction final : public IConfigTransaction, public FastAllocated<PaxosConfigTransaction> {
-	std::unique_ptr<class PaxosConfigTransactionImpl> _impl;
-	PaxosConfigTransactionImpl const& impl() const { return *_impl; }
-	PaxosConfigTransactionImpl& impl() { return *_impl; }
+	PImpl<class PaxosConfigTransactionImpl> impl;
 
 public:
 	PaxosConfigTransaction(std::vector<ConfigTransactionInterface> const&);

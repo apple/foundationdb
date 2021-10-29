@@ -224,7 +224,7 @@ struct ReadWriteWorkload : KVWorkload {
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
-	ACTOR static Future<bool> traceDumpWorkers(Reference<AsyncVar<ServerDBInfo>> db) {
+	ACTOR static Future<bool> traceDumpWorkers(Reference<AsyncVar<ServerDBInfo> const> db) {
 		try {
 			loop {
 				choose {

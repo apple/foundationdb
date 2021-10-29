@@ -23,8 +23,9 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/simulator.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/TagThrottle.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/RatekeeperInterface.h"
@@ -527,6 +528,9 @@ struct RatekeeperLimits {
 	    context(context) {}
 };
 
+namespace RatekeeperActorCpp {
+
+// Differentiate from GrvProxyInfo in DatabaseContext.h
 struct GrvProxyInfo {
 	int64_t totalTransactions;
 	int64_t batchTransactions;
@@ -540,6 +544,8 @@ struct GrvProxyInfo {
 	}
 };
 
+} // namespace RatekeeperActorCpp
+
 struct RatekeeperData {
 	UID id;
 	Database db;
@@ -547,7 +553,7 @@ struct RatekeeperData {
 	Map<UID, StorageQueueInfo> storageQueueInfo;
 	Map<UID, TLogQueueInfo> tlogQueueInfo;
 
-	std::map<UID, GrvProxyInfo> grvProxyInfo;
+	std::map<UID, RatekeeperActorCpp::GrvProxyInfo> grvProxyInfo;
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
 	HealthMetrics healthMetrics;
 	DatabaseConfiguration configuration;
@@ -595,8 +601,8 @@ struct RatekeeperData {
 	                SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
 	                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
 	    autoThrottlingEnabled(false) {
-		expiredTagThrottleCleanup =
-		    recurring([this]() { ThrottleApi::expire(this->db); }, SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
+		expiredTagThrottleCleanup = recurring([this]() { ThrottleApi::expire(this->db.getReference()); },
+		                                      SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
 	}
 };
 
@@ -942,7 +948,8 @@ void tryAutoThrottleTag(RatekeeperData* self,
 			TagSet tags;
 			tags.addTag(tag);
 
-			self->addActor.send(ThrottleApi::throttleTags(self->db,
+			Reference<DatabaseContext> db = Reference<DatabaseContext>::addRef(self->db.getPtr());
+			self->addActor.send(ThrottleApi::throttleTags(db,
 			                                              tags,
 			                                              clientRate.get(),
 			                                              SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION,
