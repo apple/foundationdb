@@ -70,7 +70,7 @@ struct SuppressionMap {
 	int64_t checkAndInsertSuppression(std::string type, double duration) {
 		ASSERT(g_network);
 		if (suppressionMap.size() >= FLOW_KNOBS->MAX_TRACE_SUPPRESSIONS) {
-			TraceEvent(SevWarnAlways, "ClearingTraceSuppressionMap");
+			TraceEvent(SevWarnAlways, "ClearingTraceSuppressionMap").log();
 			suppressionMap.clear();
 		}
 

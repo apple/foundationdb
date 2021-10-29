@@ -317,7 +317,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 				return false;
 			}
 		}
-		TraceEvent("FastRestoreApplierAllKeysPrecomputed");
+		TraceEvent("FastRestoreApplierAllKeysPrecomputed").log();
 		return true;
 	}
 

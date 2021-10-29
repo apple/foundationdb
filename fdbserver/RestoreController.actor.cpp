@@ -714,7 +714,7 @@ ACTOR static Future<std::vector<RestoreRequest>> collectRestoreRequests(Database
 	// restoreRequestTriggerKey should already been set
 	loop {
 		try {
-			TraceEvent("FastRestoreControllerPhaseCollectRestoreRequestsWait");
+			TraceEvent("FastRestoreControllerPhaseCollectRestoreRequestsWait").log();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -732,7 +732,7 @@ ACTOR static Future<std::vector<RestoreRequest>> collectRestoreRequests(Database
 				}
 				break;
 			} else {
-				TraceEvent(SevError, "FastRestoreControllerPhaseCollectRestoreRequestsEmptyRequests");
+				TraceEvent(SevError, "FastRestoreControllerPhaseCollectRestoreRequestsEmptyRequests").log();
 				wait(delay(5.0));
 			}
 		} catch (Error& e) {
@@ -1079,7 +1079,7 @@ ACTOR static Future<Void> notifyLoadersVersionBatchFinished(std::map<UID, Restor
 // Terminate those roles if terminate = true
 ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreControllerData> self, bool terminate = false) {
 	std::vector<std::pair<UID, RestoreFinishRequest>> requests;
-	TraceEvent("FastRestoreControllerPhaseNotifyRestoreCompletedStart");
+	TraceEvent("FastRestoreControllerPhaseNotifyRestoreCompletedStart").log();
 	for (auto& loader : self->loadersInterf) {
 		requests.emplace_back(loader.first, RestoreFinishRequest(terminate));
 	}
@@ -1099,7 +1099,7 @@ ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreControllerData
 		wait(endLoaders && endAppliers);
 	}
 
-	TraceEvent("FastRestoreControllerPhaseNotifyRestoreCompletedDone");
+	TraceEvent("FastRestoreControllerPhaseNotifyRestoreCompletedDone").log();
 
 	return Void();
 }
@@ -1128,7 +1128,7 @@ ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreControllerData
 		}
 	}
 
-	TraceEvent("FastRestoreControllerAllRestoreCompleted");
+	TraceEvent("FastRestoreControllerAllRestoreCompleted").log();
 
 	return Void();
 }

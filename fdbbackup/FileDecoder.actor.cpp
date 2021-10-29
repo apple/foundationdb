@@ -571,7 +571,7 @@ int main(int argc, char** argv) {
 		}
 
 		if (!param.tlsConfig.setupTLS()) {
-			TraceEvent(SevError, "TLSError");
+			TraceEvent(SevError, "TLSError").log();
 			throw tls_error();
 		}
 

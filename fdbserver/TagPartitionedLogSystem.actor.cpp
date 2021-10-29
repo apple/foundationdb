@@ -1072,7 +1072,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekTxs(UID dbgid,
                                                                     bool canDiscardPopped) {
 	Version end = getEnd();
 	if (!tLogs.size()) {
-		TraceEvent("TLogPeekTxsNoLogs", dbgid);
+		TraceEvent("TLogPeekTxsNoLogs", dbgid).log();
 		return makeReference<ILogSystem::ServerPeekCursor>(
 		    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), txsTag, begin, end, false, false);
 	}
@@ -1527,7 +1527,7 @@ ACTOR Future<Version> TagPartitionedLogSystem::getPoppedTxs(TagPartitionedLogSys
 	wait(waitForAll(poppedReady) || maxGetPoppedDuration);
 
 	if (maxGetPoppedDuration.isReady()) {
-		TraceEvent(SevWarnAlways, "PoppedTxsNotReady", dbgid);
+		TraceEvent(SevWarnAlways, "PoppedTxsNotReady", dbgid).log();
 	}
 
 	Version maxPopped = 1;
@@ -2439,7 +2439,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
                                                            LogEpoch recoveryCount,
                                                            int8_t remoteLocality,
                                                            std::vector<Tag> allTags) {
-	TraceEvent("RemoteLogRecruitment_WaitingForWorkers");
+	TraceEvent("RemoteLogRecruitment_WaitingForWorkers").log();
 	state RecruitRemoteFromConfigurationReply remoteWorkers = wait(fRemoteWorkers);
 
 	state Reference<LogSet> logSet(new LogSet());

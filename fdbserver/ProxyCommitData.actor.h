@@ -164,7 +164,7 @@ struct ProxyCommitData {
 	RequestStream<GetReadVersionRequest> getConsistentReadVersion;
 	RequestStream<CommitTransactionRequest> commit;
 	Database cx;
-	Reference<AsyncVar<ServerDBInfo>> db;
+	Reference<AsyncVar<ServerDBInfo> const> db;
 	EventMetricHandle<SingleKeyMutation> singleKeyMutationEvent;
 
 	std::map<UID, Reference<StorageInfo>> storageCache;
@@ -248,7 +248,7 @@ struct ProxyCommitData {
 	                RequestStream<GetReadVersionRequest> getConsistentReadVersion,
 	                Version recoveryTransactionVersion,
 	                RequestStream<CommitTransactionRequest> commit,
-	                Reference<AsyncVar<ServerDBInfo>> db,
+	                Reference<AsyncVar<ServerDBInfo> const> db,
 	                bool firstProxy)
 	  : dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
 	    logAdapter(nullptr), txnStateStore(nullptr), popRemoteTxs(false), committedVersion(recoveryTransactionVersion),

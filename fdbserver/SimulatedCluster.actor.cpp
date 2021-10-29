@@ -444,7 +444,7 @@ ACTOR Future<Void> runDr(Reference<ClusterConnectionFile> connFile) {
 			wait(delay(1.0));
 		}
 
-		TraceEvent("StoppingDrAgents");
+		TraceEvent("StoppingDrAgents").log();
 
 		for (auto it : agentFutures) {
 			it.cancel();
@@ -2252,7 +2252,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 		TraceEvent(SevError, "SetupAndRunError").error(e);
 	}
 
-	TraceEvent("SimulatedSystemDestruct");
+	TraceEvent("SimulatedSystemDestruct").log();
 	g_simulator.stop();
 	destructed = true;
 	wait(Never());

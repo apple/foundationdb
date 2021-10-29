@@ -26,7 +26,7 @@ uint64_t DeterministicRandom::gen64() {
 	uint64_t curr = next;
 	next = (uint64_t(random()) << 32) ^ random();
 	if (TRACE_SAMPLE())
-		TraceEvent(SevSample, "Random");
+		TraceEvent(SevSample, "Random").log();
 	return curr;
 }
 

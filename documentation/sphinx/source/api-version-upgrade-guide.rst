@@ -25,6 +25,8 @@ API version 700
 General
 -------
 
+* Committing a transaction will no longer partially reset it. In particular, getting the read version from a transaction that has committed or failed to commit with an error will return the original read version.
+
 Python bindings
 ---------------
 
