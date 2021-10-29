@@ -1671,7 +1671,8 @@ public:
 	}
 
 	ErrorOr<RecruitFromConfigurationReply> findWorkersForConfigurationFromDC(RecruitFromConfigurationRequest const& req,
-	                                                                         Optional<Key> dcId) {
+	                                                                         Optional<Key> dcId,
+	                                                                         bool checkGoodRecruitment) {
 		RecruitFromConfigurationReply result;
 		std::map<Optional<Standalone<StringRef>>, int> id_used;
 		updateKnownIds(&id_used);
@@ -1782,7 +1783,7 @@ public:
 			               [](const WorkerDetails& w) { return w.interf; });
 		}
 
-		if (!goodRecruitmentTime.isReady() &&
+		if (!goodRecruitmentTime.isReady() && checkGoodRecruitment &&
 		    (RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog)
 		         .betterCount(RoleFitness(tlogs, ProcessClass::TLog, id_used)) ||
 		     (region.satelliteTLogReplicationFactor > 0 && req.configuration.usableRegions > 1 &&
@@ -1808,7 +1809,8 @@ public:
 		return result;
 	}
 
-	RecruitFromConfigurationReply findWorkersForConfigurationDispatch(RecruitFromConfigurationRequest const& req) {
+	RecruitFromConfigurationReply findWorkersForConfigurationDispatch(RecruitFromConfigurationRequest const& req,
+	                                                                  bool checkGoodRecruitment) {
 		if (req.configuration.regions.size() > 1) {
 			std::vector<RegionInfo> regions = req.configuration.regions;
 			if (regions[0].priority == regions[1].priority && regions[1].dcId == clusterControllerDcId.get()) {
@@ -1845,7 +1847,7 @@ public:
 
 			bool setPrimaryDesired = false;
 			try {
-				auto reply = findWorkersForConfigurationFromDC(req, regions[0].dcId);
+				auto reply = findWorkersForConfigurationFromDC(req, regions[0].dcId, checkGoodRecruitment);
 				setPrimaryDesired = true;
 				std::vector<Optional<Key>> dcPriority;
 				dcPriority.push_back(regions[0].dcId);
@@ -1862,7 +1864,8 @@ public:
 				    .detail("RecruitedTxnSystemDcId", regions[0].dcId);
 				throw no_more_servers();
 			} catch (Error& e) {
-				if (!goodRemoteRecruitmentTime.isReady() && regions[1].dcId != clusterControllerDcId.get()) {
+				if (!goodRemoteRecruitmentTime.isReady() && regions[1].dcId != clusterControllerDcId.get() &&
+				    checkGoodRecruitment) {
 					throw operation_failed();
 				}
 
@@ -1872,7 +1875,7 @@ public:
 				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDc", id)
 				    .detail("SetPrimaryDesired", setPrimaryDesired)
 				    .error(e);
-				auto reply = findWorkersForConfigurationFromDC(req, regions[1].dcId);
+				auto reply = findWorkersForConfigurationFromDC(req, regions[1].dcId, checkGoodRecruitment);
 				if (!setPrimaryDesired) {
 					std::vector<Optional<Key>> dcPriority;
 					dcPriority.push_back(regions[1].dcId);
@@ -1890,7 +1893,8 @@ public:
 			std::vector<Optional<Key>> dcPriority;
 			dcPriority.push_back(req.configuration.regions[0].dcId);
 			desiredDcIds.set(dcPriority);
-			auto reply = findWorkersForConfigurationFromDC(req, req.configuration.regions[0].dcId);
+			auto reply =
+			    findWorkersForConfigurationFromDC(req, req.configuration.regions[0].dcId, checkGoodRecruitment);
 			if (reply.isError()) {
 				throw reply.getError();
 			} else if (req.configuration.regions[0].dcId == clusterControllerDcId.get()) {
@@ -2059,7 +2063,7 @@ public:
 			    .detail("DesiredResolvers", req.configuration.getDesiredResolvers())
 			    .detail("ActualResolvers", result.resolvers.size());
 
-			if (!goodRecruitmentTime.isReady() &&
+			if (!goodRecruitmentTime.isReady() && checkGoodRecruitment &&
 			    (RoleFitness(
 			         SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog)
 			         .betterCount(RoleFitness(tlogs, ProcessClass::TLog, id_used)) ||
@@ -2125,7 +2129,7 @@ public:
 	}
 
 	RecruitFromConfigurationReply findWorkersForConfiguration(RecruitFromConfigurationRequest const& req) {
-		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req);
+		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req, true);
 		if (g_network->isSimulated()) {
 			try {
 				// FIXME: The logic to pick a satellite in a remote region is not
@@ -2143,7 +2147,7 @@ public:
 					}
 				}
 				if (!remoteDCUsedAsSatellite) {
-					RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req);
+					RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req, false);
 
 					std::map<Optional<Standalone<StringRef>>, int> firstUsed;
 					std::map<Optional<Standalone<StringRef>>, int> secondUsed;
