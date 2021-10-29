@@ -5002,26 +5002,36 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 ACTOR Future<Void> handleRepairSystemData(ClusterControllerData* self, ClusterControllerFullInterface interf) {
 	loop {
 		state RepairSystemDataRequest req = waitNext(interf.clientInterface.repairSystemData.getFuture());
-		TraceEvent("RepairSystemDataStart", self->id).detail("ClusterControllerDcId", self->clusterControllerDcId);
+		state UID oldMasterID = self->db.serverInfo->get().master.id();
+		TraceEvent("RepairSystemDataStart", self->id)
+		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
+		    .detail("MasterID", oldMasterID);
 		self->db.recoverMetadata = true;
 		self->db.forceMasterFailure.trigger();
+		// state MasterInterface oldMaster = self->db.serverInfo->get().master;
+		loop {
+			wait(self->db.serverInfo->onChange());
+			if (self->db.serverInfo->get().master.id() != oldMasterID) {
+				break;
+			}
+		}
+		TraceEvent("RepairSystemDataFinish", self->id)
+		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
+		    .detail("MasterID", self->db.serverInfo->get().master.id());
 		req.reply.send(Void());
 	}
 }
 
+// Moves keyrange keys to the target servers.
 ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddress> addresses) {
 	// Disable DD to avoid DD undoing of our move.
 	state int ignore = wait(setDDMode(cx, 0));
-	std::cout << "Disabled DD" << std::endl
-	          << "Start moving Shard [" << keys.begin.toString() << ", " << keys.end.toString() << ")." << std::endl;
 
 	state std::unique_ptr<FlowLock> startMoveKeysParallelismLock = std::make_unique<FlowLock>();
 	state std::unique_ptr<FlowLock> finishMoveKeysParallelismLock = std::make_unique<FlowLock>();
 
 	state Transaction tr(cx);
 
-	// Pick a random SS as the dest, keys will reside on a single server after the move.
-	state std::vector<UID> dest;
 	loop {
 		try {
 			state RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
@@ -5032,16 +5042,16 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 		}
 	}
 
-	std::cout << "Got serverList" << std::endl;
-
 	std::unordered_set<NetworkAddress> nadds;
 	std::unordered_set<std::string> ips;
-
 	for (const auto& add : addresses) {
 		nadds.insert(add);
 		ips.insert(add.ip.toString());
 	}
 
+	state std::vector<UID> dest;
+
+	// Match the full ip:port address first.
 	for (auto s = serverList.begin(); s != serverList.end() && dest.size() < addresses.size(); ++s) {
 		auto ssi = decodeServerListValue(s->value);
 		if (nadds.count(ssi.address()) > 0) {
@@ -5051,6 +5061,7 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 		}
 	}
 
+	// Match the full ip address if not enough servers have been selected.
 	if (dest.size() < addresses.size()) {
 		for (auto s = serverList.begin(); s != serverList.end() && dest.size() < addresses.size(); ++s) {
 			auto ssi = decodeServerListValue(s->value);
@@ -5062,15 +5073,12 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 		}
 	}
 
-	std::cout << "Dest: " << describe(dest) << std::endl;
-
 	if (dest.empty()) {
 		throw destination_servers_not_found();
 	}
 
 	state UID owner = deterministicRandom()->randomUniqueID();
 	state DDEnabledState ddEnabledState;
-	// state KeyRef ownerKey = "\xff/moveKeysLock/Owner"_sr;
 
 	state Transaction txn(cx);
 	loop {
@@ -5079,10 +5087,7 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 				try {
 					BinaryWriter wrMyOwner(Unversioned());
 					wrMyOwner << owner;
-					std::cout << "moveKeysLockOwnerKey: " << moveKeysLockOwnerKey.toString()
-					          << ", Value: " << wrMyOwner.toValue().toString() << std::endl;
 					txn.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
-					std::cout << "SetDone" << std::endl;
 					wait(txn.commit());
 					break;
 				} catch (Error& e) {
@@ -5090,8 +5095,6 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 					wait(txn.onError(e));
 				}
 			}
-
-			std::cout << "Set moveKeysLockOwner" << std::endl;
 
 			MoveKeysLock moveKeysLock;
 			moveKeysLock.myOwner = owner;
@@ -5119,19 +5122,8 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 		}
 	}
 
-	std::cout << "Moved Shard [" << keys.begin.toString() << ", " << keys.end.toString() << ")"
-	          << " to New Team: " << describe(dest) << std::endl;
-
 	TraceEvent("ShardMoved").detail("Begin", keys.begin).detail("End", keys.end).detail("NewTeam", describe(dest));
 
-	// tr.reset();
-	// Standalone<VectorRef<const char*>> addresses = wait(tr.getAddressesForKey(keys.begin));
-
-	// // The move function is not what we are testing here, crash the test if the move fails.
-	// ASSERT(addresses.size() == 1);
-	// ASSERT(std::string(addresses[0]) == addr.toString());
-
-	// return addr;
 	return Void();
 }
 

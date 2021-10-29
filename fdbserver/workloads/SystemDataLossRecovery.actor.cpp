@@ -32,25 +32,22 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
-std::string printValue(const Optional<Value>& value) {
-	return value.present() ? value.get().toString() : "ValueNotFound";
+std::string printValue(const ErrorOr<Optional<Value>>& value) {
+	if (value.isError()) {
+		return value.getError().name();
+	}
+	return value.get().present() ? value.get().get().toString() : "Value Not Found.";
 }
 } // namespace
 
 struct SystemDataLossRecoveryWorkload : TestWorkload {
-	FlowLock startMoveKeysParallelismLock;
-	FlowLock finishMoveKeysParallelismLock;
 	const bool enabled;
 	bool pass;
-	NetworkAddress addr;
 
-	SystemDataLossRecoveryWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), startMoveKeysParallelismLock(1), finishMoveKeysParallelismLock(1), enabled(!clientId),
-	    pass(true) {}
+	SystemDataLossRecoveryWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(!clientId), pass(true) {}
 
-	void validationFailed(KeyRef key, Optional<Value>& expectedValue, Optional<Value>& actualValue) {
+	void validationFailed(ErrorOr<Optional<Value>> expectedValue, ErrorOr<Optional<Value>> actualValue) {
 		TraceEvent(SevError, "TestFailed")
-		    .detail("Key", key.toString())
 		    .detail("ExpectedValue", printValue(expectedValue))
 		    .detail("ActualValue", printValue(actualValue));
 		pass = false;
@@ -66,6 +63,7 @@ struct SystemDataLossRecoveryWorkload : TestWorkload {
 		}
 		return _start(this, cx);
 	}
+
 	ACTOR Future<Void> _start(SystemDataLossRecoveryWorkload* self, Database cx) {
 		wait(self->recoverFromSystemDataLoss(self, cx));
 		return Void();
@@ -85,28 +83,31 @@ struct SystemDataLossRecoveryWorkload : TestWorkload {
 
 		// Kill team {ssi}, and expect read to timeout.
 		self->killProcess(self, ssi.address());
-		std::cout << "Killed process: " << ssi.address().toString() << "(" << ssi.toString() << ")"
-		          << std::endl;
-		wait(self->readAndVerify(self, cx, keyServersKey(key), "Timeout"_sr));
+		std::cout << "Killed process: " << ssi.address().toString() << "(" << ssi.toString() << ")" << std::endl;
+		wait(self->readAndVerify(self, cx, keyServersKey(key), timed_out()));
 		std::cout << "Verified reading metadata timeout" << std::endl;
 
-		wait(repairSystemData(cx->getConnectionFile()));
-		wait(delay(30));
+		wait(repairSystemData(cx->getConnectionRecord()));
+		// wait(delay(30));
+
+		wait(self->writeAndVerify(self, cx, key, newValue));
 
 		state Transaction tr(cx);
 		loop {
 			try {
-				RangeResult res = wait(tr.getRange(systemKeys, 1));
-				ASSERT(!res.empty());
-				break;
+				Optional<Value> res = wait(timeoutError(tr.get(keyServersKeys.begin), 30.0));
+				// RangeResult res = wait(tr.getRange(systemKeys, 1));
+				if (res.present())
+					break;
+				// if (!res.empty()) {
+				// 	break;
+				// }
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
 		}
 
-		std::cout << "Read3" << std::endl;
-
-		wait(self->exclude(self, cx, key, ssi.address()));
+		wait(self->exclude(cx, ssi.address()));
 		int ignore = wait(setDDMode(cx, 1));
 
 		return Void();
@@ -115,9 +116,7 @@ struct SystemDataLossRecoveryWorkload : TestWorkload {
 	ACTOR Future<StorageServerInterface> moveToRandomServer(SystemDataLossRecoveryWorkload* self,
 	                                                        Database cx,
 	                                                        KeyRangeRef shard) {
-		TraceEvent("TestMoveShardBegin")
-		    .detail("Begin", shard.begin)
-		    .detail("End", shard.end);
+		TraceEvent("TestMoveShardBegin").detail("Begin", shard.begin).detail("End", shard.end);
 
 		loop {
 			try {
@@ -127,7 +126,7 @@ struct SystemDataLossRecoveryWorkload : TestWorkload {
 				// Move [key, endKey) to team: {address}.
 				std::vector<NetworkAddress> addresses;
 				addresses.push_back(ssi.get().address());
-				wait(moveShard(cx->getConnectionFile(), shard, addresses));
+				wait(moveShard(cx->getConnectionRecord(), shard, addresses));
 				break;
 			} catch (Error& e) {
 				if (e.code() != error_code_destination_servers_not_found) {
@@ -160,46 +159,32 @@ struct SystemDataLossRecoveryWorkload : TestWorkload {
 		loop {
 			std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
 			if (!interfs.empty()) {
-				const auto& interf = interfs[random() % interfs.size()];
-				if (g_simulator.protectedAddresses.count(interf.address()) == 0) {
+				const auto& interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
+				if (g_simulator.protectedAddresses.count(interf.address()) == 0 && !interf.isTss()) {
 					return interf;
 				}
 			}
 		}
 	}
 
-	// ACTOR Future<Optional<Value>> readFirstInRange(SystemDataLossRecoveryWorkload* self, Database cx, KeyRange keys) {
-	// 	state Transaction tr(cx);
-	// 	loop {
-	// 		try {
-	// 			state RangeResult res = wait(tr.getRange(keys, 1));
-	// 			break;
-	// 		} catch (Error& e) {
-	// 			wait(tr.onError(e));
-	// 		}
-	// 	}
-
-	// 	if (res.empty()) {
-	// 		return Optional<Value>();
-	// 	}
-	// 	return res[0].value;
-	// }
-
 	ACTOR Future<Void> readAndVerify(SystemDataLossRecoveryWorkload* self,
 	                                 Database cx,
 	                                 Key key,
-	                                 Optional<Value> expectedValue) {
+	                                 ErrorOr<Optional<Value>> expectedValue) {
 		state Transaction tr(cx);
 
 		loop {
-			tr.reset();
 			try {
-				state Optional<Value> res = wait(timeout(tr.get(key), 30.0, Optional<Value>("Timeout"_sr)));
-				if (res != expectedValue) {
-					self->validationFailed(key, expectedValue, res);
+				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
+				const bool equal = !expectedValue.isError() && res == expectedValue.get();
+				if (!equal) {
+					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
 				}
 				break;
 			} catch (Error& e) {
+				if (expectedValue.isError() && expectedValue.getError().code() == e.code()) {
+					break;
+				}
 				wait(tr.onError(e));
 			}
 		}
@@ -207,17 +192,19 @@ struct SystemDataLossRecoveryWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> writeAndVerify(SystemDataLossRecoveryWorkload* self, Database cx, Key key, Optional<Value> value) {
+	ACTOR Future<Void> writeAndVerify(SystemDataLossRecoveryWorkload* self,
+	                                  Database cx,
+	                                  Key key,
+	                                  Optional<Value> value) {
 		state Transaction tr(cx);
 		loop {
-			tr.reset();
 			try {
 				if (value.present()) {
 					tr.set(key, value.get());
 				} else {
 					tr.clear(key);
 				}
-				wait(timeout(tr.commit(), 30.0, Void()));
+				wait(timeoutError(tr.commit(), 30.0));
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -229,12 +216,11 @@ struct SystemDataLossRecoveryWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> exclude(SystemDataLossRecoveryWorkload* self, Database cx, Key key, NetworkAddress addr) {
+	ACTOR Future<Void> exclude(Database cx, NetworkAddress addr) {
 		state Transaction tr(cx);
 		state std::vector<AddressExclusion> servers;
 		servers.push_back(AddressExclusion(addr.ip, addr.port));
 		loop {
-			tr.reset();
 			try {
 				excludeServers(tr, servers, true);
 				wait(tr.commit());
@@ -248,84 +234,15 @@ struct SystemDataLossRecoveryWorkload : TestWorkload {
 		std::set<NetworkAddress> inProgress = wait(checkForExcludingServers(cx, servers, true));
 		ASSERT(inProgress.empty());
 
-		TraceEvent("ExcludedTestKey").detail("Address", addr.toString());
+		TraceEvent("ExcludedFailedServer").detail("Address", addr.toString());
 		return Void();
-	}
-
-	// Move keys to a random selected team consisting of a single SS, after disabling DD, so that keys won't be
-	// kept in the new team until DD is enabled.
-	// Returns the address of the single SS of the new team.
-	ACTOR Future<NetworkAddress> disableDDAndMoveShard(SystemDataLossRecoveryWorkload* self, Database cx, KeyRange keys) {
-		// Disable DD to avoid DD undoing of our move.
-		state int ignore = wait(setDDMode(cx, 0));
-		state NetworkAddress addr;
-
-		// Pick a random SS as the dest, keys will reside on a single server after the move.
-		state std::vector<UID> dest;
-		while (dest.empty()) {
-			std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
-			if (!interfs.empty()) {
-				const auto& interf = interfs[random() % interfs.size()];
-				if (g_simulator.protectedAddresses.count(interf.address()) == 0) {
-					dest.push_back(interf.uniqueID);
-					self->addr = interf.address();
-					addr = interf.address();
-				}
-			}
-		}
-
-		state UID owner = deterministicRandom()->randomUniqueID();
-		state DDEnabledState ddEnabledState;
-
-		state Transaction tr(cx);
-
-		loop {
-			tr.reset();
-			try {
-				BinaryWriter wrMyOwner(Unversioned());
-				wrMyOwner << owner;
-				tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
-				wait(tr.commit());
-
-				MoveKeysLock moveKeysLock;
-				moveKeysLock.myOwner = owner;
-
-				wait(moveKeys(cx,
-				              keys,
-				              dest,
-				              dest,
-				              moveKeysLock,
-				              Promise<Void>(),
-				              &self->startMoveKeysParallelismLock,
-				              &self->finishMoveKeysParallelismLock,
-				              false,
-				              UID(), // for logging only
-				              &ddEnabledState));
-				break;
-			} catch (Error& e) {
-				if (e.code() != error_code_movekeys_conflict) {
-					throw e;
-				}
-			}
-		}
-
-		TraceEvent("TestKeyMoved").detail("NewTeam", describe(dest)).detail("Address", addr.toString());
-
-		tr.reset();
-		Standalone<VectorRef<const char*>> addresses = wait(tr.getAddressesForKey(keys.begin));
-
-		// The move function is not what we are testing here, crash the test if the move fails.
-		ASSERT(addresses.size() == 1);
-		ASSERT(std::string(addresses[0]) == addr.toString());
-
-		return addr;
 	}
 
 	void killProcess(SystemDataLossRecoveryWorkload* self, const NetworkAddress& addr) {
 		ISimulator::ProcessInfo* process = g_simulator.getProcessByAddress(addr);
 		ASSERT(process->addresses.contains(addr));
 		g_simulator.killProcess(process, ISimulator::KillInstantly);
-		TraceEvent("TestTeamKilled").detail("Address", addr.toString());
+		TraceEvent("TestTeamKilled").detail("Address", addr);
 	}
 
 	Future<bool> check(Database const& cx) override { return pass; }

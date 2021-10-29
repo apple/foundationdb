@@ -2203,10 +2203,9 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 	}
 }
 
-ACTOR Future<Void> moveShard(Reference<ClusterConnectionFile> clusterFile,
+ACTOR Future<Void> moveShard(Reference<IClusterConnectionRecord> clusterFile,
                              KeyRangeRef shard,
                              std::vector<NetworkAddress> addresses) {
-	std::cout << "Moving" << std::endl;
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
 
@@ -2223,7 +2222,7 @@ ACTOR Future<Void> moveShard(Reference<ClusterConnectionFile> clusterFile,
 	}
 }
 
-ACTOR Future<Void> repairSystemData(Reference<ClusterConnectionFile> clusterFile) {
+ACTOR Future<Void> repairSystemData(Reference<IClusterConnectionRecord> clusterFile) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
 

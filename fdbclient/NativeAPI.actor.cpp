@@ -6655,11 +6655,11 @@ ACTOR static Future<Void> createSnapshotActor(DatabaseContext* cx, UID snapUID, 
 }
 
 Future<Void> DatabaseContext::moveShard(KeyRangeRef shard, std::vector<NetworkAddress> addresses) {
-	return ::moveShard(getConnectionFile(), shard, addresses);
+	return ::moveShard(getConnectionRecord(), shard, addresses);
 }
 
 Future<Void> DatabaseContext::repairSystemData() {
-	return ::repairSystemData(getConnectionFile());
+	return ::repairSystemData(getConnectionRecord());
 }
 
 Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_command) {
