@@ -3752,35 +3752,49 @@ extern void initProfiling();
 std::atomic<double> checkThreadTime;
 #endif
 
-volatile thread_local bool profileThread = false;
-volatile thread_local int profilingEnabled = 1;
+volatile bool profileThread = false;
+volatile int64_t profileThreadId = -1;
+void (*chainedSignalHandler)(int) = nullptr;
+volatile bool profilingEnabled = 1;
 
-volatile thread_local int64_t numProfilesDeferred = 0;
-volatile thread_local int64_t numProfilesOverflowed = 0;
-volatile thread_local int64_t numProfilesCaptured = 0;
-volatile thread_local bool profileRequested = false;
+volatile int64_t numProfilesDisabled = 0;
+volatile int64_t numProfilesOverflowed = 0;
+volatile int64_t numProfilesCaptured = 0;
 
-int64_t getNumProfilesDeferred() {
-	return numProfilesDeferred;
+int64_t getNumProfilesDisabled() {
+	if (profileThread) {
+		return numProfilesDisabled;
+	} else {
+		return 0;
+	}
 }
 
 int64_t getNumProfilesOverflowed() {
-	return numProfilesOverflowed;
+	if (profileThread) {
+		return numProfilesOverflowed;
+	} else {
+		return 0;
+	}
 }
 
 int64_t getNumProfilesCaptured() {
-	return numProfilesCaptured;
+	if (profileThread) {
+		return numProfilesCaptured;
+	} else {
+		return 0;
+	}
 }
 
 void profileHandler(int sig) {
 #ifdef __linux__
-	if (!profileThread) {
-		return;
+	if (chainedSignalHandler) {
+		chainedSignalHandler(sig);
 	}
 
-	if (!profilingEnabled) {
-		profileRequested = true;
-		++numProfilesDeferred;
+	if (profileThreadId != syscall(SYS_gettid)) {
+		return;
+	} else if (!profilingEnabled) {
+		++numProfilesDisabled;
 		return;
 	}
 
@@ -3810,17 +3824,13 @@ void profileHandler(int sig) {
 
 	net2backtraces_offset += size + 2;
 #else
-	// No slow task profiling for other platforms!
+// No slow task profiling for other platforms!
 #endif
 }
 
 void setProfilingEnabled(int enabled) {
 #ifdef __linux__
-	if (profileThread && enabled && !profilingEnabled && profileRequested) {
-		profilingEnabled = true;
-		profileRequested = false;
-		pthread_kill(pthread_self(), SIGPROF);
-	} else {
+	if (profileThread) {
 		profilingEnabled = enabled;
 	}
 #else
@@ -3969,16 +3979,27 @@ std::string getExecPath() {
 
 void setupRunLoopProfiler() {
 #ifdef __linux__
-	if (!profileThread && FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
+	if (profileThreadId == -1 && FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
 		TraceEvent("StartingRunLoopProfilingThread").detail("Interval", FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
 		initProfiling();
-		profileThread = true;
 
+		profileThread = true;
+		profileThreadId = syscall(__NR_gettid);
+		;
+
+		struct sigaction oldAction;
 		struct sigaction action;
 		action.sa_handler = profileHandler;
 		sigfillset(&action.sa_mask);
 		action.sa_flags = 0;
-		sigaction(SIGPROF, &action, nullptr);
+		sigaction(SIGPROF, &action, &oldAction);
+
+		if (oldAction.sa_handler != SIG_DFL && oldAction.sa_handler != SIG_ERR && oldAction.sa_handler != SIG_IGN &&
+		    oldAction.sa_handler != NULL) {
+			chainedSignalHandler = oldAction.sa_handler;
+		} else {
+			chainedSignalHandler = nullptr;
+		}
 
 		// Start a thread which will use signals to log stacks on long events
 		pthread_t* mainThread = (pthread_t*)malloc(sizeof(pthread_t));
