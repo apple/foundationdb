@@ -26,9 +26,7 @@ ServerKnobs::ServerKnobs(Randomize randomize, ClientKnobs* clientKnobs, IsSimula
 	initialize(randomize, clientKnobs, isSimulated);
 }
 
-void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsSimulated _isSimulated) {
-	bool const randomize = _randomize == Randomize::YES;
-	bool const isSimulated = _isSimulated == IsSimulated::YES;
+void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSimulated isSimulated) {
 	// clang-format off
 	// Versions
 	init( VERSIONS_PER_SECOND,                                   1e6 );
@@ -107,6 +105,8 @@ void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsS
 	init( TLOG_NEW_INTERFACE,                                  false );
 	init( BROADCAST_TLOG_GROUPS,                                true );
 	init( PTXN_DISABLE_DD,                                     false );
+	init( TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE,     250e6 );
+	init( ENABLE_DETAILED_TLOG_POP_TRACE,                       true );
 
 	// disk snapshot max timeout, to be put in TLog, storage and coordinator nodes
 	init( MAX_FORKED_PROCESS_OUTPUT,                            1024 );
@@ -260,6 +260,7 @@ void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsS
 	init( DD_TEAMS_INFO_PRINT_YIELD_COUNT,                       100 ); if( randomize && BUGGIFY ) DD_TEAMS_INFO_PRINT_YIELD_COUNT = deterministicRandom()->random01() * 1000 + 1;
 	init( DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY,                    120 ); if( randomize && BUGGIFY ) DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY = 5;
 	init( DD_STORAGE_WIGGLE_PAUSE_THRESHOLD,                       1 ); if( randomize && BUGGIFY ) DD_STORAGE_WIGGLE_PAUSE_THRESHOLD = 10;
+	init( DD_STORAGE_WIGGLE_STUCK_THRESHOLD,                      50 );
 
 	// TeamRemover
 	init( TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER,                false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
@@ -339,11 +340,14 @@ void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsS
 	// KeyValueStoreRocksDB
 	init( ROCKSDB_BACKGROUND_PARALLELISM,                          0 );
 	init( ROCKSDB_READ_PARALLELISM,                                4 );
-	init( ROCKSDB_MEMTABLE_BYTES,                  512 * 1024 * 1024 );
+	// Use a smaller memtable in simulation to avoid OOMs.
+	int64_t memtableBytes = isSimulated ? 32 * 1024 : 512 * 1024 * 1024;
+	init( ROCKSDB_MEMTABLE_BYTES,                      memtableBytes );
 	init( ROCKSDB_UNSAFE_AUTO_FSYNC,                           false );
 	init( ROCKSDB_PERIODIC_COMPACTION_SECONDS,                     0 );
 	init( ROCKSDB_PREFIX_LEN,                                      0 );
 	init( ROCKSDB_BLOCK_CACHE_SIZE,                                0 );
+	init( ROCKSDB_METRICS_DELAY,                                60.0 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -368,6 +372,7 @@ void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsS
 	init( START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,             10.0 );
 	init( START_TRANSACTION_MAX_QUEUE_SIZE,                      1e6 );
 	init( KEY_LOCATION_MAX_QUEUE_SIZE,                           1e6 );
+	init( COMMIT_PROXY_LIVENESS_TIMEOUT,                        20.0 );
 
 	init( COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE,         0.0005 ); if( randomize && BUGGIFY ) COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE = 0.005;
 	init( COMMIT_TRANSACTION_BATCH_INTERVAL_MIN,                0.001 ); if( randomize && BUGGIFY ) COMMIT_TRANSACTION_BATCH_INTERVAL_MIN = 0.1;
@@ -469,7 +474,15 @@ void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsS
 	init( REPLACE_INTERFACE_CHECK_DELAY,                         5.0 );
 	init( COORDINATOR_REGISTER_INTERVAL,                         5.0 );
 	init( CLIENT_REGISTER_INTERVAL,                            600.0 );
-	init( CLUSTER_CONTROLLER_ENABLE_WORKER_HEALTH_MONITOR,     false );
+	init( CC_ENABLE_WORKER_HEALTH_MONITOR,                     false );
+	init( CC_WORKER_HEALTH_CHECKING_INTERVAL,                   60.0 );
+	init( CC_DEGRADED_LINK_EXPIRATION_INTERVAL,                300.0 );
+	init( CC_MIN_DEGRADATION_INTERVAL,                         120.0 );
+	init( CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE,                      3 );
+	init( CC_MAX_EXCLUSION_DUE_TO_HEALTH,                          2 );
+	init( CC_HEALTH_TRIGGER_RECOVERY,                          false );
+	init( CC_TRACKING_HEALTH_RECOVERY_INTERVAL,               3600.0 );
+	init( CC_MAX_HEALTH_RECOVERY_COUNT,                            2 );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && BUGGIFY ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
 	init( EXPECTED_MASTER_FITNESS,            ProcessClass::UnsetFit );
@@ -640,6 +653,7 @@ void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsS
 	init( DBINFO_FAILED_DELAY,                                   1.0 );
 	init( ENABLE_WORKER_HEALTH_MONITOR,                        false );
 	init( WORKER_HEALTH_MONITOR_INTERVAL,                       60.0 );
+	init( PEER_LATENCY_CHECK_MIN_POPULATION,                      30 );
 	init( PEER_LATENCY_DEGRADATION_PERCENTILE,                  0.90 );
 	init( PEER_LATENCY_DEGRADATION_THRESHOLD,                   0.05 );
 	init( PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD,         0.1 );
@@ -649,7 +663,9 @@ void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsS
 
 	// Coordination
 	init( COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL,            1.0 ); if( randomize && BUGGIFY ) COORDINATED_STATE_ONCONFLICT_POLL_INTERVAL = 10.0;
+	init( FORWARD_REQUEST_TOO_OLD,                        4*24*60*60 ); if( randomize && BUGGIFY ) FORWARD_REQUEST_TOO_OLD = 60.0;
 	init( ENABLE_CROSS_CLUSTER_SUPPORT,                         true ); if( randomize && BUGGIFY ) ENABLE_CROSS_CLUSTER_SUPPORT = false;
+	init( COORDINATOR_LEADER_CONNECTION_TIMEOUT,                20.0 );
 
 	// Buggification
 	init( BUGGIFIED_EVENTUAL_CONSISTENCY,                        1.0 );
@@ -727,6 +743,7 @@ void ServerKnobs::initialize(Randomize _randomize, ClientKnobs* clientKnobs, IsS
 	init( REDWOOD_DEFAULT_EXTENT_READ_SIZE,              1024 * 1024 );
 	init( REDWOOD_EXTENT_CONCURRENT_READS,                         4 );
 	init( REDWOOD_KVSTORE_CONCURRENT_READS,                       64 );
+	init( REDWOOD_KVSTORE_RANGE_PREFETCH,                       true );
 	init( REDWOOD_PAGE_REBUILD_MAX_SLACK,                       0.33 );
 	init( REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES,                    10 );
 	init( REDWOOD_LAZY_CLEAR_MIN_PAGES,                            0 );

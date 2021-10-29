@@ -52,8 +52,8 @@ struct MakoWorkload : TestWorkload {
 		                                              "CLEAR",     "SETCLEAR", "CLEARRANGE", "SETCLEARRANGE",
 		                                              "COMMIT" };
 	MakoWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), xacts("Transactions"), retries("Retries"), conflicts("Conflicts"), commits("Commits"),
-	    totalOps("Operations"), loadTime(0.0) {
+	  : TestWorkload(wcx), loadTime(0.0), xacts("Transactions"), retries("Retries"), conflicts("Conflicts"),
+	    commits("Commits"), totalOps("Operations") {
 		// init parameters from test file
 		// Number of rows populated
 		rowCount = getOption(options, LiteralStringRef("rows"), 10000);
@@ -463,18 +463,18 @@ struct MakoWorkload : TestWorkload {
 						if (i == OP_GETREADVERSION) {
 							wait(logLatency(tr.getReadVersion(), &self->opLatencies[i]));
 						} else if (i == OP_GET) {
-							wait(logLatency(tr.get(rkey, false), &self->opLatencies[i]));
+							wait(logLatency(tr.get(rkey, Snapshot::False), &self->opLatencies[i]));
 						} else if (i == OP_GETRANGE) {
-							wait(logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, false),
+							wait(logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, Snapshot::False),
 							                &self->opLatencies[i]));
 						} else if (i == OP_SGET) {
-							wait(logLatency(tr.get(rkey, true), &self->opLatencies[i]));
+							wait(logLatency(tr.get(rkey, Snapshot::True), &self->opLatencies[i]));
 						} else if (i == OP_SGETRANGE) {
 							// do snapshot get range here
-							wait(logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, true),
+							wait(logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, Snapshot::True),
 							                &self->opLatencies[i]));
 						} else if (i == OP_UPDATE) {
-							wait(logLatency(tr.get(rkey, false), &self->opLatencies[OP_GET]));
+							wait(logLatency(tr.get(rkey, Snapshot::False), &self->opLatencies[OP_GET]));
 							if (self->latencyForLocalOperation) {
 								double opBegin = timer();
 								tr.set(rkey, rval);

@@ -49,15 +49,14 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 // TODO: Initialize with right params.
-TLogGroupCollection::TLogGroupCollection() : policy(nullptr), targetNumGroups(0), GROUP_SIZE(0) {}
+TLogGroupCollection::TLogGroupCollection() : policy(nullptr) {}
 
 TLogGroupCollection::TLogGroupCollection(const Reference<IReplicationPolicy>& policy, int numGroups, int groupSize)
-  : policy(policy), targetNumGroups(numGroups), GROUP_SIZE(groupSize) {}
+  : policy(policy), GROUP_SIZE(groupSize), targetNumGroups(numGroups) {}
 
-TLogGroupCollection::TLogGroupCollection(Reference<AsyncVar<ServerDBInfo>> dbInfo) {
-
+TLogGroupCollection::TLogGroupCollection(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	ASSERT(dbInfo.isValid());
-	for (auto logSet : dbInfo->get().logSystemConfig.tLogs) {
+	for (const auto& logSet : dbInfo->get().logSystemConfig.tLogs) {
 		if (logSet.isLocal && logSet.locality != tagLocalitySatellite) {
 			// TODO (Vishesh): Support satellite + remote TLogs
 			addWorkers(logSet.tLogsPtxn);

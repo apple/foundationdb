@@ -2605,10 +2605,9 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<ServerDBI
                                                     std::set<std::string>* incomplete_reasons) {
 	state JsonBuilderObject statusObj;
 
-	state Database cx = openDBOnServer(db,
-	                                   TaskPriority::DefaultEndpoint,
-	                                   true,
-	                                   false); // Open a new database connection that isn't lock-aware
+	state Database cx =
+	    openDBOnServer(db,
+	                   TaskPriority::DefaultEndpoint); // Open a new database connection that isn't lock-aware
 	state Transaction tr(cx);
 	state int timeoutSeconds = 5;
 	state Future<Void> getTimeout = delay(timeoutSeconds);

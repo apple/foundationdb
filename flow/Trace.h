@@ -320,11 +320,11 @@ struct TraceableStringImpl : std::true_type {
 		std::string result;
 		result.reserve(size - nonPrintables + (nonPrintables * 4) + numBackslashes);
 		for (auto iter = TraceableString<T>::begin(value); !TraceableString<T>::atEnd(value, iter); ++iter) {
-			if (isPrintable(*iter)) {
+			if (*iter == '\\') {
+				result.push_back('\\');
+				result.push_back('\\');
+			} else if (isPrintable(*iter)) {
 				result.push_back(*iter);
-			} else if (*iter == '\\') {
-				result.push_back('\\');
-				result.push_back('\\');
 			} else {
 				const uint8_t byte = *iter;
 				result.push_back('\\');
@@ -431,6 +431,7 @@ private:
 	void setField(const char* key, int64_t value);
 	void setField(const char* key, double value);
 	void setField(const char* key, const std::string& value);
+	void setThreadId();
 
 	TraceEvent& errorImpl(const class Error& e, bool includeCancelled = false);
 	// Private version of detailf that does NOT write to the eventMetric.  This is to be used by other detail methods
@@ -509,7 +510,7 @@ private:
 class StringRef;
 
 struct TraceInterval {
-	TraceInterval(const char* type) : count(-1), type(type), severity(SevInfo) {}
+	TraceInterval(const char* type) : type(type), count(-1), severity(SevInfo) {}
 
 	TraceInterval& begin();
 	TraceInterval& end() { return *this; }
@@ -563,7 +564,8 @@ void openTraceFile(const NetworkAddress& na,
                    std::string directory = ".",
                    std::string baseOfBase = "trace",
                    std::string logGroup = "default",
-                   std::string identifier = "");
+                   std::string identifier = "",
+                   std::string tracePartialFileSuffix = "");
 void initTraceEventMetrics();
 void closeTraceFile();
 bool traceFileIsOpen();

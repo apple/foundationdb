@@ -36,6 +36,26 @@
 #include "fdbclient/BackupContainer.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+FDB_DECLARE_BOOLEAN_PARAM(LockDB);
+FDB_DECLARE_BOOLEAN_PARAM(UnlockDB);
+FDB_DECLARE_BOOLEAN_PARAM(StopWhenDone);
+FDB_DECLARE_BOOLEAN_PARAM(Verbose);
+FDB_DECLARE_BOOLEAN_PARAM(WaitForComplete);
+FDB_DECLARE_BOOLEAN_PARAM(ForceAction);
+FDB_DECLARE_BOOLEAN_PARAM(Terminator);
+FDB_DECLARE_BOOLEAN_PARAM(IncrementalBackupOnly);
+FDB_DECLARE_BOOLEAN_PARAM(UsePartitionedLog);
+FDB_DECLARE_BOOLEAN_PARAM(OnlyApplyMutationLogs);
+FDB_DECLARE_BOOLEAN_PARAM(InconsistentSnapshotOnly);
+FDB_DECLARE_BOOLEAN_PARAM(ShowErrors);
+FDB_DECLARE_BOOLEAN_PARAM(AbortOldBackup);
+FDB_DECLARE_BOOLEAN_PARAM(DstOnly); // TODO: More descriptive name?
+FDB_DECLARE_BOOLEAN_PARAM(WaitForDestUID);
+FDB_DECLARE_BOOLEAN_PARAM(CheckBackupUID);
+FDB_DECLARE_BOOLEAN_PARAM(DeleteData);
+FDB_DECLARE_BOOLEAN_PARAM(SetValidation);
+FDB_DECLARE_BOOLEAN_PARAM(PartialBackup);
+
 class BackupAgentBase : NonCopyable {
 public:
 	// Time formatter for anything backup or restore related
@@ -65,6 +85,7 @@ public:
 	static const Key keyConfigStopWhenDoneKey;
 	static const Key keyStateStatus;
 	static const Key keyStateStop;
+	static const Key keyStateLogBeginVersion;
 	static const Key keyLastUid;
 	static const Key keyBeginKey;
 	static const Key keyEndKey;
@@ -82,151 +103,26 @@ public:
 	static const Key keySourceStates;
 	static const Key keySourceTagName;
 
-	static const int logHeaderSize;
+	static constexpr int logHeaderSize = 12;
 
 	// Convert the status text to an enumerated value
-	static EnumState getState(std::string stateText) {
-		auto enState = EnumState::STATE_ERRORED;
-
-		if (stateText.empty()) {
-			enState = EnumState::STATE_NEVERRAN;
-		}
-
-		else if (!stateText.compare("has been submitted")) {
-			enState = EnumState::STATE_SUBMITTED;
-		}
-
-		else if (!stateText.compare("has been started")) {
-			enState = EnumState::STATE_RUNNING;
-		}
-
-		else if (!stateText.compare("is differential")) {
-			enState = EnumState::STATE_RUNNING_DIFFERENTIAL;
-		}
-
-		else if (!stateText.compare("has been completed")) {
-			enState = EnumState::STATE_COMPLETED;
-		}
-
-		else if (!stateText.compare("has been aborted")) {
-			enState = EnumState::STATE_ABORTED;
-		}
-
-		else if (!stateText.compare("has been partially aborted")) {
-			enState = EnumState::STATE_PARTIALLY_ABORTED;
-		}
-
-		return enState;
-	}
+	static EnumState getState(std::string const& stateText);
 
 	// Convert the status enum to a text description
-	static const char* getStateText(EnumState enState) {
-		const char* stateText;
-
-		switch (enState) {
-		case EnumState::STATE_ERRORED:
-			stateText = "has errored";
-			break;
-		case EnumState::STATE_NEVERRAN:
-			stateText = "has never been started";
-			break;
-		case EnumState::STATE_SUBMITTED:
-			stateText = "has been submitted";
-			break;
-		case EnumState::STATE_RUNNING:
-			stateText = "has been started";
-			break;
-		case EnumState::STATE_RUNNING_DIFFERENTIAL:
-			stateText = "is differential";
-			break;
-		case EnumState::STATE_COMPLETED:
-			stateText = "has been completed";
-			break;
-		case EnumState::STATE_ABORTED:
-			stateText = "has been aborted";
-			break;
-		case EnumState::STATE_PARTIALLY_ABORTED:
-			stateText = "has been partially aborted";
-			break;
-		default:
-			stateText = "<undefined>";
-			break;
-		}
-
-		return stateText;
-	}
+	static const char* getStateText(EnumState enState);
 
 	// Convert the status enum to a name
-	static const char* getStateName(EnumState enState) {
-		const char* s;
-
-		switch (enState) {
-		case EnumState::STATE_ERRORED:
-			s = "Errored";
-			break;
-		case EnumState::STATE_NEVERRAN:
-			s = "NeverRan";
-			break;
-		case EnumState::STATE_SUBMITTED:
-			s = "Submitted";
-			break;
-		case EnumState::STATE_RUNNING:
-			s = "Running";
-			break;
-		case EnumState::STATE_RUNNING_DIFFERENTIAL:
-			s = "RunningDifferentially";
-			break;
-		case EnumState::STATE_COMPLETED:
-			s = "Completed";
-			break;
-		case EnumState::STATE_ABORTED:
-			s = "Aborted";
-			break;
-		case EnumState::STATE_PARTIALLY_ABORTED:
-			s = "Aborting";
-			break;
-		default:
-			s = "<undefined>";
-			break;
-		}
-
-		return s;
-	}
+	static const char* getStateName(EnumState enState);
 
 	// Determine if the specified state is runnable
-	static bool isRunnable(EnumState enState) {
-		bool isRunnable = false;
+	static bool isRunnable(EnumState enState);
 
-		switch (enState) {
-		case EnumState::STATE_SUBMITTED:
-		case EnumState::STATE_RUNNING:
-		case EnumState::STATE_RUNNING_DIFFERENTIAL:
-		case EnumState::STATE_PARTIALLY_ABORTED:
-			isRunnable = true;
-			break;
-		default:
-			break;
-		}
+	static KeyRef getDefaultTag() { return StringRef(defaultTagName); }
 
-		return isRunnable;
-	}
-
-	static const KeyRef getDefaultTag() { return StringRef(defaultTagName); }
-
-	static const std::string getDefaultTagName() { return defaultTagName; }
+	static std::string getDefaultTagName() { return defaultTagName; }
 
 	// This is only used for automatic backup name generation
-	static Standalone<StringRef> getCurrentTime() {
-		double t = now();
-		time_t curTime = t;
-		char buffer[128];
-		struct tm* timeinfo;
-		timeinfo = localtime(&curTime);
-		strftime(buffer, 128, "%Y-%m-%d-%H-%M-%S", timeinfo);
-
-		std::string time(buffer);
-		return StringRef(time + format(".%06d", (int)(1e6 * (t - curTime))));
-	}
+	static Standalone<StringRef> getCurrentTime();
 
 protected:
 	static const std::string defaultTagName;
@@ -249,7 +145,11 @@ public:
 
 	KeyBackedProperty<Key> lastBackupTimestamp() { return config.pack(LiteralStringRef(__FUNCTION__)); }
 
-	Future<Void> run(Database cx, double* pollDelay, int maxConcurrentTasks) {
+	Future<Void> run(Database cx, double pollDelay, int maxConcurrentTasks) {
+		return taskBucket->run(cx, futureBucket, std::make_shared<double const>(pollDelay), maxConcurrentTasks);
+	}
+
+	Future<Void> run(Database cx, std::shared_ptr<double const> pollDelay, int maxConcurrentTasks) {
 		return taskBucket->run(cx, futureBucket, pollDelay, maxConcurrentTasks);
 	}
 
@@ -260,13 +160,13 @@ public:
 	static Key getPauseKey();
 
 	// parallel restore
-	Future<Void> parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB = true);
+	Future<Void> parallelRestoreFinish(Database cx, UID randomUID, UnlockDB = UnlockDB::True);
 	Future<Void> submitParallelRestore(Database cx,
 	                                   Key backupTag,
 	                                   Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                   Key bcUrl,
 	                                   Version targetVersion,
-	                                   bool lockDB,
+	                                   LockDB lockDB,
 	                                   UID randomUID,
 	                                   Key addPrefix,
 	                                   Key removePrefix);
@@ -288,29 +188,31 @@ public:
 	                        Key tagName,
 	                        Key url,
 	                        Standalone<VectorRef<KeyRangeRef>> ranges,
-	                        bool waitForComplete = true,
-	                        Version targetVersion = -1,
-	                        bool verbose = true,
+	                        WaitForComplete = WaitForComplete::True,
+	                        Version targetVersion = ::invalidVersion,
+	                        Verbose = Verbose::True,
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
-	                        bool lockDB = true,
-	                        bool onlyAppyMutationLogs = false,
-	                        bool inconsistentSnapshotOnly = false,
-	                        Version beginVersion = -1);
+	                        LockDB = LockDB::True,
+	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
+	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
+	                        Version beginVersion = ::invalidVersion,
+	                        Optional<std::string> const& encryptionKeyFileName = {});
 	Future<Version> restore(Database cx,
 	                        Optional<Database> cxOrig,
 	                        Key tagName,
 	                        Key url,
-	                        bool waitForComplete = true,
-	                        Version targetVersion = -1,
-	                        bool verbose = true,
+	                        WaitForComplete waitForComplete = WaitForComplete::True,
+	                        Version targetVersion = ::invalidVersion,
+	                        Verbose verbose = Verbose::True,
 	                        KeyRange range = normalKeys,
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
-	                        bool lockDB = true,
-	                        bool onlyAppyMutationLogs = false,
-	                        bool inconsistentSnapshotOnly = false,
-	                        Version beginVersion = -1) {
+	                        LockDB lockDB = LockDB::True,
+	                        OnlyApplyMutationLogs onlyApplyMutationLogs = OnlyApplyMutationLogs::False,
+	                        InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
+	                        Version beginVersion = ::invalidVersion,
+	                        Optional<std::string> const& encryptionKeyFileName = {}) {
 		Standalone<VectorRef<KeyRangeRef>> rangeRef;
 		rangeRef.push_back_deep(rangeRef.arena(), range);
 		return restore(cx,
@@ -324,9 +226,10 @@ public:
 		               addPrefix,
 		               removePrefix,
 		               lockDB,
-		               onlyAppyMutationLogs,
+		               onlyApplyMutationLogs,
 		               inconsistentSnapshotOnly,
-		               beginVersion);
+		               beginVersion,
+		               encryptionKeyFileName);
 	}
 	Future<Version> atomicRestore(Database cx,
 	                              Key tagName,
@@ -347,7 +250,7 @@ public:
 	Future<ERestoreState> abortRestore(Database cx, Key tagName);
 
 	// Waits for a restore tag to reach a final (stable) state.
-	Future<ERestoreState> waitRestore(Database cx, Key tagName, bool verbose);
+	Future<ERestoreState> waitRestore(Database cx, Key tagName, Verbose);
 
 	// Get a string describing the status of a tag
 	Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Key tagName);
@@ -362,20 +265,22 @@ public:
 	                          Key outContainer,
 	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
-	                          std::string tagName,
+	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          bool stopWhenDone = true,
-	                          bool partitionedLog = false,
-	                          bool incrementalBackupOnly = false);
+	                          StopWhenDone = StopWhenDone::True,
+	                          UsePartitionedLog = UsePartitionedLog::False,
+	                          IncrementalBackupOnly = IncrementalBackupOnly::False,
+	                          Optional<std::string> const& encryptionKeyFileName = {});
 	Future<Void> submitBackup(Database cx,
 	                          Key outContainer,
 	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
-	                          std::string tagName,
+	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          bool stopWhenDone = true,
-	                          bool partitionedLog = false,
-	                          bool incrementalBackupOnly = false) {
+	                          StopWhenDone stopWhenDone = StopWhenDone::True,
+	                          UsePartitionedLog partitionedLog = UsePartitionedLog::False,
+	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::False,
+	                          Optional<std::string> const& encryptionKeyFileName = {}) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr,
 			                    outContainer,
@@ -385,7 +290,8 @@ public:
 			                    backupRanges,
 			                    stopWhenDone,
 			                    partitionedLog,
-			                    incrementalBackupOnly);
+			                    incrementalBackupOnly,
+			                    encryptionKeyFileName);
 		});
 	}
 
@@ -407,19 +313,19 @@ public:
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return abortBackup(tr, tagName); });
 	}
 
-	Future<std::string> getStatus(Database cx, bool showErrors, std::string tagName);
+	Future<std::string> getStatus(Database cx, ShowErrors, std::string tagName);
 	Future<std::string> getStatusJSON(Database cx, std::string tagName);
 
 	Future<Optional<Version>> getLastRestorable(Reference<ReadYourWritesTransaction> tr,
 	                                            Key tagName,
-	                                            bool snapshot = false);
+	                                            Snapshot = Snapshot::False);
 	void setLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, Version version);
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
 	Future<EnumState> waitBackup(Database cx,
 	                             std::string tagName,
-	                             bool stopWhenDone = true,
+	                             StopWhenDone = StopWhenDone::True,
 	                             Reference<IBackupContainer>* pContainer = nullptr,
 	                             UID* pUID = nullptr);
 
@@ -462,8 +368,8 @@ public:
 	DatabaseBackupAgent(DatabaseBackupAgent&& r) noexcept
 	  : subspace(std::move(r.subspace)), states(std::move(r.states)), config(std::move(r.config)),
 	    errors(std::move(r.errors)), ranges(std::move(r.ranges)), tagNames(std::move(r.tagNames)),
-	    taskBucket(std::move(r.taskBucket)), futureBucket(std::move(r.futureBucket)),
-	    sourceStates(std::move(r.sourceStates)), sourceTagNames(std::move(r.sourceTagNames)) {}
+	    sourceStates(std::move(r.sourceStates)), sourceTagNames(std::move(r.sourceTagNames)),
+	    taskBucket(std::move(r.taskBucket)), futureBucket(std::move(r.futureBucket)) {}
 
 	void operator=(DatabaseBackupAgent&& r) noexcept {
 		subspace = std::move(r.subspace);
@@ -478,7 +384,11 @@ public:
 		sourceTagNames = std::move(r.sourceTagNames);
 	}
 
-	Future<Void> run(Database cx, double* pollDelay, int maxConcurrentTasks) {
+	Future<Void> run(Database cx, double pollDelay, int maxConcurrentTasks) {
+		return taskBucket->run(cx, futureBucket, std::make_shared<double const>(pollDelay), maxConcurrentTasks);
+	}
+
+	Future<Void> run(Database cx, std::shared_ptr<double const> pollDelay, int maxConcurrentTasks) {
 		return taskBucket->run(cx, futureBucket, pollDelay, maxConcurrentTasks);
 	}
 
@@ -487,7 +397,7 @@ public:
 	                              Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                              Key addPrefix,
 	                              Key removePrefix,
-	                              bool forceAction = false);
+	                              ForceAction = ForceAction::False);
 
 	Future<Void> unlockBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<Void> unlockBackup(Database cx, Key tagName) {
@@ -506,18 +416,18 @@ public:
 	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr,
 	                          Key tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          bool stopWhenDone = true,
+	                          StopWhenDone = StopWhenDone::True,
 	                          Key addPrefix = StringRef(),
 	                          Key removePrefix = StringRef(),
-	                          bool lockDatabase = false,
+	                          LockDB lockDatabase = LockDB::False,
 	                          PreBackupAction backupAction = PreBackupAction::VERIFY);
 	Future<Void> submitBackup(Database cx,
 	                          Key tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          bool stopWhenDone = true,
+	                          StopWhenDone stopWhenDone = StopWhenDone::True,
 	                          Key addPrefix = StringRef(),
 	                          Key removePrefix = StringRef(),
-	                          bool lockDatabase = false,
+	                          LockDB lockDatabase = LockDB::False,
 	                          PreBackupAction backupAction = PreBackupAction::VERIFY) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(
@@ -533,35 +443,36 @@ public:
 
 	Future<Void> abortBackup(Database cx,
 	                         Key tagName,
-	                         bool partial = false,
-	                         bool abortOldBackup = false,
-	                         bool dstOnly = false,
-	                         bool waitForDestUID = false);
+	                         PartialBackup = PartialBackup::False,
+	                         AbortOldBackup = AbortOldBackup::False,
+	                         DstOnly = DstOnly::False,
+	                         WaitForDestUID = WaitForDestUID::False);
 
 	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
 
-	Future<EnumState> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
+	Future<EnumState> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot = Snapshot::False);
 	Future<EnumState> getStateValue(Database cx, UID logUid) {
 		return runRYWTransaction(cx,
 		                         [=](Reference<ReadYourWritesTransaction> tr) { return getStateValue(tr, logUid); });
 	}
 
-	Future<UID> getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
+	Future<UID> getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot = Snapshot::False);
 	Future<UID> getDestUid(Database cx, UID logUid) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return getDestUid(tr, logUid); });
 	}
 
-	Future<UID> getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName, bool snapshot = false);
+	Future<UID> getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName, Snapshot = Snapshot::False);
 	Future<UID> getLogUid(Database cx, Key tagName) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return getLogUid(tr, tagName); });
 	}
 
-	Future<int64_t> getRangeBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
-	Future<int64_t> getLogBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
-
+	Future<int64_t> getRangeBytesWritten(Reference<ReadYourWritesTransaction> tr,
+	                                     UID logUid,
+	                                     Snapshot = Snapshot::False);
+	Future<int64_t> getLogBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid, Snapshot = Snapshot::False);
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
-	Future<EnumState> waitBackup(Database cx, Key tagName, bool stopWhenDone = true);
+	Future<EnumState> waitBackup(Database cx, Key tagName, StopWhenDone = StopWhenDone::True);
 	Future<EnumState> waitSubmitted(Database cx, Key tagName);
 	Future<Void> waitUpgradeToLatestDrVersion(Database cx, Key tagName);
 
@@ -619,7 +530,7 @@ Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr,
                           Key logUidValue,
                           Key destUidValue,
                           Optional<Version> endVersion = Optional<Version>(),
-                          bool checkBackupUid = false,
+                          CheckBackupUID = CheckBackupUID::False,
                           Version backupUid = 0);
 Key getApplyKey(Version version, Key backupUid);
 Version getLogKeyVersion(Key key);
@@ -631,18 +542,18 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  PromiseStream<RangeResultWithVersion> results,
                                  Reference<FlowLock> lock,
                                  KeyRangeRef range,
-                                 bool terminator = true,
-                                 bool systemAccess = false,
-                                 bool lockAware = false);
+                                 Terminator terminator = Terminator::True,
+                                 AccessSystemKeys systemAccess = AccessSystemKeys::False,
+                                 LockAware lockAware = LockAware::False);
 ACTOR Future<Void> readCommitted(Database cx,
                                  PromiseStream<RCGroup> results,
                                  Future<Void> active,
                                  Reference<FlowLock> lock,
                                  KeyRangeRef range,
                                  std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy,
-                                 bool terminator = true,
-                                 bool systemAccess = false,
-                                 bool lockAware = false);
+                                 Terminator terminator = Terminator::True,
+                                 AccessSystemKeys systemAccess = AccessSystemKeys::False,
+                                 LockAware lockAware = LockAware::False);
 ACTOR Future<Void> applyMutations(Database cx,
                                   Key uid,
                                   Key addPrefix,
@@ -652,7 +563,7 @@ ACTOR Future<Void> applyMutations(Database cx,
                                   RequestStream<CommitTransactionRequest> commit,
                                   NotifiedVersion* committedVersion,
                                   Reference<KeyRangeMap<Version>> keyVersion);
-ACTOR Future<Void> cleanupBackup(Database cx, bool deleteData);
+ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData);
 
 using EBackupState = BackupAgentBase::EnumState;
 template <>
@@ -695,14 +606,15 @@ public:
 typedef KeyBackedMap<std::string, UidAndAbortedFlagT> TagMap;
 // Map of tagName to {UID, aborted_flag} located in the fileRestorePrefixRange keyspace.
 class TagUidMap : public KeyBackedMap<std::string, UidAndAbortedFlagT> {
+	ACTOR static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap* tagsMap,
+	                                                           Reference<ReadYourWritesTransaction> tr,
+	                                                           Snapshot snapshot);
+
 public:
 	TagUidMap(const StringRef& prefix) : TagMap(LiteralStringRef("tag->uid/").withPrefix(prefix)), prefix(prefix) {}
 
-	ACTOR static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap* tagsMap,
-	                                                           Reference<ReadYourWritesTransaction> tr,
-	                                                           bool snapshot);
-
-	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr, bool snapshot = false) {
+	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr,
+	                                         Snapshot snapshot = Snapshot::False) {
 		return getAll_impl(this, tr, snapshot);
 	}
 
@@ -718,12 +630,12 @@ static inline KeyBackedTag makeBackupTag(std::string tagName) {
 }
 
 static inline Future<std::vector<KeyBackedTag>> getAllRestoreTags(Reference<ReadYourWritesTransaction> tr,
-                                                                  bool snapshot = false) {
+                                                                  Snapshot snapshot = Snapshot::False) {
 	return TagUidMap(fileRestorePrefixRange.begin).getAll(tr, snapshot);
 }
 
 static inline Future<std::vector<KeyBackedTag>> getAllBackupTags(Reference<ReadYourWritesTransaction> tr,
-                                                                 bool snapshot = false) {
+                                                                 Snapshot snapshot = Snapshot::False) {
 	return TagUidMap(fileBackupPrefixRange.begin).getAll(tr, snapshot);
 }
 
@@ -738,7 +650,9 @@ public:
 
 	KeyBackedConfig(StringRef prefix, Reference<Task> task) : KeyBackedConfig(prefix, TaskParams.uid().get(task)) {}
 
-	Future<Void> toTask(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, bool setValidation = true) {
+	Future<Void> toTask(Reference<ReadYourWritesTransaction> tr,
+	                    Reference<Task> task,
+	                    SetValidation setValidation = SetValidation::True) {
 		// Set the uid task parameter
 		TaskParams.uid().set(task, uid);
 
@@ -803,11 +717,22 @@ protected:
 
 template <>
 inline Tuple Codec<Reference<IBackupContainer>>::pack(Reference<IBackupContainer> const& bc) {
-	return Tuple().append(StringRef(bc->getURL()));
+	Tuple tuple;
+	tuple.append(StringRef(bc->getURL()));
+	if (bc->getEncryptionKeyFileName().present()) {
+		tuple.append(bc->getEncryptionKeyFileName().get());
+	}
+	return tuple;
 }
 template <>
 inline Reference<IBackupContainer> Codec<Reference<IBackupContainer>>::unpack(Tuple const& val) {
-	return IBackupContainer::openContainer(val.getString(0).toString());
+	ASSERT(val.size() == 1 || val.size() == 2);
+	auto url = val.getString(0).toString();
+	Optional<std::string> encryptionKeyFileName;
+	if (val.size() == 2) {
+		encryptionKeyFileName = val.getString(1).toString();
+	}
+	return IBackupContainer::openContainer(url, encryptionKeyFileName);
 }
 
 class BackupConfig : public KeyBackedConfig {
@@ -1055,6 +980,11 @@ namespace fileBackup {
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
                                                                       int len);
+
+// Reads a mutation log block from file and parses into batch mutation blocks for further parsing.
+ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Reference<IAsyncFile> file,
+                                                                            int64_t offset,
+                                                                            int len);
 
 // Return a block of contiguous padding bytes "\0xff" for backup files, growing if needed.
 Value makePadding(int size);

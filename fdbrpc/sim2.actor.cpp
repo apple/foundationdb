@@ -33,6 +33,7 @@
 #include "flow/Util.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
+#include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
 #include "flow/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
@@ -178,7 +179,7 @@ SimClogging g_clogging;
 
 struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	Sim2Conn(ISimulator::ProcessInfo* process)
-	  : process(process), dbgid(deterministicRandom()->randomUniqueID()), opened(false), closedByCaller(false),
+	  : opened(false), closedByCaller(false), process(process), dbgid(deterministicRandom()->randomUniqueID()),
 	    stopReceive(Never()) {
 		pipes = sender(this) && receiver(this);
 	}
@@ -469,12 +470,12 @@ public:
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 
 		if (++openCount >= 3000) {
-			TraceEvent(SevError, "TooManyFiles");
+			TraceEvent(SevError, "TooManyFiles").log();
 			ASSERT(false);
 		}
 
 		if (openCount == 2000) {
-			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyFiles");
+			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyFiles").log();
 			g_simulator.speedUpSimulation = true;
 			g_simulator.connectionFailuresDisableDuration = 1e6;
 		}
@@ -562,8 +563,8 @@ private:
 	           const std::string& filename,
 	           const std::string& actualFilename,
 	           int flags)
-	  : h(h), diskParameters(diskParameters), delayOnWrite(delayOnWrite), filename(filename),
-	    actualFilename(actualFilename), dbgId(deterministicRandom()->randomUniqueID()), flags(flags) {}
+	  : h(h), diskParameters(diskParameters), filename(filename), actualFilename(actualFilename), flags(flags),
+	    dbgId(deterministicRandom()->randomUniqueID()), delayOnWrite(delayOnWrite) {}
 
 	static int flagConversion(int flags) {
 		int outFlags = O_BINARY | O_CLOEXEC;
@@ -858,13 +859,17 @@ public:
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay(seconds, taskID, currentProcess);
 	}
-	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine) {
+	Future<class Void> orderedDelay(double seconds, TaskPriority taskID) override {
+		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
+		return delay(seconds, taskID, currentProcess, true);
+	}
+	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine, bool ordered = false) {
 		ASSERT(seconds >= -0.0001);
 		seconds = std::max(0.0, seconds);
 		Future<Void> f;
 
-		if (!currentProcess->rebooting && machine == currentProcess && !currentProcess->shutdownSignal.isSet() &&
-		    FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
+		if (!ordered && !currentProcess->rebooting && machine == currentProcess &&
+		    !currentProcess->shutdownSignal.isSet() && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
 		    deterministicRandom()->random01() < 0.25) { // FIXME: why doesnt this work when we are changing machines?
 			seconds += FLOW_KNOBS->MAX_BUGGIFIED_DELAY * pow(deterministicRandom()->random01(), 1000.0);
 		}
@@ -1005,9 +1010,9 @@ public:
 		THREAD_RETURN;
 	}
 
-	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) override {
+	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override {
 		SimThreadArgs* simArgs = new SimThreadArgs(func, arg);
-		return ::startThread(simStartThread, simArgs);
+		return ::startThread(simStartThread, simArgs, stackSize, name);
 	}
 
 	void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) override {
@@ -1945,6 +1950,7 @@ public:
 			g_clogging.clogRecvFor(ip, seconds);
 	}
 	void clogPair(const IPAddress& from, const IPAddress& to, double seconds) override {
+		TraceEvent("CloggingPair").detail("From", from).detail("To", to).detail("Seconds", seconds);
 		g_clogging.clogPairFor(from, to, seconds);
 	}
 	std::vector<ProcessInfo*> getAllProcesses() const override {
@@ -1984,7 +1990,7 @@ public:
 	}
 
 	Sim2()
-	  : time(0.0), timerTime(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(TaskPriority::Zero) {
+	  : time(0.0), timerTime(0.0), currentTaskID(TaskPriority::Zero), taskCount(0), yielded(false), yield_limit(0) {
 		// Not letting currentProcess be nullptr eliminates some annoying special cases
 		currentProcess =
 		    new ProcessInfo("NoMachine",
@@ -2008,13 +2014,13 @@ public:
 		ProcessInfo* machine;
 		Promise<Void> action;
 		Task(double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Promise<Void>&& action)
-		  : time(time), taskID(taskID), stable(stable), machine(machine), action(std::move(action)) {}
+		  : taskID(taskID), time(time), stable(stable), machine(machine), action(std::move(action)) {}
 		Task(double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Future<Void>& future)
-		  : time(time), taskID(taskID), stable(stable), machine(machine) {
+		  : taskID(taskID), time(time), stable(stable), machine(machine) {
 			future = action.getFuture();
 		}
 		Task(Task&& rhs) noexcept
-		  : time(rhs.time), taskID(rhs.taskID), stable(rhs.stable), machine(rhs.machine),
+		  : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine),
 		    action(std::move(rhs.action)) {}
 		void operator=(Task const& rhs) {
 			taskID = rhs.taskID;
@@ -2471,6 +2477,14 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 		f = AsyncFileDetachable::open(f);
 		if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
+#if ENCRYPTION_ENABLED
+		if (flags & IAsyncFile::OPEN_ENCRYPTED)
+			f = map(f, [flags](Reference<IAsyncFile> r) {
+				auto mode = flags & IAsyncFile::OPEN_READWRITE ? AsyncFileEncrypted::Mode::APPEND_ONLY
+				                                               : AsyncFileEncrypted::Mode::READ_ONLY;
+				return Reference<IAsyncFile>(new AsyncFileEncrypted(r, mode));
+			});
+#endif // ENCRYPTION_ENABLED
 		return f;
 	} else
 		return AsyncFileCached::open(filename, flags, mode);

@@ -38,6 +38,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
+#include "flow/Histogram.h"
 #include "flow/IndexedSet.h"
 #include "flow/Knobs.h"
 
@@ -54,7 +55,7 @@ struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
 	int slowReplies;
 	int fastReplies;
 
-	ConnectionResetInfo() : lastReset(now()), slowReplies(0), fastReplies(0), resetCheck(Void()) {}
+	ConnectionResetInfo() : lastReset(now()), resetCheck(Void()), slowReplies(0), fastReplies(0) {}
 };
 
 // The set of tLog servers, logRouters and backupWorkers for a log tag
@@ -69,6 +70,7 @@ public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
 	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
 	std::vector<Reference<ConnectionResetInfo>> connectionResetTrackers;
+	std::vector<Reference<Histogram>> tlogPushDistTrackers;
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
 	std::vector<LocalityData> tLogLocalities; // Stores the localities of the log servers

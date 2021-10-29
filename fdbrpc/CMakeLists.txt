@@ -1,6 +1,7 @@
 set(FDBRPC_SRCS
   AsyncFileCached.actor.h
   AsyncFileEIO.actor.h
+  AsyncFileEncrypted.h
   AsyncFileKAIO.actor.h
   AsyncFileNonDurable.actor.h
   AsyncFileReadAhead.actor.h
@@ -32,6 +33,12 @@ set(FDBRPC_SRCS
   TimedRequest.h
   TraceFileIO.cpp
   TSSComparison.h)
+
+if(WITH_TLS AND NOT WIN32)
+  set(FDBRPC_SRCS
+    ${FDBRPC_SRCS}
+    AsyncFileEncrypted.actor.cpp)
+endif()
 
 set(COMPILE_EIO OFF)
 

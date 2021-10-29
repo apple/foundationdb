@@ -202,7 +202,6 @@ extern const char* getSourceVersion();
 
 extern void flushTraceFileVoid();
 
-extern bool noUnseed;
 extern const int MAX_CLUSTER_FILE_BYTES;
 
 #ifdef ALLOC_INSTRUMENTATION
@@ -1657,8 +1656,9 @@ int main(int argc, char* argv[]) {
 		enableFaultInjection(opts.faultInjectionEnabled);
 
 		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::SERVER,
-		                                         Randomize::YES,
-		                                         role == ServerRole::Simulation ? IsSimulated::YES : IsSimulated::NO);
+		                                         Randomize::True,
+		                                         role == ServerRole::Simulation ? IsSimulated::True
+		                                                                        : IsSimulated::False);
 		IKnobCollection::getMutableGlobalKnobCollection().setKnob("log_directory", KnobValue::create(opts.logFolder));
 		if (role != ServerRole::Simulation) {
 			IKnobCollection::getMutableGlobalKnobCollection().setKnob("commit_batches_mem_bytes_hard_limit",
@@ -1693,7 +1693,7 @@ int main(int argc, char* argv[]) {
 		                                                          KnobValue::create(int64_t{ opts.memLimit }));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
 		IKnobCollection::getMutableGlobalKnobCollection().initialize(
-		    Randomize::YES, role == ServerRole::Simulation ? IsSimulated::YES : IsSimulated::NO);
+		    Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
@@ -1832,18 +1832,23 @@ int main(int argc, char* argv[]) {
 
 			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
 			std::vector<std::string> directories = platform::listDirectories(dataFolder);
-			for (int i = 0; i < directories.size(); i++)
-				if (directories[i].size() != 32 && directories[i] != "." && directories[i] != ".." &&
-				    directories[i] != "backups" && directories[i].find("snap") == std::string::npos) {
+			const std::set<std::string> allowedDirectories = { ".", "..", "backups", "unittests" };
+
+			for (const auto& dir : directories) {
+				if (dir.size() != 32 && allowedDirectories.count(dir) == 0 && dir.find("snap") == std::string::npos) {
+
 					TraceEvent(SevError, "IncompatibleDirectoryFound")
 					    .detail("DataFolder", dataFolder)
-					    .detail("SuspiciousFile", directories[i]);
+					    .detail("SuspiciousFile", dir);
+
 					fprintf(stderr,
 					        "ERROR: Data folder `%s' had non fdb file `%s'; please use clean, fdb-only folder\n",
 					        dataFolder.c_str(),
-					        directories[i].c_str());
+					        dir.c_str());
+
 					flushAndExit(FDB_EXIT_ERROR);
 				}
+			}
 			std::vector<std::string> files = platform::listFiles(dataFolder);
 			if ((files.size() > 1 || (files.size() == 1 && files[0] != "restartInfo.ini")) && !opts.restarting) {
 				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder);

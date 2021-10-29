@@ -7,7 +7,9 @@ set(FDBCLI_SRCS
   FlowLineNoise.h
   ForceRecoveryWithDataLossCommand.actor.cpp
   MaintenanceCommand.actor.cpp
+  SetClassCommand.actor.cpp
   SnapshotCommand.actor.cpp
+  ThrottleCommand.actor.cpp
   Util.cpp
   linenoise/linenoise.h)
 

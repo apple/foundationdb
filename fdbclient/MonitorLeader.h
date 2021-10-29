@@ -49,7 +49,7 @@ struct ClientData {
 
 	OpenDatabaseRequest getRequest();
 
-	ClientData() : clientInfo(new AsyncVar<CachedSerialization<ClientDBInfo>>(CachedSerialization<ClientDBInfo>())) {}
+	ClientData() : clientInfo(makeReference<AsyncVar<CachedSerialization<ClientDBInfo>>>()) {}
 };
 
 struct MonitorLeaderInfo {
@@ -58,7 +58,7 @@ struct MonitorLeaderInfo {
 
 	MonitorLeaderInfo() : hasConnected(false) {}
 	explicit MonitorLeaderInfo(Reference<ClusterConnectionFile> intermediateConnFile)
-	  : intermediateConnFile(intermediateConnFile), hasConnected(false) {}
+	  : hasConnected(false), intermediateConnFile(intermediateConnFile) {}
 };
 
 // Monitors the given coordination group's leader election process and provides a best current guess

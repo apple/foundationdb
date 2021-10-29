@@ -38,12 +38,12 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	static int drAgentRequests;
 	Database extraDB;
-	bool locked;
+	LockDB locked{ false };
 	bool shareLogRange;
 	UID destUid;
 
 	BackupToDBCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		locked = sharedRandomNumber % 2;
+		locked.set(sharedRandomNumber % 2);
 		backupAfter = getOption(options, LiteralStringRef("backupAfter"), 10.0);
 		restoreAfter = getOption(options, LiteralStringRef("restoreAfter"), 35.0);
 		performRestore = getOption(options, LiteralStringRef("performRestore"), true);
@@ -302,10 +302,10 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				wait(backupAgent->submitBackup(cx,
 				                               tag,
 				                               backupRanges,
-				                               stopDifferentialDelay ? false : true,
+				                               StopWhenDone{ !stopDifferentialDelay },
 				                               self->backupPrefix,
 				                               StringRef(),
-				                               self->locked,
+				                               LockDB{ self->locked },
 				                               DatabaseBackupAgent::PreBackupAction::CLEAR));
 			} catch (Error& e) {
 				TraceEvent("BARW_SubmitBackup1Exception", randomID).error(e);
@@ -337,7 +337,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				if (BUGGIFY) {
 					TraceEvent("BARW_DoBackupWaitForRestorable", randomID).detail("Tag", printable(tag));
 					// Wait until the backup is in a restorable state
-					state EBackupState resultWait = wait(backupAgent->waitBackup(cx, tag, false));
+					state EBackupState resultWait = wait(backupAgent->waitBackup(cx, tag, StopWhenDone::False));
 
 					TraceEvent("BARW_LastBackupFolder", randomID)
 					    .detail("BackupTag", printable(tag))
@@ -383,7 +383,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		UID _destUid = wait(backupAgent->getDestUid(cx, logUid));
 		self->destUid = _destUid;
 
-		state EBackupState statusValue = wait(backupAgent->waitBackup(cx, tag, true));
+		state EBackupState statusValue = wait(backupAgent->waitBackup(cx, tag, StopWhenDone::True));
 		wait(backupAgent->unlockBackup(cx, tag));
 
 		state std::string statusText;
@@ -617,7 +617,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					extraBackup = backupAgent.submitBackup(self->extraDB,
 					                                       self->backupTag,
 					                                       self->backupRanges,
-					                                       true,
+					                                       StopWhenDone::True,
 					                                       self->extraPrefix,
 					                                       StringRef(),
 					                                       self->locked,
@@ -652,7 +652,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					wait(restoreTool.submitBackup(cx,
 					                              self->restoreTag,
 					                              restoreRange,
-					                              true,
+					                              StopWhenDone::True,
 					                              StringRef(),
 					                              self->backupPrefix,
 					                              self->locked,
@@ -704,10 +704,10 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					// not be set yet. Adding "waitForDestUID" flag to avoid the race.
 					wait(backupAgent.abortBackup(self->extraDB,
 					                             self->backupTag,
-					                             /*partial=*/false,
-					                             /*abortOldBackup=*/false,
-					                             /*dstOnly=*/false,
-					                             /*waitForDestUID*/ true));
+					                             PartialBackup::False,
+					                             AbortOldBackup::False,
+					                             DstOnly::False,
+					                             WaitForDestUID::True));
 				} catch (Error& e) {
 					TraceEvent("BARW_AbortBackupExtraException", randomID).error(e);
 					if (e.code() != error_code_backup_unneeded)

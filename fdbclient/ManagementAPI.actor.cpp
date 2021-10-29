@@ -154,7 +154,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		}
 
 		if (key == "perpetual_storage_wiggle" && isInteger(value)) {
-			int ppWiggle = atoi(value.c_str());
+			int ppWiggle = std::stoi(value);
 			if (ppWiggle >= 2 || ppWiggle < 0) {
 				printf("Error: Only 0 and 1 are valid values of perpetual_storage_wiggle at present.\n");
 				return out;
@@ -1981,7 +1981,8 @@ ACTOR Future<vector<std::string>> getExcludedLocalities(Database cx) {
 // Decodes the locality string to a pair of locality prefix and its value.
 // The prefix could be dcid, processid, machineid, processid.
 std::pair<std::string, std::string> decodeLocality(const std::string& locality) {
-	StringRef localityRef(locality.c_str());
+	StringRef localityRef((const uint8_t*)(locality.c_str()), locality.size());
+
 	std::string localityKeyValue = localityRef.removePrefix(LocalityData::ExcludeLocalityPrefix).toString();
 	int split = localityKeyValue.find(':');
 	if (split != std::string::npos) {
@@ -2497,7 +2498,8 @@ ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
 			tr.clear(sysRangeClear);
 			tr.clear(privateRange);
 			tr.addReadConflictRange(privateRange);
-			RangeResult previous = wait(tr.getRange(KeyRangeRef(storageCachePrefix, sysRange.begin), 1, true));
+			RangeResult previous =
+			    wait(tr.getRange(KeyRangeRef(storageCachePrefix, sysRange.begin), 1, Snapshot::True));
 			bool prevIsCached = false;
 			if (!previous.empty()) {
 				std::vector<uint16_t> prevVal;
@@ -2513,7 +2515,7 @@ ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
 				tr.set(sysRange.begin, trueValue);
 				tr.set(privateRange.begin, serverKeysTrue);
 			}
-			RangeResult after = wait(tr.getRange(KeyRangeRef(sysRange.end, storageCacheKeys.end), 1, false));
+			RangeResult after = wait(tr.getRange(KeyRangeRef(sysRange.end, storageCacheKeys.end), 1, Snapshot::False));
 			bool afterIsCached = false;
 			if (!after.empty()) {
 				std::vector<uint16_t> afterVal;

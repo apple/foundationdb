@@ -30,6 +30,9 @@
 #include "flow/Platform.actor.h"
 #include "flow/Arena.h"
 
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+#include "flow/StreamCipher.h"
+#endif
 #include "flow/Trace.h"
 #include "flow/Error.h"
 
@@ -1224,19 +1227,19 @@ void getDiskStatistics(std::string const& directory,
 	CFMutableDictionaryRef match = IOBSDNameMatching(kIOMasterPortDefault, kNilOptions, dev);
 
 	if (!match) {
-		TraceEvent(SevError, "IOBSDNameMatching");
+		TraceEvent(SevError, "IOBSDNameMatching").log();
 		throw platform_error();
 	}
 
 	if (IOServiceGetMatchingServices(kIOMasterPortDefault, match, &disk_list) != kIOReturnSuccess) {
-		TraceEvent(SevError, "IOServiceGetMatchingServices");
+		TraceEvent(SevError, "IOServiceGetMatchingServices").log();
 		throw platform_error();
 	}
 
 	io_registry_entry_t disk = IOIteratorNext(disk_list);
 	if (!disk) {
 		IOObjectRelease(disk_list);
-		TraceEvent(SevError, "IOIteratorNext");
+		TraceEvent(SevError, "IOIteratorNext").log();
 		throw platform_error();
 	}
 
@@ -1252,7 +1255,7 @@ void getDiskStatistics(std::string const& directory,
 	        disk, (CFMutableDictionaryRef*)&disk_dict, kCFAllocatorDefault, kNilOptions) != kIOReturnSuccess) {
 		IOObjectRelease(disk);
 		IOObjectRelease(disk_list);
-		TraceEvent(SevError, "IORegistryEntryCreateCFProperties");
+		TraceEvent(SevError, "IORegistryEntryCreateCFProperties").log();
 		throw platform_error();
 	}
 
@@ -1265,7 +1268,7 @@ void getDiskStatistics(std::string const& directory,
 		CFRelease(disk_dict);
 		IOObjectRelease(disk);
 		IOObjectRelease(disk_list);
-		TraceEvent(SevError, "CFDictionaryGetValue");
+		TraceEvent(SevError, "CFDictionaryGetValue").log();
 		throw platform_error();
 	}
 
@@ -1381,21 +1384,21 @@ struct SystemStatisticsState {
 	HCOUNTER ProcessorIdleCounter;
 	SystemStatisticsState()
 	  : Query(nullptr), QueueLengthCounter(nullptr), DiskTimeCounter(nullptr), ReadsCounter(nullptr),
-	    WritesCounter(nullptr), WriteBytesCounter(nullptr), ProcessorIdleCounter(nullptr),
+	    WritesCounter(nullptr), WriteBytesCounter(nullptr), ProcessorIdleCounter(nullptr), lastTime(0),
+	    lastClockThread(0), lastClockProcess(0), processLastSent(0), processLastReceived(0) {}
 #elif defined(__unixish__)
 	uint64_t machineLastSent, machineLastReceived;
 	uint64_t machineLastOutSegs, machineLastRetransSegs;
 	uint64_t lastBusyTicks, lastReads, lastWrites, lastWriteSectors, lastReadSectors;
 	uint64_t lastClockIdleTime, lastClockTotalTime;
 	SystemStatisticsState()
-	  : machineLastSent(0), machineLastReceived(0), machineLastOutSegs(0), machineLastRetransSegs(0), lastBusyTicks(0),
+	  : lastTime(0), lastClockThread(0), lastClockProcess(0), processLastSent(0), processLastReceived(0),
+	    machineLastSent(0), machineLastReceived(0), machineLastOutSegs(0), machineLastRetransSegs(0), lastBusyTicks(0),
 	    lastReads(0), lastWrites(0), lastWriteSectors(0), lastReadSectors(0), lastClockIdleTime(0),
-	    lastClockTotalTime(0),
+	    lastClockTotalTime(0) {}
 #else
 #error Port me!
 #endif
-	    lastTime(0), lastClockThread(0), lastClockProcess(0), processLastSent(0), processLastReceived(0) {
-	}
 };
 
 #if defined(_WIN32)
@@ -1521,7 +1524,7 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 	if ((*statState)->Query == nullptr) {
 		initPdhStrings(*statState, dataFolder);
 
-		TraceEvent("SetupQuery");
+		TraceEvent("SetupQuery").log();
 		handlePdhStatus(PdhOpenQuery(nullptr, NULL, &(*statState)->Query), "PdhOpenQuery");
 
 		if (!(*statState)->pdhStrings.diskDevice.empty()) {
@@ -2070,7 +2073,7 @@ int getRandomSeed() {
 	do {
 		retryCount++;
 		if (rand_s((unsigned int*)&randomSeed) != 0) {
-			TraceEvent(SevError, "WindowsRandomSeedError");
+			TraceEvent(SevError, "WindowsRandomSeedError").log();
 			throw platform_error();
 		}
 	} while (randomSeed == 0 &&
@@ -2090,7 +2093,7 @@ int getRandomSeed() {
 #endif
 
 	if (randomSeed == 0) {
-		TraceEvent(SevError, "RandomSeedZeroError");
+		TraceEvent(SevError, "RandomSeedZeroError").log();
 		throw platform_error();
 	}
 	return randomSeed;
@@ -3419,6 +3422,10 @@ void crashHandler(int sig) {
 	std::string backtrace = platform::get_backtrace();
 
 	bool error = (sig != SIGUSR2);
+
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+	StreamCipher::cleanup();
+#endif
 
 	fflush(stdout);
 	{

@@ -39,7 +39,7 @@ struct QueuePushWorkload : TestWorkload {
 	ContinuousSample<double> commitLatencies, GRVLatencies;
 
 	QueuePushWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), commitLatencies(2000), GRVLatencies(2000), transactions("Transactions"), retries("Retries") {
+	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), commitLatencies(2000), GRVLatencies(2000) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		actorCount = getOption(options, LiteralStringRef("actorCount"), 50);
 
@@ -115,12 +115,12 @@ struct QueuePushWorkload : TestWorkload {
 					state Key lastKey;
 
 					if (self->forward) {
-						Key _lastKey = wait(tr.getKey(lastLessThan(self->endingKey), true));
+						Key _lastKey = wait(tr.getKey(lastLessThan(self->endingKey), Snapshot::True));
 						lastKey = _lastKey;
 						if (lastKey == StringRef())
 							lastKey = self->startingKey;
 					} else {
-						Key _lastKey = wait(tr.getKey(firstGreaterThan(self->startingKey), true));
+						Key _lastKey = wait(tr.getKey(firstGreaterThan(self->startingKey), Snapshot::True));
 						lastKey = _lastKey;
 						if (!normalKeys.contains(lastKey))
 							lastKey = self->endingKey;

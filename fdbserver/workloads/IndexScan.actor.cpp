@@ -33,7 +33,7 @@ struct IndexScanWorkload : KVWorkload {
 	bool singleProcess, readYourWrites;
 
 	IndexScanWorkload(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), failedTransactions(0), rowsRead(0), chunks(0), scans(0) {
+	  : KVWorkload(wcx), rowsRead(0), chunks(0), failedTransactions(0), scans(0) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		bytesPerRead = getOption(options, LiteralStringRef("bytesPerRead"), 80000);
 		transactionDuration = getOption(options, LiteralStringRef("transactionDuration"), 1.0);

@@ -185,7 +185,7 @@ std::vector<ptxn::StorageTeamID> decodeKeyServersValue(RangeResult result,
 	std::sort(src.begin(), src.end());
 	std::sort(dest.begin(), dest.end());
 	if (missingIsError && (src.size() != srcTag.size() || dest.size() != destTag.size())) {
-		TraceEvent(SevError, "AttemptedToDecodeMissingTag");
+		TraceEvent(SevError, "AttemptedToDecodeMissingTag").log();
 		for (const KeyValueRef& kv : result) {
 			Tag tag = decodeServerTagValue(kv.value);
 			UID serverID = decodeServerTagKey(kv.key);

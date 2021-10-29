@@ -22,6 +22,11 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+FDB_DEFINE_BOOLEAN_PARAM(AccessSystemKeys);
+FDB_DEFINE_BOOLEAN_PARAM(PriorityBatch);
+FDB_DEFINE_BOOLEAN_PARAM(VerifyTask);
+FDB_DEFINE_BOOLEAN_PARAM(UpdateParams);
+
 Reference<TaskFuture> Task::getDoneFuture(Reference<FutureBucket> fb) {
 	return fb->unpack(params[reservedTaskParamKeyDone]);
 }
@@ -168,14 +173,14 @@ public:
 
 		{
 			// Get a task key that is <= a random UID task key, if successful then return it
-			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(uid)), true));
+			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(uid)), Snapshot::True));
 			if (space.contains(k))
 				return Optional<Key>(k);
 		}
 
 		{
 			// Get a task key that is <= the maximum possible UID, if successful return it.
-			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(maxUIDKey)), true));
+			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(maxUIDKey)), Snapshot::True));
 			if (space.contains(k))
 				return Optional<Key>(k);
 		}
@@ -328,7 +333,7 @@ public:
 	                                        Reference<FutureBucket> futureBucket,
 	                                        Reference<Task> task,
 	                                        Reference<TaskFuncBase> taskFunc,
-	                                        bool verifyTask) {
+	                                        VerifyTask verifyTask) {
 		bool isFinished = wait(taskBucket->isFinished(tr, task));
 		if (isFinished) {
 			return Void();
@@ -390,7 +395,7 @@ public:
 					taskBucket->setOptions(tr);
 
 					// Attempt to extend the task's timeout
-					state Version newTimeout = wait(taskBucket->extendTimeout(tr, task, false));
+					state Version newTimeout = wait(taskBucket->extendTimeout(tr, task, UpdateParams::False));
 					wait(tr->commit());
 					task->timeoutVersion = newTimeout;
 					versionNow = tr->getCommittedVersion();
@@ -406,15 +411,16 @@ public:
 	                                 Reference<TaskBucket> taskBucket,
 	                                 Reference<FutureBucket> futureBucket,
 	                                 Reference<Task> task) {
+		state Reference<TaskFuncBase> taskFunc;
+		state VerifyTask verifyTask = false;
+
 		if (!task || !TaskFuncBase::isValidTask(task))
 			return false;
-
-		state Reference<TaskFuncBase> taskFunc;
 
 		try {
 			taskFunc = TaskFuncBase::create(task->params[Task::reservedTaskParamKeyType]);
 			if (taskFunc) {
-				state bool verifyTask = (task->params.find(Task::reservedTaskParamValidKey) != task->params.end());
+				verifyTask.set(task->params.find(Task::reservedTaskParamValidKey) != task->params.end());
 
 				if (verifyTask) {
 					loop {
@@ -472,7 +478,7 @@ public:
 	ACTOR static Future<Void> dispatch(Database cx,
 	                                   Reference<TaskBucket> taskBucket,
 	                                   Reference<FutureBucket> futureBucket,
-	                                   double* pollDelay,
+	                                   std::shared_ptr<double const> pollDelay,
 	                                   int maxConcurrentTasks) {
 		state std::vector<Future<bool>> tasks(maxConcurrentTasks);
 		for (auto& f : tasks)
@@ -569,7 +575,7 @@ public:
 	ACTOR static Future<Void> run(Database cx,
 	                              Reference<TaskBucket> taskBucket,
 	                              Reference<FutureBucket> futureBucket,
-	                              double* pollDelay,
+	                              std::shared_ptr<double const> pollDelay,
 	                              int maxConcurrentTasks) {
 		state Reference<AsyncVar<bool>> paused = makeReference<AsyncVar<bool>>(true);
 		state Future<Void> watchPausedFuture = watchPaused(cx, taskBucket, paused);
@@ -812,7 +818,7 @@ public:
 	ACTOR static Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr,
 	                                           Reference<TaskBucket> taskBucket,
 	                                           Reference<Task> task,
-	                                           bool updateParams,
+	                                           UpdateParams updateParams,
 	                                           Version newTimeoutVersion) {
 		taskBucket->setOptions(tr);
 
@@ -863,14 +869,17 @@ public:
 	}
 };
 
-TaskBucket::TaskBucket(const Subspace& subspace, bool sysAccess, bool priorityBatch, bool lockAware)
-  : prefix(subspace), active(prefix.get(LiteralStringRef("ac"))), available(prefix.get(LiteralStringRef("av"))),
-    available_prioritized(prefix.get(LiteralStringRef("avp"))), timeouts(prefix.get(LiteralStringRef("to"))),
-    pauseKey(prefix.pack(LiteralStringRef("pause"))), timeout(CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS),
-    system_access(sysAccess), priority_batch(priorityBatch), lock_aware(lockAware), cc("TaskBucket"),
-    dbgid(deterministicRandom()->randomUniqueID()), dispatchSlotChecksStarted("DispatchSlotChecksStarted", cc),
-    dispatchErrors("DispatchErrors", cc), dispatchDoTasks("DispatchDoTasks", cc),
-    dispatchEmptyTasks("DispatchEmptyTasks", cc), dispatchSlotChecksComplete("DispatchSlotChecksComplete", cc) {}
+TaskBucket::TaskBucket(const Subspace& subspace,
+                       AccessSystemKeys sysAccess,
+                       PriorityBatch priorityBatch,
+                       LockAware lockAware)
+  : cc("TaskBucket"), dispatchSlotChecksStarted("DispatchSlotChecksStarted", cc), dispatchErrors("DispatchErrors", cc),
+    dispatchDoTasks("DispatchDoTasks", cc), dispatchEmptyTasks("DispatchEmptyTasks", cc),
+    dispatchSlotChecksComplete("DispatchSlotChecksComplete", cc), dbgid(deterministicRandom()->randomUniqueID()),
+    prefix(subspace), active(prefix.get(LiteralStringRef("ac"))), pauseKey(prefix.pack(LiteralStringRef("pause"))),
+    available(prefix.get(LiteralStringRef("av"))), available_prioritized(prefix.get(LiteralStringRef("avp"))),
+    timeouts(prefix.get(LiteralStringRef("to"))), timeout(CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS),
+    system_access(sysAccess), priority_batch(priorityBatch), lockAware(lockAware) {}
 
 TaskBucket::~TaskBucket() {}
 
@@ -971,7 +980,7 @@ Future<bool> TaskBucket::doTask(Database cx, Reference<FutureBucket> futureBucke
 
 Future<Void> TaskBucket::run(Database cx,
                              Reference<FutureBucket> futureBucket,
-                             double* pollDelay,
+                             std::shared_ptr<double const> pollDelay,
                              int maxConcurrentTasks) {
 	return TaskBucketImpl::run(cx, Reference<TaskBucket>::addRef(this), futureBucket, pollDelay, maxConcurrentTasks);
 }
@@ -1001,7 +1010,7 @@ Future<Void> TaskBucket::finish(Reference<ReadYourWritesTransaction> tr, Referen
 
 Future<Version> TaskBucket::extendTimeout(Reference<ReadYourWritesTransaction> tr,
                                           Reference<Task> task,
-                                          bool updateParams,
+                                          UpdateParams updateParams,
                                           Version newTimeoutVersion) {
 	return TaskBucketImpl::extendTimeout(
 	    tr, Reference<TaskBucket>::addRef(this), task, updateParams, newTimeoutVersion);
@@ -1041,8 +1050,8 @@ public:
 	}
 };
 
-FutureBucket::FutureBucket(const Subspace& subspace, bool sysAccess, bool lockAware)
-  : prefix(subspace), system_access(sysAccess), lock_aware(lockAware) {}
+FutureBucket::FutureBucket(const Subspace& subspace, AccessSystemKeys sysAccess, LockAware lockAware)
+  : prefix(subspace), system_access(sysAccess), lockAware(lockAware) {}
 
 FutureBucket::~FutureBucket() {}
 

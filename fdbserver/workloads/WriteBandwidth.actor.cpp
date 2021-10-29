@@ -38,8 +38,8 @@ struct WriteBandwidthWorkload : KVWorkload {
 	ContinuousSample<double> commitLatencies, GRVLatencies;
 
 	WriteBandwidthWorkload(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), commitLatencies(2000), GRVLatencies(2000), loadTime(0.0), transactions("Transactions"),
-	    retries("Retries") {
+	  : KVWorkload(wcx), loadTime(0.0), transactions("Transactions"), retries("Retries"), commitLatencies(2000),
+	    GRVLatencies(2000) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		keysPerTransaction = getOption(options, LiteralStringRef("keysPerTransaction"), 100);
 		valueString = std::string(maxValueBytes, '.');
@@ -122,7 +122,7 @@ struct WriteBandwidthWorkload : KVWorkload {
 					                keyAfter(self->keyForIndex(startIdx + self->keysPerTransaction - 1, false))));
 
 					for (int i = 0; i < self->keysPerTransaction; i++)
-						tr.set(self->keyForIndex(startIdx + i, false), self->randomValue(), false);
+						tr.set(self->keyForIndex(startIdx + i, false), self->randomValue(), AddConflictRange::False);
 
 					start = now();
 					wait(tr.commit());
