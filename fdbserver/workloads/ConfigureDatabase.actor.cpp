@@ -274,17 +274,23 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		// perpetual wiggle will be forced to close For other cases, later ConsistencyCheck will check KV store type
 		// there
 		if (self->allowTestStorageMigration) {
-			state DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
-			state int i;
-			state std::string wiggleLocalityKeyValue = conf.perpetualStorageWiggleLocality;
-			state std::string wiggleLocalityKey;
-			state std::string wiggleLocalityValue;
-			if (wiggleLocalityKeyValue != "0") {
-				int split = wiggleLocalityKeyValue.find(':');
-				wiggleLocalityKey = wiggleLocalityKeyValue.substr(0, split);
-				wiggleLocalityValue = wiggleLocalityKeyValue.substr(split + 1);
-			}
 			loop {
+				// There exists a race where the check can start before the last transaction that singleDB issued
+				// finishes, if singleDB gets actor cancelled from a timeout at the end of a test. This means the
+				// configuration needs to be re-read in case it changed since the last loop, since it could
+				// read a stale storage engine type from the configuration initially.
+				state DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
+
+				state std::string wiggleLocalityKeyValue = conf.perpetualStorageWiggleLocality;
+				state std::string wiggleLocalityKey;
+				state std::string wiggleLocalityValue;
+				state int i;
+				if (wiggleLocalityKeyValue != "0") {
+					int split = wiggleLocalityKeyValue.find(':');
+					wiggleLocalityKey = wiggleLocalityKeyValue.substr(0, split);
+					wiggleLocalityValue = wiggleLocalityKeyValue.substr(split + 1);
+				}
+
 				state bool pass = true;
 				state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
 

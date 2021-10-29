@@ -168,7 +168,7 @@ public:
 
 	// Constructs a new copy of this DatabaseContext from the parameters of this DatabaseContext
 	Database clone() const {
-		return Database(new DatabaseContext(connectionFile,
+		return Database(new DatabaseContext(connectionRecord,
 		                                    clientInfo,
 		                                    coordinator,
 		                                    clientInfoMonitor,
@@ -232,16 +232,16 @@ public:
 
 	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a
 	                            // leader. The cluster file therefore is valid, but the database might be unavailable.
-	Reference<ClusterConnectionFile> getConnectionFile();
+	Reference<IClusterConnectionRecord> getConnectionRecord();
 
 	// Switch the database to use the new connection file, and recreate all pending watches for committed transactions.
 	//
 	// Meant to be used as part of a 'hot standby' solution to switch to the standby. A correct switch will involve
 	// advancing the version on the new cluster sufficiently far that any transaction begun with a read version from the
 	// old cluster will fail to commit. Assuming the above version-advancing is done properly, a call to
-	// switchConnectionFile guarantees that any read with a version from the old cluster will not be attempted on the
+	// switchConnectionRecord guarantees that any read with a version from the old cluster will not be attempted on the
 	// new cluster.
-	Future<Void> switchConnectionFile(Reference<ClusterConnectionFile> standby);
+	Future<Void> switchConnectionRecord(Reference<IClusterConnectionRecord> standby);
 	Future<Void> connectionFileChanged();
 	IsSwitchable switchable{ false };
 
@@ -253,8 +253,23 @@ public:
 	// Management API, create snapshot
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
+	Future<Void> getChangeFeedStream(const PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>& results,
+	                                 Key rangeID,
+	                                 Version begin = 0,
+	                                 Version end = std::numeric_limits<Version>::max(),
+	                                 KeyRange range = allKeys);
+
+	Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
+	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
+
+	Future<Void> getBlobGranuleRangesStream(const PromiseStream<KeyRange>& results, KeyRange range);
+	Future<Void> readBlobGranulesStream(const PromiseStream<Standalone<BlobGranuleChunkRef>>& results,
+	                                    KeyRange range,
+	                                    Version begin,
+	                                    Optional<Version> end);
+
 	// private:
-	explicit DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
+	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
 	                         Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
 	                         Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
 	                         Future<Void> clientInfoMonitor,
@@ -271,7 +286,7 @@ public:
 	void expireThrottles();
 
 	// Key DB-specific information
-	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
+	Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord;
 	AsyncTrigger proxiesChangeTrigger;
 	Future<Void> monitorProxiesInfoChange;
 	Future<Void> monitorTssInfoChange;
@@ -323,11 +338,14 @@ public:
 	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 
 	std::map<UID, StorageServerInfo*> server_interf;
+	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
 
 	// map from ssid -> tss interface
 	std::unordered_map<UID, StorageServerInterface> tssMapping;
 	// map from tssid -> metrics for that tss pair
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
+	// map from changeFeedId -> changeFeedRange
+	std::unordered_map<Key, KeyRange> changeFeedCache;
 
 	// map from ssid -> ss tag
 	// @note this map allows the client to identify the latest commit versions

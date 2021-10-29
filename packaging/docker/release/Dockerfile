@@ -2,7 +2,7 @@
 #
 # This source file is part of the FoundationDB open source project
 #
-# Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+# Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,7 +31,8 @@ RUN apt-get update && \
 		less>=487-0.1 \
 		vim>=2:8.0.1453-1ubuntu1.4 \
 		net-tools>=1.60+git20161116.90da8a0-1ubuntu1 \
-		jq>=1.5+dfsg-2 && \
+		jq>=1.5+dfsg-2 \
+		openssl>=1.1.1-1ubuntu2.1~18.04.9 && \
 	rm -rf /var/lib/apt/lists/*
 
 COPY misc/tini-amd64.sha256sum /tmp/

@@ -393,5 +393,11 @@ CommandFactory excludeFactory(
         "command returns \nimmediately without checking if the exclusions have completed successfully.\n"
         "If 'FORCE' is set, the command does not perform safety checks before excluding.\n"
         "If 'failed' is set, the transaction log queue is dropped pre-emptively before waiting\n"
-        "for data movement to finish and the server cannot be included again."));
+        "for data movement to finish and the server cannot be included again."
+        "\n\nWARNING of potential dataloss\n:"
+        "If a to-be-excluded server is the last server of some team(s), and 'failed' is set, the data in the team(s) "
+        "will be lost. 'failed' should be set only if the server(s) have permanently failed."
+        "In the case all servers of a team have failed permanently and dataloss has been a fact, excluding all the "
+        "servers will clean up the corresponding keyrange, and fix the invalid metadata. The keyrange will be "
+        "assigned to a new team as an empty shard."));
 } // namespace fdb_cli

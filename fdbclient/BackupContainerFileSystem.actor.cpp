@@ -22,6 +22,7 @@
 #include "fdbclient/BackupContainerAzureBlobStore.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
+#include "fdbclient/BackupContainerS3BlobStore.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
@@ -1493,6 +1494,70 @@ Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string 
 #else
 	return Void();
 #endif
+}
+
+// Get a BackupContainerFileSystem based on a container URL string
+// TODO: refactor to not duplicate IBackupContainer::openContainer. It's the exact same
+// code but returning a different template type because you can't cast between them
+Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
+    const std::string& url,
+    Optional<std::string> const& encryptionKeyFileName) {
+	static std::map<std::string, Reference<BackupContainerFileSystem>> m_cache;
+
+	Reference<BackupContainerFileSystem>& r = m_cache[url];
+	if (r)
+		return r;
+
+	try {
+		StringRef u(url);
+		if (u.startsWith("file://"_sr)) {
+			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName);
+		} else if (u.startsWith("blobstore://"_sr)) {
+			std::string resource;
+
+			// The URL parameters contain blobstore endpoint tunables as well as possible backup-specific options.
+			S3BlobStoreEndpoint::ParametersT backupParams;
+			Reference<S3BlobStoreEndpoint> bstore =
+			    S3BlobStoreEndpoint::fromString(url, &resource, &lastOpenError, &backupParams);
+
+			if (resource.empty())
+				throw backup_invalid_url();
+			for (auto c : resource)
+				if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/')
+					throw backup_invalid_url();
+			r = makeReference<BackupContainerS3BlobStore>(bstore, resource, backupParams, encryptionKeyFileName);
+		}
+#ifdef BUILD_AZURE_BACKUP
+		else if (u.startsWith("azure://"_sr)) {
+			u.eat("azure://"_sr);
+			auto accountName = u.eat("@"_sr).toString();
+			auto endpoint = u.eat("/"_sr).toString();
+			auto containerName = u.eat("/"_sr).toString();
+			r = makeReference<BackupContainerAzureBlobStore>(
+			    endpoint, accountName, containerName, encryptionKeyFileName);
+		}
+#endif
+		else {
+			lastOpenError = "invalid URL prefix";
+			throw backup_invalid_url();
+		}
+
+		r->encryptionKeyFileName = encryptionKeyFileName;
+		r->URL = url;
+		return r;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+
+		TraceEvent m(SevWarn, "BackupContainer");
+		m.detail("Description", "Invalid container specification.  See help.");
+		m.detail("URL", url);
+		m.error(e);
+		if (e.code() == error_code_backup_invalid_url)
+			m.detail("LastOpenError", lastOpenError);
+
+		throw;
+	}
 }
 
 namespace backup_test {
