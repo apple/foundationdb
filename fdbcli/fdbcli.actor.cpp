@@ -19,6 +19,7 @@
  */
 
 #include "boost/lexical_cast.hpp"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IClientApi.h"
@@ -35,6 +36,7 @@
 #include "fdbclient/Schemas.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Tuple.h"
 
@@ -1034,8 +1036,8 @@ ACTOR Future<bool> exclude(Database db,
 			    locality.c_str());
 		}
 
+		ClusterConnectionString ccs = wait(ccf->getStoredConnectionString());
 		bool foundCoordinator = false;
-		auto ccs = ClusterConnectionFile(ccf->getFilename()).getConnectionString();
 		for (const auto& c : ccs.coordinators()) {
 			if (std::count(exclusionVector.begin(), exclusionVector.end(), AddressExclusion(c.ip, c.port)) ||
 			    std::count(exclusionVector.begin(), exclusionVector.end(), AddressExclusion(c.ip))) {
@@ -1555,6 +1557,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state Database localDb;
 	state Reference<IDatabase> db;
 	state Reference<ITransaction> tr;
+	state Transaction trx;
 
 	state bool writeMode = false;
 
@@ -1584,12 +1587,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	try {
 		localDb = Database::createDatabase(ccf, opt.api_version, IsInternal::False);
 		if (!opt.exec.present()) {
-			printf("Using cluster file `%s'.\n", ccf->getFilename().c_str());
+			printf("Using cluster file `%s'.\n", ccf->getLocation().c_str());
 		}
 		db = API->createDatabase(opt.clusterFile.c_str());
 	} catch (Error& e) {
 		fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
-		printf("Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
+		printf("Unable to connect to cluster from `%s'\n", ccf->getLocation().c_str());
 		return 1;
 	}
 
@@ -1600,7 +1603,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 		    .detail("Version", FDB_VT_VERSION)
 		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
 		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
-		    .detail("ClusterFile", ccf->getFilename().c_str())
+		    .detail("ClusterFile", ccf->toString())
 		    .detail("ConnectionString", ccf->getConnectionString().toString())
 		    .setMaxFieldLength(10000)
 		    .detail("CommandLine", opt.commandLine)
@@ -1665,7 +1668,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 			// Don't put dangerous commands in the command history
 			if (line.find("writemode") == std::string::npos && line.find("expensive_data_check") == std::string::npos &&
-			    line.find("unlock") == std::string::npos)
+			    line.find("unlock") == std::string::npos && line.find("blobrange") == std::string::npos)
 				linenoise.historyAdd(line);
 		}
 
@@ -1873,6 +1876,20 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "lock")) {
 					bool _result = wait(makeInterruptable(lockCommandActor(db, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "changefeed")) {
+					bool _result = wait(makeInterruptable(changeFeedCommandActor(localDb, tokens, warn)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "blobrange")) {
+					bool _result = wait(makeInterruptable(blobRangeCommandActor(localDb, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;

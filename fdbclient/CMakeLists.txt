@@ -20,12 +20,23 @@ set(FDBCLIENT_SRCS
   BackupContainerS3BlobStore.h
   ClientBooleanParams.cpp
   ClientBooleanParams.h
+  BlobWorkerInterface.h
+  BlobGranuleReader.actor.cpp
+  BlobGranuleReader.actor.h
+  BlobGranuleCommon.h
+  BlobWorkerCommon.h
   ClientKnobCollection.cpp
   ClientKnobCollection.h
   ClientKnobs.cpp
   ClientKnobs.h
   ClientLogEvents.h
   ClientWorkerInterface.h
+  ClusterConnectionFile.actor.cpp
+  ClusterConnectionFile.h
+  ClusterConnectionKey.actor.cpp
+  ClusterConnectionKey.actor.h
+  ClusterConnectionMemoryRecord.actor.cpp
+  ClusterConnectionMemoryRecord.h
   ClusterInterface.h
   CommitProxyInterface.h
   CommitTransaction.h
@@ -67,6 +78,8 @@ set(FDBCLIENT_SRCS
   MonitorLeader.actor.cpp
   MonitorLeader.h
   MultiVersionAssignmentVars.h
+  ClientLibManagement.actor.cpp
+  ClientLibManagement.actor.h
   MultiVersionTransaction.actor.cpp
   MultiVersionTransaction.h
   MutationList.h

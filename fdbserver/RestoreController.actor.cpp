@@ -856,18 +856,20 @@ ACTOR static Future<Void> insertRangeVersion(KeyRangeMap<Version>* pRangeVersion
 		r->value() = std::max(r->value(), file->version);
 	}
 
-	// Dump the new key ranges
-	ranges = pRangeVersions->ranges();
-	int i = 0;
-	for (auto r = ranges.begin(); r != ranges.end(); ++r) {
-		TraceEvent(SevDebug, "RangeVersionsAfterUpdate")
-		    .detail("File", file->toString())
-		    .detail("FileRange", fileRange.toString())
-		    .detail("FileVersion", file->version)
-		    .detail("RangeIndex", i++)
-		    .detail("RangeBegin", r->begin())
-		    .detail("RangeEnd", r->end())
-		    .detail("RangeVersion", r->value());
+	if (SERVER_KNOBS->FASTRESTORE_DUMP_INSERT_RANGE_VERSION) {
+		// Dump the new key ranges for debugging purpose.
+		ranges = pRangeVersions->ranges();
+		int i = 0;
+		for (auto r = ranges.begin(); r != ranges.end(); ++r) {
+			TraceEvent(SevDebug, "RangeVersionsAfterUpdate")
+			    .detail("File", file->toString())
+			    .detail("FileRange", fileRange.toString())
+			    .detail("FileVersion", file->version)
+			    .detail("RangeIndex", i++)
+			    .detail("RangeBegin", r->begin())
+			    .detail("RangeEnd", r->end())
+			    .detail("RangeVersion", r->value());
+		}
 	}
 
 	return Void();

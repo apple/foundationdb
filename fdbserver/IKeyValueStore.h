@@ -30,10 +30,12 @@ public:
 	// IClosable is a base interface for any disk-backed data structure that needs to support asynchronous errors,
 	// shutdown and deletion
 
-	virtual Future<Void> getError() = 0; // asynchronously throws an error if there is an internal error. Never set
-	                                     // inside (on the stack of) a call to another API function on this object.
-	virtual Future<Void> onClosed() = 0; // the future is set to Void when this is totally shut down after dispose() or
-	                                     // close().  But this function cannot be called after dispose or close!
+	virtual Future<Void> getError()
+	    const = 0; // asynchronously throws an error if there is an internal error. Never set
+	               // inside (on the stack of) a call to another API function on this object.
+	virtual Future<Void> onClosed()
+	    const = 0; // the future is set to Void when this is totally shut down after dispose() or
+	               // close().  But this function cannot be called after dispose or close!
 	virtual void dispose() = 0; // permanently delete the data AND invalidate this interface
 	virtual void close() = 0; // invalidate this interface, but do not delete the data.  Outstanding operations may or
 	                          // may not take effect in the background.
