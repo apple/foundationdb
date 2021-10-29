@@ -36,7 +36,6 @@
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/ProxyCommitData.actor.h"
@@ -52,88 +51,37 @@
 struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	UID dbgid;
 
-	AsyncTrigger registrationTrigger;
 	Version lastEpochEnd, // The last version in the old epoch not (to be) rolled back in this recovery
 	    recoveryTransactionVersion; // The first version in this epoch
-	double lastCommitTime;
 
 	Version liveCommittedVersion; // The largest live committed version reported by commit proxies.
 	bool databaseLocked;
 	Optional<Value> proxyMetadataVersion;
 	Version minKnownCommittedVersion;
 
-	DatabaseConfiguration originalConfiguration;
-	DatabaseConfiguration configuration;
-	std::vector<Optional<Key>> primaryDcId;
-	std::vector<Optional<Key>> remoteDcIds;
-	bool hasConfiguration;
-
 	ServerCoordinators coordinators;
 
-	Reference<ILogSystem> logSystem;
 	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
-	LogSystemDiskQueueAdapter* txnStateLogAdapter;
 	IKeyValueStore* txnStateStore;
-	int64_t memoryLimit;
-	std::map<Optional<Value>, int8_t> dcId_locality;
-	std::vector<Tag> allTags;
-
-	int8_t getNextLocality() {
-		int8_t maxLocality = -1;
-		for (auto it : dcId_locality) {
-			maxLocality = std::max(maxLocality, it.second);
-		}
-		return maxLocality + 1;
-	}
 
 	std::vector<CommitProxyInterface> commitProxies;
-	std::vector<CommitProxyInterface> provisionalCommitProxies;
-	std::vector<GrvProxyInterface> grvProxies;
-	std::vector<GrvProxyInterface> provisionalGrvProxies;
-	std::vector<ResolverInterface> resolvers;
-
 	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
 
-	Standalone<StringRef> dbId;
-
 	MasterInterface myInterface;
-	const ClusterControllerFullInterface
-	    clusterController; // If the cluster controller changes, this master will die, so this is immutable.
-
-	Promise<Void> cstateUpdated;
-	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
-	int64_t registrationCount; // Number of different MasterRegistrationRequests sent to clusterController
-
-	RecoveryState recoveryState;
 
 	AsyncVar<Standalone<VectorRef<ResolverMoveRef>>> resolverChanges;
 	Version resolverChangesVersion;
 	std::set<UID> resolverNeedingChanges;
 
-	PromiseStream<Future<Void>> addActor;
-	Reference<AsyncVar<bool>> recruitmentStalled;
 	bool forceRecovery;
-	bool neverCreated;
-	int8_t safeLocality;
-	int8_t primaryLocality;
-
-	std::vector<WorkerInterface> backupWorkers; // Recruited backup workers from cluster controller.
 
 	CounterCollection cc;
-	Counter changeCoordinatorsRequests;
 	Counter getCommitVersionRequests;
-	Counter backupWorkerDoneRequests;
 	Counter getLiveCommittedVersionRequests;
 	Counter reportLiveCommittedVersionRequests;
 
 	Future<Void> logger;
-
-	Reference<EventCacheHolder> masterRecoveryStateEventHolder;
-	Reference<EventCacheHolder> masterRecoveryGenerationsEventHolder;
-	Reference<EventCacheHolder> masterRecoveryDurationEventHolder;
-	Reference<EventCacheHolder> masterRecoveryAvailableEventHolder;
-	Reference<EventCacheHolder> recoveredConfigEventHolder;
 
 	MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 	           MasterInterface const& myInterface,
@@ -144,22 +92,12 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	           bool forceRecovery)
 
 	  : dbgid(myInterface.id()), lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
-	    lastCommitTime(0), liveCommittedVersion(invalidVersion), databaseLocked(false),
-	    minKnownCommittedVersion(invalidVersion), hasConfiguration(false), coordinators(coordinators),
-	    version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr), memoryLimit(2e9), dbId(dbId),
-	    myInterface(myInterface), clusterController(clusterController), dbInfo(dbInfo), registrationCount(0),
-	    addActor(addActor), recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery),
-	    neverCreated(false), safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid),
-	    cc("Master", dbgid.toString()), changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
+	    liveCommittedVersion(invalidVersion), databaseLocked(false), minKnownCommittedVersion(invalidVersion),
+	    coordinators(coordinators), version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr),
+	    myInterface(myInterface), forceRecovery(forceRecovery), cc("Master", dbgid.toString()),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
-	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
-	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
-	    masterRecoveryStateEventHolder(makeReference<EventCacheHolder>("MasterRecoveryState")),
-	    masterRecoveryGenerationsEventHolder(makeReference<EventCacheHolder>("MasterRecoveryGenerations")),
-	    masterRecoveryDurationEventHolder(makeReference<EventCacheHolder>("MasterRecoveryDuration")),
-	    masterRecoveryAvailableEventHolder(makeReference<EventCacheHolder>("MasterRecoveryAvailable")),
-	    recoveredConfigEventHolder(makeReference<EventCacheHolder>("RecoveredConfig")) {
+	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc) {
 		logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
 		if (forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
