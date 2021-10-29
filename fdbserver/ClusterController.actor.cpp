@@ -4128,6 +4128,9 @@ ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
 		state ChangeCoordinatorsRequest changeCoordinatorsRequest = req;
 
 		// Kill cluster controller to facilitate coordinator registration update
+		if (self->controllerData->shouldCommitSuicide) {
+			throw restart_cluster_controller();
+		}
 		self->controllerData->shouldCommitSuicide = true;
 
 		while (!self->cstate.previousWrite.isReady()) {
