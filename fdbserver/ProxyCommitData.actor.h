@@ -256,7 +256,7 @@ struct ProxyCommitData {
 	    mostRecentProcessedRequestNumber(0), getConsistentReadVersion(getConsistentReadVersion), commit(commit),
 	    lastCoalesceTime(0), localCommitBatchesStarted(0), locked(false),
 	    commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), firstProxy(firstProxy),
-	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true)), db(db),
+	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::TRUE)), db(db),
 	    singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0),
 	    lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0),
 	    lastMasterReset(now()), lastResolverReset(now()), tLogGroupCollection(makeReference<TLogGroupCollection>(db)) {

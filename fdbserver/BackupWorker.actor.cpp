@@ -243,7 +243,7 @@ struct BackupData {
 	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), popVersion(req.startVersion - 1),
 	    cc("BackupWorker", myId.toString()), pulledVersion(0), paused(false),
 	    lock(new FlowLock(SERVER_KNOBS->BACKUP_LOCK_BYTES)) {
-		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
+		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::TRUE);
 
 		specialCounter(cc, "SavedVersion", [this]() { return this->savedVersion; });
 		specialCounter(cc, "MinKnownCommittedVersion", [this]() { return this->minKnownCommittedVersion; });

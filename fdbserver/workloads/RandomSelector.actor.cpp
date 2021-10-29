@@ -103,7 +103,7 @@ struct RandomSelectorWorkload : TestWorkload {
 		state int offsetB;
 		state int randomLimit;
 		state int randomByteLimit;
-		state bool reverse;
+		state Reverse reverse = Reverse::FALSE;
 		state Error error;
 
 		clientID = format("%08d", self->clientId);
@@ -438,7 +438,7 @@ struct RandomSelectorWorkload : TestWorkload {
 						randomLimit = deterministicRandom()->randomInt(0, 2 * self->maxOffset + self->maxKeySpace);
 						randomByteLimit =
 						    deterministicRandom()->randomInt(0, (self->maxOffset + self->maxKeySpace) * 512);
-						reverse = deterministicRandom()->random01() > 0.5 ? false : true;
+						reverse.set(deterministicRandom()->coinflip());
 
 						//TraceEvent("RYOWgetRange").detail("KeyA", myKeyA).detail("KeyB", myKeyB).detail("OnEqualA",onEqualA).detail("OnEqualB",onEqualB).detail("OffsetA",offsetA).detail("OffsetB",offsetB).detail("RandomLimit",randomLimit).detail("RandomByteLimit", randomByteLimit).detail("Reverse", reverse);
 
@@ -447,7 +447,7 @@ struct RandomSelectorWorkload : TestWorkload {
 						    wait(trRYOW.getRange(KeySelectorRef(StringRef(clientID + "b/" + myKeyA), onEqualA, offsetA),
 						                         KeySelectorRef(StringRef(clientID + "b/" + myKeyB), onEqualB, offsetB),
 						                         randomLimit,
-						                         false,
+						                         Snapshot::FALSE,
 						                         reverse));
 						getRangeTest1 = getRangeTest;
 
@@ -457,7 +457,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								    tr.getRange(KeySelectorRef(StringRef(clientID + "d/" + myKeyA), onEqualA, offsetA),
 								                KeySelectorRef(StringRef(clientID + "d/" + myKeyB), onEqualB, offsetB),
 								                randomLimit,
-								                false,
+								                Snapshot::FALSE,
 								                reverse));
 
 								bool fail = false;

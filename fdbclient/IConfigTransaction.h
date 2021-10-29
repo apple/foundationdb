@@ -45,7 +45,9 @@ public:
 
 	// Not implemented:
 	void setVersion(Version) override { throw client_invalid_operation(); }
-	Future<Key> getKey(KeySelector const& key, bool snapshot = false) override { throw client_invalid_operation(); }
+	Future<Key> getKey(KeySelector const& key, Snapshot snapshot = Snapshot::FALSE) override {
+		throw client_invalid_operation();
+	}
 	Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) override {
 		throw client_invalid_operation();
 	}

@@ -71,22 +71,22 @@ public:
 	void setVersion(Version v) override { tr.setVersion(v); }
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override { return tr.getCachedReadVersion(); }
-	Future<Optional<Value>> get(const Key& key, bool snapshot = false) override;
-	Future<Key> getKey(const KeySelector& key, bool snapshot = false) override;
+	Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::FALSE) override;
+	Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::FALSE) override;
 	Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
 	                                            const KeySelector& end,
 	                                            int limit,
-	                                            bool snapshot = false,
-	                                            bool reverse = false) override;
+	                                            Snapshot = Snapshot::FALSE,
+	                                            Reverse = Reverse::FALSE) override;
 	Future<Standalone<RangeResultRef>> getRange(KeySelector begin,
 	                                            KeySelector end,
 	                                            GetRangeLimits limits,
-	                                            bool snapshot = false,
-	                                            bool reverse = false) override;
+	                                            Snapshot = Snapshot::FALSE,
+	                                            Reverse = Reverse::FALSE) override;
 	Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys,
 	                                            int limit,
-	                                            bool snapshot = false,
-	                                            bool reverse = false) {
+	                                            Snapshot snapshot = Snapshot::FALSE,
+	                                            Reverse reverse = Reverse::FALSE) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limit,
@@ -95,8 +95,8 @@ public:
 	}
 	Future<RangeResult> getRange(const KeyRange& keys,
 	                             GetRangeLimits limits,
-	                             bool snapshot = false,
-	                             bool reverse = false) {
+	                             Snapshot snapshot = Snapshot::FALSE,
+	                             Reverse reverse = Reverse::FALSE) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limits,

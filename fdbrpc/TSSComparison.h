@@ -41,6 +41,7 @@ struct DetailedTSSMismatch {
 struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	CounterCollection cc;
 	Counter requests;
+	Counter streamComparisons;
 	Counter ssErrors;
 	Counter tssErrors;
 	Counter tssTimeouts;
@@ -99,9 +100,10 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	}
 
 	TSSMetrics()
-	  : cc("TSSClientMetrics"), requests("Requests", cc), ssErrors("SSErrors", cc), tssErrors("TSSErrors", cc),
-	    tssTimeouts("TSSTimeouts", cc), mismatches("Mismatches", cc), SSgetValueLatency(1000), SSgetKeyLatency(1000),
-	    SSgetKeyValuesLatency(1000), TSSgetValueLatency(1000), TSSgetKeyLatency(1000), TSSgetKeyValuesLatency(1000) {}
+	  : cc("TSSClientMetrics"), requests("Requests", cc), streamComparisons("StreamComparisons", cc),
+	    ssErrors("SSErrors", cc), tssErrors("TSSErrors", cc), tssTimeouts("TSSTimeouts", cc),
+	    mismatches("Mismatches", cc), SSgetValueLatency(1000), SSgetKeyLatency(1000), SSgetKeyValuesLatency(1000),
+	    TSSgetValueLatency(1000), TSSgetKeyLatency(1000), TSSgetKeyValuesLatency(1000) {}
 };
 
 template <class Rep>

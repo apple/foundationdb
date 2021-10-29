@@ -138,8 +138,8 @@ ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo>> db
 
 Database openDBOnServer(Reference<AsyncVar<ServerDBInfo>> const& db,
                         TaskPriority taskID,
-                        bool enableLocalityLoadBalance,
-                        bool lockAware) {
+                        LockAware lockAware,
+                        EnableLocalityLoadBalance enableLocalityLoadBalance) {
 	auto info = makeReference<AsyncVar<ClientDBInfo>>();
 	auto cx = DatabaseContext::create(info,
 	                                  extractClientInfo(db, info),
@@ -1222,15 +1222,15 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 		if (metricsConnFile.size() > 0) {
 			try {
 				state Database db =
-				    Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST, true, locality);
+				    Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST, IsInternal::TRUE, locality);
 				metricsLogger = runMetrics(db, KeyRef(metricsPrefix));
 			} catch (Error& e) {
 				TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile").error(e).detail("ConnFile", metricsConnFile);
 			}
 		} else {
-			bool lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff';
-			metricsLogger = runMetrics(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, lockAware),
-			                           KeyRef(metricsPrefix));
+			auto lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff' ? LockAware::TRUE : LockAware::FALSE;
+			metricsLogger =
+			    runMetrics(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, lockAware), KeyRef(metricsPrefix));
 		}
 	}
 

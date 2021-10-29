@@ -168,7 +168,7 @@ public:
 	                             KeySelector begin,
 	                             KeySelector end,
 	                             GetRangeLimits limits,
-	                             bool reverse = false);
+	                             Reverse = Reverse::FALSE);
 
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value);
 
@@ -209,13 +209,13 @@ private:
 	                                               KeySelector begin,
 	                                               KeySelector end,
 	                                               GetRangeLimits limits,
-	                                               bool reverse);
+	                                               Reverse reverse);
 	ACTOR static Future<RangeResult> getRangeAggregationActor(SpecialKeySpace* sks,
 	                                                          ReadYourWritesTransaction* ryw,
 	                                                          KeySelector begin,
 	                                                          KeySelector end,
 	                                                          GetRangeLimits limits,
-	                                                          bool reverse);
+	                                                          Reverse reverse);
 
 	KeyRangeMap<SpecialKeyRangeReadImpl*> readImpls;
 	KeyRangeMap<SpecialKeySpace::MODULE> modules;

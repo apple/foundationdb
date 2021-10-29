@@ -533,6 +533,8 @@ public:
 		}
 	}
 
+	void reset() { *this = ReplyPromiseStream<T>(); }
+
 private:
 	NetNotifiedQueueWithAcknowledgements<T>* queue;
 	SAV<Void>* errors;

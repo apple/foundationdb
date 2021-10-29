@@ -158,13 +158,13 @@ public:
 	ReadFromLocalConfigEnvironment(std::string const& dataDir,
 	                               std::string const& configPath,
 	                               std::map<std::string, std::string> const& manualKnobOverrides)
-	  : dataDir(dataDir), localConfiguration(dataDir, configPath, manualKnobOverrides, IsTest::YES), consumer(Never()) {
-	}
+	  : dataDir(dataDir), localConfiguration(dataDir, configPath, manualKnobOverrides, IsTest::TRUE),
+	    consumer(Never()) {}
 
 	Future<Void> setup() { return setup(this); }
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
-		localConfiguration = LocalConfiguration(dataDir, newConfigPath, {}, IsTest::YES);
+		localConfiguration = LocalConfiguration(dataDir, newConfigPath, {}, IsTest::TRUE);
 		return setup();
 	}
 

@@ -30,7 +30,7 @@ struct RestoreFromBlobWorkload : TestWorkload {
 	double restoreAfter;
 	Key backupTag;
 	Standalone<StringRef> backupURL;
-	bool waitForComplete;
+	WaitForComplete waitForComplete{ false };
 
 	static constexpr const char* DESCRIPTION = "RestoreFromBlob";
 
@@ -44,7 +44,7 @@ struct RestoreFromBlobWorkload : TestWorkload {
 		auto secretKeyEnvVar =
 		    getOption(options, LiteralStringRef("secretKeyVar"), LiteralStringRef("BLOB_SECRET_KEY")).toString();
 		bool provideKeys = getOption(options, LiteralStringRef("provideKeys"), false);
-		waitForComplete = getOption(options, LiteralStringRef("waitForComplete"), true);
+		waitForComplete.set(getOption(options, LiteralStringRef("waitForComplete"), true));
 		if (provideKeys) {
 			updateBackupURL(backupURLString, accessKeyEnvVar, "<access_key>", secretKeyEnvVar, "<secret_key>");
 		}

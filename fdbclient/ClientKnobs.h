@@ -22,8 +22,12 @@
 #define FDBCLIENT_KNOBS_H
 #pragma once
 
+#include "flow/BooleanParam.h"
 #include "flow/Knobs.h"
 #include "flow/flow.h"
+
+FDB_DECLARE_BOOLEAN_PARAM(Randomize);
+FDB_DECLARE_BOOLEAN_PARAM(IsSimulated);
 
 class ClientKnobs : public KnobsImpl<ClientKnobs> {
 public:

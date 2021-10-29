@@ -864,7 +864,7 @@ public:
 			addShard(ShardInfo::newNotAssigned(allKeys));
 		}
 
-		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
+		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::TRUE);
 	}
 
 	// Puts the given shard into shards.  The caller is responsible for adding shards
@@ -2793,7 +2793,7 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 		loop {
 			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, SERVER_KNOBS->FETCH_BLOCK_BYTES);
 			limits.minRows = 0;
-			state RangeResult rep = wait(tr->getRange(begin, end, limits, true));
+			state RangeResult rep = wait(tr->getRange(begin, end, limits, Snapshot::TRUE));
 			if (!rep.more) {
 				rep.readThrough = keys.end;
 			}
@@ -2906,7 +2906,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			tr.info.taskID = TaskPriority::FetchKeys;
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold = SERVER_KNOBS->FETCH_USING_STREAMING
-			                              ? tr.getRangeStream(results, keys, GetRangeLimits(), true)
+			                              ? tr.getRangeStream(results, keys, GetRangeLimits(), Snapshot::TRUE)
 			                              : tryGetRange(results, &tr, keys);
 			state Key nfk = keys.begin;
 
@@ -2973,7 +2973,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 					// FIXME: remove when we no longer support upgrades from 5.X
 					if (debug_getRangeRetries >= 100) {
-						data->cx->enableLocalityLoadBalance = false;
+						data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::FALSE;
 						TraceEvent(SevWarnAlways, "FKDisableLB").detail("FKID", fetchKeysID);
 					}
 
@@ -3021,7 +3021,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		}
 
 		// FIXME: remove when we no longer support upgrades from 5.X
-		data->cx->enableLocalityLoadBalance = true;
+		data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::TRUE;
 		TraceEvent(SevWarnAlways, "FKReenableLB").detail("FKID", fetchKeysID);
 
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.

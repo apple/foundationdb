@@ -33,6 +33,7 @@
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ResolverInterface.h"
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/FDBTypes.h"
@@ -916,8 +917,8 @@ struct ServerDBInfo;
 
 class Database openDBOnServer(Reference<AsyncVar<ServerDBInfo>> const& db,
                               TaskPriority taskID = TaskPriority::DefaultEndpoint,
-                              bool enableLocalityLoadBalance = true,
-                              bool lockAware = false);
+                              LockAware = LockAware::FALSE,
+                              EnableLocalityLoadBalance = EnableLocalityLoadBalance::TRUE);
 ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> a,
                                            Reference<AsyncVar<Optional<struct ClusterInterface>>> b);
 

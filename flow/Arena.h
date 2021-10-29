@@ -237,12 +237,12 @@ public:
 	}
 
 	template <class R>
-	Optional<R> map(std::function<R(T)> f) const {
-		if (present()) {
-			return Optional<R>(f(get()));
-		} else {
-			return Optional<R>();
-		}
+	Optional<R> map(std::function<R(T)> f) const& {
+		return present() ? Optional<R>(f(get())) : Optional<R>();
+	}
+	template <class R>
+	Optional<R> map(std::function<R(T)> f) && {
+		return present() ? Optional<R>(f(std::move(*this).get())) : Optional<R>();
 	}
 
 	bool present() const { return impl.has_value(); }
@@ -258,7 +258,14 @@ public:
 		UNSTOPPABLE_ASSERT(impl.has_value());
 		return std::move(impl.value());
 	}
-	T orDefault(T const& default_value) const { return impl.value_or(default_value); }
+	template <class U>
+	T orDefault(U&& defaultValue) const& {
+		return impl.value_or(std::forward<U>(defaultValue));
+	}
+	template <class U>
+	T orDefault(U&& defaultValue) && {
+		return std::move(impl).value_or(std::forward<U>(defaultValue));
+	}
 
 	// Spaceship operator.  Treats not-present as less-than present.
 	int compare(Optional const& rhs) const {

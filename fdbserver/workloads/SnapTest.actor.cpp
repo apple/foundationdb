@@ -183,7 +183,7 @@ public: // workload functions
 					Key key1Ref(Key1);
 					std::string Val1 = std::to_string(id);
 					Value val1Ref(Val1);
-					tr.set(key1Ref, val1Ref, false);
+					tr.set(key1Ref, val1Ref, AddConflictRange::FALSE);
 				}
 				wait(tr.commit());
 				break;

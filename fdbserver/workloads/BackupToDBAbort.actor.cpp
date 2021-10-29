@@ -56,10 +56,10 @@ struct BackupToDBAbort : TestWorkload {
 			wait(backupAgent.submitBackup(self->extraDB,
 			                              BackupAgentBase::getDefaultTag(),
 			                              self->backupRanges,
-			                              false,
+			                              StopWhenDone::FALSE,
 			                              StringRef(),
 			                              StringRef(),
-			                              true));
+			                              LockDB::TRUE));
 			TraceEvent("BDBA_Submit2");
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_duplicate)
@@ -80,7 +80,7 @@ struct BackupToDBAbort : TestWorkload {
 		TraceEvent("BDBA_Start").detail("Delay", self->abortDelay);
 		wait(delay(self->abortDelay));
 		TraceEvent("BDBA_Wait");
-		wait(success(backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false)));
+		wait(success(backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), StopWhenDone::FALSE)));
 		TraceEvent("BDBA_Lock");
 		wait(lockDatabase(cx, self->lockid));
 		TraceEvent("BDBA_Abort");

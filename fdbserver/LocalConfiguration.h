@@ -29,8 +29,7 @@
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
 
-// To be used effectively as a boolean parameter with added type safety
-enum class IsTest { NO, YES };
+FDB_DECLARE_BOOLEAN_PARAM(IsTest);
 
 /*
  * Each worker maintains a LocalConfiguration object used to update its knob collection.
@@ -52,7 +51,7 @@ public:
 	LocalConfiguration(std::string const& dataFolder,
 	                   std::string const& configPath,
 	                   std::map<std::string, std::string> const& manualKnobOverrides,
-	                   IsTest isTest = IsTest::NO);
+	                   IsTest = IsTest::FALSE);
 	LocalConfiguration(LocalConfiguration&&);
 	LocalConfiguration& operator=(LocalConfiguration&&);
 	~LocalConfiguration();

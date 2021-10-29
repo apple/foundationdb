@@ -29,6 +29,8 @@
 typedef bool (*compare_pages)(void*, void*);
 typedef int64_t loc_t;
 
+FDB_DEFINE_BOOLEAN_PARAM(CheckHashes);
+
 // 0 -> 0
 // 1 -> 4k
 // 4k -> 4k
@@ -1243,9 +1245,9 @@ private:
 			// start and end are on the same page
 			ASSERT(pagedData.size() == sizeof(Page));
 			Page* data = reinterpret_cast<Page*>(const_cast<uint8_t*>(pagedData.begin()));
-			if (ch == CheckHashes::YES && !data->checkHash())
+			if (ch && !data->checkHash())
 				throw io_error();
-			if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload)
+			if (!ch && data->payloadSize > Page::maxPayload)
 				throw io_error();
 			pagedData.contents() = pagedData.substr(sizeof(PageHeader) + startingOffset, endingOffset - startingOffset);
 			return pagedData;
@@ -1254,9 +1256,9 @@ private:
 			// we don't have to double allocate in a hot, memory hungry call.
 			uint8_t* buf = mutateString(pagedData);
 			Page* data = reinterpret_cast<Page*>(const_cast<uint8_t*>(pagedData.begin()));
-			if (ch == CheckHashes::YES && !data->checkHash())
+			if (ch && !data->checkHash())
 				throw io_error();
-			if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload)
+			if (!ch && data->payloadSize > Page::maxPayload)
 				throw io_error();
 
 			// Only start copying from `start` in the first page.
@@ -1266,9 +1268,9 @@ private:
 				buf += length;
 			}
 			data++;
-			if (ch == CheckHashes::YES && !data->checkHash())
+			if (ch && !data->checkHash())
 				throw io_error();
-			if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload)
+			if (!ch && data->payloadSize > Page::maxPayload)
 				throw io_error();
 
 			// Copy all the middle pages
@@ -1279,9 +1281,9 @@ private:
 				memmove(buf, data->payload, length);
 				buf += length;
 				data++;
-				if (ch == CheckHashes::YES && !data->checkHash())
+				if (ch && !data->checkHash())
 					throw io_error();
-				if (ch == CheckHashes::NO && data->payloadSize > Page::maxPayload)
+				if (!ch && data->payloadSize > Page::maxPayload)
 					throw io_error();
 			}
 

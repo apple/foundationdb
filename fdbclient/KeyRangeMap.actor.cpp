@@ -119,7 +119,8 @@ void krmSetPreviouslyEmptyRange(CommitTransactionRef& tr,
 ACTOR Future<Void> krmSetRange(Transaction* tr, Key mapPrefix, KeyRange range, Value value) {
 	state KeyRange withPrefix =
 	    KeyRangeRef(mapPrefix.toString() + range.begin.toString(), mapPrefix.toString() + range.end.toString());
-	RangeResult old = wait(tr->getRange(lastLessOrEqual(withPrefix.end), firstGreaterThan(withPrefix.end), 1, true));
+	RangeResult old =
+	    wait(tr->getRange(lastLessOrEqual(withPrefix.end), firstGreaterThan(withPrefix.end), 1, Snapshot::TRUE));
 
 	Value oldValue;
 	bool hasResult = old.size() > 0 && old[0].key.startsWith(mapPrefix);
@@ -140,7 +141,8 @@ ACTOR Future<Void> krmSetRange(Transaction* tr, Key mapPrefix, KeyRange range, V
 ACTOR Future<Void> krmSetRange(Reference<ReadYourWritesTransaction> tr, Key mapPrefix, KeyRange range, Value value) {
 	state KeyRange withPrefix =
 	    KeyRangeRef(mapPrefix.toString() + range.begin.toString(), mapPrefix.toString() + range.end.toString());
-	RangeResult old = wait(tr->getRange(lastLessOrEqual(withPrefix.end), firstGreaterThan(withPrefix.end), 1, true));
+	RangeResult old =
+	    wait(tr->getRange(lastLessOrEqual(withPrefix.end), firstGreaterThan(withPrefix.end), 1, Snapshot::TRUE));
 
 	Value oldValue;
 	bool hasResult = old.size() > 0 && old[0].key.startsWith(mapPrefix);
@@ -175,8 +177,10 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 	    KeyRangeRef(mapPrefix.toString() + maxRange.begin.toString(), mapPrefix.toString() + maxRange.end.toString());
 
 	state vector<Future<RangeResult>> keys;
-	keys.push_back(tr->getRange(lastLessThan(withPrefix.begin), firstGreaterOrEqual(withPrefix.begin), 1, true));
-	keys.push_back(tr->getRange(lastLessOrEqual(withPrefix.end), firstGreaterThan(withPrefix.end) + 1, 2, true));
+	keys.push_back(
+	    tr->getRange(lastLessThan(withPrefix.begin), firstGreaterOrEqual(withPrefix.begin), 1, Snapshot::TRUE));
+	keys.push_back(
+	    tr->getRange(lastLessOrEqual(withPrefix.end), firstGreaterThan(withPrefix.end) + 1, 2, Snapshot::TRUE));
 	wait(waitForAll(keys));
 
 	// Determine how far to extend this range at the beginning

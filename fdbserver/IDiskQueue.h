@@ -24,11 +24,9 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/IKeyValueStore.h"
+#include "flow/BooleanParam.h"
 
-enum class CheckHashes {
-	NO,
-	YES,
-};
+FDB_DECLARE_BOOLEAN_PARAM(CheckHashes);
 
 class IDiskQueue : public IClosable {
 public:

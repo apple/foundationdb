@@ -5778,7 +5778,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 	state double lastLimited = 0;
 	self->addActor.send(monitorBatchLimitedTime(self->dbInfo, &lastLimited));
 
-	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, true, true);
+	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::TRUE);
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
 
 	// cx->setOption( FDBDatabaseOptions::LOCATION_CACHE_SIZE, StringRef((uint8_t*)
@@ -6123,7 +6123,7 @@ static std::set<int> const& normalDataDistributorErrors() {
 }
 
 ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<struct ServerDBInfo>> db) {
-	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, true, true);
+	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::TRUE);
 	state ReadYourWritesTransaction tr(cx);
 	loop {
 		try {
@@ -6464,7 +6464,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	state Reference<DataDistributorData> self(new DataDistributorData(db, di.id()));
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 	state PromiseStream<GetMetricsListRequest> getShardMetricsList;
-	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, true, true);
+	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::TRUE);
 	state ActorCollection actors(false);
 	state DDEnabledState ddEnabledState;
 	self->addActor.send(actors.getResult());
@@ -6515,8 +6515,8 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
                                                      Reference<IReplicationPolicy> policy,
                                                      int processCount) {
-	Database database =
-	    DatabaseContext::create(makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), false);
+	Database database = DatabaseContext::create(
+	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::FALSE);
 
 	DatabaseConfiguration conf;
 	conf.storageTeamSize = teamSize;
@@ -6558,8 +6558,8 @@ std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
 std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize,
                                                             Reference<IReplicationPolicy> policy,
                                                             int processCount) {
-	Database database =
-	    DatabaseContext::create(makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), false);
+	Database database = DatabaseContext::create(
+	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::FALSE);
 
 	DatabaseConfiguration conf;
 	conf.storageTeamSize = teamSize;

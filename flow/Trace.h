@@ -320,11 +320,11 @@ struct TraceableStringImpl : std::true_type {
 		std::string result;
 		result.reserve(size - nonPrintables + (nonPrintables * 4) + numBackslashes);
 		for (auto iter = TraceableString<T>::begin(value); !TraceableString<T>::atEnd(value, iter); ++iter) {
-			if (isPrintable(*iter)) {
+			if (*iter == '\\') {
+				result.push_back('\\');
+				result.push_back('\\');
+			} else if (isPrintable(*iter)) {
 				result.push_back(*iter);
-			} else if (*iter == '\\') {
-				result.push_back('\\');
-				result.push_back('\\');
 			} else {
 				const uint8_t byte = *iter;
 				result.push_back('\\');
@@ -431,6 +431,7 @@ private:
 	void setField(const char* key, int64_t value);
 	void setField(const char* key, double value);
 	void setField(const char* key, const std::string& value);
+	void setThreadId();
 
 	TraceEvent& errorImpl(const class Error& e, bool includeCancelled = false);
 	// Private version of detailf that does NOT write to the eventMetric.  This is to be used by other detail methods
