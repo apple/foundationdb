@@ -371,7 +371,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 	state PromiseStream<Future<Void>> addActor;
 	state Reference<MasterData> self(new MasterData(
 	    db, mi, coordinators, db->get().clusterInterface, LiteralStringRef(""), addActor, forceRecovery));
-	state Future<Void> collection = actorCollection(self->addActor.getFuture());
+	state Future<Void> collection = actorCollection(addActor.getFuture());
 
 	addActor.send(traceRole(Role::MASTER, mi.id()));
 	addActor.send(provideVersions(self));
@@ -406,8 +406,8 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 		if (e.code() != error_code_actor_cancelled) {
 			wait(delay(0.0));
 		}
-		while (!self->addActor.isEmpty()) {
-			self->addActor.getFuture().pop();
+		while (!addActor.isEmpty()) {
+			addActor.getFuture().pop();
 		}
 
 		TEST(err.code() == error_code_tlog_failed); // Master: terminated due to tLog failure
