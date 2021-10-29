@@ -69,7 +69,8 @@ struct RelocateData {
 		       priority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || priority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT ||
 		       priority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT || priority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT ||
 		       priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT || priority == SERVER_KNOBS->PRIORITY_TEAM_HEALTHY ||
-		       priority == SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
+		       priority == SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER ||
+		       priority == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE;
 	}
 
 	static bool isBoundaryPriority(int priority) {
@@ -402,6 +403,7 @@ struct DDQueueData {
 
 	Reference<AsyncVar<bool>> rawProcessingUnhealthy; // many operations will remove relocations before adding a new
 	                                                  // one, so delay a small time before settling on a new number.
+	Reference<AsyncVar<bool>> rawProcessingWiggle;
 
 	std::map<int, int> priority_relocations;
 	int unhealthyRelocations;
@@ -423,6 +425,9 @@ struct DDQueueData {
 			unhealthyRelocations++;
 			rawProcessingUnhealthy->set(true);
 		}
+		if (healthPriority == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE) {
+			rawProcessingWiggle->set(true);
+		}
 		priority_relocations[priority]++;
 	}
 	void finishRelocation(int priority, int healthPriority) {
@@ -439,6 +444,9 @@ struct DDQueueData {
 			}
 		}
 		priority_relocations[priority]--;
+		if (priority_relocations[SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE] == 0) {
+			rawProcessingWiggle->set(false);
+		}
 	}
 
 	DDQueueData(UID mid,
@@ -460,7 +468,7 @@ struct DDQueueData {
 	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), lastLimited(lastLimited),
 	    suppressIntervals(0), lastInterval(0), unhealthyRelocations(0),
-	    rawProcessingUnhealthy(new AsyncVar<bool>(false)),
+	    rawProcessingUnhealthy(new AsyncVar<bool>(false)), rawProcessingWiggle(new AsyncVar<bool>(false)),
 	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")) {}
 
 	void validate() {
@@ -1552,6 +1560,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,
                                          Reference<AsyncVar<bool>> processingUnhealthy,
+                                         Reference<AsyncVar<bool>> processingWiggle,
                                          std::vector<TeamCollectionInterface> teamCollections,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                          MoveKeysLock lock,
@@ -1590,6 +1599,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 		balancingFutures.push_back(BgDDValleyFiller(&self, i));
 	}
 	balancingFutures.push_back(delayedAsyncVar(self.rawProcessingUnhealthy, processingUnhealthy, 0));
+	balancingFutures.push_back(delayedAsyncVar(self.rawProcessingWiggle, processingWiggle, 0));
 
 	try {
 		loop {
