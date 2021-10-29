@@ -2769,6 +2769,24 @@ void getQueuingMetrics(StorageServer* self, StorageQueuingMetricsRequest const& 
 #pragma region Updates
 #endif
 
+Future<Optional<Value>> eagerReadValue(const StorageServer::VersionedData& versionedData,
+                                       StorageServerDisk& storage,
+                                       KeyRef key,
+                                       int size) {
+	if (SERVER_KNOBS->ENABLE_PTREE_LOOKUP_DURING_EAGER_READS) {
+		auto it = versionedData.atLatest().lastLessOrEqual(key);
+		if (it != versionedData.atLatest().end() && it->isValue() && it.key() == key) {
+			// Key exists in versioned map.
+			return Optional<Value>(it->getValue());
+		} else if (it != versionedData.atLatest().end() && it->isClearTo() && it->getEndKey() > key) {
+			// The value has been cleared.
+			return Optional<Value>();
+		}
+	}
+	// Read value from storage engine.
+	return storage.readValuePrefix(key, size, IKeyValueStore::ReadType::EAGER);
+}
+
 ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager) {
 	eager->finishKeyBegin();
 
@@ -2783,9 +2801,9 @@ ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager)
 	}
 
 	std::vector<Future<Optional<Value>>> value(eager->keys.size());
-	for (int i = 0; i < value.size(); i++)
-		value[i] =
-		    data->storage.readValuePrefix(eager->keys[i].first, eager->keys[i].second, IKeyValueStore::ReadType::EAGER);
+	for (int i = 0; i < value.size(); i++) {
+		value[i] = eagerReadValue(data->data(), data->storage, eager->keys[i].first, eager->keys[i].second);
+	}
 
 	state Future<std::vector<Optional<Value>>> futureValues = getAll(value);
 	std::vector<Optional<Value>> optionalValues = wait(futureValues);
