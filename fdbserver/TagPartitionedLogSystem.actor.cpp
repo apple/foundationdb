@@ -451,6 +451,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::pushResetChecker(Reference<Connectio
 }
 
 ACTOR Future<TLogCommitReply> TagPartitionedLogSystem::recordPushMetrics(Reference<ConnectionResetInfo> self,
+                                                                         Reference<Histogram> dist,
                                                                          NetworkAddress addr,
                                                                          Future<TLogCommitReply> in) {
 	state double startTime = now();
@@ -465,6 +466,7 @@ ACTOR Future<TLogCommitReply> TagPartitionedLogSystem::recordPushMetrics(Referen
 			self->fastReplies++;
 		}
 	}
+	dist->sampleSeconds(now() - startTime);
 	return t;
 }
 
@@ -521,7 +523,7 @@ ACTOR static Future<TLogCommitReply> recordPushMetrics(Reference<ConnectionReset
 	if (now() - self->lastReset > SERVER_KNOBS->PUSH_RESET_INTERVAL) {
 		if (now() - startTime > SERVER_KNOBS->PUSH_MAX_LATENCY) {
 			if (self->resetCheck.isReady()) {
-				self->resetCheck = pushResetChecker(self, addr);
+				self->resetCheck = TagPartitionedLogSystem::pushResetChecker(self, addr);
 			}
 			self->slowReplies++;
 		} else {

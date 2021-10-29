@@ -101,7 +101,7 @@ public:
 class InMemoryDiskQueue : public IDiskQueue {
 public:
 	InMemoryDiskQueue(UID dbgid)
-	  : dbgid(dbgid), recovered(false), initialized(false), cursorWrite(0), cursorRead(0), cursorCommit(0) {}
+	  : dbgid(dbgid), cursorWrite(0), cursorRead(0), cursorCommit(0), recovered(false), initialized(false) {}
 
 	location push(StringRef contents) override {
 		// ASSERT(recovered);

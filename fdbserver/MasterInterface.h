@@ -204,8 +204,8 @@ struct ReportRawCommittedVersionRequest {
 	                                 Optional<Value> metadataVersion,
 	                                 Version minKnownCommittedVersion,
 	                                 Optional<Version> prevVersion)
-	  : version(version), locked(locked), metadataVersion(metadataVersion),
-	    minKnownCommittedVersion(minKnownCommittedVersion), prevVersion(prevVersion) {}
+	  : version(version), prevVersion(prevVersion), locked(locked), metadataVersion(metadataVersion),
+	    minKnownCommittedVersion(minKnownCommittedVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

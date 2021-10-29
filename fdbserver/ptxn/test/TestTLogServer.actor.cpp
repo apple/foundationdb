@@ -709,7 +709,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	state int commitCnt = 0;
 	loop {
 		state IDiskQueue::location nextLoc = q->getNextReadLocation();
-		state Standalone<StringRef> actual = wait(q->read(nextLoc, nextLoc, CheckHashes::NO));
+		state Standalone<StringRef> actual = wait(q->read(nextLoc, nextLoc, CheckHashes::False));
 		// Assert contents read are the ones that we previously wrote
 		ASSERT(actual.toString() == expectedMessages[commitCnt].toString());
 		q->pop(nextLoc);

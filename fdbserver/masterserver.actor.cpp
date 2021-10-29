@@ -272,17 +272,17 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	  : dbgid(myInterface.id()), lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
 	    lastCommitTime(0), liveCommittedVersion(invalidVersion), databaseLocked(false),
 	    minKnownCommittedVersion(invalidVersion), hasConfiguration(false), coordinators(coordinators),
-	    version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr), memoryLimit(2e9), dbId(dbId),
-	    myInterface(myInterface), clusterController(clusterController), cstate(coordinators, addActor, dbgid),
-	    dbInfo(dbInfo), registrationCount(0), addActor(addActor),
-	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery), neverCreated(false),
-	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), cc("Master", dbgid.toString()),
+	    tLogGroupCollection(makeReference<TLogGroupCollection>()), version(invalidVersion), lastVersionTime(0),
+	    txnStateStore(nullptr), memoryLimit(2e9), dbId(dbId), myInterface(myInterface),
+	    clusterController(clusterController), cstate(coordinators, addActor, dbgid), dbInfo(dbInfo),
+	    registrationCount(0), addActor(addActor), recruitmentStalled(makeReference<AsyncVar<bool>>(false)),
+	    forceRecovery(forceRecovery), neverCreated(false), safeLocality(tagLocalityInvalid),
+	    primaryLocality(tagLocalityInvalid), cc("Master", dbgid.toString()),
 	    changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
-	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
-	    tLogGroupCollection(makeReference<TLogGroupCollection>()) {
+	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc) {
 		logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
 		if (forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();

@@ -91,8 +91,8 @@ public:
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), commitVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
-	    tssMapping(&proxyCommitData_.tssMapping), initialCommit(initialCommit_),
-	    tLogGroupCollection(proxyCommitData_.tLogGroupCollection), tagToServer(&proxyCommitData_.tagToServer),
+	    tssMapping(&proxyCommitData_.tssMapping), tLogGroupCollection(proxyCommitData_.tLogGroupCollection),
+	    initialCommit(initialCommit_), tagToServer(&proxyCommitData_.tagToServer),
 	    ssToStorageTeam(&proxyCommitData_.ssToStorageTeam) {
 		for (const auto [ss, team] : proxyCommitData_.ssToStorageTeam) {
 			TraceEvent(SevDebug, "SSTeam", dbgid).detail("SS", ss).detail("Team", team);

@@ -80,8 +80,8 @@ struct PeekRemoteContext {
 	                  Arena* pWorkArena_,
 	                  Arena* pAttachArena_ = nullptr)
 	  : debugID(debugID_), storageTeamID(storageTeamID_), pLastVersion(pLastVersion_), pTLogInterfaces(pInterfaces_),
-	    pDeserializer(pDeserializer_), pDeserializerIterator(pDeserializerIterator_), pWorkArena(pWorkArena_),
-	    pAttachArena(pAttachArena_) {
+	    pDeserializer(pDeserializer_), pDeserializerIterator(pDeserializerIterator_), pAttachArena(pAttachArena_),
+	    pWorkArena(pWorkArena_) {
 
 		for (const auto pTLogInterface : pTLogInterfaces) {
 			ASSERT(pTLogInterface != nullptr);
@@ -242,10 +242,10 @@ ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInte
                                    Version end,
                                    bool returnIfBlocked,
                                    bool parallelGetMore)
-  : interf(interf), results(Optional<UID>(), emptyCursorHeader().arena(), emptyCursorHeader()),
-    rd(results.arena, results.data, IncludeVersion(ProtocolVersion::withPartitionTransaction())), tag(tag),
-    storageTeamId(storageTeamId), tLogGroupID(tLogGroupID), messageVersion(begin), end(end), hasMsg(false),
-    dbgid(deterministicRandom()->randomUniqueID()), poppedVersion(0), returnIfBlocked(returnIfBlocked),
+  : interf(interf), tag(tag), storageTeamId(storageTeamId), tLogGroupID(tLogGroupID),
+    results(Optional<UID>(), emptyCursorHeader().arena(), emptyCursorHeader()),
+    rd(results.arena, results.data, IncludeVersion(ProtocolVersion::withPartitionTransaction())), messageVersion(begin),
+    end(end), dbgid(deterministicRandom()->randomUniqueID()), returnIfBlocked(returnIfBlocked),
     parallelGetMore(parallelGetMore) {
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
@@ -266,11 +266,10 @@ ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
                                    Tag tag,
                                    StorageTeamID storageTeamId,
                                    TLogGroupID tLogGroupID)
-  : results(results), tag(tag), storageTeamId(storageTeamId), tLogGroupID(tLogGroupID),
+  : tag(tag), storageTeamId(storageTeamId), tLogGroupID(tLogGroupID), results(results),
     rd(results.arena, results.data, IncludeVersion(ProtocolVersion::withPartitionTransaction())),
-    messageVersion(messageVersion), end(end), messageAndTags(message), hasMsg(hasMsg),
-    dbgid(deterministicRandom()->randomUniqueID()), poppedVersion(poppedVersion), returnIfBlocked(false),
-    parallelGetMore(false) {
+    messageVersion(messageVersion), end(end), poppedVersion(poppedVersion), messageAndTags(message), hasMsg(hasMsg),
+    dbgid(deterministicRandom()->randomUniqueID()) {
 	TraceEvent(SevDebug, "SPC_Clone", dbgid);
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;

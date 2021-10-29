@@ -594,9 +594,9 @@ inline static int64_t flowInterlockedAnd64(int64_t* p, int64_t a) {
 #error Missing byte swap methods
 #endif
 
-#define littleEndian16(value) value
-#define littleEndian32(value) value
-#define littleEndian64(value) value
+#define littleEndian16(value) uint16_t(value)
+#define littleEndian32(value) uint32_t(value)
+#define littleEndian64(value) uint64_t(value)
 
 #if defined(_WIN32)
 inline static void flushOutputStreams() {
