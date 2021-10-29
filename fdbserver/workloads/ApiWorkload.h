@@ -102,12 +102,12 @@ struct FlowTransactionWrapper : public TransactionWrapper {
 
 	// Gets a range of key-value pairs from the database specified by a key range
 	Future<RangeResult> getRange(KeyRangeRef& keys, int limit, Reverse reverse) override {
-		return transaction.getRange(keys, limit, Snapshot::FALSE, reverse);
+		return transaction.getRange(keys, limit, Snapshot::False, reverse);
 	}
 
 	// Gets a range of key-value pairs from the database specified by a pair of key selectors
 	Future<RangeResult> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit, Reverse reverse) override {
-		return transaction.getRange(begin, end, limit, Snapshot::FALSE, reverse);
+		return transaction.getRange(begin, end, limit, Snapshot::False, reverse);
 	}
 
 	// Gets the key from the database specified by a given key selector
@@ -162,12 +162,12 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 
 	// Gets a range of key-value pairs from the database specified by a key range
 	Future<RangeResult> getRange(KeyRangeRef& keys, int limit, Reverse reverse) override {
-		return unsafeThreadFutureToFuture(transaction->getRange(keys, limit, Snapshot::FALSE, reverse));
+		return unsafeThreadFutureToFuture(transaction->getRange(keys, limit, Snapshot::False, reverse));
 	}
 
 	// Gets a range of key-value pairs from the database specified by a pair of key selectors
 	Future<RangeResult> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit, Reverse reverse) override {
-		return unsafeThreadFutureToFuture(transaction->getRange(begin, end, limit, Snapshot::FALSE, reverse));
+		return unsafeThreadFutureToFuture(transaction->getRange(begin, end, limit, Snapshot::False, reverse));
 	}
 
 	// Gets the key from the database specified by a given key selector

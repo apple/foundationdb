@@ -109,7 +109,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 		state int offsetA;
 		state int offsetB;
 		state Standalone<StringRef> maxKey;
-		state Reverse reverse = Reverse::FALSE;
+		state Reverse reverse = Reverse::False;
 
 		maxKey = Standalone<StringRef>(format("%010d", self->maxKeySpace + 1));
 
@@ -180,7 +180,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 							    wait(trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
 							                         KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
 							                         2 * (self->maxKeySpace + self->maxOffset),
-							                         Snapshot::FALSE,
+							                         Snapshot::False,
 							                         reverse));
 
 							int trueSize = 0;
@@ -208,7 +208,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 							    wait(tr.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
 							                     KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
 							                     2 * (self->maxKeySpace + self->maxOffset),
-							                     Snapshot::FALSE,
+							                     Snapshot::False,
 							                     reverse));
 
 							int trueSize = 0;

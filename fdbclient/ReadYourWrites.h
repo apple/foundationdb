@@ -68,25 +68,26 @@ public:
 	explicit ReadYourWritesTransaction(Database const& cx);
 	~ReadYourWritesTransaction();
 
+	void setDatabase(Database const&) override;
 	void setVersion(Version v) override { tr.setVersion(v); }
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override { return tr.getCachedReadVersion(); }
-	Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::FALSE) override;
-	Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::FALSE) override;
+	Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::False) override;
+	Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::False) override;
 	Future<Standalone<RangeResultRef>> getRange(const KeySelector& begin,
 	                                            const KeySelector& end,
 	                                            int limit,
-	                                            Snapshot = Snapshot::FALSE,
-	                                            Reverse = Reverse::FALSE) override;
+	                                            Snapshot = Snapshot::False,
+	                                            Reverse = Reverse::False) override;
 	Future<Standalone<RangeResultRef>> getRange(KeySelector begin,
 	                                            KeySelector end,
 	                                            GetRangeLimits limits,
-	                                            Snapshot = Snapshot::FALSE,
-	                                            Reverse = Reverse::FALSE) override;
+	                                            Snapshot = Snapshot::False,
+	                                            Reverse = Reverse::False) override;
 	Future<Standalone<RangeResultRef>> getRange(const KeyRange& keys,
 	                                            int limit,
-	                                            Snapshot snapshot = Snapshot::FALSE,
-	                                            Reverse reverse = Reverse::FALSE) {
+	                                            Snapshot snapshot = Snapshot::False,
+	                                            Reverse reverse = Reverse::False) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limit,
@@ -95,8 +96,8 @@ public:
 	}
 	Future<RangeResult> getRange(const KeyRange& keys,
 	                             GetRangeLimits limits,
-	                             Snapshot snapshot = Snapshot::FALSE,
-	                             Reverse reverse = Reverse::FALSE) {
+	                             Snapshot snapshot = Snapshot::False,
+	                             Reverse reverse = Reverse::False) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limits,
@@ -152,8 +153,6 @@ public:
 	}
 
 	void getWriteConflicts(KeyRangeMap<bool>* result) override;
-
-	void preinitializeOnForeignThread();
 
 	Database getDatabase() const { return tr.getDatabase(); }
 

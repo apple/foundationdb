@@ -140,9 +140,9 @@ class FutureBucket;
 class TaskBucket : public ReferenceCounted<TaskBucket> {
 public:
 	TaskBucket(const Subspace& subspace,
-	           AccessSystemKeys = AccessSystemKeys::FALSE,
-	           PriorityBatch = PriorityBatch::FALSE,
-	           LockAware = LockAware::FALSE);
+	           AccessSystemKeys = AccessSystemKeys::False,
+	           PriorityBatch = PriorityBatch::False,
+	           LockAware = LockAware::False);
 	virtual ~TaskBucket();
 
 	void setOptions(Reference<ReadYourWritesTransaction> tr) {
@@ -311,7 +311,7 @@ class TaskFuture;
 
 class FutureBucket : public ReferenceCounted<FutureBucket> {
 public:
-	FutureBucket(const Subspace& subspace, AccessSystemKeys = AccessSystemKeys::FALSE, LockAware = LockAware::FALSE);
+	FutureBucket(const Subspace& subspace, AccessSystemKeys = AccessSystemKeys::False, LockAware = LockAware::False);
 	virtual ~FutureBucket();
 
 	void setOptions(Reference<ReadYourWritesTransaction> tr) {

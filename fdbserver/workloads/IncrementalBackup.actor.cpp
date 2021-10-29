@@ -94,7 +94,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				// Wait for backup container to be created and avoid race condition
 				TraceEvent("IBackupWaitContainer");
 				wait(success(self->backupAgent.waitBackup(
-				    cx, self->tag.toString(), StopWhenDone::FALSE, &backupContainer, &backupUID)));
+				    cx, self->tag.toString(), StopWhenDone::False, &backupContainer, &backupUID)));
 				if (!backupContainer.isValid()) {
 					TraceEvent("IBackupCheckListContainersAttempt");
 					state std::vector<std::string> containers =
@@ -156,9 +156,9 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                    1e8,
 				                                    self->tag.toString(),
 				                                    backupRanges,
-				                                    StopWhenDone::FALSE,
-				                                    UsePartitionedLog::FALSE,
-				                                    IncrementalBackupOnly::TRUE));
+				                                    StopWhenDone::False,
+				                                    UsePartitionedLog::False,
+				                                    IncrementalBackupOnly::True));
 			} catch (Error& e) {
 				TraceEvent("IBackupSubmitError").error(e);
 				if (e.code() != error_code_backup_duplicate) {
@@ -187,7 +187,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			state UID backupUID;
 			state Version beginVersion = invalidVersion;
 			wait(success(self->backupAgent.waitBackup(
-			    cx, self->tag.toString(), StopWhenDone::FALSE, &backupContainer, &backupUID)));
+			    cx, self->tag.toString(), StopWhenDone::False, &backupContainer, &backupUID)));
 			if (self->checkBeginVersion) {
 				TraceEvent("IBackupReadSystemKeys");
 				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
@@ -229,15 +229,15 @@ struct IncrementalBackupWorkload : TestWorkload {
 			                                       cx,
 			                                       Key(self->tag.toString()),
 			                                       backupURL,
-			                                       WaitForComplete::TRUE,
+			                                       WaitForComplete::True,
 			                                       invalidVersion,
-			                                       Verbose::TRUE,
+			                                       Verbose::True,
 			                                       normalKeys,
 			                                       Key(),
 			                                       Key(),
-			                                       LockDB::TRUE,
-			                                       OnlyApplyMutationLogs::TRUE,
-			                                       InconsistentSnapshotOnly::FALSE,
+			                                       LockDB::True,
+			                                       OnlyApplyMutationLogs::True,
+			                                       InconsistentSnapshotOnly::False,
 			                                       beginVersion)));
 			TraceEvent("IBackupRestoreSuccess");
 		}

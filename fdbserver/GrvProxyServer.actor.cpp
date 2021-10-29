@@ -253,7 +253,7 @@ struct GrvProxyData {
 	             RequestStream<GetReadVersionRequest> getConsistentReadVersion,
 	             Reference<AsyncVar<ServerDBInfo>> db)
 	  : dbgid(dbgid), stats(dbgid), master(master), getConsistentReadVersion(getConsistentReadVersion),
-	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::TRUE)), db(db), lastStartCommit(0),
+	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db), lastStartCommit(0),
 	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), updateCommitRequests(0), lastCommitTime(0),
 	    minKnownCommittedVersion(invalidVersion) {}
 };

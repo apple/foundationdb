@@ -656,7 +656,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int optimalTeamCount;
 	AsyncVar<bool> zeroOptimalTeams;
 
-    bool bestTeamStuck = false;
+	int bestTeamKeepStuckCount = 0;
 
 	bool isTssRecruiting; // If tss recruiting is waiting on a pair, don't consider DD recruiting for the purposes of QuietDB
 
@@ -1011,12 +1011,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 				// Log BestTeamStuck reason when we have healthy teams but they do not have healthy free space
 				if (randomTeams.empty() && !self->zeroHealthyTeams->get()) {
-					self->bestTeamStuck = true;
+					self->bestTeamKeepStuckCount++;
 					if (g_network->isSimulated()) {
 						TraceEvent(SevWarn, "GetTeamReturnEmpty").detail("HealthyTeams", self->healthyTeamCount);
 					}
 				} else {
-					self->bestTeamStuck = false;
+					self->bestTeamKeepStuckCount = 0;
 				}
 
 				for (int i = 0; i < randomTeams.size(); i++) {
@@ -2833,7 +2833,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		std::vector<Future<Void>> moveFutures;
 		if (this->pid2server_info.count(pid) != 0) {
 			for (auto& info : this->pid2server_info[pid]) {
-				AddressExclusion addr(info->lastKnownInterface.address().ip);
+				AddressExclusion addr(info->lastKnownInterface.address().ip, info->lastKnownInterface.address().port);
 				if (this->excludedServers.count(addr) &&
 				    this->excludedServers.get(addr) != DDTeamCollection::Status::NONE) {
 					continue; // don't overwrite the value set by actor trackExcludedServer
@@ -3509,7 +3509,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			bool anyUndesired = false;
 			bool anyWrongConfiguration = false;
 			bool anyWigglingServer = false;
-			int serversLeft = 0;
+			int serversLeft = 0, serverUndesired = 0, serverWrongConf = 0, serverWiggling = 0;
 
 			for (const UID& uid : team->getServerIDs()) {
 				change.push_back(self->server_status.onChange(uid));
@@ -3519,12 +3519,15 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				}
 				if (status.isUndesired) {
 					anyUndesired = true;
+					serverUndesired++;
 				}
 				if (status.isWrongConfiguration) {
 					anyWrongConfiguration = true;
+					serverWrongConf++;
 				}
 				if (status.isWiggling) {
 					anyWigglingServer = true;
+					serverWiggling++;
 				}
 			}
 
@@ -3646,6 +3649,10 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						team->setPriority(SERVER_KNOBS->PRIORITY_TEAM_2_LEFT);
 					else
 						team->setPriority(SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
+				} else if (!badTeam && anyWigglingServer && serverWiggling == serverWrongConf &&
+				           serverWiggling == serverUndesired) {
+					// the wrong configured and undesired server is the wiggling server
+					team->setPriority(SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE);
 				} else if (badTeam || anyWrongConfiguration) {
 					if (redundantTeam) {
 						team->setPriority(SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT);
@@ -3654,8 +3661,6 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 					}
 				} else if (anyUndesired) {
 					team->setPriority(SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER);
-				} else if (anyWigglingServer) {
-					team->setPriority(SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE);
 				} else {
 					team->setPriority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY);
 				}
@@ -3972,7 +3977,7 @@ ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
 					wait(delayJittered(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY));
 					// there must not have other teams to place wiggled data
 					takeRest = teamCollection->server_info.size() <= teamCollection->configuration.storageTeamSize ||
-						   teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize;
+					           teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize;
 				}
 				wait(updateNextWigglingStoragePID(teamCollection));
 			}
@@ -4020,10 +4025,12 @@ ACTOR Future<Void> clusterHealthCheckForPerpetualWiggle(DDTeamCollection* self, 
 		// b. healthy teams are not enough
 		// c. the overall disk space is not enough
 		if (count >= SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD || self->healthyTeamCount <= *extraTeamCount ||
-		    self->bestTeamStuck) {
+		    self->bestTeamKeepStuckCount > SERVER_KNOBS->DD_STORAGE_WIGGLE_STUCK_THRESHOLD) {
 			// if we pause wiggle not because the reason a, increase extraTeamCount. This helps avoid oscillation
 			// between pause and non-pause status.
-			if ((self->healthyTeamCount <= *extraTeamCount || self->bestTeamStuck) && !self->pauseWiggle->get()) {
+			if ((self->healthyTeamCount <= *extraTeamCount ||
+			     self->bestTeamKeepStuckCount > SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD) &&
+			    !self->pauseWiggle->get()) {
 				*extraTeamCount = std::min(*extraTeamCount + pausePenalty, (int)self->teams.size());
 				pausePenalty = std::min(pausePenalty * 2, (int)self->teams.size());
 			}
@@ -4060,6 +4067,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				self->includeStorageServersForWiggle();
 				TraceEvent("PerpetualStorageWigglePause", self->distributorId)
 				    .detail("ProcessId", pid)
+				    .detail("BestTeamKeepStuckCount", self->bestTeamKeepStuckCount)
 				    .detail("ExtraHealthyTeamCount", extraTeamCount)
 				    .detail("HealthyTeamCount", self->healthyTeamCount)
 				    .detail("StorageCount", movingCount);
@@ -4566,6 +4574,10 @@ ACTOR Future<Void> storageServerTracker(
 			DDTeamCollection::Status worstStatus = self->excludedServers.get(worstAddr);
 
 			if (worstStatus == DDTeamCollection::Status::WIGGLING && invalidWiggleServer(worstAddr, self, server)) {
+				TraceEvent(SevInfo, "InvalidWiggleServer", self->distributorId)
+				    .detail("Address", worstAddr.toString())
+				    .detail("ProcessId", server->lastKnownInterface.locality.processId())
+				    .detail("ValidWigglingId", self->wigglingPid.present());
 				self->excludedServers.set(worstAddr, DDTeamCollection::Status::NONE);
 				worstStatus = DDTeamCollection::Status::NONE;
 			}
@@ -4586,6 +4598,10 @@ ACTOR Future<Void> storageServerTracker(
 				DDTeamCollection::Status testStatus = self->excludedServers.get(testAddr);
 
 				if (testStatus == DDTeamCollection::Status::WIGGLING && invalidWiggleServer(testAddr, self, server)) {
+					TraceEvent(SevInfo, "InvalidWiggleServer", self->distributorId)
+					    .detail("Address", testAddr.toString())
+					    .detail("ProcessId", server->lastKnownInterface.locality.processId())
+					    .detail("ValidWigglingId", self->wigglingPid.present());
 					self->excludedServers.set(testAddr, DDTeamCollection::Status::NONE);
 					testStatus = DDTeamCollection::Status::NONE;
 				}
@@ -5778,7 +5794,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 	state double lastLimited = 0;
 	self->addActor.send(monitorBatchLimitedTime(self->dbInfo, &lastLimited));
 
-	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::TRUE);
+	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
 
 	// cx->setOption( FDBDatabaseOptions::LOCATION_CACHE_SIZE, StringRef((uint8_t*)
@@ -6123,7 +6139,7 @@ static std::set<int> const& normalDataDistributorErrors() {
 }
 
 ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<struct ServerDBInfo>> db) {
-	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::TRUE);
+	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
 	state ReadYourWritesTransaction tr(cx);
 	loop {
 		try {
@@ -6464,7 +6480,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	state Reference<DataDistributorData> self(new DataDistributorData(db, di.id()));
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 	state PromiseStream<GetMetricsListRequest> getShardMetricsList;
-	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::TRUE);
+	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
 	state ActorCollection actors(false);
 	state DDEnabledState ddEnabledState;
 	self->addActor.send(actors.getResult());
@@ -6516,7 +6532,7 @@ std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
                                                      Reference<IReplicationPolicy> policy,
                                                      int processCount) {
 	Database database = DatabaseContext::create(
-	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::FALSE);
+	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
 
 	DatabaseConfiguration conf;
 	conf.storageTeamSize = teamSize;
@@ -6559,7 +6575,7 @@ std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize,
                                                             Reference<IReplicationPolicy> policy,
                                                             int processCount) {
 	Database database = DatabaseContext::create(
-	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::FALSE);
+	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
 
 	DatabaseConfiguration conf;
 	conf.storageTeamSize = teamSize;

@@ -40,6 +40,42 @@ typedef uint32_t PhysicalPageID;
 typedef uint32_t QueueID;
 #define invalidQueueID std::numeric_limits<QueueID>::max()
 
+// Pager Events
+enum class PagerEvents { CacheLookup = 0, CacheHit, CacheMiss, PageWrite, MAXEVENTS };
+static const std::string PagerEventsCodes[] = { "Lookup", "Hit", "Miss", "Write" };
+// Reasons for page level events.
+enum class PagerEventReasons { PointRead = 0, RangeRead, RangePrefetch, Commit, LazyClear, MetaData, MAXEVENTREASONS };
+static const std::string PagerEventReasonsCodes[] = { "Get", "GetR", "GetRPF", "Commit", "LazyClr", "Meta" };
+
+static const int nonBtreeLevel = 0;
+static const std::pair<PagerEvents, PagerEventReasons> possibleEventReasonPairs[] = {
+	{ PagerEvents::CacheLookup, PagerEventReasons::PointRead },
+	{ PagerEvents::CacheLookup, PagerEventReasons::RangeRead },
+	{ PagerEvents::CacheLookup, PagerEventReasons::LazyClear },
+	{ PagerEvents::CacheLookup, PagerEventReasons::MetaData },
+	{ PagerEvents::CacheHit, PagerEventReasons::PointRead },
+	{ PagerEvents::CacheHit, PagerEventReasons::RangeRead },
+	{ PagerEvents::CacheHit, PagerEventReasons::LazyClear },
+	{ PagerEvents::CacheHit, PagerEventReasons::MetaData },
+	{ PagerEvents::CacheHit, PagerEventReasons::Commit },
+	{ PagerEvents::CacheMiss, PagerEventReasons::PointRead },
+	{ PagerEvents::CacheMiss, PagerEventReasons::RangeRead },
+	{ PagerEvents::CacheMiss, PagerEventReasons::LazyClear },
+	{ PagerEvents::CacheMiss, PagerEventReasons::MetaData },
+	{ PagerEvents::CacheMiss, PagerEventReasons::Commit },
+	{ PagerEvents::PageWrite, PagerEventReasons::MetaData },
+	{ PagerEvents::PageWrite, PagerEventReasons::LazyClear },
+};
+static const std::pair<PagerEvents, PagerEventReasons> L0PossibleEventReasonPairs[] = {
+	{ PagerEvents::CacheLookup, PagerEventReasons::RangePrefetch },
+	{ PagerEvents::CacheLookup, PagerEventReasons::MetaData },
+	{ PagerEvents::CacheHit, PagerEventReasons::RangePrefetch },
+	{ PagerEvents::CacheHit, PagerEventReasons::MetaData },
+	{ PagerEvents::CacheMiss, PagerEventReasons::RangePrefetch },
+	{ PagerEvents::CacheMiss, PagerEventReasons::MetaData },
+	{ PagerEvents::PageWrite, PagerEventReasons::MetaData },
+};
+
 // Represents a block of memory in a 4096-byte aligned location held by an Arena.
 class ArenaPage : public ReferenceCounted<ArenaPage>, public FastAllocated<ArenaPage> {
 public:
@@ -128,7 +164,11 @@ public:
 
 class IPagerSnapshot {
 public:
-	virtual Future<Reference<const ArenaPage>> getPhysicalPage(LogicalPageID pageID, bool cacheable, bool nohit) = 0;
+	virtual Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons reason,
+	                                                           unsigned int level,
+	                                                           LogicalPageID pageID,
+	                                                           bool cacheable,
+	                                                           bool nohit) = 0;
 	virtual bool tryEvictPage(LogicalPageID id) = 0;
 	virtual Version getVersion() const = 0;
 
@@ -164,13 +204,20 @@ public:
 	// Replace the contents of a page with new data across *all* versions.
 	// Existing holders of a page reference for pageID, read from any version,
 	// may see the effects of this write.
-	virtual void updatePage(LogicalPageID pageID, Reference<ArenaPage> data) = 0;
+	virtual void updatePage(PagerEventReasons reason,
+	                        unsigned int level,
+	                        LogicalPageID pageID,
+	                        Reference<ArenaPage> data) = 0;
 
 	// Try to atomically update the contents of a page as of version v in the next commit.
 	// If the pager is unable to do this at this time, it may choose to write the data to a new page ID
 	// instead and return the new page ID to the caller.  Otherwise the original pageID argument will be returned.
 	// If a new page ID is returned, the old page ID will be freed as of version v
-	virtual Future<LogicalPageID> atomicUpdatePage(LogicalPageID pageID, Reference<ArenaPage> data, Version v) = 0;
+	virtual Future<LogicalPageID> atomicUpdatePage(PagerEventReasons reason,
+	                                               unsigned int level,
+	                                               LogicalPageID pageID,
+	                                               Reference<ArenaPage> data,
+	                                               Version v) = 0;
 
 	// Free pageID to be used again after the commit that moves oldestVersion past v
 	virtual void freePage(LogicalPageID pageID, Version v) = 0;
@@ -188,7 +235,11 @@ public:
 	// Cacheable indicates that the page should be added to the page cache (if applicable?) as a result of this read.
 	// NoHit indicates that the read should not be considered a cache hit, such as when preloading pages that are
 	// considered likely to be needed soon.
-	virtual Future<Reference<ArenaPage>> readPage(LogicalPageID pageID, bool cacheable = true, bool noHit = false) = 0;
+	virtual Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
+	                                              unsigned int level,
+	                                              LogicalPageID pageID,
+	                                              bool cacheable = true,
+	                                              bool noHit = false) = 0;
 	virtual Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) = 0;
 	virtual void releaseExtentReadLock() = 0;
 

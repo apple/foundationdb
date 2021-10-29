@@ -22,6 +22,7 @@
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #pragma once
 
+#include "bindings/c/foundationdb/fdb_c_options.g.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IClientApi.h"
@@ -31,10 +32,10 @@
 // FdbCApi is used as a wrapper around the FoundationDB C API that gets loaded from an external client library.
 // All of the required functions loaded from that external library are stored in function pointers in this struct.
 struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
-	typedef struct future FDBFuture;
-	typedef struct cluster FDBCluster;
-	typedef struct database FDBDatabase;
-	typedef struct transaction FDBTransaction;
+	typedef struct FDB_future FDBFuture;
+	typedef struct FDB_cluster FDBCluster;
+	typedef struct FDB_database FDBDatabase;
+	typedef struct FDB_transaction FDBTransaction;
 
 #pragma pack(push, 4)
 	typedef struct key {
@@ -57,16 +58,16 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	// Network
 	fdb_error_t (*selectApiVersion)(int runtimeVersion, int headerVersion);
 	const char* (*getClientVersion)();
-	fdb_error_t (*setNetworkOption)(FDBNetworkOptions::Option option, uint8_t const* value, int valueLength);
+	fdb_error_t (*setNetworkOption)(FDBNetworkOption option, uint8_t const* value, int valueLength);
 	fdb_error_t (*setupNetwork)();
 	fdb_error_t (*runNetwork)();
 	fdb_error_t (*stopNetwork)();
-	fdb_error_t* (*createDatabase)(const char* clusterFilePath, FDBDatabase** db);
+	fdb_error_t (*createDatabase)(const char* clusterFilePath, FDBDatabase** db);
 
 	// Database
 	fdb_error_t (*databaseCreateTransaction)(FDBDatabase* database, FDBTransaction** tr);
 	fdb_error_t (*databaseSetOption)(FDBDatabase* database,
-	                                 FDBDatabaseOptions::Option option,
+	                                 FDBDatabaseOption option,
 	                                 uint8_t const* value,
 	                                 int valueLength);
 	void (*databaseDestroy)(FDBDatabase* database);
@@ -86,7 +87,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 
 	// Transaction
 	fdb_error_t (*transactionSetOption)(FDBTransaction* tr,
-	                                    FDBTransactionOptions::Option option,
+	                                    FDBTransactionOption option,
 	                                    uint8_t const* value,
 	                                    int valueLength);
 	void (*transactionDestroy)(FDBTransaction* tr);
@@ -113,7 +114,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                  int endOffset,
 	                                  int limit,
 	                                  int targetBytes,
-	                                  FDBStreamingModes::Option mode,
+	                                  FDBStreamingMode mode,
 	                                  int iteration,
 	                                  fdb_bool_t snapshot,
 	                                  fdb_bool_t reverse);
@@ -135,7 +136,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                            int keyNameLength,
 	                            uint8_t const* param,
 	                            int paramLength,
-	                            FDBMutationTypes::Option operationType);
+	                            FDBMutationType operationType);
 
 	FDBFuture* (*transactionGetEstimatedRangeSizeBytes)(FDBTransaction* tr,
 	                                                    uint8_t const* begin_key_name,
@@ -163,7 +164,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                           int beginKeyNameLength,
 	                                           uint8_t const* endKeyName,
 	                                           int endKeyNameLength,
-	                                           FDBConflictRangeTypes::Option);
+	                                           FDBConflictRangeType);
 
 	// Future
 	fdb_error_t (*futureGetDatabase)(FDBFuture* f, FDBDatabase** outDb);

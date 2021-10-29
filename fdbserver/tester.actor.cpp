@@ -234,6 +234,15 @@ vector<std::string> getOption(VectorRef<KeyValueRef> options, Key key, vector<st
 	return defaultValue;
 }
 
+bool hasOption(VectorRef<KeyValueRef> options, Key key) {
+	for (const auto& option : options) {
+		if (option.key == key) {
+			return true;
+		}
+	}
+	return false;
+}
+
 // returns unconsumed options
 Standalone<VectorRef<KeyValueRef>> checkAllOptionsConsumed(VectorRef<KeyValueRef> options) {
 	static StringRef nothing = LiteralStringRef("");
@@ -607,7 +616,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 		startRole(Role::TESTER, workIface.id(), UID(), details);
 
 		if (work.useDatabase) {
-			cx = Database::createDatabase(ccf, -1, IsInternal::TRUE, locality);
+			cx = Database::createDatabase(ccf, -1, IsInternal::True, locality);
 			wait(delay(1.0));
 		}
 
@@ -1049,8 +1058,7 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedStorageEngineExcludeTypes", ""); } },
 	{ "maxTLogVersion",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedMaxTLogVersion", ""); } },
-	{ "disableTss",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableTSS", ""); } }
+	{ "disableTss", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableTSS", ""); } }
 };
 
 std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
@@ -1177,6 +1185,11 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  [](const std::string& value, TestSpec* spec) {
 	      if (value == "true")
 		      spec->phases = TestWorkload::CHECK;
+	  } },
+	{ "restorePerpetualWiggleSetting",
+	  [](const std::string& value, TestSpec* spec) {
+	      if (value == "false")
+		      spec->restorePerpetualWiggleSetting = false;
 	  } },
 };
 
@@ -1468,7 +1481,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 
 		if (perpetualWiggleEnabled) { // restore the enabled perpetual storage wiggle setting
-			wait(setPerpetualStorageWiggle(cx, true, LockAware::TRUE));
+			wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
 		}
 	}
 

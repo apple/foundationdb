@@ -40,18 +40,18 @@ struct SerializabilityWorkload : TestWorkload {
 		KeySelector begin;
 		KeySelector end;
 		int limit;
-		Snapshot snapshot{ Snapshot::FALSE };
-		Reverse reverse{ Reverse::FALSE };
+		Snapshot snapshot{ Snapshot::False };
+		Reverse reverse{ Reverse::False };
 	};
 
 	struct GetKeyOperation {
 		KeySelector key;
-		Snapshot snapshot{ Snapshot::FALSE };
+		Snapshot snapshot{ Snapshot::False };
 	};
 
 	struct GetOperation {
 		Key key;
-		Snapshot snapshot{ Snapshot::FALSE };
+		Snapshot snapshot{ Snapshot::False };
 	};
 
 	struct TransactionOperation {

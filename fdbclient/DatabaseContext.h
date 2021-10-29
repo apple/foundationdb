@@ -159,9 +159,9 @@ public:
 	                       LocalityData clientLocality,
 	                       EnableLocalityLoadBalance,
 	                       TaskPriority taskID = TaskPriority::DefaultEndpoint,
-	                       LockAware = LockAware::FALSE,
+	                       LockAware = LockAware::False,
 	                       int apiVersion = Database::API_VERSION_LATEST,
-	                       IsSwitchable = IsSwitchable::FALSE);
+	                       IsSwitchable = IsSwitchable::False);
 
 	~DatabaseContext();
 
@@ -180,13 +180,13 @@ public:
 		                                    switchable));
 	}
 
-	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation(const KeyRef&, Reverse isBackward = Reverse::FALSE);
+	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation(const KeyRef&, Reverse isBackward = Reverse::False);
 	bool getCachedLocations(const KeyRangeRef&,
 	                        vector<std::pair<KeyRange, Reference<LocationInfo>>>&,
 	                        int limit,
 	                        Reverse reverse);
 	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const vector<struct StorageServerInterface>&);
-	void invalidateCache(const KeyRef&, Reverse isBackward = Reverse::FALSE);
+	void invalidateCache(const KeyRef&, Reverse isBackward = Reverse::False);
 	void invalidateCache(const KeyRangeRef&);
 
 	bool sampleReadTags() const;
@@ -217,7 +217,7 @@ public:
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
 
 	Error deferredError;
-	LockAware lockAware{ LockAware::FALSE };
+	LockAware lockAware{ LockAware::False };
 
 	bool isError() const { return deferredError.code() != invalid_error_code; }
 
@@ -261,9 +261,9 @@ public:
 	                         LocalityData const& clientLocality,
 	                         EnableLocalityLoadBalance,
 	                         LockAware,
-	                         IsInternal = IsInternal::TRUE,
+	                         IsInternal = IsInternal::True,
 	                         int apiVersion = Database::API_VERSION_LATEST,
-	                         IsSwitchable = IsSwitchable::FALSE);
+	                         IsSwitchable = IsSwitchable::False);
 
 	explicit DatabaseContext(const Error& err);
 
@@ -282,7 +282,7 @@ public:
 	UID proxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;
-	EnableLocalityLoadBalance enableLocalityLoadBalance{ EnableLocalityLoadBalance::FALSE };
+	EnableLocalityLoadBalance enableLocalityLoadBalance{ EnableLocalityLoadBalance::False };
 
 	struct VersionRequest {
 		SpanID spanContext;

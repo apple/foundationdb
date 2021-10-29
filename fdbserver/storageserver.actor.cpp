@@ -864,7 +864,7 @@ public:
 			addShard(ShardInfo::newNotAssigned(allKeys));
 		}
 
-		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::TRUE);
+		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 
 	// Puts the given shard into shards.  The caller is responsible for adding shards
@@ -2793,7 +2793,7 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 		loop {
 			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, SERVER_KNOBS->FETCH_BLOCK_BYTES);
 			limits.minRows = 0;
-			state RangeResult rep = wait(tr->getRange(begin, end, limits, Snapshot::TRUE));
+			state RangeResult rep = wait(tr->getRange(begin, end, limits, Snapshot::True));
 			if (!rep.more) {
 				rep.readThrough = keys.end;
 			}
@@ -2906,7 +2906,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			tr.info.taskID = TaskPriority::FetchKeys;
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold = SERVER_KNOBS->FETCH_USING_STREAMING
-			                              ? tr.getRangeStream(results, keys, GetRangeLimits(), Snapshot::TRUE)
+			                              ? tr.getRangeStream(results, keys, GetRangeLimits(), Snapshot::True)
 			                              : tryGetRange(results, &tr, keys);
 			state Key nfk = keys.begin;
 
@@ -2973,7 +2973,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 					// FIXME: remove when we no longer support upgrades from 5.X
 					if (debug_getRangeRetries >= 100) {
-						data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::FALSE;
+						data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::False;
 						TraceEvent(SevWarnAlways, "FKDisableLB").detail("FKID", fetchKeysID);
 					}
 
@@ -3021,7 +3021,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		}
 
 		// FIXME: remove when we no longer support upgrades from 5.X
-		data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::TRUE;
+		data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::True;
 		TraceEvent(SevWarnAlways, "FKReenableLB").detail("FKID", fetchKeysID);
 
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
@@ -3913,7 +3913,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		// version and possibly change the desired oldest version
 		if (ver != invalidVersion && ver > data->version.get()) {
 			// TODO(alexmiller): Update to version tracking.
-			DEBUG_KEY_RANGE("SSUpdate", ver, KeyRangeRef());
+			// DEBUG_KEY_RANGE("SSUpdate", ver, KeyRangeRef());
 
 			data->mutableData().createNewVersion(ver);
 			if (data->otherError.getFuture().isReady())
@@ -4203,7 +4203,7 @@ bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion,
 		VerUpdateRef const& v = u->second;
 		ASSERT(v.version > prevStorageVersion && v.version <= newStorageVersion);
 		// TODO(alexmiller): Update to version tracking.
-		DEBUG_KEY_RANGE("makeVersionMutationsDurable", v.version, KeyRangeRef());
+		// DEBUG_KEY_RANGE("makeVersionMutationsDurable", v.version, KeyRangeRef());
 		writeMutations(v.mutations, v.version, "makeVersionDurable");
 		for (const auto& m : v.mutations)
 			bytesLeft -= mvccStorageBytes(m);
