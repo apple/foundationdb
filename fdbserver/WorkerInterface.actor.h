@@ -1098,8 +1098,8 @@ ACTOR template <class T>
 Future<T> ioTimeoutError(Future<T> what, double time) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
-	if(g_network->isSimulated() && !g_simulator.speedUpSimulation) {
-		time += (FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
+	if (g_network->isSimulated() && !g_simulator.speedUpSimulation) {
+		time += std::max(0.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
 	}
 	Future<Void> end = lowPriorityDelay(time);
 	choose {
@@ -1122,8 +1122,8 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
                                    double degradedTime) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
-	if(g_network->isSimulated() && !g_simulator.speedUpSimulation) {
-		double timeShift = FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now();
+	if (g_network->isSimulated() && !g_simulator.speedUpSimulation) {
+		double timeShift = std::max(0.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
 		errTime += timeShift;
 		degradedTime += timeShift;
 	}
