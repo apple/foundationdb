@@ -904,6 +904,10 @@ public:
 			}
 		}
 
+		if (resultSet.size() < required) {
+			throw no_more_servers();
+		}
+
 		// Continue adding workers to the result set until we reach the desired number of workers
 		for (auto workerIter = fitness_workers.begin();
 		     workerIter != fitness_workers.end() && resultSet.size() < desired;
@@ -922,7 +926,7 @@ public:
 			}
 		}
 
-		ASSERT(resultSet.size() <= desired);
+		ASSERT(resultSet.size() >= required && resultSet.size() <= desired);
 
 		for (auto& result : resultSet) {
 			id_used[result.interf.locality.processId()]++;
