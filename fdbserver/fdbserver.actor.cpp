@@ -1832,18 +1832,23 @@ int main(int argc, char* argv[]) {
 
 			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
 			std::vector<std::string> directories = platform::listDirectories(dataFolder);
-			for (int i = 0; i < directories.size(); i++)
-				if (directories[i].size() != 32 && directories[i] != "." && directories[i] != ".." &&
-				    directories[i] != "backups" && directories[i].find("snap") == std::string::npos) {
+			const std::set<std::string> allowedDirectories = { ".", "..", "backups", "unittests" };
+
+			for (const auto& dir : directories) {
+				if (dir.size() != 32 && allowedDirectories.count(dir) == 0 && dir.find("snap") == std::string::npos) {
+
 					TraceEvent(SevError, "IncompatibleDirectoryFound")
 					    .detail("DataFolder", dataFolder)
-					    .detail("SuspiciousFile", directories[i]);
+					    .detail("SuspiciousFile", dir);
+
 					fprintf(stderr,
 					        "ERROR: Data folder `%s' had non fdb file `%s'; please use clean, fdb-only folder\n",
 					        dataFolder.c_str(),
-					        directories[i].c_str());
+					        dir.c_str());
+
 					flushAndExit(FDB_EXIT_ERROR);
 				}
+			}
 			std::vector<std::string> files = platform::listFiles(dataFolder);
 			if ((files.size() > 1 || (files.size() == 1 && files[0] != "restartInfo.ini")) && !opts.restarting) {
 				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder);
