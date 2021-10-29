@@ -1249,7 +1249,8 @@ std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(const Valu
 	BinaryReader reader(value, IncludeVersion());
 	reader >> st;
 	reader >> v;
-	return std::pair(st, v);
+
+	return std::pair(st, bigEndian64(v));
 }
 
 const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version) {
