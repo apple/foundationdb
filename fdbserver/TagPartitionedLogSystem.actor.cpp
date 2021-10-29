@@ -461,7 +461,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 		changes.push_back(self->backupWorkerChanged.onTrigger());
 
 		ASSERT(failed.size() >= 1);
-		wait(quorum(changes, 1) || tagError<Void>(quorum(failed, 1), master_tlog_failed()) ||
+		wait(quorum(changes, 1) || tagError<Void>(quorum(failed, 1), tlog_failed()) ||
 		     tagError<Void>(quorum(backupFailed, 1), master_backup_worker_failed()));
 	}
 }
@@ -2408,7 +2408,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 
 	if (!forRemote) {
 		self->logSystemConfigChanged.trigger();
-		wait(failed.size() ? tagError<Void>(quorum(failed, 1), master_tlog_failed()) : Future<Void>(Never()));
+		wait(failed.size() ? tagError<Void>(quorum(failed, 1), tlog_failed()) : Future<Void>(Never()));
 		throw internal_error();
 	}
 	return Void();
@@ -3044,7 +3044,7 @@ ACTOR Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(
     UID myID,
     Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog) {
 
-	TraceEvent("TLogLockStarted", myID).detail("TLog", tlog->get().id());
+	TraceEvent("TLogLockStarted", myID).detail("TLog", tlog->get().id()).detail("InfPresent", tlog->get().present());
 	loop {
 		choose {
 			when(TLogLockResult data = wait(

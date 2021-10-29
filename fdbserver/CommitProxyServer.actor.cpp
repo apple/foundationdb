@@ -878,7 +878,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 
 	if (!self->isMyFirstBatch &&
 	    pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get() != self->oldCoordinators.get()) {
-		wait(brokenPromiseToNever(pProxyCommitData->master.changeCoordinators.getReply(
+		wait(brokenPromiseToNever(pProxyCommitData->db->get().clusterInterface.getReply(
 		    ChangeCoordinatorsRequest(pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get()))));
 		ASSERT(false); // ChangeCoordinatorsRequest should always throw
 	}
@@ -1093,7 +1093,15 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 
 	applyMetadataEffect(self);
 
+	if (debugID.present()) {
+		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadaEffect");
+	}
+
 	determineCommittedTransactions(self);
+
+	if (debugID.present()) {
+		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadaEffect");
+	}
 
 	if (self->forceRecovery) {
 		wait(Future<Void>(Never()));
@@ -1102,8 +1110,17 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	// First pass
 	wait(applyMetadataToCommittedTransactions(self));
 
+	if (debugID.present()) {
+		g_traceBatch.addEvent(
+		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadaToCommittedTxn");
+	}
+
 	// Second pass
 	wait(assignMutationsToStorageServers(self));
+
+	if (debugID.present()) {
+		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.AssignMutationToSS");
+	}
 
 	// Serialize and backup the mutations as a single mutation
 	if ((pProxyCommitData->vecBackupKeys.size() > 1) && self->logRangeMutations.size()) {
@@ -1241,7 +1258,7 @@ ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_broken_promise) {
-			throw master_tlog_failed();
+			throw tlog_failed();
 		}
 		throw;
 	}
@@ -1999,6 +2016,7 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 
 ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
                                          MasterInterface master,
+										 LifetimeToken masterLifetime,
                                          Reference<AsyncVar<ServerDBInfo> const> db,
                                          LogEpoch epoch,
                                          Version recoveryTransactionVersion,
@@ -2014,7 +2032,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> onError =
-	    transformError(actorCollection(addActor.getFuture()), broken_promise(), master_tlog_failed());
+	    transformError(actorCollection(addActor.getFuture()), broken_promise(), tlog_failed());
 	state double lastCommit = 0;
 
 	state GetHealthMetricsReply healthMetricsReply;
@@ -2026,7 +2044,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	//TraceEvent("CommitProxyInit1", proxy.id());
 
 	// Wait until we can load the "real" logsystem, since we don't support switching them currently
-	while (!(commitData.db->get().master.id() == master.id() &&
+	while (!(masterLifetime.isEqual(commitData.db->get().masterLifetime) &&
 	         commitData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION)) {
 		//TraceEvent("ProxyInit2", proxy.id()).detail("LSEpoch", db->get().logSystemConfig.epoch).detail("Need", epoch);
 		wait(commitData.db->onChange());
@@ -2088,7 +2106,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	loop choose {
 		when(wait(dbInfoChange)) {
 			dbInfoChange = commitData.db->onChange();
-			if (commitData.db->get().master.id() == master.id() &&
+			if (masterLifetime.isEqual(commitData.db->get().masterLifetime) &&
 			    commitData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
 				commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
 				for (auto it : commitData.tag_popped) {
@@ -2155,6 +2173,7 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
 	try {
 		state Future<Void> core = commitProxyServerCore(proxy,
 		                                                req.master,
+														req.masterLifetime,
 		                                                db,
 		                                                req.recoveryCount,
 		                                                req.recoveryTransactionVersion,
@@ -2165,7 +2184,7 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
 		TraceEvent("CommitProxyTerminated", proxy.id()).error(e, true);
 
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
-		    e.code() != error_code_master_tlog_failed && e.code() != error_code_coordinators_changed &&
+		    e.code() != error_code_tlog_failed && e.code() != error_code_coordinators_changed &&
 		    e.code() != error_code_coordinated_state_conflict && e.code() != error_code_new_coordinators_timed_out &&
 		    e.code() != error_code_failed_to_progress) {
 			throw;
