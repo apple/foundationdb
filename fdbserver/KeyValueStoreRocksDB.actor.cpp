@@ -9,6 +9,7 @@
 #include <rocksdb/table.h>
 #include <rocksdb/version.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
+#include "fdbclient/SystemData.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
@@ -579,15 +580,26 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	Optional<Future<Void>> metrics;
 	FlowLock readSemaphore;
-	int readWaiters;
+	int numReadWaiters;
 	FlowLock fetchSemaphore;
-	int fetchWaiters;
+	int numFetchWaiters;
+
+	struct Counters {
+		CounterCollection cc;
+		Counter immediateThrottle;
+		Counter failedToAcquire;
+
+		Counters()
+		  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("failedToAcquire", cc) {}
+	};
+
+	Counters counters;
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id)
 	  : path(path), id(id), readSemaphore(SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
-	    readWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
-	    fetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX) {
+	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
+	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage engine
 		// is still multi-threaded as background compaction threads are still present. Reads/writes to disk will also
 		// block the network thread in a way that would be unacceptable in production but is a necessary evil here. When
@@ -677,6 +689,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	void checkWaiters(const FlowLock& semaphore, int maxWaiters) {
 		if (semaphore.waiters() > maxWaiters) {
+			++counters.immediateThrottle;
 			throw server_overloaded();
 		}
 	}
@@ -684,14 +697,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	// We don't throttle eager reads and reads to the FF keyspace because FDB struggles when those reads fail.
 	// Thus far, they have been low enough volume to not cause an issue.
 	static bool shouldThrottle(IKeyValueStore::ReadType type, KeyRef key) {
-		return type != IKeyValueStore::ReadType::EAGER && !(key.size() && key[0] == 0xFF);
+		return type != IKeyValueStore::ReadType::EAGER && !(key.startsWith(systemKeys.begin));
 	}
 
 	ACTOR template <class Action>
-	static Future<Optional<Value>> read(Action* action, FlowLock* semaphore, IThreadPool* pool) {
+	static Future<Optional<Value>> read(Action* action, FlowLock* semaphore, IThreadPool* pool, Counter* counter) {
 		state std::unique_ptr<Action> a(action);
 		state Optional<Void> slot = wait(timeout(semaphore->take(), SERVER_KNOBS->ROCKSDB_READ_QUEUE_WAIT));
 		if (!slot.present()) {
+			++(*counter);
 			throw server_overloaded();
 		}
 
@@ -713,11 +727,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		auto& semaphore = (type == IKeyValueStore::ReadType::FETCH) ? fetchSemaphore : readSemaphore;
-		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? fetchWaiters : readWaiters;
+		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
 		auto a = std::make_unique<Reader::ReadValueAction>(key, debugID);
-		return read(a.release(), &semaphore, readThreads.getPtr());
+		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
@@ -732,19 +746,21 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		auto& semaphore = (type == IKeyValueStore::ReadType::FETCH) ? fetchSemaphore : readSemaphore;
-		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? fetchWaiters : readWaiters;
+		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
 		auto a = std::make_unique<Reader::ReadValuePrefixAction>(key, maxLength, debugID);
-		return read(a.release(), &semaphore, readThreads.getPtr());
+		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
 	ACTOR static Future<Standalone<RangeResultRef>> read(Reader::ReadRangeAction* action,
 	                                                     FlowLock* semaphore,
-	                                                     IThreadPool* pool) {
+	                                                     IThreadPool* pool,
+	                                                     Counter* counter) {
 		state std::unique_ptr<Reader::ReadRangeAction> a(action);
 		state Optional<Void> slot = wait(timeout(semaphore->take(), SERVER_KNOBS->ROCKSDB_READ_QUEUE_WAIT));
 		if (!slot.present()) {
+			++(*counter);
 			throw server_overloaded();
 		}
 
@@ -769,11 +785,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		auto& semaphore = (type == IKeyValueStore::ReadType::FETCH) ? fetchSemaphore : readSemaphore;
-		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? fetchWaiters : readWaiters;
+		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
 		auto a = std::make_unique<Reader::ReadRangeAction>(keys, rowLimit, byteLimit);
-		return read(a.release(), &semaphore, readThreads.getPtr());
+		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
 	StorageBytes getStorageBytes() const override {
