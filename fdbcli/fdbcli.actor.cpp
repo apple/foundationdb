@@ -2054,6 +2054,20 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "move_shard")) {
+					bool _result = wait(makeInterruptable(moveShardCommandActor(db, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "repair_system_data")) {
+					bool _result = wait(makeInterruptable(repairSystemDataCommandActor(db, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "maintenance")) {
 					bool _result = wait(makeInterruptable(maintenanceCommandActor(db, tokens)));
 					if (!_result)

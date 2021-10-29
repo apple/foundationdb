@@ -26,6 +26,7 @@
 
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/ActorCollection.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "flow/SystemMonitor.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -131,6 +132,7 @@ public:
 		int64_t dbInfoCount;
 		bool recoveryStalled;
 		bool forceRecovery;
+		bool recoverMetadata;
 		DatabaseConfiguration config; // Asynchronously updated via master registration
 		DatabaseConfiguration fullyRecoveredConfig;
 		Database db;
@@ -144,12 +146,12 @@ public:
 		DBInfo()
 		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
 		    masterRegistrationCount(0), dbInfoCount(0), recoveryStalled(false), forceRecovery(false),
-		    db(DatabaseContext::create(clientInfo,
-		                               Future<Void>(),
-		                               LocalityData(),
-		                               EnableLocalityLoadBalance::True,
-		                               TaskPriority::DefaultEndpoint,
-		                               LockAware::True)), // SOMEDAY: Locality!
+		    recoverMetadata(false), db(DatabaseContext::create(clientInfo,
+		                                                       Future<Void>(),
+		                                                       LocalityData(),
+		                                                       EnableLocalityLoadBalance::True,
+		                                                       TaskPriority::DefaultEndpoint,
+		                                                       LockAware::True)), // SOMEDAY: Locality!
 		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false), clientCount(0) {
 			clientCounter = countClients(this);
 		}
@@ -352,12 +354,14 @@ public:
 		LocalityMap<WorkerDetails>* logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
 		bool bCompleted = false;
 
+		int count = 0;
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(ProcessClass::Storage);
 			if (workerAvailable(it.second, false) && !conf.isExcludedServer(it.second.details.interf.addresses()) &&
 			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    fitness != ProcessClass::NeverAssign &&
 			    (!dcId.present() || it.second.details.interf.locality.dcId() == dcId.get())) {
+				++count;
 				fitness_workers[fitness].push_back(it.second.details);
 			}
 		}
@@ -3358,12 +3362,17 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 			RecruitMasterRequest rmq;
 			rmq.lifetime = db->serverInfo->get().masterLifetime;
 			rmq.forceRecovery = db->forceRecovery;
+			rmq.recoverMetadata = db->recoverMetadata;
 
 			cluster->masterProcessId = masterWorker.worker.interf.locality.processId();
 			cluster->db.unfinishedRecoveries++;
 			state Future<ErrorOr<MasterInterface>> fNewMaster = masterWorker.worker.interf.master.tryGetReply(rmq);
 			wait(ready(fNewMaster) || db->forceMasterFailure.onTrigger());
 			if (fNewMaster.isReady() && fNewMaster.get().present()) {
+				if (db->recoverMetadata) {
+					TraceEvent("RepairedSystemData", cluster->id);
+					db->recoverMetadata = false;
+				}
 				TraceEvent("CCWDB", cluster->id).detail("Recruited", fNewMaster.get().get().id());
 
 				// for status tool
@@ -4990,6 +4999,180 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 	}
 }
 
+ACTOR Future<Void> handleRepairSystemData(ClusterControllerData* self, ClusterControllerFullInterface interf) {
+	loop {
+		state RepairSystemDataRequest req = waitNext(interf.clientInterface.repairSystemData.getFuture());
+		TraceEvent("RepairSystemDataStart", self->id).detail("ClusterControllerDcId", self->clusterControllerDcId);
+		self->db.recoverMetadata = true;
+		self->db.forceMasterFailure.trigger();
+		req.reply.send(Void());
+	}
+}
+
+ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddress> addresses) {
+	// Disable DD to avoid DD undoing of our move.
+	state int ignore = wait(setDDMode(cx, 0));
+	std::cout << "Disabled DD" << std::endl
+	          << "Start moving Shard [" << keys.begin.toString() << ", " << keys.end.toString() << ")." << std::endl;
+
+	state std::unique_ptr<FlowLock> startMoveKeysParallelismLock = std::make_unique<FlowLock>();
+	state std::unique_ptr<FlowLock> finishMoveKeysParallelismLock = std::make_unique<FlowLock>();
+
+	state Transaction tr(cx);
+
+	// Pick a random SS as the dest, keys will reside on a single server after the move.
+	state std::vector<UID> dest;
+	loop {
+		try {
+			state RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	std::cout << "Got serverList" << std::endl;
+
+	std::unordered_set<NetworkAddress> nadds;
+	std::unordered_set<std::string> ips;
+
+	for (const auto& add : addresses) {
+		nadds.insert(add);
+		ips.insert(add.ip.toString());
+	}
+
+	for (auto s = serverList.begin(); s != serverList.end() && dest.size() < addresses.size(); ++s) {
+		auto ssi = decodeServerListValue(s->value);
+		if (nadds.count(ssi.address()) > 0) {
+			dest.push_back(ssi.uniqueID);
+		} else if (ssi.secondaryAddress().present() && nadds.count(ssi.secondaryAddress().get()) > 0) {
+			dest.push_back(ssi.uniqueID);
+		}
+	}
+
+	if (dest.size() < addresses.size()) {
+		for (auto s = serverList.begin(); s != serverList.end() && dest.size() < addresses.size(); ++s) {
+			auto ssi = decodeServerListValue(s->value);
+			if (ips.count(ssi.address().ip.toString()) > 0) {
+				dest.push_back(ssi.uniqueID);
+			} else if (ssi.secondaryAddress().present() && ips.count(ssi.secondaryAddress().get().ip.toString()) > 0) {
+				dest.push_back(ssi.uniqueID);
+			}
+		}
+	}
+
+	std::cout << "Dest: " << describe(dest) << std::endl;
+
+	if (dest.empty()) {
+		throw destination_servers_not_found();
+	}
+
+	state UID owner = deterministicRandom()->randomUniqueID();
+	state DDEnabledState ddEnabledState;
+	// state KeyRef ownerKey = "\xff/moveKeysLock/Owner"_sr;
+
+	state Transaction txn(cx);
+	loop {
+		try {
+			loop {
+				try {
+					BinaryWriter wrMyOwner(Unversioned());
+					wrMyOwner << owner;
+					std::cout << "moveKeysLockOwnerKey: " << moveKeysLockOwnerKey.toString()
+					          << ", Value: " << wrMyOwner.toValue().toString() << std::endl;
+					txn.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+					std::cout << "SetDone" << std::endl;
+					wait(txn.commit());
+					break;
+				} catch (Error& e) {
+					TraceEvent("SetMoveKeysLockOwnerKeyError").error(e);
+					wait(txn.onError(e));
+				}
+			}
+
+			std::cout << "Set moveKeysLockOwner" << std::endl;
+
+			MoveKeysLock moveKeysLock;
+			moveKeysLock.myOwner = owner;
+
+			wait(moveKeys(cx,
+			              keys,
+			              dest,
+			              dest,
+			              moveKeysLock,
+			              Promise<Void>(),
+			              startMoveKeysParallelismLock.get(),
+			              finishMoveKeysParallelismLock.get(),
+			              false,
+			              UID(), // for logging only
+			              &ddEnabledState));
+			break;
+		} catch (Error& e) {
+			TraceEvent("MoveShardError").error(e);
+			if (e.code() == error_code_movekeys_conflict) {
+				txn.reset();
+				wait(delay(1.0));
+			} else {
+				throw e;
+			}
+		}
+	}
+
+	std::cout << "Moved Shard [" << keys.begin.toString() << ", " << keys.end.toString() << ")"
+	          << " to New Team: " << describe(dest) << std::endl;
+
+	TraceEvent("ShardMoved").detail("Begin", keys.begin).detail("End", keys.end).detail("NewTeam", describe(dest));
+
+	// tr.reset();
+	// Standalone<VectorRef<const char*>> addresses = wait(tr.getAddressesForKey(keys.begin));
+
+	// // The move function is not what we are testing here, crash the test if the move fails.
+	// ASSERT(addresses.size() == 1);
+	// ASSERT(std::string(addresses[0]) == addr.toString());
+
+	// return addr;
+	return Void();
+}
+
+ACTOR Future<Void> handleMoveShard(ClusterControllerData* self, ClusterControllerFullInterface interf) {
+	state std::unordered_set<UID> processedRequests;
+	loop {
+		state MoveShardRequest req = waitNext(interf.clientInterface.moveShard.getFuture());
+		TraceEvent("ManualMoveShardStart", self->id)
+		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
+		    .detail("RequestID", req.id)
+		    .detail("Begin", req.shard.begin)
+		    .detail("End", req.shard.end)
+		    .detail("Addresses", describe(req.addresses));
+
+		if (!req.id.isValid() || processedRequests.count(req.id) == 0) {
+			processedRequests.insert(req.id);
+			try {
+				wait(moveShard(self->db.db, req.shard, req.addresses));
+				TraceEvent("ManualMoveShardFinish", self->id).log();
+				req.reply.send(Void());
+			} catch (Error& e) {
+				TraceEvent("ManualMoveShardError", self->id)
+				    .detail("ClusterControllerDcId", self->clusterControllerDcId)
+				    .detail("RequestID", req.id)
+				    .detail("Begin", req.shard.begin)
+				    .detail("End", req.shard.end)
+				    .detail("Addresses", describe(req.addresses))
+				    .error(e);
+				req.reply.sendError(e);
+			}
+		} else {
+			TraceEvent("ManualMoveShardDuplicateRequestID", self->id)
+			    .detail("ClusterControllerDcId", self->clusterControllerDcId)
+			    .detail("RequestID", req.id)
+			    .detail("Begin", req.shard.begin)
+			    .detail("End", req.shard.end)
+			    .detail("Addresses", describe(req.addresses));
+		}
+	}
+}
+
 ACTOR Future<Void> startDataDistributor(ClusterControllerData* self) {
 	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
 
@@ -5424,6 +5607,8 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(updatedChangedDatacenters(&self));
 	self.addActor.send(updateDatacenterVersionDifference(&self));
 	self.addActor.send(handleForcedRecoveries(&self, interf));
+	self.addActor.send(handleMoveShard(&self, interf));
+	self.addActor.send(handleRepairSystemData(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
 	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {

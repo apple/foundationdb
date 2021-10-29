@@ -585,13 +585,14 @@ struct RecruitMasterRequest {
 	LifetimeToken lifetime;
 	bool forceRecovery;
 	ReplyPromise<struct MasterInterface> reply;
+	bool recoverMetadata;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, lifetime, forceRecovery, reply, arena);
+		serializer(ar, lifetime, forceRecovery, reply, arena, recoverMetadata);
 	}
 };
 
@@ -1009,7 +1010,8 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 ServerCoordinators serverCoordinators,
                                 LifetimeToken lifetime,
-                                bool forceRecovery);
+                                bool forceRecovery,
+                                bool recoverMetadata);
 ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
                                      InitializeCommitProxyRequest req,
                                      Reference<AsyncVar<ServerDBInfo> const> db,

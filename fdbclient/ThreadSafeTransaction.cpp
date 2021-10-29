@@ -95,6 +95,17 @@ ThreadFuture<Void> ThreadSafeDatabase::createSnapshot(const StringRef& uid, cons
 	return onMainThread([db, snapUID, cmd]() -> Future<Void> { return db->createSnapshot(snapUID, cmd); });
 }
 
+ThreadFuture<Void> ThreadSafeDatabase::moveShard(const KeyRangeRef& keys, std::vector<NetworkAddress> addresses) {
+	DatabaseContext* db = this->db;
+	KeyRange shard = keys;
+	return onMainThread([db, shard, addresses]() -> Future<Void> { return db->moveShard(shard, addresses); });
+}
+
+ThreadFuture<Void> ThreadSafeDatabase::repairSystemData() {
+	DatabaseContext* db = this->db;
+	return onMainThread([db]() -> Future<Void> { return db->repairSystemData(); });
+}
+
 // Return the main network thread busyness
 double ThreadSafeDatabase::getMainThreadBusyness() {
 	ASSERT(g_network);

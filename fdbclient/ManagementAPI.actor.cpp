@@ -30,6 +30,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ManagementAPI.actor.h"
 
+#include "fdbserver/MoveKeys.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/CoordinationInterface.h"
@@ -2194,6 +2195,43 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 			when(wait(clusterInterface->get().present()
 			              ? brokenPromiseToNever(
 			                    clusterInterface->get().get().forceRecovery.getReply(ForceRecoveryRequest(dcId)))
+			              : Never())) {
+				return Void();
+			}
+			when(wait(clusterInterface->onChange())) {}
+		}
+	}
+}
+
+ACTOR Future<Void> moveShard(Reference<ClusterConnectionFile> clusterFile,
+                             KeyRangeRef shard,
+                             std::vector<NetworkAddress> addresses) {
+	std::cout << "Moving" << std::endl;
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+
+	loop {
+		choose {
+			when(wait(clusterInterface->get().present()
+			              ? brokenPromiseToNever(clusterInterface->get().get().moveShard.getReply(
+			                    MoveShardRequest(shard, addresses, deterministicRandom()->randomUniqueID())))
+			              : Never())) {
+				return Void();
+			}
+			when(wait(clusterInterface->onChange())) {}
+		}
+	}
+}
+
+ACTOR Future<Void> repairSystemData(Reference<ClusterConnectionFile> clusterFile) {
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+
+	loop {
+		choose {
+			when(wait(clusterInterface->get().present()
+			              ? brokenPromiseToNever(
+			                    clusterInterface->get().get().repairSystemData.getReply(RepairSystemDataRequest()))
 			              : Never())) {
 				return Void();
 			}

@@ -3359,6 +3359,7 @@ ACTOR Future<RangeResult> getRange(Database cx,
 
 	try {
 		state Version version = wait(fVersion);
+		TraceEvent("GetRangeReadVersion").detail("Version", version);
 		cx->validateVersion(version);
 
 		state double startTime = now();
@@ -6651,6 +6652,14 @@ Future<Void> DatabaseContext::forceRecoveryWithDataLoss(StringRef dcId) {
 ACTOR static Future<Void> createSnapshotActor(DatabaseContext* cx, UID snapUID, StringRef snapCmd) {
 	wait(mgmtSnapCreate(cx->clone(), snapCmd, snapUID));
 	return Void();
+}
+
+Future<Void> DatabaseContext::moveShard(KeyRangeRef shard, std::vector<NetworkAddress> addresses) {
+	return ::moveShard(getConnectionFile(), shard, addresses);
+}
+
+Future<Void> DatabaseContext::repairSystemData() {
+	return ::repairSystemData(getConnectionFile());
 }
 
 Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_command) {

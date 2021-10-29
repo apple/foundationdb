@@ -209,6 +209,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 		state Future<Void> timeout;
 		state std::vector<CommitTransactionRequest> batch;
 		state int batchBytes = 0;
+		// state bool batchSupressPrivateMutations;
 
 		if (SERVER_KNOBS->MAX_COMMIT_BATCH_INTERVAL <= 0) {
 			timeout = Never();
@@ -463,6 +464,8 @@ struct CommitBatchContext {
 
 	std::vector<uint8_t> committed;
 
+	bool suppressPrivateMutations;
+
 	Optional<Key> lockedKey;
 	bool locked;
 
@@ -519,7 +522,9 @@ CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
 		                  SERVER_KNOBS->PROXY_COMPUTE_BUCKETS * batchBytes /
 		                      (batchOperations * (CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->KEY_SIZE_LIMIT)));
 	}
-
+	if (!trs.empty()) {
+		suppressPrivateMutations = trs[0].suppressPrivateMutations();
+	}
 	// since we are using just the former to limit the number of versions actually in flight!
 	ASSERT(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS <= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);
 }
@@ -842,12 +847,14 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
+			LogPushData* toCommit = self->suppressPrivateMutations ? nullptr : &self->toCommit;
+			// std::cout << "suppress private: " <<self->suppressPrivateMutations << std::endl; 
 			applyMetadataMutations(trs[t].spanContext,
 			                       *pProxyCommitData,
 			                       self->arena,
 			                       pProxyCommitData->logSystem,
 			                       trs[t].transaction.mutations,
-			                       &self->toCommit,
+			                       toCommit,
 			                       self->forceRecovery,
 			                       self->commitVersion + 1,
 			                       /* initialCommit= */ false);

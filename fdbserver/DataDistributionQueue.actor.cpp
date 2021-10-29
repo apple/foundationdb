@@ -596,6 +596,8 @@ struct DDQueueData {
 		state std::set<UID> servers;
 		state Transaction tr(cx);
 
+		TraceEvent("GetSourceServersForRange").detail("Begin", input.keys.begin).detail("End", input.keys.end);
+
 		// FIXME: is the merge case needed
 		if (input.priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD) {
 			wait(delay(0.5, TaskPriority::DataDistributionVeryLow));
@@ -635,7 +637,9 @@ struct DDQueueData {
 						}
 					}
 
-					ASSERT(servers.size() > 0);
+					if (servers.empty()) {
+						throw movekeys_conflict();
+					}
 				}
 
 				// If the size of keyServerEntries is large, then just assume we are using all storage servers
@@ -649,7 +653,9 @@ struct DDQueueData {
 					for (auto s = serverList.begin(); s != serverList.end(); ++s)
 						servers.insert(decodeServerListValue(s->value).id());
 
-					ASSERT(servers.size() > 0);
+					if (servers.empty()) {
+						throw movekeys_conflict();
+					}
 				}
 
 				break;

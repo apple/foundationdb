@@ -20,13 +20,14 @@
 
 #include <vector>
 
-#include "flow/Util.h"
-#include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/MoveKeys.actor.h"
+#include "fdbrpc/FailureMonitor.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
+#include "flow/Util.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -1338,6 +1339,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 				state int i = 0;
 				for (; i < keyServers.size() - 1; ++i) {
 					state KeyValueRef it = keyServers[i];
+					state KeyRangeRef shard(keyServers[i].key, keyServers[i + 1].key);
 					decodeKeyServersValue(UIDtoTagMap, it.value, src, dest);
 
 					// The failed server is not present
@@ -1354,11 +1356,10 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 					// If the last src server is to be removed, first check if there are dest servers who is
 					// hosting a read-write copy of the keyrange, and move such dest servers to the src list.
 					if (src.empty() && !dest.empty()) {
-						std::vector<UID> newSources =
-						    wait(pickReadWriteServers(&tr, dest, KeyRangeRef(it.key, keyServers[i + 1].key)));
+						std::vector<UID> newSources = wait(pickReadWriteServers(&tr, dest, shard));
 						for (const UID& id : newSources) {
 							TraceEvent(SevWarn, "FailedServerAdditionalSourceServer", serverID)
-							    .detail("Key", it.key)
+							    .detail("Key", shard.begin)
 							    .detail("NewSourceServerFromDest", id);
 							dest.erase(std::remove(dest.begin(), dest.end(), id), dest.end());
 							src.push_back(id);
@@ -1370,50 +1371,57 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 					if (src.empty()) {
 						if (teamForDroppedRange.empty()) {
 							TraceEvent(SevError, "ShardLossAllReplicasNoDestinationTeam", serverID)
-							    .detail("Begin", it.key)
-							    .detail("End", keyServers[i + 1].key);
+							    .detail("Begin", shard.begin)
+							    .detail("End", shard.end);
 							throw internal_error();
 						}
 
 						// Assign the shard to teamForDroppedRange in keyServer space.
-						tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, teamForDroppedRange, {}));
+						tr.set(keyServersKey(shard.begin), keyServersValue(UIDtoTagMap, teamForDroppedRange, {}));
 
-						std::vector<Future<Void>> actors;
+						state std::vector<Future<Void>> actors;
 
 						// Unassign the shard from the dest servers.
 						for (const UID& id : dest) {
-							actors.push_back(krmSetRangeCoalescing(&tr,
-							                                       serverKeysPrefixFor(id),
-							                                       KeyRangeRef(it.key, keyServers[i + 1].key),
-							                                       allKeys,
-							                                       serverKeysFalse));
+							actors.push_back(
+							    krmSetRangeCoalescing(&tr, serverKeysPrefixFor(id), shard, allKeys, serverKeysFalse));
 						}
 
 						// Assign the shard to the new team as an empty range.
 						// Note, there could be data loss.
 						for (const UID& id : teamForDroppedRange) {
-							actors.push_back(krmSetRangeCoalescing(&tr,
-							                                       serverKeysPrefixFor(id),
-							                                       KeyRangeRef(it.key, keyServers[i + 1].key),
-							                                       allKeys,
-							                                       serverKeysTrueEmptyRange));
+							actors.push_back(krmSetRangeCoalescing(
+							    &tr, serverKeysPrefixFor(id), shard, allKeys, serverKeysTrueEmptyRange));
+						}
+
+						if (systemKeys.intersects(shard)) {
+							state Transaction txn(cx);
+							txn.set(metadataRecoveryModeKey, metadataRecoverySS);
+							wait(lockDatabase(&txn, metadataRecoveryDatabaseLock));
+							TraceEvent(SevWarnAlways, "MetaDataShardAllReplicasLost", serverID)
+							    .detail("Begin", shard.begin)
+							    .detail("End", shard.end);
+							throw internal_error();
 						}
 
 						wait(waitForAll(actors));
 
 						TraceEvent trace(SevWarnAlways, "ShardLossAllReplicasDropShard", serverID);
-						trace.detail("Begin", it.key);
-						trace.detail("End", keyServers[i + 1].key);
+						trace.detail("Begin", shard.begin);
+						trace.detail("End", shard.end);
 						if (!dest.empty()) {
 							trace.detail("DropedDest", describe(dest));
 						}
 						trace.detail("NewTeamForDroppedShard", describe(teamForDroppedRange));
+						std::cout << "Shard [" << shard.begin.toString() << ", " << shard.end.toString()
+						          << ") lost all shards, it will be cleared and moved to: "
+						          << describe(teamForDroppedRange) << std::endl;
 					} else {
 						TraceEvent(SevDebug, "FailedServerSetKey", serverID)
-						    .detail("Key", it.key)
+						    .detail("Key", shard.begin)
 						    .detail("ValueSrc", describe(src))
 						    .detail("ValueDest", describe(dest));
-						tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, src, dest));
+						tr.set(keyServersKey(shard.begin), keyServersValue(UIDtoTagMap, src, dest));
 					}
 				}
 
@@ -1485,6 +1493,97 @@ ACTOR Future<Void> moveKeys(Database cx,
 	return Void();
 }
 
+void setUpMetadataServers(Arena& arena,
+                          CommitTransactionRef& tr,
+                          std::vector<StorageServerInterface> servers,
+                          std::unordered_map<UID, Tag> serverTagMap,
+                          IKeyValueStore* txnStateStore) {
+	std::cout << "SetUpMetadataServersBegin" << std::endl;
+	std::sort(servers.begin(), servers.end());
+
+	// For now, the SSes are existing ones, no need to update the metadata.
+	// for (auto& s : servers) {
+	// 	tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(serverTagMap[s.id()]));
+	// 	tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
+	// 	std::cout << "setting server " << s.id().toString() << ", tag: " << serverTagMap[s.id()].toString()
+	// 	          << std::endl;
+	// }
+
+	RangeResult UID2Tag = txnStateStore->readRange(serverTagKeys).get();
+	RangeResult keyServers = txnStateStore->readRange(keyServersKeys).get();
+	std::vector<UID> metaServers;
+	std::unordered_map<UID, Optional<KeyRangeRef>> lastOwnedNormalRange;
+	for (int i = 0; i < keyServers.size() - 1; ++i) {
+		KeyRangeRef shard(keyServers[i].key.removePrefix(keyServersPrefix),
+		                  keyServers[i + 1].key.removePrefix(keyServersPrefix));
+		std::vector<UID> src, dest;
+		decodeKeyServersValue(UID2Tag, keyServers[i].value, src, dest);
+		if (shard.begin < systemKeys.begin) {
+			for (const UID& id : src) {
+				lastOwnedNormalRange[id] = shard;
+			}
+			for (const UID& id : dest) {
+				lastOwnedNormalRange[id] = shard;
+			}
+		}
+		if (shard.intersects(systemKeys)) {
+			metaServers.insert(metaServers.end(), src.begin(), src.end());
+			metaServers.insert(metaServers.end(), dest.begin(), dest.end());
+		}
+	}
+	TraceEvent("OldSystemDataServers").detail("Servers", describe(metaServers));
+
+	for (auto& s : metaServers) {
+		KeyRef last = lastOwnedNormalRange[s].present() ? lastOwnedNormalRange[s].get().end : allKeys.begin;
+		KeyRef key = std::min(systemKeys.begin, last);
+		TraceEvent("OldMetaDataLastOwnedShardEnd", s).detail("End", key.toString()).detail("Last", last.toString());
+		tr.clear(arena, KeyRangeRef(serverKeysKey(s, key), serverKeysKey(s, systemKeys.end)));
+		// tr.set(arena, serverKeysKey(s, key), serverKeysFalse);
+		krmSetPreviouslyEmptyRange(
+		    tr, arena, serverKeysPrefixFor(s), KeyRangeRef(key, systemKeys.end), serverKeysFalse, serverKeysFalse);
+	}
+
+	// Is this redundant?
+	// for (auto& s : metaServers) {
+	// 	krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(s), systemKeys, serverKeysFalse, serverKeysFalse);
+	// }
+
+	std::vector<Tag> serverTags;
+	std::vector<UID> serverSrcUID;
+	serverTags.reserve(servers.size());
+	for (auto& s : servers) {
+		serverTags.push_back(serverTagMap[s.id()]);
+		serverSrcUID.push_back(s.id());
+	}
+
+	auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS ? keyServersValue(serverTags)
+	                                                    : keyServersValue(RangeResult(), serverSrcUID);
+
+	tr.clear(arena, KeyRangeRef(keyServersKey(systemKeys.begin), keyServersKey(systemKeys.end)));
+	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, systemKeys, ksValue, Value());
+
+	for (auto& s : servers) {
+		tr.clear(arena, KeyRangeRef(serverKeysKey(s.id(), systemKeys.begin), serverKeysKey(s.id(), systemKeys.end)));
+	}
+	for (auto& s : servers) {
+		Optional<KeyRangeRef>& last = lastOwnedNormalRange[s.id()];
+		if (!last.present() || last.get().end < systemKeys.begin) {
+			krmSetPreviouslyEmptyRange(
+			    tr, arena, serverKeysPrefixFor(s.id()), systemKeys, serverKeysTrueEmptyRange, serverKeysFalse);
+		} else {
+			krmSetPreviouslyEmptyRange(tr,
+			                           arena,
+			                           serverKeysPrefixFor(s.id()),
+			                           KeyRangeRef(last.get().begin, systemKeys.end),
+			                           serverKeysTrueEmptyRange,
+			                           serverKeysFalse);
+			// tr.set(arena, serverKeysKey(s.id(), systemKeys.begin), serverKeysTrueEmptyRange);
+		}
+		std::cout << "server id: " << s.id().toString() << " keys: " << systemKeys.toString() << std::endl;
+	}
+	std::cout << "SetUpMetadataServersEnd" << std::endl;
+}
+
 // Called by the master server to write the very first transaction to the database
 // establishing a set of shard servers and all invariants of the systemKeys.
 void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<StorageServerInterface> servers) {
@@ -1529,9 +1628,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 
 	auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS ? keyServersValue(serverTags)
 	                                                    : keyServersValue(RangeResult(), serverSrcUID);
-	// We have to set this range in two blocks, because the master tracking of "keyServersLocations" depends on a change
-	// to a specific
-	//   key (keyServersKeyServersKey)
+
 	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
 
 	for (auto& s : servers) {

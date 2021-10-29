@@ -463,6 +463,10 @@ extern const KeyRef metricConfPrefix;
 
 extern const KeyRef maxUIDKey;
 
+extern const KeyRef metadataRecoveryModeKey;
+extern const ValueRef metadataRecoveryOff, metadataRecoverySS, metadataRecoveryFull;
+extern const UID metadataRecoveryDatabaseLock;
+
 extern const KeyRef databaseLockedKey;
 extern const KeyRef databaseLockedKeyEnd;
 extern const KeyRef metadataVersionKey;

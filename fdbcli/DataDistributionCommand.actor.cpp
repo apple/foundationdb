@@ -79,6 +79,66 @@ ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, bool igno
 	}
 }
 
+ACTOR Future<Void> resolveKey(Reference<IDatabase> db, Key key) {
+	printf("Resolving key: %s\n", key.toString().c_str());
+
+	state Key withPrefix = key.withPrefix(keyServersPrefix);
+
+	state Reference<ITransaction> tr = db->createTransaction();
+	loop {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			state ThreadFuture<RangeResult> UID2TagMapFuture = tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+			state RangeResult UID2TagMap = wait(safeThreadFutureToFuture(UID2TagMapFuture));
+			ASSERT(!UID2TagMap.more && UID2TagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+			state ThreadFuture<RangeResult> keyServersFuture = tr->getRange(keyServersKeys, CLIENT_KNOBS->TOO_MANY);
+			state RangeResult keyServers = wait(safeThreadFutureToFuture(keyServersFuture));
+			ASSERT(!keyServers.more && keyServers.size() < CLIENT_KNOBS->TOO_MANY);
+
+			state std::vector<UID> src;
+			int i = 0;
+			for (; i < keyServers.size(); ++i) {
+				// printf("Checking key: %s\n", keyServers[i].key.toString().c_str());
+				if (keyServers[i].key > withPrefix)
+					break;
+			}
+
+			// printf("Found end: %s\n", keyServers[i].key.toString().c_str());
+			ASSERT(i > 0);
+
+			if (i >= keyServers.size()) {
+				return Void();
+			}
+
+			std::vector<UID> dest;
+			decodeKeyServersValue(UID2TagMap, keyServers[i - 1].value, src, dest);
+
+			state int j = 0;
+			for (j = 0; j < src.size(); ++j) {
+				UID id = src[j];
+				state ThreadFuture<Optional<Value>> serverFuture = tr->get(serverListKeyFor(id));
+				Optional<Value> serverValue = wait(safeThreadFutureToFuture(serverFuture));
+				if (serverValue.present()) {
+					StorageServerInterface ssi = decodeServerListValue(serverValue.get());
+					printf("Server ID: %s\n", ssi.toString().c_str());
+					printf("Address: %s\n", ssi.address().toString().c_str());
+					if (ssi.secondaryAddress().present()) {
+						printf("Secondary address: %s\n", ssi.address().toString().c_str());
+					}
+				}
+			}
+
+			wait(safeThreadFutureToFuture(tr->commit()));
+
+			return Void();
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
 } // namespace
 
 namespace fdb_cli {
@@ -123,6 +183,8 @@ ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::ve
 				       "<ssfailure|rebalance>>\n");
 				result = false;
 			}
+		} else if (tokencmp(tokens[1], "resolve")) {
+			wait(success(resolveKey(db, tokens[2])));
 		} else {
 			printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
 			       "<ssfailure|rebalance>>\n");

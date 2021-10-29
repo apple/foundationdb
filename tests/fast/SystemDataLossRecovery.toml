@@ -7,9 +7,9 @@ machineCount = 45
 generateFearless = false
 
 [[test]]
-testTitle = 'DataLossRecovery'
+testTitle = 'SystemDataLossRecovery'
 useDB = true
 
     [[test.workload]]
-    testName = 'DataLossRecovery'
+    testName = 'SystemDataLossRecovery'
     

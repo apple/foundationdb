@@ -185,9 +185,14 @@ The format should be the same as the value of the ``configuration`` entry in sta
 force_recovery_with_data_loss
 -----------------------------
 
-The ``force_recovery_with_data_loss`` command will recover a multi-region database to the specified datacenter. Its syntax is ``force_recovery_with_data_loss <DCID>``. It will likely result in the loss of the most recently committed mutations and is intended to be used if the primary datacenter has been lost. 
+The ``force_recovery_with_data_loss`` command will recover a multi-region database to the specified datacenter. Its syntax is ``force_recovery_with_data_loss <DCID> <ADDRESS...>``. It will likely result in the loss of the most recently committed mutations and is intended to be used if the primary datacenter has been lost. 
 
 This command will change the :ref:`region configuration <configuration-configuring-regions>` to have a positive priority for the chosen ``DCID`` and a negative priority for all other ``DCIDs``. It will also set ``usable_regions`` to 1. If the database has already recovered, this command does nothing.
+
+move_shard
+-----------------------------
+
+The ``move_shard`` command will move keyrange to a new set of servers. Its syntax is ``move_shard <BEGIN_KEY> <END_KEY> <ADDRESS...>``.
 
 get
 ---

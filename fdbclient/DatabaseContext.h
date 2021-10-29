@@ -251,6 +251,8 @@ public:
 	Future<Void> forceRecoveryWithDataLoss(StringRef dcId);
 	// Management API, create snapshot
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
+	Future<Void> moveShard(KeyRangeRef shard, std::vector<NetworkAddress> addresses);
+	Future<Void> repairSystemData();
 
 	Future<Void> getChangeFeedStream(const PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>& results,
 	                                 Key rangeID,

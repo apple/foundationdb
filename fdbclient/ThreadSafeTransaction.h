@@ -56,6 +56,8 @@ public:
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
+	ThreadFuture<Void> moveShard(const KeyRangeRef& keys, std::vector<NetworkAddress> addresses) override;
+	ThreadFuture<Void> repairSystemData() override;
 
 private:
 	friend class ThreadSafeTransaction;

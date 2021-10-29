@@ -153,10 +153,11 @@ struct CommitID {
 
 struct CommitTransactionRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 93948;
-	enum { FLAG_IS_LOCK_AWARE = 0x1, FLAG_FIRST_IN_BATCH = 0x2 };
+	enum { FLAG_IS_LOCK_AWARE = 0x1, FLAG_FIRST_IN_BATCH = 0x2, FLAG_SUPPRESS_PRIVATE_MUTATIONS = 0x4 };
 
 	bool isLockAware() const { return (flags & FLAG_IS_LOCK_AWARE) != 0; }
 	bool firstInBatch() const { return (flags & FLAG_FIRST_IN_BATCH) != 0; }
+	bool suppressPrivateMutations() const { return (flags & FLAG_SUPPRESS_PRIVATE_MUTATIONS) != 0; }
 
 	Arena arena;
 	SpanID spanContext;
@@ -166,6 +167,7 @@ struct CommitTransactionRequest : TimedRequest {
 	Optional<UID> debugID;
 	Optional<ClientTrCommitCostEstimation> commitCostEstimation;
 	Optional<TagSet> tagSet;
+	// bool suppressPrivateMutations;
 
 	CommitTransactionRequest() : CommitTransactionRequest(SpanID()) {}
 	CommitTransactionRequest(SpanID const& context) : spanContext(context), flags(0) {}

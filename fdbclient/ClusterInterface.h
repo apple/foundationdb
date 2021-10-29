@@ -311,10 +311,11 @@ struct MoveShardRequest {
 	KeyRange shard;
 	std::vector<NetworkAddress> addresses;
 	ReplyPromise<Void> reply;
+	UID id;
 
 	MoveShardRequest() {}
-	MoveShardRequest(KeyRange shard, std::vector<NetworkAddress> addresses)
-	  : shard{ std::move(shard) }, addresses{ std::move(addresses) } {}
+	MoveShardRequest(KeyRange shard, std::vector<NetworkAddress> addresses, UID id)
+	  : shard{ std::move(shard) }, addresses{ std::move(addresses) }, id{ std::move(id) } {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
