@@ -105,7 +105,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TLOG_SERVER_TEAM_PARTITIONED,                        false );
 	init( TLOG_NEW_INTERFACE,                                  false );
 	init( BROADCAST_TLOG_GROUPS,                                true );
-	init( PTXN_DISABLE_DD,                                     false );
+	init( PTXN_DISABLE_DD,                                     false ); if (TLOG_NEW_INTERFACE) PTXN_DISABLE_DD = true;
 	init( TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE,     250e6 );
 	init( ENABLE_DETAILED_TLOG_POP_TRACE,                       true );
 
