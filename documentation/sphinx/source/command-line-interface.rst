@@ -185,14 +185,23 @@ The format should be the same as the value of the ``configuration`` entry in sta
 force_recovery_with_data_loss
 -----------------------------
 
-The ``force_recovery_with_data_loss`` command will recover a multi-region database to the specified datacenter. Its syntax is ``force_recovery_with_data_loss <DCID> <ADDRESS...>``. It will likely result in the loss of the most recently committed mutations and is intended to be used if the primary datacenter has been lost. 
+The ``force_recovery_with_data_loss`` command will recover a multi-region database to the specified datacenter. Its syntax is ``force_recovery_with_data_loss <DCID>``. It will likely result in the loss of the most recently committed mutations and is intended to be used if the primary datacenter has been lost. 
 
 This command will change the :ref:`region configuration <configuration-configuring-regions>` to have a positive priority for the chosen ``DCID`` and a negative priority for all other ``DCIDs``. It will also set ``usable_regions`` to 1. If the database has already recovered, this command does nothing.
+
+repair_system_data
+-----------------------------
+
+The ``repair_system_data`` command will generate system data from txnStateStore and backfill them to a new set of storage servers.
+
+This command should be used when the storage servers hosting system keyspace, i.e., [\xff, \xff\xff), are lost or corrupted, it finds a new set of servers to host the system data, copies over the existing system data in TLogs to the servers, with necessary modification due to the changes for the metadata location.
+The ``serverKeys`` are reconstruced from the modified ``keyServers`` and ``serverTags``. System data that is not persisted in the txnStateStore, and cannot be reconstructed from other data is lost, e.g., DDMode.
 
 move_shard
 -----------------------------
 
 The ``move_shard`` command will move keyrange to a new set of servers. Its syntax is ``move_shard <BEGIN_KEY> <END_KEY> <ADDRESS...>``.
+WARNING, the command will also DISABLE DD, to avoid DD moving data in parallel.
 
 get
 ---

@@ -83,36 +83,36 @@ struct SystemDataLossRecoveryWorkload : TestWorkload {
 
 		// Kill team {ssi}, and expect read to timeout.
 		self->killProcess(self, ssi.address());
-		std::cout << "Killed process: " << ssi.address().toString() << "(" << ssi.toString() << ")" << std::endl;
-		wait(self->readAndVerify(self, cx, keyServersKey(key), timed_out()));
-		std::cout << "Verified reading metadata timeout" << std::endl;
 
+        // Read \xff/keyServers/, and expect the read to time out.
+		wait(self->readAndVerify(self, cx, keyServersKeys.begin, timed_out()));
+
+        // Repair system data.
 		wait(repairSystemData(cx->getConnectionRecord()));
-		// wait(delay(30));
 
-		wait(self->writeAndVerify(self, cx, key, newValue));
-
+        // Read \xff/keyServers/, and expect the read to succeed.
 		state Transaction tr(cx);
 		loop {
 			try {
 				Optional<Value> res = wait(timeoutError(tr.get(keyServersKeys.begin), 30.0));
-				// RangeResult res = wait(tr.getRange(systemKeys, 1));
 				ASSERT(res.present());
-                break;
-				// if (!res.empty()) {
-				// 	break;
-				// }
+				break;
 			} catch (Error& e) {
+				TraceEvent("ReadKeyServersKeysFailed").error(e);
 				wait(tr.onError(e));
 			}
 		}
 
+		TraceEvent("ReadKeyServersKeys");
+
+        // Remove the failed server.
 		wait(self->exclude(cx, ssi.address()));
 		int ignore = wait(setDDMode(cx, 1));
 
 		return Void();
 	}
 
+    // Move keyrange to a ramdom single storage server.
 	ACTOR Future<StorageServerInterface> moveToRandomServer(SystemDataLossRecoveryWorkload* self,
 	                                                        Database cx,
 	                                                        KeyRangeRef shard) {
@@ -155,6 +155,7 @@ struct SystemDataLossRecoveryWorkload : TestWorkload {
 		return ssi.get();
 	}
 
+    // Find a random storage server.
 	ACTOR Future<Optional<StorageServerInterface>> getRandomStorageServer(Database cx) {
 		loop {
 			std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));

@@ -41,11 +41,8 @@ ACTOR Future<bool> moveShardCommandActor(Reference<IDatabase> db, std::vector<St
 
 CommandFactory moveShardFactory(
     "move_shard",
-    CommandHelp("move_shard <BEGIN_KEY> <BEGIN_KEY> <ADDRESS...>",
-                "Force the database to recover into DCID",
-                "A forced recovery will cause the database to lose the most recently committed mutations. The "
-                "amount of mutations that will be lost depends on how far behind the remote datacenter is. This "
-                "command will change the region configuration to have a positive priority for the chosen DCID, and "
-                "a negative priority for all other DCIDs. This command will set usable_regions to 1. If the "
-                "database has already recovered, this command does nothing.\n"));
+    CommandHelp("move_shard <BEGIN_KEY> <END_KEY> <ADDRESS...>",
+                "Move data range [BEGIN_KEY, END_KEY) to servers identified by their addresses",
+                "Manually move the data to a set of storage servers, this tool can be used in tests to manually distribute data."
+                "WARNING, the command will also DISABLE DD, to avoid DD moving data in parallel.\n"));
 } // namespace fdb_cli

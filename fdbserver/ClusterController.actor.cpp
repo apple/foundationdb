@@ -3369,10 +3369,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 			state Future<ErrorOr<MasterInterface>> fNewMaster = masterWorker.worker.interf.master.tryGetReply(rmq);
 			wait(ready(fNewMaster) || db->forceMasterFailure.onTrigger());
 			if (fNewMaster.isReady() && fNewMaster.get().present()) {
-				if (db->recoverMetadata) {
-					TraceEvent("RepairedSystemData", cluster->id);
-					db->recoverMetadata = false;
-				}
 				TraceEvent("CCWDB", cluster->id).detail("Recruited", fNewMaster.get().get().id());
 
 				// for status tool
@@ -5019,6 +5015,7 @@ ACTOR Future<Void> handleRepairSystemData(ClusterControllerData* self, ClusterCo
 		TraceEvent("RepairSystemDataFinish", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("MasterID", self->db.serverInfo->get().master.id());
+		self->db.recoverMetadata = false;
 		req.reply.send(Void());
 	}
 }

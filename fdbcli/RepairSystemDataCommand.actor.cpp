@@ -36,7 +36,14 @@ ACTOR Future<bool> repairSystemDataCommandActor(Reference<IDatabase> db, std::ve
 
 CommandFactory repairSystemDataFactory(
     "repair_system_data",
-    CommandHelp("repair_system_data",
-                "Instruct the database to repair system data",
-                "This command will cause the database to start a recovery and reconstruct system keyspace.\n"));
+    CommandHelp(
+        "repair_system_data",
+        "The ``repair_system_data`` command will generate system data from txnStateStore and backfill them to a new "
+        "set of storage servers.",
+        "This command should be used when the storage servers hosting system keyspace, i.e., [\xff, \xff\xff), are "
+        "lost or corrupted, it finds a new set of servers to host the system data, copies over the existing system "
+        "data in TLogs to the servers, with necessary modification due to the changes for the metadata location. "
+        "The ``serverKeys`` are reconstruced from the modified ``keyServers`` and ``serverTags``. System data that is "
+        "not persisted in the txnStateStore, and cannot be reconstructed from other data is lost, e.g., DDMode. "
+        "This command will cause the database to start a recovery and reconstruct system keyspace.\n"));
 } // namespace fdb_cli

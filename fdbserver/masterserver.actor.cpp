@@ -1896,15 +1896,7 @@ static void backfillDerivedMetaDataToSS(Reference<MasterData> self, CommitTransa
 			    .detail("End", it.end())
 			    .detail("Value", it.value());
 		}
-		// TraceEvent("RecoveryPopulateSrcServerKeys", id).detail("Begin", keys.begin).detail("End", keys.end);
-		// std::cout << "Assigning range [" << keys.begin.toString() << ", " << keys.end.toString()
-		//           << ") to: " << id.toString() << std::endl;
-		// krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(id), keys, serverKeysTrue, serverKeysFalse);
-		// TraceEvent("RecoveryPopulateDestServerKeys", id).detail("Begin", keys.begin).detail("End", keys.end);
-		// std::cout << "Assigning range [" << keys.begin.toString() << ", " << keys.end.toString()
-		//           << ") to: " << id.toString() << std::endl;
 	}
-	// std::cout << "Reconstruct data distribution complete." << std::endl;
 }
 
 ACTOR Future<Void> masterCore(Reference<MasterData> self) {
@@ -2145,14 +2137,6 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	// So that all changes to transaction state store is only in the master's RAM?
 	wait(discardCommit(self->txnStateStore, self->txnStateLogAdapter));
 
-	// if (self->recoverMetadata) {
-	// 	for (auto& s : seedServers) {
-	// 		std::cout
-	// 		    << decodeServerTagValue(self->txnStateStore->readValue(serverTagKeyFor(s.id())).get().get()).toString()
-	// 		    << std::endl;
-	// 	}
-	// }
-
 	// Wait for the recovery transaction to complete.
 	// SOMEDAY: For faster recovery, do this and setDBState asynchronously and don't wait for them
 	// unless we want to change TLogs
@@ -2165,13 +2149,12 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		throw master_recovery_failed();
 	}
 
-	std::cout << "Recovery transaction completed." << std::endl;
 	ASSERT(self->recoveryTransactionVersion != 0);
 
 	// Here.
 
 	if (self->recoverMetadata) {
-		TraceEvent("MasterRecoverMetadataBegin", self->dbgid);
+		TraceEvent("RecoverMetadataBegin", self->dbgid);
 		CommitTransactionRequest recoverMetadataCommitRequest;
 		recoverMetadataCommitRequest.flags = recoverMetadataCommitRequest.flags |
 		                                     CommitTransactionRequest::FLAG_SUPPRESS_PRIVATE_MUTATIONS |
@@ -2189,23 +2172,26 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		try {
 			ErrorOr<CommitID> res = wait(recoverMetadataCommit);
 			if (res.isError()) {
+				TraceEvent("RecoverMetadataCommitError").error(res.getError());
 				throw master_recovery_failed();
 			}
 			TraceEvent("RecoverMetadataCommitSucceed").detail("Version", res.get().version);
 			std::cout << "finished recover metadata transaction." << std::endl;
 		} catch (Error& e) {
-			TraceEvent("MasterRecoverMetadataCommitError", self->dbgid).error(e);
+			TraceEvent("RecoverMetadataCommitError", self->dbgid).error(e);
 			throw master_recovery_failed();
 		}
 		if (recoverMetadataCommit.isReady() && recoverMetadataCommit.get().isError()) {
 			const Error& e = recoverMetadataCommit.get().getError();
 			std::cout << "finished recover metadata transaction." << e.name() << std::endl;
-			TraceEvent("MasterRecoverMetadataCommitError", self->dbgid).error(e);
+			TraceEvent("RecoverMetadataCommitError", self->dbgid).error(e);
 			throw master_recovery_failed();
 		}
 		ASSERT(recoverMetadataCommit.isReady());
-		TraceEvent("MasterRecoverMetadataEnd", self->dbgid);
+		TraceEvent("RecoverMetadataEnd", self->dbgid);
 	}
+
+	std::cout << "Recovery transaction completed." << std::endl;
 
 	self->recoveryState = RecoveryState::WRITING_CSTATE;
 	TraceEvent("MasterRecoveryState", self->dbgid)

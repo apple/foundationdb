@@ -167,7 +167,6 @@ struct CommitTransactionRequest : TimedRequest {
 	Optional<UID> debugID;
 	Optional<ClientTrCommitCostEstimation> commitCostEstimation;
 	Optional<TagSet> tagSet;
-	// bool suppressPrivateMutations;
 
 	CommitTransactionRequest() : CommitTransactionRequest(SpanID()) {}
 	CommitTransactionRequest(SpanID const& context) : spanContext(context), flags(0) {}
