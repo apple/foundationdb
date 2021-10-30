@@ -29,7 +29,6 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
-#include "fdbserver/LogSystem.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"

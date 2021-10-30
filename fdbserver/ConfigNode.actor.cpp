@@ -111,7 +111,7 @@ class ConfigNodeImpl {
 	Counter setMutations;
 	Counter clearMutations;
 	Counter getValueRequests;
-	Counter newVersionRequests;
+	Counter getGenerationRequests;
 	Future<Void> logger;
 
 	ACTOR static Future<ConfigGeneration> getGeneration(ConfigNodeImpl* self) {
@@ -188,7 +188,7 @@ class ConfigNodeImpl {
 		    wait(getMutations(self, req.lastSeenVersion + 1, committedVersion));
 		state Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> versionedAnnotations =
 		    wait(getAnnotations(self, req.lastSeenVersion + 1, committedVersion));
-		TraceEvent(SevDebug, "ConfigDatabaseNodeSendingChanges", self->id)
+		TraceEvent(SevDebug, "ConfigNodeSendingChanges", self->id)
 		    .detail("ReqLastSeenVersion", req.lastSeenVersion)
 		    .detail("CommittedVersion", committedVersion)
 		    .detail("NumMutations", versionedMutations.size())
@@ -203,6 +203,10 @@ class ConfigNodeImpl {
 	ACTOR static Future<Void> getNewGeneration(ConfigNodeImpl* self, ConfigTransactionGetGenerationRequest req) {
 		state ConfigGeneration generation = wait(getGeneration(self));
 		++generation.liveVersion;
+		if (req.lastSeenLiveVersion.present()) {
+			TEST(req.lastSeenLiveVersion.get() >= generation.liveVersion); // Node is lagging behind some other node
+			generation.liveVersion = std::max(generation.liveVersion, req.lastSeenLiveVersion.get() + 1);
+		}
 		self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(generation, IncludeVersion())));
 		wait(self->kvStore->commit());
 		req.reply.send(ConfigTransactionGetGenerationReply{ generation });
@@ -347,7 +351,7 @@ class ConfigNodeImpl {
 		loop {
 			choose {
 				when(ConfigTransactionGetGenerationRequest req = waitNext(cti->getGeneration.getFuture())) {
-					++self->newVersionRequests;
+					++self->getGenerationRequests;
 					wait(getNewGeneration(self, req));
 				}
 				when(ConfigTransactionGetRequest req = waitNext(cti->get.getFuture())) {
@@ -380,7 +384,7 @@ class ConfigNodeImpl {
 		wait(store(reply.snapshotVersion, getLastCompactedVersion(self)));
 		wait(store(reply.changes, getMutations(self, reply.snapshotVersion + 1, req.mostRecentVersion)));
 		wait(store(reply.annotations, getAnnotations(self, reply.snapshotVersion + 1, req.mostRecentVersion)));
-		TraceEvent(SevDebug, "ConfigDatabaseNodeGettingSnapshot", self->id)
+		TraceEvent(SevDebug, "ConfigNodeGettingSnapshot", self->id)
 		    .detail("SnapshotVersion", reply.snapshotVersion)
 		    .detail("SnapshotSize", reply.snapshot.size())
 		    .detail("ChangesSize", reply.changes.size())
@@ -394,7 +398,7 @@ class ConfigNodeImpl {
 	// However, commit annotations for compacted mutations are lost
 	ACTOR static Future<Void> compact(ConfigNodeImpl* self, ConfigFollowerCompactRequest req) {
 		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
-		TraceEvent(SevDebug, "ConfigDatabaseNodeCompacting", self->id)
+		TraceEvent(SevDebug, "ConfigNodeCompacting", self->id)
 		    .detail("Version", req.version)
 		    .detail("LastCompacted", lastCompactedVersion);
 		if (req.version <= lastCompactedVersion) {
@@ -413,7 +417,7 @@ class ConfigNodeImpl {
 			if (version > req.version) {
 				break;
 			} else {
-				TraceEvent(SevDebug, "ConfigDatabaseNodeCompactionApplyingMutation", self->id)
+				TraceEvent(SevDebug, "ConfigNodeCompactionApplyingMutation", self->id)
 				    .detail("IsSet", mutation.isSet())
 				    .detail("MutationVersion", version)
 				    .detail("LastCompactedVersion", lastCompactedVersion)
@@ -467,14 +471,13 @@ class ConfigNodeImpl {
 
 public:
 	ConfigNodeImpl(std::string const& folder)
-	  : id(deterministicRandom()->randomUniqueID()), kvStore(folder, id, "globalconf-"), cc("ConfigDatabaseNode"),
+	  : id(deterministicRandom()->randomUniqueID()), kvStore(folder, id, "globalconf-"), cc("ConfigNode"),
 	    compactRequests("CompactRequests", cc), successfulChangeRequests("SuccessfulChangeRequests", cc),
 	    failedChangeRequests("FailedChangeRequests", cc), snapshotRequests("SnapshotRequests", cc),
 	    getCommittedVersionRequests("GetCommittedVersionRequests", cc), successfulCommits("SuccessfulCommits", cc),
 	    failedCommits("FailedCommits", cc), setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
-	    getValueRequests("GetValueRequests", cc), newVersionRequests("NewVersionRequests", cc) {
-		logger = traceCounters(
-		    "ConfigDatabaseNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigDatabaseNode");
+	    getValueRequests("GetValueRequests", cc), getGenerationRequests("GetGenerationRequests", cc) {
+		logger = traceCounters("ConfigNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigNode");
 		TraceEvent(SevDebug, "StartingConfigNode", id).detail("KVStoreAlreadyExists", kvStore.exists());
 	}
 
@@ -483,14 +486,14 @@ public:
 	Future<Void> serve(ConfigFollowerInterface const& cfi) { return serve(this, &cfi); }
 };
 
-ConfigNode::ConfigNode(std::string const& folder) : _impl(std::make_unique<ConfigNodeImpl>(folder)) {}
+ConfigNode::ConfigNode(std::string const& folder) : impl(PImpl<ConfigNodeImpl>::create(folder)) {}
 
 ConfigNode::~ConfigNode() = default;
 
 Future<Void> ConfigNode::serve(ConfigTransactionInterface const& cti) {
-	return impl().serve(cti);
+	return impl->serve(cti);
 }
 
 Future<Void> ConfigNode::serve(ConfigFollowerInterface const& cfi) {
-	return impl().serve(cfi);
+	return impl->serve(cfi);
 }

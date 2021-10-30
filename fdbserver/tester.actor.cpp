@@ -315,7 +315,7 @@ struct CompoundWorkload : TestWorkload {
 
 TestWorkload* getWorkloadIface(WorkloadRequest work,
                                VectorRef<KeyValueRef> options,
-                               Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+                               Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	Value testName = getOption(options, LiteralStringRef("testName"), LiteralStringRef("no-test-specified"));
 	WorkloadContext wcx;
 	wcx.clientId = work.clientId;
@@ -350,7 +350,7 @@ TestWorkload* getWorkloadIface(WorkloadRequest work,
 	return workload;
 }
 
-TestWorkload* getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+TestWorkload* getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	if (work.options.size() < 1) {
 		TraceEvent(SevError, "TestCreationError").detail("Reason", "No options provided");
 		fprintf(stderr, "ERROR: No options were provided for workload.\n");
@@ -602,7 +602,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 
 ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
                                         Reference<ClusterConnectionFile> ccf,
-                                        Reference<AsyncVar<struct ServerDBInfo>> dbInfo,
+                                        Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
                                         LocalityData locality) {
 	state WorkloadInterface workIface;
 	state bool replied = false;
@@ -661,7 +661,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 
 ACTOR Future<Void> testerServerCore(TesterInterface interf,
                                     Reference<ClusterConnectionFile> ccf,
-                                    Reference<AsyncVar<struct ServerDBInfo>> dbInfo,
+                                    Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
                                     LocalityData locality) {
 	state PromiseStream<Future<Void>> addWorkload;
 	state Future<Void> workerFatalError = actorCollection(addWorkload.getFuture());
@@ -788,7 +788,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<Tester
 
 	if (spec.phases & TestWorkload::SETUP) {
 		state std::vector<Future<ErrorOr<Void>>> setups;
-		printf("setting up test (%s)...\n", printable(spec.title).c_str());
+		printf("%f setting up test (%s)...\n", now(), printable(spec.title).c_str());
 		TraceEvent("TestSetupStart").detail("WorkloadTitle", spec.title);
 		setups.reserve(workloads.size());
 		for (int i = 0; i < workloads.size(); i++)
@@ -800,7 +800,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<Tester
 
 	if (spec.phases & TestWorkload::EXECUTION) {
 		TraceEvent("TestStarting").detail("WorkloadTitle", spec.title);
-		printf("running test (%s)...\n", printable(spec.title).c_str());
+		printf("%f running test (%s)...\n", now(), printable(spec.title).c_str());
 		state std::vector<Future<ErrorOr<Void>>> starts;
 		starts.reserve(workloads.size());
 		for (int i = 0; i < workloads.size(); i++)
@@ -1444,7 +1444,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	state Future<Void> disabler = disableConnectionFailuresAfter(450, "Tester");
 
 	// Change the configuration (and/or create the database) if necessary
-	printf("startingConfiguration:%s start\n", startingConfiguration.toString().c_str());
+	printf("%f startingConfiguration:%s start\n", now(), startingConfiguration.toString().c_str());
 	printSimulatedTopology();
 	if (useDB && startingConfiguration != StringRef()) {
 		try {
@@ -1490,9 +1490,9 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	TraceEvent("TestsExpectedToPass").detail("Count", tests.size());
 	state int idx = 0;
 	for (; idx < tests.size(); idx++) {
-		printf("Run test:%s start\n", tests[idx].title.toString().c_str());
+		printf("%f Run test:%s start\n", now(), tests[idx].title.toString().c_str());
 		wait(success(runTest(cx, testers, tests[idx], dbInfo)));
-		printf("Run test:%s Done.\n", tests[idx].title.toString().c_str());
+		printf("%f Run test:%s Done.\n", now(), tests[idx].title.toString().c_str());
 		// do we handle a failure here?
 	}
 

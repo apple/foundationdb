@@ -720,7 +720,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 
 ACTOR Future<Void> coordinationServer(std::string dataFolder,
                                       Reference<ClusterConnectionFile> ccf,
-                                      UseConfigDB useConfigDB) {
+                                      ConfigDBType configDBType) {
 	state UID myID = deterministicRandom()->randomUniqueID();
 	state LeaderElectionRegInterface myLeaderInterface(g_network);
 	state GenerationRegInterface myInterface(g_network);
@@ -733,7 +733,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())
 	    .detail("Folder", dataFolder);
 
-	if (useConfigDB != UseConfigDB::DISABLED) {
+	if (configDBType != ConfigDBType::DISABLED) {
 		configTransactionInterface.setupWellKnownEndpoints();
 		configFollowerInterface.setupWellKnownEndpoints();
 		configNode = makeReference<ConfigNode>(dataFolder);

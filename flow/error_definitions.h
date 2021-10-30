@@ -78,6 +78,7 @@ ERROR( dd_not_found, 1053, "Data distributor not found")
 ERROR( wrong_connection_file, 1054, "Connection file mismatch")
 ERROR( version_already_compacted, 1055, "The requested changes have been compacted away")
 ERROR( local_config_changed, 1056, "Local configuration file has changed. Restart and apply these changes" )
+ERROR( failed_to_reach_quorum, 1057, "Failed to reach quorum from configuration database nodes. Retry sending these requests" )
 ERROR( storage_team_id_not_found, 1065, "Storage Team ID not found")
 
 ERROR( broken_promise, 1100, "Broken promise" )

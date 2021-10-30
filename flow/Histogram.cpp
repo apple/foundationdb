@@ -85,9 +85,15 @@ Histogram* HistogramRegistry::lookupHistogram(std::string const& name) {
 	return h->second;
 }
 
-void HistogramRegistry::logReport() {
+void HistogramRegistry::logReport(double elapsed) {
 	for (auto& i : histograms) {
-		i.second->writeToLog();
+		i.second->writeToLog(elapsed);
+		i.second->clear();
+	}
+}
+
+void HistogramRegistry::clear() {
+	for (auto& i : histograms) {
 		i.second->clear();
 	}
 }
@@ -96,13 +102,10 @@ void HistogramRegistry::logReport() {
 
 #pragma region Histogram
 
-const char* const Histogram::UnitToStringMapper[] = { "microseconds",
-	                                                  "bytes",
-	                                                  "bytes_per_second",
-	                                                  "percentage",
-	                                                  "count" };
+const char* const Histogram::UnitToStringMapper[] = { "microseconds", "bytes", "bytes_per_second",
+	                                                  "percentage",   "count", "none" };
 
-void Histogram::writeToLog() {
+void Histogram::writeToLog(double elapsed) {
 	bool active = false;
 	for (uint32_t i = 0; i < 32; i++) {
 		if (buckets[i]) {
@@ -116,7 +119,8 @@ void Histogram::writeToLog() {
 
 	TraceEvent e(SevInfo, "Histogram");
 	e.detail("Group", group).detail("Op", op).detail("Unit", UnitToStringMapper[(size_t)unit]);
-
+	if (elapsed > 0)
+		e.detail("Elapsed", elapsed);
 	int totalCount = 0;
 	for (uint32_t i = 0; i < 32; i++) {
 		uint64_t value = uint64_t(1) << (i + 1);
@@ -136,6 +140,9 @@ void Histogram::writeToLog() {
 				break;
 			case Unit::count:
 				e.detail(format("LessThan%f", (i + 1) * ((upperBound - lowerBound) / 31.0)), buckets[i]);
+				break;
+			case Unit::MAXHISTOGRAMUNIT:
+				e.detail(format("Default%u", i), buckets[i]);
 				break;
 			default:
 				ASSERT(false);
