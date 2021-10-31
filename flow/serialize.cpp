@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
-#include "flow/serialize.h"
 #include "flow/network.h"
+#include "flow/serialize.h"
+#include "flow/UnitTest.h"
 
 _AssumeVersion::_AssumeVersion(ProtocolVersion version) : v(version) {
 	if (!version.isValid()) {
@@ -37,4 +38,90 @@ const void* BinaryReader::readBytes(int bytes) {
 	}
 	begin = e;
 	return b;
+}
+
+namespace {
+
+auto const oldKey = "oldKey"_sr;
+auto const newKey = "newKey"_sr;
+
+struct _Struct {
+	static constexpr FileIdentifier file_identifier = 2340487;
+	int oldField{ 0 };
+};
+
+struct OldStruct : public _Struct {
+	void setFields() { oldField = 1; }
+	bool isSet() const { return oldField == 1; }
+
+	template <class Archive>
+	void serialize(Archive& ar) {
+		serializer(ar, oldField);
+	}
+};
+
+struct NewStruct : public _Struct {
+	int newField{ 0 };
+
+	bool isSet() const { return oldField == 1 && newField == 2; }
+	void setFields() {
+		oldField = 1;
+		newField = 2;
+	}
+
+	template <class Archive>
+	void serialize(Archive& ar) {
+		serializer(ar, oldField, newField);
+	}
+};
+
+void verifyData(StringRef value, int numObjects) {
+	{
+		// use BinaryReader
+		BinaryReader reader(value, IncludeVersion());
+		std::vector<OldStruct> data;
+		reader >> data;
+		ASSERT_EQ(data.size(), numObjects);
+		for (const auto& object : data) {
+			ASSERT(object.isSet());
+		}
+	}
+	{
+		// use ArenaReader
+		ArenaReader reader(Arena(), value, IncludeVersion());
+		std::vector<OldStruct> data;
+		reader >> data;
+		ASSERT_EQ(data.size(), numObjects);
+		for (const auto& oldObject : data) {
+			ASSERT(oldObject.isSet());
+		}
+	}
+}
+
+} // namespace
+
+TEST_CASE("flow/serialize/Downgrade/WriteOld") {
+	BinaryWriter writer(IncludeVersion(g_network->protocolVersion()));
+	auto const numObjects = deterministicRandom()->randomInt(1, 101);
+	std::vector<OldStruct> data(numObjects);
+	for (auto& oldObject : data) {
+		oldObject.setFields();
+	}
+	writer << data;
+	verifyData(writer.toValue(), numObjects);
+	return Void();
+}
+
+TEST_CASE("flow/serialize/Downgrade/WriteNew") {
+	auto protocolVersion = g_network->protocolVersion();
+	protocolVersion.addObjectSerializerFlag();
+	ObjectWriter writer(IncludeVersion(protocolVersion));
+	auto const numObjects = deterministicRandom()->randomInt(1, 101);
+	std::vector<NewStruct> data(numObjects);
+	for (auto& newObject : data) {
+		newObject.setFields();
+	}
+	writer.serialize(data);
+	verifyData(writer.toStringRef(), numObjects);
+	return Void();
 }
