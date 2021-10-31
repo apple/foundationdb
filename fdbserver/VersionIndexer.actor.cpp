@@ -95,9 +95,24 @@ ACTOR Future<Void> versionPeek(VersionIndexerState* self, VersionIndexerPeekRequ
 	VersionIndexerPeekReply reply;
 	reply.committedVersion = self->committedVersion;
 	reply.previousVersion = iter != self->versionWindow.begin() ? (iter - 1)->version : self->previousVersion;
+	std::vector<Tag> tags;
+	tags.push_back(req.tag);
+	while (req.history.size() && req.lastKnownVersion >= req.history.back().first) {
+		req.history.pop_back();
+	}
+	for (const auto& p : req.history) {
+		tags.push_back(p.second);
+	}
+	std::sort(tags.begin(), tags.end());
 	for (; iter != self->versionWindow.end(); ++iter) {
-		auto i = std::lower_bound(iter->tags.begin(), iter->tags.end(), req.tag);
-		bool hasMutations = i != iter->tags.end() && *i == req.tag;
+		// here we could use std::set_intersection but that would potentially do allocations. The loop below should be
+		// in the same complexity class but doesn't allocate memory.
+		bool hasMutations = false;
+		auto i = iter->tags.begin();
+		for (int j = 0; !hasMutations && i != tags.end() && j < tags.size(); ++j) {
+			i = std::lower_bound(i, iter->tags.end(), tags[j]);
+			hasMutations = i != iter->tags.end() && *i == tags[j];
+		}
 		ASSERT(iter->version > req.lastKnownVersion);
 		reply.versions.emplace_back(iter->version, hasMutations);
 	}
@@ -137,9 +152,6 @@ ACTOR Future<Void> addVersion(VersionIndexerState* self, VersionIndexerCommitReq
 	}
 	if (self->version.get() < req.version) {
 		ASSERT(firstCommit || self->version.get() == req.previousVersion);
-		if (firstCommit) {
-			self->previousVersion = req.previousVersion;
-		}
 		VersionIndexerState::VersionEntry entry;
 		entry.version = req.version;
 		entry.tags = std::move(req.tags);
@@ -191,6 +203,7 @@ ACTOR Future<Void> versionIndexer(VersionIndexerInterface interface,
 	state VersionIndexerState self(interface.id());
 	state ActorCollection actors(false);
 	state Future<Void> removed = checkRemoved(db, req.recoveryCount, interface);
+	self.previousVersion = req.epochEnd;
 	actors.add(waitFailureServer(interface.waitFailure.getFuture()));
 	try {
 		loop {

@@ -3728,6 +3728,8 @@ ACTOR Future<Void> tssDelayForever() {
 // Fetches mutations from the tlog system and adds them to the ptree
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double start;
+	state bool nextVersionNoData = false;
+	state Future<Void> more;
 	try {
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of memory
 		// This is often referred to as the storage server e-brake (emergency brake)
@@ -3768,14 +3770,25 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		state Reference<ILogSystem::IPeekCursor> cursor = data->logCursor;
 
 		state double beforeTLogCursorReads = now();
+		more = cursor->getMore();
 		loop {
 			choose {
-				when(wait(cursor->getMore())) {
+				when(wait(more)) {
 					if (!cursor->isExhausted()) {
+						nextVersionNoData = false;
+						break;
+					}
+					more = cursor->getMore();
+				}
+				when(wait(cursor->hasMessage() || cursor->isExhausted()
+				              ? Never()
+				              : data->nextVersionWithNoData.whenAtLeast(data->version.get() + 1))) {
+					if (!cursor->hasMessage()) {
+						nextVersionNoData = true;
+						more.cancel();
 						break;
 					}
 				}
-				when(wait(data->nextVersionWithNoData.whenAtLeast(data->version.get() + 1))) { break; }
 			}
 		}
 		data->tlogCursorReadsLatencyHistogram->sampleSeconds(now() - beforeTLogCursorReads);
@@ -3818,7 +3831,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			cloneCursor1->setProtocolVersion(data->logProtocol);
 
-			for (; cloneCursor1->hasMessage(); cloneCursor1->nextMessage()) {
+			for (; !nextVersionNoData && cloneCursor1->hasMessage(); cloneCursor1->nextMessage()) {
 				ArenaReader& cloneReader = *cloneCursor1->reader();
 
 				if (LogProtocolMessage::isNextIn(cloneReader)) {
@@ -3914,7 +3927,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		cloneCursor2->setProtocolVersion(data->logProtocol);
 		state SpanID spanContext = SpanID();
 		state double beforeTLogMsgsUpdates = now();
-		for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
+		for (; !nextVersionNoData && cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
 			if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 				mutationBytes = 0;
 				// Instead of just yielding, leave time for the storage server to respond to reads
@@ -3926,7 +3939,41 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					TraceEvent(SevError, "DataAtPastVersion", data->thisServerID)
 					    .detail("DataVersion", data->version.get())
 					    .detail("CursorVersion", cloneCursor2->version().version)
+							.detail("Ver", ver)
+							.detail("MyTag", data->tag)
 					    .log();
+					for (const auto& p : data->history) {
+						TraceEvent(SevError, "DataAtPastVersionHistory", data->thisServerID)
+					    .detail("Version", p.first)
+					    .detail("Tag", p.second)
+					    .log();
+					}
+					auto& rd = *cloneCursor2->reader();
+					for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
+						if (LogProtocolMessage::isNextIn(rd)) {
+							LogProtocolMessage lpm;
+							rd >> lpm;
+
+							data->logProtocol = rd.protocolVersion();
+							data->storage.changeLogProtocol(ver, data->logProtocol);
+							cloneCursor2->setProtocolVersion(rd.protocolVersion());
+							TraceEvent(SevError, "DataAtPastVersionLogProtocolMessage", data->thisServerID)
+								.detail("Version", rd.protocolVersion());
+						} else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
+							SpanContextMessage scm;
+							rd >> scm;
+							spanContext = scm.spanContext;
+							TraceEvent(SevError, "DataAtPastVersionSpanContext", data->thisServerID)
+								.detail("Context", spanContext);
+						} else {
+							MutationRef msg;
+							rd >> msg;
+							TraceEvent(SevError, "DataAtPastVersionMutation", data->thisServerID)
+								.detail("MutationType", msg.type)
+								.detail("Param1", msg.param1)
+								.detail("Param2", msg.param2);
+						}
+					}
 					ASSERT(false);
 				}
 			}
@@ -4019,7 +4066,11 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		if (ver != invalidVersion) {
 			data->lastVersionWithData = ver;
 		}
-		ver = std::max(cloneCursor2->version().version - 1, data->nextVersionWithNoData.get());
+		if (nextVersionNoData) {
+			ver = data->nextVersionWithNoData.get();
+		} else {
+			ver = cloneCursor2->version().version - 1;
+		}
 
 		if (injectedChanges)
 			data->lastVersionWithData = ver;
@@ -5095,25 +5146,29 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 	}
 	multi = Reference<MultiInterface<ReferencedInterface<VersionIndexerInterface>>>(
 	    new MultiInterface<ReferencedInterface<VersionIndexerInterface>>(interfaces));
-	// in a previous life we might've been cancelled before the update actor has caught up.
+	// before the update actor has caught up.
 	wait(self->version.whenAtLeast(self->nextVersionWithNoData.get()));
 	TraceEvent("VersionIndexerPeekerStart", self->thisServerID).detail("NumVersionIndexer", interfaces.size());
 	loop {
 		VersionIndexerPeekRequest request;
 		request.lastKnownVersion = self->version.get();
 		request.tag = self->tag;
+		// we could remove old entries here, though we already do that work when we pop from the tlogs. So in order to
+		// simplify code we'll potentially send slightly more data to the version indexer than necessary.
+		request.history = self->history;
 		beginTime = now();
 		VersionIndexerPeekReply _reply =
 		    wait(brokenPromiseToNever(loadBalance(multi, &VersionIndexerInterface::peek, request)));
 		self->counters.versionIndexerLatencyBand.addMeasurement(now() - beginTime);
 		++self->counters.fetchesFromVersionIndexer;
 		reply = _reply;
-		self->versionIndexerReportedCommitted = reply.committedVersion;
 		prevVersion = reply.previousVersion;
 		ASSERT(!reply.versions.empty());
 		for (i = 0; i < reply.versions.size() - 1; ++i) {
 			ASSERT(reply.versions[i + 1].first > reply.versions[i].first);
 		}
+		wait(self->version.whenAtLeast(prevVersion));
+		self->versionIndexerReportedCommitted = reply.committedVersion;
 		for (i = 0; i < reply.versions.size(); ++i) {
 			wait(self->version.whenAtLeast(prevVersion));
 			prevVersion = reply.versions[i].first;
@@ -5127,7 +5182,8 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 				// TraceEvent("SetNextVersionWithNoData", self->thisServerID)
 				//     .detail("Version", updatedVersion)
 				//     .detail("Previous", self->nextVersionWithNoData.get())
-				// 		.detail("DataVersion", self->version.get());
+				// 		.detail("DataVersion", self->version.get())
+				// 		.detail("MyTag", self->tag);
 				self->nextVersionWithNoData.set(updatedVersion);
 			}
 			if (j > 0) {

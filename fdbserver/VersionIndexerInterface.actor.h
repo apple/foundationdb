@@ -76,11 +76,12 @@ struct VersionIndexerPeekRequest {
 
 	Version lastKnownVersion;
 	Tag tag;
+	std::vector<std::pair<Version, Tag>> history;
 	ReplyPromise<struct VersionIndexerPeekReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, lastKnownVersion, tag, reply);
+		serializer(ar, lastKnownVersion, tag, history, reply);
 	}
 };
 

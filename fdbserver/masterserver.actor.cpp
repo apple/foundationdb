@@ -361,6 +361,7 @@ ACTOR Future<Void> newVersionIndexers(Reference<MasterData> self, RecruitFromCon
 	std::vector<Future<VersionIndexerInterface>> initializationReplies;
 	for (int i = 0; i < recr.versionIndexers.size(); ++i) {
 		InitializeVersionIndexerRequest req;
+		req.epochEnd = self->lastEpochEnd;
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
 		TraceEvent("VersionIndexerReplies", self->dbgid).detail("WorkerID", recr.versionIndexers[i].id());
 		initializationReplies.push_back(
