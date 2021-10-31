@@ -1308,11 +1308,6 @@ struct SharedLogsValue {
 	  : actor(actor), uid(uid), requests(requests) {}
 };
 
-ACTOR void killMeAfter(double time) {
-	wait(delay(time));
-	ASSERT(false);
-}
-
 ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 LocalityData locality,
