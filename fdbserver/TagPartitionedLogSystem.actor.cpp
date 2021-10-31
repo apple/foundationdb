@@ -2901,7 +2901,6 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 				groups.push_back(ptxn::TLogGroup(tlogGroup->id()));
 			}
 			req.tlogGroups = groups;
-			std::cout << req.tlogGroups.size() << std::endl;
 		}
 		ptxnInitializationReplies.reserve(recr.tLogs.size());
 		for (int i = 0; i < recr.tLogs.size(); ++i) {
