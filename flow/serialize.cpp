@@ -42,9 +42,6 @@ const void* BinaryReader::readBytes(int bytes) {
 
 namespace {
 
-auto const oldKey = "oldKey"_sr;
-auto const newKey = "newKey"_sr;
-
 struct _Struct {
 	static constexpr FileIdentifier file_identifier = 2340487;
 	int oldField{ 0 };
