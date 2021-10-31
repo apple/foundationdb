@@ -25,9 +25,11 @@
 #elif !defined(FDBSERVER_PROXYCOMMITDATA_ACTOR_H)
 #define FDBSERVER_PROXYCOMMITDATA_ACTOR_H
 
-#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Stats.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/Notified.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "flow/IRandom.h"
 
