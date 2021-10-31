@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"

@@ -230,6 +230,24 @@ Future<Void> quietDatabase(Database const& cx,
                            int64_t maxDataDistributionQueueSize = 0,
                            int64_t maxPoppedVersionLag = 30e6);
 
+/**
+ * A utility function for testing error situations. It succeeds if the given test
+ * throws an error. If expectedError is provided, it additionally checks if the
+ * error code is as expected.
+ *
+ * In case of a failure, logs an corresponding error in the trace with the given
+ * description and details, sets the given success flag to false (optional)
+ * and throws the given exception (optional). Note that in case of a successful
+ * test execution, the success flag is kept unchanged.
+ */
+Future<Void> testExpectedError(Future<Void> test,
+                               const char* testDescr,
+                               Optional<Error> expectedError = Optional<Error>(),
+                               Optional<bool*> successFlag = Optional<bool*>(),
+                               std::map<std::string, std::string> details = {},
+                               Optional<Error> throwOnError = Optional<Error>(),
+                               UID id = UID());
+
 #include "flow/unactorcompiler.h"
 
 #endif

@@ -133,7 +133,7 @@ struct IQuorumChange : ReferenceCounted<IQuorumChange> {
 	virtual ~IQuorumChange() {}
 	virtual Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
 	                                                                   std::vector<NetworkAddress> oldCoordinators,
-	                                                                   Reference<ClusterConnectionFile>,
+	                                                                   Reference<IClusterConnectionRecord>,
 	                                                                   CoordinatorsResult&) = 0;
 	virtual std::string getDesiredClusterKeyName() const { return std::string(); }
 };
@@ -210,11 +210,18 @@ ACTOR Future<Void> unlockDatabase(Database cx, UID id);
 ACTOR Future<Void> checkDatabaseLock(Transaction* tr, UID id);
 ACTOR Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id);
 
+ACTOR Future<Void> updateChangeFeed(Transaction* tr, Key rangeID, ChangeFeedStatus status, KeyRange range = KeyRange());
+ACTOR Future<Void> updateChangeFeed(Reference<ReadYourWritesTransaction> tr,
+                                    Key rangeID,
+                                    ChangeFeedStatus status,
+                                    KeyRange range = KeyRange());
+ACTOR Future<Void> updateChangeFeed(Database cx, Key rangeID, ChangeFeedStatus status, KeyRange range = KeyRange());
+
 ACTOR Future<Void> advanceVersion(Database cx, Version v);
 
 ACTOR Future<int> setDDMode(Database cx, int mode);
 
-ACTOR Future<Void> forceRecovery(Reference<ClusterConnectionFile> clusterFile, Standalone<StringRef> dcId);
+ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile, Standalone<StringRef> dcId);
 
 ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Database cx, bool ignoreRebalance);

@@ -74,6 +74,9 @@ public:
 	int64_t VALUE_SIZE_LIMIT;
 	int64_t SPLIT_KEY_SIZE_LIMIT;
 	int METADATA_VERSION_CACHE_SIZE;
+	int64_t CHANGE_FEED_LOCATION_LIMIT;
+	int64_t CHANGE_FEED_CACHE_SIZE;
+	double CHANGE_FEED_POP_TIMEOUT;
 
 	int MAX_BATCH_SIZE;
 	double GRV_BATCH_TIMEOUT;
@@ -242,6 +245,13 @@ public:
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;
 	double BUSYNESS_SPIKE_SATURATED_THRESHOLD;
+
+	// multi-version client control
+	int MVC_CLIENTLIB_CHUNK_SIZE;
+	int MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION;
+
+	// blob granules
+	bool ENABLE_BLOB_GRANULES;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

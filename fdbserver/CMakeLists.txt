@@ -5,6 +5,9 @@ set(FDBSERVER_SRCS
   BackupProgress.actor.cpp
   BackupProgress.actor.h
   BackupWorker.actor.cpp
+  BlobManager.actor.cpp
+  BlobManagerInterface.h
+  BlobWorker.actor.cpp
   ClusterController.actor.cpp
   ConfigBroadcaster.actor.cpp
   ConfigBroadcaster.h
@@ -159,10 +162,12 @@ set(FDBSERVER_SRCS
   workloads/BackupToDBCorrectness.actor.cpp
   workloads/BackupToDBUpgrade.actor.cpp
   workloads/BlobStoreWorkload.h
+  workloads/BlobGranuleVerifier.actor.cpp
   workloads/BulkLoad.actor.cpp
   workloads/BulkSetup.actor.h
   workloads/Cache.actor.cpp
   workloads/ChangeConfig.actor.cpp
+  workloads/ClientLibManagementWorkload.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
   workloads/TriggerRecovery.actor.cpp
   workloads/SuspendProcesses.actor.cpp
@@ -172,7 +177,9 @@ set(FDBSERVER_SRCS
   workloads/ConsistencyCheck.actor.cpp
   workloads/CpuProfiler.actor.cpp
   workloads/Cycle.actor.cpp
+  workloads/ChangeFeeds.actor.cpp
   workloads/DataDistributionMetrics.actor.cpp
+  workloads/DataLossRecovery.actor.cpp
   workloads/DDBalance.actor.cpp
   workloads/DDMetrics.actor.cpp
   workloads/DDMetricsExclude.actor.cpp
