@@ -47,7 +47,8 @@ void processTLogCommitRequestByStorageTeam(std::shared_ptr<FakeTLogContext> pFak
 			const auto& message = vsm.message;
 			// We skip the subsequence check, as SpanContextMessage is broadcasted to all storage teams, it will be
 			// interfering the subsequence of mutationRefs.
-			ASSERT(message == pFakeTLogContext->pTestDriverContext->commitRecord.messages[version][storageTeamID][index++].second);
+			ASSERT(message ==
+			       pFakeTLogContext->pTestDriverContext->commitRecord.messages[version][storageTeamID][index++].second);
 		}
 		pFakeTLogContext->pTestDriverContext->commitRecord.tags[version][storageTeamID].tLogValidated = true;
 	}

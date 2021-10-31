@@ -580,7 +580,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 				data.recordEmptyMessage(location, msg);
 				allReplies.push_back(recordPushMetrics(
 				    it->connectionResetTrackers[loc],
-					it->tlogPushDistTrackers[loc],
+				    it->tlogPushDistTrackers[loc],
 				    it->logServers[loc]->get().interf().address(),
 				    it->logServers[loc]->get().interf().commit.getReply(TLogCommitRequest(spanContext,
 				                                                                          msg.arena(),

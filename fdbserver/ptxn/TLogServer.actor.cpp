@@ -325,8 +325,7 @@ struct TLogGroupData : NonCopyable, public ReferenceCounted<TLogGroupData> {
 	              Reference<TLogServerData> tLogServer)
 	  : dbgid(dbgid), workerID(workerID), tlogGroupID(groupID), persistentData(persistentData),
 	    rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)), dbInfo(dbInfo),
-	    instanceID(deterministicRandom()->randomUniqueID().first()),
-	    dataFolder(folder), degraded(degraded),
+	    instanceID(deterministicRandom()->randomUniqueID().first()), dataFolder(folder), degraded(degraded),
 	    commitLatencyDist(Histogram::getHistogram(LiteralStringRef("tLog"),
 	                                              LiteralStringRef("commit"),
 	                                              Histogram::Unit::microseconds)),
@@ -379,7 +378,7 @@ struct TLogServerData : NonCopyable, public ReferenceCounted<TLogServerData> {
 	Reference<AsyncVar<ServerDBInfo>> dbInfo;
 	Database cx;
 
-	NotifiedVersion queueCommitEnd{0};
+	NotifiedVersion queueCommitEnd{ 0 };
 	Version queueCommitBegin = 0;
 
 	int64_t instanceID;
@@ -1341,9 +1340,9 @@ bool tlogTerminated(Reference<TLogGroupData> self,
                     Error const& e) {
 	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise just
 	// close it.
-	
-	// assign an empty PromiseSteam to self->sharedActors would delete the referenfce of the internal queue in PromiseSteam
-	// thus the actors can be cancenlled in the case there is no more references of the old queue
+
+	// assign an empty PromiseSteam to self->sharedActors would delete the referenfce of the internal queue in
+	// PromiseSteam thus the actors can be cancenlled in the case there is no more references of the old queue
 	self->sharedActors = PromiseStream<Future<Void>>();
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
 		persistentData->dispose();

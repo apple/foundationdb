@@ -373,4 +373,3 @@ Version LogSystemConfig::getEpochEndVersion(LogEpoch epoch) const {
 	}
 	return invalidVersion;
 }
-

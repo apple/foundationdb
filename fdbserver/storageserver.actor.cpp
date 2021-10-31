@@ -3668,7 +3668,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 		}
 
-
 		while (data->byteSampleClearsTooLarge.get()) {
 			wait(data->byteSampleClearsTooLarge.onChange());
 		}

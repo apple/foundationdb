@@ -114,9 +114,9 @@ struct InitializePtxnTLogRequest {
 };
 
 namespace test {
-	struct FakeLogSystem;
-	struct FakePeekCursor;
-};
+struct FakeLogSystem;
+struct FakePeekCursor;
+}; // namespace test
 
 } // namespace ptxn
 
@@ -994,16 +994,15 @@ class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
 
-ACTOR Future<Void> storageServer(
-    IKeyValueStore* persistentData,
-    StorageServerInterface ssi,
-    Tag seedTag,
-    Version tssSeedVersion,
-    ReplyPromise<InitializeStorageReply> recruitReply,
-    Reference<AsyncVar<ServerDBInfo> const> db,
-    std::string folder,
-    // Storage team id of a ptxn storage server
-    Optional<ptxn::StorageTeamID> storageTeamId = Optional<ptxn::StorageTeamID>());
+ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
+                                 StorageServerInterface ssi,
+                                 Tag seedTag,
+                                 Version tssSeedVersion,
+                                 ReplyPromise<InitializeStorageReply> recruitReply,
+                                 Reference<AsyncVar<ServerDBInfo> const> db,
+                                 std::string folder,
+                                 // Storage team id of a ptxn storage server
+                                 Optional<ptxn::StorageTeamID> storageTeamId = Optional<ptxn::StorageTeamID>());
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,

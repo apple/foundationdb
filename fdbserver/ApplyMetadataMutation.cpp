@@ -807,7 +807,8 @@ private:
 								    keyAfter(maybeTssRange.begin, arena).withPrefix(systemKeys.begin, arena);
 
 								if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-									toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
+									toCommit->writeToStorageTeams(
+									    tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 								} else {
 									toCommit->addTag(tag);
 									toCommit->writeTypedMessage(privatized);

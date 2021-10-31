@@ -54,13 +54,11 @@ static constexpr int WLTOKEN_COUNTS = 22; // number of wellKnownEndpoints
 
 class EndpointMap : NonCopyable {
 public:
-
 	// Reserve space for this many wellKnownEndpoints
 	explicit EndpointMap(int wellKnownEndpointCount);
 	void insertWellKnown(NetworkMessageReceiver* r, const Endpoint::Token& token, TaskPriority priority);
 	void insert(NetworkMessageReceiver* r, Endpoint::Token& token, TaskPriority priority);
-	const Endpoint& insert(NetworkAddressList localAddresses,
-	                       std::vector<ReceiverPriorityPair> const& streams);
+	const Endpoint& insert(NetworkAddressList localAddresses, std::vector<ReceiverPriorityPair> const& streams);
 	NetworkMessageReceiver* get(Endpoint::Token const& token);
 	TaskPriority getPriority(Endpoint::Token const& token);
 	void remove(Endpoint::Token const& token, NetworkMessageReceiver* r);

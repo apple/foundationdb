@@ -176,9 +176,7 @@ class TestConfig {
 				}
 				evt.detail(key.c_str(), optStr);
 			}
-			void operator()(std::vector<std::string>* val) const {
-				evt.detail(key.c_str(), toJSONString(*val));
-			}
+			void operator()(std::vector<std::string>* val) const { evt.detail(key.c_str(), toJSONString(*val)); }
 			void operator()(Optional<std::vector<std::string>>* val) const {
 				std::vector<std::string> res;
 				(*this)(&res);
