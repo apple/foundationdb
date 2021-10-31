@@ -221,7 +221,9 @@ class TestConfig {
 			}
 
 			if (attrib == "configureLocked") {
-				sscanf(value.c_str(), "%d", &configureLocked);
+				int configureLockedInt;
+				sscanf(value.c_str(), "%d", &configureLockedInt);
+				configureLocked = (configureLockedInt != 0);
 			}
 
 			if (attrib == "startIncompatibleProcess") {

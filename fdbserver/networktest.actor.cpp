@@ -584,7 +584,7 @@ struct P2PNetworkTest {
 
 		self->startTime = now();
 
-		printf("%d listeners, %d remotes, %d outgoing connections\n",
+		printf("%lu listeners, %lu remotes, %d outgoing connections\n",
 		       self->listeners.size(),
 		       self->remotes.size(),
 		       self->connectionsOut);

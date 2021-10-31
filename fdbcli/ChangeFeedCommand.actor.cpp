@@ -127,7 +127,7 @@ ACTOR Future<bool> changeFeedCommandActor(Database localDb, std::vector<StringRe
 					when(Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(feedResults.getFuture())) {
 						for (auto& it : res) {
 							for (auto& it2 : it.mutations) {
-								printf("%lld %s\n", it.version, it2.toString().c_str());
+								printf("%ld %s\n", it.version, it2.toString().c_str());
 							}
 						}
 					}

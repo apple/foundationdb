@@ -284,7 +284,6 @@ else()
       # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 11
       -Wno-comment
       -Wno-delete-non-virtual-dtor
-      -Wno-format
       -Wno-mismatched-tags
       -Wno-missing-field-initializers
       -Wno-sign-compare

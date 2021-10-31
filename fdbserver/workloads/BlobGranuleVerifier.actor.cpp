@@ -237,7 +237,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			    .detail("BlobSize", blob.first.size());
 
 			if (BGV_DEBUG) {
-				printf("\nMismatch for [%s - %s) @ %lld (%s). F(%d) B(%d):\n",
+				printf("\nMismatch for [%s - %s) @ %ld (%s). F(%d) B(%d):\n",
 				       range.begin.printable().c_str(),
 				       range.end.printable().c_str(),
 				       v,
@@ -291,11 +291,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					}
 					printf("  Deltas: (%d)", chunk.newDeltas.size());
 					if (chunk.newDeltas.size() > 0) {
-						printf(" with version [%lld - %lld]",
+						printf(" with version [%ld - %ld]",
 						       chunk.newDeltas[0].version,
 						       chunk.newDeltas[chunk.newDeltas.size() - 1].version);
 					}
-					printf("  IncludedVersion: %lld\n", chunk.includedVersion);
+					printf("  IncludedVersion: %ld\n", chunk.includedVersion);
 				}
 				printf("\n");
 			}
@@ -416,7 +416,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			state KeyRange r = range;
 			state PromiseStream<Standalone<BlobGranuleChunkRef>> chunkStream;
 			if (BGV_DEBUG) {
-				printf("Final availability check [%s - %s) @ %lld\n",
+				printf("Final availability check [%s - %s) @ %ld\n",
 				       r.begin.printable().c_str(),
 				       r.end.printable().c_str(),
 				       readVersion);
@@ -435,7 +435,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						break;
 					}
 					if (BGV_DEBUG) {
-						printf("BG Verifier failed final availability check for [%s - %s) @ %lld with error %s. Last "
+						printf("BG Verifier failed final availability check for [%s - %s) @ %ld with error %s. Last "
 						       "Success=[%s - %s)\n",
 						       r.begin.printable().c_str(),
 						       r.end.printable().c_str(),
@@ -452,13 +452,13 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		printf("Blob Granule Verifier finished with:\n");
 		printf("  %d successful final granule checks\n", checks);
 		printf("  %d failed final granule checks\n", availabilityPassed ? 0 : 1);
-		printf("  %lld mismatches\n", self->mismatches);
-		printf("  %lld time travel too old\n", self->timeTravelTooOld);
-		printf("  %lld errors\n", self->errors);
-		printf("  %lld initial reads\n", self->initialReads);
-		printf("  %lld time travel reads\n", self->timeTravelReads);
-		printf("  %lld rows\n", self->rowsRead);
-		printf("  %lld bytes\n", self->bytesRead);
+		printf("  %ld mismatches\n", self->mismatches);
+		printf("  %ld time travel too old\n", self->timeTravelTooOld);
+		printf("  %ld errors\n", self->errors);
+		printf("  %ld initial reads\n", self->initialReads);
+		printf("  %ld time travel reads\n", self->timeTravelReads);
+		printf("  %ld rows\n", self->rowsRead);
+		printf("  %ld bytes\n", self->bytesRead);
 		// FIXME: add above as details
 		TraceEvent("BlobGranuleVerifierChecked");
 		return availabilityPassed && self->mismatches == 0 && checks > 0 && self->timeTravelTooOld == 0;

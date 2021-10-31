@@ -7201,7 +7201,7 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 					blobGranuleMapping = _bgMapping;
 					if (blobGranuleMapping.more) {
 						if (BG_REQUEST_DEBUG) {
-							printf("BG Mapping for [%s - %s) too large!\n");
+							// printf("BG Mapping for [%s - %s) too large!\n");
 						}
 						throw unsupported_operation();
 					}
@@ -7215,7 +7215,7 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 					}
 
 					if (BG_REQUEST_DEBUG) {
-						printf("Doing blob granule request @ %lld\n", endVersion);
+						printf("Doing blob granule request @ %ld\n", endVersion);
 						printf("blob worker assignments:\n");
 					}
 
@@ -7290,7 +7290,7 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 				                                            nullptr));
 
 				if (BG_REQUEST_DEBUG) {
-					printf("Blob granule request for [%s - %s) @ %lld - %lld got reply from %s:\n",
+					printf("Blob granule request for [%s - %s) @ %ld - %ld got reply from %s:\n",
 					       granuleStartKey.printable().c_str(),
 					       granuleEndKey.printable().c_str(),
 					       begin,
@@ -7311,11 +7311,11 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 						}
 						printf("  Deltas: (%d)", chunk.newDeltas.size());
 						if (chunk.newDeltas.size() > 0) {
-							printf(" with version [%lld - %lld]",
+							printf(" with version [%ld - %ld]",
 							       chunk.newDeltas[0].version,
 							       chunk.newDeltas[chunk.newDeltas.size() - 1].version);
 						}
-						printf("  IncludedVersion: %lld\n", chunk.includedVersion);
+						printf("  IncludedVersion: %ld\n", chunk.includedVersion);
 						printf("\n\n");
 					}
 					Arena a;

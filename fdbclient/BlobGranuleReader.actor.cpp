@@ -97,7 +97,7 @@ ACTOR Future<Arena> readSnapshotFile(Reference<BackupContainerFileSystem> bstore
 		    }
 		}*/
 		if (BG_READ_DEBUG) {
-			printf("Started with %d rows from snapshot file %s after pruning to [%s - %s)\n",
+			printf("Started with %lu rows from snapshot file %s after pruning to [%s - %s)\n",
 			       dataMap->size(),
 			       f.toString().c_str(),
 			       keyRange.begin.printable().c_str(),
@@ -143,7 +143,7 @@ ACTOR Future<Standalone<GranuleDeltas>> readDeltaFile(Reference<BackupContainerF
 		// TODO REMOVE sanity check
 		for (int i = 0; i < result.size() - 1; i++) {
 			if (result[i].version > result[i + 1].version) {
-				printf("BG VERSION ORDER VIOLATION IN DELTA FILE: '%lld', '%lld'\n",
+				printf("BG VERSION ORDER VIOLATION IN DELTA FILE: '%ld', '%ld'\n",
 				       result[i].version,
 				       result[i + 1].version);
 			}
@@ -313,7 +313,7 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 		arena.dependsOn(snapshotArena);
 
 		if (BG_READ_DEBUG) {
-			printf("Applying %d delta files\n", readDeltaFutures.size());
+			printf("Applying %lu delta files\n", readDeltaFutures.size());
 		}
 		for (Future<Standalone<GranuleDeltas>> deltaFuture : readDeltaFutures) {
 			Standalone<GranuleDeltas> result = wait(deltaFuture);
