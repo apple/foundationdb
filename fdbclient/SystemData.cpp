@@ -386,7 +386,9 @@ ptxn::StorageTeamID storageTeamIdKeyDecode(const KeyRef& key) {
 	return teamId;
 }
 
-const KeyRef storageServerToTeamIdKeyPrefix = "\xff/storageServerToTeam/"_sr;
+// This prefix should come before "keyServers" prefix so that this is processed
+// before keyServers at processCompleteTransactionStateRequest().
+const KeyRef storageServerToTeamIdKeyPrefix = "\xff/astorageServerToTeam/"_sr;
 const Key storageServerToTeamIdKey(UID serverId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(storageServerToTeamIdKeyPrefix);

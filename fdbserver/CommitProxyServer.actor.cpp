@@ -2046,8 +2046,6 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 
 		MutationsVec mutations;
 		std::vector<std::pair<MapPair<Key, ServerCacheInfo>, int>> keyInfoData;
-		std::vector<UID> src, dest;
-		ServerCacheInfo info;
 		// NOTE: An ACTOR will be compiled into several classes, the this pointer is from one of them.
 		auto updateTagInfo = [this](const std::vector<UID>& uids,
 		                            std::vector<Tag>& tags,
@@ -2091,16 +2089,12 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 			if (k == allKeys.end) {
 				continue;
 			}
+			std::vector<UID> src, dest;
+			ServerCacheInfo info;
 			std::vector<ptxn::StorageTeamID> srcDstTeams = decodeKeyServersValue(tag_uid, kv.value, src, dest);
 
-			info.tags.clear();
-
-			info.src_info.clear();
 			updateTagInfo(src, info.tags, info, srcDstTeams, info.src_info);
-
-			info.dest_info.clear();
 			updateTagInfo(dest, info.tags, info, srcDstTeams, info.dest_info);
-
 			uniquify(info.tags);
 			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 				// A shard can only correspond to single storage team in the primary DC for now
