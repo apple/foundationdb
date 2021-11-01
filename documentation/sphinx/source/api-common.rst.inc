@@ -609,10 +609,6 @@
 
     Sets the passphrase for encrypted private key. Password should be set before setting the key for the password to be used.
 
-.. |option-disable-multi-version-client-api| replace::
-
-    Disables the multi-version client API and instead uses the local client directly. Must be set before setting up the network.
-
 .. |option-set-disable-local-client| replace::
 
     Prevents connections through the local client, allowing only connections through externally loaded client libraries.
