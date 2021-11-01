@@ -125,7 +125,7 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
 
     .. note:: |network-options-warning|
 
-    .. method :: fdb.options.set_knob("knob_name=value")
+    .. method :: fdb.options.set_knob(knob)
        
         |option-knob|
 

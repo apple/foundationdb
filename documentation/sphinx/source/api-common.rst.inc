@@ -591,7 +591,7 @@
 
 .. |option-knob| replace::
    
-   Sets internal tuning or debugging knobs. Available knobs could be found at https://github.com/apple/foundationdb/blob/master/fdbclient/ClientKnobs.h.
+   Sets internal tuning or debugging knobs. The argument to this function should be a string representing the knob name and the value, e.g. "transaction_size_limit=1000".
 
 .. |option-tls-verify-peers| replace::
 
