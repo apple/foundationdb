@@ -109,7 +109,8 @@ TEST_CASE("flow/serialize/Downgrade/WriteOld") {
 	return Void();
 }
 
-// Verify that old code will still be able to read the values of the struct it knows about, even if we add a new field and write a message with new code.
+// Verify that old code will still be able to read the values of the struct it knows about, even if we add a new field
+// and write a message with new code.
 TEST_CASE("flow/serialize/Downgrade/WriteNew") {
 	auto protocolVersion = g_network->protocolVersion();
 	protocolVersion.addObjectSerializerFlag();
