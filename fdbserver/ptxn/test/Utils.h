@@ -45,12 +45,12 @@ std::vector<StorageTeamID> generateRandomStorageTeamIDs(const int numStorageTeam
 
 // Pick one element from a container, randomly
 // The container should support the concept of
-//  template <typename Container>
-//  requires(const Container& container) {
-//      { container[0] };
-//      { container.size() };
-//      { Container::const_reference }
-//  }
+//  template <typename T>
+//  concept Container = requires(T t) {
+//      { container[0] } -> T;
+//      { container.size() } -> size_t;
+//      { Container::const_reference } -> const T&;
+//  };
 template <typename Container>
 typename Container::const_reference randomlyPick(const Container& container) {
 	if (container.size() == 0) {
@@ -58,6 +58,37 @@ typename Container::const_reference randomlyPick(const Container& container) {
 	}
 	return container[deterministicRandom()->randomInt(0, container.size())];
 };
+
+// Pick multiple elements from a container, randmly
+// The container should support the concept that randomlyPick supports
+// The returning container should support the concept of
+//  tempalte <typename T>
+//  concept ResultContainer = requires(T t) {
+//	    { container.resize(size_t) } -> void;
+// .    { container[0] } -> T&;
+//  };
+template <typename ResultContainer, typename Container>
+ResultContainer randomlyPick(const Container& container, const int numSamples) {
+	const int containerSize = container.size();
+	ASSERT(containerSize >= numSamples);
+
+	ResultContainer result;
+	result.resize(numSamples);
+
+	// Reservoir sampling
+	for (int i = 0; i < numSamples; ++i) {
+		result[i] = container[i];
+	}
+
+	for (int i = numSamples; i < containerSize; ++i) {
+		int j = deterministicRandom()->randomInt(1, i + 1);
+		if (j < numSamples) {
+			result[j] = container[i];
+		}
+	}
+
+	return result;
+}
 
 // Get a random alphabetical/numeric string with length between lower and upper
 std::string getRandomAlnum(int lower, int upper);
@@ -73,7 +104,7 @@ void print(const TestDriverOptions&);
 void print(const CommitRecord&);
 void print(const ptxn::test::TestTLogPeekOptions&);
 
-void printCommitRecords(const std::vector<CommitRecord>&);
+void printCommitRecords(const CommitRecord&);
 
 // Prints timing per step
 class PrintTiming {
@@ -97,7 +128,7 @@ public:
 	friend DummyOStream operator<<(PrintTiming&, const T& object);
 
 	// Support iomanips like std::endl
-	// Here we *MUST* use pointers instead of std::function, since the  see, e.g.:
+	// Here we *MUST* use pointers instead of std::function, see:
 	//   * http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p0551r3.pdf
 	friend DummyOStream operator<<(PrintTiming&, std::ostream& (*)(std::ostream&));
 
