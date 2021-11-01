@@ -156,15 +156,15 @@ ACTOR Future<Void> addVersion(VersionIndexerState* self, VersionIndexerCommitReq
 		entry.version = req.version;
 		entry.tags = std::move(req.tags);
 		std::sort(entry.tags.begin(), entry.tags.end());
-		//TraceEvent evt(SevDebug, "VersionIndexerAddVersion", self->id);
+		// TraceEvent evt(SevDebug, "VersionIndexerAddVersion", self->id);
 		// evt.detail("Version", req.version)
 		//     .detail("PrevVersion", req.previousVersion)
 		//     .detail("IndexerVersion", self->version.get())
 		//     .detail("NumTags", entry.tags.size())
 		//     .detail("FirstCommit", firstCommit);
 		// for (int i = 0; i < entry.tags.size(); ++i) {
-		//	auto k = format("Tag%d", i);
-		//	evt.detail(k.c_str(), entry.tags[i]);
+		// 	auto k = format("Tag%d", i);
+		// 	evt.detail(k.c_str(), entry.tags[i]);
 		// }
 		// evt.log();
 		self->versionWindow.emplace_back(std::move(entry));

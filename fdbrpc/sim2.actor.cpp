@@ -2060,7 +2060,7 @@ public:
 		} else {
 			mutex.enter();
 			this->time = t.time;
-			this->timerTime = std::max(this->timerTime, this->time);
+			this->timerTime = std::max(this->timerTime, this->time.load());
 			mutex.leave();
 
 			this->currentProcess = t.machine;
@@ -2075,7 +2075,7 @@ public:
 			if (randLog)
 				fprintf(randLog,
 				        "T %f %d %s %" PRId64 "\n",
-				        this->time,
+				        this->time.load(),
 				        int(deterministicRandom()->peek() % 10000),
 				        t.machine ? t.machine->name : "none",
 				        t.stable);
@@ -2106,7 +2106,7 @@ public:
 
 	// time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	// time should only be modified from the main thread.
-	double time;
+	std::atomic<double> time;
 	double timerTime;
 	TaskPriority currentTaskID;
 

@@ -4860,12 +4860,12 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			if (data->otherError.getFuture().isReady())
 				data->otherError.getFuture().get();
 
-			TraceEvent(SevDebug, "SetDesiredOldestVersion", data->thisServerID)
-				.detail("CursorMinKnownCommitted", cursor->getMinKnownCommittedVersion())
-				.detail("VersionIndexerKnownCommittedVersion", data->versionIndexerReportedCommitted)
-				.detail("StorageVersion", data->storageVersion())
-				.detail("Version", data->version.get())
-				.log();
+			// TraceEvent(SevDebug, "SetDesiredOldestVersion", data->thisServerID)
+			// 	.detail("CursorMinKnownCommitted", cursor->getMinKnownCommittedVersion())
+			// 	.detail("VersionIndexerKnownCommittedVersion", data->versionIndexerReportedCommitted)
+			// 	.detail("StorageVersion", data->storageVersion())
+			// 	.detail("Version", data->version.get())
+			// 	.log();
 			data->updateDesiredOldestVersion(
 			    std::max(cursor->getMinKnownCommittedVersion(), data->versionIndexerReportedCommitted));
 		}

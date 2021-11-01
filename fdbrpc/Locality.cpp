@@ -314,49 +314,38 @@ StringRef to_string(ProcessClass::ClusterRole role) {
 	switch (role) {
 	case ProcessClass::Storage:
 		return "Storage"_sr;
-		break;
 	case ProcessClass::TLog:
 		return "TLog"_sr;
-		break;
 	case ProcessClass::CommitProxy:
 		return "CommitProxy"_sr;
-		break;
 	case ProcessClass::GrvProxy:
 		return "GrvProxy"_sr;
-		break;
 	case ProcessClass::Master:
 		return "Master"_sr;
-		break;
 	case ProcessClass::Resolver:
 		return "Resolver"_sr;
-		break;
 	case ProcessClass::LogRouter:
 		return "LogRouter"_sr;
-		break;
 	case ProcessClass::ClusterController:
 		return "ClusterController"_sr;
-		break;
 	case ProcessClass::DataDistributor:
 		return "DataDistributor"_sr;
-		break;
 	case ProcessClass::Ratekeeper:
 		return "Ratekeeper"_sr;
-		break;
 	case ProcessClass::StorageCache:
 		return "StorageCache"_sr;
-		break;
 	case ProcessClass::Backup:
 		return "Backup"_sr;
-		break;
 	case ProcessClass::VersionIndexer:
 		return "VersionIndexer"_sr;
-		break;
 	case ProcessClass::Worker:
 		return "Worker"_sr;
-		break;
+	case ProcessClass::BlobManager:
+		return "BlobManager"_sr;
+	case ProcessClass::BlobWorker:
+		return "BlobWorker"_sr;
 	case ProcessClass::NoRole:
 		return "NoRole"_sr;
-		break;
 	}
 	UNSTOPPABLE_ASSERT(false);
 }

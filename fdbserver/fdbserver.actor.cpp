@@ -99,7 +99,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_KILL_AFTER
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -187,6 +187,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_FAULT_INJECTION,       "-fi",                         SO_REQ_SEP },
 	{ OPT_FAULT_INJECTION,       "--fault_injection",           SO_REQ_SEP },
 	{ OPT_PROFILER,	             "--profiler_",                 SO_REQ_SEP},
+	{ OPT_KILL_AFTER,            "--kill-after",                SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -702,6 +703,12 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("--io_trust_warn_only",
 		                 " Instead of failing when an I/O operation exceeds io_trust_seconds, just"
 		                 " log a warning to the trace log. Has no effect if io_trust_seconds is unspecified.");
+		printOptionUsage(
+		    "--kill-after SECONDS",
+		    "Kill the process after number of SECONDS has passed. This is particularly useful to debug "
+		    "timeout errors and using this will NOT change the determinism of a simulation run. For "
+		    "example: if you know you only need the first 600 seconds of a simulation run but the process runs for "
+		    "much longer before it times out, you can pass --kill-after 600 to the command line arguments.");
 	} else {
 		printOptionUsage("--dev-help", "Display developer-specific help and exit.");
 	}
@@ -1004,6 +1011,8 @@ struct CLIOptions {
 	UnitTestParameters testParams;
 
 	std::map<std::string, std::string> profilerConfig;
+
+	double killAfter = -1.0;
 
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
@@ -1484,6 +1493,15 @@ private:
 			case OPT_USE_TEST_CONFIG_DB:
 				configDBType = ConfigDBType::SIMPLE;
 				break;
+			case OPT_KILL_AFTER: {
+				const char* a = args.OptionArg();
+				if (!sscanf(a, "%lf", &killAfter)) {
+					fprintf(stderr, "ERROR: Could not parse kill-after `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
+			}
 
 #ifndef TLS_DISABLED
 			case TLSConfig::OPT_TLS_PLUGIN:
@@ -1868,6 +1886,11 @@ int main(int argc, char* argv[]) {
 
 		Future<Optional<Void>> f;
 
+		if (opts.killAfter > 0.0 && role != ServerRole::Simulation) {
+			std::cerr << "ERROR: --kill-after can only be used for simulation runs\n";
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+
 		if (role == ServerRole::Simulation) {
 			TraceEvent("Simulation").detail("TestFile", opts.testFile);
 
@@ -2001,6 +2024,21 @@ int main(int argc, char* argv[]) {
 				}
 			}
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
+			if (opts.killAfter > 0.0) {
+				auto killAfter = opts.killAfter;
+				auto sim = g_pSimulator;
+				std::thread killAfterThread{[killAfter, sim](){
+					while (true) {
+						std::this_thread::sleep_for(std::chrono::milliseconds(10));
+						if (sim->now() > killAfter) {
+#ifdef __unixish__
+							kill(getpid(), SIGTERM);
+#endif
+						}
+					}
+				}};
+				killAfterThread.detach();
+			}
 			g_simulator.run();
 		} else if (role == ServerRole::FDBD) {
 			// Update the global blob credential files list so that both fast

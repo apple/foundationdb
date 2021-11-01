@@ -1715,7 +1715,12 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 	state double workStart = now();
 
-	Version poppedVer = poppedVersion(logData, reqTag);
+	state Version poppedVer = poppedVersion(logData, reqTag);
+	if (poppedVer <= reqBegin && reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled && reqTag.locality >= 0 &&
+	    !reqReturnIfBlocked) {
+		wait(waitForMessagesForTag(logData, reqTag, reqBegin, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
+		poppedVer = poppedVersion(logData, reqTag);
+	}
 	if (poppedVer > reqBegin) {
 		TLogPeekReply rep;
 		rep.maxKnownVersion = logData->version.get();
@@ -1748,11 +1753,6 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 		replyPromise.send(rep);
 		return Void();
-	}
-
-	if (reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled && reqTag.locality >= 0 &&
-	    !reqReturnIfBlocked) {
-		wait(waitForMessagesForTag(logData, reqTag, reqBegin, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
 	}
 	state Version endVersion = logData->version.get() + 1;
 	state bool onlySpilled = false;
@@ -1958,10 +1958,10 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 // This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
 ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Reference<LogData> logData) {
-	self->activePeekStreams++;
-
 	state Version begin = req.begin;
 	state bool onlySpilled = false;
+	state UID streamID = deterministicRandom()->randomUniqueID();
+	self->activePeekStreams++;
 	req.reply.setByteLimit(std::min(SERVER_KNOBS->MAXIMUM_PEEK_BYTES, req.limitBytes));
 	loop {
 		state TLogPeekStreamReply reply;
@@ -1984,6 +1984,7 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			self->activePeekStreams--;
 			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId)
 			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+					.detail("StreamID", streamID)
 			    .error(e, true);
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
@@ -2493,7 +2494,9 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		}
 		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
 			TraceEvent(SevDebug, "TLogPeekStream", logData->logId)
-			    .detail("Token", tli.peekStreamMessages.getEndpoint().token);
+			    .detail("Token", tli.peekStreamMessages.getEndpoint().token)
+					.detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+					.log();
 			logData->addActor.send(tLogPeekStream(self, req, logData));
 		}
 		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {
