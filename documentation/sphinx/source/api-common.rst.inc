@@ -629,7 +629,6 @@
 
     Enables debugging feature to perform run loop profiling. Requires trace logging to be enabled. WARNING: this feature is not recommended for use in production.
 
-       
 .. |option-set-distributed-client-tracer| replace::
 
     Sets a tracer to run on the client. Should be set to the same value as the tracer set on the server.
