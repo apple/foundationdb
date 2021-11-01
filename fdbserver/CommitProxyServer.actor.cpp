@@ -1919,8 +1919,8 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		ServerCacheInfo info;
 		// NOTE: An ACTOR will be compiled into several classes, the this pointer is from one of them.
 		auto updateTagInfo = [=](const std::vector<UID>& uids,
-		                            std::vector<Tag>& tags,
-		                            std::vector<Reference<StorageInfo>>& storageInfoItems) {
+		                         std::vector<Tag>& tags,
+		                         std::vector<Reference<StorageInfo>>& storageInfoItems) {
 			for (const auto& id : uids) {
 				auto storageInfo = getStorageInfo(id, &pContext->pCommitData->storageCache, pContext->pTxnStateStore);
 				ASSERT(storageInfo->tag != invalidTag);

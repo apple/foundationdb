@@ -4666,14 +4666,14 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					TraceEvent(SevError, "DataAtPastVersion", data->thisServerID)
 					    .detail("DataVersion", data->version.get())
 					    .detail("CursorVersion", cloneCursor2->version().version)
-							.detail("Ver", ver)
-							.detail("MyTag", data->tag)
+					    .detail("Ver", ver)
+					    .detail("MyTag", data->tag)
 					    .log();
 					for (const auto& p : data->history) {
 						TraceEvent(SevError, "DataAtPastVersionHistory", data->thisServerID)
-					    .detail("Version", p.first)
-					    .detail("Tag", p.second)
-					    .log();
+						    .detail("Version", p.first)
+						    .detail("Tag", p.second)
+						    .log();
 					}
 					auto& rd = *cloneCursor2->reader();
 					for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
@@ -4685,20 +4685,20 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							data->storage.changeLogProtocol(ver, data->logProtocol);
 							cloneCursor2->setProtocolVersion(rd.protocolVersion());
 							TraceEvent(SevError, "DataAtPastVersionLogProtocolMessage", data->thisServerID)
-								.detail("Version", rd.protocolVersion());
+							    .detail("Version", rd.protocolVersion());
 						} else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
 							SpanContextMessage scm;
 							rd >> scm;
 							spanContext = scm.spanContext;
 							TraceEvent(SevError, "DataAtPastVersionSpanContext", data->thisServerID)
-								.detail("Context", spanContext);
+							    .detail("Context", spanContext);
 						} else {
 							MutationRef msg;
 							rd >> msg;
 							TraceEvent(SevError, "DataAtPastVersionMutation", data->thisServerID)
-								.detail("MutationType", msg.type)
-								.detail("Param1", msg.param1)
-								.detail("Param2", msg.param2);
+							    .detail("MutationType", msg.type)
+							    .detail("Param1", msg.param1)
+							    .detail("Param2", msg.param2);
 						}
 					}
 					ASSERT(false);

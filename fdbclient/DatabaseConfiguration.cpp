@@ -189,10 +189,10 @@ void DatabaseConfiguration::setDefaultReplicationPolicy() {
 bool DatabaseConfiguration::isValid() const {
 	if (!(initialized && tLogWriteAntiQuorum >= 0 && tLogWriteAntiQuorum <= tLogReplicationFactor / 2 &&
 	      tLogReplicationFactor >= 1 && storageTeamSize >= 1 && getDesiredCommitProxies() >= 1 &&
-	      getDesiredGrvProxies() >= 1 && getDesiredLogs() >= 1 && getDesiredResolvers() >= 1 && getDesiredVersionIndexers() >= 1 &&
-	      tLogVersion != TLogVersion::UNSET && tLogVersion >= TLogVersion::MIN_RECRUITABLE &&
-	      tLogVersion <= TLogVersion::MAX_SUPPORTED && tLogDataStoreType != KeyValueStoreType::END &&
-	      tLogSpillType != TLogSpillType::UNSET &&
+	      getDesiredGrvProxies() >= 1 && getDesiredLogs() >= 1 && getDesiredResolvers() >= 1 &&
+	      getDesiredVersionIndexers() >= 1 && tLogVersion != TLogVersion::UNSET &&
+	      tLogVersion >= TLogVersion::MIN_RECRUITABLE && tLogVersion <= TLogVersion::MAX_SUPPORTED &&
+	      tLogDataStoreType != KeyValueStoreType::END && tLogSpillType != TLogSpillType::UNSET &&
 	      !(tLogSpillType == TLogSpillType::REFERENCE && tLogVersion < TLogVersion::V3) &&
 	      storageServerStoreType != KeyValueStoreType::END && autoCommitProxyCount >= 1 && autoGrvProxyCount >= 1 &&
 	      autoResolverCount >= 1 && autoVersionIndexerCount >= 1 && autoDesiredTLogCount >= 1 && storagePolicy &&

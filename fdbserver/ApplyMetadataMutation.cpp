@@ -649,7 +649,7 @@ private:
 				    .detail("PopVersion", popVersion)
 				    .detail("Tag", tag.toString())
 				    .detail("Server", decodeServerTagKey(kv.key))
-						.detail("ToCommitSet", toCommit != nullptr);
+				    .detail("ToCommitSet", toCommit != nullptr);
 				logSystem->pop(popVersion, decodeServerTagValue(kv.value));
 				(*tag_popped)[tag] = popVersion;
 

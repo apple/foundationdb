@@ -130,7 +130,7 @@ struct WorkerInterface {
 		           backup,
 		           updateServerDBInfo,
 		           configBroadcastInterface,
-							 versionIndexer);
+		           versionIndexer);
 	}
 };
 

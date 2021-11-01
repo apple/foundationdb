@@ -2027,7 +2027,7 @@ int main(int argc, char* argv[]) {
 			if (opts.killAfter > 0.0) {
 				auto killAfter = opts.killAfter;
 				auto sim = g_pSimulator;
-				std::thread killAfterThread{[killAfter, sim](){
+				std::thread killAfterThread{ [killAfter, sim]() {
 					while (true) {
 						std::this_thread::sleep_for(std::chrono::milliseconds(10));
 						if (sim->now() > killAfter) {
@@ -2036,7 +2036,7 @@ int main(int argc, char* argv[]) {
 #endif
 						}
 					}
-				}};
+				} };
 				killAfterThread.detach();
 			}
 			g_simulator.run();

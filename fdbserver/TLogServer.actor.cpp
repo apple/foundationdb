@@ -629,13 +629,12 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	    durableKnownCommittedVersion(0), minKnownCommittedVersion(0), queuePoppedVersion(0), minPoppedTagVersion(0),
 	    minPoppedTag(invalidTag), unpoppedRecoveredTags(0), cc("TLog", interf.id().toString()),
 	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), blockingPeeks("BlockingPeeks", cc),
-	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), logId(interf.id()),
-	    protocolVersion(protocolVersion), newPersistentDataVersion(invalidVersion), tLogData(tLogData),
-	    unrecoveredBefore(1), recoveredAt(1), logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag),
-	    isPrimary(isPrimary), logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0),
-	    locality(tagLocalityInvalid), recruitmentID(recruitmentID), logSpillType(logSpillType),
-	    allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false),
-	    txsTags(txsTags) {
+	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), logId(interf.id()), protocolVersion(protocolVersion),
+	    newPersistentDataVersion(invalidVersion), tLogData(tLogData), unrecoveredBefore(1), recoveredAt(1),
+	    logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag), isPrimary(isPrimary),
+	    logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0), locality(tagLocalityInvalid),
+	    recruitmentID(recruitmentID), logSpillType(logSpillType), allTags(tags.begin(), tags.end()),
+	    terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false), txsTags(txsTags) {
 		startRole(Role::TRANSACTION_LOG,
 		          interf.id(),
 		          tLogData->workerID,
@@ -1716,8 +1715,8 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	state double workStart = now();
 
 	state Version poppedVer = poppedVersion(logData, reqTag);
-	if (poppedVer <= reqBegin && reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled && reqTag.locality >= 0 &&
-	    !reqReturnIfBlocked) {
+	if (poppedVer <= reqBegin && reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled &&
+	    reqTag.locality >= 0 && !reqReturnIfBlocked) {
 		wait(waitForMessagesForTag(logData, reqTag, reqBegin, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
 		poppedVer = poppedVersion(logData, reqTag);
 	}
@@ -1984,7 +1983,7 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			self->activePeekStreams--;
 			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId)
 			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
-					.detail("StreamID", streamID)
+			    .detail("StreamID", streamID)
 			    .error(e, true);
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
@@ -2495,8 +2494,8 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
 			TraceEvent(SevDebug, "TLogPeekStream", logData->logId)
 			    .detail("Token", tli.peekStreamMessages.getEndpoint().token)
-					.detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
-					.log();
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+			    .log();
 			logData->addActor.send(tLogPeekStream(self, req, logData));
 		}
 		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {
