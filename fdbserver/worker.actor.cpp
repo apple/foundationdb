@@ -1729,7 +1729,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                                          ServerCoordinators(connRecord),
 				                                          req.lifetime,
 				                                          req.forceRecovery,
-				                                          req.recoverMetadata);
+				                                          req.repairSystemData);
 				errorForwarders.add(
 				    zombie(recruited, forwardError(errors, Role::MASTER, recruited.id(), masterProcess)));
 				req.reply.send(recruited);

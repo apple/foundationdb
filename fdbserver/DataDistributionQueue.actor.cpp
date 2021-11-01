@@ -596,8 +596,6 @@ struct DDQueueData {
 		state std::set<UID> servers;
 		state Transaction tr(cx);
 
-		TraceEvent("GetSourceServersForRange").detail("Begin", input.keys.begin).detail("End", input.keys.end);
-
 		// FIXME: is the merge case needed
 		if (input.priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD) {
 			wait(delay(0.5, TaskPriority::DataDistributionVeryLow));
@@ -637,6 +635,8 @@ struct DDQueueData {
 						}
 					}
 
+					// During a master recovery with `repairSystemData` enabled, it is possible that they team hosting system data becomes empty in a 
+					// transient state. If the old DD is still up, it could reach here in an attempt to move data out of unhealthy team.
 					if (servers.empty()) {
 						throw movekeys_conflict();
 					}

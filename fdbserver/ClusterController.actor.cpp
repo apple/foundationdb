@@ -132,7 +132,7 @@ public:
 		int64_t dbInfoCount;
 		bool recoveryStalled;
 		bool forceRecovery;
-		bool recoverMetadata;
+		bool repairSystemData;
 		DatabaseConfiguration config; // Asynchronously updated via master registration
 		DatabaseConfiguration fullyRecoveredConfig;
 		Database db;
@@ -146,7 +146,7 @@ public:
 		DBInfo()
 		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
 		    masterRegistrationCount(0), dbInfoCount(0), recoveryStalled(false), forceRecovery(false),
-		    recoverMetadata(false), db(DatabaseContext::create(clientInfo,
+		    repairSystemData(false), db(DatabaseContext::create(clientInfo,
 		                                                       Future<Void>(),
 		                                                       LocalityData(),
 		                                                       EnableLocalityLoadBalance::True,
@@ -354,14 +354,12 @@ public:
 		LocalityMap<WorkerDetails>* logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
 		bool bCompleted = false;
 
-		int count = 0;
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(ProcessClass::Storage);
 			if (workerAvailable(it.second, false) && !conf.isExcludedServer(it.second.details.interf.addresses()) &&
 			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    fitness != ProcessClass::NeverAssign &&
 			    (!dcId.present() || it.second.details.interf.locality.dcId() == dcId.get())) {
-				++count;
 				fitness_workers[fitness].push_back(it.second.details);
 			}
 		}
@@ -3362,7 +3360,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 			RecruitMasterRequest rmq;
 			rmq.lifetime = db->serverInfo->get().masterLifetime;
 			rmq.forceRecovery = db->forceRecovery;
-			rmq.recoverMetadata = db->recoverMetadata;
+			rmq.repairSystemData = db->repairSystemData;
 
 			cluster->masterProcessId = masterWorker.worker.interf.locality.processId();
 			cluster->db.unfinishedRecoveries++;
@@ -4995,6 +4993,8 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 	}
 }
 
+// Triggers a master recovery, with `repairSystemData` enabled, `systemKeys` will be backfilled to recovery
+// from any system data loss.
 ACTOR Future<Void> handleRepairSystemData(ClusterControllerData* self, ClusterControllerFullInterface interf) {
 	loop {
 		state RepairSystemDataRequest req = waitNext(interf.clientInterface.repairSystemData.getFuture());
@@ -5002,9 +5002,12 @@ ACTOR Future<Void> handleRepairSystemData(ClusterControllerData* self, ClusterCo
 		TraceEvent("RepairSystemDataStart", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("MasterID", oldMasterID);
-		self->db.recoverMetadata = true;
+
+		// Trigger the recovery with repairSystemData enabled.
+		self->db.repairSystemData = true;
 		self->db.forceMasterFailure.trigger();
-		// state MasterInterface oldMaster = self->db.serverInfo->get().master;
+
+		// Wait for a new generation to be up.
 		loop {
 			wait(self->db.serverInfo->onChange());
 			if (self->db.serverInfo->get().master.id() != oldMasterID &&
@@ -5015,12 +5018,14 @@ ACTOR Future<Void> handleRepairSystemData(ClusterControllerData* self, ClusterCo
 		TraceEvent("RepairSystemDataFinish", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("MasterID", self->db.serverInfo->get().master.id());
-		self->db.recoverMetadata = false;
+
+		// Disable repairSystemData mode.
+		self->db.repairSystemData = false;
 		req.reply.send(Void());
 	}
 }
 
-// Moves keyrange keys to the target servers.
+// Moves keyrange to the target servers.
 ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddress> addresses) {
 	// Disable DD to avoid DD undoing of our move.
 	state int ignore = wait(setDDMode(cx, 0));
@@ -5110,7 +5115,11 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 			              &ddEnabledState));
 			break;
 		} catch (Error& e) {
-			TraceEvent("MoveShardError").error(e);
+			TraceEvent("MoveShardError")
+			    .detail("Begin", keys.begin)
+			    .detail("End", keys.end)
+			    .detail("NewTeam", describe(dest))
+			    .error(e);
 			if (e.code() == error_code_movekeys_conflict) {
 				txn.reset();
 				wait(delay(1.0));
@@ -5119,8 +5128,6 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 			}
 		}
 	}
-
-	TraceEvent("ShardMoved").detail("Begin", keys.begin).detail("End", keys.end).detail("NewTeam", describe(dest));
 
 	return Void();
 }

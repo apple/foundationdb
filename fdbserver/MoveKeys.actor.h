@@ -63,10 +63,10 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId);
 // This does not modify the moveKeysLock
 Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, const DDEnabledState* ddEnabledState);
 
-void setUpMetadataServers(Arena& arena,
+// Set up the system data, so that all system data will be hosted by `servers`.
+void setUpSystemDataServers(Arena& arena,
                           CommitTransactionRef& tr,
                           std::vector<StorageServerInterface> servers,
-                          std::unordered_map<UID, Tag> serverTagMap,
                           IKeyValueStore* txnStateStore);
 
 void seedShardServers(Arena& trArena, CommitTransactionRef& tr, std::vector<StorageServerInterface> servers);

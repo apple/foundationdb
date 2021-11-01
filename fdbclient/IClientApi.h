@@ -123,7 +123,9 @@ public:
 	virtual ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) = 0;
 	// Management API, create snapshot
 	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
+	// Management API, move a keyrange to the target storage servers
 	virtual ThreadFuture<Void> moveShard(const KeyRangeRef& keys, std::vector<NetworkAddress> addresses) = 0;
+	// Management API, repair system data on storage servers
 	virtual ThreadFuture<Void> repairSystemData() = 0;
 
 	// used in template functions as the Transaction type that can be created through createTransaction()

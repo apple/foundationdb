@@ -209,7 +209,6 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 		state Future<Void> timeout;
 		state std::vector<CommitTransactionRequest> batch;
 		state int batchBytes = 0;
-		// state bool batchSupressPrivateMutations;
 
 		if (SERVER_KNOBS->MAX_COMMIT_BATCH_INTERVAL <= 0) {
 			timeout = Never();
@@ -848,7 +847,6 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
 			LogPushData* toCommit = self->suppressPrivateMutations ? nullptr : &self->toCommit;
-			// std::cout << "suppress private: " <<self->suppressPrivateMutations << std::endl; 
 			applyMetadataMutations(trs[t].spanContext,
 			                       *pProxyCommitData,
 			                       self->arena,

@@ -1394,16 +1394,6 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							    &tr, serverKeysPrefixFor(id), shard, allKeys, serverKeysTrueEmptyRange));
 						}
 
-						if (systemKeys.intersects(shard)) {
-							state Transaction txn(cx);
-							txn.set(metadataRecoveryModeKey, metadataRecoverySS);
-							wait(lockDatabase(&txn, metadataRecoveryDatabaseLock));
-							TraceEvent(SevWarnAlways, "MetaDataShardAllReplicasLost", serverID)
-							    .detail("Begin", shard.begin)
-							    .detail("End", shard.end);
-							throw internal_error();
-						}
-
 						wait(waitForAll(actors));
 
 						TraceEvent trace(SevWarnAlways, "ShardLossAllReplicasDropShard", serverID);
@@ -1413,9 +1403,6 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							trace.detail("DropedDest", describe(dest));
 						}
 						trace.detail("NewTeamForDroppedShard", describe(teamForDroppedRange));
-						std::cout << "Shard [" << shard.begin.toString() << ", " << shard.end.toString()
-						          << ") lost all shards, it will be cleared and moved to: "
-						          << describe(teamForDroppedRange) << std::endl;
 					} else {
 						TraceEvent(SevDebug, "FailedServerSetKey", serverID)
 						    .detail("Key", shard.begin)
@@ -1493,25 +1480,18 @@ ACTOR Future<Void> moveKeys(Database cx,
 	return Void();
 }
 
-void setUpMetadataServers(Arena& arena,
-                          CommitTransactionRef& tr,
-                          std::vector<StorageServerInterface> servers,
-                          std::unordered_map<UID, Tag> serverTagMap,
-                          IKeyValueStore* txnStateStore) {
-	std::cout << "SetUpMetadataServersBegin" << std::endl;
+void setUpSystemDataServers(Arena& arena,
+                            CommitTransactionRef& tr,
+                            std::vector<StorageServerInterface> servers,
+                            IKeyValueStore* txnStateStore) {
 	std::sort(servers.begin(), servers.end());
-
-	// For now, the SSes are existing ones, no need to update the metadata.
-	// for (auto& s : servers) {
-	// 	tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(serverTagMap[s.id()]));
-	// 	tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
-	// 	std::cout << "setting server " << s.id().toString() << ", tag: " << serverTagMap[s.id()].toString()
-	// 	          << std::endl;
-	// }
 
 	RangeResult UID2Tag = txnStateStore->readRange(serverTagKeys).get();
 	RangeResult keyServers = txnStateStore->readRange(keyServersKeys).get();
-	std::vector<UID> metaServers;
+
+	// Servers hosting at least one part of the system data keyrange.
+	std::vector<UID> systemDataServers;
+	// The last keyrange intersecting wiht normalKeys owned by a server.
 	std::unordered_map<UID, Optional<KeyRangeRef>> lastOwnedNormalRange;
 	for (int i = 0; i < keyServers.size() - 1; ++i) {
 		KeyRangeRef shard(keyServers[i].key.removePrefix(keyServersPrefix),
@@ -1527,41 +1507,38 @@ void setUpMetadataServers(Arena& arena,
 			}
 		}
 		if (shard.intersects(systemKeys)) {
-			metaServers.insert(metaServers.end(), src.begin(), src.end());
-			metaServers.insert(metaServers.end(), dest.begin(), dest.end());
+			systemDataServers.insert(systemDataServers.end(), src.begin(), src.end());
+			systemDataServers.insert(systemDataServers.end(), dest.begin(), dest.end());
 		}
 	}
-	TraceEvent("OldSystemDataServers").detail("Servers", describe(metaServers));
+	TraceEvent("RepairSystemDataOldSystemDataServers").detail("Servers", describe(systemDataServers));
 
-	for (auto& s : metaServers) {
+	// Clear system data keyrange from the servers, and manually coalesce the range in `serverKeys`.
+	for (auto& s : systemDataServers) {
 		KeyRef last = lastOwnedNormalRange[s].present() ? lastOwnedNormalRange[s].get().end : allKeys.begin;
 		KeyRef key = std::min(systemKeys.begin, last);
-		TraceEvent("OldMetaDataLastOwnedShardEnd", s).detail("End", key.toString()).detail("Last", last.toString());
 		tr.clear(arena, KeyRangeRef(serverKeysKey(s, key), serverKeysKey(s, systemKeys.end)));
-		// tr.set(arena, serverKeysKey(s, key), serverKeysFalse);
 		krmSetPreviouslyEmptyRange(
 		    tr, arena, serverKeysPrefixFor(s), KeyRangeRef(key, systemKeys.end), serverKeysFalse, serverKeysFalse);
 	}
-
-	// Is this redundant?
-	// for (auto& s : metaServers) {
-	// 	krmSetPreviouslyEmptyRange(tr, arena, serverKeysPrefixFor(s), systemKeys, serverKeysFalse, serverKeysFalse);
-	// }
 
 	std::vector<Tag> serverTags;
 	std::vector<UID> serverSrcUID;
 	serverTags.reserve(servers.size());
 	for (auto& s : servers) {
-		serverTags.push_back(serverTagMap[s.id()]);
+		Tag tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(s.id())).get().get());
+		serverTags.push_back(tag);
 		serverSrcUID.push_back(s.id());
 	}
 
 	auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS ? keyServersValue(serverTags)
 	                                                    : keyServersValue(RangeResult(), serverSrcUID);
 
+	// Assign `systemKeys` to servers in `keyServers` keyspace.
 	tr.clear(arena, KeyRangeRef(keyServersKey(systemKeys.begin), keyServersKey(systemKeys.end)));
 	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, systemKeys, ksValue, Value());
 
+	// Assign `systemKeys` to servers in `serverKeys` keyrange, and manually coalesce the keys.
 	for (auto& s : servers) {
 		tr.clear(arena, KeyRangeRef(serverKeysKey(s.id(), systemKeys.begin), serverKeysKey(s.id(), systemKeys.end)));
 	}
@@ -1577,11 +1554,8 @@ void setUpMetadataServers(Arena& arena,
 			                           KeyRangeRef(last.get().begin, systemKeys.end),
 			                           serverKeysTrueEmptyRange,
 			                           serverKeysFalse);
-			// tr.set(arena, serverKeysKey(s.id(), systemKeys.begin), serverKeysTrueEmptyRange);
 		}
-		std::cout << "server id: " << s.id().toString() << " keys: " << systemKeys.toString() << std::endl;
 	}
-	std::cout << "SetUpMetadataServersEnd" << std::endl;
 }
 
 // Called by the master server to write the very first transaction to the database
@@ -1628,7 +1602,9 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 
 	auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS ? keyServersValue(serverTags)
 	                                                    : keyServersValue(RangeResult(), serverSrcUID);
-
+	// We have to set this range in two blocks, because the master tracking of "keyServersLocations" depends on a change
+	// to a specific
+	//   key (keyServersKeyServersKey)
 	krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
 
 	for (auto& s : servers) {

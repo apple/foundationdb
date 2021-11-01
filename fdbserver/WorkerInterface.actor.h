@@ -585,14 +585,16 @@ struct RecruitMasterRequest {
 	LifetimeToken lifetime;
 	bool forceRecovery;
 	ReplyPromise<struct MasterInterface> reply;
-	bool recoverMetadata;
+	// If true, system data will be backfilled to storage servers(s), while the old system keyrange will be cleared.
+	// This is used to repaire lost/corrupted system data.
+	bool repairSystemData;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, lifetime, forceRecovery, reply, arena, recoverMetadata);
+		serializer(ar, lifetime, forceRecovery, reply, arena, repairSystemData);
 	}
 };
 
@@ -1011,7 +1013,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
                                 ServerCoordinators serverCoordinators,
                                 LifetimeToken lifetime,
                                 bool forceRecovery,
-                                bool recoverMetadata);
+                                bool repairSystemData);
 ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
                                      InitializeCommitProxyRequest req,
                                      Reference<AsyncVar<ServerDBInfo> const> db,

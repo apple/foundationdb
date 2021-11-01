@@ -220,9 +220,12 @@ ACTOR Future<int> setDDMode(Database cx, int mode);
 
 ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile, Standalone<StringRef> dcId);
 
+// Move a keyrange to the target storage servers, see the corresponding cli help for more details.
 ACTOR Future<Void> moveShard(Reference<IClusterConnectionRecord> clusterFile,
                              KeyRangeRef shard,
                              std::vector<NetworkAddress> addresses);
+
+// Repair system data on storage servers, see the corresponding cli help for more details.
 ACTOR Future<Void> repairSystemData(Reference<IClusterConnectionRecord> clusterFile);
 
 ACTOR Future<Void> printHealthyZone(Database cx);

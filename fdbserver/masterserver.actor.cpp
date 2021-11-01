@@ -236,8 +236,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	PromiseStream<Future<Void>> addActor;
 	Reference<AsyncVar<bool>> recruitmentStalled;
 	bool forceRecovery;
-	bool recoverMetadata;
-	std::unordered_map<UID, Tag> serverTagMap;
+	bool repairSystemData;
 	bool neverCreated;
 	int8_t safeLocality;
 	int8_t primaryLocality;
@@ -266,7 +265,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	           Standalone<StringRef> const& dbId,
 	           PromiseStream<Future<Void>> const& addActor,
 	           bool forceRecovery,
-	           bool recoverMetadata)
+	           bool repairSystemData)
 
 	  : dbgid(myInterface.id()), lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
 	    lastCommitTime(0), liveCommittedVersion(invalidVersion), databaseLocked(false),
@@ -275,7 +274,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    myInterface(myInterface), clusterController(clusterController), cstate(coordinators, addActor, dbgid),
 	    dbInfo(dbInfo), registrationCount(0), addActor(addActor),
 	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery),
-	    recoverMetadata(recoverMetadata), neverCreated(false), safeLocality(tagLocalityInvalid),
+	    repairSystemData(repairSystemData), neverCreated(false), safeLocality(tagLocalityInvalid),
 	    primaryLocality(tagLocalityInvalid), cc("Master", dbgid.toString()),
 	    changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
@@ -487,16 +486,23 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 	return Void();
 }
 
-void randomMetaDataServers(Reference<MasterData> self,
-                           RecruitFromConfigurationReply recruits,
-                           std::vector<StorageServerInterface>* servers,
-                           std::unordered_map<UID, Tag>* serverTagMap) {
+// Randomly selects storage servers to host the system data, during master recovery with
+// repairSystemData enabled.
+void getSystemDataServers(Reference<MasterData> self,
+                          RecruitFromConfigurationReply recruits,
+                          std::vector<StorageServerInterface>* servers) {
 	servers->clear();
-	serverTagMap->clear();
-
 	RangeResult serverList = self->txnStateStore->readRange(serverListKeys).get();
 
-	int32_t num = self->configuration.storageTeamSize;
+	int32_t num = 0;
+	for (int i = 0; i < serverList.size(); ++i) {
+		StorageServerInterface ssi = decodeServerListValue(serverList[i].value);
+		if (!ssi.isTss()) {
+			++num;
+		}
+	}
+
+	num = std::min(self->configuration.storageTeamSize, num);
 	std::unordered_set<UID> selected;
 	while (selected.size() < num) {
 		const int idx = deterministicRandom()->randomInt(0, serverList.size());
@@ -506,134 +512,12 @@ void randomMetaDataServers(Reference<MasterData> self,
 			continue;
 		}
 		servers->push_back(decodeServerListValue(serverList[idx].value));
-		Tag tag = decodeServerTagValue(self->txnStateStore->readValue(serverTagKeyFor(serverId)).get().get());
-		(*serverTagMap)[serverId] = tag;
 		selected.insert(serverId);
 	}
 
-	// for (int i = 0; i < serverList.size(); i++) {
-	// 	auto ssi = decodeServerListValue(serverList[i].value);
-	// 	if (!ssi.isTss()) {
-	// 		result->allServers.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
-	// 		server_dc[ssi.id()] = ssi.locality.dcId();
-	// 	} else {
-	// 		tss_servers.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
-	// 	}
-	// }
-	// RangeResult serverTags = self->txnStateStore->readRange(serverTagKeys).get();
-
-	// state uint16_t maxTagId = 0;
-	// for (const KeyValueRef& kv : serverTags) {
-	// 	Tag t = decodeServerTagValue(kv.value);
-	// 	maxTagId = std::max(maxTagId, t.id);
-	// }
-	// std::cout << "maxTagId: " << maxTagId << std::endl;
-
-	// ASSERT(!recruits.storageServers.empty());
-	// state int idx = 0;
-	// while (idx < recruits.storageServers.size()) {
-	// 	std::cout << "MasterRecruitingEmergencyMetadataStorageServer" << std::endl;
-	// 	TraceEvent("MasterRecruitingEmergencyMetadataStorageServer", self->dbgid)
-	// 	    .detail("CandidateWorker", recruits.storageServers[idx].locality.toString());
-	// 	Optional<Value> dcId = recruits.storageServers[idx].locality.dcId();
-	// 	ASSERT(dcId.present());
-
-	// 	Optional<Value> localityValue = self->txnStateStore->readValue(tagLocalityListKeyFor(dcId.get())).get();
-	// 	ASSERT(localityValue.present());
-	// 	state int8_t locality = decodeTagLocalityListValue(localityValue.get());
-
-	// 	InitializeStorageRequest isr;
-	// 	isr.seedTag = Tag(locality, ++maxTagId);
-	// 	isr.storeType = self->configuration.storageServerStoreType;
-	// 	isr.reqId = deterministicRandom()->randomUniqueID();
-	// 	isr.interfaceId = deterministicRandom()->randomUniqueID();
-
-	// 	ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
-
-	// 	if (newServer.isError()) {
-	// 		std::cout << "New storage server failure: " << newServer.getError().name() << std::endl;
-	// 		if (!newServer.isError(error_code_recruitment_failed) &&
-	// 		    !newServer.isError(error_code_request_maybe_delivered))
-	// 			throw newServer.getError();
-
-	// 		wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY));
-	// 	} else {
-	// 		std::cout << "New storage server: " << std::endl;
-	// 		servers->push_back(newServer.get().interf);
-	// 		(*serverTagMap)[newServer.get().interf.uniqueID] = Tag(locality, maxTagId);
-	// 	}
-	// 	++idx;
-	// }
-
-	// TraceEvent("MasterRecruitedEmergencyMetadataStorageServers", self->dbgid)
-	//     .detail("TargetCount", self->configuration.storageTeamSize)
-	//     .detail("Servers", describe(*servers));
-
-	// return Void();
 	TraceEvent("MasterRecruitedMetadataStorageServers", self->dbgid)
 	    .detail("TargetCount", self->configuration.storageTeamSize)
 	    .detail("Servers", describe(*servers));
-}
-
-ACTOR Future<Void> newMetaDataServers(Reference<MasterData> self,
-                                      RecruitFromConfigurationReply recruits,
-                                      std::vector<StorageServerInterface>* servers,
-                                      std::unordered_map<UID, Tag>* serverTagMap) {
-	servers->clear();
-	serverTagMap->clear();
-
-	RangeResult serverTags = self->txnStateStore->readRange(serverTagKeys).get();
-
-	state uint16_t maxTagId = 0;
-	for (const KeyValueRef& kv : serverTags) {
-		Tag t = decodeServerTagValue(kv.value);
-		maxTagId = std::max(maxTagId, t.id);
-	}
-	maxTagId = (maxTagId + SERVER_KNOBS->MAX_SKIP_TAGS) * 10;
-	// std::cout << "maxTagId: " << maxTagId << std::endl;
-
-	ASSERT(!recruits.storageServers.empty());
-	state int idx = 0;
-	while (idx < recruits.storageServers.size()) {
-		std::cout << "MasterRecruitingEmergencyMetadataStorageServer" << std::endl;
-		TraceEvent("MasterRecruitingEmergencyMetadataStorageServer", self->dbgid)
-		    .detail("CandidateWorker", recruits.storageServers[idx].locality.toString());
-		Optional<Value> dcId = recruits.storageServers[idx].locality.dcId();
-		ASSERT(dcId.present());
-
-		Optional<Value> localityValue = self->txnStateStore->readValue(tagLocalityListKeyFor(dcId.get())).get();
-		ASSERT(localityValue.present());
-		state int8_t locality = decodeTagLocalityListValue(localityValue.get());
-
-		InitializeStorageRequest isr;
-		isr.seedTag = Tag(locality, ++maxTagId);
-		isr.storeType = self->configuration.storageServerStoreType;
-		isr.reqId = deterministicRandom()->randomUniqueID();
-		isr.interfaceId = deterministicRandom()->randomUniqueID();
-
-		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
-
-		if (newServer.isError()) {
-			std::cout << "New storage server failure: " << newServer.getError().name() << std::endl;
-			if (!newServer.isError(error_code_recruitment_failed) &&
-			    !newServer.isError(error_code_request_maybe_delivered))
-				throw newServer.getError();
-
-			wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY));
-		} else {
-			std::cout << "Recruit emergency storage server for system data complete: " << describe(*servers)
-			          << std::endl;
-			servers->push_back(newServer.get().interf);
-			(*serverTagMap)[newServer.get().interf.uniqueID] = Tag(locality, maxTagId);
-		}
-		++idx;
-	}
-
-	TraceEvent("MasterRecruitedEmergencyMetadataStorageServers", self->dbgid)
-	    .detail("TargetCount", self->configuration.storageTeamSize)
-	    .detail("Servers", describe(*servers));
-
-	return Void();
 }
 
 Future<Void> waitCommitProxyFailure(std::vector<CommitProxyInterface> const& commitProxies) {
@@ -889,9 +773,9 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 		maxLogRouters = std::max(maxLogRouters, old.logRouterTags);
 	}
 
-	state RecruitFromConfigurationReply recruits = wait(
-	    brokenPromiseToNever(self->clusterController.recruitFromConfiguration.getReply(RecruitFromConfigurationRequest(
-	        self->configuration, (self->lastEpochEnd == 0 || self->recoverMetadata), maxLogRouters))));
+	state RecruitFromConfigurationReply recruits =
+	    wait(brokenPromiseToNever(self->clusterController.recruitFromConfiguration.getReply(
+	        RecruitFromConfigurationRequest(self->configuration, self->lastEpochEnd == 0, maxLogRouters))));
 
 	std::string primaryDcIds, remoteDcIds;
 
@@ -936,9 +820,8 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	// up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
 	if (!self->lastEpochEnd) {
 		wait(newSeedServers(self, recruits, seedServers));
-	} else if (self->recoverMetadata) {
-		// wait(newMetaDataServers(self, recruits, seedServers, &self->serverTagMap));
-		randomMetaDataServers(self, recruits, seedServers, &self->serverTagMap);
+	} else if (self->repairSystemData) {
+		getSystemDataServers(self, recruits, seedServers);
 	}
 	state std::vector<Standalone<CommitTransactionRef>> confChanges;
 	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits) &&
@@ -1837,41 +1720,29 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 	return Void();
 }
 
+// Generate mutations to backfill all key-value pairs from txnStateStore to storage servers.
 static void backfillTxnStateStoreToSS(Reference<MasterData> self, CommitTransactionRef& tr, Arena& arena) {
-	std::cout << "Repair sytem data start." << std::endl;
 	TraceEvent("BackfillTxnStateStoreData", self->dbgid);
 	KeyRange txnKeys = allKeys;
-	// state std::map<Tag, UID> tag_uid;
 
-	// RangeResult UIDtoTagMap = pContext->pTxnStateStore->readRange(serverTagKeys).get();
-	// for (const KeyValueRef& kv : UIDtoTagMap) {
-	// 	tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
-	// }
-
-	// wait(yield());
-	// std::unordered_map<UID, CoalescedKeyRangeMap<Value>> serverKeysMap;
 	RangeResult data = self->txnStateStore->readRange(txnKeys).get();
 	// Fill in keyServers, serverTags, serverList, etc.
 	for (const auto& kv : data) {
-		// std::cout << "Setting key: " << kv.key.toString() << ", value: " << kv.value.toString() << std::endl;
-		TraceEvent("RecoveryPopulateSystemData", self->dbgid).detail("Key", kv.key).detail("Value", kv.value);
+		if (g_network->isSimulated()) {
+			TraceEvent("RecoveryPopulateSystemData", self->dbgid).detail("Key", kv.key).detail("Value", kv.value);
+		}
 		tr.set(arena, kv.key, kv.value);
 	}
-	// for (const auto& it : serverKeysMap) {
-	// 	for (const auto& range : it.second.ranges()) {
-	// 		tr.set(arena, serverKeysKey(it.first, kv.key), kv.value);
-	// 	}
-	// }
-	// std::cout << "Repair system data complete." << std::endl;
 }
 
+// Construct `serverKeys` from data in txnStateStore.
 static void backfillDerivedMetaDataToSS(Reference<MasterData> self, CommitTransactionRef& tr, Arena& arena) {
 	TraceEvent("BackfillDerivedMetaDataBegin", self->dbgid);
-	// std::cout << "Reconstruct data distribution start." << std::endl;
 	RangeResult keyServers = self->txnStateStore->readRange(keyServersKeys).get();
 	RangeResult UID2Tag = self->txnStateStore->readRange(serverTagKeys).get();
 	ASSERT(!keyServers.empty());
 	ASSERT(!UID2Tag.empty());
+
 	std::unordered_map<UID, CoalescedKeyRangeMap<ValueRef>> serverKeysMap;
 	for (int i = 0; i < keyServers.size() - 1; ++i) {
 		const KeyRangeRef keys(keyServers[i].key.removePrefix(keyServersPrefix),
@@ -1887,6 +1758,7 @@ static void backfillDerivedMetaDataToSS(Reference<MasterData> self, CommitTransa
 			serverKeys.insert(keys, serverKeysTrue);
 		}
 	}
+
 	for (auto& [serverID, keyMap] : serverKeysMap) {
 		for (auto& it : keyMap.ranges()) {
 			krmSetPreviouslyEmptyRange(
@@ -2076,8 +1948,8 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		seedShardServers(recoveryCommitRequest.arena, tr, seedServers);
 	}
 
-	if (self->recoverMetadata) {
-		setUpMetadataServers(recoveryCommitRequest.arena, tr, seedServers, self->serverTagMap, self->txnStateStore);
+	if (self->repairSystemData) {
+		setUpSystemDataServers(recoveryCommitRequest.arena, tr, seedServers, self->txnStateStore);
 	}
 
 	// initialConfChanges have not been conflict checked against any earlier writes in the recovery transaction, so do
@@ -2115,11 +1987,6 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	                       self->txnStateStore);
 	mmApplied = tr.mutations.size();
 
-	// if (self->recoverMetadata) {
-	// 	backfillTxnStateStoreToSS(self, tr, recoveryCommitRequest.arena);
-	// 	backfillDerivedMetaDataToSS(self, tr, recoveryCommitRequest.arena);
-	// }
-
 	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial
 	                                                     // window of the resolver(s)
 
@@ -2134,7 +2001,6 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	self->addActor.send(reportErrors(updateRegistration(self, self->logSystem), "UpdateRegistration", self->dbgid));
 	self->registrationTrigger.trigger();
 
-	// So that all changes to transaction state store is only in the master's RAM?
 	wait(discardCommit(self->txnStateStore, self->txnStateLogAdapter));
 
 	// Wait for the recovery transaction to complete.
@@ -2144,54 +2010,38 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	if (recoveryCommit.isReady() && recoveryCommit.get().isError()) {
 		TEST(true); // Master recovery failed because of the initial commit failed
 		const Error& e = recoveryCommit.get().getError();
-		std::cout << "recovery transaction failed: " << e.name() << std::endl;
 		TraceEvent("MasterRecoveryCommitError", self->dbgid).error(e);
 		throw master_recovery_failed();
 	}
 
 	ASSERT(self->recoveryTransactionVersion != 0);
 
-	// Here.
+	if (self->repairSystemData) {
+		TraceEvent("RepairSystemDataBegin", self->dbgid);
+		CommitTransactionRequest repairSystemDataCommitRequest;
 
-	if (self->recoverMetadata) {
-		TraceEvent("RecoverMetadataBegin", self->dbgid);
-		CommitTransactionRequest recoverMetadataCommitRequest;
-		recoverMetadataCommitRequest.flags = recoverMetadataCommitRequest.flags |
-		                                     CommitTransactionRequest::FLAG_SUPPRESS_PRIVATE_MUTATIONS |
-		                                     CommitTransactionRequest::FLAG_FIRST_IN_BATCH;
-		CommitTransactionRef& txn = recoverMetadataCommitRequest.transaction;
-		// backfillTxnStateStoreToSS(self, recoverMetadataCommitRequest.arena, txn);
-
-		backfillTxnStateStoreToSS(self, txn, recoverMetadataCommitRequest.arena);
-		backfillDerivedMetaDataToSS(self, txn, recoverMetadataCommitRequest.arena);
-
+		// We want to backfill system data to storage servers, but the private muations are not necessary.
+		repairSystemDataCommitRequest.flags = repairSystemDataCommitRequest.flags |
+		                                      CommitTransactionRequest::FLAG_SUPPRESS_PRIVATE_MUTATIONS |
+		                                      CommitTransactionRequest::FLAG_FIRST_IN_BATCH;
+		CommitTransactionRef& txn = repairSystemDataCommitRequest.transaction;
+		backfillTxnStateStoreToSS(self, txn, repairSystemDataCommitRequest.arena);
+		backfillDerivedMetaDataToSS(self, txn, repairSystemDataCommitRequest.arena);
 		txn.read_snapshot = self->recoveryTransactionVersion;
+		state Future<ErrorOr<CommitID>> repairSystemDataCommit =
+		    self->commitProxies[0].commit.tryGetReply(repairSystemDataCommitRequest);
 
-		state Future<ErrorOr<CommitID>> recoverMetadataCommit =
-		    self->commitProxies[0].commit.tryGetReply(recoverMetadataCommitRequest);
-		try {
-			ErrorOr<CommitID> res = wait(recoverMetadataCommit);
-			if (res.isError()) {
-				TraceEvent("RecoverMetadataCommitError").error(res.getError());
-				throw master_recovery_failed();
-			}
-			TraceEvent("RecoverMetadataCommitSucceed").detail("Version", res.get().version);
-			std::cout << "finished recover metadata transaction." << std::endl;
-		} catch (Error& e) {
-			TraceEvent("RecoverMetadataCommitError", self->dbgid).error(e);
+		wait(success(repairSystemDataCommit));
+
+		if (repairSystemDataCommit.isReady() && repairSystemDataCommit.get().isError()) {
+			const Error& e = repairSystemDataCommit.get().getError();
+			TraceEvent("RepairSystemDataCommitError", self->dbgid).error(e);
 			throw master_recovery_failed();
 		}
-		if (recoverMetadataCommit.isReady() && recoverMetadataCommit.get().isError()) {
-			const Error& e = recoverMetadataCommit.get().getError();
-			std::cout << "finished recover metadata transaction." << e.name() << std::endl;
-			TraceEvent("RecoverMetadataCommitError", self->dbgid).error(e);
-			throw master_recovery_failed();
-		}
-		ASSERT(recoverMetadataCommit.isReady());
-		TraceEvent("RecoverMetadataEnd", self->dbgid);
+
+		ASSERT(repairSystemDataCommit.isReady());
+		TraceEvent("RepairSystemDataEnd", self->dbgid);
 	}
-
-	std::cout << "Recovery transaction completed." << std::endl;
 
 	self->recoveryState = RecoveryState::WRITING_CSTATE;
 	TraceEvent("MasterRecoveryState", self->dbgid)
@@ -2270,7 +2120,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
                                 ServerCoordinators coordinators,
                                 LifetimeToken lifetime,
                                 bool forceRecovery,
-                                bool recoverMetadata) {
+                                bool repairSystemData) {
 	state Future<Void> ccTimeout = delay(SERVER_KNOBS->CC_INTERFACE_TIMEOUT);
 	while (!ccInterface->get().present() || db->get().clusterInterface != ccInterface->get().get()) {
 		wait(ccInterface->onChange() || db->onChange() || ccTimeout);
@@ -2292,7 +2142,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 	                                                LiteralStringRef(""),
 	                                                addActor,
 	                                                forceRecovery,
-	                                                recoverMetadata));
+	                                                repairSystemData));
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 	self->addActor.send(traceRole(Role::MASTER, mi.id()));
 
