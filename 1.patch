@@ -1,0 +1,191 @@
+commit db206a2a114e5d5b28b909df7ad4a944715dba1c
+Author: Neethu Haneesha Bingi <nbingi@apple.com>
+Date:   Tue Sep 28 04:48:29 2021 -0700
+
+    TransactionTagSwizzledApiCorrectness.toml
+
+diff --git a/fdbserver/QuietDatabase.actor.cpp b/fdbserver/QuietDatabase.actor.cpp
+index 97b9211cd..e246451f5 100644
+--- a/fdbserver/QuietDatabase.actor.cpp
++++ b/fdbserver/QuietDatabase.actor.cpp
+@@ -126,6 +126,9 @@ ACTOR Future<int64_t> getDataInFlight(Database cx, Reference<AsyncVar<ServerDBIn
+ 
+ // Computes the queue size for storage servers and tlogs using the bytesInput and bytesDurable attributes
+ int64_t getQueueSize(const TraceEventFields& md) {
++	//if (md.toString() == "") {
++	//	return 0;
++	//}
+ 	double inputRate, durableRate;
+ 	double inputRoughness, durableRoughness;
+ 	int64_t inputBytes, durableBytes;
+@@ -297,6 +300,10 @@ int64_t extractMaxQueueSize(const std::vector<Future<TraceEventFields>>& message
+ 
+ 	for (int i = 0; i < messages.size(); i++) {
+ 		try {
++			TraceEvent("QuietDatabaseFailure")
++			    .detail("Reason", "Getting MaxStorageServerQueue")
++			    .detail("SS", servers[i].id())
++				.detail("Message", messages[i].get().toString());
+ 			auto queueSize = getQueueSize(messages[i].get());
+ 			if (queueSize > maxQueueSize) {
+ 				maxQueueSize = queueSize;
+@@ -305,9 +312,12 @@ int64_t extractMaxQueueSize(const std::vector<Future<TraceEventFields>>& message
+ 		} catch (Error& e) {
+ 			TraceEvent("QuietDatabaseFailure")
+ 			    .detail("Reason", "Failed to extract MaxStorageServerQueue")
+-			    .detail("SS", servers[i].id());
++			    .detail("SS", servers[i].id())
++				.detail("Message", messages[i].get().toString());
++			int j = 0;
+ 			for (auto& m : messages) {
+-				TraceEvent("Messages").detail("Info", m.get().toString());
++				TraceEvent("Messages").detail("Info", m.get().toString()).detail("SS", servers[j].id());
++				j++;
+ 			}
+ 			throw;
+ 		}
+diff --git a/fdbserver/SimulatedCluster.actor.cpp b/fdbserver/SimulatedCluster.actor.cpp
+index d684c57b5..ad2ce4eb7 100644
+--- a/fdbserver/SimulatedCluster.actor.cpp
++++ b/fdbserver/SimulatedCluster.actor.cpp
+@@ -1250,7 +1250,7 @@ void SimulationConfig::setRandomConfig() {
+ 		set_config("perpetual_storage_wiggle=0");
+ 	} else {
+ 		// TraceEvent("SimulatedConfigRandom").detail("PerpetualWiggle", 1);
+-		set_config("perpetual_storage_wiggle=1");
++		set_config("perpetual_storage_wiggle=0");
+ 	}
+ 
+ 	if (deterministicRandom()->random01() < 0.5) {
+diff --git a/fdbserver/tester.actor.cpp b/fdbserver/tester.actor.cpp
+index 3184ba3ef..f48753b58 100644
+--- a/fdbserver/tester.actor.cpp
++++ b/fdbserver/tester.actor.cpp
+@@ -561,6 +561,8 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
+ 					TraceEvent("TestChecking", workIface.id()).detail("Workload", workload->description());
+ 					bool check = wait(timeoutError(workload->check(cx), workload->getCheckTimeout()));
+ 					checkResult = CheckReply{ (!startResult.present() || !startResult.get().isError()) && check };
++					TraceEvent(SevInfo, "LogsTest87").detail("check", check).detail("checkResult", checkResult.get().get().value)
++					.detail("OK", !startResult.get().isError());
+ 				} catch (Error& e) {
+ 					checkResult = operation_failed(); // was: checkResult = false;
+ 					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
+@@ -829,8 +831,10 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<Tester
+ 		for (int i = 0; i < checks.size(); i++) {
+ 			if (checks[i].get().get().value)
+ 				success++;
+-			else
++			else {
++				TraceEvent(SevInfo, "LogsTest66").detail("index", i);
+ 				failure++;
++			}
+ 		}
+ 	}
+ 
+@@ -922,20 +926,26 @@ ACTOR Future<Void> checkConsistency(Database cx,
+ 	state double start = now();
+ 	state bool lastRun = false;
+ 	loop {
++		TraceEvent(SevInfo, "LogsTest2");
+ 		DistributedTestResults testResults = wait(runWorkload(cx, testers, spec));
++		TraceEvent(SevInfo, "LogsTest3");
+ 		if (testResults.ok() || lastRun) {
+ 			if (g_network->isSimulated()) {
+ 				g_simulator.connectionFailuresDisableDuration = connectionFailures;
+ 			}
++			TraceEvent(SevInfo, "LogsTest4");
+ 			return Void();
+ 		}
++		TraceEvent(SevInfo, "LogsTest5");
+ 		if (now() - start > softTimeLimit) {
++			TraceEvent(SevInfo, "LogsTest6");
+ 			spec.options[0].push_back_deep(spec.options.arena(),
+ 			                               KeyValueRef(LiteralStringRef("failureIsError"), LiteralStringRef("true")));
+ 			lastRun = true;
+ 		}
+-
++		TraceEvent(SevInfo, "LogsTest7");
+ 		wait(repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck"));
++		TraceEvent(SevInfo, "LogsTest8");
+ 	}
+ }
+ 
+@@ -984,6 +994,7 @@ ACTOR Future<bool> runTest(Database cx,
+ 		if (spec.runConsistencyCheck) {
+ 			try {
+ 				bool quiescent = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
++				TraceEvent(SevInfo, "LogsTest1").detail("quiescent", quiescent);
+ 				wait(timeoutError(checkConsistency(cx,
+ 				                                   testers,
+ 				                                   quiescent,
+diff --git a/fdbserver/workloads/ApiWorkload.actor.cpp b/fdbserver/workloads/ApiWorkload.actor.cpp
+index 5b9b0fc10..a6c162fbc 100644
+--- a/fdbserver/workloads/ApiWorkload.actor.cpp
++++ b/fdbserver/workloads/ApiWorkload.actor.cpp
+@@ -106,6 +106,7 @@ void ApiWorkload::testFailure(std::string reason) {
+ }
+ 
+ Future<bool> ApiWorkload::check(Database const& cx) {
++	TraceEvent("LogsTest93 ApiWorkload").detail("success", success);
+ 	return success;
+ }
+ 
+diff --git a/fdbserver/workloads/RandomClogging.actor.cpp b/fdbserver/workloads/RandomClogging.actor.cpp
+index 0428b8892..3fad0c21f 100644
+--- a/fdbserver/workloads/RandomClogging.actor.cpp
++++ b/fdbserver/workloads/RandomClogging.actor.cpp
+@@ -54,7 +54,7 @@ struct RandomCloggingWorkload : TestWorkload {
+ 		else
+ 			return Void();
+ 	}
+-	Future<bool> check(Database const& cx) override { return true; }
++	Future<bool> check(Database const& cx) override { 	TraceEvent("LogsTest98 RandomClogging").detail("true", true); return true; }
+ 	void getMetrics(std::vector<PerfMetric>& m) override {}
+ 
+ 	ACTOR void doClog(ISimulator::ProcessInfo* machine, double t, double delay = 0.0) {
+diff --git a/fdbserver/workloads/Rollback.actor.cpp b/fdbserver/workloads/Rollback.actor.cpp
+index 8f3c8833d..0fe28892b 100644
+--- a/fdbserver/workloads/Rollback.actor.cpp
++++ b/fdbserver/workloads/Rollback.actor.cpp
+@@ -53,7 +53,7 @@ struct RollbackWorkload : TestWorkload {
+ 			               Void());
+ 		return Void();
+ 	}
+-	Future<bool> check(Database const& cx) override { return true; }
++	Future<bool> check(Database const& cx) override { TraceEvent("LogsTest109 Rollback").detail("true", true); return true; }
+ 	void getMetrics(std::vector<PerfMetric>& m) override {}
+ 
+ 	ACTOR Future<Void> simulateFailure(Database cx, RollbackWorkload* self) {
+diff --git a/fdbserver/workloads/TagThrottleApi.actor.cpp b/fdbserver/workloads/TagThrottleApi.actor.cpp
+index d2bd47a15..ad69dc817 100644
+--- a/fdbserver/workloads/TagThrottleApi.actor.cpp
++++ b/fdbserver/workloads/TagThrottleApi.actor.cpp
+@@ -50,7 +50,7 @@ struct TagThrottleApiWorkload : TestWorkload {
+ 		return timeout(runThrottleApi(this, cx), testDuration, Void());
+ 	}
+ 
+-	Future<bool> check(Database const& cx) override { return true; }
++	Future<bool> check(Database const& cx) override { 	TraceEvent("LogsTest97 TagThrottleApi").detail("true", true); return true; }
+ 
+ 	void getMetrics(std::vector<PerfMetric>& m) override {}
+ 
+diff --git a/tests/fast/FuzzApiCorrectness.toml b/tests/fast/FuzzApiCorrectness.toml
+index 20d4e215b..6ab9abea8 100644
+--- a/tests/fast/FuzzApiCorrectness.toml
++++ b/tests/fast/FuzzApiCorrectness.toml
+@@ -1,4 +1,5 @@
+ [configuration]
++storageEngineExcludeTypes = [4]
+ StderrSeverity = 30
+ 
+ [[test]]
+diff --git a/tests/fast/FuzzApiCorrectnessClean.toml b/tests/fast/FuzzApiCorrectnessClean.toml
+index 7165deda4..99e14446e 100644
+--- a/tests/fast/FuzzApiCorrectnessClean.toml
++++ b/tests/fast/FuzzApiCorrectnessClean.toml
+@@ -1,4 +1,5 @@
+ [configuration]
++storageEngineExcludeTypes = [4]
+ StderrSeverity = 30
+ 
+ [[test]]

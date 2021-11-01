@@ -110,7 +110,8 @@ namespace actorcompiler
                     name = name,
                     returnType = returnType,
                     endIsUnreachable = endIsUnreachable,
-                    formalParameters = formalParameters
+                    formalParameters = formalParameters,
+                    indentation = indentation
                 }
             );
         }

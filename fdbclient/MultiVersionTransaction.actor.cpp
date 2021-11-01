@@ -538,6 +538,8 @@ void DLApi::runNetwork() {
 			hook.first(hook.second);
 		} catch (Error& e) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
+		} catch (std::exception& e) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error()).detail("RootException", e.what());
 		} catch (...) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
 		}
@@ -892,12 +894,15 @@ void MultiVersionTransaction::setTimeout(Optional<StringRef> value) {
 	double timeoutDuration = extractIntOption(value, 0, std::numeric_limits<int>::max()) / 1000.0;
 
 	ThreadFuture<Void> prevTimeout;
-	ThreadFuture<Void> newTimeout = onMainThread([this, timeoutDuration]() {
-		return timeoutImpl(timeoutTsav, timeoutDuration - std::max(0.0, now() - startTime));
-	});
+	double transactionStartTime = startTime;
 
 	{ // lock scope
 		ThreadSpinLockHolder holder(timeoutLock);
+
+		Reference<ThreadSingleAssignmentVar<Void>> tsav = timeoutTsav;
+		ThreadFuture<Void> newTimeout = onMainThread([transactionStartTime, tsav, timeoutDuration]() {
+			return timeoutImpl(tsav, timeoutDuration - std::max(0.0, now() - transactionStartTime));
+		});
 
 		prevTimeout = currentTimeout;
 		currentTimeout = newTimeout;
@@ -915,12 +920,12 @@ template <class T>
 ThreadFuture<T> MultiVersionTransaction::makeTimeout() {
 	ThreadFuture<Void> f;
 
-	// We create a ThreadFuture that holds a reference to this below,
-	// but the ThreadFuture does not increment the ref count
-	timeoutTsav->addref();
-
 	{ // lock scope
 		ThreadSpinLockHolder holder(timeoutLock);
+
+		// Our ThreadFuture holds a reference to this TSAV,
+		// but the ThreadFuture does not increment the ref count
+		timeoutTsav->addref();
 		f = ThreadFuture<Void>(timeoutTsav.getPtr());
 	}
 
@@ -1810,9 +1815,14 @@ THREAD_FUNC_RETURN runNetworkThread(void* param) {
 	try {
 		((ClientInfo*)param)->api->runNetwork();
 	} catch (Error& e) {
-		TraceEvent(SevError, "RunNetworkError").error(e);
+		TraceEvent(SevError, "ExternalRunNetworkError").error(e);
+	} catch (std::exception& e) {
+		TraceEvent(SevError, "ExternalRunNetworkError").error(unknown_error()).detail("RootException", e.what());
+	} catch (...) {
+		TraceEvent(SevError, "ExternalRunNetworkError").error(unknown_error());
 	}
 
+	TraceEvent("ExternalNetworkThreadTerminating");
 	THREAD_RETURN;
 }
 
@@ -1849,6 +1859,7 @@ void MultiVersionApi::stopNetwork() {
 	}
 	lock.leave();
 
+	TraceEvent("MultiVersionStopNetwork");
 	localClient->api->stopNetwork();
 
 	if (!bypassMultiClientApi) {

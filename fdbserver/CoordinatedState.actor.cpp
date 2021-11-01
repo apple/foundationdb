@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbserver/CoordinatedState.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/Knobs.h"
@@ -288,8 +289,7 @@ struct MovableCoordinatedStateImpl {
 		// reached the point where a leader elected by the new coordinators should be doing the rest of the work
 		// (and therefore the caller should die).
 		state CoordinatedState cs(self->coordinators);
-		state CoordinatedState nccs(
-		    ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile(nc))));
+		state CoordinatedState nccs(ServerCoordinators(makeReference<ClusterConnectionMemoryRecord>(nc)));
 		state Future<Void> creationTimeout = delay(30);
 		ASSERT(self->lastValue.present() && self->lastCSValue.present());
 		TraceEvent("StartMove").detail("ConnectionString", nc.toString());
@@ -306,7 +306,7 @@ struct MovableCoordinatedStateImpl {
 			when(wait(nccs.setExclusive(
 			    BinaryWriter::toValue(MovableValue(self->lastValue.get(),
 			                                       MovableValue::MovingFrom,
-			                                       self->coordinators.ccf->getConnectionString().toString()),
+			                                       self->coordinators.ccr->getConnectionString().toString()),
 			                          IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()))))) {}
 		}
 

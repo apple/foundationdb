@@ -57,6 +57,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( SLOWTASK_PROFILING_LOG_INTERVAL,                       0 ); // A value of 0 means use RUN_LOOP_PROFILING_INTERVAL
 	init( SLOWTASK_PROFILING_MAX_LOG_INTERVAL,                 1.0 );
 	init( SLOWTASK_PROFILING_LOG_BACKOFF,                      2.0 );
+	init( SLOWTASK_BLOCKED_INTERVAL,                          60.0 );
 	init( SATURATION_PROFILING_LOG_INTERVAL,                   0.5 ); // A value of 0 means use RUN_LOOP_PROFILING_INTERVAL
 	init( SATURATION_PROFILING_MAX_LOG_INTERVAL,               5.0 );
 	init( SATURATION_PROFILING_LOG_BACKOFF,                    2.0 );
@@ -67,7 +68,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( HUGE_ARENA_LOGGING_INTERVAL,                         5.0 );
 
 	init( WRITE_TRACING_ENABLED,                              true ); if( randomize && BUGGIFY ) WRITE_TRACING_ENABLED = false;
-	init( TRACING_UDP_LISTENER_PORT,                          8889 ); // Only applicable if TracerType is set to a network option.
+	init( TRACING_SAMPLE_RATE,                                 1.0 ); // Fraction of traces (not spans) to sample (0 means ignore all traces)
+	init( TRACING_UDP_LISTENER_PORT,                          8889 ); // Only applicable if TracerType is set to a network option
 
 	//connectionMonitor
 	init( CONNECTION_MONITOR_LOOP_TIME,   isSimulated ? 0.75 : 1.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_LOOP_TIME = 6.0;
