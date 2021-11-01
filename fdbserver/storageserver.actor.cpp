@@ -120,11 +120,7 @@ struct AddingShard : NonCopyable {
 
 	Phase phase;
 
-	bool emptyRange = false;
-
 	AddingShard(StorageServer* server, KeyRangeRef const& keys);
-
-	AddingShard(StorageServer* server, KeyRangeRef const& keys, bool emptyRange);
 
 	// When fetchKeys "partially completes" (splits an adding shard in two), this is used to construct the left half
 	AddingShard(AddingShard* prev, KeyRange const& keys)
@@ -157,9 +153,6 @@ public:
 	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) { return new ShardInfo(keys, nullptr, data); }
 	static ShardInfo* newAdding(StorageServer* data, KeyRange keys) {
 		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys), nullptr);
-	}
-	static ShardInfo* newAddingEmptyRange(StorageServer* data, KeyRange keys) {
-		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys, true), nullptr);
 	}
 	static ShardInfo* addingSplitLeft(KeyRange keys, AddingShard* oldShard) {
 		return new ShardInfo(keys, std::make_unique<AddingShard>(oldShard, keys), nullptr);
@@ -365,7 +358,7 @@ struct StorageServer {
 private:
 	// versionedData contains sets and clears.
 
-	// * Nonoverlapping:r overlaps a set or another clear, or adjoins another clear.
+	// * Nonoverlapping: No clear overlaps a set or another clear, or adjoins another clear.
 	// ~ Clears are maximal: If versionedData.at(v) contains a clear [b,e) then
 	//      there is a key data[e]@v, or e==allKeys.end, or a shard boundary or former boundary at e
 
@@ -3753,6 +3746,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		}
 
 		int startSize = batch->changes.size();
+		TEST(startSize); // Adding fetch data to a batch which already has changes
 		batch->changes.resize(batch->changes.size() + shard->updates.size());
 
 		// FIXME: pass the deque back rather than copy the data
@@ -3909,12 +3903,12 @@ void changeServerKeys(StorageServer* data,
                       ChangeServerKeysContext context) {
 	ASSERT(!keys.empty());
 
-	TraceEvent("ChangeServerKeys", data->thisServerID)
-	    .detail("KeyBegin", keys.begin)
-	    .detail("KeyEnd", keys.end)
-	    .detail("NowAssigned", nowAssigned)
-	    .detail("Version", version)
-	    .detail("Context", changeServerKeysContextName[(int)context]);
+	// TraceEvent("ChangeServerKeys", data->thisServerID)
+	//     .detail("KeyBegin", keys.begin)
+	//     .detail("KeyEnd", keys.end)
+	//     .detail("NowAssigned", nowAssigned)
+	//     .detail("Version", version)
+	//     .detail("Context", changeServerKeysContextName[(int)context]);
 	validate(data);
 
 	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
@@ -5674,9 +5668,6 @@ ACTOR Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetVa
 		GetValueRequest req = waitNext(getValue);
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
 		// before doing real work
-		TraceEvent("SSRecivedGetValueRequest", self->thisServerID)
-		    .detail("Key", req.key.toString())
-		    .detail("Version", req.version);
 		if (req.debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.debugID.get().first(),
