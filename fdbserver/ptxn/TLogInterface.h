@@ -537,6 +537,20 @@ struct TLogInterface_PassivelyPull : public TLogInterfaceBase {
 	void initEndpoints() override;
 };
 
+namespace details {
+
+class TLogInterfaceSharedPtrWrapper {
+	std::shared_ptr<TLogInterfaceBase> ptr;
+
+public:
+	TLogInterfaceSharedPtrWrapper(std::shared_ptr<TLogInterfaceBase> ptr_ = nullptr) : ptr(ptr_) {}
+
+	operator std::shared_ptr<TLogInterface_PassivelyPull>();
+	operator std::shared_ptr<TLogInterface_ActivelyPush>();
+};
+
+} // namespace details
+
 std::shared_ptr<TLogInterfaceBase> getNewTLogInterface(const MessageTransferModel model,
                                                        UID id_ = deterministicRandom()->randomUniqueID(),
                                                        UID sharedTLogID_ = deterministicRandom()->randomUniqueID(),

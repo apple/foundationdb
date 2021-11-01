@@ -63,7 +63,7 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 	print::PrintTiming printTiming(__FUNCTION__);
 	print::print(options);
 
-	std::shared_ptr<TestDriverContext> context(new TestDriverContext());
+	std::shared_ptr<TestDriverContext> context = std::make_shared<TestDriverContext>();
 
 	context->numCommits = options.numCommits;
 	context->numStorageTeamIDs = options.numStorageTeams;
@@ -213,6 +213,242 @@ void startFakeStorageServer(std::vector<Future<Void>>& actors, std::shared_ptr<T
 		    getFakeStorageServerActor(pTestDriverContext->messageTransferModel, pFakeStorageServerContext));
 	}
 }
+
+namespace details {
+
+#pragma region TLogGroupFixture
+
+void TLogGroupFixture::setUp(TestDriverContext& testDriverContext,
+                             const int numTLogGroups,
+                             const int numStorageTeamIDs) {
+
+	ASSERT(numTLogGroups >= numStorageTeamIDs);
+
+	test::print::PrintTiming printTIming("TLogGroupFixture::setUp");
+
+	for (int i = 0; i < numTLogGroups; ++i) {
+		tLogGroupIDs.push_back(randomUID());
+	}
+	storageTeamIDs = generateRandomStorageTeamIDs(numStorageTeamIDs);
+
+	// Assign storageTeamIDs to TLog groups
+	for (const auto& tLogGroupID : tLogGroupIDs) {
+		tLogGroupStorageTeamMapping[tLogGroupID];
+	}
+	auto iter = std::begin(tLogGroupStorageTeamMapping);
+	for (const auto& storageTeamID : storageTeamIDs) {
+		iter->second.insert(storageTeamID);
+		iter = (++iter == std::end(tLogGroupStorageTeamMapping)) ? std::begin(tLogGroupStorageTeamMapping) : iter;
+	}
+
+	// Reverse mapping
+	for (const auto& [tLogGroupID, storageTeamIDs] : tLogGroupStorageTeamMapping) {
+		for (const auto& storageTeamID : storageTeamIDs) {
+			storageTeamTLogGroupMapping[storageTeamID] = tLogGroupID;
+		}
+	}
+
+	// Create TLogGroup objects
+	for (const auto& [tLogGroupID, storageTeamIDs] : tLogGroupStorageTeamMapping) {
+		tLogGroups.emplace_back(tLogGroupID);
+		for (const auto& storageTeamID : storageTeamIDs) {
+			tLogGroups.back().storageTeams[storageTeamID];
+		}
+	}
+}
+
+#pragma endregion TLogGroupFixture
+
+#pragma region MessageFixture
+
+void MessageFixture::setUp(const TLogGroupFixture& tLogGroupStorageTeamMapping,
+                           const int initialVersion,
+                           const int numVersions,
+                           const int numMutationsInVersion) {
+	const std::vector<StorageTeamID>& storageTeamIDs = tLogGroupStorageTeamMapping.storageTeamIDs;
+
+	Version version = initialVersion;
+	for (int _ = 0; _ < numVersions; ++_) {
+		Arena mutationArena;
+		VectorRef<MutationRef> mutationRefs;
+		generateMutationRefs(numMutationsInVersion, mutationArena, mutationRefs);
+		distributeMutationRefs(mutationRefs, version, storageTeamIDs, commitRecord);
+		version += deterministicRandom()->randomInt(5, 11);
+	}
+}
+
+#pragma endregion MessageFixture
+
+#pragma region ptxnTLogFixture
+
+void ptxnTLogFixture::setUp(const int numTLogs) {
+	int tLogGroupIndex = 0;
+	auto assignTLogGroup = [this](const TLogGroupID& tLogGroupID, std::shared_ptr<FakeTLogContext> pTLogContext) {
+		for (const auto& storageTeamID : tLogGroupFixture.tLogGroupStorageTeamMapping.at(tLogGroupID)) {
+			pTLogContext->storageTeamIDs.push_back(storageTeamID);
+		}
+		tLogGroupLeaders[tLogGroupID] = pTLogContext->pTLogInterface;
+	};
+
+	// Create TLog servers
+	for (int i = 0; i < numTLogs; ++i) {
+		std::shared_ptr<FakeTLogContext> pTLogContext = std::make_shared<FakeTLogContext>();
+
+		tLogContexts.push_back(pTLogContext);
+		pTLogContext->pTestDriverContext = pTestDriverContext;
+
+		// Assign interface
+		auto pTLogInterface = createTLogInterface();
+		pTLogInterface->initEndpoints();
+		tLogInterfaces.push_back(pTLogInterface);
+		pTLogContext->pTLogInterface = pTLogInterface;
+
+		// Assign tLog group and storage team IDs
+		const auto& tLogGroupID = tLogGroupFixture.tLogGroupIDs[tLogGroupIndex];
+		tLogGroupIndex = (tLogGroupIndex + 1) % tLogGroupFixture.getNumTLogGroups();
+		assignTLogGroup(tLogGroupID, pTLogContext);
+
+		actors.push_back(createTLogActor(pTLogContext));
+	}
+
+	// Assign remaining TLogGroups to TLog interfaces
+	if (numTLogs < tLogGroupFixture.getNumTLogGroups()) {
+		int tLogContextIndex = 0;
+		for (; tLogGroupIndex < tLogGroupFixture.getNumTLogGroups(); ++tLogGroupIndex) {
+			assignTLogGroup(tLogGroupFixture.tLogGroupIDs[tLogGroupIndex], tLogContexts[tLogContextIndex]);
+			tLogContextIndex = (tLogContextIndex + 1) % tLogGroupFixture.getNumTLogGroups();
+		}
+	}
+}
+
+ptxn::details::TLogInterfaceSharedPtrWrapper ptxnTLogFixture::getTLogLeaderByTLogGroupID(
+    const TLogGroupID& tLogGroupID) const {
+
+	if (tLogGroupLeaders.find(tLogGroupID) != std::end(tLogGroupLeaders)) {
+		return tLogGroupLeaders.at(tLogGroupID);
+	}
+
+	return {};
+}
+
+ptxn::details::TLogInterfaceSharedPtrWrapper ptxnTLogFixture::getTLogLeaderByStorageTeamID(
+    const StorageTeamID& storageTeamID) const {
+
+	const auto iter = tLogGroupFixture.storageTeamTLogGroupMapping.find(storageTeamID);
+	if (iter != std::end(tLogGroupFixture.storageTeamTLogGroupMapping)) {
+		return getTLogLeaderByTLogGroupID(iter->second);
+	}
+
+	return {};
+}
+
+#pragma endregion ptxnTLogFixture
+
+#pragma region ptxnFakeTLogFixture
+
+
+std::shared_ptr<FakeTLogContext> ptxnFakeTLogFixture::getTLogContextByIndex(const int index) {
+	ASSERT(index >= 0 && index < static_cast<int>(tLogContexts.size()));
+
+	return tLogContexts[index];
+}
+
+#pragma endregion ptxnFakeTLogFixture
+
+#pragma region ptxnTLogPassivelyPullFixture
+
+std::shared_ptr<TLogInterfaceBase> ptxnFakeTLogPassivelyPullFixture::createTLogInterface() {
+	return getNewTLogInterface(MessageTransferModel::StorageServerActivelyPull);
+}
+
+Future<Void> ptxnFakeTLogPassivelyPullFixture::createTLogActor(std::shared_ptr<FakeTLogContext> pContext) {
+	return getFakeTLogActor(MessageTransferModel::StorageServerActivelyPull, pContext);
+}
+
+#pragma endregion ptxnTLogPassivelyPullFixture
+
+} // namespace details
+
+#pragma region TestEnvironment
+
+std::unique_ptr<details::TestEnvironmentImpl> TestEnvironment::pImpl = nullptr;
+
+TestEnvironment& TestEnvironment::initDriverContext() {
+	ASSERT(!pImpl->testDriverContextImpl);
+
+	pImpl->testDriverContextImpl = std::make_shared<TestDriverContext>();
+
+	return *this;
+}
+
+TestEnvironment& TestEnvironment::initTLogGroup(const int numTLogGroupIDs, const int numStorageTeamIDs) {
+	ASSERT(pImpl->testDriverContextImpl);
+	ASSERT(!pImpl->tLogGroup);
+
+	pImpl->tLogGroup = std::make_unique<details::TLogGroupFixture>(*pImpl->testDriverContextImpl);
+	pImpl->tLogGroup->setUp(*pImpl->testDriverContextImpl, numTLogGroupIDs, numStorageTeamIDs);
+
+	return *this;
+}
+
+TestEnvironment& TestEnvironment::initPtxnTLog(const MessageTransferModel model, const int numTLogs, bool useFake) {
+	ASSERT(pImpl->testDriverContextImpl);
+	ASSERT(pImpl->tLogGroup);
+	ASSERT(!pImpl->tLogs);
+
+	if (useFake) {
+		switch (model) {
+		case MessageTransferModel::StorageServerActivelyPull:
+			pImpl->tLogs = std::make_shared<details::ptxnFakeTLogPassivelyPullFixture>(pImpl->testDriverContextImpl,
+			                                                                           *pImpl->tLogGroup);
+			break;
+		default:
+			ASSERT(false);
+		}
+	} else {
+		ASSERT(false);
+	}
+
+	pImpl->tLogs->setUp(numTLogs);
+
+	return *this;
+}
+
+TestEnvironment& TestEnvironment::initMessages(const int initialVersion,
+                                               const int numVersions,
+                                               const int numMutationsInVersion) {
+	ASSERT(pImpl->testDriverContextImpl);
+	ASSERT(pImpl->tLogGroup);
+	ASSERT(!pImpl->messages);
+
+	pImpl->messages = std::make_unique<details::MessageFixture>(pImpl->testDriverContextImpl->commitRecord);
+	pImpl->messages->setUp(*pImpl->tLogGroup, initialVersion, numVersions, numMutationsInVersion);
+
+	return *this;
+}
+
+const CommitRecord& TestEnvironment::getCommitRecords() {
+	ASSERT(pImpl);
+	ASSERT(pImpl->testDriverContextImpl);
+
+	return pImpl->testDriverContextImpl->commitRecord;
+}
+
+const details::TLogGroupFixture& TestEnvironment::getTLogGroup() {
+	ASSERT(pImpl);
+	ASSERT(pImpl->tLogGroup);
+
+	return *pImpl->tLogGroup;
+}
+
+std::shared_ptr<details::ptxnTLogFixture> TestEnvironment::getTLogs() {
+	ASSERT(pImpl);
+	ASSERT(pImpl->tLogs);
+
+	return pImpl->tLogs;
+}
+
+#pragma endregion TestEnvironment
 
 } // namespace ptxn::test
 

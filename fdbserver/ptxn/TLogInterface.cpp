@@ -67,4 +67,28 @@ std::shared_ptr<TLogInterfaceBase> getNewTLogInterface(const MessageTransferMode
 	}
 }
 
+namespace details {
+
+namespace {
+template <typename T>
+std::shared_ptr<T> TLogInterfaceCastHelper(std::shared_ptr<TLogInterfaceBase> ptr) {
+	std::shared_ptr<T> result = std::dynamic_pointer_cast<T>(ptr);
+	if (!result) {
+		// std::bad_cast might be a better choice if not using flow
+		throw internal_error_msg("Unable to downcast TLogInterface");
+	}
+	return result;
+}
+} // namespace
+
+TLogInterfaceSharedPtrWrapper::operator std::shared_ptr<TLogInterface_PassivelyPull>() {
+	return TLogInterfaceCastHelper<TLogInterface_PassivelyPull>(ptr);
+}
+
+TLogInterfaceSharedPtrWrapper::operator std::shared_ptr<TLogInterface_ActivelyPush>() {
+	return TLogInterfaceCastHelper<TLogInterface_ActivelyPush>(ptr);
+}
+
+} // namespace details
+
 } // namespace ptxn
