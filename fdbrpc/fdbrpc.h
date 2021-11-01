@@ -320,8 +320,8 @@ public:
 	}
 
 	// stream.tryGetReply( request )
-	//   Unreliable at most once delivery: Either delivers request and returns a reply, or returns failure
-	//   (Optional<T>()) eventually. If a reply is returned, request was delivered exactly once. If cancelled or returns
+	//   Unreliable at most once delivery: Either delivers request and returns a reply, or returns an error eventually.
+	//   If a reply is returned, request was delivered exactly once. If cancelled or returns
 	//   failure, request was or will be delivered zero or one times. The caller must be capable of retrying if this
 	//   request returns failure
 	template <class X>
