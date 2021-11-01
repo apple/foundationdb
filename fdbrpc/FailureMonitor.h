@@ -157,7 +157,7 @@ public:
 private:
 	std::unordered_map<NetworkAddress, FailureStatus> addressStatus;
 	YieldedAsyncMap<Endpoint, bool> endpointKnownFailed;
-	YieldedAsyncMap<NetworkAddress, bool> disconnectTriggers;
+	AsyncMap<NetworkAddress, bool> disconnectTriggers;
 	std::unordered_set<Endpoint> failedEndpoints;
 
 	friend class OnStateChangedActorActor;

@@ -210,6 +210,7 @@ public:
 
 	void operator=(RangeMap&& r) noexcept { map = std::move(r.map); }
 	// void clear( const Val& value ) { ranges.clear(); ranges.insert(std::make_pair(Key(),value)); }
+	void clear() { map.clear(); }
 
 	void insert(const Range& keys, const Val& value);
 

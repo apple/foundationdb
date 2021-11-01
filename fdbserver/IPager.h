@@ -49,7 +49,7 @@ static const char* const PagerEventReasonsStrings[] = {
 	"Get", "GetR", "GetRPF", "Commit", "LazyClr", "Meta", "Unknown"
 };
 
-static const int nonBtreeLevel = 0;
+static const unsigned int nonBtreeLevel = 0;
 static const std::vector<std::pair<PagerEvents, PagerEventReasons>> possibleEventReasonPairs = {
 	{ PagerEvents::CacheLookup, PagerEventReasons::Commit },
 	{ PagerEvents::CacheLookup, PagerEventReasons::LazyClear },
@@ -170,6 +170,12 @@ public:
 	                                                           int priority,
 	                                                           bool cacheable,
 	                                                           bool nohit) = 0;
+	virtual Future<Reference<const ArenaPage>> getMultiPhysicalPage(PagerEventReasons reason,
+	                                                                unsigned int level,
+	                                                                VectorRef<LogicalPageID> pageIDs,
+	                                                                int priority,
+	                                                                bool cacheable,
+	                                                                bool nohit) = 0;
 	virtual bool tryEvictPage(LogicalPageID id) = 0;
 	virtual Version getVersion() const = 0;
 
@@ -185,7 +191,7 @@ public:
 class IPager2 : public IClosable {
 public:
 	// Returns an ArenaPage that can be passed to writePage. The data in the returned ArenaPage might not be zeroed.
-	virtual Reference<ArenaPage> newPageBuffer() = 0;
+	virtual Reference<ArenaPage> newPageBuffer(size_t size = 1) = 0;
 
 	// Returns the usable size of pages returned by the pager (i.e. the size of the page that isn't pager overhead).
 	// For a given pager instance, separate calls to this function must return the same value.
@@ -207,9 +213,8 @@ public:
 	// may see the effects of this write.
 	virtual void updatePage(PagerEventReasons reason,
 	                        unsigned int level,
-	                        LogicalPageID pageID,
+	                        Standalone<VectorRef<LogicalPageID>> pageIDs,
 	                        Reference<ArenaPage> data) = 0;
-
 	// Try to atomically update the contents of a page as of version v in the next commit.
 	// If the pager is unable to do this at this time, it may choose to write the data to a new page ID
 	// instead and return the new page ID to the caller.  Otherwise the original pageID argument will be returned.
@@ -238,10 +243,17 @@ public:
 	// considered likely to be needed soon.
 	virtual Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
 	                                              unsigned int level,
-	                                              LogicalPageID pageID,
+	                                              PhysicalPageID pageIDs,
 	                                              int priority,
 	                                              bool cacheable,
 	                                              bool noHit) = 0;
+	virtual Future<Reference<ArenaPage>> readMultiPage(PagerEventReasons reason,
+	                                                   unsigned int level,
+	                                                   Standalone<VectorRef<PhysicalPageID>> pageIDs,
+	                                                   int priority,
+	                                                   bool cacheable,
+	                                                   bool noHit) = 0;
+
 	virtual Future<Reference<ArenaPage>> readExtent(LogicalPageID pageID) = 0;
 	virtual void releaseExtentReadLock() = 0;
 
@@ -257,17 +269,16 @@ public:
 	// The snapshot shall be usable until setOldVersion() is called with a version > v.
 	virtual Reference<IPagerSnapshot> getReadSnapshot(Version v) = 0;
 
-	// Atomically make durable all pending page writes, page frees, and update the metadata string.
-	virtual Future<Void> commit() = 0;
+	// Atomically make durable all pending page writes, page frees, and update the metadata string,
+	// setting the committed version to v
+	// v must be >= the highest versioned page write.
+	virtual Future<Void> commit(Version v) = 0;
 
 	// Get the latest meta key set or committed
 	virtual Key getMetaKey() const = 0;
 
 	// Set the metakey which will be stored in the next commit
 	virtual void setMetaKey(KeyRef metaKey) = 0;
-
-	// Sets the next commit version
-	virtual void setCommitVersion(Version v) = 0;
 
 	virtual StorageBytes getStorageBytes() const = 0;
 
@@ -282,16 +293,16 @@ public:
 	virtual Future<Void> init() = 0;
 
 	// Returns latest committed version
-	virtual Version getLatestVersion() const = 0;
+	virtual Version getLastCommittedVersion() const = 0;
 
 	// Returns the oldest readable version as of the most recent committed version
-	virtual Version getOldestVersion() const = 0;
+	virtual Version getOldestReadableVersion() const = 0;
 
 	// Sets the oldest readable version to be put into affect at the next commit.
 	// The pager can reuse pages that were freed at a version less than v.
 	// If any snapshots are in use at a version less than v, the pager can either forcefully
 	// invalidate them or keep their versions around until the snapshots are no longer in use.
-	virtual void setOldestVersion(Version v) = 0;
+	virtual void setOldestReadableVersion(Version v) = 0;
 
 protected:
 	~IPager2() {} // Destruction should be done using close()/dispose() from the IClosable interface

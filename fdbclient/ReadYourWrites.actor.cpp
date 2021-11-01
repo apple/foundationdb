@@ -1336,9 +1336,9 @@ ACTOR Future<Optional<Value>> getJSON(Database db) {
 	return getValueFromJSON(statusObj);
 }
 
-ACTOR Future<RangeResult> getWorkerInterfaces(Reference<ClusterConnectionFile> clusterFile) {
+ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> connRecord) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
-	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(connRecord, clusterInterface);
 
 	loop {
 		choose {
@@ -1371,7 +1371,7 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 		}
 	} else {
 		if (key == LiteralStringRef("\xff\xff/status/json")) {
-			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
+			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
 				++tr.getDatabase()->transactionStatusRequests;
 				return getJSON(tr.getDatabase());
 			} else {
@@ -1381,8 +1381,8 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 
 		if (key == LiteralStringRef("\xff\xff/cluster_file_path")) {
 			try {
-				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-					Optional<Value> output = StringRef(tr.getDatabase()->getConnectionFile()->getFilename());
+				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
+					Optional<Value> output = StringRef(tr.getDatabase()->getConnectionRecord()->getLocation());
 					return output;
 				}
 			} catch (Error& e) {
@@ -1393,8 +1393,8 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 
 		if (key == LiteralStringRef("\xff\xff/connection_string")) {
 			try {
-				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-					Reference<ClusterConnectionFile> f = tr.getDatabase()->getConnectionFile();
+				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
+					Reference<IClusterConnectionRecord> f = tr.getDatabase()->getConnectionRecord();
 					Optional<Value> output = StringRef(f->getConnectionString().toString());
 					return output;
 				}
@@ -1454,8 +1454,8 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 		}
 	} else {
 		if (begin.getKey() == LiteralStringRef("\xff\xff/worker_interfaces")) {
-			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-				return getWorkerInterfaces(tr.getDatabase()->getConnectionFile());
+			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
+				return getWorkerInterfaces(tr.getDatabase()->getConnectionRecord());
 			} else {
 				return RangeResult();
 			}
