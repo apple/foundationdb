@@ -1047,6 +1047,7 @@ TraceEvent& TraceEvent::detailf(std::string key, const char* valueFormat, ...) {
 	}
 	return *this;
 }
+
 TraceEvent& TraceEvent::detailfNoMetric(std::string&& key, const char* valueFormat, ...) {
 	if (enabled) {
 		va_list args;

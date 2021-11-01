@@ -94,7 +94,12 @@ bool validationIsEnabled(BuggifyType type);
 
 extern Optional<uint64_t> parse_with_suffix(std::string const& toparse, std::string const& default_unit = "");
 extern Optional<uint64_t> parseDuration(std::string const& str, std::string const& defaultUnit = "");
-extern std::string format(const char* form, ...);
+
+#if defined(__clang__) || defined(__GNUC__)
+__attribute__((__format__(__printf__, 1, 2)))
+#endif
+std::string
+format(const char* form, ...);
 
 // On success, returns the number of characters written. On failure, returns a negative number.
 extern int vsformat(std::string& outputString, const char* form, va_list args);

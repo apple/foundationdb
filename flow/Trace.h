@@ -208,7 +208,11 @@ char base16Char(IntType c) {
 
 // forward declare format from flow.h as we
 // can't include flow.h here
-std::string format(const char* form, ...);
+#if defined(__clang__) || defined(__GNUC__)
+__attribute__((__format__(__printf__, 1, 2)))
+#endif
+std::string
+format(const char* form, ...);
 
 template <class T>
 struct Traceable : std::false_type {};
@@ -411,7 +415,12 @@ struct TraceEvent {
 		}
 		return *this;
 	}
-	TraceEvent& detailf(std::string key, const char* valueFormat, ...);
+
+#if defined(__clang__) || defined(__GNUC__)
+	__attribute__((__format__(__printf__, 3, 4)))
+#endif
+	TraceEvent&
+	detailf(std::string key, const char* valueFormat, ...);
 
 private:
 	template <class T>
@@ -436,7 +445,11 @@ private:
 	TraceEvent& errorImpl(const class Error& e, bool includeCancelled = false);
 	// Private version of detailf that does NOT write to the eventMetric.  This is to be used by other detail methods
 	// which can write field metrics of a more appropriate type than string but use detailf() to add to the TraceEvent.
-	TraceEvent& detailfNoMetric(std::string&& key, const char* valueFormat, ...);
+#if defined(__clang__) || defined(__GNUC__)
+	__attribute__((__format__(__printf__, 3, 4)))
+#endif
+	TraceEvent&
+	detailfNoMetric(std::string&& key, const char* valueFormat, ...);
 	TraceEvent& detailImpl(std::string&& key, std::string&& value, bool writeEventMetricField = true);
 
 public:

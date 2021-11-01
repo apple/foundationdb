@@ -32,8 +32,6 @@
 #undef max
 #endif
 
-extern std::string format(const char* form, ...);
-
 Event::Event() {
 #ifdef _WIN32
 	ev = CreateEvent(nullptr, FALSE, FALSE, nullptr);

@@ -2936,7 +2936,11 @@ std::string getWorkingDirectory() {
 
 } // namespace platform
 
-extern std::string format(const char* form, ...);
+#if defined(__clang__) || defined(__GNUC__)
+__attribute__((__format__(__printf__, 1, 2)))
+#endif
+extern std::string
+format(const char* form, ...);
 
 namespace platform {
 std::string getDefaultConfigPath() {
