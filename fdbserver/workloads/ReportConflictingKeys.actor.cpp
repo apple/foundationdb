@@ -73,13 +73,13 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override { return invalidReports.getValue() == 0; }
 
 	void getMetrics(vector<PerfMetric>& m) override {
-		m.push_back(PerfMetric("Measured Duration", testDuration, true));
+		m.emplace_back("Measured Duration", testDuration, Averaged::True);
 		m.push_back(xacts.getMetric());
-		m.push_back(PerfMetric("Transactions/sec", xacts.getValue() / testDuration, true));
+		m.emplace_back("Transactions/sec", xacts.getValue() / testDuration, Averaged::True);
 		m.push_back(commits.getMetric());
-		m.push_back(PerfMetric("Commits/sec", commits.getValue() / testDuration, true));
+		m.emplace_back("Commits/sec", commits.getValue() / testDuration, Averaged::True);
 		m.push_back(conflicts.getMetric());
-		m.push_back(PerfMetric("Conflicts/sec", conflicts.getValue() / testDuration, true));
+		m.emplace_back("Conflicts/sec", conflicts.getValue() / testDuration, Averaged::True);
 	}
 
 	// disable the default timeout setting

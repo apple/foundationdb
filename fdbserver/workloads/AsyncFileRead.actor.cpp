@@ -324,8 +324,8 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		if (enabled) {
-			m.emplace_back("Bytes read/sec", bytesRead.getValue() / testDuration, false);
-			m.emplace_back("Average CPU Utilization (Percentage)", averageCpuUtilization * 100, false);
+			m.emplace_back("Bytes read/sec", bytesRead.getValue() / testDuration, Averaged::False);
+			m.emplace_back("Average CPU Utilization (Percentage)", averageCpuUtilization * 100, Averaged::False);
 		}
 	}
 };

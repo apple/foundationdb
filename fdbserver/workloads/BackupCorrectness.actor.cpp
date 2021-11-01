@@ -121,8 +121,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					    .detail("BackupRange", printable(range))
 					    .detail("Intersection", intersection);
 				}
-				// If the backup range intersects with restorePrefixesToInclude or a coin flip is true then use it as a restore
-				// range as well, otherwise skip it.
+				// If the backup range intersects with restorePrefixesToInclude or a coin flip is true then use it as a
+				// restore range as well, otherwise skip it.
 				if (intersection || deterministicRandom()->coinflip()) {
 					restoreRanges.push_back_deep(restoreRanges.arena(), range);
 				} else {
@@ -133,8 +133,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			restoreRanges = backupRanges;
 		}
 
-		// If no random backup ranges intersected with restorePrefixesToInclude or won the coin flip then restoreRanges will be
-		// empty, so move an item from skippedRestoreRanges to restoreRanges.
+		// If no random backup ranges intersected with restorePrefixesToInclude or won the coin flip then restoreRanges
+		// will be empty, so move an item from skippedRestoreRanges to restoreRanges.
 		if (restoreRanges.empty()) {
 			ASSERT(!skippedRestoreRanges.empty());
 			restoreRanges.push_back_deep(restoreRanges.arena(), skippedRestoreRanges.back());
@@ -682,8 +682,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 								                                             Key(),
 								                                             Key(),
 								                                             self->locked,
-																			 OnlyApplyMutationLogs::False,
-																			 InconsistentSnapshotOnly::False,
+								                                             OnlyApplyMutationLogs::False,
+								                                             InconsistentSnapshotOnly::False,
 								                                             ::invalidVersion,
 								                                             self->encryptionKeyFileName);
 							}

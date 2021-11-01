@@ -608,7 +608,7 @@ TEST_CASE("/fdbserver/ptxn/test/lock_tlog") {
 	int index = 0;
 	for (; index < pContext->numStorageTeamIDs; index++) {
 		// find the first storage team affiliated to tlog[0]
-		if(pContext->getTLogLeaderByStorageTeamID(pContext->storageTeamIDs[index]) == pContext->tLogInterfaces[0]) {
+		if (pContext->getTLogLeaderByStorageTeamID(pContext->storageTeamIDs[index]) == pContext->tLogInterfaces[0]) {
 			break;
 		}
 	}

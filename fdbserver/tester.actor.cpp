@@ -731,7 +731,7 @@ vector<PerfMetric> aggregateMetrics(vector<vector<PerfMetric>> metrics) {
 			sum += vec[i].value();
 		if (vec[0].averaged() && vec.size())
 			sum /= vec.size();
-		result.push_back(PerfMetric(vec[0].name(), sum, false, vec[0].format_code()));
+		result.emplace_back(vec[0].name(), sum, Averaged::False, vec[0].format_code());
 	}
 	return result;
 }

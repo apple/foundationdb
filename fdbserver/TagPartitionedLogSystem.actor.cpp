@@ -580,7 +580,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 				data.recordEmptyMessage(location, msg);
 				allReplies.push_back(recordPushMetrics(
 				    it->connectionResetTrackers[loc],
-					it->tlogPushDistTrackers[loc],
+				    it->tlogPushDistTrackers[loc],
 				    it->logServers[loc]->get().interf().address(),
 				    it->logServers[loc]->get().interf().commit.getReply(TLogCommitRequest(spanContext,
 				                                                                          msg.arena(),
@@ -2901,7 +2901,6 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 				groups.push_back(ptxn::TLogGroup(tlogGroup->id()));
 			}
 			req.tlogGroups = groups;
-			std::cout << req.tlogGroups.size() << std::endl;
 		}
 		ptxnInitializationReplies.reserve(recr.tLogs.size());
 		for (int i = 0; i < recr.tLogs.size(); ++i) {

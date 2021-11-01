@@ -1134,7 +1134,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			                                         relocateShardInterval.pairID,
 			                                         ddEnabledState);
 			// TODO(jingyu): remove after we can correctly manage new teams
-			if (SERVER_KNOBS->PTXN_DISABLE_DD) doMoveKeys = Never();
+			if (SERVER_KNOBS->PTXN_DISABLE_DD)
+				doMoveKeys = Never();
 
 			state Future<Void> pollHealth =
 			    signalledTransferComplete ? Never()
@@ -1268,7 +1269,8 @@ ACTOR Future<bool> rebalanceTeams(DDQueueData* self,
                                   Reference<IDataDistributionTeam> destTeam,
                                   bool primary,
                                   TraceEvent* traceEvent) {
-	if (SERVER_KNOBS->PTXN_DISABLE_DD) return false;
+	if (SERVER_KNOBS->PTXN_DISABLE_DD)
+		return false;
 
 	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
 		traceEvent->detail("CancelingDueToSimulationSpeedup", true);

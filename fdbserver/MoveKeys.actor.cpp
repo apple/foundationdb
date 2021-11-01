@@ -1541,7 +1541,8 @@ void seedShardServers(Arena& arena,
 		TraceEvent("SeedShard", serverSrcUID[serverIndex]).detail("KeyRange", keyRange.toString());
 		krmSetPreviouslyEmptyRange(
 		    tr, arena, serverKeysPrefixFor(servers[serverIndex].first.id()), keyRange, serverKeysTrue, serverKeysFalse);
-		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, keyRange, getServersValue(serverIndex), serverKeysFalse);
+		krmSetPreviouslyEmptyRange(
+		    tr, arena, keyServersPrefix, keyRange, getServersValue(serverIndex), serverKeysFalse);
 		++serverIndex;
 		serverIndex %= numServers;
 		keyRangeStart = keySplits[index];

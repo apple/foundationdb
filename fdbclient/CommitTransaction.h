@@ -105,9 +105,7 @@ struct MutationRef {
 		return type == another.type && param1 == another.param1 && param2 == another.param2;
 	}
 
-	bool operator!=(const MutationRef& another) const {
-		return !(*this == another);
-	}
+	bool operator!=(const MutationRef& another) const { return !(*this == another); }
 
 	std::string toString() const {
 		return format("code: %s param1: %s param2: %s",

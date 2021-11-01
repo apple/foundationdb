@@ -965,7 +965,9 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 
 // Reads txnStateStore and broadcasts the data to all Commit Proxies. After
 // that, initializes Resolvers to allow recovery transaction goes through.
-ACTOR static Future<Void> sendInitialCommitToResolvers(Reference<MasterData> self, std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>>* servers) {
+ACTOR static Future<Void> sendInitialCommitToResolvers(
+    Reference<MasterData> self,
+    std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>>* servers) {
 	state KeyRange txnKeys = allKeys;
 	state Sequence txnSequence = 0;
 	ASSERT(self->recoveryTransactionVersion);

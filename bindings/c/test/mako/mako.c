@@ -152,18 +152,17 @@ void* fdb_network_thread(void* args) {
 }
 
 int genprefix(char* str, char* prefix, int prefixlen, int prefixpadding, int rows, int len) {
-        const int rowdigit = digits(rows);
-        const int paddinglen = len - (prefixlen + rowdigit) - 1;
-        int offset = 0;
-        if (prefixpadding) {
-                memset(str, 'x', paddinglen);
-                offset += paddinglen;
-        }
-        memcpy(str + offset, prefix, prefixlen);
-        str[len - 1] = '\0';
-        return offset + prefixlen;
+	const int rowdigit = digits(rows);
+	const int paddinglen = len - (prefixlen + rowdigit) - 1;
+	int offset = 0;
+	if (prefixpadding) {
+		memset(str, 'x', paddinglen);
+		offset += paddinglen;
+	}
+	memcpy(str + offset, prefix, prefixlen);
+	str[len - 1] = '\0';
+	return offset + prefixlen;
 }
-
 
 /* cleanup database */
 int cleanup(FDBTransaction* transaction, mako_args_t* args) {
@@ -194,13 +193,13 @@ retryTxn:
 
 	fdb_transaction_clear_range(transaction, (uint8_t*)beginstr, len + 1, (uint8_t*)endstr, len + 1);
 	switch (commit_transaction(transaction)) {
-		case (FDB_SUCCESS):
-			break;
-		case (FDB_ERROR_RETRY):
-			fdb_transaction_reset(transaction);
-			goto retryTxn;
-		default:
-			goto failExit;
+	case (FDB_SUCCESS):
+		break;
+	case (FDB_ERROR_RETRY):
+		fdb_transaction_reset(transaction);
+		goto retryTxn;
+	default:
+		goto failExit;
 	}
 
 	fdb_transaction_reset(transaction);
@@ -323,12 +322,12 @@ int populate(FDBTransaction* transaction,
 			}
 
 			switch (commit_transaction(transaction)) {
-				case (FDB_SUCCESS):
-					break;
-				case (FDB_ERROR_RETRY):
-					goto retryTxn;
-				default:
-					goto failExit;
+			case (FDB_SUCCESS):
+				break;
+			case (FDB_ERROR_RETRY):
+				goto retryTxn;
+			default:
+				goto failExit;
 			}
 
 			/* xact latency stats */
@@ -380,9 +379,14 @@ int populate(FDBTransaction* transaction,
 		if (stats->xacts % args->sampling == 0) {
 			clock_gettime(CLOCK_MONOTONIC, &timer_per_xact_end);
 			update_op_lat_stats(
-				&timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block, elem_size, is_memory_allocated);
-			update_op_lat_stats(
-				&timer_per_xact_start, &timer_per_xact_end, OP_TRANSACTION, stats, block, elem_size, is_memory_allocated);
+			    &timer_start_commit, &timer_per_xact_end, OP_COMMIT, stats, block, elem_size, is_memory_allocated);
+			update_op_lat_stats(&timer_per_xact_start,
+			                    &timer_per_xact_end,
+			                    OP_TRANSACTION,
+			                    stats,
+			                    block,
+			                    elem_size,
+			                    is_memory_allocated);
 		}
 	}
 
@@ -588,7 +592,13 @@ retryTxn:
 					if (keyend > args->rows - 1) {
 						keyend = args->rows - 1;
 					}
-				  genkey(keystr2, KEYPREFIX, KEYPREFIXLEN, args->prefixpadding, keyend, args->rows, args->key_length + 1);
+					genkey(keystr2,
+					       KEYPREFIX,
+					       KEYPREFIXLEN,
+					       args->prefixpadding,
+					       keyend,
+					       args->rows,
+					       args->key_length + 1);
 				}
 
 				if (stats->xacts % args->sampling == 0) {

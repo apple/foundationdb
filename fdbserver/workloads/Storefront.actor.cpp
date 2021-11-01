@@ -82,7 +82,7 @@ struct StorefrontWorkload : TestWorkload {
 	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back(transactions.getMetric());
 		m.push_back(retries.getMetric());
-		m.push_back(PerfMetric("Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), true));
+		m.emplace_back("Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), Averaged::True);
 	}
 
 	/*static inline orderID valueToOrderID( const StringRef& v ) {

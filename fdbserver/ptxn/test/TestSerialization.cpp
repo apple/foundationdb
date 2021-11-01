@@ -786,7 +786,7 @@ bool testWriteSerialized() {
 	using namespace ptxn;
 
 	ptxn::details::SubsequencedItemsHeader header;
-	header.version = 0xab; 
+	header.version = 0xab;
 	header.lastSubsequence = 1;
 	header.numItems = 1;
 	header.length = 0xff; // TODO even in this test the length is not being used, set the proper value

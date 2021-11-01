@@ -1580,9 +1580,7 @@ void CacheRangeInfo::addMutation(Version version, MutationRef const& mutation) {
 		readWrite->addMutation(this->keys, version, mutation);
 	else if (mutation.type != MutationRef::ClearRange) { // TODO NEELAM: ClearRange mutations are ignored (why do we
 		                                                 // even allow them on un-assigned range?)
-		TraceEvent(SevError, "DeliveredToNotAssigned")
-		    .detail("Version", version)
-		    .detail("Mutation", mutation);
+		TraceEvent(SevError, "DeliveredToNotAssigned").detail("Version", version).detail("Mutation", mutation);
 		ASSERT(false); // Mutation delivered to notAssigned cacheRange!
 	}
 }

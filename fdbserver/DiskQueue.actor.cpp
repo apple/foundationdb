@@ -869,8 +869,6 @@ public:
 	}
 };
 
-
-
 class DiskQueue : public IDiskQueue, public Tracked<DiskQueue> {
 public:
 	// FIXME: Is setting lastCommittedSeq to -1 instead of 0 necessary?

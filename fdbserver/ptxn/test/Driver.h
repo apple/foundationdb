@@ -39,7 +39,6 @@
 
 namespace ptxn::test {
 
-
 // Driver options for starting mock environment.
 struct TestDriverOptions {
 	static const int DEFAULT_NUM_COMMITS = 3;

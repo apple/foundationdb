@@ -1630,9 +1630,7 @@ struct YieldedFutureActor : SAV<Void>, ActorCallback<YieldedFutureActor, 1, Void
 	void destroy() override { delete this; }
 
 #ifdef ENABLE_SAMPLING
-	LineageReference* lineageAddr() {
-		return currentLineage;
-	}
+	LineageReference* lineageAddr() { return currentLineage; }
 #endif
 
 	void a_callback_fire(ActorCallback<YieldedFutureActor, 1, Void>*, Void) {

@@ -90,7 +90,12 @@ public:
 	virtual void delref() = 0;
 
 	// used in template functions as returned Future type
-	template<class Type> using FutureT = ThreadFuture<Type>;
+	template <class Type>
+	using FutureT = ThreadFuture<Type>;
+	// internal use only, return true by default
+	// Only if it's a MultiVersionTransaction and the underlying transaction handler is null,
+	// it will return false
+	virtual bool isValid() { return true; }
 };
 
 // An interface that represents a connection to a cluster made by a client

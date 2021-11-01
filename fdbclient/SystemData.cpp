@@ -130,7 +130,7 @@ const Value keyServersValue(RangeResult result,
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withPartitionTransaction()));
 	wr << src << srcTeam << dest << dstTeam;
 	return wr.toValue();
-	//return keyServersValue(srcTag, srcTeam, destTag, dstTeam);
+	// return keyServersValue(srcTag, srcTeam, destTag, dstTeam);
 }
 
 const Value keyServersValue(const std::vector<Tag>& srcTag, const std::vector<Tag>& destTag) {
@@ -386,7 +386,9 @@ ptxn::StorageTeamID storageTeamIdKeyDecode(const KeyRef& key) {
 	return teamId;
 }
 
-const KeyRef storageServerToTeamIdKeyPrefix = "\xff/storageServerToTeam/"_sr;
+// This prefix should come before "keyServers" prefix so that this is processed
+// before keyServers at processCompleteTransactionStateRequest().
+const KeyRef storageServerToTeamIdKeyPrefix = "\xff/astorageServerToTeam/"_sr;
 const Key storageServerToTeamIdKey(UID serverId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(storageServerToTeamIdKeyPrefix);

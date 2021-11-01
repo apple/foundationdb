@@ -73,13 +73,14 @@ struct StreamingReadWorkload : TestWorkload {
 	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back(transactions.getMetric());
 		m.push_back(readKeys.getMetric());
-		m.push_back(PerfMetric(
-		    "Bytes read/sec", (readKeys.getValue() * keyBytes + readValueBytes.getValue()) / testDuration, false));
+		m.emplace_back("Bytes read/sec",
+		               (readKeys.getValue() * keyBytes + readValueBytes.getValue()) / testDuration,
+		               Averaged::False);
 
-		m.push_back(PerfMetric("Mean Latency (ms)", 1000 * latencies.mean(), true));
-		m.push_back(PerfMetric("Median Latency (ms, averaged)", 1000 * latencies.median(), true));
-		m.push_back(PerfMetric("90% Latency (ms, averaged)", 1000 * latencies.percentile(0.90), true));
-		m.push_back(PerfMetric("98% Latency (ms, averaged)", 1000 * latencies.percentile(0.98), true));
+		m.emplace_back("Mean Latency (ms)", 1000 * latencies.mean(), Averaged::True);
+		m.emplace_back("Median Latency (ms, averaged)", 1000 * latencies.median(), Averaged::True);
+		m.emplace_back("90% Latency (ms, averaged)", 1000 * latencies.percentile(0.90), Averaged::True);
+		m.emplace_back("98% Latency (ms, averaged)", 1000 * latencies.percentile(0.98), Averaged::True);
 	}
 
 	Key keyForIndex(uint64_t index) {
