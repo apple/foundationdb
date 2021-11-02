@@ -42,7 +42,9 @@ namespace ptxn::test {
 // Driver options for starting mock environment.
 struct TestDriverOptions {
 	static const int DEFAULT_NUM_COMMITS = 3;
-	static const int DEFAULT_NUM_TEAMS = 10;
+	// Default is equal to numStorageTeamIDs so that an assertion in
+	// startStorageServers() won't fail.
+	static const int DEFAULT_NUM_TEAMS = 3;
 	static const int DEFAULT_NUM_PROXIES = 1;
 	static const int DEFAULT_NUM_TLOGS = 3;
 	static const int DEFAULT_NUM_TLOG_GROUPS = 4;
