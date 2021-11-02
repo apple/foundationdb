@@ -5143,7 +5143,7 @@ ACTOR Future<Void> handleMoveShard(ClusterControllerData* self, ClusterControlle
 		    .detail("End", req.shard.end)
 		    .detail("Addresses", describe(req.addresses));
 
-		if (!req.id.isValid() || processedRequests.count(req.id) == 0) {
+		if (processedRequests.count(req.id) == 0) {
 			processedRequests.insert(req.id);
 			try {
 				wait(moveShard(self->db.db, req.shard, req.addresses));

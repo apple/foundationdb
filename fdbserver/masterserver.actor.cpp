@@ -2067,7 +2067,8 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	debug_advanceMinCommittedVersion(UID(), self->recoveryTransactionVersion);
 
 	if (debugResult) {
-		TraceEvent(self->forceRecovery ? SevWarn : SevError, "DBRecoveryDurabilityError").log();
+		TraceEvent((self->forceRecovery || self->repairSystemData) ? SevWarn : SevError, "DBRecoveryDurabilityError")
+		    .log();
 	}
 
 	TraceEvent("MasterCommittedTLogs", self->dbgid)
