@@ -65,3 +65,11 @@ std::string KeySelectorRef::toString() const {
 			return format("%d+lastLessThan(%s)", offset, printable(key).c_str());
 	}
 }
+
+std::string describe(const std::string& s) {
+	return s;
+}
+
+std::string describe(UID const& item) {
+	return item.shortString();
+}

@@ -268,7 +268,9 @@ inline void load(Archive& ar, std::map<K, V>& value) {
 	ASSERT(ar.protocolVersion().isValid());
 }
 
+#ifdef _MSC_VER
 #pragma intrinsic(memcpy)
+#endif
 
 #if VALGRIND
 static bool valgrindCheck(const void* data, int bytes, const char* context) {
@@ -851,7 +853,8 @@ struct ISerializeSource {
 };
 
 template <class T, class V>
-struct MakeSerializeSource : ISerializeSource {
+class MakeSerializeSource : public ISerializeSource {
+public:
 	using value_type = V;
 	void serializePacketWriter(PacketWriter& w) const override {
 		ObjectWriter writer([&](size_t size) { return w.writeBytes(size); }, AssumeVersion(w.protocolVersion()));

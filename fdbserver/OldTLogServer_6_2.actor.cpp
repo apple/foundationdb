@@ -267,7 +267,7 @@ static StringRef stripTagMessagesKey(StringRef key) {
 	return key.substr(sizeof(UID) + sizeof(Tag) + persistTagMessagesKeys.begin.size());
 }
 
-static StringRef stripTagMessageRefsKey(StringRef key) {
+[[maybe_unused]] static StringRef stripTagMessageRefsKey(StringRef key) {
 	return key.substr(sizeof(UID) + sizeof(Tag) + persistTagMessageRefsKeys.begin.size());
 }
 
