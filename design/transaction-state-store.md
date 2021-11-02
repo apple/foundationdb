@@ -49,9 +49,21 @@ receive resolution response, along with metadata mutations happend at other prox
 its commit version, and apply all these metadata mutations in the commit order.
 Finally, this proxy only writes metadata mutations in its own transaction batch to TLogs,
 i.e., do not write other proxies' metadata mutations to TLogs to avoid repeated writes.
-Notably `\xff\x02` prefix is used for backup data and is *NOT* metadata mutations.
 
-## How is transaction state store persisted?
+It's worth calling out that everything in the `txnStateStore` is stored at some storage
+servers and a client (e.g., `fdbcli`) can read from these storage servers. During the
+commit process, commit proxies parse all mutations in a batch of transactions, and apply
+changes (i.e., metadata mutations) to its in-memory copy of `txnStateStore`. Later, the
+same changes are applied at storage servers for persistence. Additionally, the process
+to store `txnStateStore` at log system is described below.
+
+Notably `applyMetadataMutations()` is the function that commit proxies use to make changes
+to `txnStateStore`. The key ranges stored in `txnStateStore` include `[\xff, \xff\x02)` and
+`[\xff\x03, \xff\xff)`, but not everything in these ranges. There is no data in the range
+of `[\xff\x02, \xff\x03)` belong to `txnStateStore`, e.g., `\xff\x02` prefix is used for
+backup data and is *NOT* metadata mutations.
+
+## How is transaction state store persisted at log system?
 
 When a commit proxy writes metadata mutations to the log system, the proxy assigns a
 "txs" tag to the mutation. Depending on FDB versions, the "txs" tag can be one special
