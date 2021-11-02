@@ -1557,7 +1557,7 @@ ACTOR Future<Void> tLog(
 					// Disk errors need a chance to kill this actor.
 					wait(delay(0.000001));
 
-					for(auto& [_, tlogGroup] : self->tlogGroups) {
+					for (auto& [_, tlogGroup] : self->tlogGroups) {
 						tlogGroup->sharedActors.send(commitQueue(tlogGroup));
 						// TODO: add updateStorageLoop when implementing pop
 						// tlogGroup->sharedActors.send(updateStorageLoop(tlogGroup));
