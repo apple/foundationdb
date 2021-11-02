@@ -1388,11 +1388,6 @@ void stopAllTLogs(Reference<TLogServerData> self, UID newLogId) {
 ACTOR Future<Void> tlogGroupRecovery(Reference<TLogGroupData> self, Promise<Void> recovered) {
 	try {
 		wait(ioTimeoutError(checkEmptyQueue(self) && checkRecovered(self), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
-
-		// Disk errors need a chance to kill this actor.
-		wait(delay(0.000001));
-
-		self->sharedActors.send(commitQueue(self));
 	} catch (Error& e) {
 		self->terminated.send(Void());
 		TraceEvent("TLogError", self->dbgid).detail("GroupID", self->tlogGroupID).error(e, true);
@@ -1538,7 +1533,6 @@ ACTOR Future<Void> tLog(
 						// memory managed by each tlog group
 						IKeyValueStore* persistentData = persistentDataAndQueues[group.logGroupId].first;
 						IDiskQueue* persistentQueue = persistentDataAndQueues[group.logGroupId].second;
-
 						Reference<TLogGroupData> tlogGroup = makeReference<TLogGroupData>(tlogId,
 						                                                                  group.logGroupId,
 						                                                                  workerID,
@@ -1548,14 +1542,7 @@ ACTOR Future<Void> tLog(
 						                                                                  degraded,
 						                                                                  folder,
 						                                                                  self);
-						tlogGroup->sharedActors.send(commitQueue(tlogGroup));
-
-						//	TODO: add updateStorageLoop when implementing pop
-						//	tlogGroup->sharedActors.send(updateStorageLoop(tlogGroup));
-
-						TraceEvent("SharedTlogGroup").detail("LogId", tlogId).detail("GroupID", group.logGroupId);
 						self->tlogGroups[group.logGroupId] = tlogGroup;
-
 						Promise<Void> teamRecovered;
 						tlogGroupRecoveries.push_back(tlogGroupRecovery(tlogGroup, teamRecovered));
 						tlogGroupTerminated.push_back(tlogGroup->terminated.getFuture());
@@ -1564,6 +1551,16 @@ ACTOR Future<Void> tLog(
 					choose {
 						when(wait(waitForAny(tlogGroupTerminated))) { throw tlog_stopped(); }
 						when(wait(waitForAll(tlogGroupRecoveries))) {}
+					}
+
+					// Disk errors need a chance to kill this actor.
+					wait(delay(0.000001));
+
+					for (auto& it : self->tlogGroups) {
+						Reference<TLogGroupData> tlogGroup = it.second;
+						tlogGroup->sharedActors.send(commitQueue(tlogGroup));
+						// TODO: add updateStorageLoop when implementing pop
+						// tlogGroup->sharedActors.send(updateStorageLoop(tlogGroup));
 					}
 
 					// start the new generation
