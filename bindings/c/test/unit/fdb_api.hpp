@@ -132,7 +132,20 @@ public:
 
 private:
 	friend class Transaction;
+	friend class Database;
 	KeyValueArrayFuture(FDBFuture* f) : Future(f) {}
+};
+
+class KeyRangeArrayFuture : public Future {
+public:
+	// Call this function instead of fdb_future_get_keyrange_array when using
+	// the KeyRangeArrayFuture type. It's behavior is identical to
+	// fdb_future_get_keyrange_array.
+	fdb_error_t get(const FDBKeyRange** out_keyranges, int* out_count);
+
+private:
+	friend class Database;
+	KeyRangeArrayFuture(FDBFuture* f) : Future(f) {}
 };
 
 class EmptyFuture : public Future {
@@ -156,6 +169,14 @@ public:
 	                                   int uid_length,
 	                                   const uint8_t* snap_command,
 	                                   int snap_command_length);
+
+	KeyRangeArrayFuture get_blob_granule_ranges(FDBDatabase* db, std::string_view begin_key, std::string_view end_key);
+	KeyValueArrayFuture read_blob_granules(FDBDatabase* db,
+	                                       std::string_view begin_key,
+	                                       std::string_view end_key,
+	                                       int64_t beginVersion,
+	                                       int64_t endVersion,
+	                                       FDBReadBlobGranuleContext granule_context);
 };
 
 // Wrapper around FDBTransaction, providing the same set of calls as the C API.

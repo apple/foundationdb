@@ -7109,15 +7109,15 @@ Future<Void> DatabaseContext::popChangeFeedMutations(Key rangeID, Version versio
 	return popChangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, version);
 }
 
-#define BG_REQUEST_DEBUG false
+#define BG_REQUEST_DEBUG true
 
-ACTOR Future<Void> getBlobGranuleRangesStreamActor(Reference<DatabaseContext> db,
-                                                   PromiseStream<KeyRange> results,
-                                                   KeyRange keyRange) {
+ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Reference<DatabaseContext> db,
+                                                                           KeyRange keyRange) {
 	// FIXME: use streaming range read
 	state Database cx(db);
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 	state KeyRange currentRange = keyRange;
+	state Standalone<VectorRef<KeyRangeRef>> results;
 	if (BG_REQUEST_DEBUG) {
 		printf("Getting Blob Granules for [%s - %s)\n",
 		       keyRange.begin.printable().c_str(),
@@ -7131,14 +7131,14 @@ ACTOR Future<Void> getBlobGranuleRangesStreamActor(Reference<DatabaseContext> db
 
 			for (int i = 0; i < blobGranuleMapping.size() - 1; i++) {
 				if (blobGranuleMapping[i].value.size()) {
-					results.send(KeyRangeRef(blobGranuleMapping[i].key, blobGranuleMapping[i + 1].key));
+					results.push_back(results.arena(),
+					                  KeyRangeRef(blobGranuleMapping[i].key, blobGranuleMapping[i + 1].key));
 				}
 			}
 			if (blobGranuleMapping.more) {
 				currentRange = KeyRangeRef(blobGranuleMapping.back().key, currentRange.end);
 			} else {
-				results.sendError(end_of_stream());
-				return Void();
+				return results;
 			}
 		} catch (Error& e) {
 			wait(tr->onError(e));
@@ -7146,11 +7146,11 @@ ACTOR Future<Void> getBlobGranuleRangesStreamActor(Reference<DatabaseContext> db
 	}
 }
 
-Future<Void> DatabaseContext::getBlobGranuleRangesStream(const PromiseStream<KeyRange>& results, KeyRange range) {
+Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::getBlobGranuleRanges(KeyRange range) {
 	if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
 		throw client_invalid_operation();
 	}
-	return getBlobGranuleRangesStreamActor(Reference<DatabaseContext>::addRef(this), results, range);
+	return getBlobGranuleRangesActor(Reference<DatabaseContext>::addRef(this), range);
 }
 
 // hack (for now) to get blob worker interface into load balance
@@ -7353,6 +7353,38 @@ Future<Void> DatabaseContext::readBlobGranulesStream(const PromiseStream<Standal
 		throw client_invalid_operation();
 	}
 	return readBlobGranulesStreamActor(Reference<DatabaseContext>::addRef(this), results, range, begin, end);
+}
+
+ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(DatabaseContext* self,
+                                                                               KeyRange range,
+                                                                               Version begin,
+                                                                               Optional<Version> end) {
+	state PromiseStream<Standalone<BlobGranuleChunkRef>> chunks;
+	state Standalone<VectorRef<BlobGranuleChunkRef>> results;
+	state Future<Void> reader = self->readBlobGranulesStream(chunks, range, begin, end);
+	loop {
+		try {
+			Standalone<BlobGranuleChunkRef> chunk = waitNext(chunks.getFuture());
+			results.arena().dependsOn(chunk.arena());
+			results.push_back(results.arena(), chunk);
+		} catch (Error& e) {
+			if (e.code() == error_code_end_of_stream) {
+				break;
+			}
+			throw;
+		}
+	}
+	wait(reader);
+	return results;
+}
+
+Future<Standalone<VectorRef<BlobGranuleChunkRef>>> DatabaseContext::readBlobGranules(KeyRange range,
+                                                                                     Version begin,
+                                                                                     Optional<Version> end) {
+	if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		throw client_invalid_operation();
+	}
+	return readBlobGranulesActor(this, range, begin, end);
 }
 
 ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {

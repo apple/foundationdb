@@ -112,7 +112,20 @@ typedef struct keyvalue {
 	int value_length;
 } FDBKeyValue;
 #endif
+typedef struct keyrange {
+	const uint8_t* begin_key;
+	int begin_key_length;
+	const uint8_t* end_key;
+	int end_key_length;
+} FDBKeyRange;
 #pragma pack(pop)
+
+typedef struct readgranulecontext {
+	void* userContext;
+	int64_t (*start_load_f)(const char*, int, int64_t, int64_t, void*);
+	uint8_t (*get_load_f)(int64_t, void*);
+	void (*free_load_f)(uint8_t*);
+} FDBReadBlobGranuleContext;
 
 DLLEXPORT void fdb_future_cancel(FDBFuture* f);
 
@@ -159,6 +172,10 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_string_array(FDBFuture* 
                                                                      const char*** out_strings,
                                                                      int* out_count);
 
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_keyrange_array(FDBFuture* f,
+                                                                       FDBKeyRange const** out_ranges,
+                                                                       int* out_count);
+
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_create_database(const char* cluster_file_path, FDBDatabase** out_database);
 
 DLLEXPORT void fdb_database_destroy(FDBDatabase* d);
@@ -190,6 +207,21 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_create_snapshot(FDBDatabase
 DLLEXPORT WARN_UNUSED_RESULT double fdb_database_get_main_thread_busyness(FDBDatabase* db);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db, uint64_t expected_version);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_blob_granule_ranges(FDBDatabase* db,
+                                                                             uint8_t const* begin_key_name,
+                                                                             int begin_key_name_length,
+                                                                             uint8_t const* end_key_name,
+                                                                             int end_key_name_length);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_read_blob_granules(FDBDatabase* db,
+                                                                        uint8_t const* begin_key_name,
+                                                                        int begin_key_name_length,
+                                                                        uint8_t const* end_key_name,
+                                                                        int end_key_name_length,
+                                                                        int64_t beginVersion,
+                                                                        int64_t endVersion,
+                                                                        FDBReadBlobGranuleContext granuleContext);
 
 DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr);
 

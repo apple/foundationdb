@@ -60,7 +60,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	std::vector<Future<Void>> clients;
 
 	Reference<BackupContainerFileSystem> bstore;
-	AsyncVar<std::vector<KeyRange>> granuleRanges;
+	AsyncVar<Standalone<VectorRef<KeyRangeRef>>> granuleRanges;
 
 	BlobGranuleVerifierWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		doSetup = !clientId; // only do this on the "first" client
@@ -144,22 +144,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		// updates the current set of granules in the database, but on a delay, so there can be some mismatch if ranges
 		// change
 		loop {
-			state std::vector<KeyRange> allGranules;
-			state Transaction tr(cx);
-			state PromiseStream<KeyRange> stream;
-			state Future<Void> reader = cx->getBlobGranuleRangesStream(stream, normalKeys);
-			loop {
-				try {
-					KeyRange r = waitNext(stream.getFuture());
-					allGranules.push_back(r);
-				} catch (Error& e) {
-					if (e.code() == error_code_end_of_stream) {
-						break;
-					}
-					throw e;
-				}
-			}
-			wait(reader);
+			Standalone<VectorRef<KeyRangeRef>> allGranules = wait(cx->getBlobGranuleRanges(normalKeys));
+
 			// printf("BG find granules found %d granules\n", allGranules.size());
 			self->granuleRanges.set(allGranules);
 
@@ -411,7 +397,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		state int checks = 0;
 
 		state bool availabilityPassed = true;
-		state std::vector<KeyRange> allRanges = self->granuleRanges.get();
+		state Standalone<VectorRef<KeyRangeRef>> allRanges = self->granuleRanges.get();
 		for (auto& range : allRanges) {
 			state KeyRange r = range;
 			state PromiseStream<Standalone<BlobGranuleChunkRef>> chunkStream;

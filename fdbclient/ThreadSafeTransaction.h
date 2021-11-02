@@ -57,6 +57,13 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
+
+	ThreadFuture<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
+	                                           Version beginVersion,
+	                                           Version endVersion,
+	                                           ReadBlobGranuleContext granuleContext) override;
+
 private:
 	friend class ThreadSafeTransaction;
 	bool isConfigDB{ false };

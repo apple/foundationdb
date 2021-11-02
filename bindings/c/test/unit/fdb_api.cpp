@@ -78,6 +78,12 @@ void Future::cancel() {
 	return fdb_future_get_string_array(future_, out_strings, out_count);
 }
 
+// KeyRangeArrayFuture
+
+[[nodiscard]] fdb_error_t KeyRangeArrayFuture::get(const FDBKeyRange** out_keyranges, int* out_count) {
+	return fdb_future_get_keyrange_array(future_, out_keyranges, out_count);
+}
+
 // KeyValueArrayFuture
 
 [[nodiscard]] fdb_error_t KeyValueArrayFuture::get(const FDBKeyValue** out_kv, int* out_count, fdb_bool_t* out_more) {
@@ -103,6 +109,28 @@ EmptyFuture Database::create_snapshot(FDBDatabase* db,
                                       const uint8_t* snap_command,
                                       int snap_command_length) {
 	return EmptyFuture(fdb_database_create_snapshot(db, uid, uid_length, snap_command, snap_command_length));
+}
+
+KeyRangeArrayFuture Database::get_blob_granule_ranges(FDBDatabase* db,
+                                                      std::string_view begin_key,
+                                                      std::string_view end_key) {
+	return KeyRangeArrayFuture(fdb_database_get_blob_granule_ranges(
+	    db, (const uint8_t*)begin_key.data(), begin_key.size(), (const uint8_t*)end_key.data(), end_key.size()));
+}
+KeyValueArrayFuture Database::read_blob_granules(FDBDatabase* db,
+                                                 std::string_view begin_key,
+                                                 std::string_view end_key,
+                                                 int64_t beginVersion,
+                                                 int64_t endVersion,
+                                                 FDBReadBlobGranuleContext granuleContext) {
+	return KeyValueArrayFuture(fdb_database_read_blob_granules(db,
+	                                                           (const uint8_t*)begin_key.data(),
+	                                                           begin_key.size(),
+	                                                           (const uint8_t*)end_key.data(),
+	                                                           end_key.size(),
+	                                                           beginVersion,
+	                                                           endVersion,
+	                                                           granuleContext));
 }
 
 // Transaction

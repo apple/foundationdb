@@ -260,6 +260,14 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_string_array(FDBFuture* f, const
 	                 *out_count = na.size(););
 }
 
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_keyrange_array(FDBFuture* f,
+                                                               FDBKeyRange const** out_ranges,
+                                                               int* out_count) {
+	CATCH_AND_RETURN(Standalone<VectorRef<KeyRangeRef>> na = TSAV(Standalone<VectorRef<KeyRangeRef>>, f)->get();
+	                 *out_ranges = (FDBKeyRange*)na.begin();
+	                 *out_count = na.size(););
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_future_get_key_array(FDBFuture* f, FDBKey const** out_key_array, int* out_count) {
 	CATCH_AND_RETURN(Standalone<VectorRef<KeyRef>> na = TSAV(Standalone<VectorRef<KeyRef>>, f)->get();
 	                 *out_key_array = (FDBKey*)na.begin();
@@ -379,6 +387,35 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db
 	                                uint64_t>(DB(db)->getServerProtocol(expected), [](ErrorOr<ProtocolVersion> result) {
 		                return result.map<uint64_t>([](ProtocolVersion pv) { return pv.versionWithFlags(); });
 	                }).extractPtr());
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_get_blob_granule_ranges(FDBDatabase* db,
+                                                                     uint8_t const* begin_key_name,
+                                                                     int begin_key_name_length,
+                                                                     uint8_t const* end_key_name,
+                                                                     int end_key_name_length) {
+	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	return (FDBFuture*)(DB(db)->getBlobGranuleRanges(range).extractPtr());
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_read_blob_granules(FDBDatabase* db,
+                                                                uint8_t const* begin_key_name,
+                                                                int begin_key_name_length,
+                                                                uint8_t const* end_key_name,
+                                                                int end_key_name_length,
+                                                                int64_t beginVersion,
+                                                                int64_t endVersion,
+                                                                FDBReadBlobGranuleContext granule_context) {
+	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+
+	// FIXME: better way to convert?
+	ReadBlobGranuleContext context;
+	context.userContext = granule_context.userContext;
+	context.start_load_f = granule_context.start_load_f;
+	context.get_load_f = granule_context.get_load_f;
+	context.free_load_f = granule_context.free_load_f;
+
+	return (FDBFuture*)(DB(db)->readBlobGranules(range, beginVersion, endVersion, context).extractPtr());
 }
 
 extern "C" DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr) {

@@ -124,6 +124,13 @@ public:
 	// Management API, create snapshot
 	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
 
+	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) = 0;
+
+	virtual ThreadFuture<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
+	                                                   Version beginVersion,
+	                                                   Version endVersion,
+	                                                   ReadBlobGranuleContext granuleContext) = 0;
+
 	// used in template functions as the Transaction type that can be created through createTransaction()
 	using TransactionT = ITransaction;
 };
