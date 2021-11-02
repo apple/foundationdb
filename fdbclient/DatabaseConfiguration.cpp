@@ -591,9 +591,6 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	return true; // All of the above options currently require recovery to take effect
 }
 
-static KeyValueRef* lower_bound(VectorRef<KeyValueRef>& config, KeyRef const& key) {
-	return std::lower_bound(config.begin(), config.end(), KeyValueRef(key, ValueRef()), KeyValueRef::OrderByKey());
-}
 static KeyValueRef const* lower_bound(VectorRef<KeyValueRef> const& config, KeyRef const& key) {
 	return std::lower_bound(config.begin(), config.end(), KeyValueRef(key, ValueRef()), KeyValueRef::OrderByKey());
 }

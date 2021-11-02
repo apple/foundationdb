@@ -37,7 +37,10 @@
 #include "flow/Util.h"
 #include "flow/IndexedSet.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+#ifdef _MSC_VER
 #pragma warning(disable : 4355) // 'this' : used in base member initializer list
+#endif
 
 ACTOR template <class T, class X>
 Future<T> traceAfter(Future<T> what, const char* type, const char* key, X value, bool traceErrors = false) {

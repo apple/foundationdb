@@ -37,7 +37,7 @@
 #include "flow/Platform.h"
 #include "crc32c-generated-constants.cpp"
 
-static uint32_t append_trivial(uint32_t crc, const uint8_t* input, size_t length) {
+[[maybe_unused]] static uint32_t append_trivial(uint32_t crc, const uint8_t* input, size_t length) {
 	for (size_t i = 0; i < length; ++i) {
 		crc = crc ^ input[i];
 		for (int j = 0; j < 8; j++)
@@ -49,7 +49,7 @@ static uint32_t append_trivial(uint32_t crc, const uint8_t* input, size_t length
 /* Table-driven software version as a fall-back.  This is about 15 times slower
    than using the hardware instructions.  This assumes little-endian integers,
    as is the case on Intel processors that the assembler code here is for. */
-static uint32_t append_adler_table(uint32_t crci, const uint8_t* input, size_t length) {
+[[maybe_unused]] static uint32_t append_adler_table(uint32_t crci, const uint8_t* input, size_t length) {
 	const uint8_t* next = input;
 	uint64_t crc;
 

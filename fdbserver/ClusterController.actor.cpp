@@ -1214,40 +1214,44 @@ public:
 					                                         exclusionWorkerIds);
 
 					if (g_network->isSimulated()) {
-						auto testWorkers = getWorkersForTlogsBackup(
-						    conf, required, desired, policy, testUsed, checkStable, dcIds, exclusionWorkerIds);
-						RoleFitness testFitness(testWorkers, ProcessClass::TLog, testUsed);
-						RoleFitness fitness(workers, ProcessClass::TLog, id_used);
+						try {
+							auto testWorkers = getWorkersForTlogsBackup(
+							    conf, required, desired, policy, testUsed, checkStable, dcIds, exclusionWorkerIds);
+							RoleFitness testFitness(testWorkers, ProcessClass::TLog, testUsed);
+							RoleFitness fitness(workers, ProcessClass::TLog, id_used);
 
-						std::map<Optional<Standalone<StringRef>>, int> field_count;
-						std::set<Optional<Standalone<StringRef>>> zones;
-						for (auto& worker : testWorkers) {
-							if (!zones.count(worker.interf.locality.zoneId())) {
-								field_count[worker.interf.locality.get(pa1->attributeKey())]++;
-								zones.insert(worker.interf.locality.zoneId());
+							std::map<Optional<Standalone<StringRef>>, int> field_count;
+							std::set<Optional<Standalone<StringRef>>> zones;
+							for (auto& worker : testWorkers) {
+								if (!zones.count(worker.interf.locality.zoneId())) {
+									field_count[worker.interf.locality.get(pa1->attributeKey())]++;
+									zones.insert(worker.interf.locality.zoneId());
+								}
 							}
-						}
-						// backup recruitment is not required to use degraded processes that have better fitness
-						// so we cannot compare degraded between the two methods
-						testFitness.degraded = fitness.degraded;
+							// backup recruitment is not required to use degraded processes that have better fitness
+							// so we cannot compare degraded between the two methods
+							testFitness.degraded = fitness.degraded;
 
-						int minField = 100;
+							int minField = 100;
 
-						for (auto& f : field_count) {
-							minField = std::min(minField, f.second);
-						}
-
-						if (fitness > testFitness && minField > 1) {
-							for (auto& w : testWorkers) {
-								TraceEvent("TestTLogs").detail("Interf", w.interf.address());
+							for (auto& f : field_count) {
+								minField = std::min(minField, f.second);
 							}
-							for (auto& w : workers) {
-								TraceEvent("RealTLogs").detail("Interf", w.interf.address());
+
+							if (fitness > testFitness && minField > 1) {
+								for (auto& w : testWorkers) {
+									TraceEvent("TestTLogs").detail("Interf", w.interf.address());
+								}
+								for (auto& w : workers) {
+									TraceEvent("RealTLogs").detail("Interf", w.interf.address());
+								}
+								TraceEvent("FitnessCompare")
+								    .detail("TestF", testFitness.toString())
+								    .detail("RealF", fitness.toString());
+								ASSERT(false);
 							}
-							TraceEvent("FitnessCompare")
-							    .detail("TestF", testFitness.toString())
-							    .detail("RealF", fitness.toString());
-							ASSERT(false);
+						} catch (Error& e) {
+							ASSERT(false); // Simulation only validation should not throw errors
 						}
 					}
 
@@ -1267,25 +1271,29 @@ public:
 			    getWorkersForTlogsSimple(conf, required, desired, id_used, checkStable, dcIds, exclusionWorkerIds);
 
 			if (g_network->isSimulated()) {
-				auto testWorkers = getWorkersForTlogsBackup(
-				    conf, required, desired, policy, testUsed, checkStable, dcIds, exclusionWorkerIds);
-				RoleFitness testFitness(testWorkers, ProcessClass::TLog, testUsed);
-				RoleFitness fitness(workers, ProcessClass::TLog, id_used);
-				// backup recruitment is not required to use degraded processes that have better fitness
-				// so we cannot compare degraded between the two methods
-				testFitness.degraded = fitness.degraded;
+				try {
+					auto testWorkers = getWorkersForTlogsBackup(
+					    conf, required, desired, policy, testUsed, checkStable, dcIds, exclusionWorkerIds);
+					RoleFitness testFitness(testWorkers, ProcessClass::TLog, testUsed);
+					RoleFitness fitness(workers, ProcessClass::TLog, id_used);
+					// backup recruitment is not required to use degraded processes that have better fitness
+					// so we cannot compare degraded between the two methods
+					testFitness.degraded = fitness.degraded;
 
-				if (fitness > testFitness) {
-					for (auto& w : testWorkers) {
-						TraceEvent("TestTLogs").detail("Interf", w.interf.address());
+					if (fitness > testFitness) {
+						for (auto& w : testWorkers) {
+							TraceEvent("TestTLogs").detail("Interf", w.interf.address());
+						}
+						for (auto& w : workers) {
+							TraceEvent("RealTLogs").detail("Interf", w.interf.address());
+						}
+						TraceEvent("FitnessCompare")
+						    .detail("TestF", testFitness.toString())
+						    .detail("RealF", fitness.toString());
+						ASSERT(false);
 					}
-					for (auto& w : workers) {
-						TraceEvent("RealTLogs").detail("Interf", w.interf.address());
-					}
-					TraceEvent("FitnessCompare")
-					    .detail("TestF", testFitness.toString())
-					    .detail("RealF", fitness.toString());
-					ASSERT(false);
+				} catch (Error& e) {
+					ASSERT(false); // Simulation only validation should not throw errors
 				}
 			}
 			return workers;
@@ -1663,7 +1671,8 @@ public:
 	}
 
 	ErrorOr<RecruitFromConfigurationReply> findWorkersForConfigurationFromDC(RecruitFromConfigurationRequest const& req,
-	                                                                         Optional<Key> dcId) {
+	                                                                         Optional<Key> dcId,
+	                                                                         bool checkGoodRecruitment) {
 		RecruitFromConfigurationReply result;
 		std::map<Optional<Standalone<StringRef>>, int> id_used;
 		updateKnownIds(&id_used);
@@ -1788,7 +1797,7 @@ public:
 			               [](const WorkerDetails& w) { return w.interf; });
 		}
 
-		if (!goodRecruitmentTime.isReady() &&
+		if (!goodRecruitmentTime.isReady() && checkGoodRecruitment &&
 		    (RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog)
 		         .betterCount(RoleFitness(tlogs, ProcessClass::TLog, id_used)) ||
 		     (region.satelliteTLogReplicationFactor > 0 && req.configuration.usableRegions > 1 &&
@@ -1818,7 +1827,8 @@ public:
 		return result;
 	}
 
-	RecruitFromConfigurationReply findWorkersForConfigurationDispatch(RecruitFromConfigurationRequest const& req) {
+	RecruitFromConfigurationReply findWorkersForConfigurationDispatch(RecruitFromConfigurationRequest const& req,
+	                                                                  bool checkGoodRecruitment) {
 		if (req.configuration.regions.size() > 1) {
 			std::vector<RegionInfo> regions = req.configuration.regions;
 			if (regions[0].priority == regions[1].priority && regions[1].dcId == clusterControllerDcId.get()) {
@@ -1855,7 +1865,7 @@ public:
 
 			bool setPrimaryDesired = false;
 			try {
-				auto reply = findWorkersForConfigurationFromDC(req, regions[0].dcId);
+				auto reply = findWorkersForConfigurationFromDC(req, regions[0].dcId, checkGoodRecruitment);
 				setPrimaryDesired = true;
 				std::vector<Optional<Key>> dcPriority;
 				dcPriority.push_back(regions[0].dcId);
@@ -1872,7 +1882,8 @@ public:
 				    .detail("RecruitedTxnSystemDcId", regions[0].dcId);
 				throw no_more_servers();
 			} catch (Error& e) {
-				if (!goodRemoteRecruitmentTime.isReady() && regions[1].dcId != clusterControllerDcId.get()) {
+				if (!goodRemoteRecruitmentTime.isReady() && regions[1].dcId != clusterControllerDcId.get() &&
+				    checkGoodRecruitment) {
 					throw operation_failed();
 				}
 
@@ -1882,7 +1893,7 @@ public:
 				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDc", id)
 				    .detail("SetPrimaryDesired", setPrimaryDesired)
 				    .error(e);
-				auto reply = findWorkersForConfigurationFromDC(req, regions[1].dcId);
+				auto reply = findWorkersForConfigurationFromDC(req, regions[1].dcId, checkGoodRecruitment);
 				if (!setPrimaryDesired) {
 					std::vector<Optional<Key>> dcPriority;
 					dcPriority.push_back(regions[1].dcId);
@@ -1900,7 +1911,8 @@ public:
 			std::vector<Optional<Key>> dcPriority;
 			dcPriority.push_back(req.configuration.regions[0].dcId);
 			desiredDcIds.set(dcPriority);
-			auto reply = findWorkersForConfigurationFromDC(req, req.configuration.regions[0].dcId);
+			auto reply =
+			    findWorkersForConfigurationFromDC(req, req.configuration.regions[0].dcId, checkGoodRecruitment);
 			if (reply.isError()) {
 				throw reply.getError();
 			} else if (req.configuration.regions[0].dcId == clusterControllerDcId.get()) {
@@ -2093,7 +2105,7 @@ public:
 			    .detail("DesiredVersionIndexers", req.configuration.getDesiredVersionIndexers())
 			    .detail("ActualVersionIndexers", result.versionIndexers.size());
 
-			if (!goodRecruitmentTime.isReady() &&
+			if (!goodRecruitmentTime.isReady() && checkGoodRecruitment &&
 			    (RoleFitness(
 			         SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog)
 			         .betterCount(RoleFitness(tlogs, ProcessClass::TLog, id_used)) ||
@@ -2163,93 +2175,98 @@ public:
 	}
 
 	RecruitFromConfigurationReply findWorkersForConfiguration(RecruitFromConfigurationRequest const& req) {
-		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req);
+		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req, true);
 		if (g_network->isSimulated()) {
-			// FIXME: The logic to pick a satellite in a remote region is not
-			// deterministic and can therefore break this nondeterminism check.
-			// Since satellites will generally be in the primary region,
-			// disable the determinism check for remote region satellites.
-			bool remoteDCUsedAsSatellite = false;
-			if (req.configuration.regions.size() > 1) {
-				auto [region, remoteRegion] =
-				    getPrimaryAndRemoteRegion(req.configuration.regions, req.configuration.regions[0].dcId);
-				for (const auto& satellite : region.satellites) {
-					if (satellite.dcId == remoteRegion.dcId) {
-						remoteDCUsedAsSatellite = true;
+			try {
+				// FIXME: The logic to pick a satellite in a remote region is not
+				// deterministic and can therefore break this nondeterminism check.
+				// Since satellites will generally be in the primary region,
+				// disable the determinism check for remote region satellites.
+				bool remoteDCUsedAsSatellite = false;
+				if (req.configuration.regions.size() > 1) {
+					auto [region, remoteRegion] =
+					    getPrimaryAndRemoteRegion(req.configuration.regions, req.configuration.regions[0].dcId);
+					for (const auto& satellite : region.satellites) {
+						if (satellite.dcId == remoteRegion.dcId) {
+							remoteDCUsedAsSatellite = true;
+						}
 					}
 				}
-			}
-			if (!remoteDCUsedAsSatellite) {
-				RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req);
+				if (!remoteDCUsedAsSatellite) {
+					RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req, false);
 
-				std::map<Optional<Standalone<StringRef>>, int> firstUsed;
-				std::map<Optional<Standalone<StringRef>>, int> secondUsed;
-				updateKnownIds(&firstUsed);
-				updateKnownIds(&secondUsed);
+					std::map<Optional<Standalone<StringRef>>, int> firstUsed;
+					std::map<Optional<Standalone<StringRef>>, int> secondUsed;
+					updateKnownIds(&firstUsed);
+					updateKnownIds(&secondUsed);
 
-				// auto mworker = id_worker.find(masterProcessId);
-				//TraceEvent("CompareAddressesMaster")
-				//    .detail("Master",
-				//            mworker != id_worker.end() ? mworker->second.details.interf.address() : NetworkAddress());
+					// auto mworker = id_worker.find(masterProcessId);
+					//TraceEvent("CompareAddressesMaster")
+					//    .detail("Master",
+					//            mworker != id_worker.end() ? mworker->second.details.interf.address() :
+					//            NetworkAddress());
 
-				updateIdUsed(rep.tLogs, firstUsed);
-				updateIdUsed(compare.tLogs, secondUsed);
-				compareWorkers(
-				    req.configuration, rep.tLogs, firstUsed, compare.tLogs, secondUsed, ProcessClass::TLog, "TLog");
-				updateIdUsed(rep.satelliteTLogs, firstUsed);
-				updateIdUsed(compare.satelliteTLogs, secondUsed);
-				compareWorkers(req.configuration,
-				               rep.satelliteTLogs,
-				               firstUsed,
-				               compare.satelliteTLogs,
-				               secondUsed,
-				               ProcessClass::TLog,
-				               "Satellite");
-				updateIdUsed(rep.commitProxies, firstUsed);
-				updateIdUsed(compare.commitProxies, secondUsed);
-				updateIdUsed(rep.grvProxies, firstUsed);
-				updateIdUsed(compare.grvProxies, secondUsed);
-				updateIdUsed(rep.resolvers, firstUsed);
-				updateIdUsed(compare.resolvers, secondUsed);
-				updateIdUsed(rep.versionIndexers, firstUsed);
-				updateIdUsed(compare.versionIndexers, secondUsed);
-				compareWorkers(req.configuration,
-				               rep.commitProxies,
-				               firstUsed,
-				               compare.commitProxies,
-				               secondUsed,
-				               ProcessClass::CommitProxy,
-				               "CommitProxy");
-				compareWorkers(req.configuration,
-				               rep.grvProxies,
-				               firstUsed,
-				               compare.grvProxies,
-				               secondUsed,
-				               ProcessClass::GrvProxy,
-				               "GrvProxy");
-				compareWorkers(req.configuration,
-				               rep.resolvers,
-				               firstUsed,
-				               compare.resolvers,
-				               secondUsed,
-				               ProcessClass::Resolver,
-				               "Resolver");
-				compareWorkers(req.configuration,
-				               rep.versionIndexers,
-				               firstUsed,
-				               compare.versionIndexers,
-				               secondUsed,
-				               ProcessClass::VersionIndexer,
-				               "VersionIndexer");
-				updateIdUsed(rep.backupWorkers, firstUsed);
-				updateIdUsed(compare.backupWorkers, secondUsed);
-				compareWorkers(req.configuration,
-				               rep.backupWorkers,
-				               firstUsed,
-				               compare.backupWorkers,
-				               secondUsed,
-				               ProcessClass::Backup,
-				               "Backup");
+					updateIdUsed(rep.tLogs, firstUsed);
+					updateIdUsed(compare.tLogs, secondUsed);
+					compareWorkers(
+					    req.configuration, rep.tLogs, firstUsed, compare.tLogs, secondUsed, ProcessClass::TLog, "TLog");
+					updateIdUsed(rep.satelliteTLogs, firstUsed);
+					updateIdUsed(compare.satelliteTLogs, secondUsed);
+					compareWorkers(req.configuration,
+					               rep.satelliteTLogs,
+					               firstUsed,
+					               compare.satelliteTLogs,
+					               secondUsed,
+					               ProcessClass::TLog,
+					               "Satellite");
+					updateIdUsed(rep.commitProxies, firstUsed);
+					updateIdUsed(compare.commitProxies, secondUsed);
+					updateIdUsed(rep.grvProxies, firstUsed);
+					updateIdUsed(compare.grvProxies, secondUsed);
+					updateIdUsed(rep.resolvers, firstUsed);
+					updateIdUsed(compare.resolvers, secondUsed);
+					updateIdUsed(rep.versionIndexers, firstUsed);
+					updateIdUsed(compare.versionIndexers, secondUsed);
+					compareWorkers(req.configuration,
+					               rep.commitProxies,
+					               firstUsed,
+					               compare.commitProxies,
+					               secondUsed,
+					               ProcessClass::CommitProxy,
+					               "CommitProxy");
+					compareWorkers(req.configuration,
+					               rep.grvProxies,
+					               firstUsed,
+					               compare.grvProxies,
+					               secondUsed,
+					               ProcessClass::GrvProxy,
+					               "GrvProxy");
+					compareWorkers(req.configuration,
+					               rep.resolvers,
+					               firstUsed,
+					               compare.resolvers,
+					               secondUsed,
+					               ProcessClass::Resolver,
+					               "Resolver");
+					compareWorkers(req.configuration,
+					               rep.resolvers,
+					               firstUsed,
+					               compare.resolvers,
+					               secondUsed,
+					               ProcessClass::VersionIndexer,
+					               "VersionIndexer");
+					updateIdUsed(rep.backupWorkers, firstUsed);
+					updateIdUsed(compare.backupWorkers, secondUsed);
+					compareWorkers(req.configuration,
+					               rep.backupWorkers,
+					               firstUsed,
+					               compare.backupWorkers,
+					               secondUsed,
+					               ProcessClass::Backup,
+					               "Backup");
+				}
+			} catch (Error& e) {
+				ASSERT(false); // Simulation only validation should not throw errors
 			}
 		}
 		return rep;
