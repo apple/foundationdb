@@ -26,7 +26,9 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Subspace.h"
+#include "flow/ObjectSerializer.h"
 #include "flow/genericactors.actor.h"
+#include "flow/serialize.h"
 
 // Codec is a utility struct to convert a type to and from a Tuple.  It is used by the template
 // classes below like KeyBackedProperty and KeyBackedMap to convert key parts and values
@@ -168,14 +170,8 @@ public:
 	Future<T> getOrThrow(Reference<ReadYourWritesTransaction> tr,
 	                     Snapshot snapshot = Snapshot::False,
 	                     Error err = key_not_found()) const {
-		auto keyCopy = key;
-		auto backtrace = platform::get_backtrace();
 		return map(get(tr, snapshot), [=](Optional<T> val) -> T {
 			if (!val.present()) {
-				TraceEvent(SevInfo, "KeyBackedProperty_KeyNotFound")
-				    .detail("Key", keyCopy)
-				    .detail("Err", err.code())
-				    .detail("ParentTrace", backtrace.c_str());
 				throw err;
 			}
 
@@ -184,45 +180,39 @@ public:
 	}
 
 	Future<Optional<T>> get(Database cx, Snapshot snapshot = Snapshot::False) const {
-		auto& copy = *this;
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+		return runRYWTransaction(cx, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			return copy.get(tr, snapshot);
+			return self.get(tr, snapshot);
 		});
 	}
 
 	Future<T> getD(Database cx, Snapshot snapshot = Snapshot::False, T defaultValue = T()) const {
-		auto& copy = *this;
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+		return runRYWTransaction(cx, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			return copy.getD(tr, snapshot, defaultValue);
+			return self.getD(tr, snapshot, defaultValue);
 		});
 	}
 
 	Future<T> getOrThrow(Database cx, Snapshot snapshot = Snapshot::False, Error err = key_not_found()) const {
-		auto& copy = *this;
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+		return runRYWTransaction(cx, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			return copy.getOrThrow(tr, snapshot, err);
+			return self.getOrThrow(tr, snapshot, err);
 		});
 	}
 
 	void set(Reference<ReadYourWritesTransaction> tr, T const& val) { return tr->set(key, Codec<T>::pack(val).pack()); }
 
 	Future<Void> set(Database cx, T const& val) {
-		auto _key = key;
-		Value _val = Codec<T>::pack(val).pack();
-		return runRYWTransaction(cx, [_key, _val](Reference<ReadYourWritesTransaction> tr) {
+		return runRYWTransaction(cx, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->set(_key, _val);
-
+			self->set(tr, val);
 			return Future<Void>(Void());
 		});
 	}
@@ -262,12 +252,12 @@ public:
 	Key key;
 };
 
-// Convenient read/write access to a sorted map of KeyType to ValueType that has key as its prefix
+// Convenient read/write access to a sorted map of KeyType to ValueType under prefix
 // Even though 'this' is not actually mutated, methods that change db keys are not const.
 template <typename _KeyType, typename _ValueType>
 class KeyBackedMap {
 public:
-	KeyBackedMap(KeyRef key) : space(key) {}
+	KeyBackedMap(KeyRef prefix) : space(prefix) {}
 
 	typedef _KeyType KeyType;
 	typedef _ValueType ValueType;
