@@ -93,6 +93,9 @@ namespace {
 TransactionLineageCollector transactionLineageCollector;
 NameLineageCollector nameLineageCollector;
 
+// Set to true when new transactions should enable distributed trace recording.
+bool transactionTracingSample = false;
+
 template <class Interface, class Request>
 Future<REPLY_TYPE(Request)> loadBalance(
     DatabaseContext* ctx,
@@ -4205,9 +4208,15 @@ void debugAddTags(Transaction* tr) {
 	}
 }
 
-SpanID generateSpanID(int transactionTracingEnabled) {
+SpanID generateSpanID(bool transactionTracingEnabled, SpanID parentContext = SpanID()) {
 	uint64_t txnId = deterministicRandom()->randomUInt64();
-	if (transactionTracingEnabled > 0) {
+	if (parentContext.isValid()) {
+		if (parentContext.first() > 0) {
+			txnId = parentContext.first();
+		}
+		uint64_t tokenId = parentContext.second() > 0 ? deterministicRandom()->randomUInt64() : 0;
+		return SpanID(txnId, tokenId);
+	} else if (transactionTracingEnabled && transactionTracingSample) {
 		uint64_t tokenId = deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE
 		                       ? deterministicRandom()->randomUInt64()
 		                       : 0;
@@ -4217,7 +4226,7 @@ SpanID generateSpanID(int transactionTracingEnabled) {
 	}
 }
 
-Transaction::Transaction() : info(TaskPriority::DefaultEndpoint, generateSpanID(true)) {}
+Transaction::Transaction() : info(TaskPriority::DefaultEndpoint, generateSpanID(false)) {}
 
 Transaction::Transaction(Database const& cx)
   : info(cx->taskID, generateSpanID(cx->transactionTracingEnabled)), numErrors(0), options(cx),
@@ -4845,8 +4854,8 @@ void Transaction::reset() {
 
 void Transaction::fullReset() {
 	reset();
-	span = Span(span.location);
-	info.spanID = span.context;
+	info.spanID = generateSpanID(cx->transactionTracingEnabled);
+	span = Span(info.spanID, "Transaction"_loc);
 	backoff = CLIENT_KNOBS->DEFAULT_BACKOFF;
 }
 
@@ -5157,6 +5166,7 @@ ACTOR static Future<Void> tryCommit(Database cx,
 			}
 			when(CommitID ci = wait(reply)) {
 				Version v = ci.version;
+				transactionTracingSample = (v % 60000000) < (60000000 * FLOW_KNOBS->TRACING_SAMPLE_RATE);
 				if (v != invalidVersion) {
 					if (CLIENT_BUGGIFY) {
 						throw commit_unknown_result();
@@ -5871,7 +5881,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		}
 
 		Location location = "NAPI:getReadVersion"_loc;
-		UID spanContext = generateSpanID(cx->transactionTracingEnabled);
+		UID spanContext = generateSpanID(cx->transactionTracingEnabled, info.spanID);
 		auto const req = DatabaseContext::VersionRequest(spanContext, options.tags, info.debugID);
 		batcher.stream.send(req);
 		startTime = now();

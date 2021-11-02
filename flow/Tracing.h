@@ -38,9 +38,12 @@ struct Span {
 	  : context(context), begin(g_network->now()), location(location), parents(arena, parents.begin(), parents.end()) {
 		if (parents.size() > 0) {
 			// If the parents' token is 0 (meaning the trace should not be
-			// recorded), set the child token to 0 as well. Otherwise, use the
-			// existing (likely randomly generated) value.
-			uint64_t traceId = (*parents.begin()).second() > 0 ? context.second() : 0;
+			// recorded), set the child token to 0 as well. Otherwise, generate
+			// a new, random token.
+			uint64_t traceId = 0;
+			if ((*parents.begin()).second() > 0) {
+				traceId = deterministicRandom()->randomUInt64();
+			}
 			this->context = SpanID((*parents.begin()).first(), traceId);
 		}
 	}
@@ -79,12 +82,16 @@ struct Span {
 
 	void addParent(SpanID span) {
 		if (parents.size() == 0) {
+			uint64_t traceId = 0;
+			if (span.second() > 0) {
+				traceId = context.second() == 0 ? deterministicRandom()->randomUInt64() : context.second();
+			}
 			// Use first parent to set trace ID. This is non-ideal for spans
 			// with multiple parents, because the trace ID will associate the
 			// span with only one trace. A workaround is to look at the parent
 			// relationships instead of the trace ID. Another option in the
 			// future is to keep a list of trace IDs.
-			context = SpanID(span.first(), context.second());
+			context = SpanID(span.first(), traceId);
 		}
 		parents.push_back(arena, span);
 	}
