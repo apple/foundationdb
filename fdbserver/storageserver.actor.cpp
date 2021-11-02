@@ -5092,6 +5092,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				data->logProtocol = rd.protocolVersion();
 				data->storage.changeLogProtocol(ver, data->logProtocol);
 				cloneCursor2->setProtocolVersion(rd.protocolVersion());
+				spanContext = UID();
 			} else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
 				SpanContextMessage scm;
 				rd >> scm;
