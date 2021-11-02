@@ -715,7 +715,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	state PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags;
 
 	state PromiseStream<double> normalGRVLatency;
-	state Span span;
+	// state Span span;
 
 	state int64_t midShardSize = SERVER_KNOBS->MIN_SHARD_BYTES;
 	addActor.send(monitorDDMetricsChanges(&midShardSize, db));
@@ -796,7 +796,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 			} else {
 				break;
 			}
-			transactionQueue->span.swap(span);
+			// transactionQueue->span.swap(span);
 
 			auto& req = transactionQueue->front();
 			int tc = req.transactionCount;
@@ -877,7 +877,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 		int batchGRVProcessed = 0;
 		for (int i = 0; i < start.size(); i++) {
 			if (start[i].size()) {
-				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(span.context,
+				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(UID() /*span.context*/,
 				                                                                       grvProxyData,
 				                                                                       i,
 				                                                                       debugID,
@@ -900,7 +900,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 				batchGRVProcessed += batchPriTransactionsStarted[i];
 			}
 		}
-		span = Span(span.location);
+		// span = Span(span.location);
 
 		grvProxyData->stats.percentageOfDefaultGRVQueueProcessed =
 		    defaultQueueSize ? (double)defaultGRVProcessed / defaultQueueSize : 1;
