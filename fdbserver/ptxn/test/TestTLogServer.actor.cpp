@@ -558,7 +558,7 @@ TEST_CASE("/fdbserver/ptxn/test/commit_peek") {
 	return Void();
 }
 
-TEST_CASE(":/fdbserver/ptxn/test/run_storage_server") {
+TEST_CASE("/fdbserver/ptxn/test/run_storage_server") {
 	state ptxn::test::TestDriverOptions options(params);
 	state std::vector<Future<Void>> actors;
 	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
