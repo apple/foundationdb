@@ -6110,9 +6110,16 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		// (ClusterController, and from there to the DataDistributionTeamCollection)
 		if (!recruitReply.isSet())
 			recruitReply.sendError(recruitment_failed());
-		if (storageServerTerminated(self, persistentData, e))
+		if (e.code() == error_code_actor_cancelled)
+			throw e;
+
+		// If the storage server dies while something that uses self is still on the stack,
+		// we want that actor to complete before we terminate and that memory goes out of scope
+		state Error err = e;
+		wait(delay(0));
+		if (storageServerTerminated(self, persistentData, err))
 			return Void();
-		throw e;
+		throw err;
 	}
 }
 
@@ -6320,9 +6327,17 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	} catch (Error& e) {
 		if (recovered.canBeSet())
 			recovered.send(Void());
-		if (storageServerTerminated(self, persistentData, e))
+
+		if (e.code() == error_code_actor_cancelled)
+			throw e;
+
+		// If the storage server dies while something that uses self is still on the stack,
+		// we want that actor to complete before we terminate and that memory goes out of scope
+		state Error err = e;
+		wait(delay(0));
+		if (storageServerTerminated(self, persistentData, err))
 			return Void();
-		throw e;
+		throw err;
 	}
 }
 
