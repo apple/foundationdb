@@ -1820,7 +1820,6 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 				// boundaries. For now with only splits we can skip the whole range
 				continue;
 			}
-			ASSERT(readThrough == m->keyRange.begin);
 			state Reference<GranuleMetadata> metadata = m;
 
 			if (metadata->readable.canBeSet()) {

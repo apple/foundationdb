@@ -51,6 +51,7 @@ enum Operations {
 	OP_SETCLEARRANGE,
 	OP_COMMIT,
 	OP_TRANSACTION, /* pseudo-operation - cumulative time for the operation + commit */
+	OP_READ_BG,
 	MAX_OP /* must be the last item */
 };
 

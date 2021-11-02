@@ -409,6 +409,7 @@ public:
 
 	int transactionTracingEnabled;
 	double verifyCausalReadsProp = 0.0;
+	bool blobGranuleNoMaterialize = false;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;

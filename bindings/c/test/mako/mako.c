@@ -541,8 +541,40 @@ int run_op_clearrange(FDBTransaction* transaction, char* keystr, char* keystr2) 
 	return FDB_SUCCESS;
 }
 
+int run_op_read_blob_granules(FDBDatabase* database, char* keystr, char* keystr2, int64_t readVersion) {
+	FDBFuture* f;
+	fdb_error_t err;
+	FDBKeyValue const* out_kv;
+	int out_count;
+	int out_more;
+
+	// Not used currently! FIXME: fix warning
+	FDBReadBlobGranuleContext context;
+
+	f = fdb_database_read_blob_granules(database,
+	                                    (uint8_t*)keystr,
+	                                    strlen(keystr),
+	                                    (uint8_t*)keystr2,
+	                                    strlen(keystr2),
+	                                    0 /* beginVersion*/,
+	                                    readVersion,
+	                                    context);
+
+	wait_future(f);
+
+	err = fdb_future_get_keyvalue_array(f, &out_kv, &out_count, &out_more);
+	if (err) {
+		fprintf(stderr, "ERROR: fdb_future_get_keyvalue_array: %s\n", fdb_get_error(err));
+		fdb_future_destroy(f);
+		return FDB_ERROR_RETRY;
+	}
+	fdb_future_destroy(f);
+	return FDB_SUCCESS;
+}
+
 /* run one transaction */
-int run_one_transaction(FDBTransaction* transaction,
+int run_one_transaction(FDBDatabase* database,
+                        FDBTransaction* transaction,
                         mako_args_t* args,
                         mako_stats_t* stats,
                         char* keystr,
@@ -785,6 +817,10 @@ retryTxn:
 					rc = run_op_clearrange(transaction, keystr2, keystr);
 					docommit = 1;
 					break;
+				case OP_READ_BG:
+					// Requires that there is an explicit grv before bg
+					rc = run_op_read_blob_granules(database, keystr, keystr2, readversion);
+					break;
 				default:
 					fprintf(stderr, "ERROR: Unknown Operation %d\n", i);
 					break;
@@ -863,7 +899,8 @@ retryTxn:
 	return 0;
 }
 
-int run_workload(FDBTransaction* transaction,
+int run_workload(FDBDatabase* database,
+                 FDBTransaction* transaction,
                  mako_args_t* args,
                  int thread_tps,
                  volatile double* throttle_factor,
@@ -980,7 +1017,7 @@ int run_workload(FDBTransaction* transaction,
 		}
 
 		rc = run_one_transaction(
-		    transaction, args, stats, keystr, keystr2, valstr, block, elem_size, is_memory_allocated);
+		    database, transaction, args, stats, keystr, keystr2, valstr, block, elem_size, is_memory_allocated);
 		if (rc) {
 			/* FIXME: run_one_transaction should return something meaningful */
 			fprintf(annoyme, "ERROR: run_one_transaction failed (%d)\n", rc);
@@ -1057,6 +1094,9 @@ void get_stats_file_name(char filename[], int worker_id, int thread_id, int op) 
 		break;
 	case OP_TRANSACTION:
 		strcat(filename, "TRANSACTION");
+		break;
+	case OP_READ_BG:
+		strcat(filename, "READBLOBGRANULES");
 		break;
 	}
 }
@@ -1147,7 +1187,8 @@ void* worker_thread(void* thread_args) {
 
 	/* run the workload */
 	else if (args->mode == MODE_RUN) {
-		rc = run_workload(transaction,
+		rc = run_workload(database,
+		                  transaction,
 		                  args,
 		                  thread_tps,
 		                  throttle_factor,
@@ -1350,6 +1391,8 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 		if (args->disable_ryw) {
 			fdb_database_set_option(process.databases[i], FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, (uint8_t*)NULL, 0);
 		}
+		// always do not materialize blob granules
+		fdb_database_set_option(process.databases[i], FDB_DB_OPTION_TEST_BG_NO_MATERIALIZE, (uint8_t*)NULL, 0);
 	}
 #endif
 
@@ -1537,6 +1580,15 @@ int parse_transaction(mako_args_t* args, char* optarg) {
 			ptr += 3;
 		} else if (strncmp(ptr, "sc", 2) == 0) {
 			op = OP_SETCLEAR;
+			ptr += 2;
+		} else if (strncmp(ptr, "bg", 2) == 0) {
+			if (!args->txnspec.ops[OP_GETREADVERSION][OP_COUNT]) {
+				fprintf(debugme, "Error: bg requires explicit grv first!\n", ptr);
+				error = 1;
+				break;
+			}
+			op = OP_READ_BG;
+			rangeop = 1;
 			ptr += 2;
 		} else {
 			fprintf(debugme, "Error: Invalid transaction spec: %s\n", ptr);
@@ -1928,6 +1980,8 @@ char* get_ops_name(int ops_code) {
 		return "COMMIT";
 	case OP_TRANSACTION:
 		return "TRANSACTION";
+	case OP_READ_BG:
+		return "READBLOBGRANULE";
 	default:
 		return "";
 	}

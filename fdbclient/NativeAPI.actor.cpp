@@ -1681,6 +1681,11 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 		case FDBDatabaseOptions::TEST_CAUSAL_READ_RISKY:
 			verifyCausalReadsProp = double(extractIntOption(value, 0, 100)) / 100.0;
 			break;
+		case FDBDatabaseOptions::TEST_BG_NO_MATERIALIZE:
+			blobGranuleNoMaterialize = true;
+			// FIXME: warn if this is set?
+			break;
+
 		default:
 			break;
 		}
@@ -7321,7 +7326,7 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 					Arena a;
 					a.dependsOn(rep.arena);
 					results.send(Standalone<BlobGranuleChunkRef>(chunk, a));
-					keyRange = KeyRangeRef(chunk.keyRange.end, keyRange.end);
+					keyRange = KeyRangeRef(std::min(chunk.keyRange.end, keyRange.end), keyRange.end);
 				}
 			}
 			results.sendError(end_of_stream());

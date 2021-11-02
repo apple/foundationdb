@@ -259,6 +259,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION,      32 );
 
 	// blob granules
+	// TODO CHANGE BACK BEFORE MERGE!
 	init( ENABLE_BLOB_GRANULES,                   false );
 
 	// clang-format on

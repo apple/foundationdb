@@ -137,41 +137,45 @@ ThreadFuture<RangeResult> ThreadSafeDatabase::readBlobGranules(const KeyRangeRef
 	getFilesFuture.blockUntilReadyCheckOnMainThread();
 	Standalone<VectorRef<BlobGranuleChunkRef>> files = getFilesFuture.get();
 
-	// FIXME: could submit multiple chunks to start_load_f in parallel?
 	RangeResult results;
-
 	int chunkIdx = 0;
+
+	// FIXME: could submit multiple chunks to start_load_f in parallel?
 	for (BlobGranuleChunkRef& chunk : files) {
-		printf("TSD::readBlobGranules chunk %d\n", chunkIdx++);
-		// In V1 of api this is required, optional is just for forward compatibility
-		ASSERT(chunk.snapshotFile.present());
-		std::string snapshotFname = chunk.snapshotFile.get().filename.toString();
-		int64_t snapshotLoadId = granule_context.start_load_f(snapshotFname.c_str(),
-		                                                      snapshotFname.size(),
-		                                                      chunk.snapshotFile.get().offset,
-		                                                      chunk.snapshotFile.get().length,
-		                                                      granule_context.userContext);
-		printf("  S_ID=%lld\n", snapshotLoadId);
-
-		int64_t deltaLoadIds[chunk.deltaFiles.size()];
-		for (int deltaFileIdx = 0; deltaFileIdx < chunk.deltaFiles.size(); deltaFileIdx++) {
-			std::string deltaFName = chunk.deltaFiles[deltaFileIdx].filename.toString();
-			deltaLoadIds[deltaFileIdx] = granule_context.start_load_f(deltaFName.c_str(),
-			                                                          deltaFName.size(),
-			                                                          chunk.deltaFiles[deltaFileIdx].offset,
-			                                                          chunk.deltaFiles[deltaFileIdx].length,
-			                                                          granule_context.userContext);
-			printf("  D_ID=%lld\n", deltaLoadIds[deltaFileIdx]);
-		}
-
 		RangeResult chunkRows;
 
-		// FIXME: actually implement materialization! For now just printing stuff out
+		if (!db->blobGranuleNoMaterialize) {
+			// FIXME: actually implement file loading and materialization! For now just printing stuff out
+
+			// Start load process for all files in chunk
+			// In V1 of api snapshot is required, optional is just for forward compatibility
+			ASSERT(chunk.snapshotFile.present());
+			std::string snapshotFname = chunk.snapshotFile.get().filename.toString();
+			int64_t snapshotLoadId = granule_context.start_load_f(snapshotFname.c_str(),
+			                                                      snapshotFname.size(),
+			                                                      chunk.snapshotFile.get().offset,
+			                                                      chunk.snapshotFile.get().length,
+			                                                      granule_context.userContext);
+			printf("  S_ID=%lld\n", snapshotLoadId); // TODO REMOVE
+
+			int64_t deltaLoadIds[chunk.deltaFiles.size()];
+			for (int deltaFileIdx = 0; deltaFileIdx < chunk.deltaFiles.size(); deltaFileIdx++) {
+				std::string deltaFName = chunk.deltaFiles[deltaFileIdx].filename.toString();
+				deltaLoadIds[deltaFileIdx] = granule_context.start_load_f(deltaFName.c_str(),
+				                                                          deltaFName.size(),
+				                                                          chunk.deltaFiles[deltaFileIdx].offset,
+				                                                          chunk.deltaFiles[deltaFileIdx].length,
+				                                                          granule_context.userContext);
+				printf("  D_ID=%lld\n", deltaLoadIds[deltaFileIdx]); // TODO REMOVE
+			}
+		}
 
 		results.arena().dependsOn(chunkRows.arena());
 		results.append(results.arena(), chunkRows.begin(), chunkRows.size());
 
-		// FIXME: free with granule_context
+		if (!db->blobGranuleNoMaterialize) {
+			// FIXME: free with granule_context
+		}
 	}
 
 	return results;
