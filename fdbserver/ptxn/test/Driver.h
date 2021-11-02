@@ -96,6 +96,7 @@ struct TestDriverContext {
 	int numTLogs;
 	int numTLogGroups;
 	std::vector<TLogGroup> tLogGroups;
+	std::vector<std::vector<ptxn::TLogGroup>> groupsPerTLog;
 	std::unordered_map<TLogGroupID, std::shared_ptr<TLogInterfaceBase>> tLogGroupLeaders;
 	std::unordered_map<TLogGroupID, Version> tLogGroupVersion;
 	std::vector<std::shared_ptr<TLogInterfaceBase>> tLogInterfaces;

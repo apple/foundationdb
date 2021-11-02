@@ -108,6 +108,6 @@ startDelay = 0
     maxTestCases = 1
     testsMatching = '/fdbserver/ptxn/test/lock_tlog'
 
-    numTLogs = 1
+    numTLogs = 3
     numStorageTeams = 40
     numTLogGroups = 7
