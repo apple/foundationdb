@@ -1542,6 +1542,7 @@ ACTOR Future<Void> tLog(
 						                                                                  degraded,
 						                                                                  folder,
 						                                                                  self);
+						TraceEvent("SharedTlogGroup").detail("LogId", tlogId).detail("GroupID", group.logGroupId);
 						self->tlogGroups[group.logGroupId] = tlogGroup;
 						Promise<Void> teamRecovered;
 						tlogGroupRecoveries.push_back(tlogGroupRecovery(tlogGroup, teamRecovered));
@@ -1556,8 +1557,7 @@ ACTOR Future<Void> tLog(
 					// Disk errors need a chance to kill this actor.
 					wait(delay(0.000001));
 
-					for (auto& it : self->tlogGroups) {
-						Reference<TLogGroupData> tlogGroup = it.second;
+					for(auto& [_, tlogGroup] : self->tlogGroups) {
 						tlogGroup->sharedActors.send(commitQueue(tlogGroup));
 						// TODO: add updateStorageLoop when implementing pop
 						// tlogGroup->sharedActors.send(updateStorageLoop(tlogGroup));
