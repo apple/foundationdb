@@ -4447,15 +4447,17 @@ struct BTreePage {
 				c.moveFirst();
 				ASSERT(c.valid());
 
-				bool anyOutOfRange = false;
 				do {
 					r += "  ";
 					r += c.get().toString(height == 1);
 
+					// Out of range entries are annotated but can actually be valid, as they can be the result of
+					// subtree deletion followed by incremental insertions of records in the deleted range being added
+					// to an adjacent subtree which is logically expanded encompass the deleted range but still is using
+					// the original subtree boundaries as DeltaTree2 boundaries.
 					bool tooLow = c.get().withoutValue() < lowerBound.withoutValue();
 					bool tooHigh = c.get().withoutValue() >= upperBound.withoutValue();
 					if (tooLow || tooHigh) {
-						anyOutOfRange = true;
 						if (tooLow) {
 							r += " (below decode lower bound)";
 						}
@@ -4466,12 +4468,6 @@ struct BTreePage {
 					r += "\n";
 
 				} while (c.moveNext());
-
-				// Out of range entries are actually okay now and the result of subtree deletion followed by
-				// incremental insertions of records in the deleted range being added to an adjacent subtree
-				// which is logically expanded encompass the deleted range but still is using the original
-				// subtree boundaries as DeltaTree2 boundaries.
-				// ASSERT(!anyOutOfRange);
 			}
 		} catch (Error& e) {
 			debug_printf("BTreePage::toString ERROR: %s\n", e.what());
