@@ -491,4 +491,8 @@ void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* ho
 	threadCompletionHooks.emplace_back(hook, hookParameter);
 }
 
-IClientApi* ThreadSafeApi::api = new ThreadSafeApi();
+// static initialization of IClientApi::localApi with a singleton instance of ThreadSafeApi
+ThreadSafeApi::LocalClientInitializer::LocalClientInitializer() {
+	IClientApi::localApi = new ThreadSafeApi();
+}
+ThreadSafeApi::LocalClientInitializer ThreadSafeApi::LocalClientInitializer::instance;

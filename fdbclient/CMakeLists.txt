@@ -30,6 +30,7 @@ set(FDBCLIENT_SRCS
   ClientKnobs.cpp
   ClientKnobs.h
   ClientLogEvents.h
+  ClientVersion.h
   ClientWorkerInterface.h
   ClusterConnectionFile.actor.cpp
   ClusterConnectionFile.h
@@ -60,6 +61,7 @@ set(FDBCLIENT_SRCS
   GlobalConfig.actor.cpp
   GrvProxyInterface.h
   HTTP.actor.cpp
+  IClientApi.cpp
   IClientApi.h
   IConfigTransaction.cpp
   IConfigTransaction.h
