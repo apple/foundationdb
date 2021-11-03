@@ -533,6 +533,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 	state Future<Void> cacheProcessFuture;
 	state Future<Void> cacheErrorsFuture;
 	state Optional<double> incorrectTime;
+	state UID lastCCInterfaceId = UID();
 	loop {
 		state ClusterConnectionString storedConnectionString;
 		state bool upToDate = true;
@@ -585,10 +586,14 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		}
 
 		state bool ccInterfacePresent = ccInterface->get().present();
+		if (ccInterfacePresent) {
+			request.requestDbInfo = (ccInterface->get().get().id() != lastCCInterfaceId);
+		}
 		state Future<RegisterWorkerReply> registrationReply =
 		    ccInterfacePresent ? brokenPromiseToNever(ccInterface->get().get().registerWorker.getReply(request))
 		                       : Never();
 		state double startTime = now();
+		lastCCInterfaceId = ccInterface->get().present() ? ccInterface->get().get().id() : UID();
 		loop choose {
 			when(RegisterWorkerReply reply = wait(registrationReply)) {
 				processClass = reply.processClass;

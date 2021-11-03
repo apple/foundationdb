@@ -413,6 +413,7 @@ struct RegisterWorkerRequest {
 	bool degraded;
 	Version lastSeenKnobVersion;
 	ConfigClassSet knobConfigClassSet;
+	bool requestDbInfo;
 
 	RegisterWorkerRequest()
 	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
@@ -429,7 +430,8 @@ struct RegisterWorkerRequest {
 	                      ConfigClassSet knobConfigClassSet)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), blobManagerInterf(bmInterf),
-	    degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet) {}
+	    degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet),
+	    requestDbInfo(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -447,7 +449,8 @@ struct RegisterWorkerRequest {
 		           reply,
 		           degraded,
 		           lastSeenKnobVersion,
-		           knobConfigClassSet);
+		           knobConfigClassSet,
+		           requestDbInfo);
 	}
 };
 
