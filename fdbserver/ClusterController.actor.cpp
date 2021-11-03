@@ -3876,6 +3876,8 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 	        : waitFailureClient(worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME);
 	cluster->updateWorkerList.set(worker.locality.processId(),
 	                              ProcessData(worker.locality, startingClass, worker.stableAddress()));
+	cluster->updateDBInfoEndpoints.insert(worker.updateServerDBInfo.getEndpoint());
+	cluster->updateDBInfo.trigger();
 	// This switching avoids a race where the worker can be added to id_worker map after the workerAvailabilityWatch
 	// fails for the worker.
 	wait(delay(0));
@@ -4311,6 +4313,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 		info->second.issues = req.issues;
 
 		if (info->second.details.interf.id() != w.id()) {
+			self->removedDBInfoEndpoints.insert(info->second.details.interf.updateServerDBInfo.getEndpoint());
 			info->second.details.interf = w;
 			info->second.watcher = workerAvailabilityWatch(w, newProcessClass, self);
 		}
