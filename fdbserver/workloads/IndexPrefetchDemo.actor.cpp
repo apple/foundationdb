@@ -97,16 +97,17 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> scanRangeAndHop(Database cx, KeyRange range, Key hopInfo) {
-		std::cout << "start scanRangeAndHop " << range.toString() << std::endl;
+	ACTOR Future<Void> scanRangeAndFlatMap(Database cx, KeyRange range, Key mapper) {
+		std::cout << "start scanRangeAndFlatMap " << range.toString() << std::endl;
 		// TODO: When n is large, split into multiple transactions.
 		state Transaction tr(cx);
 		try {
 			tr.reset();
-			RangeResult result = wait(tr.getRangeAndHop(KeySelector(firstGreaterOrEqual(range.begin), range.arena()),
-			                                            KeySelector(firstGreaterOrEqual(range.end), range.arena()),
-			                                            hopInfo,
-			                                            GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+			RangeResult result =
+			    wait(tr.getRangeAndFlatMap(KeySelector(firstGreaterOrEqual(range.begin), range.arena()),
+			                               KeySelector(firstGreaterOrEqual(range.end), range.arena()),
+			                               mapper,
+			                               GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			showResult(result);
 			// result size: 2
 			// key=\x01prefix\x00\x01RECORD\x00\x01primary-key-of-record-2\x00, value=\x01data-of-record-2\x00
@@ -114,7 +115,7 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
-		std::cout << "finished scanRangeAndHop" << std::endl;
+		std::cout << "finished scanRangeAndFlatMap" << std::endl;
 		return Void();
 	}
 
@@ -129,10 +130,10 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 		state KeyRange someIndexes = KeyRangeRef(someIndexesBegin, someIndexesEnd);
 		wait(self->scanRange(cx, someIndexes));
 
-		Tuple hopInfoTuple;
-		hopInfoTuple << prefix << RECORD << "{K[3]}"_sr;
-		Key hopInfo = hopInfoTuple.getDataAsStandalone();
-		wait(self->scanRangeAndHop(cx, someIndexes, hopInfo));
+		Tuple mapperTuple;
+		mapperTuple << prefix << RECORD << "{K[3]}"_sr;
+		Key mapper = mapperTuple.getDataAsStandalone();
+		wait(self->scanRangeAndFlatMap(cx, someIndexes, mapper));
 		return Void();
 	}
 

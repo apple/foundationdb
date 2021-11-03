@@ -434,7 +434,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @param begin the beginning of the range (inclusive)
 	 * @param end the end of the range (exclusive)
-	 * @param hopInfo TODO
+	 * @param mapper TODO
 	 * @param limit the maximum number of results to return. Limits results to the
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
@@ -458,8 +458,8 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 * </p>
 	 * @return a handle to access the results of the asynchronous call
 	 */
-	AsyncIterable<KeyValue> getRangeAndHop(KeySelector begin, KeySelector end, byte[] hopInfo, int limit,
-	                                       boolean reverse, StreamingMode mode);
+	AsyncIterable<KeyValue> getRangeAndFlatMap(KeySelector begin, KeySelector end, byte[] mapper, int limit,
+	                                           boolean reverse, StreamingMode mode);
 
 	/**
 	 * Gets an estimate for the number of bytes stored in the given range.

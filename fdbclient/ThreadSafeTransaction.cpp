@@ -257,20 +257,20 @@ ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& 
 	});
 }
 
-ThreadFuture<RangeResult> ThreadSafeTransaction::getRangeAndHop(const KeySelectorRef& begin,
-                                                                const KeySelectorRef& end,
-                                                                const StringRef& hopInfo,
-                                                                GetRangeLimits limits,
-                                                                bool snapshot,
-                                                                bool reverse) {
+ThreadFuture<RangeResult> ThreadSafeTransaction::getRangeAndFlatMap(const KeySelectorRef& begin,
+                                                                    const KeySelectorRef& end,
+                                                                    const StringRef& mapper,
+                                                                    GetRangeLimits limits,
+                                                                    bool snapshot,
+                                                                    bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
-	Key h = hopInfo;
+	Key h = mapper;
 
 	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, b, e, h, limits, snapshot, reverse]() -> Future<RangeResult> {
 		tr->checkDeferredError();
-		return tr->getRangeAndHop(b, e, h, limits, Snapshot{ snapshot }, Reverse{ reverse });
+		return tr->getRangeAndFlatMap(b, e, h, limits, Snapshot{ snapshot }, Reverse{ reverse });
 	});
 }
 

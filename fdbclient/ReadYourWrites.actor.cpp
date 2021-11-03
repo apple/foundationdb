@@ -75,11 +75,11 @@ public:
 	};
 
 	template <bool reverse>
-	struct GetRangeAndHopReq {
-		GetRangeAndHopReq(KeySelector begin, KeySelector end, Key hopInfo, GetRangeLimits limits)
-		  : begin(begin), end(end), hopInfo(hopInfo), limits(limits) {}
+	struct GetRangeAndFlatMapReq {
+		GetRangeAndFlatMapReq(KeySelector begin, KeySelector end, Key mapper, GetRangeLimits limits)
+		  : begin(begin), end(end), mapper(mapper), limits(limits) {}
 		KeySelector begin, end;
-		Key hopInfo;
+		Key mapper;
 		GetRangeLimits limits;
 		using Result = RangeResult;
 	};
@@ -214,9 +214,9 @@ public:
 	}
 
 	ACTOR template <bool backwards>
-	static Future<RangeResult> readThroughAndHop(ReadYourWritesTransaction* ryw,
-	                                             GetRangeAndHopReq<backwards> read,
-	                                             Snapshot snapshot) {
+	static Future<RangeResult> readThroughAndFlatMap(ReadYourWritesTransaction* ryw,
+	                                                 GetRangeAndFlatMapReq<backwards> read,
+	                                                 Snapshot snapshot) {
 		if (backwards && read.end.offset > 1) {
 			// FIXME: Optimistically assume that this will not run into the system keys, and only reissue if the result
 			// actually does.
@@ -227,8 +227,8 @@ public:
 				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
 		}
 
-		RangeResult v = wait(ryw->tr.getRangeAndHop(
-		    read.begin, read.end, read.hopInfo, read.limits, snapshot, backwards ? Reverse::True : Reverse::False));
+		RangeResult v = wait(ryw->tr.getRangeAndFlatMap(
+		    read.begin, read.end, read.mapper, read.limits, snapshot, backwards ? Reverse::True : Reverse::False));
 		KeyRef maxKey = ryw->getMaxReadKey();
 		if (v.size() > 0) {
 			if (!backwards && v[v.size() - 1].key >= maxKey) {
@@ -349,11 +349,11 @@ public:
 		}
 	}
 	ACTOR template <class Req>
-	static Future<typename Req::Result> readWithConflictRangeThroughAndHop(ReadYourWritesTransaction* ryw,
-	                                                                       Req req,
-	                                                                       Snapshot snapshot) {
+	static Future<typename Req::Result> readWithConflictRangeThroughAndFlatMap(ReadYourWritesTransaction* ryw,
+	                                                                           Req req,
+	                                                                           Snapshot snapshot) {
 		choose {
-			when(typename Req::Result result = wait(readThroughAndHop(ryw, req, snapshot))) { return result; }
+			when(typename Req::Result result = wait(readThroughAndFlatMap(ryw, req, snapshot))) { return result; }
 			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
 		}
 	}
@@ -394,16 +394,16 @@ public:
 	}
 
 	template <class Req>
-	static inline Future<typename Req::Result> readWithConflictRangeAndHop(ReadYourWritesTransaction* ryw,
-	                                                                       Req const& req,
-	                                                                       Snapshot snapshot) {
+	static inline Future<typename Req::Result> readWithConflictRangeAndFlatMap(ReadYourWritesTransaction* ryw,
+	                                                                           Req const& req,
+	                                                                           Snapshot snapshot) {
 		if (ryw->options.readYourWritesDisabled) {
-			return readWithConflictRangeThroughAndHop(ryw, req, snapshot);
+			return readWithConflictRangeThroughAndFlatMap(ryw, req, snapshot);
 		} else if (snapshot && ryw->options.snapshotRywEnabled <= 0) {
-			TEST(true); // readWithConflictRangeSnapshot not supported for hop
+			TEST(true); // readWithConflictRangeSnapshot not supported for getRangeAndFlatMap
 			throw client_invalid_operation();
 		}
-		TEST(true); // readWithConflictRangeRYW not supported for hop
+		TEST(true); // readWithConflictRangeRYW not supported for getRangeAndFlatMap
 		throw client_invalid_operation();
 	}
 
@@ -1572,16 +1572,16 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(const KeySelector& begin
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
-Future<RangeResult> ReadYourWritesTransaction::getRangeAndHop(KeySelector begin,
-                                                              KeySelector end,
-                                                              Key hopInfo,
-                                                              GetRangeLimits limits,
-                                                              Snapshot snapshot,
-                                                              Reverse reverse) {
+Future<RangeResult> ReadYourWritesTransaction::getRangeAndFlatMap(KeySelector begin,
+                                                                  KeySelector end,
+                                                                  Key mapper,
+                                                                  GetRangeLimits limits,
+                                                                  Snapshot snapshot,
+                                                                  Reverse reverse) {
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
 		    end.getKey() <= specialKeys.end) {
-			TEST(true); // Special key space get range (Hop)
+			TEST(true); // Special key space get range (FlatMap)
 			throw client_invalid_operation(); // Not support special keys.
 		}
 	} else {
@@ -1603,7 +1603,7 @@ Future<RangeResult> ReadYourWritesTransaction::getRangeAndHop(KeySelector begin,
 
 	// This optimization prevents nullptr operations from being added to the conflict range
 	if (limits.isReached()) {
-		TEST(true); // RYW range read limit 0 (Hop)
+		TEST(true); // RYW range read limit 0 (FlatMap)
 		return RangeResult();
 	}
 
@@ -1617,15 +1617,15 @@ Future<RangeResult> ReadYourWritesTransaction::getRangeAndHop(KeySelector begin,
 		end.removeOrEqual(end.arena());
 
 	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
-		TEST(true); // RYW range inverted (Hop)
+		TEST(true); // RYW range inverted (FlatMap)
 		return RangeResult();
 	}
 
 	Future<RangeResult> result =
-	    reverse ? RYWImpl::readWithConflictRangeAndHop(
-	                  this, RYWImpl::GetRangeAndHopReq<true>(begin, end, hopInfo, limits), snapshot)
-	            : RYWImpl::readWithConflictRangeAndHop(
-	                  this, RYWImpl::GetRangeAndHopReq<false>(begin, end, hopInfo, limits), snapshot);
+	    reverse ? RYWImpl::readWithConflictRangeAndFlatMap(
+	                  this, RYWImpl::GetRangeAndFlatMapReq<true>(begin, end, mapper, limits), snapshot)
+	            : RYWImpl::readWithConflictRangeAndFlatMap(
+	                  this, RYWImpl::GetRangeAndFlatMapReq<false>(begin, end, mapper, limits), snapshot);
 
 	reading.add(success(result));
 	return result;

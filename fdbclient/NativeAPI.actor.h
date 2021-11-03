@@ -289,18 +289,18 @@ public:
 		                reverse);
 	}
 
-	[[nodiscard]] Future<RangeResult> getRangeAndHop(const KeySelector& begin,
-	                                                 const KeySelector& end,
-	                                                 const Key& hopInfo,
-	                                                 GetRangeLimits limits,
-	                                                 Snapshot = Snapshot::False,
-	                                                 Reverse = Reverse::False);
+	[[nodiscard]] Future<RangeResult> getRangeAndFlatMap(const KeySelector& begin,
+	                                                     const KeySelector& end,
+	                                                     const Key& mapper,
+	                                                     GetRangeLimits limits,
+	                                                     Snapshot = Snapshot::False,
+	                                                     Reverse = Reverse::False);
 
 private:
-	template <class GetKeyValuesMaybeHopRequest, class GetKeyValuesMaybeHopReply>
-	Future<RangeResult> getRangeMaybeHop(const KeySelector& begin,
+	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
+	Future<RangeResult> getRangeInternal(const KeySelector& begin,
 	                                     const KeySelector& end,
-	                                     const Key& hopInfo,
+	                                     const Key& mapper,
 	                                     GetRangeLimits limits,
 	                                     Snapshot snapshot,
 	                                     Reverse reverse);

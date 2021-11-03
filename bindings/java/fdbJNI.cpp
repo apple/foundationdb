@@ -756,23 +756,24 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 	return (jlong)f;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getRangeAndHop(JNIEnv* jenv,
-                                                                                               jobject,
-                                                                                               jlong tPtr,
-                                                                                               jbyteArray keyBeginBytes,
-                                                                                               jboolean orEqualBegin,
-                                                                                               jint offsetBegin,
-                                                                                               jbyteArray keyEndBytes,
-                                                                                               jboolean orEqualEnd,
-                                                                                               jint offsetEnd,
-                                                                                               jbyteArray hopInfoBytes,
-                                                                                               jint rowLimit,
-                                                                                               jint targetBytes,
-                                                                                               jint streamingMode,
-                                                                                               jint iteration,
-                                                                                               jboolean snapshot,
-                                                                                               jboolean reverse) {
-	if (!tPtr || !keyBeginBytes || !keyEndBytes || !hopInfoBytes) {
+JNIEXPORT jlong JNICALL
+Java_com_apple_foundationdb_FDBTransaction_Transaction_1getRangeAndFlatMap(JNIEnv* jenv,
+                                                                           jobject,
+                                                                           jlong tPtr,
+                                                                           jbyteArray keyBeginBytes,
+                                                                           jboolean orEqualBegin,
+                                                                           jint offsetBegin,
+                                                                           jbyteArray keyEndBytes,
+                                                                           jboolean orEqualEnd,
+                                                                           jint offsetEnd,
+                                                                           jbyteArray mapperBytes,
+                                                                           jint rowLimit,
+                                                                           jint targetBytes,
+                                                                           jint streamingMode,
+                                                                           jint iteration,
+                                                                           jboolean snapshot,
+                                                                           jboolean reverse) {
+	if (!tPtr || !keyBeginBytes || !keyEndBytes || !mapperBytes) {
 		throwParamNotNull(jenv);
 		return 0;
 	}
@@ -793,8 +794,8 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		return 0;
 	}
 
-	uint8_t* barrHopInfo = (uint8_t*)jenv->GetByteArrayElements(hopInfoBytes, JNI_NULL);
-	if (!barrHopInfo) {
+	uint8_t* barrMapper = (uint8_t*)jenv->GetByteArrayElements(mapperBytes, JNI_NULL);
+	if (!barrMapper) {
 		jenv->ReleaseByteArrayElements(keyBeginBytes, (jbyte*)barrBegin, JNI_ABORT);
 		jenv->ReleaseByteArrayElements(keyEndBytes, (jbyte*)barrEnd, JNI_ABORT);
 		if (!jenv->ExceptionOccurred())
@@ -802,26 +803,26 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		return 0;
 	}
 
-	FDBFuture* f = fdb_transaction_get_range_and_hop(tr,
-	                                                 barrBegin,
-	                                                 jenv->GetArrayLength(keyBeginBytes),
-	                                                 orEqualBegin,
-	                                                 offsetBegin,
-	                                                 barrEnd,
-	                                                 jenv->GetArrayLength(keyEndBytes),
-	                                                 orEqualEnd,
-	                                                 offsetEnd,
-	                                                 barrHopInfo,
-	                                                 jenv->GetArrayLength(hopInfoBytes),
-	                                                 rowLimit,
-	                                                 targetBytes,
-	                                                 (FDBStreamingMode)streamingMode,
-	                                                 iteration,
-	                                                 snapshot,
-	                                                 reverse);
+	FDBFuture* f = fdb_transaction_get_range_and_flat_map(tr,
+	                                                      barrBegin,
+	                                                      jenv->GetArrayLength(keyBeginBytes),
+	                                                      orEqualBegin,
+	                                                      offsetBegin,
+	                                                      barrEnd,
+	                                                      jenv->GetArrayLength(keyEndBytes),
+	                                                      orEqualEnd,
+	                                                      offsetEnd,
+	                                                      barrMapper,
+	                                                      jenv->GetArrayLength(mapperBytes),
+	                                                      rowLimit,
+	                                                      targetBytes,
+	                                                      (FDBStreamingMode)streamingMode,
+	                                                      iteration,
+	                                                      snapshot,
+	                                                      reverse);
 	jenv->ReleaseByteArrayElements(keyBeginBytes, (jbyte*)barrBegin, JNI_ABORT);
 	jenv->ReleaseByteArrayElements(keyEndBytes, (jbyte*)barrEnd, JNI_ABORT);
-	jenv->ReleaseByteArrayElements(hopInfoBytes, (jbyte*)barrHopInfo, JNI_ABORT);
+	jenv->ReleaseByteArrayElements(mapperBytes, (jbyte*)barrMapper, JNI_ABORT);
 	return (jlong)f;
 }
 
