@@ -1182,7 +1182,6 @@ ThreadFuture<RangeResult> MultiVersionDatabase::readBlobGranules(const KeyRangeR
                                                                  Version endVersion,
                                                                  ReadBlobGranuleContext granuleContext) {
 	// FIXME: what to do if not set?..
-	printf("    MultiVersionDatabase::readBlobGranules. DB set=%d\n", dbState->db ? 1 : 0);
 	return dbState->db->readBlobGranules(keyRange, beginVersion, endVersion, granuleContext);
 }
 

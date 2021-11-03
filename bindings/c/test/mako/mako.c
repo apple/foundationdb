@@ -2031,9 +2031,6 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			}
 			break;
 		case ARG_BG_FILE_PATH:
-			// TODO REMOVE
-
-			printf("BG file path arg: %s\n", optarg);
 			args->bg_materialize_files = true;
 			strncpy(args->bg_file_path, optarg, strlen(optarg) + 1);
 		}

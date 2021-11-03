@@ -33,20 +33,11 @@
 static Arena loadSnapshotFile(const StringRef& snapshotData,
                               KeyRangeRef keyRange,
                               std::map<KeyRef, ValueRef>& dataMap) {
-	// weird stuff for deserializing vector and arenas
-	/*Arena arena;
-	Arena parseArena;
-	GranuleSnapshot snapshot;
-	ArenaObjectReader rdr(arena, snapshotData, Unversioned());
-	rdr.deserialize(FileIdentifierFor<GranuleSnapshot>::value, snapshot, parseArena);
-	arena.dependsOn(parseArena);*/
 
 	Arena parseArena;
 	GranuleSnapshot snapshot;
 	ObjectReader reader(snapshotData.begin(), Unversioned());
 	reader.deserialize(FileIdentifierFor<GranuleSnapshot>::value, snapshot, parseArena);
-
-	// printf("Parsed %d rows from snapshot file %s\n", snapshot.size(), filename.c_str());
 
 	// TODO REMOVE sanity check eventually
 	for (int i = 0; i < snapshot.size() - 1; i++) {

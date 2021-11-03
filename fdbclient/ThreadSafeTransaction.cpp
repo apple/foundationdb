@@ -139,7 +139,6 @@ ThreadFuture<RangeResult> ThreadSafeDatabase::readBlobGranules(const KeyRangeRef
 	Standalone<VectorRef<BlobGranuleChunkRef>> files = getFilesFuture.get();
 
 	RangeResult results;
-	int chunkIdx = 0;
 
 	// FIXME: could submit multiple chunks to start_load_f in parallel?
 	for (BlobGranuleChunkRef& chunk : files) {
@@ -179,8 +178,7 @@ ThreadFuture<RangeResult> ThreadSafeDatabase::readBlobGranules(const KeyRangeRef
 				                         chunk.deltaFiles[i].length);
 			}
 
-			// FIXME: use bytes from snapshot and delta to materialize chunkRows
-
+			// materialize rows from chunk
 			chunkRows = materializeBlobGranule(chunk, keyRange, readVersion, snapshotData, deltaData);
 		}
 
