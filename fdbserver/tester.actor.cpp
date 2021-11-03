@@ -284,7 +284,7 @@ struct CompoundWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		std::vector<Future<Void>> all;
 		all.reserve(workloads.size());
-		auto wCount = std::make_shared<unsigned>(workloads.size());
+		auto wCount = std::make_shared<unsigned>(0);
 		for (int w = 0; w < workloads.size(); w++) {
 			std::string workloadName = workloads[w]->description();
 			++(*wCount);
@@ -312,7 +312,7 @@ struct CompoundWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override {
 		std::vector<Future<bool>> all;
 		all.reserve(workloads.size());
-		auto wCount = std::make_shared<unsigned>(workloads.size());
+		auto wCount = std::make_shared<unsigned>(0);
 		for (int w = 0; w < workloads.size(); w++) {
 			std::string workloadName = workloads[w]->description();
 			++(*wCount);
