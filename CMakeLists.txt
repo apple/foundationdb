@@ -18,7 +18,7 @@
 # limitations under the License.
 cmake_minimum_required(VERSION 3.13)
 project(foundationdb
-  VERSION 6.3.22
+  VERSION 6.3.23
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES C CXX ASM)
