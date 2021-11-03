@@ -1,5 +1,5 @@
 /*
- * RangeAndHopQueryIntegrationTest.java
+ * RangeAndFlatMapQueryIntegrationTest.java
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -40,7 +40,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 @ExtendWith(RequiresDatabase.class)
-class RangeAndHopQueryIntegrationTest {
+class RangeAndFlatMapQueryIntegrationTest {
 	private static final FDB fdb = FDB.selectAPIVersion(710);
 	public String databaseArg = null;
 	private Database openFDB() { return fdb.open(databaseArg); }
@@ -86,7 +86,7 @@ class RangeAndHopQueryIntegrationTest {
 		return cluster;
 	}
 	public static void main(String[] args) throws Exception {
-		final RangeAndHopQueryIntegrationTest test = new RangeAndHopQueryIntegrationTest();
+		final RangeAndFlatMapQueryIntegrationTest test = new RangeAndFlatMapQueryIntegrationTest();
 		test.databaseArg = getArgFromEnv();
 		test.clearDatabase();
 		test.comparePerformance();
@@ -103,7 +103,7 @@ class RangeAndHopQueryIntegrationTest {
 		try (Database db = openFDB()) {
 			insertRecordsWithIndexes(numRecords, db);
 			instrument(rangeQueryAndGet, "rangeQueryAndGet", db);
-			instrument(rangeQueryAndHop, "rangeQueryAndHop", db);
+			instrument(rangeQueryAndFlatMap, "rangeQueryAndFlatMap", db);
 		}
 	}
 
@@ -176,14 +176,15 @@ class RangeAndHopQueryIntegrationTest {
 		return null;
 	});
 
-	RangeQueryWithIndex rangeQueryAndHop = (int begin, int end, Database db) -> db.run(tr -> {
+	RangeQueryWithIndex rangeQueryAndFlatMap = (int begin, int end, Database db) -> db.run(tr -> {
 		try {
 			tr.options().setReadYourWritesDisable();
-			List<KeyValue> kvs = tr.getRangeAndHop(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
-			                                       KeySelector.firstGreaterOrEqual(indexEntryKey(end)), HOP_INFO,
-			                                       ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
-			                         .asList()
-			                         .get();
+			List<KeyValue> kvs =
+			    tr.getRangeAndFlatMap(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
+			                          KeySelector.firstGreaterOrEqual(indexEntryKey(end)), HOP_INFO,
+			                          ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
+			        .asList()
+			        .get();
 			Assertions.assertEquals(end - begin, kvs.size());
 
 			if (validate) {
@@ -205,7 +206,7 @@ class RangeAndHopQueryIntegrationTest {
 	}
 
 	@Test
-	void rangeAndHopQueryOverMultipleRows() throws Exception {
+	void rangeAndFlatMapQueryOverMultipleRows() throws Exception {
 		try (Database db = openFDB()) {
 			insertRecordsWithIndexes(3, db);
 
@@ -215,13 +216,13 @@ class RangeAndHopQueryIntegrationTest {
 			}
 
 			db.run(tr -> {
-				// getRangeAndHop is only support without RYW. This is a must!!!
+				// getRangeAndFlatMap is only support without RYW. This is a must!!!
 				tr.options().setReadYourWritesDisable();
 
 				Iterator<KeyValue> kvs =
-				    tr.getRangeAndHop(KeySelector.firstGreaterOrEqual(indexEntryKey(0)),
-				                      KeySelector.firstGreaterThan(indexEntryKey(1)), HOP_INFO,
-				                      ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
+				    tr.getRangeAndFlatMap(KeySelector.firstGreaterOrEqual(indexEntryKey(0)),
+				                          KeySelector.firstGreaterThan(indexEntryKey(1)), HOP_INFO,
+				                          ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
 				        .iterator();
 				Iterator<byte[]> expected_data_of_records_iter = expected_data_of_records.iterator();
 				while (expected_data_of_records_iter.hasNext()) {

@@ -225,39 +225,39 @@ GetRangeResult get_range(fdb::Transaction& tr,
 	return GetRangeResult{ results, out_more != 0, 0 };
 }
 
-GetRangeResult get_range_and_hop(fdb::Transaction& tr,
-                                 const uint8_t* begin_key_name,
-                                 int begin_key_name_length,
-                                 fdb_bool_t begin_or_equal,
-                                 int begin_offset,
-                                 const uint8_t* end_key_name,
-                                 int end_key_name_length,
-                                 fdb_bool_t end_or_equal,
-                                 int end_offset,
-                                 const uint8_t* hop_info_name,
-                                 int hop_info_name_length,
-                                 int limit,
-                                 int target_bytes,
-                                 FDBStreamingMode mode,
-                                 int iteration,
-                                 fdb_bool_t snapshot,
-                                 fdb_bool_t reverse) {
-	fdb::KeyValueArrayFuture f1 = tr.get_range_and_hop(begin_key_name,
-	                                                   begin_key_name_length,
-	                                                   begin_or_equal,
-	                                                   begin_offset,
-	                                                   end_key_name,
-	                                                   end_key_name_length,
-	                                                   end_or_equal,
-	                                                   end_offset,
-	                                                   hop_info_name,
-	                                                   hop_info_name_length,
-	                                                   limit,
-	                                                   target_bytes,
-	                                                   mode,
-	                                                   iteration,
-	                                                   snapshot,
-	                                                   reverse);
+GetRangeResult get_range_and_flat_map(fdb::Transaction& tr,
+                                      const uint8_t* begin_key_name,
+                                      int begin_key_name_length,
+                                      fdb_bool_t begin_or_equal,
+                                      int begin_offset,
+                                      const uint8_t* end_key_name,
+                                      int end_key_name_length,
+                                      fdb_bool_t end_or_equal,
+                                      int end_offset,
+                                      const uint8_t* mapper_name,
+                                      int mapper_name_length,
+                                      int limit,
+                                      int target_bytes,
+                                      FDBStreamingMode mode,
+                                      int iteration,
+                                      fdb_bool_t snapshot,
+                                      fdb_bool_t reverse) {
+	fdb::KeyValueArrayFuture f1 = tr.get_range_and_flat_map(begin_key_name,
+	                                                        begin_key_name_length,
+	                                                        begin_or_equal,
+	                                                        begin_offset,
+	                                                        end_key_name,
+	                                                        end_key_name_length,
+	                                                        end_or_equal,
+	                                                        end_offset,
+	                                                        mapper_name,
+	                                                        mapper_name_length,
+	                                                        limit,
+	                                                        target_bytes,
+	                                                        mode,
+	                                                        iteration,
+	                                                        snapshot,
+	                                                        reverse);
 
 	fdb_error_t err = wait_future(f1);
 	if (err) {
@@ -895,7 +895,7 @@ static std::string recordValue(const int i) {
 	return Tuple().append(dataOfRecord(i)).pack().toString();
 }
 
-TEST_CASE("fdb_transaction_get_range_and_hop") {
+TEST_CASE("fdb_transaction_get_range_and_flat_map") {
 	// Note: The user requested `prefix` should be added as the first element of the tuple that forms the key, rather
 	// than the prefix of the key. So we don't use key() or create_data() in this test.
 	std::map<std::string, std::string> data;
@@ -905,19 +905,19 @@ TEST_CASE("fdb_transaction_get_range_and_hop") {
 	}
 	insert_data(db, data);
 
-	std::string hop_info = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).pack().toString();
+	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).pack().toString();
 
 	fdb::Transaction tr(db);
-	// get_range_and_hop is only support without RYW. This is a must!!!
+	// get_range_and_flat_map is only support without RYW. This is a must!!!
 	fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
 	while (1) {
-		auto result = get_range_and_hop(
+		auto result = get_range_and_flat_map(
 		    tr,
 		    // [0, 1]
 		    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKey(0).c_str(), indexEntryKey(0).size()),
 		    FDB_KEYSEL_FIRST_GREATER_THAN((const uint8_t*)indexEntryKey(1).c_str(), indexEntryKey(1).size()),
-		    (const uint8_t*)hop_info.c_str(),
-		    hop_info.size(),
+		    (const uint8_t*)mapper.c_str(),
+		    mapper.size(),
 		    /* limit */ 0,
 		    /* target_bytes */ 0,
 		    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,

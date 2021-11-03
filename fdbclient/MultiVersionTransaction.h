@@ -118,23 +118,23 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                  int iteration,
 	                                  fdb_bool_t snapshot,
 	                                  fdb_bool_t reverse);
-	FDBFuture* (*transactionGetRangeAndHop)(FDBTransaction* tr,
-	                                        uint8_t const* beginKeyName,
-	                                        int beginKeyNameLength,
-	                                        fdb_bool_t beginOrEqual,
-	                                        int beginOffset,
-	                                        uint8_t const* endKeyName,
-	                                        int endKeyNameLength,
-	                                        fdb_bool_t endOrEqual,
-	                                        int endOffset,
-	                                        uint8_t const* hop_info_name,
-	                                        int hop_info_name_length,
-	                                        int limit,
-	                                        int targetBytes,
-	                                        FDBStreamingMode mode,
-	                                        int iteration,
-	                                        fdb_bool_t snapshot,
-	                                        fdb_bool_t reverse);
+	FDBFuture* (*transactionGetRangeAndFlatMap)(FDBTransaction* tr,
+	                                            uint8_t const* beginKeyName,
+	                                            int beginKeyNameLength,
+	                                            fdb_bool_t beginOrEqual,
+	                                            int beginOffset,
+	                                            uint8_t const* endKeyName,
+	                                            int endKeyNameLength,
+	                                            fdb_bool_t endOrEqual,
+	                                            int endOffset,
+	                                            uint8_t const* mapper_name,
+	                                            int mapper_name_length,
+	                                            int limit,
+	                                            int targetBytes,
+	                                            FDBStreamingMode mode,
+	                                            int iteration,
+	                                            fdb_bool_t snapshot,
+	                                            fdb_bool_t reverse);
 	FDBFuture* (*transactionGetVersionstamp)(FDBTransaction* tr);
 
 	void (*transactionSet)(FDBTransaction* tr,
@@ -236,12 +236,12 @@ public:
 	                                   GetRangeLimits limits,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override;
-	ThreadFuture<RangeResult> getRangeAndHop(const KeySelectorRef& begin,
-	                                         const KeySelectorRef& end,
-	                                         const StringRef& hopInfo,
-	                                         GetRangeLimits limits,
-	                                         bool snapshot,
-	                                         bool reverse) override;
+	ThreadFuture<RangeResult> getRangeAndFlatMap(const KeySelectorRef& begin,
+	                                             const KeySelectorRef& end,
+	                                             const StringRef& mapper,
+	                                             GetRangeLimits limits,
+	                                             bool snapshot,
+	                                             bool reverse) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
@@ -383,12 +383,12 @@ public:
 	                                   GetRangeLimits limits,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override;
-	ThreadFuture<RangeResult> getRangeAndHop(const KeySelectorRef& begin,
-	                                         const KeySelectorRef& end,
-	                                         const StringRef& hopInfo,
-	                                         GetRangeLimits limits,
-	                                         bool snapshot,
-	                                         bool reverse) override;
+	ThreadFuture<RangeResult> getRangeAndFlatMap(const KeySelectorRef& begin,
+	                                             const KeySelectorRef& end,
+	                                             const StringRef& mapper,
+	                                             GetRangeLimits limits,
+	                                             bool snapshot,
+	                                             bool reverse) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 

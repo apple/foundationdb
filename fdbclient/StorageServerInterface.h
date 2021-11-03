@@ -66,7 +66,7 @@ struct StorageServerInterface {
 	// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 	// selector offset prevents all data from being read in one range read
 	RequestStream<struct GetKeyValuesRequest> getKeyValues;
-	RequestStream<struct GetKeyValuesAndHopRequest> getKeyValuesAndHop;
+	RequestStream<struct GetKeyValuesAndFlatMapRequest> getKeyValuesAndFlatMap;
 
 	RequestStream<struct GetShardStateRequest> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
@@ -131,8 +131,8 @@ struct StorageServerInterface {
 				    RequestStream<struct OverlappingChangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
 				changeFeedPop =
 				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
-				getKeyValuesAndHop =
-				    RequestStream<struct GetKeyValuesAndHopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
+				getKeyValuesAndFlatMap =
+				    RequestStream<struct GetKeyValuesAndFlatMapRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -178,7 +178,7 @@ struct StorageServerInterface {
 		streams.push_back(changeFeedStream.getReceiver());
 		streams.push_back(overlappingChangeFeeds.getReceiver());
 		streams.push_back(changeFeedPop.getReceiver());
-		streams.push_back(getKeyValuesAndHop.getReceiver(TaskPriority::LoadBalancedEndpoint));
+		streams.push_back(getKeyValuesAndFlatMap.getReceiver(TaskPriority::LoadBalancedEndpoint));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -303,7 +303,7 @@ struct GetKeyValuesRequest : TimedRequest {
 	KeySelectorRef begin, end;
 	// This is a dummy field there has never been used.
 	// TODO: Get rid of this by constexpr or other template magic in getRange
-	KeyRef hopInfo = KeyRef();
+	KeyRef mapper = KeyRef();
 	Version version; // or latestVersion
 	int limit, limitBytes;
 	bool isFetchKeys;
@@ -318,16 +318,15 @@ struct GetKeyValuesRequest : TimedRequest {
 	}
 };
 
-struct GetKeyValuesAndHopReply : public LoadBalancedReply {
+struct GetKeyValuesAndFlatMapReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 1783067;
 	Arena arena;
-	// The key is the key in the requested range rather than the hop key.
 	VectorRef<KeyValueRef, VecSerStrategy::String> data;
 	Version version; // useful when latestVersion was requested
 	bool more;
 	bool cached = false;
 
-	GetKeyValuesAndHopReply() : version(invalidVersion), more(false), cached(false) {}
+	GetKeyValuesAndFlatMapReply() : version(invalidVersion), more(false), cached(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -335,24 +334,24 @@ struct GetKeyValuesAndHopReply : public LoadBalancedReply {
 	}
 };
 
-struct GetKeyValuesAndHopRequest : TimedRequest {
+struct GetKeyValuesAndFlatMapRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 6795747;
 	SpanID spanContext;
 	Arena arena;
 	KeySelectorRef begin, end;
-	KeyRef hopInfo;
+	KeyRef mapper;
 	Version version; // or latestVersion
 	int limit, limitBytes;
 	bool isFetchKeys;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
-	ReplyPromise<GetKeyValuesAndHopReply> reply;
+	ReplyPromise<GetKeyValuesAndFlatMapReply> reply;
 
-	GetKeyValuesAndHopRequest() : isFetchKeys(false) {}
+	GetKeyValuesAndFlatMapRequest() : isFetchKeys(false) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(
-		    ar, begin, end, hopInfo, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
+		    ar, begin, end, mapper, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
 	}
 };
 

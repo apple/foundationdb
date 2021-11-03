@@ -160,8 +160,8 @@ void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageSe
 		                             TSSEndpointData(tssi.id(), tssi.getKey.getEndpoint(), metrics));
 		queueModel.updateTssEndpoint(ssi.getKeyValues.getEndpoint().token.first(),
 		                             TSSEndpointData(tssi.id(), tssi.getKeyValues.getEndpoint(), metrics));
-		queueModel.updateTssEndpoint(ssi.getKeyValuesAndHop.getEndpoint().token.first(),
-		                             TSSEndpointData(tssi.id(), tssi.getKeyValuesAndHop.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.getKeyValuesAndFlatMap.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getKeyValuesAndFlatMap.getEndpoint(), metrics));
 		queueModel.updateTssEndpoint(ssi.getKeyValuesStream.getEndpoint().token.first(),
 		                             TSSEndpointData(tssi.id(), tssi.getKeyValuesStream.getEndpoint(), metrics));
 
@@ -185,7 +185,7 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 		queueModel.removeTssEndpoint(ssi.getValue.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.getKey.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.getKeyValues.getEndpoint().token.first());
-		queueModel.removeTssEndpoint(ssi.getKeyValuesAndHop.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.getKeyValuesAndFlatMap.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.getKeyValuesStream.getEndpoint().token.first());
 
 		queueModel.removeTssEndpoint(ssi.watchValue.getEndpoint().token.first());
@@ -1199,7 +1199,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionPhysicalReadsCompleted("PhysicalReadRequestsCompleted", cc),
     transactionGetKeyRequests("GetKeyRequests", cc), transactionGetValueRequests("GetValueRequests", cc),
     transactionGetRangeRequests("GetRangeRequests", cc),
-    transactionGetRangeAndHopRequests("GetRangeAndHopRequests", cc),
+    transactionGetRangeAndFlatMapRequests("GetRangeAndFlatMapRequests", cc),
     transactionGetRangeStreamRequests("GetRangeStreamRequests", cc), transactionWatchRequests("WatchRequests", cc),
     transactionGetAddressesForKeyRequests("GetAddressesForKeyRequests", cc), transactionBytesRead("BytesRead", cc),
     transactionKeysRead("KeysRead", cc), transactionMetadataVersionReads("MetadataVersionReads", cc),
@@ -1455,7 +1455,7 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionPhysicalReadsCompleted("PhysicalReadRequestsCompleted", cc),
     transactionGetKeyRequests("GetKeyRequests", cc), transactionGetValueRequests("GetValueRequests", cc),
     transactionGetRangeRequests("GetRangeRequests", cc),
-    transactionGetRangeAndHopRequests("GetRangeAndHopRequests", cc),
+    transactionGetRangeAndFlatMapRequests("GetRangeAndFlatMapRequests", cc),
     transactionGetRangeStreamRequests("GetRangeStreamRequests", cc), transactionWatchRequests("WatchRequests", cc),
     transactionGetAddressesForKeyRequests("GetAddressesForKeyRequests", cc), transactionBytesRead("BytesRead", cc),
     transactionKeysRead("KeysRead", cc), transactionMetadataVersionReads("MetadataVersionReads", cc),
@@ -3034,8 +3034,8 @@ ACTOR Future<Void> watchValueMap(Future<Version> version,
 	return Void();
 }
 
-template <class GetKeyValuesMaybeHopRequest>
-void transformRangeLimits(GetRangeLimits limits, Reverse reverse, GetKeyValuesMaybeHopRequest& req) {
+template <class GetKeyValuesFamilyRequest>
+void transformRangeLimits(GetRangeLimits limits, Reverse reverse, GetKeyValuesFamilyRequest& req) {
 	if (limits.bytes != 0) {
 		if (!limits.hasRowLimit())
 			req.limit = CLIENT_KNOBS->REPLY_BYTE_LIMIT; // Can't get more than this many rows anyway
@@ -3055,22 +3055,22 @@ void transformRangeLimits(GetRangeLimits limits, Reverse reverse, GetKeyValuesMa
 	}
 }
 
-template <class GetKeyValuesMaybeHopRequest>
-RequestStream<GetKeyValuesMaybeHopRequest> StorageServerInterface::*getRangeRequestStream() {
-	if constexpr (std::is_same<GetKeyValuesMaybeHopRequest, GetKeyValuesRequest>::value) {
+template <class GetKeyValuesFamilyRequest>
+RequestStream<GetKeyValuesFamilyRequest> StorageServerInterface::*getRangeRequestStream() {
+	if constexpr (std::is_same<GetKeyValuesFamilyRequest, GetKeyValuesRequest>::value) {
 		return &StorageServerInterface::getKeyValues;
-	} else if (std::is_same<GetKeyValuesMaybeHopRequest, GetKeyValuesAndHopRequest>::value) {
-		return &StorageServerInterface::getKeyValuesAndHop;
+	} else if (std::is_same<GetKeyValuesFamilyRequest, GetKeyValuesAndFlatMapRequest>::value) {
+		return &StorageServerInterface::getKeyValuesAndFlatMap;
 	} else {
 		UNREACHABLE();
 	}
 }
 
-ACTOR template <class GetKeyValuesMaybeHopRequest, class GetKeyValuesMaybeHopReply>
+ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
 Future<RangeResult> getExactRange(Database cx,
                                   Version version,
                                   KeyRange keys,
-                                  Key hopInfo,
+                                  Key mapper,
                                   GetRangeLimits limits,
                                   Reverse reverse,
                                   TransactionInfo info,
@@ -3085,16 +3085,16 @@ Future<RangeResult> getExactRange(Database cx,
 		                              keys,
 		                              CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT,
 		                              reverse,
-		                              getRangeRequestStream<GetKeyValuesMaybeHopRequest>(),
+		                              getRangeRequestStream<GetKeyValuesFamilyRequest>(),
 		                              info));
 		ASSERT(locations.size());
 		state int shard = 0;
 		loop {
 			const KeyRangeRef& range = locations[shard].first;
 
-			GetKeyValuesMaybeHopRequest req;
-			req.hopInfo = hopInfo;
-			req.arena.dependsOn(hopInfo.arena());
+			GetKeyValuesFamilyRequest req;
+			req.mapper = mapper;
+			req.arena.dependsOn(mapper.arena());
 
 			req.version = version;
 			req.begin = firstGreaterOrEqual(range.begin);
@@ -3125,14 +3125,14 @@ Future<RangeResult> getExactRange(Database cx,
 					    .detail("Servers", locations[shard].second->description());*/
 				}
 				++cx->transactionPhysicalReads;
-				state GetKeyValuesMaybeHopReply rep;
+				state GetKeyValuesFamilyReply rep;
 				try {
 					choose {
 						when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
-						when(GetKeyValuesMaybeHopReply _rep =
+						when(GetKeyValuesFamilyReply _rep =
 						         wait(loadBalance(cx.getPtr(),
 						                          locations[shard].second,
-						                          getRangeRequestStream<GetKeyValuesMaybeHopRequest>(),
+						                          getRangeRequestStream<GetKeyValuesFamilyRequest>(),
 						                          req,
 						                          TaskPriority::DefaultPromiseEndpoint,
 						                          AtMostOnce::False,
@@ -3182,7 +3182,7 @@ Future<RangeResult> getExactRange(Database cx,
 						    .detail("BlockBytes", rep.data.expectedSize());
 						ASSERT(false);
 					}
-					TEST(true); // GetKeyValuesMaybeHopReply.more in getExactRange
+					TEST(true); // GetKeyValuesFamilyReply.more in getExactRange
 					// Make next request to the same shard with a beginning key just after the last key returned
 					if (reverse)
 						locations[shard].first =
@@ -3258,12 +3258,12 @@ Future<Key> resolveKey(Database const& cx,
 	return getKey(cx, key, version, info, tags);
 }
 
-ACTOR template <class GetKeyValuesMaybeHopRequest, class GetKeyValuesMaybeHopReply>
+ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
 Future<RangeResult> getRangeFallback(Database cx,
                                      Version version,
                                      KeySelector begin,
                                      KeySelector end,
-                                     Key hopInfo,
+                                     Key mapper,
                                      GetRangeLimits limits,
                                      Reverse reverse,
                                      TransactionInfo info,
@@ -3290,8 +3290,8 @@ Future<RangeResult> getRangeFallback(Database cx,
 	// if b is allKeys.begin, we have either read through the beginning of the database,
 	// or allKeys.begin exists in the database and will be part of the conflict range anyways
 
-	RangeResult _r = wait(getExactRange<GetKeyValuesMaybeHopRequest, GetKeyValuesMaybeHopReply>(
-	    cx, version, KeyRangeRef(b, e), hopInfo, limits, reverse, info, tags));
+	RangeResult _r = wait(getExactRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply>(
+	    cx, version, KeyRangeRef(b, e), mapper, limits, reverse, info, tags));
 	RangeResult r = _r;
 
 	if (b == allKeys.begin && ((reverse && !r.more) || !reverse))
@@ -3316,7 +3316,7 @@ Future<RangeResult> getRangeFallback(Database cx,
 	return r;
 }
 
-// TODO: Client should add hop keys to conflict ranges.
+// TODO: Client should add mapped keys to conflict ranges.
 void getRangeFinished(Database cx,
                       Reference<TransactionLogInfo> trLogInfo,
                       double startTime,
@@ -3371,17 +3371,17 @@ void getRangeFinished(Database cx,
 	}
 }
 
-// GetKeyValuesMaybeHopRequest: GetKeyValuesRequest or GetKeyValuesAndHopRequest
-// GetKeyValuesMaybeHopReply: GetKeyValuesReply or GetKeyValuesAndHopReply
-// Sadly we need GetKeyValuesMaybeHopReply because cannot do something like: state
-// REPLY_TYPE(GetKeyValuesMaybeHopRequest) rep;
-ACTOR template <class GetKeyValuesMaybeHopRequest, class GetKeyValuesMaybeHopReply>
+// GetKeyValuesFamilyRequest: GetKeyValuesRequest or GetKeyValuesAndFlatMapRequest
+// GetKeyValuesFamilyReply: GetKeyValuesReply or GetKeyValuesAndFlatMapReply
+// Sadly we need GetKeyValuesFamilyReply because cannot do something like: state
+// REPLY_TYPE(GetKeyValuesFamilyRequest) rep;
+ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
 Future<RangeResult> getRange(Database cx,
                              Reference<TransactionLogInfo> trLogInfo,
                              Future<Version> fVersion,
                              KeySelector begin,
                              KeySelector end,
-                             Key hopInfo,
+                             Key mapper,
                              GetRangeLimits limits,
                              Promise<std::pair<Key, Key>> conflictRange,
                              Snapshot snapshot,
@@ -3422,12 +3422,12 @@ Future<RangeResult> getRange(Database cx,
 			Key locationKey = reverse ? Key(end.getKey(), end.arena()) : Key(begin.getKey(), begin.arena());
 			Reverse locationBackward{ reverse ? (end - 1).isBackward() : begin.isBackward() };
 			state std::pair<KeyRange, Reference<LocationInfo>> beginServer = wait(getKeyLocation(
-			    cx, locationKey, getRangeRequestStream<GetKeyValuesMaybeHopRequest>(), info, locationBackward));
+			    cx, locationKey, getRangeRequestStream<GetKeyValuesFamilyRequest>(), info, locationBackward));
 			state KeyRange shard = beginServer.first;
 			state bool modifiedSelectors = false;
-			state GetKeyValuesMaybeHopRequest req;
-			req.hopInfo = hopInfo;
-			req.arena.dependsOn(hopInfo.arena());
+			state GetKeyValuesFamilyRequest req;
+			req.mapper = mapper;
+			req.arena.dependsOn(mapper.arena());
 
 			req.isFetchKeys = (info.taskID == TaskPriority::FetchKeys);
 			req.version = readVersion;
@@ -3486,17 +3486,17 @@ Future<RangeResult> getRange(Database cx,
 				}
 
 				++cx->transactionPhysicalReads;
-				state GetKeyValuesMaybeHopReply rep;
+				state GetKeyValuesFamilyReply rep;
 				try {
 					if (CLIENT_BUGGIFY_WITH_PROB(.01)) {
 						throw deterministicRandom()->randomChoice(
 						    std::vector<Error>{ transaction_too_old(), future_version() });
 					}
 					// state AnnotateActor annotation(currentLineage);
-					GetKeyValuesMaybeHopReply _rep =
+					GetKeyValuesFamilyReply _rep =
 					    wait(loadBalance(cx.getPtr(),
 					                     beginServer.second,
-					                     getRangeRequestStream<GetKeyValuesMaybeHopRequest>(),
+					                     getRangeRequestStream<GetKeyValuesFamilyRequest>(),
 					                     req,
 					                     TaskPriority::DefaultPromiseEndpoint,
 					                     AtMostOnce::False,
@@ -3596,12 +3596,11 @@ Future<RangeResult> getRange(Database cx,
 
 				if (!rep.more) {
 					ASSERT(modifiedSelectors);
-					TEST(true); // !GetKeyValuesMaybeHopReply.more and modifiedSelectors in getRange
+					TEST(true); // !GetKeyValuesFamilyReply.more and modifiedSelectors in getRange
 
 					if (!rep.data.size()) {
-						RangeResult result =
-						    wait(getRangeFallback<GetKeyValuesMaybeHopRequest, GetKeyValuesMaybeHopReply>(
-						        cx, version, originalBegin, originalEnd, hopInfo, originalLimits, reverse, info, tags));
+						RangeResult result = wait(getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply>(
+						    cx, version, originalBegin, originalEnd, mapper, originalLimits, reverse, info, tags));
 						getRangeFinished(cx,
 						                 trLogInfo,
 						                 startTime,
@@ -3619,7 +3618,7 @@ Future<RangeResult> getRange(Database cx,
 					else
 						begin = firstGreaterOrEqual(shard.end);
 				} else {
-					TEST(true); // GetKeyValuesMaybeHopReply.more in getRange
+					TEST(true); // GetKeyValuesFamilyReply.more in getRange
 					if (reverse)
 						end = firstGreaterOrEqual(output[output.size() - 1].key);
 					else
@@ -3637,9 +3636,8 @@ Future<RangeResult> getRange(Database cx,
 					                    Reverse{ reverse ? (end - 1).isBackward() : begin.isBackward() });
 
 					if (e.code() == error_code_wrong_shard_server) {
-						RangeResult result =
-						    wait(getRangeFallback<GetKeyValuesMaybeHopRequest, GetKeyValuesMaybeHopReply>(
-						        cx, version, originalBegin, originalEnd, hopInfo, originalLimits, reverse, info, tags));
+						RangeResult result = wait(getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply>(
+						    cx, version, originalBegin, originalEnd, mapper, originalLimits, reverse, info, tags));
 						getRangeFinished(cx,
 						                 trLogInfo,
 						                 startTime,
@@ -4511,26 +4509,26 @@ Future<Key> Transaction::getKey(const KeySelector& key, Snapshot snapshot) {
 	return getKeyAndConflictRange(cx, key, getReadVersion(), conflictRange, info, options.readTags);
 }
 
-template <class GetKeyValuesMaybeHopRequest>
+template <class GetKeyValuesFamilyRequest>
 void increaseCounterForRequest(Database cx) {
-	if constexpr (std::is_same<GetKeyValuesMaybeHopRequest, GetKeyValuesRequest>::value) {
+	if constexpr (std::is_same<GetKeyValuesFamilyRequest, GetKeyValuesRequest>::value) {
 		++cx->transactionGetRangeRequests;
-	} else if (std::is_same<GetKeyValuesMaybeHopRequest, GetKeyValuesAndHopRequest>::value) {
-		++cx->transactionGetRangeAndHopRequests;
+	} else if (std::is_same<GetKeyValuesFamilyRequest, GetKeyValuesAndFlatMapRequest>::value) {
+		++cx->transactionGetRangeAndFlatMapRequests;
 	} else {
 		UNREACHABLE();
 	}
 }
 
-template <class GetKeyValuesMaybeHopRequest, class GetKeyValuesMaybeHopReply>
-Future<RangeResult> Transaction::getRangeMaybeHop(const KeySelector& begin,
+template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
+Future<RangeResult> Transaction::getRangeInternal(const KeySelector& begin,
                                                   const KeySelector& end,
-                                                  const Key& hopInfo,
+                                                  const Key& mapper,
                                                   GetRangeLimits limits,
                                                   Snapshot snapshot,
                                                   Reverse reverse) {
 	++cx->transactionLogicalReads;
-	increaseCounterForRequest<GetKeyValuesMaybeHopRequest>(cx);
+	increaseCounterForRequest<GetKeyValuesFamilyRequest>(cx);
 
 	if (limits.isReached())
 		return RangeResult();
@@ -4562,18 +4560,18 @@ Future<RangeResult> Transaction::getRangeMaybeHop(const KeySelector& begin,
 		extraConflictRanges.push_back(conflictRange.getFuture());
 	}
 
-	return ::getRange<GetKeyValuesMaybeHopRequest, GetKeyValuesMaybeHopReply>(cx,
-	                                                                          trLogInfo,
-	                                                                          getReadVersion(),
-	                                                                          b,
-	                                                                          e,
-	                                                                          hopInfo,
-	                                                                          limits,
-	                                                                          conflictRange,
-	                                                                          snapshot,
-	                                                                          reverse,
-	                                                                          info,
-	                                                                          options.readTags);
+	return ::getRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply>(cx,
+	                                                                      trLogInfo,
+	                                                                      getReadVersion(),
+	                                                                      b,
+	                                                                      e,
+	                                                                      mapper,
+	                                                                      limits,
+	                                                                      conflictRange,
+	                                                                      snapshot,
+	                                                                      reverse,
+	                                                                      info,
+	                                                                      options.readTags);
 }
 
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,
@@ -4581,18 +4579,18 @@ Future<RangeResult> Transaction::getRange(const KeySelector& begin,
                                           GetRangeLimits limits,
                                           Snapshot snapshot,
                                           Reverse reverse) {
-	return getRangeMaybeHop<GetKeyValuesRequest, GetKeyValuesReply>(begin, end, ""_sr, limits, snapshot, reverse);
+	return getRangeInternal<GetKeyValuesRequest, GetKeyValuesReply>(begin, end, ""_sr, limits, snapshot, reverse);
 }
 
-Future<RangeResult> Transaction::getRangeAndHop(const KeySelector& begin,
-                                                const KeySelector& end,
-                                                const Key& hopInfo,
-                                                GetRangeLimits limits,
-                                                Snapshot snapshot,
-                                                Reverse reverse) {
+Future<RangeResult> Transaction::getRangeAndFlatMap(const KeySelector& begin,
+                                                    const KeySelector& end,
+                                                    const Key& mapper,
+                                                    GetRangeLimits limits,
+                                                    Snapshot snapshot,
+                                                    Reverse reverse) {
 
-	return getRangeMaybeHop<GetKeyValuesAndHopRequest, GetKeyValuesAndHopReply>(
-	    begin, end, hopInfo, limits, snapshot, reverse);
+	return getRangeInternal<GetKeyValuesAndFlatMapRequest, GetKeyValuesAndFlatMapReply>(
+	    begin, end, mapper, limits, snapshot, reverse);
 }
 
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,

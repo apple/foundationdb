@@ -92,12 +92,12 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		}
 
 		@Override
-		public AsyncIterable<KeyValue> getRangeAndHop(KeySelector begin, KeySelector end, byte[] hopInfo, int limit,
-		                                              boolean reverse, StreamingMode mode) {
-			if (hopInfo == null) {
-				throw new IllegalArgumentException("HopInfo must be non-null");
+		public AsyncIterable<KeyValue> getRangeAndFlatMap(KeySelector begin, KeySelector end, byte[] mapper, int limit,
+		                                                  boolean reverse, StreamingMode mode) {
+			if (mapper == null) {
+				throw new IllegalArgumentException("Mapper must be non-null");
 			}
-			return new RangeQuery(FDBTransaction.this, true, begin, end, hopInfo, limit, reverse, mode, eventKeeper);
+			return new RangeQuery(FDBTransaction.this, true, begin, end, mapper, limit, reverse, mode, eventKeeper);
 		}
 
 		///////////////////
@@ -348,12 +348,12 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	@Override
-	public AsyncIterable<KeyValue> getRangeAndHop(KeySelector begin, KeySelector end, byte[] hopInfo, int limit,
-	                                              boolean reverse, StreamingMode mode) {
-		if (hopInfo == null) {
-			throw new IllegalArgumentException("HopInfo must be non-null");
+	public AsyncIterable<KeyValue> getRangeAndFlatMap(KeySelector begin, KeySelector end, byte[] mapper, int limit,
+	                                                  boolean reverse, StreamingMode mode) {
+		if (mapper == null) {
+			throw new IllegalArgumentException("Mapper must be non-null");
 		}
-		return new RangeQuery(this, false, begin, end, hopInfo, limit, reverse, mode, eventKeeper);
+		return new RangeQuery(this, false, begin, end, mapper, limit, reverse, mode, eventKeeper);
 	}
 
 	///////////////////
@@ -434,7 +434,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	// Users of this function must close the returned FutureResults when finished
 	protected FutureResults getRange_internal(KeySelector begin, KeySelector end,
-	                                          byte[] hopInfo, // Nullable
+	                                          byte[] mapper, // Nullable
 	                                          int rowLimit, int targetBytes, int streamingMode, int iteration,
 	                                          boolean isSnapshot, boolean reverse) {
 		if (eventKeeper != null) {
@@ -447,13 +447,13 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 				begin.toString(), end.toString(), rowLimit, targetBytes, streamingMode,
 				iteration, Boolean.toString(isSnapshot), Boolean.toString(reverse)));*/
 			return new FutureResults(
-			    hopInfo == null
+			    mapper == null
 			        ? Transaction_getRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(), end.getKey(),
 			                               end.orEqual(), end.getOffset(), rowLimit, targetBytes, streamingMode,
 			                               iteration, isSnapshot, reverse)
-			        : Transaction_getRangeAndHop(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
-			                                     end.getKey(), end.orEqual(), end.getOffset(), hopInfo, rowLimit,
-			                                     targetBytes, streamingMode, iteration, isSnapshot, reverse),
+			        : Transaction_getRangeAndFlatMap(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
+			                                         end.getKey(), end.orEqual(), end.getOffset(), mapper, rowLimit,
+			                                         targetBytes, streamingMode, iteration, isSnapshot, reverse),
 			    FDB.instance().isDirectBufferQueriesEnabled(), executor, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
@@ -793,11 +793,12 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			byte[] keyEnd, boolean orEqualEnd, int offsetEnd,
 			int rowLimit, int targetBytes, int streamingMode, int iteration,
 			boolean isSnapshot, boolean reverse);
-	private native long Transaction_getRangeAndHop(long cPtr, byte[] keyBegin, boolean orEqualBegin, int offsetBegin,
-	                                               byte[] keyEnd, boolean orEqualEnd, int offsetEnd,
-	                                               byte[] hopInfo, // Nonnull
-	                                               int rowLimit, int targetBytes, int streamingMode, int iteration,
-	                                               boolean isSnapshot, boolean reverse);
+	private native long Transaction_getRangeAndFlatMap(long cPtr, byte[] keyBegin, boolean orEqualBegin,
+	                                                   int offsetBegin, byte[] keyEnd, boolean orEqualEnd,
+	                                                   int offsetEnd,
+	                                                   byte[] mapper, // Nonnull
+	                                                   int rowLimit, int targetBytes, int streamingMode, int iteration,
+	                                                   boolean isSnapshot, boolean reverse);
 	private native void Transaction_addConflictRange(long cPtr,
 			byte[] keyBegin, byte[] keyEnd, int conflictRangeType);
 	private native void Transaction_set(long cPtr, byte[] key, byte[] value);

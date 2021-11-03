@@ -152,22 +152,22 @@ void TSS_traceMismatch(TraceEvent& event,
 	    .detail("TSSReply", tssResultsString);
 }
 
-// range reads and hop
+// range reads and flat map
 template <>
-bool TSS_doCompare(const GetKeyValuesAndHopReply& src, const GetKeyValuesAndHopReply& tss) {
+bool TSS_doCompare(const GetKeyValuesAndFlatMapReply& src, const GetKeyValuesAndFlatMapReply& tss) {
 	return src.more == tss.more && src.data == tss.data;
 }
 
 template <>
-const char* TSS_mismatchTraceName(const GetKeyValuesAndHopRequest& req) {
-	return "TSSMismatchGetKeyValuesAndHop";
+const char* TSS_mismatchTraceName(const GetKeyValuesAndFlatMapRequest& req) {
+	return "TSSMismatchGetKeyValuesAndFlatMap";
 }
 
 template <>
 void TSS_traceMismatch(TraceEvent& event,
-                       const GetKeyValuesAndHopRequest& req,
-                       const GetKeyValuesAndHopReply& src,
-                       const GetKeyValuesAndHopReply& tss) {
+                       const GetKeyValuesAndFlatMapRequest& req,
+                       const GetKeyValuesAndFlatMapReply& src,
+                       const GetKeyValuesAndFlatMapReply& tss) {
 	std::string ssResultsString = format("(%d)%s:\n", src.data.size(), src.more ? "+" : "");
 	for (auto& it : src.data) {
 		ssResultsString += "\n" + it.key.printable() + "=" + traceChecksumValue(it.value);
@@ -396,9 +396,9 @@ void TSSMetrics::recordLatency(const GetKeyValuesRequest& req, double ssLatency,
 }
 
 template <>
-void TSSMetrics::recordLatency(const GetKeyValuesAndHopRequest& req, double ssLatency, double tssLatency) {
-	SSgetKeyValuesAndHopLatency.addSample(ssLatency);
-	TSSgetKeyValuesAndHopLatency.addSample(tssLatency);
+void TSSMetrics::recordLatency(const GetKeyValuesAndFlatMapRequest& req, double ssLatency, double tssLatency) {
+	SSgetKeyValuesAndFlatMapLatency.addSample(ssLatency);
+	TSSgetKeyValuesAndFlatMapLatency.addSample(tssLatency);
 }
 
 template <>
