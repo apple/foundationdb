@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Special Keys &#8212; FoundationDB 6.3</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '6.3.22',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Tutorials" href="tutorials.html" />
+    <link rel="prev" title="Error Codes" href="api-error-codes.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Special Keys</a><ul>
+<li><a class="reference internal" href="#modules">Modules</a><ul>
+<li><a class="reference internal" href="#transaction-module">Transaction module</a><ul>
+<li><a class="reference internal" href="#caveats">Caveats</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#metrics-module">Metrics module</a><ul>
+<li><a class="reference internal" href="#id4">Caveats</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="api-error-codes.html" title="Previous Chapter: Error Codes"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Error Codes</span>
+    </a>
+  </li>
+  <li>
+    <a href="tutorials.html" title="Next Chapter: Tutorials"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Tutorials &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Special Keys</a><ul>
+<li><a class="reference internal" href="#modules">Modules</a><ul>
+<li><a class="reference internal" href="#transaction-module">Transaction module</a><ul>
+<li><a class="reference internal" href="#caveats">Caveats</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#metrics-module">Metrics module</a><ul>
+<li><a class="reference internal" href="#id4">Caveats</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="special-keys">
+<span id="id1"></span><h1>Special Keys</h1>
+<p>Keys starting with the bytes <code class="docutils literal"><span class="pre">\xff\xff</span></code> are called &#8220;special&#8221; keys, and they are materialized when read. <a class="reference internal" href="mr-status.html"><span class="doc">\xff\xff/status/json</span></a> is an example of a special key.
+As of api version 630, additional features have been exposed as special keys and are available to read as ranges instead of just individual keys. Additionally, the special keys are now organized into &#8220;modules&#8221;.</p>
+<div class="section" id="modules">
+<h2>Modules</h2>
+<p>A module is loosely defined as a key range in the special key space where a user can expect similar behavior from reading any key in that range.
+By default, users will see a <code class="docutils literal"><span class="pre">special_keys_no_module_found</span></code> error if they read from a range not contained in a module.
+The error indicates the read would always return an empty set of keys if it proceeded. This could be caused by typo in the keys to read.
+Users will also (by default) see a <code class="docutils literal"><span class="pre">special_keys_cross_module_read</span></code> error if their read spans a module boundary.
+The error is to save the user from the surprise of seeing the behavior of multiple modules in the same read.
+Users may opt out of these restrictions by setting the <code class="docutils literal"><span class="pre">special_key_space_relaxed</span></code> transaction option.</p>
+<p>Each special key that existed before api version 630 is its own module. These are</p>
+<ol class="arabic simple">
+<li><code class="docutils literal"><span class="pre">\xff\xff/cluster_file_path</span></code> See <a class="reference internal" href="administration.html#cluster-file-client-access"><span class="std std-ref">cluster file client access</span></a></li>
+<li><code class="docutils literal"><span class="pre">\xff\xff/status/json</span></code> See <a class="reference internal" href="mr-status.html"><span class="doc">Machine-readable status</span></a></li>
+</ol>
+<p>Prior to api version 630, it was also possible to read a range starting at
+<code class="docutils literal"><span class="pre">\xff\xff/worker_interfaces</span></code>. This is mostly an implementation detail of fdbcli,
+but it&#8217;s available in api version 630 as a module with prefix <code class="docutils literal"><span class="pre">\xff\xff/worker_interfaces/</span></code>.</p>
+<p>Api version 630 includes two new modules with prefixes
+<code class="docutils literal"><span class="pre">\xff\xff/transaction/</span></code> (information about the current transaction), and
+<code class="docutils literal"><span class="pre">\xff\xff/metrics/</span></code> (various metrics, not transactional).</p>
+<div class="section" id="transaction-module">
+<h3>Transaction module</h3>
+<p>Reads from the transaction module generally do not require an rpc and only inspect in-memory state for the current transaction.</p>
+<p>There are three sets of keys exposed by the transaction module, and each set uses the same encoding, so let&#8217;s first describe that encoding.</p>
+<p>Let&#8217;s say we have a set of keys represented as intervals of the form <code class="docutils literal"><span class="pre">begin1</span> <span class="pre">&lt;=</span> <span class="pre">k</span> <span class="pre">&lt;</span> <span class="pre">end1</span> <span class="pre">&amp;&amp;</span> <span class="pre">begin2</span> <span class="pre">&lt;=</span> <span class="pre">k</span> <span class="pre">&lt;</span> <span class="pre">end2</span> <span class="pre">&amp;&amp;</span> <span class="pre">...</span></code>.
+It could be the case that some of the intervals overlap, e.g. if <code class="docutils literal"><span class="pre">begin1</span> <span class="pre">&lt;=</span> <span class="pre">begin2</span> <span class="pre">&lt;</span> <span class="pre">end1</span></code>, or are adjacent, e.g. if <code class="docutils literal"><span class="pre">end1</span> <span class="pre">==</span> <span class="pre">begin2</span></code>.
+If we merge all overlapping/adjacent intervals then sort, we end up with a canonical representation of this set of keys.</p>
+<p>We encode this canonical set as ordered key value pairs like this:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">&lt;</span><span class="n">namespace</span><span class="o">&gt;&lt;</span><span class="n">begin1</span><span class="o">&gt;</span> <span class="o">-&gt;</span> <span class="s2">&quot;1&quot;</span>
+<span class="o">&lt;</span><span class="n">namespace</span><span class="o">&gt;&lt;</span><span class="n">end1</span><span class="o">&gt;</span> <span class="o">-&gt;</span> <span class="s2">&quot;0&quot;</span>
+<span class="o">&lt;</span><span class="n">namespace</span><span class="o">&gt;&lt;</span><span class="n">begin2</span><span class="o">&gt;</span> <span class="o">-&gt;</span> <span class="s2">&quot;1&quot;</span>
+<span class="o">&lt;</span><span class="n">namespace</span><span class="o">&gt;&lt;</span><span class="n">end2</span><span class="o">&gt;</span> <span class="o">-&gt;</span> <span class="s2">&quot;0&quot;</span>
+<span class="o">...</span>
+</pre></div>
+</div>
+<p>Python example:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">tr</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">create_transaction</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">tr</span><span class="o">.</span><span class="n">add_read_conflict_key</span><span class="p">(</span><span class="s1">&#39;foo&#39;</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">tr</span><span class="o">.</span><span class="n">add_read_conflict_range</span><span class="p">(</span><span class="s1">&#39;bar/&#39;</span><span class="p">,</span> <span class="s1">&#39;bar0&#39;</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="o">.</span><span class="n">get_range_startswith</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\xff\xff</span><span class="s1">/transaction/read_conflict_range/&#39;</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="nb">print</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+<span class="gp">...</span>
+<span class="go">(&#39;\xff\xff/transaction/read_conflict_range/bar/&#39;, &#39;1&#39;)</span>
+<span class="go">(&#39;\xff\xff/transaction/read_conflict_range/bar0&#39;, &#39;0&#39;)</span>
+<span class="go">(&#39;\xff\xff/transaction/read_conflict_range/foo&#39;, &#39;1&#39;)</span>
+<span class="go">(&#39;\xff\xff/transaction/read_conflict_range/foo\x00&#39;, &#39;0&#39;)</span>
+</pre></div>
+</div>
+<p>For read-your-writes transactions, this canonical encoding of conflict ranges
+is already available in memory, and so requesting small ranges is
+correspondingly cheaper than large ranges.</p>
+<p>For transactions with read-your-writes disabled, this canonical encoding is computed on
+every read, so you&#8217;re paying the full cost in CPU time whether or not you
+request a small range.</p>
+<p>The namespaces for sets of keys are</p>
+<ol class="arabic simple">
+<li><code class="docutils literal"><span class="pre">\xff\xff/transaction/read_conflict_range/</span></code> This is the set of keys that will be used for read conflict detection. If another transaction writes to any of these keys after this transaction&#8217;s read version, then this transaction won&#8217;t commit.</li>
+<li><code class="docutils literal"><span class="pre">\xff\xff/transaction/write_conflict_range/</span></code> This is the set of keys that will be used for write conflict detection. Keys in this range may cause other transactions which read these keys to abort if this transaction commits.</li>
+<li><code class="docutils literal"><span class="pre">\xff\xff/transaction/conflicting_keys/</span></code> If this transaction failed due to a conflict, it must be the case that some transaction attempted <a class="footnote-reference" href="#conflicting-keys" id="id2">[1]</a> to commit with a write conflict range that intersects this transaction&#8217;s read conflict range. This is the subset of your read conflict range that actually intersected a write conflict from another transaction.</li>
+</ol>
+<div class="section" id="caveats">
+<h4>Caveats</h4>
+<ol class="arabic simple">
+<li><code class="docutils literal"><span class="pre">\xff\xff/transaction/read_conflict_range/</span></code> The conflict range for a read is sometimes not known until that read completes (e.g. range reads with limits, key selectors). When you read from these special keys, the returned future first blocks until all pending reads are complete so it can give an accurate response.</li>
+<li><code class="docutils literal"><span class="pre">\xff\xff/transaction/write_conflict_range/</span></code> The conflict range range for a <code class="docutils literal"><span class="pre">set_versionstamped_key</span></code> atomic op is not known until commit time. You&#8217;ll get an approximate range (the actual range will be a subset of the approximate range) until the precise range is known.</li>
+<li><code class="docutils literal"><span class="pre">\xff\xff/transaction/conflicting_keys/</span></code> Since using this feature costs server (i.e., proxy and resolver) resources, it&#8217;s disabled by default. You must opt in by setting the <code class="docutils literal"><span class="pre">report_conflicting_keys</span></code> transaction option.</li>
+</ol>
+</div>
+</div>
+<div class="section" id="metrics-module">
+<h3>Metrics module</h3>
+<p>Reads in the metrics module are not transactional and may require rpcs to complete.</p>
+<p><code class="docutils literal"><span class="pre">\xff\xff/metrics/data_distribution_stats/&lt;begin&gt;</span></code> represent stats about the shard that begins at <code class="docutils literal"><span class="pre">&lt;begin&gt;</span></code></p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">db</span><span class="o">.</span><span class="n">get_range_startswith</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\xff\xff</span><span class="s1">/metrics/data_distribution_stats/&#39;</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">3</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="nb">print</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+<span class="gp">...</span>
+<span class="go">(&#39;\xff\xff/metrics/data_distribution_stats/&#39;, &#39;{&quot;shard_bytes&quot;:3828000}&#39;)</span>
+<span class="go">(&#39;\xff\xff/metrics/data_distribution_stats/mako00079&#39;, &#39;{&quot;shard_bytes&quot;:2013000}&#39;)</span>
+<span class="go">(&#39;\xff\xff/metrics/data_distribution_stats/mako00126&#39;, &#39;{&quot;shard_bytes&quot;:3201000}&#39;)</span>
+</pre></div>
+</div>
+<table border="1" class="docutils">
+<colgroup>
+<col width="30%" />
+<col width="10%" />
+<col width="60%" />
+</colgroup>
+<tbody valign="top">
+<tr class="row-odd"><td><strong>Field</strong></td>
+<td><strong>Type</strong></td>
+<td><strong>Description</strong></td>
+</tr>
+<tr class="row-even"><td>shard_bytes</td>
+<td>number</td>
+<td>An estimate of the sum of kv sizes for this shard.</td>
+</tr>
+</tbody>
+</table>
+<p>Keys starting with <code class="docutils literal"><span class="pre">\xff\xff/metrics/health/</span></code> represent stats about the health of the cluster, suitable for application-level throttling.
+Some of this information is also available in <code class="docutils literal"><span class="pre">\xff\xff/status/json</span></code>, but these keys are significantly cheaper (in terms of server resources) to read.</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">db</span><span class="o">.</span><span class="n">get_range_startswith</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\xff\xff</span><span class="s1">/metrics/health/&#39;</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="nb">print</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+<span class="gp">...</span>
+<span class="go">(&#39;\xff\xff/metrics/health/aggregate&#39;, &#39;{&quot;batch_limited&quot;:false,&quot;tps_limit&quot;:483988.66315011407,&quot;worst_storage_durability_lag&quot;:5000001,&quot;worst_storage_queue&quot;:2036,&quot;worst_log_queue&quot;:300}&#39;)</span>
+<span class="go">(&#39;\xff\xff/metrics/health/log/e639a9ad0373367784cc550c615c469b&#39;, &#39;{&quot;log_queue&quot;:300}&#39;)</span>
+<span class="go">(&#39;\xff\xff/metrics/health/storage/ab2ce4caf743c9c1ae57063629c6678a&#39;, &#39;{&quot;cpu_usage&quot;:2.398696781487125,&quot;disk_usage&quot;:0.059995917598039405,&quot;storage_durability_lag&quot;:5000001,&quot;storage_queue&quot;:2036}&#39;)</span>
+</pre></div>
+</div>
+<p><code class="docutils literal"><span class="pre">\xff\xff/metrics/health/aggregate</span></code></p>
+<p>Aggregate stats about cluster health. Reading this key alone is slightly cheaper than reading any of the per-process keys.</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="27%" />
+<col width="8%" />
+<col width="65%" />
+</colgroup>
+<tbody valign="top">
+<tr class="row-odd"><td><strong>Field</strong></td>
+<td><strong>Type</strong></td>
+<td><strong>Description</strong></td>
+</tr>
+<tr class="row-even"><td>batch_limited</td>
+<td>boolean</td>
+<td>Whether or not the cluster is limiting batch priority transactions</td>
+</tr>
+<tr class="row-odd"><td>tps_limit</td>
+<td>number</td>
+<td>The rate at which normal priority transactions are allowed to start</td>
+</tr>
+<tr class="row-even"><td>worst_storage_durability_lag</td>
+<td>number</td>
+<td>See the description for storage_durability_lag</td>
+</tr>
+<tr class="row-odd"><td>worst_storage_queue</td>
+<td>number</td>
+<td>See the description for storage_queue</td>
+</tr>
+<tr class="row-even"><td>worst_log_queue</td>
+<td>number</td>
+<td>See the description for log_queue</td>
+</tr>
+</tbody>
+</table>
+<p><code class="docutils literal"><span class="pre">\xff\xff/metrics/health/log/&lt;id&gt;</span></code></p>
+<p>Stats about the health of a particular transaction log process</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="19%" />
+<col width="6%" />
+<col width="75%" />
+</colgroup>
+<tbody valign="top">
+<tr class="row-odd"><td><strong>Field</strong></td>
+<td><strong>Type</strong></td>
+<td><strong>Description</strong></td>
+</tr>
+<tr class="row-even"><td>log_queue</td>
+<td>number</td>
+<td>The number of bytes of mutations that need to be stored in memory on this transaction log process</td>
+</tr>
+</tbody>
+</table>
+<p><code class="docutils literal"><span class="pre">\xff\xff/metrics/health/storage/&lt;id&gt;</span></code></p>
+<p>Stats about the health of a particular storage process</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="12%" />
+<col width="4%" />
+<col width="85%" />
+</colgroup>
+<tbody valign="top">
+<tr class="row-odd"><td><strong>Field</strong></td>
+<td><strong>Type</strong></td>
+<td><strong>Description</strong></td>
+</tr>
+<tr class="row-even"><td>cpu_usage</td>
+<td>number</td>
+<td>The cpu percentage used by this storage process</td>
+</tr>
+<tr class="row-odd"><td>disk_usage</td>
+<td>number</td>
+<td>The disk IO percentage used by this storage process</td>
+</tr>
+<tr class="row-even"><td>storage_durability_lag</td>
+<td>number</td>
+<td>The difference between the newest version and the durable version on this storage process. On a lightly loaded cluster this will stay just above 5000000 <a class="footnote-reference" href="#max-read-transaction-life-versions" id="id3">[2]</a>.</td>
+</tr>
+<tr class="row-odd"><td>storage_queue</td>
+<td>number</td>
+<td>The number of bytes of mutations that need to be stored in memory on this storage process</td>
+</tr>
+</tbody>
+</table>
+<div class="section" id="id4">
+<h4>Caveats</h4>
+<ol class="arabic simple">
+<li><code class="docutils literal"><span class="pre">\xff\xff/metrics/health/</span></code> These keys may return data that&#8217;s several seconds old, and the data may not be available for a brief period during recovery. This will be indicated by the keys being absent.</li>
+</ol>
+<table class="docutils footnote" frame="void" id="conflicting-keys" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id2">[1]</a></td><td>In practice, the transaction probably committed successfully. However, if you&#8217;re running multiple resolvers then it&#8217;s possible for a transaction to cause another to abort even if it doesn&#8217;t commit successfully.</td></tr>
+</tbody>
+</table>
+<table class="docutils footnote" frame="void" id="max-read-transaction-life-versions" rules="none">
+<colgroup><col class="label" /><col /></colgroup>
+<tbody valign="top">
+<tr><td class="label"><a class="fn-backref" href="#id3">[2]</a></td><td>The number 5000000 comes from the server knob MAX_READ_TRANSACTION_LIFE_VERSIONS</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/special-keys.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Nov 02, 2021.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

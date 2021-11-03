@@ -132,9 +132,16 @@ If you suspect that a client process's workload may be saturating the network th
 Multi-threaded Client
 =====================
 
-FoundationDB client library can start multiple worker threads for each version of client that is loaded. Every single cluster will be serviced by one of the client threads. If the client is connected to only one cluster, exactly one thread would be active and the rest will remain idle. Hence, using this feature is useful when the client is actively using more than one cluster.
+FoundationDB client library can start multiple worker threads for each version of client that is loaded.
+
+Currently, each database object is associated with exactly one of the threads, so a user would need at least ``N`` database objects to make use of ``N`` threads. Additionally, some language bindings (e.g. the python bindings) cache database objects by cluster file, so users may need multiple cluster files to make use of multiple threads. This may be improved in the future.
 
 Clients can be configured to use worker-threads by setting the ``FDBNetworkOptions::CLIENT_THREADS_PER_VERSION`` option.
+
+.. warning::
+  In order to use the multi-threaded client feature, you must configure at
+  least one external client. See :ref:`multi-version client API
+  <multi-version-client-api>` for how to configure an external client.
 
 .. _client-trace-logging:
 

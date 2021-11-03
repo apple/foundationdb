@@ -16,3 +16,4 @@ The following documents give detailed descriptions of the API for each language:
    Go API <https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb>
    api-c
    api-error-codes
+   special-keys

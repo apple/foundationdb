@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.15',
+        VERSION:     '6.3.22',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -343,6 +343,23 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l5"><a class="reference internal" href="read-write-path.html#reference">Reference</a></li>
 </ul>
 </li>
+<li class="toctree-l4"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="ha-write-path.html#sharding-which-shard-goes-to-which-servers">Sharding: Which shard goes to which servers?</a></li>
+<li class="toctree-l5"><a class="reference internal" href="ha-write-path.html#tag-structure">Tag structure</a></li>
+<li class="toctree-l5"><a class="reference internal" href="ha-write-path.html#how-does-a-mutation-travel-in-fdb">How does a mutation travel in FDB?</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="ha-write-path.html#at-client">At Client</a></li>
+<li class="toctree-l6"><a class="reference internal" href="ha-write-path.html#at-proxy">At Proxy</a></li>
+<li class="toctree-l6"><a class="reference internal" href="ha-write-path.html#at-primary-tlogs-and-satellite-tlogs">At primary tLogs and satellite tLogs</a></li>
+<li class="toctree-l6"><a class="reference internal" href="ha-write-path.html#at-primary-ss">At primary SS</a></li>
+<li class="toctree-l6"><a class="reference internal" href="ha-write-path.html#at-log-router">At log router</a></li>
+<li class="toctree-l6"><a class="reference internal" href="ha-write-path.html#at-remote-tlogs">At remote tLogs</a></li>
+<li class="toctree-l6"><a class="reference internal" href="ha-write-path.html#at-remote-sses">At remote SSes</a></li>
+</ul>
+</li>
+<li class="toctree-l5"><a class="reference internal" href="ha-write-path.html#implementation">Implementation</a></li>
+<li class="toctree-l5"><a class="reference internal" href="ha-write-path.html#mutation-serialization-wip">Mutation Serialization (WiP)</a></li>
+</ul>
+</li>
 </ul>
 </li>
 <li class="toctree-l3"><a class="reference internal" href="client-design.html">Client Design</a><ul>
@@ -416,18 +433,6 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l6"><a class="reference internal" href="developer-guide.html#snapshot-reads">Snapshot reads</a></li>
 <li class="toctree-l6"><a class="reference internal" href="developer-guide.html#transaction-cancellation">Transaction cancellation</a></li>
 <li class="toctree-l6"><a class="reference internal" href="developer-guide.html#watches">Watches</a></li>
-</ul>
-</li>
-<li class="toctree-l5"><a class="reference internal" href="developer-guide.html#special-keys">Special keys</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="developer-guide.html#modules">Modules</a></li>
-<li class="toctree-l6"><a class="reference internal" href="developer-guide.html#transaction-module">Transaction module</a><ul>
-<li class="toctree-l7"><a class="reference internal" href="developer-guide.html#caveats">Caveats</a></li>
-</ul>
-</li>
-<li class="toctree-l6"><a class="reference internal" href="developer-guide.html#metrics-module">Metrics module</a><ul>
-<li class="toctree-l7"><a class="reference internal" href="developer-guide.html#id5">Caveats</a></li>
-</ul>
-</li>
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="developer-guide.html#performance-considerations">Performance considerations</a><ul>
@@ -990,6 +995,20 @@ If you are having trouble finding something in particular, try the search box in
 </ul>
 </li>
 <li class="toctree-l4"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l4"><a class="reference internal" href="special-keys.html">Special Keys</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="special-keys.html#modules">Modules</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="special-keys.html#transaction-module">Transaction module</a><ul>
+<li class="toctree-l7"><a class="reference internal" href="special-keys.html#caveats">Caveats</a></li>
+</ul>
+</li>
+<li class="toctree-l6"><a class="reference internal" href="special-keys.html#metrics-module">Metrics module</a><ul>
+<li class="toctree-l7"><a class="reference internal" href="special-keys.html#id4">Caveats</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
 </ul>
 </li>
 <li class="toctree-l3"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
@@ -1824,16 +1843,21 @@ If you are having trouble finding something in particular, try the search box in
 </ul>
 </li>
 <li class="toctree-l4"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a><ul>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id2">6.3.15</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id4">6.3.14</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id7">6.3.13</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id8">6.3.12</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id9">6.3.11</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id10">6.3.10</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id2">6.3.22</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id3">6.3.20</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id4">6.3.19</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id5">6.3.18</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id7">6.3.17</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id8">6.3.15</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id10">6.3.14</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id13">6.3.13</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id14">6.3.12</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id15">6.3.11</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id16">6.3.10</a><ul>
 <li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-630.html#packaging">Packaging</a></li>
 </ul>
 </li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id12">6.3.9</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-630.html#id18">6.3.9</a><ul>
 <li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-630.html#features">Features</a></li>
 <li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-630.html#performance">Performance</a></li>
 <li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-630.html#reliability">Reliability</a></li>
@@ -1878,7 +1902,7 @@ If you are having trouble finding something in particular, try the search box in
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 17, 2021.<br/>
+      Last updated on Nov 02, 2021.<br/>
     </p>
   </div>
 </footer>

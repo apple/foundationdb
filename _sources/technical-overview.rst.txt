@@ -30,6 +30,8 @@ These documents explain the engineering design of FoundationDB, with detailed in
 
 * :doc:`read-write-path` describes how FDB read and write path works.
 
+* :doc:`ha-write-path` describes how FDB write path works in HA setting.
+
 .. toctree::
    :maxdepth: 1
    :titlesonly:
@@ -48,3 +50,4 @@ These documents explain the engineering design of FoundationDB, with detailed in
    testing
    kv-architecture
    read-write-path
+   ha-write-path

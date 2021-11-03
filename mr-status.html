@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.15',
+        VERSION:     '6.3.22',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -215,6 +215,9 @@
                <span class="s2">&quot;kvstore_available_bytes&quot;</span><span class="o">:</span><span class="mf">12341234</span><span class="p">,</span>
                <span class="s2">&quot;kvstore_free_bytes&quot;</span><span class="o">:</span><span class="mf">12341234</span><span class="p">,</span>
                <span class="s2">&quot;kvstore_total_bytes&quot;</span><span class="o">:</span><span class="mf">12341234</span><span class="p">,</span>
+               <span class="s2">&quot;kvstore_total_size&quot;</span><span class="o">:</span><span class="mf">12341234</span><span class="p">,</span>
+               <span class="s2">&quot;kvstore_total_nodes&quot;</span><span class="o">:</span><span class="mf">12341234</span><span class="p">,</span>
+               <span class="s2">&quot;kvstore_inline_keys&quot;</span><span class="o">:</span><span class="mf">12341234</span><span class="p">,</span>
                <span class="s2">&quot;durable_bytes&quot;</span><span class="o">:</span><span class="p">{</span>
                   <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
                   <span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
@@ -297,16 +300,28 @@
                <span class="p">},</span>
                <span class="s2">&quot;grv_latency_statistics&quot;</span><span class="o">:</span><span class="p">{</span>
                   <span class="s2">&quot;default&quot;</span><span class="o">:</span><span class="p">{</span>
-                      <span class="s2">&quot;count&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
-                      <span class="s2">&quot;min&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                      <span class="s2">&quot;max&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                      <span class="s2">&quot;median&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                      <span class="s2">&quot;mean&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                      <span class="s2">&quot;p25&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                      <span class="s2">&quot;p90&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                      <span class="s2">&quot;p95&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                      <span class="s2">&quot;p99&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                      <span class="s2">&quot;p99.9&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+                     <span class="s2">&quot;count&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+                     <span class="s2">&quot;min&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                     <span class="s2">&quot;max&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                     <span class="s2">&quot;median&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                     <span class="s2">&quot;mean&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                     <span class="s2">&quot;p25&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                     <span class="s2">&quot;p90&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                     <span class="s2">&quot;p95&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                     <span class="s2">&quot;p99&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                     <span class="s2">&quot;p99.9&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+                  <span class="p">},</span>
+                  <span class="s2">&quot;batch&quot;</span><span class="o">:</span><span class="p">{</span>
+                     <span class="s2">&quot;count&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+                     <span class="s2">&quot;min&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                     <span class="s2">&quot;max&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                     <span class="s2">&quot;median&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                     <span class="s2">&quot;mean&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                     <span class="s2">&quot;p25&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                     <span class="s2">&quot;p90&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                     <span class="s2">&quot;p95&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                     <span class="s2">&quot;p99&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                     <span class="s2">&quot;p99.9&quot;</span><span class="o">:</span><span class="mf">0.0</span>
                   <span class="p">}</span>
                <span class="p">},</span>
                <span class="s2">&quot;read_latency_statistics&quot;</span><span class="o">:</span><span class="p">{</span>
@@ -378,6 +393,9 @@
                   <span class="s2">&quot;$enum&quot;</span><span class="o">:</span><span class="p">[</span>
                      <span class="s2">&quot;file_open_error&quot;</span><span class="p">,</span>
                      <span class="s2">&quot;incorrect_cluster_file_contents&quot;</span><span class="p">,</span>
+                     <span class="s2">&quot;trace_log_file_write_error&quot;</span><span class="p">,</span>
+                     <span class="s2">&quot;trace_log_could_not_create_file&quot;</span><span class="p">,</span>
+                     <span class="s2">&quot;trace_log_writer_thread_unresponsive&quot;</span><span class="p">,</span>
                      <span class="s2">&quot;process_error&quot;</span><span class="p">,</span>
                      <span class="s2">&quot;io_error&quot;</span><span class="p">,</span>
                      <span class="s2">&quot;io_timeout&quot;</span><span class="p">,</span>
@@ -437,15 +455,20 @@
          <span class="s2">&quot;run_loop_busy&quot;</span><span class="o">:</span><span class="mf">0.2</span> <span class="c1">// fraction of time the run loop was busy</span>
       <span class="p">}</span>
    <span class="p">},</span>
-   <span class="s2">&quot;old_logs&quot;</span><span class="o">:</span><span class="p">[</span>
+   <span class="s2">&quot;logs&quot;</span><span class="o">:</span><span class="p">[</span>
       <span class="p">{</span>
-         <span class="s2">&quot;logs&quot;</span><span class="o">:</span><span class="p">[</span> <span class="c1">// this field will be absent if a value has not been explicitly set</span>
+         <span class="s2">&quot;log_interfaces&quot;</span><span class="o">:</span><span class="p">[</span> <span class="c1">// this field will be absent if a value has not been explicitly set</span>
             <span class="p">{</span>
                <span class="s2">&quot;id&quot;</span><span class="o">:</span><span class="s2">&quot;7f8d623d0cb9966e&quot;</span><span class="p">,</span>
                <span class="s2">&quot;healthy&quot;</span><span class="o">:</span><span class="kc">true</span><span class="p">,</span>
                <span class="s2">&quot;address&quot;</span><span class="o">:</span><span class="s2">&quot;1.2.3.4:1234&quot;</span>
             <span class="p">}</span>
          <span class="p">],</span>
+         <span class="s2">&quot;epoch&quot;</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
+         <span class="s2">&quot;current&quot;</span><span class="o">:</span><span class="kc">false</span><span class="p">,</span>
+         <span class="s2">&quot;begin_version&quot;</span><span class="o">:</span><span class="mf">23</span><span class="p">,</span>
+         <span class="s2">&quot;end_version&quot;</span><span class="o">:</span><span class="mf">112315141</span><span class="p">,</span>
+         <span class="s2">&quot;possibly_losing_data&quot;</span><span class="o">:</span><span class="kc">true</span><span class="p">,</span>
          <span class="s2">&quot;log_replication_factor&quot;</span><span class="o">:</span><span class="mf">3</span><span class="p">,</span>
          <span class="s2">&quot;log_write_anti_quorum&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
          <span class="s2">&quot;log_fault_tolerance&quot;</span><span class="o">:</span><span class="mf">2</span><span class="p">,</span>
@@ -477,7 +500,8 @@
                <span class="s2">&quot;storage_server_min_free_space_ratio&quot;</span><span class="p">,</span>
                <span class="s2">&quot;log_server_min_free_space&quot;</span><span class="p">,</span>
                <span class="s2">&quot;log_server_min_free_space_ratio&quot;</span><span class="p">,</span>
-               <span class="s2">&quot;storage_server_durability_lag&quot;</span>
+               <span class="s2">&quot;storage_server_durability_lag&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;storage_server_list_fetch_failed&quot;</span>
             <span class="p">]</span>
          <span class="p">},</span>
          <span class="s2">&quot;description&quot;</span><span class="o">:</span><span class="s2">&quot;The database is not being saturated by the workload.&quot;</span>
@@ -497,7 +521,8 @@
                <span class="s2">&quot;storage_server_min_free_space_ratio&quot;</span><span class="p">,</span>
                <span class="s2">&quot;log_server_min_free_space&quot;</span><span class="p">,</span>
                <span class="s2">&quot;log_server_min_free_space_ratio&quot;</span><span class="p">,</span>
-               <span class="s2">&quot;storage_server_durability_lag&quot;</span>
+               <span class="s2">&quot;storage_server_durability_lag&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;storage_server_list_fetch_failed&quot;</span>
             <span class="p">]</span>
          <span class="p">},</span>
          <span class="s2">&quot;description&quot;</span><span class="o">:</span><span class="s2">&quot;The database is not being saturated by the workload.&quot;</span>
@@ -508,7 +533,7 @@
       <span class="s2">&quot;released_transactions_per_second&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
       <span class="s2">&quot;throttled_tags&quot;</span><span class="o">:</span><span class="p">{</span>
          <span class="s2">&quot;auto&quot;</span><span class="o">:</span><span class="p">{</span>
-            <span class="s2">&quot;count&quot;</span><span class="o">:</span><span class="mf">0</span>
+            <span class="s2">&quot;count&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
          <span class="p">},</span>
          <span class="s2">&quot;manual&quot;</span><span class="o">:</span><span class="p">{</span>
             <span class="s2">&quot;count&quot;</span><span class="o">:</span><span class="mf">0</span>
@@ -544,7 +569,7 @@
    <span class="s2">&quot;database_lock_state&quot;</span><span class="o">:</span><span class="p">{</span>
       <span class="s2">&quot;locked&quot;</span><span class="o">:</span><span class="kc">true</span><span class="p">,</span>
       <span class="s2">&quot;lock_uid&quot;</span><span class="o">:</span><span class="s2">&quot;00000000000000000000000000000000&quot;</span> <span class="c1">// Only present when database is locked</span>
-   <span class="p">}</span>
+   <span class="p">},</span>
    <span class="s2">&quot;generation&quot;</span><span class="o">:</span><span class="mf">2</span><span class="p">,</span>
    <span class="s2">&quot;latency_probe&quot;</span><span class="o">:</span><span class="p">{</span> <span class="c1">// all measurements are based on running sample transactions</span>
       <span class="s2">&quot;read_seconds&quot;</span><span class="o">:</span><span class="mf">7</span><span class="p">,</span> <span class="c1">// time to perform a single read</span>
@@ -613,6 +638,8 @@
                <span class="s2">&quot;database_availability_timeout&quot;</span><span class="p">,</span>
                <span class="s2">&quot;consistencycheck_suspendkey_fetch_timeout&quot;</span><span class="p">,</span>
                <span class="s2">&quot;consistencycheck_disabled&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;duplicate_mutation_streams&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;duplicate_mutation_fetch_timeout&quot;</span><span class="p">,</span>
                <span class="s2">&quot;primary_dc_missing&quot;</span><span class="p">,</span>
                <span class="s2">&quot;fetch_primary_dc_timeout&quot;</span>
             <span class="p">]</span>
@@ -621,7 +648,10 @@
             <span class="p">{</span>
                <span class="s2">&quot;name&quot;</span><span class="o">:</span><span class="p">{</span> <span class="c1">// when not limiting</span>
                   <span class="s2">&quot;$enum&quot;</span><span class="o">:</span><span class="p">[</span>
-                     <span class="s2">&quot;incorrect_cluster_file_contents&quot;</span>
+                     <span class="s2">&quot;incorrect_cluster_file_contents&quot;</span><span class="p">,</span>
+                     <span class="s2">&quot;trace_log_file_write_error&quot;</span><span class="p">,</span>
+                     <span class="s2">&quot;trace_log_could_not_create_file&quot;</span><span class="p">,</span>
+                     <span class="s2">&quot;trace_log_writer_thread_unresponsive&quot;</span>
                   <span class="p">]</span>
                <span class="p">},</span>
                <span class="s2">&quot;description&quot;</span><span class="o">:</span><span class="s2">&quot;Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally.&quot;</span>
@@ -823,7 +853,10 @@
           <span class="s2">&quot;ssd-2&quot;</span><span class="p">,</span>
           <span class="s2">&quot;ssd-redwood-experimental&quot;</span><span class="p">,</span>
           <span class="s2">&quot;ssd-rocksdb-experimental&quot;</span><span class="p">,</span>
-          <span class="s2">&quot;memory&quot;</span>
+          <span class="s2">&quot;memory&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;memory-1&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;memory-2&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;memory-radixtree-beta&quot;</span>
       <span class="p">]},</span>
       <span class="s2">&quot;coordinators_count&quot;</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
       <span class="s2">&quot;excluded_servers&quot;</span><span class="o">:</span><span class="p">[</span>
@@ -834,8 +867,8 @@
       <span class="s2">&quot;auto_proxies&quot;</span><span class="o">:</span><span class="mf">3</span><span class="p">,</span>
       <span class="s2">&quot;auto_resolvers&quot;</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
       <span class="s2">&quot;auto_logs&quot;</span><span class="o">:</span><span class="mf">3</span><span class="p">,</span>
+      <span class="s2">&quot;proxies&quot;</span><span class="o">:</span><span class="mf">5</span><span class="p">,</span> <span class="c1">// this field will be absent if a value has not been explicitly set</span>
       <span class="s2">&quot;backup_worker_enabled&quot;</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
-      <span class="s2">&quot;proxies&quot;</span><span class="o">:</span><span class="mf">5</span> <span class="c1">// this field will be absent if a value has not been explicitly set</span>
    <span class="p">},</span>
    <span class="s2">&quot;data&quot;</span><span class="o">:</span><span class="p">{</span>
       <span class="s2">&quot;least_operating_space_bytes_log_server&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
@@ -895,8 +928,7 @@
              <span class="p">}</span>
          <span class="p">}</span>
       <span class="p">],</span>
-      <span class="s2">&quot;least_operating_space_bytes_storage_server&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
-      <span class="s2">&quot;max_machine_failures_without_losing_data&quot;</span><span class="o">:</span><span class="mf">0</span>
+      <span class="s2">&quot;least_operating_space_bytes_storage_server&quot;</span><span class="o">:</span><span class="mf">0</span>
    <span class="p">},</span>
    <span class="s2">&quot;machines&quot;</span><span class="o">:</span><span class="p">{</span>
       <span class="s2">&quot;$map_key=machineid&quot;</span><span class="o">:</span><span class="p">{</span>
@@ -1235,7 +1267,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 17, 2021.<br/>
+      Last updated on Nov 02, 2021.<br/>
     </p>
   </div>
 </footer>

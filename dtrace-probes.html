@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.15',
+        VERSION:     '6.3.22',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -155,14 +155,14 @@ macros.</p>
 <h2>Probes</h2>
 <div class="section" id="actors">
 <h3>Actors</h3>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">actor_create</span><span class="p">,</span> <span class="s">&quot;actorname&quot;</span><span class="p">)</span>
-<span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">actor_destroy</span><span class="p">,</span> <span class="s">&quot;actorname&quot;</span><span class="p">)</span>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">actor_create</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;actorname&quot;</span><span class="p">)</span><span class="w"></span>
+<span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">actor_destroy</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;actorname&quot;</span><span class="p">)</span><span class="w"></span>
 </pre></div>
 </div>
 <p>Get&#8217;s called whenever an actor is created or gets destroyed. It provides one argument which is a
 string and it is the name of the actor.</p>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">actor_enter</span><span class="p">,</span> <span class="s">&quot;name&quot;</span><span class="p">,</span> <span class="n">index</span><span class="p">)</span>
-<span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">actor_exit</span><span class="p">,</span> <span class="s">&quot;name&quot;</span><span class="p">,</span> <span class="n">index</span><span class="p">)</span>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">actor_enter</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;name&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">index</span><span class="p">)</span><span class="w"></span>
+<span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">actor_exit</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;name&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">index</span><span class="p">)</span><span class="w"></span>
 </pre></div>
 </div>
 <p>Whenever we call into an actor (either directly through a function call or indirectly through a callback)
@@ -172,27 +172,27 @@ index. <code class="docutils literal"><span class="pre">-1</span></code> means t
 </div>
 <div class="section" id="main-loop">
 <h3>Main-Loop</h3>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">run_loop_begin</span><span class="p">)</span>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">run_loop_begin</span><span class="p">)</span><span class="w"></span>
 </pre></div>
 </div>
 <p>Is called whenever the main network loop starts over.</p>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">run_loop_ready_timers</span><span class="p">,</span> <span class="n">numTimers</span><span class="p">)</span>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">run_loop_ready_timers</span><span class="p">,</span><span class="w"> </span><span class="n">numTimers</span><span class="p">)</span><span class="w"></span>
 </pre></div>
 </div>
 <p>On each iteration of the run-loop, this indicates how many timers (created through <code class="docutils literal"><span class="pre">delay</span></code> or <code class="docutils literal"><span class="pre">yield</span></code>) are
 ready. Its argument is of type <code class="docutils literal"><span class="pre">int</span></code>.</p>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">run_loop_thread_ready</span><span class="p">,</span> <span class="n">numReady</span><span class="p">)</span>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">run_loop_thread_ready</span><span class="p">,</span><span class="w"> </span><span class="n">numReady</span><span class="p">)</span><span class="w"></span>
 </pre></div>
 </div>
 <p>On each loop-iteration. The second argument is of type <code class="docutils literal"><span class="pre">int</span></code> and it is the number of thread ready processes.</p>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">run_loop_yield</span><span class="p">)</span>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">run_loop_yield</span><span class="p">)</span><span class="w"></span>
 </pre></div>
 </div>
 <p>Run loop yields.</p>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">run_loop_tasks_start</span><span class="p">,</span> <span class="n">queueSize</span><span class="p">)</span>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">run_loop_tasks_start</span><span class="p">,</span><span class="w"> </span><span class="n">queueSize</span><span class="p">)</span><span class="w"></span>
 </pre></div>
 </div>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">run_loop_done</span><span class="p">,</span> <span class="n">queueSize</span><span class="p">)</span>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">FDB_TRACE_PROBE</span><span class="p">(</span><span class="n">run_loop_done</span><span class="p">,</span><span class="w"> </span><span class="n">queueSize</span><span class="p">)</span><span class="w"></span>
 </pre></div>
 </div>
 <p>One iteration of the run-loop is done. The argument is of type <code class="docutils literal"><span class="pre">int</span></code> and is the remaining number of tasks on the
@@ -221,7 +221,7 @@ ready queue.</p>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 17, 2021.<br/>
+      Last updated on Nov 02, 2021.<br/>
     </p>
   </div>
 </footer>

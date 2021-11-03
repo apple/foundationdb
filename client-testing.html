@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.15',
+        VERSION:     '6.3.22',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -237,14 +237,14 @@ might be hard to reproduce.</p>
 <p>To start a new thread, one has to &#8220;bind&#8221; operating system threads to their simulated processes. This can be done by setting the
 <code class="docutils literal"><span class="pre">ProcessId</span></code> in the child threads when they get created. In Java this is done by only starting new threads through the provided
 <code class="docutils literal"><span class="pre">Executor</span></code>. In the C++ API one can use the <code class="docutils literal"><span class="pre">FDBWorkloadContext</span></code> to do that. For example:</p>
-<div class="highlight-C++"><div class="highlight"><pre><span></span><span class="k">template</span><span class="o">&lt;</span><span class="k">class</span> <span class="nc">Fun</span><span class="o">&gt;</span>
-<span class="n">std</span><span class="o">::</span><span class="kr">thread</span> <span class="n">startThread</span><span class="p">(</span><span class="n">FDBWorkloadContext</span><span class="o">*</span> <span class="n">context</span><span class="p">,</span> <span class="n">Fun</span> <span class="n">fun</span><span class="p">)</span> <span class="p">{</span>
-    <span class="k">auto</span> <span class="n">processId</span> <span class="o">=</span> <span class="n">context</span><span class="o">-&gt;</span><span class="n">getProcessID</span><span class="p">();</span>
-    <span class="k">return</span> <span class="n">std</span><span class="o">::</span><span class="kr">thread</span><span class="p">([</span><span class="n">context</span><span class="p">,</span> <span class="n">processID</span><span class="p">,</span> <span class="n">fun</span><span class="p">](</span>
-        <span class="n">context</span><span class="o">-&gt;</span><span class="n">setProcessID</span><span class="p">(</span><span class="n">processID</span><span class="p">);</span>
-        <span class="n">fun</span><span class="p">();</span>
-    <span class="p">));</span>
-<span class="p">}</span>
+<div class="highlight-C++"><div class="highlight"><pre><span></span><span class="k">template</span><span class="o">&lt;</span><span class="k">class</span> <span class="nc">Fun</span><span class="o">&gt;</span><span class="w"></span>
+<span class="n">std</span><span class="o">::</span><span class="kr">thread</span><span class="w"> </span><span class="n">startThread</span><span class="p">(</span><span class="n">FDBWorkloadContext</span><span class="o">*</span><span class="w"> </span><span class="n">context</span><span class="p">,</span><span class="w"> </span><span class="n">Fun</span><span class="w"> </span><span class="n">fun</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">processId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">context</span><span class="o">-&gt;</span><span class="n">getProcessID</span><span class="p">();</span><span class="w"></span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kr">thread</span><span class="p">([</span><span class="n">context</span><span class="p">,</span><span class="w"> </span><span class="n">processID</span><span class="p">,</span><span class="w"> </span><span class="n">fun</span><span class="p">](</span><span class="w"></span>
+<span class="w">        </span><span class="n">context</span><span class="o">-&gt;</span><span class="n">setProcessID</span><span class="p">(</span><span class="n">processID</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">fun</span><span class="p">();</span><span class="w"></span>
+<span class="w">    </span><span class="p">));</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
 </div>
@@ -544,7 +544,7 @@ with the <code class="docutils literal"><span class="pre">multitest</span></code
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jun 17, 2021.<br/>
+      Last updated on Nov 02, 2021.<br/>
     </p>
   </div>
 </footer>
