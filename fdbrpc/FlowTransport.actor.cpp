@@ -1593,7 +1593,9 @@ static ReliablePacket* sendPacket(TransportData* self,
 	if (checksumEnabled) {
 		packetInfoSize += sizeof(checksum);
 		checksumState = XXH3_createState();
-		ASSERT(XXH3_64bits_reset(checksumState) == XXH_OK);
+		if (XXH3_64bits_reset(checksumState) != XXH_OK) {
+			throw internal_error();
+		}
 	}
 
 	wr.writeAhead(packetInfoSize, &packetInfoBuffer);
@@ -1616,7 +1618,9 @@ static ReliablePacket* sendPacket(TransportData* self,
 			uint32_t processLength =
 			    std::min(checksumUnprocessedLength, (uint32_t)(checksumPb->bytes_written - prevBytesWritten));
 			// This won't fail if inputs are non null
-			ASSERT(XXH3_64bits_update(checksumState, checksumPb->data() + prevBytesWritten, processLength) == XXH_OK);
+			if (XXH3_64bits_update(checksumState, checksumPb->data() + prevBytesWritten, processLength) != XXH_OK) {
+				throw internal_error();
+			}
 			checksumUnprocessedLength -= processLength;
 			checksumPb = checksumPb->nextPacketBuffer();
 			prevBytesWritten = 0;
@@ -1624,7 +1628,9 @@ static ReliablePacket* sendPacket(TransportData* self,
 
 		checksum = XXH3_64bits_digest(checksumState);
 		// This always returns OK
-		ASSERT(XXH3_freeState(checksumState) == XXH_OK);
+		if (XXH3_freeState(checksumState) != XXH_OK) {
+			throw internal_error();
+		}
 	}
 
 	// Write packet length and checksum into packet buffer
