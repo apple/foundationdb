@@ -677,9 +677,12 @@ ACTOR Future<std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>>
 		                      currVersion,
 		                      0,
 		                      0,
+<<<<<<< HEAD
 		                      std::set<ptxn::StorageTeamID>{},
 		                      std::set<ptxn::StorageTeamID>{},
 		                      std::map<ptxn::StorageTeamID, vector<Tag>>(),
+=======
+>>>>>>> 149c28a07 (Populate persistent data in IKeyValueStore in TLog)
 		                      Optional<UID>());
 		writtenMessages.emplace_back(getLogEntryContent(requests.back(), pInterface->id()));
 		versions.push_back(currVersion);

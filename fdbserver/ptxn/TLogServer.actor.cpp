@@ -585,7 +585,6 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 
 	Version durableKnownCommittedVersion;
 	Version minKnownCommittedVersion;
-
 	Version newPersistentDataVersion;
 
 	CounterCollection cc;
