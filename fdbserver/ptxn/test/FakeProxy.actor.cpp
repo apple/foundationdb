@@ -115,9 +115,9 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 			                          commitVersionPair.second,
 			                          0,
 			                          0,
-									  {},
-									  {},
-									  std::map<ptxn::StorageTeamID, vector<Tag>>(),
+			                          {},
+			                          {},
+			                          std::map<ptxn::StorageTeamID, vector<Tag>>(),
 			                          Optional<UID>(deterministicRandom()->randomUniqueID()));
 			tLogCommitReplies.push_back(pTestDriverContext->tLogGroupLeaders[tLogGroupID]->commit.getReply(request));
 		}

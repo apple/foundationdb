@@ -324,7 +324,7 @@ private:
 
 		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 			(*changedTeams)[group].push_back(std::make_pair(teamid, true));
-			//TODO (Vishesh) Check if team already exists. Create entry for deleting it from old group.
+			// TODO (Vishesh) Check if team already exists. Create entry for deleting it from old group.
 		}
 
 		// Storage Team ID to TLogGroup

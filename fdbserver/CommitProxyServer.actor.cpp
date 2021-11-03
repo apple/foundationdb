@@ -1347,8 +1347,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			                                                        span.context,
 			                                                        self->debugID,
 			                                                        groupId,
-																	addedTeams,
-																	removedTeams));
+			                                                        addedTeams,
+			                                                        removedTeams));
 		}
 
 		std::function<Version(const std::vector<Version>&)> reduce =

@@ -184,17 +184,16 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                                                       NetworkAddress addr,
 	                                                       Future<TLogCommitReply> in);
 
-	Future<Version> pushTLogGroup(
-	    Version prevVersion,
-	    Version version,
-	    Version knownCommittedVersion,
-	    Version minKnownCommittedVersion,
-	    LogPushData& data,
-	    SpanID const& spanContext,
-	    Optional<UID> debugID,
-	    ptxn::TLogGroupID tLogGroup,
-	    const std::set<ptxn::StorageTeamID>& addedTeams,
-	    const std::set<ptxn::StorageTeamID>& removedTeams);
+	Future<Version> pushTLogGroup(Version prevVersion,
+	                              Version version,
+	                              Version knownCommittedVersion,
+	                              Version minKnownCommittedVersion,
+	                              LogPushData& data,
+	                              SpanID const& spanContext,
+	                              Optional<UID> debugID,
+	                              ptxn::TLogGroupID tLogGroup,
+	                              const std::set<ptxn::StorageTeamID>& addedTeams,
+	                              const std::set<ptxn::StorageTeamID>& removedTeams);
 
 	Future<Version> push(Version prevVersion,
 	                     Version version,

@@ -149,7 +149,7 @@ struct TLogCommitRequest {
 		           debugID,
 		           addedTeams,
 		           removedTeams,
-				   teamToTags,
+		           teamToTags,
 		           reply);
 	}
 };

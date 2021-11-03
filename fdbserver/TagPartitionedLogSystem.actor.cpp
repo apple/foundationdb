@@ -511,7 +511,7 @@ Future<Version> TagPartitionedLogSystem::pushTLogGroup(Version prevVersion,
 				                                                                            minKnownCommittedVersion,
 				                                                                            addedTeams,
 				                                                                            removedTeams,
-																							teamToTags,
+				                                                                            teamToTags,
 				                                                                            debugID),
 				                                                    TaskPriority::ProxyTLogCommitReply));
 				Future<Void> commitSuccess = success(allReplies.back());
