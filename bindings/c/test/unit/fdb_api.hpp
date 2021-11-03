@@ -219,6 +219,24 @@ public:
 	                              fdb_bool_t snapshot,
 	                              fdb_bool_t reverse);
 
+	// Returns a future which will be set to an FDBKeyValue array.
+	KeyValueArrayFuture get_range_and_hop(const uint8_t* begin_key_name,
+	                                      int begin_key_name_length,
+	                                      fdb_bool_t begin_or_equal,
+	                                      int begin_offset,
+	                                      const uint8_t* end_key_name,
+	                                      int end_key_name_length,
+	                                      fdb_bool_t end_or_equal,
+	                                      int end_offset,
+	                                      const uint8_t* hop_info_name,
+	                                      int hop_info_name_length,
+	                                      int limit,
+	                                      int target_bytes,
+	                                      FDBStreamingMode mode,
+	                                      int iteration,
+	                                      fdb_bool_t snapshot,
+	                                      fdb_bool_t reverse);
+
 	// Wrapper around fdb_transaction_watch. Returns a future representing an
 	// empty value.
 	EmptyFuture watch(std::string_view key);

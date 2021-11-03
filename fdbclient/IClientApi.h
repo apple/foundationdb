@@ -59,6 +59,12 @@ public:
 	                                           GetRangeLimits limits,
 	                                           bool snapshot = false,
 	                                           bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRangeAndHop(const KeySelectorRef& begin,
+	                                                 const KeySelectorRef& end,
+	                                                 const StringRef& hopInfo,
+	                                                 GetRangeLimits limits,
+	                                                 bool snapshot = false,
+	                                                 bool reverse = false) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) = 0;
 	virtual ThreadFuture<Standalone<StringRef>> getVersionstamp() = 0;
 
