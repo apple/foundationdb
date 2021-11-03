@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/DatabaseContext.h"
@@ -120,7 +121,7 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeDatabase::getBlobGran
 
 ThreadFuture<RangeResult> ThreadSafeDatabase::readBlobGranules(const KeyRangeRef& keyRange,
                                                                Version beginVersion,
-                                                               Version endVersion,
+                                                               Version readVersion,
                                                                ReadBlobGranuleContext granule_context) {
 	// In V1 of api this is required, field is just for forward compatibility
 	ASSERT(beginVersion == 0);
@@ -129,8 +130,8 @@ ThreadFuture<RangeResult> ThreadSafeDatabase::readBlobGranules(const KeyRangeRef
 	KeyRange r = keyRange;
 
 	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> getFilesFuture =
-	    onMainThread([db, r, beginVersion, endVersion]() -> Future<Standalone<VectorRef<BlobGranuleChunkRef>>> {
-		    return db->readBlobGranules(r, beginVersion, endVersion);
+	    onMainThread([db, r, beginVersion, readVersion]() -> Future<Standalone<VectorRef<BlobGranuleChunkRef>>> {
+		    return db->readBlobGranules(r, beginVersion, readVersion);
 	    });
 
 	// FIXME: can this safely avoid another main thread jump?
@@ -144,19 +145,22 @@ ThreadFuture<RangeResult> ThreadSafeDatabase::readBlobGranules(const KeyRangeRef
 	for (BlobGranuleChunkRef& chunk : files) {
 		RangeResult chunkRows;
 
+		int64_t snapshotLoadId;
+		int64_t deltaLoadIds[chunk.deltaFiles.size()];
+
 		if (!db->blobGranuleNoMaterialize) {
 			// Start load process for all files in chunk
 			// In V1 of api snapshot is required, optional is just for forward compatibility
 			ASSERT(chunk.snapshotFile.present());
 			std::string snapshotFname = chunk.snapshotFile.get().filename.toString();
-			int64_t snapshotLoadId = granule_context.start_load_f(snapshotFname.c_str(),
-			                                                      snapshotFname.size(),
-			                                                      chunk.snapshotFile.get().offset,
-			                                                      chunk.snapshotFile.get().length,
-			                                                      granule_context.userContext);
+			snapshotLoadId = granule_context.start_load_f(snapshotFname.c_str(),
+			                                              snapshotFname.size(),
+			                                              chunk.snapshotFile.get().offset,
+			                                              chunk.snapshotFile.get().length,
+			                                              granule_context.userContext);
 			int64_t deltaLoadIds[chunk.deltaFiles.size()];
 			int64_t deltaLoadLengths[chunk.deltaFiles.size()];
-			uint8_t* deltaData[chunk.deltaFiles.size()];
+			StringRef deltaData[chunk.deltaFiles.size()];
 			for (int deltaFileIdx = 0; deltaFileIdx < chunk.deltaFiles.size(); deltaFileIdx++) {
 				std::string deltaFName = chunk.deltaFiles[deltaFileIdx].filename.toString();
 				deltaLoadIds[deltaFileIdx] = granule_context.start_load_f(deltaFName.c_str(),
@@ -168,24 +172,26 @@ ThreadFuture<RangeResult> ThreadSafeDatabase::readBlobGranules(const KeyRangeRef
 			}
 
 			// once all loads kicked off, load data for chunk
-			uint8_t* snapshotData = granule_context.get_load_f(snapshotLoadId, granule_context.userContext);
+			StringRef snapshotData(granule_context.get_load_f(snapshotLoadId, granule_context.userContext),
+			                       chunk.snapshotFile.get().length);
 			for (int i = 0; i < chunk.deltaFiles.size(); i++) {
-				deltaData[i] = granule_context.get_load_f(deltaLoadIds[i], granule_context.userContext);
+				deltaData[i] = StringRef(granule_context.get_load_f(deltaLoadIds[i], granule_context.userContext),
+				                         chunk.deltaFiles[i].length);
 			}
 
 			// FIXME: use bytes from snapshot and delta to materialize chunkRows
 
-			granule_context.free_load_f(snapshotLoadId, granule_context.userContext);
-			for (int i = 0; i < chunk.deltaFiles.size(); i++) {
-				granule_context.free_load_f(deltaLoadIds[i], granule_context.userContext);
-			}
+			chunkRows = materializeBlobGranule(chunk, keyRange, readVersion, snapshotData, deltaData);
 		}
 
 		results.arena().dependsOn(chunkRows.arena());
 		results.append(results.arena(), chunkRows.begin(), chunkRows.size());
 
 		if (!db->blobGranuleNoMaterialize) {
-			// FIXME: free with granule_context
+			granule_context.free_load_f(snapshotLoadId, granule_context.userContext);
+			for (int i = 0; i < chunk.deltaFiles.size(); i++) {
+				granule_context.free_load_f(deltaLoadIds[i], granule_context.userContext);
+			}
 		}
 	}
 
