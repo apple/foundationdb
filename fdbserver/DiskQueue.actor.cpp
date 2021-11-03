@@ -1029,14 +1029,14 @@ private:
 		wait(self->onSafeToDestruct());
 		TraceEvent("DQDestroyDone", self->dbgid).detail("File0Name", self->rawQueue->files[0].dbgFilename);
 		self->rawQueue->dispose();
-		delete self;
+		// delete self;
 	}
 
 	ACTOR static void close(DiskQueue* self) {
 		wait(self->onSafeToDestruct());
 		TraceEvent("DQCloseDone", self->dbgid).detail("File0Name", self->rawQueue->files[0].dbgFilename);
 		self->rawQueue->close();
-		delete self;
+		// delete self;
 	}
 
 #pragma pack(push, 1)
@@ -1555,11 +1555,11 @@ public:
 	Future<Void> onClosed() override { return queue->onClosed(); }
 	void dispose() override {
 		queue->dispose();
-		delete this;
+		// delete this;
 	}
 	void close() override {
 		queue->close();
-		delete this;
+		// delete this;
 	}
 
 	// IDiskQueue

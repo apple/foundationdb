@@ -52,7 +52,7 @@ public:
 			delete[] reserved_buffer;
 			reserved_buffer = nullptr;
 		}
-		delete this;
+		// delete this;
 	}
 	void close() override {
 		recovering.cancel();
@@ -61,7 +61,7 @@ public:
 			delete[] reserved_buffer;
 			reserved_buffer = nullptr;
 		}
-		delete this;
+		// delete this;
 	}
 
 	// IKeyValueStore

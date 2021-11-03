@@ -59,12 +59,11 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
                                     std::shared_ptr<ptxn::test::TestDriverContext> pContext,
                                     std::string folder) {
 	state std::vector<ptxn::InitializePtxnTLogRequest> tLogInitializations;
-	state std::unordered_map<ptxn::TLogGroupID, int> groupToLeaderId;
 	pContext->groupsPerTLog.resize(pContext->numTLogs);
 	for (int i = 0, index = 0; i < pContext->numTLogGroups; ++i) {
 		ptxn::TLogGroup& tLogGroup = pContext->tLogGroups[i];
 		pContext->groupsPerTLog[index].push_back(tLogGroup);
-		groupToLeaderId[tLogGroup.logGroupId] = index;
+		pContext->groupToLeaderId[tLogGroup.logGroupId] = index;
 		++index;
 		index %= pContext->numTLogs;
 	}
@@ -127,7 +126,7 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 	}
 	// Update the TLogGroupID to interface mapping
 	for (auto& [tLogGroupID, tLogGroupLeader] : pContext->tLogGroupLeaders) {
-		tLogGroupLeader = pContext->tLogInterfaces[groupToLeaderId[tLogGroupID]];
+		tLogGroupLeader = pContext->tLogInterfaces[pContext->groupToLeaderId[tLogGroupID]];
 	}
 	return Void();
 }
@@ -677,12 +676,9 @@ ACTOR Future<std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>>
 		                      currVersion,
 		                      0,
 		                      0,
-<<<<<<< HEAD
 		                      std::set<ptxn::StorageTeamID>{},
 		                      std::set<ptxn::StorageTeamID>{},
 		                      std::map<ptxn::StorageTeamID, vector<Tag>>(),
-=======
->>>>>>> 149c28a07 (Populate persistent data in IKeyValueStore in TLog)
 		                      Optional<UID>());
 		writtenMessages.emplace_back(getLogEntryContent(requests.back(), pInterface->id()));
 		versions.push_back(currVersion);
@@ -727,11 +723,10 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	state std::unordered_map<ptxn::TLogGroupID, IDiskQueue*> qs;
 	pContext->groupsPerTLog.resize(pContext->numTLogs);
 	state std::unordered_map<ptxn::TLogGroupID, IKeyValueStore*> ds;
-	state std::unordered_map<ptxn::TLogGroupID, int> groupToLeaderId;
 	for (int i = 0, index = 0; i < pContext->numTLogGroups; ++i) {
 		ptxn::TLogGroup& tLogGroup = pContext->tLogGroups[i];
 		pContext->groupsPerTLog[index].push_back(tLogGroup);
-		groupToLeaderId[tLogGroup.logGroupId] = index;
+		pContext->groupToLeaderId[tLogGroup.logGroupId] = index;
 		++index;
 		index %= pContext->numTLogs;
 	}
@@ -790,7 +785,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	}
 
 	for (auto& [tLogGroupID, tLogGroupLeader] : pContext->tLogGroupLeaders) {
-		tLogGroupLeader = pContext->tLogInterfaces[groupToLeaderId[tLogGroupID]];
+		tLogGroupLeader = pContext->tLogInterfaces[pContext->groupToLeaderId[tLogGroupID]];
 	}
 
 	state IKeyValueStore* d = ds[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
@@ -834,6 +829,39 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	}
 
 	ASSERT(q->getNextReadLocation() == q->getNextCommitLocation());
+
+	std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> dqs;
+	state int writtenTLogID = pContext->groupToLeaderId[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
+	for (ptxn::TLogGroup& tlogGroup : pContext->groupsPerTLog[writtenTLogID]) {
+		TraceEvent("hfu5DQS").detail("groupId", tlogGroup.logGroupId);
+		dqs[tlogGroup.logGroupId] = std::make_pair(ds[tlogGroup.logGroupId], qs[tlogGroup.logGroupId]);
+	}
+	UID id1 = ptxn::test::randomUID();
+	UID id2 = ptxn::test::randomUID();
+
+	PromiseStream<ptxn::InitializePtxnTLogRequest> initializeTLog2;
+
+	actors.push_back(ptxn::tLog(dqs,
+								makeReference<AsyncVar<ServerDBInfo>>(),
+								LocalityData(),
+								initializeTLog2,
+								id1,
+								id2,
+								true,
+								Promise<Void>(),
+								Promise<Void>(),
+								folder,
+								makeReference<AsyncVar<bool>>(false),
+								makeReference<AsyncVar<UID>>(id1)));
+	tLogInitializations.emplace_back();
+	tLogInitializations.back().isPrimary = true;
+	tLogInitializations.back().storeType = KeyValueStoreType::MEMORY;
+	tLogInitializations.back().tlogGroups = pContext->groupsPerTLog[writtenTLogID];
+	// nede to set recruitementId to avoid caching
+	tLogInitializations.back().recruitmentID = ptxn::test::randomUID();
+	TraceEvent("hfu5Test").detail("recruitmentID", tLogInitializations.back().recruitmentID);
+	initializeTLog2.send(tLogInitializations.back());
+	wait(delay(1.0));
 
 	platform::eraseDirectoryRecursive(folder);
 	return Void();

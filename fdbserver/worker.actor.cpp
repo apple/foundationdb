@@ -1428,6 +1428,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				auto& logData = sharedLogs[SharedLogsKey(s.tLogOptions, s.storeType)];
 				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
 				// be sending a fake InitializeTLogRequest rather than calling tLog() ?
+				// here is where recovery happens
 				Future<Void> tl =
 				    tLogFn(persistentDataAndQueues,
 				           dbInfo,
@@ -1785,6 +1786,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>>
 					    persistentDataAndQueues;
 					for (auto& group : req.tlogGroups) {
+						// hfu5: create persistent data structure here
 						IKeyValueStore* data =
 						    keyValueStoreMemory(joinPath(folder, "loggroup"), group.logGroupId, 500e6);
 						IDiskQueue* queue =

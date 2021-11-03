@@ -95,7 +95,13 @@ public:
 		delete this;
 	}
 	void close() override {
+		TraceEvent("hfu5CloseTLogQueue")
+			.detail("queueInvalid", queue == 0)
+			.detail("queue", static_cast<void*>(queue));
 		queue->close();
+		TraceEvent("hfu5CloseTLogQueue2")
+			.detail("queueInvalid", queue == 0)
+			.detail("queue", static_cast<void*>(queue));
 		delete this;
 	}
 
@@ -254,8 +260,16 @@ static Tag decodeTagPoppedKey(KeyRef id, KeyRef key) {
 	return s;
 }
 
+static StorageTeamID decodeStorageTeamIDPoppedKey(KeyRef key) {
+	return BinaryReader::fromStringRef<StorageTeamID>(key, Unversioned());
+}
+
 static Version decodeTagPoppedValue(ValueRef value) {
 	return BinaryReader::fromStringRef<Version>(value, Unversioned());
+}
+
+static std::pair<std::vector<Tag>, Version> decodePairValue(ValueRef value) {
+	return BinaryReader::fromStringRef<std::pair<std::vector<Tag>, Version>>(value, Unversioned());
 }
 
 static StringRef stripTagMessagesKey(StringRef key) {
@@ -305,7 +319,7 @@ struct TLogGroupData : NonCopyable, public ReferenceCounted<TLogGroupData> {
 	// ^committing is the location where the active TLog accepts the pushed data.
 	Deque<UID> popOrder;
 	Deque<UID> spillOrder;
-	std::map<UID, Reference<struct LogGenerationData>> id_data;
+	std::map<UID, Reference<LogGenerationData>> id_data;
 
 	UID dbgid;
 	UID workerID;
@@ -624,8 +638,8 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	                                                              const StorageTeamID& strorageTeamID);
 
 	// only callable after getStorageTeamData returns a null reference
-	Reference<StorageTeamData> createStorageTeamData(StorageTeamID team, std::vector<Tag>& tags) {
-		return storageTeamData[team] = makeReference<StorageTeamData>(team, tags);
+	Reference<StorageTeamData> createStorageTeamData(StorageTeamID team, std::vector<Tag>& tags, Version popped = 0) {
+		return storageTeamData[team] = makeReference<StorageTeamData>(team, tags, popped);
 	}
 
 	// only callable after getStorageTeamData returns a null reference
@@ -1382,8 +1396,11 @@ ACTOR Future<Void> tLogCore(
     Reference<TLogServerData> self,
     std::shared_ptr<std::unordered_map<TLogGroupID, Reference<LogGenerationData>>> activeGeneration,
     TLogInterface_PassivelyPull tli) {
+	// TraceEvent("hfu5TLogCore1111").detail("ready", self->removed.isReady());
 	if (self->removed.isReady()) {
 		wait(delay(0)); // to avoid iterator invalidation in restorePersistentState when removed is already ready
+		TraceEvent("hfu5TLogCoreqqqqq").detail("error", self->removed.isError());
+
 		ASSERT(self->removed.isError());
 
 		if (self->removed.getError().code() != error_code_worker_removed) {
@@ -1400,6 +1417,7 @@ ACTOR Future<Void> tLogCore(
 	self->addActors.send(self->removed);
 
 	// FIXME: update tlogMetrics to include new information, or possibly only have one copy for the shared instance
+	TraceEvent("hfu5TLogCore2222").detail("removed", self->removed.isValid());
 	for (auto& logGroup : *activeGeneration) {
 		self->sharedActors.send(traceCounters("TLogMetrics",
 		                                      logGroup.second->logId,
@@ -1411,14 +1429,22 @@ ACTOR Future<Void> tLogCore(
 
 	// TODO: remove this so that a log generation is only tracked once
 	self->addActors.send(traceRole(Role::TRANSACTION_LOG, tli.id()));
+	TraceEvent("hfu5PassivelyPull");
 	self->addActors.send(serveTLogInterface_PassivelyPull(self, tli, activeGeneration));
 	self->addActors.send(waitFailureServer(tli.waitFailure.getFuture()));
+	// line below error
+	TraceEvent("hfu5TLogCorepppppppppp");
 	state Future<Void> error = actorCollection(self->addActors.getFuture());
+	TraceEvent("hfu5TLogCoreqqqqqqqq");
 
 	try {
 		wait(error);
+		TraceEvent("hfu5TLogCore4444444444");
+
 		throw internal_error();
 	} catch (Error& e) {
+		TraceEvent("hfu5TLogCore5555555").detail("e", e.code());
+
 		if (e.code() != error_code_worker_removed)
 			throw;
 		for (auto& logGroup : *activeGeneration) {
@@ -1459,13 +1485,29 @@ bool tlogTerminated(Reference<TLogGroupData> self,
 	// close it.
 	// assign an empty PromiseSteam to self->sharedActors would delete the referenfce of the internal queue in
 	// PromiseSteam thus the actors can be cancelled in the case there is no more references of the old queue
+	TraceEvent("hfu5TLogTerminated").detail("group", self->tlogGroupID).detail("error", e.code());
+
 	self->sharedActors = PromiseStream<Future<Void>>();
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
-		persistentData->dispose();
-		persistentQueue->dispose();
+		TraceEvent("hfu5TLogDispose2222").detail("group", self->tlogGroupID)
+			.detail("error", e.code())
+			.detail("persistentQueueNull", persistentQueue == 0)
+			.detail("persistentDataNull", persistentData == 0);
+		// persistentData->dispose();
+		TraceEvent("hfu5TLogDispose3333").detail("group", self->tlogGroupID);
+		// persistentQueue->dispose();
 	} else {
-		persistentData->close();
-		persistentQueue->close();
+		TraceEvent("hfu5TLogTerminated2222").detail("group", self->tlogGroupID)
+			.detail("error", e.code())
+			.detail("persistentQueueNull", persistentQueue == 0)
+			.detail("persistentDataNull", persistentData == 0);
+		// persistentData->close();
+		TraceEvent("hfu5TLogTerminated3333").detail("group", self->tlogGroupID)
+			.detail("error", e.code());
+		// persistentQueue->close();
+		TraceEvent("hfu5TLogTerminate多4444").detail("group", self->tlogGroupID)
+			.detail("error", e.code());
+
 	}
 
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
@@ -1498,29 +1540,319 @@ void stopAllTLogs(Reference<TLogServerData> self, UID newLogId) {
 	}
 }
 
+ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
+                                          InitializePtxnTLogRequest req,
+                                          ptxn::TLogGroup group,
+                                          LocalityData locality,
+                                          Reference<TLogServerData> serverData) {
+	state double startt = now();
+	state Reference<LogGenerationData> logData;
+	state KeyRange tagKeys;
+	// PERSIST: Read basic state from persistentData; replay persistentQueue but don't erase it
+
+	state IKeyValueStore* storage = self->persistentData;
+	wait(storage->init());
+	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
+	state Future<Optional<Value>> fRecoveryLocation = storage->readValue(persistRecoveryLocationKey);
+	state Future<RangeResult> fVers = storage->readRange(persistCurrentVersionKeys); // these kv must be persisted so that we can restore
+	state Future<RangeResult> fKnownCommitted = storage->readRange(persistKnownCommittedVersionKeys);
+	state Future<RangeResult> fLocality = storage->readRange(persistLocalityKeys);
+	state Future<RangeResult> fLogRouterTags = storage->readRange(persistLogRouterTagsKeys);
+	state Future<RangeResult> fTxsTags = storage->readRange(persistTxsTagsKeys);
+	state Future<RangeResult> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);
+	state Future<RangeResult> fProtocolVersions = storage->readRange(persistProtocolVersionKeys);
+	state Future<RangeResult> fTLogSpillTypes = storage->readRange(persistTLogSpillTypeKeys);
+
+	// FIXME: metadata in queue?
+
+	wait(waitForAll(std::vector{ fFormat, fRecoveryLocation }));
+	wait(waitForAll(std::vector{ fVers,
+	                             fKnownCommitted,
+	                             fLocality,
+	                             fLogRouterTags,
+	                             fTxsTags,
+	                             fRecoverCounts,
+	                             fProtocolVersions,
+	                             fTLogSpillTypes }));
+
+	if (fFormat.get().present() && !persistFormatReadableRange.contains(fFormat.get().get())) {
+		// FIXME: remove when we no longer need to test upgrades from 4.X releases
+		if (g_network->isSimulated()) {
+			TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0).detail("RandomUnseed", 0);
+			flushAndExit(0);
+		}
+
+		TraceEvent(SevError, "UnsupportedDBFormat", self->dbgid)
+		    .detail("Format", fFormat.get().get())
+		    .detail("Expected", persistFormat.value.toString());
+		throw worker_recovery_failed();
+	}
+
+	if (!fFormat.get().present()) {
+		RangeResult v = wait(self->persistentData->readRange(KeyRangeRef(StringRef(), LiteralStringRef("\xff")), 1));
+		if (!v.size()) {
+			TEST(true); // The DB is completely empty, so it was never initialized.  Delete it.
+			throw worker_removed();
+		} else {
+			// This should never happen
+			TraceEvent(SevError, "NoDBFormatKey", self->dbgid).detail("FirstKey", v[0].key);
+			ASSERT(false);
+			throw worker_recovery_failed();
+		}
+	}
+
+	state std::vector<Future<ErrorOr<Void>>> removed;
+
+	ASSERT(fFormat.get().get() == LiteralStringRef("FoundationDB/LogServer/3/0"));
+
+	ASSERT(fVers.get().size() == fRecoverCounts.get().size());
+
+	state std::map<UID, int8_t> id_locality;
+	for (auto it : fLocality.get()) {
+		id_locality[BinaryReader::fromStringRef<UID>(it.key.removePrefix(persistLocalityKeys.begin), Unversioned())] =
+		    BinaryReader::fromStringRef<int8_t>(it.value, Unversioned());
+	}
+
+	state std::map<UID, int> id_logRouterTags;
+	for (auto it : fLogRouterTags.get()) {
+		id_logRouterTags[BinaryReader::fromStringRef<UID>(it.key.removePrefix(persistLogRouterTagsKeys.begin),
+		                                                  Unversioned())] =
+		    BinaryReader::fromStringRef<int>(it.value, Unversioned());
+	}
+
+	state std::map<UID, int> id_txsTags;
+	for (auto it : fTxsTags.get()) {
+		id_txsTags[BinaryReader::fromStringRef<UID>(it.key.removePrefix(persistTxsTagsKeys.begin), Unversioned())] =
+		    BinaryReader::fromStringRef<int>(it.value, Unversioned());
+	}
+
+	state std::map<UID, Version> id_knownCommitted;
+	for (auto it : fKnownCommitted.get()) {
+		id_knownCommitted[BinaryReader::fromStringRef<UID>(it.key.removePrefix(persistKnownCommittedVersionKeys.begin),
+		                                                   Unversioned())] =
+		    BinaryReader::fromStringRef<Version>(it.value, Unversioned());
+	}
+
+	state IDiskQueue::location minimumRecoveryLocation = 0;
+	if (fRecoveryLocation.get().present()) {
+		minimumRecoveryLocation =
+		    BinaryReader::fromStringRef<IDiskQueue::location>(fRecoveryLocation.get().get(), Unversioned());
+	}
+
+	state int idx = 0;
+	state Promise<Void> registerWithMaster;
+	state std::map<UID, ptxn::TLogInterface_PassivelyPull> id_interf;
+	state std::vector<std::pair<Version, UID>> logsByVersion;
+	state std::shared_ptr<std::unordered_map<TLogGroupID, Reference<LogGenerationData>>> activeGeneration =
+	    std::make_shared<std::unordered_map<TLogGroupID, Reference<LogGenerationData>>>();
+	serverData->removed = Never();
+
+	for (idx = 0; idx < fVers.get().size(); idx++) {
+		state KeyRef rawId = fVers.get()[idx].key.removePrefix(persistCurrentVersionKeys.begin);
+		UID id1 = BinaryReader::fromStringRef<UID>(rawId, Unversioned());
+		UID id2 = BinaryReader::fromStringRef<UID>(
+		    fRecoverCounts.get()[idx].key.removePrefix(persistRecoveryCountKeys.begin), Unversioned());
+		ASSERT(id1 == id2);
+
+		ptxn::TLogInterface_PassivelyPull recruited(id1, self->dbgid, locality);
+		recruited.initEndpoints();
+
+		// DUMPTOKEN(recruited.peekMessages);
+		// DUMPTOKEN(recruited.popMessages);
+		DUMPTOKEN(recruited.commit);
+		DUMPTOKEN(recruited.lock);
+		DUMPTOKEN(recruited.getQueuingMetrics);
+		DUMPTOKEN(recruited.confirmRunning);
+		DUMPTOKEN(recruited.waitFailure);
+		DUMPTOKEN(recruited.recoveryFinished);
+		DUMPTOKEN(recruited.disablePopRequest);
+		DUMPTOKEN(recruited.enablePopRequest);
+		DUMPTOKEN(recruited.snapRequest);
+
+		ProtocolVersion protocolVersion =
+		    BinaryReader::fromStringRef<ProtocolVersion>(fProtocolVersions.get()[idx].value, Unversioned());
+		TLogSpillType logSpillType = BinaryReader::fromStringRef<TLogSpillType>(fTLogSpillTypes.get()[idx].value,
+		                                                                        AssumeVersion(protocolVersion));
+
+		logData = makeReference<LogGenerationData>(self,
+		                                           recruited,
+		                                           UID(),
+		                                           protocolVersion,
+		                                           logSpillType,
+		                                           group.storageTeams,
+		                                           req.locality,
+		                                           req.epoch,
+		                                           "Restored");
+		logData->locality = id_locality[id1];
+		logData->stopped = true;
+		self->id_data[id1] = logData;
+		id_interf[id1] = recruited;
+
+		logData->knownCommittedVersion = id_knownCommitted[id1];
+		Version ver = BinaryReader::fromStringRef<Version>(fVers.get()[idx].value, Unversioned());
+		logData->persistentDataVersion = ver;
+		logData->persistentDataDurableVersion = ver;
+		logData->version.set(ver);
+		logData->recoveryCount =
+		    BinaryReader::fromStringRef<DBRecoveryCount>(fRecoverCounts.get()[idx].value, Unversioned());
+		logData->removed = rejoinMasters(serverData, recruited, logData->recoveryCount, registerWithMaster.getFuture(), false);
+		removed.push_back(errorOr(logData->removed));
+		logsByVersion.emplace_back(ver, id1);
+		
+		activeGeneration->emplace(group.logGroupId, logData);
+
+		TraceEvent("TLogPersistentStateRestore", self->dbgid)
+		    .detail("LogId", logData->logId)
+		    .detail("Ver", ver)
+		    .detail("RecoveryCount", logData->recoveryCount);
+		// Restore popped keys.  Pop operations that took place after the last (committed) updatePersistentDataVersion
+		// might be lost, but that is fine because we will get the corresponding data back, too.
+		tagKeys = prefixRange(rawId.withPrefix(persistTagPoppedKeys.begin));
+		loop {
+			if (logData->removed.isReady())
+				break;
+			RangeResult data = wait(self->persistentData->readRange(tagKeys, BUGGIFY ? 3 : 1 << 30, 1 << 20));
+			if (!data.size())
+				break;
+			((KeyRangeRef&)tagKeys) = KeyRangeRef(keyAfter(data.back().key, tagKeys.arena()), tagKeys.end);
+
+			for (auto& kv : data) {
+				StorageTeamID id = decodeStorageTeamIDPoppedKey(kv.key);
+				std::pair<std::vector<Tag>, Version> v = decodePairValue(kv.value);
+				std::vector<Tag> tags = v.first;
+				Version popped = v.second;
+				TraceEvent("TLogRestorePopped", logData->logId)
+				    .detail("StorageTeamID", id.toString())
+				    .detail("To", popped);
+
+				auto storageTeamData = logData->getStorageTeamData(id);
+				ASSERT(!storageTeamData);
+				logData->createStorageTeamData(id, tags, popped);
+				logData->getStorageTeamData(id)->persistentPopped = popped;
+			}
+		}
+	}
+
+	std::sort(logsByVersion.begin(), logsByVersion.end());
+	for (const auto& pair : logsByVersion) {
+		// TLogs that have been fully spilled won't have queue entries read in the loop below.
+		self->popOrder.push_back(pair.second);
+	}
+	logsByVersion.clear();
+
+	state Future<Void> allRemoved = waitForAll(removed);
+	state UID lastId = UID(1, 1); // initialized so it will not compare equal to a default UID
+	state double recoverMemoryLimit = SERVER_KNOBS->TLOG_RECOVER_MEMORY_LIMIT;
+	if (BUGGIFY)
+		recoverMemoryLimit =
+		    std::max<double>(SERVER_KNOBS->BUGGIFY_RECOVER_MEMORY_LIMIT, (double)SERVER_KNOBS->TLOG_SPILL_THRESHOLD);
+
+	try {
+		bool recoveryFinished = wait(self->persistentQueue->initializeRecovery(minimumRecoveryLocation));
+		if (recoveryFinished) {
+			TraceEvent("hfu5RecoveryFinished").detail("group", self->tlogGroupID);
+			throw end_of_stream();
+		}
+		loop {
+			if (allRemoved.isReady()) {
+				TEST(true); // all tlogs removed during queue recovery
+				throw worker_removed();
+			}
+			choose {
+				when(TLogQueueEntry qe = wait(self->persistentQueue->readNext(self.getPtr()))) {
+					if (qe.id != lastId) {
+						lastId = qe.id;
+						auto it = self->id_data.find(qe.id);
+						if (it != self->id_data.end()) {
+							logData = it->second;
+						} else {
+							logData = Reference<LogGenerationData>();
+						}
+					}
+
+					//TraceEvent("TLogRecoveredQE", self->dbgid).detail("LogId", qe.id).detail("Ver", qe.version).detail("MessageBytes", qe.messages.size()).detail("Tags", qe.tags.size())
+					//	.detail("Tag0", qe.tags.size() ? qe.tags[0].tag : invalidTag).detail("Version",
+					// logData->version.get());
+
+					if (logData) {
+						if (!self->spillOrder.size() || self->spillOrder.back() != qe.id) {
+							self->spillOrder.push_back(qe.id);
+						}
+						logData->knownCommittedVersion =
+						    std::max(logData->knownCommittedVersion, qe.knownCommittedVersion);
+						if (qe.version > logData->version.get()) {
+							for (int i = 0; i < qe.messages.size(); i++) {
+								commitMessages(self, logData, qe.version, qe.messages[i], qe.storageTeams[i]);
+							}
+							logData->version.set(qe.version);
+							logData->queueCommittedVersion.set(qe.version);
+
+							while (self->bytesInput - self->bytesDurable >= recoverMemoryLimit) {
+								TEST(true); // Flush excess data during TLog queue recovery
+								TraceEvent("FlushLargeQueueDuringRecovery", self->dbgid)
+								    .detail("LogId", logData->logId)
+								    .detail("BytesInput", self->bytesInput)
+								    .detail("BytesDurable", self->bytesDurable)
+								    .detail("Version", logData->version.get())
+								    .detail("PVer", logData->persistentDataVersion);
+
+								// choose {
+								// 	when(wait(updateStorage(self))) {}
+								// 	when(wait(allRemoved)) { throw worker_removed(); }
+								// }
+							}
+						} else {
+							// Updating persistRecoveryLocation and persistCurrentVersion at the same time,
+							// transactionally, should mean that we never read any TLogQueueEntry that has already
+							// been spilled.
+							ASSERT_WE_THINK(qe.version == logData->version.get());
+						}
+					}
+				}
+				when(wait(allRemoved)) { throw worker_removed(); }
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_end_of_stream)
+			throw;
+	}
+
+	TraceEvent("TLogRestorePersistentStateDone", self->dbgid).detail("Took", now() - startt);
+	TEST(now() - startt >= 1.0); // TLog recovery took more than 1 second
+
+	for (auto it : self->id_data) {
+		if (it.second->queueCommittedVersion.get() == 0) {
+			TraceEvent("TLogZeroVersion", self->dbgid).detail("LogId", it.first);
+			it.second->queueCommittedVersion.set(it.second->version.get());
+		}
+		it.second->recoveryComplete.sendError(end_of_stream());
+		// in old code path, tLogCore is called for each generation for each tlog.
+		// why we need to start a tLogCore for each generation of of each group?
+		self->sharedActors.send(tLogCore(serverData, activeGeneration, id_interf[it.first]));
+	}
+
+	if (registerWithMaster.canBeSet())
+		registerWithMaster.send(Void());
+	return Void();
+}
+
 // Initialize a new tLog team (if !recoverFrom.size()) or restore from network
 // persistentData: All teams share single persistentData, in-memory for now.
 // persistentQueue: dummy queue for now, we will let the team find out
-ACTOR Future<Void> tlogGroupRecovery(Reference<TLogGroupData> self, Promise<Void> recovered) {
-	try {
-		wait(ioTimeoutError(checkEmptyQueue(self) && checkRecovered(self), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
-	} catch (Error& e) {
-		self->terminated.send(Void());
-		TraceEvent("TLogError", self->dbgid).detail("GroupID", self->tlogGroupID).error(e, true);
-		if (recovered.canBeSet())
-			recovered.send(Void());
-
-		for (auto& it : self->id_data) {
-			if (!it.second->recoveryComplete.isSet()) {
-				it.second->recoveryComplete.sendError(end_of_stream());
-			}
-		}
-
-		if (tlogTerminated(self, self->persistentData, self->persistentQueue, e)) {
-			return Void();
-		} else {
-			throw;
-		}
+ACTOR Future<Void> tlogGroupRecovery(Reference<TLogGroupData> self,
+                                     InitializePtxnTLogRequest req,
+                                     ptxn::TLogGroup group,
+                                     LocalityData locality,
+                                     Reference<TLogServerData> serverData,
+                                     bool restoreFromDisk,
+                                     Promise<Void> recovered) {
+	TraceEvent("hfu5Restore").detail("disk", restoreFromDisk);
+	if (restoreFromDisk) {
+		// i do not want this call to be blocked because i have batch waiting, does it work now?
+		wait(restorePersistentState(self, req, group, locality, serverData));
+	} else {
+		wait(ioTimeoutError(checkEmptyQueue(self) && checkRecovered(self),
+								SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
 	}
 	return Void();
 }
@@ -1611,7 +1943,9 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializePtxnTLogR
 
 	req.reply.send(recruited);
 
-	TraceEvent("TLogStart", recruited.id());
+	TraceEvent("hfu5BeforeTLogCore2222").detail("recruitment", req.recruitmentID)
+				.detail("size", activeGeneration->size());
+
 	wait(tLogCore(self, activeGeneration, recruited));
 	return Void();
 }
@@ -2017,25 +2351,31 @@ ACTOR Future<Void> tLog(
     std::string folder,
     Reference<AsyncVar<bool>> degraded,
     Reference<AsyncVar<UID>> activeSharedTLog) {
+	TraceEvent("hfu5TLog").detail("restore", restoreFromDisk);
 
 	state Reference<TLogServerData> self = makeReference<TLogServerData>(tlogId, workerID, db, degraded, folder);
 	state Future<Void> error = actorCollection(self->sharedActors.getFuture());
 
 	TraceEvent("SharedTlog", tlogId);
-	ASSERT(!restoreFromDisk);
 
 	try {
 		state Future<Void> activeSharedChange = Void();
 		state std::vector<Future<Void>> tlogGroupTerminated = { Never() };
+		state std::vector<Future<Void>> tlogGroupRecoveries;
 
 		loop choose {
 			// TODO: restore old tlog groups from disk and build overlapping tlog groups from the restore
 			when(state InitializePtxnTLogRequest req = waitNext(tlogRequests.getFuture())) {
+				TraceEvent("hfu5ReceiveRequest").detail("restore", restoreFromDisk)
+					.detail("recoverAt", req.recoverAt)
+					.detail("recruiteId", req.recruitmentID)
+					.detail("tlogGroupsSize", req.tlogGroups.size())
+					.detail("enter", self->tlogCache.exists(req.recruitmentID));
 				if (!self->tlogCache.exists(req.recruitmentID)) {
 					self->tlogCache.set(req.recruitmentID, req.reply.getFuture());
-
 					std::vector<Future<Void>> tlogGroupRecoveries;
 					for (auto& group : req.tlogGroups) {
+						TraceEvent("hfu5Group").detail("groupId", group.logGroupId).detail("restore", restoreFromDisk);
 						// memory managed by each tlog group
 						IKeyValueStore* persistentData = persistentDataAndQueues[group.logGroupId].first;
 						IDiskQueue* persistentQueue = persistentDataAndQueues[group.logGroupId].second;
@@ -2050,14 +2390,17 @@ ACTOR Future<Void> tLog(
 						                                                                  self);
 						TraceEvent("SharedTlogGroup").detail("LogId", tlogId).detail("GroupID", group.logGroupId);
 						self->tlogGroups[group.logGroupId] = tlogGroup;
-						Promise<Void> teamRecovered;
-						tlogGroupRecoveries.push_back(tlogGroupRecovery(tlogGroup, teamRecovered));
+						tlogGroupRecoveries.push_back(
+						    tlogGroupRecovery(tlogGroup, req, group, locality, self, restoreFromDisk, recovered));
 						tlogGroupTerminated.push_back(tlogGroup->terminated.getFuture());
 					}
-
 					choose {
-						when(wait(waitForAny(tlogGroupTerminated))) { throw tlog_stopped(); }
-						when(wait(waitForAll(tlogGroupRecoveries))) {}
+						when(wait(waitForAny(tlogGroupTerminated))) { 
+							TraceEvent("hfu5TlogStopped");
+							throw tlog_stopped(); }
+						when(wait(waitForAll(tlogGroupRecoveries))) {
+							TraceEvent("hfu5TlogRecovered");
+						}
 					}
 
 					// Disk errors need a chance to kill this actor.
@@ -2095,10 +2438,20 @@ ACTOR Future<Void> tLog(
 			tlogRequests.getFuture().pop().reply.sendError(recruitment_failed());
 		}
 
-		for (auto& group : self->tlogGroups) {
-			if (!tlogTerminated(group.second, group.second->persistentData, group.second->persistentQueue, e)) {
+		for (auto& [_, group] : self->tlogGroups) {
+			for (auto& [_, generationData] : group->id_data) {
+				if (!generationData->recoveryComplete.isSet()) {
+					generationData->recoveryComplete.sendError(end_of_stream());
+				}
+			}
+		}
+
+		for (auto& [_, group] : self->tlogGroups) {
+			TraceEvent("hfu5TerminateInTLog").detail("group", group->tlogGroupID).detail("error", e.code());
+			if (!tlogTerminated(group, group->persistentData, group->persistentQueue, e)) {
 				throw;
 			}
+			TraceEvent("hfu5TerminateInTLog2").detail("group", group->tlogGroupID);
 		}
 		return Void();
 	}

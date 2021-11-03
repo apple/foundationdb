@@ -2792,6 +2792,7 @@ ACTOR Future<Void> checkRecovered(TLogData* self) {
 }
 
 // Recovery persistent state of tLog from disk
+// hfu5 : starting of recovery
 ACTOR Future<Void> restorePersistentState(TLogData* self,
                                           LocalityData locality,
                                           Promise<Void> oldLog,
@@ -2898,6 +2899,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	state std::map<UID, TLogInterface> id_interf;
 	state std::vector<std::pair<Version, UID>> logsByVersion;
 	for (idx = 0; idx < fVers.get().size(); idx++) {
+		// old tlog id
+		// fVer is a list of kv, k is tlog id.
 		state KeyRef rawId = fVers.get()[idx].key.removePrefix(persistCurrentVersionKeys.begin);
 		UID id1 = BinaryReader::fromStringRef<UID>(rawId, Unversioned());
 		UID id2 = BinaryReader::fromStringRef<UID>(
