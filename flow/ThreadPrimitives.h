@@ -59,10 +59,10 @@ public:
 	}
 	void enter() {
 		while (isLocked.test_and_set(std::memory_order_acquire))
-#ifndef __aarch64__
-			_mm_pause();
+#ifdef __aarch64__
+			__asm__ volatile("isb");
 #else
-			; /* spin */
+			_mm_pause();
 #endif
 #if VALGRIND
 		ANNOTATE_RWLOCK_ACQUIRED(this, true);

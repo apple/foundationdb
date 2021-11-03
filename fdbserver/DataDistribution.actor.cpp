@@ -369,8 +369,8 @@ struct ServerStatus {
 	}
 
 	// If a process has reappeared without the storage server that was on it (isFailed == true), we don't need to
-	// exclude it We also don't need to exclude processes who are in the wrong configuration (since those servers will be
-	// removed)
+	// exclude it We also don't need to exclude processes who are in the wrong configuration (since those servers will
+	// be removed)
 	bool excludeOnRecruit() { return !isFailed && !isWrongConfiguration; }
 };
 typedef AsyncMap<UID, ServerStatus> ServerStatusMap;
@@ -4919,7 +4919,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
 
 	// cx->setOption( FDBDatabaseOptions::LOCATION_CACHE_SIZE, StringRef((uint8_t*)
-	// &SERVER_KNOBS->DD_LOCATION_CACHE_SIZE, 8) ); ASSERT( cx->locationCacheSize == SERVER_KNOBS->DD_LOCATION_CACHE_SIZE
+	// &SERVER_KNOBS->DD_LOCATION_CACHE_SIZE, 8) ); ASSERT( cx->locationCacheSize ==
+	// SERVER_KNOBS->DD_LOCATION_CACHE_SIZE
 	// );
 
 	// wait(debugCheckCoalescing(cx));
@@ -5258,7 +5259,7 @@ ACTOR static Future<Void> ddSnapCreateValidateServerDBInfo(Database cx, ServerDB
 //  4. Reenabling pops on tlogs
 //  5. Snapshotting coordinator workers
 //  6. Validating that a recovery has not occured during the previous steps, so the correct workers were snapshotted
-ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<struct ServerDBInfo>> db ) {
+ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<struct ServerDBInfo>> db) {
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, true, true);
 	TraceEvent("SnapDataDistributor_SnapReqEnter")
 	    .detail("SnapPayload", snapReq.snapPayload)
@@ -5334,8 +5335,8 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		}
 		wait(waitForAll(coordSnapReqs));
 		TraceEvent("SnapDataDistributor_AfterSnapCoords")
-			.detail("SnapPayload", snapReq.snapPayload)
-			.detail("SnapUID", snapReq.snapUID);
+		    .detail("SnapPayload", snapReq.snapPayload)
+		    .detail("SnapUID", snapReq.snapUID);
 		wait(ddSnapCreateValidateServerDBInfo(cx, db->get()));
 		TraceEvent("SnapDataDistributor_AfterValidateServerDBInfo")
 		    .detail("SnapPayload", snapReq.snapPayload)

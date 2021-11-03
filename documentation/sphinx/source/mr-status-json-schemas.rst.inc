@@ -48,6 +48,9 @@
                   "kvstore_available_bytes":12341234,
                   "kvstore_free_bytes":12341234,
                   "kvstore_total_bytes":12341234,
+                  "kvstore_total_size":12341234,
+                  "kvstore_total_nodes":12341234,
+                  "kvstore_inline_keys":12341234,
                   "durable_bytes":{
                      "hz":0.0,
                      "counter":0,
@@ -130,16 +133,28 @@
                   },
                   "grv_latency_statistics":{
                      "default":{
-                         "count":0,
-                         "min":0.0,
-                         "max":0.0,
-                         "median":0.0,
-                         "mean":0.0,
-                         "p25":0.0,
-                         "p90":0.0,
-                         "p95":0.0,
-                         "p99":0.0,
-                         "p99.9":0.0
+                        "count":0,
+                        "min":0.0,
+                        "max":0.0,
+                        "median":0.0,
+                        "mean":0.0,
+                        "p25":0.0,
+                        "p90":0.0,
+                        "p95":0.0,
+                        "p99":0.0,
+                        "p99.9":0.0
+                     },
+                     "batch":{
+                        "count":0,
+                        "min":0.0,
+                        "max":0.0,
+                        "median":0.0,
+                        "mean":0.0,
+                        "p25":0.0,
+                        "p90":0.0,
+                        "p95":0.0,
+                        "p99":0.0,
+                        "p99.9":0.0
                      }
                   },
                   "read_latency_statistics":{
@@ -211,6 +226,9 @@
                      "$enum":[
                         "file_open_error",
                         "incorrect_cluster_file_contents",
+                        "trace_log_file_write_error",
+                        "trace_log_could_not_create_file",
+                        "trace_log_writer_thread_unresponsive",
                         "process_error",
                         "io_error",
                         "io_timeout",
@@ -270,15 +288,20 @@
             "run_loop_busy":0.2 // fraction of time the run loop was busy
          }
       },
-      "old_logs":[
+      "logs":[
          {
-            "logs":[ // this field will be absent if a value has not been explicitly set
+            "log_interfaces":[ // this field will be absent if a value has not been explicitly set
                {
                   "id":"7f8d623d0cb9966e",
                   "healthy":true,
                   "address":"1.2.3.4:1234"
                }
             ],
+            "epoch":1,
+            "current":false,
+            "begin_version":23,
+            "end_version":112315141,
+            "possibly_losing_data":true,
             "log_replication_factor":3,
             "log_write_anti_quorum":0,
             "log_fault_tolerance":2,
@@ -310,7 +333,8 @@
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
                   "log_server_min_free_space_ratio",
-                  "storage_server_durability_lag"
+                  "storage_server_durability_lag",
+                  "storage_server_list_fetch_failed"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -330,7 +354,8 @@
                   "storage_server_min_free_space_ratio",
                   "log_server_min_free_space",
                   "log_server_min_free_space_ratio",
-                  "storage_server_durability_lag"
+                  "storage_server_durability_lag",
+                  "storage_server_list_fetch_failed"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -341,7 +366,7 @@
          "released_transactions_per_second":0,
          "throttled_tags":{
             "auto":{
-               "count":0
+               "count":0,
             },
             "manual":{
                "count":0
@@ -377,7 +402,7 @@
       "database_lock_state":{
          "locked":true,
          "lock_uid":"00000000000000000000000000000000" // Only present when database is locked
-      }
+      },
       "generation":2,
       "latency_probe":{ // all measurements are based on running sample transactions
          "read_seconds":7, // time to perform a single read
@@ -446,6 +471,8 @@
                   "database_availability_timeout",
                   "consistencycheck_suspendkey_fetch_timeout",
                   "consistencycheck_disabled",
+                  "duplicate_mutation_streams",
+                  "duplicate_mutation_fetch_timeout",
                   "primary_dc_missing",
                   "fetch_primary_dc_timeout"
                ]
@@ -454,7 +481,10 @@
                {
                   "name":{ // when not limiting
                      "$enum":[
-                        "incorrect_cluster_file_contents"
+                        "incorrect_cluster_file_contents",
+                        "trace_log_file_write_error",
+                        "trace_log_could_not_create_file",
+                        "trace_log_writer_thread_unresponsive"
                      ]
                   },
                   "description":"Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally."
@@ -656,7 +686,10 @@
              "ssd-2",
              "ssd-redwood-experimental",
              "ssd-rocksdb-experimental",
-             "memory"
+             "memory",
+             "memory-1",
+             "memory-2",
+             "memory-radixtree-beta"
          ]},
          "coordinators_count":1,
          "excluded_servers":[
@@ -667,8 +700,8 @@
          "auto_proxies":3,
          "auto_resolvers":1,
          "auto_logs":3,
+         "proxies":5, // this field will be absent if a value has not been explicitly set
          "backup_worker_enabled":1,
-         "proxies":5 // this field will be absent if a value has not been explicitly set
       },
       "data":{
          "least_operating_space_bytes_log_server":0,
@@ -728,8 +761,7 @@
                 }
             }
          ],
-         "least_operating_space_bytes_storage_server":0,
-         "max_machine_failures_without_losing_data":0
+         "least_operating_space_bytes_storage_server":0
       },
       "machines":{
          "$map_key=machineid":{

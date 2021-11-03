@@ -426,6 +426,7 @@ private:
 	void setField(const char* key, int64_t value);
 	void setField(const char* key, double value);
 	void setField(const char* key, const std::string& value);
+	void setThreadId();
 
 	TraceEvent& errorImpl(const class Error& e, bool includeCancelled = false);
 	// Private version of detailf that does NOT write to the eventMetric.  This is to be used by other detail methods
@@ -454,7 +455,7 @@ public:
 
 	bool isEnabled() const { return enabled; }
 
-	TraceEvent &setErrorKind(ErrorKind errorKind);
+	TraceEvent& setErrorKind(ErrorKind errorKind);
 
 	void log();
 
@@ -480,7 +481,7 @@ private:
 	int maxFieldLength;
 	int maxEventLength;
 	int timeIndex;
-	int errorKindIndex { -1 };
+	int errorKindIndex{ -1 };
 
 	void setSizeLimits();
 
@@ -577,7 +578,8 @@ void openTraceFile(const NetworkAddress& na,
                    std::string directory = ".",
                    std::string baseOfBase = "trace",
                    std::string logGroup = "default",
-                   std::string identifier = "");
+                   std::string identifier = "",
+                   std::string tracePartialFileSuffix = "");
 void initTraceEventMetrics();
 void closeTraceFile();
 bool traceFileIsOpen();

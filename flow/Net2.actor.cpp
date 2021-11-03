@@ -1320,7 +1320,7 @@ void Net2::run() {
 			double newTaskBegin = timer_monotonic();
 			if (check_yield(TaskPriority::Max, tscNow)) {
 				checkForSlowTask(tscBegin, tscNow, newTaskBegin - taskBegin, currentTaskID);
-				taskBegin = newTaskBegin;	
+				taskBegin = newTaskBegin;
 				FDB_TRACE_PROBE(run_loop_yield);
 				++countYields;
 				break;
@@ -1566,7 +1566,7 @@ THREAD_HANDLE Net2::startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) {
 
 Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, std::string host) {
 #ifndef TLS_DISABLED
-	if ( toAddr.isTLS() ) {
+	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
 		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr);
 	}
@@ -1651,9 +1651,9 @@ bool Net2::isAddressOnThisHost(NetworkAddress const& addr) {
 Reference<IListener> Net2::listen(NetworkAddress localAddr) {
 	try {
 #ifndef TLS_DISABLED
-		if ( localAddr.isTLS() ) {
+		if (localAddr.isTLS()) {
 			initTLS(ETLSInitState::LISTEN);
-			return Reference<IListener>(new SSLListener( reactor.ios, &this->sslContextVar, localAddr ));
+			return Reference<IListener>(new SSLListener(reactor.ios, &this->sslContextVar, localAddr));
 		}
 #endif
 		return Reference<IListener>(new Listener(reactor.ios, localAddr));

@@ -27,7 +27,9 @@
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "flow/Histogram.h"
 #include "flow/IndexedSet.h"
+#include "flow/ProtocolVersion.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Replication.h"
@@ -52,6 +54,7 @@ public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
 	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
 	std::vector<Reference<ConnectionResetInfo>> connectionResetTrackers;
+	std::vector<Reference<Histogram>> tlogPushDistTrackers;
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
 	std::vector<LocalityData> tLogLocalities; // Stores the localities of the log servers
@@ -952,6 +955,7 @@ struct LogPushData : NonCopyable {
 				}
 			}
 		}
+		isEmptyMessage = std::vector<bool>(messagesWriter.size(), false);
 	}
 
 	void addTxsTag() {
@@ -1022,11 +1026,32 @@ struct LogPushData : NonCopyable {
 
 	Standalone<StringRef> getMessages(int loc) { return messagesWriter[loc].toValue(); }
 
+	// Records if a tlog (specified by "loc") will receive an empty version batch message.
+	// "value" is the message returned by getMessages() call.
+	void recordEmptyMessage(int loc, const Standalone<StringRef>& value) {
+		if (!isEmptyMessage[loc]) {
+			BinaryWriter w(AssumeVersion(currentProtocolVersion));
+			Standalone<StringRef> v = w.toValue();
+			if (value.size() > v.size()) {
+				isEmptyMessage[loc] = true;
+			}
+		}
+	}
+
+	// Returns the ratio of empty messages in this version batch.
+	// MUST be called after getMessages() and recordEmptyMessage().
+	float getEmptyMessageRatio() const {
+		auto count = std::count(isEmptyMessage.begin(), isEmptyMessage.end(), false);
+		ASSERT_WE_THINK(isEmptyMessage.size() > 0);
+		return 1.0 * count / isEmptyMessage.size();
+	}
+
 private:
 	Reference<ILogSystem> logSystem;
 	std::vector<Tag> next_message_tags;
 	std::vector<Tag> prev_tags;
 	std::vector<BinaryWriter> messagesWriter;
+	std::vector<bool> isEmptyMessage; // if messagesWriter has written anything
 	std::vector<int> msg_locations;
 	uint32_t subsequence;
 };

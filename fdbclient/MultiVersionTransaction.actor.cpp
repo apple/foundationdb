@@ -490,7 +490,7 @@ Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
 Reference<IDatabase> DLApi::createDatabase(const char* clusterFilePath) {
 	if (headerVersion >= 610) {
 		FdbCApi::FDBDatabase* db;
-		api->createDatabase(clusterFilePath, &db);
+		throwIfError(api->createDatabase(clusterFilePath, &db));
 		return Reference<IDatabase>(new DLDatabase(api, db));
 	} else {
 		return DLApi::createDatabase609(clusterFilePath);
@@ -505,7 +505,7 @@ void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParame
 // MultiVersionTransaction
 MultiVersionTransaction::MultiVersionTransaction(Reference<MultiVersionDatabase> db,
                                                  UniqueOrderedOptionList<FDBTransactionOptions> defaultOptions)
-  : db(db) {
+  : db(db), startTime(timer_monotonic()), timeoutTsav(new ThreadSingleAssignmentVar<Void>()) {
 	setDefaultOptions(defaultOptions);
 	updateTransaction();
 }
@@ -521,20 +521,23 @@ void MultiVersionTransaction::updateTransaction() {
 	TransactionInfo newTr;
 	if (currentDb.value) {
 		newTr.transaction = currentDb.value->createTransaction();
+	}
 
-		Optional<StringRef> timeout;
-		for (auto option : persistentOptions) {
-			if (option.first == FDBTransactionOptions::TIMEOUT) {
-				timeout = option.second.castTo<StringRef>();
-			} else {
-				newTr.transaction->setOption(option.first, option.second.castTo<StringRef>());
-			}
+	Optional<StringRef> timeout;
+	for (auto option : persistentOptions) {
+		if (option.first == FDBTransactionOptions::TIMEOUT) {
+			timeout = option.second.castTo<StringRef>();
+		} else if (currentDb.value) {
+			newTr.transaction->setOption(option.first, option.second.castTo<StringRef>());
 		}
+	}
 
-		// Setting a timeout can immediately cause a transaction to fail. The only timeout
-		// that matters is the one most recently set, so we ignore any earlier set timeouts
-		// that might inadvertently fail the transaction.
-		if (timeout.present()) {
+	// Setting a timeout can immediately cause a transaction to fail. The only timeout
+	// that matters is the one most recently set, so we ignore any earlier set timeouts
+	// that might inadvertently fail the transaction.
+	if (timeout.present()) {
+		setTimeout(timeout);
+		if (currentDb.value) {
 			newTr.transaction->setOption(FDBTransactionOptions::TIMEOUT, timeout);
 		}
 	}
@@ -569,19 +572,19 @@ void MultiVersionTransaction::setVersion(Version v) {
 }
 ThreadFuture<Version> MultiVersionTransaction::getReadVersion() {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getReadVersion() : ThreadFuture<Version>(Never());
+	auto f = tr.transaction ? tr.transaction->getReadVersion() : makeTimeout<Version>();
 	return abortableFuture(f, tr.onChange);
 }
 
 ThreadFuture<Optional<Value>> MultiVersionTransaction::get(const KeyRef& key, bool snapshot) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->get(key, snapshot) : ThreadFuture<Optional<Value>>(Never());
+	auto f = tr.transaction ? tr.transaction->get(key, snapshot) : makeTimeout<Optional<Value>>();
 	return abortableFuture(f, tr.onChange);
 }
 
 ThreadFuture<Key> MultiVersionTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getKey(key, snapshot) : ThreadFuture<Key>(Never());
+	auto f = tr.transaction ? tr.transaction->getKey(key, snapshot) : makeTimeout<Key>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -592,7 +595,7 @@ ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const
                                                                            bool reverse) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRange(begin, end, limit, snapshot, reverse)
-	                        : ThreadFuture<Standalone<RangeResultRef>>(Never());
+	                        : makeTimeout<Standalone<RangeResultRef>>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -603,7 +606,7 @@ ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const
                                                                            bool reverse) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRange(begin, end, limits, snapshot, reverse)
-	                        : ThreadFuture<Standalone<RangeResultRef>>(Never());
+	                        : makeTimeout<Standalone<RangeResultRef>>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -613,7 +616,7 @@ ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const
                                                                            bool reverse) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRange(keys, limit, snapshot, reverse)
-	                        : ThreadFuture<Standalone<RangeResultRef>>(Never());
+	                        : makeTimeout<Standalone<RangeResultRef>>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -623,20 +626,20 @@ ThreadFuture<Standalone<RangeResultRef>> MultiVersionTransaction::getRange(const
                                                                            bool reverse) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRange(keys, limits, snapshot, reverse)
-	                        : ThreadFuture<Standalone<RangeResultRef>>(Never());
+	                        : makeTimeout<Standalone<RangeResultRef>>();
 	return abortableFuture(f, tr.onChange);
 }
 
 ThreadFuture<Standalone<StringRef>> MultiVersionTransaction::getVersionstamp() {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getVersionstamp() : ThreadFuture<Standalone<StringRef>>(Never());
+	auto f = tr.transaction ? tr.transaction->getVersionstamp() : makeTimeout<Standalone<StringRef>>();
 	return abortableFuture(f, tr.onChange);
 }
 
 ThreadFuture<Standalone<VectorRef<const char*>>> MultiVersionTransaction::getAddressesForKey(const KeyRef& key) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getAddressesForKey(key)
-	                        : ThreadFuture<Standalone<VectorRef<const char*>>>(Never());
+	auto f =
+	    tr.transaction ? tr.transaction->getAddressesForKey(key) : makeTimeout<Standalone<VectorRef<const char*>>>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -649,7 +652,7 @@ void MultiVersionTransaction::addReadConflictRange(const KeyRangeRef& keys) {
 
 ThreadFuture<int64_t> MultiVersionTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getEstimatedRangeSizeBytes(keys) : ThreadFuture<int64_t>(Never());
+	auto f = tr.transaction ? tr.transaction->getEstimatedRangeSizeBytes(keys) : makeTimeout<int64_t>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -690,7 +693,7 @@ void MultiVersionTransaction::clear(const KeyRef& key) {
 
 ThreadFuture<Void> MultiVersionTransaction::watch(const KeyRef& key) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->watch(key) : ThreadFuture<Void>(Never());
+	auto f = tr.transaction ? tr.transaction->watch(key) : makeTimeout<Void>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -703,7 +706,7 @@ void MultiVersionTransaction::addWriteConflictRange(const KeyRangeRef& keys) {
 
 ThreadFuture<Void> MultiVersionTransaction::commit() {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->commit() : ThreadFuture<Void>(Never());
+	auto f = tr.transaction ? tr.transaction->commit() : makeTimeout<Void>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -718,7 +721,7 @@ Version MultiVersionTransaction::getCommittedVersion() {
 
 ThreadFuture<int64_t> MultiVersionTransaction::getApproximateSize() {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getApproximateSize() : ThreadFuture<int64_t>(Never());
+	auto f = tr.transaction ? tr.transaction->getApproximateSize() : makeTimeout<int64_t>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -732,6 +735,11 @@ void MultiVersionTransaction::setOption(FDBTransactionOptions::Option option, Op
 	if (MultiVersionApi::apiVersionAtLeast(610) && itr->second.persistent) {
 		persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
 	}
+
+	if (itr->first == FDBTransactionOptions::TIMEOUT) {
+		setTimeout(value);
+	}
+
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		tr.transaction->setOption(option, value);
@@ -744,7 +752,7 @@ ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 		return ThreadFuture<Void>(Void());
 	} else {
 		auto tr = getTransaction();
-		auto f = tr.transaction ? tr.transaction->onError(e) : ThreadFuture<Void>(Never());
+		auto f = tr.transaction ? tr.transaction->onError(e) : makeTimeout<Void>();
 		f = abortableFuture(f, tr.onChange);
 
 		return flatMapThreadFuture<Void, Void>(f, [this, e](ErrorOr<Void> ready) {
@@ -762,10 +770,93 @@ ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 	}
 }
 
+// Waits for the specified duration and signals the assignment variable with a timed out error
+// This will be canceled if a new timeout is set, in which case the tsav will not be signaled.
+ACTOR Future<Void> timeoutImpl(Reference<ThreadSingleAssignmentVar<Void>> tsav, double duration) {
+	wait(delay(duration));
+
+	tsav->trySendError(transaction_timed_out());
+	return Void();
+}
+
+// Configure a timeout based on the options set for this transaction. This timeout only applies
+// if we don't have an underlying database object to connect with.
+void MultiVersionTransaction::setTimeout(Optional<StringRef> value) {
+	double timeoutDuration = extractIntOption(value, 0, std::numeric_limits<int>::max()) / 1000.0;
+
+	ThreadFuture<Void> prevTimeout;
+	double transactionStartTime = startTime;
+
+	{ // lock scope
+		ThreadSpinLockHolder holder(timeoutLock);
+
+		Reference<ThreadSingleAssignmentVar<Void>> tsav = timeoutTsav;
+		ThreadFuture<Void> newTimeout = onMainThread([transactionStartTime, tsav, timeoutDuration]() {
+			return timeoutImpl(tsav, timeoutDuration - std::max(0.0, now() - transactionStartTime));
+		});
+
+		prevTimeout = currentTimeout;
+		currentTimeout = newTimeout;
+	}
+
+	// Cancel the previous timeout now that we have a new one. This means that changing the timeout
+	// affects in-flight operations, which is consistent with the behavior in RYW.
+	if (prevTimeout.isValid()) {
+		prevTimeout.cancel();
+	}
+}
+
+// Creates a ThreadFuture<T> that will signal an error if the transaction times out.
+template <class T>
+ThreadFuture<T> MultiVersionTransaction::makeTimeout() {
+	ThreadFuture<Void> f;
+
+	{ // lock scope
+		ThreadSpinLockHolder holder(timeoutLock);
+
+		// Our ThreadFuture holds a reference to this TSAV,
+		// but the ThreadFuture does not increment the ref count
+		timeoutTsav->addref();
+		f = ThreadFuture<Void>(timeoutTsav.getPtr());
+	}
+
+	// When our timeoutTsav gets set, map it to the appropriate type
+	return mapThreadFuture<Void, T>(f, [](ErrorOr<Void> v) {
+		ASSERT(v.isError());
+		return ErrorOr<T>(v.getError());
+	});
+}
+
 void MultiVersionTransaction::reset() {
 	persistentOptions.clear();
+
+	// Reset the timeout state
+	Reference<ThreadSingleAssignmentVar<Void>> prevTimeoutTsav;
+	ThreadFuture<Void> prevTimeout;
+	startTime = timer_monotonic();
+
+	{ // lock scope
+		ThreadSpinLockHolder holder(timeoutLock);
+
+		prevTimeoutTsav = timeoutTsav;
+		timeoutTsav = Reference<ThreadSingleAssignmentVar<Void>>(new ThreadSingleAssignmentVar<Void>());
+
+		prevTimeout = currentTimeout;
+		currentTimeout = ThreadFuture<Void>();
+	}
+
+	// Cancel any outstanding operations if they don't have an underlying transaction object to cancel them
+	prevTimeoutTsav->trySendError(transaction_cancelled());
+	if (prevTimeout.isValid()) {
+		prevTimeout.cancel();
+	}
+
 	setDefaultOptions(db->dbState->transactionDefaultOptions);
 	updateTransaction();
+}
+
+MultiVersionTransaction::~MultiVersionTransaction() {
+	timeoutTsav->trySendError(transaction_cancelled());
 }
 
 // MultiVersionDatabase
@@ -786,22 +877,43 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 
 		api->runOnExternalClients(threadIdx, [this](Reference<ClientInfo> client) { dbState->addClient(client); });
 
-		if (!externalClientsInitialized.test_and_set()) {
-			api->runOnExternalClientsAllThreads([&clusterFilePath](Reference<ClientInfo> client) {
-				// This creates a database to initialize some client state on the external library
-				// We only do this on 6.2+ clients to avoid some bugs associated with older versions
-				// This deletes the new database immediately to discard its connections
-				if (client->protocolVersion.hasCloseUnusedConnection()) {
+		api->runOnExternalClientsAllThreads([&clusterFilePath](Reference<ClientInfo> client) {
+			// This creates a database to initialize some client state on the external library.
+			// We only do this on 6.2+ clients to avoid some bugs associated with older versions.
+			// This deletes the new database immediately to discard its connections.
+			//
+			// Simultaneous attempts to create a database could result in us running this initialization
+			// code in multiple threads simultaneously. It is necessary that each attempt have a chance
+			// to run this initialization in case the other fails, and it's safe to run them in parallel.
+			if (client->protocolVersion.hasCloseUnusedConnection() && !client->initialized) {
+				try {
 					Reference<IDatabase> newDb = client->api->createDatabase(clusterFilePath.c_str());
+					client->initialized = true;
+				} catch (Error& e) {
+					// This connection is not initialized. It is still possible to connect with it,
+					// but we may not see trace logs from this client until a successful connection
+					// is established.
+					TraceEvent(SevWarnAlways, "FailedToInitializeExternalClient")
+					    .detail("LibraryPath", client->libPath)
+					    .detail("ClusterFilePath", clusterFilePath)
+					    .error(e);
 				}
-			});
-		}
+			}
+		});
 
 		// For clients older than 6.2 we create and maintain our database connection
 		api->runOnExternalClients(threadIdx, [this, &clusterFilePath](Reference<ClientInfo> client) {
 			if (!client->protocolVersion.hasCloseUnusedConnection()) {
-				dbState->legacyDatabaseConnections[client->protocolVersion] =
-				    client->api->createDatabase(clusterFilePath.c_str());
+				try {
+					dbState->legacyDatabaseConnections[client->protocolVersion] =
+					    client->api->createDatabase(clusterFilePath.c_str());
+				} catch (Error& e) {
+					// This connection is discarded
+					TraceEvent(SevWarnAlways, "FailedToCreateLegacyDatabaseConnection")
+					    .detail("LibraryPath", client->libPath)
+					    .detail("ClusterFilePath", clusterFilePath)
+					    .error(e);
+				}
 			}
 		});
 
@@ -859,7 +971,7 @@ ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<P
 
 MultiVersionDatabase::DatabaseState::DatabaseState(std::string clusterFilePath, Reference<IDatabase> versionMonitorDb)
   : clusterFilePath(clusterFilePath), versionMonitorDb(versionMonitorDb),
-    dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))) {}
+    dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))), closed(false) {}
 
 // Adds a client (local or externally loaded) that can be used to connect to the cluster
 void MultiVersionDatabase::DatabaseState::addClient(Reference<ClientInfo> client) {
@@ -923,6 +1035,10 @@ ThreadFuture<Void> MultiVersionDatabase::DatabaseState::monitorProtocolVersion()
 // Called when a change to the protocol version of the cluster has been detected.
 // Must be called from the main thread
 void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion protocolVersion) {
+	if (closed) {
+		return;
+	}
+
 	// If the protocol version changed but is still compatible, update our local version but keep the same connection
 	if (dbProtocolVersion.present() &&
 	    protocolVersion.normalizedVersion() == dbProtocolVersion.get().normalizedVersion()) {
@@ -949,7 +1065,20 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 			    .detail("Failed", client->failed)
 			    .detail("External", client->external);
 
-			Reference<IDatabase> newDb = client->api->createDatabase(clusterFilePath.c_str());
+			Reference<IDatabase> newDb;
+			try {
+				newDb = client->api->createDatabase(clusterFilePath.c_str());
+			} catch (Error& e) {
+				TraceEvent(SevWarnAlways, "MultiVersionClientFailedToCreateDatabase")
+				    .detail("LibraryPath", client->libPath)
+				    .detail("External", client->external)
+				    .detail("ClusterFilePath", clusterFilePath)
+				    .error(e);
+
+				// Put the client in a disconnected state until the version changes again
+				updateDatabase(Reference<IDatabase>(), Reference<ClientInfo>());
+				return;
+			}
 
 			if (client->external && !MultiVersionApi::apiVersionAtLeast(610)) {
 				// Old API versions return a future when creating the database, so we need to wait for it
@@ -977,6 +1106,10 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 
 // Replaces the active database connection with a new one. Must be called from the main thread.
 void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> newDb, Reference<ClientInfo> client) {
+	if (closed) {
+		return;
+	}
+
 	if (newDb) {
 		optionLock.enter();
 		for (auto option : options) {
@@ -1034,6 +1167,7 @@ void MultiVersionDatabase::DatabaseState::close() {
 	Reference<DatabaseState> self = Reference<DatabaseState>::addRef(this);
 	onMainThreadVoid(
 	    [self]() {
+		    self->closed = true;
 		    if (self->protocolVersionMonitor.isValid()) {
 			    self->protocolVersionMonitor.cancel();
 		    }
@@ -1110,8 +1244,6 @@ void MultiVersionDatabase::LegacyVersionMonitor::close() {
 		versionMonitor.cancel();
 	}
 }
-
-std::atomic_flag MultiVersionDatabase::externalClientsInitialized = ATOMIC_FLAG_INIT;
 
 // MultiVersionApi
 bool MultiVersionApi::apiVersionAtLeast(int minVersion) {

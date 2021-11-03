@@ -312,8 +312,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				req.reply.send(clientData.clientInfo->get());
 			} else {
 				if (!leaderMon.isValid()) {
-					leaderMon =
-					    monitorLeaderForProxies(req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
+					leaderMon = monitorLeaderAndGetClientInfo(
+					    req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
 				}
 				actors.add(openDatabase(&clientData, &clientCount, hasConnectedClients, req));
 			}
@@ -324,7 +324,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				req.reply.send(currentElectedLeader->get());
 			} else {
 				if (!leaderMon.isValid()) {
-					leaderMon = monitorLeaderForProxies(req.key, req.coordinators, &clientData, currentElectedLeader);
+					leaderMon =
+					    monitorLeaderAndGetClientInfo(req.key, req.coordinators, &clientData, currentElectedLeader);
 				}
 				actors.add(remoteMonitorLeader(&clientCount, hasConnectedClients, currentElectedLeader, req));
 			}
@@ -413,8 +414,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 
 				// If the current leader's priority became worse, we still need to notified all clients because now one
 				// of them might be better than the leader. In addition, even though FitnessRemote is better than
-				// FitnessUnknown, we still need to notified clients so that monitorLeaderRemotely has a change to switch
-				// from passively monitoring the leader to actively attempting to become the leader.
+				// FitnessUnknown, we still need to notified clients so that monitorLeaderRemotely has a change to
+				// switch from passively monitoring the leader to actively attempting to become the leader.
 				if (!currentNominee.present() || !nextNominee.present() ||
 				    !currentNominee.get().equalInternalId(nextNominee.get()) ||
 				    nextNominee.get() > currentNominee.get() ||

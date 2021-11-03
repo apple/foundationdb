@@ -61,6 +61,7 @@ packaging/msi/obj
 simfdb
 tests/oldBinaries
 trace.*.xml
+.venv
 
 # Editor files
 *.iml
@@ -73,6 +74,7 @@ trace.*.xml
 .pydevproject
 .vscode
 .vs/
+fdb.code-workspace
 FoundationDB.xcodeproj
 foundationdb.VC.db
 foundationdb.VC.VC.opendb
@@ -85,6 +87,7 @@ flow/coveragetool/obj
 /compile_commands.json
 /.ccls-cache
 /.clangd
+/.cache
 
 # Temporary and user configuration files
 *~

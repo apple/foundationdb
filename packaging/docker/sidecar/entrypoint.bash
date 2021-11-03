@@ -1,4 +1,4 @@
-#! /bin/bash
+#!/bin/bash
 
 # entrypoint.bash
 #
@@ -24,4 +24,4 @@ if [[ -n "$ADDITIONAL_ENV_FILE" ]]; then
   source $ADDITIONAL_ENV_FILE
 fi
 
-/sidecar.py $*
+exec /sidecar.py $*

@@ -150,7 +150,7 @@ public:
 	enum Status { Unset, NeverSet, Set, ErrorSet }; // order is important
 	// volatile long referenceCount;
 	ThreadSpinLock mutex;
-	Status status;
+	std::atomic<Status> status;
 	Error error;
 	ThreadCallback* callback;
 
@@ -228,19 +228,21 @@ public:
 		this->status = NeverSet;
 	}
 
-	void sendError(const Error& err) {
+	// Sends an error through the assignment var if it is not already set. Otherwise does nothing.
+	// Returns true if the assignment var was not already set; otherwise returns false.
+	bool trySendError(const Error& err) {
 		if (TRACE_SAMPLE())
 			TraceEvent(SevSample, "Promise_sendError").detail("ErrorCode", err.code());
 		this->mutex.enter();
 		if (!canBeSetUnsafe()) {
 			this->mutex.leave();
-			ASSERT(false); // Promise fulfilled twice
+			return false;
 		}
 		error = err;
 		status = ErrorSet;
 		if (!callback) {
 			this->mutex.leave();
-			return;
+			return true;
 		}
 		auto func = callback;
 		if (!callback->isMultiCallback())
@@ -255,7 +257,12 @@ public:
 			int userParam = 0;
 			func->error(err, userParam);
 		}
+
+		return true;
 	}
+
+	// Like trySendError, except that it is assumed the assignment var is not already set.
+	void sendError(const Error& err) { ASSERT(trySendError(err)); }
 
 	SetCallbackResult::Result callOrSetAsCallback(ThreadCallback* callback, int& userParam1, int notMadeActive) {
 		this->mutex.enter();
@@ -314,12 +321,20 @@ public:
 	void setCancel(Future<Void>&& cf) { cancelFuture = std::move(cf); }
 
 	virtual void cancel() {
-		onMainThreadVoid(
-		    [this]() {
-			    this->cancelFuture.cancel();
-			    this->delref();
-		    },
-		    nullptr);
+		// Cancels the action and decrements the reference count by 1. The if statement is just an optimization. It's ok
+		// if we take the "wrong path" if we call this while someone else holds |mutex|. We can't take |mutex| since
+		// this is called from releaseMemory. Trying to avoid going to the network thread here is important - without
+		// this we see lower throughput on the client for e.g. GRV workloads.
+		if (isReadyUnsafe()) {
+			delref();
+		} else {
+			onMainThreadVoid(
+			    [this]() {
+				    this->cancelFuture.cancel();
+				    this->delref();
+			    },
+			    nullptr);
+		}
 	}
 
 	void releaseMemory() {
@@ -334,6 +349,24 @@ private:
 
 protected:
 	// The caller of any of these *Unsafe functions should be holding |mutex|
+	//
+	// |status| is an atomic, so these are not unsafe in the "data race"
+	// sense. It appears that there are some class invariants (e.g. that
+	// callback should be null if the future is ready), so we should still
+	// hold |mutex| when calling these functions. One exception is for
+	// cancel, which mustn't try to acquire |mutex| since it's called from
+	// releaseMemory while holding the |mutex|. In cancel, we only need to
+	// know if there's possibly work to cancel on the main thread, so it's safe to
+	// call without holding |mutex|.
+	//
+	// A bit of history: the original implementation of cancel was not
+	// thread safe (in practice it behaved as intended, but TSAN didn't like
+	// it, and it was definitely a data race.) The first attempt to fix this[1]
+	// was simply to cancel on the main thread, but this turns out to cause
+	// a performance regression on the client. Now we simply make |status|
+	// atomic so that it behaves (legally) how the original author intended.
+	//
+	// [1]: https://github.com/apple/foundationdb/pull/3750
 	bool isReadyUnsafe() const { return status >= Set; }
 	bool isErrorUnsafe() const { return status == ErrorSet; }
 	bool canBeSetUnsafe() const { return status == Unset; }

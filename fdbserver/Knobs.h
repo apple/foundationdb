@@ -66,6 +66,8 @@ public:
 	                                              // message (measured in 1/1024ths, e.g. a value of 2048 yields a
 	                                              // factor of 2).
 	int64_t VERSION_MESSAGES_ENTRY_BYTES_WITH_OVERHEAD;
+	int64_t TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE;
+	bool ENABLE_DETAILED_TLOG_POP_TRACE;
 	double TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
 	int64_t TLOG_MESSAGE_BLOCK_BYTES;
 	int64_t MAX_MESSAGE_SIZE;
@@ -379,12 +381,39 @@ public:
 	double INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
 	double VERSION_LAG_METRIC_INTERVAL;
 	int64_t MAX_VERSION_DIFFERENCE;
+	double INITIAL_UPDATE_CROSS_DC_INFO_DELAY; // The intial delay in a new Cluster Controller just started to refresh
+	                                           // the info of remote DC, such as remote DC health, and whether we need
+	                                           // to take remote DC health info when making failover decision.
+	double CHECK_REMOTE_HEALTH_INTERVAL; // Remote DC health refresh interval.
 	double FORCE_RECOVERY_CHECK_DELAY;
 	double RATEKEEPER_FAILURE_TIME;
 	double REPLACE_INTERFACE_DELAY;
 	double REPLACE_INTERFACE_CHECK_DELAY;
 	double COORDINATOR_REGISTER_INTERVAL;
 	double CLIENT_REGISTER_INTERVAL;
+	bool CC_ENABLE_WORKER_HEALTH_MONITOR;
+	double CC_WORKER_HEALTH_CHECKING_INTERVAL; // The interval of refreshing the degraded server list.
+	double CC_DEGRADED_LINK_EXPIRATION_INTERVAL; // The time period from the last degradation report after which a
+	                                             // degraded server is considered healthy.
+	double CC_MIN_DEGRADATION_INTERVAL; // The minimum interval that a server is reported as degraded to be considered
+	                                    // as degraded by Cluster Controller.
+	int CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE; // The maximum number of degraded peers when excluding a server. When the
+	                                        // number of degraded peers is more than this value, we will not exclude
+	                                        // this server since it may because of server overload.
+	int CC_MAX_EXCLUSION_DUE_TO_HEALTH; // The max number of degraded servers to exclude by Cluster Controller due to
+	                                    // degraded health.
+	bool CC_HEALTH_TRIGGER_RECOVERY; // If true, cluster controller will kill the master to trigger recovery when
+	                                 // detecting degraded servers. If false, cluster controller only prints a warning.
+	double CC_TRACKING_HEALTH_RECOVERY_INTERVAL; // The number of recovery count should not exceed
+	                                             // CC_MAX_HEALTH_RECOVERY_COUNT within
+	                                             // CC_TRACKING_HEALTH_RECOVERY_INTERVAL.
+	int CC_MAX_HEALTH_RECOVERY_COUNT; // The max number of recoveries can be triggered due to worker health within
+	                                  // CC_TRACKING_HEALTH_RECOVERY_INTERVAL
+	bool CC_HEALTH_TRIGGER_FAILOVER; // Whether to enable health triggered failover in CC.
+	int CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION; // The minimum number of degraded servers that can trigger a
+	                                               // failover.
+	int CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION; // The maximum number of degraded servers that can trigger a
+	                                               // failover.
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
@@ -550,6 +579,12 @@ public:
 	                                                 // become the leader.
 	double MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS;
 	double DBINFO_FAILED_DELAY;
+	bool ENABLE_WORKER_HEALTH_MONITOR;
+	double WORKER_HEALTH_MONITOR_INTERVAL; // Interval between two health monitor health check.
+	int PEER_LATENCY_CHECK_MIN_POPULATION; // The minimum number of latency samples required to check a peer.
+	double PEER_LATENCY_DEGRADATION_PERCENTILE; // The percentile latency used to check peer health.
+	double PEER_LATENCY_DEGRADATION_THRESHOLD; // The latency threshold to consider a peer degraded.
+	double PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD; // The percentage of timeout to consider a peer degraded.
 
 	// Test harness
 	double WORKER_POLL_DELAY;

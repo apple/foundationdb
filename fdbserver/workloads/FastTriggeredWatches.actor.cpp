@@ -27,6 +27,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct FastTriggeredWatchesWorkload : TestWorkload {
+	// Tests the time it takes for a watch to be fired after the value has changed in the storage server
 	int nodes, keyBytes;
 	double testDuration;
 	vector<Future<Void>> clients;
@@ -75,6 +76,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 
 	ACTOR Future<Version> setter(Database cx, Key key, Optional<Value> value) {
 		state ReadYourWritesTransaction tr(cx);
+		// set the value of key and return the commit version
 		wait(delay(deterministicRandom()->random01()));
 		loop {
 			try {
@@ -105,22 +107,25 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 				state Optional<Value> setValue;
 				if (deterministicRandom()->random01() > 0.5)
 					setValue = StringRef(format("%010d", deterministicRandom()->randomInt(0, 1000)));
+				// Set the value at setKey to something random
 				state Future<Version> setFuture = self->setter(cx, setKey, setValue);
 				wait(delay(deterministicRandom()->random01()));
 				loop {
 					state ReadYourWritesTransaction tr(cx);
 
 					try {
-
 						Optional<Value> val = wait(tr.get(setKey));
 						if (!first) {
 							getDuration = now() - watchEnd;
 						}
 						lastReadVersion = tr.getReadVersion().get();
 						//TraceEvent("FTWGet").detail("Key", printable(setKey)).detail("Value", printable(val)).detail("Ver", tr.getReadVersion().get());
+						// if the value is already setValue then there is no point setting a watch so break out of the
+						// loop
 						if (val == setValue)
 							break;
 						ASSERT(first);
+						// set a watch and wait for it to be triggered (i.e for self->setter to set the value)
 						state Future<Void> watchFuture = tr.watch(setKey);
 						wait(tr.commit());
 						//TraceEvent("FTWStartWatch").detail("Key", printable(setKey));
@@ -134,8 +139,10 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 				}
 				Version ver = wait(setFuture);
 				//TraceEvent("FTWWatchDone").detail("Key", printable(setKey));
+				// Assert that the time from setting the key to triggering the watch is no greater than 25s
+				// TODO: This assertion can cause flaky behaviour since sometimes a watch can take longer to fire
 				ASSERT(lastReadVersion - ver >= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT ||
-				       lastReadVersion - ver < SERVER_KNOBS->VERSIONS_PER_SECOND * (12 + getDuration));
+				       lastReadVersion - ver < SERVER_KNOBS->VERSIONS_PER_SECOND * (25 + getDuration));
 
 				if (now() - testStart > self->testDuration)
 					break;

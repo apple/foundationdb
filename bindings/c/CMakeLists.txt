@@ -72,16 +72,26 @@ if(NOT WIN32)
     test/mako/utils.c
     test/mako/utils.h)
 
+  add_subdirectory(test/unit/third_party)
+  find_package(Threads REQUIRED)
+  set(DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS 
+    test/unit/disconnected_timeout_tests.cpp
+    test/unit/fdb_api.cpp
+    test/unit/fdb_api.hpp)
+
   if(OPEN_FOR_IDE)
     add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)
     add_library(fdb_c_ryw_benchmark OBJECT test/ryw_benchmark.c test/test.h)
     add_library(fdb_c_txn_size_test OBJECT test/txn_size_test.c test/test.h)
     add_library(mako OBJECT ${MAKO_SRCS})
+    add_library(disconnected_timeout_unit_tests OBJECT ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
   else()
     add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
     add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
     add_executable(fdb_c_txn_size_test test/txn_size_test.c test/test.h)
     add_executable(mako ${MAKO_SRCS})
+    add_executable(trace_partial_file_suffix_test test/unit/trace_partial_file_suffix_test.cpp)
+    add_executable(disconnected_timeout_unit_tests ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
     strip_debug_symbols(fdb_c_performance_test)
     strip_debug_symbols(fdb_c_ryw_benchmark)
     strip_debug_symbols(fdb_c_txn_size_test)
@@ -89,9 +99,46 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_performance_test PRIVATE fdb_c)
   target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c)
   target_link_libraries(fdb_c_txn_size_test PRIVATE fdb_c)
+
+  add_dependencies(disconnected_timeout_unit_tests doctest)
+  target_include_directories(disconnected_timeout_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
+  target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)
+
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
   target_link_libraries(mako PRIVATE fdb_c)
+
+  target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads)
+
+  if(OPEN_FOR_IDE)
+    set(FDB_C_TARGET $<TARGET_OBJECTS:fdb_c>)
+  else()
+    set(FDB_C_TARGET $<TARGET_FILE:fdb_c>)
+  endif()
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
+    COMMAND ${CMAKE_COMMAND} -E copy ${FDB_C_TARGET} ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
+    DEPENDS fdb_c
+    COMMENT "Copy libfdb_c to use as external client for test")
+  add_custom_target(external_client DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so)
+  add_dependencies(disconnected_timeout_unit_tests external_client)
+
+  add_fdbclient_test(
+    NAME trace_partial_file_suffix_test
+    COMMAND $<TARGET_FILE:trace_partial_file_suffix_test>
+            @CLUSTER_FILE@
+            fdb)
+  add_unavailable_fdbclient_test(
+    NAME disconnected_timeout_unit_tests
+    COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
+            @CLUSTER_FILE@
+            )
+  add_unavailable_fdbclient_test(
+    NAME disconnected_timeout_external_client_unit_tests
+    COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
+            @CLUSTER_FILE@
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
+            )
 endif()
 
 set(c_workloads_srcs
@@ -107,6 +154,10 @@ endif()
 set_target_properties(c_workloads PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/share/foundationdb")
 target_link_libraries(c_workloads PUBLIC fdb_c)
+
+if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
+  target_link_options(c_workloads PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/external_workload.map,-z,nodelete")
+endif()
 
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
