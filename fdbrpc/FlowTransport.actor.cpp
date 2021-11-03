@@ -1261,8 +1261,11 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 						} else {
 							peerProtocolVersion = protocolVersion;
 							if (pkt.canonicalRemotePort) {
-								peerAddress = NetworkAddress(
-								    pkt.canonicalRemoteIp(), pkt.canonicalRemotePort, true, peerAddress.isTLS());
+								peerAddress = NetworkAddress(pkt.canonicalRemoteIp(),
+								                             pkt.canonicalRemotePort,
+								                             true,
+								                             peerAddress.isTLS(),
+								                             peerAddress.fromHostname);
 							}
 							peer = transport->getOrOpenPeer(peerAddress, false);
 							peer->compatible = compatible;

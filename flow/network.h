@@ -24,6 +24,7 @@
 #pragma once
 
 #include <array>
+#include <regex>
 #include <string>
 #include <stdint.h>
 #include <variant>
@@ -33,6 +34,7 @@
 #include "boost/asio/ssl.hpp"
 #endif
 #include "flow/Arena.h"
+#include "flow/BooleanParam.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/WriteOnlySet.h"
@@ -132,6 +134,29 @@ inline TaskPriority incrementPriorityIfEven(TaskPriority p) {
 
 class Void;
 
+struct Hostname {
+	std::string host;
+	std::string service; // decimal port number
+	bool useTLS;
+
+	Hostname(std::string host, std::string service, bool useTLS) : host(host), service(service), useTLS(useTLS) {}
+
+	// Allow hostnames in forms like following:
+	//    hostname:1234
+	//    host.name:1234
+	//    host-name:1234
+	//    host-name_part1.host-name_part2:1234:tls
+	static bool isHostname(std::string& s) {
+		std::regex validation("^([\\w\\-]+\\.?)+:([\\d]+){1,}(:tls)?$");
+		std::regex ipv4Validation("^([\\d]{1,3}\\.?){4,}:([\\d]+){1,}(:tls)?$");
+		return !std::regex_match(s, ipv4Validation) && std::regex_match(s, validation);
+	}
+
+	static Hostname parse(std::string const& str);
+
+	std::string toString() const { return host + ":" + service + (useTLS ? ":tls" : ""); }
+};
+
 struct IPAddress {
 	typedef boost::asio::ip::address_v6::bytes_type IPAddressStore;
 	static_assert(std::is_same<IPAddressStore, std::array<uint8_t, 16>>::value,
@@ -201,23 +226,38 @@ struct Traceable<IPAddress> : std::true_type {
 	static std::string toString(const IPAddress& value) { return value.toString(); }
 };
 
+FDB_DECLARE_BOOLEAN_PARAM(NetworkAddressFromHostname);
+
 struct NetworkAddress {
 	constexpr static FileIdentifier file_identifier = 14155727;
 	// A NetworkAddress identifies a particular running server (i.e. a TCP endpoint).
 	IPAddress ip;
 	uint16_t port;
 	uint16_t flags;
+	NetworkAddressFromHostname fromHostname;
 
 	enum { FLAG_PRIVATE = 1, FLAG_TLS = 2 };
 
-	NetworkAddress() : ip(IPAddress(0)), port(0), flags(FLAG_PRIVATE) {}
-	NetworkAddress(const IPAddress& address, uint16_t port, bool isPublic, bool isTLS)
-	  : ip(address), port(port), flags((isPublic ? 0 : FLAG_PRIVATE) | (isTLS ? FLAG_TLS : 0)) {}
-	NetworkAddress(uint32_t ip, uint16_t port, bool isPublic, bool isTLS)
-	  : NetworkAddress(IPAddress(ip), port, isPublic, isTLS) {}
+	NetworkAddress()
+	  : ip(IPAddress(0)), port(0), flags(FLAG_PRIVATE), fromHostname(NetworkAddressFromHostname::False) {}
+	NetworkAddress(const IPAddress& address,
+	               uint16_t port,
+	               bool isPublic,
+	               bool isTLS,
+	               NetworkAddressFromHostname fromHostname = NetworkAddressFromHostname::False)
+	  : ip(address), port(port), flags((isPublic ? 0 : FLAG_PRIVATE) | (isTLS ? FLAG_TLS : 0)),
+	    fromHostname(fromHostname) {}
+	NetworkAddress(uint32_t ip,
+	               uint16_t port,
+	               bool isPublic,
+	               bool isTLS,
+	               NetworkAddressFromHostname fromHostname = NetworkAddressFromHostname::False)
+	  : NetworkAddress(IPAddress(ip), port, isPublic, isTLS, fromHostname) {}
 
-	NetworkAddress(uint32_t ip, uint16_t port) : NetworkAddress(ip, port, false, false) {}
-	NetworkAddress(const IPAddress& ip, uint16_t port) : NetworkAddress(ip, port, false, false) {}
+	NetworkAddress(uint32_t ip, uint16_t port)
+	  : NetworkAddress(ip, port, false, false, NetworkAddressFromHostname::False) {}
+	NetworkAddress(const IPAddress& ip, uint16_t port)
+	  : NetworkAddress(ip, port, false, false, NetworkAddressFromHostname::False) {}
 
 	bool operator==(NetworkAddress const& r) const { return ip == r.ip && port == r.port && flags == r.flags; }
 	bool operator!=(NetworkAddress const& r) const { return ip != r.ip || port != r.port || flags != r.flags; }
@@ -256,7 +296,8 @@ struct NetworkAddress {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (is_fb_function<Ar>) {
-			serializer(ar, ip, port, flags);
+			bool fromHN = fromHostname == NetworkAddressFromHostname::True;
+			serializer(ar, ip, port, flags, fromHN);
 		} else {
 			if (ar.isDeserializing && !ar.protocolVersion().hasIPv6()) {
 				uint32_t ipV4;
@@ -264,6 +305,10 @@ struct NetworkAddress {
 				ip = IPAddress(ipV4);
 			} else {
 				serializer(ar, ip, port, flags);
+			}
+			if (ar.protocolVersion().hasNetworkAddressHostnameFlag()) {
+				bool fromHN = fromHostname == NetworkAddressFromHostname::True;
+				serializer(ar, fromHN);
 			}
 		}
 	}
