@@ -289,6 +289,23 @@ public:
 		                reverse);
 	}
 
+	[[nodiscard]] Future<RangeResult> getRangeAndHop(const KeySelector& begin,
+	                                                 const KeySelector& end,
+	                                                 const Key& hopInfo,
+	                                                 GetRangeLimits limits,
+	                                                 Snapshot = Snapshot::False,
+	                                                 Reverse = Reverse::False);
+
+private:
+	template <class GetKeyValuesMaybeHopRequest, class GetKeyValuesMaybeHopReply>
+	Future<RangeResult> getRangeMaybeHop(const KeySelector& begin,
+	                                     const KeySelector& end,
+	                                     const Key& hopInfo,
+	                                     GetRangeLimits limits,
+	                                     Snapshot snapshot,
+	                                     Reverse reverse);
+
+public:
 	// A method for streaming data from the storage server that is more efficient than getRange when reading large
 	// amounts of data
 	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,

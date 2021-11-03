@@ -160,6 +160,8 @@ void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageSe
 		                             TSSEndpointData(tssi.id(), tssi.getKey.getEndpoint(), metrics));
 		queueModel.updateTssEndpoint(ssi.getKeyValues.getEndpoint().token.first(),
 		                             TSSEndpointData(tssi.id(), tssi.getKeyValues.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.getKeyValuesAndHop.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getKeyValuesAndHop.getEndpoint(), metrics));
 		queueModel.updateTssEndpoint(ssi.getKeyValuesStream.getEndpoint().token.first(),
 		                             TSSEndpointData(tssi.id(), tssi.getKeyValuesStream.getEndpoint(), metrics));
 
@@ -183,6 +185,7 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 		queueModel.removeTssEndpoint(ssi.getValue.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.getKey.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.getKeyValues.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.getKeyValuesAndHop.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.getKeyValuesStream.getEndpoint().token.first());
 
 		queueModel.removeTssEndpoint(ssi.watchValue.getEndpoint().token.first());
@@ -1196,6 +1199,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionPhysicalReadsCompleted("PhysicalReadRequestsCompleted", cc),
     transactionGetKeyRequests("GetKeyRequests", cc), transactionGetValueRequests("GetValueRequests", cc),
     transactionGetRangeRequests("GetRangeRequests", cc),
+    transactionGetRangeAndHopRequests("GetRangeAndHopRequests", cc),
     transactionGetRangeStreamRequests("GetRangeStreamRequests", cc), transactionWatchRequests("WatchRequests", cc),
     transactionGetAddressesForKeyRequests("GetAddressesForKeyRequests", cc), transactionBytesRead("BytesRead", cc),
     transactionKeysRead("KeysRead", cc), transactionMetadataVersionReads("MetadataVersionReads", cc),
@@ -1451,6 +1455,7 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionPhysicalReadsCompleted("PhysicalReadRequestsCompleted", cc),
     transactionGetKeyRequests("GetKeyRequests", cc), transactionGetValueRequests("GetValueRequests", cc),
     transactionGetRangeRequests("GetRangeRequests", cc),
+    transactionGetRangeAndHopRequests("GetRangeAndHopRequests", cc),
     transactionGetRangeStreamRequests("GetRangeStreamRequests", cc), transactionWatchRequests("WatchRequests", cc),
     transactionGetAddressesForKeyRequests("GetAddressesForKeyRequests", cc), transactionBytesRead("BytesRead", cc),
     transactionKeysRead("KeysRead", cc), transactionMetadataVersionReads("MetadataVersionReads", cc),
@@ -3029,7 +3034,8 @@ ACTOR Future<Void> watchValueMap(Future<Version> version,
 	return Void();
 }
 
-void transformRangeLimits(GetRangeLimits limits, Reverse reverse, GetKeyValuesRequest& req) {
+template <class GetKeyValuesMaybeHopRequest>
+void transformRangeLimits(GetRangeLimits limits, Reverse reverse, GetKeyValuesMaybeHopRequest& req) {
 	if (limits.bytes != 0) {
 		if (!limits.hasRowLimit())
 			req.limit = CLIENT_KNOBS->REPLY_BYTE_LIMIT; // Can't get more than this many rows anyway
@@ -3049,26 +3055,47 @@ void transformRangeLimits(GetRangeLimits limits, Reverse reverse, GetKeyValuesRe
 	}
 }
 
-ACTOR Future<RangeResult> getExactRange(Database cx,
-                                        Version version,
-                                        KeyRange keys,
-                                        GetRangeLimits limits,
-                                        Reverse reverse,
-                                        TransactionInfo info,
-                                        TagSet tags) {
+template <class GetKeyValuesMaybeHopRequest>
+RequestStream<GetKeyValuesMaybeHopRequest> StorageServerInterface::*getRangeRequestStream() {
+	if constexpr (std::is_same<GetKeyValuesMaybeHopRequest, GetKeyValuesRequest>::value) {
+		return &StorageServerInterface::getKeyValues;
+	} else if (std::is_same<GetKeyValuesMaybeHopRequest, GetKeyValuesAndHopRequest>::value) {
+		return &StorageServerInterface::getKeyValuesAndHop;
+	} else {
+		UNREACHABLE();
+	}
+}
+
+ACTOR template <class GetKeyValuesMaybeHopRequest, class GetKeyValuesMaybeHopReply>
+Future<RangeResult> getExactRange(Database cx,
+                                  Version version,
+                                  KeyRange keys,
+                                  Key hopInfo,
+                                  GetRangeLimits limits,
+                                  Reverse reverse,
+                                  TransactionInfo info,
+                                  TagSet tags) {
 	state RangeResult output;
 	state Span span("NAPI:getExactRange"_loc, info.spanID);
 
 	// printf("getExactRange( '%s', '%s' )\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
 	loop {
-		state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
-		    cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValues, info));
+		state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
+		    wait(getKeyRangeLocations(cx,
+		                              keys,
+		                              CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT,
+		                              reverse,
+		                              getRangeRequestStream<GetKeyValuesMaybeHopRequest>(),
+		                              info));
 		ASSERT(locations.size());
 		state int shard = 0;
 		loop {
 			const KeyRangeRef& range = locations[shard].first;
 
-			GetKeyValuesRequest req;
+			GetKeyValuesMaybeHopRequest req;
+			req.hopInfo = hopInfo;
+			req.arena.dependsOn(hopInfo.arena());
+
 			req.version = version;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
@@ -3098,14 +3125,14 @@ ACTOR Future<RangeResult> getExactRange(Database cx,
 					    .detail("Servers", locations[shard].second->description());*/
 				}
 				++cx->transactionPhysicalReads;
-				state GetKeyValuesReply rep;
+				state GetKeyValuesMaybeHopReply rep;
 				try {
 					choose {
 						when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
-						when(GetKeyValuesReply _rep =
+						when(GetKeyValuesMaybeHopReply _rep =
 						         wait(loadBalance(cx.getPtr(),
 						                          locations[shard].second,
-						                          &StorageServerInterface::getKeyValues,
+						                          getRangeRequestStream<GetKeyValuesMaybeHopRequest>(),
 						                          req,
 						                          TaskPriority::DefaultPromiseEndpoint,
 						                          AtMostOnce::False,
@@ -3155,7 +3182,7 @@ ACTOR Future<RangeResult> getExactRange(Database cx,
 						    .detail("BlockBytes", rep.data.expectedSize());
 						ASSERT(false);
 					}
-					TEST(true); // GetKeyValuesReply.more in getExactRange
+					TEST(true); // GetKeyValuesMaybeHopReply.more in getExactRange
 					// Make next request to the same shard with a beginning key just after the last key returned
 					if (reverse)
 						locations[shard].first =
@@ -3231,14 +3258,16 @@ Future<Key> resolveKey(Database const& cx,
 	return getKey(cx, key, version, info, tags);
 }
 
-ACTOR Future<RangeResult> getRangeFallback(Database cx,
-                                           Version version,
-                                           KeySelector begin,
-                                           KeySelector end,
-                                           GetRangeLimits limits,
-                                           Reverse reverse,
-                                           TransactionInfo info,
-                                           TagSet tags) {
+ACTOR template <class GetKeyValuesMaybeHopRequest, class GetKeyValuesMaybeHopReply>
+Future<RangeResult> getRangeFallback(Database cx,
+                                     Version version,
+                                     KeySelector begin,
+                                     KeySelector end,
+                                     Key hopInfo,
+                                     GetRangeLimits limits,
+                                     Reverse reverse,
+                                     TransactionInfo info,
+                                     TagSet tags) {
 	if (version == latestVersion) {
 		state Transaction transaction(cx);
 		transaction.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
@@ -3261,7 +3290,8 @@ ACTOR Future<RangeResult> getRangeFallback(Database cx,
 	// if b is allKeys.begin, we have either read through the beginning of the database,
 	// or allKeys.begin exists in the database and will be part of the conflict range anyways
 
-	RangeResult _r = wait(getExactRange(cx, version, KeyRangeRef(b, e), limits, reverse, info, tags));
+	RangeResult _r = wait(getExactRange<GetKeyValuesMaybeHopRequest, GetKeyValuesMaybeHopReply>(
+	    cx, version, KeyRangeRef(b, e), hopInfo, limits, reverse, info, tags));
 	RangeResult r = _r;
 
 	if (b == allKeys.begin && ((reverse && !r.more) || !reverse))
@@ -3286,6 +3316,7 @@ ACTOR Future<RangeResult> getRangeFallback(Database cx,
 	return r;
 }
 
+// TODO: Client should add hop keys to conflict ranges.
 void getRangeFinished(Database cx,
                       Reference<TransactionLogInfo> trLogInfo,
                       double startTime,
@@ -3340,17 +3371,23 @@ void getRangeFinished(Database cx,
 	}
 }
 
-ACTOR Future<RangeResult> getRange(Database cx,
-                                   Reference<TransactionLogInfo> trLogInfo,
-                                   Future<Version> fVersion,
-                                   KeySelector begin,
-                                   KeySelector end,
-                                   GetRangeLimits limits,
-                                   Promise<std::pair<Key, Key>> conflictRange,
-                                   Snapshot snapshot,
-                                   Reverse reverse,
-                                   TransactionInfo info,
-                                   TagSet tags) {
+// GetKeyValuesMaybeHopRequest: GetKeyValuesRequest or GetKeyValuesAndHopRequest
+// GetKeyValuesMaybeHopReply: GetKeyValuesReply or GetKeyValuesAndHopReply
+// Sadly we need GetKeyValuesMaybeHopReply because cannot do something like: state
+// REPLY_TYPE(GetKeyValuesMaybeHopRequest) rep;
+ACTOR template <class GetKeyValuesMaybeHopRequest, class GetKeyValuesMaybeHopReply>
+Future<RangeResult> getRange(Database cx,
+                             Reference<TransactionLogInfo> trLogInfo,
+                             Future<Version> fVersion,
+                             KeySelector begin,
+                             KeySelector end,
+                             Key hopInfo,
+                             GetRangeLimits limits,
+                             Promise<std::pair<Key, Key>> conflictRange,
+                             Snapshot snapshot,
+                             Reverse reverse,
+                             TransactionInfo info,
+                             TagSet tags) {
 	state GetRangeLimits originalLimits(limits);
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
@@ -3384,11 +3421,13 @@ ACTOR Future<RangeResult> getRange(Database cx,
 
 			Key locationKey = reverse ? Key(end.getKey(), end.arena()) : Key(begin.getKey(), begin.arena());
 			Reverse locationBackward{ reverse ? (end - 1).isBackward() : begin.isBackward() };
-			state std::pair<KeyRange, Reference<LocationInfo>> beginServer =
-			    wait(getKeyLocation(cx, locationKey, &StorageServerInterface::getKeyValues, info, locationBackward));
+			state std::pair<KeyRange, Reference<LocationInfo>> beginServer = wait(getKeyLocation(
+			    cx, locationKey, getRangeRequestStream<GetKeyValuesMaybeHopRequest>(), info, locationBackward));
 			state KeyRange shard = beginServer.first;
 			state bool modifiedSelectors = false;
-			state GetKeyValuesRequest req;
+			state GetKeyValuesMaybeHopRequest req;
+			req.hopInfo = hopInfo;
+			req.arena.dependsOn(hopInfo.arena());
 
 			req.isFetchKeys = (info.taskID == TaskPriority::FetchKeys);
 			req.version = readVersion;
@@ -3447,17 +3486,17 @@ ACTOR Future<RangeResult> getRange(Database cx,
 				}
 
 				++cx->transactionPhysicalReads;
-				state GetKeyValuesReply rep;
+				state GetKeyValuesMaybeHopReply rep;
 				try {
 					if (CLIENT_BUGGIFY_WITH_PROB(.01)) {
 						throw deterministicRandom()->randomChoice(
 						    std::vector<Error>{ transaction_too_old(), future_version() });
 					}
 					// state AnnotateActor annotation(currentLineage);
-					GetKeyValuesReply _rep =
+					GetKeyValuesMaybeHopReply _rep =
 					    wait(loadBalance(cx.getPtr(),
 					                     beginServer.second,
-					                     &StorageServerInterface::getKeyValues,
+					                     getRangeRequestStream<GetKeyValuesMaybeHopRequest>(),
 					                     req,
 					                     TaskPriority::DefaultPromiseEndpoint,
 					                     AtMostOnce::False,
@@ -3557,11 +3596,12 @@ ACTOR Future<RangeResult> getRange(Database cx,
 
 				if (!rep.more) {
 					ASSERT(modifiedSelectors);
-					TEST(true); // !GetKeyValuesReply.more and modifiedSelectors in getRange
+					TEST(true); // !GetKeyValuesMaybeHopReply.more and modifiedSelectors in getRange
 
 					if (!rep.data.size()) {
-						RangeResult result = wait(getRangeFallback(
-						    cx, version, originalBegin, originalEnd, originalLimits, reverse, info, tags));
+						RangeResult result =
+						    wait(getRangeFallback<GetKeyValuesMaybeHopRequest, GetKeyValuesMaybeHopReply>(
+						        cx, version, originalBegin, originalEnd, hopInfo, originalLimits, reverse, info, tags));
 						getRangeFinished(cx,
 						                 trLogInfo,
 						                 startTime,
@@ -3579,7 +3619,7 @@ ACTOR Future<RangeResult> getRange(Database cx,
 					else
 						begin = firstGreaterOrEqual(shard.end);
 				} else {
-					TEST(true); // GetKeyValuesReply.more in getRange
+					TEST(true); // GetKeyValuesMaybeHopReply.more in getRange
 					if (reverse)
 						end = firstGreaterOrEqual(output[output.size() - 1].key);
 					else
@@ -3597,8 +3637,9 @@ ACTOR Future<RangeResult> getRange(Database cx,
 					                    Reverse{ reverse ? (end - 1).isBackward() : begin.isBackward() });
 
 					if (e.code() == error_code_wrong_shard_server) {
-						RangeResult result = wait(getRangeFallback(
-						    cx, version, originalBegin, originalEnd, originalLimits, reverse, info, tags));
+						RangeResult result =
+						    wait(getRangeFallback<GetKeyValuesMaybeHopRequest, GetKeyValuesMaybeHopReply>(
+						        cx, version, originalBegin, originalEnd, hopInfo, originalLimits, reverse, info, tags));
 						getRangeFinished(cx,
 						                 trLogInfo,
 						                 startTime,
@@ -4164,17 +4205,18 @@ Future<RangeResult> getRange(Database const& cx,
                              Reverse const& reverse,
                              TransactionInfo const& info,
                              TagSet const& tags) {
-	return getRange(cx,
-	                Reference<TransactionLogInfo>(),
-	                fVersion,
-	                begin,
-	                end,
-	                limits,
-	                Promise<std::pair<Key, Key>>(),
-	                Snapshot::True,
-	                reverse,
-	                info,
-	                tags);
+	return getRange<GetKeyValuesRequest, GetKeyValuesReply>(cx,
+	                                                        Reference<TransactionLogInfo>(),
+	                                                        fVersion,
+	                                                        begin,
+	                                                        end,
+	                                                        ""_sr,
+	                                                        limits,
+	                                                        Promise<std::pair<Key, Key>>(),
+	                                                        Snapshot::True,
+	                                                        reverse,
+	                                                        info,
+	                                                        tags);
 }
 
 bool DatabaseContext::debugUseTags = false;
@@ -4469,13 +4511,26 @@ Future<Key> Transaction::getKey(const KeySelector& key, Snapshot snapshot) {
 	return getKeyAndConflictRange(cx, key, getReadVersion(), conflictRange, info, options.readTags);
 }
 
-Future<RangeResult> Transaction::getRange(const KeySelector& begin,
-                                          const KeySelector& end,
-                                          GetRangeLimits limits,
-                                          Snapshot snapshot,
-                                          Reverse reverse) {
+template <class GetKeyValuesMaybeHopRequest>
+void increaseCounterForRequest(Database cx) {
+	if constexpr (std::is_same<GetKeyValuesMaybeHopRequest, GetKeyValuesRequest>::value) {
+		++cx->transactionGetRangeRequests;
+	} else if (std::is_same<GetKeyValuesMaybeHopRequest, GetKeyValuesAndHopRequest>::value) {
+		++cx->transactionGetRangeAndHopRequests;
+	} else {
+		UNREACHABLE();
+	}
+}
+
+template <class GetKeyValuesMaybeHopRequest, class GetKeyValuesMaybeHopReply>
+Future<RangeResult> Transaction::getRangeMaybeHop(const KeySelector& begin,
+                                                  const KeySelector& end,
+                                                  const Key& hopInfo,
+                                                  GetRangeLimits limits,
+                                                  Snapshot snapshot,
+                                                  Reverse reverse) {
 	++cx->transactionLogicalReads;
-	++cx->transactionGetRangeRequests;
+	increaseCounterForRequest<GetKeyValuesMaybeHopRequest>(cx);
 
 	if (limits.isReached())
 		return RangeResult();
@@ -4507,8 +4562,37 @@ Future<RangeResult> Transaction::getRange(const KeySelector& begin,
 		extraConflictRanges.push_back(conflictRange.getFuture());
 	}
 
-	return ::getRange(
-	    cx, trLogInfo, getReadVersion(), b, e, limits, conflictRange, snapshot, reverse, info, options.readTags);
+	return ::getRange<GetKeyValuesMaybeHopRequest, GetKeyValuesMaybeHopReply>(cx,
+	                                                                          trLogInfo,
+	                                                                          getReadVersion(),
+	                                                                          b,
+	                                                                          e,
+	                                                                          hopInfo,
+	                                                                          limits,
+	                                                                          conflictRange,
+	                                                                          snapshot,
+	                                                                          reverse,
+	                                                                          info,
+	                                                                          options.readTags);
+}
+
+Future<RangeResult> Transaction::getRange(const KeySelector& begin,
+                                          const KeySelector& end,
+                                          GetRangeLimits limits,
+                                          Snapshot snapshot,
+                                          Reverse reverse) {
+	return getRangeMaybeHop<GetKeyValuesRequest, GetKeyValuesReply>(begin, end, ""_sr, limits, snapshot, reverse);
+}
+
+Future<RangeResult> Transaction::getRangeAndHop(const KeySelector& begin,
+                                                const KeySelector& end,
+                                                const Key& hopInfo,
+                                                GetRangeLimits limits,
+                                                Snapshot snapshot,
+                                                Reverse reverse) {
+
+	return getRangeMaybeHop<GetKeyValuesAndHopRequest, GetKeyValuesAndHopReply>(
+	    begin, end, hopInfo, limits, snapshot, reverse);
 }
 
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,
