@@ -33,7 +33,7 @@ public:
 
 	static std::string getURLFormat();
 
-	BackupContainerLocalDirectory(const std::string& url);
+	BackupContainerLocalDirectory(const std::string& url, Optional<std::string> const& encryptionKeyFileName);
 
 	static Future<std::vector<std::string>> listURLs(const std::string& url);
 

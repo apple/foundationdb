@@ -50,8 +50,7 @@ void TLogInterface_ActivelyPush::initEndpoints() {
 
 void TLogInterface_PassivelyPull::initEndpoints() {
 	// RequestSteam order must be the same as declared in TLogInterface_PassivelyPull
-	TLogInterfaceBase::initEndpointsImpl({ disablePopRequest.getReceiver(),
-	                                       enablePopRequest.getReceiver() });
+	TLogInterfaceBase::initEndpointsImpl({ disablePopRequest.getReceiver(), enablePopRequest.getReceiver() });
 }
 
 std::shared_ptr<TLogInterfaceBase> getNewTLogInterface(const MessageTransferModel model,

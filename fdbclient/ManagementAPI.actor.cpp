@@ -154,7 +154,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		}
 
 		if (key == "perpetual_storage_wiggle" && isInteger(value)) {
-			int ppWiggle = atoi(value.c_str());
+			int ppWiggle = std::stoi(value);
 			if (ppWiggle >= 2 || ppWiggle < 0) {
 				printf("Error: Only 0 and 1 are valid values of perpetual_storage_wiggle at present.\n");
 				return out;
@@ -1981,7 +1981,8 @@ ACTOR Future<vector<std::string>> getExcludedLocalities(Database cx) {
 // Decodes the locality string to a pair of locality prefix and its value.
 // The prefix could be dcid, processid, machineid, processid.
 std::pair<std::string, std::string> decodeLocality(const std::string& locality) {
-	StringRef localityRef(locality.c_str());
+	StringRef localityRef((const uint8_t*)(locality.c_str()), locality.size());
+
 	std::string localityKeyValue = localityRef.removePrefix(LocalityData::ExcludeLocalityPrefix).toString();
 	int split = localityKeyValue.find(':');
 	if (split != std::string::npos) {
@@ -2481,67 +2482,6 @@ ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {
 			wait(tr.onError(e));
 		}
 	}
-}
-
-ACTOR Future<Void> changeCachedRange(Database cx, KeyRangeRef range, bool add) {
-	state ReadYourWritesTransaction tr(cx);
-	state KeyRange sysRange = KeyRangeRef(storageCacheKey(range.begin), storageCacheKey(range.end));
-	state KeyRange sysRangeClear = KeyRangeRef(storageCacheKey(range.begin), keyAfter(storageCacheKey(range.end)));
-	state KeyRange privateRange = KeyRangeRef(cacheKeysKey(0, range.begin), cacheKeysKey(0, range.end));
-	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
-	state Value falseValue = storageCacheValue(std::vector<uint16_t>{});
-	loop {
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		try {
-			tr.clear(sysRangeClear);
-			tr.clear(privateRange);
-			tr.addReadConflictRange(privateRange);
-			RangeResult previous = wait(tr.getRange(KeyRangeRef(storageCachePrefix, sysRange.begin), 1, true));
-			bool prevIsCached = false;
-			if (!previous.empty()) {
-				std::vector<uint16_t> prevVal;
-				decodeStorageCacheValue(previous[0].value, prevVal);
-				prevIsCached = !prevVal.empty();
-			}
-			if (prevIsCached && !add) {
-				// we need to uncache from here
-				tr.set(sysRange.begin, falseValue);
-				tr.set(privateRange.begin, serverKeysFalse);
-			} else if (!prevIsCached && add) {
-				// we need to cache, starting from here
-				tr.set(sysRange.begin, trueValue);
-				tr.set(privateRange.begin, serverKeysTrue);
-			}
-			RangeResult after = wait(tr.getRange(KeyRangeRef(sysRange.end, storageCacheKeys.end), 1, false));
-			bool afterIsCached = false;
-			if (!after.empty()) {
-				std::vector<uint16_t> afterVal;
-				decodeStorageCacheValue(after[0].value, afterVal);
-				afterIsCached = afterVal.empty();
-			}
-			if (afterIsCached && !add) {
-				tr.set(sysRange.end, trueValue);
-				tr.set(privateRange.end, serverKeysTrue);
-			} else if (!afterIsCached && add) {
-				tr.set(sysRange.end, falseValue);
-				tr.set(privateRange.end, serverKeysFalse);
-			}
-			wait(tr.commit());
-			return Void();
-		} catch (Error& e) {
-			state Error err = e;
-			wait(tr.onError(err));
-			TraceEvent(SevDebug, "ChangeCachedRangeError").error(err);
-		}
-	}
-}
-
-Future<Void> addCachedRange(const Database& cx, KeyRangeRef range) {
-	return changeCachedRange(cx, range, true);
-}
-Future<Void> removeCachedRange(const Database& cx, KeyRangeRef range) {
-	return changeCachedRange(cx, range, false);
 }
 
 json_spirit::Value_type normJSONType(json_spirit::Value_type type) {

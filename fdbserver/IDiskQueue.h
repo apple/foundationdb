@@ -24,11 +24,9 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/IKeyValueStore.h"
+#include "flow/BooleanParam.h"
 
-enum class CheckHashes {
-	NO,
-	YES,
-};
+FDB_DECLARE_BOOLEAN_PARAM(CheckHashes);
 
 class IDiskQueue : public IClosable {
 public:
@@ -103,7 +101,7 @@ public:
 class InMemoryDiskQueue : public IDiskQueue {
 public:
 	InMemoryDiskQueue(UID dbgid)
-	  : dbgid(dbgid), recovered(false), initialized(false), cursorWrite(0), cursorRead(0), cursorCommit(0) {}
+	  : dbgid(dbgid), cursorWrite(0), cursorRead(0), cursorCommit(0), recovered(false), initialized(false) {}
 
 	location push(StringRef contents) override {
 		// ASSERT(recovered);

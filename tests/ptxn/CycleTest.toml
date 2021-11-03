@@ -1,5 +1,7 @@
 [configuration]
-splits = ["a","b","c"]
+splits = ["a"]
+generateFearless = false
+disableTss = true
 
 [[test]]
 testTitle = 'Cycle'

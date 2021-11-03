@@ -31,7 +31,8 @@ namespace {
 class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
 public:
 	BackupFile(const std::string& fileName, Reference<IAsyncFile> file, const std::string& finalFullPath)
-	  : IBackupFile(fileName), m_file(file), m_finalFullPath(finalFullPath), m_writeOffset(0), m_blockSize(CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK) {
+	  : IBackupFile(fileName), m_file(file), m_writeOffset(0), m_finalFullPath(finalFullPath),
+	    m_blockSize(CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK) {
 		if (BUGGIFY) {
 			m_blockSize = deterministicRandom()->randomInt(100, 20000);
 		}
@@ -131,7 +132,10 @@ std::string BackupContainerLocalDirectory::getURLFormat() {
 	return "file://</path/to/base/dir/>";
 }
 
-BackupContainerLocalDirectory::BackupContainerLocalDirectory(const std::string& url) {
+BackupContainerLocalDirectory::BackupContainerLocalDirectory(const std::string& url,
+                                                             const Optional<std::string>& encryptionKeyFileName) {
+	setEncryptionKey(encryptionKeyFileName);
+
 	std::string path;
 	if (url.find("file://") != 0) {
 		TraceEvent(SevWarn, "BackupContainerLocalDirectory")
@@ -193,7 +197,10 @@ Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(const s
 }
 
 Future<Void> BackupContainerLocalDirectory::create() {
-	// Nothing should be done here because create() can be called by any process working with the container URL,
+	if (usesEncryption()) {
+		return encryptionSetupComplete();
+	}
+	// No directory should be created here because create() can be called by any process working with the container URL,
 	// such as fdbbackup. Since "local directory" containers are by definition local to the machine they are
 	// accessed from, the container's creation (in this case the creation of a directory) must be ensured prior to
 	// every file creation, which is done in openFile(). Creating the directory here will result in unnecessary
@@ -207,6 +214,9 @@ Future<bool> BackupContainerLocalDirectory::exists() {
 
 Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std::string& path) {
 	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED;
+	if (usesEncryption()) {
+		flags |= IAsyncFile::OPEN_ENCRYPTED;
+	}
 	// Simulation does not properly handle opening the same file from multiple machines using a shared filesystem,
 	// so create a symbolic link to make each file opening appear to be unique.  This could also work in production
 	// but only if the source directory is writeable which shouldn't be required for a restore.
@@ -218,7 +228,7 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 		}
 
 		if (g_simulator.getCurrentProcess()->uid == UID()) {
-			TraceEvent(SevError, "BackupContainerReadFileOnUnsetProcessID");
+			TraceEvent(SevError, "BackupContainerReadFileOnUnsetProcessID").log();
 		}
 		std::string uniquePath = fullPath + "." + g_simulator.getCurrentProcess()->uid.toString() + ".lnk";
 		unlink(uniquePath.c_str());
@@ -258,8 +268,11 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 }
 
 Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const std::string& path) {
-	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
-	            IAsyncFile::OPEN_READWRITE;
+	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE |
+	            IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
+	if (usesEncryption()) {
+		flags |= IAsyncFile::OPEN_ENCRYPTED;
+	}
 	std::string fullPath = joinPath(m_path, path);
 	platform::createDirectory(parentDirectory(fullPath));
 	std::string temp = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";

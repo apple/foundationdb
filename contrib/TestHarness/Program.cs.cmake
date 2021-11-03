@@ -308,9 +308,16 @@ namespace SummarizeTest
                     string lastFolderName = Path.GetFileName(Path.GetDirectoryName(testFile));
                     if (lastFolderName.Contains("from_") || lastFolderName.Contains("to_")) // Only perform upgrade/downgrade tests from certain versions
                     {
-                        oldBinaryVersionLowerBound = lastFolderName.Split('_').Last();
+                        oldBinaryVersionLowerBound = lastFolderName.Split('_').ElementAt(1); // Assuming "from_*.*.*" appears first in the folder name
                     }
                     string oldBinaryVersionUpperBound = getFdbserverVersion(fdbserverName);
+                    if (lastFolderName.Contains("until_")) // Specify upper bound for old binary; "until_*.*.*" is assumed at the end if present
+                    {
+                        string givenUpperBound = lastFolderName.Split('_').Last();
+                        if (versionLessThan(givenUpperBound, oldBinaryVersionUpperBound)) {
+                            oldBinaryVersionUpperBound = givenUpperBound;
+                        }
+                    }
                     if (versionGreaterThanOrEqual("4.0.0", oldBinaryVersionUpperBound)) {
                         // If the binary under test is from 3.x, then allow upgrade tests from 3.x binaries.
                         oldBinaryVersionLowerBound = "0.0.0";
@@ -320,8 +327,22 @@ namespace SummarizeTest
                                                          Directory.GetFiles(oldBinaryFolder),
                                                          x => versionGreaterThanOrEqual(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionLowerBound)
                                                            && versionLessThan(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionUpperBound));
-                    oldBinaries = oldBinaries.Concat(currentBinary);
-                    oldServerName = random.Choice(oldBinaries.ToList<string>());
+                    if (!lastFolderName.Contains("until_")) {
+                        // only add current binary to the list of old binaries if "until_" is not specified in the folder name
+                        // <version> in until_<version> should be less or equal to the current binary version
+                        // otherwise, using "until_" makes no sense
+                        // thus, by definition, if "until_" appears, we do not want to run with the current binary version
+                        oldBinaries = oldBinaries.Concat(currentBinary);
+                    }
+                    List<string> oldBinariesList = oldBinaries.ToList<string>();
+                    if (oldBinariesList.Count == 0) {
+                        // In theory, restarting tests are named to have at least one old binary version to run
+                        // But if none of the provided old binaries fall in the range, we just skip the test
+                        Console.WriteLine("No available old binary version from {0} to {1}", oldBinaryVersionLowerBound, oldBinaryVersionUpperBound);
+                        return 0;
+                    } else {
+                        oldServerName = random.Choice(oldBinariesList);
+                    }
                 }
                 else
                 {
@@ -539,7 +560,8 @@ namespace SummarizeTest
                     consoleThread.Join();
 
                     var traceFiles = Directory.GetFiles(tempPath, "trace*.*").Where(s => s.EndsWith(".xml") || s.EndsWith(".json")).ToArray();
-                    if (traceFiles.Length == 0)
+                    // if no traces caused by the process failed then the result will include its stderr
+                    if (process.ExitCode == 0 && traceFiles.Length == 0)
                     {
                         if (!traceToStdout)
                         {
@@ -640,6 +662,15 @@ namespace SummarizeTest
             {
                 if(!String.IsNullOrEmpty(errLine.Data))
                 {
+                    if (errLine.Data.EndsWith("WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!")) {
+                        // When running ASAN we expect to see this message. Boost coroutine should be using the correct asan annotations so that it shouldn't produce any false positives.
+                        return;
+                    }
+                    if (errLine.Data.EndsWith("Warning: unimplemented fcntl command: 1036")) {
+                        // Valgrind produces this warning when F_SET_RW_HINT is used
+                        return;
+                    }
+
                     hasError = true;
                     if(Errors.Count < maxErrors) {
                         if(errLine.Data.Length > maxErrorLength) {
@@ -967,10 +998,6 @@ namespace SummarizeTest
                 int stderrBytes = 0;
                 foreach (string err in outputErrors)
                 {
-                    if (err.EndsWith("WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!")) {
-                        // When running ASAN we expect to see this message. Boost coroutine should be using the correct asan annotations so that it shouldn't produce any false positives.
-                        continue;
-                    }
                     if (stderrSeverity == (int)Magnesium.Severity.SevError)
                     {
                         error = true;

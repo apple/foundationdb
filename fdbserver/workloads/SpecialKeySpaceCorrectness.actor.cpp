@@ -126,13 +126,14 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> getRangeCallActor(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		state double lastTime = now();
+		state Reverse reverse = Reverse::False;
 		loop {
 			wait(poisson(&lastTime, 1.0 / self->transactionsPerSecond));
-			state bool reverse = deterministicRandom()->coinflip();
+			reverse.set(deterministicRandom()->coinflip());
 			state GetRangeLimits limit = self->randomLimits();
 			state KeySelector begin = self->randomKeySelector();
 			state KeySelector end = self->randomKeySelector();
-			auto correctResultFuture = self->ryw->getRange(begin, end, limit, false, reverse);
+			auto correctResultFuture = self->ryw->getRange(begin, end, limit, Snapshot::False, reverse);
 			ASSERT(correctResultFuture.isReady());
 			auto correctResult = correctResultFuture.getValue();
 			auto testResultFuture = cx->specialKeySpace->getRange(self->ryw.getPtr(), begin, end, limit, reverse);
@@ -173,7 +174,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				self->ryw->clear(rkr);
 			}
 			// use the same key selectors again to test consistency of ryw
-			auto correctRywResultFuture = self->ryw->getRange(begin, end, limit, false, reverse);
+			auto correctRywResultFuture = self->ryw->getRange(begin, end, limit, Snapshot::False, reverse);
 			ASSERT(correctRywResultFuture.isReady());
 			auto correctRywResult = correctRywResultFuture.getValue();
 			auto testRywResultFuture = cx->specialKeySpace->getRange(self->ryw.getPtr(), begin, end, limit, reverse);
@@ -547,13 +548,13 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				if (begin.getKey() < end.getKey())
 					break;
 			}
-			bool reverse = deterministicRandom()->coinflip();
+			Reverse reverse{ deterministicRandom()->coinflip() };
 
-			auto correctResultFuture = referenceTx->getRange(begin, end, limit, false, reverse);
+			auto correctResultFuture = referenceTx->getRange(begin, end, limit, Snapshot::False, reverse);
 			ASSERT(correctResultFuture.isReady());
 			begin.setKey(begin.getKey().withPrefix(prefix, begin.arena()));
 			end.setKey(end.getKey().withPrefix(prefix, begin.arena()));
-			auto testResultFuture = tx->getRange(begin, end, limit, false, reverse);
+			auto testResultFuture = tx->getRange(begin, end, limit, Snapshot::False, reverse);
 			ASSERT(testResultFuture.isReady());
 			auto correct_iter = correctResultFuture.get().begin();
 			auto test_iter = testResultFuture.get().begin();
@@ -631,10 +632,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		{
 			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			for (const std::string& option : SpecialKeySpace::getManagementApiOptionsSet()) {
-				tx->set(LiteralStringRef("options/")
-				            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
-				            .withSuffix(option),
-				        ValueRef());
+				tx->set(
+				    "options/"_sr.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
+				        .withSuffix(option),
+				    ValueRef());
 			}
 			RangeResult result = wait(tx->getRange(
 			    KeyRangeRef(LiteralStringRef("options/"), LiteralStringRef("options0"))
@@ -720,7 +721,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					ASSERT(false);
 				} else {
 					// If no worker process returned, skip the test
-					TraceEvent(SevDebug, "EmptyWorkerListInSetClassTest");
+					TraceEvent(SevDebug, "EmptyWorkerListInSetClassTest").log();
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled)
@@ -782,6 +783,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					    Value(worker.processClass.toString())); // Set it as the same class type as before, thus only
 					                                            // class source will be changed
 					wait(tx->commit());
+					tx->reset();
 					Optional<Value> class_source = wait(tx->get(
 					    Key("process/class_source/" + address)
 					        .withPrefix(
@@ -795,7 +797,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					tx->reset();
 				} else {
 					// If no worker process returned, skip the test
-					TraceEvent(SevDebug, "EmptyWorkerListInSetClassTest");
+					TraceEvent(SevDebug, "EmptyWorkerListInSetClassTest").log();
 				}
 			} catch (Error& e) {
 				wait(tx->onError(e));
@@ -807,7 +809,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			try {
 				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				// lock the database
-				tx->set(SpecialKeySpace::getManagementApiCommandPrefix("lock"), LiteralStringRef(""));
+				UID uid = deterministicRandom()->randomUniqueID();
+				tx->set(SpecialKeySpace::getManagementApiCommandPrefix("lock"), uid.toString());
 				// commit
 				wait(tx->commit());
 				break;
@@ -831,7 +834,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				}
 			}
 		}
-		TraceEvent(SevDebug, "DatabaseLocked");
+		TraceEvent(SevDebug, "DatabaseLocked").log();
 		// if database locked, fdb read should get database_locked error
 		try {
 			tx->reset();
@@ -850,7 +853,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				// unlock the database
 				tx->clear(SpecialKeySpace::getManagementApiCommandPrefix("lock"));
 				wait(tx->commit());
-				TraceEvent(SevDebug, "DatabaseUnlocked");
+				TraceEvent(SevDebug, "DatabaseUnlocked").log();
 				tx->reset();
 				// read should be successful
 				RangeResult res = wait(tx->getRange(normalKeys, 1));

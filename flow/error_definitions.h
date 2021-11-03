@@ -78,6 +78,7 @@ ERROR( dd_not_found, 1053, "Data distributor not found")
 ERROR( wrong_connection_file, 1054, "Connection file mismatch")
 ERROR( version_already_compacted, 1055, "The requested changes have been compacted away")
 ERROR( local_config_changed, 1056, "Local configuration file has changed. Restart and apply these changes" )
+ERROR( failed_to_reach_quorum, 1057, "Failed to reach quorum from configuration database nodes. Retry sending these requests" )
 ERROR( storage_team_id_not_found, 1065, "Storage Team ID not found")
 
 ERROR( broken_promise, 1100, "Broken promise" )
@@ -101,6 +102,7 @@ ERROR( master_backup_worker_failed, 1212, "Master terminating because a backup w
 ERROR( tag_throttled, 1213, "Transaction tag is being throttled" )
 ERROR( grv_proxy_failed, 1214, "Master terminating because a GRV CommitProxy failed" )
 ERROR( dd_tracker_cancelled, 1215, "The data distribution tracker has been cancelled" )
+ERROR( failed_to_progress, 1216, "Process has failed to make sufficient progress" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -229,6 +231,7 @@ ERROR( restore_destination_not_empty, 2370, "Attempted to restore into a non-emp
 ERROR( restore_duplicate_uid, 2371, "Attempted to restore using a UID that had been used for an aborted restore")
 ERROR( task_invalid_version, 2381, "Invalid task version")
 ERROR( task_interrupted, 2382, "Task execution stopped due to timeout, abort, or completion by another worker")
+ERROR( invalid_encryption_key_file, 2383, "The provided encryption key file has invalid contents" )
 
 ERROR( key_not_found, 2400, "Expected key is missing")
 ERROR( json_malformed, 2401, "JSON string was malformed")

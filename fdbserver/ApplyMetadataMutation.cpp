@@ -29,7 +29,6 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
-#include "fdbserver/LogSystem.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
@@ -91,8 +90,8 @@ public:
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), commitVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
-	    tssMapping(&proxyCommitData_.tssMapping), initialCommit(initialCommit_),
-	    tLogGroupCollection(proxyCommitData_.tLogGroupCollection), tagToServer(&proxyCommitData_.tagToServer),
+	    tssMapping(&proxyCommitData_.tssMapping), tLogGroupCollection(proxyCommitData_.tLogGroupCollection),
+	    initialCommit(initialCommit_), tagToServer(&proxyCommitData_.tagToServer),
 	    ssToStorageTeam(&proxyCommitData_.ssToStorageTeam), changedTeams(&proxyCommitData_.changedTeams) {
 
 		for (const auto [ss, team] : proxyCommitData_.ssToStorageTeam) {
@@ -816,7 +815,8 @@ private:
 								    keyAfter(maybeTssRange.begin, arena).withPrefix(systemKeys.begin, arena);
 
 								if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-									toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
+									toCommit->writeToStorageTeams(
+									    tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 								} else {
 									toCommit->addTag(tag);
 									toCommit->writeTypedMessage(privatized);

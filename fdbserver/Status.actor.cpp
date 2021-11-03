@@ -2605,10 +2605,9 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<ServerDBI
                                                     std::set<std::string>* incomplete_reasons) {
 	state JsonBuilderObject statusObj;
 
-	state Database cx = openDBOnServer(db,
-	                                   TaskPriority::DefaultEndpoint,
-	                                   true,
-	                                   false); // Open a new database connection that isn't lock-aware
+	state Database cx =
+	    openDBOnServer(db,
+	                   TaskPriority::DefaultEndpoint); // Open a new database connection that isn't lock-aware
 	state Transaction tr(cx);
 	state int timeoutSeconds = 5;
 	state Future<Void> getTimeout = delay(timeoutSeconds);
@@ -2922,10 +2921,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["workload"] = workerStatuses[1];
 
 			statusObj["layers"] = workerStatuses[2];
+			/*
 			if (configBroadcaster) {
-				// TODO: Read from coordinators for more up-to-date config database status?
-				statusObj["configuration_database"] = configBroadcaster->getStatus();
+			    // TODO: Read from coordinators for more up-to-date config database status?
+			    statusObj["configuration_database"] = configBroadcaster->getStatus();
 			}
+			*/
 
 			// Add qos section if it was populated
 			if (!qos.empty())

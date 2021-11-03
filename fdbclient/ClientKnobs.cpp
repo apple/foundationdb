@@ -23,14 +23,13 @@
 #include "fdbclient/SystemData.h"
 #include "flow/UnitTest.h"
 
-#define init(knob, value) initKnob(knob, value, #knob)
+#define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
 
 ClientKnobs::ClientKnobs(Randomize randomize) {
 	initialize(randomize);
 }
 
-void ClientKnobs::initialize(Randomize _randomize) {
-	bool const randomize = (_randomize == Randomize::YES);
+void ClientKnobs::initialize(Randomize randomize) {
 	// clang-format off
 
 	init( TOO_MANY,                            1000000 );
@@ -248,18 +247,22 @@ void ClientKnobs::initialize(Randomize _randomize) {
 	init( TAG_THROTTLE_RECHECK_INTERVAL,            5.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_RECHECK_INTERVAL = 0.0;
 	init( TAG_THROTTLE_EXPIRATION_INTERVAL,        60.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_EXPIRATION_INTERVAL = 1.0;
 
+	// busyness reporting
+	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
+	init( BUSYNESS_SPIKE_SATURATED_THRESHOLD,     0.500 );
+
 	// clang-format on
 }
 
 TEST_CASE("/fdbclient/knobs/initialize") {
 	// This test depends on TASKBUCKET_TIMEOUT_VERSIONS being defined as a constant multiple of CORE_VERSIONSPERSECOND
-	ClientKnobs clientKnobs(Randomize::NO);
+	ClientKnobs clientKnobs(Randomize::False);
 	int64_t initialCoreVersionsPerSecond = clientKnobs.CORE_VERSIONSPERSECOND;
 	int initialTaskBucketTimeoutVersions = clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS;
 	clientKnobs.setKnob("core_versionspersecond", initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.CORE_VERSIONSPERSECOND, initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS, initialTaskBucketTimeoutVersions);
-	clientKnobs.initialize(Randomize::NO);
+	clientKnobs.initialize(Randomize::False);
 	ASSERT_EQ(clientKnobs.CORE_VERSIONSPERSECOND, initialCoreVersionsPerSecond * 2);
 	ASSERT_EQ(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS, initialTaskBucketTimeoutVersions * 2);
 	return Void();

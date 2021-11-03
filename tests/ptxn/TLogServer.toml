@@ -93,7 +93,7 @@ startDelay = 0
     maxTestCases = 1
     testsMatching = '/fdbserver/ptxn/test/read_persisted_disk_on_tlog'
 
-    numTLogs = 1
+    numTLogs = 3
     numStorageTeams = 40
     numTLogGroups = 7
     numCommits = 20
@@ -108,6 +108,6 @@ startDelay = 0
     maxTestCases = 1
     testsMatching = '/fdbserver/ptxn/test/lock_tlog'
 
-    numTLogs = 1
+    numTLogs = 3
     numStorageTeams = 40
     numTLogGroups = 7

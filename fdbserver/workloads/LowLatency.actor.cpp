@@ -77,7 +77,7 @@ struct LowLatencyWorkload : TestWorkload {
 				++self->operations;
 				loop {
 					try {
-						TraceEvent("StartLowLatencyTransaction");
+						TraceEvent("StartLowLatencyTransaction").log();
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						if (doCommit) {
@@ -114,7 +114,7 @@ struct LowLatencyWorkload : TestWorkload {
 
 	void getMetrics(vector<PerfMetric>& m) override {
 		double duration = testDuration;
-		m.push_back(PerfMetric("Operations/sec", operations.getValue() / duration, false));
+		m.emplace_back("Operations/sec", operations.getValue() / duration, Averaged::False);
 		m.push_back(operations.getMetric());
 		m.push_back(retries.getMetric());
 	}

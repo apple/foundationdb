@@ -20,13 +20,14 @@
 
 #include "fdbclient/IKnobCollection.h"
 #include "fdbrpc/Stats.h"
-#include "fdbserver/ConfigBroadcastFollowerInterface.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LocalConfiguration.h"
 #include "fdbserver/OnDemandStore.h"
 #include "flow/UnitTest.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+FDB_DEFINE_BOOLEAN_PARAM(IsTest);
 
 namespace {
 
@@ -43,9 +44,9 @@ KeyRef stringToKeyRef(std::string const& s) {
 class LocalConfigurationImpl {
 	UID id;
 	OnDemandStore kvStore;
-	Future<Void> initFuture;
 	Version lastSeenVersion{ 0 };
 	std::unique_ptr<IKnobCollection> testKnobCollection;
+	Future<Void> initFuture;
 
 	class ConfigKnobOverrides {
 		Standalone<VectorRef<KeyRef>> configPath;
@@ -164,7 +165,6 @@ class LocalConfigurationImpl {
 	}
 
 	CounterCollection cc;
-	Counter broadcasterChanges;
 	Counter snapshots;
 	Counter changeRequestsFetched;
 	Counter mutations;
@@ -213,7 +213,7 @@ class LocalConfigurationImpl {
 			self->updateInMemoryState(lastSeenVersion);
 			return Void();
 		}
-		Standalone<RangeResultRef> range = wait(self->kvStore->readRange(knobOverrideKeys));
+		RangeResult range = wait(self->kvStore->readRange(knobOverrideKeys));
 		for (const auto& kv : range) {
 			auto configKey =
 			    BinaryReader::fromStringRef<ConfigKey>(kv.key.removePrefix(knobOverrideKeys.begin), IncludeVersion());
@@ -227,30 +227,39 @@ class LocalConfigurationImpl {
 
 	void updateInMemoryState(Version lastSeenVersion) {
 		this->lastSeenVersion = lastSeenVersion;
-		// TODO: Support randomization?
-		getKnobs().reset(Randomize::NO, g_network->isSimulated() ? IsSimulated::YES : IsSimulated::NO);
+		if (g_network->isSimulated()) {
+			getKnobs().clearTestKnobs();
+		}
 		configKnobOverrides.update(getKnobs());
 		manualKnobOverrides.update(getKnobs());
-		// Must reinitialize in order to update dependent knobs
-		getKnobs().initialize(Randomize::NO, g_network->isSimulated() ? IsSimulated::YES : IsSimulated::NO);
+		// FIXME: Reinitialize in order to update dependent knobs?
 	}
 
 	ACTOR static Future<Void> setSnapshot(LocalConfigurationImpl* self,
 	                                      std::map<ConfigKey, KnobValue> snapshot,
 	                                      Version snapshotVersion) {
-		// TODO: Concurrency control?
-		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
+		if (snapshotVersion <= self->lastSeenVersion) {
+			TraceEvent(SevWarnAlways, "LocalConfigGotOldSnapshot", self->id)
+			    .detail("NewSnapshotVersion", snapshotVersion)
+			    .detail("LastSeenVersion", self->lastSeenVersion);
+			return Void();
+		}
 		++self->snapshots;
 		self->kvStore->clear(knobOverrideKeys);
+		state bool restartRequired = false;
 		for (const auto& [configKey, knobValue] : snapshot) {
 			self->configKnobOverrides.set(configKey.configClass, configKey.knobName, knobValue);
 			self->kvStore->set(
 			    KeyValueRef(BinaryWriter::toValue(configKey, IncludeVersion()).withPrefix(knobOverrideKeys.begin),
 			                ObjectWriter::toValue(knobValue, IncludeVersion())));
+			restartRequired |= self->getKnobs().isAtomic(configKey.knobName.toString());
 		}
 		ASSERT_GE(snapshotVersion, self->lastSeenVersion);
 		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(snapshotVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
+		if (restartRequired) {
+			throw local_config_changed();
+		}
 		self->updateInMemoryState(snapshotVersion);
 		return Void();
 	}
@@ -259,12 +268,26 @@ class LocalConfigurationImpl {
 	                                     Standalone<VectorRef<VersionedConfigMutationRef>> changes,
 	                                     Version mostRecentVersion) {
 		// TODO: Concurrency control?
-		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
 		++self->changeRequestsFetched;
+		state bool restartRequired = false;
 		for (const auto& versionedMutation : changes) {
-			ASSERT_GT(versionedMutation.version, self->lastSeenVersion);
+			if (versionedMutation.version <= self->lastSeenVersion) {
+				TraceEvent(SevWarnAlways, "LocalConfigGotRepeatedChange")
+				    .detail("NewChangeVersion", versionedMutation.version)
+				    .detail("LastSeenVersion", self->lastSeenVersion);
+				continue;
+			}
 			++self->mutations;
 			const auto& mutation = versionedMutation.mutation;
+			{
+				TraceEvent te(SevDebug, "LocalConfigAddingChange", self->id);
+				te.detail("ConfigClass", mutation.getConfigClass())
+				    .detail("Version", versionedMutation.version)
+				    .detail("KnobName", mutation.getKnobName());
+				if (mutation.isSet()) {
+					te.detail("Op", "Set").detail("KnobValue", mutation.getValue().toString());
+				}
+			}
 			auto serializedKey = BinaryWriter::toValue(mutation.getKey(), IncludeVersion());
 			if (mutation.isSet()) {
 				self->kvStore->set(KeyValueRef(serializedKey.withPrefix(knobOverrideKeys.begin),
@@ -274,47 +297,37 @@ class LocalConfigurationImpl {
 				self->kvStore->clear(singleKeyRange(serializedKey.withPrefix(knobOverrideKeys.begin)));
 				self->configKnobOverrides.remove(mutation.getConfigClass(), mutation.getKnobName());
 			}
+			restartRequired |= self->getKnobs().isAtomic(mutation.getKnobName().toString());
 		}
 		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(mostRecentVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
+		if (restartRequired) {
+			throw local_config_changed();
+		}
 		self->updateInMemoryState(mostRecentVersion);
 		return Void();
 	}
 
-	ACTOR static Future<Void> consumeInternal(LocalConfigurationImpl* self,
-	                                          ConfigBroadcastFollowerInterface broadcaster) {
+	ACTOR static Future<Void> consumeInternal(LocalConfigurationImpl* self, ConfigBroadcastInterface broadcaster) {
+		wait(self->initialize());
 		loop {
-			try {
-				state ConfigBroadcastFollowerGetChangesReply changesReply =
-				    wait(broadcaster.getChanges.getReply(ConfigBroadcastFollowerGetChangesRequest{
-				        self->lastSeenVersion, self->configKnobOverrides.getConfigClassSet() }));
-				TraceEvent(SevDebug, "LocalConfigGotChanges", self->id)
-				    .detail("Size", changesReply.changes.size())
-				    .detail("Version", changesReply.mostRecentVersion);
-				wait(self->addChanges(changesReply.changes, changesReply.mostRecentVersion));
-			} catch (Error& e) {
-				if (e.code() == error_code_version_already_compacted) {
-					state ConfigBroadcastFollowerGetSnapshotReply snapshotReply = wait(broadcaster.getSnapshot.getReply(
-					    ConfigBroadcastFollowerGetSnapshotRequest{ self->configKnobOverrides.getConfigClassSet() }));
-					ASSERT_GT(snapshotReply.version, self->lastSeenVersion);
-					++self->snapshots;
-					wait(setSnapshot(self, std::move(snapshotReply.snapshot), snapshotReply.version));
-				} else {
-					throw e;
+			choose {
+				when(state ConfigBroadcastSnapshotRequest snapshotReq = waitNext(broadcaster.snapshot.getFuture())) {
+					wait(setSnapshot(self, std::move(snapshotReq.snapshot), snapshotReq.version));
+					snapshotReq.reply.send(ConfigBroadcastSnapshotReply{});
+				}
+				when(state ConfigBroadcastChangesRequest req = waitNext(broadcaster.changes.getFuture())) {
+					wait(self->addChanges(req.changes, req.mostRecentVersion));
+					req.reply.send(ConfigBroadcastChangesReply{});
 				}
 			}
-			wait(yield()); // Necessary to not immediately trigger retry?
 		}
 	}
 
-	ACTOR static Future<Void> consume(
-	    LocalConfigurationImpl* self,
-	    Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> broadcaster) {
-		ASSERT(self->initFuture.isValid() && self->initFuture.isReady());
+	ACTOR static Future<Void> consume(LocalConfigurationImpl* self, ConfigBroadcastInterface broadcaster) {
 		loop {
 			choose {
-				when(wait(brokenPromiseToNever(consumeInternal(self, broadcaster->get())))) { ASSERT(false); }
-				when(wait(broadcaster->onChange())) { ++self->broadcasterChanges; }
+				when(wait(consumeInternal(self, broadcaster))) { ASSERT(false); }
 				when(wait(self->kvStore->getError())) { ASSERT(false); }
 			}
 		}
@@ -325,54 +338,47 @@ public:
 	                       std::string const& configPath,
 	                       std::map<std::string, std::string> const& manualKnobOverrides,
 	                       IsTest isTest)
-	  : id(deterministicRandom()->randomUniqueID()), kvStore(dataFolder, id, "localconf-"), cc("LocalConfiguration"),
-	    broadcasterChanges("BroadcasterChanges", cc), snapshots("Snapshots", cc),
-	    changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc), configKnobOverrides(configPath),
-	    manualKnobOverrides(manualKnobOverrides) {
-		if (isTest == IsTest::YES) {
-			testKnobCollection = IKnobCollection::create(IKnobCollection::Type::TEST,
-			                                             Randomize::NO,
-			                                             g_network->isSimulated() ? IsSimulated::YES : IsSimulated::NO);
+	  : id(deterministicRandom()->randomUniqueID()), kvStore(dataFolder, id, "localconf-"),
+	    configKnobOverrides(configPath), manualKnobOverrides(manualKnobOverrides), cc("LocalConfiguration"),
+	    snapshots("Snapshots", cc), changeRequestsFetched("ChangeRequestsFetched", cc), mutations("Mutations", cc) {
+		if (isTest) {
+			testKnobCollection =
+			    IKnobCollection::create(IKnobCollection::Type::TEST,
+			                            Randomize::False,
+			                            g_network->isSimulated() ? IsSimulated::True : IsSimulated::False);
 		}
 		logger = traceCounters(
 		    "LocalConfigurationMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LocalConfigurationMetrics");
-	}
-
-	Future<Void> initialize() {
-		ASSERT(!initFuture.isValid());
-		initFuture = initialize(this);
-		return initFuture;
 	}
 
 	Future<Void> addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> changes, Version mostRecentVersion) {
 		return addChanges(this, changes, mostRecentVersion);
 	}
 
-	FlowKnobs const& getFlowKnobs() const {
-		ASSERT(initFuture.isValid() && initFuture.isReady());
-		return getKnobs().getFlowKnobs();
-	}
+	FlowKnobs const& getFlowKnobs() const { return getKnobs().getFlowKnobs(); }
 
-	ClientKnobs const& getClientKnobs() const {
-		ASSERT(initFuture.isValid() && initFuture.isReady());
-		return getKnobs().getClientKnobs();
-	}
+	ClientKnobs const& getClientKnobs() const { return getKnobs().getClientKnobs(); }
 
-	ServerKnobs const& getServerKnobs() const {
-		ASSERT(initFuture.isValid() && initFuture.isReady());
-		return getKnobs().getServerKnobs();
-	}
+	ServerKnobs const& getServerKnobs() const { return getKnobs().getServerKnobs(); }
 
-	TestKnobs const& getTestKnobs() const {
-		ASSERT(initFuture.isValid() && initFuture.isReady());
-		return getKnobs().getTestKnobs();
-	}
+	TestKnobs const& getTestKnobs() const { return getKnobs().getTestKnobs(); }
 
-	Future<Void> consume(Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
-		return consume(this, broadcaster);
+	Future<Void> consume(ConfigBroadcastInterface const& broadcastInterface) {
+		return consume(this, broadcastInterface);
 	}
 
 	UID getID() const { return id; }
+
+	Version getLastSeenVersion() const { return lastSeenVersion; }
+
+	ConfigClassSet configClassSet() const { return configKnobOverrides.getConfigClassSet(); }
+
+	Future<Void> initialize() {
+		if (!initFuture.isValid()) {
+			initFuture = initialize(this);
+		}
+		return initFuture;
+	}
 
 	static void testManualKnobOverridesInvalidName() {
 		std::map<std::string, std::string> invalidOverrides;
@@ -401,7 +407,8 @@ public:
 		ConfigKnobOverrides configKnobOverrides;
 		configKnobOverrides.set(
 		    {}, "knob_name_that_does_not_exist"_sr, KnobValueRef::create(ParsedKnobValue(int{ 1 })));
-		auto testKnobCollection = IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::NO, IsSimulated::NO);
+		auto testKnobCollection =
+		    IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::False, IsSimulated::False);
 		// Should only trace and not throw an error:
 		configKnobOverrides.update(*testKnobCollection);
 	}
@@ -409,7 +416,8 @@ public:
 	static void testConfigKnobOverridesInvalidValue() {
 		ConfigKnobOverrides configKnobOverrides;
 		configKnobOverrides.set({}, "test_int"_sr, KnobValueRef::create(ParsedKnobValue("not_an_int")));
-		auto testKnobCollection = IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::NO, IsSimulated::NO);
+		auto testKnobCollection =
+		    IKnobCollection::create(IKnobCollection::Type::TEST, Randomize::False, IsSimulated::False);
 		// Should only trace and not throw an error:
 		configKnobOverrides.update(*testKnobCollection);
 	}
@@ -419,46 +427,49 @@ LocalConfiguration::LocalConfiguration(std::string const& dataFolder,
                                        std::string const& configPath,
                                        std::map<std::string, std::string> const& manualKnobOverrides,
                                        IsTest isTest)
-  : _impl(std::make_unique<LocalConfigurationImpl>(dataFolder, configPath, manualKnobOverrides, isTest)) {}
-
-LocalConfiguration::LocalConfiguration(LocalConfiguration&&) = default;
-
-LocalConfiguration& LocalConfiguration::operator=(LocalConfiguration&&) = default;
+  : impl(PImpl<LocalConfigurationImpl>::create(dataFolder, configPath, manualKnobOverrides, isTest)) {}
 
 LocalConfiguration::~LocalConfiguration() = default;
 
-Future<Void> LocalConfiguration::initialize() {
-	return impl().initialize();
-}
-
 FlowKnobs const& LocalConfiguration::getFlowKnobs() const {
-	return impl().getFlowKnobs();
+	return impl->getFlowKnobs();
 }
 
 ClientKnobs const& LocalConfiguration::getClientKnobs() const {
-	return impl().getClientKnobs();
+	return impl->getClientKnobs();
 }
 
 ServerKnobs const& LocalConfiguration::getServerKnobs() const {
-	return impl().getServerKnobs();
+	return impl->getServerKnobs();
 }
 
 TestKnobs const& LocalConfiguration::getTestKnobs() const {
-	return impl().getTestKnobs();
+	return impl->getTestKnobs();
 }
 
-Future<Void> LocalConfiguration::consume(
-    Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& broadcaster) {
-	return impl().consume(broadcaster);
+Future<Void> LocalConfiguration::consume(ConfigBroadcastInterface const& broadcaster) {
+	return impl->consume(broadcaster);
 }
 
 Future<Void> LocalConfiguration::addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> changes,
                                             Version mostRecentVersion) {
-	return impl().addChanges(changes, mostRecentVersion);
+	return impl->addChanges(changes, mostRecentVersion);
 }
 
 UID LocalConfiguration::getID() const {
-	return impl().getID();
+	return impl->getID();
+}
+
+Version LocalConfiguration::lastSeenVersion() const {
+	return impl->getLastSeenVersion();
+}
+
+ConfigClassSet LocalConfiguration::configClassSet() const {
+	return impl->configClassSet();
+}
+
+Future<Void> LocalConfiguration::initialize() {
+	return impl->initialize();
 }
 
 TEST_CASE("/fdbserver/ConfigDB/ManualKnobOverrides/InvalidName") {

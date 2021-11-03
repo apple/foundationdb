@@ -46,7 +46,7 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 	PerfIntCounter bytesWritten;
 
 	AsyncFileWriteWorkload(WorkloadContext const& wcx)
-	  : AsyncFileWorkload(wcx), bytesWritten("Bytes Written"), writeBuffer(nullptr) {
+	  : AsyncFileWorkload(wcx), writeBuffer(nullptr), bytesWritten("Bytes Written") {
 		numParallelWrites = getOption(options, LiteralStringRef("numParallelWrites"), 0);
 		writeSize = getOption(options, LiteralStringRef("writeSize"), _PAGE_SIZE);
 		fileSize = getOption(options, LiteralStringRef("fileSize"), 10002432);
@@ -147,8 +147,8 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 
 	void getMetrics(vector<PerfMetric>& m) override {
 		if (enabled) {
-			m.push_back(PerfMetric("Bytes written/sec", bytesWritten.getValue() / testDuration, false));
-			m.push_back(PerfMetric("Average CPU Utilization (Percentage)", averageCpuUtilization * 100, false));
+			m.emplace_back("Bytes written/sec", bytesWritten.getValue() / testDuration, Averaged::False);
+			m.emplace_back("Average CPU Utilization (Percentage)", averageCpuUtilization * 100, Averaged::False);
 		}
 	}
 };

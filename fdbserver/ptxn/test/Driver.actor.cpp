@@ -141,8 +141,7 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 	return context;
 }
 
-std::shared_ptr<TLogInterfaceBase> TestDriverContext::getTLogLeaderByStorageTeamID(
-    const StorageTeamID& storageTeamID) {
+std::shared_ptr<TLogInterfaceBase> TestDriverContext::getTLogLeaderByStorageTeamID(const StorageTeamID& storageTeamID) {
 	if (auto iter = storageTeamIDTLogGroupIDMapper.find(storageTeamID); iter != storageTeamIDTLogGroupIDMapper.end()) {
 		if (auto iter2 = tLogGroupLeaders.find(iter->second); iter2 != tLogGroupLeaders.end()) {
 			return iter2->second;

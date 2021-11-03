@@ -6,6 +6,7 @@ set(FLOW_SRCS
   Arena.cpp
   Arena.h
   AsioReactor.h
+  BooleanParam.h
   CompressedInt.actor.cpp
   CompressedInt.h
   Deque.cpp
@@ -52,6 +53,7 @@ set(FLOW_SRCS
   SignalSafeUnwind.cpp
   SignalSafeUnwind.h
   SimpleOpt.h
+  StreamCipher.h
   SystemMonitor.cpp
   SystemMonitor.h
   TDMetric.actor.h
@@ -71,6 +73,7 @@ set(FLOW_SRCS
   TypeTraits.h
   UnitTest.cpp
   UnitTest.h
+  WriteOnlySet.actor.cpp
   XmlTraceLogFormatter.cpp
   XmlTraceLogFormatter.h
   actorcompiler.h
@@ -96,6 +99,12 @@ set(FLOW_SRCS
   xxhash.c
   xxhash.h)
 
+if(WITH_TLS AND NOT WIN32)
+  set(FLOW_SRCS
+    ${FLOW_SRCS}
+    StreamCipher.cpp)
+endif()
+
 add_library(stacktrace stacktrace.amalgamation.cpp stacktrace.h)
 if (USE_ASAN)
   target_compile_definitions(stacktrace PRIVATE ADDRESS_SANITIZER)
@@ -111,46 +120,69 @@ if(UNIX AND NOT APPLE)
   list(APPEND FLOW_SRCS folly_memcpy.S)
 endif()
 
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  list(APPEND FLOW_SRCS aarch64/memcmp.S aarch64/memcpy.S)
+endif()
+
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config.h)
 
 add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
 target_link_libraries(flow PRIVATE stacktrace)
+
+add_flow_target(STATIC_LIBRARY NAME flow_sampling SRCS ${FLOW_SRCS})
+target_link_libraries(flow_sampling PRIVATE stacktrace)
+target_compile_definitions(flow_sampling PRIVATE -DENABLE_SAMPLING)
+if(WIN32)
+  add_dependencies(flow_sampling_actors flow_actors)
+endif()
+
 if (NOT APPLE AND NOT WIN32)
   set (FLOW_LIBS ${FLOW_LIBS} rt)
 elseif(WIN32)
   target_link_libraries(flow PUBLIC winmm.lib)
   target_link_libraries(flow PUBLIC psapi.lib)
+  target_link_libraries(flow_sampling PUBLIC winmm.lib)
+  target_link_libraries(flow_sampling PUBLIC psapi.lib)
 endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   set (FLOW_LIBS ${FLOW_LIBS} execinfo devstat)
   find_library(EIO eio)
   if(EIO)
     target_link_libraries(flow PUBLIC ${EIO})
+    target_link_libraries(flow_sampling PUBLIC ${EIO})
   endif()
 endif()
 target_link_libraries(flow PRIVATE ${FLOW_LIBS})
+target_link_libraries(flow_sampling PRIVATE ${FLOW_LIBS})
 if(USE_VALGRIND)
   target_link_libraries(flow PUBLIC Valgrind)
+  target_link_libraries(flow_sampling PUBLIC Valgrind)
 endif()
-# TODO(atn34) Re-enable TLS for OPEN_FOR_IDE build once #2201 is resolved
-if(NOT WITH_TLS OR OPEN_FOR_IDE)
+if(NOT WITH_TLS)
   target_compile_definitions(flow PUBLIC TLS_DISABLED)
+  target_compile_definitions(flow_sampling PUBLIC TLS_DISABLED)
 else()
   target_link_libraries(flow PUBLIC OpenSSL::SSL)
+  target_link_libraries(flow_sampling PUBLIC OpenSSL::SSL)
 endif()
 target_link_libraries(flow PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(flow_sampling PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 if(USE_SANITIZER)
   target_link_libraries(flow PUBLIC boost_asan)
+  target_link_libraries(flow_sampling PUBLIC boost_asan)
 else()
   target_link_libraries(flow PUBLIC boost_target)
+  target_link_libraries(flow_sampling PUBLIC boost_target)
 endif()
 if(USE_VALGRIND)
   target_link_libraries(flow PUBLIC Valgrind)
+  target_link_libraries(flow_sampling PUBLIC Valgrind)
 endif()
 
 if(APPLE)
   find_library(IO_KIT IOKit)
   find_library(CORE_FOUNDATION CoreFoundation)
   target_link_libraries(flow PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
+  target_link_libraries(flow_sampling PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
 endif()

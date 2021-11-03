@@ -32,9 +32,9 @@ class HasToString {
 	using NO = char[2];
 
 	template <typename C>
-		static YES& tester(decltype(&C::toString));
+	static YES& tester(decltype(&C::toString));
 	template <typename C>
-		static NO& tester(...);
+	static NO& tester(...);
 
 public:
 	enum { value = sizeof(tester<T>(nullptr)) == sizeof(YES) };

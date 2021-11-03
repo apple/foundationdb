@@ -38,7 +38,7 @@ cluster_file = {etcdir}/fdb.cluster
 command = {fdbserver_bin}
 public_address = auto:$ID
 listen_address = public
-datadir = {datadir}
+datadir = {datadir}/$ID
 logdir = {logdir}
 # logsize = 10MiB
 # maxlogssize = 100MiB
@@ -53,13 +53,13 @@ logdir = {logdir}
 
 ## An individual fdbserver process with id 4000
 ## Parameters set here override defaults from the [fdbserver] section
-[fdbserver.{server_port}]
-    """
+
+"""
 
     valid_letters_for_secret = string.ascii_letters + string.digits
 
     def __init__(self, basedir: str, fdbserver_binary: str, fdbmonitor_binary: str,
-                 fdbcli_binary: str, create_config=True, port=None, ip_address=None):
+                 fdbcli_binary: str, process_number: int, create_config=True, port=None, ip_address=None):
         self.basedir = Path(basedir)
         self.fdbserver_binary = Path(fdbserver_binary)
         self.fdbmonitor_binary = Path(fdbmonitor_binary)
@@ -93,9 +93,16 @@ logdir = {logdir}
                         etcdir=self.etc,
                         fdbserver_bin=self.fdbserver_binary,
                         datadir=self.data,
-                        logdir=self.log,
-                        server_port=self.port
+                        logdir=self.log
                     ))
+                    # By default, the cluster only has one process
+                    # If a port number is given and process_number > 1, we will use subsequent numbers
+                    # E.g., port = 4000, process_number = 5
+                    # Then 4000,4001,4002,4003,4004 will be used as ports
+                    # If port number is not given, we will randomly pick free ports
+                    for index, _ in enumerate(range(process_number)):
+                        f.write('[fdbserver.{server_port}]\n'.format(server_port=self.port))
+                        self.port = get_free_port() if port is None else str(int(self.port) + 1)
 
     def __enter__(self):
         assert not self.running, "Can't start a server that is already running"

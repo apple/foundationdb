@@ -73,7 +73,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 	PerfIntCounter numOperations;
 
 	AsyncFileCorrectnessWorkload(WorkloadContext const& wcx)
-	  : AsyncFileWorkload(wcx), success(true), numOperations("Num Operations"), memoryFile(nullptr) {
+	  : AsyncFileWorkload(wcx), memoryFile(nullptr), success(true), numOperations("Num Operations") {
 		maxOperationSize = getOption(options, LiteralStringRef("maxOperationSize"), 4096);
 		numSimultaneousOperations = getOption(options, LiteralStringRef("numSimultaneousOperations"), 10);
 		targetFileSize = getOption(options, LiteralStringRef("targetFileSize"), (uint64_t)163840);
@@ -428,8 +428,8 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 
 	void getMetrics(vector<PerfMetric>& m) override {
 		if (enabled) {
-			m.push_back(PerfMetric("Number of Operations Performed", numOperations.getValue(), false));
-			m.push_back(PerfMetric("Average CPU Utilization (Percentage)", averageCpuUtilization * 100, false));
+			m.emplace_back("Number of Operations Performed", numOperations.getValue(), Averaged::False);
+			m.emplace_back("Average CPU Utilization (Percentage)", averageCpuUtilization * 100, Averaged::False);
 		}
 	}
 };

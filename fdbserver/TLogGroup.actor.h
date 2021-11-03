@@ -69,7 +69,7 @@ public:
 
 	// Construct a TLogGroupCollection from `serverDbInfo`. This object would not be able to recruit TLogGroup, and is
 	// intended to  be used by CommitProxy.
-	explicit TLogGroupCollection(Reference<AsyncVar<ServerDBInfo>> serverDbInfo);
+	explicit TLogGroupCollection(Reference<AsyncVar<ServerDBInfo> const> serverDbInfo);
 
 	// Sets the policy for TLogGroupCollection.
 	void setPolicy(const Reference<IReplicationPolicy>& policy, int numGroups, int groupSize);
@@ -133,10 +133,9 @@ public:
 	// Called by the master server to write the very first transaction to the database establishing
 	// the first storage team to tLogGroup mapping. TLogGroups should be created by the time this is
 	// called during recovery. Gives ID to first storage server team, and assigns a TLogGroup to it.
-	void seedTLogGroupAssignment(
-	    Arena& arena,
-	    CommitTransactionRef& tr,
-	    const std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>>& servers);
+	void seedTLogGroupAssignment(Arena& arena,
+	                             CommitTransactionRef& tr,
+	                             const std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>>& servers);
 
 private:
 	// Returns a LocalityMap of all the workers inside 'recruitMap', but ignore the workers
@@ -148,10 +147,10 @@ private:
 	Reference<IReplicationPolicy> policy;
 
 	// Size of each group, set once during intialization.
-	int GROUP_SIZE;
+	int GROUP_SIZE = 0;
 
 	// Number of groups the collection is configured to recruit.
-	int targetNumGroups;
+	int targetNumGroups = 0;
 
 	// List of TLogGroup's managed by this collection.
 	std::vector<TLogGroupRef> recruitedGroups;
@@ -225,7 +224,7 @@ struct TLogWorkerData : public ReferenceCounted<TLogWorkerData> {
 
 	TLogWorkerData(const UID& id) : id(id) {}
 	TLogWorkerData(const UID& id, const NetworkAddress& addr, const LocalityData& locality)
-	  : id(id), address(addr), locality(locality) {}
+	  : id(id), locality(locality), address(addr) {}
 
 	// Converts a TLogInterface to TLogWorkerData.
 	// TODO Convert the interface overloading to a concept template

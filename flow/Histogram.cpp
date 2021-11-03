@@ -45,7 +45,7 @@ static HistogramRegistry* globalHistograms = nullptr;
 #pragma region HistogramRegistry
 
 HistogramRegistry& GetHistogramRegistry() {
-	ISimulator::ProcessInfo* info = g_simulator.getCurrentProcess();
+	ISimulator::ProcessInfo* info = g_network && g_network->isSimulated() ? g_simulator.getCurrentProcess() : nullptr;
 
 	if (info) {
 		// in simulator; scope histograms to simulated process
@@ -85,9 +85,15 @@ Histogram* HistogramRegistry::lookupHistogram(std::string const& name) {
 	return h->second;
 }
 
-void HistogramRegistry::logReport() {
+void HistogramRegistry::logReport(double elapsed) {
 	for (auto& i : histograms) {
-		i.second->writeToLog();
+		// Reset all buckets in writeToLog function
+		i.second->writeToLog(elapsed);
+	}
+}
+
+void HistogramRegistry::clear() {
+	for (auto& i : histograms) {
 		i.second->clear();
 	}
 }
@@ -96,13 +102,10 @@ void HistogramRegistry::logReport() {
 
 #pragma region Histogram
 
-const std::unordered_map<Histogram::Unit, std::string> Histogram::UnitToStringMapper = {
-	{ Histogram::Unit::microseconds, "microseconds" },
-	{ Histogram::Unit::bytes, "bytes" },
-	{ Histogram::Unit::bytes_per_second, "bytes_per_second" }
-};
+const char* const Histogram::UnitToStringMapper[] = { "microseconds", "bytes", "bytes_per_second",
+	                                                  "percentage",   "count", "none" };
 
-void Histogram::writeToLog() {
+void Histogram::writeToLog(double elapsed) {
 	bool active = false;
 	for (uint32_t i = 0; i < 32; i++) {
 		if (buckets[i]) {
@@ -115,31 +118,110 @@ void Histogram::writeToLog() {
 	}
 
 	TraceEvent e(SevInfo, "Histogram");
-	e.detail("Group", group).detail("Op", op).detail("Unit", UnitToStringMapper.at(unit));
-
+	e.detail("Group", group).detail("Op", op).detail("Unit", UnitToStringMapper[(size_t)unit]);
+	if (elapsed > 0)
+		e.detail("Elapsed", elapsed);
+	int totalCount = 0;
 	for (uint32_t i = 0; i < 32; i++) {
 		uint64_t value = uint64_t(1) << (i + 1);
 
 		if (buckets[i]) {
+			totalCount += buckets[i];
 			switch (unit) {
 			case Unit::microseconds:
-				e.detail(format("LessThan%u.%03u", value / 1000, value % 1000), buckets[i]);
+				e.detail(format("LessThan%u.%03u", int(value / 1000), int(value % 1000)), buckets[i]);
 				break;
 			case Unit::bytes:
 			case Unit::bytes_per_second:
-				e.detail(format("LessThan%u", value), buckets[i]);
+				e.detail(format("LessThan%" PRIu64, value), buckets[i]);
+				break;
+			case Unit::percentageLinear:
+				e.detail(format("LessThan%f", (i + 1) * 0.04), buckets[i]);
+				break;
+			case Unit::countLinear:
+				value = uint64_t((i + 1) * ((upperBound - lowerBound) / 31.0));
+				e.detail(format("LessThan%" PRIu64, value), buckets[i]);
+				break;
+			case Unit::MAXHISTOGRAMUNIT:
+				e.detail(format("Default%u", i), buckets[i]);
 				break;
 			default:
 				ASSERT(false);
 			}
 		}
 	}
+	e.detail("TotalCount", totalCount);
+	clear();
+}
+
+std::string Histogram::drawHistogram() {
+
+	std::stringstream result;
+
+	const char* verticalLine = "├\0";
+	const char* origin = "└\0";
+	const char* emptyCell = "------\0";
+	const char* halfCell = "---▄▄▄\0";
+	const char* fullCell = "---███\0";
+	const char* xFull = "---▀▀▀\0";
+	const char* xEmpty = "------\0";
+	const char* lineEnd = "--- \0";
+	const unsigned int width = std::strlen(emptyCell);
+
+	int max_lines = 23;
+	uint32_t total = 0;
+	double maxPct = 0;
+
+	for (int i = 0; i < 32; i++) {
+		total += buckets[i];
+	}
+	for (int i = 0; i < 32; i++) {
+		maxPct = std::max(maxPct, (100.0 * buckets[i]) / total);
+	}
+
+	double intervalSize = (maxPct < (max_lines - 3)) ? 1 : maxPct / (max_lines - 3);
+	unsigned int lines = (maxPct < (max_lines - 3)) ? (unsigned int)maxPct : (max_lines - 3);
+
+	result << "Total Inputs: " << total << std::fixed << "\n";
+	result << "Percent"
+	       << "\n";
+	for (int l = 0; l < lines; l++) {
+		double currHeight = (lines - l) * intervalSize;
+		double halfFullHeight = currHeight - intervalSize / 4;
+		result << std::setw(6) << std::setprecision(2) << currHeight << " " << verticalLine;
+		for (int i = 0; i < 32; i++) {
+			double pct = (100.0 * buckets[i]) / total;
+			if (pct > currHeight)
+				result << fullCell;
+			else if (pct > halfFullHeight)
+				result << halfCell;
+			else
+				result << emptyCell;
+		}
+		result << lineEnd << "\n";
+	}
+
+	result << "  0.00 " << origin;
+	for (int i = 0; i < 32; i++) {
+		double pct = (100.0 * buckets[i]) / total;
+		if (pct > intervalSize / 4)
+			result << xFull;
+		else
+			result << xEmpty;
+	}
+	result << lineEnd << "\n";
+
+	result << std::string(9, ' ');
+	for (int i = 0; i < 32; i++) {
+		result << std::left << std::setw(width) << "  B" + std::to_string(i);
+	}
+	result << "\n";
+	return result.str();
 }
 
 #pragma endregion // Histogram
 
 TEST_CASE("/flow/histogram/smoke_test") {
-
 	{
 		Reference<Histogram> h =
 		    Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("counts"), Histogram::Unit::bytes);

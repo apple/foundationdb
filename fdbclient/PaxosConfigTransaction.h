@@ -23,32 +23,33 @@
 #include <memory>
 
 #include "fdbclient/IConfigTransaction.h"
+#include "fdbclient/PImpl.h"
 
 /*
  * Fault-tolerant configuration transaction implementation
  */
 class PaxosConfigTransaction final : public IConfigTransaction, public FastAllocated<PaxosConfigTransaction> {
-	std::unique_ptr<class PaxosConfigTransactionImpl> _impl;
-	PaxosConfigTransactionImpl const& impl() const { return *_impl; }
-	PaxosConfigTransactionImpl& impl() { return *_impl; }
+	PImpl<class PaxosConfigTransactionImpl> impl;
 
 public:
-	PaxosConfigTransaction(Database const&);
+	PaxosConfigTransaction(std::vector<ConfigTransactionInterface> const&);
+	PaxosConfigTransaction();
 	~PaxosConfigTransaction();
+	void setDatabase(Database const&) override;
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override;
 
-	Future<Optional<Value>> get(Key const& key, bool snapshot = false) override;
-	Future<Standalone<RangeResultRef>> getRange(KeySelector const& begin,
-	                                            KeySelector const& end,
-	                                            int limit,
-	                                            bool snapshot = false,
-	                                            bool reverse = false) override;
-	Future<Standalone<RangeResultRef>> getRange(KeySelector begin,
-	                                            KeySelector end,
-	                                            GetRangeLimits limits,
-	                                            bool snapshot = false,
-	                                            bool reverse = false) override;
+	Future<Optional<Value>> get(Key const& key, Snapshot = Snapshot::False) override;
+	Future<RangeResult> getRange(KeySelector const& begin,
+	                             KeySelector const& end,
+	                             int limit,
+	                             Snapshot = Snapshot::False,
+	                             Reverse = Reverse::False) override;
+	Future<RangeResult> getRange(KeySelector begin,
+	                             KeySelector end,
+	                             GetRangeLimits limits,
+	                             Snapshot = Snapshot::False,
+	                             Reverse = Reverse::False) override;
 	void set(KeyRef const& key, ValueRef const& value) override;
 	void clear(KeyRangeRef const&) override { throw client_invalid_operation(); }
 	void clear(KeyRef const&) override;

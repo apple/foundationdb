@@ -130,15 +130,15 @@ public:
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 
 		DBInfo()
-		  : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0),
-		    logGenerations(0), cachePopulated(false), clientInfo(new AsyncVar<ClientDBInfo>()), dbInfoCount(0),
-		    serverInfo(new AsyncVar<ServerDBInfo>()), db(DatabaseContext::create(clientInfo,
-		                                                                         Future<Void>(),
-		                                                                         LocalityData(),
-		                                                                         true,
-		                                                                         TaskPriority::DefaultEndpoint,
-		                                                                         true)) // SOMEDAY: Locality!
-		{}
+		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
+		    masterRegistrationCount(0), dbInfoCount(0), recoveryStalled(false), forceRecovery(false),
+		    db(DatabaseContext::create(clientInfo,
+		                               Future<Void>(),
+		                               LocalityData(),
+		                               EnableLocalityLoadBalance::True,
+		                               TaskPriority::DefaultEndpoint,
+		                               LockAware::True)), // SOMEDAY: Locality!
+		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false) {}
 
 		void setDistributor(const DataDistributorInterface& interf) {
 			auto newInfo = serverInfo->get();
@@ -197,6 +197,8 @@ public:
 			}
 
 			loop {
+				tr.reset();
+
 				// Wait for some changes
 				while (!self->anyDelta.get())
 					wait(self->anyDelta.onChange());
@@ -291,6 +293,7 @@ public:
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(ProcessClass::Storage);
 			if (workerAvailable(it.second, false) && !conf.isExcludedServer(it.second.details.interf.addresses()) &&
+			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    fitness != ProcessClass::NeverAssign &&
 			    (!dcId.present() || it.second.details.interf.locality.dcId() == dcId.get())) {
 				fitness_workers[fitness].push_back(it.second.details);
@@ -531,6 +534,16 @@ public:
 				                     dcIds);
 				continue;
 			}
+			if (isExcludedDegradedServer(worker_details.interf.addresses())) {
+				logWorkerUnavailable(SevInfo,
+				                     id,
+				                     "complex",
+				                     "Worker server is excluded from the cluster due to degradation",
+				                     worker_details,
+				                     fitness,
+				                     dcIds);
+				continue;
+			}
 			if (fitness == ProcessClass::NeverAssign) {
 				logWorkerUnavailable(
 				    SevDebug, id, "complex", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
@@ -766,6 +779,16 @@ public:
 				                     dcIds);
 				continue;
 			}
+			if (isExcludedDegradedServer(worker_details.interf.addresses())) {
+				logWorkerUnavailable(SevInfo,
+				                     id,
+				                     "simple",
+				                     "Worker server is excluded from the cluster due to degradation",
+				                     worker_details,
+				                     fitness,
+				                     dcIds);
+				continue;
+			}
 			if (fitness == ProcessClass::NeverAssign) {
 				logWorkerUnavailable(
 				    SevDebug, id, "complex", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
@@ -894,6 +917,16 @@ public:
 				                     id,
 				                     "deprecated",
 				                     "Worker server is excluded from the cluster",
+				                     worker_details,
+				                     fitness,
+				                     dcIds);
+				continue;
+			}
+			if (isExcludedDegradedServer(worker_details.interf.addresses())) {
+				logWorkerUnavailable(SevInfo,
+				                     id,
+				                     "deprecated",
+				                     "Worker server is excluded from the cluster due to degradation",
 				                     worker_details,
 				                     fitness,
 				                     dcIds);
@@ -1314,7 +1347,8 @@ public:
 
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(role);
-			if (conf.isExcludedServer(it.second.details.interf.addresses())) {
+			if (conf.isExcludedServer(it.second.details.interf.addresses()) ||
+			    isExcludedDegradedServer(it.second.details.interf.addresses())) {
 				fitness = std::max(fitness, ProcessClass::ExcludeFit);
 			}
 			if (workerAvailable(it.second, checkStable) && fitness < unacceptableFitness &&
@@ -1361,6 +1395,7 @@ public:
 			auto fitness = it.second.details.processClass.machineClassFitness(role);
 			if (workerAvailable(it.second, checkStable) &&
 			    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
+			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    it.second.details.interf.locality.dcId() == dcId &&
 			    (!minWorker.present() ||
 			     (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
@@ -1400,12 +1435,12 @@ public:
 		bool degraded = false;
 
 		RoleFitness(int bestFit, int worstFit, int count, ProcessClass::ClusterRole role)
-		  : bestFit((ProcessClass::Fitness)bestFit), worstFit((ProcessClass::Fitness)worstFit), count(count),
-		    role(role) {}
+		  : bestFit((ProcessClass::Fitness)bestFit), worstFit((ProcessClass::Fitness)worstFit), role(role),
+		    count(count) {}
 
 		RoleFitness(int fitness, int count, ProcessClass::ClusterRole role)
-		  : bestFit((ProcessClass::Fitness)fitness), worstFit((ProcessClass::Fitness)fitness), count(count),
-		    role(role) {}
+		  : bestFit((ProcessClass::Fitness)fitness), worstFit((ProcessClass::Fitness)fitness), role(role),
+		    count(count) {}
 
 		RoleFitness()
 		  : bestFit(ProcessClass::NeverAssign), worstFit(ProcessClass::NeverAssign), role(ProcessClass::NoRole),
@@ -1495,7 +1530,9 @@ public:
 	                                                         bool checkStable = false) {
 		std::set<Optional<Standalone<StringRef>>> result;
 		for (auto& it : id_worker)
-			if (workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.details.interf.addresses()))
+			if (workerAvailable(it.second, checkStable) &&
+			    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
+			    !isExcludedDegradedServer(it.second.details.interf.addresses()))
 				result.insert(it.second.details.interf.locality.dcId());
 		return result;
 	}
@@ -1545,6 +1582,20 @@ public:
 		return result;
 	}
 
+	// Given datacenter ID, returns the primary and remote regions.
+	std::pair<RegionInfo, RegionInfo> getPrimaryAndRemoteRegion(const std::vector<RegionInfo>& regions, Key dcId) {
+		RegionInfo region;
+		RegionInfo remoteRegion;
+		for (const auto& r : regions) {
+			if (r.dcId == dcId) {
+				region = r;
+			} else {
+				remoteRegion = r;
+			}
+		}
+		return std::make_pair(region, remoteRegion);
+	}
+
 	ErrorOr<RecruitFromConfigurationReply> findWorkersForConfigurationFromDC(RecruitFromConfigurationRequest const& req,
 	                                                                         Optional<Key> dcId) {
 		RecruitFromConfigurationReply result;
@@ -1557,15 +1608,7 @@ public:
 		primaryDC.insert(dcId);
 		result.dcId = dcId;
 
-		RegionInfo region;
-		RegionInfo remoteRegion;
-		for (auto& r : req.configuration.regions) {
-			if (r.dcId == dcId.get()) {
-				region = r;
-			} else {
-				remoteRegion = r;
-			}
-		}
+		auto [region, remoteRegion] = getPrimaryAndRemoteRegion(req.configuration.regions, dcId.get());
 
 		if (req.recruitSeedServers) {
 			auto primaryStorageServers =
@@ -1923,7 +1966,7 @@ public:
 			}
 
 			if (bestDC != clusterControllerDcId) {
-				TraceEvent("BestDCIsNotClusterDC");
+				TraceEvent("BestDCIsNotClusterDC").log();
 				vector<Optional<Key>> dcPriority;
 				dcPriority.push_back(bestDC);
 				desiredDcIds.set(dcPriority);
@@ -2010,67 +2053,83 @@ public:
 	RecruitFromConfigurationReply findWorkersForConfiguration(RecruitFromConfigurationRequest const& req) {
 		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req);
 		if (g_network->isSimulated()) {
-			RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req);
+			// FIXME: The logic to pick a satellite in a remote region is not
+			// deterministic and can therefore break this nondeterminism check.
+			// Since satellites will generally be in the primary region,
+			// disable the determinism check for remote region satellites.
+			bool remoteDCUsedAsSatellite = false;
+			if (req.configuration.regions.size() > 1) {
+				auto [region, remoteRegion] =
+				    getPrimaryAndRemoteRegion(req.configuration.regions, req.configuration.regions[0].dcId);
+				for (const auto& satellite : region.satellites) {
+					if (satellite.dcId == remoteRegion.dcId) {
+						remoteDCUsedAsSatellite = true;
+					}
+				}
+			}
+			if (!remoteDCUsedAsSatellite) {
+				RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req);
 
-			std::map<Optional<Standalone<StringRef>>, int> firstUsed;
-			std::map<Optional<Standalone<StringRef>>, int> secondUsed;
-			updateKnownIds(&firstUsed);
-			updateKnownIds(&secondUsed);
+				std::map<Optional<Standalone<StringRef>>, int> firstUsed;
+				std::map<Optional<Standalone<StringRef>>, int> secondUsed;
+				updateKnownIds(&firstUsed);
+				updateKnownIds(&secondUsed);
 
-			// auto mworker = id_worker.find(masterProcessId);
-			//TraceEvent("CompareAddressesMaster")
-			//    .detail("Master",
-			//            mworker != id_worker.end() ? mworker->second.details.interf.address() : NetworkAddress());
+				// auto mworker = id_worker.find(masterProcessId);
+				//TraceEvent("CompareAddressesMaster")
+				//    .detail("Master",
+				//            mworker != id_worker.end() ? mworker->second.details.interf.address() : NetworkAddress());
 
-			updateIdUsed(rep.tLogs, firstUsed);
-			updateIdUsed(compare.tLogs, secondUsed);
-			compareWorkers(
-			    req.configuration, rep.tLogs, firstUsed, compare.tLogs, secondUsed, ProcessClass::TLog, "TLog");
-			updateIdUsed(rep.satelliteTLogs, firstUsed);
-			updateIdUsed(compare.satelliteTLogs, secondUsed);
-			compareWorkers(req.configuration,
-			               rep.satelliteTLogs,
-			               firstUsed,
-			               compare.satelliteTLogs,
-			               secondUsed,
-			               ProcessClass::TLog,
-			               "Satellite");
-			updateIdUsed(rep.commitProxies, firstUsed);
-			updateIdUsed(compare.commitProxies, secondUsed);
-			updateIdUsed(rep.grvProxies, firstUsed);
-			updateIdUsed(compare.grvProxies, secondUsed);
-			updateIdUsed(rep.resolvers, firstUsed);
-			updateIdUsed(compare.resolvers, secondUsed);
-			compareWorkers(req.configuration,
-			               rep.commitProxies,
-			               firstUsed,
-			               compare.commitProxies,
-			               secondUsed,
-			               ProcessClass::CommitProxy,
-			               "CommitProxy");
-			compareWorkers(req.configuration,
-			               rep.grvProxies,
-			               firstUsed,
-			               compare.grvProxies,
-			               secondUsed,
-			               ProcessClass::GrvProxy,
-			               "GrvProxy");
-			compareWorkers(req.configuration,
-			               rep.resolvers,
-			               firstUsed,
-			               compare.resolvers,
-			               secondUsed,
-			               ProcessClass::Resolver,
-			               "Resolver");
-			updateIdUsed(rep.backupWorkers, firstUsed);
-			updateIdUsed(compare.backupWorkers, secondUsed);
-			compareWorkers(req.configuration,
-			               rep.backupWorkers,
-			               firstUsed,
-			               compare.backupWorkers,
-			               secondUsed,
-			               ProcessClass::Backup,
-			               "Backup");
+				updateIdUsed(rep.tLogs, firstUsed);
+				updateIdUsed(compare.tLogs, secondUsed);
+				compareWorkers(
+				    req.configuration, rep.tLogs, firstUsed, compare.tLogs, secondUsed, ProcessClass::TLog, "TLog");
+				updateIdUsed(rep.satelliteTLogs, firstUsed);
+				updateIdUsed(compare.satelliteTLogs, secondUsed);
+				compareWorkers(req.configuration,
+				               rep.satelliteTLogs,
+				               firstUsed,
+				               compare.satelliteTLogs,
+				               secondUsed,
+				               ProcessClass::TLog,
+				               "Satellite");
+				updateIdUsed(rep.commitProxies, firstUsed);
+				updateIdUsed(compare.commitProxies, secondUsed);
+				updateIdUsed(rep.grvProxies, firstUsed);
+				updateIdUsed(compare.grvProxies, secondUsed);
+				updateIdUsed(rep.resolvers, firstUsed);
+				updateIdUsed(compare.resolvers, secondUsed);
+				compareWorkers(req.configuration,
+				               rep.commitProxies,
+				               firstUsed,
+				               compare.commitProxies,
+				               secondUsed,
+				               ProcessClass::CommitProxy,
+				               "CommitProxy");
+				compareWorkers(req.configuration,
+				               rep.grvProxies,
+				               firstUsed,
+				               compare.grvProxies,
+				               secondUsed,
+				               ProcessClass::GrvProxy,
+				               "GrvProxy");
+				compareWorkers(req.configuration,
+				               rep.resolvers,
+				               firstUsed,
+				               compare.resolvers,
+				               secondUsed,
+				               ProcessClass::Resolver,
+				               "Resolver");
+				updateIdUsed(rep.backupWorkers, firstUsed);
+				updateIdUsed(compare.backupWorkers, secondUsed);
+				compareWorkers(req.configuration,
+				               rep.backupWorkers,
+				               firstUsed,
+				               compare.backupWorkers,
+				               secondUsed,
+				               ProcessClass::Backup,
+				               "Backup");
+			}
 		}
 		return rep;
 	}
@@ -2721,65 +2780,215 @@ public:
 		return idUsed;
 	}
 
-    // Updates work health signals in `workerHealth` based on `req`.
-    void updateWorkerHealth(const UpdateWorkerHealthRequest& req) {
-        std::string degradedPeersString;
-        for (int i = 0; i < req.degradedPeers.size(); ++i) {
-            degradedPeersString += i == 0 ? "" : " " + req.degradedPeers[i].toString();
-        }
-        TraceEvent("ClusterControllerUpdateWorkerHealth")
-            .detail("WorkerAddress", req.address)
-            .detail("DegradedPeers", degradedPeersString);
+	// Updates work health signals in `workerHealth` based on `req`.
+	void updateWorkerHealth(const UpdateWorkerHealthRequest& req) {
+		std::string degradedPeersString;
+		for (int i = 0; i < req.degradedPeers.size(); ++i) {
+			degradedPeersString += i == 0 ? "" : " " + req.degradedPeers[i].toString();
+		}
+		TraceEvent("ClusterControllerUpdateWorkerHealth")
+		    .detail("WorkerAddress", req.address)
+		    .detail("DegradedPeers", degradedPeersString);
 
-        // `req.degradedPeers` contains the latest peer performance view from the worker. Clear the worker if the
-        // requested worker doesn't see any degraded peers.
-        if (req.degradedPeers.empty()) {
-            workerHealth.erase(req.address);
-            return;
-        }
+		// `req.degradedPeers` contains the latest peer performance view from the worker. Clear the worker if the
+		// requested worker doesn't see any degraded peers.
+		if (req.degradedPeers.empty()) {
+			workerHealth.erase(req.address);
+			return;
+		}
 
-        double currentTime = now();
+		double currentTime = now();
 
-        // Current `workerHealth` doesn't have any information about the incoming worker. Add the worker into
-        // `workerHealth`.
-        if (workerHealth.find(req.address) == workerHealth.end()) {
-            workerHealth[req.address] = {};
-            for (const auto& degradedPeer : req.degradedPeers) {
-                workerHealth[req.address].degradedPeers[degradedPeer] = { currentTime, currentTime };
-            }
+		// Current `workerHealth` doesn't have any information about the incoming worker. Add the worker into
+		// `workerHealth`.
+		if (workerHealth.find(req.address) == workerHealth.end()) {
+			workerHealth[req.address] = {};
+			for (const auto& degradedPeer : req.degradedPeers) {
+				workerHealth[req.address].degradedPeers[degradedPeer] = { currentTime, currentTime };
+			}
 
-            return;
-        }
+			return;
+		}
 
-        // The incoming worker already exists in `workerHealth`.
+		// The incoming worker already exists in `workerHealth`.
 
-        auto& health = workerHealth[req.address];
+		auto& health = workerHealth[req.address];
 
-        // First, remove any degraded peers recorded in the `workerHealth`, but aren't in the incoming request. These
-        // machines network performance should have recovered.
-        std::unordered_set<NetworkAddress> recoveredPeers;
-        for (const auto& [peer, times] : health.degradedPeers) {
-            recoveredPeers.insert(peer);
-        }
-        for (const auto& peer : req.degradedPeers) {
-            if (recoveredPeers.find(peer) != recoveredPeers.end()) {
-                recoveredPeers.erase(peer);
-            }  
-        }
-        for (const auto& peer : recoveredPeers) {
-            health.degradedPeers.erase(peer);
-        }
+		// First, remove any degraded peers recorded in the `workerHealth`, but aren't in the incoming request. These
+		// machines network performance should have recovered.
+		std::unordered_set<NetworkAddress> recoveredPeers;
+		for (const auto& [peer, times] : health.degradedPeers) {
+			recoveredPeers.insert(peer);
+		}
+		for (const auto& peer : req.degradedPeers) {
+			if (recoveredPeers.find(peer) != recoveredPeers.end()) {
+				recoveredPeers.erase(peer);
+			}
+		}
+		for (const auto& peer : recoveredPeers) {
+			health.degradedPeers.erase(peer);
+		}
 
-        // Update the worker's degradedPeers.
-        for (const auto& peer : req.degradedPeers) {
-            auto it = health.degradedPeers.find(peer);
-            if (it == health.degradedPeers.end()) {
-                health.degradedPeers[peer] = { currentTime, currentTime };
-                continue;
-            }
-            it->second.lastRefreshTime = currentTime;
-        }
-    }
+		// Update the worker's degradedPeers.
+		for (const auto& peer : req.degradedPeers) {
+			auto it = health.degradedPeers.find(peer);
+			if (it == health.degradedPeers.end()) {
+				health.degradedPeers[peer] = { currentTime, currentTime };
+				continue;
+			}
+			it->second.lastRefreshTime = currentTime;
+		}
+	}
+
+	// Checks that if any worker or their degraded peers have recovered. If so, remove them from `workerHealth`.
+	void updateRecoveredWorkers() {
+		double currentTime = now();
+		for (auto& [workerAddress, health] : workerHealth) {
+			for (auto it = health.degradedPeers.begin(); it != health.degradedPeers.end();) {
+				if (currentTime - it->second.lastRefreshTime > SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL) {
+					TraceEvent("WorkerPeerHealthRecovered").detail("Worker", workerAddress).detail("Peer", it->first);
+					health.degradedPeers.erase(it++);
+				} else {
+					++it;
+				}
+			}
+		}
+
+		for (auto it = workerHealth.begin(); it != workerHealth.end();) {
+			if (it->second.degradedPeers.empty()) {
+				TraceEvent("WorkerAllPeerHealthRecovered").detail("Worker", it->first);
+				workerHealth.erase(it++);
+			} else {
+				++it;
+			}
+		}
+	}
+
+	// Returns a list of servers who are experiencing degraded links. These are candidates to perform exclusion. Note
+	// that only one endpoint of a bad link will be included in this list.
+	std::unordered_set<NetworkAddress> getServersWithDegradedLink() {
+		updateRecoveredWorkers();
+
+		// Build a map keyed by measured degraded peer. This map gives the info that who complains a particular server.
+		std::unordered_map<NetworkAddress, std::unordered_set<NetworkAddress>> degradedLinkDst2Src;
+		double currentTime = now();
+		for (const auto& [server, health] : workerHealth) {
+			for (const auto& [degradedPeer, times] : health.degradedPeers) {
+				if (currentTime - times.startTime < SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL) {
+					// This degraded link is not long enough to be considered as degraded.
+					continue;
+				}
+				degradedLinkDst2Src[degradedPeer].insert(server);
+			}
+		}
+
+		// Sort degraded peers based on the number of workers complaining about it.
+		std::vector<std::pair<int, NetworkAddress>> count2DegradedPeer;
+		for (const auto& [degradedPeer, complainers] : degradedLinkDst2Src) {
+			count2DegradedPeer.push_back({ complainers.size(), degradedPeer });
+		}
+		std::sort(count2DegradedPeer.begin(), count2DegradedPeer.end(), std::greater<>());
+
+		// Go through all reported degraded peers by decreasing order of the number of complainers. For a particular
+		// degraded peer, if a complainer has already be considered as degraded, we skip the current examine degraded
+		// peer since there has been one endpoint on the link between degradedPeer and complainer considered as
+		// degraded. This is to address the issue that both endpoints on a bad link may be considered as degraded
+		// server.
+		//
+		// For example, if server A is already considered as a degraded server, and A complains B, we won't add B as
+		// degraded since A is already considered as degraded.
+		std::unordered_set<NetworkAddress> currentDegradedServers;
+		for (const auto& [complainerCount, badServer] : count2DegradedPeer) {
+			for (const auto& complainer : degradedLinkDst2Src[badServer]) {
+				if (currentDegradedServers.find(complainer) == currentDegradedServers.end()) {
+					currentDegradedServers.insert(badServer);
+					break;
+				}
+			}
+		}
+
+		// For degraded server that are complained by more than SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE, we
+		// don't know if it is a hot server, or the network is bad. We remove from the returned degraded server list.
+		std::unordered_set<NetworkAddress> currentDegradedServersWithinLimit;
+		for (const auto& badServer : currentDegradedServers) {
+			if (degradedLinkDst2Src[badServer].size() <= SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE) {
+				currentDegradedServersWithinLimit.insert(badServer);
+			}
+		}
+		return currentDegradedServersWithinLimit;
+	}
+
+	// Returns true when the cluster controller should trigger a recovery due to degraded servers are used in the
+	// transaction system in the primary data center.
+	bool shouldTriggerRecoveryDueToDegradedServers() {
+		if (degradedServers.size() > SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
+			return false;
+		}
+
+		const ServerDBInfo dbi = db.serverInfo->get();
+		if (dbi.recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			return false;
+		}
+
+		// Do not trigger recovery if the cluster controller is excluded, since the master will change
+		// anyways once the cluster controller is moved
+		if (id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
+			return false;
+		}
+
+		for (const auto& excludedServer : degradedServers) {
+			if (dbi.master.addresses().contains(excludedServer)) {
+				return true;
+			}
+
+			for (auto& logSet : dbi.logSystemConfig.tLogs) {
+				if (!logSet.isLocal || logSet.locality == tagLocalitySatellite) {
+					continue;
+				}
+				for (const auto& tlog : logSet.tLogs) {
+					if (tlog.present() && tlog.interf().addresses().contains(excludedServer)) {
+						return true;
+					}
+				}
+			}
+
+			for (auto& proxy : dbi.client.grvProxies) {
+				if (proxy.addresses().contains(excludedServer)) {
+					return true;
+				}
+			}
+
+			for (auto& proxy : dbi.client.commitProxies) {
+				if (proxy.addresses().contains(excludedServer)) {
+					return true;
+				}
+			}
+
+			for (auto& resolver : dbi.resolvers) {
+				if (resolver.addresses().contains(excludedServer)) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	int recentRecoveryCountDueToHealth() {
+		while (!recentHealthTriggeredRecoveryTime.empty() &&
+		       now() - recentHealthTriggeredRecoveryTime.front() > SERVER_KNOBS->CC_TRACKING_HEALTH_RECOVERY_INTERVAL) {
+			recentHealthTriggeredRecoveryTime.pop();
+		}
+		return recentHealthTriggeredRecoveryTime.size();
+	}
+
+	bool isExcludedDegradedServer(const NetworkAddressList& a) {
+		for (const auto& server : excludedDegradedServers) {
+			if (a.contains(server))
+				return true;
+		}
+		return false;
+	}
 
 	std::map<Optional<Standalone<StringRef>>, WorkerInfo> id_worker;
 	std::map<Optional<Standalone<StringRef>>, ProcessClass>
@@ -2819,17 +3028,23 @@ public:
 	Optional<UID> recruitingRatekeeperID;
 	AsyncVar<bool> recruitRatekeeper;
 
-    // Stores the health information from a particular worker's perspective.
-    struct WorkerHealth {
-        struct DegradedTimes {
-            double startTime = 0;
-            double lastRefreshTime = 0;
-        };
-        std::unordered_map<NetworkAddress, DegradedTimes> degradedPeers;
+	// Stores the health information from a particular worker's perspective.
+	struct WorkerHealth {
+		struct DegradedTimes {
+			double startTime = 0;
+			double lastRefreshTime = 0;
+		};
+		std::unordered_map<NetworkAddress, DegradedTimes> degradedPeers;
 
-        // TODO(zhewu): Include disk and CPU signals.
-    };
+		// TODO(zhewu): Include disk and CPU signals.
+	};
 	std::unordered_map<NetworkAddress, WorkerHealth> workerHealth;
+	std::unordered_set<NetworkAddress>
+	    degradedServers; // The servers that the cluster controller is considered as degraded. The servers in this list
+	                     // are not excluded unless they are added to `excludedDegradedServers`.
+	std::unordered_set<NetworkAddress>
+	    excludedDegradedServers; // The degraded servers to be excluded when assigning workers to roles.
+	std::queue<double> recentHealthTriggeredRecoveryTime;
 
 	CounterCollection clusterControllerMetrics;
 
@@ -2843,9 +3058,9 @@ public:
 	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
 	                      LocalityData const& locality,
 	                      ServerCoordinators const& coordinators)
-	  : clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
-	    ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), gotProcessClasses(false),
-	    gotFullyRecoveredConfig(false), startTime(now()), goodRecruitmentTime(Never()),
+	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), clusterControllerProcessId(locality.processId()),
+	    clusterControllerDcId(locality.dcId()), id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()),
+	    outstandingRemoteRequestChecker(Void()), startTime(now()), goodRecruitmentTime(Never()),
 	    goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0), versionDifferenceUpdated(false),
 	    recruitingDistributor(false), recruitRatekeeper(false),
 	    clusterControllerMetrics("ClusterController", id.toString()),
@@ -2862,7 +3077,7 @@ public:
 		serverInfo.clusterInterface = ccInterface;
 		serverInfo.myLocality = locality;
 		db.serverInfo->set(serverInfo);
-		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, true, true);
+		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 
 	~ClusterControllerData() {
@@ -2878,7 +3093,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 	// When this someday is implemented, make sure forced failures still cause the master to be recruited again
 
 	loop {
-		TraceEvent("CCWDB", cluster->id);
+		TraceEvent("CCWDB", cluster->id).log();
 		try {
 			state double recoveryStart = now();
 			TraceEvent("CCWDB", cluster->id).detail("Recruiting", "Master");
@@ -2930,7 +3145,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 				dbInfo.distributor = db->serverInfo->get().distributor;
 				dbInfo.ratekeeper = db->serverInfo->get().ratekeeper;
 				dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
-				dbInfo.configBroadcaster = db->serverInfo->get().configBroadcaster;
 
 				TraceEvent("CCWDB", cluster->id)
 				    .detail("Lifetime", dbInfo.masterLifetime.toString())
@@ -3375,6 +3589,12 @@ ACTOR Future<Void> clusterRecruitFromConfiguration(ClusterControllerData* self, 
 				return Void();
 			} else if (e.code() == error_code_operation_failed || e.code() == error_code_no_more_servers) {
 				// recruitment not good enough, try again
+				TraceEvent("RecruitFromConfigurationRetry", self->id)
+				    .error(e)
+				    .detail("GoodRecruitmentTimeReady", self->goodRecruitmentTime.isReady());
+				while (!self->goodRecruitmentTime.isReady()) {
+					wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+				}
 			} else {
 				TraceEvent(SevError, "RecruitFromConfigurationError", self->id).error(e);
 				throw; // goodbye, cluster controller
@@ -3400,6 +3620,12 @@ ACTOR Future<Void> clusterRecruitRemoteFromConfiguration(ClusterControllerData* 
 				return Void();
 			} else if (e.code() == error_code_operation_failed || e.code() == error_code_no_more_servers) {
 				// recruitment not good enough, try again
+				TraceEvent("RecruitRemoteFromConfigurationRetry", self->id)
+				    .error(e)
+				    .detail("GoodRecruitmentTimeReady", self->goodRemoteRecruitmentTime.isReady());
+				while (!self->goodRemoteRecruitmentTime.isReady()) {
+					wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+				}
 			} else {
 				TraceEvent(SevError, "RecruitRemoteFromConfigurationError", self->id).error(e);
 				throw; // goodbye, cluster controller
@@ -3516,7 +3742,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	checkOutstandingRequests(self);
 }
 
-void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
+void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, ConfigBroadcaster* configBroadcaster) {
 	const WorkerInterface& w = req.wi;
 	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find(w.locality.processId());
@@ -3605,6 +3831,13 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		    w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
 			self->masterProcessId = w.locality.processId();
 		}
+		if (configBroadcaster != nullptr) {
+			self->addActor.send(configBroadcaster->registerWorker(
+			    req.lastSeenKnobVersion,
+			    req.knobConfigClassSet,
+			    self->id_worker[w.locality.processId()].watcher,
+			    self->id_worker[w.locality.processId()].details.interf.configBroadcastInterface));
+		}
 		checkOutstandingRequests(self);
 	} else if (info->second.details.interf.id() != w.id() || req.generation >= info->second.gen) {
 		if (!info->second.reply.isSet()) {
@@ -3622,6 +3855,13 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 			self->removedDBInfoEndpoints.insert(info->second.details.interf.updateServerDBInfo.getEndpoint());
 			info->second.details.interf = w;
 			info->second.watcher = workerAvailabilityWatch(w, newProcessClass, self);
+		}
+		if (configBroadcaster != nullptr) {
+			self->addActor.send(
+			    configBroadcaster->registerWorker(req.lastSeenKnobVersion,
+			                                      req.knobConfigClassSet,
+			                                      info->second.watcher,
+			                                      info->second.details.interf.configBroadcastInterface));
 		}
 		checkOutstandingRequests(self);
 	} else {
@@ -3703,7 +3943,7 @@ ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData* self) {
 ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
 
-	TraceEvent("TimeKeeperStarted");
+	TraceEvent("TimeKeeperStarted").log();
 
 	wait(timeKeeperSetVersion(self));
 
@@ -3715,10 +3955,9 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 				// FIXME: replace or augment this with logging on the proxy which tracks
 				//       how long it is taking to hear responses from each other component.
 
-				UID debugID = deterministicRandom()->randomUniqueID();
-				TraceEvent("TimeKeeperCommit", debugID);
+				state UID debugID = deterministicRandom()->randomUniqueID();
+				TraceEvent("TimeKeeperCommit", debugID).log();
 				tr->debugTransaction(debugID);
-
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -3731,7 +3970,9 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 				Version v = tr->getReadVersion().get();
 				int64_t currentTime = (int64_t)now();
 				versionMap.set(tr, currentTime, v);
-
+				if (!g_network->isSimulated()) {
+					TraceEvent("TimeKeeperCommit", debugID).detail("Version", v);
+				}
 				int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
 				if (ttl > 0) {
 					versionMap.erase(tr, 0, ttl);
@@ -3867,7 +4108,7 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData* self) {
 			}
 
 			wait(trVer.commit());
-			TraceEvent("ProcessClassUpgrade");
+			TraceEvent("ProcessClassUpgrade").log();
 			break;
 		} catch (Error& e) {
 			wait(trVer.onError(e));
@@ -4296,7 +4537,7 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 			}
 			wait(fCommit);
 		}
-		TraceEvent("ForcedRecoveryFinish", self->id);
+		TraceEvent("ForcedRecoveryFinish", self->id).log();
 		self->db.forceRecovery = false;
 		req.reply.send(Void());
 	}
@@ -4305,7 +4546,7 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 ACTOR Future<DataDistributorInterface> startDataDistributor(ClusterControllerData* self) {
 	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
 
-	TraceEvent("CCStartDataDistributor", self->id);
+	TraceEvent("CCStartDataDistributor", self->id).log();
 	loop {
 		try {
 			state bool no_distributor = !self->db.serverInfo->get().distributor.present();
@@ -4372,7 +4613,7 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 ACTOR Future<Void> startRatekeeper(ClusterControllerData* self) {
 	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
 
-	TraceEvent("CCStartRatekeeper", self->id);
+	TraceEvent("CCStartRatekeeper", self->id).log();
 	loop {
 		try {
 			state bool no_ratekeeper = !self->db.serverInfo->get().ratekeeper.present();
@@ -4489,7 +4730,7 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 		req.serializedDbInfo =
 		    BinaryWriter::toValue(self->db.serverInfo->get(), AssumeVersion(g_network->protocolVersion()));
 
-		TraceEvent("DBInfoStartBroadcast", self->id);
+		TraceEvent("DBInfoStartBroadcast", self->id).log();
 		choose {
 			when(std::vector<Endpoint> notUpdated =
 			         wait(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, Optional<Endpoint>(), false))) {
@@ -4504,26 +4745,78 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 	}
 }
 
+// The actor that periodically monitors the health of tracked workers.
+ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
+	loop {
+		try {
+			while (!self->goodRecruitmentTime.isReady()) {
+				wait(lowPriorityDelay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
+			}
+
+			self->degradedServers = self->getServersWithDegradedLink();
+
+			// Compare `self->degradedServers` with `self->excludedDegradedServers` and remove those that have
+			// recovered.
+			for (auto it = self->excludedDegradedServers.begin(); it != self->excludedDegradedServers.end();) {
+				if (self->degradedServers.find(*it) == self->degradedServers.end()) {
+					self->excludedDegradedServers.erase(it++);
+				} else {
+					++it;
+				}
+			}
+
+			if (!self->degradedServers.empty()) {
+				std::string degradedServerString;
+				for (const auto& server : self->degradedServers) {
+					degradedServerString += server.toString() + " ";
+				}
+				TraceEvent("ClusterControllerHealthMonitor").detail("DegradedServers", degradedServerString);
+
+				// Check if the cluster controller should trigger a recovery to exclude any degraded servers from the
+				// transaction system.
+				if (self->shouldTriggerRecoveryDueToDegradedServers()) {
+					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_RECOVERY) {
+						if (self->recentRecoveryCountDueToHealth() < SERVER_KNOBS->CC_MAX_HEALTH_RECOVERY_COUNT) {
+							self->recentHealthTriggeredRecoveryTime.push(now());
+							self->excludedDegradedServers = self->degradedServers;
+							TraceEvent("DegradedServerDetectedAndTriggerRecovery")
+							    .detail("RecentRecoveryCountDueToHealth", self->recentRecoveryCountDueToHealth());
+							self->db.forceMasterFailure.trigger();
+						}
+					} else {
+						self->excludedDegradedServers.clear();
+						TraceEvent("DegradedServerDetectedAndSuggestRecovery").log();
+					}
+				}
+			}
+
+			wait(delay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
+		} catch (Error& e) {
+			TraceEvent(SevWarnAlways, "ClusterControllerHealthMonitorError").error(e);
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
                                          ServerCoordinators coordinators,
                                          LocalityData locality,
-                                         UseConfigDB useConfigDB) {
+                                         ConfigDBType configDBType) {
 	state ClusterControllerData self(interf, locality, coordinators);
-	state ConfigBroadcaster configBroadcaster(coordinators, useConfigDB);
+	state ConfigBroadcaster configBroadcaster(coordinators, configDBType);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
 	state uint64_t step = 0;
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
 
-	if (useConfigDB != UseConfigDB::DISABLED) {
-		self.addActor.send(configBroadcaster.serve(self.db.serverInfo->get().configBroadcaster));
-	}
 	self.addActor.send(clusterWatchDatabase(&self, &self.db)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
 	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(),
 	                                &self,
 	                                coordinators,
-	                                (useConfigDB == UseConfigDB::DISABLED) ? nullptr : &configBroadcaster));
+	                                (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster));
 	self.addActor.send(timeKeeper(&self));
 	self.addActor.send(monitorProcessClasses(&self));
 	self.addActor.send(monitorServerInfoConfig(&self.db));
@@ -4543,6 +4836,10 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	                                 self.id.toString() + "/ClusterControllerMetrics"));
 	self.addActor.send(traceRole(Role::CLUSTER_CONTROLLER, interf.id()));
 	// printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
+
+	if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
+		self.addActor.send(workerHealthMonitor(&self));
+	}
 
 	loop choose {
 		when(ErrorOr<Void> err = wait(error)) {
@@ -4571,24 +4868,24 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		}
 		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;
-			registerWorker(req, &self);
+			registerWorker(req, &self, (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster);
 		}
 		when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
 			++self.getWorkersRequests;
 			vector<WorkerDetails> workers;
 
-			for (auto& it : self.id_worker) {
+			for (auto const& [id, worker] : self.id_worker) {
 				if ((req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) &&
-				    self.db.config.isExcludedServer(it.second.details.interf.addresses())) {
+				    self.db.config.isExcludedServer(worker.details.interf.addresses())) {
 					continue;
 				}
 
 				if ((req.flags & GetWorkersRequest::TESTER_CLASS_ONLY) &&
-				    it.second.details.processClass.classType() != ProcessClass::TesterClass) {
+				    worker.details.processClass.classType() != ProcessClass::TesterClass) {
 					continue;
 				}
 
-				workers.push_back(it.second.details);
+				workers.push_back(worker.details);
 			}
 
 			req.reply.send(workers);
@@ -4615,7 +4912,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 			clusterRegisterMaster(&self, req);
 		}
 		when(UpdateWorkerHealthRequest req = waitNext(interf.updateWorkerHealth.getFuture())) {
-			if (SERVER_KNOBS->CLUSTER_CONTROLLER_ENABLE_WORKER_HEALTH_MONITOR) {
+			if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
 				self.updateWorkerHealth(req);
 			}
 		}
@@ -4647,7 +4944,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
                                      bool hasConnected,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      LocalityData locality,
-                                     UseConfigDB useConfigDB) {
+                                     ConfigDBType configDBType) {
 	loop {
 		state ClusterControllerFullInterface cci;
 		state bool inRole = false;
@@ -4674,7 +4971,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 				startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
 				inRole = true;
 
-				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, useConfigDB));
+				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, configDBType));
 			}
 		} catch (Error& e) {
 			if (inRole)
@@ -4698,13 +4995,13 @@ ACTOR Future<Void> clusterController(Reference<ClusterConnectionFile> connFile,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
                                      LocalityData locality,
-                                     UseConfigDB useConfigDB) {
+                                     ConfigDBType configDBType) {
 	wait(recoveredDiskFiles);
 	state bool hasConnected = false;
 	loop {
 		try {
 			ServerCoordinators coordinators(connFile);
-			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, useConfigDB));
+			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType));
 		} catch (Error& e) {
 			if (e.code() != error_code_coordinators_changed)
 				throw; // Expected to terminate fdbserver
@@ -4719,61 +5016,321 @@ namespace {
 // Tests `ClusterControllerData::updateWorkerHealth()` can update `ClusterControllerData::workerHealth` based on
 // `UpdateWorkerHealth` request correctly.
 TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
-    // Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
-    state ClusterControllerData data(ClusterControllerFullInterface(),
-                                     LocalityData(),
-                                     ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
-    state NetworkAddress workerAddress(IPAddress(0x01010101), 1);
-    state NetworkAddress badPeer1(IPAddress(0x02020202), 1);
-    state NetworkAddress badPeer2(IPAddress(0x03030303), 1);
-    state NetworkAddress badPeer3(IPAddress(0x04040404), 1);
+	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
+	state ClusterControllerData data(ClusterControllerFullInterface(),
+	                                 LocalityData(),
+	                                 ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+	state NetworkAddress workerAddress(IPAddress(0x01010101), 1);
+	state NetworkAddress badPeer1(IPAddress(0x02020202), 1);
+	state NetworkAddress badPeer2(IPAddress(0x03030303), 1);
+	state NetworkAddress badPeer3(IPAddress(0x04040404), 1);
 
-    // Create a `UpdateWorkerHealthRequest` with two bad peers, and they should appear in the `workerAddress`'s
-    // degradedPeers.
-    {
-        UpdateWorkerHealthRequest req;
-        req.address = workerAddress;
-        req.degradedPeers.push_back(badPeer1);
-        req.degradedPeers.push_back(badPeer2);
-        data.updateWorkerHealth(req);
-        ASSERT(data.workerHealth.find(workerAddress) != data.workerHealth.end());
-        auto& health = data.workerHealth[workerAddress];
-        ASSERT_EQ(health.degradedPeers.size(), 2);
-        ASSERT(health.degradedPeers.find(badPeer1) != health.degradedPeers.end());
-        ASSERT_EQ(health.degradedPeers[badPeer1].startTime, health.degradedPeers[badPeer1].lastRefreshTime);
-        ASSERT(health.degradedPeers.find(badPeer2) != health.degradedPeers.end());
-    }
+	// Create a `UpdateWorkerHealthRequest` with two bad peers, and they should appear in the `workerAddress`'s
+	// degradedPeers.
+	{
+		UpdateWorkerHealthRequest req;
+		req.address = workerAddress;
+		req.degradedPeers.push_back(badPeer1);
+		req.degradedPeers.push_back(badPeer2);
+		data.updateWorkerHealth(req);
+		ASSERT(data.workerHealth.find(workerAddress) != data.workerHealth.end());
+		auto& health = data.workerHealth[workerAddress];
+		ASSERT_EQ(health.degradedPeers.size(), 2);
+		ASSERT(health.degradedPeers.find(badPeer1) != health.degradedPeers.end());
+		ASSERT_EQ(health.degradedPeers[badPeer1].startTime, health.degradedPeers[badPeer1].lastRefreshTime);
+		ASSERT(health.degradedPeers.find(badPeer2) != health.degradedPeers.end());
+	}
 
-    // Create a `UpdateWorkerHealthRequest` with two bad peers, one from the previous test and a new one.
-    // The one from the previous test should have lastRefreshTime updated.
-    // The other one from the previous test not included in this test should be removed.
-    {
-        // Make the time to move so that now() guarantees to return a larger value than before.
-        wait(delay(0.001));
-        UpdateWorkerHealthRequest req;
-        req.address = workerAddress;
-        req.degradedPeers.push_back(badPeer1);
-        req.degradedPeers.push_back(badPeer3);
-        data.updateWorkerHealth(req);
-        ASSERT(data.workerHealth.find(workerAddress) != data.workerHealth.end());
-        auto& health = data.workerHealth[workerAddress];
-        ASSERT_EQ(health.degradedPeers.size(), 2);
-        ASSERT(health.degradedPeers.find(badPeer1) != health.degradedPeers.end());
-        ASSERT_LT(health.degradedPeers[badPeer1].startTime, health.degradedPeers[badPeer1].lastRefreshTime);
-        ASSERT(health.degradedPeers.find(badPeer2) == health.degradedPeers.end());
-        ASSERT(health.degradedPeers.find(badPeer3) != health.degradedPeers.end());
-    }
+	// Create a `UpdateWorkerHealthRequest` with two bad peers, one from the previous test and a new one.
+	// The one from the previous test should have lastRefreshTime updated.
+	// The other one from the previous test not included in this test should be removed.
+	{
+		// Make the time to move so that now() guarantees to return a larger value than before.
+		wait(delay(0.001));
+		UpdateWorkerHealthRequest req;
+		req.address = workerAddress;
+		req.degradedPeers.push_back(badPeer1);
+		req.degradedPeers.push_back(badPeer3);
+		data.updateWorkerHealth(req);
+		ASSERT(data.workerHealth.find(workerAddress) != data.workerHealth.end());
+		auto& health = data.workerHealth[workerAddress];
+		ASSERT_EQ(health.degradedPeers.size(), 2);
+		ASSERT(health.degradedPeers.find(badPeer1) != health.degradedPeers.end());
+		ASSERT_LT(health.degradedPeers[badPeer1].startTime, health.degradedPeers[badPeer1].lastRefreshTime);
+		ASSERT(health.degradedPeers.find(badPeer2) == health.degradedPeers.end());
+		ASSERT(health.degradedPeers.find(badPeer3) != health.degradedPeers.end());
+	}
 
-    // Create a `UpdateWorkerHealthRequest` with empty `degradedPeers`, which should remove the worker from
-    // `workerHealth`.
-    {
-        UpdateWorkerHealthRequest req;
-        req.address = workerAddress;
-        data.updateWorkerHealth(req);
-        ASSERT(data.workerHealth.find(workerAddress) == data.workerHealth.end());
-    }
+	// Create a `UpdateWorkerHealthRequest` with empty `degradedPeers`, which should remove the worker from
+	// `workerHealth`.
+	{
+		UpdateWorkerHealthRequest req;
+		req.address = workerAddress;
+		data.updateWorkerHealth(req);
+		ASSERT(data.workerHealth.find(workerAddress) == data.workerHealth.end());
+	}
 
-    return Void();
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/updateRecoveredWorkers") {
+	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+	NetworkAddress worker1(IPAddress(0x01010101), 1);
+	NetworkAddress worker2(IPAddress(0x11111111), 1);
+	NetworkAddress badPeer1(IPAddress(0x02020202), 1);
+	NetworkAddress badPeer2(IPAddress(0x03030303), 1);
+
+	// Create following test scenario:
+	// 	 worker1 -> badPeer1 active
+	// 	 worker1 -> badPeer2 recovered
+	// 	 worker2 -> badPeer2 recovered
+	data.workerHealth[worker1].degradedPeers[badPeer1] = {
+		now() - SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL - 1, now()
+	};
+	data.workerHealth[worker1].degradedPeers[badPeer2] = {
+		now() - SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL - 1,
+		now() - SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL - 1
+	};
+	data.workerHealth[worker2].degradedPeers[badPeer2] = {
+		now() - SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL - 1,
+		now() - SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL - 1
+	};
+	data.updateRecoveredWorkers();
+
+	ASSERT_EQ(data.workerHealth.size(), 1);
+	ASSERT(data.workerHealth.find(worker1) != data.workerHealth.end());
+	ASSERT(data.workerHealth[worker1].degradedPeers.find(badPeer1) != data.workerHealth[worker1].degradedPeers.end());
+	ASSERT(data.workerHealth[worker1].degradedPeers.find(badPeer2) == data.workerHealth[worker1].degradedPeers.end());
+	ASSERT(data.workerHealth.find(worker2) == data.workerHealth.end());
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/getServersWithDegradedLink") {
+	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+	NetworkAddress worker(IPAddress(0x01010101), 1);
+	NetworkAddress badPeer1(IPAddress(0x02020202), 1);
+	NetworkAddress badPeer2(IPAddress(0x03030303), 1);
+	NetworkAddress badPeer3(IPAddress(0x04040404), 1);
+	NetworkAddress badPeer4(IPAddress(0x05050505), 1);
+
+	// Test that a reported degraded link should stay for sometime before being considered as a degraded link by cluster
+	// controller.
+	{
+		data.workerHealth[worker].degradedPeers[badPeer1] = { now(), now() };
+		ASSERT(data.getServersWithDegradedLink().empty());
+		data.workerHealth.clear();
+	}
+
+	// Test that when there is only one reported degraded link, getServersWithDegradedLink can return correct degraded
+	// server.
+	{
+		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		auto degradedServers = data.getServersWithDegradedLink();
+		ASSERT(degradedServers.size() == 1);
+		ASSERT(degradedServers.find(badPeer1) != degradedServers.end());
+		data.workerHealth.clear();
+	}
+
+	// Test that if both A complains B and B compalins A, only one of the server will be chosen as degraded server.
+	{
+		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer1].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		auto degradedServers = data.getServersWithDegradedLink();
+		ASSERT(degradedServers.size() == 1);
+		ASSERT(degradedServers.find(worker) != degradedServers.end() ||
+		       degradedServers.find(badPeer1) != degradedServers.end());
+		data.workerHealth.clear();
+	}
+
+	// Test that if B complains A and C complains A, A is selected as degraded server instead of B or C.
+	{
+		ASSERT(SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE < 4);
+		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer1].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[worker].degradedPeers[badPeer2] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer2].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		auto degradedServers = data.getServersWithDegradedLink();
+		ASSERT(degradedServers.size() == 1);
+		ASSERT(degradedServers.find(worker) != degradedServers.end());
+		data.workerHealth.clear();
+	}
+
+	// Test that if the number of complainers exceeds the threshold, no degraded server is returned.
+	{
+		ASSERT(SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE < 4);
+		data.workerHealth[badPeer1].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer2].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer3].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer4].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		ASSERT(data.getServersWithDegradedLink().empty());
+		data.workerHealth.clear();
+	}
+
+	// Test that if the degradation is reported both ways between A and other 4 servers, no degraded server is returned.
+	{
+		ASSERT(SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE < 4);
+		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer1].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[worker].degradedPeers[badPeer2] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer2].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[worker].degradedPeers[badPeer3] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer3].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[worker].degradedPeers[badPeer4] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		data.workerHealth[badPeer4].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
+			                                                  now() };
+		ASSERT(data.getServersWithDegradedLink().empty());
+		data.workerHealth.clear();
+	}
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/recentRecoveryCountDueToHealth") {
+	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+
+	ASSERT_EQ(data.recentRecoveryCountDueToHealth(), 0);
+
+	data.recentHealthTriggeredRecoveryTime.push(now() - SERVER_KNOBS->CC_TRACKING_HEALTH_RECOVERY_INTERVAL - 1);
+	ASSERT_EQ(data.recentRecoveryCountDueToHealth(), 0);
+
+	data.recentHealthTriggeredRecoveryTime.push(now() - SERVER_KNOBS->CC_TRACKING_HEALTH_RECOVERY_INTERVAL + 1);
+	ASSERT_EQ(data.recentRecoveryCountDueToHealth(), 1);
+
+	data.recentHealthTriggeredRecoveryTime.push(now());
+	ASSERT_EQ(data.recentRecoveryCountDueToHealth(), 2);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServers") {
+	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+	NetworkAddress master(IPAddress(0x01010101), 1);
+	NetworkAddress tlog(IPAddress(0x02020202), 1);
+	NetworkAddress satelliteTlog(IPAddress(0x03030303), 1);
+	NetworkAddress remoteTlog(IPAddress(0x04040404), 1);
+	NetworkAddress logRouter(IPAddress(0x05050505), 1);
+	NetworkAddress backup(IPAddress(0x06060606), 1);
+	NetworkAddress proxy(IPAddress(0x07070707), 1);
+	NetworkAddress resolver(IPAddress(0x08080808), 1);
+
+	// Create a ServerDBInfo using above addresses.
+	ServerDBInfo testDbInfo;
+	testDbInfo.master.changeCoordinators =
+	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ master }, UID(1, 2)));
+
+	TLogInterface localTLogInterf;
+	localTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ tlog }, UID(1, 2)));
+	TLogInterface localLogRouterInterf;
+	localLogRouterInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ logRouter }, UID(1, 2)));
+	BackupInterface backupInterf;
+	backupInterf.waitFailure = RequestStream<ReplyPromise<Void>>(Endpoint({ backup }, UID(1, 2)));
+	TLogSet localTLogSet;
+	localTLogSet.isLocal = true;
+	localTLogSet.tLogs.push_back(OptionalInterface(localTLogInterf));
+	localTLogSet.logRouters.push_back(OptionalInterface(localLogRouterInterf));
+	localTLogSet.backupWorkers.push_back(OptionalInterface(backupInterf));
+	testDbInfo.logSystemConfig.tLogs.push_back(localTLogSet);
+
+	TLogInterface sateTLogInterf;
+	sateTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ satelliteTlog }, UID(1, 2)));
+	TLogSet sateTLogSet;
+	sateTLogSet.isLocal = true;
+	sateTLogSet.locality = tagLocalitySatellite;
+	sateTLogSet.tLogs.push_back(OptionalInterface(sateTLogInterf));
+	testDbInfo.logSystemConfig.tLogs.push_back(sateTLogSet);
+
+	TLogInterface remoteTLogInterf;
+	remoteTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ remoteTlog }, UID(1, 2)));
+	TLogSet remoteTLogSet;
+	remoteTLogSet.isLocal = false;
+	remoteTLogSet.tLogs.push_back(OptionalInterface(remoteTLogInterf));
+	testDbInfo.logSystemConfig.tLogs.push_back(remoteTLogSet);
+
+	GrvProxyInterface proxyInterf;
+	proxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, UID(1, 2)));
+	testDbInfo.client.grvProxies.push_back(proxyInterf);
+
+	ResolverInterface resolverInterf;
+	resolverInterf.resolve = RequestStream<struct ResolveTransactionBatchRequest>(Endpoint({ resolver }, UID(1, 2)));
+	testDbInfo.resolvers.push_back(resolverInterf);
+
+	testDbInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+
+	// No recovery when no degraded servers.
+	data.db.serverInfo->set(testDbInfo);
+	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
+
+	// Trigger recovery when master is degraded.
+	data.degradedServers.insert(master);
+	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
+	data.degradedServers.clear();
+
+	// Trigger recovery when primary TLog is degraded.
+	data.degradedServers.insert(tlog);
+	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
+	data.degradedServers.clear();
+
+	// No recovery when satellite Tlog is degraded.
+	data.degradedServers.insert(satelliteTlog);
+	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
+	data.degradedServers.clear();
+
+	// No recovery when remote tlog is degraded.
+	data.degradedServers.insert(remoteTlog);
+	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
+	data.degradedServers.clear();
+
+	// No recovery when log router is degraded.
+	data.degradedServers.insert(logRouter);
+	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
+	data.degradedServers.clear();
+
+	// No recovery when backup worker is degraded.
+	data.degradedServers.insert(backup);
+	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
+	data.degradedServers.clear();
+
+	// Trigger recovery when proxy is degraded.
+	data.degradedServers.insert(proxy);
+	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
+	data.degradedServers.clear();
+
+	// Trigger recovery when resolver is degraded.
+	data.degradedServers.insert(resolver);
+	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
+
+	return Void();
 }
 
 } // namespace

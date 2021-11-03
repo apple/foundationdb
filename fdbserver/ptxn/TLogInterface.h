@@ -45,8 +45,8 @@ struct TLogQueueEntryRef {
 
 	TLogQueueEntryRef() : version(0), knownCommittedVersion(0) {}
 	TLogQueueEntryRef(Arena& a, TLogQueueEntryRef const& from)
-	  : version(from.version), knownCommittedVersion(from.knownCommittedVersion), id(from.id),
-	    storageTeams(from.storageTeams) {
+	  : id(from.id), storageTeams(from.storageTeams), version(from.version),
+	    knownCommittedVersion(from.knownCommittedVersion) {
 		messages.reserve(from.messages.size());
 		for (const auto& message : from.messages) {
 			messages.emplace_back(a, message);
@@ -222,8 +222,8 @@ struct TLogPeekRequest {
 	                bool onlySpilled_,
 	                const StorageTeamID& storageTeamID_,
 	                const TLogGroupID& tLogGroupID_)
-	  : debugID(debugID_), beginVersion(beginVersion_), endVersion(endVersion_), returnIfBlocked(returnIfBlocked_),
-	    onlySpilled(onlySpilled_), storageTeamID(storageTeamID_), tLogGroupID(tLogGroupID_) {}
+	  : debugID(debugID_), beginVersion(beginVersion_), endVersion(endVersion_), storageTeamID(storageTeamID_),
+	    tLogGroupID(tLogGroupID_), returnIfBlocked(returnIfBlocked_), onlySpilled(onlySpilled_) {}
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
@@ -313,7 +313,7 @@ struct VerUpdateRef {
 	VectorRef<MutationRef> mutations;
 	bool isPrivateData;
 
-	VerUpdateRef() : isPrivateData(false), version(invalidVersion) {}
+	VerUpdateRef() : version(invalidVersion), isPrivateData(false) {}
 	VerUpdateRef(Arena& to, const VerUpdateRef& from)
 	  : version(from.version), mutations(to, from.mutations), isPrivateData(from.isPrivateData) {}
 	int expectedSize() const { return mutations.expectedSize(); }
@@ -457,8 +457,8 @@ protected:
 
 	TLogInterfaceBase(const LocalityData& locality_,
 	                  const MessageTransferModel& model_ = MessageTransferModel::StorageServerActivelyPull)
-	  : uniqueID(deterministicRandom()->randomUniqueID()), filteredLocality(locality_), sharedTLogID(uniqueID),
-	    messageTransferModel(model_) {}
+	  : uniqueID(deterministicRandom()->randomUniqueID()), sharedTLogID(uniqueID), messageTransferModel(model_),
+	    filteredLocality(locality_) {}
 
 	TLogInterfaceBase(UID sharedTLogID_,
 	                  const LocalityData& locality_,
@@ -469,7 +469,7 @@ protected:
 	                  UID sharedTLogID_,
 	                  const LocalityData& locality_,
 	                  const MessageTransferModel& model_ = MessageTransferModel::StorageServerActivelyPull)
-	  : uniqueID(id_), sharedTLogID(sharedTLogID_), filteredLocality(locality_), messageTransferModel(model_) {}
+	  : uniqueID(id_), sharedTLogID(sharedTLogID_), messageTransferModel(model_), filteredLocality(locality_) {}
 
 	void initEndpointsImpl(std::vector<ReceiverPriorityPair>&& receivers);
 

@@ -103,8 +103,8 @@ TLogSet::TLogSet(const LogSet& rhs)
 }
 
 OldTLogConf::OldTLogConf(const OldLogData& oldLogData)
-  : logRouterTags(oldLogData.logRouterTags), txsTags(oldLogData.txsTags), epochBegin(oldLogData.epochBegin),
-    epochEnd(oldLogData.epochEnd), pseudoLocalities(oldLogData.pseudoLocalities), epoch(oldLogData.epoch) {
+  : epochBegin(oldLogData.epochBegin), epochEnd(oldLogData.epochEnd), logRouterTags(oldLogData.logRouterTags),
+    txsTags(oldLogData.txsTags), pseudoLocalities(oldLogData.pseudoLocalities), epoch(oldLogData.epoch) {
 	for (const Reference<LogSet>& logSet : oldLogData.tLogs) {
 		tLogs.emplace_back(*logSet);
 	}
@@ -452,6 +452,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::pushResetChecker(Reference<Connectio
 }
 
 ACTOR Future<TLogCommitReply> TagPartitionedLogSystem::recordPushMetrics(Reference<ConnectionResetInfo> self,
+                                                                         Reference<Histogram> dist,
                                                                          NetworkAddress addr,
                                                                          Future<TLogCommitReply> in) {
 	state double startTime = now();
@@ -466,6 +467,7 @@ ACTOR Future<TLogCommitReply> TagPartitionedLogSystem::recordPushMetrics(Referen
 			self->fastReplies++;
 		}
 	}
+	dist->sampleSeconds(now() - startTime);
 	return t;
 }
 
@@ -524,6 +526,26 @@ Future<Version> TagPartitionedLogSystem::pushTLogGroup(Version prevVersion,
 	return minVersionWhenReady(waitForAll(quorumResults), allReplies);
 }
 
+ACTOR static Future<TLogCommitReply> recordPushMetrics(Reference<ConnectionResetInfo> self,
+                                                       Reference<Histogram> dist,
+                                                       NetworkAddress addr,
+                                                       Future<TLogCommitReply> in) {
+	state double startTime = now();
+	TLogCommitReply t = wait(in);
+	if (now() - self->lastReset > SERVER_KNOBS->PUSH_RESET_INTERVAL) {
+		if (now() - startTime > SERVER_KNOBS->PUSH_MAX_LATENCY) {
+			if (self->resetCheck.isReady()) {
+				self->resetCheck = TagPartitionedLogSystem::pushResetChecker(self, addr);
+			}
+			self->slowReplies++;
+		} else {
+			self->fastReplies++;
+		}
+	}
+	dist->sampleSeconds(now() - startTime);
+	return t;
+}
+
 Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
                                               Version version,
                                               Version knownCommittedVersion,
@@ -561,12 +583,21 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 					it->connectionResetTrackers.push_back(makeReference<ConnectionResetInfo>());
 				}
 			}
+			if (it->tlogPushDistTrackers.empty()) {
+				for (int i = 0; i < it->logServers.size(); i++) {
+					it->tlogPushDistTrackers.push_back(
+					    Histogram::getHistogram("ToTlog_" + it->logServers[i]->get().interf().uniqueID.toString(),
+					                            it->logServers[i]->get().interf().address().toString(),
+					                            Histogram::Unit::microseconds));
+				}
+			}
 			vector<Future<Void>> tLogCommitResults;
 			for (int loc = 0; loc < it->logServers.size(); loc++) {
 				Standalone<StringRef> msg = data.getMessages(location);
 				data.recordEmptyMessage(location, msg);
 				allReplies.push_back(recordPushMetrics(
 				    it->connectionResetTrackers[loc],
+				    it->tlogPushDistTrackers[loc],
 				    it->logServers[loc]->get().interf().address(),
 				    it->logServers[loc]->get().interf().commit.getReply(TLogCommitRequest(spanContext,
 				                                                                          msg.arena(),
@@ -1089,7 +1120,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekTxs(UID dbgid,
                                                                     bool canDiscardPopped) {
 	Version end = getEnd();
 	if (!tLogs.size()) {
-		TraceEvent("TLogPeekTxsNoLogs", dbgid);
+		TraceEvent("TLogPeekTxsNoLogs", dbgid).log();
 		return makeReference<ILogSystem::ServerPeekCursor>(
 		    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), txsTag, begin, end, false, false);
 	}
@@ -1539,11 +1570,12 @@ ACTOR Future<Version> TagPartitionedLogSystem::getPoppedTxs(TagPartitionedLogSys
 		}
 	}
 
+	state UID dbgid = self->dbgid;
 	state Future<Void> maxGetPoppedDuration = delay(SERVER_KNOBS->TXS_POPPED_MAX_DELAY);
 	wait(waitForAll(poppedReady) || maxGetPoppedDuration);
 
 	if (maxGetPoppedDuration.isReady()) {
-		TraceEvent(SevWarnAlways, "PoppedTxsNotReady", self->dbgid);
+		TraceEvent(SevWarnAlways, "PoppedTxsNotReady", dbgid).log();
 	}
 
 	Version maxPopped = 1;
@@ -2455,7 +2487,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
                                                            LogEpoch recoveryCount,
                                                            int8_t remoteLocality,
                                                            std::vector<Tag> allTags) {
-	TraceEvent("RemoteLogRecruitment_WaitingForWorkers");
+	TraceEvent("RemoteLogRecruitment_WaitingForWorkers").log();
 	state RecruitRemoteFromConfigurationReply remoteWorkers = wait(fRemoteWorkers);
 
 	state Reference<LogSet> logSet(new LogSet());
@@ -2886,7 +2918,6 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 				groups.push_back(ptxn::TLogGroup(tlogGroup->id()));
 			}
 			req.tlogGroups = groups;
-			std::cout << req.tlogGroups.size() << std::endl;
 		}
 		ptxnInitializationReplies.reserve(recr.tLogs.size());
 		for (int i = 0; i < recr.tLogs.size(); ++i) {

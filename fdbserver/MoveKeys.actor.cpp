@@ -106,7 +106,7 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
                                             const DDEnabledState* ddEnabledState,
                                             bool isWrite = true) {
 	if (!ddEnabledState->isDDEnabled()) {
-		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck");
+		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck").log();
 		throw movekeys_conflict();
 	}
 	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
@@ -641,9 +641,8 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 	state int retries = 0;
 	state FlowLock::Releaser releaser;
 
-	state std::vector<std::pair<UID, UID>> tssToKill;
 	state std::unordered_set<UID> tssToIgnore;
-	// try waiting for tss for a 2 loops, give up if they're stuck to not affect the rest of the cluster
+	// try waiting for tss for a 2 loops, give up if they're behind to not affect the rest of the cluster
 	state int waitForTSSCounter = 2;
 
 	ASSERT(!destinationTeam.empty());
@@ -663,22 +662,6 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 			// printf("finishMoveKeys( '%s'-'%s' )\n", begin.toString().c_str(), keys.end.toString().c_str());
 			loop {
 				try {
-					if (tssToKill.size()) {
-						TEST(true); // killing TSS because they were unavailable for movekeys
-
-						// Kill tss BEFORE committing main txn so that client requests don't make it to the tss when it
-						// has a different shard set than its pair use a different RYW transaction since i'm too lazy
-						// (and don't want to add bugs) by changing whole method to RYW. Also, using a different
-						// transaction makes it commit earlier which we may need to guarantee causality of tss getting
-						// removed before client sends a request to this key range on the new SS
-						wait(removeTSSPairsFromCluster(occ, tssToKill));
-
-						for (auto& tssPair : tssToKill) {
-							TraceEvent(SevWarnAlways, "TSS_KillMoveKeys").detail("TSSID", tssPair.second);
-							tssToIgnore.insert(tssPair.second);
-						}
-						tssToKill.clear();
-					}
 
 					tr.info.taskID = TaskPriority::MoveKeys;
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -821,8 +804,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 
 					// Wait for a durable quorum of servers in destServers to have keys available (readWrite)
 					// They must also have at least the transaction read version so they can't "forget" the shard
-					// between
-					//   now and when this transaction commits.
+					// between now and when this transaction commits.
 					state vector<Future<Void>> serverReady; // only for count below
 					state vector<Future<Void>> tssReady; // for waiting in parallel with tss
 					state vector<StorageServerInterface> tssReadyInterfs;
@@ -883,8 +865,8 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					             TaskPriority::MoveKeys));
 
 					// Check to see if we're waiting only on tss. If so, decrement the waiting counter.
-					// If the waiting counter is zero, kill the slow/non-responsive tss processes before finalizing the
-					// data move.
+					// If the waiting counter is zero, ignore the slow/non-responsive tss processes before finalizing
+					// the data move.
 					if (tssReady.size()) {
 						bool allSSDone = true;
 						for (auto& f : serverReady) {
@@ -908,12 +890,9 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 							if (anyTssNotDone && waitForTSSCounter == 0) {
 								for (int i = 0; i < tssReady.size(); i++) {
 									if (!tssReady[i].isReady() || tssReady[i].isError()) {
-										tssToKill.push_back(
-										    std::pair(tssReadyInterfs[i].tssPairID.get(), tssReadyInterfs[i].id()));
+										tssToIgnore.insert(tssReadyInterfs[i].id());
 									}
 								}
-								// repeat loop and go back to start to kill tss' before continuing on
-								continue;
 							}
 						}
 					}
@@ -926,22 +905,11 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					for (int s = 0; s < tssReady.size(); s++)
 						tssCount += tssReady[s].isReady() && !tssReady[s].isError();
 
-					/*if (tssReady.size()) {
-					    printf("  fMK: [%s - %s) moved data to %d/%d servers and %d/%d tss\n",
-					           begin.toString().c_str(),
-					           keys.end.toString().c_str(),
-					           count,
-					           serverReady.size(),
-					           tssCount,
-					           tssReady.size());
-					} else {
-					    printf("  fMK: [%s - %s) moved data to %d/%d servers\n",
-					           begin.toString().c_str(),
-					           keys.end.toString().c_str(),
-					           count,
-					           serverReady.size());
-					}*/
-					TraceEvent(SevDebug, waitInterval.end(), relocationIntervalId).detail("ReadyServers", count);
+					TraceEvent readyServersEv(SevDebug, waitInterval.end(), relocationIntervalId);
+					readyServersEv.detail("ReadyServers", count);
+					if (tssReady.size()) {
+						readyServersEv.detail("ReadyTSS", tssCount);
+					}
 
 					if (count == dest.size()) {
 						// update keyServers, serverKeys
@@ -1045,8 +1013,9 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 				    LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" + l.second))));
 			}
 
-			state Future<RangeResult> fTags = tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY, true);
-			state Future<RangeResult> fHistoryTags = tr->getRange(serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY, true);
+			state Future<RangeResult> fTags = tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY, Snapshot::True);
+			state Future<RangeResult> fHistoryTags =
+			    tr->getRange(serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY, Snapshot::True);
 
 			wait(success(fTagLocalities) && success(fv) && success(fTags) && success(fHistoryTags) &&
 			     success(fExclProc) && success(fExclIP) && success(fFailProc) && success(fFailIP) &&
@@ -1148,7 +1117,7 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 
 				if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
 					// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
-					TraceEvent(SevError, "TSSIdentityMappingEnabled");
+					TraceEvent(SevError, "TSSIdentityMappingEnabled").log();
 					tssMapDB.set(tr, server.id(), server.id());
 				}
 			}
@@ -1273,7 +1242,7 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 
 				if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
 					// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
-					TraceEvent(SevError, "TSSIdentityMappingEnabled");
+					TraceEvent(SevError, "TSSIdentityMappingEnabled").log();
 					tssMapDB.erase(tr, serverID);
 				} else if (tssPairID.present()) {
 					// remove the TSS from the mapping
@@ -1518,7 +1487,7 @@ void seedShardServers(Arena& arena,
 		tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
 		if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
 			// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
-			TraceEvent(SevError, "TSSIdentityMappingEnabled");
+			TraceEvent(SevError, "TSSIdentityMappingEnabled").log();
 			// hack key-backed map here since we can't really change CommitTransactionRef to a RYW transaction
 			Key uidRef = Codec<UID>::pack(s.id()).pack();
 			tr.set(arena, uidRef.withPrefix(tssMappingKeys.begin), uidRef);
@@ -1572,7 +1541,8 @@ void seedShardServers(Arena& arena,
 		TraceEvent("SeedShard", serverSrcUID[serverIndex]).detail("KeyRange", keyRange.toString());
 		krmSetPreviouslyEmptyRange(
 		    tr, arena, serverKeysPrefixFor(servers[serverIndex].first.id()), keyRange, serverKeysTrue, serverKeysFalse);
-		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, keyRange, getServersValue(serverIndex), serverKeysFalse);
+		krmSetPreviouslyEmptyRange(
+		    tr, arena, keyServersPrefix, keyRange, getServersValue(serverIndex), serverKeysFalse);
 		++serverIndex;
 		serverIndex %= numServers;
 		keyRangeStart = keySplits[index];

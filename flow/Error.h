@@ -135,8 +135,11 @@ extern bool isAssertDisabled(int line);
 #define ASSERT_THROW(expression, exception)                                                                            \
 	do {                                                                                                               \
 		bool _____exception_happened = false;                                                                          \
-		try { expression; }                                                                                            \
-		catch(exception& ex) { _____exception_happened = true; }                                                       \
+		try {                                                                                                          \
+			expression;                                                                                                \
+		} catch (exception & ex) {                                                                                     \
+			_____exception_happened = true;                                                                            \
+		}                                                                                                              \
 		if (!(_____exception_happened || isAssertDisabled(__LINE__))) {                                                \
 			throw internal_error_impl(#expression " - " #exception, __FILE__, __LINE__);                               \
 		}                                                                                                              \
@@ -147,8 +150,11 @@ extern bool isAssertDisabled(int line);
 #define ASSERT_THROW_FDB_ERROR(expression, fdb_error)                                                                  \
 	do {                                                                                                               \
 		bool _____exception_happened = false;                                                                          \
-		try { expression; }                                                                                            \
-		catch(Error& ex) { _____exception_happened = ex.code() == fdb_error().code(); }                                \
+		try {                                                                                                          \
+			expression;                                                                                                \
+		} catch (Error & ex) {                                                                                         \
+			_____exception_happened = ex.code() == fdb_error().code();                                                 \
+		}                                                                                                              \
 		if (!(_____exception_happened || isAssertDisabled(__LINE__))) {                                                \
 			throw internal_error_impl(#expression, __FILE__, __LINE__);                                                \
 		}                                                                                                              \
@@ -159,8 +165,11 @@ extern bool isAssertDisabled(int line);
 #define ASSERT_THROW_ANY_EXCEPTION(expression)                                                                         \
 	do {                                                                                                               \
 		bool _____exception_happened = false;                                                                          \
-		try { expression; }                                                                                            \
-		catch(...) { _____exception_happened = true; }                                                                 \
+		try {                                                                                                          \
+			expression;                                                                                                \
+		} catch (...) {                                                                                                \
+			_____exception_happened = true;                                                                            \
+		}                                                                                                              \
 		if (!(_____exception_happened || isAssertDisabled(__LINE__))) {                                                \
 			throw internal_error_impl(#expression, __FILE__, __LINE__);                                                \
 		}                                                                                                              \

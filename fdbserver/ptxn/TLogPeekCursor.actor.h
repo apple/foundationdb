@@ -189,18 +189,18 @@ struct ServerPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<Server
 	// Exclusive end version of the cursor
 	LogMessageVersion end;
 
-	Version poppedVersion;
+	Version poppedVersion = 0;
 	TagsAndMessage messageAndTags; // TODO: do we still have tag concept in a message
-	bool hasMsg;
+	bool hasMsg = false;
 	Future<Void> more;
 	UID dbgid; // i.e., unique debugID of this cursor.
-	bool returnIfBlocked;
+	bool returnIfBlocked = false;
 
 	int numMessagesInCurrentVersion = 0;
 	int messageIndexInCurrentVersion = 0;
 
 	bool onlySpilled = false;
-	bool parallelGetMore;
+	bool parallelGetMore = false;
 	int sequence = 0;
 	Deque<Future<ptxn::TLogPeekReply>> futureResults;
 	Future<Void> interfaceChanged;

@@ -57,8 +57,8 @@ enum {
 
 	// Log routers' locality.
 	tagLocalityLogRouter = -2,
-	tagLocalityRemoteLog = -3, // tag created by log router for remote tLogs
-	tagLocalityUpgraded = -4,
+	tagLocalityRemoteLog = -3, // tag created by log router for remote (aka. not in Primary DC) tLogs
+	tagLocalityUpgraded = -4, // tlogs with old log format
 	tagLocalitySatellite = -5,
 	tagLocalityLogRouterMapped = -6, // The pseudo tag used by log routers to pop the real LogRouter tag (i.e., -2)
 	tagLocalityTxs = -7,
@@ -683,9 +683,9 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 
 	RangeResultRef() : more(false), readToBegin(false), readThroughEnd(false) {}
 	RangeResultRef(Arena& p, const RangeResultRef& toCopy)
-	  : more(toCopy.more), readToBegin(toCopy.readToBegin), readThroughEnd(toCopy.readThroughEnd),
+	  : VectorRef<KeyValueRef>(p, toCopy), more(toCopy.more),
 	    readThrough(toCopy.readThrough.present() ? KeyRef(p, toCopy.readThrough.get()) : Optional<KeyRef>()),
-	    VectorRef<KeyValueRef>(p, toCopy) {}
+	    readToBegin(toCopy.readToBegin), readThroughEnd(toCopy.readThroughEnd) {}
 	RangeResultRef(const VectorRef<KeyValueRef>& value, bool more, Optional<KeyRef> readThrough = Optional<KeyRef>())
 	  : VectorRef<KeyValueRef>(value), more(more), readThrough(readThrough), readToBegin(false), readThroughEnd(false) {
 	}

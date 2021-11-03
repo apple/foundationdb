@@ -27,6 +27,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IConfigTransaction.h"
+#include "fdbclient/PImpl.h"
 #include "flow/Error.h"
 #include "flow/flow.h"
 
@@ -36,28 +37,28 @@
  * (the lowest coordinator by IP address), so there is no fault tolerance.
  */
 class SimpleConfigTransaction final : public IConfigTransaction, public FastAllocated<SimpleConfigTransaction> {
-	std::unique_ptr<class SimpleConfigTransactionImpl> _impl;
-	SimpleConfigTransactionImpl const& impl() const { return *_impl; }
-	SimpleConfigTransactionImpl& impl() { return *_impl; }
+	PImpl<class SimpleConfigTransactionImpl> impl;
 
 public:
 	SimpleConfigTransaction(ConfigTransactionInterface const&);
 	SimpleConfigTransaction(Database const&);
+	SimpleConfigTransaction();
+	void setDatabase(Database const&) override;
 	~SimpleConfigTransaction();
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override;
 
-	Future<Optional<Value>> get(Key const& key, bool snapshot = false) override;
-	Future<Standalone<RangeResultRef>> getRange(KeySelector const& begin,
-	                                            KeySelector const& end,
-	                                            int limit,
-	                                            bool snapshot = false,
-	                                            bool reverse = false) override;
-	Future<Standalone<RangeResultRef>> getRange(KeySelector begin,
-	                                            KeySelector end,
-	                                            GetRangeLimits limits,
-	                                            bool snapshot = false,
-	                                            bool reverse = false) override;
+	Future<Optional<Value>> get(Key const& key, Snapshot = Snapshot::False) override;
+	Future<RangeResult> getRange(KeySelector const& begin,
+	                             KeySelector const& end,
+	                             int limit,
+	                             Snapshot = Snapshot::False,
+	                             Reverse = Reverse::False) override;
+	Future<RangeResult> getRange(KeySelector begin,
+	                             KeySelector end,
+	                             GetRangeLimits limits,
+	                             Snapshot = Snapshot::False,
+	                             Reverse = Reverse::False) override;
 	Future<Void> commit() override;
 	Version getCommittedVersion() const override;
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
