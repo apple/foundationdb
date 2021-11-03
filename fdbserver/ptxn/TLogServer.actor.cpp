@@ -243,7 +243,6 @@ static Value persistTagPoppedValue(Version popped) {
 	return BinaryWriter::toValue(popped, Unversioned());
 }
 
-
 static Value persistStorageTeamPoppedValue(Version popped) {
 	return BinaryWriter::toValue(popped, Unversioned());
 }
@@ -510,7 +509,7 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 		  : storageTeamId(r.storageTeamId), tags(r.tags), versionMessages(std::move(r.versionMessages)),
 		    popped(r.popped), poppedLocation(r.poppedLocation), persistentPopped(r.persistentPopped),
 		    versionForPoppedLocation(r.versionForPoppedLocation), poppedRecently(r.poppedRecently),
-			unpoppedRecovered(r.unpoppedRecovered), nothingPersistent(r.nothingPersistent) {}
+		    unpoppedRecovered(r.unpoppedRecovered), nothingPersistent(r.nothingPersistent) {}
 		void operator=(StorageTeamData&& r) noexcept {
 			storageTeamId = r.storageTeamId;
 			nothingPersistent = r.nothingPersistent;
@@ -586,7 +585,7 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 
 	Version durableKnownCommittedVersion;
 	Version minKnownCommittedVersion;
-	
+
 	Version newPersistentDataVersion;
 
 	CounterCollection cc;
@@ -646,10 +645,9 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	                           DBRecoveryCount epoch,
 	                           const std::string& context)
 	  : tlogGroupData(tlogGroupData), knownCommittedVersion(0), logId(interf.id()), cc("TLog", interf.id().toString()),
-	    bytesInput("BytesInput", cc),  bytesDurable("BytesDurable", cc), 
-		protocolVersion(protocolVersion), storageTeams(storageTeams),
-	    logSystem(new AsyncVar<Reference<ILogSystem>>()), durableKnownCommittedVersion(0), minKnownCommittedVersion(0),
-		unrecoveredBefore(1), recoveredAt(1),
+	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), protocolVersion(protocolVersion),
+	    storageTeams(storageTeams), logSystem(new AsyncVar<Reference<ILogSystem>>()), durableKnownCommittedVersion(0),
+	    minKnownCommittedVersion(0), unrecoveredBefore(1), recoveredAt(1),
 	    terminated(tlogGroupData->terminated.getFuture()),
 	    // These are initialized differently on init() or recovery
 	    locality(locality), recruitmentID(recruitmentID), logSpillType(logSpillType) {
@@ -1639,11 +1637,13 @@ ACTOR Future<Void> tLogPop(Reference<TLogGroupData> self, TLogPopRequest req, Re
 	return Void();
 }
 
-void updatePersistentPopped(Reference<TLogGroupData> self, Reference<LogGenerationData> logData, Reference<LogGenerationData::StorageTeamData> data) {
+void updatePersistentPopped(Reference<TLogGroupData> self,
+                            Reference<LogGenerationData> logData,
+                            Reference<LogGenerationData::StorageTeamData> data) {
 	if (!data->poppedRecently)
 		return;
-	self->persistentData->set(
-	    KeyValueRef(persistStorageTeamPoppedKey(logData->logId, data->storageTeamId), persistStorageTeamPoppedValue(data->popped)));
+	self->persistentData->set(KeyValueRef(persistStorageTeamPoppedKey(logData->logId, data->storageTeamId),
+	                                      persistStorageTeamPoppedValue(data->popped)));
 	data->poppedRecently = false;
 	data->persistentPopped = data->popped;
 
@@ -1651,11 +1651,13 @@ void updatePersistentPopped(Reference<TLogGroupData> self, Reference<LogGenerati
 		return;
 
 	if (logData->shouldSpillByValue(data->storageTeamId)) {
-		self->persistentData->clear(KeyRangeRef(persistStorageTeamMessagesKey(logData->logId, data->storageTeamId, Version(0)),
-		                                        persistStorageTeamMessagesKey(logData->logId, data->storageTeamId, data->popped)));
+		self->persistentData->clear(
+		    KeyRangeRef(persistStorageTeamMessagesKey(logData->logId, data->storageTeamId, Version(0)),
+		                persistStorageTeamMessagesKey(logData->logId, data->storageTeamId, data->popped)));
 	} else {
-		self->persistentData->clear(KeyRangeRef(persistStorageTeamMessageRefsKey(logData->logId, data->storageTeamId, Version(0)),
-		                                        persistStorageTeamMessageRefsKey(logData->logId, data->storageTeamId, data->popped)));
+		self->persistentData->clear(
+		    KeyRangeRef(persistStorageTeamMessageRefsKey(logData->logId, data->storageTeamId, Version(0)),
+		                persistStorageTeamMessageRefsKey(logData->logId, data->storageTeamId, data->popped)));
 	}
 
 	if (data->popped > logData->persistentDataVersion) {
@@ -1663,7 +1665,9 @@ void updatePersistentPopped(Reference<TLogGroupData> self, Reference<LogGenerati
 	}
 }
 
-ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self, Reference<LogGenerationData> logData, Version newPersistentDataVersion) {
+ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self,
+                                        Reference<LogGenerationData> logData,
+                                        Version newPersistentDataVersion) {
 	state BinaryWriter wr(Unversioned());
 
 	// PERSIST: Changes self->persistentDataVersion and writes and commits the relevant changes
@@ -1692,8 +1696,7 @@ ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self, Reference
 			state Version lastVersion = std::numeric_limits<Version>::min();
 			state IDiskQueue::location firstLocation = std::numeric_limits<IDiskQueue::location>::max();
 			// Transfer unpopped messages with version numbers less than newPersistentDataVersion to persistentData
-			state std::map<Version, std::pair<StringRef, Arena>>::iterator msg =
-				teamData->versionMessages.begin();
+			state std::map<Version, std::pair<StringRef, Arena>>::iterator msg = teamData->versionMessages.begin();
 			state int refSpilledTagCount = 0;
 			wr = BinaryWriter(AssumeVersion(logData->protocolVersion));
 			// We prefix our spilled locations with a count, so that we can read this back out as a VectorRef.
@@ -1711,7 +1714,8 @@ ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self, Reference
 					}
 
 					self->persistentData->set(KeyValueRef(
-						persistStorageTeamMessagesKey(logData->logId, teamData->storageTeamId, currentVersion), wr.toValue()));
+					    persistStorageTeamMessagesKey(logData->logId, teamData->storageTeamId, currentVersion),
+					    wr.toValue()));
 				} else {
 					// spill everything else by reference
 					const IDiskQueue::location begin = logData->versionLocation[currentVersion].first;
@@ -1735,10 +1739,11 @@ ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self, Reference
 					firstLocation = std::min(begin, firstLocation);
 
 					if ((wr.getLength() + sizeof(SpilledData) >
-							SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH)) {
+					     SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH)) {
 						*(uint32_t*)wr.getData() = refSpilledTagCount;
 						self->persistentData->set(KeyValueRef(
-							persistStorageTeamMessageRefsKey(logData->logId, teamData->storageTeamId, lastVersion), wr.toValue()));
+						    persistStorageTeamMessageRefsKey(logData->logId, teamData->storageTeamId, lastVersion),
+						    wr.toValue()));
 						teamData->poppedLocation = std::min(teamData->poppedLocation, firstLocation);
 						refSpilledTagCount = 0;
 						wr = BinaryWriter(AssumeVersion(logData->protocolVersion));
@@ -1755,7 +1760,8 @@ ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self, Reference
 			if (refSpilledTagCount > 0) {
 				*(uint32_t*)wr.getData() = refSpilledTagCount;
 				self->persistentData->set(
-					KeyValueRef(persistStorageTeamMessageRefsKey(logData->logId, teamData->storageTeamId, lastVersion), wr.toValue()));
+				    KeyValueRef(persistStorageTeamMessageRefsKey(logData->logId, teamData->storageTeamId, lastVersion),
+				                wr.toValue()));
 				teamData->poppedLocation = std::min(teamData->poppedLocation, firstLocation);
 			}
 
@@ -1945,7 +1951,7 @@ ACTOR Future<Void> updateStorage(Reference<TLogGroupData> self) {
 		} else {
 			// Double check that a running TLog wasn't wrongly affected by spilling locked SharedTLogs.
 			ASSERT_WE_THINK(self->targetVolatileBytes == SERVER_KNOBS->TLOG_SPILL_THRESHOLD);
-			Map<Version, std::pair<int, int>>::iterator sizeItr = logData->version_sizes.begin();			
+			Map<Version, std::pair<int, int>>::iterator sizeItr = logData->version_sizes.begin();
 			while (totalSize < SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT &&
 			       sizeItr != logData->version_sizes.end() &&
 			       (logData->bytesInput.getValue() - logData->bytesDurable.getValue() - totalSize >=

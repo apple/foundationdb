@@ -648,9 +648,10 @@ TEST_CASE("/fdbserver/ptxn/test/lock_tlog") {
 	return Void();
 }
 
-ACTOR Future<std::pair<std::vector<Standalone<StringRef>>, std::vector<Version> >> commitInjectReturnVersions(std::shared_ptr<ptxn::test::TestDriverContext> pContext,
-                                                              ptxn::StorageTeamID storageTeamID,
-                                                              int numCommits) {
+ACTOR Future<std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>>> commitInjectReturnVersions(
+    std::shared_ptr<ptxn::test::TestDriverContext> pContext,
+    ptxn::StorageTeamID storageTeamID,
+    int numCommits) {
 	state ptxn::test::print::PrintTiming printTiming("tlog/commitInject");
 
 	state const ptxn::TLogGroupID tLogGroupID = pContext->storageTeamIDTLogGroupIDMapper.at(storageTeamID);
@@ -676,6 +677,9 @@ ACTOR Future<std::pair<std::vector<Standalone<StringRef>>, std::vector<Version> 
 		                      currVersion,
 		                      0,
 		                      0,
+		                      std::set<ptxn::StorageTeamID>{},
+		                      std::set<ptxn::StorageTeamID>{},
+		                      std::map<ptxn::StorageTeamID, vector<Tag>>(),
 		                      Optional<UID>());
 		writtenMessages.emplace_back(getLogEntryContent(requests.back(), pInterface->id()));
 		versions.push_back(currVersion);
@@ -788,7 +792,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 
 	state IKeyValueStore* d = ds[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
 
-	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version> > res =
+	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>> res =
 	    wait(commitInjectReturnVersions(pContext, storageTeamID, pContext->numCommits));
 	state std::vector<Standalone<StringRef>> expectedMessages = res.first;
 	wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
