@@ -124,9 +124,10 @@ func main() {
 				logger.Error(err, "Error copying files")
 				os.Exit(1)
 			}
-			done := make(chan bool)
-			<-done
 		}
+		logger.Info("Waiting for process to be terminated")
+		done := make(chan bool)
+		<-done
 	default:
 		logger.Error(nil, "Unknown execution mode", "mode", mode)
 		os.Exit(1)

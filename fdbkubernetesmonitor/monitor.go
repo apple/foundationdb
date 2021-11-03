@@ -83,7 +83,7 @@ type Monitor struct {
 
 // StartMonitor starts the monitor loop.
 func StartMonitor(logger logr.Logger, configFile string, customEnvironment map[string]string) {
-	podClient, err := CreatePodClient()
+	podClient, err := CreatePodClient(logger)
 	if err != nil {
 		panic(err)
 	}
