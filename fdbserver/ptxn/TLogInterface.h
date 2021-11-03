@@ -253,6 +253,10 @@ struct TLogPopRequest {
 
 	ReplyPromise<Void> reply;
 
+	TLogPopRequest(Version version, Version durableKnownCommittedVersion, Tag tag)
+	  : version(version), durableKnownCommittedVersion(durableKnownCommittedVersion), tag(tag) {}
+	TLogPopRequest() {}
+
 	template <typename Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, arena, version, durableKnownCommittedVersion, tag, storageTeamID, reply);

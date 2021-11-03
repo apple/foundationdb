@@ -1105,6 +1105,8 @@ ACTOR Future<Void> tLog(
     std::string folder,
     Reference<AsyncVar<bool>> degraded,
     Reference<AsyncVar<UID>> activeSharedTLog);
+
+Key persistStorageTeamMessageRefsKey(UID id, StorageTeamID storageTeamId, Version version);
 }
 
 typedef decltype(&tLog) TLogFn;
