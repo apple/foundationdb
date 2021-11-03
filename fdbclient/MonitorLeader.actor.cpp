@@ -48,6 +48,14 @@ std::string trim(std::string const& connectionString) {
 	return trimmed;
 }
 
+std::string trimFromHostname(std::string const& networkAddress) {
+	std::string result = networkAddress;
+	if (result.find("(fromHostname)") != std::string::npos) {
+		return result.substr(0, result.find("(fromHostname)"));
+	}
+	return result;
+}
+
 } // namespace
 
 FDB_DEFINE_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
@@ -269,9 +277,10 @@ std::string ClusterConnectionString::toString() const {
 	std::string s = key.toString();
 	s += '@';
 	for (int i = 0; i < coord.size(); i++) {
-		if (i)
+		if (i) {
 			s += ',';
-		s += coord[i].toString();
+		}
+		s += trimFromHostname(coord[i].toString());
 	}
 	return s;
 }
