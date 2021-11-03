@@ -59,8 +59,8 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	typedef struct readgranulecontext {
 		void* userContext;
 		int64_t (*start_load_f)(const char*, int, int64_t, int64_t, void*);
-		uint8_t (*get_load_f)(int64_t, void*);
-		void (*free_load_f)(uint8_t*);
+		uint8_t* (*get_load_f)(int64_t, void*);
+		void (*free_load_f)(int64_t, void*);
 	} FDBReadBlobGranuleContext;
 
 	typedef int fdb_error_t;

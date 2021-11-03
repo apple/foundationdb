@@ -203,7 +203,7 @@ description is not currently required but encouraged.
     <Option name="test_causal_read_risky" code="900"
             description="An integer between 0 and 100 (default is 0) expressing the probability that a client will verify it can't read stale data whenever it detects a recovery." />
     <Option name="test_bg_no_materialize" code="901"
-            description="An integer between 0 and 100 (default is 0) expressing the probability that a client will verify it can't read stale data whenever it detects a recovery." />
+            description="Blob Granule reads do not actually materialize the result. Used for testing the server-side load of blob granule reading without the client side." />
   </Scope>
   
   <Scope name="TransactionOption">

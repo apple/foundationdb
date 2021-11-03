@@ -1181,8 +1181,8 @@ inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 struct ReadBlobGranuleContext {
 	void* userContext;
 	int64_t (*start_load_f)(const char*, int, int64_t, int64_t, void*);
-	uint8_t (*get_load_f)(int64_t, void*);
-	void (*free_load_f)(uint8_t*);
+	uint8_t* (*get_load_f)(int64_t, void*);
+	void (*free_load_f)(int64_t, void*);
 };
 
 #endif

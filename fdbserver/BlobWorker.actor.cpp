@@ -1822,6 +1822,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 			}
 			state Reference<GranuleMetadata> metadata = m;
 
+			// don't do 'if (canBeSet)'
 			if (metadata->readable.canBeSet()) {
 				wait(metadata->readable.getFuture());
 			}

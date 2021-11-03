@@ -84,7 +84,8 @@ enum Arguments {
 	ARG_STREAMING_MODE,
 	ARG_DISABLE_RYW,
 	ARG_CLIENT_THREADS_PER_VERSION,
-	ARG_JSON_REPORT
+	ARG_JSON_REPORT,
+	ARG_BG_FILE_PATH // if blob granule files are stored locally, mako will read and materialize them if this is set
 };
 
 enum TPSChangeTypes { TPS_SIN, TPS_SQUARE, TPS_PULSE };
@@ -147,6 +148,8 @@ typedef struct {
 	uint32_t client_threads_per_version;
 	int disable_ryw;
 	char json_output_path[PATH_MAX];
+	bool bg_materialize_files;
+	char bg_file_path[PATH_MAX];
 } mako_args_t;
 
 /* shared memory */

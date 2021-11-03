@@ -145,8 +145,6 @@ ThreadFuture<RangeResult> ThreadSafeDatabase::readBlobGranules(const KeyRangeRef
 		RangeResult chunkRows;
 
 		if (!db->blobGranuleNoMaterialize) {
-			// FIXME: actually implement file loading and materialization! For now just printing stuff out
-
 			// Start load process for all files in chunk
 			// In V1 of api snapshot is required, optional is just for forward compatibility
 			ASSERT(chunk.snapshotFile.present());
@@ -156,9 +154,9 @@ ThreadFuture<RangeResult> ThreadSafeDatabase::readBlobGranules(const KeyRangeRef
 			                                                      chunk.snapshotFile.get().offset,
 			                                                      chunk.snapshotFile.get().length,
 			                                                      granule_context.userContext);
-			printf("  S_ID=%lld\n", snapshotLoadId); // TODO REMOVE
-
 			int64_t deltaLoadIds[chunk.deltaFiles.size()];
+			int64_t deltaLoadLengths[chunk.deltaFiles.size()];
+			uint8_t* deltaData[chunk.deltaFiles.size()];
 			for (int deltaFileIdx = 0; deltaFileIdx < chunk.deltaFiles.size(); deltaFileIdx++) {
 				std::string deltaFName = chunk.deltaFiles[deltaFileIdx].filename.toString();
 				deltaLoadIds[deltaFileIdx] = granule_context.start_load_f(deltaFName.c_str(),
@@ -166,7 +164,20 @@ ThreadFuture<RangeResult> ThreadSafeDatabase::readBlobGranules(const KeyRangeRef
 				                                                          chunk.deltaFiles[deltaFileIdx].offset,
 				                                                          chunk.deltaFiles[deltaFileIdx].length,
 				                                                          granule_context.userContext);
-				printf("  D_ID=%lld\n", deltaLoadIds[deltaFileIdx]); // TODO REMOVE
+				deltaLoadLengths[deltaFileIdx] = chunk.deltaFiles[deltaFileIdx].length;
+			}
+
+			// once all loads kicked off, load data for chunk
+			uint8_t* snapshotData = granule_context.get_load_f(snapshotLoadId, granule_context.userContext);
+			for (int i = 0; i < chunk.deltaFiles.size(); i++) {
+				deltaData[i] = granule_context.get_load_f(deltaLoadIds[i], granule_context.userContext);
+			}
+
+			// FIXME: use bytes from snapshot and delta to materialize chunkRows
+
+			granule_context.free_load_f(snapshotLoadId, granule_context.userContext);
+			for (int i = 0; i < chunk.deltaFiles.size(); i++) {
+				granule_context.free_load_f(deltaLoadIds[i], granule_context.userContext);
 			}
 		}
 
