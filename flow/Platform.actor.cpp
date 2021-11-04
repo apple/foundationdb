@@ -3763,6 +3763,7 @@ volatile bool profileThread = false;
 volatile int64_t profileThreadId = -1;
 void (*chainedSignalHandler)(int) = nullptr;
 volatile bool profilingEnabled = 1;
+volatile thread_local bool flowProfilingEnabled = 1;
 
 volatile int64_t numProfilesDisabled = 0;
 volatile int64_t numProfilesOverflowed = 0;
@@ -3840,6 +3841,7 @@ void setProfilingEnabled(int enabled) {
 	if (profileThread) {
 		profilingEnabled = enabled;
 	}
+	flowProfilingEnabled = enabled;
 #else
 	// No profiling for other platforms!
 #endif
