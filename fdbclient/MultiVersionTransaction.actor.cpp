@@ -141,41 +141,6 @@ ThreadFuture<RangeResult> DLTransaction::getRange(const KeyRangeRef& keys,
 	return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 }
 
-ThreadFuture<RangeResult> DLTransaction::getRangeAndFlatMap(const KeySelectorRef& begin,
-                                                            const KeySelectorRef& end,
-                                                            const StringRef& mapper,
-                                                            GetRangeLimits limits,
-                                                            bool snapshot,
-                                                            bool reverse) {
-	FdbCApi::FDBFuture* f = api->transactionGetRangeAndFlatMap(tr,
-	                                                           begin.getKey().begin(),
-	                                                           begin.getKey().size(),
-	                                                           begin.orEqual,
-	                                                           begin.offset,
-	                                                           end.getKey().begin(),
-	                                                           end.getKey().size(),
-	                                                           end.orEqual,
-	                                                           end.offset,
-	                                                           mapper.begin(),
-	                                                           mapper.size(),
-	                                                           limits.rows,
-	                                                           limits.bytes,
-	                                                           FDB_STREAMING_MODE_EXACT,
-	                                                           0,
-	                                                           snapshot,
-	                                                           reverse);
-	return toThreadFuture<RangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const FdbCApi::FDBKeyValue* kvs;
-		int count;
-		FdbCApi::fdb_bool_t more;
-		FdbCApi::fdb_error_t error = api->futureGetKeyValueArray(f, &kvs, &count, &more);
-		ASSERT(!error);
-
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena());
-	});
-}
-
 ThreadFuture<Standalone<VectorRef<const char*>>> DLTransaction::getAddressesForKey(const KeyRef& key) {
 	FdbCApi::FDBFuture* f = api->transactionGetAddressesForKey(tr, key.begin(), key.size());
 
@@ -487,7 +452,6 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionGetKey, lib, fdbCPath, "fdb_transaction_get_key");
 	loadClientFunction(&api->transactionGetAddressesForKey, lib, fdbCPath, "fdb_transaction_get_addresses_for_key");
 	loadClientFunction(&api->transactionGetRange, lib, fdbCPath, "fdb_transaction_get_range");
-	loadClientFunction(&api->transactionGetRangeAndFlatMap, lib, fdbCPath, "fdb_transaction_get_range_and_flat_map");
 	loadClientFunction(
 	    &api->transactionGetVersionstamp, lib, fdbCPath, "fdb_transaction_get_versionstamp", headerVersion >= 410);
 	loadClientFunction(&api->transactionSet, lib, fdbCPath, "fdb_transaction_set");
@@ -764,18 +728,6 @@ ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& k
                                                             bool reverse) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRange(keys, limits, snapshot, reverse) : makeTimeout<RangeResult>();
-	return abortableFuture(f, tr.onChange);
-}
-
-ThreadFuture<RangeResult> MultiVersionTransaction::getRangeAndFlatMap(const KeySelectorRef& begin,
-                                                                      const KeySelectorRef& end,
-                                                                      const StringRef& mapper,
-                                                                      GetRangeLimits limits,
-                                                                      bool snapshot,
-                                                                      bool reverse) {
-	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getRangeAndFlatMap(begin, end, mapper, limits, snapshot, reverse)
-	                        : makeTimeout<RangeResult>();
 	return abortableFuture(f, tr.onChange);
 }
 
