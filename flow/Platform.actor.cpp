@@ -3759,8 +3759,13 @@ std::atomic<bool> loopProfilerStopRequested = false;
 } // namespace
 #endif
 
-volatile bool profileThread = false;
+// True if this thread is the thread being profiled. Not to be used from the signal handler.
+thread_local bool profileThread = false;
+
+// The thread ID of the profiled thread. This can be compared against the current thread ID
+// to see if we are on the profiled thread. Can be used in the signal handler.
 volatile int64_t profileThreadId = -1;
+
 void (*chainedSignalHandler)(int) = nullptr;
 volatile bool profilingEnabled = 1;
 volatile thread_local bool flowProfilingEnabled = 1;
@@ -3799,6 +3804,8 @@ void profileHandler(int sig) {
 		chainedSignalHandler(sig);
 	}
 
+	// This is not documented in the POSIX list of signal-safe functions, but numbered syscalls are reported to be
+	// async safe in Linux.
 	if (profileThreadId != syscall(SYS_gettid)) {
 		return;
 	} else if (!profilingEnabled) {
@@ -3990,21 +3997,31 @@ void setupRunLoopProfiler() {
 #ifdef __linux__
 	if (profileThreadId == -1 && FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
 		TraceEvent("StartingRunLoopProfilingThread").detail("Interval", FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
-		initProfiling();
 
 		profileThread = true;
 		profileThreadId = syscall(__NR_gettid);
-		;
+		if (profileThreadId < 0) {
+			TraceEvent(SevWarnAlways, "RunLoopProfilingSetupFailed")
+			    .detail("Reason", "Error getting thread ID")
+			    .GetLastError();
+			return;
+		}
+
+		initProfiling();
 
 		struct sigaction oldAction;
 		struct sigaction action;
 		action.sa_handler = profileHandler;
 		sigfillset(&action.sa_mask);
 		action.sa_flags = 0;
-		sigaction(SIGPROF, &action, &oldAction);
+		if (sigaction(SIGPROF, &action, &oldAction)) {
+			TraceEvent(SevWarnAlways, "RunLoopProfilingSetupFailed")
+			    .detail("Reason", "Error configuring signal handler")
+			    .GetLastError();
+			return;
+		}
 
-		if (oldAction.sa_handler != SIG_DFL && oldAction.sa_handler != SIG_ERR && oldAction.sa_handler != SIG_IGN &&
-		    oldAction.sa_handler != NULL) {
+		if (oldAction.sa_handler != SIG_DFL && oldAction.sa_handler != SIG_IGN && oldAction.sa_handler != NULL) {
 			chainedSignalHandler = oldAction.sa_handler;
 		} else {
 			chainedSignalHandler = nullptr;
