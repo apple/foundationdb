@@ -6063,6 +6063,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder) {
 	state StorageServer self(persistentData, db, ssi);
+	state Future<Void> ssCore;
 	if (ssi.isTss()) {
 		self.setTssPair(ssi.tssPairID.get());
 		ASSERT(self.isTss());
@@ -6102,7 +6103,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		recruitReply.send(rep);
 		self.byteSampleRecovery = Void();
 
-		wait(storageServerCore(&self, ssi));
+		ssCore = storageServerCore(&self, ssi);
+		wait(ssCore);
 
 		throw internal_error();
 	} catch (Error& e) {
@@ -6110,15 +6112,19 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		// (ClusterController, and from there to the DataDistributionTeamCollection)
 		if (!recruitReply.isSet())
 			recruitReply.sendError(recruitment_failed());
-		if (e.code() == error_code_actor_cancelled)
-			throw e;
 
 		// If the storage server dies while something that uses self is still on the stack,
 		// we want that actor to complete before we terminate and that memory goes out of scope
 		state Error err = e;
-		wait(delay(0));
-		if (storageServerTerminated(self, persistentData, err))
+		if (storageServerTerminated(self, persistentData, err)) {
+			ssCore.cancel();
+			self.actors.clear(true);
+			wait(delay(0));
 			return Void();
+		}
+		ssCore.cancel();
+		self.actors.clear(true);
+		wait(delay(0));
 		throw err;
 	}
 }
@@ -6267,6 +6273,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Promise<Void> recovered,
                                  Reference<IClusterConnectionRecord> connRecord) {
 	state StorageServer self(persistentData, db, ssi);
+	state Future<Void> ssCore;
 	self.folder = folder;
 
 	try {
@@ -6321,22 +6328,26 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		TraceEvent("StorageServerStartingCore", self.thisServerID).detail("TimeTaken", now() - start);
 
 		// wait( delay(0) );  // To make sure self->zkMasterInfo.onChanged is available to wait on
-		wait(storageServerCore(&self, ssi));
+		ssCore = storageServerCore(&self, ssi);
+		wait(ssCore);
 
 		throw internal_error();
 	} catch (Error& e) {
 		if (recovered.canBeSet())
 			recovered.send(Void());
 
-		if (e.code() == error_code_actor_cancelled)
-			throw e;
-
 		// If the storage server dies while something that uses self is still on the stack,
 		// we want that actor to complete before we terminate and that memory goes out of scope
 		state Error err = e;
-		wait(delay(0));
-		if (storageServerTerminated(self, persistentData, err))
+		if (storageServerTerminated(self, persistentData, err)) {
+			ssCore.cancel();
+			self.actors.clear(true);
+			wait(delay(0));
 			return Void();
+		}
+		ssCore.cancel();
+		self.actors.clear(true);
+		wait(delay(0));
 		throw err;
 	}
 }
