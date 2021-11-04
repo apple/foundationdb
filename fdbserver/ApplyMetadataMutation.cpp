@@ -132,7 +132,6 @@ private:
 	std::map<UID, Reference<StorageInfo>>* storageCache = nullptr;
 	std::map<Tag, Version>* tag_popped = nullptr;
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
-	std::unordered_map<UID, std::vector<std::pair<ptxn::StorageTeamID, bool>>>* changedTeams = nullptr;
 
 	Reference<TLogGroupCollection> tLogGroupCollection;
 
@@ -156,6 +155,7 @@ private:
 
 	std::map<Tag, UID>* tagToServer = nullptr;
 	std::unordered_map<UID, ptxn::StorageTeamID>* ssToStorageTeam = nullptr;
+	std::unordered_map<UID, std::vector<std::pair<ptxn::StorageTeamID, bool>>>* changedTeams = nullptr;
 
 	// All SSes' own teams, populated from ssToStorageTeam mapping.
 	std::set<ptxn::StorageTeamID> allTeams;
