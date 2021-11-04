@@ -1739,7 +1739,27 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 	state double workStart = now();
 
-	Version poppedVer = poppedVersion(logData, reqTag);
+	state Version poppedVer = poppedVersion(logData, reqTag);
+
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && poppedVer <= reqBegin &&
+	    reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled && reqTag.locality >= 0 &&
+	    !reqReturnIfBlocked) {
+		state double startTime = now();
+		// TODO (version vector) check if this should be included in "status details" json
+		// TODO (version vector) all tags may be too many, instead,  standard deviation?
+		wait(waitForMessagesForTag(logData, reqTag, reqBegin, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
+		double latency = now() - startTime;
+		if (logData->blockingPeekLatencies.find(reqTag) == logData->blockingPeekLatencies.end()) {
+			UID ssID = nondeterministicRandom()->randomUniqueID();
+			std::string s = "BlockingPeekLatencies-" + reqTag.toString();
+			logData->blockingPeekLatencies.try_emplace(
+			    reqTag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE);
+		}
+		LatencySample& sample = logData->blockingPeekLatencies.at(reqTag);
+		sample.addMeasurement(latency);
+		poppedVer = poppedVersion(logData, reqTag);
+	}
+
 	if (poppedVer > reqBegin) {
 		TLogPeekReply rep;
 		rep.maxKnownVersion = logData->version.get();
@@ -1774,22 +1794,6 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		return Void();
 	}
 
-	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled &&
-	    reqTag.locality >= 0 && !reqReturnIfBlocked) {
-		state double startTime = now();
-		// TODO (version vector) check if this should be included in "status details" json
-		// TODO (version vector) all tags may be too many, instead,  standard deviation?
-		wait(waitForMessagesForTag(logData, reqTag, reqBegin, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
-		double latency = now() - startTime;
-		if (logData->blockingPeekLatencies.find(reqTag) == logData->blockingPeekLatencies.end()) {
-			UID ssID = nondeterministicRandom()->randomUniqueID();
-			std::string s = "BlockingPeekLatencies " + reqTag.toString();
-			logData->blockingPeekLatencies.try_emplace(
-			    reqTag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE);
-		}
-		LatencySample& sample = logData->blockingPeekLatencies.at(reqTag);
-		sample.addMeasurement(latency);
-	}
 	state Version endVersion = logData->version.get() + 1;
 	state bool onlySpilled = false;
 	state uint32_t memPeekCount = 0; // number of versions peeked from memory
