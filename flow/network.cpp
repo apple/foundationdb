@@ -90,9 +90,10 @@ NetworkAddress NetworkAddress::parse(std::string const& s) {
 	bool isTLS = false;
 	NetworkAddressFromHostname fromHostname = NetworkAddressFromHostname::False;
 	std::string f = s;
-	if (f.find("(fromHostname)") != std::string::npos) {
+	const auto& pos = f.find("(fromHostname)");
+	if (pos != std::string::npos) {
 		fromHostname = NetworkAddressFromHostname::True;
-		f = f.substr(0, f.find("(fromHostname)"));
+		f = f.substr(0, pos);
 	}
 	if (f.size() > 4 && strcmp(f.c_str() + f.size() - 4, ":tls") == 0) {
 		isTLS = true;
