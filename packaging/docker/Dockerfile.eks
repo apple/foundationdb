@@ -25,6 +25,7 @@ RUN yum install -y \
     gdb \
     jq \
     less \
+    libsanitizer \
     lsof \
     nc \
     net-tools \
