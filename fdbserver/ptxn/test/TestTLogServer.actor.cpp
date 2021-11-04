@@ -118,7 +118,12 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 	}
 	std::vector<ptxn::TLogInterface_PassivelyPull> interfaces = wait(getAll(interfaceFutures));
 	for (i = 0; i < pContext->numTLogs; i++) {
-		*(pContext->tLogInterfaces[i]) = interfaces[i];
+		// This is awkward, but we can't do: *(pContext->tLogInterfaces[i]) = interfaces[i]
+		// because this only copies the base class data. The pointer can no longer
+		// be casted back to "TLogInterface_PassivelyPull".
+		std::shared_ptr<ptxn::TLogInterface_PassivelyPull> tli(new ptxn::TLogInterface_PassivelyPull());
+		*tli = interfaces[i];
+		pContext->tLogInterfaces[i] = std::static_pointer_cast<ptxn::TLogInterfaceBase>(tli);
 	}
 	// Update the TLogGroupID to interface mapping
 	for (auto& [tLogGroupID, tLogGroupLeader] : pContext->tLogGroupLeaders) {
@@ -239,11 +244,12 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 	tLogSet.locality = locality;
 
 	printTiming << "Assign TLog group leaders" << std::endl;
-	for (auto tLogGroup : pContext->tLogGroupLeaders) {
+	for (auto& [groupID, interf] : pContext->tLogGroupLeaders) {
+		auto tlogInterf = std::dynamic_pointer_cast<ptxn::TLogInterface_PassivelyPull>(interf);
+		ASSERT(tlogInterf != nullptr);
 		OptionalInterface<ptxn::TLogInterface_PassivelyPull> optionalInterface =
-		    OptionalInterface<ptxn::TLogInterface_PassivelyPull>(
-		        *std::dynamic_pointer_cast<ptxn::TLogInterface_PassivelyPull>(tLogGroup.second));
-		tLogSet.tLogGroupIDs.push_back(tLogGroup.first);
+		    OptionalInterface<ptxn::TLogInterface_PassivelyPull>(*tlogInterf);
+		tLogSet.tLogGroupIDs.push_back(groupID);
 		tLogSet.ptxnTLogGroups.emplace_back();
 		tLogSet.ptxnTLogGroups.back().push_back(optionalInterface);
 	}
