@@ -7099,13 +7099,13 @@ public:
 
 				// The last entry in an internal page could be a null link, if so move back
 				if (!forward && !entry.cursor.get().value.present()) {
-					ASSERT(entry.cursor.movePrev());
-					ASSERT(entry.cursor.get().value.present());
+					UNSTOPPABLE_ASSERT(entry.cursor.movePrev());
+					UNSTOPPABLE_ASSERT(entry.cursor.get().value.present());
 				}
 
 				wait(self->pushPage(entry.cursor));
 				auto& newEntry = self->path.back();
-				ASSERT(forward ? newEntry.cursor.moveFirst() : newEntry.cursor.moveLast());
+				UNSTOPPABLE_ASSERT(forward ? newEntry.cursor.moveFirst() : newEntry.cursor.moveLast());
 			}
 
 			self->valid = true;
