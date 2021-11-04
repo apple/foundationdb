@@ -3799,7 +3799,7 @@ void profileHandler(int sig) {
 
 	// This is not documented in the POSIX list of signal-safe functions, but numbered syscalls are reported to be
 	// async safe in Linux.
-	if (profileThreadId != syscall(SYS_gettid)) {
+	if (profileThreadId != syscall(__NR_gettid)) {
 		return;
 	} else if (!profilingEnabled) {
 		++numProfilesDisabled;
