@@ -2317,6 +2317,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		std::pair<uint64_t, uint64_t> minMaxTeamsOnServer = calculateMinMaxServerTeamsOnServer();
 		std::pair<uint64_t, uint64_t> minMaxMachineTeamsOnMachine = calculateMinMaxMachineTeamsOnMachine();
 
+		traceMachineInfo();
+
 		TraceEvent("TeamCollectionInfo", distributorId)
 		    .detail("Primary", primary)
 		    .detail("AddedTeams", addedTeams)
