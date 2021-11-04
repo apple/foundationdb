@@ -74,16 +74,6 @@ public:
 		using Result = RangeResult;
 	};
 
-	template <bool reverse>
-	struct GetRangeAndFlatMapReq {
-		GetRangeAndFlatMapReq(KeySelector begin, KeySelector end, Key mapper, GetRangeLimits limits)
-		  : begin(begin), end(end), mapper(mapper), limits(limits) {}
-		KeySelector begin, end;
-		Key mapper;
-		GetRangeLimits limits;
-		using Result = RangeResult;
-	};
-
 	// read() Performs a read (get, getKey, getRange, etc), in the context of the given transaction.  Snapshot or RYW
 	// reads are distingushed by the type Iter being SnapshotCache::iterator or RYWIterator. Fills in the snapshot cache
 	// as a side effect but does not affect conflict ranges. Some (indicated) overloads of read are required to update
@@ -213,36 +203,6 @@ public:
 		return v;
 	}
 
-	ACTOR template <bool backwards>
-	static Future<RangeResult> readThroughAndFlatMap(ReadYourWritesTransaction* ryw,
-	                                                 GetRangeAndFlatMapReq<backwards> read,
-	                                                 Snapshot snapshot) {
-		if (backwards && read.end.offset > 1) {
-			// FIXME: Optimistically assume that this will not run into the system keys, and only reissue if the result
-			// actually does.
-			Key key = wait(ryw->tr.getKey(read.end, snapshot));
-			if (key > ryw->getMaxReadKey())
-				read.end = firstGreaterOrEqual(ryw->getMaxReadKey());
-			else
-				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
-		}
-
-		RangeResult v = wait(ryw->tr.getRangeAndFlatMap(
-		    read.begin, read.end, read.mapper, read.limits, snapshot, backwards ? Reverse::True : Reverse::False));
-		KeyRef maxKey = ryw->getMaxReadKey();
-		if (v.size() > 0) {
-			if (!backwards && v[v.size() - 1].key >= maxKey) {
-				state RangeResult _v = v;
-				int i = _v.size() - 2;
-				for (; i >= 0 && _v[i].key >= maxKey; --i) {
-				}
-				return RangeResult(RangeResultRef(VectorRef<KeyValueRef>(&_v[0], i + 1), false), _v.arena());
-			}
-		}
-
-		return v;
-	}
-
 	// addConflictRange(ryw,read,result) is called after a serializable read and is responsible for adding the relevant
 	// conflict range
 
@@ -349,15 +309,6 @@ public:
 		}
 	}
 	ACTOR template <class Req>
-	static Future<typename Req::Result> readWithConflictRangeThroughAndFlatMap(ReadYourWritesTransaction* ryw,
-	                                                                           Req req,
-	                                                                           Snapshot snapshot) {
-		choose {
-			when(typename Req::Result result = wait(readThroughAndFlatMap(ryw, req, snapshot))) { return result; }
-			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
-		}
-	}
-	ACTOR template <class Req>
 	static Future<typename Req::Result> readWithConflictRangeSnapshot(ReadYourWritesTransaction* ryw, Req req) {
 		state SnapshotCache::iterator it(&ryw->cache, &ryw->writes);
 		choose {
@@ -391,20 +342,6 @@ public:
 			return readWithConflictRangeSnapshot(ryw, req);
 		}
 		return readWithConflictRangeRYW(ryw, req, snapshot);
-	}
-
-	template <class Req>
-	static inline Future<typename Req::Result> readWithConflictRangeAndFlatMap(ReadYourWritesTransaction* ryw,
-	                                                                           Req const& req,
-	                                                                           Snapshot snapshot) {
-		if (ryw->options.readYourWritesDisabled) {
-			return readWithConflictRangeThroughAndFlatMap(ryw, req, snapshot);
-		} else if (snapshot && ryw->options.snapshotRywEnabled <= 0) {
-			TEST(true); // readWithConflictRangeSnapshot not supported for getRangeAndFlatMap
-			throw client_invalid_operation();
-		}
-		TEST(true); // readWithConflictRangeRYW not supported for getRangeAndFlatMap
-		throw client_invalid_operation();
 	}
 
 	template <class Iter>
@@ -1570,65 +1507,6 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(const KeySelector& begin
                                                         Snapshot snapshot,
                                                         Reverse reverse) {
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
-}
-
-Future<RangeResult> ReadYourWritesTransaction::getRangeAndFlatMap(KeySelector begin,
-                                                                  KeySelector end,
-                                                                  Key mapper,
-                                                                  GetRangeLimits limits,
-                                                                  Snapshot snapshot,
-                                                                  Reverse reverse) {
-	if (getDatabase()->apiVersionAtLeast(630)) {
-		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
-		    end.getKey() <= specialKeys.end) {
-			TEST(true); // Special key space get range (FlatMap)
-			throw client_invalid_operation(); // Not support special keys.
-		}
-	} else {
-		if (begin.getKey() == LiteralStringRef("\xff\xff/worker_interfaces")) {
-			throw client_invalid_operation(); // Not support special keys.
-		}
-	}
-
-	if (checkUsedDuringCommit()) {
-		return used_during_commit();
-	}
-
-	if (resetPromise.isSet())
-		return resetPromise.getFuture().getError();
-
-	KeyRef maxKey = getMaxReadKey();
-	if (begin.getKey() > maxKey || end.getKey() > maxKey)
-		return key_outside_legal_range();
-
-	// This optimization prevents nullptr operations from being added to the conflict range
-	if (limits.isReached()) {
-		TEST(true); // RYW range read limit 0 (FlatMap)
-		return RangeResult();
-	}
-
-	if (!limits.isValid())
-		return range_limits_invalid();
-
-	if (begin.orEqual)
-		begin.removeOrEqual(begin.arena());
-
-	if (end.orEqual)
-		end.removeOrEqual(end.arena());
-
-	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
-		TEST(true); // RYW range inverted (FlatMap)
-		return RangeResult();
-	}
-
-	Future<RangeResult> result =
-	    reverse ? RYWImpl::readWithConflictRangeAndFlatMap(
-	                  this, RYWImpl::GetRangeAndFlatMapReq<true>(begin, end, mapper, limits), snapshot)
-	            : RYWImpl::readWithConflictRangeAndFlatMap(
-	                  this, RYWImpl::GetRangeAndFlatMapReq<false>(begin, end, mapper, limits), snapshot);
-
-	reading.add(success(result));
-	return result;
 }
 
 Future<Standalone<VectorRef<const char*>>> ReadYourWritesTransaction::getAddressesForKey(const Key& key) {
