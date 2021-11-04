@@ -59,12 +59,6 @@ public:
 	                                           GetRangeLimits limits,
 	                                           bool snapshot = false,
 	                                           bool reverse = false) = 0;
-	virtual ThreadFuture<RangeResult> getRangeAndFlatMap(const KeySelectorRef& begin,
-	                                                     const KeySelectorRef& end,
-	                                                     const StringRef& mapper,
-	                                                     GetRangeLimits limits,
-	                                                     bool snapshot = false,
-	                                                     bool reverse = false) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) = 0;
 	virtual ThreadFuture<Standalone<StringRef>> getVersionstamp() = 0;
 

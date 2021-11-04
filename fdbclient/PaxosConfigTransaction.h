@@ -50,14 +50,6 @@ public:
 	                             GetRangeLimits limits,
 	                             Snapshot = Snapshot::False,
 	                             Reverse = Reverse::False) override;
-	Future<RangeResult> getRangeAndFlatMap(KeySelector begin,
-	                                       KeySelector end,
-	                                       Key mapper,
-	                                       GetRangeLimits limits,
-	                                       Snapshot = Snapshot::False,
-	                                       Reverse = Reverse::False) override {
-		throw client_invalid_operation();
-	}
 	void set(KeyRef const& key, ValueRef const& value) override;
 	void clear(KeyRangeRef const&) override { throw client_invalid_operation(); }
 	void clear(KeyRef const&) override;
