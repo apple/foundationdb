@@ -1316,17 +1316,18 @@ ACTOR Future<Void> blobWorkerRecruiter(
 }
 
 // TODO: make this its own role if it becomes a performance bottleneck for BM
-ACTOR Future<Void> blobPruner(PromiseStream<PruneFilesRequest>& pruneFiles) {
-	Version lastDeleteTime = 0;
+ACTOR Future<Void> blobPruner(PromiseStream<Version>& pruneFiles) {
+	Version lastDeleteVersion = 0;
 	loop {
-		PruneFilesRequest req = waitNext(pruneFiles.getFuture());
+		Version deleteVersion = waitNext(pruneFiles.getFuture());
 
 		// if this is an old prune request, then do nothing since we
 		// already saw a newer prune request
-		if (lastDeleteTime >= req.pruneVersion) {
+		if (lastDeleteVersion >= deleteVersion) {
 			continue;
 		}
-		lastDeleteTime = req.pruneVersion;
+
+		lastDeleteVersion = deleteVersion;
 
 		// TODO: implement deletion logic
 	}
@@ -1336,7 +1337,7 @@ ACTOR Future<Void> blobPruner(PromiseStream<PruneFilesRequest>& pruneFiles) {
 // When a new blob manager is created, we want to prune right away so that
 // if the previous blob manager died right before pruning, we don't wait approximately 2R
 // versions before pruning
-ACTOR Future<Void> blobPrunerScheduler(BlobManagerData* self, PromiseStream<PruneFilesRequest>& deleteFiles) {
+ACTOR Future<Void> blobPrunerScheduler(BlobManagerData* self, PromiseStream<Version>& deleteFiles) {
 	loop {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
 
@@ -1361,13 +1362,14 @@ ACTOR Future<Void> blobPrunerScheduler(BlobManagerData* self, PromiseStream<Prun
 		}
 
 		// wait until all blob workers have agreed to stop reading older than the new prune version
+		// TODO: do we have to do anything here to take care of a BW that died before it sent ACK
 		waitForAll(acks);
 
 		// at this point, all blob workers have ACK'd the latest prune version
 
 		// delete at NOW-R-L = newPruneVersion - BG_FILE_CLIENT_LIFETIME
 		Version deleteFilesVersion = self->latestPruneVersion - SERVER_KNOBS->BG_FILE_CLIENT_LIFETIME;
-		deleteFiles.send(PruneFilesRequest(self->epoch, deleteFilesVersion));
+		deleteFiles.send(deleteFilesVersion);
 
 		// don't start pruning again until cadence is up
 		delay(SERVER_KNOBS->BG_FILE_PRUNER_CADENCE);
@@ -1417,7 +1419,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	wait(recoverBlobManager(&self));
 
 	// start an actor to receive prune requests and prune files
-	PromiseStream<PruneFilesRequest> pruneFiles;
+	PromiseStream<Version> pruneFiles;
 	self.addActor.send(blobPruner(pruneFiles));
 	self.addActor.send(blobPrunerScheduler(&self, pruneFiles));
 

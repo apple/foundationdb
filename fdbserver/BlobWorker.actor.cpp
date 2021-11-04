@@ -1845,7 +1845,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 		KeyRef lastRangeEnd = req.keyRange.begin;
 
 		// if data has been pruned, can't serve this request
-		if (req.readVersion < bwData->latestPruneVersion) { // TODO: < or <=?
+		if (req.readVersion < bwData->latestPruneVersion) {
 			throw transaction_too_old();
 		}
 
@@ -2608,13 +2608,20 @@ ACTOR Future<Void> handleRangeRevoke(Reference<BlobWorkerData> bwData, RevokeBlo
 }
 
 ACTOR Future<Void> handlePruneRequest(Reference<BlobWorkerData> bwData, PruneFilesRequest req) {
-	if (req.pruneVersion > bwData->latestPruneVersion) {
-		bwData->latestPruneVersion = req.pruneVersion;
-		req.reply.send(Void());
-		// TODO: start a pruner actor with low priority
-	} else {
-		// TODO: out of order prune req... what should we do with it?
+	// if we see an out of order prune req, just skip it because we would have
+	// pruned everything before this version when we handled latestPruneVersion
+	if (req.pruneVersion <= bwData->latestPruneVersion) {
+		return Void();
 	}
+
+	// stop serving queries older than this version
+	bwData->latestPruneVersion = req.pruneVersion;
+
+	// send back acknowledgement
+	req.reply.send(Void());
+
+	// TODO: start a pruner actor with low priority
+
 	return Void();
 }
 
