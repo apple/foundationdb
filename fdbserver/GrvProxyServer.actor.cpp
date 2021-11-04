@@ -449,14 +449,14 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo>>
 					stats->txnSystemPriorityStartIn += req.transactionCount;
 					++stats->systemGRVQueueSize;
 					systemQueue->push_back(req);
-					systemQueue->span.addParent(req.spanContext);
+					// systemQueue->span.addParent(req.spanContext);
 				} else if (req.priority >= TransactionPriority::DEFAULT) {
 					++stats->txnRequestIn;
 					stats->txnStartIn += req.transactionCount;
 					stats->txnDefaultPriorityStartIn += req.transactionCount;
 					++stats->defaultGRVQueueSize;
 					defaultQueue->push_back(req);
-					defaultQueue->span.addParent(req.spanContext);
+					// defaultQueue->span.addParent(req.spanContext);
 				} else {
 					// Return error for batch_priority GRV requests
 					int64_t proxiesCount = std::max((int)db->get().client.grvProxies.size(), 1);
@@ -469,7 +469,7 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo>>
 						stats->txnBatchPriorityStartIn += req.transactionCount;
 						++stats->batchGRVQueueSize;
 						batchQueue->push_back(req);
-						batchQueue->span.addParent(req.spanContext);
+						// batchQueue->span.addParent(req.spanContext);
 					}
 				}
 			}
