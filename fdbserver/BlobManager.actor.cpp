@@ -213,7 +213,7 @@ struct BlobManagerData {
 
 	int64_t epoch = -1;
 	int64_t seqNo = 1;
-	Version latestPruneVersion = -1;
+	Version latestPruneVersion = 0;
 
 	Promise<Void> iAmReplaced;
 
@@ -1315,6 +1315,24 @@ ACTOR Future<Void> blobWorkerRecruiter(
 	}
 }
 
+// TODO: make this its own role if it becomes a performance bottleneck for BM
+ACTOR Future<Void> blobPruner(PromiseStream<PruneFilesRequest>& pruneFiles) {
+	Version lastDeleteTime = 0;
+	loop {
+		PruneFilesRequest req = waitNext(pruneFiles.getFuture());
+
+		// if this is an old prune request, then do nothing since we
+		// already saw a newer prune request
+		if (lastDeleteTime >= req.pruneVersion) {
+			continue;
+		}
+		lastDeleteTime = req.pruneVersion;
+
+		// TODO: implement deletion logic
+	}
+	return Void();
+}
+
 // When a new blob manager is created, we want to prune right away so that
 // if the previous blob manager died right before pruning, we don't wait approximately 2R
 // versions before pruning
@@ -1324,22 +1342,30 @@ ACTOR Future<Void> blobPrunerScheduler(BlobManagerData* self, PromiseStream<Prun
 
 		Version currVersion = wait(tr->getReadVersion());
 		Version newPruneVersion = std::max<Version>(0, currVersion - SERVER_KNOBS->BG_FILE_RETENTION_PERIOD);
+		if (newPruneVersion == 0) {
+			delay(SERVER_KNOBS->BG_FILE_PRUNER_CADENCE);
+			continue;
+		}
 
-		// although it might seem a little early to set this, we need to so that
-		// if new blob workers are created while reqs are in flight, then they can use the latest prune
+		ASSERT(newPruneVersion > self->latestPruneVersion);
+
+		// although it might seem a little early to set this, we need to so that new
+		// blob workers which are created while reqs are in fligh use the latest prune
 		self->latestPruneVersion = newPruneVersion;
 
+		// broadcast new prune version to all workers
 		std::vector<Future<Void>> acks;
 		for (auto& [id, bwi] : self->workersById) {
 			PruneFilesRequest req(self->epoch, self->latestPruneVersion);
-			acks.emplace_back(bwi.pruneFiles.getReply(req)); // use some sort of priority here?
+			acks.emplace_back(bwi.pruneFiles.getReply(req)); // TODO: use some sort of priority here?
 		}
 
+		// wait until all blob workers have agreed to stop reading older than the new prune version
 		waitForAll(acks);
 
 		// at this point, all blob workers have ACK'd the latest prune version
 
-		// prune at newPruneVersion - BG_FILE_CLIENT_LIFETIME
+		// delete at NOW-R-L = newPruneVersion - BG_FILE_CLIENT_LIFETIME
 		Version deleteFilesVersion = self->latestPruneVersion - SERVER_KNOBS->BG_FILE_CLIENT_LIFETIME;
 		deleteFiles.send(PruneFilesRequest(self->epoch, deleteFilesVersion));
 
@@ -1348,8 +1374,6 @@ ACTOR Future<Void> blobPrunerScheduler(BlobManagerData* self, PromiseStream<Prun
 	}
 	return Void();
 }
-
-ACTOR Future<Void> blobPruner(PromiseStream<PruneFilesRequest>& deleteFiles);
 
 ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
                                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
@@ -1372,8 +1396,6 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	try {
 		wait(checkManagerLock(tr, &self));
-		Version currVersion = wait(tr->getReadVersion());
-		self.latestPruneVersion = currVersion - SERVER_KNOBS->BG_FILE_RETENTION_PERIOD;
 	} catch (Error& e) {
 		if (BM_DEBUG) {
 			printf("Blob manager lock check got unexpected error %s. Dying...\n", e.name());
@@ -1390,16 +1412,17 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	    dbInfo, [](auto const& info) { return info.clusterInterface.recruitBlobWorker; });
 	self.addActor.send(blobWorkerRecruiter(&self, recruitBlobWorker));
 
-	// we need to recover the old blob manager's state (e.g. granule assignments) before
+	// we need to recover the old blob manager's state (e.g. granule assignments)
 	// before the new blob manager does anything
 	wait(recoverBlobManager(&self));
 
-	PromiseStream<PruneFilesRequest> deleteFiles;
-	self.addActor.send(blobPruner(deleteFiles));
+	// start an actor to receive prune requests and prune files
+	PromiseStream<PruneFilesRequest> pruneFiles;
+	self.addActor.send(blobPruner(pruneFiles));
+	self.addActor.send(blobPrunerScheduler(&self, pruneFiles));
 
 	self.addActor.send(monitorClientRanges(&self));
 	self.addActor.send(rangeAssigner(&self));
-	self.addActor.send(blobPrunerScheduler(&self, deleteFiles));
 
 	if (BUGGIFY) {
 		self.addActor.send(chaosRangeMover(&self));
