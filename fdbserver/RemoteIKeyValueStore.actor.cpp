@@ -24,13 +24,9 @@ struct AfterReturn {
 };
 
 ACTOR void sendCommitReply(IKVSCommitRequest commitReq, IKeyValueStore* kvStore) {
-	// try {
 	wait(kvStore->commit(commitReq.sequential));
 	StorageBytes storageBytes = kvStore->getStorageBytes();
 	commitReq.reply.send(IKVSCommitReply{ storageBytes });
-	// } catch (Error& e) {
-	// 	commitReq.reply.sendError(e);
-	// }
 }
 
 ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterface) {
@@ -103,7 +99,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 			}
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "RemoteKVStoreError").detail("Error", e.code());
-			kvStore->close();
+			// kvStore->close();
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
@@ -114,67 +110,27 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 	// return Void();
 }
 
-namespace {
-
-struct IKVSProcess {
-	IKVSProcessInterface processInterface; // do this in the caller
-	Future<int> ikvsProcess = 0; // do this in the caller
-
-	Future<Void> init() { return init(this); }
-
-private:
-	// TODO: rename to initializeIKVSProcess
-	ACTOR static Future<Void> init(IKVSProcess* self) {
-		std::string ikvsAddrStr = g_network->getLocalAddress().ip.toString().append(":");
-		std::string ikvsPortStr = std::to_string(SERVER_KNOBS->IKVS_PORT);
-		ikvsAddrStr.append(ikvsPortStr);
-		state NetworkAddress addr = NetworkAddress::parse(ikvsAddrStr);
-		state IKVSProcessInterface ikvsProcessServer;
-		TraceEvent(SevDebug, "GetProcessInterfReqSending").detail("Address", addr.toString());
-		ikvsProcessServer.getProcessInterface =
-		    RequestStream<GetIKVSProcessInterfaceRequest>(Endpoint({ addr }, UID(-1, 2)));
-
-		if (self->ikvsProcess.isReady()) {
-			// no ikvs process is running
-			state std::string absExecPath = abspath(getExecPath());
-			state std::vector<std::string> paramList = {
-				absExecPath,        "-r",       "remoteIKVS", "-p", ikvsAddrStr, "--knob_min_trace_severity", "1",
-				"--knob_ikvs_port", ikvsPortStr
-			};
-			TraceEvent(SevDebug, "SpawningProcess").detail("AbsExecPath", absExecPath);
-			self->ikvsProcess = spawnProcess(absExecPath, paramList, 20.0, false, 0.01);
-			TraceEvent(SevDebug, "ProcessSpawned").detail("AbsExecPath", absExecPath);
-			std::cout << "creating new endpoint\n";
-			TraceEvent(SevDebug, "SendGetProcessInterfaceReq").log();
-			IKVSProcessInterface processInterface =
-			    wait(ikvsProcessServer.getProcessInterface.getReply(GetIKVSProcessInterfaceRequest()));
-			TraceEvent(SevDebug, "ProcessInterfaceReceived").log();
-			self->processInterface = processInterface;
-		} else {
-			TraceEvent(SevDebug, "SpawningProcessSkipped").log();
-		}
-		return Void();
-	}
-};
-
-IKVSProcess process;
-
-} // namespace
-
 ACTOR Future<Void> spawnRemoteIKVS(RemoteIKeyValueStore* self, OpenKVStoreRequest openKVSReq) {
-
+	state IKVSProcess* process = static_cast<IKVSProcess*>(g_network->global(INetwork::enIKVSProcess));
 	std::cout << "initializing connection to server...\n";
 	TraceEvent(SevDebug, "InitProcess").log();
-	wait(process.init());
+	// IKVSProcess* process = g_network->global(INetwork::enIKVSProcess);
+	if (process == nullptr) {
+		process = new IKVSProcess();
+		g_network->setGlobal(INetwork::enIKVSProcess, process);
+	}
+	wait(process->init());
 	std::cout << "Connection established\n";
 	TraceEvent(SevDebug, "RemoteKVStore")
 	    .detail("Action", "sending open kv store request")
 	    .detail("Filename", openKVSReq.filename)
 	    .detail("StoreType", openKVSReq.storeType);
-	IKVSInterface ikvsInterface = wait(process.processInterface.openKVStore.getReply(openKVSReq));
+	IKVSInterface ikvsInterface = wait(process->processInterface.openKVStore.getReply(openKVSReq));
 	TraceEvent(SevDebug, "IKVSInterfaceReceived").detail("UID", ikvsInterface.id());
 	std::cout << "kv store opened\n";
+	self->ikvsProcess = process;
 	self->interf = ikvsInterface;
+	self->interf.storeType = openKVSReq.storeType;
 	return Void();
 }
 
@@ -195,7 +151,6 @@ ACTOR Future<Void> runRemoteServer() {
 
 	state IKVSProcessInterface processInterface;
 	state ActorCollection actors(false);
-	TraceEvent(SevDebug, "RemoteIKVStoreIP").detail("IP", g_network->getLocalAddress().toString());
 	TraceEvent(SevDebug, "RemoteIKVStoreServerStarting").detail("IKVSInterfaceUID", processInterface.id());
 	processInterface.getProcessInterface.makeWellKnownEndpoint(WLTOKEN_IKVS_PROCESS_SERVER,
 	                                                           TaskPriority::DefaultEndpoint);
@@ -211,7 +166,8 @@ ACTOR Future<Void> runRemoteServer() {
 					req.reply.send(processInterface);
 				}
 				when(OpenKVStoreRequest req = waitNext(processInterface.openKVStore.getFuture())) {
-					IKVSInterface ikvsInterf(req.storeType);
+					IKVSInterface ikvsInterf;
+					ikvsInterf.storeType = req.storeType;
 					TraceEvent(SevDebug, "CreatingIKVSInterface").detail("UID", ikvsInterf.id());
 					actors.add(runIKVS(req, ikvsInterf));
 				}
