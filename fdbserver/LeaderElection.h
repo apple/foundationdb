@@ -41,7 +41,8 @@ Future<Void> tryBecomeLeader(ServerCoordinators const& coordinators,
                              LeaderInterface const& proposedInterface,
                              Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader,
                              bool hasConnected,
-                             Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo);
+                             Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo,
+                             Reference<IClusterConnectionRecord> const& connRecord);
 
 // Inform all the coordinators that they have been replaced with a new connection string
 Future<Void> changeLeaderCoordinators(ServerCoordinators const& coordinators, Value const& forwardingInfo);
@@ -54,20 +55,23 @@ Future<Void> tryBecomeLeaderInternal(ServerCoordinators const& coordinators,
                                      Value const& proposedSerializedInterface,
                                      Reference<AsyncVar<Value>> const& outSerializedLeader,
                                      bool const& hasConnected,
-                                     Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo);
+                                     Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo,
+                                     Reference<IClusterConnectionRecord> const& connRecord);
 
 template <class LeaderInterface>
 Future<Void> tryBecomeLeader(ServerCoordinators const& coordinators,
                              LeaderInterface const& proposedInterface,
                              Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader,
                              bool hasConnected,
-                             Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo) {
+                             Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo,
+                             Reference<IClusterConnectionRecord> const& connRecord) {
 	auto serializedInfo = makeReference<AsyncVar<Value>>();
 	Future<Void> m = tryBecomeLeaderInternal(coordinators,
 	                                         ObjectWriter::toValue(proposedInterface, IncludeVersion()),
 	                                         serializedInfo,
 	                                         hasConnected,
-	                                         asyncPriorityInfo);
+	                                         asyncPriorityInfo,
+	                                         connRecord);
 	return m || asyncDeserialize(serializedInfo, outKnownLeader);
 }
 

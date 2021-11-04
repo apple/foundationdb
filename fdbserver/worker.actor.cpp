@@ -2198,10 +2198,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> in,
                                            Reference<AsyncVar<Optional<ClusterInterface>>> out) {
 	loop {
-		if (in->get().present())
+		if (in->get().present()) {
 			out->set(in->get().get().clientInterface);
-		else
+		} else {
 			out->set(Optional<ClusterInterface>());
+		}
 		wait(in->onChange());
 	}
 }
@@ -2399,6 +2400,10 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 			}
 			successIndex = index;
 		} else {
+			if (leader.isError() && leader.getError().code() == error_code_coordinators_changed) {
+				info.intermediateConnRecord->getMutableConnectionString()->resetToUnresolved();
+				return info;
+			}
 			index = (index + 1) % addrs.size();
 			if (index == successIndex) {
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
@@ -2411,6 +2416,9 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacyImplInternal(Reference<IClus
                                                                  Reference<AsyncVar<Value>> outSerializedLeaderInfo) {
 	state MonitorLeaderInfo info(connRecord);
 	loop {
+		if (info.intermediateConnRecord->hasUnresolvedHostnames()) {
+			wait(info.intermediateConnRecord->resolveHostnames());
+		}
 		MonitorLeaderInfo _info =
 		    wait(monitorLeaderWithDelayedCandidacyImplOneGeneration(connRecord, outSerializedLeaderInfo, info));
 		info = _info;
@@ -2542,6 +2550,9 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 	actors.push_back(serveProcess());
 
 	try {
+		if (connRecord->hasUnresolvedHostnames()) {
+			wait(connRecord->resolveHostnames());
+		}
 		ServerCoordinators coordinators(connRecord);
 		if (g_network->isSimulated()) {
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
@@ -2577,6 +2588,7 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		                              "MonitorAndWriteCCPriorityInfo"));
 		if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::NeverAssign) {
 			actors.push_back(reportErrors(monitorLeader(connRecord, cc), "ClusterController"));
+			std::cout << "litian 3 " << std::endl;
 		} else if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::WorstFit &&
 		           SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS > 0) {
 			actors.push_back(reportErrors(monitorLeaderWithDelayedCandidacy(connRecord,
@@ -2587,11 +2599,13 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 			                                                                dbInfo,
 			                                                                configDBType),
 			                              "ClusterController"));
+			std::cout << "litian 4 " << std::endl;
 		} else {
 			actors.push_back(reportErrors(
 			    clusterController(
 			        connRecord, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, configDBType),
 			    "ClusterController"));
+			std::cout << "litian 5 " << std::endl;
 		}
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
 		actors.push_back(reportErrorsExcept(workerServer(connRecord,

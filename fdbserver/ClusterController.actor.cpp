@@ -5567,7 +5567,8 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
                                      bool hasConnected,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      LocalityData locality,
-                                     ConfigDBType configDBType) {
+                                     ConfigDBType configDBType,
+                                     Reference<IClusterConnectionRecord> connRecord) {
 	loop {
 		state ClusterControllerFullInterface cci;
 		state bool inRole = false;
@@ -5575,7 +5576,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 		try {
 			// Register as a possible leader; wait to be elected
 			state Future<Void> leaderFail =
-			    tryBecomeLeader(coordinators, cci, currentCC, hasConnected, asyncPriorityInfo);
+			    tryBecomeLeader(coordinators, cci, currentCC, hasConnected, asyncPriorityInfo, connRecord);
 			state Future<Void> shouldReplace = replaceInterface(cci);
 
 			while (!currentCC->get().present() || currentCC->get().get() != cci) {
@@ -5623,11 +5624,19 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 	state bool hasConnected = false;
 	loop {
 		try {
+			if (connRecord->hasUnresolvedHostnames()) {
+				wait(connRecord->resolveHostnames());
+			}
 			ServerCoordinators coordinators(connRecord);
-			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType));
+			wait(clusterController(
+			    coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType, connRecord));
 		} catch (Error& e) {
-			if (e.code() != error_code_coordinators_changed)
+			if (e.code() != error_code_coordinators_changed) {
 				throw; // Expected to terminate fdbserver
+			} else {
+				std::cout << "litian 10" << std::endl;
+				connRecord->getMutableConnectionString()->resetToUnresolved();
+			}
 		}
 
 		hasConnected = true;

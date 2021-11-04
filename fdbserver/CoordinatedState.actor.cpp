@@ -359,5 +359,9 @@ Future<Void> MovableCoordinatedState::setExclusive(Value v) {
 	return impl->setExclusive(v);
 }
 Future<Void> MovableCoordinatedState::move(ClusterConnectionString const& nc) {
+	// We assume the new connection string contains only IP addresses. Even `coordinators` command in fdbcli is going to
+	// support hostnames, those hostnames should have been resolved in place and will be treated as IP address
+	// afterwards, i.e. no automatic re-resolve as that of the hostname used in cluster file.
+	ASSERT(nc.hostnames().size() == 0);
 	return MovableCoordinatedStateImpl::move(impl.get(), nc);
 }

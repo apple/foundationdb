@@ -825,7 +825,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 	NetworkAddressList listenNetworkAddresses;
 
 	auto& coordinators = connectionRecord.getConnectionString().coordinators();
-	ASSERT(coordinators.size() > 0);
+	ASSERT(coordinators.size() + connectionRecord.getConnectionString().hostnames().size() > 0);
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
 		const std::string& publicAddressStr = publicAddressStrs[ii];

@@ -25,12 +25,19 @@
 #include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Void> submitCandidacy(Key key,
-                                   LeaderElectionRegInterface coord,
-                                   LeaderInfo myInfo,
-                                   UID prevChangeID,
-                                   Reference<AsyncVar<std::vector<Optional<LeaderInfo>>>> nominees,
-                                   int index) {
+// Keep trying to become a leader by submitting itself to all coordinators. Monitor the health of all coordinators
+// at the same time
+// Note: for coordinators whose NetworkAddress is parsed out of a hostname, a connection failure will cause this actor
+// to throw `coordinators_changed()` error
+ACTOR Future<Void> submitCandidacy(
+    Key key,
+    LeaderElectionRegInterface coord,
+    LeaderInfo myInfo,
+    UID prevChangeID,
+    Reference<AsyncVar<std::vector<Optional<LeaderInfo>>>> nominees,
+    int index,
+    Optional<Hostname> hostname = Optional<Hostname>(),
+    Reference<IClusterConnectionRecord> connRecord = Reference<IClusterConnectionRecord>()) {
 	loop {
 		auto const& nom = nominees->get()[index];
 		Optional<LeaderInfo> li = wait(
@@ -49,6 +56,49 @@ ACTOR Future<Void> submitCandidacy(Key key,
 			wait(Future<Void>(Void())); // Make sure we weren't cancelled
 		}
 	}
+
+	// state Optional<LeaderInfo> li;
+	// loop {
+
+	// 	auto const& nom = nominees->get()[index];
+	// 	if (coord.candidacy.getEndpoint().getPrimaryAddress().fromHostname) {
+	// 		ErrorOr<Optional<LeaderInfo>> rep = wait(coord.candidacy.tryGetReply(
+	// 		    CandidacyRequest(key, myInfo, nom.present() ? nom.get().changeID : UID(), prevChangeID),
+	// 		    TaskPriority::CoordinationReply));
+	// 		if (rep.isError() && rep.getError().code() == error_code_request_maybe_delivered) {
+	// 			// connecting to nominee failed, most likely due to timeout.
+	// 			// re-resolve this single hostname
+	// 			if (connRecord.isValid()) {
+	// 				TraceEvent("CoordnitorChangedSubmitCandadicy")
+	// 				    .detail("Hostname", hostname.present() ? hostname.get().toString() : "UnknownHostname")
+	// 				    .detail("OldAddr", coord.candidacy.getEndpoint().getPrimaryAddress().toString());
+	// 				// 50 milliseconds delay to prevent tight resolving loop due to outdated DNS cache
+	// 				wait(delay(0.05));
+	// 				connRecord->getMutableConnectionString()->resetToUnresolved();
+	// 			}
+	// 			// throw coordinators_changed();
+	// 		} else if (rep.present()) {
+	// 			li = rep.get();
+	// 		}
+	// 	} else {
+	// 		Optional<LeaderInfo> tmp = wait(retryBrokenPromise(
+	// 		    coord.candidacy,
+	// 			CandidacyRequest(key, myInfo, nom.present() ? nom.get().changeID : UID(), prevChangeID),
+	// 		    TaskPriority::CoordinationReply));
+	// 		li = tmp;
+	// 	}
+
+	// 	if (li != nominees->get()[index]) {
+	// 		std::vector<Optional<LeaderInfo>> v = nominees->get();
+	// 		v[index] = li;
+	// 		nominees->set(v);
+
+	// 		if (li.present() && li.get().forward)
+	// 			wait(Future<Void>(Never()));
+
+	// 		wait(Future<Void>(Void())); // Make sure we weren't cancelled
+	// 	}
+	// }
 }
 
 ACTOR template <class T>
@@ -88,7 +138,8 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
                                            Value proposedSerializedInterface,
                                            Reference<AsyncVar<Value>> outSerializedLeader,
                                            bool hasConnected,
-                                           Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo) {
+                                           Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
+                                           Reference<IClusterConnectionRecord> connRecord) {
 	state Reference<AsyncVar<std::vector<Optional<LeaderInfo>>>> nominees(
 	    new AsyncVar<std::vector<Optional<LeaderInfo>>>());
 	state LeaderInfo myInfo;
@@ -122,9 +173,22 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 
 		std::vector<Future<Void>> cand;
 		cand.reserve(coordinators.leaderElectionServers.size());
-		for (int i = 0; i < coordinators.leaderElectionServers.size(); i++)
-			cand.push_back(submitCandidacy(
-			    coordinators.clusterKey, coordinators.leaderElectionServers[i], myInfo, prevChangeID, nominees, i));
+		for (int i = 0; i < coordinators.leaderElectionServers.size(); i++) {
+			Optional<Hostname> hn;
+			auto r = connRecord->getConnectionString().networkAddressToHostname().find(
+			    coordinators.leaderElectionServers[i].candidacy.getEndpoint().getPrimaryAddress());
+			if (r != connRecord->getConnectionString().networkAddressToHostname().end()) {
+				hn = r->second;
+			}
+			cand.push_back(submitCandidacy(coordinators.clusterKey,
+			                               coordinators.leaderElectionServers[i],
+			                               myInfo,
+			                               prevChangeID,
+			                               nominees,
+			                               i,
+			                               hn,
+			                               connRecord));
+		}
 		candidacies = waitForAll(cand);
 
 		loop {

@@ -731,6 +731,22 @@ ACTOR static Future<Void> monitorProxiesChange(DatabaseContext* cx,
 			when(wait(clientDBInfo->onChange())) {
 				if (clientDBInfo->get().commitProxies != curCommitProxies ||
 				    clientDBInfo->get().grvProxies != curGrvProxies) {
+
+					// std::cout << "litian monitorProxiesChange" << std::endl;
+
+					// for (auto grvproxy : clientDBInfo->get().grvProxies) {
+					// 	std::cout << "clientDBInfo grv proxy " << grvproxy.address().toString() << std::endl;
+					// }
+					// for (auto grvproxy : curGrvProxies) {
+					// 	std::cout << "curGrvProxies grv proxy " << grvproxy.address().toString() << std::endl;
+					// }
+					// for (auto commitproxy : clientDBInfo->get().commitProxies) {
+					// 	std::cout << "clientDBInfo commit proxy " << commitproxy.address().toString() << std::endl;
+					// }
+					// for (auto commitproxy : curCommitProxies) {
+					// 	std::cout << "curCommitProxies commit proxy " << commitproxy.address().toString() << std::endl;
+					// }
+
 					// This condition is a bit complicated. Here we want to verify that we're unable to receive a read
 					// version from a proxy of an old generation after a successful recovery. The conditions are:
 					// 1. We only do this with a configured probability.
@@ -6542,6 +6558,9 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 		throw;
 	}
 	TraceEvent("ExclusionSafetyCheckCoordinators").log();
+	if (cx->getConnectionRecord()->hasUnresolvedHostnames()) {
+		wait(cx->getConnectionRecord()->resolveHostnames());
+	}
 	state ClientCoordinators coordinatorList(cx->getConnectionRecord());
 	state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 	leaderServers.reserve(coordinatorList.clientLeaderServers.size());

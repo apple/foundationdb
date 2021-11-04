@@ -59,22 +59,38 @@ struct ClientLeaderRegInterface {
 class ClusterConnectionString {
 public:
 	ClusterConnectionString() {}
-	ClusterConnectionString(std::string const& connectionString);
+	ClusterConnectionString(std::string const& connStr);
 	ClusterConnectionString(std::vector<NetworkAddress>, Key);
 
 	std::vector<NetworkAddress> const& coordinators() const { return coord; }
+	std::vector<NetworkAddress>* mutableCoordinators() { return &coord; }
+	std::vector<Hostname> const& hostnames() const { return hosts; }
+	std::vector<Hostname>* mutableHostnames() { return &hosts; }
+	std::unordered_map<NetworkAddress, Hostname>* mutableNetworkAddressToHostname() {
+		return &_networkAddressToHostname;
+	}
+	std::unordered_map<NetworkAddress, Hostname> const& networkAddressToHostname() const {
+		return _networkAddressToHostname;
+	};
 	Key clusterKey() const { return key; }
 	Key clusterKeyName() const {
 		return keyDesc;
 	} // Returns the "name" or "description" part of the clusterKey (the part before the ':')
 	std::string toString() const;
 	static std::string getErrorString(std::string const& source, Error const& e);
+	Future<Void> resolveHostnames();
+	void resetToUnresolved();
+
+	bool hasUnresolvedHostnames = false;
 
 private:
+	void parseConnString();
 	void parseKey(std::string const& key);
-
+	std::vector<Hostname> hosts;
+	std::unordered_map<NetworkAddress, Hostname> _networkAddressToHostname;
 	std::vector<NetworkAddress> coord;
 	Key key, keyDesc;
+	std::string connectionString;
 };
 
 FDB_DECLARE_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
@@ -94,6 +110,8 @@ public:
 	// Returns the connection string currently held in this object. This may not match the stored record if it hasn't
 	// been persisted or if the persistent storage for the record has been modified externally.
 	ClusterConnectionString const& getConnectionString() const;
+
+	ClusterConnectionString* getMutableConnectionString();
 
 	// Sets the connections string held by this object and persists it.
 	virtual Future<Void> setConnectionString(ClusterConnectionString const&) = 0;
@@ -124,6 +142,9 @@ public:
 	// Signals to the connection record that it was successfully used to connect to a cluster.
 	void notifyConnected();
 
+	bool hasUnresolvedHostnames() const;
+	Future<Void> resolveHostnames();
+
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
@@ -151,7 +172,10 @@ struct LeaderInfo {
 	UID changeID;
 	static const uint64_t changeIDMask = ~(uint64_t(0b1111111) << 57);
 	Value serializedInfo;
-	bool forward; // If true, serializedInfo is a connection string instead!
+	// If true, serializedInfo is a connection string instead!
+	// If true, it also means the receipient need to update their local cluster file
+	// with the latest list of coordinators
+	bool forward;
 
 	LeaderInfo() : forward(false) {}
 	LeaderInfo(UID changeID) : changeID(changeID), forward(false) {}

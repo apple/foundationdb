@@ -74,10 +74,11 @@ Future<Void> monitorLeader(Reference<IClusterConnectionRecord> const& connFile,
 // This is one place where the leader election algorithm is run. The coodinator contacts all coodinators to collect
 // nominees, the nominee with the most nomination is the leader, and collects client data from the leader. This function
 // also monitors the change of the leader.
-Future<Void> monitorLeaderAndGetClientInfo(Value const& key,
+Future<Void> monitorLeaderAndGetClientInfo(Key const& clusterKey,
                                            std::vector<NetworkAddress> const& coordinators,
                                            ClientData* const& clientData,
-                                           Reference<AsyncVar<Optional<LeaderInfo>>> const& leaderInfo);
+                                           Reference<AsyncVar<Optional<LeaderInfo>>> const& leaderInfo,
+                                           Reference<AsyncVar<Void>> const& coordinatorsChanged);
 
 Future<Void> monitorProxies(
     Reference<AsyncVar<Reference<IClusterConnectionRecord>>> const& connRecord,

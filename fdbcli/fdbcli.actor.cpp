@@ -1575,6 +1575,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	    ClusterConnectionFile::lookupClusterFileName(opt.clusterFile);
 	try {
 		ccf = makeReference<ClusterConnectionFile>(resolvedClusterFile.first);
+		if (ccf->hasUnresolvedHostnames()) {
+			wait(ccf->resolveHostnames());
+		}
 	} catch (Error& e) {
 		fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
 		return 1;
