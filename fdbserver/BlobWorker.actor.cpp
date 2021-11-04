@@ -179,7 +179,8 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	PromiseStream<Future<Void>> addActor;
 
 	LocalityData locality;
-	int64_t currentManagerEpoch = -1;
+	int64_t currentManagerEpoch;
+	Version latestPruneVersion;
 
 	AsyncVar<ReplyPromiseStream<GranuleStatusReply>> currentManagerStatusStream;
 
@@ -195,7 +196,9 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 	PromiseStream<AssignBlobRangeRequest> granuleUpdateErrors;
 
-	BlobWorkerData(UID id, Database db) : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
+	BlobWorkerData(UID id, Database db, int64_t managerEpoch, Version latestPruneVersion)
+	  : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL), currentManagerEpoch(managerEpoch),
+	    latestPruneVersion(latestPruneVersion) {}
 	~BlobWorkerData() { printf("Destroying blob worker data for %s\n", id.toString().c_str()); }
 
 	bool managerEpochOk(int64_t epoch) {
@@ -1841,6 +1844,11 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 		// work
 		KeyRef lastRangeEnd = req.keyRange.begin;
 
+		// if data has been pruned, can't serve this request
+		if (req.readVersion < bwData->latestPruneVersion) { // TODO: < or <=?
+			throw transaction_too_old();
+		}
+
 		for (auto& r : checkRanges) {
 			bool isValid = r.value().activeMetadata.isValid();
 			if (lastRangeEnd < r.begin() || !isValid) {
@@ -2599,11 +2607,27 @@ ACTOR Future<Void> handleRangeRevoke(Reference<BlobWorkerData> bwData, RevokeBlo
 	}
 }
 
+ACTOR Future<Void> handlePruneRequest(Reference<BlobWorkerData> bwData, PruneFilesRequest req) {
+	if (req.pruneVersion > bwData->latestPruneVersion) {
+		bwData->latestPruneVersion = req.pruneVersion;
+		req.reply.send(Void());
+		// TODO: start a pruner actor with low priority
+	} else {
+		// TODO: out of order prune req... what should we do with it?
+	}
+	return Void();
+}
+
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
                               ReplyPromise<InitializeBlobWorkerReply> recruitReply,
-                              Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+                              Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                              int64_t managerEpoch,
+                              Version latestPruneVersion) {
 	state Reference<BlobWorkerData> self(
-	    new BlobWorkerData(bwInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
+	    new BlobWorkerData(bwInterf.id(),
+	                       openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True),
+	                       managerEpoch,
+	                       latestPruneVersion));
 	self->id = bwInterf.id();
 	self->locality = bwInterf.locality;
 
@@ -2708,6 +2732,18 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			}
 			when(AssignBlobRangeRequest granuleToReassign = waitNext(self->granuleUpdateErrors.getFuture())) {
 				self->addActor.send(handleRangeAssign(self, granuleToReassign, true));
+			}
+			when(PruneFilesRequest pruneReq = waitNext(bwInterf.pruneFiles.getFuture())) {
+				if (self->managerEpochOk(pruneReq.managerEpoch)) {
+					TraceEvent("BlobWorkerPruneRequest", bwInterf.id()).detail("PruneVersion", pruneReq.pruneVersion);
+					if (BW_DEBUG) {
+						printf("Blob worker %s received prune request from manager %lld @ version = %lld\n",
+						       self->id.toString().c_str(),
+						       pruneReq.managerEpoch,
+						       pruneReq.pruneVersion);
+					}
+					self->addActor.send(handlePruneRequest(self, pruneReq));
+				}
 			}
 			when(HaltBlobWorkerRequest req = waitNext(bwInterf.haltBlobWorker.getFuture())) {
 				req.reply.send(Void());

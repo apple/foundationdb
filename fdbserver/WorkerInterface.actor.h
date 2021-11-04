@@ -715,11 +715,14 @@ struct InitializeBlobWorkerRequest {
 	constexpr static FileIdentifier file_identifier = 5838547;
 	UID reqId;
 	UID interfaceId;
+	int64_t managerEpoch;
+	Version latestPruneVersion;
+
 	ReplyPromise<InitializeBlobWorkerReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reqId, interfaceId, reply);
+		serializer(ar, reqId, interfaceId, managerEpoch, latestPruneVersion, reply);
 	}
 };
 

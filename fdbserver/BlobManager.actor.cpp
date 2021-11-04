@@ -213,6 +213,7 @@ struct BlobManagerData {
 
 	int64_t epoch = -1;
 	int64_t seqNo = 1;
+	Version latestPruneVersion = -1;
 
 	Promise<Void> iAmReplaced;
 
@@ -1191,6 +1192,8 @@ ACTOR Future<Void> initializeBlobWorker(BlobManagerData* self, RecruitBlobWorker
 		state InitializeBlobWorkerRequest initReq;
 		initReq.reqId = deterministicRandom()->randomUniqueID();
 		initReq.interfaceId = interfaceId;
+		initReq.managerEpoch = self->epoch;
+		initReq.latestPruneVersion = self->latestPruneVersion;
 
 		// acknowledge that this worker is currently being recruited on
 		self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
@@ -1312,6 +1315,42 @@ ACTOR Future<Void> blobWorkerRecruiter(
 	}
 }
 
+// When a new blob manager is created, we want to prune right away so that
+// if the previous blob manager died right before pruning, we don't wait approximately 2R
+// versions before pruning
+ACTOR Future<Void> blobPrunerScheduler(BlobManagerData* self, PromiseStream<PruneFilesRequest>& deleteFiles) {
+	loop {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
+
+		Version currVersion = wait(tr->getReadVersion());
+		Version newPruneVersion = std::max<Version>(0, currVersion - SERVER_KNOBS->BG_FILE_RETENTION_PERIOD);
+
+		// although it might seem a little early to set this, we need to so that
+		// if new blob workers are created while reqs are in flight, then they can use the latest prune
+		self->latestPruneVersion = newPruneVersion;
+
+		std::vector<Future<Void>> acks;
+		for (auto& [id, bwi] : self->workersById) {
+			PruneFilesRequest req(self->epoch, self->latestPruneVersion);
+			acks.emplace_back(bwi.pruneFiles.getReply(req)); // use some sort of priority here?
+		}
+
+		waitForAll(acks);
+
+		// at this point, all blob workers have ACK'd the latest prune version
+
+		// prune at newPruneVersion - BG_FILE_CLIENT_LIFETIME
+		Version deleteFilesVersion = self->latestPruneVersion - SERVER_KNOBS->BG_FILE_CLIENT_LIFETIME;
+		deleteFiles.send(PruneFilesRequest(self->epoch, deleteFilesVersion));
+
+		// don't start pruning again until cadence is up
+		delay(SERVER_KNOBS->BG_FILE_PRUNER_CADENCE);
+	}
+	return Void();
+}
+
+ACTOR Future<Void> blobPruner(PromiseStream<PruneFilesRequest>& deleteFiles);
+
 ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
                                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                int64_t epoch) {
@@ -1333,6 +1372,8 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	try {
 		wait(checkManagerLock(tr, &self));
+		Version currVersion = wait(tr->getReadVersion());
+		self.latestPruneVersion = currVersion - SERVER_KNOBS->BG_FILE_RETENTION_PERIOD;
 	} catch (Error& e) {
 		if (BM_DEBUG) {
 			printf("Blob manager lock check got unexpected error %s. Dying...\n", e.name());
@@ -1353,8 +1394,12 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	// before the new blob manager does anything
 	wait(recoverBlobManager(&self));
 
+	PromiseStream<PruneFilesRequest> deleteFiles;
+	self.addActor.send(blobPruner(deleteFiles));
+
 	self.addActor.send(monitorClientRanges(&self));
 	self.addActor.send(rangeAssigner(&self));
+	self.addActor.send(blobPrunerScheduler(&self, deleteFiles));
 
 	if (BUGGIFY) {
 		self.addActor.send(chaosRangeMover(&self));

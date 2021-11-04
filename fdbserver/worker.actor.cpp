@@ -1981,7 +1981,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				startRole(Role::BLOB_WORKER, recruited.id(), interf.id());
 
 				ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady = req.reply;
-				Future<Void> bw = blobWorker(recruited, blobWorkerReady, dbInfo);
+				Future<Void> bw =
+				    blobWorker(recruited, blobWorkerReady, dbInfo, req.managerEpoch, req.latestPruneVersion);
 				errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
 			}
 			when(InitializeCommitProxyRequest req = waitNext(interf.commitProxy.getFuture())) {

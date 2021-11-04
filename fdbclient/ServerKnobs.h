@@ -731,6 +731,10 @@ public:
 	int BG_DELTA_FILE_TARGET_BYTES;
 	int BG_DELTA_BYTES_BEFORE_COMPACT;
 
+	int64_t BG_FILE_RETENTION_PERIOD;
+	int64_t BG_FILE_CLIENT_LIFETIME;
+	int64_t BG_FILE_PRUNER_CADENCE;
+
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
