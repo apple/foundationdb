@@ -120,7 +120,7 @@ void print(const TLogPeekReply& reply) {
 }
 
 void print(const TestDriverOptions& option) {
-	std::cout << std::endl << ">> ptxn/test//Driver.actor.cpp:DriverTestOptions:" << std::endl;
+	std::cout << std::endl << ">> ptxn/test/Driver.actor.cpp:DriverTestOptions:" << std::endl;
 
 	std::cout << formatKVPair("numCommits", option.numCommits) << std::endl
 	          << formatKVPair("numStorageTeams", option.numStorageTeams) << std::endl
@@ -134,7 +134,7 @@ void print(const TestDriverOptions& option) {
 }
 
 void print(const ptxn::test::TestTLogPeekOptions& option) {
-	std::cout << std::endl << ">> ptxn/test//Driver.actor.cpp:DriverTestOptions:" << std::endl;
+	std::cout << std::endl << ">> ptxn/test/Driver.actor.cpp:DriverTestOptions:" << std::endl;
 
 	std::cout << formatKVPair("Mutations", option.numMutations) << std::endl
 	          << formatKVPair("Teams", option.numStorageTeams) << std::endl

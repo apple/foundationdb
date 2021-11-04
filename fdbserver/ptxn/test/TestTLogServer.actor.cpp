@@ -118,7 +118,12 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 	}
 	std::vector<ptxn::TLogInterface_PassivelyPull> interfaces = wait(getAll(interfaceFutures));
 	for (i = 0; i < pContext->numTLogs; i++) {
-		*(pContext->tLogInterfaces[i]) = interfaces[i];
+		// This is awkward, but we can't do: *(pContext->tLogInterfaces[i]) = interfaces[i]
+		// because this only copies the base class data. The pointer can no longer
+		// be casted back to "TLogInterface_PassivelyPull".
+		std::shared_ptr<ptxn::TLogInterface_PassivelyPull> tli(new ptxn::TLogInterface_PassivelyPull());
+		*tli = interfaces[i];
+		pContext->tLogInterfaces[i] = std::static_pointer_cast<ptxn::TLogInterfaceBase>(tli);
 	}
 	// Update the TLogGroupID to interface mapping
 	for (auto& [tLogGroupID, tLogGroupLeader] : pContext->tLogGroupLeaders) {
@@ -239,11 +244,12 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 	tLogSet.locality = locality;
 
 	printTiming << "Assign TLog group leaders" << std::endl;
-	for (auto tLogGroup : pContext->tLogGroupLeaders) {
+	for (auto& [groupID, interf] : pContext->tLogGroupLeaders) {
+		auto tlogInterf = std::dynamic_pointer_cast<ptxn::TLogInterface_PassivelyPull>(interf);
+		ASSERT(tlogInterf != nullptr);
 		OptionalInterface<ptxn::TLogInterface_PassivelyPull> optionalInterface =
-		    OptionalInterface<ptxn::TLogInterface_PassivelyPull>(
-		        *std::dynamic_pointer_cast<ptxn::TLogInterface_PassivelyPull>(tLogGroup.second));
-		tLogSet.tLogGroupIDs.push_back(tLogGroup.first);
+		    OptionalInterface<ptxn::TLogInterface_PassivelyPull>(*tlogInterf);
+		tLogSet.tLogGroupIDs.push_back(groupID);
 		tLogSet.ptxnTLogGroups.emplace_back();
 		tLogSet.ptxnTLogGroups.back().push_back(optionalInterface);
 	}
@@ -268,7 +274,7 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 		                                storageInitializations.back().reply,
 		                                dbInfo,
 		                                folder,
-		                                pContext->storageTeamIDs[i]));
+		                                pContext->storageTeamIDs[0]));
 		initializeStorage.send(storageInitializations.back());
 		printTiming << "Recruited storage server " << i
 		            << " : Storage Server Debug ID = " << recruited.id().shortString() << "\n";
@@ -296,7 +302,7 @@ TEST_CASE("/fdbserver/ptxn/test/run_tlog_server") {
 	state std::vector<Future<Void>> actors;
 	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
 
-	state std::string folder = "simdb" + deterministicRandom()->randomAlphaNumeric(10);
+	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 	// start a real TLog server
 	wait(startTLogServers(&actors, pContext, folder));
@@ -317,7 +323,7 @@ TEST_CASE("/fdbserver/ptxn/test/peek_tlog_server") {
 		ptxn::test::print::print(group);
 	}
 
-	state std::string folder = "simdb/" + deterministicRandom()->randomAlphaNumeric(10);
+	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 	// start a real TLog server
 	wait(startTLogServers(&actors, pContext, folder));
@@ -554,7 +560,7 @@ TEST_CASE("/fdbserver/ptxn/test/commit_peek") {
 	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
 	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
 
-	state std::string folder = "simdb/" + deterministicRandom()->randomAlphaNumeric(10);
+	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 
 	wait(startTLogServers(&actors, pContext, folder));
@@ -654,7 +660,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
 	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
 
-	state std::string folder = "simdb/" + deterministicRandom()->randomAlphaNumeric(10);
+	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 
 	state std::vector<ptxn::InitializePtxnTLogRequest> tLogInitializations;
