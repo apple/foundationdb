@@ -1144,6 +1144,7 @@ void arrayGenerator(const char* text, const char* line, const char** options, st
 		iter++;
 		if (!strncmp(name, text, len)) {
 			lc.push_back(newCompletion(line, name));
+			printf("%s%s\n", line, name);
 		}
 	}
 }
@@ -1270,6 +1271,7 @@ void fdbcliCompCmd(std::string const& text, std::vector<std::string>& lc) {
 	}
 
 	if (tokencmp(tokens[0], "configure")) {
+		printf("text: %s, base_input: %s\n", ntext.c_str(), base_input.c_str());
 		configureGenerator(ntext.c_str(), base_input.c_str(), lc);
 	}
 

@@ -82,6 +82,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	// Randomize shard order with each iteration if true
 	bool shuffleShards;
 
+	double maxRate;
+	double targetInterval;
+
 	bool success;
 
 	// Number of times this client has run its portion of the consistency check
@@ -106,6 +109,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		rateLimitMax = getOption(options, LiteralStringRef("rateLimitMax"), 0);
 		shuffleShards = getOption(options, LiteralStringRef("shuffleShards"), false);
 		indefinite = getOption(options, LiteralStringRef("indefinite"), false);
+		maxRate = getOption(options, LiteralStringRef("maxRate"), 0);
+		targetInterval = getOption(options, LiteralStringRef("targetInterval"), 0);
 		suspendConsistencyCheck.set(true);
 
 		success = true;

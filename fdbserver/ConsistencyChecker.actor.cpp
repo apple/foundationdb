@@ -53,7 +53,7 @@ struct ConsistencyCheckerData {
 };
 
 ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-									  double maxRate, double targetInterval) {
+									  double maxRate, double targetInterval,Reference<ClusterConnectionFile> connFile) {
 	state ConsistencyCheckerData self(ckInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 	state Promise<Void> err;
 	state Future<Void> collection = actorCollection(self.addActor.getFuture());
@@ -71,7 +71,7 @@ ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf, Refe
 	try {
 		loop choose {
 			// Run consistency check workload. Pass in the DBConfig params as testParams
-			when(wait(runTests(Reference<ClusterConnectionFile>(new ClusterConnectionFile()),
+			when(wait(runTests(connFile, //Reference<ClusterConnectionFile>(new ClusterConnectionFile()),
 							   TEST_TYPE_CONSISTENCY_CHECK,
 							   TEST_HERE,
 							   1,

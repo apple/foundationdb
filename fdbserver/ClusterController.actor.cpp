@@ -169,7 +169,6 @@ public:
 			newInfo.infoGeneration = ++dbInfoCount;
 			newInfo.consistencyChecker = interf;
 			serverInfo->set(newInfo);
-			printf("SetConsistencyChecker\n");
 		}
 
 		void clearInterf(ProcessClass::ClassType t) {
@@ -253,7 +252,6 @@ public:
 	}
 
 	bool isLongLivedStateless(Optional<Key> const& processId) {
-		printf("IsLongLivedStateless\n");
 		return (db.serverInfo->get().distributor.present() &&
 		        db.serverInfo->get().distributor.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().ratekeeper.present() &&
@@ -2772,7 +2770,6 @@ public:
 	// - role is a singleton AND worker's pid is being used for any non-singleton role
 	bool onMasterIsBetter(const WorkerDetails& worker, ProcessClass::ClusterRole role) const {
 		ASSERT(masterProcessId.present());
-		printf("onMasterIsBetter\n");
 		const auto& pid = worker.interf.locality.processId();
 		if ((role != ProcessClass::DataDistributor && role != ProcessClass::Ratekeeper &&
 		     role != ProcessClass::ConsistencyChecker) ||
@@ -3261,7 +3258,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 				dbInfo.ratekeeper = db->serverInfo->get().ratekeeper;
 				dbInfo.consistencyChecker = db->serverInfo->get().consistencyChecker;
 				dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
-				printf("CCWDB\n");
 
 				TraceEvent("CCWDB", cluster->id)
 				    .detail("Lifetime", dbInfo.masterLifetime.toString())
@@ -3510,7 +3506,6 @@ std::map<Optional<Standalone<StringRef>>, int> getColocCounts(
 // Checks if there exists a better process for each singleton (e.g. DD) compared
 // to the process it is currently on.
 void checkBetterSingletons(ClusterControllerData* self) {
-	printf("CheckBetterSingletons\n");
 	if (!self->masterProcessId.present() ||
 	    self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 		return;
@@ -3521,7 +3516,6 @@ void checkBetterSingletons(ClusterControllerData* self) {
 
 	int recruitCK = 0;
 	recruitCK = self->db.config.consistencyScanEnabled;
-	printf("CheckBetterSingletons - recruitCK: %d\n", recruitCK);
 
 	// We prefer spreading out other roles more than separating singletons on their own process
 	// so we artificially amplify the pid count for the processes used by non-singleton roles.
@@ -3568,7 +3562,6 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// if any of the singletons are unhealthy (rerecruited or not stable), then do not
 	// consider any further re-recruitments
 	if (!(rkHealthy && ddHealthy && ckHealthy)) {
-		printf("Singleton Unhealthy. rkHealthy: %d, ddHealthy: %d, ckHealthy: %d\n", rkHealthy, ddHealthy, ckHealthy);
 		return;
 	}
 
@@ -4878,7 +4871,6 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 ACTOR Future<Void> startRatekeeper(ClusterControllerData* self) {
 	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
 
-	printf("CCStartRatekeeper\n");
 	TraceEvent("CCStartRatekeeper", self->id).log();
 	loop {
 		try {
@@ -4906,19 +4898,16 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData* self) {
 			}
 
 			self->recruitingRatekeeperID = req.reqId;
-			printf("CCRecruitRatekeeper\n");
 			TraceEvent("CCRecruitRatekeeper", self->id)
 			    .detail("Addr", worker.interf.address())
 			    .detail("RKID", req.reqId);
 
 			ErrorOr<RatekeeperInterface> interf = wait(
 			    worker.interf.ratekeeper.getReplyUnlessFailedFor(req, SERVER_KNOBS->WAIT_FOR_RATEKEEPER_JOIN_DELAY, 0));
-			printf("CCRatekeeperRecruitRequestSent\n");
 			if (interf.present()) {
 				self->recruitRatekeeper.set(false);
 				self->recruitingRatekeeperID = interf.get().id();
 				const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
-				printf("CCRatekeeperRecruited\n");
 				TraceEvent("CCRatekeeperRecruited", self->id)
 				    .detail("Addr", worker.interf.address())
 				    .detail("RKID", interf.get().id());
@@ -4936,7 +4925,6 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData* self) {
 				return Void();
 			}
 		} catch (Error& e) {
-			printf("CCRatekeeperRecruitError\n");
 			TraceEvent("CCRatekeeperRecruitError", self->id).error(e);
 			if (e.code() != error_code_no_more_servers) {
 				throw;
@@ -4950,14 +4938,12 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData* self) {
 	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 		wait(self->db.serverInfo->onChange());
 	}
-	printf("I am the CCMonitorRatekeeper\n");
 
 	loop {
 		if (self->db.serverInfo->get().ratekeeper.present() && !self->recruitRatekeeper.get()) {
 			choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().ratekeeper.get().waitFailure,
 				                            SERVER_KNOBS->RATEKEEPER_FAILURE_TIME))) {
-					printf("CCRatekeeperDied\n");
 					TraceEvent("CCRatekeeperDied", self->id)
 					    .detail("RKID", self->db.serverInfo->get().ratekeeper.get().id());
 					self->db.clearInterf(ProcessClass::RatekeeperClass);
@@ -5048,7 +5034,6 @@ ACTOR Future<Void> monitorConsistencyChecker(ClusterControllerData* self) {
 	}
 
 	TraceEvent("CCMonitorConsistencyChecker", self->id).log();
-	printf("%s: I am the CCMonitorConsistencyChecker\n", g_network->getLocalAddress().toString().c_str());
 	loop {
 		if (self->db.serverInfo->get().consistencyChecker.present() /*&& !self->db.config.consistencyScanEnabled */
 		    && !self->recruitConsistencyChecker.get()) {
@@ -5071,7 +5056,6 @@ ACTOR Future<Void> monitorConsistencyChecker(ClusterControllerData* self) {
 			}
 		} else if (self->db.config.consistencyScanEnabled) {
 			TraceEvent("CCMonitorConsistencyCheckerStarting", self->id).log();
-			printf("CCMonitorConsistencyCheckerStarting\n");
 			wait(startConsistencyChecker(self));
 		} else {
 			wait(delay(5.0));

@@ -324,6 +324,21 @@ TestWorkload* getWorkloadIface(WorkloadRequest work,
 
 	TestWorkload* workload = IWorkloadFactory::create(testName.toString(), wcx);
 
+	for (int q = 0; q < options.size(); q++)
+		fprintf(stdout,
+				" '%s' = '%s'\n",
+				options[q].key.toString().c_str(),
+				options[q].value.toString().c_str());
+	if (workload) {
+		fprintf(stdout,
+				"TestName: %s\n. Workload Options:",
+				printable(testName).c_str());
+		for (int p = 0; p < workload->options.size(); p++)
+			fprintf(stdout,
+					" '%s' = '%s'\n",
+					workload->options[p].key.toString().c_str(),
+					workload->options[p].value.toString().c_str());
+	}
 	auto unconsumedOptions = checkAllOptionsConsumed(workload ? workload->options : VectorRef<KeyValueRef>());
 	if (!workload || unconsumedOptions.size()) {
 		TraceEvent evt(SevError, "TestCreationError");
@@ -354,6 +369,7 @@ TestWorkload* getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDB
 		fprintf(stderr, "ERROR: No options were provided for workload.\n");
 		throw test_specification_invalid();
 	}
+	fprintf(stdout, "Workloads #options: %d\n", work.options.size());
 	if (work.options.size() == 1)
 		return getWorkloadIface(work, work.options[0], dbInfo);
 
@@ -891,6 +907,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 		g_simulator.speedUpSimulation = true;
 	}
 
+	printf("checkConsistency\n");
 	Standalone<VectorRef<KeyValueRef>> options;
 	StringRef performQuiescent = LiteralStringRef("false");
 	StringRef performCacheCheck = LiteralStringRef("false");
@@ -945,6 +962,7 @@ ACTOR Future<bool> runTest(Database cx,
                            Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	state DistributedTestResults testResults;
 
+	printf("runTest\n");
 	try {
 		Future<DistributedTestResults> fTestResults = runWorkload(cx, testers, spec);
 		if (spec.timeout > 0) {
@@ -1623,6 +1641,7 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 		TraceEvent(SevDebug, "TestHarnessConsistencyCheck").detail("File", fileName.c_str());
 		spec.title = LiteralStringRef("ConsistencyCheck");
 		spec.databasePingDelay = 0;
+		//spec.useDB = false;
 		spec.timeout = 0;
 		spec.waitForQuiescenceBegin = false;
 		spec.waitForQuiescenceEnd = false;
@@ -1643,6 +1662,12 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 		for (auto& kv : testOptions.params) {
 			options.push_back_deep(options.arena(), KeyValueRef(kv.first, kv.second));
 		}
+		printf("runTests: Options:\n");
+		for (int q = 0; q < options.size(); q++)
+			fprintf(stdout,
+					" '%s' = '%s'\n",
+					options[q].key.toString().c_str(),
+					options[q].value.toString().c_str());
 		spec.options.push_back_deep(spec.options.arena(), options);
 		testSpecs.push_back(spec);
 	} else if (whatToRun == TEST_TYPE_UNIT_TESTS) {
@@ -1708,6 +1733,5 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 			throw internal_error();
 		}
 	}
-	//return Void();
 
 }

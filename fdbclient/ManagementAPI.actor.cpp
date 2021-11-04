@@ -164,6 +164,18 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			}
 			out[p + key] = format("%d", type);
 		}
+		if (key == "consistency_scan_enabled" && isInteger(value)) {
+			//int csEnabled = std::stoi(value);
+			out[p + key] = value;
+		}
+		if (key == "consistency_scan_rate" && isInteger(value)) {
+			//int csRate = std::stoi(value);
+			out[p + key] = value;
+		}
+		if (key == "consistency_scan_interval" && isInteger(value)) {
+			//int csInterval = std::stoi(value);
+			out[p + key] = value;
+		}
 		return out;
 	}
 
