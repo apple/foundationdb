@@ -20,6 +20,7 @@
 
 #include "fdbserver/TagPartitionedLogSystem.actor.h"
 
+#include "fdbclient/FDBTypes.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR template <class T>
@@ -477,18 +478,26 @@ Future<Version> TagPartitionedLogSystem::pushTLogGroup(Version prevVersion,
                                                        LogPushData& data,
                                                        SpanID const& spanContext,
                                                        Optional<UID> debugID,
-                                                       ptxn::TLogGroupID tLogGroup) {
+                                                       ptxn::TLogGroupID tLogGroup,
+                                                       const std::set<ptxn::StorageTeamID>& addedTeams,
+                                                       const std::set<ptxn::StorageTeamID>& removedTeams) {
+
 	std::vector<Future<Void>> quorumResults;
 	std::vector<Future<ptxn::TLogCommitReply>> allReplies;
 	int location = 0;
 	Span span("TPLS:push"_loc, spanContext);
 	auto serialized = data.pGroupMessageBuilders->find(tLogGroup)->second->getAllSerialized();
 
+	std::map<ptxn::StorageTeamID, vector<Tag>> teamToTags;
+	for (auto& team : addedTeams) {
+		teamToTags[team] = {}; // TODO (Vishesh) Add tag
+	}
 	for (auto& it : tLogs) {
 		if (it->isLocal && !it->groupIdToInterfaces.empty()) {
 			ASSERT(it->groupIdToInterfaces.count(tLogGroup));
 			const auto& logServers = it->groupIdToInterfaces[tLogGroup];
 			std::vector<Future<Void>> tLogCommitResults;
+
 			for (int loc = 0; loc < logServers.size(); loc++) {
 				// TODO: pass serializer from caller
 				allReplies.push_back(
@@ -500,6 +509,9 @@ Future<Version> TagPartitionedLogSystem::pushTLogGroup(Version prevVersion,
 				                                                                            version,
 				                                                                            knownCommittedVersion,
 				                                                                            minKnownCommittedVersion,
+				                                                                            addedTeams,
+				                                                                            removedTeams,
+				                                                                            teamToTags,
 				                                                                            debugID),
 				                                                    TaskPriority::ProxyTLogCommitReply));
 				Future<Void> commitSuccess = success(allReplies.back());
@@ -541,7 +553,10 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
                                               LogPushData& data,
                                               SpanID const& spanContext,
                                               Optional<UID> debugID,
-                                              Optional<ptxn::TLogGroupID> tLogGroup) {
+                                              Optional<ptxn::TLogGroupID> tLogGroup,
+                                              const std::set<ptxn::StorageTeamID>& addedTeams,
+                                              const std::set<ptxn::StorageTeamID>& removedTeams) {
+
 	// commit to ptxn tlog system
 	if (tLogGroup.present()) {
 		return pushTLogGroup(prevVersion,
@@ -551,7 +566,9 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 		                     data,
 		                     spanContext,
 		                     debugID,
-		                     tLogGroup.get());
+		                     tLogGroup.get(),
+		                     addedTeams,
+		                     removedTeams);
 	}
 
 	// FIXME: Randomize request order as in LegacyLogSystem?

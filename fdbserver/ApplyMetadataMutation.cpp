@@ -92,7 +92,8 @@ public:
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
 	    tssMapping(&proxyCommitData_.tssMapping), tLogGroupCollection(proxyCommitData_.tLogGroupCollection),
 	    initialCommit(initialCommit_), tagToServer(&proxyCommitData_.tagToServer),
-	    ssToStorageTeam(&proxyCommitData_.ssToStorageTeam) {
+	    ssToStorageTeam(&proxyCommitData_.ssToStorageTeam), changedTeams(&proxyCommitData_.changedTeams) {
+
 		for (const auto [ss, team] : proxyCommitData_.ssToStorageTeam) {
 			TraceEvent(SevDebug, "SSTeam", dbgid).detail("SS", ss).detail("Team", team);
 			allTeams.insert(team);
@@ -131,6 +132,7 @@ private:
 	std::map<UID, Reference<StorageInfo>>* storageCache = nullptr;
 	std::map<Tag, Version>* tag_popped = nullptr;
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
+	std::unordered_map<UID, std::vector<std::pair<ptxn::StorageTeamID, bool>>>* changedTeams = nullptr;
 
 	Reference<TLogGroupCollection> tLogGroupCollection;
 
@@ -316,8 +318,14 @@ private:
 			return;
 		}
 		ASSERT_WE_THINK(tLogGroupCollection.isValid());
-		tLogGroupCollection->assignStorageTeam(decodeStorageTeamIdToTLogGroupKey(m.param1),
-		                                       BinaryReader::fromStringRef<UID>(m.param2, Unversioned()));
+		auto teamid = decodeStorageTeamIdToTLogGroupKey(m.param1);
+		auto group = BinaryReader::fromStringRef<UID>(m.param2, Unversioned());
+		tLogGroupCollection->assignStorageTeam(teamid, group);
+
+		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			(*changedTeams)[group].push_back(std::make_pair(teamid, true));
+			// TODO (Vishesh) Check if team already exists. Create entry for deleting it from old group.
+		}
 
 		// Storage Team ID to TLogGroup
 		// TODO: Update proxy state
