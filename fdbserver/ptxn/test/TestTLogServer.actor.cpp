@@ -302,7 +302,7 @@ TEST_CASE("/fdbserver/ptxn/test/run_tlog_server") {
 	state std::vector<Future<Void>> actors;
 	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
 
-	state std::string folder = "simdb" + deterministicRandom()->randomAlphaNumeric(10);
+	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 	// start a real TLog server
 	wait(startTLogServers(&actors, pContext, folder));
@@ -323,7 +323,7 @@ TEST_CASE("/fdbserver/ptxn/test/peek_tlog_server") {
 		ptxn::test::print::print(group);
 	}
 
-	state std::string folder = "simdb/" + deterministicRandom()->randomAlphaNumeric(10);
+	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 	// start a real TLog server
 	wait(startTLogServers(&actors, pContext, folder));
@@ -560,7 +560,7 @@ TEST_CASE("/fdbserver/ptxn/test/commit_peek") {
 	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
 	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
 
-	state std::string folder = "simdb/" + deterministicRandom()->randomAlphaNumeric(10);
+	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 
 	wait(startTLogServers(&actors, pContext, folder));
@@ -660,7 +660,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
 	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
 
-	state std::string folder = "simdb/" + deterministicRandom()->randomAlphaNumeric(10);
+	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 
 	state std::vector<ptxn::InitializePtxnTLogRequest> tLogInitializations;
