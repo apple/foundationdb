@@ -2017,7 +2017,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	ASSERT(self->recoveryTransactionVersion != 0);
 
 	if (self->repairSystemData) {
-		TraceEvent("RepairSystemDataBegin", self->dbgid);
+		TraceEvent("MasterRecoveryRepairSystemDataBegin", self->dbgid);
 		CommitTransactionRequest repairSystemDataCommitRequest;
 
 		// We want to backfill system data to storage servers, but the private muations are not necessary.
@@ -2035,12 +2035,12 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 
 		if (repairSystemDataCommit.isReady() && repairSystemDataCommit.get().isError()) {
 			const Error& e = repairSystemDataCommit.get().getError();
-			TraceEvent("RepairSystemDataCommitError", self->dbgid).error(e);
+			TraceEvent("MasterRecoveryRepairSystemDataCommitError", self->dbgid).error(e);
 			throw master_recovery_failed();
 		}
 
 		ASSERT(repairSystemDataCommit.isReady());
-		TraceEvent("RepairSystemDataEnd", self->dbgid);
+		TraceEvent("MasterRecoveryRepairSystemDataEnd", self->dbgid);
 	}
 
 	self->recoveryState = RecoveryState::WRITING_CSTATE;
@@ -2134,6 +2134,9 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 		}
 	}
 
+	if (repairSystemData) {
+		TraceEvent(SevWarnAlways, "MasterRecoveryRepairSystemData", mi.id());
+	}
 	state Future<Void> onDBChange = Void();
 	state PromiseStream<Future<Void>> addActor;
 	state Reference<MasterData> self(new MasterData(db,

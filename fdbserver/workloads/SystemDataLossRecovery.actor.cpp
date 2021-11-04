@@ -84,17 +84,17 @@ struct SystemDataLossRecoveryWorkload : TestWorkload {
 		// Kill team {ssi}, and expect read to timeout.
 		self->killProcess(self, ssi.address());
 
-        // Read \xff/keyServers/, and expect the read to time out.
+		// Read \xff/keyServers/, and expect the read to time out.
 		wait(self->readAndVerify(self, cx, keyServersKeys.begin, timed_out()));
 
-        // Repair system data.
+		// Repair system data.
 		wait(repairSystemData(cx->getConnectionRecord()));
 
-        // Read \xff/keyServers/, and expect the read to succeed.
+		// Read \xff/keyServers/, and expect the read to succeed.
 		state Transaction tr(cx);
 		loop {
 			try {
-				Optional<Value> res = wait(timeoutError(tr.get(keyServersKeys.begin), 30.0));
+				Optional<Value> res = wait(tr.get(keyServersKeys.begin));
 				ASSERT(res.present());
 				break;
 			} catch (Error& e) {
@@ -105,19 +105,20 @@ struct SystemDataLossRecoveryWorkload : TestWorkload {
 
 		TraceEvent("ReadKeyServersKeys");
 
-        // Remove the failed server.
+		// Remove the failed server.
 		wait(self->exclude(cx, ssi.address()));
 		int ignore = wait(setDDMode(cx, 1));
 
 		return Void();
 	}
 
-    // Move keyrange to a ramdom single storage server.
+	// Move keyrange to a ramdom single storage server.
 	ACTOR Future<StorageServerInterface> moveToRandomServer(SystemDataLossRecoveryWorkload* self,
 	                                                        Database cx,
 	                                                        KeyRangeRef shard) {
 		TraceEvent("TestMoveShardBegin").detail("Begin", shard.begin).detail("End", shard.end);
 
+        state int i = 1;
 		loop {
 			try {
 				state Optional<StorageServerInterface> ssi = wait(self->getRandomStorageServer(cx));
@@ -126,10 +127,10 @@ struct SystemDataLossRecoveryWorkload : TestWorkload {
 				// Move [key, endKey) to team: {address}.
 				std::vector<NetworkAddress> addresses;
 				addresses.push_back(ssi.get().address());
-				wait(moveShard(cx->getConnectionRecord(), shard, addresses));
+				wait(moveShard(cx->getConnectionRecord(), shard, addresses, UID(1, i++)));
 				break;
 			} catch (Error& e) {
-				if (e.code() != error_code_destination_servers_not_found) {
+				if (e.code() != error_code_destination_servers_not_found && e.code() != error_code_movekeys_conflict) {
 					throw e;
 				}
 			}
@@ -155,7 +156,7 @@ struct SystemDataLossRecoveryWorkload : TestWorkload {
 		return ssi.get();
 	}
 
-    // Find a random storage server.
+	// Find a random storage server.
 	ACTOR Future<Optional<StorageServerInterface>> getRandomStorageServer(Database cx) {
 		loop {
 			std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));

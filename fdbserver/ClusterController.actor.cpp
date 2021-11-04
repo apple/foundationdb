@@ -147,11 +147,11 @@ public:
 		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
 		    masterRegistrationCount(0), dbInfoCount(0), recoveryStalled(false), forceRecovery(false),
 		    repairSystemData(false), db(DatabaseContext::create(clientInfo,
-		                                                       Future<Void>(),
-		                                                       LocalityData(),
-		                                                       EnableLocalityLoadBalance::True,
-		                                                       TaskPriority::DefaultEndpoint,
-		                                                       LockAware::True)), // SOMEDAY: Locality!
+		                                                        Future<Void>(),
+		                                                        LocalityData(),
+		                                                        EnableLocalityLoadBalance::True,
+		                                                        TaskPriority::DefaultEndpoint,
+		                                                        LockAware::True)), // SOMEDAY: Locality!
 		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false), clientCount(0) {
 			clientCounter = countClients(this);
 		}
@@ -4999,7 +4999,7 @@ ACTOR Future<Void> handleRepairSystemData(ClusterControllerData* self, ClusterCo
 	loop {
 		state RepairSystemDataRequest req = waitNext(interf.clientInterface.repairSystemData.getFuture());
 		state UID oldMasterID = self->db.serverInfo->get().master.id();
-		TraceEvent("RepairSystemDataStart", self->id)
+		TraceEvent("CCRepairSystemDataStart", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("MasterID", oldMasterID);
 
@@ -5015,7 +5015,7 @@ ACTOR Future<Void> handleRepairSystemData(ClusterControllerData* self, ClusterCo
 				break;
 			}
 		}
-		TraceEvent("RepairSystemDataFinish", self->id)
+		TraceEvent("CCRepairSystemDataFinish", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("MasterID", self->db.serverInfo->get().master.id());
 
@@ -5119,7 +5119,7 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 			    .detail("Begin", keys.begin)
 			    .detail("End", keys.end)
 			    .detail("NewTeam", describe(dest))
-			    .error(e);
+			    .error(e, /*includeCancelled=*/true);
 			if (e.code() == error_code_movekeys_conflict) {
 				txn.reset();
 				wait(delay(1.0));
@@ -5133,40 +5133,66 @@ ACTOR Future<Void> moveShard(Database cx, KeyRange keys, std::vector<NetworkAddr
 }
 
 ACTOR Future<Void> handleMoveShard(ClusterControllerData* self, ClusterControllerFullInterface interf) {
-	state std::unordered_set<UID> processedRequests;
-	loop {
-		state MoveShardRequest req = waitNext(interf.clientInterface.moveShard.getFuture());
-		TraceEvent("ManualMoveShardStart", self->id)
-		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
-		    .detail("RequestID", req.id)
-		    .detail("Begin", req.shard.begin)
-		    .detail("End", req.shard.end)
-		    .detail("Addresses", describe(req.addresses));
-
-		if (processedRequests.count(req.id) == 0) {
-			processedRequests.insert(req.id);
-			try {
-				wait(moveShard(self->db.db, req.shard, req.addresses));
-				TraceEvent("ManualMoveShardFinish", self->id).log();
-				req.reply.send(Void());
-			} catch (Error& e) {
-				TraceEvent("ManualMoveShardError", self->id)
-				    .detail("ClusterControllerDcId", self->clusterControllerDcId)
-				    .detail("RequestID", req.id)
-				    .detail("Begin", req.shard.begin)
-				    .detail("End", req.shard.end)
-				    .detail("Addresses", describe(req.addresses))
-				    .error(e);
-				req.reply.sendError(e);
-			}
-		} else {
-			TraceEvent("ManualMoveShardDuplicateRequestID", self->id)
+	state std::unordered_map<UID, Optional<Error>> processedRequests;
+	try {
+		loop {
+			state MoveShardRequest req = waitNext(interf.clientInterface.moveShard.getFuture());
+			TraceEvent("ManualMoveShardStart", self->id)
 			    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 			    .detail("RequestID", req.id)
 			    .detail("Begin", req.shard.begin)
 			    .detail("End", req.shard.end)
 			    .detail("Addresses", describe(req.addresses));
+
+			if (processedRequests.count(req.id) == 0) {
+				processedRequests.emplace(req.id, Optional<Error>());
+				try {
+					wait(moveShard(self->db.db, req.shard, req.addresses));
+					TraceEvent("ManualMoveShardFinish", self->id).log();
+					req.reply.send(Void());
+				} catch (Error& e) {
+					TraceEvent("ManualMoveShardError", self->id)
+					    .detail("ClusterControllerDcId", self->clusterControllerDcId)
+					    .detail("RequestID", req.id)
+					    .detail("Begin", req.shard.begin)
+					    .detail("End", req.shard.end)
+					    .detail("Addresses", describe(req.addresses))
+					    .error(e, /*includeCancelled=*/true);
+					if (e.code() == error_code_actor_cancelled) {
+						std::cout << "here" << std::endl;
+						processedRequests[req.id] = operation_cancelled();
+						req.reply.sendError(movekeys_conflict());
+					} else {
+						processedRequests[req.id] = e;
+						req.reply.sendError(e);
+					}
+				}
+			} else {
+				TraceEvent("ManualMoveShardDuplicateRequestID", self->id)
+				    .detail("ClusterControllerDcId", self->clusterControllerDcId)
+				    .detail("RequestID", req.id)
+				    .detail("Begin", req.shard.begin)
+				    .detail("End", req.shard.end)
+				    .detail("Addresses", describe(req.addresses));
+				if (!req.reply.isSet()) {
+					if (processedRequests[req.id].present()) {
+						req.reply.sendError(processedRequests[req.id].get());
+					} else {
+						req.reply.send(Void());
+					}
+				}
+			}
 		}
+	} catch (Error& e) {
+		TraceEvent("ManualMoveShardHandlerError", self->id).error(e, /*includeCancelled=*/true);
+		if (req.reply.isValid() && !req.reply.isSet()) {
+			if (e.code() == error_code_actor_cancelled) {
+				req.reply.sendError(operation_cancelled());
+			} else {
+				req.reply.sendError(e);
+			}
+		}
+		throw e;
 	}
 }
 

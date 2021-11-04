@@ -319,7 +319,7 @@ struct MoveShardRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, shard, addresses, reply);
+		serializer(ar, shard, addresses, reply, id);
 	}
 };
 

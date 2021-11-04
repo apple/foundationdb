@@ -2205,15 +2205,17 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 
 ACTOR Future<Void> moveShard(Reference<IClusterConnectionRecord> clusterFile,
                              KeyRangeRef shard,
-                             std::vector<NetworkAddress> addresses) {
+                             std::vector<NetworkAddress> addresses,
+                             UID replay) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
-
+	state UID id = replay.isValid() ? replay : deterministicRandom()->randomUniqueID();
+	TraceEvent("ManualMoveShardReplay").detail("UID", id);
 	loop {
 		choose {
 			when(wait(clusterInterface->get().present()
 			              ? brokenPromiseToNever(clusterInterface->get().get().moveShard.getReply(
-			                    MoveShardRequest(shard, addresses, deterministicRandom()->randomUniqueID())))
+			                    MoveShardRequest(shard, addresses, id)))
 			              : Never())) {
 				return Void();
 			}
