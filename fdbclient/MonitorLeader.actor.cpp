@@ -49,11 +49,11 @@ std::string trim(std::string const& connectionString) {
 }
 
 std::string trimFromHostname(std::string const& networkAddress) {
-	std::string result = networkAddress;
-	if (result.find("(fromHostname)") != std::string::npos) {
-		return result.substr(0, result.find("(fromHostname)"));
+	const auto& pos = networkAddress.find("(fromHostname)");
+	if (pos != std::string::npos) {
+		return networkAddress.substr(0, pos);
 	}
-	return result;
+	return networkAddress;
 }
 
 } // namespace
