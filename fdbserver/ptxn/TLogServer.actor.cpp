@@ -1696,7 +1696,10 @@ ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self,
 			state Version lastVersion = std::numeric_limits<Version>::min();
 			state IDiskQueue::location firstLocation = std::numeric_limits<IDiskQueue::location>::max();
 			// Transfer unpopped messages with version numbers less than newPersistentDataVersion to persistentData
-			state std::map<Version, std::pair<StringRef, Arena>>::iterator msg = teamData->versionMessages.begin();
+			// TOFIX: versions in logData->versionLocation is erased through persistentQueue->forgetBefore,
+			// however we do not erase it in teamData yet, that alone needs a PR.
+			state std::map<Version, std::pair<StringRef, Arena>>::iterator msg =
+			    teamData->versionMessages.lower_bound(logData->versionLocation.begin()->key);
 			state int refSpilledTagCount = 0;
 			wr = BinaryWriter(AssumeVersion(logData->protocolVersion));
 			// We prefix our spilled locations with a count, so that we can read this back out as a VectorRef.

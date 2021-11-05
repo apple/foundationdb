@@ -797,6 +797,9 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	state std::vector<Standalone<StringRef>> expectedMessages = res.first;
 	wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
 
+	// wait 1s so that actors who update persistent data can do their job.
+	wait(delay(1.0));
+
 	// only wrote to a single storageTeamId, thus only 1 tlogGroup, while each tlogGroup has their own disk queue.
 	state IDiskQueue* q = qs[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
 	state bool exist = false;
