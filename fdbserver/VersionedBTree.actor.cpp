@@ -3719,7 +3719,7 @@ private:
 #pragma pack(push, 1)
 	// Header is the format of page 0 of the database
 	struct Header {
-		static constexpr int FORMAT_VERSION = 7;
+		static constexpr int FORMAT_VERSION = 8;
 		uint16_t formatVersion;
 		uint32_t queueCount;
 		uint32_t pageSize;
@@ -3970,8 +3970,8 @@ struct SplitStringRef {
 
 	struct const_iterator {
 		const uint8_t* ptr;
-		const uint8_t* end;
-		const uint8_t* next;
+		const uint8_t* end{ nullptr };
+		const uint8_t* next{ nullptr };
 
 		inline bool operator==(const const_iterator& rhs) const { return ptr == rhs.ptr; }
 		inline bool operator!=(const const_iterator& rhs) const { return !(*this == rhs); }
@@ -4544,15 +4544,17 @@ struct BTreePage {
 				c.moveFirst();
 				ASSERT(c.valid());
 
-				bool anyOutOfRange = false;
 				do {
 					r += "  ";
 					r += c.get().toString(height == 1);
 
+					// Out of range entries are annotated but can actually be valid, as they can be the result of
+					// subtree deletion followed by incremental insertions of records in the deleted range being added
+					// to an adjacent subtree which is logically expanded encompass the deleted range but still is using
+					// the original subtree boundaries as DeltaTree2 boundaries.
 					bool tooLow = c.get().withoutValue() < lowerBound.withoutValue();
 					bool tooHigh = c.get().withoutValue() >= upperBound.withoutValue();
 					if (tooLow || tooHigh) {
-						anyOutOfRange = true;
 						if (tooLow) {
 							r += " (below decode lower bound)";
 						}
@@ -4563,12 +4565,6 @@ struct BTreePage {
 					r += "\n";
 
 				} while (c.moveNext());
-
-				// Out of range entries are actually okay now and the result of subtree deletion followed by
-				// incremental insertions of records in the deleted range being added to an adjacent subtree
-				// which is logically expanded encompass the deleted range but still is using the original
-				// subtree boundaries as DeltaTree2 boundaries.
-				// ASSERT(!anyOutOfRange);
 			}
 		} catch (Error& e) {
 			debug_printf("BTreePage::toString ERROR: %s\n", e.what());
@@ -4698,7 +4694,7 @@ public:
 
 #pragma pack(push, 1)
 	struct MetaKey {
-		static constexpr int FORMAT_VERSION = 14;
+		static constexpr int FORMAT_VERSION = 15;
 		// This serves as the format version for the entire tree, individual pages will not be versioned
 		uint16_t formatVersion;
 		uint8_t height;
