@@ -300,9 +300,6 @@ public:
 		this->localAddress = na;
 		this->tracePartialFileSuffix = tracePartialFileSuffix;
 
-		// std::cout << "open-directory: " << directory << std::endl;
-		// std::cout << "open-processName: " << processName << std::endl;
-		// std::cout << "open-addr: " << na.get().toString() << std::endl;
 		basename = format("%s/%s.%s.%s",
 		                  directory.c_str(),
 		                  processName.c_str(),
@@ -725,18 +722,8 @@ void openTraceFile(const NetworkAddress& na,
                    std::string logGroup,
                    std::string identifier,
                    std::string tracePartialFileSuffix) {
-	// std::cout << "addr: " << na.toString() << std::endl;
-	// std::cout << "rollsize: " << rollsize << std::endl;
-	// std::cout << "directory: " << directory << std::endl;
-	// std::cout << "baseOfBase: " << baseOfBase << std::endl;
-	// std::cout << "logGroup: " << logGroup << std::endl;
-	// std::cout << "identifier: " << identifier << std::endl;
-	// std::cout << "tracePartialFileSuffix: " << tracePartialFileSuffix << std::endl;
-	if (g_traceLog.isOpen()) {
-		// std::cout << "trace is open\n";
-		// std::cout << na.toString() << " " << identifier << " " << directory << " " << baseOfBase << std::endl;
+	if (g_traceLog.isOpen())
 		return;
-	}
 
 	if (directory.empty())
 		directory = ".";
@@ -752,8 +739,6 @@ void openTraceFile(const NetworkAddress& na,
 	} else {
 		baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.port);
 	}
-	// std::cout << "dirctory: " << directory << " baseName: " << baseName << std::endl;
-	// std::cout << "addr:" << na.toString() << std::endl;
 	g_traceLog.open(directory,
 	                baseName,
 	                logGroup,
