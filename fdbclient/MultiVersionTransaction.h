@@ -36,6 +36,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	typedef struct FDB_result FDBResult;
 	typedef struct FDB_cluster FDBCluster;
 	typedef struct FDB_database FDBDatabase;
+	typedef struct FDB_tenant FDBTenant;
 	typedef struct FDB_transaction FDBTransaction;
 
 #pragma pack(push, 4)
@@ -91,6 +92,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*createDatabase)(const char* clusterFilePath, FDBDatabase** db);
 
 	// Database
+	fdb_error_t (*databaseOpenTenant)(FDBDatabase* database, const char* tenantName, FDBTenant** outTenant);
 	fdb_error_t (*databaseCreateTransaction)(FDBDatabase* database, FDBTransaction** tr);
 	fdb_error_t (*databaseSetOption)(FDBDatabase* database,
 	                                 FDBDatabaseOption option,
@@ -110,6 +112,10 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                     int snapshotCommandLength);
 	double (*databaseGetMainThreadBusyness)(FDBDatabase* database);
 	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
+
+	// Tenant
+	fdb_error_t (*tenantCreateTransaction)(FDBTenant* tenant, FDBTransaction** outTransaction);
+	void (*tenantDestroy)(FDBTenant* tenant);
 
 	// Transaction
 	fdb_error_t (*transactionSetOption)(FDBTransaction* tr,
@@ -328,6 +334,25 @@ private:
 	FdbCApi::FDBTransaction* const tr;
 };
 
+class DLTenant : public ITenant, ThreadSafeReferenceCounted<DLTenant> {
+public:
+	DLTenant(Reference<FdbCApi> api, FdbCApi::FDBTenant* tenant) : api(api), tenant(tenant) {}
+	~DLTenant() override {
+		if (tenant) {
+			api->tenantDestroy(tenant);
+		}
+	}
+
+	Reference<ITransaction> createTransaction() override;
+
+	void addref() override { ThreadSafeReferenceCounted<DLTenant>::addref(); }
+	void delref() override { ThreadSafeReferenceCounted<DLTenant>::delref(); }
+
+private:
+	const Reference<FdbCApi> api;
+	FdbCApi::FDBTenant* tenant;
+};
+
 // An implementation of IDatabase that wraps a database object created on an externally loaded client library.
 // All API calls to that database are routed through the external library.
 class DLDatabase : public IDatabase, ThreadSafeReferenceCounted<DLDatabase> {
@@ -342,6 +367,7 @@ public:
 
 	ThreadFuture<Void> onReady();
 
+	Reference<ITenant> openTenant(const char* tenantName) override;
 	Reference<ITransaction> createTransaction() override;
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	double getMainThreadBusyness() override;
@@ -552,6 +578,17 @@ struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 
 class MultiVersionApi;
 
+class MultiVersionTenant final : public ITenant, ThreadSafeReferenceCounted<MultiVersionTenant> {
+public:
+	MultiVersionTenant() {}
+	~MultiVersionTenant() override;
+
+	Reference<ITransaction> createTransaction() override;
+
+	void addref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::addref(); }
+	void delref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::delref(); }
+};
+
 // An implementation of IDatabase that wraps a database created either locally or through a dynamically loaded
 // external client. The MultiVersionDatabase monitors the protocol version of the cluster and automatically
 // replaces the wrapped database when the protocol version changes.
@@ -566,6 +603,7 @@ public:
 
 	~MultiVersionDatabase() override;
 
+	Reference<ITenant> openTenant(const char* tenantName) override;
 	Reference<ITransaction> createTransaction() override;
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	double getMainThreadBusyness() override;

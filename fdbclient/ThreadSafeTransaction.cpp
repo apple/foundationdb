@@ -46,6 +46,10 @@ ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::createFromExistingDatabas
 	});
 }
 
+Reference<ITenant> ThreadSafeDatabase::openTenant(const char* tenantName) {
+	return makeReference<ThreadSafeTenant>(db, tenantName);
+}
+
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
 	auto type = isConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
 	return Reference<ITransaction>(new ThreadSafeTransaction(db, type));
@@ -138,6 +142,12 @@ ThreadSafeDatabase::~ThreadSafeDatabase() {
 	DatabaseContext* db = this->db;
 	onMainThreadVoid([db]() { db->delref(); }, nullptr);
 }
+
+Reference<ITransaction> ThreadSafeTenant::createTransaction() {
+	return Reference<ITransaction>();
+}
+
+ThreadSafeTenant::~ThreadSafeTenant() {}
 
 ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadTransaction::Type type) {
 	// Allocate memory for the transaction from this thread (so the pointer is known for subsequent method calls)

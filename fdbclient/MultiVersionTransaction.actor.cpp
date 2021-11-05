@@ -381,6 +381,15 @@ void DLTransaction::reset() {
 	api->transactionReset(tr);
 }
 
+// DLTenant
+Reference<ITransaction> DLTenant::createTransaction() {
+	ASSERT(api->tenantCreateTransaction != nullptr);
+
+	FdbCApi::FDBTransaction* tr;
+	api->tenantCreateTransaction(tenant, &tr);
+	return Reference<ITransaction>(new DLTransaction(api, tr));
+}
+
 // DLDatabase
 DLDatabase::DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture) : api(api), db(nullptr) {
 	addref();
@@ -400,9 +409,19 @@ ThreadFuture<Void> DLDatabase::onReady() {
 	return ready;
 }
 
+Reference<ITenant> DLDatabase::openTenant(const char* tenantName) {
+	if (!api->databaseOpenTenant) {
+		throw unsupported_operation();
+	}
+
+	FdbCApi::FDBTenant* tenant;
+	throwIfError(api->databaseOpenTenant(db, tenantName, &tenant));
+	return makeReference<DLTenant>(api, tenant);
+}
+
 Reference<ITransaction> DLDatabase::createTransaction() {
 	FdbCApi::FDBTransaction* tr;
-	api->databaseCreateTransaction(db, &tr);
+	throwIfError(api->databaseCreateTransaction(db, &tr));
 	return Reference<ITransaction>(new DLTransaction(api, tr));
 }
 
@@ -521,6 +540,7 @@ void DLApi::init() {
 	loadClientFunction(&api->stopNetwork, lib, fdbCPath, "fdb_stop_network", headerVersion >= 0);
 	loadClientFunction(&api->createDatabase, lib, fdbCPath, "fdb_create_database", headerVersion >= 610);
 
+	loadClientFunction(&api->databaseOpenTenant, lib, fdbCPath, "fdb_database_open_tenant", headerVersion >= 710);
 	loadClientFunction(
 	    &api->databaseCreateTransaction, lib, fdbCPath, "fdb_database_create_transaction", headerVersion >= 0);
 	loadClientFunction(&api->databaseSetOption, lib, fdbCPath, "fdb_database_set_option", headerVersion >= 0);
@@ -540,6 +560,10 @@ void DLApi::init() {
 	                   headerVersion >= 700);
 	loadClientFunction(
 	    &api->databaseCreateSnapshot, lib, fdbCPath, "fdb_database_create_snapshot", headerVersion >= 700);
+
+	loadClientFunction(
+	    &api->tenantCreateTransaction, lib, fdbCPath, "fdb_tenant_create_transaction", headerVersion >= 710);
+	loadClientFunction(&api->tenantDestroy, lib, fdbCPath, "fdb_tenant_destroy", headerVersion >= 710);
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option", headerVersion >= 0);
 	loadClientFunction(&api->transactionDestroy, lib, fdbCPath, "fdb_transaction_destroy", headerVersion >= 0);
@@ -1167,6 +1191,12 @@ bool MultiVersionTransaction::isValid() {
 	return tr.transaction.isValid();
 }
 
+MultiVersionTenant::~MultiVersionTenant() {}
+
+Reference<ITransaction> MultiVersionTenant::createTransaction() {
+	return Reference<ITransaction>();
+}
+
 // MultiVersionDatabase
 MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
                                            int threadIdx,
@@ -1239,6 +1269,10 @@ MultiVersionDatabase::~MultiVersionDatabase() {
 // For internal use in testing
 Reference<IDatabase> MultiVersionDatabase::debugCreateFromExistingDatabase(Reference<IDatabase> db) {
 	return Reference<IDatabase>(new MultiVersionDatabase(MultiVersionApi::api, 0, "", db, db, false));
+}
+
+Reference<ITenant> MultiVersionDatabase::openTenant(const char* tenantName) {
+	return makeReference<MultiVersionTenant>();
 }
 
 Reference<ITransaction> MultiVersionDatabase::createTransaction() {

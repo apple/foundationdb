@@ -35,6 +35,7 @@ public:
 	~ThreadSafeDatabase() override;
 	static ThreadFuture<Reference<IDatabase>> createFromExistingDatabase(Database cx);
 
+	Reference<ITenant> openTenant(const char* tenantName) override;
 	Reference<ITransaction> createTransaction() override;
 
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
@@ -66,6 +67,19 @@ public: // Internal use only
 	ThreadSafeDatabase(std::string connFilename, int apiVersion);
 	ThreadSafeDatabase(DatabaseContext* db) : db(db) {}
 	DatabaseContext* unsafeGetPtr() const { return db; }
+};
+
+class ThreadSafeTenant : public ITenant, ThreadSafeReferenceCounted<ThreadSafeTenant>, NonCopyable {
+public:
+	ThreadSafeTenant(DatabaseContext* db, std::string name) {}
+	~ThreadSafeTenant() override;
+
+	Reference<ITransaction> createTransaction() override;
+
+	void addref() override { ThreadSafeReferenceCounted<ThreadSafeTenant>::addref(); }
+	void delref() override { ThreadSafeReferenceCounted<ThreadSafeTenant>::delref(); }
+
+private:
 };
 
 // An implementation of ITransaction that serializes operations onto the network thread and interacts with the

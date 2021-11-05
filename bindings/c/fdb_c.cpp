@@ -37,12 +37,14 @@ int g_api_version = 0;
  *   FDBFuture -> ThreadSingleAssignmentVarBase
  *   FDBResult -> ThreadSingleAssignmentVarBase
  *   FDBDatabase -> IDatabase
+ *   FDBTenant -> ITenant
  *   FDBTransaction -> ITransaction
  */
 #define TSAVB(f) ((ThreadSingleAssignmentVarBase*)(f))
 #define TSAV(T, f) ((ThreadSingleAssignmentVar<T>*)(f))
 
 #define DB(d) ((IDatabase*)d)
+#define TENANT(t) ((ITenant*)t)
 #define TXN(t) ((ITransaction*)t)
 
 // Legacy (pre API version 610)
@@ -375,6 +377,12 @@ extern "C" DLLEXPORT void fdb_database_destroy(FDBDatabase* d) {
 	CATCH_AND_DIE(DB(d)->delref(););
 }
 
+extern "C" DLLEXPORT fdb_error_t fdb_database_open_tenant(FDBDatabase* d,
+                                                          const char* tenant_name,
+                                                          FDBTenant** out_tenant) {
+	CATCH_AND_RETURN(*out_tenant = (FDBTenant*)DB(d)->openTenant(tenant_name).extractPtr(););
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_database_create_transaction(FDBDatabase* d, FDBTransaction** out_transaction) {
 	CATCH_AND_RETURN(Reference<ITransaction> tr = DB(d)->createTransaction();
 	                 if (g_api_version <= 15) tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -426,6 +434,17 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db
 	                                uint64_t>(DB(db)->getServerProtocol(expected), [](ErrorOr<ProtocolVersion> result) {
 		                return result.map<uint64_t>([](ProtocolVersion pv) { return pv.versionWithFlags(); });
 	                }).extractPtr());
+}
+
+extern "C" DLLEXPORT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant, FDBTransaction** out_transaction) {
+	CATCH_AND_RETURN(*out_transaction = (FDBTransaction*)TENANT(tenant)->createTransaction().extractPtr(););
+}
+
+extern "C" DLLEXPORT void fdb_tenant_destroy(FDBTenant* tenant) {
+	try {
+		TENANT(tenant)->delref();
+	} catch (...) {
+	}
 }
 
 extern "C" DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr) {
