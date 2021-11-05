@@ -1026,6 +1026,8 @@ struct HealthMetrics {
 	int64_t limitingStorageQueue;
 	int64_t worstStorageDurabilityLag;
 	int64_t limitingStorageDurabilityLag;
+	int64_t worstStorageReadQueue;
+	int64_t limitingStorageReadQueue;
 	int64_t worstTLogQueue;
 	double tpsLimit;
 	bool batchLimited;
@@ -1034,7 +1036,7 @@ struct HealthMetrics {
 
 	HealthMetrics()
 	  : worstStorageQueue(0), limitingStorageQueue(0), worstStorageDurabilityLag(0), limitingStorageDurabilityLag(0),
-	    worstTLogQueue(0), tpsLimit(0.0), batchLimited(false) {}
+	    worstStorageReadQueue(0), limitingStorageReadQueue(0), worstTLogQueue(0), tpsLimit(0.0), batchLimited(false) {}
 
 	void update(const HealthMetrics& hm, bool detailedInput, bool detailedOutput) {
 		worstStorageQueue = hm.worstStorageQueue;

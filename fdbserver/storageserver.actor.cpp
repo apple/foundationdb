@@ -477,6 +477,11 @@ public:
 	Arena lastArena;
 	double cpuUsage;
 	double diskUsage;
+	// The number of currently outstanding reads. This is tracked so that Ratekeeper can slow transactions when
+	// the queue gets too deep. It currently does not track eager reads as those are a small proportion of
+	// total reads.
+	// TODO: We should throttle the number of FetchKeys reads so that Ratekeeper doesn't kick in due to data movement.
+	int64_t readQueue = 0;
 
 	std::map<Version, Standalone<VerUpdateRef>> const& getMutationLog() const { return mutationLog; }
 	std::map<Version, Standalone<VerUpdateRef>>& getMutableMutationLog() { return mutationLog; }
@@ -665,8 +670,6 @@ public:
 	int64_t numWatches;
 	AsyncVar<bool> noRecentUpdates;
 	double lastUpdate;
-
-	Int64MetricHandle readQueueSizeMetric;
 
 	std::string folder;
 
@@ -887,8 +890,7 @@ public:
 	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), primaryLocality(tagLocalityInvalid),
 	    knownCommittedVersion(0), versionLag(0), logProtocol(0), thisServerID(ssi.id()), tssInQuarantine(false), db(db),
 	    actors(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), durableInProgress(Void()),
-	    watchBytes(0), numWatches(0), noRecentUpdates(false), lastUpdate(now()),
-	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), updateEagerReads(nullptr),
+	    watchBytes(0), numWatches(0), noRecentUpdates(false), lastUpdate(now()), updateEagerReads(nullptr),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
@@ -1273,8 +1275,24 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	}
 }
 
+// TODO: This namespace should cover the mass majority of this file. For now, just protect the generic `ReadCounter`
+// name.
+namespace {
+
+class ReadCounter {
+public:
+	ReadCounter(int64_t& val) : val(++val) {}
+	~ReadCounter() { --val; }
+
+private:
+	int64_t& val;
+};
+
+} // namespace
+
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	state int64_t resultSize = 0;
+	state ReadCounter counter(data->readQueue);
 	Span span("SS:getValue"_loc, { req.spanContext });
 	span.addTag("key"_sr, req.key);
 	// Temporarily disabled -- this path is hit a lot
@@ -1283,7 +1301,6 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	try {
 		++data->counters.getValueQueries;
 		++data->counters.allQueries;
-		++data->readQueueSizeMetric;
 		data->maxQueryQueue = std::max<int>(
 		    data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
 
@@ -1385,7 +1402,6 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
 
 	++data->counters.finishedQueries;
-	--data->readQueueSizeMetric;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
@@ -2311,11 +2327,11 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	state int64_t resultSize = 0;
 	state IKeyValueStore::ReadType type =
 	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
+	state ReadCounter counter(data->readQueue);
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
 	++data->counters.getRangeQueries;
 	++data->counters.allQueries;
-	++data->readQueueSizeMetric;
 	data->maxQueryQueue = std::max<int>(
 	    data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
 
@@ -2452,7 +2468,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
 	++data->counters.finishedQueries;
-	--data->readQueueSizeMetric;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
@@ -2482,7 +2497,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 	++data->counters.getRangeStreamQueries;
 	++data->counters.allQueries;
-	++data->readQueueSizeMetric;
 	data->maxQueryQueue = std::max<int>(
 	    data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
 
@@ -2649,7 +2663,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
 	++data->counters.finishedQueries;
-	--data->readQueueSizeMetric;
 
 	return Void();
 }
@@ -2657,11 +2670,11 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	state Span span("SS:getKey"_loc, { req.spanContext });
 	state int64_t resultSize = 0;
+	state ReadCounter counter(data->readQueue);
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
 	++data->counters.getKeyQueries;
 	++data->counters.allQueries;
-	++data->readQueueSizeMetric;
 	data->maxQueryQueue = std::max<int>(
 	    data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
 
@@ -2720,7 +2733,6 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
 
 	++data->counters.finishedQueries;
-	--data->readQueueSizeMetric;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
@@ -2750,6 +2762,7 @@ void getQueuingMetrics(StorageServer* self, StorageQueuingMetricsRequest const& 
 	reply.cpuUsage = self->cpuUsage;
 	reply.diskUsage = self->diskUsage;
 	reply.durableVersion = self->durableVersion.get();
+	reply.readQueueLength = self->readQueue;
 
 	Optional<StorageServer::TransactionTagCounter::TagInfo> busiestTag = self->transactionTagCounter.getBusiestTag();
 	reply.busiestTag = busiestTag.map<TransactionTag>(
@@ -5578,6 +5591,7 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 			                                         UID(self->thisServerID.first() ^ self->ssPairID.get().first(),
 			                                             self->thisServerID.second() ^ self->ssPairID.get().second()));
 		                               }
+		                               te.detail("ReadQueue", self->readQueue);
 	                               }));
 
 	loop {

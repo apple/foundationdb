@@ -775,6 +775,7 @@ struct StorageQueuingMetricsReply {
 	Optional<TransactionTag> busiestTag;
 	double busiestTagFractionalBusyness;
 	double busiestTagRate;
+	int64_t readQueueLength;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -791,7 +792,8 @@ struct StorageQueuingMetricsReply {
 		           localRateLimit,
 		           busiestTag,
 		           busiestTagFractionalBusyness,
-		           busiestTagRate);
+		           busiestTagRate,
+		           readQueueLength);
 	}
 };
 

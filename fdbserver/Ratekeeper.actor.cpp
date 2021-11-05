@@ -46,6 +46,7 @@ enum limitReason_t {
 	log_server_min_free_space_ratio,
 	storage_server_durability_lag, // 10
 	storage_server_list_fetch_failed,
+	storage_server_read_queue,
 	limitReason_t_end
 };
 
@@ -62,7 +63,8 @@ const char* limitReasonName[] = { "workload",
 	                              "log_server_min_free_space",
 	                              "log_server_min_free_space_ratio",
 	                              "storage_server_durability_lag",
-	                              "storage_server_list_fetch_failed" };
+	                              "storage_server_list_fetch_failed",
+	                              "storage_server_read_queue" };
 static_assert(sizeof(limitReasonName) / sizeof(limitReasonName[0]) == limitReason_t_end, "limitReasonDesc table size");
 
 // NOTE: This has a corresponding table in Script.cs (see RatekeeperReason graph)
@@ -78,7 +80,8 @@ const char* limitReasonDesc[] = { "Workload or read performance.",
 	                              "Log server running out of space (approaching 100MB limit).",
 	                              "Log server running out of space (approaching 5% limit).",
 	                              "Storage server durable version falling behind.",
-	                              "Unable to fetch storage server list." };
+	                              "Unable to fetch storage server list.",
+	                              "Storage server performance (read queue)" };
 
 static_assert(sizeof(limitReasonDesc) / sizeof(limitReasonDesc[0]) == limitReason_t_end, "limitReasonDesc table size");
 
@@ -92,6 +95,7 @@ struct StorageQueueInfo {
 	Smoother smoothDurableVersion, smoothLatestVersion;
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
+	Smoother smoothReadQueue;
 	limitReason_t limitReason;
 
 	Optional<TransactionTag> busiestReadTag, busiestWriteTag;
@@ -110,7 +114,7 @@ struct StorageQueueInfo {
 	    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
 	    smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    limitReason(limitReason_t::unlimited),
+	    smoothReadQueue(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited),
 	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(id.toString() + "/BusiestWriteTag")) {
 		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 		lastReply.instanceID = -1;
@@ -508,6 +512,10 @@ struct RatekeeperLimits {
 	int64_t lastDurabilityLag;
 	double durabilityLagLimit;
 
+	int64_t readQueueMaxSize;
+	int64_t lastReadQueue;
+	double readQueueLimit;
+
 	TransactionPriority priority;
 	std::string context;
 
@@ -529,8 +537,10 @@ struct RatekeeperLimits {
 	        durabilityLagTargetVersions +
 	        SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions are expected to not
 	                                                           // be durable on the storage servers
-	    lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()), priority(priority),
-	    context(context), rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}
+	    lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()),
+	    readQueueMaxSize(SERVER_KNOBS->MAX_READ_QUEUE), lastReadQueue(0),
+	    readQueueLimit(std::numeric_limits<double>::infinity()), priority(priority), context(context),
+	    rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}
 };
 
 namespace RatekeeperActorCpp {
@@ -632,6 +642,7 @@ ACTOR Future<Void> trackStorageServerQueueInfo(RatekeeperData* self, StorageServ
 					myQueueInfo->value.smoothTotalSpace.reset(reply.get().storageBytes.total);
 					myQueueInfo->value.smoothDurableVersion.reset(reply.get().durableVersion);
 					myQueueInfo->value.smoothLatestVersion.reset(reply.get().version);
+					myQueueInfo->value.smoothReadQueue.reset(reply.get().readQueueLength);
 				} else {
 					self->smoothTotalDurableBytes.addDelta(reply.get().bytesDurable -
 					                                       myQueueInfo->value.prevReply.bytesDurable);
@@ -642,6 +653,7 @@ ACTOR Future<Void> trackStorageServerQueueInfo(RatekeeperData* self, StorageServ
 					myQueueInfo->value.smoothTotalSpace.setTotal(reply.get().storageBytes.total);
 					myQueueInfo->value.smoothDurableVersion.setTotal(reply.get().durableVersion);
 					myQueueInfo->value.smoothLatestVersion.setTotal(reply.get().version);
+					myQueueInfo->value.smoothReadQueue.setTotal(reply.get().readQueueLength);
 				}
 
 				myQueueInfo->value.busiestReadTag = reply.get().busiestTag;
@@ -1018,9 +1030,11 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	int64_t worstStorageQueueStorageServer = 0;
 	int64_t limitingStorageQueueStorageServer = 0;
 	int64_t worstDurabilityLag = 0;
+	int64_t worstReadQueue = 0;
 
 	std::multimap<double, StorageQueueInfo*> storageTpsLimitReverseIndex;
 	std::multimap<int64_t, StorageQueueInfo*> storageDurabilityLagReverseIndex;
+	std::multimap<int64_t, StorageQueueInfo*, std::greater<int64_t>> storageReadQueueReverseIndex;
 
 	std::map<UID, limitReason_t> ssReasons;
 
@@ -1059,6 +1073,10 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		worstDurabilityLag = std::max(worstDurabilityLag, storageDurabilityLag);
 
 		storageDurabilityLagReverseIndex.insert(std::make_pair(-1 * storageDurabilityLag, &ss));
+
+		int64_t readQueue = ss.smoothReadQueue.smoothTotal();
+		worstReadQueue = std::max(readQueue, worstReadQueue);
+		storageReadQueueReverseIndex.insert({ readQueue, &ss });
 
 		auto& ssMetrics = self->healthMetrics.storageStats[ss.id];
 		ssMetrics.storageQueue = storageQueue;
@@ -1193,10 +1211,49 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		break;
 	}
 
+	int64_t limitingReadQueue = 0;
+	std::set<Optional<Standalone<StringRef>>> ignoredReadQueueMachines;
+	for (const auto& ss : storageReadQueueReverseIndex) {
+		if (ignoredReadQueueMachines.size() <
+		    std::min(self->configuration.storageTeamSize - 1, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND)) {
+			ignoredReadQueueMachines.insert(ss.second->locality.zoneId());
+			continue;
+		}
+
+		limitingReadQueue = ss.first;
+		if (limitingReadQueue > limits->readQueueMaxSize &&
+		    self->actualTpsHistory.size() > SERVER_KNOBS->NEEDED_TPS_HISTORY_SAMPLES) {
+			if (limits->readQueueLimit == std::numeric_limits<double>::infinity()) {
+				double maxTps = 0;
+				for (int i = 0; i < self->actualTpsHistory.size(); i++) {
+					maxTps = std::max(maxTps, self->actualTpsHistory[i]);
+				}
+				limits->readQueueLimit = SERVER_KNOBS->INITIAL_READ_QUEUE_MULTIPLIER * maxTps;
+			} else if (limitingReadQueue > limits->lastReadQueue) {
+				limits->readQueueLimit = SERVER_KNOBS->READ_QUEUE_REDUCTION_RATE * limits->readQueueLimit;
+			}
+
+			if (limits->readQueueLimit < limits->tpsLimit) {
+				limits->tpsLimit = limits->readQueueLimit;
+				limitReason = limitReason_t::storage_server_read_queue;
+			}
+		} else if (limits->readQueueLimit != std::numeric_limits<double>::infinity() &&
+		           limitingReadQueue > limits->readQueueMaxSize * 0.5) {
+			limits->readQueueLimit = SERVER_KNOBS->READ_QUEUE_INCREASE_RATE * limits->readQueueLimit;
+		} else {
+			limits->readQueueLimit = std::numeric_limits<double>::infinity();
+		}
+
+		limits->lastReadQueue = limitingReadQueue;
+		break;
+	}
+
 	self->healthMetrics.worstStorageQueue = worstStorageQueueStorageServer;
 	self->healthMetrics.limitingStorageQueue = limitingStorageQueueStorageServer;
 	self->healthMetrics.worstStorageDurabilityLag = worstDurabilityLag;
 	self->healthMetrics.limitingStorageDurabilityLag = limitingDurabilityLag;
+	self->healthMetrics.worstStorageReadQueue = worstReadQueue;
+	self->healthMetrics.limitingStorageReadQueue = limitingReadQueue;
 
 	double writeToReadLatencyLimit = 0;
 	Version worstVersionLag = 0;
@@ -1371,6 +1428,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		    .detail("LimitingStorageServerVersionLag", limitingVersionLag)
 		    .detail("WorstStorageServerDurabilityLag", worstDurabilityLag)
 		    .detail("LimitingStorageServerDurabilityLag", limitingDurabilityLag)
+		    .detail("WorstStorageServerReadQueue", worstReadQueue)
+		    .detail("LimitingStorageServerReadQueue", limitingReadQueue)
 		    .detail("TagsAutoThrottled", self->throttledTags.autoThrottleCount())
 		    .detail("TagsAutoThrottledBusyRead", self->throttledTags.busyReadTagCount)
 		    .detail("TagsAutoThrottledBusyWrite", self->throttledTags.busyWriteTagCount)
