@@ -488,7 +488,8 @@ public:
 		enNetworkAddressesFunc = 11,
 		enClientFailureMonitor = 12,
 		enSQLiteInjectedError = 13,
-		enGlobalConfig = 14
+		enGlobalConfig = 14,
+		enIKVSProcess = 15
 	};
 
 	virtual void longTaskCheck(const char* name) {}

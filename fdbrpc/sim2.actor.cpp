@@ -20,6 +20,7 @@
 
 #include <cinttypes>
 #include <memory>
+#include <string>
 
 #include "fdbrpc/simulator.h"
 #define BOOST_SYSTEM_NO_LIB
@@ -1162,6 +1163,18 @@ public:
 				    .detail("ExistingMachineId", machine.processes[i]->locality.machineId())
 				    .detail("ExistingName", machine.processes[i]->name);
 				ASSERT(false);
+			}
+			TraceEvent tEvent(SevDebug, "AllProcesses");
+			std::string procPrefix = "ProcessNum";
+			int procNum = 0;
+			std::string str = "";
+			for (auto& proc : machine.processes) {
+				procPrefix.append(std::to_string(procNum++));
+				tEvent.detail(procPrefix.c_str(), proc->address.port);
+			}
+			tEvent.log();
+			if (machine.processes[i]->address.port == port) {
+				TraceEvent(SevDebug, "ConflictingPort").detail("PortNum", port);
 			}
 			ASSERT(machine.processes[i]->address.port != port);
 		}

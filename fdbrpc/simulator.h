@@ -254,7 +254,8 @@ public:
 		    .detail("Address", address)
 		    .detail("Role", role)
 		    .detail("NumRoles", roleAddresses[address].size())
-		    .detail("Value", roleAddresses[address][role]);
+		    .detail("Value", roleAddresses[address][role])
+		    .backtrace();
 	}
 
 	void removeRole(NetworkAddress const& address, std::string const& role) {

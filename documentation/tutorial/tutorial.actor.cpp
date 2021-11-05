@@ -214,10 +214,20 @@ ACTOR Future<Void> echoClient() {
 	    RequestStream<GetInterfaceRequest>(Endpoint::wellKnown({ serverAddress }, WLTOKEN_ECHO_SERVER));
 	EchoServerInterface s = wait(server.getInterface.getReply(GetInterfaceRequest()));
 	server = s;
+	std::cout << "waiting....\n";
+	wait(delay(3.0));
 	EchoRequest echoRequest;
 	echoRequest.message = "Hello World";
-	std::string echoMessage = wait(server.echo.getReply(echoRequest));
-	std::cout << format("Sent %s to echo, received %s\n", "Hello World", echoMessage.c_str());
+	state Future<std::string> echoMessageFut = server.echo.getReply(echoRequest);
+	wait(success(echoMessageFut) || ready(echoMessageFut) || success(delay(3.0)));
+	if (echoMessageFut.isError()) {
+		std::cout << "Error: " << echoMessageFut.getError().code() << "\n";
+	} else if (echoMessageFut.isReady()) {
+		std::string echoMessage = echoMessageFut.getValue();
+		std::cout << format("Sent %s to echo, received %s\n", "Hello World", echoMessage.c_str());
+	} else {
+		std::cout << "No Response\n";
+	}
 	ReverseRequest reverseRequest;
 	reverseRequest.message = "Hello World";
 	std::string reverseString = wait(server.reverse.getReply(reverseRequest));

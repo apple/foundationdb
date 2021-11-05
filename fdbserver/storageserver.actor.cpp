@@ -32,6 +32,7 @@
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
 #include "flow/SystemMonitor.h"
+#include "flow/Trace.h"
 #include "flow/Tracing.h"
 #include "flow/Util.h"
 #include "fdbclient/Atomic.h"
@@ -176,9 +177,7 @@ public:
 };
 
 struct StorageServerDisk {
-	explicit StorageServerDisk(struct StorageServer* data, IKeyValueStore* storage) : data(data), storage(storage) {
-		TraceEvent(SevDebug, "StorageServerDisk").detail("Event", "Constructor");
-	}
+	explicit StorageServerDisk(struct StorageServer* data, IKeyValueStore* storage) : data(data), storage(storage) {}
 
 	void makeNewStorageServerDurable();
 	bool makeVersionMutationsDurable(Version& prevStorageVersion, Version newStorageVersion, int64_t& bytesLeft);
@@ -194,7 +193,7 @@ struct StorageServerDisk {
 
 	Future<Void> getError() { return storage->getError(); }
 	Future<Void> init() {
-		TraceEvent(SevDebug, "StorageServerDisk").detail("action", "remote init");
+		TraceEvent(SevDebug, "StorageInit").log();
 		return storage->init();
 	}
 	Future<Void> commit() { return storage->commit(); }
@@ -1769,7 +1768,13 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			                     : range.begin;
 			RangeResult atStorageVersion =
 			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes));
-
+			if (atStorageVersion.size() > -limit) {
+				TraceEvent(SevDebug, "AtStorageVersion")
+				    .detail("KeyRefRange", KeyRangeRef(readBegin, readEnd))
+				    .detail("size", atStorageVersion.size())
+				    .detail("Content", atStorageVersion)
+				    .detail("Limit", limit);
+			}
 			ASSERT(atStorageVersion.size() <= -limit);
 			if (data->storageVersion() > version)
 				throw transaction_too_old();
@@ -5108,6 +5113,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 }
 
 bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData, Error const& e) {
+	TraceEvent(SevDebug, "RStorageServerTerminated").detail("Error", e.code()).detail("Name", e.name());
 	self.shuttingDown = true;
 
 	// Clearing shards shuts down any fetchKeys actors; these may do things on cancellation that are best done with self
@@ -5122,6 +5128,7 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 		// SOMEDAY: could close instead of dispose if tss in quarantine gets removed so it could still be investigated?
 		persistentData->dispose();
 	} else {
+		TraceEvent(SevDebug, "RStorageServerKVClose").detail("Error", e.code()).detail("Name", e.name());
 		persistentData->close();
 	}
 
@@ -5169,6 +5176,16 @@ ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<ClusterCo
 	}
 }
 
+ACTOR Future<Void> killAfterStorage(double time) {
+	double killTime = time - now();
+	killTime = killTime > 0 ? killTime : time;
+	TraceEvent(SevDebug, "WaitingToKillStorage").detail("TimeToKill", time);
+	wait(success(delay(killTime)));
+	TraceEvent(SevDebug, "KillingStorage").log();
+	throw Error(1101);
+	// return Void();
+}
+
 // for creating a new storage server
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
@@ -5179,25 +5196,27 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  std::string folder) {
 	state StorageServer self(persistentData, db, ssi);
 
-	TraceEvent(SevDebug, "RStorageServer").detail("event", "initialized");
+	TraceEvent(SevDebug, "RStorageServer").detail("Event", "initialized");
 	if (ssi.isTss()) {
 		self.setTssPair(ssi.tssPairID.get());
 		ASSERT(self.isTss());
 	}
-	TraceEvent(SevDebug, "RStorageServer").detail("event", "2");
+	TraceEvent(SevDebug, "RStorageServer").detail("Event", "2");
 
 	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
 	              .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
 	self.folder = folder;
 
-	TraceEvent(SevDebug, "RStorageServer").detail("event", "3");
+	// state Future<Void> killTimeout = killAfterStorage(10.0);
+
+	TraceEvent(SevDebug, "RStorageServer").detail("Event", "3");
 	try {
 		// Optional<Value> val = wait(self.storage.readValue(KeyRef("foo")));
-		// TraceEvent(SevDebug, "IKVSInterface").detail("event", "after read").detail("value", val);
+		// TraceEvent(SevDebug, "IKVSInterface").detail("Event, "after read").detail("value", val);
 		wait(self.storage.init());
-		TraceEvent(SevDebug, "RStorageServer").detail("event", "post init");
+		TraceEvent(SevDebug, "RStorageServer").detail("Event", "post init");
 		wait(self.storage.commit());
-		TraceEvent(SevDebug, "RStorageServer").detail("event", "post commit");
+		TraceEvent(SevDebug, "RStorageServer").detail("Event", "post commit");
 
 		if (seedTag == invalidTag) {
 			std::pair<Version, Tag> verAndTag = wait(addStorageServer(
@@ -5212,7 +5231,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			self.tag = seedTag;
 		}
 
-		TraceEvent(SevDebug, "StorageServer").detail("event", "4");
+		// TraceEvent(SevDebug, "StorageServer").detail("Event, "4");
 
 		self.storage.makeNewStorageServerDurable();
 		wait(self.storage.commit());
@@ -5233,7 +5252,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	} catch (Error& e) {
 		// If we die with an error before replying to the recruitment request, send the error to the recruiter
 		// (ClusterController, and from there to the DataDistributionTeamCollection)
-		TraceEvent(SevDebug, "RStorageServerError").detail("error", e.code());
+		TraceEvent(SevDebug, "RStorageServerError").detail("Error", e.code());
 		if (!recruitReply.isSet())
 			recruitReply.sendError(recruitment_failed());
 		if (storageServerTerminated(self, persistentData, e))
@@ -5390,6 +5409,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	try {
 		state double start = now();
 		TraceEvent("StorageServerRebootStart", self.thisServerID).log();
+		// state Future<Void> storageKillTimeout = killAfterStorage(10.0);
 
 		wait(self.storage.init());
 		choose {
@@ -5443,6 +5463,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		throw internal_error();
 	} catch (Error& e) {
+		TraceEvent(SevDebug, "RecoveredStorageServerError").detail("Error", e.code());
 		if (recovered.canBeSet())
 			recovered.send(Void());
 		if (storageServerTerminated(self, persistentData, e))

@@ -1214,18 +1214,6 @@ struct SharedLogsValue {
 	  : actor(actor), uid(uid), requests(requests) {}
 };
 
-ACTOR Future<Void> killAfter(double time) {
-	double killTime = time - now();
-	killTime = killTime > 0 ? killTime : time;
-	TraceEvent(SevDebug, "WaitingToKill").detail("TimeToKill", time);
-	wait(success(delay(killTime)));
-	TraceEvent(SevDebug, "KillingWorker").log();
-	ASSERT(false);
-	// throw Error(1101);
-
-	return Void();
-}
-
 ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 LocalityData locality,
@@ -1271,8 +1259,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 	interf.initEndpoints();
 
 	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
-
-	// state Future<Void> killTimeout = killAfter(10.0);
 
 	folder = abspath(folder);
 
