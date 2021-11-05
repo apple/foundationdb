@@ -2,6 +2,7 @@
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/FlowProcess.actor.h"
 
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
@@ -28,6 +29,43 @@ ACTOR void sendCommitReply(IKVSCommitRequest commitReq, IKeyValueStore* kvStore)
 	StorageBytes storageBytes = kvStore->getStorageBytes();
 	commitReq.reply.send(IKVSCommitReply{ storageBytes });
 }
+
+ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterface);
+
+struct KeyValueStoreProcess : FlowProcess {
+	IKVSProcessInterface kvsIf;
+	Standalone<StringRef> serializedIf;
+
+	KeyValueStoreProcess() {
+		ObjectWriter writer(IncludeVersion());
+		writer.serialize(kvsIf);
+		serializedIf = writer.toString();
+	}
+
+	StringRef name() const override {
+		return "KeyValueStoreProcess"_sr;
+	}
+  StringRef serializedInterface() const override {
+		return serializedIf;
+	}
+
+	ACTOR static Future<Void> _run(KeyValueStoreProcess* self) {
+		state ActorCollection actors(true);
+		loop {
+			choose {
+				when (OpenKVStoreRequest req = waitNext(self->kvsIf.openKVStore.getFuture())) {
+					IKVSInterface reply;
+					actors.add(runIKVS(req, reply));
+				}
+				when (wait(actors.getResult())) { return Void(); }
+			}
+		}
+	}
+
+  Future<Void> run() override {
+		return _run(this);
+	}
+};
 
 ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterface) {
 	state IKeyValueStore* kvStore = openKVStore(openReq.storeType,
