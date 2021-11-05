@@ -1317,6 +1317,7 @@ ACTOR Future<Void> blobWorkerRecruiter(
 	}
 }
 
+// Does the work of deleting files given the delete request's version
 // TODO: make this its own role if it becomes a performance bottleneck for BM
 ACTOR Future<Void> blobPruner(BlobManagerData* bmData) {
 	state Version lastDeleteVersion = 0;
@@ -1335,21 +1336,22 @@ ACTOR Future<Void> blobPruner(BlobManagerData* bmData) {
 	}
 }
 
-// When a new blob manager is created, we want to prune right away so that
-// if the previous blob manager died right before pruning, we don't wait approximately 2R
-// versions before pruning
+// Schedules the pruner to run on some configured cadence.
 ACTOR Future<Void> blobPrunerScheduler(BlobManagerData* bmData) {
+	// When a new blob manager is created, we want to prune right away so that
+	// if the previous blob manager died right before pruning, we don't wait approximately 2R
+	// versions before pruning. That's why we prune first, and then delay.
+
 	loop {
-		printf("prune scheduler\n");
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 
+		// get the new version to prune at (i.e. NOW-R)
 		Version currVersion = wait(tr->getReadVersion());
 		Version newPruneVersion = std::max<Version>(0, currVersion - SERVER_KNOBS->BG_FILE_RETENTION_PERIOD);
 		if (newPruneVersion <= bmData->latestPruneVersion) {
 			delay(SERVER_KNOBS->BG_FILE_PRUNER_CADENCE);
 			continue;
 		}
-		printf("newPruneVersion: %lld, latestPruneVersion: %lld\n", newPruneVersion, bmData->latestPruneVersion);
 
 		ASSERT(newPruneVersion > bmData->latestPruneVersion);
 
