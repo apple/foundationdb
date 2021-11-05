@@ -49,6 +49,10 @@ struct KeyValueStoreProcess : FlowProcess {
 		return serializedIf;
 	}
 
+	void consumeInterface(StringRef intf) override {
+		kvsIf = ObjectReader::fromStringRef<IKVSProcessInterface>(intf, IncludeVersion());
+	}
+
 	ACTOR static Future<Void> _run(KeyValueStoreProcess* self) {
 		state ActorCollection actors(true);
 		loop {
