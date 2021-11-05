@@ -424,7 +424,7 @@ ACTOR Future<Void> monitorNominee(
 			    wait(coord.getLeader.tryGetReply(GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
 			                                     TaskPriority::CoordinationReply));
 			if (rep.isError() && rep.getError().code() == error_code_request_maybe_delivered) {
-				std::cout << "litian 9" << std::endl;
+				// std::cout << "litian 9" << std::endl;
 				// connecting to nominee failed, most likely due to connection failed.
 				if (connRecord.isValid()) {
 					TraceEvent("CoordnitorChangedMonitorNominee")
@@ -433,6 +433,8 @@ ACTOR Future<Void> monitorNominee(
 					// 50 milliseconds delay to prevent tight resolving loop due to outdated DNS cache
 					wait(delay(0.05));
 					connRecord->getMutableConnectionString()->resetToUnresolved();
+					std::cout << "litian 666666" << std::endl;
+					throw coordinators_changed();
 				}
 			} else if (rep.present()) {
 				li = rep.get();
@@ -446,8 +448,6 @@ ACTOR Future<Void> monitorNominee(
 		}
 
 		wait(Future<Void>(Void())); // Make sure we weren't cancelled
-
-		// std::cout << "litian coordinator " << coord.getLeader.getEndpoint().getPrimaryAddress().toString();
 
 		TraceEvent("GetLeaderReply")
 		    .suppressFor(1.0)
@@ -562,10 +562,6 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterCon
 				return info;
 			}
 			if (connRecord != info.intermediateConnRecord) {
-				std::cout << "litian cluster file change " << std::endl;
-				std::cout << "ConnectionStringFromFile " << connRecord->getConnectionString().toString() << std::endl;
-				std::cout << "CurrentConnectionString " << info.intermediateConnRecord->getConnectionString().toString()
-				          << std::endl;
 				if (!info.hasConnected) {
 					TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection")
 					    .detail("ClusterFile", connRecord->toString())
@@ -582,7 +578,15 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterCon
 
 			outSerializedLeaderInfo->set(leader.get().first.serializedInfo);
 		}
-		wait(nomineeChange.onTrigger() || allActors);
+		try {
+			wait(nomineeChange.onTrigger() || allActors);
+		} catch (Error& e) {
+			// ASSERT(e.code() == error_code_connection_string_invalid);
+			std::cout << "litian 555555 " << e.name() << std::endl;
+			if (e.code() == error_code_coordinators_changed) {
+				throw e;
+			}
+		}
 	}
 }
 
@@ -600,7 +604,10 @@ ACTOR Future<Void> monitorLeaderInternal(Reference<IClusterConnectionRecord> con
 			MonitorLeaderInfo _info = wait(monitorLeaderOneGeneration(connRecord, outSerializedLeaderInfo, info));
 			info = _info;
 		} catch (Error& e) {
+			// ASSERT(e.code() == error_code_connection_string_invalid);
+			std::cout << "litian 000000 " << e.name() << std::endl;
 			if (e.code() == error_code_coordinators_changed) {
+				std::cout << "litian 444444444444" << std::endl;
 				info.intermediateConnRecord->getMutableConnectionString()->resetToUnresolved();
 				connRecord->getMutableConnectionString()->resetToUnresolved();
 			}
@@ -728,8 +735,7 @@ ACTOR Future<Void> getClientInfoFromLeader(Reference<AsyncVar<Optional<ClusterCo
 ACTOR Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
                                                  std::vector<NetworkAddress> coordinators,
                                                  ClientData* clientData,
-                                                 Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo,
-                                                 Reference<AsyncVar<Void>> coordinatorsChanged) {
+                                                 Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo) {
 	state std::vector<ClientLeaderRegInterface> clientLeaderServers;
 	state AsyncTrigger nomineeChange;
 	state std::vector<Optional<LeaderInfo>> nominees;
@@ -777,16 +783,7 @@ ACTOR Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
 				leaderInfo->set(leader.get().first);
 			}
 		}
-		try {
-			wait(nomineeChange.onTrigger() || allActors);
-		} catch (Error& e) {
-			if (e.code() == error_code_coordinators_changed) {
-				coordinatorsChanged->trigger();
-				return Void();
-			} else {
-				throw;
-			}
-		}
+		wait(nomineeChange.onTrigger() || allActors);
 	}
 }
 
@@ -914,7 +911,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			clientInfo->set(ni);
 			successIndex = idx;
 		} else {
-			std::cout << "litian thinks here's a bug " << rep.getError().name() << std::endl;
+			// std::cout << "litian thinks here's a bug " << rep.getError().name() << std::endl;
 			TEST(rep.getError().code() == error_code_failed_to_progress); // Coordinator cant talk to cluster controller
 			if (rep.isError() && (rep.getError().code() == error_code_request_maybe_delivered)) {
 				info.intermediateConnRecord->getMutableConnectionString()->resetToUnresolved();
@@ -934,10 +931,13 @@ ACTOR Future<Void> monitorProxies(
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
     Key traceLogGroup) {
+	if (connRecord->get()->hasUnresolvedHostnames()) {
+		wait(connRecord->get()->resolveHostnames());
+	}
 	state MonitorLeaderInfo info(connRecord->get());
 	loop {
-		if (info.intermediateConnRecord->hasUnresolvedHostnames()) {
-			wait(info.intermediateConnRecord->resolveHostnames());
+		if (connRecord->get()->hasUnresolvedHostnames()) {
+			wait(connRecord->get()->resolveHostnames());
 		}
 		choose {
 			when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(

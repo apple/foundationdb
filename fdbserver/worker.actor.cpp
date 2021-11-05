@@ -2400,9 +2400,13 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 			}
 			successIndex = index;
 		} else {
-			if (leader.isError() && leader.getError().code() == error_code_coordinators_changed) {
-				info.intermediateConnRecord->getMutableConnectionString()->resetToUnresolved();
-				return info;
+			if (leader.isError()) {
+				std::cout << "litian 333333 " << leader.getError().name() << std::endl;
+				if (leader.getError().code() == error_code_coordinators_changed) {
+					std::cout << "litian 444444" << std::endl;
+					info.intermediateConnRecord->getMutableConnectionString()->resetToUnresolved();
+					return info;
+				}
 			}
 			index = (index + 1) % addrs.size();
 			if (index == successIndex) {

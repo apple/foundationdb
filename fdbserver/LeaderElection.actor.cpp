@@ -57,6 +57,7 @@ ACTOR Future<Void> submitCandidacy(
 		}
 	}
 
+	// TODO(renxuan): this might be uncessary. If so, delete the hostname and connRecord in the function signature.
 	// state Optional<LeaderInfo> li;
 	// loop {
 
