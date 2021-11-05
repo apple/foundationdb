@@ -218,6 +218,8 @@ struct StorageServerDisk {
 		return storage->readRange(keys, rowLimit, byteLimit, type);
 	}
 
+	Future<CheckpointRecord> checkpoint(std::string checkpointDir) { return storage->checkpoint(checkpointDir); }
+
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
@@ -389,6 +391,8 @@ private:
 
 public:
 public:
+	std::map<Version, CheckpointRecord> checkpoints;
+
 	// Histograms
 	struct FetchKeysHistograms {
 		const Reference<Histogram> latency;
@@ -4878,6 +4882,28 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
+		// while (!data->pendingCheckpointRequests.empty() &&
+		//        data->pendingCheckpointRequests.begin()->first <= newOldestVersion) {
+		// 	try {
+		// 		state CheckpointRecord checkpointRecord = wait(data->storage.checkpoint(
+		// 		    data->folder + "/rockscheckpoints" + std::to_string(newOldestVersion) + "/"));
+		// 		checkpointRecord.version = newOldestVersion;
+		// 	} catch (Error& e) {
+		// 		data->pendingCheckpointRequests.begin()->second.sendError(e);
+		// 		data->pendingCheckpointRequests.erase(data->pendingCheckpointRequests.begin());
+		// 		TraceEvent(SevWarnAlways, "CheckpointFailed")
+		// 		    .detail("MinVerison", data->pendingCheckpointRequests.begin()->first)
+		// 		    .error(e, /*includeCancel=*/true);
+		// 		continue;
+		// 	}
+		// 	data->checkpoints.emplace(newOldestVersion, checkpointRecord);
+		// 	data->pendingCheckpointRequests.begin()->second.send(checkpointRecord);
+		// 	data->pendingCheckpointRequests.erase(data->pendingCheckpointRequests.begin());
+		// 	TraceEvent("CheckpointSucceeded")
+		// 	    .detail("MinVerison", data->pendingCheckpointRequests.begin()->first)
+		// 	    .detail("CheckpointVersion", newOldestVersion);
+		// }
+
 		if (newOldestVersion > data->rebootAfterDurableVersion) {
 			TraceEvent("RebootWhenDurableTriggered", data->thisServerID)
 			    .detail("NewOldestVersion", newOldestVersion)
@@ -5843,6 +5869,41 @@ ACTOR Future<Void> serveChangeFeedPopRequests(StorageServer* self, FutureStream<
 	}
 }
 
+ACTOR Future<Void> checkpointQ(StorageServer* self, CheckpointRequest req) {
+	wait(self->durableVersion.whenAtLeast(req.minVersion));
+	// wait(delay(0, TaskPriority::UpdateStorage));
+	state Version version = self->durableVersion.get();
+	try {
+		wait(self->durableVersionLock.take(TaskPriority::MoveKeys, 1));
+		state FlowLock::Releaser holdingDVL(self->durableVersionLock);
+		state CheckpointRecord checkpointRecord =
+		    wait(self->storage.checkpoint(self->folder + "/rockscheckpoints_" + std::to_string(version) + "/"));
+		checkpointRecord.version = version;
+		self->checkpoints.emplace(version, checkpointRecord);
+		req.reply.send(checkpointRecord);
+		TraceEvent("CheckpointSucceeded").detail("MinVerison", req.minVersion).detail("CheckpointVersion", version);
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "CheckpointFailed")
+		    .detail("MinVerison", req.minVersion)
+		    .detail("DurableVersion", version)
+		    .error(e, /*includeCancel=*/true);
+		req.reply.sendError(e);
+	}
+	return Void();
+}
+
+ACTOR Future<Void> serveCheckpointRequests(StorageServer* self, FutureStream<CheckpointRequest> checkpoint) {
+	loop {
+		CheckpointRequest req = waitNext(checkpoint);
+		const auto it = self->checkpoints.lower_bound(req.minVersion);
+		if (it != self->checkpoints.end()) {
+			req.reply.send(it->second);
+		} else {
+			self->actors.add(checkpointQ(self, req));
+		}
+	}
+}
+
 ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 	if (!SERVER_KNOBS->REPORT_DD_METRICS) {
 		return Void();
@@ -5895,6 +5956,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(serveChangeFeedStreamRequests(self, ssi.changeFeedStream.getFuture()));
 	self->actors.add(serveOverlappingChangeFeedsRequests(self, ssi.overlappingChangeFeeds.getFuture()));
 	self->actors.add(serveChangeFeedPopRequests(self, ssi.changeFeedPop.getFuture()));
+	self->actors.add(serveCheckpointRequests(self, ssi.checkpoint.getFuture()));
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));
 

@@ -6512,6 +6512,26 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 	}
 }
 
+ACTOR Future<CheckpointRecord> createCheckpoint(Database cx, KeyRange keys, Version minVersion) {
+	state Span span("NAPI:CreateCheckpoint"_loc);
+
+	TraceEvent("CreateCheckpointStart").detail("Version", minVersion);
+	state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
+	    wait(getKeyRangeLocations(cx,
+	                              keys,
+	                              3,
+	                              Reverse::False,
+	                              &StorageServerInterface::checkpoint,
+	                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
+
+	const int idx = deterministicRandom()->randomInt(0, locations[0].second->size());
+	CheckpointRecord reply = wait(
+	    locations[0].second->getInterface(idx).checkpoint.getReply(CheckpointRequest(minVersion, locations[0].first)));
+
+	TraceEvent("CreateCheckpointFinish").detail("Version", reply.version);
+	return reply;
+}
+
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions) {
 	TraceEvent("ExclusionSafetyCheckBegin")
 	    .detail("NumExclusion", exclusions.size())

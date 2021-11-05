@@ -254,6 +254,7 @@ ERROR( snap_invalid_uid_string, 2509, "The given uid string is not a 32-length h
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error
 ERROR( internal_error, 4100, "An internal error occurred" )
+ERROR( not_implemented, 4200, "Not implemented yet" )
 // clang-format on
 
 #undef ERROR

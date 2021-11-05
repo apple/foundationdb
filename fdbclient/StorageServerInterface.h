@@ -81,6 +81,7 @@ struct StorageServerInterface {
 	RequestStream<struct ChangeFeedStreamRequest> changeFeedStream;
 	RequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
 	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
+	RequestStream<struct CheckpointRequest> checkpoint;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
@@ -129,6 +130,7 @@ struct StorageServerInterface {
 				    RequestStream<struct OverlappingChangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
 				changeFeedPop =
 				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
+				checkpoint = RequestStream<struct CheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -174,6 +176,7 @@ struct StorageServerInterface {
 		streams.push_back(changeFeedStream.getReceiver());
 		streams.push_back(overlappingChangeFeeds.getReceiver());
 		streams.push_back(changeFeedPop.getReceiver());
+		streams.push_back(checkpoint.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -681,6 +684,56 @@ struct ChangeFeedPopRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, rangeID, version, range, reply);
+	}
+};
+
+struct CheckpointRecord {
+	constexpr static FileIdentifier file_identifier = 13804342;
+	Version version;
+	KeyRange range;
+
+	// Used by RocksDB for safty check during import.
+	std::string dbComparatorName;
+
+	// Each pair describes an SST file in the format of {<File name>, <SST file level>}.
+	std::vector<std::pair<std::string, int64_t>> sstFileMetadata;
+
+	// Each pair describes an SST file in the format of {<File name>, <SST file level>}.
+	std::vector<std::string> sstFiles;
+
+	CheckpointRecord() {}
+	CheckpointRecord(Version version, KeyRange const& range) : version(version), range(range) {}
+
+	std::string toString() const {
+		std::string res = "Version: " + std::to_string(version) + "\nSST Files:\n";
+		for (const std::string& file : sstFiles) {
+			res += file + "\n";
+		}
+		res += "ComparatorName: " + dbComparatorName + "\nSST File Metadata:\n";
+		for (const auto& [file, level] : sstFileMetadata) {
+			res += "File: " + file + ", Leve: " + std::to_string(level) + "\n";
+		}
+		return res;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, range, dbComparatorName, sstFileMetadata, sstFiles);
+	}
+};
+
+struct CheckpointRequest {
+	constexpr static FileIdentifier file_identifier = 13804343;
+	Version minVersion;
+	KeyRange range;
+	ReplyPromise<CheckpointRecord> reply;
+
+	CheckpointRequest() {}
+	CheckpointRequest(Version minVersion, KeyRange const& range) : minVersion(minVersion), range(range) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, minVersion, range, reply);
 	}
 };
 

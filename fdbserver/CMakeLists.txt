@@ -176,6 +176,7 @@ set(FDBSERVER_SRCS
   workloads/ChangeFeeds.actor.cpp
   workloads/DataDistributionMetrics.actor.cpp
   workloads/DataLossRecovery.actor.cpp
+  workloads/PhysicalShardMove.actor.cpp
   workloads/DDBalance.actor.cpp
   workloads/DDMetrics.actor.cpp
   workloads/DDMetricsExclude.actor.cpp

@@ -24,6 +24,8 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
+#include "flow/Error.h"
+#include "fdbclient/StorageServerInterface.h"
 
 class IClosable {
 public:
@@ -85,6 +87,8 @@ public:
 	virtual void resyncLog() {}
 
 	virtual void enableSnapshot() {}
+
+	virtual Future<CheckpointRecord> checkpoint(std::string checkpointDir) { throw internal_error(); }
 
 	/*
 	Concurrency contract

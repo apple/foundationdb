@@ -9,6 +9,7 @@
 #include <rocksdb/db.h>
 #include <rocksdb/filter_policy.h>
 #include <rocksdb/options.h>
+#include <rocksdb/metadata.h>
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/sst_file_reader.h>
 #include <rocksdb/sst_file_writer.h>
@@ -335,6 +336,50 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Close");
 			a.done.send(Void());
+		}
+
+		struct CheckpointAction : TypedAction<Writer, CheckpointAction> {
+			std::string checkpointDir;
+			ThreadReturnPromise<CheckpointRecord> reply;
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+		};
+
+		void action(CheckpointAction& a) {
+			rocksdb::Checkpoint* checkpoint;
+			rocksdb::Status s = rocksdb::Checkpoint::Create(db, &checkpoint);
+			ASSERT(s.ok());
+
+			const std::string& checkpointDir = a.checkpointDir;
+
+			rocksdb::ExportImportFilesMetaData* pMetadata;
+			std::cout << "RocksDB export dir: " << checkpointDir << std::endl;
+			platform::eraseDirectoryRecursive(checkpointDir);
+			std::string cwd = platform::getWorkingDirectory() + "/";
+			std::cout << "Working directory: " << cwd << std::endl;
+			s = checkpoint->ExportColumnFamily(db->DefaultColumnFamily(), checkpointDir, &pMetadata);
+			if (!s.ok()) {
+				logRocksDBError(s, "Checkpoint");
+				a.reply.sendError(statusToError(s));
+				return;
+			}
+
+			std::vector<std::string> files = platform::listFiles(checkpointDir);
+			for (auto& file : files) {
+				res.sstFiles.push_back(file);
+				std::cout << file << std::endl;
+			}
+			std::cout << "Metadata: " << pMetadata->db_comparator_name << std::endl;
+			for (const auto& md : pMetadata->files) {
+				std::cout << "CF: " << md.column_family_name << ", LV: " << md.level << std::endl;
+			}
+
+			CheckpointRecord res;
+			res.dbComparatorName = pMetadata->db_comparator_name;
+			for (const auto& md : pMetadata->files) {
+				res.sstFileMetadata.emplace_back(md.column_family_name, md.level);
+			}
+			delete pMetadata;
+			a.reply.send(res);
 		}
 	};
 
@@ -687,6 +732,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		return StorageBytes(free, total, live, free);
 	}
+
+	Future<CheckpointRecord> checkpoint(std::string checkpointDir) override {
+		std::cout << "RocksDB received checkpoint request: " << checkpointDir << std::endl;
+		auto a = new Writer::CheckpointAction();
+		a->checkpointDir = checkpointDir;
+		auto res = a->reply.getFuture();
+		writeThread->post(a);
+		return res;
+	}
 };
 
 } // namespace
@@ -772,56 +826,75 @@ TEST_CASE("/rocks/fileops") {
 	rocksdb::Checkpoint* checkpoint;
 	rocksdb::Status s = rocksdb::Checkpoint::Create(db, &checkpoint);
 	ASSERT(s.ok());
-	uint64_t checkpointSeq = -1;
-	s = checkpoint->CreateCheckpoint(checkpointDir, /*log_size_for_flush=*/0, &checkpointSeq);
-	std::cout << "Checkpoint Sequence Number: " << checkpointSeq << std::endl;
-	ASSERT(s.ok());
+	// uint64_t checkpointSeq = -1;
+	// s = checkpoint->CreateCheckpoint(checkpointDir, /*log_size_for_flush=*/0, &checkpointSeq);
+	// ColumnFamilyHandle* DefaultColumnFamily()
+	rocksdb::ExportImportFilesMetaData* pMetadata;
+	ASSERT(checkpoint->ExportColumnFamily(db->DefaultColumnFamily(), checkpointDir, &pMetadata).ok());
+	// std::cout << "Checkpoint Sequence Number: " << checkpointSeq << std::endl;
+	// ASSERT(s.ok());
 	// std::vector<std::string> files = platform::listFiles(checkpointDir, "sst");
-	std::vector<std::string> files = platform::listFiles(checkpointDir, "sst");
-	state std::vector<std::pair<std::string, std::string>> sstFiles;
+	std::vector<std::string> files = platform::listFiles(checkpointDir);
+	// state std::vector<std::pair<std::string, std::string>> sstFiles;
 	for (auto& file : files) {
-		std::string path = checkpointDir + "/" + file, pPath = checkpointDir + "/processed" + file;
-		std::cout << path << std::endl;
-		sstFiles.push_back(std::pair(path, pPath));
+		// std::string path = checkpointDir + "/" + file, pPath = checkpointDir + "/processed" + file;
+		std::cout << file << std::endl;
+		// sstFiles.push_back(std::pair(path, pPath));
 	}
-
-	kvStore->clear(allKeys);
-	wait(kvStore->commit(false));
-
-	rocksdb::Options options;
-	rocksdb::ReadOptions ropts;
-	state std::vector<std::string> importFiles;
-	for (const auto& [ file, pFile ] : sstFiles) {
-		std::cout << "File: " << file << ", pFile: " << pFile << std::endl;
-		rocksdb::SstFileReader reader(options);
-		rocksdb::SstFileWriter writer(rocksdb::EnvOptions(), options);
-		ASSERT(writer.Open(pFile).ok());
-		ASSERT(reader.Open(file).ok());
-		ASSERT(reader.VerifyChecksum().ok());
-		std::unique_ptr<rocksdb::Iterator> iter(reader.NewIterator(ropts));
-		iter->SeekToFirst();
-		while (iter->Valid()) {
-			std::cout << "Key: " << iter->key().ToString() << ", Value: " << iter->value().ToString() << std::endl;
-			writer.Put(iter->key(), iter->value());
-			iter->Next();
-		}
-		ASSERT(writer.Finish().ok());
-		importFiles.push_back(pFile);
+	std::cout << pMetadata->db_comparator_name << std::endl;
+	for (const auto& md : pMetadata->files) {
+		std::cout << "CF: " << md.column_family_name << ", LV: " << md.level << std::endl;
 	}
+	// kvStore->clear(allKeys);
+	// wait(kvStore->commit(false));
+
+	// rocksdb::Options options;
+	// rocksdb::ReadOptions ropts;
+	// state std::vector<std::string> importFiles;
+	// for (const auto& [file, pFile] : sstFiles) {
+	// 	std::cout << "File: " << file << ", pFile: " << pFile << std::endl;
+	// 	rocksdb::SstFileReader reader(options);
+	// 	rocksdb::SstFileWriter writer(rocksdb::EnvOptions(), options);
+	// 	ASSERT(writer.Open(pFile).ok());
+	// 	ASSERT(reader.Open(file).ok());
+	// 	ASSERT(reader.VerifyChecksum().ok());
+	// 	std::unique_ptr<rocksdb::Iterator> iter(reader.NewIterator(ropts));
+	// 	iter->SeekToFirst();
+	// 	while (iter->Valid()) {
+	// 		std::cout << "Key: " << iter->key().ToString() << ", Value: " << iter->value().ToString() << std::endl;
+	// 		writer.Put(iter->key().ToString(), iter->value().ToString());
+	// 		iter->Next();
+	// 	}
+	// 	ASSERT(writer.Finish().ok());
+	// 	importFiles.push_back(pFile);
+	// }
 
 	// state std::string rocksDBTestDir2 = "rocksdb-kvstore-reopen-test-db2";
 	// state IKeyValueStore* kvStore2 = new RocksDBKeyValueStore(rocksDBTestDir,
 	// deterministicRandom()->randomUniqueID()); wait(kvStore2->init()); RocksDBKeyValueStore::DB db2 =
 	// ((RocksDBKeyValueStore*)kvStore2)->db; ASSERT(db2 != nullptr);
-	Optional<Value> val1 = wait(kvStore->readValue(LiteralStringRef("foo")));
-	ASSERT(Optional<Value>() == val1);
+	// Create a new db and import the files.
+	rocksdb::DB* db_copy;
+	platform::eraseDirectoryRecursive("db_copy");
+	ASSERT(rocksdb::DB::Open(getOptions(), ((RocksDBKeyValueStore*)kvStore)->path + "/db_copy", &db_copy).ok());
+	rocksdb::ColumnFamilyHandle* cfh = nullptr;
+	ASSERT(db_copy
+	           ->CreateColumnFamilyWithImport(
+	               rocksdb::ColumnFamilyOptions(), "detault", rocksdb::ImportColumnFamilyOptions(), *pMetadata, &cfh)
+	           .ok());
+	rocksdb::PinnableSlice value;
+	db_copy->Get(rocksdb::ReadOptions(), db->DefaultColumnFamily(), "foo", &value);
+	std::cout << "Value: " << value.ToString() << std::endl;
+	ASSERT("bar" == value.ToString());
+	// Optional<Value> val1 = wait(kvStore->readValue(LiteralStringRef("foo")));
+	// ASSERT(Optional<Value>() == val1);
 
-	rocksdb::IngestExternalFileOptions ifo;
-	rocksdb::Status s = db->IngestExternalFile(importFiles, ifo);
-	std::cout << s.ToString() << std::endl;
+	// rocksdb::IngestExternalFileOptions ifo;
+	// rocksdb::Status s = db->IngestExternalFile(importFiles, ifo);
+	// std::cout << s.ToString() << std::endl;
 
-	Optional<Value> val2 = wait(kvStore->readValue(LiteralStringRef("foo")));
-	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val2);
+	// Optional<Value> val2 = wait(kvStore->readValue(LiteralStringRef("foo")));
+	// ASSERT(Optional<Value>(LiteralStringRef("bar")) == val2);
 
 	return Void();
 }
