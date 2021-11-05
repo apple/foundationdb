@@ -56,12 +56,6 @@ ACTOR Future<Reference<ClusterConnectionKey>> ClusterConnectionKey::loadClusterC
 	}
 }
 
-// Returns the connection string currently held in this object. This may not match the string in the database if it
-// hasn't been persisted or if the key has been modified externally.
-ClusterConnectionString const& ClusterConnectionKey::getConnectionString() const {
-	return cs;
-}
-
 // Sets the connections string held by this object and persists it.
 Future<Void> ClusterConnectionKey::setConnectionString(ClusterConnectionString const& connectionString) {
 	cs = connectionString;

@@ -1703,3 +1703,70 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		}
 	}
 }
+
+namespace {
+ACTOR Future<Void> testExpectedErrorImpl(Future<Void> test,
+                                         const char* testDescr,
+                                         Optional<Error> expectedError,
+                                         Optional<bool*> successFlag,
+                                         std::map<std::string, std::string> details,
+                                         Optional<Error> throwOnError,
+                                         UID id) {
+	state Error actualError;
+	try {
+		wait(test);
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		actualError = e;
+		// The test failed as expected
+		if (!expectedError.present() || actualError.code() == expectedError.get().code()) {
+			return Void();
+		}
+	}
+
+	// The test has failed
+	if (successFlag.present()) {
+		*(successFlag.get()) = false;
+	}
+	TraceEvent evt(SevError, "TestErrorFailed", id);
+	evt.detail("TestDescription", testDescr);
+	if (expectedError.present()) {
+		evt.detail("ExpectedError", expectedError.get().name());
+		evt.detail("ExpectedErrorCode", expectedError.get().code());
+	}
+	if (actualError.isValid()) {
+		evt.detail("ActualError", actualError.name());
+		evt.detail("ActualErrorCode", actualError.code());
+	} else {
+		evt.detail("Reason", "Unexpected success");
+	}
+
+	// Make sure that no duplicate details were provided
+	ASSERT(details.count("TestDescription") == 0);
+	ASSERT(details.count("ExpectedError") == 0);
+	ASSERT(details.count("ExpectedErrorCode") == 0);
+	ASSERT(details.count("ActualError") == 0);
+	ASSERT(details.count("ActualErrorCode") == 0);
+	ASSERT(details.count("Reason") == 0);
+
+	for (auto& p : details) {
+		evt.detail(p.first.c_str(), p.second);
+	}
+	if (throwOnError.present()) {
+		throw throwOnError.get();
+	}
+	return Void();
+}
+} // namespace
+
+Future<Void> testExpectedError(Future<Void> test,
+                               const char* testDescr,
+                               Optional<Error> expectedError,
+                               Optional<bool*> successFlag,
+                               std::map<std::string, std::string> details,
+                               Optional<Error> throwOnError,
+                               UID id) {
+	return testExpectedErrorImpl(test, testDescr, expectedError, successFlag, details, throwOnError, id);
+}

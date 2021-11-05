@@ -141,6 +141,7 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, TSS);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, ChangeFeed); // FIXME: Change to 7.1 once we cut release
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, BlobGranule); // FIXME: Change to 7.1 once we cut release
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, NetworkAddressHostnameFlag);
 };
 
 template <>

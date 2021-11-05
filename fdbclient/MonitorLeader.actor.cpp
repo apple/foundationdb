@@ -48,9 +48,23 @@ std::string trim(std::string const& connectionString) {
 	return trimmed;
 }
 
+std::string trimFromHostname(std::string const& networkAddress) {
+	const auto& pos = networkAddress.find("(fromHostname)");
+	if (pos != std::string::npos) {
+		return networkAddress.substr(0, pos);
+	}
+	return networkAddress;
+}
+
 } // namespace
 
 FDB_DEFINE_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
+
+// Returns the connection string currently held in this object. This may not match the stored record if it hasn't
+// been persisted or if the persistent storage for the record has been modified externally.
+ClusterConnectionString const& IClusterConnectionRecord::getConnectionString() const {
+	return cs;
+}
 
 Future<bool> IClusterConnectionRecord::upToDate() {
 	ClusterConnectionString temp;
@@ -263,9 +277,10 @@ std::string ClusterConnectionString::toString() const {
 	std::string s = key.toString();
 	s += '@';
 	for (int i = 0; i < coord.size(); i++) {
-		if (i)
+		if (i) {
 			s += ',';
-		s += coord[i].toString();
+		}
+		s += trimFromHostname(coord[i].toString());
 	}
 	return s;
 }

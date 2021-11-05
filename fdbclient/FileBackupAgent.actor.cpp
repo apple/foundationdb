@@ -193,10 +193,10 @@ public:
 	struct RestoreFile {
 		Version version;
 		std::string fileName;
-		bool isRange; // false for log file
-		int64_t blockSize;
-		int64_t fileSize;
-		Version endVersion; // not meaningful for range files
+		bool isRange{ false }; // false for log file
+		int64_t blockSize{ 0 };
+		int64_t fileSize{ 0 };
+		Version endVersion{ ::invalidVersion }; // not meaningful for range files
 
 		Tuple pack() const {
 			return Tuple()
