@@ -2607,11 +2607,11 @@ ACTOR Future<Void> handleRangeRevoke(Reference<BlobWorkerData> bwData, RevokeBlo
 	}
 }
 
-ACTOR Future<Void> handlePruneRequest(Reference<BlobWorkerData> bwData, PruneFilesRequest req) {
+void handlePruneRequest(Reference<BlobWorkerData> bwData, PruneFilesRequest req) {
 	// if we see an out of order prune req, just skip it because we would have
 	// pruned everything before this version when we handled latestPruneVersion
 	if (req.pruneVersion <= bwData->latestPruneVersion) {
-		return Void();
+		return;
 	}
 
 	// stop serving queries older than this version
@@ -2621,8 +2621,6 @@ ACTOR Future<Void> handlePruneRequest(Reference<BlobWorkerData> bwData, PruneFil
 	req.reply.send(Void());
 
 	// TODO: start a pruner actor with low priority
-
-	return Void();
 }
 
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
@@ -2749,7 +2747,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 						       pruneReq.managerEpoch,
 						       pruneReq.pruneVersion);
 					}
-					self->addActor.send(handlePruneRequest(self, pruneReq));
+					handlePruneRequest(self, pruneReq);
 				}
 			}
 			when(HaltBlobWorkerRequest req = waitNext(bwInterf.haltBlobWorker.getFuture())) {

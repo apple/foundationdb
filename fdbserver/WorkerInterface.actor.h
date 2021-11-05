@@ -986,7 +986,9 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
 
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwi,
                               ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady,
-                              Reference<AsyncVar<ServerDBInfo> const> dbInfo);
+                              Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                              int64_t managerEpoch,
+                              Version latestPruneVersion);
 
 // These servers are started by workerServer
 class IKeyValueStore;

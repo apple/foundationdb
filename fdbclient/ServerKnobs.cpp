@@ -775,9 +775,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BG_SNAPSHOT_FILE_TARGET_BYTES,                    10000000 ); if( randomize && BUGGIFY ) { deterministicRandom()->random01() < 0.1 ? BG_SNAPSHOT_FILE_TARGET_BYTES /= 100 : BG_SNAPSHOT_FILE_TARGET_BYTES /= 10; }
 	init( BG_DELTA_BYTES_BEFORE_COMPACT, BG_SNAPSHOT_FILE_TARGET_BYTES/2 );
 	init( BG_DELTA_FILE_TARGET_BYTES,   BG_DELTA_BYTES_BEFORE_COMPACT/10 );
-	init( BG_FILE_RETENTION_PERIOD,                    7*24*60*60*1e6); // 7 days in terms of versions
-	init( BG_FILE_CLIENT_LIFETIME,                        1*60*60*1e6); // 1 hour in terms of versions
-	init( BG_FILE_PRUNER_CADENCE,                        1*60*60*1e6); // 1 hour in terms of versions
+	init( BG_FILE_RETENTION_PERIOD,                       5*60*60*1e6); // 5 hours in terms of versions
+	init( BG_FILE_CLIENT_LIFETIME,                        2*60*60*1e6); // 2 hour in terms of versions
+	init( BG_FILE_PRUNER_CADENCE,                         1*60*60*1e6); // 1 hour in terms of versions
 
 	init( BLOB_WORKER_TIMEOUT,                                  10.0 ); if( randomize && BUGGIFY ) BLOB_WORKER_TIMEOUT = 1.0;
 
