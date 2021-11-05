@@ -363,9 +363,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
+			CheckpointRecord res;
 			std::vector<std::string> files = platform::listFiles(checkpointDir);
 			for (auto& file : files) {
-				res.sstFiles.push_back(file);
+				res.sstFiles.push_back(checkpointDir + file);
 				std::cout << file << std::endl;
 			}
 			std::cout << "Metadata: " << pMetadata->db_comparator_name << std::endl;
@@ -373,7 +374,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				std::cout << "CF: " << md.column_family_name << ", LV: " << md.level << std::endl;
 			}
 
-			CheckpointRecord res;
 			res.dbComparatorName = pMetadata->db_comparator_name;
 			for (const auto& md : pMetadata->files) {
 				res.sstFileMetadata.emplace_back(md.column_family_name, md.level);

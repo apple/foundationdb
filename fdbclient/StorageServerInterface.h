@@ -737,6 +737,38 @@ struct CheckpointRequest {
 	}
 };
 
+struct GetFileReply {
+	constexpr static FileIdentifier file_identifier = 13804344;
+	std::string name;
+	uint64_t offset;
+	uint64_t size;
+	Standalone<StringRef> bytes;
+
+	GetFileReply() {}
+	GetFileReply(std::string name, uint64_t offset, uint64_t size) : name(name), offset(offset), size(size) {}
+	GetFileReply(std::string name) : GetFileReply(name, 0, 0) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, name, offset, size, bytes);
+	}
+};
+
+struct GetFileRequest {
+	constexpr static FileIdentifier file_identifier = 13804344;
+	std::string path;
+	uint64_t offset;
+	ReplyPromise<GetFileReply> reply;
+
+	GetFileRequest() {}
+	GetFileRequest(std::string path, uint64_t offset) : path(path), offset(offset) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, path, offset, reply);
+	}
+};
+
 struct OverlappingChangeFeedEntry {
 	Key rangeId;
 	KeyRange range;

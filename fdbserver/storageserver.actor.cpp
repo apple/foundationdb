@@ -5892,6 +5892,77 @@ ACTOR Future<Void> checkpointQ(StorageServer* self, CheckpointRequest req) {
 	return Void();
 }
 
+ACTOR Future<Void> getFileQ(StorageServer* self, GetFileRequest req) {
+	req.reply.setByteLimit(1024);
+	state int i = 0;
+	for (; i < 100; ++i) {
+		wait(req.reply.onReady());
+		std::cout << "Send " << i << std::endl;
+		req.reply.send(StreamReply{ i });
+	}
+	req.reply.sendError(end_of_stream());
+	state int transactionSize = 4096;
+	state size_t fileOffset = 0;
+	state size_t chunkNo = 0;
+	state MD5_CTX sum;
+	state Arena arena;
+	state StringRef buf;
+	state Transaction tr;
+	state size_t firstChunkNo;
+
+	// Disabling AIO, because it currently supports only page-aligned writes, but the size of a client library
+	// is not necessariliy page-aligned, need to investigate if it is a limitation of AIO or just the way
+	// we are wrapping it
+	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
+	    req.path, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO, 0));
+
+	::MD5_Init(&sum);
+
+	loop {
+		arena = Arena();
+		// Use page-aligned buffers for enabling possible future use with AIO
+		buf = makeAlignedString(_PAGE_SIZE, transactionSize, arena);
+		state int bytesRead = wait(file->read(mutateString(buf), transactionSize, fileOffset));
+		fileOffset += bytesRead;
+		if (bytesRead <= 0) {
+			break;
+		}
+
+		::MD5_Update(&sum, buf.begin(), bytesRead);
+
+		tr = Transaction(db);
+		firstChunkNo = chunkNo;
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				int bufferOffset = 0;
+				chunkNo = firstChunkNo;
+				while (bufferOffset < bytesRead) {
+					size_t chunkLen = std::min(chunkSize, bytesRead - bufferOffset);
+					KeyRef chunkKey = chunkKeyFromNo(chunkKeyPrefix, chunkNo, arena);
+					chunkNo++;
+					tr.set(chunkKey, ValueRef(mutateString(buf) + bufferOffset, chunkLen));
+					bufferOffset += chunkLen;
+				}
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		if (bytesRead < transactionSize) {
+			break;
+		}
+	}
+	binInfo->totalBytes = fileOffset;
+	binInfo->chunkCnt = chunkNo;
+	binInfo->chunkSize = chunkSize;
+	binInfo->sumBytes = md5SumToHexString(sum);
+	return Void();
+}
+
 ACTOR Future<Void> serveCheckpointRequests(StorageServer* self, FutureStream<CheckpointRequest> checkpoint) {
 	loop {
 		CheckpointRequest req = waitNext(checkpoint);
