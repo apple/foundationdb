@@ -33,7 +33,7 @@
 
 struct FlowProcessInterface {
   constexpr static FileIdentifier file_identifier = 3491839;
-  RequestStream<struct FlowProcessReqgistrationRequest> registerProcess;
+  RequestStream<struct FlowProcessRegistrationRequest> registerProcess;
 
   template <class Ar>
 	void serialize(Ar& ar) {
@@ -41,7 +41,7 @@ struct FlowProcessInterface {
 	}
 };
 
-struct FlowProcessReqgistrationRequest {
+struct FlowProcessRegistrationRequest {
   constexpr static FileIdentifier file_identifier = 3411838;
   Standalone<StringRef> flowProcessInterface;
 
@@ -51,11 +51,19 @@ struct FlowProcessReqgistrationRequest {
 	}
 };
 
-struct FlowProcess {
+class FlowProcess {
+  Promise<Void> readyPromise;
+  Future<int> returnCodePromise;
+public:
   virtual ~FlowProcess();
   virtual StringRef name() const = 0;
   virtual StringRef serializedInterface() const = 0;
+  virtual void consumeInterface(StringRef intf) = 0;
   virtual Future<Void> run() = 0;
+
+  void start();
+  Future<Void> onReady() const { return readyPromise.getFuture(); }
+  Future<int> returnCode() const { return returnCodePromise; }
 };
 
 struct IProcessFactory {
