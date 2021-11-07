@@ -5298,9 +5298,10 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("SnapUID", snapReq.snapUID);
 		std::vector<Future<Void>> storageSnapReqs;
 		for (const auto& worker : storageWorkers) {
-			storageSnapReqs.push_back(sendSnapReq(worker.workerSnapReq,
-			                                      WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "storage"_sr),
-			                                      snap_storage_failed()));
+			storageSnapReqs.push_back(
+			    sendSnapReq(worker.workerSnapReq,
+			                WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("storage")),
+			                snap_storage_failed()));
 		}
 		wait(waitForAll(storageSnapReqs));
 
@@ -5310,9 +5311,10 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		// snap local tlog nodes
 		std::vector<Future<Void>> tLogSnapReqs;
 		for (const auto& tlog : tlogs) {
-			tLogSnapReqs.push_back(sendSnapReq(tlog.snapRequest,
-			                                   TLogSnapRequest{ snapReq.snapPayload, snapReq.snapUID, "tlog"_sr },
-			                                   snap_tlog_failed()));
+			tLogSnapReqs.push_back(
+			    sendSnapReq(tlog.snapRequest,
+			                TLogSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("tlog")),
+			                snap_tlog_failed()));
 		}
 		wait(waitForAll(tLogSnapReqs));
 
@@ -5337,9 +5339,10 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("SnapUID", snapReq.snapUID);
 		std::vector<Future<Void>> coordSnapReqs;
 		for (const auto& worker : coordWorkers) {
-			coordSnapReqs.push_back(sendSnapReq(worker.workerSnapReq,
-			                                    WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "coord"_sr),
-			                                    snap_coord_failed()));
+			coordSnapReqs.push_back(
+			    sendSnapReq(worker.workerSnapReq,
+			                WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("coord")),
+			                snap_coord_failed()));
 		}
 		wait(waitForAll(coordSnapReqs));
 		TraceEvent("SnapDataDistributor_AfterSnapCoords")
