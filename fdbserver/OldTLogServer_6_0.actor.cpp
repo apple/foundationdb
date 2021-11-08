@@ -2886,4 +2886,40 @@ struct DequeAllocator : std::allocator<T> {
 	}
 };
 
+TEST_CASE("Lfdbserver/tlogserver/VersionMessagesOverheadFactor") {
+
+	typedef std::pair<Version, LengthPrefixedStringRef> TestType; // type used by versionMessages
+
+	for (int i = 1; i < 9; ++i) {
+		for (int j = 0; j < 20; ++j) {
+			DequeAllocatorStats::allocatedBytes = 0;
+			DequeAllocator<TestType> allocator;
+			std::deque<TestType, DequeAllocator<TestType>> d(allocator);
+
+			int numElements = deterministicRandom()->randomInt(pow(10, i - 1), pow(10, i));
+			for (int k = 0; k < numElements; ++k) {
+				d.push_back(TestType());
+			}
+
+			int removedElements = 0; // deterministicRandom()->randomInt(0, numElements); // FIXME: the overhead factor
+			                         // does not accurately account for removal!
+			for (int k = 0; k < removedElements; ++k) {
+				d.pop_front();
+			}
+
+			int64_t dequeBytes = DequeAllocatorStats::allocatedBytes + sizeof(std::deque<TestType>);
+			int64_t insertedBytes = (numElements - removedElements) * sizeof(TestType);
+			double overheadFactor =
+			    std::max<double>(insertedBytes, dequeBytes - 10000) /
+			    insertedBytes; // We subtract 10K here as an estimated upper bound for the fixed cost of an std::deque
+			// fprintf(stderr, "%d elements (%d inserted, %d removed):\n", numElements-removedElements, numElements,
+			// removedElements); fprintf(stderr, "Allocated %lld bytes to store %lld bytes (%lf overhead factor)\n",
+			// dequeBytes, insertedBytes, overheadFactor);
+			ASSERT(overheadFactor * 1024 <= SERVER_KNOBS->VERSION_MESSAGES_OVERHEAD_FACTOR_1024THS);
+		}
+	}
+
+	return Void();
+}
+
 } // namespace oldTLog_6_0
