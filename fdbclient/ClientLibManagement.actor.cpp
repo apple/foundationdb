@@ -47,7 +47,7 @@ struct ClientLibBinaryInfo {
 #define ASSERT_INDEX_IN_RANGE(idx, arr) ASSERT(idx >= 0 && idx < sizeof(arr) / sizeof(arr[0]))
 
 const std::string& getStatusName(ClientLibStatus status) {
-	static const std::string statusNames[] = { "disabled", "available", "uploading", "download", "active" };
+	static const std::string statusNames[] = { "disabled", "uploading", "download", "active" };
 	int idx = static_cast<int>(status);
 	ASSERT_INDEX_IN_RANGE(idx, statusNames);
 	return statusNames[idx];
@@ -124,13 +124,12 @@ ClientLibChecksumAlg getChecksumAlgByName(std::string_view checksumAlgName) {
 namespace {
 
 bool isValidTargetStatus(ClientLibStatus status) {
-	return status == ClientLibStatus::AVAILABLE || status == ClientLibStatus::DISABLED ||
-	       status == ClientLibStatus::DOWNLOAD || status == ClientLibStatus::ACTIVE;
+	return status == ClientLibStatus::DISABLED || status == ClientLibStatus::DOWNLOAD ||
+	       status == ClientLibStatus::ACTIVE;
 }
 
 bool isAvailableForDownload(ClientLibStatus status) {
-	return status == ClientLibStatus::AVAILABLE || status == ClientLibStatus::DOWNLOAD ||
-	       status == ClientLibStatus::ACTIVE;
+	return status == ClientLibStatus::DOWNLOAD || status == ClientLibStatus::ACTIVE;
 }
 
 void updateClientLibChangeCounter(Transaction& tr, ClientLibStatus prevStatus, ClientLibStatus newStatus) {

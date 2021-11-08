@@ -35,10 +35,9 @@ namespace ClientLibManagement {
 
 enum class ClientLibStatus {
 	DISABLED = 0,
-	AVAILABLE, // 1
-	UPLOADING, // 2
-	DOWNLOAD, // 3
-	ACTIVE, // 4
+	UPLOADING, // 1
+	DOWNLOAD, // 2
+	ACTIVE, // 3
 	COUNT // must be the last one
 };
 

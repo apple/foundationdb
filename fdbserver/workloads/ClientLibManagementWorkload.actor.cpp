@@ -435,7 +435,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 		metadataJson[CLIENTLIB_ATTR_GIT_HASH] = randomHexadecimalStr(40);
 		metadataJson[CLIENTLIB_ATTR_TYPE] = "debug";
 		metadataJson[CLIENTLIB_ATTR_CHECKSUM] = randomHexadecimalStr(32);
-		metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(ClientLibStatus::AVAILABLE);
+		metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(ClientLibStatus::DOWNLOAD);
 		metadataJson[CLIENTLIB_ATTR_API_VERSION] = 710;
 		metadataJson[CLIENTLIB_ATTR_PROTOCOL] = "fdb00b07001001";
 		metadataJson[CLIENTLIB_ATTR_CHECKSUM_ALG] = "md5";
