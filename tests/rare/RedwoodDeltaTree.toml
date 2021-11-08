@@ -12,5 +12,6 @@ startDelay = 0
 testTitle = "RedwoodRecordRef"
 
     [[test.workload]]
-    testName = 'Lredwood/correctness/unit/deltaTree/RedwoodRecordRef'
+    testName = 'UnitTests'
     maxTestCases = 2 # there are two of those
+    testsMatching = 'Lredwood/correctness/unit/deltaTree/RedwoodRecordRef'
