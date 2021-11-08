@@ -267,7 +267,7 @@ public:
 	TestEnvironment& initPtxnTLog(const MessageTransferModel model, const int numTLogs, bool useFake = true);
 	TestEnvironment& initMessages(const int initialVersion, const int numVersions, const int numMutationsInVersion);
 
-	static const CommitRecord& getCommitRecords();
+	static CommitRecord& getCommitRecords();
 	static const details::TLogGroupFixture& getTLogGroup();
 	static std::shared_ptr<details::ptxnTLogFixture> getTLogs();
 };

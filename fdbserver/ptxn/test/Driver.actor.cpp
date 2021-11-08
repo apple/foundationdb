@@ -216,15 +216,13 @@ void startFakeStorageServer(std::vector<Future<Void>>& actors, std::shared_ptr<T
 
 namespace details {
 
-#pragma region TLogGroupFixture
-
 void TLogGroupFixture::setUp(TestDriverContext& testDriverContext,
                              const int numTLogGroups,
                              const int numStorageTeamIDs) {
 
-	ASSERT(numTLogGroups >= numStorageTeamIDs);
+	ASSERT(numTLogGroups <= numStorageTeamIDs);
 
-	test::print::PrintTiming printTIming("TLogGroupFixture::setUp");
+	test::print::PrintTiming printTiming("TLogGroupFixture::setUp");
 
 	for (int i = 0; i < numTLogGroups; ++i) {
 		tLogGroupIDs.push_back(randomUID());
@@ -257,10 +255,6 @@ void TLogGroupFixture::setUp(TestDriverContext& testDriverContext,
 	}
 }
 
-#pragma endregion TLogGroupFixture
-
-#pragma region MessageFixture
-
 void MessageFixture::setUp(const TLogGroupFixture& tLogGroupStorageTeamMapping,
                            const int initialVersion,
                            const int numVersions,
@@ -276,8 +270,6 @@ void MessageFixture::setUp(const TLogGroupFixture& tLogGroupStorageTeamMapping,
 		version += deterministicRandom()->randomInt(5, 11);
 	}
 }
-
-#pragma endregion MessageFixture
 
 #pragma region ptxnTLogFixture
 
@@ -344,16 +336,11 @@ ptxn::details::TLogInterfaceSharedPtrWrapper ptxnTLogFixture::getTLogLeaderBySto
 
 #pragma endregion ptxnTLogFixture
 
-#pragma region ptxnFakeTLogFixture
-
-
 std::shared_ptr<FakeTLogContext> ptxnFakeTLogFixture::getTLogContextByIndex(const int index) {
 	ASSERT(index >= 0 && index < static_cast<int>(tLogContexts.size()));
 
 	return tLogContexts[index];
 }
-
-#pragma endregion ptxnFakeTLogFixture
 
 #pragma region ptxnTLogPassivelyPullFixture
 
@@ -427,7 +414,7 @@ TestEnvironment& TestEnvironment::initMessages(const int initialVersion,
 	return *this;
 }
 
-const CommitRecord& TestEnvironment::getCommitRecords() {
+CommitRecord& TestEnvironment::getCommitRecords() {
 	ASSERT(pImpl);
 	ASSERT(pImpl->testDriverContextImpl);
 

@@ -81,7 +81,7 @@ ResultContainer randomlyPick(const Container& container, const int numSamples) {
 	}
 
 	for (int i = numSamples; i < containerSize; ++i) {
-		int j = deterministicRandom()->randomInt(1, i + 1);
+		int j = deterministicRandom()->randomInt(0, i + 1);
 		if (j < numSamples) {
 			result[j] = container[i];
 		}
