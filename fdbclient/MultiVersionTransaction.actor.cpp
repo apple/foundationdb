@@ -1494,7 +1494,7 @@ Reference<ClientInfo> MultiVersionApi::getLocalClient() {
 
 void MultiVersionApi::selectApiVersion(int apiVersion) {
 	if (!localClient) {
-		//		localClient = makeReference<ClientInfo>(ThreadSafeApi::api);
+		localClient = makeReference<ClientInfo>(IClientApi::localApi);
 	}
 
 	if (this->apiVersion != 0 && this->apiVersion != apiVersion) {
