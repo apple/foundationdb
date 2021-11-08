@@ -49,6 +49,7 @@
 #include "fdbclient/WellKnownEndpoints.h"
 #include "fdbmonitor/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
+#include "fdbrpc/FlowProcess.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/PerfMetric.h"
 #include "fdbrpc/simulator.h"
@@ -105,7 +106,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -192,7 +193,9 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_USE_TEST_CONFIG_DB,    "--use_test_config_db",        SO_NONE },
 	{ OPT_FAULT_INJECTION,       "-fi",                         SO_REQ_SEP },
 	{ OPT_FAULT_INJECTION,       "--fault_injection",           SO_REQ_SEP },
-	{ OPT_PROFILER,	             "--profiler_",                 SO_REQ_SEP},
+	{ OPT_PROFILER,	             "--profiler_",                 SO_REQ_SEP },
+	{ OPT_FLOW_PROCESS_NAME,     "--process_name",              SO_REQ_SEP },
+	{ OPT_FLOW_PROCESS_ENDPOINT, "--process_endpoint",          SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -955,6 +958,7 @@ enum class ServerRole {
 	Test,
 	VersionedMapTest,
 	UnitTests,
+	FlowProcess,
 	RemoteIKVS,
 	RemoteIKVSClient,
 	SpawnRemoteIKVS
@@ -1013,6 +1017,8 @@ struct CLIOptions {
 	UnitTestParameters testParams;
 
 	std::map<std::string, std::string> profilerConfig;
+	std::string flowProcessName;
+	Endpoint flowProcessEndpoint;
 
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
@@ -1169,6 +1175,8 @@ private:
 					role = ServerRole::ConsistencyCheck;
 				else if (!strcmp(sRole, "unittests"))
 					role = ServerRole::UnitTests;
+				else if (!strcmp(sRole, "flowprocess"))
+					role = ServerRole::FlowProcess;
 				else if (!strcmp(sRole, "remoteIKVS"))
 					role = ServerRole::RemoteIKVS;
 				else if (!strcmp(sRole, "remoteIKVSClient"))
@@ -1499,6 +1507,34 @@ private:
 			case OPT_USE_TEST_CONFIG_DB:
 				configDBType = ConfigDBType::SIMPLE;
 				break;
+			case OPT_FLOW_PROCESS_NAME:
+				flowProcessName = args.OptionArg();
+				break;
+			case OPT_FLOW_PROCESS_ENDPOINT: {
+				std::vector<std::string> strings;
+				boost::split(strings, args.OptionArg(), [](char c) { return ','; });
+				if (strings.size() != 3) {
+					std::cerr << "Invalid argument, expected 3 elements in --process_endpoint got " << strings.size()
+					          << std::endl;
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				try {
+					auto addr = NetworkAddress::parse(strings[0]);
+					uint64_t fst = std::stoul(strings[1]);
+					uint64_t snd = std::stoul(strings[2]);
+					UID token(fst, snd);
+					NetworkAddressList l;
+					l.address = addr;
+					flowProcessEndpoint = Endpoint(l, token);
+				} catch (Error& e) {
+					std::cerr << "Could not parse network address " << strings[0] << std::endl;
+					flushAndExit(FDB_EXIT_ERROR);
+				} catch (std::exception& e) {
+					std::cerr << "Could not parse token " << strings[1] << "," << strings[2] << std::endl;
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
+			}
 
 #ifndef TLS_DISABLED
 			case TLSConfig::OPT_TLS_PLUGIN:
@@ -2144,6 +2180,10 @@ int main(int argc, char* argv[]) {
 			}
 
 			f = result;
+		} else if (role == ServerRole::FlowProcess) {
+			TraceEvent(SevDebug, "StartingFlowProcess").detail("From", "fdbserver");
+			f = stopAfter(runFlowProcess(opts.flowProcessName, opts.flowProcessEndpoint));
+			g_network->run();
 		} else if (role == ServerRole::RemoteIKVS) {
 			TraceEvent(SevDebug, "StartingRemoteIKVSServer").detail("From", "fdbserver");
 			f = stopAfter(runRemoteServer());
