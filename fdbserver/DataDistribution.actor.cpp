@@ -4640,13 +4640,18 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self,
 						TraceEvent("MaintenanceZoneCleared", self->distributorId).log();
 						self->healthyZone.set(Optional<Key>());
 					}
+				} else if (!status->isUnhealthy()) {
+					// On server transistion from unhealthy -> healthy, trigger buildTeam check,
+					// handles scenario when team building failed due to insufficient healthy servers.
+					// Operaton cost is minimal if currentTeamCount == desiredTeamCount/maxTeamCount.
+					self->doBuildTeams = true;
 				}
 
-				// TraceEvent("StatusMapChange", self->distributorId)
-				//     .detail("ServerID", interf.id())
-				//     .detail("Status", status->toString())
-				//     .detail("Available",
-				//             IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
+				TraceEvent(SevDebug, "StatusMapChange", self->distributorId)
+				    .detail("ServerID", interf.id())
+				    .detail("Status", status->toString())
+				    .detail("Available",
+				            IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
 			}
 			when(wait(status->isUnhealthy() ? waitForAllDataRemoved(cx, interf.id(), addedVersion, self) : Never())) {
 				break;
