@@ -111,28 +111,6 @@ EmptyFuture Database::create_snapshot(FDBDatabase* db,
 	return EmptyFuture(fdb_database_create_snapshot(db, uid, uid_length, snap_command, snap_command_length));
 }
 
-KeyRangeArrayFuture Database::get_blob_granule_ranges(FDBDatabase* db,
-                                                      std::string_view begin_key,
-                                                      std::string_view end_key) {
-	return KeyRangeArrayFuture(fdb_database_get_blob_granule_ranges(
-	    db, (const uint8_t*)begin_key.data(), begin_key.size(), (const uint8_t*)end_key.data(), end_key.size()));
-}
-KeyValueArrayFuture Database::read_blob_granules(FDBDatabase* db,
-                                                 std::string_view begin_key,
-                                                 std::string_view end_key,
-                                                 int64_t beginVersion,
-                                                 int64_t endVersion,
-                                                 FDBReadBlobGranuleContext granuleContext) {
-	return KeyValueArrayFuture(fdb_database_read_blob_granules(db,
-	                                                           (const uint8_t*)begin_key.data(),
-	                                                           begin_key.size(),
-	                                                           (const uint8_t*)end_key.data(),
-	                                                           end_key.size(),
-	                                                           beginVersion,
-	                                                           endVersion,
-	                                                           granuleContext));
-}
-
 // Transaction
 
 Transaction::Transaction(FDBDatabase* db) {
@@ -262,6 +240,25 @@ fdb_error_t Transaction::add_conflict_range(std::string_view begin_key,
                                             FDBConflictRangeType type) {
 	return fdb_transaction_add_conflict_range(
 	    tr_, (const uint8_t*)begin_key.data(), begin_key.size(), (const uint8_t*)end_key.data(), end_key.size(), type);
+}
+
+KeyRangeArrayFuture Transaction::get_blob_granule_ranges(std::string_view begin_key, std::string_view end_key) {
+	return KeyRangeArrayFuture(fdb_transaction_get_blob_granule_ranges(
+	    tr_, (const uint8_t*)begin_key.data(), begin_key.size(), (const uint8_t*)end_key.data(), end_key.size()));
+}
+KeyValueArrayFuture Transaction::read_blob_granules(std::string_view begin_key,
+                                                    std::string_view end_key,
+                                                    int64_t beginVersion,
+                                                    int64_t readVersion,
+                                                    FDBReadBlobGranuleContext granuleContext) {
+	return KeyValueArrayFuture(fdb_transaction_read_blob_granules(tr_,
+	                                                              (const uint8_t*)begin_key.data(),
+	                                                              begin_key.size(),
+	                                                              (const uint8_t*)end_key.data(),
+	                                                              end_key.size(),
+	                                                              beginVersion,
+	                                                              readVersion,
+	                                                              granuleContext));
 }
 
 } // namespace fdb

@@ -125,6 +125,10 @@ typedef struct readgranulecontext {
 	int64_t (*start_load_f)(const char*, int, int64_t, int64_t, void*);
 	uint8_t* (*get_load_f)(int64_t, void*);
 	void (*free_load_f)(int64_t, void*);
+
+	// Set this to true for testing if you don't want to read the granule files,
+	// just do the request to the blob workers
+	fdb_bool_t debugNoMaterialize;
 } FDBReadBlobGranuleContext;
 
 DLLEXPORT void fdb_future_cancel(FDBFuture* f);
@@ -207,21 +211,6 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_create_snapshot(FDBDatabase
 DLLEXPORT WARN_UNUSED_RESULT double fdb_database_get_main_thread_busyness(FDBDatabase* db);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db, uint64_t expected_version);
-
-DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_blob_granule_ranges(FDBDatabase* db,
-                                                                             uint8_t const* begin_key_name,
-                                                                             int begin_key_name_length,
-                                                                             uint8_t const* end_key_name,
-                                                                             int end_key_name_length);
-
-DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_read_blob_granules(FDBDatabase* db,
-                                                                        uint8_t const* begin_key_name,
-                                                                        int begin_key_name_length,
-                                                                        uint8_t const* end_key_name,
-                                                                        int end_key_name_length,
-                                                                        int64_t beginVersion,
-                                                                        int64_t endVersion,
-                                                                        FDBReadBlobGranuleContext granuleContext);
 
 DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr);
 
@@ -340,6 +329,23 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_split_points(F
                                                                                uint8_t const* end_key_name,
                                                                                int end_key_name_length,
                                                                                int64_t chunk_size);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_blob_granule_ranges(FDBTransaction* db,
+                                                                                uint8_t const* begin_key_name,
+                                                                                int begin_key_name_length,
+                                                                                uint8_t const* end_key_name,
+                                                                                int end_key_name_length);
+
+// InvalidVersion (-1) for readVersion means get read version from transaction
+// Separated out as optional because BG reads can support longer-lived reads than normal FDB transactions
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_read_blob_granules(FDBTransaction* db,
+                                                                           uint8_t const* begin_key_name,
+                                                                           int begin_key_name_length,
+                                                                           uint8_t const* end_key_name,
+                                                                           int end_key_name_length,
+                                                                           int64_t beginVersion,
+                                                                           int64_t readVersion,
+                                                                           FDBReadBlobGranuleContext granuleContext);
 
 #define FDB_KEYSEL_LAST_LESS_THAN(k, l) k, l, 0, 0
 #define FDB_KEYSEL_LAST_LESS_OR_EQUAL(k, l) k, l, 1, 0

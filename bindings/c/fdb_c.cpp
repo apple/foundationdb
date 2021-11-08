@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include <cstdint>
 #define FDB_API_VERSION 710
 #define FDB_INCLUDE_LEGACY_TYPES
@@ -389,35 +390,6 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db
 	                }).extractPtr());
 }
 
-extern "C" DLLEXPORT FDBFuture* fdb_database_get_blob_granule_ranges(FDBDatabase* db,
-                                                                     uint8_t const* begin_key_name,
-                                                                     int begin_key_name_length,
-                                                                     uint8_t const* end_key_name,
-                                                                     int end_key_name_length) {
-	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
-	return (FDBFuture*)(DB(db)->getBlobGranuleRanges(range).extractPtr());
-}
-
-extern "C" DLLEXPORT FDBFuture* fdb_database_read_blob_granules(FDBDatabase* db,
-                                                                uint8_t const* begin_key_name,
-                                                                int begin_key_name_length,
-                                                                uint8_t const* end_key_name,
-                                                                int end_key_name_length,
-                                                                int64_t beginVersion,
-                                                                int64_t endVersion,
-                                                                FDBReadBlobGranuleContext granule_context) {
-	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
-
-	// FIXME: better way to convert?
-	ReadBlobGranuleContext context;
-	context.userContext = granule_context.userContext;
-	context.start_load_f = granule_context.start_load_f;
-	context.get_load_f = granule_context.get_load_f;
-	context.free_load_f = granule_context.free_load_f;
-
-	return (FDBFuture*)(DB(db)->readBlobGranules(range, beginVersion, endVersion, context).extractPtr());
-}
-
 extern "C" DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr) {
 	try {
 		TXN(tr)->delref();
@@ -691,6 +663,41 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_range_split_points(FDBTransa
                                                                        int64_t chunk_size) {
 	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
 	return (FDBFuture*)(TXN(tr)->getRangeSplitPoints(range, chunk_size).extractPtr());
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_blob_granule_ranges(FDBTransaction* tr,
+                                                                        uint8_t const* begin_key_name,
+                                                                        int begin_key_name_length,
+                                                                        uint8_t const* end_key_name,
+                                                                        int end_key_name_length) {
+	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	return (FDBFuture*)(TXN(tr)->getBlobGranuleRanges(range).extractPtr());
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules(FDBTransaction* tr,
+                                                                   uint8_t const* begin_key_name,
+                                                                   int begin_key_name_length,
+                                                                   uint8_t const* end_key_name,
+                                                                   int end_key_name_length,
+                                                                   int64_t beginVersion,
+                                                                   int64_t readVersion,
+                                                                   FDBReadBlobGranuleContext granule_context) {
+	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+
+	// FIXME: better way to convert?
+	ReadBlobGranuleContext context;
+	context.userContext = granule_context.userContext;
+	context.start_load_f = granule_context.start_load_f;
+	context.get_load_f = granule_context.get_load_f;
+	context.free_load_f = granule_context.free_load_f;
+	context.debugNoMaterialize = granule_context.debugNoMaterialize;
+
+	Optional<Version> rv;
+	if (readVersion != invalidVersion) {
+		rv = readVersion;
+	}
+
+	return (FDBFuture*)(TXN(tr)->readBlobGranules(range, beginVersion, rv, context).extractPtr());
 }
 
 #include "fdb_c_function_pointers.g.h"

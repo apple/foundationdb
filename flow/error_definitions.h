@@ -159,6 +159,7 @@ ERROR( blocked_from_network_thread, 2026, "Detected a deadlock in a callback cal
 ERROR( invalid_config_db_range_read, 2027, "Invalid configuration database range read" )
 ERROR( invalid_config_db_key, 2028, "Invalid configuration database key provided" )
 ERROR( invalid_config_path, 2029, "Invalid configuration path" )
+ERROR( bg_no_ryw, 2030, "Blob Granule Read Transactions must be specified as ryw-disabled" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )

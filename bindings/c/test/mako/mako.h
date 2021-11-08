@@ -109,6 +109,7 @@ typedef struct {
 #define TAGPREFIXLENGTH_MAX 8
 #define NUM_CLUSTERS_MAX 3
 #define NUM_DATABASES_MAX 10
+#define MAX_BG_IDS 1000
 
 /* benchmark parameters */
 typedef struct {

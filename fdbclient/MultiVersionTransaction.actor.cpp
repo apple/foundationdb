@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "fdbclient/ThreadSafeTransaction.h"
@@ -205,6 +206,64 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> DLTransaction::getRangeSplitPoints(c
 	});
 }
 
+ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> DLTransaction::getBlobGranuleRanges(const KeyRangeRef& keyRange) {
+	if (!api->transactionGetBlobGranuleRanges) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->transactionGetBlobGranuleRanges(
+	    tr, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
+	return toThreadFuture<Standalone<VectorRef<KeyRangeRef>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const FdbCApi::FDBKeyRange* keyRanges;
+		int keyRangesLength;
+		FdbCApi::fdb_error_t error = api->futureGetKeyRangeArray(f, &keyRanges, &keyRangesLength);
+		ASSERT(!error);
+		return Standalone<VectorRef<KeyRangeRef>>(VectorRef<KeyRangeRef>((KeyRangeRef*)keyRanges, keyRangesLength),
+		                                          Arena());
+	});
+}
+
+ThreadFuture<RangeResult> DLTransaction::readBlobGranules(const KeyRangeRef& keyRange,
+                                                          Version beginVersion,
+                                                          Optional<Version> readVersion,
+                                                          ReadBlobGranuleContext granuleContext) {
+	// TODO REMOVE prints
+	printf("    DLTransaction::readBlobGranules\n");
+	if (!api->transactionReadBlobGranules) {
+		return unsupported_operation();
+	}
+	printf("    DLTransaction::readBlobGranules 2\n");
+
+	// FIXME: better way to convert here?
+	FdbCApi::FDBReadBlobGranuleContext context;
+	context.userContext = granuleContext.userContext;
+	context.start_load_f = granuleContext.start_load_f;
+	context.get_load_f = granuleContext.get_load_f;
+	context.free_load_f = granuleContext.free_load_f;
+	context.debugNoMaterialize = granuleContext.debugNoMaterialize;
+
+	int64_t rv = readVersion.present() ? readVersion.get() : invalidVersion;
+
+	FdbCApi::FDBFuture* f = api->transactionReadBlobGranules(tr,
+	                                                         keyRange.begin.begin(),
+	                                                         keyRange.begin.size(),
+	                                                         keyRange.end.begin(),
+	                                                         keyRange.end.size(),
+	                                                         beginVersion,
+	                                                         rv,
+	                                                         context);
+	return toThreadFuture<RangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const FdbCApi::FDBKeyValue* kvs;
+		int count;
+		FdbCApi::fdb_bool_t more;
+		FdbCApi::fdb_error_t error = api->futureGetKeyValueArray(f, &kvs, &count, &more);
+		ASSERT(!error);
+
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
+		return RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena());
+	});
+}
+
 void DLTransaction::addReadConflictRange(const KeyRangeRef& keys) {
 	throwIfError(api->transactionAddConflictRange(
 	    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDB_CONFLICT_RANGE_TYPE_READ));
@@ -359,61 +418,6 @@ double DLDatabase::getMainThreadBusyness() {
 	return 0;
 }
 
-ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> DLDatabase::getBlobGranuleRanges(const KeyRangeRef& keyRange) {
-	if (!api->databaseGetBlobGranuleRanges) {
-		return unsupported_operation();
-	}
-
-	FdbCApi::FDBFuture* f = api->databaseGetBlobGranuleRanges(
-	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
-	return toThreadFuture<Standalone<VectorRef<KeyRangeRef>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const FdbCApi::FDBKeyRange* keyRanges;
-		int keyRangesLength;
-		FdbCApi::fdb_error_t error = api->futureGetKeyRangeArray(f, &keyRanges, &keyRangesLength);
-		ASSERT(!error);
-		return Standalone<VectorRef<KeyRangeRef>>(VectorRef<KeyRangeRef>((KeyRangeRef*)keyRanges, keyRangesLength),
-		                                          Arena());
-	});
-}
-
-ThreadFuture<RangeResult> DLDatabase::readBlobGranules(const KeyRangeRef& keyRange,
-                                                       Version beginVersion,
-                                                       Version endVersion,
-                                                       ReadBlobGranuleContext granuleContext) {
-
-	printf("    DLDatabase::readBlobGranules\n");
-	if (!api->databaseReadBlobGranules) {
-		return unsupported_operation();
-	}
-	printf("    DLDatabase::readBlobGranules 2\n");
-
-	// FIXME: better way to convert here?
-	FdbCApi::FDBReadBlobGranuleContext context;
-	context.userContext = granuleContext.userContext;
-	context.start_load_f = granuleContext.start_load_f;
-	context.get_load_f = granuleContext.get_load_f;
-	context.free_load_f = granuleContext.free_load_f;
-
-	FdbCApi::FDBFuture* f = api->databaseReadBlobGranules(db,
-	                                                      keyRange.begin.begin(),
-	                                                      keyRange.begin.size(),
-	                                                      keyRange.end.begin(),
-	                                                      keyRange.end.size(),
-	                                                      beginVersion,
-	                                                      endVersion,
-	                                                      context);
-	return toThreadFuture<RangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const FdbCApi::FDBKeyValue* kvs;
-		int count;
-		FdbCApi::fdb_bool_t more;
-		FdbCApi::fdb_error_t error = api->futureGetKeyValueArray(f, &kvs, &count, &more);
-		ASSERT(!error);
-
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena());
-	});
-}
-
 // Returns the protocol version reported by the coordinator this client is connected to
 // If an expected version is given, the future won't return until the protocol version is different than expected
 // Note: this will never return if the server is running a protocol from FDB 5.0 or older
@@ -489,13 +493,6 @@ void DLApi::init() {
 	                   headerVersion >= 700);
 	loadClientFunction(
 	    &api->databaseGetServerProtocol, lib, fdbCPath, "fdb_database_get_server_protocol", headerVersion >= 700);
-	loadClientFunction(&api->databaseGetBlobGranuleRanges,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_database_get_blob_granule_ranges",
-	                   headerVersion >= 710);
-	loadClientFunction(
-	    &api->databaseReadBlobGranules, lib, fdbCPath, "fdb_database_read_blob_granules", headerVersion >= 710);
 	loadClientFunction(&api->databaseDestroy, lib, fdbCPath, "fdb_database_destroy");
 	loadClientFunction(&api->databaseRebootWorker, lib, fdbCPath, "fdb_database_reboot_worker", headerVersion >= 700);
 	loadClientFunction(&api->databaseForceRecoveryWithDataLoss,
@@ -543,6 +540,13 @@ void DLApi::init() {
 	                   "fdb_transaction_get_range_split_points",
 	                   headerVersion >= 700);
 
+	loadClientFunction(&api->transactionGetBlobGranuleRanges,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_get_blob_granule_ranges",
+	                   headerVersion >= 710);
+	loadClientFunction(
+	    &api->transactionReadBlobGranules, lib, fdbCPath, "fdb_transaction_read_blob_granules", headerVersion >= 710);
 	loadClientFunction(
 	    &api->futureGetInt64, lib, fdbCPath, headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version");
 	loadClientFunction(&api->futureGetUInt64, lib, fdbCPath, "fdb_future_get_uint64", headerVersion >= 700);
@@ -826,6 +830,24 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> MultiVersionTransaction::getRangeSpl
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRangeSplitPoints(range, chunkSize)
 	                        : makeTimeout<Standalone<VectorRef<KeyRef>>>();
+	return abortableFuture(f, tr.onChange);
+}
+
+ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> MultiVersionTransaction::getBlobGranuleRanges(
+    const KeyRangeRef& keyRange) {
+	auto tr = getTransaction();
+	auto f = tr.transaction ? tr.transaction->getBlobGranuleRanges(keyRange)
+	                        : makeTimeout<Standalone<VectorRef<KeyRangeRef>>>();
+	return abortableFuture(f, tr.onChange);
+}
+
+ThreadFuture<RangeResult> MultiVersionTransaction::readBlobGranules(const KeyRangeRef& keyRange,
+                                                                    Version beginVersion,
+                                                                    Optional<Version> readVersion,
+                                                                    ReadBlobGranuleContext granuleContext) {
+	auto tr = getTransaction();
+	auto f = tr.transaction ? tr.transaction->readBlobGranules(keyRange, beginVersion, readVersion, granuleContext)
+	                        : makeTimeout<RangeResult>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -1169,20 +1191,6 @@ double MultiVersionDatabase::getMainThreadBusyness() {
 	}
 
 	return localClientBusyness;
-}
-
-ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> MultiVersionDatabase::getBlobGranuleRanges(
-    const KeyRangeRef& keyRange) {
-	// FIXME: what to do if not set?..
-	return dbState->db->getBlobGranuleRanges(keyRange);
-}
-
-ThreadFuture<RangeResult> MultiVersionDatabase::readBlobGranules(const KeyRangeRef& keyRange,
-                                                                 Version beginVersion,
-                                                                 Version endVersion,
-                                                                 ReadBlobGranuleContext granuleContext) {
-	// FIXME: what to do if not set?..
-	return dbState->db->readBlobGranules(keyRange, beginVersion, endVersion, granuleContext);
 }
 
 // Returns the protocol version reported by the coordinator this client is connected to

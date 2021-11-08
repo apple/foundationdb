@@ -543,7 +543,6 @@ int run_op_clearrange(FDBTransaction* transaction, char* keystr, char* keystr2) 
 
 // TODO: could always abstract this into something more generically usable by something other than mako.
 // But outside of testing there are likely few use cases for local granules
-int MAX_BG_IDS = 1000;
 typedef struct {
 	char* bgFilePath;
 	int nextId;
@@ -621,16 +620,22 @@ void granule_free_load(int64_t loadId, void* userContext) {
 	context->data_by_id[loadId] = 0;
 }
 
-int run_op_read_blob_granules(FDBDatabase* database,
+int run_op_read_blob_granules(FDBTransaction* transaction,
                               char* keystr,
                               char* keystr2,
-                              int64_t readVersion,
+                              bool doMaterialize,
                               char* bgFilePath) {
 	FDBFuture* f;
 	fdb_error_t err;
 	FDBKeyValue const* out_kv;
 	int out_count;
 	int out_more;
+
+	err = fdb_transaction_set_option(transaction, FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, (uint8_t*)NULL, 0);
+	if (err) {
+		fprintf(stderr, "ERROR: FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE: %s\n", fdb_get_error(err));
+		return FDB_ERROR_RETRY;
+	}
 
 	// Not used currently! FIXME: fix warning
 
@@ -646,15 +651,16 @@ int run_op_read_blob_granules(FDBDatabase* database,
 	granuleContext.start_load_f = &granule_start_load;
 	granuleContext.get_load_f = &granule_get_load;
 	granuleContext.free_load_f = &granule_free_load;
+	granuleContext.debugNoMaterialize = !doMaterialize;
 
-	f = fdb_database_read_blob_granules(database,
-	                                    (uint8_t*)keystr,
-	                                    strlen(keystr),
-	                                    (uint8_t*)keystr2,
-	                                    strlen(keystr2),
-	                                    0 /* beginVersion*/,
-	                                    readVersion,
-	                                    granuleContext);
+	f = fdb_transaction_read_blob_granules(transaction,
+	                                       (uint8_t*)keystr,
+	                                       strlen(keystr),
+	                                       (uint8_t*)keystr2,
+	                                       strlen(keystr2),
+	                                       0 /* beginVersion*/,
+	                                       -1, /* endVersion. -1 is use txn read version */
+	                                       granuleContext);
 
 	wait_future(f);
 
@@ -672,8 +678,7 @@ int run_op_read_blob_granules(FDBDatabase* database,
 }
 
 /* run one transaction */
-int run_one_transaction(FDBDatabase* database,
-                        FDBTransaction* transaction,
+int run_one_transaction(FDBTransaction* transaction,
                         mako_args_t* args,
                         mako_stats_t* stats,
                         char* keystr,
@@ -917,8 +922,8 @@ retryTxn:
 					docommit = 1;
 					break;
 				case OP_READ_BG:
-					// Requires that there is an explicit grv before bg
-					rc = run_op_read_blob_granules(database, keystr, keystr2, readversion, args->bg_file_path);
+					rc = run_op_read_blob_granules(
+					    transaction, keystr, keystr2, args->bg_materialize_files, args->bg_file_path);
 					break;
 				default:
 					fprintf(stderr, "ERROR: Unknown Operation %d\n", i);
@@ -998,8 +1003,7 @@ retryTxn:
 	return 0;
 }
 
-int run_workload(FDBDatabase* database,
-                 FDBTransaction* transaction,
+int run_workload(FDBTransaction* transaction,
                  mako_args_t* args,
                  int thread_tps,
                  volatile double* throttle_factor,
@@ -1116,7 +1120,7 @@ int run_workload(FDBDatabase* database,
 		}
 
 		rc = run_one_transaction(
-		    database, transaction, args, stats, keystr, keystr2, valstr, block, elem_size, is_memory_allocated);
+		    transaction, args, stats, keystr, keystr2, valstr, block, elem_size, is_memory_allocated);
 		if (rc) {
 			/* FIXME: run_one_transaction should return something meaningful */
 			fprintf(annoyme, "ERROR: run_one_transaction failed (%d)\n", rc);
@@ -1286,8 +1290,7 @@ void* worker_thread(void* thread_args) {
 
 	/* run the workload */
 	else if (args->mode == MODE_RUN) {
-		rc = run_workload(database,
-		                  transaction,
+		rc = run_workload(transaction,
 		                  args,
 		                  thread_tps,
 		                  throttle_factor,
@@ -1490,9 +1493,6 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 		if (args->disable_ryw) {
 			fdb_database_set_option(process.databases[i], FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, (uint8_t*)NULL, 0);
 		}
-		if (!args->bg_materialize_files) {
-			fdb_database_set_option(process.databases[i], FDB_DB_OPTION_TEST_BG_NO_MATERIALIZE, (uint8_t*)NULL, 0);
-		}
 	}
 #endif
 
@@ -1684,11 +1684,6 @@ int parse_transaction(mako_args_t* args, char* optarg) {
 			op = OP_SETCLEAR;
 			ptr += 2;
 		} else if (strncmp(ptr, "bg", 2) == 0) {
-			if (!args->txnspec.ops[OP_GETREADVERSION][OP_COUNT]) {
-				fprintf(debugme, "Error: bg requires explicit grv first!\n", ptr);
-				error = 1;
-				break;
-			}
 			op = OP_READ_BG;
 			rangeop = 1;
 			ptr += 2;

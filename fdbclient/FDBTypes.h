@@ -1183,6 +1183,9 @@ struct ReadBlobGranuleContext {
 	int64_t (*start_load_f)(const char*, int, int64_t, int64_t, void*);
 	uint8_t* (*get_load_f)(int64_t, void*);
 	void (*free_load_f)(int64_t, void*);
+	// Set this to true for testing if you don't want to read the granule files,
+	// just do the request to the blob workers
+	bool debugNoMaterialize;
 };
 
 #endif

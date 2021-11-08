@@ -56,15 +56,18 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	} FDBKeyRange;
 #pragma pack(pop)
 
+	typedef int fdb_error_t;
+	typedef int fdb_bool_t;
+
 	typedef struct readgranulecontext {
 		void* userContext;
 		int64_t (*start_load_f)(const char*, int, int64_t, int64_t, void*);
 		uint8_t* (*get_load_f)(int64_t, void*);
 		void (*free_load_f)(int64_t, void*);
+		// set this to true for testing if you don't want to read the granule files, just
+		// do the request to the blob workers
+		fdb_bool_t debugNoMaterialize;
 	} FDBReadBlobGranuleContext;
-
-	typedef int fdb_error_t;
-	typedef int fdb_bool_t;
 
 	typedef void (*FDBCallback)(FDBFuture* future, void* callback_parameter);
 
@@ -97,21 +100,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                     int snapshotCommandLength);
 	double (*databaseGetMainThreadBusyness)(FDBDatabase* database);
 	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
-
-	FDBFuture* (*databaseGetBlobGranuleRanges)(FDBDatabase* db,
-	                                           uint8_t const* begin_key_name,
-	                                           int begin_key_name_length,
-	                                           uint8_t const* end_key_name,
-	                                           int end_key_name_length);
-
-	FDBFuture* (*databaseReadBlobGranules)(FDBDatabase* db,
-	                                       uint8_t const* begin_key_name,
-	                                       int begin_key_name_length,
-	                                       uint8_t const* end_key_name,
-	                                       int end_key_name_length,
-	                                       int64_t beginVersion,
-	                                       int64_t endVersion,
-	                                       FDBReadBlobGranuleContext granule_context);
 
 	// Transaction
 	fdb_error_t (*transactionSetOption)(FDBTransaction* tr,
@@ -178,6 +166,21 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                             uint8_t const* end_key_name,
 	                                             int end_key_name_length,
 	                                             int64_t chunkSize);
+
+	FDBFuture* (*transactionGetBlobGranuleRanges)(FDBTransaction* db,
+	                                              uint8_t const* begin_key_name,
+	                                              int begin_key_name_length,
+	                                              uint8_t const* end_key_name,
+	                                              int end_key_name_length);
+
+	FDBFuture* (*transactionReadBlobGranules)(FDBTransaction* db,
+	                                          uint8_t const* begin_key_name,
+	                                          int begin_key_name_length,
+	                                          uint8_t const* end_key_name,
+	                                          int end_key_name_length,
+	                                          int64_t beginVersion,
+	                                          int64_t readVersion,
+	                                          FDBReadBlobGranuleContext granule_context);
 
 	FDBFuture* (*transactionCommit)(FDBTransaction* tr);
 	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction* tr, int64_t* outVersion);
@@ -253,6 +256,12 @@ public:
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                int64_t chunkSize) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
+
+	ThreadFuture<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
+	                                           Version beginVersion,
+	                                           Optional<Version> readVersion,
+	                                           ReadBlobGranuleContext granule_context) override;
 
 	void addReadConflictRange(const KeyRangeRef& keys) override;
 
@@ -313,13 +322,6 @@ public:
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
-
-	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
-
-	ThreadFuture<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
-	                                           Version beginVersion,
-	                                           Version endVersion,
-	                                           ReadBlobGranuleContext granule_context) override;
 
 private:
 	const Reference<FdbCApi> api;
@@ -401,8 +403,15 @@ public:
 
 	void addReadConflictRange(const KeyRangeRef& keys) override;
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
+
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                int64_t chunkSize) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
+
+	ThreadFuture<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
+	                                           Version beginVersion,
+	                                           Optional<Version> readVersion,
+	                                           ReadBlobGranuleContext granule_context) override;
 
 	void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) override;
 	void set(const KeyRef& key, const ValueRef& value) override;
@@ -531,13 +540,6 @@ public:
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
-
-	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
-
-	ThreadFuture<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
-	                                           Version beginVersion,
-	                                           Version endVersion,
-	                                           ReadBlobGranuleContext granuleContext) override;
 
 	// private:
 
