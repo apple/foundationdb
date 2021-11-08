@@ -1961,7 +1961,7 @@ void parse(StringRef& val, WaitState& w) {
 }
 
 void parse(StringRef& val, time_t& t) {
-	struct tm tm = { 0 };
+	struct tm tm;
 #ifdef _WIN32
 	std::istringstream s(val.toString());
 	s.imbue(std::locale(setlocale(LC_TIME, nullptr)));
