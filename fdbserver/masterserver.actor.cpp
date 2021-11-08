@@ -259,7 +259,10 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	// This counter gives an estimate of the number of non-empty peeks that storage servers
 	// should do from tlogs (in the worst case, ignoring blocking peek timeouts).
 	Counter versionVectorTagUpdates;
+	Counter waitForPrevCommitRequests;
+	Counter nonWaitForPrevCommitRequests;
 	LatencySample versionVectorSizeOnCVReply;
+	LatencySample waitForPrevLatencies;
 
 	Future<Void> logger;
 
@@ -291,10 +294,16 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
 	    versionVectorTagUpdates("VersionVectorTagUpdates", cc),
+	    waitForPrevCommitRequests("WaitForPrevCommitRequests", cc),
+	    nonWaitForPrevCommitRequests("NonWaitForPrevCommitRequests", cc),
 	    versionVectorSizeOnCVReply("VersionVectorSizeOnCVReply",
 	                               dbgid,
 	                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                               SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    waitForPrevLatencies("WaitForPrevLatencies",
+	                         dbgid,
+	                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                         SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    masterRecoveryStateEventHolder(makeReference<EventCacheHolder>("MasterRecoveryState")),
 	    masterRecoveryGenerationsEventHolder(makeReference<EventCacheHolder>("MasterRecoveryGenerations")),
 	    masterRecoveryDurationEventHolder(makeReference<EventCacheHolder>("MasterRecoveryDuration")),
@@ -1270,7 +1279,11 @@ void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVe
 }
 
 ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
+	state double startTime = now();
 	wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
+	double latency = now() - startTime;
+	self->waitForPrevLatencies.addMeasurement(latency);
+	++self->waitForPrevCommitRequests;
 	updateLiveCommittedVersion(self, req);
 	req.reply.send(Void());
 	return Void();
@@ -1306,6 +1319,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 					self->addActor.send(waitForPrev(self, req));
 				} else {
 					updateLiveCommittedVersion(self, req);
+					++self->nonWaitForPrevCommitRequests;
 					req.reply.send(Void());
 				}
 			}
