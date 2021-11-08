@@ -133,9 +133,11 @@ bool isAvailableForDownload(ClientLibStatus status) {
 	       status == ClientLibStatus::ACTIVE;
 }
 
-void updateClientLibChangeCounter(Transaction& tr, ClientLibStatus status) {
+void updateClientLibChangeCounter(Transaction& tr, ClientLibStatus prevStatus, ClientLibStatus newStatus) {
 	static const int64_t counterIncVal = 1;
-	if (status == ClientLibStatus::DOWNLOAD || status == ClientLibStatus::ACTIVE) {
+	if ((prevStatus != newStatus) &&
+	    (newStatus == ClientLibStatus::DOWNLOAD || newStatus == ClientLibStatus::ACTIVE ||
+	     prevStatus == ClientLibStatus::DOWNLOAD || prevStatus == ClientLibStatus::ACTIVE)) {
 		tr.atomicOp(clientLibChangeCounterKey,
 		            StringRef(reinterpret_cast<const uint8_t*>(&counterIncVal), sizeof(counterIncVal)),
 		            MutationRef::AddValue);
@@ -448,7 +450,7 @@ ACTOR Future<Void> uploadClientLibrary(Database db,
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.set(clientLibMetaKey, ValueRef(jsStr));
-			updateClientLibChangeCounter(tr, targetStatus);
+			updateClientLibChangeCounter(tr, ClientLibStatus::DISABLED, targetStatus);
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -505,7 +507,7 @@ ACTOR Future<Void> downloadClientLibrary(Database db,
 		}
 	}
 
-	// Allow downloading only libraries in the available state
+	// Prevent downloading not yet uploaded and disabled libraries
 	if (!isAvailableForDownload(getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS)))) {
 		throw client_lib_not_available();
 	}
@@ -637,8 +639,11 @@ ACTOR Future<Void> deleteClientLibrary(Database db, Standalone<StringRef> client
 				TraceEvent(SevWarnAlways, "ClientLibraryNotFound").detail("Key", clientLibMetaKey);
 				throw client_lib_not_found();
 			}
+			json_spirit::mObject metadataJson = parseMetadataJson(metadataOpt.get());
+			ClientLibStatus status = getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS));
 			tr.clear(prefixRange(chunkKeyPrefix));
 			tr.clear(clientLibMetaKey);
+			updateClientLibChangeCounter(tr, status, ClientLibStatus::DISABLED);
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -730,6 +735,7 @@ ACTOR Future<ClientLibStatus> getClientLibraryStatus(Database db, Standalone<Str
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			Optional<Value> metadataOpt = wait(tr.get(clientLibMetaKey));
 			if (!metadataOpt.present()) {
 				TraceEvent(SevWarnAlways, "ClientLibraryNotFound").detail("Key", clientLibMetaKey);
@@ -762,6 +768,7 @@ ACTOR Future<Void> changeClientLibraryStatus(Database db,
 		tr = Transaction(db);
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> metadataOpt = wait(tr.get(clientLibMetaKey));
 			if (!metadataOpt.present()) {
 				TraceEvent(SevWarnAlways, "ClientLibraryNotFound").detail("Key", clientLibMetaKey);
@@ -776,7 +783,7 @@ ACTOR Future<Void> changeClientLibraryStatus(Database db,
 			jsStr = json_spirit::write_string(json_spirit::mValue(metadataJson));
 			tr.set(clientLibMetaKey, ValueRef(jsStr));
 
-			updateClientLibChangeCounter(tr, newStatus);
+			updateClientLibChangeCounter(tr, prevStatus, newStatus);
 
 			wait(tr.commit());
 			break;

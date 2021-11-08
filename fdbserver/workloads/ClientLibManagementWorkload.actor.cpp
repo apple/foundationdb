@@ -216,6 +216,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 			self->success = false;
 		}
 
+		// Clients should be notified about upload of a library with the active status
 		Optional<Void> notificationWait = wait(timeout(clientLibChanged, 100.0));
 		if (!notificationWait.present()) {
 			TraceEvent(SevError, "ClientLibChangeNotificationFailed").log();
@@ -266,7 +267,15 @@ struct ClientLibManagementWorkload : public TestWorkload {
 	}
 
 	ACTOR static Future<Void> testDeleteClientLib(ClientLibManagementWorkload* self, Database cx) {
+		state Future<Void> clientLibChanged = cx->onClientLibStatusChanged();
+
 		wait(deleteClientLibrary(cx, self->uploadedClientLibId));
+
+		// Clients should be notified about deletion of the library, because it has "download" status
+		Optional<Void> notificationWait = wait(timeout(clientLibChanged, 100.0));
+		if (!notificationWait.present()) {
+			TraceEvent(SevError, "ClientLibChangeNotificationFailed").log();
+		}
 		return Void();
 	}
 
@@ -349,6 +358,7 @@ struct ClientLibManagementWorkload : public TestWorkload {
 
 	ACTOR static Future<Void> testDisableClientLib(ClientLibManagementWorkload* self, Database cx) {
 		state std::string destFileName = format("clientLibDownload%d", self->clientId);
+		state Future<Void> clientLibChanged = cx->onClientLibStatusChanged();
 
 		// Set disabled status on the uploaded library
 		wait(changeClientLibraryStatus(cx, self->uploadedClientLibId, ClientLibStatus::DISABLED));
@@ -361,11 +371,19 @@ struct ClientLibManagementWorkload : public TestWorkload {
 			self->success = false;
 		}
 
+		// Clients should be notified about an active library being disabled
+		Optional<Void> notificationWait = wait(timeout(clientLibChanged, 100.0));
+		if (!notificationWait.present()) {
+			TraceEvent(SevError, "ClientLibChangeNotificationFailed").log();
+			self->success = false;
+		}
+
 		// It should not be possible to download a disabled client library
 		wait(testExpectedError(downloadClientLibrary(cx, self->uploadedClientLibId, StringRef(destFileName)),
 		                       "Downloading disabled client library",
 		                       client_lib_not_available(),
 		                       &self->success));
+
 		return Void();
 	}
 
