@@ -4640,7 +4640,8 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self,
 						TraceEvent("MaintenanceZoneCleared", self->distributorId).log();
 						self->healthyZone.set(Optional<Key>());
 					}
-				} else if (!status->isUnhealthy()) {
+				} 
+				if (!status->isUnhealthy()) {
 					// On server transistion from unhealthy -> healthy, trigger buildTeam check,
 					// handles scenario when team building failed due to insufficient healthy servers.
 					// Operaton cost is minimal if currentTeamCount == desiredTeamCount/maxTeamCount.
