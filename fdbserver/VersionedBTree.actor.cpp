@@ -10362,7 +10362,7 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
 	return Void();
 }
 
-TEST_CASE("!/redwood/performance/randomRangeScans") {
+TEST_CASE(":/redwood/performance/randomRangeScans") {
 	state int prefixLen = 30;
 	state int suffixSize = 12;
 	state int valueSize = 100;
