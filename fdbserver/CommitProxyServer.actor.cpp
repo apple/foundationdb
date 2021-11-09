@@ -971,7 +971,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					    .detail("To", ranges.begin().value().tags);
 
 					ranges.begin().value().populateTags();
-					self->toCommit.addTags(ranges.begin().value().tags);
+					const auto& tags = ranges.begin().value().tags;
+					self->toCommit.addTags(tags);
 
 					// check whether clear is sampled
 					if (checkSample && !trCost->get().clearIdxCosts.empty() &&
@@ -1060,6 +1061,33 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 	}
 
 	return Void();
+}
+
+// Send the version and the set of tags we are writing to to the version indexers. This can be made asynchronous in the
+// future, but for now it isn't in order to simplify the implementation.
+Future<Void> informVersionIndexers(CommitBatchContext* self) {
+	VersionIndexerCommitRequest req;
+	req.version = self->commitVersion;
+	req.previousVersion = self->prevVersion;
+	req.committedVersion = self->pProxyCommitData->minKnownCommittedVersion;
+	const auto& tags = self->toCommit.getWrittenTags();
+	req.tags.reserve(tags.size());
+	req.tags.insert(req.tags.end(), tags.begin(), tags.end());
+	std::vector<Future<Void>> resp;
+	const auto& versionIndexers = self->pProxyCommitData->db->get().versionIndexers;
+	resp.reserve(versionIndexers.size());
+	for (const auto& vi : versionIndexers) {
+		req.reply = ReplyPromise<Void>();
+		resp.emplace_back(vi.commit.getReply(req));
+	}
+	return waitForAll(resp);
+}
+
+// A helper function. We need to wait on logging and on the version indexers to acknowledge the write. However, we are
+// only interested in the result from the tlogs.
+ACTOR Future<Version> loggingComplete(Future<Version> logging, Future<Void> versionIndexersInformed) {
+	wait(versionIndexersInformed && success(logging));
+	return logging.get();
 }
 
 ACTOR Future<Void> postResolution(CommitBatchContext* self) {
@@ -1187,13 +1215,15 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 
 	self->commitStartTime = now();
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
-	self->loggingComplete = pProxyCommitData->logSystem->push(self->prevVersion,
-	                                                          self->commitVersion,
-	                                                          pProxyCommitData->committedVersion.get(),
-	                                                          pProxyCommitData->minKnownCommittedVersion,
-	                                                          self->toCommit,
-	                                                          span.context,
-	                                                          self->debugID);
+	self->loggingComplete =
+	    loggingComplete(pProxyCommitData->logSystem->push(self->prevVersion,
+	                                                      self->commitVersion,
+	                                                      pProxyCommitData->committedVersion.get(),
+	                                                      pProxyCommitData->minKnownCommittedVersion,
+	                                                      self->toCommit,
+	                                                      span.context,
+	                                                      self->debugID),
+	                    informVersionIndexers(self));
 
 	float ratio = self->toCommit.getEmptyMessageRatio();
 	pProxyCommitData->stats.commitBatchingEmptyMessageRatio.addMeasurement(ratio);
@@ -1888,9 +1918,9 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		std::vector<UID> src, dest;
 		ServerCacheInfo info;
 		// NOTE: An ACTOR will be compiled into several classes, the this pointer is from one of them.
-		auto updateTagInfo = [this](const std::vector<UID>& uids,
-		                            std::vector<Tag>& tags,
-		                            std::vector<Reference<StorageInfo>>& storageInfoItems) {
+		auto updateTagInfo = [=](const std::vector<UID>& uids,
+		                         std::vector<Tag>& tags,
+		                         std::vector<Reference<StorageInfo>>& storageInfoItems) {
 			for (const auto& id : uids) {
 				auto storageInfo = getStorageInfo(id, &pContext->pCommitData->storageCache, pContext->pTxnStateStore);
 				ASSERT(storageInfo->tag != invalidTag);

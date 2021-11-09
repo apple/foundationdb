@@ -86,6 +86,19 @@ struct flow_ref<Tag> : std::integral_constant<bool, false> {};
 
 #pragma pack(pop)
 
+namespace std {
+
+template <>
+struct hash<Tag> {
+	hash<uint32_t> intHash;
+	size_t operator()(const Tag& tag) const {
+		uint32_t res = uint32_t(tag.locality) << 16 | tag.id;
+		return intHash(res);
+	}
+};
+
+} // namespace std
+
 template <class Ar>
 void load(Ar& ar, Tag& tag) {
 	tag.serialize_unversioned(ar);

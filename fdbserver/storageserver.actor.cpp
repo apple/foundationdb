@@ -352,6 +352,11 @@ public:
 	  : key(key), value(value), version(version), tags(tags), debugID(debugID) {}
 };
 
+struct VersionStreamMessage {
+	Version previous, version;
+	bool expectData;
+};
+
 struct StorageServer {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
 
@@ -440,9 +445,9 @@ public:
 			keyRangeMap.erase(id);
 		}
 
-		std::pair<double, KeyRange> longestTime() const {
+		std::tuple<double, KeyRange, UID> longestTime() const {
 			if (numRunning() == 0) {
-				return { -1, emptyKeyRange };
+				return { -1, emptyKeyRange, UID() };
 			}
 
 			const double currentTime = now();
@@ -460,9 +465,9 @@ public:
 			}
 			auto it = keyRangeMap.find(UIDofLongest);
 			if (it != keyRangeMap.end()) {
-				return { longest, it->second };
+				return { longest, it->second, UIDofLongest };
 			}
-			return { -1, emptyKeyRange };
+			return { -1, emptyKeyRange, UIDofLongest };
 		}
 
 		int numRunning() const { return startTimeMap.size(); }
@@ -628,6 +633,9 @@ public:
 	                                      // when the disk permits
 	NotifiedVersion oldestVersion; // See also storageVersion()
 	NotifiedVersion durableVersion; // At least this version will be readable from storage after a power failure
+	NotifiedVersion nextVersionWithNoData; // Comes from version indexer. All versions bewteen version and this don't
+	                                       // have mutations for this storage
+	Version versionIndexerReportedCommitted = invalidVersion;
 	Version rebootAfterDurableVersion;
 	int8_t primaryLocality;
 	Version knownCommittedVersion;
@@ -683,6 +691,7 @@ public:
 
 	Promise<Void> otherError;
 	Promise<Void> coreStarted;
+	PromiseStream<VersionStreamMessage> versionStream;
 	bool shuttingDown;
 
 	bool behind;
@@ -807,9 +816,12 @@ public:
 		Counter wrongShardServer;
 		Counter fetchedVersions;
 		Counter fetchesFromLogs;
+		Counter fetchesFromVersionIndexer;
+		Counter versionIndexerIncrements;
 
 		LatencySample readLatencySample;
 		LatencyBands readLatencyBands;
+		LatencyBands versionIndexerLatencyBand;
 
 		Counters(StorageServer* self)
 		  : cc("StorageServer", self->thisServerID.toString()), allQueries("QueryQueue", cc),
@@ -826,11 +838,16 @@ public:
 		    fetchWaitingCount("FetchWaitingCount", cc), fetchExecutingMS("FetchExecutingMS", cc),
 		    fetchExecutingCount("FetchExecutingCount", cc), readsRejected("ReadsRejected", cc),
 		    wrongShardServer("WrongShardServer", cc), fetchedVersions("FetchedVersions", cc),
-		    fetchesFromLogs("FetchesFromLogs", cc), readLatencySample("ReadLatencyMetrics",
-		                                                              self->thisServerID,
-		                                                              SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                                                              SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
+		    fetchesFromLogs("FetchesFromLogs", cc), fetchesFromVersionIndexer("FetchesFromVersionIndexer", cc),
+		    versionIndexerIncrements("VersionIndexerIncrements", cc),
+		    readLatencySample("ReadLatencyMetrics",
+		                      self->thisServerID,
+		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
+		    versionIndexerLatencyBand("VersionIndexerLatencyBand",
+		                              self->thisServerID,
+		                              SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
 			specialCounter(cc, "StorageVersion", [self]() { return self->storageVersion(); });
@@ -1045,6 +1062,32 @@ public:
 		}
 		return fun(this, request);
 	}
+
+	void updateDesiredOldestVersion(Version knownCommittedVersion) {
+		Version maxVersionsInMemory = SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+		for (int i = 0; i < recoveryVersionSkips.size(); i++) {
+			maxVersionsInMemory += recoveryVersionSkips[i].second;
+		}
+		Version proposedOldestVersion = std::max(version.get(), knownCommittedVersion) - maxVersionsInMemory;
+		if (primaryLocality == tagLocalitySpecial || tag.locality == primaryLocality) {
+			proposedOldestVersion = std::max(proposedOldestVersion, lastTLogVersion - maxVersionsInMemory);
+		}
+		proposedOldestVersion = std::min(proposedOldestVersion, version.get() - 1);
+		proposedOldestVersion = std::max(proposedOldestVersion, oldestVersion.get());
+		proposedOldestVersion = std::max(proposedOldestVersion, desiredOldestVersion.get());
+
+		//TraceEvent("StorageServerUpdated", thisServerID).detail("Ver", ver).detail("DataVersion", version.get())
+		//	.detail("LastTLogVersion", lastTLogVersion).detail("NewOldest",
+		// oldestVersion.get()).detail("DesiredOldest",desiredOldestVersion.get())
+		//	.detail("MaxVersionInMemory", maxVersionsInMemory).detail("Proposed",
+		// proposedOldestVersion).detail("PrimaryLocality", primaryLocality).detail("Tag",
+		// tag.toString());
+
+		while (!recoveryVersionSkips.empty() && proposedOldestVersion > recoveryVersionSkips.front().first) {
+			recoveryVersionSkips.pop_front();
+		}
+		desiredOldestVersion.set(proposedOldestVersion);
+	}
 };
 
 const StringRef StorageServer::CurrentRunningFetchKeys::emptyString = LiteralStringRef("");
@@ -1214,8 +1257,16 @@ void updateProcessStats(StorageServer* self) {
 
 ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanID spanContext) {
 	state Span span("SS.WaitForVersion"_loc, { spanContext });
+	state double beginWait = now();
 	choose {
 		when(wait(data->version.whenAtLeast(version))) {
+			auto waitTime = now() - beginWait;
+			if (waitTime > 0.01) {
+				TraceEvent(SevWarn, "LongWaitDelay", data->thisServerID)
+				    .detail("Version", version)
+				    .detail("MyVersion", data->version.get())
+				    .detail("ServerID", data->thisServerID);
+			}
 			// FIXME: A bunch of these can block with or without the following delay 0.
 			// wait( delay(0) );  // don't do a whole bunch of these at once
 			if (version < data->oldestVersion.get())
@@ -3470,7 +3521,7 @@ ACTOR Future<Void> dispatchChangeFeeds(StorageServer* data, UID fetchKeysID, Key
 }
 
 ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
-	state const UID fetchKeysID = deterministicRandom()->randomUniqueID();
+	state UID fetchKeysID = deterministicRandom()->randomUniqueID();
 	state TraceInterval interval("FetchKeys");
 	state KeyRange keys = shard->keys;
 	state Future<Void> warningLogger = logFetchKeysWarning(shard);
@@ -3490,10 +3541,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 	try {
 		DEBUG_KEY_RANGE("fetchKeysBegin", data->version.get(), shard->keys, data->thisServerID);
-
 		TraceEvent(SevDebug, interval.begin(), data->thisServerID)
 		    .detail("KeyBegin", shard->keys.begin)
-		    .detail("KeyEnd", shard->keys.end);
+		    .detail("KeyEnd", shard->keys.end)
+		    .detail("FKID", fetchKeysID);
 
 		validate(data);
 
@@ -3514,7 +3565,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			wait(data->durableVersion.whenAtLeast(lastAvailable + 1));
 		}
 
-		TraceEvent(SevDebug, "FetchKeysVersionSatisfied", data->thisServerID).detail("FKID", interval.pairID);
+		TraceEvent(SevDebug, "FetchKeysVersionSatisfied", data->thisServerID).detail("FKID", fetchKeysID);
 
 		wait(data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield));
 		state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
@@ -3547,7 +3598,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			fetchVersion = data->version.get();
 
 			TraceEvent(SevDebug, "FetchKeysUnblocked", data->thisServerID)
-			    .detail("FKID", interval.pairID)
+			    .detail("FKID", fetchKeysID)
 			    .detail("Version", fetchVersion);
 
 			while (!shard->updates.empty() && shard->updates[0].version <= fetchVersion)
@@ -3572,7 +3623,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					    (int)this_block.expectedSize() + (8 - (int)sizeof(KeyValueRef)) * this_block.size();
 
 					TraceEvent(SevDebug, "FetchKeysBlock", data->thisServerID)
-					    .detail("FKID", interval.pairID)
+					    .detail("FKID", fetchKeysID)
 					    .detail("BlockRows", this_block.size())
 					    .detail("BlockBytes", expectedBlockSize)
 					    .detail("KeyBegin", keys.begin)
@@ -3626,12 +3677,12 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					TraceEvent("FKBlockFail", data->thisServerID)
 					    .error(e, true)
 					    .suppressFor(1.0)
-					    .detail("FKID", interval.pairID);
+					    .detail("FKID", fetchKeysID);
 
 					// FIXME: remove when we no longer support upgrades from 5.X
 					if (debug_getRangeRetries >= 100) {
 						data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::False;
-						TraceEvent(SevWarnAlways, "FKDisableLB").detail("FKID", fetchKeysID);
+						TraceEvent(SevWarnAlways, "FKDisableLB", data->thisServerID).detail("FKID", fetchKeysID);
 					}
 
 					debug_getRangeRetries++;
@@ -3639,7 +3690,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						debug_nextRetryToLog += std::min(debug_nextRetryToLog, 1024);
 						TraceEvent(SevWarn, "FetchPast", data->thisServerID)
 						    .detail("TotalAttempts", debug_getRangeRetries)
-						    .detail("FKID", interval.pairID)
+						    .detail("FKID", fetchKeysID)
 						    .detail("N", fetchVersion)
 						    .detail("E", data->version.get());
 					}
@@ -3686,7 +3737,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		shard->fetchComplete.send(Void());
 
 		TraceEvent(SevDebug, "FKBeforeFinalCommit", data->thisServerID)
-		    .detail("FKID", interval.pairID)
+		    .detail("FKID", fetchKeysID)
 		    .detail("SV", data->storageVersion())
 		    .detail("DV", data->durableVersion.get());
 		// Directly commit()ing the IKVS would interfere with updateStorage, possibly resulting in an incomplete version
@@ -3700,7 +3751,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		wait(fetchDurable);
 
 		TraceEvent(SevDebug, "FKAfterFinalCommit", data->thisServerID)
-		    .detail("FKID", interval.pairID)
+		    .detail("FKID", fetchKeysID)
 		    .detail("SV", data->storageVersion())
 		    .detail("DV", data->durableVersion.get());
 
@@ -3712,7 +3763,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// After we add to the promise readyFetchKeys, update() would provide a pointer to FetchInjectionInfo that we
 		// can put mutation in.
 		FetchInjectionInfo* batch = wait(p.getFuture());
-		TraceEvent(SevDebug, "FKUpdateBatch", data->thisServerID).detail("FKID", interval.pairID);
+		TraceEvent(SevDebug, "FKUpdateBatch", data->thisServerID).detail("FKID", fetchKeysID);
 
 		shard->phase = AddingShard::Waiting;
 
@@ -3730,7 +3781,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		ASSERT(shard->transferredVersion == data->data().getLatestVersion());
 
 		TraceEvent(SevDebug, "FetchKeysHaveData", data->thisServerID)
-		    .detail("FKID", interval.pairID)
+		    .detail("FKID", fetchKeysID)
 		    .detail("Version", shard->transferredVersion)
 		    .detail("StorageVersion", data->storageVersion());
 		validate(data);
@@ -3788,9 +3839,12 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		++data->counters.fetchExecutingCount;
 		data->counters.fetchExecutingMS += 1000 * (now() - executeStart);
 
-		TraceEvent(SevDebug, interval.end(), data->thisServerID);
+		TraceEvent(SevDebug, interval.end(), data->thisServerID).detail("FKID", fetchKeysID);
 	} catch (Error& e) {
-		TraceEvent(SevDebug, interval.end(), data->thisServerID).error(e, true).detail("Version", data->version.get());
+		TraceEvent(SevDebug, interval.end(), data->thisServerID)
+		    .error(e, true)
+		    .detail("Version", data->version.get())
+		    .detail("FKID", fetchKeysID);
 
 		if (e.code() == error_code_actor_cancelled && !data->shuttingDown && shard->phase >= AddingShard::Fetching) {
 			if (shard->phase < AddingShard::Waiting) {
@@ -3809,6 +3863,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		TraceEvent(SevError, "FetchKeysError", data->thisServerID)
 		    .error(e)
+		    .detail("FKID", fetchKeysID)
 		    .detail("Elapsed", now() - startTime)
 		    .detail("KeyBegin", keys.begin)
 		    .detail("KeyEnd", keys.end);
@@ -4378,8 +4433,11 @@ ACTOR Future<Void> tssDelayForever() {
 	}
 }
 
+// Fetches mutations from the tlog system and adds them to the ptree
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double start;
+	state bool nextVersionNoData = false;
+	state Future<Void> more;
 	try {
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of memory
 		// This is often referred to as the storage server e-brake (emergency brake)
@@ -4438,10 +4496,25 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		state Reference<ILogSystem::IPeekCursor> cursor = data->logCursor;
 
 		state double beforeTLogCursorReads = now();
+		more = cursor->getMore();
 		loop {
-			wait(cursor->getMore());
-			if (!cursor->isExhausted()) {
-				break;
+			choose {
+				when(wait(more)) {
+					if (!cursor->isExhausted()) {
+						nextVersionNoData = false;
+						break;
+					}
+					more = cursor->getMore();
+				}
+				when(wait(cursor->hasMessage() || cursor->isExhausted()
+				              ? Never()
+				              : data->nextVersionWithNoData.whenAtLeast(data->version.get() + 1))) {
+					if (!cursor->hasMessage()) {
+						nextVersionNoData = true;
+						more.cancel();
+						break;
+					}
+				}
 			}
 		}
 		data->tlogCursorReadsLatencyHistogram->sampleSeconds(now() - beforeTLogCursorReads);
@@ -4485,7 +4558,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			cloneCursor1->setProtocolVersion(data->logProtocol);
 
-			for (; cloneCursor1->hasMessage(); cloneCursor1->nextMessage()) {
+			for (; !nextVersionNoData && cloneCursor1->hasMessage(); cloneCursor1->nextMessage()) {
 				ArenaReader& cloneReader = *cloneCursor1->reader();
 
 				if (LogProtocolMessage::isNextIn(cloneReader)) {
@@ -4581,7 +4654,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		cloneCursor2->setProtocolVersion(data->logProtocol);
 		state SpanID spanContext = SpanID();
 		state double beforeTLogMsgsUpdates = now();
-		for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
+		for (; !nextVersionNoData && cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
 			if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 				mutationBytes = 0;
 				// Instead of just yielding, leave time for the storage server to respond to reads
@@ -4589,7 +4662,47 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 
 			if (cloneCursor2->version().version > ver) {
-				ASSERT(cloneCursor2->version().version > data->version.get());
+				if (cloneCursor2->version().version <= data->version.get()) {
+					TraceEvent(SevError, "DataAtPastVersion", data->thisServerID)
+					    .detail("DataVersion", data->version.get())
+					    .detail("CursorVersion", cloneCursor2->version().version)
+					    .detail("Ver", ver)
+					    .detail("MyTag", data->tag)
+					    .log();
+					for (const auto& p : data->history) {
+						TraceEvent(SevError, "DataAtPastVersionHistory", data->thisServerID)
+						    .detail("Version", p.first)
+						    .detail("Tag", p.second)
+						    .log();
+					}
+					auto& rd = *cloneCursor2->reader();
+					for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
+						if (LogProtocolMessage::isNextIn(rd)) {
+							LogProtocolMessage lpm;
+							rd >> lpm;
+
+							data->logProtocol = rd.protocolVersion();
+							data->storage.changeLogProtocol(ver, data->logProtocol);
+							cloneCursor2->setProtocolVersion(rd.protocolVersion());
+							TraceEvent(SevError, "DataAtPastVersionLogProtocolMessage", data->thisServerID)
+							    .detail("Version", rd.protocolVersion());
+						} else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
+							SpanContextMessage scm;
+							rd >> scm;
+							spanContext = scm.spanContext;
+							TraceEvent(SevError, "DataAtPastVersionSpanContext", data->thisServerID)
+							    .detail("Context", spanContext);
+						} else {
+							MutationRef msg;
+							rd >> msg;
+							TraceEvent(SevError, "DataAtPastVersionMutation", data->thisServerID)
+							    .detail("MutationType", msg.type)
+							    .detail("Param1", msg.param1)
+							    .detail("Param2", msg.param2);
+						}
+					}
+					ASSERT(false);
+				}
 			}
 
 			auto& rd = *cloneCursor2->reader();
@@ -4702,7 +4815,11 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		if (ver != invalidVersion) {
 			data->lastVersionWithData = ver;
 		}
-		ver = cloneCursor2->version().version - 1;
+		if (nextVersionNoData) {
+			ver = data->nextVersionWithNoData.get();
+		} else {
+			ver = cloneCursor2->version().version - 1;
+		}
 
 		if (injectedChanges)
 			data->lastVersionWithData = ver;
@@ -4743,38 +4860,23 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			if (data->otherError.getFuture().isReady())
 				data->otherError.getFuture().get();
 
-			Version maxVersionsInMemory = SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
-			for (int i = 0; i < data->recoveryVersionSkips.size(); i++) {
-				maxVersionsInMemory += data->recoveryVersionSkips[i].second;
-			}
-
-			// Trigger updateStorage if necessary
-			Version proposedOldestVersion =
-			    std::max(data->version.get(), cursor->getMinKnownCommittedVersion()) - maxVersionsInMemory;
-			if (data->primaryLocality == tagLocalitySpecial || data->tag.locality == data->primaryLocality) {
-				proposedOldestVersion = std::max(proposedOldestVersion, data->lastTLogVersion - maxVersionsInMemory);
-			}
-			proposedOldestVersion = std::min(proposedOldestVersion, data->version.get() - 1);
-			proposedOldestVersion = std::max(proposedOldestVersion, data->oldestVersion.get());
-			proposedOldestVersion = std::max(proposedOldestVersion, data->desiredOldestVersion.get());
-
-			//TraceEvent("StorageServerUpdated", data->thisServerID).detail("Ver", ver).detail("DataVersion", data->version.get())
-			//	.detail("LastTLogVersion", data->lastTLogVersion).detail("NewOldest",
-			// data->oldestVersion.get()).detail("DesiredOldest",data->desiredOldestVersion.get())
-			//	.detail("MaxVersionInMemory", maxVersionsInMemory).detail("Proposed",
-			// proposedOldestVersion).detail("PrimaryLocality", data->primaryLocality).detail("Tag",
-			// data->tag.toString());
-
-			while (!data->recoveryVersionSkips.empty() &&
-			       proposedOldestVersion > data->recoveryVersionSkips.front().first) {
-				data->recoveryVersionSkips.pop_front();
-			}
-			data->desiredOldestVersion.set(proposedOldestVersion);
+			// TraceEvent(SevDebug, "SetDesiredOldestVersion", data->thisServerID)
+			// 	.detail("CursorMinKnownCommitted", cursor->getMinKnownCommittedVersion())
+			// 	.detail("VersionIndexerKnownCommittedVersion", data->versionIndexerReportedCommitted)
+			// 	.detail("StorageVersion", data->storageVersion())
+			// 	.detail("Version", data->version.get())
+			// 	.log();
+			data->updateDesiredOldestVersion(
+			    std::max(cursor->getMinKnownCommittedVersion(), data->versionIndexerReportedCommitted));
 		}
 
 		validate(data);
 
-		data->logCursor->advanceTo(cloneCursor2->version());
+		if (data->version.get() > cloneCursor2->version().version) {
+			data->logCursor->advanceTo(LogMessageVersion(data->version.get()));
+		} else {
+			data->logCursor->advanceTo(cloneCursor2->version());
+		}
 		if (cursor->version().version >= data->lastTLogVersion) {
 			if (data->behind) {
 				TraceEvent("StorageServerNoLongerBehind", data->thisServerID)
@@ -5859,16 +5961,93 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 		const auto longestRunningFetchKeys = self->currentRunningFetchKeys.longestTime();
 
 		auto level = SevInfo;
-		if (longestRunningFetchKeys.first >= SERVER_KNOBS->FETCH_KEYS_TOO_LONG_TIME_CRITERIA) {
+		if (std::get<0>(longestRunningFetchKeys) >= SERVER_KNOBS->FETCH_KEYS_TOO_LONG_TIME_CRITERIA) {
 			level = SevWarnAlways;
 		}
 
 		TraceEvent(level, "FetchKeysCurrentStatus", self->thisServerID)
 		    .detail("Timestamp", now())
-		    .detail("LongestRunningTime", longestRunningFetchKeys.first)
-		    .detail("StartKey", longestRunningFetchKeys.second.begin)
-		    .detail("EndKey", longestRunningFetchKeys.second.end)
+		    .detail("LongestRunningTime", std::get<0>(longestRunningFetchKeys))
+		    .detail("LongestRunningFetchID", std::get<2>(longestRunningFetchKeys))
+		    .detail("StartKey", std::get<1>(longestRunningFetchKeys).begin)
+		    .detail("EndKey", std::get<1>(longestRunningFetchKeys).end)
 		    .detail("NumRunning", numRunningFetchKeys);
+	}
+}
+
+ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
+	state std::vector<Reference<ReferencedInterface<VersionIndexerInterface>>> interfaces;
+	state Reference<MultiInterface<ReferencedInterface<VersionIndexerInterface>>> multi;
+	state VersionIndexerPeekReply reply;
+	state int i = 0;
+	state Version prevVersion;
+	state double beginTime;
+	for (auto& vInterface : self->db->get().versionIndexers) {
+		interfaces.emplace_back(new ReferencedInterface<VersionIndexerInterface>(vInterface));
+	}
+	multi = Reference<MultiInterface<ReferencedInterface<VersionIndexerInterface>>>(
+	    new MultiInterface<ReferencedInterface<VersionIndexerInterface>>(interfaces));
+	// before the update actor has caught up.
+	wait(self->version.whenAtLeast(self->nextVersionWithNoData.get()));
+	TraceEvent("VersionIndexerPeekerStart", self->thisServerID).detail("NumVersionIndexer", interfaces.size());
+	loop {
+		VersionIndexerPeekRequest request;
+		request.lastKnownVersion = self->version.get();
+		request.tag = self->tag;
+		// we could remove old entries here, though we already do that work when we pop from the tlogs. So in order to
+		// simplify code we'll potentially send slightly more data to the version indexer than necessary.
+		request.history = self->history;
+		beginTime = now();
+		VersionIndexerPeekReply _reply =
+		    wait(brokenPromiseToNever(loadBalance(multi, &VersionIndexerInterface::peek, request)));
+		self->counters.versionIndexerLatencyBand.addMeasurement(now() - beginTime);
+		++self->counters.fetchesFromVersionIndexer;
+		reply = _reply;
+		prevVersion = reply.previousVersion;
+		ASSERT(!reply.versions.empty());
+		for (i = 0; i < reply.versions.size() - 1; ++i) {
+			ASSERT(reply.versions[i + 1].first > reply.versions[i].first);
+		}
+		wait(self->version.whenAtLeast(prevVersion));
+		self->versionIndexerReportedCommitted = reply.committedVersion;
+		for (i = 0; i < reply.versions.size(); ++i) {
+			wait(self->version.whenAtLeast(prevVersion));
+			prevVersion = reply.versions[i].first;
+			Version updatedVersion = invalidVersion;
+			int j;
+			for (j = 0; j + i < reply.versions.size() && !reply.versions[i + j].second; ++j) {
+				updatedVersion = reply.versions[i + j].first;
+				prevVersion = reply.versions[i + j].first;
+			}
+			if (updatedVersion != invalidVersion) {
+				// TraceEvent("SetNextVersionWithNoData", self->thisServerID)
+				//     .detail("Version", updatedVersion)
+				//     .detail("Previous", self->nextVersionWithNoData.get())
+				// 		.detail("DataVersion", self->version.get())
+				// 		.detail("MyTag", self->tag);
+				self->nextVersionWithNoData.set(updatedVersion);
+			}
+			if (j > 0) {
+				i += j - 1;
+			}
+		}
+		wait(self->version.whenAtLeast(prevVersion));
+		ASSERT(self->version.get() >= reply.versions.back().first);
+	}
+}
+
+ACTOR Future<Void> versionIndexerPeeker(StorageServer* self) {
+	loop {
+		Future<Void> impl = Never();
+		ASSERT_WE_THINK(self->db->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
+		                !self->db->get().versionIndexers.empty());
+		if (self->db.isValid() && !self->db->get().versionIndexers.empty()) {
+			impl = versionIndexerPeekerImpl(self);
+		}
+		choose {
+			when(wait(impl)) { ASSERT(false); }
+			when(wait(self->db->onChange())) {}
+		}
 	}
 }
 
@@ -5897,6 +6076,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(serveChangeFeedPopRequests(self, ssi.changeFeedPop.getFuture()));
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));
+	self->actors.add(versionIndexerPeeker(self));
 
 	self->transactionTagCounter.startNewInterval();
 	self->actors.add(

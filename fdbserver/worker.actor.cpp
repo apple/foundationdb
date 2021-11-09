@@ -1780,6 +1780,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
 				req.reply.send(recruited);
 			}
+			when(InitializeVersionIndexerRequest req = waitNext(interf.versionIndexer.getFuture())) {
+				VersionIndexerInterface recruited;
+				recruited.locality = locality;
+				startRole(Role::VERSION_INDEXER, recruited.id(), interf.id());
+				DUMPTOKEN(recruited.waitFailure);
+				errorForwarders.add(versionIndexer(recruited, req, dbInfo));
+				TraceEvent("VersionIndexer_InitRequest", req.reqId).detail("VersionIndexerId", recruited.id());
+				req.reply.send(recruited);
+			}
 			when(InitializeBlobManagerRequest req = waitNext(interf.blobManager.getFuture())) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobManager;
@@ -2647,3 +2656,4 @@ const Role Role::BLOB_WORKER("BlobWorker", "BW");
 const Role Role::STORAGE_CACHE("StorageCache", "SC");
 const Role Role::COORDINATOR("Coordinator", "CD");
 const Role Role::BACKUP("Backup", "BK");
+const Role Role::VERSION_INDEXER("VersionIndexer", "VI");

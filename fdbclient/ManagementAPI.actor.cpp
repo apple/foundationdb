@@ -570,6 +570,7 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 	int existingProxyCount = 0;
 	int existingGrvProxyCount = 0;
 	int existingResolverCount = 0;
+	int existingVersionIndexerCount = 0;
 	int existingStatelessCount = 0;
 	for (auto& it : machine_processes) {
 		for (auto& proc : it.second) {
@@ -588,6 +589,9 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 			}
 			if (proc.second == ProcessClass::ResolutionClass) {
 				existingResolverCount++;
+			}
+			if (proc.second == ProcessClass::VersionIndexerClass) {
+				++existingVersionIndexerCount;
 			}
 			if (proc.second == ProcessClass::StorageClass) {
 				machinesWithStorage.insert(it.first);
@@ -611,6 +615,18 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 	} else {
 		result.auto_resolvers = result.old_resolvers;
 		resolverCount = result.old_resolvers;
+	}
+
+	result.desired_version_indexers = 1;
+	int versionIndexerCount;
+	if (!statusObjConfig.get("version_indexers", result.old_version_indexers)) {
+		result.old_version_indexers = CLIENT_KNOBS->DEFAULT_AUTO_VERSION_INDEXERS;
+		statusObjConfig.get("auto_version_indexers", result.old_version_indexers);
+		result.auto_version_indexers = result.desired_version_indexers;
+		versionIndexerCount = result.auto_version_indexers;
+	} else {
+		result.auto_version_indexers = result.old_version_indexers;
+		versionIndexerCount = result.old_version_indexers;
 	}
 
 	result.desired_commit_proxies = std::max(std::min(12, processCount / 15), 1);
@@ -656,6 +672,7 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 	totalTransactionProcesses += std::min(existingProxyCount, proxyCount);
 	totalTransactionProcesses += std::min(existingGrvProxyCount, grvProxyCount);
 	totalTransactionProcesses += std::min(existingResolverCount, resolverCount);
+	totalTransactionProcesses += std::min(existingVersionIndexerCount, versionIndexerCount);
 	totalTransactionProcesses += existingStatelessCount;
 
 	// if one process on a machine is transaction class, make them all transaction class
@@ -672,7 +689,7 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 		}
 	}
 
-	int desiredTotalTransactionProcesses = logCount + resolverCount + proxyCount + grvProxyCount;
+	int desiredTotalTransactionProcesses = logCount + resolverCount + versionIndexerCount + proxyCount + grvProxyCount;
 
 	// add machines with all transaction class until we have enough processes and enough machines
 	for (auto& it : count_processes) {

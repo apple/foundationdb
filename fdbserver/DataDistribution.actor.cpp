@@ -4451,6 +4451,7 @@ ACTOR Future<Void> waitServerListChange(DDTeamCollection* self,
 				}
 			}
 		} catch (Error& e) {
+			TraceEvent(SevDebug, "RkWaitServerListChangeFailed").error(e);
 			wait(tr.onError(e));
 			serverListAndProcessClasses = Never();
 			isFetchingResults = false;

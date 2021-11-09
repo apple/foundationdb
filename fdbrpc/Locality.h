@@ -46,6 +46,7 @@ struct ProcessClass {
 		StorageCacheClass,
 		BackupClass,
 		GrvProxyClass,
+		VersionIndexerClass,
 		BlobManagerClass,
 		BlobWorkerClass,
 		InvalidClass = -1
@@ -75,6 +76,7 @@ struct ProcessClass {
 		BlobWorker,
 		StorageCache,
 		Backup,
+		VersionIndexer,
 		Worker, // used for actor lineage tracking
 		NoRole
 	};
@@ -112,6 +114,7 @@ public:
 		else if (s=="blob_worker") _class = BlobWorkerClass;
 		else if (s=="storage_cache") _class = StorageCacheClass;
 		else if (s=="backup") _class = BackupClass;
+		else if (s=="version_indexer") _class = VersionIndexerClass;
 		else _class = InvalidClass;
 	}
 
@@ -141,6 +144,7 @@ public:
 		else if (classStr=="blob_worker") _class = BlobWorkerClass;
 		else if (classStr=="storage_cache") _class = StorageCacheClass;
 		else if (classStr=="backup") _class = BackupClass;
+		else if (classStr=="version_indexer") _class = VersionIndexerClass;
 		else _class = InvalidClass;
 
 		if (sourceStr=="command_line") _source = CommandLineSource;
@@ -180,6 +184,7 @@ public:
 			case BlobWorkerClass: return "blob_worker";
 			case StorageCacheClass: return "storage_cache";
 			case BackupClass: return "backup";
+			case VersionIndexerClass: return "version_indexer";
 			default: return "invalid";
 		}
 	}
@@ -207,6 +212,8 @@ public:
 		serializer(ar, _class, _source);
 	}
 };
+
+StringRef to_string(ProcessClass::ClusterRole role);
 
 struct LocalityData {
 	std::map<Standalone<StringRef>, Optional<Standalone<StringRef>>> _data;

@@ -28,8 +28,8 @@ DatabaseConfiguration::DatabaseConfiguration() {
 void DatabaseConfiguration::resetInternal() {
 	// does NOT reset rawConfiguration
 	initialized = false;
-	commitProxyCount = grvProxyCount = resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor =
-	    storageTeamSize = desiredLogRouterCount = -1;
+	commitProxyCount = grvProxyCount = resolverCount = versionIndexerCount = desiredTLogCount = tLogWriteAntiQuorum =
+	    tLogReplicationFactor = storageTeamSize = desiredLogRouterCount = -1;
 	tLogVersion = TLogVersion::DEFAULT;
 	tLogDataStoreType = storageServerStoreType = testingStorageServerStoreType = KeyValueStoreType::END;
 	desiredTSSCount = 0;
@@ -37,6 +37,7 @@ void DatabaseConfiguration::resetInternal() {
 	autoCommitProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_COMMIT_PROXIES;
 	autoGrvProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_GRV_PROXIES;
 	autoResolverCount = CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS;
+	autoVersionIndexerCount = CLIENT_KNOBS->DEFAULT_AUTO_VERSION_INDEXERS;
 	autoDesiredTLogCount = CLIENT_KNOBS->DEFAULT_AUTO_LOGS;
 	usableRegions = 1;
 	regions.clear();
@@ -189,15 +190,16 @@ bool DatabaseConfiguration::isValid() const {
 	if (!(initialized && tLogWriteAntiQuorum >= 0 && tLogWriteAntiQuorum <= tLogReplicationFactor / 2 &&
 	      tLogReplicationFactor >= 1 && storageTeamSize >= 1 && getDesiredCommitProxies() >= 1 &&
 	      getDesiredGrvProxies() >= 1 && getDesiredLogs() >= 1 && getDesiredResolvers() >= 1 &&
-	      tLogVersion != TLogVersion::UNSET && tLogVersion >= TLogVersion::MIN_RECRUITABLE &&
-	      tLogVersion <= TLogVersion::MAX_SUPPORTED && tLogDataStoreType != KeyValueStoreType::END &&
-	      tLogSpillType != TLogSpillType::UNSET &&
+	      getDesiredVersionIndexers() >= 1 && tLogVersion != TLogVersion::UNSET &&
+	      tLogVersion >= TLogVersion::MIN_RECRUITABLE && tLogVersion <= TLogVersion::MAX_SUPPORTED &&
+	      tLogDataStoreType != KeyValueStoreType::END && tLogSpillType != TLogSpillType::UNSET &&
 	      !(tLogSpillType == TLogSpillType::REFERENCE && tLogVersion < TLogVersion::V3) &&
 	      storageServerStoreType != KeyValueStoreType::END && autoCommitProxyCount >= 1 && autoGrvProxyCount >= 1 &&
-	      autoResolverCount >= 1 && autoDesiredTLogCount >= 1 && storagePolicy && tLogPolicy &&
-	      getDesiredRemoteLogs() >= 1 && remoteTLogReplicationFactor >= 0 && repopulateRegionAntiQuorum >= 0 &&
-	      repopulateRegionAntiQuorum <= 1 && usableRegions >= 1 && usableRegions <= 2 && regions.size() <= 2 &&
-	      (usableRegions == 1 || regions.size() == 2) && (regions.size() == 0 || regions[0].priority >= 0) &&
+	      autoResolverCount >= 1 && autoVersionIndexerCount >= 1 && autoDesiredTLogCount >= 1 && storagePolicy &&
+	      tLogPolicy && getDesiredRemoteLogs() >= 1 && remoteTLogReplicationFactor >= 0 &&
+	      repopulateRegionAntiQuorum >= 0 && repopulateRegionAntiQuorum <= 1 && usableRegions >= 1 &&
+	      usableRegions <= 2 && regions.size() <= 2 && (usableRegions == 1 || regions.size() == 2) &&
+	      (regions.size() == 0 || regions[0].priority >= 0) &&
 	      (regions.size() == 0 || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1") &&
 	      // We cannot specify regions with three_datacenter replication
 	      (perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1) &&
@@ -366,6 +368,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	if (resolverCount != -1 || isOverridden("resolvers")) {
 		result["resolvers"] = resolverCount;
 	}
+	if (versionIndexerCount != -1 || isOverridden("version_indexers")) {
+		result["version_indexers"] = versionIndexerCount;
+	}
 	if (desiredLogRouterCount != -1 || isOverridden("log_routers")) {
 		result["log_routers"] = desiredLogRouterCount;
 	}
@@ -383,6 +388,10 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	}
 	if (autoResolverCount != CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS || isOverridden("auto_resolvers")) {
 		result["auto_resolvers"] = autoResolverCount;
+	}
+	if (autoVersionIndexerCount != CLIENT_KNOBS->DEFAULT_AUTO_VERSION_INDEXERS ||
+	    isOverridden("auto_version_indexers")) {
+		result["auto_version_indexers"] = autoVersionIndexerCount;
 	}
 	if (autoDesiredTLogCount != CLIENT_KNOBS->DEFAULT_AUTO_LOGS || isOverridden("auto_logs")) {
 		result["auto_logs"] = autoDesiredTLogCount;
@@ -478,6 +487,8 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		parse(&grvProxyCount, value);
 	} else if (ck == LiteralStringRef("resolvers")) {
 		parse(&resolverCount, value);
+	} else if (ck == "version_indexers"_sr) {
+		parse(&versionIndexerCount, value);
 	} else if (ck == LiteralStringRef("logs")) {
 		parse(&desiredTLogCount, value);
 	} else if (ck == LiteralStringRef("log_replicas")) {
@@ -523,6 +534,8 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		parse(&autoGrvProxyCount, value);
 	} else if (ck == LiteralStringRef("auto_resolvers")) {
 		parse(&autoResolverCount, value);
+	} else if (ck == "auto_version_indexers"_sr) {
+		parse(&autoVersionIndexerCount, value);
 	} else if (ck == LiteralStringRef("auto_logs")) {
 		parse(&autoDesiredTLogCount, value);
 	} else if (ck == LiteralStringRef("storage_replication_policy")) {

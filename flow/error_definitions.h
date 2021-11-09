@@ -105,6 +105,7 @@ ERROR( tag_throttled, 1213, "Transaction tag is being throttled" )
 ERROR( grv_proxy_failed, 1214, "Master terminating because a GRVProxy failed" )
 ERROR( dd_tracker_cancelled, 1215, "The data distribution tracker has been cancelled" )
 ERROR( failed_to_progress, 1216, "Process has failed to make sufficient progress" )
+ERROR( master_version_indexer_failed, 1217, "Master terminating because version indexer failed");
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

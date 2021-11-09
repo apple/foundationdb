@@ -512,6 +512,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	std::vector<std::vector<Reference<TagData>>> tag_data; // tag.locality | tag.id
 	int unpoppedRecoveredTags;
+	std::map<Tag, Promise<Void>> waitingTags;
 
 	Reference<TagData> getTagData(Tag tag) {
 		int idx = tag.toTagDataIndex();
@@ -544,6 +545,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	CounterCollection cc;
 	Counter bytesInput;
 	Counter bytesDurable;
+	Counter blockingPeeks;
+	Counter blockingPeekTimeouts;
 
 	UID logId;
 	ProtocolVersion protocolVersion;
@@ -625,13 +628,13 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	  : stopped(false), initialized(false), queueCommittingVersion(0), knownCommittedVersion(0),
 	    durableKnownCommittedVersion(0), minKnownCommittedVersion(0), queuePoppedVersion(0), minPoppedTagVersion(0),
 	    minPoppedTag(invalidTag), unpoppedRecoveredTags(0), cc("TLog", interf.id().toString()),
-	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), logId(interf.id()),
-	    protocolVersion(protocolVersion), newPersistentDataVersion(invalidVersion), tLogData(tLogData),
-	    unrecoveredBefore(1), recoveredAt(1), logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag),
-	    isPrimary(isPrimary), logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0),
-	    locality(tagLocalityInvalid), recruitmentID(recruitmentID), logSpillType(logSpillType),
-	    allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false),
-	    txsTags(txsTags) {
+	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), blockingPeeks("BlockingPeeks", cc),
+	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), logId(interf.id()), protocolVersion(protocolVersion),
+	    newPersistentDataVersion(invalidVersion), tLogData(tLogData), unrecoveredBefore(1), recoveredAt(1),
+	    logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag), isPrimary(isPrimary),
+	    logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0), locality(tagLocalityInvalid),
+	    recruitmentID(recruitmentID), logSpillType(logSpillType), allTags(tags.begin(), tags.end()),
+	    terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false), txsTags(txsTags) {
 		startRole(Role::TRANSACTION_LOG,
 		          interf.id(),
 		          tLogData->workerID,
@@ -1462,6 +1465,12 @@ void commitMessages(TLogData* self,
 				} else {
 					txsBytes += tagData->versionMessages.back().second.expectedSize();
 				}
+				auto iter = logData->waitingTags.find(tag);
+				if (iter != logData->waitingTags.end()) {
+					auto promise = iter->second;
+					logData->waitingTags.erase(iter);
+					promise.send(Void());
+				}
 
 				// The factor of VERSION_MESSAGES_OVERHEAD is intended to be an overestimate of the actual memory used
 				// to store this data in a std::deque. In practice, this number is probably something like 528/512
@@ -1516,6 +1525,22 @@ std::deque<std::pair<Version, LengthPrefixedStringRef>>& getVersionMessages(Refe
 	}
 	return tagData->versionMessages;
 };
+
+ACTOR Future<Void> waitForMessagesForTag(Reference<LogData> self, Tag reqTag, Version reqBegin, double timeout) {
+	self->blockingPeeks += 1;
+	auto tagData = self->getTagData(reqTag);
+	if (tagData.isValid() && !tagData->versionMessages.empty() && tagData->versionMessages.back().first >= reqBegin) {
+		return Void();
+	}
+	choose {
+		when(wait(self->waitingTags[reqTag].getFuture())) {
+			// we want the caller to finish first, otherwise the data structure it is building might not be complete
+			wait(delay(0.0));
+		}
+		when(wait(delay(timeout))) { self->blockingPeekTimeouts += 1; }
+	}
+	return Void();
+}
 
 void peekMessagesFromMemory(Reference<LogData> self,
                             Tag tag,
@@ -1689,7 +1714,12 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 	state double workStart = now();
 
-	Version poppedVer = poppedVersion(logData, reqTag);
+	state Version poppedVer = poppedVersion(logData, reqTag);
+	if (poppedVer <= reqBegin && reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled &&
+	    reqTag.locality >= 0 && !reqReturnIfBlocked) {
+		wait(waitForMessagesForTag(logData, reqTag, reqBegin, SERVER_KNOBS->BLOCKING_PEEK_TIMEOUT));
+		poppedVer = poppedVersion(logData, reqTag);
+	}
 	if (poppedVer > reqBegin) {
 		TLogPeekReply rep;
 		rep.maxKnownVersion = logData->version.get();
@@ -1723,7 +1753,6 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		replyPromise.send(rep);
 		return Void();
 	}
-
 	state Version endVersion = logData->version.get() + 1;
 	state bool onlySpilled = false;
 
@@ -1928,10 +1957,10 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 // This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
 ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Reference<LogData> logData) {
-	self->activePeekStreams++;
-
 	state Version begin = req.begin;
 	state bool onlySpilled = false;
+	state UID streamID = deterministicRandom()->randomUniqueID();
+	self->activePeekStreams++;
 	req.reply.setByteLimit(std::min(SERVER_KNOBS->MAXIMUM_PEEK_BYTES, req.limitBytes));
 	loop {
 		state TLogPeekStreamReply reply;
@@ -1954,6 +1983,7 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			self->activePeekStreams--;
 			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId)
 			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+			    .detail("StreamID", streamID)
 			    .error(e, true);
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
@@ -2463,7 +2493,9 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		}
 		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
 			TraceEvent(SevDebug, "TLogPeekStream", logData->logId)
-			    .detail("Token", tli.peekStreamMessages.getEndpoint().token);
+			    .detail("Token", tli.peekStreamMessages.getEndpoint().token)
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
+			    .log();
 			logData->addActor.send(tLogPeekStream(self, req, logData));
 		}
 		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {

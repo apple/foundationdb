@@ -35,6 +35,7 @@
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbserver/VersionIndexerInterface.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/LogSystemConfig.h"
@@ -60,6 +61,7 @@ struct WorkerInterface {
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
 	RequestStream<struct InitializeBackupRequest> backup;
+	RequestStream<struct InitializeVersionIndexerRequest> versionIndexer;
 
 	RequestStream<struct LoadedPingRequest> debugPing;
 	RequestStream<struct CoordinationPingMessage> coordinationPing;
@@ -96,6 +98,7 @@ struct WorkerInterface {
 		coordinationPing.getEndpoint(TaskPriority::Worker);
 		updateServerDBInfo.getEndpoint(TaskPriority::Worker);
 		eventLogRequest.getEndpoint(TaskPriority::Worker);
+		versionIndexer.getEndpoint(TaskPriority::Worker);
 	}
 
 	template <class Ar>
@@ -126,7 +129,8 @@ struct WorkerInterface {
 		           workerSnapReq,
 		           backup,
 		           updateServerDBInfo,
-		           configBroadcastInterface);
+		           configBroadcastInterface,
+		           versionIndexer);
 	}
 };
 
@@ -232,6 +236,7 @@ struct RegisterMasterRequest {
 	std::vector<CommitProxyInterface> commitProxies;
 	std::vector<GrvProxyInterface> grvProxies;
 	std::vector<ResolverInterface> resolvers;
+	std::vector<VersionIndexerInterface> versionIndexers;
 	DBRecoveryCount recoveryCount;
 	int64_t registrationCount;
 	Optional<DatabaseConfiguration> configuration;
@@ -261,7 +266,8 @@ struct RegisterMasterRequest {
 		           priorCommittedLogServers,
 		           recoveryState,
 		           recoveryStalled,
-		           reply);
+		           reply,
+		           versionIndexers);
 	}
 };
 
@@ -273,6 +279,7 @@ struct RecruitFromConfigurationReply {
 	std::vector<WorkerInterface> commitProxies;
 	std::vector<WorkerInterface> grvProxies;
 	std::vector<WorkerInterface> resolvers;
+	std::vector<WorkerInterface> versionIndexers;
 	std::vector<WorkerInterface> storageServers;
 	std::vector<WorkerInterface> oldLogRouters; // During recovery, log routers for older generations will be recruited.
 	Optional<Key> dcId; // dcId is where master is recruited. It prefers to be in configuration.primaryDcId, but
@@ -294,7 +301,8 @@ struct RecruitFromConfigurationReply {
 		           oldLogRouters,
 		           dcId,
 		           satelliteFallback,
-		           backupWorkers);
+		           backupWorkers,
+		           versionIndexers);
 	}
 };
 
@@ -575,6 +583,19 @@ struct InitializeBackupRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reqId, recruitedEpoch, backupEpoch, routerTag, totalTags, startVersion, endVersion, reply);
+	}
+};
+
+struct InitializeVersionIndexerRequest {
+	constexpr static FileIdentifier file_identifier = 6194990;
+	UID reqId = deterministicRandom()->randomUniqueID();
+	uint64_t recoveryCount;
+	Version epochEnd;
+	ReplyPromise<VersionIndexerInterface> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reqId, recoveryCount, epochEnd, reply);
 	}
 };
 
@@ -888,6 +909,7 @@ struct Role {
 	static const Role STORAGE_CACHE;
 	static const Role COORDINATOR;
 	static const Role BACKUP;
+	static const Role VERSION_INDEXER;
 
 	std::string roleName;
 	std::string abbreviation;
@@ -1091,6 +1113,10 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Reference<AsyncVar<bool>> degraded,
                         Reference<AsyncVar<UID>> activeSharedTLog);
 }
+
+ACTOR Future<Void> versionIndexer(VersionIndexerInterface interface,
+                                  InitializeVersionIndexerRequest req,
+                                  Reference<AsyncVar<ServerDBInfo>> db);
 
 typedef decltype(&tLog) TLogFn;
 

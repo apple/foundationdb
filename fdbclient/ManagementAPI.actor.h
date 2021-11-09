@@ -85,6 +85,7 @@ struct ConfigureAutoResult {
 	int32_t old_commit_proxies;
 	int32_t old_grv_proxies;
 	int32_t old_resolvers;
+	int32_t old_version_indexers;
 	int32_t old_logs;
 	int32_t old_processes_with_transaction;
 	int32_t old_machines_with_transaction;
@@ -93,6 +94,7 @@ struct ConfigureAutoResult {
 	int32_t auto_commit_proxies;
 	int32_t auto_grv_proxies;
 	int32_t auto_resolvers;
+	int32_t auto_version_indexers;
 	int32_t auto_logs;
 	int32_t auto_processes_with_transaction;
 	int32_t auto_machines_with_transaction;
@@ -100,6 +102,7 @@ struct ConfigureAutoResult {
 	int32_t desired_commit_proxies;
 	int32_t desired_grv_proxies;
 	int32_t desired_resolvers;
+	int32_t desired_version_indexers;
 	int32_t desired_logs;
 
 	ConfigureAutoResult()
