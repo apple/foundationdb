@@ -884,7 +884,10 @@ void assertResolutionStateMutationsSizeConsistent(const std::vector<ResolveTrans
 
 	for (int r = 1; r < resolution.size(); r++) {
 		ASSERT(resolution[r].stateMutations.size() == resolution[0].stateMutations.size());
-		ASSERT_EQ(resolution[0].privateMutationCount, resolution[r].privateMutationCount);
+		// The resolution[r].privateMutationCount can be different due to random log router tags:
+		// two consecutive mutations may have the same or different locations. If they share the
+		// same locations, then no new SpanContextMessage is written. Otherwise, a new one is written.
+		ASSERT_EQ(resolution[0].privateMutations.size(), resolution[r].privateMutations.size());
 		for (int s = 0; s < resolution[r].stateMutations.size(); s++) {
 			ASSERT(resolution[r].stateMutations[s].size() == resolution[0].stateMutations[s].size());
 		}
