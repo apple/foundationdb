@@ -405,7 +405,8 @@ public:
 
 	int snapshotRywEnabled;
 
-	int transactionTracingEnabled;
+	double transactionTracingSampleRate;
+	bool transactionTracingSample;
 	double verifyCausalReadsProp = 0.0;
 
 	Future<Void> logger;

@@ -25,6 +25,8 @@
 #include <unordered_set>
 #include <atomic>
 
+extern double distributedTraceSampleRate;
+
 struct Location {
 	StringRef name;
 };
@@ -49,9 +51,8 @@ struct Span {
 	}
 	Span(Location location, std::initializer_list<SpanID> const& parents = {})
 	  : Span(UID(deterministicRandom()->randomUInt64(),
-	             deterministicRandom()->random01() < FLOW_KNOBS->TRACING_SAMPLE_RATE
-	                 ? deterministicRandom()->randomUInt64()
-	                 : 0),
+	             deterministicRandom()->random01() < distributedTraceSampleRate ? deterministicRandom()->randomUInt64()
+	                                                                            : 0),
 	         location,
 	         parents) {}
 	Span(Location location, SpanID context) : Span(location, { context }) {}
@@ -105,6 +106,8 @@ struct Span {
 	SmallVectorRef<SpanID> parents;
 	std::unordered_map<StringRef, StringRef> tags;
 };
+
+void setDistributedTraceSampleRate(double rate);
 
 // The user selects a tracer using a string passed to fdbserver on boot.
 // Clients should not refer to TracerType directly, and mappings of names to
