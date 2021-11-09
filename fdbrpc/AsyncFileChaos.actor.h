@@ -113,7 +113,7 @@ public:
 		// Wait for diskDelay before submitting the I/O
 		return mapAsync<Void, std::function<Future<Void>(Void)>, Void>(delay(diskDelay), [=](Void _) -> Future<Void> {
 			if (pdata)
-				return holdWhile(pdata, file->write(pdata, length, offset));
+				return holdWhile(arena, file->write(pdata, length, offset));
 
 			return file->write(data, length, offset);
 		});
