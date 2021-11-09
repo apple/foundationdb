@@ -91,9 +91,9 @@ rocksdb::Options getOptions() {
 		bbOpts.whole_key_filtering = false;
 	}
 
-	if (SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE > 0) {
-		bbOpts.block_cache = rocksdb::NewLRUCache(SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE);
-	}
+	//if (SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE > 0) {
+		bbOpts.block_cache  = rocksdb::NewLRUCache(33554432);
+	//}
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
