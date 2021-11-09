@@ -49,9 +49,9 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 		return Void();
 	}
 
-	static KeyRef primaryKey(int i) { return KeyRef("primary-key-of-record-" + std::to_string(i)); }
-	static KeyRef indexKey(int i) { return KeyRef("index-key-of-record-" + std::to_string(i)); }
-	static KeyRef data(int i) { return KeyRef("data-of-record-" + std::to_string(i)); }
+	static Key primaryKey(int i) { return KeyRef("primary-key-of-record-" + std::to_string(i)); }
+	static Key indexKey(int i) { return KeyRef("index-key-of-record-" + std::to_string(i)); }
+	static Key data(int i) { return KeyRef("data-of-record-" + std::to_string(i)); }
 
 	ACTOR Future<Void> fillInRecords(Database cx, int n) {
 		std::cout << "start fillInRecords n=" << n << std::endl;
