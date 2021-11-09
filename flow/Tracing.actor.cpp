@@ -349,6 +349,12 @@ ITracer* g_tracer = new NoopTracer();
 } // namespace
 #endif
 
+double distributedTraceSampleRate = 0;
+
+void setDistributedTraceSampleRate(double rate) {
+	distributedTraceSampleRate = rate;
+}
+
 void openTracer(TracerType type) {
 	if (g_tracer->type() == type) {
 		return;
