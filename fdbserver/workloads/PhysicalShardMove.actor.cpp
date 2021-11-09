@@ -18,17 +18,20 @@
  * limitations under the License.
  */
 
-#include <cstdint>
-#include <limits>
-#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbrpc/simulator.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
-#include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/flow.h"
+#include <cstdint>
+#include <limits>
+#include <rocksdb/options.h>
+#include <rocksdb/sst_file_reader.h>
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -74,8 +77,52 @@ struct SSCheckpointWorkload : TestWorkload {
 
 		// Disable DD to avoid DD undoing of our move.
 		int ignore = wait(setDDMode(cx, 0));
-		CheckpointRecord checkpoint = wait(createCheckpoint(cx, normalKeys, 1));
-        std::cout << checkpoint.toString() << std::endl;
+		CheckpointRecord checkpoint = wait(createCheckpoint(cx, normalKeys, latestVersion));
+		std::cout << checkpoint.toString() << std::endl;
+
+		state std::string folder = platform::getWorkingDirectory() + "/checkpoints";
+		platform::eraseDirectoryRecursive(folder);
+		ASSERT(platform::createDirectory(folder));
+
+		CheckpointRecord record = wait(getCheckpoint(cx, KeyRangeRef(key, endKey), checkpoint.version, folder));
+
+		std::vector<std::string> files = platform::listFiles(folder);
+		std::cout << "Received checkpoint files:" << std::endl;
+		for (auto& file : files) {
+			std::cout << file << std::endl;
+		}
+
+		rocksdb::Options options;
+		rocksdb::ReadOptions ropts;
+		state std::unordered_map<Key, Value> kvs;
+		for (auto& file : files) {
+			rocksdb::SstFileReader reader(options);
+			std::cout << file << std::endl;
+			ASSERT(reader.Open(folder + "/" + file).ok());
+			ASSERT(reader.VerifyChecksum().ok());
+			std::unique_ptr<rocksdb::Iterator> iter(reader.NewIterator(ropts));
+			iter->SeekToFirst();
+			while (iter->Valid()) {
+				std::cout << "Key: " << iter->key().ToString() << ", Value: " << iter->value().ToString() << std::endl;
+				// writer.Put(iter->key().ToString(), iter->value().ToString());
+				kvs[Key(iter->key().ToString())] = Value(iter->value().ToString());
+				iter->Next();
+			}
+		}
+
+		std::cout << "Done print." << std::endl;
+
+		state std::unordered_map<Key, Value>::iterator it = kvs.begin();
+		for (; it != kvs.end(); ++it) {
+			if (normalKeys.contains(it->first)) {
+				std::cout << "Key: " << it->first.toString() << ", Value: " << it->second.toString() << std::endl;
+				ErrorOr<Optional<Value>> value(Optional<Value>(it->second));
+				wait(self->readAndVerify(self, cx, it->first, value));
+			}
+		}
+
+		std::cout << "Done verify." << std::endl;
+
 		int ignore = wait(setDDMode(cx, 1));
 		return Void();
 	}
@@ -85,6 +132,7 @@ struct SSCheckpointWorkload : TestWorkload {
 	                                 Key key,
 	                                 ErrorOr<Optional<Value>> expectedValue) {
 		state Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 		loop {
 			try {

@@ -82,6 +82,7 @@ struct StorageServerInterface {
 	RequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
 	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
 	RequestStream<struct CheckpointRequest> checkpoint;
+	RequestStream<struct GetFileRequest> getFile;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
@@ -131,6 +132,7 @@ struct StorageServerInterface {
 				changeFeedPop =
 				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
 				checkpoint = RequestStream<struct CheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
+				getFile = RequestStream<struct GetFileRequest>(getValue.getEndpoint().getAdjustedEndpoint(18));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -177,6 +179,7 @@ struct StorageServerInterface {
 		streams.push_back(overlappingChangeFeeds.getReceiver());
 		streams.push_back(changeFeedPop.getReceiver());
 		streams.push_back(checkpoint.getReceiver());
+		streams.push_back(getFile.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -737,31 +740,34 @@ struct CheckpointRequest {
 	}
 };
 
-struct GetFileReply {
+struct GetFileReply : public ReplyPromiseStreamReply {
 	constexpr static FileIdentifier file_identifier = 13804344;
 	std::string name;
-	uint64_t offset;
-	uint64_t size;
-	Standalone<StringRef> bytes;
+	int64_t offset;
+	int64_t size;
+	Standalone<StringRef> data;
 
 	GetFileReply() {}
-	GetFileReply(std::string name, uint64_t offset, uint64_t size) : name(name), offset(offset), size(size) {}
+	GetFileReply(std::string name, int64_t offset, int64_t size) : name(name), offset(offset), size(size) {}
 	GetFileReply(std::string name) : GetFileReply(name, 0, 0) {}
+
+	int expectedSize() const { return sizeof(GetFileReply) + data.expectedSize(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, name, offset, size, bytes);
+		serializer(
+		    ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, name, offset, size, data);
 	}
 };
 
 struct GetFileRequest {
 	constexpr static FileIdentifier file_identifier = 13804344;
 	std::string path;
-	uint64_t offset;
-	ReplyPromise<GetFileReply> reply;
+	int64_t offset;
+	ReplyPromiseStream<GetFileReply> reply;
 
 	GetFileRequest() {}
-	GetFileRequest(std::string path, uint64_t offset) : path(path), offset(offset) {}
+	GetFileRequest(std::string path, int64_t offset) : path(path), offset(offset) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

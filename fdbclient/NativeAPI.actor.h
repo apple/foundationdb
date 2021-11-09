@@ -450,6 +450,8 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 
 ACTOR Future<CheckpointRecord> createCheckpoint(Database cx, KeyRange keys, Version minVersion);
 
+ACTOR Future<CheckpointRecord> getCheckpoint(Database cx, KeyRange keys, Version minVersion, std::string dir);
+
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);
 

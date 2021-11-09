@@ -1,6 +1,7 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
 #include "fdbclient/SystemData.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.actor.h"
@@ -42,6 +43,8 @@ static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 22) ? ROCKSDB_PATCH >= 1 :
               "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
 
 namespace {
+
+const KeyRangeRef persistRocksColumnFamilyKeys = KeyRangeRef("\xff\xff/ColumnFamily/"_sr, "\xff\xff/ColumnFamily0"_sr);
 
 rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
@@ -243,16 +246,62 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(OpenAction& a) {
-			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
-				"default", getCFOptions() } };
-			std::vector<rocksdb::ColumnFamilyHandle*> handle;
+			// std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
+			// 	"default", getCFOptions() } };
+			std::vector<std::string> columnFamilies;
 			auto options = getOptions();
-			auto status = rocksdb::DB::Open(options, a.path, defaultCF, &handle, &db);
+			rocksdb::Status s = rocksdb::DB::ListColumnFamilies(options, a.path, &columnFamilies);
+			std::cout << s.ToString() << std::endl;
+			std::vector<rocksdb::ColumnFamilyDescriptor> CFs;
+			bool newRocks = false;
+			if (s.ok()) {
+				for (const std::string& name : columnFamilies) {
+					CFs.push_back(rocksdb::ColumnFamilyDescriptor{ name, getCFOptions() });
+				}
+			} else if (s.IsPathNotFound()) {
+				CFs.push_back(rocksdb::ColumnFamilyDescriptor{ "default", getCFOptions() });
+				newRocks = true;
+			} else {
+				a.done.sendError(statusToError(s));
+				return;
+			}
+			std::vector<rocksdb::ColumnFamilyHandle*> handle;
+			auto status = rocksdb::DB::Open(options, a.path, CFs, &handle, &db);
+			std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*> handles;
+			for (auto& h : handle) {
+				handles[h->GetID()] = h;
+			}
 			if (!status.ok()) {
 				logRocksDBError(status, "Open");
 				a.done.sendError(statusToError(status));
 			} else {
 				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
+				if (newRocks) {
+					rocksdb::WriteOptions options;
+					options.sync = true;
+					db->Put(options, db->DefaultColumnFamily(), persistRocksColumnFamilyKeys.begin.toString(), "");
+					db->Put(options,
+					        db->DefaultColumnFamily(),
+					        persistRocksColumnFamilyKeys.begin.toString() + systemKeys.begin.toString(),
+					        std::to_string(db->DefaultColumnFamily()->GetID()));
+					db->Put(options,
+					        db->DefaultColumnFamily(),
+					        persistRocksColumnFamilyKeys.begin.toString() + systemKeys.end.toString(),
+					        "");
+				}
+
+				rocksdb::ReadOptions options = getReadOptions();
+				auto endSlice = toSlice(persistRocksColumnFamilyKeys.end);
+				options.iterate_upper_bound = &endSlice;
+				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
+				cursor->Seek(toSlice(persistRocksColumnFamilyKeys.begin));
+				while (cursor->Valid() && toStringRef(cursor->key()) < persistRocksColumnFamilyKeys.end) {
+					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
+					
+					// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
+					cursor->Next();
+				}
+				s = cursor->status();
 				// The current thread and main thread are same when the code runs in simulation.
 				// blockUntilReady() is getting the thread into deadlock state, so avoiding the
 				// metric logger in simulation.
@@ -609,6 +658,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> openFuture;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	Optional<Future<Void>> metrics;
+
+	KeyRangeMap<Optional<rocksdb::ColumnFamilyHandle*>> columnFamilies;
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id) : path(path), id(id) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage engine
