@@ -284,15 +284,49 @@ struct CompoundWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		std::vector<Future<Void>> all;
 		all.reserve(workloads.size());
-		for (int w = 0; w < workloads.size(); w++)
-			all.push_back(workloads[w]->start(cx));
+		auto wCount = std::make_shared<unsigned>(0);
+		for (int i = 0; i < workloads.size(); i++) {
+			std::string workloadName = workloads[i]->description();
+			++(*wCount);
+			TraceEvent("WorkloadRunStatus")
+			    .detail("Name", workloadName)
+			    .detail("Count", *wCount)
+			    .detail("Phase", "Start");
+			all.push_back(fmap(
+			    [workloadName, wCount](Void value) {
+				    --(*wCount);
+				    TraceEvent("WorkloadRunStatus")
+				        .detail("Name", workloadName)
+				        .detail("Remaining", *wCount)
+				        .detail("Phase", "End");
+				    return Void();
+			    },
+			    workloads[i]->start(cx)));
+		}
 		return waitForAll(all);
 	}
 	Future<bool> check(Database const& cx) override {
 		std::vector<Future<bool>> all;
 		all.reserve(workloads.size());
-		for (int w = 0; w < workloads.size(); w++)
-			all.push_back(workloads[w]->check(cx));
+		auto wCount = std::make_shared<unsigned>(0);
+		for (int i = 0; i < workloads.size(); i++) {
+			++(*wCount);
+			std::string workloadName = workloads[i]->description();
+			TraceEvent("WorkloadCheckStatus")
+			    .detail("Name", workloadName)
+			    .detail("Count", *wCount)
+			    .detail("Phase", "Start");
+			all.push_back(fmap(
+			    [workloadName, wCount](bool ret) {
+				    --(*wCount);
+				    TraceEvent("WorkloadCheckStatus")
+				        .detail("Name", workloadName)
+				        .detail("Remaining", *wCount)
+				        .detail("Phase", "End");
+				    return true;
+			    },
+			    workloads[i]->check(cx)));
+		}
 		return allTrue(all);
 	}
 	void getMetrics(std::vector<PerfMetric>& m) override {
