@@ -6076,7 +6076,9 @@ private:
 
 		// Leaf Page
 		if (btPage->isLeaf()) {
-			bool updatingInPlace = tryToUpdate;
+			// When true, we are modifying the existing DeltaTree
+			// When false, we are accumulating retained and added records in merged vector to build pages from them.
+			bool updatingDeltaTree = tryToUpdate;
 			bool changesMade = false;
 
 			// Copy page for modification if not already copied
@@ -6089,17 +6091,6 @@ private:
 			};
 
 			state Standalone<VectorRef<RedwoodRecordRef>> merged;
-			auto switchToLinearMerge = [&]() {
-				// Couldn't make changes in place, so now do a linear merge and build new pages.
-				updatingInPlace = false;
-				auto c = cursor;
-				c.moveFirst();
-				while (c != cursor) {
-					debug_printf("%s catch-up adding %s\n", context.c_str(), c.get().toString().c_str());
-					merged.push_back(merged.arena(), c.get());
-					c.moveNext();
-				}
-			};
 
 			// The first mutation buffer boundary has a key <= the first key in the page.
 
@@ -6119,13 +6110,13 @@ private:
 				bool boundaryExists = cursor.valid() && cursor.get().key == mBegin.key();
 
 				debug_printf("%s New mutation boundary: '%s': %s  applyBoundaryChange=%d  boundaryExists=%d "
-				             "updatingInPlace=%d\n",
+				             "updatingDeltaTree=%d\n",
 				             context.c_str(),
 				             printable(mBegin.key()).c_str(),
 				             mBegin.mutation().toString().c_str(),
 				             applyBoundaryChange,
 				             boundaryExists,
-				             updatingInPlace);
+				             updatingDeltaTree);
 
 				firstMutationBoundary = false;
 
@@ -6136,7 +6127,7 @@ private:
 					// Optimization:  In-place value update of new same-sized value
 					// If the boundary exists in the page and we're in update mode and the boundary is being set to a
 					// new value of the same length as the old value then just update the value bytes.
-					if (boundaryExists && updatingInPlace && shouldInsertBoundary &&
+					if (boundaryExists && updatingDeltaTree && shouldInsertBoundary &&
 					    mBegin.mutation().boundaryValue.get().size() == cursor.get().value.get().size()) {
 						changesMade = true;
 						shouldInsertBoundary = false;
@@ -6155,7 +6146,7 @@ private:
 						changesMade = true;
 
 						// If updating, erase from the page, otherwise do not add to the output set
-						if (updatingInPlace) {
+						if (updatingDeltaTree) {
 							debug_printf("%s Erasing %s [existing, boundary start]\n",
 							             context.c_str(),
 							             cursor.get().toString().c_str());
@@ -6177,7 +6168,7 @@ private:
 						changesMade = true;
 
 						// If updating, first try to add the record to the page
-						if (updatingInPlace) {
+						if (updatingDeltaTree) {
 							copyForUpdate();
 							if (cursor.insert(rec, update->skipLen, maxHeightAllowed)) {
 								btPage->kvBytes += rec.kvBytes();
@@ -6188,12 +6179,25 @@ private:
 								debug_printf("%s Insert failed for %s [mutation, boundary start]\n",
 								             context.c_str(),
 								             rec.toString().c_str());
-								switchToLinearMerge();
+
+								// Since the insert failed we must switch to a linear merge of existing data and
+								// mutations, accumulating the new record set in the merge vector and build new pages
+								// from it. First, we must populate the merged vector with all the records up to but not
+								// including the current mutation boundary key.
+								auto c = cursor;
+								c.moveFirst();
+								while (c != cursor) {
+									debug_printf(
+									    "%s catch-up adding %s\n", context.c_str(), c.get().toString().c_str());
+									merged.push_back(merged.arena(), c.get());
+									c.moveNext();
+								}
+								updatingDeltaTree = false;
 							}
 						}
 
-						// If not updating, add record to the output set
-						if (!updatingInPlace) {
+						// If not updating, possibly due to insert failure above, then add record to the output set
+						if (!updatingDeltaTree) {
 							merged.push_back(merged.arena(), rec);
 							debug_printf(
 							    "%s Added %s [mutation, boundary start]\n", context.c_str(), rec.toString().c_str());
@@ -6202,7 +6206,7 @@ private:
 				} else if (boundaryExists) {
 					// If the boundary exists in the page but there is no pending change,
 					// then if updating move past it, otherwise add it to the output set.
-					if (updatingInPlace) {
+					if (updatingDeltaTree) {
 						cursor.moveNext();
 					} else {
 						merged.push_back(merged.arena(), cursor.get());
@@ -6228,24 +6232,24 @@ private:
 
 				// If the records are being removed and we're not doing an in-place update
 				// OR if we ARE doing an update but the records are NOT being removed, then just skip them.
-				if (remove != updatingInPlace) {
+				if (remove != updatingDeltaTree) {
 					// If not updating, then the records, if any exist, are being removed.  We don't know if there
 					// actually are any but we must assume there are.
-					if (!updatingInPlace) {
+					if (!updatingDeltaTree) {
 						changesMade = true;
 					}
 
 					debug_printf("%s Seeking forward to next boundary (remove=%d updating=%d) %s\n",
 					             context.c_str(),
 					             remove,
-					             updatingInPlace,
+					             updatingDeltaTree,
 					             mBegin.key().toString().c_str());
 					cursor.seekGreaterThanOrEqual(end, update->skipLen);
 				} else {
 					// Otherwise we must visit the records.  If updating, the visit is to erase them, and if doing a
 					// linear merge than the visit is to add them to the output set.
 					while (cursor.valid() && cursor.get().compare(end, update->skipLen) < 0) {
-						if (updatingInPlace) {
+						if (updatingDeltaTree) {
 							debug_printf("%s Erasing %s [existing, boundary start]\n",
 							             context.c_str(),
 							             cursor.get().toString().c_str());
@@ -6274,17 +6278,17 @@ private:
 
 				// If we don't have to remove the records and we are updating, do nothing.
 				// If we do have to remove the records and we are not updating, do nothing.
-				if (remove != updatingInPlace) {
+				if (remove != updatingDeltaTree) {
 					debug_printf("%s Ignoring remaining records, remove=%d updating=%d\n",
 					             context.c_str(),
 					             remove,
-					             updatingInPlace);
+					             updatingDeltaTree);
 				} else {
 					// If updating and the key is changing, we must visit the records to erase them.
 					// If not updating and the key is not changing, we must visit the records to add them to the output
 					// set.
 					while (cursor.valid()) {
-						if (updatingInPlace) {
+						if (updatingDeltaTree) {
 							debug_printf(
 							    "%s Erasing %s and beyond [existing, matches changed upper mutation boundary]\n",
 							    context.c_str(),
@@ -6318,7 +6322,7 @@ private:
 				    context.c_str());
 			}
 
-			if (updatingInPlace) {
+			if (updatingDeltaTree) {
 				// If the tree is now empty, delete the page
 				if (cursor.tree->numItems == 0) {
 					update->cleared();
