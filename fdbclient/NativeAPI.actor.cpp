@@ -87,9 +87,6 @@ using std::pair;
 
 namespace {
 
-// Set to true when new transactions should enable distributed trace recording.
-bool transactionTracingSample = false;
-
 template <class Interface, class Request>
 Future<REPLY_TYPE(Request)> loadBalance(
     DatabaseContext* ctx,
@@ -4113,7 +4110,7 @@ void debugAddTags(Transaction* tr) {
 	}
 }
 
-SpanID generateSpanID(bool transactionTracingEnabled, SpanID parentContext = SpanID()) {
+SpanID generateSpanID(Database const& cx, SpanID parentContext = SpanID()) {
 	uint64_t txnId = deterministicRandom()->randomUInt64();
 	if (parentContext.isValid()) {
 		if (parentContext.first() > 0) {
@@ -4121,8 +4118,8 @@ SpanID generateSpanID(bool transactionTracingEnabled, SpanID parentContext = Spa
 		}
 		uint64_t tokenId = parentContext.second() > 0 ? deterministicRandom()->randomUInt64() : 0;
 		return SpanID(txnId, tokenId);
-	} else if (transactionTracingEnabled && transactionTracingSample) {
-		uint64_t tokenId = deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE
+	} else if (cx.getPtr() != nullptr && cx->transactionTracingSample) {
+		uint64_t tokenId = deterministicRandom()->random01() <= cx->transactionTracingSampleRate
 		                       ? deterministicRandom()->randomUInt64()
 		                       : 0;
 		return SpanID(txnId, tokenId);
@@ -4131,7 +4128,7 @@ SpanID generateSpanID(bool transactionTracingEnabled, SpanID parentContext = Spa
 	}
 }
 
-Transaction::Transaction() : info(TaskPriority::DefaultEndpoint, generateSpanID(false)) {}
+Transaction::Transaction() : info(TaskPriority::DefaultEndpoint, generateSpanID(Database())) {}
 
 Transaction::Transaction(Database const& cx)
   : cx(cx), info(cx->taskID, generateSpanID(cx->transactionTracingEnabled)), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF),
@@ -4753,7 +4750,7 @@ void Transaction::reset() {
 
 void Transaction::fullReset() {
 	reset();
-	info.spanID = generateSpanID(cx->transactionTracingEnabled);
+	info.spanID = generateSpanID(cx);
 	span = Span(info.spanID, "Transaction"_loc);
 	backoff = CLIENT_KNOBS->DEFAULT_BACKOFF;
 }
@@ -5064,7 +5061,6 @@ ACTOR static Future<Void> tryCommit(Database cx,
 			}
 			when(CommitID ci = wait(reply)) {
 				Version v = ci.version;
-				transactionTracingSample = (v % 60000000) < (60000000 * FLOW_KNOBS->TRACING_SAMPLE_RATE);
 				if (v != invalidVersion) {
 					if (CLIENT_BUGGIFY) {
 						throw commit_unknown_result();
@@ -5275,6 +5271,9 @@ Future<Void> Transaction::commitMutations() {
 ACTOR Future<Void> commitAndWatch(Transaction* self) {
 	try {
 		wait(self->commitMutations());
+
+		self->getDatabase()->transactionTracingSample =
+		    (self->getCommittedVersion() % 60000000) < (60000000 * self->getDatabase()->transactionTracingSampleRate);
 
 		if (!self->watches.empty()) {
 			self->setupWatches();
@@ -5782,7 +5781,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		}
 
 		Location location = "NAPI:getReadVersion"_loc;
-		UID spanContext = generateSpanID(cx->transactionTracingEnabled, info.spanID);
+		UID spanContext = generateSpanID(cx, info.spanID);
 		auto const req = DatabaseContext::VersionRequest(spanContext, options.tags, info.debugID);
 		batcher.stream.send(req);
 		startTime = now();
@@ -6144,7 +6143,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Databa
                                                                           StorageMetrics permittedError,
                                                                           int shardLimit,
                                                                           int expectedShardCount) {
-	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingEnabled));
+	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx));
 	loop {
 		vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 		    wait(getKeyRangeLocations(cx,
