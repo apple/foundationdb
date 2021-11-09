@@ -2818,6 +2818,7 @@ failExit:
 	if (shmfd) {
 		close(shmfd);
 		shm_unlink(shmpath);
+		unlink(shmpath);
 	}
 
 	return 0;
