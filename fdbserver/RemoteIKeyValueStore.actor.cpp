@@ -2,6 +2,7 @@
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/FlowProcess.actor.h"
 
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
@@ -111,21 +112,11 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 }
 
 ACTOR Future<Void> spawnRemoteIKVS(RemoteIKeyValueStore* self, OpenKVStoreRequest openKVSReq) {
-	state IKVSProcess* process = static_cast<IKVSProcess*>(g_network->global(INetwork::enIKVSProcess));
-	std::cout << "initializing connection to server...\n";
-	TraceEvent(SevDebug, "InitProcess").log();
-	// IKVSProcess* process = g_network->global(INetwork::enIKVSProcess);
-	if (process == nullptr) {
-		process = new IKVSProcess();
-		g_network->setGlobal(INetwork::enIKVSProcess, process);
-	}
-	wait(process->init());
-	std::cout << "Connection established\n";
-	TraceEvent(SevDebug, "RemoteKVStore")
-	    .detail("Action", "sending open kv store request")
-	    .detail("Filename", openKVSReq.filename)
-	    .detail("StoreType", openKVSReq.storeType);
-	IKVSInterface ikvsInterface = wait(process->processInterface.openKVStore.getReply(openKVSReq));
+	state KeyValueStoreProcess process;
+	process.start();
+	wait(process.onReady());
+	TraceEvent(SevDebug, "FlowProcessReady").log();
+	IKVSInterface ikvsInterface = wait(process.kvsIf.openKVStore.getReply(openKVSReq));
 	TraceEvent(SevDebug, "IKVSInterfaceReceived").detail("UID", ikvsInterface.id());
 	std::cout << "kv store opened\n";
 	self->ikvsProcess = process;

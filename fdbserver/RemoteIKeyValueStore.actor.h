@@ -7,9 +7,11 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/FlowProcess.actor.h"
+#include "fdbrpc/FlowTransport.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbrpc/FlowTransport.h"
+#include "flow/ActorCollection.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/network.h"
@@ -261,6 +263,55 @@ struct IKVSCloseRequest {
 	}
 };
 
+ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterface);
+
+struct KeyValueStoreProcess : FlowProcess {
+	IKVSProcessInterface kvsIf;
+	Standalone<StringRef> serializedIf;
+
+	KeyValueStoreProcess() {
+		std::cout << "Init KeyValueStoreProcess\n";
+		ObjectWriter writer(IncludeVersion());
+		std::cout << "ObjectWriter initialized\n";
+		writer.serialize(kvsIf);
+		std::cout << "Interface serialized\n";
+		serializedIf = writer.toString();
+		std::cout << "Writer toString\n";
+	}
+
+	StringRef name() const override { return "KeyValueStoreProcess"_sr; }
+	StringRef serializedInterface() const override { return serializedIf; }
+
+	void consumeInterface(StringRef intf) override {
+		kvsIf = ObjectReader::fromStringRef<IKVSProcessInterface>(intf, IncludeVersion());
+	}
+
+	ACTOR static Future<Void> _run(KeyValueStoreProcess* self) {
+		state ActorCollection actors(true);
+		std::cout << "In _run KeyValueStoreProcess\n";
+		TraceEvent(SevDebug, "WaitingForOpenKVStoreRequest").log();
+		loop {
+			choose {
+				when(OpenKVStoreRequest req = waitNext(self->kvsIf.openKVStore.getFuture())) {
+					TraceEvent(SevDebug, "OpenKVStoreRequestReceived").log();
+					std::cout << "OpenKVStoreRequestReceived\n";
+					IKVSInterface reply;
+					actors.add(runIKVS(req, reply));
+				}
+				when(wait(actors.getResult())) {
+					std::cout << "Actor got result\n";
+					return Void();
+				}
+			}
+		}
+	}
+
+	Future<Void> run() override {
+		std::cout << "In run KeyValueStoreProcess\n";
+		return _run(this);
+	}
+};
+
 struct IKVSProcess {
 	IKVSProcessInterface processInterface; // do this in the caller
 	Future<int> ikvsProcess = 0; // do this in the caller
@@ -306,7 +357,8 @@ private:
 struct RemoteIKeyValueStore : public IKeyValueStore {
 	IKVSInterface interf;
 	Future<Void> initialized;
-	IKVSProcess* ikvsProcess;
+	// IKVSProcess* ikvsProcess;
+	KeyValueStoreProcess ikvsProcess;
 	StorageBytes storageBytes;
 	RemoteIKeyValueStore() {}
 
@@ -399,8 +451,8 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 				// TraceEvent(SevDebug, "RemoteIKVSGetError").log();
 				UNSTOPPABLE_ASSERT(false);
 			}
-			when(int res = wait(self->ikvsProcess->ikvsProcess)) {
-				// TraceEvent(SevDebug, "SpawnedProcessHasDied").detail("Res", res);
+			when(int res = wait(self->ikvsProcess.returnCode())) {
+				TraceEvent(SevDebug, "SpawnedProcessHasDied").detail("Res", res);
 				// return Error(error_code_operation_cancelled);
 				// ASSERT(false);
 			}

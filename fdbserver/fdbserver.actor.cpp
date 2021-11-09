@@ -1509,10 +1509,16 @@ private:
 				break;
 			case OPT_FLOW_PROCESS_NAME:
 				flowProcessName = args.OptionArg();
+				std::cout << flowProcessName << std::endl;
 				break;
 			case OPT_FLOW_PROCESS_ENDPOINT: {
 				std::vector<std::string> strings;
-				boost::split(strings, args.OptionArg(), [](char c) { return ','; });
+				std::cout << args.OptionArg() << std::endl;
+				boost::split(strings, args.OptionArg(), [](char c) { return c == ','; });
+				for (auto& str : strings) {
+					std::cout << str << " ";
+				}
+				std::cout << "\n";
 				if (strings.size() != 3) {
 					std::cerr << "Invalid argument, expected 3 elements in --process_endpoint got " << strings.size()
 					          << std::endl;
@@ -1526,6 +1532,8 @@ private:
 					NetworkAddressList l;
 					l.address = addr;
 					flowProcessEndpoint = Endpoint(l, token);
+					std::cout << "flowProcessEndpoint: " << flowProcessEndpoint.getPrimaryAddress().toString()
+					          << ", token: " << flowProcessEndpoint.token.toString() << "\n";
 				} catch (Error& e) {
 					std::cerr << "Could not parse network address " << strings[0] << std::endl;
 					flushAndExit(FDB_EXIT_ERROR);
@@ -2182,6 +2190,12 @@ int main(int argc, char* argv[]) {
 			f = result;
 		} else if (role == ServerRole::FlowProcess) {
 			TraceEvent(SevDebug, "StartingFlowProcess").detail("From", "fdbserver");
+			std::cout << opts.flowProcessName << "\n";
+			std::cout << opts.flowProcessEndpoint.getPrimaryAddress().toString() << "\n";
+			if (opts.flowProcessName == "KeyValueStoreProcess") {
+				std::cout << "Factory set\n";
+				ProcessFactory<KeyValueStoreProcess> process(opts.flowProcessName.c_str());
+			}
 			f = stopAfter(runFlowProcess(opts.flowProcessName, opts.flowProcessEndpoint));
 			g_network->run();
 		} else if (role == ServerRole::RemoteIKVS) {

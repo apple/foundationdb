@@ -39,7 +39,7 @@ ACTOR Future<int> flowProcessRunner(FlowProcess* self, Promise<Void> ready) {
 	auto address = endpoint.addresses.address.toString();
 	auto token = endpoint.token;
 
-	std::vector<std::string> args = { "-r", "flowprocess", "--process_name" };
+	std::vector<std::string> args = { "bin/fdbserver", "-r", "flowprocess", "--process_name" };
 	args.emplace_back(self->name().toString());
 	args.emplace_back("--process_endpoint");
 	args.emplace_back(format("%s,%lu,%lu", address.c_str(), token.first(), token.second()));
@@ -47,6 +47,7 @@ ACTOR Future<int> flowProcessRunner(FlowProcess* self, Promise<Void> ready) {
 	process = spawnProcess(path, args, 5000.0, false, 0.01);
 	choose {
 		when(FlowProcessRegistrationRequest req = waitNext(processInterface.registerProcess.getFuture())) {
+			std::cout << "Received Interface\n";
 			self->consumeInterface(req.flowProcessInterface);
 			ready.send(Void());
 		}
@@ -68,10 +69,14 @@ void FlowProcess::start() {
 }
 
 Future<Void> runFlowProcess(std::string name, Endpoint endpoint) {
+	std::cout << "In runFlowProcess\n";
 	FlowProcess* self = IProcessFactory::create(name.c_str());
+	std::cout << "endpoint address is: " << endpoint.getPrimaryAddress().toString() << std::endl;
 	RequestStream<FlowProcessRegistrationRequest> registerProcess(endpoint);
+	std::cout << "registeredProcess with endpoint: " << endpoint.getPrimaryAddress().toString() << std::endl;
 	FlowProcessRegistrationRequest req;
 	req.flowProcessInterface = self->serializedInterface();
 	registerProcess.send(req);
+	std::cout << "run" << std::endl;
 	return self->run();
 }

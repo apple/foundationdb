@@ -21,7 +21,7 @@
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBRPC_FLOW_PROCESS_ACTOR_G_H)
 #define FDBRPC_FLOW_PROCESS_ACTOR_G_H
-#include "flow/genericactors.actor.g.h"
+#include "fdbrpc/FlowProcess.actor.g.h"
 #elif !defined(FDBRPC_FLOW_PROCESS_ACTOR_H)
 #define FDBRPC_FLOW_PROCESS_ACTOR_H
 #include "fdbrpc/fdbrpc.h"
@@ -83,8 +83,8 @@ struct IProcessFactory {
 };
 
 template <class ProcessType>
-struct ProcessFactor : IProcessFactory {
-	ProcessFactor(const char* name) { factories()[name] = this; }
+struct ProcessFactory : IProcessFactory {
+	ProcessFactory(const char* name) { factories()[name] = this; }
 	FlowProcess* create() override { return new ProcessType(); }
 };
 

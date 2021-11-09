@@ -11,6 +11,7 @@ set(FDBRPC_SRCS
   AsyncFileWriteChecker.cpp
   FailureMonitor.actor.cpp
   FlowProcess.actor.h
+  FlowProcess.actor.cpp
   FlowTransport.actor.cpp
   genericactors.actor.h
   genericactors.actor.cpp
