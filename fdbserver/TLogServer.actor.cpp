@@ -730,6 +730,15 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	}
 
 	bool shouldSpillByReference(Tag t) const { return !shouldSpillByValue(t); }
+
+	void unblockWaitingPeeks() {
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+			for (auto& iter : waitingTags) {
+				iter.second.send(Void());
+			}
+			waitingTags.clear();
+		}
+	}
 };
 
 template <class T>
@@ -791,6 +800,7 @@ ACTOR Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, 
 	    .detail("QueueCommitted", logData->queueCommittedVersion.get());
 
 	logData->stopped = true;
+	logData->unblockWaitingPeeks();
 	if (!logData->recoveryComplete.isSet()) {
 		logData->recoveryComplete.sendError(end_of_stream());
 	}
@@ -1076,20 +1086,6 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 	for (tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
 		for (tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
 			if (logData->tag_data[tagLocality][tagId]) {
-				// Currently, when version vector is enabled, peeks wait if there is no data in memory.
-				// In tlog commit, peeks are woken. If there is a restart, there may be data from the previous
-				// run that must be written to the ss. It has already been committed but not reached here.
-				// The conditional below checks such cases. There is a follow up radar to fine-tune this logic.
-				// rdar://84308526 (Version vector / validate logic controlling when to block peeks)
-				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-					Tag tag(tagLocality, tagId);
-					auto iter = logData->waitingTags.find(tag);
-					if (iter != logData->waitingTags.end()) {
-						auto promise = iter->second;
-						logData->waitingTags.erase(iter);
-						promise.send(Void());
-					}
-				}
 				wait(logData->tag_data[tagLocality][tagId]->eraseMessagesBefore(
 				    newPersistentDataVersion + 1, self, logData, TaskPriority::UpdateStorage));
 				wait(yield(TaskPriority::UpdateStorage));
@@ -2624,6 +2620,7 @@ void removeLog(TLogData* self, Reference<LogData> logData) {
 	    .detail("Input", logData->bytesInput.getValue())
 	    .detail("Durable", logData->bytesDurable.getValue());
 	logData->stopped = true;
+	logData->unblockWaitingPeeks();
 	if (!logData->recoveryComplete.isSet()) {
 		logData->recoveryComplete.sendError(end_of_stream());
 	}
@@ -3025,6 +3022,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		                                 "Restored");
 		logData->locality = id_locality[id1];
 		logData->stopped = true;
+		logData->unblockWaitingPeeks();
 		self->id_data[id1] = logData;
 		id_interf[id1] = recruited;
 
@@ -3243,6 +3241,7 @@ void stopAllTLogs(TLogData* self, UID newLogId) {
 			}
 		}
 		it.second->stopped = true;
+		it.second->unblockWaitingPeeks();
 		if (!it.second->recoveryComplete.isSet()) {
 			it.second->recoveryComplete.sendError(end_of_stream());
 		}
