@@ -734,6 +734,9 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	void unblockWaitingPeeks() {
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
 			for (auto& iter : waitingTags) {
+				TraceEvent("UnblockWaitingPeeks", tLogData->dbgid)
+				    .detail("LogId", logId)
+				    .detail("Tag", iter.first.toString());
 				iter.second.send(Void());
 			}
 			waitingTags.clear();
