@@ -580,7 +580,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( INITIAL_READ_QUEUE_MULTIPLIER,                        1.02 );
 	init( READ_QUEUE_REDUCTION_RATE,                          0.9999 );
 	init( READ_QUEUE_INCREASE_RATE,                            1.001 );
-	init( MAX_READ_QUEUE,                                  200000000 ); // This is set sufficiently high to be effectively disabled by default.
+	// This is set sufficiently high to be effectively disabled by default.
+	init( MAX_READ_QUEUE,                                  200000000 ); if( randomize && BUGGIFY ) MAX_READ_QUEUE = 10;
 	init( STORAGE_SERVER_LIST_FETCH_TIMEOUT,                    20.0 );
 
 	init( MAX_AUTO_THROTTLED_TRANSACTION_TAGS,                     5 ); if(randomize && BUGGIFY) MAX_AUTO_THROTTLED_TRANSACTION_TAGS = 1;
