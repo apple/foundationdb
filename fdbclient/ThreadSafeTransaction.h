@@ -106,6 +106,12 @@ public:
 	                                   bool reverse = false) override {
 		return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 	}
+	ThreadFuture<RangeResult> getRangeAndFlatMap(const KeySelectorRef& begin,
+	                                             const KeySelectorRef& end,
+	                                             const StringRef& mapper,
+	                                             GetRangeLimits limits,
+	                                             bool snapshot,
+	                                             bool reverse) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;

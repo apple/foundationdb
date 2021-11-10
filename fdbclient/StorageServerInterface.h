@@ -22,6 +22,7 @@
 #define FDBCLIENT_STORAGESERVERINTERFACE_H
 #pragma once
 
+#include <ostream>
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
@@ -65,6 +66,7 @@ struct StorageServerInterface {
 	// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 	// selector offset prevents all data from being read in one range read
 	RequestStream<struct GetKeyValuesRequest> getKeyValues;
+	RequestStream<struct GetKeyValuesAndFlatMapRequest> getKeyValuesAndFlatMap;
 
 	RequestStream<struct GetShardStateRequest> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
@@ -129,6 +131,8 @@ struct StorageServerInterface {
 				    RequestStream<struct OverlappingChangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
 				changeFeedPop =
 				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
+				getKeyValuesAndFlatMap =
+				    RequestStream<struct GetKeyValuesAndFlatMapRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -174,6 +178,7 @@ struct StorageServerInterface {
 		streams.push_back(changeFeedStream.getReceiver());
 		streams.push_back(overlappingChangeFeeds.getReceiver());
 		streams.push_back(changeFeedPop.getReceiver());
+		streams.push_back(getKeyValuesAndFlatMap.getReceiver(TaskPriority::LoadBalancedEndpoint));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -296,6 +301,9 @@ struct GetKeyValuesRequest : TimedRequest {
 	SpanID spanContext;
 	Arena arena;
 	KeySelectorRef begin, end;
+	// This is a dummy field there has never been used.
+	// TODO: Get rid of this by constexpr or other template magic in getRange
+	KeyRef mapper = KeyRef();
 	Version version; // or latestVersion
 	int limit, limitBytes;
 	bool isFetchKeys;
@@ -307,6 +315,43 @@ struct GetKeyValuesRequest : TimedRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
+	}
+};
+
+struct GetKeyValuesAndFlatMapReply : public LoadBalancedReply {
+	constexpr static FileIdentifier file_identifier = 1783067;
+	Arena arena;
+	VectorRef<KeyValueRef, VecSerStrategy::String> data;
+	Version version; // useful when latestVersion was requested
+	bool more;
+	bool cached = false;
+
+	GetKeyValuesAndFlatMapReply() : version(invalidVersion), more(false), cached(false) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, cached, arena);
+	}
+};
+
+struct GetKeyValuesAndFlatMapRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 6795747;
+	SpanID spanContext;
+	Arena arena;
+	KeySelectorRef begin, end;
+	KeyRef mapper;
+	Version version; // or latestVersion
+	int limit, limitBytes;
+	bool isFetchKeys;
+	Optional<TagSet> tags;
+	Optional<UID> debugID;
+	ReplyPromise<GetKeyValuesAndFlatMapReply> reply;
+
+	GetKeyValuesAndFlatMapRequest() : isFetchKeys(false) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(
+		    ar, begin, end, mapper, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
 	}
 };
 

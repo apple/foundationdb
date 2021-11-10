@@ -14,5 +14,5 @@ echo "RUNNING YCSB"
 echo "YCSB FINISHED"
 
 echo "COPYING HISTOGRAMS TO S3"
-aws s3 sync --sse aws:kms --exclude "*" --include "histogram.*" /tmp s3://${BUCKET}/ycsb_histgorams/${namespace}/${POD_NAME}
+aws s3 sync --sse aws:kms --exclude "*" --include "histogram.*" /tmp s3://${BUCKET}/ycsb_histograms/${namespace}/${POD_NAME}
 echo "COPYING HISTOGRAMS TO S3 FINISHED"

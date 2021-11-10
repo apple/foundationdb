@@ -215,7 +215,7 @@ KeyRef chunkKeyFromNo(StringRef clientLibBinPrefix, size_t chunkNo, Arena& arena
 	return clientLibBinPrefix.withSuffix(format("%06zu", chunkNo), arena);
 }
 
-ClientLibPlatform getCurrentClientPlatform() {
+[[maybe_unused]] ClientLibPlatform getCurrentClientPlatform() {
 #ifdef __x86_64__
 #if defined(_WIN32)
 	return ClientLibPlatform::X86_64_WINDOWS;

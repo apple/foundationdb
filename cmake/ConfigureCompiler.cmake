@@ -282,18 +282,11 @@ else()
       -Woverloaded-virtual
       -Wshift-sign-overflow
       # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 11
-      -Wno-comment
       -Wno-delete-non-virtual-dtor
       -Wno-format
-      -Wno-mismatched-tags
-      -Wno-missing-field-initializers
       -Wno-sign-compare
-      -Wno-tautological-pointer-compare
       -Wno-undefined-var-template
-      -Wno-unknown-pragmas
       -Wno-unknown-warning-option
-      -Wno-unused-function
-      -Wno-unused-local-typedef
       -Wno-unused-parameter
       )
     if (USE_CCACHE)
@@ -320,7 +313,7 @@ else()
     -fvisibility=hidden
     -Wreturn-type
     -fPIC)
-  if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
+  if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86" AND NOT CLANG)
     add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wclass-memaccess>)
   endif()
   if (GPERFTOOLS_FOUND AND GCC)

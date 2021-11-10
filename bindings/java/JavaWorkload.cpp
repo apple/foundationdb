@@ -176,9 +176,9 @@ void promiseSend(JNIEnv, jclass, jlong self, jboolean value) {
 
 struct JNIError {
 	JNIEnv* env;
-	jthrowable throwable = nullptr;
-	const char* file;
-	int line;
+	jthrowable throwable{ nullptr };
+	const char* file{ nullptr };
+	int line{ 0 };
 
 	std::string location() const {
 		if (file == nullptr) {
