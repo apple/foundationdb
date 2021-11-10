@@ -4160,7 +4160,7 @@ public:
 			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix))
 				applyPrivateCacheData(data, m);
 			else {
-				applyPrivateData(data, m);
+				applyPrivateData(data, ver, m);
 			}
 		} else {
 			// FIXME: enable when DEBUG_MUTATION is active
@@ -4189,8 +4189,8 @@ private:
 	KeyRef cacheStartKey;
 	bool processedCacheStartKey;
 
-	void applyPrivateData(StorageServer* data, MutationRef const& m) {
-		TraceEvent(SevDebug, "SSPrivateMutation", data->thisServerID).detail("Mutation", m);
+	void applyPrivateData(StorageServer* data, Version ver, MutationRef const& m) {
+		TraceEvent(SevDebug, "SSPrivateMutation", data->thisServerID).detail("Mutation", m).detail("Version", ver);
 
 		if (processedStartKey) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
