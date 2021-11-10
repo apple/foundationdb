@@ -104,6 +104,12 @@ public:
 		                snapshot,
 		                reverse);
 	}
+	Future<RangeResult> getRangeAndFlatMap(KeySelector begin,
+	                                       KeySelector end,
+	                                       Key mapper,
+	                                       GetRangeLimits limits,
+	                                       Snapshot = Snapshot::False,
+	                                       Reverse = Reverse::False) override;
 
 	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key) override;
 	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range, int64_t chunkSize) override;
