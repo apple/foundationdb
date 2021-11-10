@@ -3453,7 +3453,7 @@ struct DequeAllocator : std::allocator<T> {
 	}
 };
 
-TEST_CASE("/fdbserver/tlogserver/VersionMessagesOverheadFactor") {
+TEST_CASE("Lfdbserver/tlogserver/VersionMessagesOverheadFactor") {
 
 	typedef std::pair<Version, LengthPrefixedStringRef> TestType; // type used by versionMessages
 
