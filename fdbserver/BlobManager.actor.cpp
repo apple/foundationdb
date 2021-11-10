@@ -40,7 +40,7 @@
 
 // TODO add comments + documentation
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
-                           Arena ar,
+                           Arena& ar,
                            VectorRef<KeyRangeRef>* rangesToAdd,
                            VectorRef<KeyRangeRef>* rangesToRemove,
                            KeyRef rangeStart,
@@ -81,7 +81,7 @@ void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
 
 void updateClientBlobRanges(KeyRangeMap<bool>* knownBlobRanges,
                             RangeResult dbBlobRanges,
-                            Arena ar,
+                            Arena& ar,
                             VectorRef<KeyRangeRef>* rangesToAdd,
                             VectorRef<KeyRangeRef>* rangesToRemove) {
 	if (BM_DEBUG) {
