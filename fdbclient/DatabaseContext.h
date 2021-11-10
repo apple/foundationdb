@@ -404,7 +404,6 @@ public:
 
 	int snapshotRywEnabled;
 
-	double transactionTracingSampleRate;
 	bool transactionTracingSample;
 	double verifyCausalReadsProp = 0.0;
 
