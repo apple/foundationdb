@@ -55,137 +55,427 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 
 	typedef void (*FDBCallback)(FDBFuture* future, void* callback_parameter);
 
+	/**
+	 * Must be called before any other method.
+	 */
+	void init(const std::string& fdbCPath, int headerVersion, bool unlinkOnLoad);
+
+	// [[nodiscard]] wrappers around the function pointers. Motivated by a
+	// difficult bug caused by ignoring an fdb_error_t in the multi-version
+	// client.
+
 	// Network
-	fdb_error_t (*selectApiVersion)(int runtimeVersion, int headerVersion);
-	const char* (*getClientVersion)();
-	fdb_error_t (*setNetworkOption)(FDBNetworkOption option, uint8_t const* value, int valueLength);
-	fdb_error_t (*setupNetwork)();
-	fdb_error_t (*runNetwork)();
-	fdb_error_t (*stopNetwork)();
-	fdb_error_t (*createDatabase)(const char* clusterFilePath, FDBDatabase** db);
+	[[nodiscard]] fdb_error_t selectApiVersion(int runtimeVersion, int headerVersion) {
+		return selectApiVersion_(runtimeVersion, headerVersion);
+	}
+	[[nodiscard]] const char* getClientVersion() {
+		if (!getClientVersion_) {
+			return "unknown";
+		}
+		return getClientVersion_();
+	}
+
+	[[nodiscard]] fdb_error_t setNetworkOption(FDBNetworkOption option, uint8_t const* value, int valueLength) {
+		return setNetworkOption_(option, value, valueLength);
+	}
+	[[nodiscard]] fdb_error_t setupNetwork() { return setupNetwork_(); }
+	[[nodiscard]] fdb_error_t runNetwork() { return runNetwork_(); }
+	[[nodiscard]] fdb_error_t stopNetwork() { return stopNetwork_(); }
+	[[nodiscard]] fdb_error_t createDatabase(const char* clusterFilePath, FDBDatabase** db) {
+		return createDatabase_(clusterFilePath, db);
+	}
 
 	// Database
-	fdb_error_t (*databaseCreateTransaction)(FDBDatabase* database, FDBTransaction** tr);
-	fdb_error_t (*databaseSetOption)(FDBDatabase* database,
-	                                 FDBDatabaseOption option,
-	                                 uint8_t const* value,
-	                                 int valueLength);
-	void (*databaseDestroy)(FDBDatabase* database);
-	FDBFuture* (*databaseRebootWorker)(FDBDatabase* database,
-	                                   uint8_t const* address,
-	                                   int addressLength,
-	                                   fdb_bool_t check,
-	                                   int duration);
-	FDBFuture* (*databaseForceRecoveryWithDataLoss)(FDBDatabase* database, uint8_t const* dcid, int dcidLength);
-	FDBFuture* (*databaseCreateSnapshot)(FDBDatabase* database,
-	                                     uint8_t const* uid,
-	                                     int uidLength,
-	                                     uint8_t const* snapshotCommmand,
-	                                     int snapshotCommandLength);
-	double (*databaseGetMainThreadBusyness)(FDBDatabase* database);
-	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
+	[[nodiscard]] fdb_error_t databaseCreateTransaction(FDBDatabase* database, FDBTransaction** tr) {
+		return databaseCreateTransaction_(database, tr);
+	}
+	[[nodiscard]] fdb_error_t databaseSetOption(FDBDatabase* database,
+	                                            FDBDatabaseOption option,
+	                                            uint8_t const* value,
+	                                            int valueLength) {
+		return databaseSetOption_(database, option, value, valueLength);
+	}
+	void databaseDestroy(FDBDatabase* database) { return databaseDestroy_(database); }
+	[[nodiscard]] FDBFuture* databaseRebootWorker(FDBDatabase* database,
+	                                              uint8_t const* address,
+	                                              int addressLength,
+	                                              fdb_bool_t check,
+	                                              int duration) {
+
+		if (!databaseRebootWorker_) {
+			throw unsupported_operation();
+		}
+		return databaseRebootWorker_(database, address, addressLength, check, duration);
+	}
+	[[nodiscard]] FDBFuture* databaseForceRecoveryWithDataLoss(FDBDatabase* database,
+	                                                           uint8_t const* dcid,
+	                                                           int dcidLength) {
+		if (!databaseForceRecoveryWithDataLoss_) {
+			throw unsupported_operation();
+		}
+
+		return databaseForceRecoveryWithDataLoss_(database, dcid, dcidLength);
+	}
+	[[nodiscard]] FDBFuture* databaseCreateSnapshot(FDBDatabase* database,
+	                                                uint8_t const* uid,
+	                                                int uidLength,
+	                                                uint8_t const* snapshotCommmand,
+	                                                int snapshotCommandLength) {
+		if (!databaseCreateSnapshot_) {
+			throw unsupported_operation();
+		}
+
+		return databaseCreateSnapshot_(database, uid, uidLength, snapshotCommmand, snapshotCommandLength);
+	}
+	[[nodiscard]] double databaseGetMainThreadBusyness(FDBDatabase* database) {
+		if (databaseGetMainThreadBusyness_ == nullptr) {
+			return 0;
+		}
+
+		return databaseGetMainThreadBusyness_(database);
+	}
+	[[nodiscard]] FDBFuture* databaseGetServerProtocol(FDBDatabase* database, uint64_t expectedVersion) {
+
+		ASSERT(databaseGetServerProtocol_ != nullptr);
+		return databaseGetServerProtocol_(database, expectedVersion);
+	}
 
 	// Transaction
-	fdb_error_t (*transactionSetOption)(FDBTransaction* tr,
-	                                    FDBTransactionOption option,
-	                                    uint8_t const* value,
-	                                    int valueLength);
-	void (*transactionDestroy)(FDBTransaction* tr);
+	[[nodiscard]] fdb_error_t transactionSetOption(FDBTransaction* tr,
+	                                               FDBTransactionOption option,
+	                                               uint8_t const* value,
+	                                               int valueLength) {
+		return transactionSetOption_(tr, option, value, valueLength);
+	}
+	void transactionDestroy(FDBTransaction* tr) { return transactionDestroy_(tr); }
 
-	void (*transactionSetReadVersion)(FDBTransaction* tr, int64_t version);
-	FDBFuture* (*transactionGetReadVersion)(FDBTransaction* tr);
+	void transactionSetReadVersion(FDBTransaction* tr, int64_t version) {
+		return transactionSetReadVersion_(tr, version);
+	}
+	[[nodiscard]] FDBFuture* transactionGetReadVersion(FDBTransaction* tr) { return transactionGetReadVersion_(tr); }
 
-	FDBFuture* (*transactionGet)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength, fdb_bool_t snapshot);
-	FDBFuture* (*transactionGetKey)(FDBTransaction* tr,
-	                                uint8_t const* keyName,
-	                                int keyNameLength,
-	                                fdb_bool_t orEqual,
-	                                int offset,
-	                                fdb_bool_t snapshot);
-	FDBFuture* (*transactionGetAddressesForKey)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength);
-	FDBFuture* (*transactionGetRange)(FDBTransaction* tr,
-	                                  uint8_t const* beginKeyName,
-	                                  int beginKeyNameLength,
-	                                  fdb_bool_t beginOrEqual,
-	                                  int beginOffset,
-	                                  uint8_t const* endKeyName,
-	                                  int endKeyNameLength,
-	                                  fdb_bool_t endOrEqual,
-	                                  int endOffset,
-	                                  int limit,
-	                                  int targetBytes,
-	                                  FDBStreamingMode mode,
-	                                  int iteration,
-	                                  fdb_bool_t snapshot,
-	                                  fdb_bool_t reverse);
-	FDBFuture* (*transactionGetVersionstamp)(FDBTransaction* tr);
+	[[nodiscard]] FDBFuture* transactionGet(FDBTransaction* tr,
+	                                        uint8_t const* keyName,
+	                                        int keyNameLength,
+	                                        fdb_bool_t snapshot) {
+		return transactionGet_(tr, keyName, keyNameLength, snapshot);
+	}
+	[[nodiscard]] FDBFuture* transactionGetKey(FDBTransaction* tr,
+	                                           uint8_t const* keyName,
+	                                           int keyNameLength,
+	                                           fdb_bool_t orEqual,
+	                                           int offset,
+	                                           fdb_bool_t snapshot) {
+		return transactionGetKey_(tr, keyName, keyNameLength, orEqual, offset, snapshot);
+	}
+	[[nodiscard]] FDBFuture* transactionGetAddressesForKey(FDBTransaction* tr,
+	                                                       uint8_t const* keyName,
+	                                                       int keyNameLength) {
+		return transactionGetAddressesForKey_(tr, keyName, keyNameLength);
+	}
+	[[nodiscard]] FDBFuture* transactionGetRange(FDBTransaction* tr,
+	                                             uint8_t const* beginKeyName,
+	                                             int beginKeyNameLength,
+	                                             fdb_bool_t beginOrEqual,
+	                                             int beginOffset,
+	                                             uint8_t const* endKeyName,
+	                                             int endKeyNameLength,
+	                                             fdb_bool_t endOrEqual,
+	                                             int endOffset,
+	                                             int limit,
+	                                             int targetBytes,
+	                                             FDBStreamingMode mode,
+	                                             int iteration,
+	                                             fdb_bool_t snapshot,
+	                                             fdb_bool_t reverse) {
+		return transactionGetRange_(tr,
+		                            beginKeyName,
+		                            beginKeyNameLength,
+		                            beginOrEqual,
+		                            beginOffset,
+		                            endKeyName,
+		                            endKeyNameLength,
+		                            endOrEqual,
+		                            endOffset,
+		                            limit,
+		                            targetBytes,
+		                            mode,
+		                            iteration,
+		                            snapshot,
+		                            reverse);
+	}
+	[[nodiscard]] FDBFuture* transactionGetVersionstamp(FDBTransaction* tr) {
 
-	void (*transactionSet)(FDBTransaction* tr,
-	                       uint8_t const* keyName,
-	                       int keyNameLength,
-	                       uint8_t const* value,
-	                       int valueLength);
-	void (*transactionClear)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength);
-	void (*transactionClearRange)(FDBTransaction* tr,
-	                              uint8_t const* beginKeyName,
-	                              int beginKeyNameLength,
-	                              uint8_t const* endKeyName,
-	                              int endKeyNameLength);
-	void (*transactionAtomicOp)(FDBTransaction* tr,
-	                            uint8_t const* keyName,
-	                            int keyNameLength,
-	                            uint8_t const* param,
-	                            int paramLength,
-	                            FDBMutationType operationType);
+		if (!transactionGetVersionstamp_) {
+			throw unsupported_operation();
+		}
 
-	FDBFuture* (*transactionGetEstimatedRangeSizeBytes)(FDBTransaction* tr,
-	                                                    uint8_t const* begin_key_name,
-	                                                    int begin_key_name_length,
-	                                                    uint8_t const* end_key_name,
-	                                                    int end_key_name_length);
+		return transactionGetVersionstamp_(tr);
+	}
 
-	FDBFuture* (*transactionGetRangeSplitPoints)(FDBTransaction* tr,
-	                                             uint8_t const* begin_key_name,
-	                                             int begin_key_name_length,
-	                                             uint8_t const* end_key_name,
-	                                             int end_key_name_length,
-	                                             int64_t chunkSize);
+	void transactionSet(FDBTransaction* tr,
+	                    uint8_t const* keyName,
+	                    int keyNameLength,
+	                    uint8_t const* value,
+	                    int valueLength) {
+		return transactionSet_(tr, keyName, keyNameLength, value, valueLength);
+	}
+	void transactionClear(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength) {
+		return transactionClear_(tr, keyName, keyNameLength);
+	}
+	void transactionClearRange(FDBTransaction* tr,
+	                           uint8_t const* beginKeyName,
+	                           int beginKeyNameLength,
+	                           uint8_t const* endKeyName,
+	                           int endKeyNameLength) {
+		return transactionClearRange_(tr, beginKeyName, beginKeyNameLength, endKeyName, endKeyNameLength);
+	}
+	void transactionAtomicOp(FDBTransaction* tr,
+	                         uint8_t const* keyName,
+	                         int keyNameLength,
+	                         uint8_t const* param,
+	                         int paramLength,
+	                         FDBMutationType operationType) {
+		return transactionAtomicOp_(tr, keyName, keyNameLength, param, paramLength, operationType);
+	}
 
-	FDBFuture* (*transactionCommit)(FDBTransaction* tr);
-	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction* tr, int64_t* outVersion);
-	FDBFuture* (*transactionGetApproximateSize)(FDBTransaction* tr);
-	FDBFuture* (*transactionWatch)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength);
-	FDBFuture* (*transactionOnError)(FDBTransaction* tr, fdb_error_t error);
-	void (*transactionReset)(FDBTransaction* tr);
-	void (*transactionCancel)(FDBTransaction* tr);
+	[[nodiscard]] FDBFuture* transactionGetEstimatedRangeSizeBytes(FDBTransaction* tr,
+	                                                               uint8_t const* begin_key_name,
+	                                                               int begin_key_name_length,
+	                                                               uint8_t const* end_key_name,
+	                                                               int end_key_name_length) {
+		if (!transactionGetEstimatedRangeSizeBytes_) {
+			throw unsupported_operation();
+		}
+		return transactionGetEstimatedRangeSizeBytes_(
+		    tr, begin_key_name, begin_key_name_length, end_key_name, end_key_name_length);
+	}
 
-	fdb_error_t (*transactionAddConflictRange)(FDBTransaction* tr,
-	                                           uint8_t const* beginKeyName,
-	                                           int beginKeyNameLength,
-	                                           uint8_t const* endKeyName,
-	                                           int endKeyNameLength,
-	                                           FDBConflictRangeType);
+	[[nodiscard]] FDBFuture* transactionGetRangeSplitPoints(FDBTransaction* tr,
+	                                                        uint8_t const* begin_key_name,
+	                                                        int begin_key_name_length,
+	                                                        uint8_t const* end_key_name,
+	                                                        int end_key_name_length,
+	                                                        int64_t chunkSize) {
+
+		if (!transactionGetRangeSplitPoints_) {
+			throw unsupported_operation();
+		}
+		return transactionGetRangeSplitPoints_(
+		    tr, begin_key_name, begin_key_name_length, end_key_name, end_key_name_length, chunkSize);
+	}
+
+	[[nodiscard]] FDBFuture* transactionCommit(FDBTransaction* tr) { return transactionCommit_(tr); }
+	[[nodiscard]] fdb_error_t transactionGetCommittedVersion(FDBTransaction* tr, int64_t* outVersion) {
+		return transactionGetCommittedVersion_(tr, outVersion);
+	}
+	[[nodiscard]] FDBFuture* transactionGetApproximateSize(FDBTransaction* tr) {
+
+		if (!transactionGetApproximateSize_) {
+			throw unsupported_operation();
+		}
+
+		return transactionGetApproximateSize_(tr);
+	}
+	[[nodiscard]] FDBFuture* transactionWatch(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength) {
+		return transactionWatch_(tr, keyName, keyNameLength);
+	}
+	[[nodiscard]] FDBFuture* transactionOnError(FDBTransaction* tr, fdb_error_t error) {
+		return transactionOnError_(tr, error);
+	}
+	void transactionReset(FDBTransaction* tr) { return transactionReset_(tr); }
+	void transactionCancel(FDBTransaction* tr) { return transactionCancel_(tr); }
+
+	[[nodiscard]] fdb_error_t transactionAddConflictRange(FDBTransaction* tr,
+	                                                      uint8_t const* beginKeyName,
+	                                                      int beginKeyNameLength,
+	                                                      uint8_t const* endKeyName,
+	                                                      int endKeyNameLength,
+	                                                      FDBConflictRangeType type) {
+		return transactionAddConflictRange_(tr, beginKeyName, beginKeyNameLength, endKeyName, endKeyNameLength, type);
+	}
 
 	// Future
-	fdb_error_t (*futureGetDatabase)(FDBFuture* f, FDBDatabase** outDb);
-	fdb_error_t (*futureGetInt64)(FDBFuture* f, int64_t* outValue);
-	fdb_error_t (*futureGetUInt64)(FDBFuture* f, uint64_t* outValue);
-	fdb_error_t (*futureGetBool)(FDBFuture* f, bool* outValue);
-	fdb_error_t (*futureGetError)(FDBFuture* f);
-	fdb_error_t (*futureGetKey)(FDBFuture* f, uint8_t const** outKey, int* outKeyLength);
-	fdb_error_t (*futureGetValue)(FDBFuture* f, fdb_bool_t* outPresent, uint8_t const** outValue, int* outValueLength);
-	fdb_error_t (*futureGetStringArray)(FDBFuture* f, const char*** outStrings, int* outCount);
-	fdb_error_t (*futureGetKeyArray)(FDBFuture* f, FDBKey const** outKeys, int* outCount);
-	fdb_error_t (*futureGetKeyValueArray)(FDBFuture* f, FDBKeyValue const** outKV, int* outCount, fdb_bool_t* outMore);
-	fdb_error_t (*futureSetCallback)(FDBFuture* f, FDBCallback callback, void* callback_parameter);
-	void (*futureCancel)(FDBFuture* f);
-	void (*futureDestroy)(FDBFuture* f);
+	[[nodiscard]] fdb_error_t futureGetDatabase(FDBFuture* f, FDBDatabase** outDb) {
+		return futureGetDatabase_(f, outDb);
+	}
+	[[nodiscard]] fdb_error_t futureGetInt64(FDBFuture* f, int64_t* outValue) { return futureGetInt64_(f, outValue); }
+	[[nodiscard]] fdb_error_t futureGetUInt64(FDBFuture* f, uint64_t* outValue) {
+		return futureGetUInt64_(f, outValue);
+	}
+	[[nodiscard]] fdb_error_t futureGetBool(FDBFuture* f, bool* outValue) { return futureGetBool_(f, outValue); }
+	[[nodiscard]] fdb_error_t futureGetError(FDBFuture* f) { return futureGetError_(f); }
+	[[nodiscard]] fdb_error_t futureGetKey(FDBFuture* f, uint8_t const** outKey, int* outKeyLength) {
+		return futureGetKey_(f, outKey, outKeyLength);
+	}
+	[[nodiscard]] fdb_error_t futureGetValue(FDBFuture* f,
+	                                         fdb_bool_t* outPresent,
+	                                         uint8_t const** outValue,
+	                                         int* outValueLength) {
+		return futureGetValue_(f, outPresent, outValue, outValueLength);
+	}
+	[[nodiscard]] fdb_error_t futureGetStringArray(FDBFuture* f, const char*** outStrings, int* outCount) {
+		return futureGetStringArray_(f, outStrings, outCount);
+	}
+	[[nodiscard]] fdb_error_t futureGetKeyArray(FDBFuture* f, FDBKey const** outKeys, int* outCount) {
+		return futureGetKeyArray_(f, outKeys, outCount);
+	}
+	[[nodiscard]] fdb_error_t futureGetKeyValueArray(FDBFuture* f,
+	                                                 FDBKeyValue const** outKV,
+	                                                 int* outCount,
+	                                                 fdb_bool_t* outMore) {
+		return futureGetKeyValueArray_(f, outKV, outCount, outMore);
+	}
+	[[nodiscard]] fdb_error_t futureSetCallback(FDBFuture* f, FDBCallback callback, void* callback_parameter) {
+		return futureSetCallback_(f, callback, callback_parameter);
+	}
+	void futureCancel(FDBFuture* f) { return futureCancel_(f); }
+	void futureDestroy(FDBFuture* f) { return futureDestroy_(f); }
 
 	// Legacy Support
-	FDBFuture* (*createCluster)(const char* clusterFilePath);
-	FDBFuture* (*clusterCreateDatabase)(FDBCluster* cluster, uint8_t* dbName, int dbNameLength);
-	void (*clusterDestroy)(FDBCluster* cluster);
-	fdb_error_t (*futureGetCluster)(FDBFuture* f, FDBCluster** outCluster);
+	[[nodiscard]] FDBFuture* createCluster(const char* clusterFilePath) { return createCluster_(clusterFilePath); }
+	[[nodiscard]] FDBFuture* clusterCreateDatabase(FDBCluster* cluster, uint8_t* dbName, int dbNameLength) {
+		return clusterCreateDatabase_(cluster, dbName, dbNameLength);
+	}
+	void clusterDestroy(FDBCluster* cluster) { return clusterDestroy_(cluster); }
+	[[nodiscard]] fdb_error_t futureGetCluster(FDBFuture* f, FDBCluster** outCluster) {
+		return futureGetCluster_(f, outCluster);
+	}
+
+private:
+	friend class DLTest;
+
+	// Network
+	fdb_error_t (*selectApiVersion_)(int runtimeVersion, int headerVersion);
+	const char* (*getClientVersion_)();
+	fdb_error_t (*setNetworkOption_)(FDBNetworkOption option, uint8_t const* value, int valueLength);
+	fdb_error_t (*setupNetwork_)();
+	fdb_error_t (*runNetwork_)();
+	fdb_error_t (*stopNetwork_)();
+	fdb_error_t (*createDatabase_)(const char* clusterFilePath, FDBDatabase** db);
+
+	// Database
+	fdb_error_t (*databaseCreateTransaction_)(FDBDatabase* database, FDBTransaction** tr);
+	fdb_error_t (*databaseSetOption_)(FDBDatabase* database,
+	                                  FDBDatabaseOption option,
+	                                  uint8_t const* value,
+	                                  int valueLength);
+	void (*databaseDestroy_)(FDBDatabase* database);
+	FDBFuture* (*databaseRebootWorker_)(FDBDatabase* database,
+	                                    uint8_t const* address,
+	                                    int addressLength,
+	                                    fdb_bool_t check,
+	                                    int duration);
+	FDBFuture* (*databaseForceRecoveryWithDataLoss_)(FDBDatabase* database, uint8_t const* dcid, int dcidLength);
+	FDBFuture* (*databaseCreateSnapshot_)(FDBDatabase* database,
+	                                      uint8_t const* uid,
+	                                      int uidLength,
+	                                      uint8_t const* snapshotCommmand,
+	                                      int snapshotCommandLength);
+	double (*databaseGetMainThreadBusyness_)(FDBDatabase* database);
+	FDBFuture* (*databaseGetServerProtocol_)(FDBDatabase* database, uint64_t expectedVersion);
+
+	// Transaction
+	fdb_error_t (*transactionSetOption_)(FDBTransaction* tr,
+	                                     FDBTransactionOption option,
+	                                     uint8_t const* value,
+	                                     int valueLength);
+	void (*transactionDestroy_)(FDBTransaction* tr);
+
+	void (*transactionSetReadVersion_)(FDBTransaction* tr, int64_t version);
+	FDBFuture* (*transactionGetReadVersion_)(FDBTransaction* tr);
+
+	FDBFuture* (*transactionGet_)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength, fdb_bool_t snapshot);
+	FDBFuture* (*transactionGetKey_)(FDBTransaction* tr,
+	                                 uint8_t const* keyName,
+	                                 int keyNameLength,
+	                                 fdb_bool_t orEqual,
+	                                 int offset,
+	                                 fdb_bool_t snapshot);
+	FDBFuture* (*transactionGetAddressesForKey_)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength);
+	FDBFuture* (*transactionGetRange_)(FDBTransaction* tr,
+	                                   uint8_t const* beginKeyName,
+	                                   int beginKeyNameLength,
+	                                   fdb_bool_t beginOrEqual,
+	                                   int beginOffset,
+	                                   uint8_t const* endKeyName,
+	                                   int endKeyNameLength,
+	                                   fdb_bool_t endOrEqual,
+	                                   int endOffset,
+	                                   int limit,
+	                                   int targetBytes,
+	                                   FDBStreamingMode mode,
+	                                   int iteration,
+	                                   fdb_bool_t snapshot,
+	                                   fdb_bool_t reverse);
+	FDBFuture* (*transactionGetVersionstamp_)(FDBTransaction* tr);
+
+	void (*transactionSet_)(FDBTransaction* tr,
+	                        uint8_t const* keyName,
+	                        int keyNameLength,
+	                        uint8_t const* value,
+	                        int valueLength);
+	void (*transactionClear_)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength);
+	void (*transactionClearRange_)(FDBTransaction* tr,
+	                               uint8_t const* beginKeyName,
+	                               int beginKeyNameLength,
+	                               uint8_t const* endKeyName,
+	                               int endKeyNameLength);
+	void (*transactionAtomicOp_)(FDBTransaction* tr,
+	                             uint8_t const* keyName,
+	                             int keyNameLength,
+	                             uint8_t const* param,
+	                             int paramLength,
+	                             FDBMutationType operationType);
+
+	FDBFuture* (*transactionGetEstimatedRangeSizeBytes_)(FDBTransaction* tr,
+	                                                     uint8_t const* begin_key_name,
+	                                                     int begin_key_name_length,
+	                                                     uint8_t const* end_key_name,
+	                                                     int end_key_name_length);
+
+	FDBFuture* (*transactionGetRangeSplitPoints_)(FDBTransaction* tr,
+	                                              uint8_t const* begin_key_name,
+	                                              int begin_key_name_length,
+	                                              uint8_t const* end_key_name,
+	                                              int end_key_name_length,
+	                                              int64_t chunkSize);
+
+	FDBFuture* (*transactionCommit_)(FDBTransaction* tr);
+	fdb_error_t (*transactionGetCommittedVersion_)(FDBTransaction* tr, int64_t* outVersion);
+	FDBFuture* (*transactionGetApproximateSize_)(FDBTransaction* tr);
+	FDBFuture* (*transactionWatch_)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength);
+	FDBFuture* (*transactionOnError_)(FDBTransaction* tr, fdb_error_t error);
+	void (*transactionReset_)(FDBTransaction* tr);
+	void (*transactionCancel_)(FDBTransaction* tr);
+
+	fdb_error_t (*transactionAddConflictRange_)(FDBTransaction* tr,
+	                                            uint8_t const* beginKeyName,
+	                                            int beginKeyNameLength,
+	                                            uint8_t const* endKeyName,
+	                                            int endKeyNameLength,
+	                                            FDBConflictRangeType);
+
+	// Future
+	fdb_error_t (*futureGetDatabase_)(FDBFuture* f, FDBDatabase** outDb);
+	fdb_error_t (*futureGetInt64_)(FDBFuture* f, int64_t* outValue);
+	fdb_error_t (*futureGetUInt64_)(FDBFuture* f, uint64_t* outValue);
+	fdb_error_t (*futureGetBool_)(FDBFuture* f, bool* outValue);
+	fdb_error_t (*futureGetError_)(FDBFuture* f);
+	fdb_error_t (*futureGetKey_)(FDBFuture* f, uint8_t const** outKey, int* outKeyLength);
+	fdb_error_t (*futureGetValue_)(FDBFuture* f, fdb_bool_t* outPresent, uint8_t const** outValue, int* outValueLength);
+	fdb_error_t (*futureGetStringArray_)(FDBFuture* f, const char*** outStrings, int* outCount);
+	fdb_error_t (*futureGetKeyArray_)(FDBFuture* f, FDBKey const** outKeys, int* outCount);
+	fdb_error_t (*futureGetKeyValueArray_)(FDBFuture* f, FDBKeyValue const** outKV, int* outCount, fdb_bool_t* outMore);
+	fdb_error_t (*futureSetCallback_)(FDBFuture* f, FDBCallback callback, void* callback_parameter);
+	void (*futureCancel_)(FDBFuture* f);
+	void (*futureDestroy_)(FDBFuture* f);
+
+	// Legacy Support
+	FDBFuture* (*createCluster_)(const char* clusterFilePath);
+	FDBFuture* (*clusterCreateDatabase_)(FDBCluster* cluster, uint8_t* dbName, int dbNameLength);
+	void (*clusterDestroy_)(FDBCluster* cluster);
+	fdb_error_t (*futureGetCluster_)(FDBFuture* f, FDBCluster** outCluster);
 };
 
 // An implementation of ITransaction that wraps a transaction object created on an externally loaded client library.
@@ -320,8 +610,6 @@ private:
 
 	Mutex lock;
 	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
-
-	void init();
 };
 
 class MultiVersionDatabase;
