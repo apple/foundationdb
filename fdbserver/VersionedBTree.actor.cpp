@@ -8065,7 +8065,7 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	return Void();
 }
 
-TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
+TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	// Sanity check on delta tree node format
 	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(false) == 4);
 	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(true) == 8);
@@ -8241,7 +8241,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	return Void();
 }
 
-TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
+TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 	// Sanity check on delta tree node format
 	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(false) == 4);
 	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(true) == 8);
@@ -8420,7 +8420,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 	return Void();
 }
 
-TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
+TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 	const int N = 200;
 	IntIntPair lowerBound = { 0, 0 };
 	IntIntPair upperBound = { 1000, 1000 };
@@ -9017,7 +9017,7 @@ TEST_CASE(":/redwood/pager/ArenaPage") {
 	return Void();
 }
 
-TEST_CASE("/redwood/correctness/btree") {
+TEST_CASE("Lredwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
