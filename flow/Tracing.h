@@ -106,8 +106,6 @@ struct Span {
 	std::unordered_map<StringRef, StringRef> tags;
 };
 
-void setDistributedTraceSampleRate(double rate);
-
 // The user selects a tracer using a string passed to fdbserver on boot.
 // Clients should not refer to TracerType directly, and mappings of names to
 // values in this enum can change without notice.
