@@ -148,9 +148,6 @@ public:
 	virtual Reference<IDatabase> createDatabase(const char* clusterFilePath) = 0;
 
 	virtual void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) = 0;
-
-protected:
-	static IClientApi* localApi;
 };
 
 #endif

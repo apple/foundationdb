@@ -21,6 +21,7 @@
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "fdbclient/ClientVersion.h"
+#include "fdbclient/LocalClientAPI.h"
 
 #include "flow/network.h"
 #include "flow/Platform.h"
@@ -1494,7 +1495,8 @@ Reference<ClientInfo> MultiVersionApi::getLocalClient() {
 
 void MultiVersionApi::selectApiVersion(int apiVersion) {
 	if (!localClient) {
-		localClient = makeReference<ClientInfo>(IClientApi::localApi);
+		localClient = makeReference<ClientInfo>(getLocalClientAPI());
+		ASSERT(localClient);
 	}
 
 	if (this->apiVersion != 0 && this->apiVersion != apiVersion) {

@@ -61,7 +61,6 @@ set(FDBCLIENT_SRCS
   GlobalConfig.actor.cpp
   GrvProxyInterface.h
   HTTP.actor.cpp
-  IClientApi.cpp
   IClientApi.h
   IConfigTransaction.cpp
   IConfigTransaction.h
@@ -75,6 +74,8 @@ set(FDBCLIENT_SRCS
   Knobs.h
   IKnobCollection.cpp
   IKnobCollection.h
+  LocalClientAPI.cpp
+  LocalClientAPI.h
   ManagementAPI.actor.cpp
   ManagementAPI.actor.h
   MonitorLeader.actor.cpp

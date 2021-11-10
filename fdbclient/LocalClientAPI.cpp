@@ -1,5 +1,5 @@
 /*
- * IClientApi.cpp
+ * LocalClientAPI.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,6 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbclient/IClientApi.h"
+#include "fdbclient/LocalClientAPI.h"
+#include "fdbclient/ThreadSafeTransaction.h"
 
-IClientApi* IClientApi::localApi = nullptr;
+IClientApi* getLocalClientAPI() {
+	static IClientApi* api = new ThreadSafeApi();
+	return api;
+}

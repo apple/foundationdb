@@ -167,12 +167,8 @@ public:
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 
 private:
+	friend IClientApi* getLocalClientAPI();
 	ThreadSafeApi();
-
-	class LocalClientInitializer {
-		LocalClientInitializer();
-		static LocalClientInitializer instance;
-	};
 
 	int apiVersion;
 	const std::string clientVersion;
