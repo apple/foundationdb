@@ -85,25 +85,12 @@ Control options
 In addition to the command line parameter described above, tracing can be set
 at a database and transaction level.
 
-Tracing can be controlled by setting the
-``distributed_transaction_trace_sample_rate`` database option. Set this option
-to a value between 0 and 1,000,000, representing a fraction of traces to
-record. For example, to completely disable distributed tracing, set the value
-to 0. To trace half of all transactions, set the value to 500,000. Note that
-the value must be an integer. The initial distributed trace sample fraction is
-set by the knob ``TRACING_SAMPLE_RATE``.
+Tracing can be controlled on a global level by setting the
+``TRACING_SAMPLE_RATE`` knob. Set the knob to 0.0 to record no traces, to 1.0
+to record all traces, or somewhere in the middle. Traces are sampled as a unit.
+All individual spans in the trace will be included in the sample.
 
 Tracing can be enabled or disabled for individual transactions. The special key
 space exposes an API to set a custom trace ID for a transaction, or to disable
 tracing for the transaction. See the special key space :ref:`tracing module
 documentation <special-key-space-tracing-module>` to learn more.
-
-^^^^^^^^^^^^^^
-Trace sampling
-^^^^^^^^^^^^^^
-
-By default, all traces are recorded. If tracing is producing too much data,
-adjust the trace sample rate with the ``TRACING_SAMPLE_RATE`` knob. Set the
-knob to 0.0 to record no traces, to 1.0 to record all traces, or somewhere in
-the middle. Traces are sampled as a unit. All individual spans in the trace
-will be included in the sample.
