@@ -1167,18 +1167,20 @@ ACTOR Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Referen
 		}
 
 		uint64_t PoppedVersionLag = logData->persistentDataDurableVersion - logData->queuePoppedVersion;
- 		if ( SERVER_KNOBS->ENABLE_DETAILED_TLOG_POP_TRACE &&
- 			(logData->queuePoppedVersion > 0) && //avoid generating massive events at beginning
- 			(tagData->unpoppedRecovered || PoppedVersionLag >= SERVER_KNOBS->TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE)) { //when recovery or long lag
- 			TraceEvent("TLogPopDetails", logData->logId)
- 				.detail("Tag", tagData->tag.toString())
- 				.detail("UpTo", upTo)
- 				.detail("PoppedVersionLag", PoppedVersionLag)
- 				.detail("MinPoppedTag", logData->minPoppedTag.toString())
- 				.detail("QueuePoppedVersion", logData->queuePoppedVersion)
- 				.detail("UnpoppedRecovered", tagData->unpoppedRecovered ? "True" : "False")
- 				.detail("NothingPersistent", tagData->nothingPersistent ? "True" : "False");
- 		}
+		if (SERVER_KNOBS->ENABLE_DETAILED_TLOG_POP_TRACE &&
+		    (logData->queuePoppedVersion > 0) && // avoid generating massive events at beginning
+		    (tagData->unpoppedRecovered ||
+		     PoppedVersionLag >=
+		         SERVER_KNOBS->TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE)) { // when recovery or long lag
+			TraceEvent("TLogPopDetails", logData->logId)
+			    .detail("Tag", tagData->tag.toString())
+			    .detail("UpTo", upTo)
+			    .detail("PoppedVersionLag", PoppedVersionLag)
+			    .detail("MinPoppedTag", logData->minPoppedTag.toString())
+			    .detail("QueuePoppedVersion", logData->queuePoppedVersion)
+			    .detail("UnpoppedRecovered", tagData->unpoppedRecovered ? "True" : "False")
+			    .detail("NothingPersistent", tagData->nothingPersistent ? "True" : "False");
+		}
 		if (upTo > logData->persistentDataDurableVersion)
 			wait(tagData->eraseMessagesBefore(upTo, self, logData, TaskPriority::TLogPop));
 		//TraceEvent("TLogPop", logData->logId).detail("Tag", tag.toString()).detail("To", upTo);
@@ -1505,7 +1507,7 @@ Version poppedVersion(Reference<LogData> self, Tag tag) {
 		if (tag == txsTag || tag.locality == tagLocalityTxs) {
 			return 0;
 		}
-		return self->recoveredAt;
+		return self->recoveredAt + 1;
 	}
 	return tagData->popped;
 }
@@ -2668,7 +2670,7 @@ ACTOR Future<Void> tLogCore(TLogData* self,
 	                                     SERVER_KNOBS->STORAGE_LOGGING_DELAY,
 	                                     &logData->cc,
 	                                     logData->logId.toString() + "/TLogMetrics",
-	                                     [self=self](TraceEvent& te) {
+	                                     [self = self](TraceEvent& te) {
 		                                     StorageBytes sbTlog = self->persistentData->getStorageBytes();
 		                                     te.detail("KvstoreBytesUsed", sbTlog.used);
 		                                     te.detail("KvstoreBytesFree", sbTlog.free);
@@ -2898,9 +2900,9 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		logsByVersion.emplace_back(ver, id1);
 
 		TraceEvent("TLogPersistentStateRestore", self->dbgid)
-			.detail("LogId", logData->logId)
-			.detail("Ver", ver)
-			.detail("RecoveryCount", logData->recoveryCount);
+		    .detail("LogId", logData->logId)
+		    .detail("Ver", ver)
+		    .detail("RecoveryCount", logData->recoveryCount);
 		// Restore popped keys.  Pop operations that took place after the last (committed) updatePersistentDataVersion
 		// might be lost, but that is fine because we will get the corresponding data back, too.
 		tagKeys = prefixRange(rawId.withPrefix(persistTagPoppedKeys.begin));
@@ -3191,12 +3193,12 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 					std::vector<Tag> tags;
 					tags.push_back(logData->remoteTag);
 					wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, req.recoverAt, true) ||
-					     logData->removed);
+					     logData->removed || logData->stopCommit.onTrigger());
 				} else if (!req.recoverTags.empty()) {
 					ASSERT(logData->unrecoveredBefore > req.knownCommittedVersion);
 					wait(pullAsyncData(
 					         self, logData, req.recoverTags, req.knownCommittedVersion + 1, req.recoverAt, false) ||
-					     logData->removed);
+					     logData->removed || logData->stopCommit.onTrigger());
 				}
 				pulledRecoveryVersions = true;
 				logData->knownCommittedVersion = req.recoverAt;

@@ -47,26 +47,27 @@ Reference<StorageInfo> getStorageInfo(UID id,
 // It is incredibly important that any modifications to txnStateStore are done in such a way that
 // the same operations will be done on all commit proxies at the same time. Otherwise, the data
 // stored in txnStateStore will become corrupted.
-void applyMetadataMutations(SpanID const& spanContext,
-                            UID const& dbgid,
-                            Arena& arena,
-                            VectorRef<MutationRef> const& mutations,
-                            IKeyValueStore* txnStateStore,
-                            LogPushData* toCommit, // non-null if these mutations were part of a new commit handled by this commit proxy
-                            bool& confChange,
-                            Reference<ILogSystem> logSystem,
-                            Version popVersion,
-                            KeyRangeMap<std::set<Key>>* vecBackupKeys,
-                            KeyRangeMap<ServerCacheInfo>* keyInfo,
-                            KeyRangeMap<bool>* cacheInfo,
-                            std::map<Key, ApplyMutationsData>* uid_applyMutationsData,
-                            RequestStream<CommitTransactionRequest> commit,
-                            Database cx,
-                            NotifiedVersion* commitVersion,
-                            std::map<UID, Reference<StorageInfo>>* storageCache,
-                            std::map<Tag, Version>* tag_popped,
-                            std::unordered_map<UID, StorageServerInterface>* tssMapping,
-                            bool initialCommit // true if the mutations were already written to the txnStateStore as part of recovery
+void applyMetadataMutations(
+    SpanID const& spanContext,
+    UID const& dbgid,
+    Arena& arena,
+    VectorRef<MutationRef> const& mutations,
+    IKeyValueStore* txnStateStore,
+    LogPushData* toCommit, // non-null if these mutations were part of a new commit handled by this commit proxy
+    bool& confChange,
+    Reference<ILogSystem> logSystem,
+    Version popVersion,
+    KeyRangeMap<std::set<Key>>* vecBackupKeys,
+    KeyRangeMap<ServerCacheInfo>* keyInfo,
+    KeyRangeMap<bool>* cacheInfo,
+    std::map<Key, ApplyMutationsData>* uid_applyMutationsData,
+    RequestStream<CommitTransactionRequest> commit,
+    Database cx,
+    NotifiedVersion* commitVersion,
+    std::map<UID, Reference<StorageInfo>>* storageCache,
+    std::map<Tag, Version>* tag_popped,
+    std::unordered_map<UID, StorageServerInterface>* tssMapping,
+    bool initialCommit // true if the mutations were already written to the txnStateStore as part of recovery
 ) {
 	// std::map<keyRef, vector<uint16_t>> cacheRangeInfo;
 	std::map<KeyRef, MutationRef> cachedRangeInfo;
@@ -554,6 +555,7 @@ void applyMetadataMutations(SpanID const& spanContext,
 					if (tagV.present()) {
 						MutationRef privatized = m;
 						privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+						privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
 						toCommit->addTag(decodeServerTagValue(tagV.get()));
 						toCommit->writeTypedMessage(privatized);
 					}
@@ -576,6 +578,7 @@ void applyMetadataMutations(SpanID const& spanContext,
 								if (tagV.present()) {
 									MutationRef privatized = m;
 									privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+									privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
 									toCommit->addTag(decodeServerTagValue(tagV.get()));
 									toCommit->writeTypedMessage(privatized);
 								}

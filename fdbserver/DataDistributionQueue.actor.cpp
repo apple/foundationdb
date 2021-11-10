@@ -23,6 +23,8 @@
 #include <vector>
 
 #include "flow/ActorCollection.h"
+#include "flow/FastRef.h"
+#include "flow/Trace.h"
 #include "flow/Util.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/SystemData.h"
@@ -67,7 +69,8 @@ struct RelocateData {
 		       priority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || priority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT ||
 		       priority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT || priority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT ||
 		       priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT || priority == SERVER_KNOBS->PRIORITY_TEAM_HEALTHY ||
-		       priority == SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
+		       priority == SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER ||
+		       priority == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE;
 	}
 
 	static bool isBoundaryPriority(int priority) {
@@ -400,9 +403,13 @@ struct DDQueueData {
 
 	Reference<AsyncVar<bool>> rawProcessingUnhealthy; // many operations will remove relocations before adding a new
 	                                                  // one, so delay a small time before settling on a new number.
+	Reference<AsyncVar<bool>> rawProcessingWiggle;
 
 	std::map<int, int> priority_relocations;
 	int unhealthyRelocations;
+
+	Reference<EventCacheHolder> movedKeyServersEventHolder;
+
 	void startRelocation(int priority, int healthPriority) {
 		// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
 		// we must count it into unhealthyRelocations; because team removers relies on unhealthyRelocations to
@@ -417,6 +424,9 @@ struct DDQueueData {
 		    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT) {
 			unhealthyRelocations++;
 			rawProcessingUnhealthy->set(true);
+		}
+		if (healthPriority == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE) {
+			rawProcessingWiggle->set(true);
 		}
 		priority_relocations[priority]++;
 	}
@@ -434,6 +444,9 @@ struct DDQueueData {
 			}
 		}
 		priority_relocations[priority]--;
+		if (priority_relocations[SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE] == 0) {
+			rawProcessingWiggle->set(false);
+		}
 	}
 
 	DDQueueData(UID mid,
@@ -455,7 +468,8 @@ struct DDQueueData {
 	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), lastLimited(lastLimited),
 	    suppressIntervals(0), lastInterval(0), unhealthyRelocations(0),
-	    rawProcessingUnhealthy(new AsyncVar<bool>(false)) {}
+	    rawProcessingUnhealthy(new AsyncVar<bool>(false)), rawProcessingWiggle(new AsyncVar<bool>(false)),
+	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")) {}
 
 	void validate() {
 		if (EXPENSIVE_VALIDATION) {
@@ -1216,7 +1230,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					if (rd.keys.begin == keyServersPrefix) {
 						TraceEvent("MovedKeyServerKeys")
 						    .detail("Dest", describe(destIds))
-						    .trackLatest("MovedKeyServers");
+						    .trackLatest(self->movedKeyServersEventHolder->trackingKey);
 					}
 
 					if (!signalledTransferComplete) {
@@ -1546,6 +1560,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,
                                          Reference<AsyncVar<bool>> processingUnhealthy,
+                                         Reference<AsyncVar<bool>> processingWiggle,
                                          std::vector<TeamCollectionInterface> teamCollections,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                          MoveKeysLock lock,
@@ -1584,6 +1599,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 		balancingFutures.push_back(BgDDValleyFiller(&self, i));
 	}
 	balancingFutures.push_back(delayedAsyncVar(self.rawProcessingUnhealthy, processingUnhealthy, 0));
+	balancingFutures.push_back(delayedAsyncVar(self.rawProcessingWiggle, processingWiggle, 0));
 
 	try {
 		loop {
@@ -1678,7 +1694,9 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					    .detail("PriorityTeam1Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_1_LEFT])
 					    .detail("PriorityTeam0Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_0_LEFT])
 					    .detail("PrioritySplitShard", self.priority_relocations[SERVER_KNOBS->PRIORITY_SPLIT_SHARD])
-					    .trackLatest("MovingData");
+					    .trackLatest("MovingData"); // This trace event's trackLatest lifetime is controlled by
+					                                // DataDistributorData::movingDataEventHolder. The track latest key
+					                                // we use here must match the key used in the holder.
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 				when(wait(waitForAll(balancingFutures))) {}

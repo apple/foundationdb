@@ -45,6 +45,7 @@ void DatabaseConfiguration::resetInternal() {
 	remoteTLogReplicationFactor = repopulateRegionAntiQuorum = 0;
 	backupWorkerEnabled = false;
 	perpetualStorageWiggleSpeed = 0;
+	storageMigrationType = StorageMigrationType::DEFAULT;
 }
 
 void parse(int* i, ValueRef const& v) {
@@ -198,7 +199,8 @@ bool DatabaseConfiguration::isValid() const {
 	      (usableRegions == 1 || regions.size() == 2) && (regions.size() == 0 || regions[0].priority >= 0) &&
 	      (regions.size() == 0 || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1") &&
 	      // We cannot specify regions with three_datacenter replication
-	      (perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1))) {
+	      (perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1) &&
+	      storageMigrationType != StorageMigrationType::UNSET)) {
 		return false;
 	}
 	std::set<Key> dcIds;
@@ -389,6 +391,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 
 	result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
 	result["perpetual_storage_wiggle"] = perpetualStorageWiggleSpeed;
+	result["storage_migration_type"] = storageMigrationType.toString();
 	return result;
 }
 
@@ -542,6 +545,25 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		parse(&regions, value);
 	} else if (ck == LiteralStringRef("perpetual_storage_wiggle")) {
 		parse(&perpetualStorageWiggleSpeed, value);
+	} else if (ck == LiteralStringRef("storage_migration_type")) {
+		parse((&type), value);
+		storageMigrationType = (StorageMigrationType::MigrationType)type;
+	} else if (ck == LiteralStringRef("proxies")) {
+		int proxiesCount;
+		parse(&proxiesCount, value);
+		if (proxiesCount > 1) {
+			int derivedGrvProxyCount =
+			    std::max(1,
+			             std::min(CLIENT_KNOBS->DEFAULT_MAX_GRV_PROXIES,
+			                      proxiesCount / (CLIENT_KNOBS->DEFAULT_COMMIT_GRV_PROXIES_RATIO + 1)));
+			int derivedCommitProxyCount = proxiesCount - derivedGrvProxyCount;
+			if (grvProxyCount == -1) {
+				grvProxyCount = derivedGrvProxyCount;
+			}
+			if (commitProxyCount == -1) {
+				commitProxyCount = derivedCommitProxyCount;
+			}
+		}
 	} else {
 		return false;
 	}

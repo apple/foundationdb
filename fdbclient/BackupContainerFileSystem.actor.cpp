@@ -1444,13 +1444,16 @@ int chooseFileSize(std::vector<int>& sizes) {
 	return deterministicRandom()->randomInt(0, 2e6);
 }
 
-ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f, int size, FlowLock* lock) {
+ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c,
+                                      Reference<IBackupFile> f,
+                                      int size,
+                                      FlowLock* lock) {
 	state Standalone<VectorRef<uint8_t>> content;
 
 	wait(lock->take(TaskPriority::DefaultYield, size));
- 	state FlowLock::Releaser releaser(*lock, size);
+	state FlowLock::Releaser releaser(*lock, size);
 
- 	printf("writeAndVerify size=%d file=%s\n", size, f->getFileName().c_str());
+	printf("writeAndVerify size=%d file=%s\n", size, f->getFileName().c_str());
 	content.resize(content.arena(), size);
 	for (int i = 0; i < content.size(); ++i) {
 		content[i] = (uint8_t)deterministicRandom()->randomInt(0, 256);
@@ -1534,9 +1537,9 @@ ACTOR static Future<Void> testBackupContainer(std::string url) {
 	// List of sizes to use to test edge cases on underlying file implementations
 	state std::vector<int> fileSizes = { 0 };
 	if (StringRef(url).startsWith(LiteralStringRef("blob"))) {
- 		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE);
- 		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE + 10);
- 	}
+		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE);
+		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE + 10);
+	}
 
 	loop {
 		state Version logStart = v;
