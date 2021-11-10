@@ -31,8 +31,6 @@ Configuration
 
 You can configure the Perpetual Storage Wiggle via the FDB :ref:`command line interface <command-line-interface>`.
 
-Note that to have the Perpetual Storage Wiggle change the storage engine type, you must configure ``storage_migration_type=gradual``.
-
 Example commands
 ----------------
 

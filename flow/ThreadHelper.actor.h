@@ -228,21 +228,19 @@ public:
 		this->status = NeverSet;
 	}
 
-	// Sends an error through the assignment var if it is not already set. Otherwise does nothing.
-	// Returns true if the assignment var was not already set; otherwise returns false.
-	bool trySendError(const Error& err) {
+	void sendError(const Error& err) {
 		if (TRACE_SAMPLE())
 			TraceEvent(SevSample, "Promise_sendError").detail("ErrorCode", err.code());
 		this->mutex.enter();
 		if (!canBeSetUnsafe()) {
 			this->mutex.leave();
-			return false;
+			ASSERT(false); // Promise fulfilled twice
 		}
 		error = err;
 		status = ErrorSet;
 		if (!callback) {
 			this->mutex.leave();
-			return true;
+			return;
 		}
 		auto func = callback;
 		if (!callback->isMultiCallback())
@@ -257,12 +255,7 @@ public:
 			int userParam = 0;
 			func->error(err, userParam);
 		}
-
-		return true;
 	}
-
-	// Like trySendError, except that it is assumed the assignment var is not already set.
-	void sendError(const Error& err) { ASSERT(trySendError(err)); }
 
 	SetCallbackResult::Result callOrSetAsCallback(ThreadCallback* callback, int& userParam1, int notMadeActive) {
 		this->mutex.enter();

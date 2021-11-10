@@ -1299,7 +1299,7 @@ ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransa
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != uid) {
 		// check database not locked
 		// if locked already, throw error
-		throw database_locked();
+		msg = ManagementAPIError::toJsonString(false, "lock", "Database has already been locked");
 	} else if (!val.present()) {
 		// lock database
 		ryw->getTransaction().atomicOp(databaseLockedKey,

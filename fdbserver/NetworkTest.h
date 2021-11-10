@@ -68,7 +68,7 @@ struct NetworkTestStreamingReply : ReplyPromiseStreamReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, index);
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, index);
 	}
 };
 

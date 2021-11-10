@@ -97,8 +97,6 @@ struct StorageQueueInfo {
 	double busiestReadTagFractionalBusyness = 0, busiestWriteTagFractionalBusyness = 0;
 	double busiestReadTagRate = 0, busiestWriteTagRate = 0;
 
-	Reference<EventCacheHolder> busiestWriteTagEventHolder;
-
 	// refresh periodically
 	TransactionTagMap<TransactionCommitCostEstimation> tagCostEst;
 	uint64_t totalWriteCosts = 0;
@@ -109,8 +107,7 @@ struct StorageQueueInfo {
 	    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
 	    smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    limitReason(limitReason_t::unlimited),
-	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(id.toString() + "/BusiestWriteTag")) {
+	    limitReason(limitReason_t::unlimited) {
 		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 		lastReply.instanceID = -1;
 	}
@@ -510,8 +507,6 @@ struct RatekeeperLimits {
 	TransactionPriority priority;
 	std::string context;
 
-	Reference<EventCacheHolder> rkUpdateEventCacheHolder;
-
 	RatekeeperLimits(TransactionPriority priority,
 	                 std::string context,
 	                 int64_t storageTargetBytes,
@@ -529,8 +524,7 @@ struct RatekeeperLimits {
 	        durabilityLagTargetVersions +
 	        SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions are expected to not
 	                                                           // be durable on the storage servers
-	    lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()), context(context),
-	    rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}
+	    durabilityLagLimit(std::numeric_limits<double>::infinity()), lastDurabilityLag(0), context(context) {}
 };
 
 struct GrvProxyInfo {
@@ -923,7 +917,7 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData* self) {
 		    .detail("TagCost", maxCost.getCostSum())
 		    .detail("TotalCost", it->value.totalWriteCosts)
 		    .detail("Reported", it->value.busiestWriteTag.present())
-		    .trackLatest(it->value.busiestWriteTagEventHolder->trackingKey);
+		    .trackLatest(it->key.toString() + "/BusiestWriteTag");
 
 		// reset statistics
 		it->value.tagCostEst.clear();
@@ -1343,7 +1337,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	limits->reasonMetric = limitReason;
 
 	if (deterministicRandom()->random01() < 0.1) {
-		const std::string& name = limits->rkUpdateEventCacheHolder.getPtr()->trackingKey;
+		std::string name = "RkUpdate" + limits->context;
 		TraceEvent(name.c_str(), self->id)
 		    .detail("TPSLimit", limits->tpsLimit)
 		    .detail("Reason", limitReason)

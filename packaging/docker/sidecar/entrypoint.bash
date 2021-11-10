@@ -24,4 +24,4 @@ if [[ -n "$ADDITIONAL_ENV_FILE" ]]; then
   source $ADDITIONAL_ENV_FILE
 fi
 
-exec /sidecar.py $*
+/sidecar.py $*

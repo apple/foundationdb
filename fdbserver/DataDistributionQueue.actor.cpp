@@ -23,8 +23,6 @@
 #include <vector>
 
 #include "flow/ActorCollection.h"
-#include "flow/FastRef.h"
-#include "flow/Trace.h"
 #include "flow/Util.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/SystemData.h"
@@ -405,9 +403,6 @@ struct DDQueueData {
 
 	std::map<int, int> priority_relocations;
 	int unhealthyRelocations;
-
-	Reference<EventCacheHolder> movedKeyServersEventHolder;
-
 	void startRelocation(int priority, int healthPriority) {
 		// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
 		// we must count it into unhealthyRelocations; because team removers relies on unhealthyRelocations to
@@ -460,8 +455,7 @@ struct DDQueueData {
 	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), lastLimited(lastLimited),
 	    suppressIntervals(0), lastInterval(0), unhealthyRelocations(0),
-	    rawProcessingUnhealthy(new AsyncVar<bool>(false)),
-	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")) {}
+	    rawProcessingUnhealthy(new AsyncVar<bool>(false)) {}
 
 	void validate() {
 		if (EXPENSIVE_VALIDATION) {
@@ -1222,7 +1216,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					if (rd.keys.begin == keyServersPrefix) {
 						TraceEvent("MovedKeyServerKeys")
 						    .detail("Dest", describe(destIds))
-						    .trackLatest(self->movedKeyServersEventHolder->trackingKey);
+						    .trackLatest("MovedKeyServers");
 					}
 
 					if (!signalledTransferComplete) {
@@ -1684,9 +1678,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					    .detail("PriorityTeam1Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_1_LEFT])
 					    .detail("PriorityTeam0Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_0_LEFT])
 					    .detail("PrioritySplitShard", self.priority_relocations[SERVER_KNOBS->PRIORITY_SPLIT_SHARD])
-					    .trackLatest("MovingData"); // This trace event's trackLatest lifetime is controlled by
-					                                // DataDistributorData::movingDataEventHolder. The track latest key
-					                                // we use here must match the key used in the holder.
+					    .trackLatest("MovingData");
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 				when(wait(waitForAll(balancingFutures))) {}

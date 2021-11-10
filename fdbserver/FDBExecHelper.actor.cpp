@@ -159,8 +159,6 @@ ACTOR Future<int> spawnProcess(std::string path,
 		state Arena arena;
 		state char* outputBuffer = new (arena) char[SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT];
 		state size_t bytesRead = 0;
-		int flags = fcntl(readFD.get(), F_GETFL, 0);
-		fcntl(readFD.get(), F_SETFL, flags | O_NONBLOCK);
 		while (true) {
 			if (runTime > maxWaitTime) {
 				// timing out
@@ -175,13 +173,9 @@ ACTOR Future<int> spawnProcess(std::string path,
 			loop {
 				int bytes =
 				    read(readFD.get(), &outputBuffer[bytesRead], SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT - bytesRead);
-				if (bytes < 0 && errno == EAGAIN)
-					break;
-				else if (bytes < 0)
-					throw internal_error();
-				else if (bytes == 0)
-					break;
 				bytesRead += bytes;
+				if (bytes == 0)
+					break;
 			}
 
 			if (err < 0) {

@@ -666,14 +666,6 @@ public:
 
 		Optional<TagInfo> previousBusiestTag;
 
-		UID thisServerID;
-
-		Reference<EventCacheHolder> busiestReadTagEventHolder;
-
-		TransactionTagCounter(UID thisServerID)
-		  : thisServerID(thisServerID),
-		    busiestReadTagEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReadTag")) {}
-
 		int64_t costFunction(int64_t bytes) { return bytes / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1; }
 
 		void addRequest(Optional<TagSet> const& tags, int64_t bytes) {
@@ -693,7 +685,7 @@ public:
 			}
 		}
 
-		void startNewInterval() {
+		void startNewInterval(UID id) {
 			double elapsed = now() - intervalStart;
 			previousBusiestTag.reset();
 			if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
@@ -702,13 +694,13 @@ public:
 					previousBusiestTag = TagInfo(busiestTag, rate, (double)busiestTagCount / intervalTotalSampledCount);
 				}
 
-				TraceEvent("BusiestReadTag", thisServerID)
+				TraceEvent("BusiestReadTag", id)
 				    .detail("Elapsed", elapsed)
 				    .detail("Tag", printable(busiestTag))
 				    .detail("TagCost", busiestTagCount)
 				    .detail("TotalSampledCost", intervalTotalSampledCount)
 				    .detail("Reported", previousBusiestTag.present())
-				    .trackLatest(busiestReadTagEventHolder->trackingKey);
+				    .trackLatest(id.toString() + "/BusiestReadTag");
 			}
 
 			intervalCounts.clear();
@@ -785,8 +777,6 @@ public:
 		}
 	} counters;
 
-	Reference<EventCacheHolder> storageServerSourceTLogIDEventHolder;
-
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo>> const& db,
 	              StorageServerInterface const& ssi)
@@ -797,7 +787,7 @@ public:
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false), shuttingDown(false),
 	    debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0), logProtocol(0),
-	    tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()), tssInQuarantine(false),
+	    counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()), tssInQuarantine(false),
 	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), behind(false), versionBehind(false),
 	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), lastUpdate(now()),
 	    poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0),
@@ -824,10 +814,7 @@ public:
 	                                                          Histogram::Unit::microseconds)),
 	    ssDurableVersionUpdateLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                                   SS_DURABLE_VERSION_UPDATE_LATENCY_HISTOGRAM,
-	                                                                   Histogram::Unit::microseconds)),
-	    transactionTagCounter(ssi.id()), counters(this),
-	    storageServerSourceTLogIDEventHolder(
-	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
+	                                                                   Histogram::Unit::microseconds)) {
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
@@ -3470,11 +3457,7 @@ private:
 			UID serverTagKey = decodeServerTagKey(m.param1.substr(1));
 			bool matchesThisServer = serverTagKey == data->thisServerID;
 			bool matchesTssPair = data->isTss() ? serverTagKey == data->tssPairID.get() : false;
-			// Remove SS if another SS is now assigned our tag, or this server was removed by deleting our tag entry
-			// Since TSS don't have tags, they check for their pair's tag. If a TSS is in quarantine, it will stick
-			// around until its pair is removed or it is finished quarantine.
-			if ((m.type == MutationRef::SetValue &&
-			     ((!data->isTss() && !matchesThisServer) || (data->isTss() && !matchesTssPair))) ||
+			if ((m.type == MutationRef::SetValue && !data->isTss() && !matchesThisServer) ||
 			    (m.type == MutationRef::ClearRange &&
 			     ((!data->isTSSInQuarantine() && matchesThisServer) || (data->isTss() && matchesTssPair)))) {
 				throw worker_removed();
@@ -3511,10 +3494,10 @@ private:
 				ASSERT(ssId == data->thisServerID);
 				if (m.type == MutationRef::SetValue) {
 					TEST(true); // Putting TSS in quarantine
-					TraceEvent(SevWarn, "TSSQuarantineStart", data->thisServerID).log();
+					TraceEvent(SevWarn, "TSSQuarantineStart", data->thisServerID);
 					data->startTssQuarantine();
 				} else {
-					TraceEvent(SevWarn, "TSSQuarantineStop", data->thisServerID).log();
+					TraceEvent(SevWarn, "TSSQuarantineStop", data->thisServerID);
 					// dipose of this TSS
 					throw worker_removed();
 				}
@@ -3872,7 +3855,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				TraceEvent("StorageServerSourceTLogID", data->thisServerID)
 				    .detail("SourceTLogID",
 				            data->sourceTLogID.present() ? data->sourceTLogID.get().toString() : "unknown")
-				    .trackLatest(data->storageServerSourceTLogIDEventHolder->trackingKey);
+				    .trackLatest(data->thisServerID.toString() + "/StorageServerSourceTLogID");
 			}
 
 			data->noRecentUpdates.set(false);
@@ -4936,9 +4919,9 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));
 
-	self->transactionTagCounter.startNewInterval();
-	self->actors.add(
-	    recurring([&]() { self->transactionTagCounter.startNewInterval(); }, SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
+	self->transactionTagCounter.startNewInterval(self->thisServerID);
+	self->actors.add(recurring([&]() { self->transactionTagCounter.startNewInterval(self->thisServerID); },
+	                           SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
 
 	self->coreStarted.send(Void());
 

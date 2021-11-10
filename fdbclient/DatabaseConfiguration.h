@@ -246,9 +246,6 @@ struct DatabaseConfiguration {
 	// Perpetual Storage Setting
 	int32_t perpetualStorageWiggleSpeed;
 
-	// Storage Migration Type
-	StorageMigrationType storageMigrationType;
-
 	// Excluded servers (no state should be here)
 	bool isExcludedServer(NetworkAddressList) const;
 	bool isExcludedLocality(const LocalityData& locality) const;

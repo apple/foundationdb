@@ -1,6 +1,3 @@
-// Thread naming only works on Linux.
-#if defined(__linux__)
-
 #include "flow/IThreadPool.h"
 
 #include <pthread.h>
@@ -8,6 +5,9 @@
 
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
+
+// Thread naming only works on Linux.
+#if defined(__linux__)
 
 void forceLinkIThreadPoolTests() {}
 

@@ -390,8 +390,7 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 		    .detail("MaxMutationsPerCommit", cx->mutationsPerCommit.max())
 		    .detail("MeanBytesPerCommit", cx->bytesPerCommit.mean())
 		    .detail("MedianBytesPerCommit", cx->bytesPerCommit.median())
-		    .detail("MaxBytesPerCommit", cx->bytesPerCommit.max())
-		    .detail("NumLocalityCacheEntries", cx->locationCache.size());
+		    .detail("MaxBytesPerCommit", cx->bytesPerCommit.max());
 
 		cx->latencies.clear();
 		cx->readLatencies.clear();
@@ -444,10 +443,10 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 			    .detail("TSSGetKeyLatency90", it.second->TSSgetKeyLatency.percentile(0.90))
 			    .detail("TSSGetKeyLatency99", it.second->TSSgetKeyLatency.percentile(0.99));
 
-			tssEv.detail("MeanSSGetKeyValuesLatency", it.second->SSgetKeyValuesLatency.mean())
-			    .detail("MedianSSGetKeyValuesLatency", it.second->SSgetKeyValuesLatency.median())
-			    .detail("SSGetKeyValuesLatency90", it.second->SSgetKeyValuesLatency.percentile(0.90))
-			    .detail("SSGetKeyValuesLatency99", it.second->SSgetKeyValuesLatency.percentile(0.99));
+			tssEv.detail("MeanSSGetKeyValuesLatency", it.second->SSgetKeyLatency.mean())
+			    .detail("MedianSSGetKeyValuesLatency", it.second->SSgetKeyLatency.median())
+			    .detail("SSGetKeyValuesLatency90", it.second->SSgetKeyLatency.percentile(0.90))
+			    .detail("SSGetKeyValuesLatency99", it.second->SSgetKeyLatency.percentile(0.99));
 
 			tssEv.detail("MeanTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.mean())
 			    .detail("MedianTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.median())
@@ -1136,7 +1135,6 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     bytesPerCommit(1000), mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
     internal(internal), transactionTracingEnabled(true), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
-    transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size())
@@ -1378,9 +1376,8 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), latencies(1000),
     readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
-    transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
-    internal(false), transactionTracingEnabled(true) {}
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false),
+    transactionTracingEnabled(true) {}
 
 // Static constructor used by server processes to create a DatabaseContext
 // For internal (fdbserver) use only
@@ -2073,7 +2070,6 @@ void stopNetwork() {
 	if (!g_network)
 		throw network_not_setup();
 
-	TraceEvent("ClientStopNetwork");
 	g_network->stop();
 	closeTraceFile();
 }
@@ -4111,14 +4107,11 @@ void debugAddTags(Transaction* tr) {
 }
 
 SpanID generateSpanID(int transactionTracingEnabled) {
-	uint64_t txnId = deterministicRandom()->randomUInt64();
+	uint64_t tid = deterministicRandom()->randomUInt64();
 	if (transactionTracingEnabled > 0) {
-		uint64_t tokenId = deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE
-		                       ? deterministicRandom()->randomUInt64()
-		                       : 0;
-		return SpanID(txnId, tokenId);
+		return SpanID(tid, deterministicRandom()->randomUInt64());
 	} else {
-		return SpanID(txnId, 0);
+		return SpanID(tid, 0);
 	}
 }
 
@@ -4662,9 +4655,8 @@ double Transaction::getBackoff(int errCode) {
 				auto tagItr = priorityItr->second.find(tag);
 				if (tagItr != priorityItr->second.end()) {
 					TEST(true); // Returning throttle backoff
-					returnedBackoff = std::max(
-					    returnedBackoff,
-					    std::min(CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL, tagItr->second.throttleDuration()));
+					returnedBackoff = std::min(CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL,
+					                           std::max(returnedBackoff, tagItr->second.throttleDuration()));
 					if (returnedBackoff == CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL) {
 						break;
 					}
@@ -5555,20 +5547,6 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 	state Future<Void> timeout;
 	state Optional<UID> debugID;
 	state bool send_batch;
-	state Reference<Histogram> batchSizeDist = Histogram::getHistogram(LiteralStringRef("GrvBatcher"),
-	                                                                   LiteralStringRef("ClientGrvBatchSize"),
-	                                                                   Histogram::Unit::count,
-	                                                                   0,
-	                                                                   CLIENT_KNOBS->MAX_BATCH_SIZE * 2);
-	state Reference<Histogram> batchIntervalDist =
-	    Histogram::getHistogram(LiteralStringRef("GrvBatcher"),
-	                            LiteralStringRef("ClientGrvBatchInterval"),
-	                            Histogram::Unit::microseconds,
-	                            0,
-	                            CLIENT_KNOBS->GRV_BATCH_TIMEOUT * 1000000 * 2);
-	state Reference<Histogram> grvReplyLatencyDist = Histogram::getHistogram(
-	    LiteralStringRef("GrvBatcher"), LiteralStringRef("ClientGrvReplyLatency"), Histogram::Unit::microseconds);
-	state double lastRequestTime = now();
 
 	state TransactionTagMap<uint32_t> tags;
 
@@ -5593,34 +5571,22 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 					++tags[tag];
 				}
 
-				if (requests.size() == CLIENT_KNOBS->MAX_BATCH_SIZE) {
+				if (requests.size() == CLIENT_KNOBS->MAX_BATCH_SIZE)
 					send_batch = true;
-					++cx->transactionGrvFullBatches;
-				} else if (!timeout.isValid()) {
+				else if (!timeout.isValid())
 					timeout = delay(batchTime, TaskPriority::GetConsistentReadVersion);
-				}
 			}
-			when(wait(timeout.isValid() ? timeout : Never())) {
-				send_batch = true;
-				++cx->transactionGrvTimedOutBatches;
-			}
+			when(wait(timeout.isValid() ? timeout : Never())) { send_batch = true; }
 			// dynamic batching monitors reply latencies
 			when(double reply_latency = waitNext(replyTimes.getFuture())) {
 				double target_latency = reply_latency * 0.5;
 				batchTime = min(0.1 * target_latency + 0.9 * batchTime, CLIENT_KNOBS->GRV_BATCH_TIMEOUT);
-				grvReplyLatencyDist->sampleSeconds(reply_latency);
 			}
 			when(wait(collection)) {} // for errors
 		}
 		if (send_batch) {
 			int count = requests.size();
 			ASSERT(count);
-
-			batchSizeDist->sampleRecordCounter(count);
-			auto requestTime = now();
-			batchIntervalDist->sampleSeconds(requestTime - lastRequestTime);
-			lastRequestTime = requestTime;
-
 			// dynamic batching
 			Promise<GetReadVersionReply> GRVReply;
 			requests.push_back(GRVReply);
@@ -5773,7 +5739,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		}
 
 		Location location = "NAPI:getReadVersion"_loc;
-		UID spanContext = generateSpanID(cx->transactionTracingEnabled);
+		UID spanContext = deterministicRandom()->randomUniqueID();
 		auto const req = DatabaseContext::VersionRequest(spanContext, options.tags, info.debugID);
 		batcher.stream.send(req);
 		startTime = now();
@@ -6135,7 +6101,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Databa
                                                                           StorageMetrics permittedError,
                                                                           int shardLimit,
                                                                           int expectedShardCount) {
-	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingEnabled));
+	state Span span("NAPI:WaitStorageMetrics"_loc);
 	loop {
 		vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 		    wait(getKeyRangeLocations(cx,

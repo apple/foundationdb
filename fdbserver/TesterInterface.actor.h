@@ -111,7 +111,6 @@ struct TestConfig {
 	int logAntiQuorum = -1;
 	bool isFirstTestInRestart;
 	bool disableTss;
-	int extraMachineCountDC = 0;
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
 	//	0 = "ssd"
 	//	1 = "memory"

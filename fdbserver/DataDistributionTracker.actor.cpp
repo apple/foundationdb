@@ -24,8 +24,6 @@
 #include "fdbserver/Knobs.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/ActorCollection.h"
-#include "flow/FastRef.h"
-#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // The used bandwidth of a shard. The higher the value is, the busier the shard is.
@@ -935,7 +933,6 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	                                   *trackerCancelled);
 	state Future<Void> loggingTrigger = Void();
 	state Future<Void> readHotDetect = readHotDetector(&self);
-	state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
 	try {
 		wait(trackInitialShards(&self, initData));
 		initData = Reference<InitialDataDistribution>();
@@ -949,7 +946,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 				    .detail("Shards", self.shards.size())
 				    .detail("TotalSizeBytes", self.dbSizeEstimate->get())
 				    .detail("SystemSizeBytes", self.systemSizeEstimate)
-				    .trackLatest(ddTrackerStatsEventHolder->trackingKey);
+				    .trackLatest("DDTrackerStats");
 
 				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 			}

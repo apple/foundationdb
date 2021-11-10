@@ -207,7 +207,6 @@ set(FDBSERVER_SRCS
   workloads/SlowTaskWorkload.actor.cpp
   workloads/SnapTest.actor.cpp
   workloads/SpecialKeySpaceCorrectness.actor.cpp
-  workloads/StreamingRangeRead.actor.cpp
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
   workloads/StreamingRead.actor.cpp

@@ -215,17 +215,17 @@ set(CPACK_COMPONENT_SERVER-DEB_DEPENDS clients-deb)
 set(CPACK_COMPONENT_SERVER-TGZ_DEPENDS clients-tgz)
 set(CPACK_COMPONENT_SERVER-VERSIONED_DEPENDS clients-versioned)
 set(CPACK_RPM_SERVER-VERSIONED_PACKAGE_REQUIRES
-  "foundationdb${PROJECT_VERSION}-clients")
+  "foundationdb-clients-${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH} = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
 
 set(CPACK_COMPONENT_SERVER-EL7_DISPLAY_NAME "foundationdb-server")
 set(CPACK_COMPONENT_SERVER-DEB_DISPLAY_NAME "foundationdb-server")
 set(CPACK_COMPONENT_SERVER-TGZ_DISPLAY_NAME "foundationdb-server")
-set(CPACK_COMPONENT_SERVER-VERSIONED_DISPLAY_NAME "foundationdb${PROJECT_VERSION}-server")
+set(CPACK_COMPONENT_SERVER-VERSIONED_DISPLAY_NAME "foundationdb-server-${PROJECT_VERSION}")
 
 set(CPACK_COMPONENT_CLIENTS-EL7_DISPLAY_NAME "foundationdb-clients")
 set(CPACK_COMPONENT_CLIENTS-DEB_DISPLAY_NAME "foundationdb-clients")
 set(CPACK_COMPONENT_CLIENTS-TGZ_DISPLAY_NAME "foundationdb-clients")
-set(CPACK_COMPONENT_CLIENTS-VERSIONED_DISPLAY_NAME "foundationdb${PROJECT_VERSION}-clients")
+set(CPACK_COMPONENT_CLIENTS-VERSIONED_DISPLAY_NAME "foundationdb-clients-${PROJECT_VERSION}")
 
 
 # MacOS needs a file exiension for the LICENSE file
@@ -246,21 +246,14 @@ else()
   set(prerelease_string "-1")
 endif()
 
-#############
-# Filenames #
-#############
-set(unversioned_postfix "${PROJECT_VERSION}${prerelease_string}")
+
 # RPM filenames
-set(rpm-clients-filename "foundationdb-clients-${unversioned_postfix}")
-set(rpm-server-filename "foundationdb-server-${unversioned_postfix}")
-set(rpm-clients-versioned-filename "foundationdb${PROJECT_VERSION}-clients${prerelease_string}")
-set(rpm-server-versioned-filename "foundationdb${PROJECT_VERSION}-server${prerelease_string}")
+set(rpm-clients-filename "foundationdb-clients-${PROJECT_VERSION}${prerelease_string}")
+set(rpm-server-filename "foundationdb-server-${PROJECT_VERSION}${prerelease_string}")
 
 # Deb filenames
-set(deb-clients-filename "foundationdb-clients_${unversioned_postfix}")
-set(deb-server-filename "foundationdb-server_${unversioned_postfix}")
-set(deb-clients-versioned-filename "foundationdb${PROJECT_VERSION}-clients${prerelease_string}")
-set(deb-server-versioned-filename "foundationdb${PROJECT_VERSION}-server${prerelease_string}")
+set(deb-clients-filename "foundationdb-clients_${PROJECT_VERSION}${prerelease_string}")
+set(deb-server-filename "foundationdb-server_${PROJECT_VERSION}${prerelease_string}")
 
 ################################################################################
 # Configuration for RPM
@@ -271,18 +264,18 @@ set(CPACK_RPM_PACKAGE_LICENSE "Apache 2.0")
 set(CPACK_RPM_PACKAGE_NAME "foundationdb")
 set(CPACK_RPM_CLIENTS-EL7_PACKAGE_NAME "foundationdb-clients")
 set(CPACK_RPM_SERVER-EL7_PACKAGE_NAME "foundationdb-server")
-set(CPACK_RPM_SERVER-VERSIONED_PACKAGE_NAME "foundationdb${PROJECT_VERSION}-server")
-set(CPACK_RPM_CLIENTS-VERSIONED_PACKAGE_NAME "foundationdb${PROJECT_VERSION}-clients")
+set(CPACK_RPM_SERVER-VERSIONED_PACKAGE_NAME "foundationdb-server-${PROJECT_VERSION}")
+set(CPACK_RPM_CLIENTS-VERSIONED_PACKAGE_NAME "foundationdb-clients-${PROJECT_VERSION}")
 
 set(CPACK_RPM_CLIENTS-EL7_FILE_NAME "${rpm-clients-filename}.el7.${CMAKE_SYSTEM_PROCESSOR}.rpm")
-set(CPACK_RPM_CLIENTS-VERSIONED_FILE_NAME "${rpm-clients-versioned-filename}.versioned.${CMAKE_SYSTEM_PROCESSOR}.rpm")
+set(CPACK_RPM_CLIENTS-VERSIONED_FILE_NAME "${rpm-clients-filename}.versioned.${CMAKE_SYSTEM_PROCESSOR}.rpm")
 set(CPACK_RPM_SERVER-EL7_FILE_NAME "${rpm-server-filename}.el7.${CMAKE_SYSTEM_PROCESSOR}.rpm")
-set(CPACK_RPM_SERVER-VERSIONED_FILE_NAME "${rpm-server-versioned-filename}.versioned.${CMAKE_SYSTEM_PROCESSOR}.rpm")
+set(CPACK_RPM_SERVER-VERSIONED_FILE_NAME "${rpm-server-filename}.versioned.${CMAKE_SYSTEM_PROCESSOR}.rpm")
 
 set(CPACK_RPM_CLIENTS-EL7_DEBUGINFO_FILE_NAME "${rpm-clients-filename}.el7-debuginfo.${CMAKE_SYSTEM_PROCESSOR}.rpm")
-set(CPACK_RPM_CLIENTS-VERSIONED_DEBUGINFO_FILE_NAME "${rpm-clients-versioned-filename}.versioned-debuginfo.${CMAKE_SYSTEM_PROCESSOR}.rpm")
+set(CPACK_RPM_CLIENTS-VERSIONED_DEBUGINFO_FILE_NAME "${rpm-clients-filename}.versioned-debuginfo.${CMAKE_SYSTEM_PROCESSOR}.rpm")
 set(CPACK_RPM_SERVER-EL7_DEBUGINFO_FILE_NAME "${rpm-server-filename}.el7-debuginfo.${CMAKE_SYSTEM_PROCESSOR}.rpm")
-set(CPACK_RPM_SERVER-VERSIONED_DEBUGINFO_FILE_NAME "${rpm-server-versioned-filename}.versioned-debuginfo.${CMAKE_SYSTEM_PROCESSOR}.rpm")
+set(CPACK_RPM_SERVER-VERSIONED_DEBUGINFO_FILE_NAME "${rpm-server-filename}.versioned-debuginfo.${CMAKE_SYSTEM_PROCESSOR}.rpm")
 
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir")
 fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION data COMPONENT server)
@@ -354,13 +347,13 @@ set(CPACK_RPM_CLIENTS-VERSIONED_PRE_UNINSTALL_SCRIPT_FILE
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
   set(CPACK_DEBIAN_CLIENTS-DEB_FILE_NAME "${deb-clients-filename}_amd64.deb")
   set(CPACK_DEBIAN_SERVER-DEB_FILE_NAME "${deb-server-filename}_amd64.deb")
-  set(CPACK_DEBIAN_CLIENTS-VERSIONED_FILE_NAME "${deb-clients-versioned-filename}.versioned_amd64.deb")
-  set(CPACK_DEBIAN_SERVER-VERSIONED_FILE_NAME "${deb-server-versioned-filename}.versioned_amd64.deb")
+  set(CPACK_DEBIAN_CLIENTS-VERSIONED_FILE_NAME "${deb-clients-filename}.versioned_amd64.deb")
+  set(CPACK_DEBIAN_SERVER-VERSIONED_FILE_NAME "${deb-server-filename}.versioned_amd64.deb")
 else()
   set(CPACK_DEBIAN_CLIENTS-DEB_FILE_NAME "${deb-clients-filename}_${CMAKE_SYSTEM_PROCESSOR}.deb")
   set(CPACK_DEBIAN_SERVER-DEB_FILE_NAME "${deb-server-filename}_${CMAKE_SYSTEM_PROCESSOR}.deb")
-  set(CPACK_DEBIAN_CLIENTS-VERSIONED_FILE_NAME "${deb-clients-versioned-filename}.versioned_${CMAKE_SYSTEM_PROCESSOR}.deb")
-  set(CPACK_DEBIAN_SERVER-VERSIONED_FILE_NAME "${deb-server-versioned-filename}.versioned_${CMAKE_SYSTEM_PROCESSOR}.deb")
+  set(CPACK_DEBIAN_CLIENTS-VERSIONED_FILE_NAME "${deb-clients-filename}.versioned_${CMAKE_SYSTEM_PROCESSOR}.deb")
+  set(CPACK_DEBIAN_SERVER-VERSIONED_FILE_NAME "${deb-server-filename}.versioned_${CMAKE_SYSTEM_PROCESSOR}.deb")
 endif()
 
 set(CPACK_DEB_COMPONENT_INSTALL ON)
@@ -370,8 +363,8 @@ set(CPACK_DEBIAN_ENABLE_COMPONENT_DEPENDS ON)
 
 set(CPACK_DEBIAN_SERVER-DEB_PACKAGE_NAME "foundationdb-server")
 set(CPACK_DEBIAN_CLIENTS-DEB_PACKAGE_NAME "foundationdb-clients")
-set(CPACK_DEBIAN_SERVER-VERSIONED_PACKAGE_NAME "foundationdb${PROJECT_VERSION}-server")
-set(CPACK_DEBIAN_CLIENTS-VERSIONED_PACKAGE_NAME "foundationdb${PROJECT_VERSION}-clients")
+set(CPACK_DEBIAN_SERVER-VERSIONED_PACKAGE_NAME "foundationdb-server-${PROJECT_VERSION}")
+set(CPACK_DEBIAN_CLIENTS-VERSIONED_PACKAGE_NAME "foundationdb-clients-${PROJECT_VERSION}")
 
 set(CPACK_DEBIAN_SERVER-DEB_PACKAGE_DEPENDS "adduser, libc6 (>= 2.12), foundationdb-clients (= ${FDB_VERSION})")
 set(CPACK_DEBIAN_SERVER-DEB_PACKAGE_RECOMMENDS "python (>= 2.6)")

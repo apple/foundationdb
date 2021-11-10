@@ -373,7 +373,7 @@ void openTracer(TracerType type) {
 ITracer::~ITracer() {}
 
 Span& Span::operator=(Span&& o) {
-	if (begin > 0.0 && context.second() > 0) {
+	if (begin > 0.0) {
 		end = g_network->now();
 		g_tracer->trace(*this);
 	}
@@ -388,7 +388,7 @@ Span& Span::operator=(Span&& o) {
 }
 
 Span::~Span() {
-	if (begin > 0.0 && context.second() > 0) {
+	if (begin > 0.0) {
 		end = g_network->now();
 		g_tracer->trace(*this);
 	}

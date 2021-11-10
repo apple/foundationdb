@@ -57,8 +57,6 @@ struct GrvProxyStats {
 	Deque<int> requestBuckets;
 	double lastBucketBegin;
 	double bucketInterval;
-	Reference<Histogram> grvConfirmEpochLiveDist;
-	Reference<Histogram> grvGetCommittedVersionRpcDist;
 
 	void updateRequestBuckets() {
 		while (now() - lastBucketBegin > bucketInterval) {
@@ -112,13 +110,7 @@ struct GrvProxyStats {
 	                          id,
 	                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-	    grvLatencyBands("GRVLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
-	    grvConfirmEpochLiveDist(Histogram::getHistogram(LiteralStringRef("GrvProxy"),
-	                                                    LiteralStringRef("GrvConfirmEpochLive"),
-	                                                    Histogram::Unit::microseconds)),
-	    grvGetCommittedVersionRpcDist(Histogram::getHistogram(LiteralStringRef("GrvProxy"),
-	                                                          LiteralStringRef("GrvGetCommittedVersionRpc"),
-	                                                          Histogram::Unit::microseconds)) {
+	    grvLatencyBands("GRVLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 		// The rate at which the limit(budget) is allowed to grow.
 		specialCounter(cc, "SystemGRVQueueSize", [this]() { return this->systemGRVQueueSize; });
 		specialCounter(cc, "DefaultGRVQueueSize", [this]() { return this->defaultGRVQueueSize; });
@@ -532,8 +524,6 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	//     and no other proxy could have already committed anything without first ending the epoch
 	state Span span("GP:getLiveCommittedVersion"_loc, parentSpan);
 	++grvProxyData->stats.txnStartBatch;
-
-	state double grvStart = now();
 	state Future<GetRawCommittedVersionReply> replyFromMasterFuture;
 	replyFromMasterFuture = grvProxyData->master.getLiveCommittedVersion.getReply(
 	    GetRawCommittedVersionRequest(span.context, debugID), TaskPriority::GetLiveCommittedVersionReply);
@@ -545,8 +535,6 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 		wait(grvProxyData->lastCommitTime.whenAtLeast(now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION));
 	}
 
-	state double grvConfirmEpochLive = now();
-	grvProxyData->stats.grvConfirmEpochLiveDist->sampleSeconds(grvConfirmEpochLive - grvStart);
 	if (debugID.present()) {
 		g_traceBatch.addEvent(
 		    "TransactionDebug", debugID.get().first(), "GrvProxyServer.getLiveCommittedVersion.confirmEpochLive");
@@ -556,7 +544,6 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	grvProxyData->minKnownCommittedVersion =
 	    std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
 
-	grvProxyData->stats.grvGetCommittedVersionRpcDist->sampleSeconds(now() - grvConfirmEpochLive);
 	GetReadVersionReply rep;
 	rep.version = repFromMaster.version;
 	rep.locked = repFromMaster.locked;

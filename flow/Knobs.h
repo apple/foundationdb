@@ -27,7 +27,6 @@
 #include <map>
 #include <set>
 #include <string>
-#include <memory>
 #include <stdint.h>
 
 class Knobs {
@@ -77,7 +76,6 @@ public:
 	double CHAOS_LOGGING_INTERVAL;
 
 	bool WRITE_TRACING_ENABLED;
-	double TRACING_SAMPLE_RATE;
 	int TRACING_UDP_LISTENER_PORT;
 
 	// run loop profiling
@@ -85,7 +83,6 @@ public:
 	double SLOWTASK_PROFILING_LOG_INTERVAL;
 	double SLOWTASK_PROFILING_MAX_LOG_INTERVAL;
 	double SLOWTASK_PROFILING_LOG_BACKOFF;
-	double SLOWTASK_BLOCKED_INTERVAL;
 	double SATURATION_PROFILING_LOG_INTERVAL;
 	double SATURATION_PROFILING_MAX_LOG_INTERVAL;
 	double SATURATION_PROFILING_LOG_BACKOFF;

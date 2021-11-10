@@ -457,13 +457,13 @@ private:
 	                         void const* data,
 	                         int length,
 	                         int64_t offset) {
-		state Standalone<StringRef> dataCopy(StringRef((uint8_t*)data, length));
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		wait(g_simulator.onMachine(currentProcess));
 
 		state double delayDuration =
 		    g_simulator.speedUpSimulation ? 0.0001 : (deterministicRandom()->random01() * self->maxWriteDelay);
+		state Standalone<StringRef> dataCopy(StringRef((uint8_t*)data, length));
 
 		state Future<bool> startSyncFuture = self->startSyncPromise.getFuture();
 

@@ -1,10 +1,8 @@
 FROM amazonlinux:2.0.20210326.0 as base
 
 RUN yum install -y \
-  binutils \
   bind-utils \
   curl \
-  gdb \
   jq \
   less \
   lsof \
@@ -12,7 +10,6 @@ RUN yum install -y \
   net-tools \
   perf \
   perl \
-  procps \
   python38 \
   python3-pip \
   strace \

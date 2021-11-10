@@ -305,8 +305,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				req.reply.send(clientData.clientInfo->get());
 			} else {
 				if (!leaderMon.isValid()) {
-					leaderMon = monitorLeaderAndGetClientInfo(
-					    req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
+					leaderMon =
+					    monitorLeaderForProxies(req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
 				}
 				actors.add(openDatabase(&clientData, &clientCount, hasConnectedClients, req));
 			}
@@ -317,8 +317,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				req.reply.send(currentElectedLeader->get());
 			} else {
 				if (!leaderMon.isValid()) {
-					leaderMon =
-					    monitorLeaderAndGetClientInfo(req.key, req.coordinators, &clientData, currentElectedLeader);
+					leaderMon = monitorLeaderForProxies(req.key, req.coordinators, &clientData, currentElectedLeader);
 				}
 				actors.add(remoteMonitorLeader(&clientCount, hasConnectedClients, currentElectedLeader, req));
 			}

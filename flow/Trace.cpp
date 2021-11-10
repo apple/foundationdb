@@ -388,17 +388,6 @@ public:
 		eventBuffer.push_back(fields);
 		bufferLength += fields.sizeBytes();
 
-		// If we have queued up a large number of events in simulation, then throw an error. This makes it easier to
-		// diagnose cases where we get stuck in a loop logging trace events that eventually runs out of memory.
-		// Without this we would never see any trace events from that loop, and it would be more difficult to identify
-		// where the process is actually stuck.
-		if (g_network && g_network->isSimulated() && bufferLength > 1e8) {
-			// Setting this to 0 avoids a recurse from the assertion trace event and also prevents a situation where
-			// we roll the trace log only to log the single assertion event when using --crash.
-			bufferLength = 0;
-			ASSERT(false);
-		}
-
 		if (trackError) {
 			latestEventCache.setLatestError(fields);
 		}
