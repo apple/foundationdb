@@ -1796,41 +1796,6 @@ TEST_CASE("special-key-space set transaction ID after write") {
 	}
 }
 
-// TEST_CASE("special-key-space set token after write") {
-// 	fdb::Transaction tr(db);
-// 	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-// 	while (1) {
-// 		tr.set(key("foo"), "bar");
-// 		tr.set("\xff\xff/tracing/token", "false");
-// 		fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/token",
-// 		                             /* snapshot */ false);
-//
-// 		fdb_error_t err = wait_future(f1);
-// 		if (err) {
-// 			fdb::EmptyFuture f2 = tr.on_error(err);
-// 			fdb_check(wait_future(f2));
-// 			continue;
-// 		}
-//
-// 		int out_present;
-// 		char* val;
-// 		int vallen;
-// 		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-//
-// 		REQUIRE(out_present);
-// 		uint64_t token = std::stoul(std::string(val, vallen));
-// 		CHECK(token != 0);
-// 		break;
-// 	}
-// }
-
-// TEST_CASE("special-key-space valid token") {
-// 	auto value = get_value("\xff\xff/tracing/token", /* snapshot */ false, {});
-// 	REQUIRE(value.has_value());
-// 	uint64_t token = std::stoul(value.value());
-// 	CHECK(token > 0);
-// }
-
 TEST_CASE("special-key-space disable tracing") {
 	fdb::Transaction tr(db);
 	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
@@ -1857,48 +1822,6 @@ TEST_CASE("special-key-space disable tracing") {
 		break;
 	}
 }
-
-// TEST_CASE("FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE") {
-// 	fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE, nullptr, 0));
-//
-// 	auto value = get_value("\xff\xff/tracing/token", /* snapshot */ false, {});
-// 	REQUIRE(value.has_value());
-// 	uint64_t token = std::stoul(value.value());
-// 	CHECK(token == 0);
-//
-// 	fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_ENABLE, nullptr, 0));
-// }
-
-// TEST_CASE("FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE enable tracing for transaction") {
-// 	fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE, nullptr, 0));
-//
-// 	fdb::Transaction tr(db);
-// 	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-// 	while (1) {
-// 		tr.set("\xff\xff/tracing/token", "true");
-// 		fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/token",
-// 		                             /* snapshot */ false);
-//
-// 		fdb_error_t err = wait_future(f1);
-// 		if (err) {
-// 			fdb::EmptyFuture f2 = tr.on_error(err);
-// 			fdb_check(wait_future(f2));
-// 			continue;
-// 		}
-//
-// 		int out_present;
-// 		char* val;
-// 		int vallen;
-// 		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-//
-// 		REQUIRE(out_present);
-// 		uint64_t token = std::stoul(std::string(val, vallen));
-// 		CHECK(token > 0);
-// 		break;
-// 	}
-//
-// 	fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_ENABLE, nullptr, 0));
-// }
 
 TEST_CASE("special-key-space tracing get range") {
 	std::string tracingBegin = "\xff\xff/tracing/";
@@ -1932,8 +1855,6 @@ TEST_CASE("special-key-space tracing get range") {
 		CHECK(!out_more);
 		CHECK(out_count == 2);
 
-		CHECK(std::string((char*)out_kv[0].key, out_kv[0].key_length) == tracingBegin + "token");
-		// CHECK(std::stoul(std::string((char*)out_kv[0].value, out_kv[0].value_length)) > 0);
 		CHECK(std::string((char*)out_kv[1].key, out_kv[1].key_length) == tracingBegin + "transaction_id");
 		CHECK(std::stoul(std::string((char*)out_kv[1].value, out_kv[1].value_length)) > 0);
 		break;
