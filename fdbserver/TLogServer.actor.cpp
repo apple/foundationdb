@@ -52,7 +52,6 @@ struct TLogQueueEntryRef {
 	Version version;
 	Version knownCommittedVersion;
 	StringRef messages;
-
 	TLogQueueEntryRef() : version(0), knownCommittedVersion(0) {}
 	TLogQueueEntryRef(Arena& a, TLogQueueEntryRef const& from)
 	  : id(from.id), version(from.version), knownCommittedVersion(from.knownCommittedVersion),
@@ -319,6 +318,8 @@ struct TLogData : NonCopyable {
 	IDiskQueue* rawPersistentQueue; // The physical queue the persistentQueue below stores its data. Ideally, log
 	                                // interface should work without directly accessing rawPersistentQueue
 	TLogQueue* persistentQueue; // Logical queue the log operates on and persist its data.
+
+	std::deque<Version> unknownCommittedVersions;
 
 	int64_t diskQueueCommitBytes;
 	AsyncVar<bool>
@@ -816,6 +817,8 @@ ACTOR Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, 
 	TLogLockResult result;
 	result.end = stopVersion;
 	result.knownCommittedVersion = logData->knownCommittedVersion;
+	result.unknownCommittedVersions = self->unknownCommittedVersions;
+	result.id = self->dbgid;
 
 	TraceEvent("TLogStop2", self->dbgid)
 	    .detail("LogId", logData->logId)
@@ -1085,7 +1088,6 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 
 	TEST(anyData); // TLog moved data to persistentData
 	logData->persistentDataDurableVersion = newPersistentDataVersion;
-
 	for (tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
 		for (tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
 			if (logData->tag_data[tagLocality][tagId]) {
@@ -2253,7 +2255,13 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 
 	if (req.debugID.present())
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.After");
-
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		self->unknownCommittedVersions.push_front(req.version);
+		while (!self->unknownCommittedVersions.empty() &&
+		       self->unknownCommittedVersions.back() <= req.knownCommittedVersion) {
+			self->unknownCommittedVersions.pop_back();
+		}
+	}
 	req.reply.send(logData->durableKnownCommittedVersion);
 	return Void();
 }
@@ -3302,6 +3310,12 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 
 		if (recovering) {
 			logData->unrecoveredBefore = req.startVersion;
+			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+				if (req.rvLogs.find(self->dbgid) != req.rvLogs.end()) {
+					req.recoverAt = req.rvLogs[self->dbgid];
+					// TraceEvent("TLogUnicastRecovered").detail("U", req.recoverAt);
+				}
+			}
 			logData->recoveredAt = req.recoverAt;
 			logData->knownCommittedVersion = req.startVersion - 1;
 			logData->persistentDataVersion = logData->unrecoveredBefore - 1;
