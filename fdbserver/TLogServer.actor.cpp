@@ -2496,9 +2496,9 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 				logData->logSystem->set(Reference<ILogSystem>());
 			}
 
-			// Persist cluster ID once cluster has sufficientnly recovered.
+			// Persist cluster ID once cluster has recovered.
 			auto masterClusterId = self->dbInfo->get().clusterId;
-			if (self->dbInfo->get().recoveryState == RecoveryState::ACCEPTING_COMMITS &&
+			if (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
 			    !self->durableClusterId.isValid()) {
 				ASSERT(masterClusterId.isValid());
 				self->durableClusterId = masterClusterId;
