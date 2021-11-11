@@ -637,8 +637,6 @@ int run_op_read_blob_granules(FDBTransaction* transaction,
 		return FDB_ERROR_RETRY;
 	}
 
-	// Not used currently! FIXME: fix warning
-
 	// Allocate a separate context per call to avoid multiple threads accessing
 	BGLocalFileContext fileContext;
 	fileContext.bgFilePath = bgFilePath;

@@ -227,12 +227,9 @@ ThreadFuture<RangeResult> DLTransaction::readBlobGranules(const KeyRangeRef& key
                                                           Version beginVersion,
                                                           Optional<Version> readVersion,
                                                           ReadBlobGranuleContext granuleContext) {
-	// TODO REMOVE prints
-	printf("    DLTransaction::readBlobGranules\n");
 	if (!api->transactionReadBlobGranules) {
 		return unsupported_operation();
 	}
-	printf("    DLTransaction::readBlobGranules 2\n");
 
 	// FIXME: better way to convert here?
 	FdbCApi::FDBReadBlobGranuleContext context;

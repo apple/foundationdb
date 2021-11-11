@@ -132,7 +132,6 @@ public:
 
 private:
 	friend class Transaction;
-	friend class Database;
 	KeyValueArrayFuture(FDBFuture* f) : Future(f) {}
 };
 
