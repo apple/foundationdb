@@ -5006,7 +5006,19 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			for (auto& c : fii.changes)
 				eager.addMutations(c.mutations);
 
-			wait(doEagerReads(data, &eager));
+			try {
+				wait(doEagerReads(data, &eager));
+			} catch (Error& err) {
+				// Sometimes when a read take too long, a storage engine will throw `transaction_too_old`. If this
+				// happens, log a warning and retry.
+				if (e.code() != error_code_transaction_too_old) {
+					throw;
+				}
+
+				TraceEvent(SevWarnAlways, "EagerReadsFailed").error(err);
+				eager = UpdateEagerReadInfo();
+				continue;
+			}
 			if (data->shardChangeCounter == changeCounter)
 				break;
 			TEST(true); // A fetchKeys completed while we were doing this, so eager might be outdated.  Read it again.
