@@ -47,7 +47,7 @@ ACTOR template <class Node>
 	while (!prefetchQueue.empty() || !toFree.empty()) {
 
 		while (prefetchQueue.size() < 10 && !toFree.empty()) {
-			_mm_prefetch((const char*)toFree.back(), _MM_HINT_T0);
+			__builtin_prefetch((const char*)toFree.back(), _MM_HINT_T0);
 			prefetchQueue.push_back(toFree.back());
 			toFree.pop_back();
 		}
