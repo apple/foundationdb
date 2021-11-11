@@ -319,7 +319,7 @@ struct TLogData : NonCopyable {
 	                                // interface should work without directly accessing rawPersistentQueue
 	TLogQueue* persistentQueue; // Logical queue the log operates on and persist its data.
 
-	std::deque<Version> unknownCommittedVersions;
+	std::deque<std::tuple<Version, int>> unknownCommittedVersions;
 
 	int64_t diskQueueCommitBytes;
 	AsyncVar<bool>
@@ -2256,9 +2256,9 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 	if (req.debugID.present())
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.After");
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-		self->unknownCommittedVersions.push_front(req.version);
+		self->unknownCommittedVersions.push_front(std::make_tuple(req.version, req.tLogCount));
 		while (!self->unknownCommittedVersions.empty() &&
-		       self->unknownCommittedVersions.back() <= req.knownCommittedVersion) {
+		       std::get<0>(self->unknownCommittedVersions.back()) <= req.knownCommittedVersion) {
 			self->unknownCommittedVersions.pop_back();
 		}
 	}

@@ -515,6 +515,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 	std::vector<Future<TLogCommitReply>> allReplies;
 	int location = 0;
 	Span span("TPLS:push"_loc, spanContext);
+	int tLogCount = tpcvMap.present() ? tpcvMap.get().size() : 0;
 
 	for (auto& it : tLogs) {
 		if (it->isLocal && it->logServers.size()) {
@@ -554,6 +555,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 				                                                                          knownCommittedVersion,
 				                                                                          minKnownCommittedVersion,
 				                                                                          msg,
+				                                                                          tLogCount,
 				                                                                          debugID),
 				                                                        TaskPriority::ProxyTLogCommitReply)));
 				Future<Void> commitSuccess = success(allReplies.back());
@@ -1917,40 +1919,27 @@ Optional<std::tuple<Version, Version, std::map<UID, Version>>> TagPartitionedLog
 			std::map<UID, Version> rvPerTLog;
 			std::unordered_map<Version, int> versionRepCount;
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				for (int log = 0; log < logSet->logServers.size(); log++) {
-					if (std::find(availableItems.begin(), availableItems.end(), logSet->tLogLocalities[log]) ==
-					    availableItems.end()) {
-						continue;
-					}
-					rvPerTLog[lockInfo.replies[log].get().id] = results[new_safe_range_begin].end;
-					for (int i = 0; i < lockInfo.replies[log].get().unknownCommittedVersions.size(); i++) {
-						Version k = lockInfo.replies[log].get().unknownCommittedVersions[i];
+				for (auto& result : results) {
+					rvPerTLog[result.id] = results[new_safe_range_begin].end;
+					for (int i = 0; i < result.unknownCommittedVersions.size(); i++) {
+						Version k = std::get<0>(result.unknownCommittedVersions[i]);
 						if (k <= results[new_safe_range_begin].end) {
 							continue;
 						}
 						versionRepCount[k]++;
 					}
 				}
-				for (int log = 0; log < logSet->logServers.size(); log++) {
-					if (std::find(availableItems.begin(), availableItems.end(), logSet->tLogLocalities[log]) ==
-					    availableItems.end()) {
-						continue;
-					}
-					for (int i = 0; i < lockInfo.replies[log].get().unknownCommittedVersions.size(); i++) {
-						Version k = lockInfo.replies[log].get().unknownCommittedVersions[i];
-						if (versionRepCount[k] >= logSet->tLogReplicationFactor) {
-							rvPerTLog[lockInfo.replies[log].get().id] = k;
+				int toleratedFailues = logSet->logServers.size() - requiredCount;
+				for (auto& result : results) {
+					for (int i = 0; i < result.unknownCommittedVersions.size(); i++) {
+						Version k = std::get<0>(result.unknownCommittedVersions[i]);
+						if (versionRepCount[k] >= std::get<1>(result.unknownCommittedVersions[i]) - toleratedFailues) {
+							rvPerTLog[result.id] = k;
 						}
 					}
 				}
-				for (int log = 0; log < logSet->logServers.size(); log++) {
-					if (std::find(availableItems.begin(), availableItems.end(), logSet->tLogLocalities[log]) ==
-					    availableItems.end()) {
-						continue;
-					}
-					TraceEvent("GetDurableResultLog")
-					    .detail("LOG", lockInfo.replies[log].get().id)
-					    .detail("RV", rvPerTLog[lockInfo.replies[log].get().id]);
+				for (auto& result : results) {
+					TraceEvent("GetDurableResultLog").detail("LOG", result.id).detail("RV", rvPerTLog[result.id]);
 				}
 			}
 			return std::make_tuple(knownCommittedVersion, results[new_safe_range_begin].end, rvPerTLog);

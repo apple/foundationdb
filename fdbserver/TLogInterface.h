@@ -132,7 +132,7 @@ struct TLogLockResult {
 	constexpr static FileIdentifier file_identifier = 11822027;
 	Version end;
 	Version knownCommittedVersion;
-	std::deque<Version> unknownCommittedVersions;
+	std::deque<std::tuple<Version, int>> unknownCommittedVersions;
 	UID id;
 
 	template <class Ar>
@@ -306,6 +306,7 @@ struct TLogCommitRequest {
 	StringRef messages; // Each message prefixed by a 4-byte length
 
 	ReplyPromise<TLogCommitReply> reply;
+	int tLogCount;
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}
@@ -316,10 +317,11 @@ struct TLogCommitRequest {
 	                  Version knownCommittedVersion,
 	                  Version minKnownCommittedVersion,
 	                  StringRef messages,
+	                  int tLogCount,
 	                  Optional<UID> debugID)
 	  : spanContext(context), arena(a), prevVersion(prevVersion), version(version),
 	    knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion),
-	    messages(messages), debugID(debugID) {}
+	    messages(messages), tLogCount(tLogCount), debugID(debugID) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -331,6 +333,7 @@ struct TLogCommitRequest {
 		           reply,
 		           arena,
 		           debugID,
+		           tLogCount,
 		           spanContext);
 	}
 };
