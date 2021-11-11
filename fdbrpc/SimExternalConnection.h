@@ -28,6 +28,24 @@
 
 #include <boost/asio.hpp>
 
+// MockDNS is a class maintaining a <hostname, vector<NetworkAddress>> mapping, mocking a DNS in simulation.
+class MockDNS {
+public:
+	bool findMockTCPEndpoint(const std::string& host, const std::string& service);
+	void addMockTCPEndpoint(const std::string& host,
+	                        const std::string& service,
+	                        const std::vector<NetworkAddress>& addresses);
+	void updateMockTCPEndpoint(const std::string& host,
+	                           const std::string& service,
+	                           const std::vector<NetworkAddress>& addresses);
+	void removeMockTCPEndpoint(const std::string& host, const std::string& service);
+	void clearMockTCPEndpoints();
+	std::vector<NetworkAddress> getTCPEndpoint(const std::string& host, const std::string& service);
+
+private:
+	std::map<std::string, std::vector<NetworkAddress>> hostnameToAddresses;
+};
+
 class SimExternalConnection final : public IConnection, public ReferenceCounted<SimExternalConnection> {
 	boost::asio::ip::tcp::socket socket;
 	SimExternalConnection(boost::asio::ip::tcp::socket&& socket);
@@ -50,6 +68,9 @@ public:
 	UID getDebugID() const override;
 	static Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host, const std::string& service);
 	static Future<Reference<IConnection>> connect(NetworkAddress toAddr);
+
+private:
+	static MockDNS mockDNS;
 };
 
 #endif

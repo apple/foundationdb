@@ -67,6 +67,49 @@ public:
 	}
 };
 
+bool MockDNS::findMockTCPEndpoint(const std::string& host, const std::string& service) {
+	std::string hostname = host + ":" + service;
+	return hostnameToAddresses.find(hostname) != hostnameToAddresses.end();
+}
+
+void MockDNS::addMockTCPEndpoint(const std::string& host,
+                                 const std::string& service,
+                                 const std::vector<NetworkAddress>& addresses) {
+	if (findMockTCPEndpoint(host, service)) {
+		throw operation_failed();
+	}
+	hostnameToAddresses[host + ":" + service] = addresses;
+}
+
+void MockDNS::updateMockTCPEndpoint(const std::string& host,
+                                    const std::string& service,
+                                    const std::vector<NetworkAddress>& addresses) {
+	if (!findMockTCPEndpoint(host, service)) {
+		throw operation_failed();
+	}
+	hostnameToAddresses[host + ":" + service] = addresses;
+}
+
+void MockDNS::removeMockTCPEndpoint(const std::string& host, const std::string& service) {
+	if (!findMockTCPEndpoint(host, service)) {
+		throw operation_failed();
+	}
+	hostnameToAddresses.erase(host + ":" + service);
+}
+
+std::vector<NetworkAddress> MockDNS::getTCPEndpoint(const std::string& host, const std::string& service) {
+	if (!findMockTCPEndpoint(host, service)) {
+		throw operation_failed();
+	}
+	return hostnameToAddresses[host + ":" + service];
+}
+
+void MockDNS::clearMockTCPEndpoints() {
+	hostnameToAddresses.clear();
+}
+
+MockDNS SimExternalConnection::mockDNS;
+
 void SimExternalConnection::close() {
 	socket.close();
 }
@@ -152,6 +195,9 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpointImpl(std::str
 
 Future<std::vector<NetworkAddress>> SimExternalConnection::resolveTCPEndpoint(const std::string& host,
                                                                               const std::string& service) {
+	if (mockDNS.findMockTCPEndpoint(host, service)) {
+		return mockDNS.getTCPEndpoint(host, service);
+	}
 	return resolveTCPEndpointImpl(host, service);
 }
 
@@ -209,6 +255,51 @@ TEST_CASE("fdbrpc/SimExternalClient") {
 	StringRef echo(&vec[0], vec.size());
 	ASSERT(echo.toString() == data.toString());
 	serverThread.join();
+	return Void();
+}
+
+TEST_CASE("fdbrpc/MockTCPEndpoints") {
+	state MockDNS mockDNS;
+	state std::vector<NetworkAddress> networkAddresses;
+	state NetworkAddress address1(IPAddress(0x13131313), 1);
+	state NetworkAddress address2(IPAddress(0x14141414), 2);
+	networkAddresses.push_back(address1);
+	networkAddresses.push_back(address2);
+	mockDNS.addMockTCPEndpoint("testhost1", "testport1", networkAddresses);
+	ASSERT(mockDNS.findMockTCPEndpoint("testhost1", "testport1"));
+	ASSERT(mockDNS.findMockTCPEndpoint("testhost1", "testport2") == false);
+	std::vector<NetworkAddress> resolvedNetworkAddresses = mockDNS.getTCPEndpoint("testhost1", "testport1");
+	ASSERT(resolvedNetworkAddresses.size() == 2);
+	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address1) !=
+	       resolvedNetworkAddresses.end());
+	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address2) !=
+	       resolvedNetworkAddresses.end());
+	// Adding a hostname twice should fail.
+	try {
+		mockDNS.addMockTCPEndpoint("testhost1", "testport1", networkAddresses);
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_operation_failed);
+	}
+	// Updating an unexisted hostname should fail.
+	try {
+		mockDNS.updateMockTCPEndpoint("testhost2", "testport2", networkAddresses);
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_operation_failed);
+	}
+	// Removing an unexisted hostname should fail.
+	try {
+		mockDNS.removeMockTCPEndpoint("testhost2", "testport2");
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_operation_failed);
+	}
+	mockDNS.clearMockTCPEndpoints();
+	// Updating any hostname right after clearing endpoints should fail.
+	try {
+		mockDNS.updateMockTCPEndpoint("testhost1", "testport1", networkAddresses);
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_operation_failed);
+	}
+
 	return Void();
 }
 
