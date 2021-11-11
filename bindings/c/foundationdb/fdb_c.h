@@ -265,6 +265,24 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range(FDBTransaction
                                                                   fdb_bool_t reverse);
 #endif
 
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_and_flat_map(FDBTransaction* tr,
+                                                                               uint8_t const* begin_key_name,
+                                                                               int begin_key_name_length,
+                                                                               fdb_bool_t begin_or_equal,
+                                                                               int begin_offset,
+                                                                               uint8_t const* end_key_name,
+                                                                               int end_key_name_length,
+                                                                               fdb_bool_t end_or_equal,
+                                                                               int end_offset,
+                                                                               uint8_t const* mapper_name,
+                                                                               int mapper_name_length,
+                                                                               int limit,
+                                                                               int target_bytes,
+                                                                               FDBStreamingMode mode,
+                                                                               int iteration,
+                                                                               fdb_bool_t snapshot,
+                                                                               fdb_bool_t reverse);
+
 DLLEXPORT void fdb_transaction_set(FDBTransaction* tr,
                                    uint8_t const* key_name,
                                    int key_name_length,

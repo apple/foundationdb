@@ -1438,12 +1438,15 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 
 	if (args->client_threads_per_version > 0) {
 		err = fdb_network_set_option(
-		    FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, (uint8_t*)&args->client_threads_per_version, sizeof(uint32_t));
+		    FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, (uint8_t*)&args->client_threads_per_version, sizeof(int64_t));
 		if (err) {
 			fprintf(stderr,
 			        "ERROR: fdb_network_set_option (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) (%d): %s\n",
 			        (uint8_t*)&args->client_threads_per_version,
 			        fdb_get_error(err));
+			// let's exit here since we do not want to confuse users
+			// that mako is running with multi-threaded client enabled
+			return -1;
 		}
 	}
 

@@ -63,7 +63,7 @@ bool IPAddress::isValid() const {
 	return std::get<uint32_t>(addr) != 0;
 }
 
-NetworkAddress NetworkAddress::parse(std::string const& s) {
+Hostname Hostname::parse(std::string const& s) {
 	if (s.empty()) {
 		throw connection_string_invalid();
 	}
@@ -75,6 +75,29 @@ NetworkAddress NetworkAddress::parse(std::string const& s) {
 		f = s.substr(0, s.size() - 4);
 	} else {
 		f = s;
+	}
+	auto colonPos = f.find_first_of(":");
+	return Hostname(f.substr(0, colonPos), f.substr(colonPos + 1), isTLS);
+}
+
+FDB_DEFINE_BOOLEAN_PARAM(NetworkAddressFromHostname);
+
+NetworkAddress NetworkAddress::parse(std::string const& s) {
+	if (s.empty()) {
+		throw connection_string_invalid();
+	}
+
+	bool isTLS = false;
+	NetworkAddressFromHostname fromHostname = NetworkAddressFromHostname::False;
+	std::string f = s;
+	const auto& pos = f.find("(fromHostname)");
+	if (pos != std::string::npos) {
+		fromHostname = NetworkAddressFromHostname::True;
+		f = f.substr(0, pos);
+	}
+	if (f.size() > 4 && strcmp(f.c_str() + f.size() - 4, ":tls") == 0) {
+		isTLS = true;
+		f = f.substr(0, f.size() - 4);
 	}
 
 	if (f[0] == '[') {
@@ -89,13 +112,13 @@ NetworkAddress NetworkAddress::parse(std::string const& s) {
 		if (!addr.present()) {
 			throw connection_string_invalid();
 		}
-		return NetworkAddress(addr.get(), port, true, isTLS);
+		return NetworkAddress(addr.get(), port, true, isTLS, fromHostname);
 	} else {
 		// TODO: Use IPAddress::parse
 		int a, b, c, d, port, count = -1;
 		if (sscanf(f.c_str(), "%d.%d.%d.%d:%d%n", &a, &b, &c, &d, &port, &count) < 5 || count != f.size())
 			throw connection_string_invalid();
-		return NetworkAddress((a << 24) + (b << 16) + (c << 8) + d, port, true, isTLS);
+		return NetworkAddress((a << 24) + (b << 16) + (c << 8) + d, port, true, isTLS, fromHostname);
 	}
 }
 
@@ -123,7 +146,11 @@ std::vector<NetworkAddress> NetworkAddress::parseList(std::string const& addrs) 
 }
 
 std::string NetworkAddress::toString() const {
-	return formatIpPort(ip, port) + (isTLS() ? ":tls" : "");
+	std::string ipString = formatIpPort(ip, port) + (isTLS() ? ":tls" : "");
+	if (fromHostname) {
+		return ipString + "(fromHostname)";
+	}
+	return ipString;
 }
 
 std::string toIPVectorString(const std::vector<uint32_t>& ips) {
@@ -158,8 +185,10 @@ Future<Reference<IConnection>> INetworkConnections::connect(const std::string& h
 	Future<NetworkAddress> pickEndpoint =
 	    map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
 		    NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
-		    if (useTLS)
+		    addr.fromHostname = NetworkAddressFromHostname::True;
+		    if (useTLS) {
 			    addr.flags = NetworkAddress::FLAG_TLS;
+		    }
 		    return addr;
 	    });
 
@@ -185,15 +214,18 @@ TEST_CASE("/flow/network/ipaddress") {
 		auto addrCompressed = "[2001:db8:85a3::8a2e:370:7334]:4800";
 		ASSERT(addrParsed.isV6());
 		ASSERT(!addrParsed.isTLS());
+		ASSERT(addrParsed.fromHostname == NetworkAddressFromHostname::False);
+		ASSERT(addrParsed.toString() == addrCompressed);
 		ASSERT(addrParsed.toString() == addrCompressed);
 	}
 
 	{
-		auto addr = "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:4800:tls";
+		auto addr = "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:4800:tls(fromHostname)";
 		auto addrParsed = NetworkAddress::parse(addr);
-		auto addrCompressed = "[2001:db8:85a3::8a2e:370:7334]:4800:tls";
+		auto addrCompressed = "[2001:db8:85a3::8a2e:370:7334]:4800:tls(fromHostname)";
 		ASSERT(addrParsed.isV6());
 		ASSERT(addrParsed.isTLS());
+		ASSERT(addrParsed.fromHostname == NetworkAddressFromHostname::True);
 		ASSERT(addrParsed.toString() == addrCompressed);
 	}
 
@@ -216,6 +248,64 @@ TEST_CASE("/flow/network/ipaddress") {
 		auto addrParsed = IPAddress::parse(addr);
 		ASSERT(!addrParsed.present());
 	}
+
+	return Void();
+}
+
+TEST_CASE("/flow/network/hostname") {
+	std::string hn1s = "localhost:1234";
+	std::string hn2s = "host-name:1234";
+	std::string hn3s = "host.name:1234";
+	std::string hn4s = "host-name_part1.host-name_part2:1234:tls";
+
+	std::string hn5s = "127.0.0.1:1234";
+	std::string hn6s = "127.0.0.1:1234:tls";
+	std::string hn7s = "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:4800";
+	std::string hn8s = "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:4800:tls";
+	std::string hn9s = "2001:0db8:85a3:0000:0000:8a2e:0370:7334";
+	std::string hn10s = "2001:0db8:85a3:0000:0000:8a2e:0370:7334:tls";
+	std::string hn11s = "[::1]:4800";
+	std::string hn12s = "[::1]:4800:tls";
+	std::string hn13s = "1234";
+
+	auto hn1 = Hostname::parse(hn1s);
+	ASSERT(hn1.toString() == hn1s);
+	ASSERT(hn1.host == "localhost");
+	ASSERT(hn1.service == "1234");
+	ASSERT(!hn1.useTLS);
+
+	auto hn2 = Hostname::parse(hn2s);
+	ASSERT(hn2.toString() == hn2s);
+	ASSERT(hn2.host == "host-name");
+	ASSERT(hn2.service == "1234");
+	ASSERT(!hn2.useTLS);
+
+	auto hn3 = Hostname::parse(hn3s);
+	ASSERT(hn3.toString() == hn3s);
+	ASSERT(hn3.host == "host.name");
+	ASSERT(hn3.service == "1234");
+	ASSERT(!hn3.useTLS);
+
+	auto hn4 = Hostname::parse(hn4s);
+	ASSERT(hn4.toString() == hn4s);
+	ASSERT(hn4.host == "host-name_part1.host-name_part2");
+	ASSERT(hn4.service == "1234");
+	ASSERT(hn4.useTLS);
+
+	ASSERT(Hostname::isHostname(hn1s));
+	ASSERT(Hostname::isHostname(hn2s));
+	ASSERT(Hostname::isHostname(hn3s));
+	ASSERT(Hostname::isHostname(hn4s));
+
+	ASSERT(!Hostname::isHostname(hn5s));
+	ASSERT(!Hostname::isHostname(hn6s));
+	ASSERT(!Hostname::isHostname(hn7s));
+	ASSERT(!Hostname::isHostname(hn8s));
+	ASSERT(!Hostname::isHostname(hn9s));
+	ASSERT(!Hostname::isHostname(hn10s));
+	ASSERT(!Hostname::isHostname(hn11s));
+	ASSERT(!Hostname::isHostname(hn12s));
+	ASSERT(!Hostname::isHostname(hn13s));
 
 	return Void();
 }

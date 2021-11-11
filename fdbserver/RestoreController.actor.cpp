@@ -37,7 +37,8 @@
 #include "flow/Platform.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR static Future<Void> clearDB(Database cx);
+// TODO: Support [[maybe_unused]] attribute for actors
+// ACTOR static Future<Void> clearDB(Database cx);
 ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc,
                                                 std::vector<RestoreFileFR>* rangeFiles,
                                                 std::vector<RestoreFileFR>* logFiles,
@@ -76,7 +77,8 @@ ACTOR static Future<Void> notifyLoadersVersionBatchFinished(std::map<UID, Restor
                                                             int batchIndex);
 ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreControllerData> self, bool terminate);
 ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreControllerData> self, Database cx);
-ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreControllerData> self);
+// TODO: Support [[maybe_unused]] attribute for actors
+// ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreControllerData> self);
 ACTOR static Future<Void> checkRolesLiveness(Reference<RestoreControllerData> self);
 
 void splitKeyRangeForAppliers(Reference<ControllerBatchData> batchData,
@@ -900,16 +902,18 @@ ACTOR static Future<Void> buildRangeVersions(KeyRangeMap<Version>* pRangeVersion
 	return Void();
 }
 
+/*
 ACTOR static Future<Void> clearDB(Database cx) {
-	wait(runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		tr->clear(normalKeys);
-		return Void();
-	}));
+    wait(runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+        tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+        tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+        tr->clear(normalKeys);
+        return Void();
+    }));
 
-	return Void();
+    return Void();
 }
+*/
 
 ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInterface> appliersInterf,
                                                  std::map<UID, RestoreLoaderInterface> loadersInterf,
@@ -1135,67 +1139,69 @@ ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreControllerData
 	return Void();
 }
 
+/*
 // Update the most recent time when controller receives hearbeat from each loader and applier
 // TODO: Replace the heartbeat mechanism with FDB failure monitoring mechanism
 ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreControllerData> self) {
-	wait(self->recruitedRoles.getFuture());
+    wait(self->recruitedRoles.getFuture());
 
-	int numRoles = self->loadersInterf.size() + self->appliersInterf.size();
-	state std::map<UID, RestoreLoaderInterface>::iterator loader = self->loadersInterf.begin();
-	state std::map<UID, RestoreApplierInterface>::iterator applier = self->appliersInterf.begin();
-	state std::vector<Future<RestoreCommonReply>> fReplies(numRoles, Never()); // TODO: Reserve memory for this vector
-	state std::vector<UID> nodes;
-	state int index = 0;
-	state Future<Void> fTimeout = Void();
+    int numRoles = self->loadersInterf.size() + self->appliersInterf.size();
+    state std::map<UID, RestoreLoaderInterface>::iterator loader = self->loadersInterf.begin();
+    state std::map<UID, RestoreApplierInterface>::iterator applier = self->appliersInterf.begin();
+    state std::vector<Future<RestoreCommonReply>> fReplies(numRoles, Never()); // TODO: Reserve memory for this vector
+    state std::vector<UID> nodes;
+    state int index = 0;
+    state Future<Void> fTimeout = Void();
 
-	// Initialize nodes only once
-	std::transform(self->loadersInterf.begin(),
-	               self->loadersInterf.end(),
-	               std::back_inserter(nodes),
-	               [](const std::pair<UID, RestoreLoaderInterface>& in) { return in.first; });
-	std::transform(self->appliersInterf.begin(),
-	               self->appliersInterf.end(),
-	               std::back_inserter(nodes),
-	               [](const std::pair<UID, RestoreApplierInterface>& in) { return in.first; });
+    // Initialize nodes only once
+    std::transform(self->loadersInterf.begin(),
+                   self->loadersInterf.end(),
+                   std::back_inserter(nodes),
+                   [](const std::pair<UID, RestoreLoaderInterface>& in) { return in.first; });
+    std::transform(self->appliersInterf.begin(),
+                   self->appliersInterf.end(),
+                   std::back_inserter(nodes),
+                   [](const std::pair<UID, RestoreApplierInterface>& in) { return in.first; });
 
-	loop {
-		loader = self->loadersInterf.begin();
-		applier = self->appliersInterf.begin();
-		index = 0;
-		std::fill(fReplies.begin(), fReplies.end(), Never());
-		// ping loaders and appliers
-		while (loader != self->loadersInterf.end()) {
-			fReplies[index] = loader->second.heartbeat.getReply(RestoreSimpleRequest());
-			loader++;
-			index++;
-		}
-		while (applier != self->appliersInterf.end()) {
-			fReplies[index] = applier->second.heartbeat.getReply(RestoreSimpleRequest());
-			applier++;
-			index++;
-		}
+    loop {
+        loader = self->loadersInterf.begin();
+        applier = self->appliersInterf.begin();
+        index = 0;
+        std::fill(fReplies.begin(), fReplies.end(), Never());
+        // ping loaders and appliers
+        while (loader != self->loadersInterf.end()) {
+            fReplies[index] = loader->second.heartbeat.getReply(RestoreSimpleRequest());
+            loader++;
+            index++;
+        }
+        while (applier != self->appliersInterf.end()) {
+            fReplies[index] = applier->second.heartbeat.getReply(RestoreSimpleRequest());
+            applier++;
+            index++;
+        }
 
-		fTimeout = delay(SERVER_KNOBS->FASTRESTORE_HEARTBEAT_DELAY);
+        fTimeout = delay(SERVER_KNOBS->FASTRESTORE_HEARTBEAT_DELAY);
 
-		// Here we have to handle error, otherwise controller worker will fail and exit.
-		try {
-			wait(waitForAll(fReplies) || fTimeout);
-		} catch (Error& e) {
-			// This should be an ignorable error.
-			TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "FastRestoreUpdateHeartbeatError").error(e);
-		}
+        // Here we have to handle error, otherwise controller worker will fail and exit.
+        try {
+            wait(waitForAll(fReplies) || fTimeout);
+        } catch (Error& e) {
+            // This should be an ignorable error.
+            TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "FastRestoreUpdateHeartbeatError").error(e);
+        }
 
-		// Update the most recent heart beat time for each role
-		for (int i = 0; i < fReplies.size(); ++i) {
-			if (!fReplies[i].isError() && fReplies[i].isReady()) {
-				double currentTime = now();
-				auto item = self->rolesHeartBeatTime.emplace(nodes[i], currentTime);
-				item.first->second = currentTime;
-			}
-		}
-		wait(fTimeout); // Ensure not updating heartbeat too quickly
-	}
+        // Update the most recent heart beat time for each role
+        for (int i = 0; i < fReplies.size(); ++i) {
+            if (!fReplies[i].isError() && fReplies[i].isReady()) {
+                double currentTime = now();
+                auto item = self->rolesHeartBeatTime.emplace(nodes[i], currentTime);
+                item.first->second = currentTime;
+            }
+        }
+        wait(fTimeout); // Ensure not updating heartbeat too quickly
+    }
 }
+*/
 
 // Check if a restore role dies or disconnected
 ACTOR static Future<Void> checkRolesLiveness(Reference<RestoreControllerData> self) {

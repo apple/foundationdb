@@ -27,6 +27,7 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
+#include "fdbclient/ClientVersion.h"
 
 struct ClusterInterface {
 	constexpr static FileIdentifier file_identifier = 15888863;
@@ -90,56 +91,6 @@ struct ClusterControllerClientInterface {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, clientInterface);
-	}
-};
-
-struct ClientVersionRef {
-	StringRef clientVersion;
-	StringRef sourceVersion;
-	StringRef protocolVersion;
-
-	ClientVersionRef() { initUnknown(); }
-
-	ClientVersionRef(Arena& arena, ClientVersionRef const& cv)
-	  : clientVersion(arena, cv.clientVersion), sourceVersion(arena, cv.sourceVersion),
-	    protocolVersion(arena, cv.protocolVersion) {}
-	ClientVersionRef(StringRef clientVersion, StringRef sourceVersion, StringRef protocolVersion)
-	  : clientVersion(clientVersion), sourceVersion(sourceVersion), protocolVersion(protocolVersion) {}
-	ClientVersionRef(StringRef versionString) {
-		std::vector<StringRef> parts = versionString.splitAny(LiteralStringRef(","));
-		if (parts.size() != 3) {
-			initUnknown();
-			return;
-		}
-		clientVersion = parts[0];
-		sourceVersion = parts[1];
-		protocolVersion = parts[2];
-	}
-
-	void initUnknown() {
-		clientVersion = LiteralStringRef("Unknown");
-		sourceVersion = LiteralStringRef("Unknown");
-		protocolVersion = LiteralStringRef("Unknown");
-	}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, clientVersion, sourceVersion, protocolVersion);
-	}
-
-	size_t expectedSize() const { return clientVersion.size() + sourceVersion.size() + protocolVersion.size(); }
-
-	bool operator<(const ClientVersionRef& rhs) const {
-		if (protocolVersion != rhs.protocolVersion) {
-			return protocolVersion < rhs.protocolVersion;
-		}
-
-		// These comparisons are arbitrary because they aren't ordered
-		if (clientVersion != rhs.clientVersion) {
-			return clientVersion < rhs.clientVersion;
-		}
-
-		return sourceVersion < rhs.sourceVersion;
 	}
 };
 
