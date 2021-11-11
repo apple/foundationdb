@@ -89,6 +89,16 @@ rocksdb::ReadOptions getReadOptions() {
 	return options;
 }
 
+Error statusToError(const rocksdb::Status& s) {
+	if (s.IsIOError()) {
+		return io_error();
+	} else if (s.IsTimedOut()) {
+		return transaction_too_old();
+	} else {
+		return unknown_error();
+	}
+}
+
 struct RocksDBKeyValueStore : IKeyValueStore {
 	using DB = rocksdb::DB*;
 	using CF = rocksdb::ColumnFamilyHandle*;
@@ -106,14 +116,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		void init() override {}
-
-		Error statusToError(const rocksdb::Status& s) {
-			if (s == rocksdb::Status::IOError()) {
-				return io_error();
-			} else {
-				return unknown_error();
-			}
-		}
 
 		struct OpenAction : TypedAction<Writer, OpenAction> {
 			std::string path;
@@ -246,11 +248,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			if (s.ok()) {
 				a.result.send(Value(toStringRef(value)));
-			} else {
-				if (!s.IsNotFound()) {
-					TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValue");
-				}
+			} else if (s.IsNotFound()) {
 				a.result.send(Optional<Value>());
+			} else {
+				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValue");
+				a.result.sendError(statusToError(s));
 			}
 		}
 
@@ -282,13 +284,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (s.ok()) {
 				a.result.send(Value(StringRef(reinterpret_cast<const uint8_t*>(value.data()),
 				                              std::min(value.size(), size_t(a.maxLength)))));
-			} else {
-				if (!s.IsNotFound()) {
-					TraceEvent(SevError, "RocksDBError")
-					    .detail("Error", s.ToString())
-					    .detail("Method", "ReadValuePrefix");
-				}
+			} else if (s.IsNotFound()) {
 				a.result.send(Optional<Value>());
+			} else {
+				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValuePrefix");
+				a.result.sendError(statusToError(s));
 			}
 		}
 
@@ -350,6 +350,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadRange");
+				a.result.sendError(statusToError(s));
+				return;
 			}
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
