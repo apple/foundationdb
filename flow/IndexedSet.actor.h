@@ -29,6 +29,7 @@
 #define FLOW_INDEXEDSET_ACTOR_H
 
 #include "flow/flow.h"
+#include "flow/Platform.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR template <class Node>
@@ -47,7 +48,7 @@ ACTOR template <class Node>
 	while (!prefetchQueue.empty() || !toFree.empty()) {
 
 		while (prefetchQueue.size() < 10 && !toFree.empty()) {
-			__builtin_prefetch((const char*)toFree.back(), _MM_HINT_T0);
+			_mm_prefetch((const char*)toFree.back(), _MM_HINT_T0);
 			prefetchQueue.push_back(toFree.back());
 			toFree.pop_back();
 		}
