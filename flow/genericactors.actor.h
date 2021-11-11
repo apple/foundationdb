@@ -1253,13 +1253,13 @@ ACTOR template <class T, class U>
 void tagAndForward(Promise<T>* pOutputPromise, U value, Future<Void> signal) {
 	state Promise<T> out(std::move(*pOutputPromise));
 	wait(signal);
-	out.send(value);
+	out.send(std::move(value));
 }
 
 ACTOR template <class T>
 void tagAndForward(PromiseStream<T>* pOutput, T value, Future<Void> signal) {
 	wait(signal);
-	pOutput->send(value);
+	pOutput->send(std::move(value));
 }
 
 ACTOR template <class T>
