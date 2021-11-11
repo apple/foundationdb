@@ -256,7 +256,6 @@ std::string printable(const VectorRef<StringRef>& val) {
 std::string printable(const StringRef& val) {
 	return val.printable();
 }
-
 std::string printable(const std::string& str) {
 	return StringRef(str).printable();
 }
@@ -6432,7 +6431,8 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 					//TraceEvent("SplitStorageMetricsResult").detail("Used", used.bytes).detail("Location", i).detail("Size", res.splits.size());
 				}
 
-				if (used.allLessOrEqual(limit * CLIENT_KNOBS->STORAGE_METRICS_UNFAIR_SPLIT_LIMIT)) {
+				if (used.allLessOrEqual(limit * CLIENT_KNOBS->STORAGE_METRICS_UNFAIR_SPLIT_LIMIT) &&
+				    results.size() > 1) {
 					results.resize(results.arena(), results.size() - 1);
 				}
 

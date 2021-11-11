@@ -405,7 +405,7 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 
 		BlobGranuleSplitState st = decodeBlobGranuleSplitValue(it.value).first;
 		ASSERT(st != BlobGranuleSplitState::Unknown);
-		if (st == BlobGranuleSplitState::Started) {
+		if (st == BlobGranuleSplitState::Initialized) {
 			totalStarted++;
 		} else if (st == BlobGranuleSplitState::Done) {
 			totalDone++;
@@ -445,7 +445,7 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 			tr->clear(currentRange);
 		} else {
 			tr->atomicOp(myStateKey, blobGranuleSplitValueFor(newState), MutationRef::SetVersionstampedValue);
-			if (newState == BlobGranuleSplitState::Assigned && currentState == BlobGranuleSplitState::Started &&
+			if (newState == BlobGranuleSplitState::Assigned && currentState == BlobGranuleSplitState::Initialized &&
 			    totalStarted == 1) {
 				// We are the last one to change from Start -> Assigned, so we can stop the parent change feed.
 				if (BW_DEBUG) {
@@ -2221,7 +2221,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 					info.parentGranule = std::pair(parentGranuleRange, parentGranuleID);
 
 					state std::pair<BlobGranuleSplitState, Version> granuleSplitState =
-					    std::pair(BlobGranuleSplitState::Started, invalidVersion);
+					    std::pair(BlobGranuleSplitState::Initialized, invalidVersion);
 					if (hasPrevOwner) {
 						std::pair<BlobGranuleSplitState, Version> _gss =
 						    wait(getGranuleSplitState(&tr, parentGranuleID, info.granuleID));
@@ -2232,7 +2232,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 						// was already assigned, use change feed start version
 						ASSERT(granuleSplitState.second > 0);
 						info.changeFeedStartVersion = granuleSplitState.second;
-					} else if (granuleSplitState.first == BlobGranuleSplitState::Started) {
+					} else if (granuleSplitState.first == BlobGranuleSplitState::Initialized) {
 						wait(updateGranuleSplitState(&tr,
 						                             info.parentGranule.get().first,
 						                             info.parentGranule.get().second,

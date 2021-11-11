@@ -255,6 +255,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 
 				Standalone<VectorRef<KeyRef>> keys =
 				    wait(tr->getTransaction().splitStorageMetrics(range, splitMetrics, estimated));
+				ASSERT(keys.size() >= 2);
 				return keys;
 			} else {
 				// printf("  Not splitting range\n");
@@ -613,10 +614,8 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
 	state int64_t newLockSeqno = -1;
 
 	// first get ranges to split
-	if (newRanges.empty()) {
-		Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(tr, granuleRange));
-		newRanges = _newRanges;
-	}
+	Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(tr, granuleRange));
+	newRanges = _newRanges;
 
 	if (newRanges.size() == 2) {
 		// not large enough to split, just reassign back to worker
@@ -635,13 +634,23 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
 		return Void();
 	}
 
+	if (BM_DEBUG) {
+		printf("Splitting range [%s - %s) into (%d):\n",
+		       granuleRange.begin.printable().c_str(),
+		       granuleRange.end.printable().c_str(),
+		       newRanges.size() - 1);
+		for (int i = 0; i < newRanges.size(); i++) {
+			printf("    %s\n", newRanges[i].printable().c_str());
+		}
+	}
+
 	// Need to split range. Persist intent to split and split metadata to DB BEFORE sending split requests
 	loop {
 		try {
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
-			ASSERT(newRanges.size() >= 2);
+			ASSERT(newRanges.size() > 2);
 
 			// make sure we're still manager when this transaction gets committed
 			wait(checkManagerLock(tr, bmData));
@@ -685,7 +694,7 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
 				Key splitKey = blobGranuleSplitKeyFor(granuleID, newGranuleID);
 
 				tr->atomicOp(splitKey,
-				             blobGranuleSplitValueFor(BlobGranuleSplitState::Started),
+				             blobGranuleSplitValueFor(BlobGranuleSplitState::Initialized),
 				             MutationRef::SetVersionstampedValue);
 
 				Key historyKey = blobGranuleHistoryKeyFor(KeyRangeRef(newRanges[i], newRanges[i + 1]), latestVersion);
@@ -713,16 +722,6 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
 				return Void();
 			}
 			wait(tr->onError(e));
-		}
-	}
-
-	if (BM_DEBUG) {
-		printf("Splitting range [%s - %s) into (%d):\n",
-		       granuleRange.begin.printable().c_str(),
-		       granuleRange.end.printable().c_str(),
-		       newRanges.size() - 1);
-		for (int i = 0; i < newRanges.size() - 1; i++) {
-			printf("  [%s - %s)\n", newRanges[i].printable().c_str(), newRanges[i + 1].printable().c_str());
 		}
 	}
 
@@ -1084,7 +1083,7 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 				std::tie(parentGranuleID, granuleID) = decodeBlobGranuleSplitKey(split.key);
 				std::tie(splitState, version) = decodeBlobGranuleSplitValue(split.value);
 				const KeyRange range = blobGranuleSplitKeyRangeFor(parentGranuleID);
-				if (splitState <= BlobGranuleSplitState::Started) {
+				if (splitState <= BlobGranuleSplitState::Initialized) {
 					bmData->workerAssignments.insert(range, UID());
 				}
 			}
