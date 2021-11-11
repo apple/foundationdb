@@ -2599,6 +2599,31 @@ ACTOR Future<Void> handleRangeRevoke(Reference<BlobWorkerData> bwData, RevokeBlo
 	}
 }
 
+ACTOR Future<Void> monitorRemoval(Reference<BlobWorkerData> bwData) {
+	state Key blobWorkerListKey = blobWorkerListKeyFor(bwData->id);
+	loop {
+		loop {
+			state ReadYourWritesTransaction tr(bwData->db);
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+				Optional<Value> val = wait(tr.get(blobWorkerListKey));
+				if (!val.present()) {
+					return Void();
+				}
+
+				state Future<Void> watchFuture = tr.watch(blobWorkerListKey);
+
+				wait(tr.commit());
+				wait(watchFuture);
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
                               ReplyPromise<InitializeBlobWorkerReply> recruitReply,
                               Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
@@ -2651,6 +2676,9 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	recruitReply.send(rep);
 
 	self->addActor.send(waitFailureServer(bwInterf.waitFailure.getFuture()));
+	state Future<Void> selfRemoved = monitorRemoval(self);
+
+	TraceEvent("BlobWorkerInit", self->id);
 
 	try {
 		loop choose {
@@ -2712,15 +2740,27 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			when(HaltBlobWorkerRequest req = waitNext(bwInterf.haltBlobWorker.getFuture())) {
 				req.reply.send(Void());
 				if (self->managerEpochOk(req.managerEpoch)) {
-					TraceEvent("BlobWorkerHalted", bwInterf.id()).detail("ReqID", req.requesterID);
-					printf("BW %s was halted\n", bwInterf.id().toString().c_str());
+					TraceEvent("BlobWorkerHalted", self->id)
+					    .detail("ReqID", req.requesterID)
+					    .detail("ManagerEpoch", req.managerEpoch);
+					if (BW_DEBUG) {
+						printf(
+						    "BW %s was halted by manager %lld\n", bwInterf.id().toString().c_str(), req.managerEpoch);
+					}
 					break;
 				}
 			}
 			when(wait(collection)) {
-				TraceEvent("BlobWorkerActorCollectionError");
+				TraceEvent("BlobWorkerActorCollectionError", self->id);
 				ASSERT(false);
 				throw internal_error();
+			}
+			when(wait(selfRemoved)) {
+				if (BW_DEBUG) {
+					printf("Blob worker detected removal. Exiting...\n");
+				}
+				TraceEvent("BlobWorkerRemoved", self->id);
+				return Void();
 			}
 		}
 	} catch (Error& e) {
