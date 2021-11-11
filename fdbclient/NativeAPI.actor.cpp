@@ -720,14 +720,17 @@ Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
 	return waitForAll(replies);
 }
 
-ACTOR static Future<Void> monitorProxiesChange(DatabaseContext* cx,
-                                               Reference<AsyncVar<ClientDBInfo> const> clientDBInfo,
-                                               AsyncTrigger* triggerVar) {
+ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
+                                                    Reference<AsyncVar<ClientDBInfo> const> clientDBInfo,
+                                                    AsyncTrigger* proxyChangeTrigger,
+                                                    AsyncTrigger* clientLibChangeTrigger) {
 	state std::vector<CommitProxyInterface> curCommitProxies;
 	state std::vector<GrvProxyInterface> curGrvProxies;
 	state ActorCollection actors(false);
+	state uint64_t curClientLibChangeCounter;
 	curCommitProxies = clientDBInfo->get().commitProxies;
 	curGrvProxies = clientDBInfo->get().grvProxies;
+	curClientLibChangeCounter = clientDBInfo->get().clientLibChangeCounter;
 
 	loop {
 		choose {
@@ -748,7 +751,10 @@ ACTOR static Future<Void> monitorProxiesChange(DatabaseContext* cx,
 					}
 					curCommitProxies = clientDBInfo->get().commitProxies;
 					curGrvProxies = clientDBInfo->get().grvProxies;
-					triggerVar->trigger();
+					proxyChangeTrigger->trigger();
+				}
+				if (curClientLibChangeCounter != clientDBInfo->get().clientLibChangeCounter) {
+					clientLibChangeTrigger->trigger();
 				}
 			}
 			when(wait(actors.getResult())) { UNSTOPPABLE_ASSERT(false); }
@@ -1238,7 +1244,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	getValueSubmitted.init(LiteralStringRef("NativeAPI.GetValueSubmitted"));
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
-	monitorProxiesInfoChange = monitorProxiesChange(this, clientInfo, &proxiesChangeTrigger);
+	clientDBInfoMonitor = monitorClientDBInfoChange(this, clientInfo, &proxiesChangeTrigger, &clientLibChangeTrigger);
 	tssMismatchHandler = handleTssMismatches(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
@@ -1499,7 +1505,7 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo,
 
 DatabaseContext::~DatabaseContext() {
 	cacheListMonitor.cancel();
-	monitorProxiesInfoChange.cancel();
+	clientDBInfoMonitor.cancel();
 	monitorTssInfoChange.cancel();
 	tssMismatchHandler.cancel();
 	for (auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
@@ -1586,6 +1592,10 @@ void DatabaseContext::invalidateCache(const KeyRangeRef& keys) {
 
 Future<Void> DatabaseContext::onProxiesChanged() const {
 	return this->proxiesChangeTrigger.onTrigger();
+}
+
+Future<Void> DatabaseContext::onClientLibStatusChanged() const {
+	return this->clientLibChangeTrigger.onTrigger();
 }
 
 bool DatabaseContext::sampleReadTags() const {

@@ -507,5 +507,3 @@ void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* ho
 	                          // upon return that the hook is set.
 	threadCompletionHooks.emplace_back(hook, hookParameter);
 }
-
-IClientApi* ThreadSafeApi::api = new ThreadSafeApi();

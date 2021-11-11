@@ -172,9 +172,8 @@ public:
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 
-	static IClientApi* api;
-
 private:
+	friend IClientApi* getLocalClientAPI();
 	ThreadSafeApi();
 
 	int apiVersion;
