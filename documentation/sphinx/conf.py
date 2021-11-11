@@ -53,7 +53,7 @@ copyright = u'2013-2021 Apple, Inc and the FoundationDB project authors'
 
 # Load the version information from 'versions.target'
 import xml.etree.ElementTree as ET
-version_path = os.environ['FDB_VERSIONS_TARGET_PATH']
+version_path = os.path.join(os.path.dirname(sys.executable), '..', '..', '..', 'versions.target')
 tree = ET.parse(version_path)
 root = tree.getroot()
 
