@@ -433,8 +433,8 @@ inline static uint64_t timestampCounter() {
 #if !(__has_builtin(__rdtsc))
 inline static uint64_t timestampCounter() {
 	uint64_t lo, hi;
-	asm( "rdtsc" : "=a" (lo), "=d" (hi) );
-	return( lo | (hi << 32) );
+	asm("rdtsc" : "=a"(lo), "=d"(hi));
+	return (lo | (hi << 32));
 }
 #else
 #define timestampCounter() __rdtsc()
