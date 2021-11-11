@@ -286,10 +286,8 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 				reply.privateMutations.push_back(reply.arena, mutations);
 				reply.arena.dependsOn(mutations.arena());
 			}
-			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				// merge mutation tags with sent client tags
-				toCommit.saveTags(reply.writtenTags);
-			}
+			// merge mutation tags with sent client tags
+			toCommit.saveTags(reply.writtenTags);
 			reply.privateMutationCount = toCommit.getMutationCount();
 		}
 
