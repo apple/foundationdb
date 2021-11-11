@@ -49,6 +49,7 @@ function(add_documentation_target)
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target}_done
     COMMAND ${CMAKE_COMMAND} -E make_directory ${out_dir} &&
+            FDB_VERSIONS_TARGET_PATH=${CMAKE_BINARY_DIR}/versions.target
             ${python_command} ${SPHINX_COMMAND} -W -b ${target}
                               -d ${doctree} -c ${sphinx_dir}
                               ${sphinx_dir}/source

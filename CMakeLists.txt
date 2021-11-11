@@ -89,7 +89,7 @@ message(STATUS "Current git version ${CURRENT_GIT_VERSION}")
 set(FDB_PACKAGE_NAME "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 set(FDB_VERSION ${PROJECT_VERSION})
 set(FDB_VERSION_PLAIN ${FDB_VERSION})
-configure_file(${CMAKE_SOURCE_DIR}/versions.target.cmake ${CMAKE_SOURCE_DIR}/versions.target)
+configure_file(${CMAKE_SOURCE_DIR}/versions.target.cmake ${CMAKE_CURRENT_BINARY_DIR}/versions.target)
 
 message(STATUS "FDB version is ${FDB_VERSION}")
 message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
