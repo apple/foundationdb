@@ -770,6 +770,8 @@ struct LogPushData : NonCopyable {
 		}
 	}
 
+	void addWrittenTags(const std::set<Tag>& tags) { written_tags.insert(tags.begin(), tags.end()); }
+
 	void getLocations(const std::set<Tag>& tags, std::set<uint16_t>& writtenTLogs) {
 		std::vector<Tag> vtags(tags.begin(), tags.end());
 		std::vector<int> msg_locations;
