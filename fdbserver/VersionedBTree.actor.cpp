@@ -4941,6 +4941,7 @@ private:
 		bool clearAfterBoundary;
 
 		bool boundaryCleared() const { return boundaryChanged && !boundaryValue.present(); }
+		bool boundarySet() const { return boundaryChanged && boundaryValue.present(); }
 
 		// Returns true if this RangeMutation doesn't actually mutate anything
 		bool noChanges() const { return !boundaryChanged && !clearAfterBoundary; }
@@ -4959,8 +4960,6 @@ private:
 			boundaryChanged = true;
 			boundaryValue = v;
 		}
-
-		bool boundarySet() const { return boundaryChanged && boundaryValue.present(); }
 
 		std::string toString() const {
 			return format("boundaryChanged=%d clearAfterBoundary=%d boundaryValue=%s",
@@ -6077,21 +6076,21 @@ private:
 
 		// Leaf Page
 		if (btPage->isLeaf()) {
-			bool updating = tryToUpdate;
+			// When true, we are modifying the existing DeltaTree
+			// When false, we are accumulating retained and added records in merged vector to build pages from them.
+			bool updatingDeltaTree = tryToUpdate;
 			bool changesMade = false;
 
-			state Standalone<VectorRef<RedwoodRecordRef>> merged;
-			auto switchToLinearMerge = [&]() {
-				// Couldn't make changes in place, so now do a linear merge and build new pages.
-				updating = false;
-				auto c = cursor;
-				c.moveFirst();
-				while (c != cursor) {
-					debug_printf("%s catch-up adding %s\n", context.c_str(), c.get().toString().c_str());
-					merged.push_back(merged.arena(), c.get());
-					c.moveNext();
+			// Copy page for modification if not already copied
+			auto copyForUpdate = [&]() {
+				if (!pageCopy.isValid()) {
+					pageCopy = clonePageForUpdate(page);
+					btPage = (BTreePage*)pageCopy->begin();
+					cursor.switchTree(btPage->tree());
 				}
 			};
+
+			state Standalone<VectorRef<RedwoodRecordRef>> merged;
 
 			// The first mutation buffer boundary has a key <= the first key in the page.
 
@@ -6100,48 +6099,59 @@ private:
 
 			// Now, process each mutation range and merge changes with existing data.
 			bool firstMutationBoundary = true;
-			while (mBegin != mEnd) {
-				debug_printf("%s New mutation boundary: '%s': %s\n",
-				             context.c_str(),
-				             printable(mBegin.key()).c_str(),
-				             mBegin.mutation().toString().c_str());
+			constexpr int maxHeightAllowed = 8;
 
+			while (mBegin != mEnd) {
 				// Apply the change to the mutation buffer start boundary key only if
-				//   - there actually is a change (whether a set or a clear, old records are to be removed)
+				//   - there actually is a change (clear or set to new value)
 				//   - either this is not the first boundary or it is but its key matches our lower bound key
 				bool applyBoundaryChange = mBegin.mutation().boundaryChanged &&
 				                           (!firstMutationBoundary || mBegin.key() == update->subtreeLowerBound.key);
+				bool boundaryExists = cursor.valid() && cursor.get().key == mBegin.key();
+
+				debug_printf("%s New mutation boundary: '%s': %s  applyBoundaryChange=%d  boundaryExists=%d "
+				             "updatingDeltaTree=%d\n",
+				             context.c_str(),
+				             printable(mBegin.key()).c_str(),
+				             mBegin.mutation().toString().c_str(),
+				             applyBoundaryChange,
+				             boundaryExists,
+				             updatingDeltaTree);
+
 				firstMutationBoundary = false;
 
-				// Iterate over records for the mutation boundary key, keep them unless the boundary key was changed or
-				// we are not applying it
-				while (cursor.valid() && cursor.get().key == mBegin.key()) {
-					// If there were no changes to the key or we're not applying it
-					if (!applyBoundaryChange) {
-						// If not updating, add to the output set, otherwise skip ahead past the records for the
-						// mutation boundary
-						if (!updating) {
-							merged.push_back(merged.arena(), cursor.get());
-							debug_printf("%s Added %s [existing, boundary start]\n",
-							             context.c_str(),
-							             cursor.get().toString().c_str());
-						}
-						cursor.moveNext();
-					} else {
+				if (applyBoundaryChange) {
+					// If the boundary is being set to a value, the new KV record will be inserted
+					bool shouldInsertBoundary = mBegin.mutation().boundarySet();
+
+					// Optimization:  In-place value update of new same-sized value
+					// If the boundary exists in the page and we're in update mode and the boundary is being set to a
+					// new value of the same length as the old value then just update the value bytes.
+					if (boundaryExists && updatingDeltaTree && shouldInsertBoundary &&
+					    mBegin.mutation().boundaryValue.get().size() == cursor.get().value.get().size()) {
 						changesMade = true;
+						shouldInsertBoundary = false;
+
+						debug_printf("%s In-place value update for %s [existing, boundary start]\n",
+						             context.c_str(),
+						             cursor.get().toString().c_str());
+
+						copyForUpdate();
+						memcpy((uint8_t*)cursor.get().value.get().begin(),
+						       mBegin.mutation().boundaryValue.get().begin(),
+						       cursor.get().value.get().size());
+						cursor.moveNext();
+					} else if (boundaryExists) {
+						// An in place update can't be done, so if the boundary exists then erase or skip the record
+						changesMade = true;
+
 						// If updating, erase from the page, otherwise do not add to the output set
-						if (updating) {
+						if (updatingDeltaTree) {
 							debug_printf("%s Erasing %s [existing, boundary start]\n",
 							             context.c_str(),
 							             cursor.get().toString().c_str());
 
-							// Copy page for modification if not already copied
-							if (!pageCopy.isValid()) {
-								pageCopy = clonePageForUpdate(page);
-								btPage = (BTreePage*)pageCopy->begin();
-								cursor.tree = btPage->tree();
-							}
-
+							copyForUpdate();
 							btPage->kvBytes -= cursor.get().kvBytes();
 							cursor.erase();
 						} else {
@@ -6151,42 +6161,59 @@ private:
 							cursor.moveNext();
 						}
 					}
-				}
 
-				constexpr int maxHeightAllowed = 8;
+					// If the boundary value is being set and we must insert it, add it to the page or the output set
+					if (shouldInsertBoundary) {
+						RedwoodRecordRef rec(mBegin.key(), mBegin.mutation().boundaryValue.get());
+						changesMade = true;
 
-				// Write the new record(s) for the mutation boundary start key if its value has been set
-				// Clears of this key will have been processed above by not being erased from the updated page or
-				// excluded from the merge output
-				if (applyBoundaryChange && mBegin.mutation().boundarySet()) {
-					RedwoodRecordRef rec(mBegin.key(), mBegin.mutation().boundaryValue.get());
-					changesMade = true;
+						// If updating, first try to add the record to the page
+						if (updatingDeltaTree) {
+							copyForUpdate();
+							if (cursor.insert(rec, update->skipLen, maxHeightAllowed)) {
+								btPage->kvBytes += rec.kvBytes();
+								debug_printf("%s Inserted %s [mutation, boundary start]\n",
+								             context.c_str(),
+								             rec.toString().c_str());
+							} else {
+								debug_printf("%s Insert failed for %s [mutation, boundary start]\n",
+								             context.c_str(),
+								             rec.toString().c_str());
 
-					// If updating, add to the page, else add to the output set
-					if (updating) {
-						// Copy page for modification if not already copied
-						if (!pageCopy.isValid()) {
-							pageCopy = clonePageForUpdate(page);
-							btPage = (BTreePage*)pageCopy->begin();
-							cursor.tree = btPage->tree();
+								// Since the insert failed we must switch to a linear merge of existing data and
+								// mutations, accumulating the new record set in the merge vector and build new pages
+								// from it. First, we must populate the merged vector with all the records up to but not
+								// including the current mutation boundary key.
+								auto c = cursor;
+								c.moveFirst();
+								while (c != cursor) {
+									debug_printf(
+									    "%s catch-up adding %s\n", context.c_str(), c.get().toString().c_str());
+									merged.push_back(merged.arena(), c.get());
+									c.moveNext();
+								}
+								updatingDeltaTree = false;
+							}
 						}
 
-						if (cursor.insert(rec, update->skipLen, maxHeightAllowed)) {
-							btPage->kvBytes += rec.kvBytes();
+						// If not updating, possibly due to insert failure above, then add record to the output set
+						if (!updatingDeltaTree) {
+							merged.push_back(merged.arena(), rec);
 							debug_printf(
-							    "%s Inserted %s [mutation, boundary start]\n", context.c_str(), rec.toString().c_str());
-						} else {
-							debug_printf("%s Insert failed for %s [mutation, boundary start]\n",
-							             context.c_str(),
-							             rec.toString().c_str());
-							switchToLinearMerge();
+							    "%s Added %s [mutation, boundary start]\n", context.c_str(), rec.toString().c_str());
 						}
 					}
-
-					if (!updating) {
-						merged.push_back(merged.arena(), rec);
-						debug_printf(
-						    "%s Added %s [mutation, boundary start]\n", context.c_str(), rec.toString().c_str());
+				} else if (boundaryExists) {
+					// If the boundary exists in the page but there is no pending change,
+					// then if updating move past it, otherwise add it to the output set.
+					if (updatingDeltaTree) {
+						cursor.moveNext();
+					} else {
+						merged.push_back(merged.arena(), cursor.get());
+						debug_printf("%s Added %s [existing, boundary start]\n",
+						             context.c_str(),
+						             cursor.get().toString().c_str());
+						cursor.moveNext();
 					}
 				}
 
@@ -6205,35 +6232,29 @@ private:
 
 				// If the records are being removed and we're not doing an in-place update
 				// OR if we ARE doing an update but the records are NOT being removed, then just skip them.
-				if (remove != updating) {
+				if (remove != updatingDeltaTree) {
 					// If not updating, then the records, if any exist, are being removed.  We don't know if there
 					// actually are any but we must assume there are.
-					if (!updating) {
+					if (!updatingDeltaTree) {
 						changesMade = true;
 					}
 
 					debug_printf("%s Seeking forward to next boundary (remove=%d updating=%d) %s\n",
 					             context.c_str(),
 					             remove,
-					             updating,
+					             updatingDeltaTree,
 					             mBegin.key().toString().c_str());
 					cursor.seekGreaterThanOrEqual(end, update->skipLen);
 				} else {
 					// Otherwise we must visit the records.  If updating, the visit is to erase them, and if doing a
 					// linear merge than the visit is to add them to the output set.
 					while (cursor.valid() && cursor.get().compare(end, update->skipLen) < 0) {
-						if (updating) {
+						if (updatingDeltaTree) {
 							debug_printf("%s Erasing %s [existing, boundary start]\n",
 							             context.c_str(),
 							             cursor.get().toString().c_str());
 
-							// Copy page for modification if not already copied
-							if (!pageCopy.isValid()) {
-								pageCopy = clonePageForUpdate(page);
-								btPage = (BTreePage*)pageCopy->begin();
-								cursor.tree = btPage->tree();
-							}
-
+							copyForUpdate();
 							btPage->kvBytes -= cursor.get().kvBytes();
 							cursor.erase();
 							changesMade = true;
@@ -6257,27 +6278,23 @@ private:
 
 				// If we don't have to remove the records and we are updating, do nothing.
 				// If we do have to remove the records and we are not updating, do nothing.
-				if (remove != updating) {
-					debug_printf(
-					    "%s Ignoring remaining records, remove=%d updating=%d\n", context.c_str(), remove, updating);
+				if (remove != updatingDeltaTree) {
+					debug_printf("%s Ignoring remaining records, remove=%d updating=%d\n",
+					             context.c_str(),
+					             remove,
+					             updatingDeltaTree);
 				} else {
 					// If updating and the key is changing, we must visit the records to erase them.
 					// If not updating and the key is not changing, we must visit the records to add them to the output
 					// set.
 					while (cursor.valid()) {
-						if (updating) {
+						if (updatingDeltaTree) {
 							debug_printf(
 							    "%s Erasing %s and beyond [existing, matches changed upper mutation boundary]\n",
 							    context.c_str(),
 							    cursor.get().toString().c_str());
 
-							// Copy page for modification if not already copied
-							if (!pageCopy.isValid()) {
-								pageCopy = clonePageForUpdate(page);
-								btPage = (BTreePage*)pageCopy->begin();
-								cursor.tree = btPage->tree();
-							}
-
+							copyForUpdate();
 							btPage->kvBytes -= cursor.get().kvBytes();
 							cursor.erase();
 						} else {
@@ -6305,7 +6322,7 @@ private:
 				    context.c_str());
 			}
 
-			if (updating) {
+			if (updatingDeltaTree) {
 				// If the tree is now empty, delete the page
 				if (cursor.tree->numItems == 0) {
 					update->cleared();
@@ -6581,7 +6598,7 @@ private:
 			if (modifier.clonedPage) {
 				pageCopy = modifier.page;
 				btPage = modifier.btPage();
-				cursor.tree = btPage->tree();
+				cursor.switchTree(btPage->tree());
 			}
 
 			// If page contents have changed
@@ -8065,7 +8082,7 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	return Void();
 }
 
-TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
+TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	// Sanity check on delta tree node format
 	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(false) == 4);
 	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(true) == 8);
@@ -8241,7 +8258,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	return Void();
 }
 
-TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
+TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 	// Sanity check on delta tree node format
 	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(false) == 4);
 	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(true) == 8);
@@ -8420,7 +8437,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 	return Void();
 }
 
-TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
+TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 	const int N = 200;
 	IntIntPair lowerBound = { 0, 0 };
 	IntIntPair upperBound = { 1000, 1000 };
@@ -9017,7 +9034,7 @@ TEST_CASE(":/redwood/pager/ArenaPage") {
 	return Void();
 }
 
-TEST_CASE("/redwood/correctness/btree") {
+TEST_CASE("Lredwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
@@ -10254,7 +10271,7 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
 	return Void();
 }
 
-TEST_CASE("!/redwood/performance/randomRangeScans") {
+TEST_CASE(":/redwood/performance/randomRangeScans") {
 	state int prefixLen = 30;
 	state int suffixSize = 12;
 	state int valueSize = 100;
