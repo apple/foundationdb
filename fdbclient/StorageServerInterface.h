@@ -125,14 +125,14 @@ struct StorageServerInterface {
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
 				getKeyValuesStream =
 				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
-				changeFeedStream =
-				    RequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
-				overlappingChangeFeeds =
-				    RequestStream<struct OverlappingChangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
-				changeFeedPop =
-				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
 				getKeyValuesAndFlatMap =
-				    RequestStream<struct GetKeyValuesAndFlatMapRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
+				    RequestStream<struct GetKeyValuesAndFlatMapRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
+				changeFeedStream =
+				    RequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
+				overlappingChangeFeeds =
+				    RequestStream<struct OverlappingChangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
+				changeFeedPop =
+				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -175,10 +175,10 @@ struct StorageServerInterface {
 		streams.push_back(getReadHotRanges.getReceiver());
 		streams.push_back(getRangeSplitPoints.getReceiver());
 		streams.push_back(getKeyValuesStream.getReceiver(TaskPriority::LoadBalancedEndpoint));
+		streams.push_back(getKeyValuesAndFlatMap.getReceiver(TaskPriority::LoadBalancedEndpoint));
 		streams.push_back(changeFeedStream.getReceiver());
 		streams.push_back(overlappingChangeFeeds.getReceiver());
 		streams.push_back(changeFeedPop.getReceiver());
-		streams.push_back(getKeyValuesAndFlatMap.getReceiver(TaskPriority::LoadBalancedEndpoint));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
