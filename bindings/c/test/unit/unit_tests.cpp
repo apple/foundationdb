@@ -922,7 +922,7 @@ TEST_CASE("fdb_transaction_get_range_and_flat_map") {
 		    /* target_bytes */ 0,
 		    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
 		    /* iteration */ 0,
-		    /* snapshot */ false,
+		    /* snapshot */ true,
 		    /* reverse */ 0);
 
 		if (result.err) {
