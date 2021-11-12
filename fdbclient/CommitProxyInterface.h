@@ -384,13 +384,28 @@ struct GetStorageServerRejoinInfoRequest {
 	}
 };
 
+// TxnStateRequest is use to broadcastx key-value pairs from TxnStateStore to
+// proxies and tLogs. The request can be divided into multiple parts, and
+// receiver is responsible for collecting and ordering them.
 struct TxnStateRequest {
 	constexpr static FileIdentifier file_identifier = 15250781;
 	Arena arena;
+
+	// List of key-value pairs from txnStateStore.
 	VectorRef<KeyValueRef> data;
+
+	// Sequence number to order when TxnStateRequest is divided into multiple
+	// parts.
 	Sequence sequence;
+
+	// Is this the last TxnStateRequest part.
 	bool last;
+
+	// List of endpoints to broadcast this request to. Instead of one process
+	// sending this request to every endpoint, each process is resposible for
+	// sending to a limited number of processes.
 	std::vector<Endpoint> broadcastInfo;
+
 	ReplyPromise<Void> reply;
 
 	template <class Ar>

@@ -439,7 +439,7 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 	state int idx = 0;
 	state std::map<Optional<Value>, Tag> dcId_tags;
 	state int8_t nextLocality = 0;
-	state UID teamId;
+	state UID seedTeamId = deterministicRandom()->randomUniqueID();
 	state std::vector<StorageServerInterface> ssInterfaces;
 	while (idx < recruits.storageServers.size()) {
 		TraceEvent("MasterRecruitingInitialStorageServer", self->dbgid)
@@ -455,8 +455,7 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
 		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-			// XXX: each storage server belongs to a unique team
-			isr.storageTeamId = teamId = deterministicRandom()->randomUniqueID();
+			isr.storageTeamId = seedTeamId;
 		}
 
 		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
@@ -478,7 +477,7 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 			tag.id++;
 			idx++;
 
-			servers->emplace_back(newServer.get().interf, teamId);
+			servers->emplace_back(newServer.get().interf, seedTeamId);
 			ssInterfaces.push_back(newServer.get().interf);
 		}
 	}

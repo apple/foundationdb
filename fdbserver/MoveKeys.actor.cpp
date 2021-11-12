@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/FDBTypes.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
@@ -1474,14 +1475,10 @@ void seedShardServers(Arena& arena,
 	tr.read_snapshot = 0;
 	tr.read_conflict_ranges.push_back_deep(arena, allKeys);
 
+	std::unordered_map<ptxn::StorageTeamID, std::vector<UID>> teamToServers;
+
 	for (const auto& [s, teamId] : servers) {
-		std::vector<UID> team = { s.id() };
-		Key teamListKey = storageServerListToTeamIdKey(team);
-
-		// Create teams
-		tr.set(arena, storageTeamIdKey(teamId), encodeStorageTeams(team)); // TeamId -> Vec<StorageServers>
-		tr.set(arena, teamListKey, BinaryWriter::toValue(teamId, Unversioned())); // Vec<StorageServer> -> TeamId
-
+		teamToServers[teamId].push_back(s.id());
 		// Assign tags
 		tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(server_tag[s.id()]));
 		tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
@@ -1491,6 +1488,15 @@ void seedShardServers(Arena& arena,
 			// hack key-backed map here since we can't really change CommitTransactionRef to a RYW transaction
 			Key uidRef = Codec<UID>::pack(s.id()).pack();
 			tr.set(arena, uidRef.withPrefix(tssMappingKeys.begin), uidRef);
+		}
+	}
+
+	// Create seed teams. Initially all storage servers belong to same team.
+	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		for (auto& [teamId, servers] : teamToServers) {
+			tr.set(arena, storageTeamIdKey(teamId), encodeStorageTeams(servers)); // TeamId -> Vec<StorageServers>
+			Key teamListKey = storageServerListToTeamIdKey(servers);
+			tr.set(arena, teamListKey, BinaryWriter::toValue(teamId, Unversioned())); // Vec<StorageServer> -> TeamId
 		}
 	}
 
@@ -1517,7 +1523,20 @@ void seedShardServers(Arena& arena,
 			    tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysTrue, serverKeysFalse);
 		}
 		return;
+	} else {
+		auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS
+		                   ? keyServersValue(serverTags)
+		                   : keyServersValue(RangeResult(), serverSrcUID, serverTeamIDs[0]);
+		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, serverKeysFalse);
+
+		for (const auto& [s, _] : servers) {
+			krmSetPreviouslyEmptyRange(
+			    tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysTrue, serverKeysFalse);
+		}
+		return;
 	}
+
+	//TODO: Remove key-splits code.
 
 	auto getServersValue = [&](int serverIndex) -> Value {
 		// TODO: encode team into keyServersValue with tags

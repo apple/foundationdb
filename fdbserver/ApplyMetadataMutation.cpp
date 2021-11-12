@@ -302,7 +302,6 @@ private:
 			//     should do the assignment.
 			txnStateStore->set(
 			    KeyValueRef(storageTeamIdToTLogGroupKey(teamid), BinaryWriter::toValue(group->id(), Unversioned())));
-			ASSERT(team.size() == 1);
 		}
 
 		// Storage Team ID to Storage Server List

@@ -398,7 +398,7 @@ ACTOR Future<Void> addBackupMutations(
 			//				TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To",
 			// describe(tags)).detail("BackupMutation", backupMutation.toString())
 			// .detail("BackupMutationSize", val.size()).detail("Version", commitVersion).detail("DestPath",
-			// logRangeMutation.first) 					.detail("PartIndex", part).detail("PartIndexEndian",
+			// logRangeMutation.first)					.detail("PartIndex", part).detail("PartIndexEndian",
 			// bigEndian32(part)).detail("PartData", backupMutation.param1);
 			//			}
 		}
@@ -581,7 +581,6 @@ void CommitBatchContext::evaluateBatchSize() {
 
 void CommitBatchContext::trackStorageTeams(const std::set<ptxn::StorageTeamID>& storageTeams) {
 	ASSERT(!pProxyCommitData->tLogGroupCollection->groups().empty());
-	ASSERT(storageTeams.size() == 1);
 	auto tLogGroupId = pProxyCommitData->tLogGroupCollection->assignStorageTeam(*storageTeams.begin())->id();
 	if (!pGroupMessageBuilders.count(tLogGroupId)) {
 		pGroupMessageBuilders.emplace(tLogGroupId,
@@ -2007,15 +2006,16 @@ ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
 
 namespace {
 
+// Collects data and sequences from TxnStateRequest parts.
 struct TransactionStateResolveContext {
+	ProxyCommitData* pCommitData = nullptr;
+
 	// Maximum sequence for txnStateRequest, this is defined when the request last flag is set.
 	Sequence maxSequence = std::numeric_limits<Sequence>::max();
 
 	// Flags marks received transaction state requests, we only process the transaction request when *all* requests are
 	// received.
 	std::unordered_set<Sequence> receivedSequences;
-
-	ProxyCommitData* pCommitData = nullptr;
 
 	// Pointer to transaction state store, shortcut for commitData.txnStateStore
 	IKeyValueStore* pTxnStateStore = nullptr;
@@ -2035,6 +2035,9 @@ struct TransactionStateResolveContext {
 	}
 };
 
+// Called once all parts of TxnStateStore are received via TxnStateRequests. Goes through all KV pairs in TxnStateStore
+// and (1) Updates the ServerCacheInfo which keeps tracks of shards and the related storage team info (including SSID and tags)
+// (2) Calls applyMetadataMutations.
 ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveContext* pContext) {
 	state KeyRange txnKeys = allKeys;
 	state std::map<Tag, UID> tag_uid;
@@ -2088,7 +2091,6 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 				UID k = decodeStorageServerToTeamIdKey(kv.key);
 				std::set<ptxn::StorageTeamID> storageTeamIDs = decodeStorageServerToTeamIdValue(kv.value);
 				// For demo purpose, each storage server can only belong to single storage team.
-				ASSERT(storageTeamIDs.size() == 1);
 				// The first team of a storage server is its own team.
 				pContext->pCommitData->ssToStorageTeam.emplace(k, *storageTeamIDs.begin());
 				continue;
@@ -2108,10 +2110,6 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 			updateTagInfo(src, info.tags, info, srcDstTeams, info.src_info);
 			updateTagInfo(dest, info.tags, info, srcDstTeams, info.dest_info);
 			uniquify(info.tags);
-			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-				// A shard can only correspond to single storage team in the primary DC for now
-				ASSERT(info.storageTeams.size() == 1);
-			}
 			keyInfoData.emplace_back(MapPair<Key, ServerCacheInfo>(k, info), 1);
 		}
 
@@ -2145,6 +2143,8 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 	return Void();
 }
 
+// Receives TxnStateRequest parts and (1) Re-broadcast to other processes (2)
+// collects the entire sequence of TxnStateRequest into `pContext`.
 ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveContext* pContext,
                                                       TxnStateRequest request) {
 	state const TxnStateRequest& req = request;
@@ -2157,8 +2157,9 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 	ASSERT(pContext->pCommitData != nullptr);
 	ASSERT(pContext->pActors != nullptr);
 
+	// Check if part is already received.
 	if (pContext->receivedSequences.count(request.sequence)) {
-		// This part is already received. Still we will re-broadcast it to other CommitProxies
+		// We will still re-broadcast it to other CommitProxies
 		pContext->pActors->send(broadcastTxnRequest(request, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, true));
 		wait(yield());
 		return Void();
