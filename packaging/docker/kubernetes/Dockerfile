@@ -26,7 +26,7 @@ FROM golang:1.16.7-bullseye AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
-RUN go build -o /fdb-kubernetes-monitor ./...
+RUN go build -o /fdb-kubernetes-monitor *.go
 
 # Build the main image
 

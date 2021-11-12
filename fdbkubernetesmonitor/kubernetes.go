@@ -27,6 +27,7 @@ import (
 	"path"
 	"strconv"
 
+	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -95,7 +96,7 @@ func CreatePodClient(logger logr.Logger) (*PodClient, error) {
 
 // retrieveEnvironmentVariables extracts the environment variables we have for
 // an argument into a map.
-func retrieveEnvironmentVariables(argument Argument, target map[string]string) {
+func retrieveEnvironmentVariables(argument api.Argument, target map[string]string) {
 	if argument.Source != "" {
 		target[argument.Source] = os.Getenv(argument.Source)
 	}

@@ -32,6 +32,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-logr/logr"
 )
@@ -52,7 +53,7 @@ type Monitor struct {
 	CustomEnvironment map[string]string
 
 	// ActiveConfiguration defines the active process configuration.
-	ActiveConfiguration *ProcessConfiguration
+	ActiveConfiguration *api.ProcessConfiguration
 
 	// ActiveConfigurationBytes defines the source data for the active process
 	// configuration.
@@ -61,6 +62,9 @@ type Monitor struct {
 	// LastConfigurationTime is the last time we successfully reloaded the
 	// configuration file.
 	LastConfigurationTime time.Time
+
+	// ProcessCount defines how many processes the
+	ProcessCount int
 
 	// ProcessIDs stores the PIDs of the processes that are running. A PID of
 	// zero will indicate that a process does not have a run loop. A PID of -1
@@ -82,7 +86,7 @@ type Monitor struct {
 }
 
 // StartMonitor starts the monitor loop.
-func StartMonitor(logger logr.Logger, configFile string, customEnvironment map[string]string) {
+func StartMonitor(logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int) {
 	podClient, err := CreatePodClient(logger)
 	if err != nil {
 		panic(err)
@@ -93,6 +97,7 @@ func StartMonitor(logger logr.Logger, configFile string, customEnvironment map[s
 		PodClient:         podClient,
 		Logger:            logger,
 		CustomEnvironment: customEnvironment,
+		ProcessCount:      processCount,
 	}
 
 	go func() { monitor.WatchPodTimestamps() }()
@@ -107,7 +112,7 @@ func (monitor *Monitor) LoadConfiguration() {
 		return
 	}
 	defer file.Close()
-	configuration := &ProcessConfiguration{}
+	configuration := &api.ProcessConfiguration{}
 	configurationBytes, err := io.ReadAll(file)
 	if err != nil {
 		monitor.Logger.Error(err, "Error reading monitor configuration", "monitorConfigPath", monitor.ConfigFile)
@@ -154,15 +159,15 @@ func checkOwnerExecutable(path string) error {
 
 // acceptConfiguration is called when the monitor process parses and accepts
 // a configuration from the local config file.
-func (monitor *Monitor) acceptConfiguration(configuration *ProcessConfiguration, configurationBytes []byte) {
+func (monitor *Monitor) acceptConfiguration(configuration *api.ProcessConfiguration, configurationBytes []byte) {
 	monitor.Mutex.Lock()
 	defer monitor.Mutex.Unlock()
 	monitor.Logger.Info("Received new configuration file", "configuration", configuration)
 
 	if monitor.ProcessIDs == nil {
-		monitor.ProcessIDs = make([]int, configuration.ServerCount+1)
+		monitor.ProcessIDs = make([]int, monitor.ProcessCount+1)
 	} else {
-		for len(monitor.ProcessIDs) <= configuration.ServerCount {
+		for len(monitor.ProcessIDs) <= monitor.ProcessCount {
 			monitor.ProcessIDs = append(monitor.ProcessIDs, 0)
 		}
 	}
@@ -171,7 +176,7 @@ func (monitor *Monitor) acceptConfiguration(configuration *ProcessConfiguration,
 	monitor.ActiveConfigurationBytes = configurationBytes
 	monitor.LastConfigurationTime = time.Now()
 
-	for processNumber := 1; processNumber <= configuration.ServerCount; processNumber++ {
+	for processNumber := 1; processNumber <= monitor.ProcessCount; processNumber++ {
 		if monitor.ProcessIDs[processNumber] == 0 {
 			monitor.ProcessIDs[processNumber] = -1
 			tempNumber := processNumber
@@ -284,7 +289,8 @@ func (monitor *Monitor) checkProcessRequired(processNumber int) bool {
 	monitor.Mutex.Lock()
 	defer monitor.Mutex.Unlock()
 	logger := monitor.Logger.WithValues("processNumber", processNumber, "area", "checkProcessRequired")
-	if monitor.ActiveConfiguration.ServerCount < processNumber {
+	runProcesses := monitor.ActiveConfiguration.RunServers
+	if monitor.ProcessCount < processNumber || (runProcesses != nil && !*runProcesses) {
 		logger.Info("Terminating run loop")
 		monitor.ProcessIDs[processNumber] = 0
 		return false
