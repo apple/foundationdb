@@ -718,7 +718,7 @@ inline static int clz(uint32_t value) {
 #endif
 
 // These return thread local counts
-int64_t getNumProfilesDeferred();
+int64_t getNumProfilesDisabled();
 int64_t getNumProfilesOverflowed();
 int64_t getNumProfilesCaptured();
 

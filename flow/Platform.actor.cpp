@@ -3500,13 +3500,12 @@ std::atomic<double> checkThreadTime;
 volatile thread_local bool profileThread = false;
 volatile thread_local int profilingEnabled = 1;
 
-volatile thread_local int64_t numProfilesDeferred = 0;
+volatile thread_local int64_t numProfilesDisabled = 0;
 volatile thread_local int64_t numProfilesOverflowed = 0;
 volatile thread_local int64_t numProfilesCaptured = 0;
-volatile thread_local bool profileRequested = false;
 
-int64_t getNumProfilesDeferred() {
-	return numProfilesDeferred;
+int64_t getNumProfilesDisabled() {
+	return numProfilesDisabled;
 }
 
 int64_t getNumProfilesOverflowed() {
@@ -3524,8 +3523,7 @@ void profileHandler(int sig) {
 	}
 
 	if (!profilingEnabled) {
-		profileRequested = true;
-		++numProfilesDeferred;
+		++numProfilesDisabled;
 		return;
 	}
 
@@ -3561,13 +3559,7 @@ void profileHandler(int sig) {
 
 void setProfilingEnabled(int enabled) {
 #ifdef __linux__
-	if (profileThread && enabled && !profilingEnabled && profileRequested) {
-		profilingEnabled = true;
-		profileRequested = false;
-		pthread_kill(pthread_self(), SIGPROF);
-	} else {
-		profilingEnabled = enabled;
-	}
+	profilingEnabled = enabled;
 #else
 	// No profiling for other platforms!
 #endif
@@ -3684,6 +3676,12 @@ void setupRunLoopProfiler() {
 		TraceEvent("StartingRunLoopProfilingThread").detail("Interval", FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
 		initProfiling();
 		profileThread = true;
+
+		// Explicitly initialize all thread-local state
+		profilingEnabled = 1;
+		numProfilesDisabled = 0;
+		numProfilesOverflowed = 0;
+		numProfilesCaptured = 0;
 
 		struct sigaction action;
 		action.sa_handler = profileHandler;

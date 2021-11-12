@@ -43,7 +43,7 @@ struct SlowTaskWorkload : TestWorkload {
 	ACTOR static Future<Void> go() {
 		wait(delay(1));
 		int64_t phc = dl_iterate_phdr_calls;
-		int64_t startProfilesDeferred = getNumProfilesDeferred();
+		int64_t startProfilesDisabled = getNumProfilesDisabled();
 		int64_t startProfilesOverflowed = getNumProfilesOverflowed();
 		int64_t startProfilesCaptured = getNumProfilesCaptured();
 		int64_t exc = 0;
@@ -60,7 +60,7 @@ struct SlowTaskWorkload : TestWorkload {
 		        " profiles deferred, %" PRId64 " profiles overflowed, %" PRId64 " profiles captured\n",
 		        exc,
 		        dl_iterate_phdr_calls - phc,
-		        getNumProfilesDeferred() - startProfilesDeferred,
+		        getNumProfilesDisabled() - startProfilesDisabled,
 		        getNumProfilesOverflowed() - startProfilesOverflowed,
 		        getNumProfilesCaptured() - startProfilesCaptured);
 
