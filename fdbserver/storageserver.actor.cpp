@@ -85,6 +85,13 @@ bool canReplyWith(Error e) {
 	case error_code_watch_cancelled:
 	case error_code_unknown_change_feed:
 	case error_code_server_overloaded:
+	// getRangeAndMap related exceptions that are not retriable:
+	case error_code_mapper_bad_index:
+	case error_code_mapper_no_such_key:
+	case error_code_mapper_bad_range_decriptor:
+	case error_code_quick_get_key_values_has_more:
+	case error_code_quick_get_value_miss:
+	case error_code_quick_get_key_values_miss:
 		// case error_code_all_alternatives_failed:
 		return true;
 	default:
@@ -2868,11 +2875,18 @@ ACTOR Future<Void> getKeyValuesAndFlatMapQ(StorageServer* data, GetKeyValuesAndF
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
 
-			GetKeyValuesReply _r = wait(
+			GetKeyValuesReply getKeyValuesReply = wait(
 			    readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span.context, type));
 
-			// Map the scanned range to another list of keys and look up.
-			state GetKeyValuesAndFlatMapReply r = wait(flatMap(data, _r, req.mapper));
+			state GetKeyValuesAndFlatMapReply r;
+			try {
+				// Map the scanned range to another list of keys and look up.
+				GetKeyValuesAndFlatMapReply _r = wait(flatMap(data, getKeyValuesReply, req.mapper));
+				r = _r;
+			} catch (Error& e) {
+				TraceEvent("FlatMapError").error(e);
+				throw;
+			}
 
 			if (req.debugID.present())
 				g_traceBatch.addEvent("TransactionDebug",
