@@ -886,19 +886,13 @@ static Value dataOfRecord(const int i) {
 	return Value(format("data-of-record-%08d", i));
 }
 static std::string indexEntryKey(const int i) {
-	return Tuple()
-	    .append(StringRef(prefix))
-	    .append(INDEX)
-	    .append(indexKey(i).contents())
-	    .append(primaryKey(i).contents())
-	    .pack()
-	    .toString();
+	return Tuple().append(StringRef(prefix)).append(INDEX).append(indexKey(i)).append(primaryKey(i)).pack().toString();
 }
 static std::string recordKey(const int i) {
 	return Tuple().append(prefix).append(RECORD).append(primaryKey(i)).pack().toString();
 }
 static std::string recordValue(const int i) {
-	return Tuple().append(dataOfRecord(i).contents()).pack().toString();
+	return Tuple().append(dataOfRecord(i)).pack().toString();
 }
 
 TEST_CASE("fdb_transaction_get_range_and_flat_map") {
