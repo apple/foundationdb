@@ -36,7 +36,7 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	}
 	// Compact sstables when there's too much deleted stuff.
 	options.table_properties_collector_factories = { rocksdb::NewCompactOnDeletionCollectorFactory(128, 1) };
-	
+
 	rocksdb::BlockBasedTableOptions bbOpts;
 	// TODO: Add a knob for the block cache size. (Default is 8 MB)
 	if (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0) {
