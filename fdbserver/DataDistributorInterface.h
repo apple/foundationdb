@@ -21,9 +21,10 @@
 #ifndef FDBSERVER_DATADISTRIBUTORINTERFACE_H
 #define FDBSERVER_DATADISTRIBUTORINTERFACE_H
 
-#include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/Locality.h"
+#include "fdbclient/ClusterInterface.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbrpc/Locality.h"
+#include "fdbrpc/fdbrpc.h"
 
 struct DataDistributorInterface {
 	constexpr static FileIdentifier file_identifier = 12383874;
@@ -33,6 +34,7 @@ struct DataDistributorInterface {
 	UID myId;
 	RequestStream<struct DistributorSnapRequest> distributorSnapReq;
 	RequestStream<struct DistributorExclusionSafetyCheckRequest> distributorExclCheckReq;
+	RequestStream<struct DistributorSplitRangeRequest> distributorSplitRange;
 	RequestStream<struct GetDataDistributorMetricsRequest> dataDistributorMetrics;
 
 	DataDistributorInterface() {}
@@ -53,6 +55,7 @@ struct DataDistributorInterface {
 		           myId,
 		           distributorSnapReq,
 		           distributorExclCheckReq,
+		           distributorSplitRange,
 		           dataDistributorMetrics);
 	}
 };
@@ -144,6 +147,21 @@ struct DistributorExclusionSafetyCheckRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, exclusions, reply);
+	}
+};
+
+// Insert split points, and distribute the resulted shards to different teams.
+struct DistributorSplitRangeRequest {
+	constexpr static FileIdentifier file_identifier = 1384441;
+	std::vector<Key> splitPoints;
+	ReplyPromise<SplitShardReply> reply;
+
+	DistributorSplitRangeRequest() {}
+	explicit DistributorSplitRangeRequest(std::vector<Key> splitPoints) : splitPoints{ std::move(splitPoints) } {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, splitPoints, reply);
 	}
 };
 
