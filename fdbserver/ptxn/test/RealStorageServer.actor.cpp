@@ -128,8 +128,7 @@ ACTOR Future<Void> runStorageServer(StorageServerTestDriver* self) {
 	FakeLogSystem_CustomPeekCursor::getCursorByID(ssi.uniqueID) = self->cursor;
 
 	printTiming << "Starting Storage Server." << std::endl;
-	state Future<Void> ss =
-	    storageServer(data, ssi, self->tag, tssSeedVersion, storageReady, dbInfo, folder);
+	state Future<Void> ss = storageServer(data, ssi, self->tag, tssSeedVersion, storageReady, dbInfo, folder);
 	printTiming << "Storage Server started." << std::endl;
 
 	self->actors.add(ss);

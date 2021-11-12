@@ -78,7 +78,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
 		extraDB = Database::createDatabase(extraFile, -1);
 
-		TraceEvent("DRU_Start");
+		TraceEvent("DRU_Start").log();
 	}
 
 	std::string description() const override { return "BackupToDBUpgrade"; }
@@ -116,7 +116,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 							tr->clear(targetRange);
 						}
 					}
-					wait(backupAgent->submitBackup(tr, tag, backupRanges, false, self->backupPrefix, StringRef()));
+					wait(backupAgent->submitBackup(
+					    tr, tag, backupRanges, StopWhenDone::False, self->backupPrefix, StringRef()));
 					wait(tr->commit());
 					break;
 				} catch (Error& e) {
@@ -132,7 +133,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 		}
 
-		wait(success(backupAgent->waitBackup(self->extraDB, tag, false)));
+		wait(success(backupAgent->waitBackup(self->extraDB, tag, StopWhenDone::False)));
 
 		return Void();
 	}
@@ -458,7 +459,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				}
 			}
 
-			TraceEvent("DRU_DiffRanges");
+			TraceEvent("DRU_DiffRanges").log();
 			wait(diffRanges(prevBackupRanges, self->backupPrefix, cx, self->extraDB));
 
 			// abort backup
@@ -499,7 +500,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			try {
 				TraceEvent("DRU_RestoreDb").detail("RestoreTag", printable(self->restoreTag));
 				wait(restoreTool.submitBackup(
-				    cx, self->restoreTag, restoreRanges, true, StringRef(), self->backupPrefix));
+				    cx, self->restoreTag, restoreRanges, StopWhenDone::True, StringRef(), self->backupPrefix));
 			} catch (Error& e) {
 				TraceEvent("DRU_RestoreSubmitBackupError").error(e).detail("Tag", printable(self->restoreTag));
 				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)

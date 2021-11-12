@@ -90,7 +90,10 @@ Future<Version> FakeLogSystem::push(Version prevVersion,
                                     struct LogPushData& data,
                                     const SpanID& spanContext,
                                     Optional<UID> debugID,
-                                    Optional<ptxn::TLogGroupID> tLogGroup) {
+                                    Optional<ptxn::TLogGroupID> tLogGroup,
+                                    const std::set<ptxn::StorageTeamID>& addedTeams,
+                                    const std::set<ptxn::StorageTeamID>& removedTeams) {
+
 	logMethodName(__func__);
 	return Future<Version>();
 }

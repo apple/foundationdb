@@ -47,7 +47,7 @@ public:
 	template <typename T>
 	static void QueueUserWorkItem(void (T::*function)(void), T* object, ULONG flags = WT_EXECUTELONGFUNCTION) {
 		typedef std::pair<void (T::*)(), T*> CallbackType;
-		std::unique_ptr<CallbackType> p(new CallbackType(function, object));
+		auto p = std::make_unique<CallbackType>(function, object);
 
 		if (::QueueUserWorkItem(ThreadProc<T>, p.get(), flags)) {
 			// The ThreadProc now has the responsibility of deleting the pair.

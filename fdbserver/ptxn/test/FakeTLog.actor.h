@@ -31,7 +31,6 @@
 #include "fdbserver/ptxn/MessageSerializer.h"
 #include "fdbserver/ptxn/MessageTypes.h"
 #include "fdbserver/ptxn/StorageServerInterface.h"
-#include "fdbserver/ptxn/test/Driver.h"
 #include "fdbserver/ptxn/TLogInterface.h"
 #include "flow/flow.h"
 
@@ -40,6 +39,8 @@
 #pragma once
 
 namespace ptxn::test {
+
+struct TestDriverContext;
 
 struct FakeTLogContext {
 	std::shared_ptr<TestDriverContext> pTestDriverContext;

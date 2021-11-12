@@ -268,32 +268,33 @@ struct TLogGroupData : NonCopyable, public ReferenceCounted<TLogGroupData> {
 	// interface should work without directly accessing rawPersistentQueue
 	TLogQueue* persistentQueue; // Logical queue the log operates on and persist its data.
 
-	int64_t diskQueueCommitBytes;
-	AsyncVar<bool>
-	    largeDiskQueueCommitBytes; // becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
+	int64_t diskQueueCommitBytes = 0;
+	// becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
+	AsyncVar<bool> largeDiskQueueCommitBytes{ false };
 
 	Reference<AsyncVar<ServerDBInfo>> dbInfo;
 	Database cx;
 
-	NotifiedVersion queueCommitEnd;
-	Version queueCommitBegin;
+	NotifiedVersion queueCommitEnd{ 0 };
+	Version queueCommitBegin = 0;
 
 	int64_t instanceID;
-	int64_t bytesInput;
-	int64_t bytesDurable;
-	int64_t targetVolatileBytes; // The number of bytes of mutations this TLog should hold in memory before spilling.
-	int64_t overheadBytesInput;
-	int64_t overheadBytesDurable;
+	int64_t bytesInput = 0;
+	int64_t bytesDurable = 0;
+	// The number of bytes of mutations this TLog should hold in memory before spilling.
+	int64_t targetVolatileBytes = SERVER_KNOBS->TLOG_SPILL_THRESHOLD;
+	int64_t overheadBytesInput = 0;
+	int64_t overheadBytesDurable = 0;
 
-	FlowLock peekMemoryLimiter;
+	FlowLock peekMemoryLimiter{ SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES };
 
 	PromiseStream<Future<Void>> sharedActors;
 	Promise<Void> terminated;
-	FlowLock concurrentLogRouterReads;
+	FlowLock concurrentLogRouterReads{ SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS };
 	FlowLock persistentDataCommitLock;
 
 	// Beginning of fields used by snapshot based backup and restore
-	bool ignorePopRequest; // ignore pop request from storage servers
+	bool ignorePopRequest = false; // ignore pop request from storage servers
 	double ignorePopDeadline; // time until which the ignorePopRequest will be
 	// honored
 	std::string ignorePopUid; // callers that set ignorePopRequest will set this
@@ -322,20 +323,14 @@ struct TLogGroupData : NonCopyable, public ReferenceCounted<TLogGroupData> {
 	              Reference<AsyncVar<bool>> degraded,
 	              std::string folder,
 	              Reference<TLogServerData> tLogServer)
-	  : dbgid(dbgid), tlogGroupID(groupID), workerID(workerID),
-	    instanceID(deterministicRandom()->randomUniqueID().first()), persistentData(persistentData),
+	  : dbgid(dbgid), workerID(workerID), tlogGroupID(groupID), persistentData(persistentData),
 	    rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)), dbInfo(dbInfo),
-	    degraded(degraded), queueCommitBegin(0), queueCommitEnd(0), diskQueueCommitBytes(0),
-	    largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0),
-	    targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0), overheadBytesDurable(0),
-	    peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
-	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopRequest(false),
-	    ignorePopDeadline(), ignorePopUid(), dataFolder(folder), toBePopped(),
+	    instanceID(deterministicRandom()->randomUniqueID().first()), dataFolder(folder), degraded(degraded),
 	    commitLatencyDist(Histogram::getHistogram(LiteralStringRef("tLog"),
 	                                              LiteralStringRef("commit"),
 	                                              Histogram::Unit::microseconds)),
 	    tLogServerData(tLogServer) {
-		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, true);
+		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 };
 
@@ -376,22 +371,22 @@ struct TLogServerData : NonCopyable, public ReferenceCounted<TLogServerData> {
 
 	IKeyValueStore* persistentData; // Durable data on disk that were spilled.
 
-	int64_t diskQueueCommitBytes;
-	AsyncVar<bool>
-	    largeDiskQueueCommitBytes; // becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
+	int64_t diskQueueCommitBytes = 0;
+	// becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
+	AsyncVar<bool> largeDiskQueueCommitBytes{ false };
 
 	Reference<AsyncVar<ServerDBInfo>> dbInfo;
 	Database cx;
 
-	NotifiedVersion queueCommitEnd;
-	Version queueCommitBegin;
+	NotifiedVersion queueCommitEnd{ 0 };
+	Version queueCommitBegin = 0;
 
 	int64_t instanceID;
-	int64_t bytesInput;
-	int64_t bytesDurable;
+	int64_t bytesInput = 0;
+	int64_t bytesDurable = 0;
 	int64_t targetVolatileBytes; // The number of bytes of mutations this TLog should hold in memory before spilling.
-	int64_t overheadBytesInput;
-	int64_t overheadBytesDurable;
+	int64_t overheadBytesInput = 0;
+	int64_t overheadBytesDurable = 0;
 
 	WorkerCache<TLogInterface_PassivelyPull> tlogCache;
 	FlowLock peekMemoryLimiter;
@@ -403,7 +398,7 @@ struct TLogServerData : NonCopyable, public ReferenceCounted<TLogServerData> {
 	FlowLock persistentDataCommitLock;
 
 	// Beginning of fields used by snapshot based backup and restore
-	bool ignorePopRequest; // ignore pop request from storage servers
+	bool ignorePopRequest = false; // ignore pop request from storage servers
 	double ignorePopDeadline; // time until which the ignorePopRequest will be
 	// honored
 	std::string ignorePopUid; // callers that set ignorePopRequest will set this
@@ -427,17 +422,14 @@ struct TLogServerData : NonCopyable, public ReferenceCounted<TLogServerData> {
 	               Reference<AsyncVar<ServerDBInfo>> dbInfo,
 	               Reference<AsyncVar<bool>> degraded,
 	               std::string folder)
-	  : dbgid(dbgid), workerID(workerID), instanceID(deterministicRandom()->randomUniqueID().first()), dbInfo(dbInfo),
-	    degraded(degraded), queueCommitBegin(0), queueCommitEnd(0), diskQueueCommitBytes(0),
-	    largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0),
-	    targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0), overheadBytesDurable(0),
+	  : dbgid(dbgid), workerID(workerID), dbInfo(dbInfo), instanceID(deterministicRandom()->randomUniqueID().first()),
+	    targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD),
 	    peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
-	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopRequest(false),
-	    ignorePopDeadline(), ignorePopUid(), dataFolder(folder),
-	    commitLatencyDist(Histogram::getHistogram(LiteralStringRef("tLog"),
-	                                              LiteralStringRef("commit"),
-	                                              Histogram::Unit::microseconds)) {
-		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, true);
+	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopDeadline(), dataFolder(folder),
+	    degraded(degraded), commitLatencyDist(Histogram::getHistogram(LiteralStringRef("tLog"),
+	                                                                  LiteralStringRef("commit"),
+	                                                                  Histogram::Unit::microseconds)) {
+		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 };
 
@@ -481,23 +473,23 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	std::unordered_map<ptxn::StorageTeamID, std::vector<Tag>> storageTeams;
 
 	AsyncTrigger stopCommit; // Trigger to stop the commit
-	bool stopped; // Whether this generation has been stopped.
-	bool initialized; // Whether this generation has been initialized.
+	bool stopped = false; // Whether this generation has been stopped.
+	bool initialized = false; // Whether this generation has been initialized.
 	DBRecoveryCount recoveryCount; // How many recoveries happened in the past, served as generation id.
 
 	// Versions related to Commit.
-	NotifiedVersion version; // next version to commit
+	NotifiedVersion version{ 0 }; // next version to commit
 
 	// The disk queue has committed up until the queueCommittedVersion version.
 	NotifiedVersion queueCommittedVersion;
 
-	Version queueCommittingVersion;
+	Version queueCommittingVersion = 0;
 
 	// The maximum version that a proxy has told us that is committed (all TLogs have ack'd a commit for this version).
-	Version knownCommittedVersion;
+	Version knownCommittedVersion = 0;
 
-	Version durableKnownCommittedVersion;
-	Version minKnownCommittedVersion;
+	Version durableKnownCommittedVersion = 0;
+	Version minKnownCommittedVersion = 0;
 
 	CounterCollection cc;
 	Counter bytesInput;
@@ -538,6 +530,12 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 		return storageTeamData[team] = makeReference<StorageTeamData>(team, tags);
 	}
 
+	// only callable after getStorageTeamData returns a null reference
+	void removeStorageTeam(StorageTeamID team) {
+		storageTeamData.erase(team);
+		storageTeams.erase(team);
+	}
+
 	explicit LogGenerationData(Reference<TLogGroupData> tlogGroupData,
 	                           TLogInterface_PassivelyPull interf,
 	                           UID recruitmentID,
@@ -547,14 +545,12 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	                           int8_t locality,
 	                           DBRecoveryCount epoch,
 	                           const std::string& context)
-	  : tlogGroupData(tlogGroupData), knownCommittedVersion(0), logId(interf.id()), cc("TLog", interf.id().toString()),
-	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), recruitmentID(recruitmentID),
-	    protocolVersion(protocolVersion), logSpillType(logSpillType), storageTeams(storageTeams),
-	    logSystem(new AsyncVar<Reference<ILogSystem>>()), durableKnownCommittedVersion(0), minKnownCommittedVersion(0),
-	    terminated(tlogGroupData->terminated.getFuture()),
+	  : tlogGroupData(tlogGroupData), storageTeams(storageTeams), recoveryCount(epoch),
+	    cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc),
+	    logId(interf.id()), protocolVersion(protocolVersion), terminated(tlogGroupData->terminated.getFuture()),
+	    logSystem(new AsyncVar<Reference<ILogSystem>>()),
 	    // These are initialized differently on init() or recovery
-	    stopped(false), initialized(false), version(0), queueCommittingVersion(0), locality(locality),
-	    recoveryCount(epoch) {
+	    locality(locality), recruitmentID(recruitmentID), logSpillType(logSpillType) {
 		specialCounter(cc, "Version", [this]() { return this->version.get(); });
 		specialCounter(cc, "QueueCommittedVersion", [this]() { return this->queueCommittedVersion.get(); });
 		specialCounter(cc, "KnownCommittedVersion", [this]() { return this->knownCommittedVersion; });
@@ -1225,13 +1221,25 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 				req.reply.sendError(tlog_group_not_found());
 				continue;
 			}
+
 			Reference<LogGenerationData> logData = tlogGroup->second;
 			TEST(logData->stopped); // TLogCommitRequest while stopped
 			if (logData->stopped) {
 				req.reply.sendError(tlog_stopped());
-			} else {
-				self->addActors.send(tLogCommit(logData->tlogGroupData, req, logData));
+				continue;
 			}
+
+			// Update storage teams.
+			for (auto t : req.addedTeams) {
+				logData->storageTeams.emplace(t, req.teamToTags.find(t)->second);
+				logData->createStorageTeamData(t, logData->storageTeams[t]);
+			}
+
+			for (auto& t : req.removedTeams) {
+				logData->removeStorageTeam(t);
+			}
+
+			self->addActors.send(tLogCommit(logData->tlogGroupData, req, logData));
 		}
 		when(TLogPeekRequest req = waitNext(tli.peek.getFuture())) {
 			auto tlogGroup = activeGeneration->find(req.tLogGroupID);
@@ -1350,9 +1358,8 @@ bool tlogTerminated(Reference<TLogGroupData> self,
                     Error const& e) {
 	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise just
 	// close it.
-	
-	// assign an empty PromiseSteam to self->sharedActors would delete the referenfce of the internal queue in PromiseSteam
-	// thus the actors can be cancenlled in the case there is no more references of the old queue
+	// assign an empty PromiseSteam to self->sharedActors would delete the referenfce of the internal queue in
+	// PromiseSteam thus the actors can be cancelled in the case there is no more references of the old queue
 	self->sharedActors = PromiseStream<Future<Void>>();
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
 		persistentData->dispose();
@@ -1398,11 +1405,6 @@ void stopAllTLogs(Reference<TLogServerData> self, UID newLogId) {
 ACTOR Future<Void> tlogGroupRecovery(Reference<TLogGroupData> self, Promise<Void> recovered) {
 	try {
 		wait(ioTimeoutError(checkEmptyQueue(self) && checkRecovered(self), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
-
-		// Disk errors need a chance to kill this actor.
-		wait(delay(0.000001));
-
-		self->sharedActors.send(commitQueue(self));
 	} catch (Error& e) {
 		self->terminated.send(Void());
 		TraceEvent("TLogError", self->dbgid).detail("GroupID", self->tlogGroupID).error(e, true);
@@ -1548,7 +1550,6 @@ ACTOR Future<Void> tLog(
 						// memory managed by each tlog group
 						IKeyValueStore* persistentData = persistentDataAndQueues[group.logGroupId].first;
 						IDiskQueue* persistentQueue = persistentDataAndQueues[group.logGroupId].second;
-
 						Reference<TLogGroupData> tlogGroup = makeReference<TLogGroupData>(tlogId,
 						                                                                  group.logGroupId,
 						                                                                  workerID,
@@ -1558,14 +1559,8 @@ ACTOR Future<Void> tLog(
 						                                                                  degraded,
 						                                                                  folder,
 						                                                                  self);
-						tlogGroup->sharedActors.send(commitQueue(tlogGroup));
-
-						//	TODO: add updateStorageLoop when implementing pop
-						//	tlogGroup->sharedActors.send(updateStorageLoop(tlogGroup));
-
 						TraceEvent("SharedTlogGroup").detail("LogId", tlogId).detail("GroupID", group.logGroupId);
 						self->tlogGroups[group.logGroupId] = tlogGroup;
-
 						Promise<Void> teamRecovered;
 						tlogGroupRecoveries.push_back(tlogGroupRecovery(tlogGroup, teamRecovered));
 						tlogGroupTerminated.push_back(tlogGroup->terminated.getFuture());
@@ -1574,6 +1569,15 @@ ACTOR Future<Void> tLog(
 					choose {
 						when(wait(waitForAny(tlogGroupTerminated))) { throw tlog_stopped(); }
 						when(wait(waitForAll(tlogGroupRecoveries))) {}
+					}
+
+					// Disk errors need a chance to kill this actor.
+					wait(delay(0.000001));
+
+					for (auto& [_, tlogGroup] : self->tlogGroups) {
+						tlogGroup->sharedActors.send(commitQueue(tlogGroup));
+						// TODO: add updateStorageLoop when implementing pop
+						// tlogGroup->sharedActors.send(updateStorageLoop(tlogGroup));
 					}
 
 					// start the new generation

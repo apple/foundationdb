@@ -20,21 +20,25 @@
 
 #pragma once
 
+#include "fdbclient/PImpl.h"
 #include "fdbserver/IConfigConsumer.h"
 
 /*
  * A fault-tolerant configuration database consumer implementation
  */
 class PaxosConfigConsumer : public IConfigConsumer {
-	std::unique_ptr<class PaxosConfigConsumerImpl> _impl;
-	PaxosConfigConsumerImpl const& impl() const { return *_impl; }
-	PaxosConfigConsumerImpl& impl() { return *_impl; }
+	PImpl<class PaxosConfigConsumerImpl> impl;
 
 public:
-	PaxosConfigConsumer(ServerCoordinators const& cfi,
-	                    Optional<double> pollingInterval,
+	PaxosConfigConsumer(ServerCoordinators const& coordinators,
+	                    double pollingInterval,
 	                    Optional<double> compactionInterval);
 	~PaxosConfigConsumer();
 	Future<Void> consume(ConfigBroadcaster& broadcaster) override;
 	UID getID() const override;
+
+public: // Testing
+	PaxosConfigConsumer(std::vector<ConfigFollowerInterface> const& cfis,
+	                    double pollingInterval,
+	                    Optional<double> compactionInterval);
 };

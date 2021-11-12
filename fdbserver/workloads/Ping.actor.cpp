@@ -94,7 +94,7 @@ struct PingWorkload : TestWorkload {
 
 	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back(messages.getMetric());
-		m.push_back(PerfMetric("Avg Latency (ms)", 1000 * totalMessageLatency.getValue() / messages.getValue(), true));
+		m.emplace_back("Avg Latency (ms)", 1000 * totalMessageLatency.getValue() / messages.getValue(), Averaged::True);
 		m.push_back(maxMessageLatency.getMetric());
 	}
 
@@ -259,7 +259,7 @@ struct PingWorkload : TestWorkload {
 			// peers[i].payloadPing.getEndpoint().getPrimaryAddress(), pingId ) ); peers[i].payloadPing.send( req );
 			// replies.push_back( self->payloadDelayer( req, peers[i].payloadPing ) );
 		}
-		TraceEvent("PayloadPingSent", pingId);
+		TraceEvent("PayloadPingSent", pingId).log();
 		wait(waitForAll(replies));
 		double elapsed = now() - start;
 		TraceEvent("PayloadPingDone", pingId).detail("Elapsed", elapsed);

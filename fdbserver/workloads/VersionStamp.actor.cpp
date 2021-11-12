@@ -297,7 +297,7 @@ struct VersionStampWorkload : TestWorkload {
 				wait(tr.onError(e));
 			}
 		}
-		TraceEvent("VST_CheckEnd");
+		TraceEvent("VST_CheckEnd").log();
 		return true;
 	}
 

@@ -681,7 +681,7 @@ struct SQLiteTransaction {
 struct IntKeyCursor {
 	SQLiteDB& db;
 	BtCursor* cursor;
-	IntKeyCursor(SQLiteDB& db, int table, bool write) : cursor(0), db(db) {
+	IntKeyCursor(SQLiteDB& db, int table, bool write) : db(db), cursor(nullptr) {
 		cursor = (BtCursor*)new char[sqlite3BtreeCursorSize()];
 		sqlite3BtreeCursorZero(cursor);
 		db.checkError("BtreeCursor", sqlite3BtreeCursor(db.btree, table, write, nullptr, cursor));
@@ -705,7 +705,7 @@ struct RawCursor {
 
 	operator bool() const { return valid; }
 
-	RawCursor(SQLiteDB& db, int table, bool write) : cursor(0), db(db), valid(false) {
+	RawCursor(SQLiteDB& db, int table, bool write) : db(db), cursor(nullptr), valid(false) {
 		keyInfo.db = db.db;
 		keyInfo.enc = db.db->aDb[0].pSchema->enc;
 		keyInfo.aColl[0] = db.db->pDfltColl;
@@ -727,7 +727,7 @@ struct RawCursor {
 			try {
 				db.checkError("BtreeCloseCursor", sqlite3BtreeCloseCursor(cursor));
 			} catch (...) {
-				TraceEvent(SevError, "RawCursorDestructionError");
+				TraceEvent(SevError, "RawCursorDestructionError").log();
 			}
 			delete[](char*) cursor;
 		}
@@ -1639,7 +1639,7 @@ private:
 			return cursor;
 		}
 
-		struct ReadValueAction : TypedAction<Reader, ReadValueAction>, FastAllocated<ReadValueAction> {
+		struct ReadValueAction final : TypedAction<Reader, ReadValueAction>, FastAllocated<ReadValueAction> {
 			Key key;
 			Optional<UID> debugID;
 			ThreadReturnPromise<Optional<Value>> result;
@@ -1692,7 +1692,7 @@ private:
 			// if (t >= 1.0) TraceEvent("ReadValuePrefixActionSlow",dbgid).detail("Elapsed", t);
 		}
 
-		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
+		struct ReadRangeAction final : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
 			KeyRange keys;
 			int rowLimit, byteLimit;
 			ThreadReturnPromise<RangeResult> result;
@@ -1732,14 +1732,14 @@ private:
 		                volatile int64_t& freeListPages,
 		                UID dbgid,
 		                vector<Reference<ReadCursor>>* pReadThreads)
-		  : kvs(kvs), conn(kvs->filename, isBtreeV2, isBtreeV2), commits(), setsThisCommit(), freeTableEmpty(false),
-		    writesComplete(writesComplete), springCleaningStats(springCleaningStats), diskBytesUsed(diskBytesUsed),
-		    freeListPages(freeListPages), cursor(nullptr), dbgid(dbgid), readThreads(*pReadThreads),
+		  : kvs(kvs), conn(kvs->filename, isBtreeV2, isBtreeV2), cursor(nullptr), commits(), setsThisCommit(),
+		    freeTableEmpty(false), writesComplete(writesComplete), springCleaningStats(springCleaningStats),
+		    diskBytesUsed(diskBytesUsed), freeListPages(freeListPages), dbgid(dbgid), readThreads(*pReadThreads),
 		    checkAllChecksumsOnOpen(checkAllChecksumsOnOpen), checkIntegrityOnOpen(checkIntegrityOnOpen) {}
 		~Writer() override {
-			TraceEvent("KVWriterDestroying", dbgid);
+			TraceEvent("KVWriterDestroying", dbgid).log();
 			delete cursor;
-			TraceEvent("KVWriterDestroyed", dbgid);
+			TraceEvent("KVWriterDestroyed", dbgid).log();
 		}
 		void init() override {
 			if (checkAllChecksumsOnOpen) {
@@ -1775,7 +1775,7 @@ private:
 			}
 		}
 
-		struct InitAction : TypedAction<Writer, InitAction>, FastAllocated<InitAction> {
+		struct InitAction final : TypedAction<Writer, InitAction>, FastAllocated<InitAction> {
 			ThreadReturnPromise<Void> result;
 			double getTimeEstimate() const override { return 0; }
 		};
@@ -1784,7 +1784,7 @@ private:
 			a.result.send(Void());
 		}
 
-		struct SetAction : TypedAction<Writer, SetAction>, FastAllocated<SetAction> {
+		struct SetAction final : TypedAction<Writer, SetAction>, FastAllocated<SetAction> {
 			KeyValue kv;
 			SetAction(KeyValue kv) : kv(kv) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->SET_TIME_ESTIMATE; }
@@ -1799,7 +1799,7 @@ private:
 				TraceEvent("SetActionFinished", dbgid).detail("Elapsed", now() - s);
 		}
 
-		struct ClearAction : TypedAction<Writer, ClearAction>, FastAllocated<ClearAction> {
+		struct ClearAction final : TypedAction<Writer, ClearAction>, FastAllocated<ClearAction> {
 			KeyRange range;
 			ClearAction(KeyRange range) : range(range) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->CLEAR_TIME_ESTIMATE; }
@@ -1813,7 +1813,7 @@ private:
 				TraceEvent("ClearActionFinished", dbgid).detail("Elapsed", now() - s);
 		}
 
-		struct CommitAction : TypedAction<Writer, CommitAction>, FastAllocated<CommitAction> {
+		struct CommitAction final : TypedAction<Writer, CommitAction>, FastAllocated<CommitAction> {
 			double issuedTime;
 			ThreadReturnPromise<Void> result;
 			CommitAction() : issuedTime(now()) {}
@@ -1887,7 +1887,8 @@ private:
 			// freeListPages, iterationsi, freeTableEmpty);
 		}
 
-		struct SpringCleaningAction : TypedAction<Writer, SpringCleaningAction>, FastAllocated<SpringCleaningAction> {
+		struct SpringCleaningAction final : TypedAction<Writer, SpringCleaningAction>,
+		                                    FastAllocated<SpringCleaningAction> {
 			ThreadReturnPromise<SpringCleaningWorkPerformed> result;
 			double getTimeEstimate() const override {
 				return std::max(SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_TIME_ESTIMATE,
@@ -2109,7 +2110,7 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename,
                                          KeyValueStoreType storeType,
                                          bool checkChecksums,
                                          bool checkIntegrity)
-  : type(storeType), filename(filename), logID(id), readThreads(CoroThreadPool::createThreadPool()),
+  : type(storeType), logID(id), filename(filename), readThreads(CoroThreadPool::createThreadPool()),
     writeThread(CoroThreadPool::createThreadPool()), readsRequested(0), writesRequested(0), writesComplete(0),
     diskBytesUsed(0), freeListPages(0) {
 	TraceEvent(SevDebug, "KeyValueStoreSQLiteCreate").detail("Filename", filename);

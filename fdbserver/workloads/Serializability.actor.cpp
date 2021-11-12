@@ -40,18 +40,18 @@ struct SerializabilityWorkload : TestWorkload {
 		KeySelector begin;
 		KeySelector end;
 		int limit;
-		bool snapshot;
-		bool reverse;
+		Snapshot snapshot{ Snapshot::False };
+		Reverse reverse{ Reverse::False };
 	};
 
 	struct GetKeyOperation {
 		KeySelector key;
-		bool snapshot;
+		Snapshot snapshot{ Snapshot::False };
 	};
 
 	struct GetOperation {
 		Key key;
-		bool snapshot;
+		Snapshot snapshot{ Snapshot::False };
 	};
 
 	struct TransactionOperation {
@@ -138,20 +138,20 @@ struct SerializabilityWorkload : TestWorkload {
 			if (operationType == 0) {
 				GetKeyOperation getKey;
 				getKey.key = getRandomKeySelector();
-				getKey.snapshot = deterministicRandom()->random01() < 0.5;
+				getKey.snapshot.set(deterministicRandom()->coinflip());
 				op.getKeyOp = getKey;
 			} else if (operationType == 1) {
 				GetRangeOperation getRange;
 				getRange.begin = getRandomKeySelector();
 				getRange.end = getRandomKeySelector();
 				getRange.limit = deterministicRandom()->randomInt(0, 1 << deterministicRandom()->randomInt(1, 10));
-				getRange.reverse = deterministicRandom()->random01() < 0.5;
-				getRange.snapshot = deterministicRandom()->random01() < 0.5;
+				getRange.reverse.set(deterministicRandom()->coinflip());
+				getRange.snapshot.set(deterministicRandom()->coinflip());
 				op.getRangeOp = getRange;
 			} else if (operationType == 2) {
 				GetOperation getOp;
 				getOp.key = getRandomKey();
-				getOp.snapshot = deterministicRandom()->random01() < 0.5;
+				getOp.snapshot.set(deterministicRandom()->coinflip());
 				op.getOp = getOp;
 			} else if (operationType == 3) {
 				KeyRange range = getRandomRange(maxClearSize);

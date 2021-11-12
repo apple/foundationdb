@@ -378,9 +378,7 @@ public:
 	const uint8_t* peekBytes(int nBytes) const { return reinterpret_cast<const uint8_t*>(reader.peekBytes(nBytes)); }
 
 	// Returns the arena the deserialized data uses.
-	Arena& arena() {
-		return reader.arena();
-	}
+	Arena& arena() { return reader.arena(); }
 };
 
 } // namespace ptxn

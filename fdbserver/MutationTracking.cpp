@@ -33,40 +33,33 @@
 // keys in debugKeys and the ranges in debugRanges.
 // Each entry is a pair of (label, keyOrRange) and the Label will be attached to the
 // MutationTracking TraceEvent for easier searching/recognition.
-std::vector<std::pair<const char *, KeyRef>> debugKeys = {
-	{"SomeKey", "foo"_sr}
-};
-std::vector<std::pair<const char *, KeyRangeRef>> debugRanges = {
-	{"Everything", {""_sr, "\xff\xff\xff\xff"_sr}}
-};
+std::vector<std::pair<const char*, KeyRef>> debugKeys = { { "SomeKey", "foo"_sr } };
+std::vector<std::pair<const char*, KeyRangeRef>> debugRanges = { { "Everything", { ""_sr, "\xff\xff\xff\xff"_sr } } };
 
 TraceEvent debugMutationEnabled(const char* context, Version version, MutationRef const& mutation, UID id) {
-	const char *label = nullptr;
+	const char* label = nullptr;
 
-	for(auto &labelKey : debugKeys) {
-		if(((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
-					KeyRangeRef(mutation.param1, mutation.param2).contains(labelKey.second)) ||
-			mutation.param1 == labelKey.second) {
+	for (auto& labelKey : debugKeys) {
+		if (((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
+		     KeyRangeRef(mutation.param1, mutation.param2).contains(labelKey.second)) ||
+		    mutation.param1 == labelKey.second) {
 			label = labelKey.first;
 			break;
 		}
 	}
 
-	for(auto &labelRange : debugRanges) {
-		if(((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
-					KeyRangeRef(mutation.param1, mutation.param2).intersects(labelRange.second)) ||
-			labelRange.second.contains(mutation.param1)) {
+	for (auto& labelRange : debugRanges) {
+		if (((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
+		     KeyRangeRef(mutation.param1, mutation.param2).intersects(labelRange.second)) ||
+		    labelRange.second.contains(mutation.param1)) {
 			label = labelRange.first;
 			break;
 		}
 	}
 
-	if(label != nullptr) {
+	if (label != nullptr) {
 		TraceEvent event("MutationTracking", id);
-		event.detail("Label", label)
-			.detail("At", context)
-			.detail("Version", version)
-			.detail("Mutation", mutation);
+		event.detail("Label", label).detail("At", context).detail("Version", version).detail("Mutation", mutation);
 		return event;
 	}
 

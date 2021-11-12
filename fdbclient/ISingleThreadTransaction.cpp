@@ -26,33 +26,28 @@
 
 ISingleThreadTransaction* ISingleThreadTransaction::allocateOnForeignThread(Type type) {
 	if (type == Type::RYW) {
-		auto tr =
-		    (ReadYourWritesTransaction*)(ReadYourWritesTransaction::operator new(sizeof(ReadYourWritesTransaction)));
-		tr->preinitializeOnForeignThread();
+		auto tr = new ReadYourWritesTransaction;
 		return tr;
 	} else if (type == Type::SIMPLE_CONFIG) {
-		auto tr = (SimpleConfigTransaction*)(SimpleConfigTransaction::operator new(sizeof(SimpleConfigTransaction)));
+		auto tr = new SimpleConfigTransaction;
 		return tr;
 	} else if (type == Type::PAXOS_CONFIG) {
-		auto tr = (PaxosConfigTransaction*)(PaxosConfigTransaction::operator new(sizeof(PaxosConfigTransaction)));
+		auto tr = new PaxosConfigTransaction;
 		return tr;
 	}
 	ASSERT(false);
 	return nullptr;
 }
 
-void ISingleThreadTransaction::create(ISingleThreadTransaction* tr, Type type, Database db) {
-	switch (type) {
-	case Type::RYW:
-		new (tr) ReadYourWritesTransaction(db);
-		break;
-	case Type::SIMPLE_CONFIG:
-		new (tr) SimpleConfigTransaction(db);
-		break;
-	case Type::PAXOS_CONFIG:
-		new (tr) PaxosConfigTransaction(db);
-		break;
-	default:
-		ASSERT(false);
+Reference<ISingleThreadTransaction> ISingleThreadTransaction::create(Type type, Database const& cx) {
+	Reference<ISingleThreadTransaction> result;
+	if (type == Type::RYW) {
+		result = makeReference<ReadYourWritesTransaction>();
+	} else if (type == Type::SIMPLE_CONFIG) {
+		result = makeReference<SimpleConfigTransaction>();
+	} else {
+		result = makeReference<PaxosConfigTransaction>();
 	}
+	result->setDatabase(cx);
+	return result;
 }

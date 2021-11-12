@@ -57,8 +57,8 @@ struct RWTransactor : ITransactor {
 	int keyCount, keyBytes;
 
 	RWTransactor(int reads, int writes, int keyCount, int keyBytes, int minValueBytes, int maxValueBytes)
-	  : reads(reads), writes(writes), keyCount(keyCount), keyBytes(keyBytes), minValueBytes(minValueBytes),
-	    maxValueBytes(maxValueBytes) {
+	  : reads(reads), writes(writes), minValueBytes(minValueBytes), maxValueBytes(maxValueBytes), keyCount(keyCount),
+	    keyBytes(keyBytes) {
 		ASSERT(minValueBytes <= maxValueBytes);
 		valueString = std::string(maxValueBytes, '.');
 	}
@@ -138,7 +138,7 @@ struct ABTransactor : ITransactor {
 	Reference<ITransactor> a, b;
 	double alpha; // 0.0 = all a, 1.0 = all b
 
-	ABTransactor(double alpha, Reference<ITransactor> a, Reference<ITransactor> b) : alpha(alpha), a(a), b(b) {}
+	ABTransactor(double alpha, Reference<ITransactor> a, Reference<ITransactor> b) : a(a), b(b), alpha(alpha) {}
 
 	Future<Void> doTransaction(Database const& db, Stats* stats) override {
 		return deterministicRandom()->random01() >= alpha ? a->doTransaction(db, stats) : b->doTransaction(db, stats);
@@ -154,7 +154,7 @@ struct SweepTransactor : ITransactor {
 	double duration;
 
 	SweepTransactor(double duration, double startDelay, Reference<ITransactor> a, Reference<ITransactor> b)
-	  : a(a), b(b), duration(duration), startTime(-1), startDelay(startDelay) {}
+	  : a(a), b(b), startTime(-1), startDelay(startDelay), duration(duration) {}
 
 	Future<Void> doTransaction(Database const& db, Stats* stats) override {
 		if (startTime == -1)
@@ -216,23 +216,23 @@ struct MeasureSinglePeriod : IMeasurer {
 	}
 	void getMetrics(vector<PerfMetric>& m) override {
 		double measureDuration = duration;
-		m.push_back(PerfMetric("Transactions/sec", stats.transactions / measureDuration, false));
-		m.push_back(PerfMetric("Retries/sec", stats.retries / measureDuration, false));
-		m.push_back(PerfMetric("Operations/sec", (stats.reads + stats.writes) / measureDuration, false));
-		m.push_back(PerfMetric("Read rows/sec", stats.reads / measureDuration, false));
-		m.push_back(PerfMetric("Write rows/sec", stats.writes / measureDuration, false));
+		m.emplace_back("Transactions/sec", stats.transactions / measureDuration, Averaged::False);
+		m.emplace_back("Retries/sec", stats.retries / measureDuration, Averaged::False);
+		m.emplace_back("Operations/sec", (stats.reads + stats.writes) / measureDuration, Averaged::False);
+		m.emplace_back("Read rows/sec", stats.reads / measureDuration, Averaged::False);
+		m.emplace_back("Write rows/sec", stats.writes / measureDuration, Averaged::False);
 
-		m.push_back(PerfMetric("Mean Latency (ms)", 1000 * totalLatency.mean(), true));
-		m.push_back(PerfMetric("Median Latency (ms, averaged)", 1000 * totalLatency.median(), true));
-		m.push_back(PerfMetric("90% Latency (ms, averaged)", 1000 * totalLatency.percentile(0.90), true));
-		m.push_back(PerfMetric("98% Latency (ms, averaged)", 1000 * totalLatency.percentile(0.98), true));
+		m.emplace_back("Mean Latency (ms)", 1000 * totalLatency.mean(), Averaged::True);
+		m.emplace_back("Median Latency (ms, averaged)", 1000 * totalLatency.median(), Averaged::True);
+		m.emplace_back("90% Latency (ms, averaged)", 1000 * totalLatency.percentile(0.90), Averaged::True);
+		m.emplace_back("98% Latency (ms, averaged)", 1000 * totalLatency.percentile(0.98), Averaged::True);
 
-		m.push_back(PerfMetric("Mean Row Read Latency (ms)", 1000 * rowReadLatency.mean(), true));
-		m.push_back(PerfMetric("Median Row Read Latency (ms, averaged)", 1000 * rowReadLatency.median(), true));
-		m.push_back(PerfMetric("Mean GRV Latency (ms)", 1000 * grvLatency.mean(), true));
-		m.push_back(PerfMetric("Median GRV Latency (ms, averaged)", 1000 * grvLatency.median(), true));
-		m.push_back(PerfMetric("Mean Commit Latency (ms)", 1000 * commitLatency.mean(), true));
-		m.push_back(PerfMetric("Median Commit Latency (ms, averaged)", 1000 * commitLatency.median(), true));
+		m.emplace_back("Mean Row Read Latency (ms)", 1000 * rowReadLatency.mean(), Averaged::True);
+		m.emplace_back("Median Row Read Latency (ms, averaged)", 1000 * rowReadLatency.median(), Averaged::True);
+		m.emplace_back("Mean GRV Latency (ms)", 1000 * grvLatency.mean(), Averaged::True);
+		m.emplace_back("Median GRV Latency (ms, averaged)", 1000 * grvLatency.median(), Averaged::True);
+		m.emplace_back("Mean Commit Latency (ms)", 1000 * commitLatency.mean(), Averaged::True);
+		m.emplace_back("Median Commit Latency (ms, averaged)", 1000 * commitLatency.median(), Averaged::True);
 	}
 };
 

@@ -26,6 +26,24 @@
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+FDB_DEFINE_BOOLEAN_PARAM(LockDB);
+FDB_DEFINE_BOOLEAN_PARAM(UnlockDB);
+FDB_DEFINE_BOOLEAN_PARAM(StopWhenDone);
+FDB_DEFINE_BOOLEAN_PARAM(Verbose);
+FDB_DEFINE_BOOLEAN_PARAM(WaitForComplete);
+FDB_DEFINE_BOOLEAN_PARAM(ForceAction);
+FDB_DEFINE_BOOLEAN_PARAM(Terminator);
+FDB_DEFINE_BOOLEAN_PARAM(UsePartitionedLog);
+FDB_DEFINE_BOOLEAN_PARAM(InconsistentSnapshotOnly);
+FDB_DEFINE_BOOLEAN_PARAM(ShowErrors);
+FDB_DEFINE_BOOLEAN_PARAM(AbortOldBackup);
+FDB_DEFINE_BOOLEAN_PARAM(DstOnly);
+FDB_DEFINE_BOOLEAN_PARAM(WaitForDestUID);
+FDB_DEFINE_BOOLEAN_PARAM(CheckBackupUID);
+FDB_DEFINE_BOOLEAN_PARAM(DeleteData);
+FDB_DEFINE_BOOLEAN_PARAM(SetValidation);
+FDB_DEFINE_BOOLEAN_PARAM(PartialBackup);
+
 std::string BackupAgentBase::formatTime(int64_t epochs) {
 	time_t curTime = (time_t)epochs;
 	char buffer[30];
@@ -95,32 +113,33 @@ int64_t BackupAgentBase::parseTime(std::string timestamp) {
 	return ts;
 }
 
-const Key BackupAgentBase::keyFolderId = LiteralStringRef("config_folderid");
-const Key BackupAgentBase::keyBeginVersion = LiteralStringRef("beginVersion");
-const Key BackupAgentBase::keyEndVersion = LiteralStringRef("endVersion");
-const Key BackupAgentBase::keyPrevBeginVersion = LiteralStringRef("prevBeginVersion");
-const Key BackupAgentBase::keyConfigBackupTag = LiteralStringRef("config_backup_tag");
-const Key BackupAgentBase::keyConfigLogUid = LiteralStringRef("config_log_uid");
-const Key BackupAgentBase::keyConfigBackupRanges = LiteralStringRef("config_backup_ranges");
-const Key BackupAgentBase::keyConfigStopWhenDoneKey = LiteralStringRef("config_stop_when_done");
-const Key BackupAgentBase::keyStateStop = LiteralStringRef("state_stop");
-const Key BackupAgentBase::keyStateStatus = LiteralStringRef("state_status");
-const Key BackupAgentBase::keyLastUid = LiteralStringRef("last_uid");
-const Key BackupAgentBase::keyBeginKey = LiteralStringRef("beginKey");
-const Key BackupAgentBase::keyEndKey = LiteralStringRef("endKey");
-const Key BackupAgentBase::keyDrVersion = LiteralStringRef("drVersion");
-const Key BackupAgentBase::destUid = LiteralStringRef("destUid");
-const Key BackupAgentBase::backupStartVersion = LiteralStringRef("backupStartVersion");
+const Key BackupAgentBase::keyFolderId = "config_folderid"_sr;
+const Key BackupAgentBase::keyBeginVersion = "beginVersion"_sr;
+const Key BackupAgentBase::keyEndVersion = "endVersion"_sr;
+const Key BackupAgentBase::keyPrevBeginVersion = "prevBeginVersion"_sr;
+const Key BackupAgentBase::keyConfigBackupTag = "config_backup_tag"_sr;
+const Key BackupAgentBase::keyConfigLogUid = "config_log_uid"_sr;
+const Key BackupAgentBase::keyConfigBackupRanges = "config_backup_ranges"_sr;
+const Key BackupAgentBase::keyConfigStopWhenDoneKey = "config_stop_when_done"_sr;
+const Key BackupAgentBase::keyStateStop = "state_stop"_sr;
+const Key BackupAgentBase::keyStateStatus = "state_status"_sr;
+const Key BackupAgentBase::keyStateLogBeginVersion = "last_begin_version"_sr;
+const Key BackupAgentBase::keyLastUid = "last_uid"_sr;
+const Key BackupAgentBase::keyBeginKey = "beginKey"_sr;
+const Key BackupAgentBase::keyEndKey = "endKey"_sr;
+const Key BackupAgentBase::keyDrVersion = "drVersion"_sr;
+const Key BackupAgentBase::destUid = "destUid"_sr;
+const Key BackupAgentBase::backupStartVersion = "backupStartVersion"_sr;
 
-const Key BackupAgentBase::keyTagName = LiteralStringRef("tagname");
-const Key BackupAgentBase::keyStates = LiteralStringRef("state");
-const Key BackupAgentBase::keyConfig = LiteralStringRef("config");
-const Key BackupAgentBase::keyErrors = LiteralStringRef("errors");
-const Key BackupAgentBase::keyRanges = LiteralStringRef("ranges");
-const Key BackupAgentBase::keyTasks = LiteralStringRef("tasks");
-const Key BackupAgentBase::keyFutures = LiteralStringRef("futures");
-const Key BackupAgentBase::keySourceStates = LiteralStringRef("source_states");
-const Key BackupAgentBase::keySourceTagName = LiteralStringRef("source_tagname");
+const Key BackupAgentBase::keyTagName = "tagname"_sr;
+const Key BackupAgentBase::keyStates = "state"_sr;
+const Key BackupAgentBase::keyConfig = "config"_sr;
+const Key BackupAgentBase::keyErrors = "errors"_sr;
+const Key BackupAgentBase::keyRanges = "ranges"_sr;
+const Key BackupAgentBase::keyTasks = "tasks"_sr;
+const Key BackupAgentBase::keyFutures = "futures"_sr;
+const Key BackupAgentBase::keySourceStates = "source_states"_sr;
+const Key BackupAgentBase::keySourceTagName = "source_tagname"_sr;
 
 bool copyParameter(Reference<Task> source, Reference<Task> dest, Key key) {
 	if (source) {
@@ -208,6 +227,16 @@ Key getApplyKey(Version version, Key backupUid) {
 	Key k1 = StringRef((uint8_t*)&v, sizeof(uint64_t)).withPrefix(StringRef(&hash, sizeof(uint8_t)));
 	Key k2 = k1.withPrefix(backupUid);
 	return k2.withPrefix(applyLogKeys.begin);
+}
+
+Key getLogKey(Version version, Key backupUid) {
+	int64_t vblock = (version - 1) / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
+	uint64_t v = bigEndian64(version);
+	uint32_t data = vblock & 0xffffffff;
+	uint8_t hash = (uint8_t)hashlittle(&data, sizeof(uint32_t), 0);
+	Key k1 = StringRef((uint8_t*)&v, sizeof(uint64_t)).withPrefix(StringRef(&hash, sizeof(uint8_t)));
+	Key k2 = k1.withPrefix(backupUid);
+	return k2.withPrefix(backupLogKeys.begin);
 }
 
 Version getLogKeyVersion(Key key) {
@@ -374,9 +403,9 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  PromiseStream<RangeResultWithVersion> results,
                                  Reference<FlowLock> lock,
                                  KeyRangeRef range,
-                                 bool terminator,
-                                 bool systemAccess,
-                                 bool lockAware) {
+                                 Terminator terminator,
+                                 AccessSystemKeys systemAccess,
+                                 LockAware lockAware) {
 	state KeySelector begin = firstGreaterOrEqual(range.begin);
 	state KeySelector end = firstGreaterOrEqual(range.end);
 	state Transaction tr(cx);
@@ -450,9 +479,9 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  Reference<FlowLock> lock,
                                  KeyRangeRef range,
                                  std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy,
-                                 bool terminator,
-                                 bool systemAccess,
-                                 bool lockAware) {
+                                 Terminator terminator,
+                                 AccessSystemKeys systemAccess,
+                                 LockAware lockAware) {
 	state KeySelector nextKey = firstGreaterOrEqual(range.begin);
 	state KeySelector end = firstGreaterOrEqual(range.end);
 
@@ -559,7 +588,8 @@ Future<Void> readCommitted(Database cx,
                            Reference<FlowLock> lock,
                            KeyRangeRef range,
                            std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy) {
-	return readCommitted(cx, results, Void(), lock, range, groupBy, true, true, true);
+	return readCommitted(
+	    cx, results, Void(), lock, range, groupBy, Terminator::True, AccessSystemKeys::True, LockAware::True);
 }
 
 ACTOR Future<int> dumpData(Database cx,
@@ -770,7 +800,7 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
                                         Key logUidValue,
                                         Key destUidValue,
                                         Optional<Version> endVersion,
-                                        bool checkBackupUid,
+                                        CheckBackupUID checkBackupUid,
                                         Version backupUid) {
 	state Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
 	state Key backupLatestVersionsKey = logUidValue.withPrefix(backupLatestVersionsPath);
@@ -898,7 +928,7 @@ Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr,
                           Key logUidValue,
                           Key destUidValue,
                           Optional<Version> endVersion,
-                          bool checkBackupUid,
+                          CheckBackupUID checkBackupUid,
                           Version backupUid) {
 	return _eraseLogData(tr, logUidValue, destUidValue, endVersion, checkBackupUid, backupUid);
 }
@@ -995,7 +1025,7 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 	}
 }
 
-ACTOR Future<Void> cleanupBackup(Database cx, bool deleteData) {
+ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	loop {
 		try {
@@ -1014,3 +1044,124 @@ ACTOR Future<Void> cleanupBackup(Database cx, bool deleteData) {
 		}
 	}
 }
+
+// Convert the status text to an enumerated value
+BackupAgentBase::EnumState BackupAgentBase::getState(std::string const& stateText) {
+	auto enState = EnumState::STATE_ERRORED;
+
+	if (stateText.empty()) {
+		enState = EnumState::STATE_NEVERRAN;
+	}
+
+	else if (!stateText.compare("has been submitted")) {
+		enState = EnumState::STATE_SUBMITTED;
+	}
+
+	else if (!stateText.compare("has been started")) {
+		enState = EnumState::STATE_RUNNING;
+	}
+
+	else if (!stateText.compare("is differential")) {
+		enState = EnumState::STATE_RUNNING_DIFFERENTIAL;
+	}
+
+	else if (!stateText.compare("has been completed")) {
+		enState = EnumState::STATE_COMPLETED;
+	}
+
+	else if (!stateText.compare("has been aborted")) {
+		enState = EnumState::STATE_ABORTED;
+	}
+
+	else if (!stateText.compare("has been partially aborted")) {
+		enState = EnumState::STATE_PARTIALLY_ABORTED;
+	}
+
+	return enState;
+}
+
+const char* BackupAgentBase::getStateText(EnumState enState) {
+	const char* stateText;
+
+	switch (enState) {
+	case EnumState::STATE_ERRORED:
+		stateText = "has errored";
+		break;
+	case EnumState::STATE_NEVERRAN:
+		stateText = "has never been started";
+		break;
+	case EnumState::STATE_SUBMITTED:
+		stateText = "has been submitted";
+		break;
+	case EnumState::STATE_RUNNING:
+		stateText = "has been started";
+		break;
+	case EnumState::STATE_RUNNING_DIFFERENTIAL:
+		stateText = "is differential";
+		break;
+	case EnumState::STATE_COMPLETED:
+		stateText = "has been completed";
+		break;
+	case EnumState::STATE_ABORTED:
+		stateText = "has been aborted";
+		break;
+	case EnumState::STATE_PARTIALLY_ABORTED:
+		stateText = "has been partially aborted";
+		break;
+	default:
+		stateText = "<undefined>";
+		break;
+	}
+
+	return stateText;
+}
+
+const char* BackupAgentBase::getStateName(EnumState enState) {
+	switch (enState) {
+	case EnumState::STATE_ERRORED:
+		return "Errored";
+	case EnumState::STATE_NEVERRAN:
+		return "NeverRan";
+	case EnumState::STATE_SUBMITTED:
+		return "Submitted";
+		break;
+	case EnumState::STATE_RUNNING:
+		return "Running";
+	case EnumState::STATE_RUNNING_DIFFERENTIAL:
+		return "RunningDifferentially";
+	case EnumState::STATE_COMPLETED:
+		return "Completed";
+	case EnumState::STATE_ABORTED:
+		return "Aborted";
+	case EnumState::STATE_PARTIALLY_ABORTED:
+		return "Aborting";
+	default:
+		return "<undefined>";
+	}
+}
+
+bool BackupAgentBase::isRunnable(EnumState enState) {
+	switch (enState) {
+	case EnumState::STATE_SUBMITTED:
+	case EnumState::STATE_RUNNING:
+	case EnumState::STATE_RUNNING_DIFFERENTIAL:
+	case EnumState::STATE_PARTIALLY_ABORTED:
+		return true;
+	default:
+		return false;
+	}
+}
+
+Standalone<StringRef> BackupAgentBase::getCurrentTime() {
+	double t = now();
+	time_t curTime = t;
+	char buffer[128];
+	struct tm* timeinfo;
+	timeinfo = localtime(&curTime);
+	strftime(buffer, 128, "%Y-%m-%d-%H-%M-%S", timeinfo);
+
+	std::string time(buffer);
+	return StringRef(time + format(".%06d", (int)(1e6 * (t - curTime))));
+}
+
+std::string const BackupAgentBase::defaultTagName = "default";

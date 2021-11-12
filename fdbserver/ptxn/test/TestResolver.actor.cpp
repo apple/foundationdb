@@ -92,7 +92,7 @@ bool trackerTest() {
 	}
 	const Version initialVersion = 100;
 	tracker.addGroups(groups, initialVersion);
-	ASSERT_EQ(tracker.getCommitVersion({0, 1}), initialVersion);
+	ASSERT_EQ(tracker.getCommitVersion({ 0, 1 }), initialVersion);
 	ASSERT_EQ(tracker.getMaxCommitVersion(), initialVersion);
 
 	std::vector<ptxn::TLogGroupID> updatedGroups, newGroups, removedGroups;

@@ -41,8 +41,8 @@ struct FakeSequencerContext {
 	std::shared_ptr<MasterInterface> pSequencerInterface;
 
 	Version liveCommittedVersion = 0;
-    Version minKnownCommittedVersion = 0;
-    Version version = 0;
+	Version minKnownCommittedVersion = 0;
+	Version version = 0;
 };
 
 ACTOR Future<Void> fakeSequencer(std::shared_ptr<FakeSequencerContext> pFakeSequencerContext);

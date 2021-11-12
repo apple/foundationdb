@@ -45,8 +45,8 @@ struct TLogQueueEntryRef {
 
 	TLogQueueEntryRef() : version(0), knownCommittedVersion(0) {}
 	TLogQueueEntryRef(Arena& a, TLogQueueEntryRef const& from)
-	  : version(from.version), knownCommittedVersion(from.knownCommittedVersion), id(from.id),
-	    storageTeams(from.storageTeams) {
+	  : id(from.id), storageTeams(from.storageTeams), version(from.version),
+	    knownCommittedVersion(from.knownCommittedVersion) {
 		messages.reserve(from.messages.size());
 		for (const auto& message : from.messages) {
 			messages.emplace_back(a, message);
@@ -104,6 +104,13 @@ struct TLogCommitRequest {
 	Version knownCommittedVersion;
 	Version minKnownCommittedVersion;
 
+	// Team changes within group.
+	std::set<ptxn::StorageTeamID> addedTeams;
+	std::set<ptxn::StorageTeamID> removedTeams;
+
+	// Maps storage team ID to the list of tags within that team.x
+	std::map<ptxn::StorageTeamID, std::vector<Tag>> teamToTags;
+
 	// Debug ID
 	Optional<UID> debugID;
 
@@ -119,10 +126,14 @@ struct TLogCommitRequest {
 	                  const Version version_,
 	                  const Version knownCommittedVersion_,
 	                  const Version minKnownCommittedVersion_,
+	                  const std::set<ptxn::StorageTeamID>& addedTeams_,
+	                  const std::set<ptxn::StorageTeamID>& removedTeams_,
+	                  std::map<ptxn::StorageTeamID, vector<Tag>> teamToTags_,
 	                  const Optional<UID>& debugID_)
 	  : spanID(spanID_), tLogGroupID(tLogGroupID_), arena(arena_), messages(std::move(messages_)),
 	    prevVersion(prevVersion_), version(version_), knownCommittedVersion(knownCommittedVersion_),
-	    minKnownCommittedVersion(minKnownCommittedVersion_), debugID(debugID_) {}
+	    minKnownCommittedVersion(minKnownCommittedVersion_), addedTeams(addedTeams_), removedTeams(removedTeams_),
+	    teamToTags(teamToTags_), debugID(debugID_) {}
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
@@ -136,6 +147,9 @@ struct TLogCommitRequest {
 		           knownCommittedVersion,
 		           minKnownCommittedVersion,
 		           debugID,
+		           addedTeams,
+		           removedTeams,
+		           teamToTags,
 		           reply);
 	}
 };
@@ -208,8 +222,8 @@ struct TLogPeekRequest {
 	                bool onlySpilled_,
 	                const StorageTeamID& storageTeamID_,
 	                const TLogGroupID& tLogGroupID_)
-	  : debugID(debugID_), beginVersion(beginVersion_), endVersion(endVersion_), returnIfBlocked(returnIfBlocked_),
-	    onlySpilled(onlySpilled_), storageTeamID(storageTeamID_), tLogGroupID(tLogGroupID_) {}
+	  : debugID(debugID_), beginVersion(beginVersion_), endVersion(endVersion_), storageTeamID(storageTeamID_),
+	    tLogGroupID(tLogGroupID_), returnIfBlocked(returnIfBlocked_), onlySpilled(onlySpilled_) {}
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
@@ -299,7 +313,7 @@ struct VerUpdateRef {
 	VectorRef<MutationRef> mutations;
 	bool isPrivateData;
 
-	VerUpdateRef() : isPrivateData(false), version(invalidVersion) {}
+	VerUpdateRef() : version(invalidVersion), isPrivateData(false) {}
 	VerUpdateRef(Arena& to, const VerUpdateRef& from)
 	  : version(from.version), mutations(to, from.mutations), isPrivateData(from.isPrivateData) {}
 	int expectedSize() const { return mutations.expectedSize(); }
@@ -443,8 +457,8 @@ protected:
 
 	TLogInterfaceBase(const LocalityData& locality_,
 	                  const MessageTransferModel& model_ = MessageTransferModel::StorageServerActivelyPull)
-	  : uniqueID(deterministicRandom()->randomUniqueID()), filteredLocality(locality_), sharedTLogID(uniqueID),
-	    messageTransferModel(model_) {}
+	  : uniqueID(deterministicRandom()->randomUniqueID()), sharedTLogID(uniqueID), messageTransferModel(model_),
+	    filteredLocality(locality_) {}
 
 	TLogInterfaceBase(UID sharedTLogID_,
 	                  const LocalityData& locality_,
@@ -455,7 +469,7 @@ protected:
 	                  UID sharedTLogID_,
 	                  const LocalityData& locality_,
 	                  const MessageTransferModel& model_ = MessageTransferModel::StorageServerActivelyPull)
-	  : uniqueID(id_), sharedTLogID(sharedTLogID_), filteredLocality(locality_), messageTransferModel(model_) {}
+	  : uniqueID(id_), sharedTLogID(sharedTLogID_), messageTransferModel(model_), filteredLocality(locality_) {}
 
 	void initEndpointsImpl(std::vector<ReceiverPriorityPair>&& receivers);
 
@@ -522,6 +536,20 @@ struct TLogInterface_PassivelyPull : public TLogInterfaceBase {
 
 	void initEndpoints() override;
 };
+
+namespace details {
+
+class TLogInterfaceSharedPtrWrapper {
+	std::shared_ptr<TLogInterfaceBase> ptr;
+
+public:
+	TLogInterfaceSharedPtrWrapper(std::shared_ptr<TLogInterfaceBase> ptr_ = nullptr) : ptr(ptr_) {}
+
+	operator std::shared_ptr<TLogInterface_PassivelyPull>();
+	operator std::shared_ptr<TLogInterface_ActivelyPush>();
+};
+
+} // namespace details
 
 std::shared_ptr<TLogInterfaceBase> getNewTLogInterface(const MessageTransferModel model,
                                                        UID id_ = deterministicRandom()->randomUniqueID(),

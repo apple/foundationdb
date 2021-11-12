@@ -24,13 +24,13 @@
 
 #include "fdbclient/ConfigKnobs.h"
 #include "fdbclient/IKnobCollection.h"
-#include "fdbserver/ConfigBroadcastFollowerInterface.h"
+#include "fdbclient/PImpl.h"
+#include "fdbserver/ConfigBroadcastInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
 
-// To be used effectively as a boolean parameter with added type safety
-enum class IsTest { NO, YES };
+FDB_DECLARE_BOOLEAN_PARAM(IsTest);
 
 /*
  * Each worker maintains a LocalConfiguration object used to update its knob collection.
@@ -43,26 +43,24 @@ enum class IsTest { NO, YES };
  *    - Register with the broadcaster to receive new updates for the relevant configuration classes
  *      - Persist these updates when received, and restart if necessary
  */
-class LocalConfiguration {
-	std::unique_ptr<class LocalConfigurationImpl> _impl;
-	LocalConfigurationImpl& impl() { return *_impl; }
-	LocalConfigurationImpl const& impl() const { return *_impl; }
+class LocalConfiguration : public ReferenceCounted<LocalConfiguration> {
+	PImpl<class LocalConfigurationImpl> impl;
 
 public:
 	LocalConfiguration(std::string const& dataFolder,
 	                   std::string const& configPath,
 	                   std::map<std::string, std::string> const& manualKnobOverrides,
-	                   IsTest isTest = IsTest::NO);
-	LocalConfiguration(LocalConfiguration&&);
-	LocalConfiguration& operator=(LocalConfiguration&&);
+	                   IsTest = IsTest::False);
 	~LocalConfiguration();
-	Future<Void> initialize();
 	FlowKnobs const& getFlowKnobs() const;
 	ClientKnobs const& getClientKnobs() const;
 	ServerKnobs const& getServerKnobs() const;
 	TestKnobs const& getTestKnobs() const;
-	Future<Void> consume(Reference<IDependentAsyncVar<ConfigBroadcastFollowerInterface> const> const& broadcaster);
+	Future<Void> consume(ConfigBroadcastInterface const& broadcastInterface);
 	UID getID() const;
+	Version lastSeenVersion() const;
+	ConfigClassSet configClassSet() const;
+	Future<Void> initialize();
 
 public: // Testing
 	Future<Void> addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,

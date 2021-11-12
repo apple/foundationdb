@@ -91,9 +91,10 @@ public:
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), commitVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
-	    tssMapping(&proxyCommitData_.tssMapping), initialCommit(initialCommit_),
-	    tLogGroupCollection(proxyCommitData_.tLogGroupCollection), tagToServer(&proxyCommitData_.tagToServer),
-	    ssToStorageTeam(&proxyCommitData_.ssToStorageTeam) {
+	    tssMapping(&proxyCommitData_.tssMapping), tLogGroupCollection(proxyCommitData_.tLogGroupCollection),
+	    initialCommit(initialCommit_), tagToServer(&proxyCommitData_.tagToServer),
+	    ssToStorageTeam(&proxyCommitData_.ssToStorageTeam), changedTeams(&proxyCommitData_.changedTeams) {
+
 		for (const auto [ss, team] : proxyCommitData_.ssToStorageTeam) {
 			TraceEvent(SevDebug, "SSTeam", dbgid).detail("SS", ss).detail("Team", team);
 			allTeams.insert(team);
@@ -167,6 +168,7 @@ private:
 
 	std::map<Tag, UID>* tagToServer = nullptr;
 	std::unordered_map<UID, ptxn::StorageTeamID>* ssToStorageTeam = nullptr;
+	std::unordered_map<UID, std::vector<std::pair<ptxn::StorageTeamID, bool>>>* changedTeams = nullptr;
 
 	// All SSes' own teams, populated from ssToStorageTeam mapping.
 	std::set<ptxn::StorageTeamID> allTeams;
@@ -329,8 +331,14 @@ private:
 			return;
 		}
 		ASSERT_WE_THINK(tLogGroupCollection.isValid());
-		tLogGroupCollection->assignStorageTeam(decodeStorageTeamIdToTLogGroupKey(m.param1),
-		                                       BinaryReader::fromStringRef<UID>(m.param2, Unversioned()));
+		auto teamid = decodeStorageTeamIdToTLogGroupKey(m.param1);
+		auto group = BinaryReader::fromStringRef<UID>(m.param2, Unversioned());
+		tLogGroupCollection->assignStorageTeam(teamid, group);
+
+		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			(*changedTeams)[group].push_back(std::make_pair(teamid, true));
+			// TODO (Vishesh) Check if team already exists. Create entry for deleting it from old group.
+		}
 
 		// Storage Team ID to TLogGroup
 		// TODO: Update proxy state
@@ -832,7 +840,8 @@ private:
 								    keyAfter(maybeTssRange.begin, arena).withPrefix(systemKeys.begin, arena);
 
 								if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-									toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
+									toCommit->writeToStorageTeams(
+									    tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 								} else {
 									TraceEvent(SevDebug, "SendingPrivatized_TSSClearServerTag", dbgid)
 									    .detail("M", privatized);

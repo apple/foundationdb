@@ -43,7 +43,7 @@ struct FileSystemWorkload : TestWorkload {
 	};
 
 	FileSystemWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), latencies(2500), writeLatencies(1000), queries("Queries"), writes("Latency") {
+	  : TestWorkload(wcx), queries("Queries"), writes("Latency"), latencies(2500), writeLatencies(1000) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 5000.0) / clientCount;
 		double allowedLatency = getOption(options, LiteralStringRef("allowedLatency"), 0.250);
@@ -76,14 +76,14 @@ struct FileSystemWorkload : TestWorkload {
 
 	void getMetrics(vector<PerfMetric>& m) override {
 		double duration = testDuration * (discardEdgeMeasurements ? 0.75 : 1.0);
-		m.push_back(PerfMetric("Measured Duration", duration, true));
-		m.push_back(PerfMetric("Transactions/sec", queries.getValue() / duration, false));
-		m.push_back(PerfMetric("Writes/sec", writes.getValue() / duration, false));
-		m.push_back(PerfMetric("Mean Latency (ms)", 1000 * latencies.mean(), true));
-		m.push_back(PerfMetric("Median Latency (ms, averaged)", 1000 * latencies.median(), true));
-		m.push_back(PerfMetric("90% Latency (ms, averaged)", 1000 * latencies.percentile(0.90), true));
-		m.push_back(PerfMetric("98% Latency (ms, averaged)", 1000 * latencies.percentile(0.98), true));
-		m.push_back(PerfMetric("Median Write Latency (ms, averaged)", 1000 * writeLatencies.median(), true));
+		m.emplace_back("Measured Duration", duration, Averaged::True);
+		m.emplace_back("Transactions/sec", queries.getValue() / duration, Averaged::False);
+		m.emplace_back("Writes/sec", writes.getValue() / duration, Averaged::False);
+		m.emplace_back("Mean Latency (ms)", 1000 * latencies.mean(), Averaged::True);
+		m.emplace_back("Median Latency (ms, averaged)", 1000 * latencies.median(), Averaged::True);
+		m.emplace_back("90% Latency (ms, averaged)", 1000 * latencies.percentile(0.90), Averaged::True);
+		m.emplace_back("98% Latency (ms, averaged)", 1000 * latencies.percentile(0.98), Averaged::True);
+		m.emplace_back("Median Write Latency (ms, averaged)", 1000 * writeLatencies.median(), Averaged::True);
 	}
 
 	Key keyForFileID(uint64_t id) { return StringRef(format("/files/id/%016llx", id)); }

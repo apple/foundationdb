@@ -33,8 +33,8 @@ struct Increment : TestWorkload {
 	PerfDoubleCounter totalLatency;
 
 	Increment(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), totalLatency("Latency"),
-	    tooOldRetries("Retries.too_old"), commitFailedRetries("Retries.commit_failed") {
+	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), tooOldRetries("Retries.too_old"),
+	    commitFailedRetries("Retries.commit_failed"), totalLatency("Latency") {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 5000.0);
 		actorCount = getOption(options, LiteralStringRef("actorsPerClient"), transactionsPerSecond / 5);
@@ -66,9 +66,9 @@ struct Increment : TestWorkload {
 		m.push_back(retries.getMetric());
 		m.push_back(tooOldRetries.getMetric());
 		m.push_back(commitFailedRetries.getMetric());
-		m.push_back(PerfMetric("Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), true));
-		m.push_back(PerfMetric("Read rows/simsec (approx)", transactions.getValue() * 3 / testDuration, false));
-		m.push_back(PerfMetric("Write rows/simsec (approx)", transactions.getValue() * 4 / testDuration, false));
+		m.emplace_back("Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), Averaged::True);
+		m.emplace_back("Read rows/simsec (approx)", transactions.getValue() * 3 / testDuration, Averaged::False);
+		m.emplace_back("Write rows/simsec (approx)", transactions.getValue() * 4 / testDuration, Averaged::False);
 	}
 
 	static Key intToTestKey(int i) { return StringRef(format("%016d", i)); }

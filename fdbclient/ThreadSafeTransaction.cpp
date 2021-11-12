@@ -45,8 +45,7 @@ ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::createFromExistingDatabas
 }
 
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
-	auto type =
-		isConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
+	auto type = isConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
 	return Reference<ITransaction>(new ThreadSafeTransaction(db, type));
 }
 
@@ -122,7 +121,7 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 	    [db, connFile, apiVersion]() {
 		    try {
 			    Database::createDatabase(
-			        Reference<ClusterConnectionFile>(connFile), apiVersion, false, LocalityData(), db)
+			        Reference<ClusterConnectionFile>(connFile), apiVersion, IsInternal::False, LocalityData(), db)
 			        .extractPtr();
 		    } catch (Error& e) {
 			    new (db) DatabaseContext(e);
@@ -149,9 +148,9 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadT
 	auto tr = this->tr = ISingleThreadTransaction::allocateOnForeignThread(type);
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
 	onMainThreadVoid(
-	    [tr, type, cx]() {
+	    [tr, cx]() {
 		    cx->addref();
-		    ISingleThreadTransaction::create(tr, type, Database(cx));
+		    tr->setDatabase(Database(cx));
 	    },
 	    nullptr);
 }
@@ -192,7 +191,7 @@ ThreadFuture<Optional<Value>> ThreadSafeTransaction::get(const KeyRef& key, bool
 	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, k, snapshot]() -> Future<Optional<Value>> {
 		tr->checkDeferredError();
-		return tr->get(k, snapshot);
+		return tr->get(k, Snapshot{ snapshot });
 	});
 }
 
@@ -202,7 +201,7 @@ ThreadFuture<Key> ThreadSafeTransaction::getKey(const KeySelectorRef& key, bool 
 	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, k, snapshot]() -> Future<Key> {
 		tr->checkDeferredError();
-		return tr->getKey(k, snapshot);
+		return tr->getKey(k, Snapshot{ snapshot });
 	});
 }
 
@@ -238,7 +237,7 @@ ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& 
 	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, b, e, limit, snapshot, reverse]() -> Future<RangeResult> {
 		tr->checkDeferredError();
-		return tr->getRange(b, e, limit, snapshot, reverse);
+		return tr->getRange(b, e, limit, Snapshot{ snapshot }, Reverse{ reverse });
 	});
 }
 
@@ -253,7 +252,7 @@ ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& 
 	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, b, e, limits, snapshot, reverse]() -> Future<RangeResult> {
 		tr->checkDeferredError();
-		return tr->getRange(b, e, limits, snapshot, reverse);
+		return tr->getRange(b, e, limits, Snapshot{ snapshot }, Reverse{ reverse });
 	});
 }
 

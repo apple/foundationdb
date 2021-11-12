@@ -51,7 +51,7 @@ struct OldLogData {
 	std::set<int8_t> pseudoLocalities;
 	LogEpoch epoch;
 
-	OldLogData() : epochBegin(0), epochEnd(0), logRouterTags(0), txsTags(0), epoch(0) {}
+	OldLogData() : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), epoch(0) {}
 
 	// Constructor for T of OldTLogConf and OldTLogCoreData
 	template <class T>
@@ -79,15 +79,15 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	const UID dbgid;
 	LogSystemType logSystemType;
 	std::vector<Reference<LogSet>> tLogs; // LogSets in different locations: primary, satellite, or remote
-	int expectedLogSets;
-	int logRouterTags;
-	int txsTags;
+	int expectedLogSets = 0;
+	int logRouterTags = 0;
+	int txsTags = 0;
 	UID recruitmentID;
-	int repopulateRegionAntiQuorum;
-	bool stopped;
+	int repopulateRegionAntiQuorum = 0;
+	bool stopped = false;
 	std::set<int8_t> pseudoLocalities; // Represent special localities that will be mapped to tagLocalityLogRouter
 	const LogEpoch epoch;
-	LogEpoch oldestBackupEpoch;
+	LogEpoch oldestBackupEpoch = 0;
 
 	// new members
 	std::map<Tag, Version> pseudoLocalityPopVersion;
@@ -97,8 +97,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	Future<Void> remoteRecoveryComplete;
 	std::vector<LogLockInfo> lockResults;
 	AsyncVar<bool> recoveryCompleteWrittenToCoreState;
-	bool remoteLogsWrittenToCoreState;
-	bool hasRemoteServers;
+	bool remoteLogsWrittenToCoreState = false;
+	bool hasRemoteServers = false;
 	AsyncTrigger backupWorkerChanged;
 	std::set<UID> removedBackupWorkers; // Workers that are removed before setting them.
 
@@ -124,10 +124,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                        LocalityData locality,
 	                        LogEpoch e,
 	                        Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>())
-	  : dbgid(dbgid), logSystemType(LogSystemType::empty), expectedLogSets(0), logRouterTags(0), txsTags(0),
-	    repopulateRegionAntiQuorum(0), epoch(e), oldestBackupEpoch(0), recoveryCompleteWrittenToCoreState(false),
-	    locality(locality), remoteLogsWrittenToCoreState(false), hasRemoteServers(false), stopped(false),
-	    addActor(addActor), popActors(false) {}
+	  : dbgid(dbgid), logSystemType(LogSystemType::empty), epoch(e), recoveryCompleteWrittenToCoreState(false),
+	    locality(locality), addActor(addActor), popActors(false) {}
 
 	void stopRejoins() final { rejoins = Future<Void>(); }
 
@@ -182,6 +180,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	ACTOR static Future<Void> pushResetChecker(Reference<ConnectionResetInfo> self, NetworkAddress addr);
 
 	ACTOR static Future<TLogCommitReply> recordPushMetrics(Reference<ConnectionResetInfo> self,
+	                                                       Reference<Histogram> dist,
 	                                                       NetworkAddress addr,
 	                                                       Future<TLogCommitReply> in);
 
@@ -192,7 +191,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                              LogPushData& data,
 	                              SpanID const& spanContext,
 	                              Optional<UID> debugID,
-	                              ptxn::TLogGroupID tLogGroup);
+	                              ptxn::TLogGroupID tLogGroup,
+	                              const std::set<ptxn::StorageTeamID>& addedTeams,
+	                              const std::set<ptxn::StorageTeamID>& removedTeams);
 
 	Future<Version> push(Version prevVersion,
 	                     Version version,
@@ -201,7 +202,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                     LogPushData& data,
 	                     SpanID const& spanContext,
 	                     Optional<UID> debugID,
-	                     Optional<ptxn::TLogGroupID> tLogGroup) final;
+	                     Optional<ptxn::TLogGroupID> tLogGroup,
+	                     const std::set<ptxn::StorageTeamID>& addedTeams = {},
+	                     const std::set<ptxn::StorageTeamID>& removedTeams = {}) final;
 
 	Reference<IPeekCursor> peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore);
 

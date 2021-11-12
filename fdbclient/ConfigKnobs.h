@@ -18,9 +18,6 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_CONFIGKNOBS_H
-#define FDBCLIENT_CONFIGKNOBS_H
-
 #pragma once
 
 #include <string>
@@ -202,10 +199,5 @@ struct ConfigCommitAnnotationRef {
 };
 using ConfigCommitAnnotation = Standalone<ConfigCommitAnnotationRef>;
 
-enum class UseConfigDB {
-	DISABLED,
-	SIMPLE,
-	PAXOS,
-};
-
-#endif // FDBCLIENT_CONFIGKNOBS_H
+ConfigDBType configDBTypeFromString(std::string const&);
+std::string configDBTypeToString(ConfigDBType);

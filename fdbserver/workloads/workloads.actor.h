@@ -43,19 +43,18 @@ bool getOption(VectorRef<KeyValueRef> options, Key key, bool defaultValue);
 vector<std::string> getOption(VectorRef<KeyValueRef> options,
                               Key key,
                               vector<std::string> defaultValue); // comma-separated strings
+bool hasOption(VectorRef<KeyValueRef> options, Key key);
 
 struct WorkloadContext {
 	Standalone<VectorRef<KeyValueRef>> options;
 	int clientId, clientCount;
 	int64_t sharedRandomNumber;
-	Reference<AsyncVar<struct ServerDBInfo>> dbInfo;
+	Reference<AsyncVar<struct ServerDBInfo> const> dbInfo;
 
 	WorkloadContext();
 	WorkloadContext(const WorkloadContext&);
 	~WorkloadContext();
-
-private:
-	void operator=(const WorkloadContext&);
+	WorkloadContext& operator=(const WorkloadContext&) = delete;
 };
 
 struct TestWorkload : NonCopyable, WorkloadContext {
@@ -167,7 +166,7 @@ public:
 	         double startDelay = 30.0,
 	         bool useDB = true,
 	         double databasePingDelay = -1.0)
-	  : title(title), dumpAfterTest(dump), clearAfterTest(clear), startDelay(startDelay), useDB(useDB), timeout(600),
+	  : title(title), dumpAfterTest(dump), clearAfterTest(clear), useDB(useDB), startDelay(startDelay), timeout(600),
 	    databasePingDelay(databasePingDelay), runConsistencyCheck(g_network->isSimulated()),
 	    runConsistencyCheckOnCache(false), runConsistencyCheckOnTSS(false), waitForQuiescenceBegin(true),
 	    waitForQuiescenceEnd(true), restorePerpetualWiggleSetting(true), simCheckRelocationDuration(false),
@@ -193,10 +192,10 @@ public:
 	bool waitForQuiescenceBegin;
 	bool waitForQuiescenceEnd;
 	bool restorePerpetualWiggleSetting; // whether set perpetual_storage_wiggle as the value after run
-	                                      // QuietDatabase. QuietDatabase always disables perpetual storage wiggle on
-	                                      // purpose. If waitForQuiescenceBegin == true and we want to keep perpetual
-	                                      // storage wiggle the same setting as before during testing, this value should
-	                                      // be set true.
+	                                    // QuietDatabase. QuietDatabase always disables perpetual storage wiggle on
+	                                    // purpose. If waitForQuiescenceBegin == true and we want to keep perpetual
+	                                    // storage wiggle the same setting as before during testing, this value should
+	                                    // be set true.
 
 	bool simCheckRelocationDuration; // If set to true, then long duration relocations generate SevWarnAlways messages.
 	                                 // Once any workload sets this to true, it will be true for the duration of the
@@ -223,7 +222,7 @@ double testKeyToDouble(const KeyRef& p, const KeyRef& prefix);
 ACTOR Future<Void> databaseWarmer(Database cx);
 
 Future<Void> quietDatabase(Database const& cx,
-                           Reference<AsyncVar<struct ServerDBInfo>> const&,
+                           Reference<AsyncVar<struct ServerDBInfo> const> const&,
                            std::string phase,
                            int64_t dataInFlightGate = 2e6,
                            int64_t maxTLogQueueGate = 5e6,

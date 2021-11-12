@@ -120,7 +120,8 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 						}
 						lastReadVersion = tr.getReadVersion().get();
 						//TraceEvent("FTWGet").detail("Key", printable(setKey)).detail("Value", printable(val)).detail("Ver", tr.getReadVersion().get());
-						// if the value is already setValue then there is no point setting a watch so break out of the loop
+						// if the value is already setValue then there is no point setting a watch so break out of the
+						// loop
 						if (val == setValue)
 							break;
 						ASSERT(first);
@@ -164,7 +165,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 
 	void getMetrics(vector<PerfMetric>& m) override {
 		double duration = testDuration;
-		m.push_back(PerfMetric("Operations/sec", operations.getValue() / duration, false));
+		m.emplace_back("Operations/sec", operations.getValue() / duration, Averaged::False);
 		m.push_back(operations.getMetric());
 		m.push_back(retries.getMetric());
 	}

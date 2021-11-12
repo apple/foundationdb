@@ -24,6 +24,7 @@
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
+#include "flow/WriteOnlySet.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/TLSConfig.actor.h"
@@ -234,6 +235,8 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 
 	Future<class Void> delay(double seconds, TaskPriority taskID) override { return nextTick.getFuture(); }
 
+	Future<class Void> orderedDelay(double seconds, TaskPriority taskID) override { return nextTick.getFuture(); }
+
 	Future<class Void> yield(TaskPriority taskID) override {
 		if (check_yield(taskID))
 			return delay(0, taskID);
@@ -262,8 +265,8 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 		return baseNetwork->onMainThread(std::move(signal), taskID);
 	}
 	bool isOnMainThread() const override { return baseNetwork->isOnMainThread(); }
-	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) override {
-		return baseNetwork->startThread(func, arg);
+	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override {
+		return baseNetwork->startThread(func, arg, stackSize, name);
 	}
 	Future<Reference<class IAsyncFile>> open(std::string filename, int64_t flags, int64_t mode) {
 		return IAsyncFileSystem::filesystem()->open(filename, flags, mode);
@@ -283,6 +286,9 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
 	}
+#ifdef ENABLE_SAMPLING
+	ActorLineageSet& getActorLineageSet() override { throw std::exception(); }
+#endif
 	ProtocolVersion protocolVersion() override { return baseNetwork->protocolVersion(); }
 };
 
@@ -1386,7 +1392,7 @@ TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
 struct Tracker {
 	int copied;
 	bool moved;
-	Tracker(int copied = 0) : moved(false), copied(copied) {}
+	Tracker(int copied = 0) : copied(copied), moved(false) {}
 	Tracker(Tracker&& other) : Tracker(other.copied) {
 		ASSERT(!other.moved);
 		other.moved = true;

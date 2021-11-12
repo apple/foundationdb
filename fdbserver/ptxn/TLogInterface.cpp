@@ -50,8 +50,7 @@ void TLogInterface_ActivelyPush::initEndpoints() {
 
 void TLogInterface_PassivelyPull::initEndpoints() {
 	// RequestSteam order must be the same as declared in TLogInterface_PassivelyPull
-	TLogInterfaceBase::initEndpointsImpl({ disablePopRequest.getReceiver(),
-	                                       enablePopRequest.getReceiver() });
+	TLogInterfaceBase::initEndpointsImpl({ disablePopRequest.getReceiver(), enablePopRequest.getReceiver() });
 }
 
 std::shared_ptr<TLogInterfaceBase> getNewTLogInterface(const MessageTransferModel model,
@@ -67,5 +66,29 @@ std::shared_ptr<TLogInterfaceBase> getNewTLogInterface(const MessageTransferMode
 		throw internal_error_msg("Unsupported TLog Interface");
 	}
 }
+
+namespace details {
+
+namespace {
+template <typename T>
+std::shared_ptr<T> TLogInterfaceCastHelper(std::shared_ptr<TLogInterfaceBase> ptr) {
+	std::shared_ptr<T> result = std::dynamic_pointer_cast<T>(ptr);
+	if (!result) {
+		// std::bad_cast might be a better choice if not using flow
+		throw internal_error_msg("Unable to downcast TLogInterface");
+	}
+	return result;
+}
+} // namespace
+
+TLogInterfaceSharedPtrWrapper::operator std::shared_ptr<TLogInterface_PassivelyPull>() {
+	return TLogInterfaceCastHelper<TLogInterface_PassivelyPull>(ptr);
+}
+
+TLogInterfaceSharedPtrWrapper::operator std::shared_ptr<TLogInterface_ActivelyPush>() {
+	return TLogInterfaceCastHelper<TLogInterface_ActivelyPush>(ptr);
+}
+
+} // namespace details
 
 } // namespace ptxn

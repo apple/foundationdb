@@ -35,7 +35,7 @@ struct DDBalanceWorkload : TestWorkload {
 	ContinuousSample<double> latencies;
 
 	DDBalanceWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), latencies(2000), bin_shifts("Bin_Shifts"), operations("Operations"), retries("Retries") {
+	  : TestWorkload(wcx), bin_shifts("Bin_Shifts"), operations("Operations"), retries("Retries"), latencies(2000) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		binCount = getOption(options, LiteralStringRef("binCount"), 1000);
 		writesPerTransaction = getOption(options, LiteralStringRef("writesPerTransaction"), 1);
@@ -77,14 +77,14 @@ struct DDBalanceWorkload : TestWorkload {
 
 	void getMetrics(vector<PerfMetric>& m) override {
 		double duration = testDuration * (discardEdgeMeasurements ? 0.75 : 1.0);
-		m.push_back(PerfMetric("Operations/sec", operations.getValue() / duration, false));
+		m.emplace_back("Operations/sec", operations.getValue() / duration, Averaged::False);
 		m.push_back(operations.getMetric());
 		m.push_back(retries.getMetric());
 		m.push_back(bin_shifts.getMetric());
-		m.push_back(PerfMetric("Mean Latency (ms)", 1000 * latencies.mean(), true));
-		m.push_back(PerfMetric("Median Latency (ms, averaged)", 1000 * latencies.median(), true));
-		m.push_back(PerfMetric("90% Latency (ms, averaged)", 1000 * latencies.percentile(0.90), true));
-		m.push_back(PerfMetric("98% Latency (ms, averaged)", 1000 * latencies.percentile(0.98), true));
+		m.emplace_back("Mean Latency (ms)", 1000 * latencies.mean(), Averaged::True);
+		m.emplace_back("Median Latency (ms, averaged)", 1000 * latencies.median(), Averaged::True);
+		m.emplace_back("90% Latency (ms, averaged)", 1000 * latencies.percentile(0.90), Averaged::True);
+		m.emplace_back("98% Latency (ms, averaged)", 1000 * latencies.percentile(0.98), Averaged::True);
 	}
 
 	Key key(int bin, int n, int actorid, int clientid) {

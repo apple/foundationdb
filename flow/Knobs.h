@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
-#ifndef FLOW_KNOBS_H
-#define FLOW_KNOBS_H
+#ifndef __FLOW_KNOBS_H__
+#define __FLOW_KNOBS_H__
+
 #pragma once
 
 #include "flow/Platform.h"
@@ -31,31 +32,47 @@
 #include <variant>
 #include <optional>
 
+// Helper macros to allow the init macro to be called with an optional third
+// paramater, used to explicit set atomicity of knobs.
+#define KNOB_FN(_1, _2, _3, FN, ...) FN
+#define INIT_KNOB(knob, value) initKnob(knob, value, #knob)
+#define INIT_ATOMIC_KNOB(knob, value, atomic) initKnob(knob, value, #knob, atomic)
+
 // NOTE: Directly using KnobValueRef as the return type for Knobs::parseKnobValue would result
 // in a cyclic dependency, so we use this intermediate ParsedKnobValue type
 struct NoKnobFound {};
 using ParsedKnobValue = std::variant<NoKnobFound, int, double, int64_t, bool, std::string>;
 
-// To be used as effectively boolean parameters with added type safety
-enum class IsSimulated { NO, YES };
-enum class Randomize { NO, YES };
+enum class ConfigDBType {
+	DISABLED,
+	SIMPLE,
+	PAXOS,
+};
+
+enum class Atomic { YES, NO };
 
 class Knobs {
 protected:
+	template <class T>
+	struct KnobValue {
+		T* value;
+		Atomic atomic;
+	};
+
 	Knobs() = default;
 	Knobs(Knobs const&) = delete;
 	Knobs& operator=(Knobs const&) = delete;
-	void initKnob(double& knob, double value, std::string const& name);
-	void initKnob(int64_t& knob, int64_t value, std::string const& name);
-	void initKnob(int& knob, int value, std::string const& name);
-	void initKnob(std::string& knob, const std::string& value, const std::string& name);
-	void initKnob(bool& knob, bool value, std::string const& name);
+	void initKnob(double& knob, double value, std::string const& name, Atomic atomic = Atomic::YES);
+	void initKnob(int64_t& knob, int64_t value, std::string const& name, Atomic atomic = Atomic::YES);
+	void initKnob(int& knob, int value, std::string const& name, Atomic atomic = Atomic::YES);
+	void initKnob(std::string& knob, const std::string& value, const std::string& name, Atomic atomic = Atomic::YES);
+	void initKnob(bool& knob, bool value, std::string const& name, Atomic atomic = Atomic::YES);
 
-	std::map<std::string, double*> double_knobs;
-	std::map<std::string, int64_t*> int64_knobs;
-	std::map<std::string, int*> int_knobs;
-	std::map<std::string, std::string*> string_knobs;
-	std::map<std::string, bool*> bool_knobs;
+	std::map<std::string, KnobValue<double>> double_knobs;
+	std::map<std::string, KnobValue<int64_t>> int64_knobs;
+	std::map<std::string, KnobValue<int>> int_knobs;
+	std::map<std::string, KnobValue<std::string>> string_knobs;
+	std::map<std::string, KnobValue<bool>> bool_knobs;
 	std::set<std::string> explicitlySetKnobs;
 
 public:
@@ -65,6 +82,7 @@ public:
 	bool setKnob(std::string const& name, double value);
 	bool setKnob(std::string const& name, std::string const& value);
 	ParsedKnobValue parseKnobValue(std::string const& name, std::string const& value) const;
+	bool isAtomic(std::string const& knob) const;
 	void trace() const;
 };
 
@@ -167,6 +185,10 @@ public:
 	// AsyncFileEIO
 	int EIO_MAX_PARALLELISM;
 	int EIO_USE_ODIRECT;
+
+	// AsyncFileEncrypted
+	int ENCRYPTION_BLOCK_SIZE;
+	int MAX_DECRYPTED_BLOCKS;
 
 	// AsyncFileKAIO
 	int MAX_OUTSTANDING;
@@ -280,14 +302,15 @@ public:
 	double LOAD_BALANCE_TSS_TIMEOUT;
 	bool LOAD_BALANCE_TSS_MISMATCH_VERIFY_SS;
 	bool LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL;
+	int TSS_LARGE_TRACE_SIZE;
 
 	// Health Monitor
 	int FAILURE_DETECTION_DELAY;
 	bool HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS;
 	int HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS;
 	int HEALTH_MONITOR_CONNECTION_MAX_CLOSED;
-	FlowKnobs(Randomize, IsSimulated);
-	void initialize(Randomize, IsSimulated);
+	FlowKnobs(class Randomize, class IsSimulated);
+	void initialize(class Randomize, class IsSimulated);
 };
 
 // Flow knobs are needed before the knob collections are available, so a global FlowKnobs object is used to bootstrap

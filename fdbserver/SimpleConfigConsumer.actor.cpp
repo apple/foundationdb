@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbserver/ConfigBroadcastFollowerInterface.h"
+#include "fdbserver/ConfigBroadcastInterface.h"
 #include "fdbserver/SimpleConfigConsumer.h"
+#include "flow/actorcompiler.h" // must be last include
 
 class SimpleConfigConsumerImpl {
 	ConfigFollowerInterface cfi;
@@ -49,28 +50,36 @@ class SimpleConfigConsumerImpl {
 		}
 	}
 
+	ACTOR static Future<Version> getCommittedVersion(SimpleConfigConsumerImpl* self) {
+		ConfigFollowerGetCommittedVersionReply committedVersionReply =
+		    wait(self->cfi.getCommittedVersion.getReply(ConfigFollowerGetCommittedVersionRequest{}));
+		return committedVersionReply.version;
+	}
+
 	ACTOR static Future<Void> fetchChanges(SimpleConfigConsumerImpl* self, ConfigBroadcaster* broadcaster) {
 		wait(getSnapshotAndChanges(self, broadcaster));
 		loop {
 			try {
-				ConfigFollowerGetChangesReply reply =
-				    wait(self->cfi.getChanges.getReply(ConfigFollowerGetChangesRequest{ self->lastSeenVersion }));
-				++self->successfulChangeRequest;
-				for (const auto& versionedMutation : reply.changes) {
-					TraceEvent te(SevDebug, "ConsumerFetchedMutation", self->id);
-					te.detail("Version", versionedMutation.version)
-					    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
-					    .detail("KnobName", versionedMutation.mutation.getKnobName());
-					if (versionedMutation.mutation.isSet()) {
-						te.detail("Op", "Set").detail("KnobValue", versionedMutation.mutation.getValue().toString());
-					} else {
-						te.detail("Op", "Clear");
+				state Version committedVersion = wait(getCommittedVersion(self));
+				ASSERT_GE(committedVersion, self->lastSeenVersion);
+				if (committedVersion > self->lastSeenVersion) {
+					ConfigFollowerGetChangesReply reply = wait(self->cfi.getChanges.getReply(
+					    ConfigFollowerGetChangesRequest{ self->lastSeenVersion, committedVersion }));
+					++self->successfulChangeRequest;
+					for (const auto& versionedMutation : reply.changes) {
+						TraceEvent te(SevDebug, "ConsumerFetchedMutation", self->id);
+						te.detail("Version", versionedMutation.version)
+						    .detail("ConfigClass", versionedMutation.mutation.getConfigClass())
+						    .detail("KnobName", versionedMutation.mutation.getKnobName());
+						if (versionedMutation.mutation.isSet()) {
+							te.detail("Op", "Set")
+							    .detail("KnobValue", versionedMutation.mutation.getValue().toString());
+						} else {
+							te.detail("Op", "Clear");
+						}
 					}
-				}
-				ASSERT_GE(reply.mostRecentVersion, self->lastSeenVersion);
-				if (reply.mostRecentVersion > self->lastSeenVersion) {
-					self->lastSeenVersion = reply.mostRecentVersion;
-					broadcaster->applyChanges(reply.changes, reply.mostRecentVersion, reply.annotations);
+					self->lastSeenVersion = committedVersion;
+					broadcaster->applyChanges(reply.changes, committedVersion, reply.annotations);
 				}
 				wait(delayJittered(self->pollingInterval));
 			} catch (Error& e) {
@@ -86,19 +95,20 @@ class SimpleConfigConsumerImpl {
 	}
 
 	ACTOR static Future<Void> getSnapshotAndChanges(SimpleConfigConsumerImpl* self, ConfigBroadcaster* broadcaster) {
-		ConfigFollowerGetSnapshotAndChangesReply reply =
-		    wait(self->cfi.getSnapshotAndChanges.getReply(ConfigFollowerGetSnapshotAndChangesRequest{}));
+		state Version committedVersion = wait(getCommittedVersion(self));
+		ConfigFollowerGetSnapshotAndChangesReply reply = wait(
+		    self->cfi.getSnapshotAndChanges.getReply(ConfigFollowerGetSnapshotAndChangesRequest{ committedVersion }));
 		++self->snapshotRequest;
 		TraceEvent(SevDebug, "ConfigConsumerGotSnapshotAndChanges", self->id)
 		    .detail("SnapshotVersion", reply.snapshotVersion)
 		    .detail("SnapshotSize", reply.snapshot.size())
-		    .detail("ChangesVersion", reply.changesVersion)
+		    .detail("ChangesVersion", committedVersion)
 		    .detail("ChangesSize", reply.changes.size())
 		    .detail("AnnotationsSize", reply.annotations.size());
+		ASSERT_GE(committedVersion, self->lastSeenVersion);
+		self->lastSeenVersion = committedVersion;
 		broadcaster->applySnapshotAndChanges(
-		    std::move(reply.snapshot), reply.snapshotVersion, reply.changes, reply.changesVersion, reply.annotations);
-		ASSERT_GE(reply.changesVersion, self->lastSeenVersion);
-		self->lastSeenVersion = reply.changesVersion;
+		    std::move(reply.snapshot), reply.snapshotVersion, reply.changes, committedVersion, reply.annotations);
 		return Void();
 	}
 
@@ -132,19 +142,19 @@ public:
 SimpleConfigConsumer::SimpleConfigConsumer(ConfigFollowerInterface const& cfi,
                                            double pollingInterval,
                                            Optional<double> compactionInterval)
-  : _impl(std::make_unique<SimpleConfigConsumerImpl>(cfi, pollingInterval, compactionInterval)) {}
+  : impl(PImpl<SimpleConfigConsumerImpl>::create(cfi, pollingInterval, compactionInterval)) {}
 
 SimpleConfigConsumer::SimpleConfigConsumer(ServerCoordinators const& coordinators,
                                            double pollingInterval,
                                            Optional<double> compactionInterval)
-  : _impl(std::make_unique<SimpleConfigConsumerImpl>(coordinators, pollingInterval, compactionInterval)) {}
+  : impl(PImpl<SimpleConfigConsumerImpl>::create(coordinators, pollingInterval, compactionInterval)) {}
 
 Future<Void> SimpleConfigConsumer::consume(ConfigBroadcaster& broadcaster) {
-	return impl().consume(broadcaster);
+	return impl->consume(broadcaster);
 }
 
 SimpleConfigConsumer::~SimpleConfigConsumer() = default;
 
 UID SimpleConfigConsumer::getID() const {
-	return impl().getID();
+	return impl->getID();
 }

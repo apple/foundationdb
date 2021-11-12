@@ -64,9 +64,7 @@ TEST_CASE("/fdbclient/ParallelStream") {
 	state ParallelStream<ParallelStreamTest::TestValue> parallelStream(results, bufferLimit);
 	state Future<Void> consumer = ParallelStreamTest::consume(results.getFuture(), numProducers);
 	state std::vector<Future<Void>> producers;
-	TraceEvent("StartingParallelStreamTest")
-	    .detail("BufferLimit", bufferLimit)
-	    .detail("NumProducers", numProducers);
+	TraceEvent("StartingParallelStreamTest").detail("BufferLimit", bufferLimit).detail("NumProducers", numProducers);
 	state int i = 0;
 	for (; i < numProducers; ++i) {
 		ParallelStream<ParallelStreamTest::TestValue>::Fragment* fragment = wait(parallelStream.createFragment());
