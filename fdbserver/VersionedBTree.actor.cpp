@@ -144,7 +144,7 @@ private:
 
 public:
 	PriorityMultiLock(int concurrency, int maxPriority, int launchLimit = std::numeric_limits<int>::max())
-	  : concurrency(concurrency), available(concurrency), launchLimit(launchLimit), waiting(0) {
+	  : concurrency(concurrency), available(concurrency), waiting(0), launchLimit(launchLimit) {
 		waiters.resize(maxPriority + 1);
 		fRunner = runner(this);
 	}
@@ -2603,8 +2603,8 @@ public:
 		if (pageID >= self->filePageCount) {
 			// And no extension pending will include pageID
 			if (pageID >= self->filePageCountPending) {
-				// Then start an extension that will include pageID
-				self->fileExtension = extendToCover(self, pageID);
+				// Update extension to a new one that waits on the old one and extends further
+				self->fileExtension = extendToCover(self, pageID, self->fileExtension);
 			}
 
 			// Wait for extension that covers pageID to complete;
@@ -2616,7 +2616,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> extendToCover(DWALPager* self, uint64_t pageID) {
+	ACTOR static Future<Void> extendToCover(DWALPager* self, uint64_t pageID, Future<Void> previousExtension) {
 		// Calculate new page count, round up to nearest multiple of growth size > pageID
 		state int64_t newPageCount = pageID + SERVER_KNOBS->REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES -
 		                             (pageID % SERVER_KNOBS->REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES);
@@ -2625,7 +2625,7 @@ public:
 		self->filePageCountPending = newPageCount;
 
 		// Wait for any previous extensions to complete
-		wait(self->fileExtension);
+		wait(previousExtension);
 
 		// Grow the file
 		wait(self->pageFile->truncate(newPageCount * self->physicalPageSize));
