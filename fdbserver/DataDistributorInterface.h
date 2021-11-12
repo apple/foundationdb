@@ -34,8 +34,8 @@ struct DataDistributorInterface {
 	UID myId;
 	RequestStream<struct DistributorSnapRequest> distributorSnapReq;
 	RequestStream<struct DistributorExclusionSafetyCheckRequest> distributorExclCheckReq;
-	RequestStream<struct DistributorSplitRangeRequest> distributorSplitRange;
 	RequestStream<struct GetDataDistributorMetricsRequest> dataDistributorMetrics;
+	RequestStream<struct DistributorSplitRangeRequest> distributorSplitRange;
 
 	DataDistributorInterface() {}
 	explicit DataDistributorInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
@@ -55,8 +55,8 @@ struct DataDistributorInterface {
 		           myId,
 		           distributorSnapReq,
 		           distributorExclCheckReq,
-		           distributorSplitRange,
-		           dataDistributorMetrics);
+		           dataDistributorMetrics,
+		           distributorSplitRange);
 	}
 };
 
