@@ -386,7 +386,7 @@ public:
 
 	int snapshotRywEnabled;
 
-	int transactionTracingEnabled;
+	bool transactionTracingSample;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;
