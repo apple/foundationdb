@@ -876,17 +876,17 @@ TEST_CASE("fdb_transaction_set_read_version future_version") {
 const std::string EMPTY = Tuple().pack().toString();
 const KeyRef RECORD = "RECORD"_sr;
 const KeyRef INDEX = "INDEX"_sr;
-static KeyRef primaryKey(const int i) {
-	return KeyRef(format("primary-key-of-record-%08d", i));
+static Key primaryKey(const int i) {
+	return Key(format("primary-key-of-record-%08d", i));
 }
-static KeyRef indexKey(const int i) {
-	return KeyRef(format("index-key-of-record-%08d", i));
+static Key indexKey(const int i) {
+	return Key(format("index-key-of-record-%08d", i));
 }
-static ValueRef dataOfRecord(const int i) {
-	return KeyRef(format("data-of-record-%08d", i));
+static Value dataOfRecord(const int i) {
+	return Value(format("data-of-record-%08d", i));
 }
 static std::string indexEntryKey(const int i) {
-	return Tuple().append(prefix).append(INDEX).append(indexKey(i)).append(primaryKey(i)).pack().toString();
+	return Tuple().append(StringRef(prefix)).append(INDEX).append(indexKey(i)).append(primaryKey(i)).pack().toString();
 }
 static std::string recordKey(const int i) {
 	return Tuple().append(prefix).append(RECORD).append(primaryKey(i)).pack().toString();
