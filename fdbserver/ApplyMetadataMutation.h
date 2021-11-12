@@ -49,6 +49,9 @@ struct ResolverData {
 	Version popVersion = 0; // exclusive, usually set to commitVersion + 1
 	std::map<UID, Reference<StorageInfo>>* storageCache = nullptr;
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
+	std::map<Tag, UID> tagToServer;
+	std::unordered_map<UID, ptxn::StorageTeamID> ssToStorageTeam;
+	std::unordered_map<UID, std::vector<std::pair<ptxn::StorageTeamID, bool>>> changedTeams;
 
 	// For initial broadcast
 	ResolverData(UID debugId, IKeyValueStore* store, KeyRangeMap<ServerCacheInfo>* info, bool& forceRecovery)

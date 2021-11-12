@@ -108,7 +108,8 @@ public:
 	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
 	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
 	    keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
-	    initialCommit(resolverData_.initialCommit), forResolver(true) {}
+	    initialCommit(resolverData_.initialCommit), forResolver(true), tagToServer(&resolverData_.tagToServer),
+	    ssToStorageTeam(&resolverData_.ssToStorageTeam), changedTeams(&resolverData_.changedTeams) {}
 
 private:
 	// The following variables are incoming parameters
@@ -812,8 +813,7 @@ private:
 					if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 						toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 					} else {
-						TraceEvent(SevDebug, "SendingPrivatized_ClearServerTag", dbgid)
-						    .detail("M", privatized);
+						TraceEvent(SevDebug, "SendingPrivatized_ClearServerTag", dbgid).detail("M", privatized);
 						toCommit->addTag(tag);
 						toCommit->writeTypedMessage(privatized);
 					}
