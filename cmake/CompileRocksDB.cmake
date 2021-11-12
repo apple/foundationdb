@@ -1,6 +1,6 @@
 # FindRocksDB
 
-find_package(RocksDB)
+find_package(RocksDB 6.22.1)
 
 include(ExternalProject)
 
