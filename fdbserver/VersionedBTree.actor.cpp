@@ -127,8 +127,13 @@ public:
 	};
 
 private:
-	typedef Promise<Lock> Slot;
-	typedef Deque<Slot> Queue;
+	struct Waiter {
+		Waiter() : queuedTime(now()) {}
+		Promise<Lock> lockPromise;
+		double queuedTime;
+	};
+
+	typedef Deque<Waiter> Queue;
 
 #if PRIORITYMULTILOCK_DEBUG
 #define prioritylock_printf(...) printf(__VA_ARGS__)
@@ -137,7 +142,8 @@ private:
 #endif
 
 public:
-	PriorityMultiLock(int concurrency, int maxPriority) : concurrency(concurrency), available(concurrency), waiting(0) {
+	PriorityMultiLock(int concurrency, int maxPriority, int launchLimit = std::numeric_limits<int>::max())
+	  : concurrency(concurrency), available(concurrency), waiting(0), launchLimit(launchLimit) {
 		waiters.resize(maxPriority + 1);
 		fRunner = runner(this);
 	}
@@ -156,11 +162,37 @@ public:
 			return p;
 		}
 
-		Slot s;
-		waiters[priority].push_back(s);
+		Waiter w;
+		waiters[priority].push_back(w);
 		++waiting;
 		prioritylock_printf("lock exit queued %s\n", toString().c_str());
-		return s.getFuture();
+		return w.lockPromise.getFuture();
+	}
+
+	std::string toString() const {
+		int runnersDone = 0;
+		for (int i = 0; i < runners.size(); ++i) {
+			if (runners[i].isReady()) {
+				++runnersDone;
+			}
+		}
+
+		std::string s =
+		    format("{ ptr=%p concurrency=%d available=%d running=%d waiting=%d runnersQueue=%d runnersDone=%d ",
+		           this,
+		           concurrency,
+		           available,
+		           concurrency - available,
+		           waiting,
+		           runners.size(),
+		           runnersDone);
+
+		for (int i = 0; i < waiters.size(); ++i) {
+			s += format("p%d_waiters=%u ", i, waiters[i].size());
+		}
+
+		s += "}";
+		return s;
 	}
 
 private:
@@ -180,6 +212,13 @@ private:
 		state Future<Void> error = self->brokenOnDestruct.getFuture();
 		state int maxPriority = self->waiters.size() - 1;
 
+		// Priority to try to run tasks from next
+		state int priority = maxPriority;
+		state Queue* pQueue = &self->waiters[maxPriority];
+
+		// Track the number of waiters unlocked at the same priority in a row
+		state int lastPriorityCount = 0;
+
 		loop {
 			// Cleanup finished runner futures at the front of the runner queue.
 			while (!self->runners.empty() && self->runners.front().isReady()) {
@@ -196,20 +235,22 @@ private:
 			}
 
 			// While there are available slots and there are waiters, launch tasks
-			int priority = maxPriority;
-
 			while (self->available > 0 && self->waiting > 0) {
-				auto& q = self->waiters[priority];
-				prioritylock_printf(
-				    "Checking priority=%d prioritySize=%d %s\n", priority, q.size(), self->toString().c_str());
+				prioritylock_printf("Checking priority=%d lastPriorityCount=%d %s\n",
+				                    priority,
+				                    lastPriorityCount,
+				                    self->toString().c_str());
 
-				while (!q.empty()) {
-					Slot s = q.front();
-					q.pop_front();
+				while (!pQueue->empty() && ++lastPriorityCount < self->launchLimit) {
+					Waiter w = pQueue->front();
+					pQueue->pop_front();
 					--self->waiting;
 					Lock lock;
-					prioritylock_printf("  Running waiter priority=%d prioritySize=%d\n", priority, q.size());
-					s.send(lock);
+					prioritylock_printf("  Running waiter priority=%d wait=%f %s\n",
+					                    priority,
+					                    now() - w.queuedTime,
+					                    self->toString().c_str());
+					w.lockPromise.send(lock);
 
 					// Self may have been destructed during the lock callback
 					if (error.isReady()) {
@@ -227,24 +268,28 @@ private:
 					}
 				}
 
-				// Wrap around to highest priority
+				// If there are no more slots available, then don't move to the next priority
+				if (self->available == 0) {
+					break;
+				}
+
+				// Decrease priority, wrapping around to max from 0
 				if (priority == 0) {
 					priority = maxPriority;
 				} else {
 					--priority;
 				}
+
+				pQueue = &self->waiters[priority];
+				lastPriorityCount = 0;
 			}
 		}
-	}
-
-	std::string toString() const {
-		return format(
-		    "{ slots=%d/%d waiting=%d runners=%d }", (concurrency - available), concurrency, waiting, runners.size());
 	}
 
 	int concurrency;
 	int available;
 	int waiting;
+	int launchLimit;
 	std::vector<Queue> waiters;
 	Deque<Future<Void>> runners;
 	Future<Void> fRunner;
@@ -366,7 +411,7 @@ std::string toString(const std::pair<F, S>& o) {
 
 static constexpr int ioMinPriority = 0;
 static constexpr int ioLeafPriority = 1;
-static constexpr int ioMaxPriority = 2;
+static constexpr int ioMaxPriority = 3;
 
 // A FIFO queue of T stored as a linked list of pages.
 // Main operations are pop(), pushBack(), pushFront(), and flush().
@@ -2044,17 +2089,17 @@ public:
 	// Use pageCacheSizeBytes == 0 to use default from flow knobs
 	// If filename is empty, the pager will exist only in memory and once the cache is full writes will fail.
 	DWALPager(int desiredPageSize,
-	          int desiredExtentSize,
-	          std::string filename,
-	          int64_t pageCacheSizeBytes,
-	          Version remapCleanupWindow,
-	          int concurrentExtentReads,
-	          bool memoryOnly = false,
-	          Promise<Void> errorPromise = {})
-	  : desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize), filename(filename), pHeader(nullptr),
-	    pageCacheBytes(pageCacheSizeBytes), memoryOnly(memoryOnly), remapCleanupWindow(remapCleanupWindow),
-	    concurrentExtentReads(new FlowLock(concurrentExtentReads)), errorPromise(errorPromise),
-	    ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority) {
+			  int desiredExtentSize,
+			  std::string filename,
+			  int64_t pageCacheSizeBytes,
+			  Version remapCleanupWindow,
+			  int concurrentExtentReads,
+			  bool memoryOnly = false,
+			  Promise<Void> errorPromise = {})
+		: ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2),
+		  pageCacheBytes(pageCacheSizeBytes), pHeader(nullptr), desiredPageSize(desiredPageSize),
+		  desiredExtentSize(desiredExtentSize), filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
+		  remapCleanupWindow(remapCleanupWindow), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
 
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();

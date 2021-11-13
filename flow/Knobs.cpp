@@ -198,6 +198,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( MAX_TRACE_FIELD_LENGTH,                              495 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
 	init( MAX_TRACE_EVENT_LENGTH,                             4000 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
 	init( ALLOCATION_TRACING_ENABLED,                         true );
+	init( SIM_SPEEDUP_AFTER_SECONDS,                           450);
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
