@@ -108,7 +108,8 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 			    wait(tr.getRangeAndFlatMap(KeySelector(firstGreaterOrEqual(range.begin), range.arena()),
 			                               KeySelector(firstGreaterOrEqual(range.end), range.arena()),
 			                               mapper,
-			                               GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+			                               GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
+			                               Snapshot::True));
 			showResult(result);
 			if (self->BAD_MAPPER) {
 				TraceEvent("IndexPrefetchDemoWorkloadShouldNotReachable").detail("ResultSize", result.size());
