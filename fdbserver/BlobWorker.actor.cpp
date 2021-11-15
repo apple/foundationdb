@@ -196,7 +196,6 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	PromiseStream<AssignBlobRangeRequest> granuleUpdateErrors;
 
 	BlobWorkerData(UID id, Database db) : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
-	~BlobWorkerData() { printf("Destroying blob worker data for %s\n", id.toString().c_str()); }
 
 	bool managerEpochOk(int64_t epoch) {
 		if (epoch < currentManagerEpoch) {
@@ -1619,7 +1618,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		}
 	} catch (Error& e) {
 		// TODO REMOVE
-		printf("BGUF got error %s\n", e.name());
+		if (BW_DEBUG) {
+			printf("BGUF got error %s\n", e.name());
+		}
 		if (e.code() == error_code_operation_cancelled) {
 			throw;
 		}
@@ -2216,7 +2217,9 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 					std::tuple<int64_t, int64_t, UID> parentGranuleLock =
 					    decodeBlobGranuleLockValue(parentGranuleLockValue.get());
 					UID parentGranuleID = std::get<2>(parentGranuleLock);
-					printf("  parent granule id %s\n", parentGranuleID.toString().c_str());
+					if (BW_DEBUG) {
+						printf("  parent granule id %s\n", parentGranuleID.toString().c_str());
+					}
 
 					info.parentGranule = std::pair(parentGranuleRange, parentGranuleID);
 
@@ -2379,7 +2382,9 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 		    }
 		}*/
 		bool thisAssignmentNewer = newerRangeAssignment(r.value(), epoch, seqno);
-		printf("thisAssignmentNewer=%s\n", thisAssignmentNewer ? "true" : "false");
+		if (BW_DEBUG) {
+			printf("thisAssignmentNewer=%s\n", thisAssignmentNewer ? "true" : "false");
+		}
 
 		// if this granule already has it, and this was a specialassignment (i.e. a new blob maanger is
 		// trying to reassign granules), then just continue
@@ -2391,7 +2396,9 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 			break;
 		}
 
-		printf("last: (%d, %d). now: (%d, %d)\n", r.value().lastEpoch, r.value().lastSeqno, epoch, seqno);
+		if (BW_DEBUG) {
+			printf("last: (%d, %d). now: (%d, %d)\n", r.value().lastEpoch, r.value().lastSeqno, epoch, seqno);
+		}
 
 		if (r.value().lastEpoch == epoch && r.value().lastSeqno == seqno) {
 			ASSERT(r.begin() == keyRange.begin);
@@ -2760,7 +2767,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 					printf("Blob worker detected removal. Exiting...\n");
 				}
 				TraceEvent("BlobWorkerRemoved", self->id);
-				return Void();
+				break;
 			}
 		}
 	} catch (Error& e) {
