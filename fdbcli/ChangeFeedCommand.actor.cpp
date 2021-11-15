@@ -62,6 +62,17 @@ ACTOR Future<Void> changeFeedList(Database db) {
 
 namespace fdb_cli {
 
+ACTOR Future<Void> requestVersionUpdate(Database localDb, Reference<ChangeFeedData> feedData) {
+	loop {
+		wait(delay(5.0));
+		Transaction tr(localDb);
+		state Version ver = wait(tr.getReadVersion());
+		printf("Requesting version %d\n", ver);
+		wait(feedData->whenAtLeast(ver));
+		printf("Feed at version %d\n", ver);
+	}
+}
+
 ACTOR Future<bool> changeFeedCommandActor(Database localDb, std::vector<StringRef> tokens, Future<Void> warn) {
 	if (tokens.size() == 1) {
 		printUsage(tokens[0]);
@@ -117,14 +128,16 @@ ACTOR Future<bool> changeFeedCommandActor(Database localDb, std::vector<StringRe
 		if (warn.isValid()) {
 			warn.cancel();
 		}
-		state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> feedResults;
-		state Future<Void> feed = localDb->getChangeFeedStream(feedResults, tokens[2], begin, end);
+		state Reference<ChangeFeedData> feedData = makeReference<ChangeFeedData>();
+		state Future<Void> feed = localDb->getChangeFeedStream(feedData, tokens[2], begin, end);
+		state Future<Void> versionUpdates = requestVersionUpdate(localDb, feedData);
 		printf("\n");
 		try {
 			state Future<Void> feedInterrupt = LineNoise::onKeyboardInterrupt();
 			loop {
 				choose {
-					when(Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(feedResults.getFuture())) {
+					when(Standalone<VectorRef<MutationsAndVersionRef>> res =
+					         waitNext(feedData->mutations.getFuture())) {
 						for (auto& it : res) {
 							for (auto& it2 : it.mutations) {
 								printf("%lld %s\n", it.version, it2.toString().c_str());
@@ -134,7 +147,7 @@ ACTOR Future<bool> changeFeedCommandActor(Database localDb, std::vector<StringRe
 					when(wait(feedInterrupt)) {
 						feedInterrupt = Future<Void>();
 						feed.cancel();
-						feedResults = PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>();
+						feedData = makeReference<ChangeFeedData>();
 						break;
 					}
 				}

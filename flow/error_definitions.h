@@ -82,6 +82,7 @@ ERROR( wrong_format_version, 1058, "Format version not recognized" )
 ERROR( unknown_change_feed, 1059, "Change feed not found" )
 ERROR( change_feed_not_registered, 1060, "Change feed not registered" )
 ERROR( granule_assignment_conflict, 1061, "Conflicting attempts to assign blob granules" )
+ERROR( change_feed_cancelled, 1062, "Change feed was cancelled" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )

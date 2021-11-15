@@ -607,6 +607,7 @@ public:
 	Deque<std::pair<std::vector<Key>, Version>> changeFeedVersions;
 	std::map<UID, PromiseStream<Key>> changeFeedRemovals;
 	std::set<Key> currentChangeFeeds;
+	std::unordered_map<NetworkAddress, std::map<UID, Version>> changeFeedClientVersions;
 
 	// newestAvailableVersion[k]
 	//   == invalidVersion -> k is unavailable at all versions
@@ -622,7 +623,7 @@ public:
 	                                                  // that were only partly available (due to cancelled fetchKeys)
 
 	// The following are in rough order from newest to oldest
-	Version lastTLogVersion, lastVersionWithData, restoredVersion;
+	Version lastTLogVersion, lastVersionWithData, restoredVersion, prevVersion;
 	NotifiedVersion version;
 	NotifiedVersion desiredOldestVersion; // We can increase oldestVersion (and then durableVersion) to this version
 	                                      // when the disk permits
@@ -884,10 +885,11 @@ public:
 	                                                                   Histogram::Unit::microseconds)),
 	    tag(invalidTag), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0),
 	    storage(this, storage), shardChangeCounter(0), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
-	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), primaryLocality(tagLocalityInvalid),
-	    knownCommittedVersion(0), versionLag(0), logProtocol(0), thisServerID(ssi.id()), tssInQuarantine(false), db(db),
-	    actors(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), durableInProgress(Void()),
-	    watchBytes(0), numWatches(0), noRecentUpdates(false), lastUpdate(now()),
+	    prevVersion(0), rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
+	    primaryLocality(tagLocalityInvalid), knownCommittedVersion(0), versionLag(0), logProtocol(0),
+	    thisServerID(ssi.id()), tssInQuarantine(false), db(db), actors(false),
+	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), durableInProgress(Void()), watchBytes(0),
+	    numWatches(0), noRecentUpdates(false), lastUpdate(now()),
 	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), updateEagerReads(nullptr),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
@@ -1712,7 +1714,7 @@ ACTOR Future<ChangeFeedStreamReply> getChangeFeedMutations(StorageServer* data,
 	state ChangeFeedStreamReply memoryReply;
 	state int remainingLimitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	state int remainingDurableBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-	wait(delay(0, TaskPriority::DefaultEndpoint));
+
 	if (data->version.get() < req.begin) {
 		wait(data->version.whenAtLeast(req.begin));
 	}
@@ -1847,17 +1849,47 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
 
 ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamRequest req) {
 	state Span span("SS:getChangeFeedStream"_loc, { req.spanContext });
+	state bool atLatest = false;
+	state UID streamUID = deterministicRandom()->randomUniqueID();
+	state bool removeUID = false;
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
 	try {
 		loop {
-			wait(req.reply.onReady());
-			ChangeFeedStreamReply _feedReply = wait(getChangeFeedMutations(data, req, false));
+			Future<Void> onReady = req.reply.onReady();
+			if (atLatest && !onReady.isReady()) {
+				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
+				    data->version.get();
+				removeUID = true;
+			}
+			wait(onReady);
+			state Future<ChangeFeedStreamReply> feedReplyFuture = getChangeFeedMutations(data, req, false);
+			if (atLatest && !removeUID && !feedReplyFuture.isReady()) {
+				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
+				    data->prevVersion;
+				removeUID = true;
+			}
+			ChangeFeedStreamReply _feedReply = wait(feedReplyFuture);
 			ChangeFeedStreamReply feedReply = _feedReply;
 
 			req.begin = feedReply.mutations.back().version + 1;
+			if (!atLatest && feedReply.mutations.back().mutations.empty()) {
+				atLatest = true;
+			}
+			auto& clientVersions = data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()];
+			Version minVersion = removeUID ? data->version.get() : data->prevVersion;
+			if (removeUID) {
+				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()].erase(streamUID);
+				removeUID = false;
+			}
+
+			for (auto& it : clientVersions) {
+				minVersion = std::min(minVersion, it.second);
+			}
+			feedReply.atLatestVersion = atLatest;
+			feedReply.minStreamVersion = minVersion;
 			req.reply.send(feedReply);
 			if (feedReply.mutations.back().version == req.end - 1) {
 				req.reply.sendError(end_of_stream());
@@ -1869,19 +1901,39 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					req.reply.sendError(unknown_change_feed());
 					return Void();
 				}
-				choose {
-					when(wait(delay(5.0, TaskPriority::DefaultEndpoint))) {}
-					when(wait(feed->second->newMutations.onTrigger())) {}
-				}
+				wait(feed->second->newMutations
+				         .onTrigger()); // FIXME: check that this is triggered when the range is moved to a different
+				                        // server, also check that the stream is closed
 			}
 		}
 	} catch (Error& e) {
+		auto it = data->changeFeedClientVersions.find(req.reply.getEndpoint().getPrimaryAddress());
+		if (it != data->changeFeedClientVersions.end()) {
+			if (removeUID) {
+				it->second.erase(streamUID);
+			}
+			if (it->second.empty()) {
+				data->changeFeedClientVersions.erase(it);
+			}
+		}
 		if (e.code() != error_code_operation_obsolete) {
 			if (!canReplyWith(e))
 				throw;
 			req.reply.sendError(e);
 		}
 	}
+	return Void();
+}
+
+ACTOR Future<Void> changeFeedVersionUpdateQ(StorageServer* data, ChangeFeedVersionUpdateRequest req) {
+	wait(data->version.whenAtLeast(req.minVersion));
+	wait(delay(0));
+	auto& clientVersions = data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()];
+	Version minVersion = data->version.get();
+	for (auto& it : clientVersions) {
+		minVersion = std::min(minVersion, it.second);
+	}
+	req.reply.send(ChangeFeedVersionUpdateReply(minVersion));
 	return Void();
 }
 
@@ -3294,14 +3346,14 @@ ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
                                           KeyRange range,
                                           Version fetchVersion,
                                           bool existing) {
-	state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> feedResults;
+	state Reference<ChangeFeedData> feedResults = makeReference<ChangeFeedData>();
 	state Future<Void> feed = data->cx->getChangeFeedStream(
 	    feedResults, rangeId, 0, existing ? fetchVersion + 1 : data->version.get() + 1, range);
 
 	if (!existing) {
 		try {
 			loop {
-				Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(feedResults.getFuture());
+				Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(feedResults->mutations.getFuture());
 				for (auto& it : res) {
 					if (it.mutations.size()) {
 						data->storage.writeKeyValue(
@@ -3332,7 +3384,8 @@ ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
 	localResult = _localResult;
 	try {
 		loop {
-			state Standalone<VectorRef<MutationsAndVersionRef>> remoteResult = waitNext(feedResults.getFuture());
+			state Standalone<VectorRef<MutationsAndVersionRef>> remoteResult =
+			    waitNext(feedResults->mutations.getFuture());
 			state int remoteLoc = 0;
 			while (remoteLoc < remoteResult.size()) {
 				if (remoteResult[remoteLoc].version < localResult.version) {
@@ -4581,6 +4634,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		cloneCursor2->setProtocolVersion(data->logProtocol);
 		state SpanID spanContext = SpanID();
 		state double beforeTLogMsgsUpdates = now();
+		state std::set<Key> updatedChangeFeeds;
 		for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
 			if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 				mutationBytes = 0;
@@ -4599,12 +4653,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				if (data->currentChangeFeeds.size()) {
 					data->changeFeedVersions.push_back(std::make_pair(
 					    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver));
-					for (auto& it : data->currentChangeFeeds) {
-						auto feed = data->uidChangeFeed.find(it);
-						if (feed != data->uidChangeFeed.end()) {
-							feed->second->newMutations.trigger();
-						}
-					}
+					updatedChangeFeeds.insert(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end());
 					data->currentChangeFeeds.clear();
 				}
 				ver = cloneCursor2->version().version;
@@ -4690,12 +4739,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		if (data->currentChangeFeeds.size()) {
 			data->changeFeedVersions.push_back(std::make_pair(
 			    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver));
-			for (auto& it : data->currentChangeFeeds) {
-				auto feed = data->uidChangeFeed.find(it);
-				if (feed != data->uidChangeFeed.end()) {
-					feed->second->newMutations.trigger();
-				}
-			}
+			updatedChangeFeeds.insert(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end());
 			data->currentChangeFeeds.clear();
 		}
 
@@ -4737,7 +4781,16 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			data->noRecentUpdates.set(false);
 			data->lastUpdate = now();
+
+			data->prevVersion = data->version.get();
 			data->version.set(ver); // Triggers replies to waiting gets for new version(s)
+
+			for (auto& it : updatedChangeFeeds) {
+				auto feed = data->uidChangeFeed.find(it);
+				if (feed != data->uidChangeFeed.end()) {
+					feed->second->newMutations.trigger();
+				}
+			}
 
 			setDataVersion(data->thisServerID, data->version.get());
 			if (data->otherError.getFuture().isReady())
@@ -5843,6 +5896,15 @@ ACTOR Future<Void> serveChangeFeedPopRequests(StorageServer* self, FutureStream<
 	}
 }
 
+ACTOR Future<Void> serveChangeFeedVersionUpdateRequests(
+    StorageServer* self,
+    FutureStream<ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate) {
+	loop {
+		ChangeFeedVersionUpdateRequest req = waitNext(changeFeedVersionUpdate);
+		self->actors.add(self->readGuard(req, changeFeedVersionUpdateQ));
+	}
+}
+
 ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 	if (!SERVER_KNOBS->REPORT_DD_METRICS) {
 		return Void();
@@ -5895,6 +5957,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(serveChangeFeedStreamRequests(self, ssi.changeFeedStream.getFuture()));
 	self->actors.add(serveOverlappingChangeFeedsRequests(self, ssi.overlappingChangeFeeds.getFuture()));
 	self->actors.add(serveChangeFeedPopRequests(self, ssi.changeFeedPop.getFuture()));
+	self->actors.add(serveChangeFeedVersionUpdateRequests(self, ssi.changeFeedVersionUpdate.getFuture()));
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));
 

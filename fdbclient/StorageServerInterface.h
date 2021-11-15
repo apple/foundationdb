@@ -81,6 +81,7 @@ struct StorageServerInterface {
 	RequestStream<struct ChangeFeedStreamRequest> changeFeedStream;
 	RequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
 	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
+	RequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
@@ -129,6 +130,8 @@ struct StorageServerInterface {
 				    RequestStream<struct OverlappingChangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
 				changeFeedPop =
 				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
+				changeFeedVersionUpdate = RequestStream<struct ChangeFeedVersionUpdateRequest>(
+				    getValue.getEndpoint().getAdjustedEndpoint(17));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -174,6 +177,7 @@ struct StorageServerInterface {
 		streams.push_back(changeFeedStream.getReceiver());
 		streams.push_back(overlappingChangeFeeds.getReceiver());
 		streams.push_back(changeFeedPop.getReceiver());
+		streams.push_back(changeFeedVersionUpdate.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -639,6 +643,8 @@ struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 	constexpr static FileIdentifier file_identifier = 1783066;
 	Arena arena;
 	VectorRef<MutationsAndVersionRef> mutations;
+	bool atLatestVersion = false;
+	Version minStreamVersion = invalidVersion;
 
 	ChangeFeedStreamReply() {}
 
@@ -646,7 +652,13 @@ struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, mutations, arena);
+		serializer(ar,
+		           ReplyPromiseStreamReply::acknowledgeToken,
+		           ReplyPromiseStreamReply::sequence,
+		           mutations,
+		           atLatestVersion,
+		           minStreamVersion,
+		           arena);
 	}
 };
 
@@ -731,6 +743,33 @@ struct OverlappingChangeFeedsRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, range, minVersion, reply);
+	}
+};
+
+struct ChangeFeedVersionUpdateReply {
+	constexpr static FileIdentifier file_identifier = 11815134;
+	Version version = 0;
+
+	ChangeFeedVersionUpdateReply() {}
+	explicit ChangeFeedVersionUpdateReply(Version version) : version(version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version);
+	}
+};
+
+struct ChangeFeedVersionUpdateRequest {
+	constexpr static FileIdentifier file_identifier = 6795746;
+	Version minVersion;
+	ReplyPromise<ChangeFeedVersionUpdateReply> reply;
+
+	ChangeFeedVersionUpdateRequest() {}
+	explicit ChangeFeedVersionUpdateRequest(Version minVersion) : minVersion(minVersion) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, minVersion, reply);
 	}
 };
 

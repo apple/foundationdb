@@ -65,6 +65,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Error.h"
+#include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
@@ -6663,12 +6664,101 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
 }
 
+ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, ChangeFeedStorageData* self) {
+	loop {
+		if (self->version.get() < self->desired.get()) {
+			wait(delay(CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME) || self->version.whenAtLeast(self->desired.get()));
+			if (self->version.get() < self->desired.get()) {
+				ChangeFeedVersionUpdateReply rep = wait(brokenPromiseToNever(
+				    interf.changeFeedVersionUpdate.getReply(ChangeFeedVersionUpdateRequest(self->desired.get()))));
+				if (rep.version > self->version.get()) {
+					self->version.set(rep.version);
+				}
+			}
+		} else {
+			wait(self->desired.whenAtLeast(self->version.get() + 1));
+		}
+	}
+}
+
+Reference<ChangeFeedStorageData> DatabaseContext::getStorageData(StorageServerInterface interf) {
+	auto it = changeFeedUpdaters.find(interf.id());
+	if (it == changeFeedUpdaters.end()) {
+		Reference<ChangeFeedStorageData> newStorageUpdater = makeReference<ChangeFeedStorageData>();
+		newStorageUpdater->id = interf.id();
+		newStorageUpdater->updater = storageFeedVersionUpdater(interf, newStorageUpdater.getPtr());
+		changeFeedUpdaters[interf.id()] = newStorageUpdater;
+		return newStorageUpdater;
+	}
+	return it->second;
+}
+
+Version ChangeFeedData::getVersion() {
+	if (notAtLatest.get() == 0 && mutations.isEmpty()) {
+		Version v = storageData[0]->version.get();
+		for (int i = 1; i < storageData.size(); i++) {
+			if (storageData[i]->version.get() < v) {
+				v = storageData[i]->version.get();
+			}
+		}
+		return std::max(v, lastReturnedVersion.get());
+	}
+	return lastReturnedVersion.get();
+}
+
+ACTOR Future<Void> changeFeedWhenAtLatest(ChangeFeedData* self, Version version) {
+	state Future<Void> lastReturned = self->lastReturnedVersion.whenAtLeast(version);
+	loop {
+		if (self->notAtLatest.get() == 0) {
+			std::vector<Future<Void>> allAtLeast;
+			for (auto& it : self->storageData) {
+				if (it->version.get() < version) {
+					if (version > it->desired.get()) {
+						it->desired.set(version);
+					}
+					allAtLeast.push_back(it->version.whenAtLeast(version));
+				}
+			}
+			choose {
+				when(wait(lastReturned)) { return Void(); }
+				when(wait(waitForAll(allAtLeast))) {
+					if (self->mutations.isEmpty()) {
+						return Void();
+					}
+					choose {
+						when(wait(self->mutations.onEmpty())) {
+							wait(delay(0));
+							return Void();
+						}
+						when(wait(lastReturned)) { return Void(); }
+						when(wait(self->refresh.getFuture())) {}
+					}
+				}
+				when(wait(self->refresh.getFuture())) {}
+			}
+		} else {
+			choose {
+				when(wait(lastReturned)) { return Void(); }
+				when(wait(self->notAtLatest.onChange())) {}
+				when(wait(self->refresh.getFuture())) {}
+			}
+		}
+	}
+}
+
+Future<Void> ChangeFeedData::whenAtLeast(Version version) {
+	return changeFeedWhenAtLatest(this, version);
+}
+
 ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
                                           PromiseStream<Standalone<MutationsAndVersionRef>> results,
                                           Key rangeID,
                                           Version begin,
                                           Version end,
-                                          KeyRange range) {
+                                          KeyRange range,
+                                          Reference<ChangeFeedData> feedData,
+                                          Reference<ChangeFeedStorageData> storageData) {
+	state bool atLatestVersion = false;
 	loop {
 		try {
 			state Version lastEmpty = invalidVersion;
@@ -6699,6 +6789,13 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
 					results.sendError(end_of_stream());
 					return Void();
 				}
+				if (!atLatestVersion && rep.atLatestVersion) {
+					atLatestVersion = true;
+					feedData->notAtLatest.set(feedData->notAtLatest.get() - 1);
+				}
+				if (rep.minStreamVersion > storageData->version.get()) {
+					storageData->version.set(rep.minStreamVersion);
+				}
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
@@ -6716,17 +6813,39 @@ struct MutationAndVersionStream {
 	bool operator<(MutationAndVersionStream const& rhs) const { return next.version > rhs.next.version; }
 };
 
-ACTOR Future<Void> mergeChangeFeedStream(std::vector<std::pair<StorageServerInterface, KeyRange>> interfs,
-                                         PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> results,
+ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
+                                         std::vector<std::pair<StorageServerInterface, KeyRange>> interfs,
+                                         Reference<ChangeFeedData> results,
                                          Key rangeID,
                                          Version* begin,
                                          Version end) {
 	state std::priority_queue<MutationAndVersionStream, std::vector<MutationAndVersionStream>> mutations;
 	state std::vector<Future<Void>> fetchers(interfs.size());
 	state std::vector<MutationAndVersionStream> streams(interfs.size());
+
+	for (auto& it : results->storageData) {
+		if (it->debugGetReferenceCount() == 2) {
+			db->changeFeedUpdaters.erase(it->id);
+		}
+	}
+	results->storageData.clear();
+	Promise<Void> refresh = results->refresh;
+	results->refresh = Promise<Void>();
 	for (int i = 0; i < interfs.size(); i++) {
-		fetchers[i] =
-		    singleChangeFeedStream(interfs[i].first, streams[i].results, rangeID, *begin, end, interfs[i].second);
+		results->storageData.push_back(db->getStorageData(interfs[i].first));
+	}
+	results->notAtLatest.set(interfs.size());
+	refresh.send(Void());
+
+	for (int i = 0; i < interfs.size(); i++) {
+		fetchers[i] = singleChangeFeedStream(interfs[i].first,
+		                                     streams[i].results,
+		                                     rangeID,
+		                                     *begin,
+		                                     end,
+		                                     interfs[i].second,
+		                                     results,
+		                                     results->storageData[i]);
 	}
 	state int interfNum = 0;
 	while (interfNum < interfs.size()) {
@@ -6750,7 +6869,8 @@ ACTOR Future<Void> mergeChangeFeedStream(std::vector<std::pair<StorageServerInte
 		if (nextStream.next.version != checkVersion) {
 			if (nextOut.size()) {
 				*begin = checkVersion + 1;
-				results.send(nextOut);
+				results->mutations.send(nextOut);
+				results->lastReturnedVersion.set(nextOut.back().version);
 				nextOut = Standalone<VectorRef<MutationsAndVersionRef>>();
 			}
 			checkVersion = nextStream.next.version;
@@ -6775,7 +6895,8 @@ ACTOR Future<Void> mergeChangeFeedStream(std::vector<std::pair<StorageServerInte
 		}
 	}
 	if (nextOut.size()) {
-		results.send(nextOut);
+		results->mutations.send(nextOut);
+		results->lastReturnedVersion.set(nextOut.back().version);
 	}
 	throw end_of_stream();
 }
@@ -6814,7 +6935,7 @@ ACTOR Future<KeyRange> getChangeFeedRange(Reference<DatabaseContext> db, Databas
 }
 
 ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
-                                            PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> results,
+                                            Reference<ChangeFeedData> results,
                                             Key rangeID,
                                             Version begin,
                                             Version end,
@@ -6887,32 +7008,57 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 					interfs.push_back(std::make_pair(locations[i].second->getInterface(chosenLocations[i]),
 					                                 locations[i].first & range));
 				}
-				wait(mergeChangeFeedStream(interfs, results, rangeID, &begin, end) || cx->connectionFileChanged());
+				wait(mergeChangeFeedStream(db, interfs, results, rangeID, &begin, end) || cx->connectionFileChanged());
 			} else {
 				state ChangeFeedStreamRequest req;
 				req.rangeID = rangeID;
 				req.begin = begin;
 				req.end = end;
 				req.range = range;
-
+				StorageServerInterface interf = locations[0].second->getInterface(chosenLocations[0]);
 				state ReplyPromiseStream<ChangeFeedStreamReply> replyStream =
-				    locations[0]
-				        .second->get(chosenLocations[0], &StorageServerInterface::changeFeedStream)
-				        .getReplyStream(req);
-
+				    interf.changeFeedStream.getReplyStream(req);
+				for (auto& it : results->storageData) {
+					if (it->debugGetReferenceCount() == 2) {
+						db->changeFeedUpdaters.erase(it->id);
+					}
+				}
+				results->storageData.clear();
+				results->storageData.push_back(db->getStorageData(interf));
+				Promise<Void> refresh = results->refresh;
+				results->refresh = Promise<Void>();
+				results->notAtLatest.set(1);
+				refresh.send(Void());
+				state bool atLatest = false;
 				loop {
-					wait(results.onEmpty());
+					wait(results->mutations.onEmpty());
 					choose {
 						when(wait(cx->connectionFileChanged())) { break; }
 						when(ChangeFeedStreamReply rep = waitNext(replyStream.getFuture())) {
 							begin = rep.mutations.back().version + 1;
-							results.send(Standalone<VectorRef<MutationsAndVersionRef>>(rep.mutations, rep.arena));
+							results->mutations.send(
+							    Standalone<VectorRef<MutationsAndVersionRef>>(rep.mutations, rep.arena));
+							results->lastReturnedVersion.set(rep.mutations.back().version);
+							if (!atLatest && rep.atLatestVersion) {
+								atLatest = true;
+								results->notAtLatest.set(0);
+							}
+							if (rep.minStreamVersion > results->storageData[0]->version.get()) {
+								results->storageData[0]->version.set(rep.minStreamVersion);
+							}
 						}
 					}
 				}
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
+				for (auto& it : results->storageData) {
+					if (it->debugGetReferenceCount() == 2) {
+						db->changeFeedUpdaters.erase(it->id);
+					}
+				}
+				results->storageData.clear();
+				results->refresh.sendError(change_feed_cancelled());
 				throw;
 			}
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
@@ -6922,19 +7068,25 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				cx->invalidateCache(keys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
 			} else {
-				results.sendError(e);
+				results->mutations.sendError(e);
+				results->refresh.sendError(change_feed_cancelled());
+				for (auto& it : results->storageData) {
+					if (it->debugGetReferenceCount() == 2) {
+						db->changeFeedUpdaters.erase(it->id);
+					}
+				}
+				results->storageData.clear();
 				return Void();
 			}
 		}
 	}
 }
 
-Future<Void> DatabaseContext::getChangeFeedStream(
-    const PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>& results,
-    Key rangeID,
-    Version begin,
-    Version end,
-    KeyRange range) {
+Future<Void> DatabaseContext::getChangeFeedStream(Reference<ChangeFeedData> results,
+                                                  Key rangeID,
+                                                  Version begin,
+                                                  Version end,
+                                                  KeyRange range) {
 	return getChangeFeedStreamActor(Reference<DatabaseContext>::addRef(this), results, rangeID, begin, end, range);
 }
 
