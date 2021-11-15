@@ -607,6 +607,7 @@ inline static void flushOutputStreams() {
 #if defined(_MSC_VER)
 #define DLLEXPORT __declspec(dllexport)
 #elif defined(__GNUG__)
+#undef DLLEXPORT
 #define DLLEXPORT __attribute__((visibility("default")))
 #else
 #error Missing symbol export

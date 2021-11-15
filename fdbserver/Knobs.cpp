@@ -97,7 +97,9 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( PEEK_STATS_INTERVAL,                                  10.0 );
 	init( PEEK_STATS_SLOW_AMOUNT,                                  2 );
 	init( PEEK_STATS_SLOW_RATIO,                                 0.5 );
-	init( PUSH_RESET_INTERVAL,                                 300.0 ); if ( randomize && BUGGIFY ) PUSH_RESET_INTERVAL = 20.0;
+	// Buggified value must be larger than the amount of simulated time taken by snapshots, to prevent repeatedly failing
+	// snapshots due to closed commit proxy connections
+	init( PUSH_RESET_INTERVAL,                                 300.0 ); if ( randomize && BUGGIFY ) PUSH_RESET_INTERVAL = 40.0;
 	init( PUSH_MAX_LATENCY,                                      0.5 ); if ( randomize && BUGGIFY ) PUSH_MAX_LATENCY = 0.0;
 	init( PUSH_STATS_INTERVAL,                                  10.0 );
 	init( PUSH_STATS_SLOW_AMOUNT,                                  2 );
@@ -344,6 +346,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( ROCKSDB_PERIODIC_COMPACTION_SECONDS,                     0 );
 	init( ROCKSDB_PREFIX_LEN,                                      0 );
 	init( ROCKSDB_BLOCK_CACHE_SIZE,                                0 );
+	init( ROCKSDB_METRICS_DELAY,                                60.0 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -633,6 +636,8 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( FETCH_KEYS_TOO_LONG_TIME_CRITERIA,                   300.0 );
 	init( MAX_STORAGE_COMMIT_TIME,                             120.0 ); //The max fsync stall time on the storage server and tlog before marking a disk as failed
 	init( RANGESTREAM_LIMIT_BYTES,                               2e6 ); if( randomize && BUGGIFY ) RANGESTREAM_LIMIT_BYTES = 1;
+	init( QUICK_GET_VALUE_FALLBACK,                             true );
+	init( QUICK_GET_KEY_VALUES_FALLBACK,                        true );
 
 	//Wait Failure
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;
