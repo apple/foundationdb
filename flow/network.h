@@ -689,6 +689,9 @@ public:
 	// Make an outgoing udp connection without establishing a connection
 	virtual Future<Reference<IUDPSocket>> createUDPSocket(bool isV6 = false) = 0;
 
+	virtual void addMockTCPEndpoint(const std::string& host,
+	                                const std::string& service,
+	                                const std::vector<NetworkAddress>& addresses) = 0;
 	// Resolve host name and service name (such as "http" or can be a plain number like "80") to a list of 1 or more
 	// NetworkAddresses
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
