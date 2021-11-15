@@ -68,9 +68,6 @@ public:
 	UID getDebugID() const override;
 	static Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host, const std::string& service);
 	static Future<Reference<IConnection>> connect(NetworkAddress toAddr);
-
-private:
-	static MockDNS mockDNS;
 };
 
 #endif
