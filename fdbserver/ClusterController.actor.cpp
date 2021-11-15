@@ -4740,6 +4740,48 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 	}
 }
 
+ACTOR Future<Void> monitorClientLibChangeCounter(ClusterControllerData::DBInfo* db) {
+	state ClientDBInfo clientInfo;
+	state ReadYourWritesTransaction tr;
+	state Future<Void> clientLibChangeFuture;
+
+	loop {
+		tr = ReadYourWritesTransaction(db->db);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+				Optional<Value> counterVal = wait(tr.get(clientLibChangeCounterKey));
+				if (counterVal.present() && counterVal.get().size() == sizeof(uint64_t)) {
+					uint64_t changeCounter = *reinterpret_cast<const uint64_t*>(counterVal.get().begin());
+
+					clientInfo = db->serverInfo->get().client;
+					if (changeCounter != clientInfo.clientLibChangeCounter) {
+						TraceEvent("ClientLibChangeCounterChanged").detail("Value", changeCounter);
+						clientInfo.id = deterministicRandom()->randomUniqueID();
+						clientInfo.clientLibChangeCounter = changeCounter;
+						db->clientInfo->set(clientInfo);
+
+						ServerDBInfo serverInfo = db->serverInfo->get();
+						serverInfo.id = deterministicRandom()->randomUniqueID();
+						serverInfo.infoGeneration = ++db->dbInfoCount;
+						serverInfo.client = clientInfo;
+						db->serverInfo->set(serverInfo);
+					}
+				}
+
+				clientLibChangeFuture = tr.watch(clientLibChangeCounterKey);
+				wait(tr.commit());
+				wait(clientLibChangeFuture);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> updatedChangingDatacenters(ClusterControllerData* self) {
 	// do not change the cluster controller until all the processes have had a chance to register
 	wait(delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
@@ -5437,6 +5479,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorProcessClasses(&self));
 	self.addActor.send(monitorServerInfoConfig(&self.db));
 	self.addActor.send(monitorGlobalConfig(&self.db));
+	self.addActor.send(monitorClientLibChangeCounter(&self.db));
 	self.addActor.send(updatedChangingDatacenters(&self));
 	self.addActor.send(updatedChangedDatacenters(&self));
 	self.addActor.send(updateDatacenterVersionDifference(&self));

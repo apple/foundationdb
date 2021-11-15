@@ -488,6 +488,8 @@ extern const KeyRef clientLibMetadataPrefix;
 extern const KeyRangeRef clientLibBinaryKeys;
 extern const KeyRef clientLibBinaryPrefix;
 
+extern const KeyRef clientLibChangeCounterKey;
+
 // All mutations done to this range are blindly copied into txnStateStore.
 // Used to create artifically large txnStateStore instances in testing.
 extern const KeyRangeRef testOnlyTxnStateStorePrefixRange;

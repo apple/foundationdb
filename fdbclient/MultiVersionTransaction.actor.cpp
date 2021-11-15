@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
-#include "fdbclient/ThreadSafeTransaction.h"
+#include "fdbclient/ClientVersion.h"
+#include "fdbclient/LocalClientAPI.h"
 
 #include "flow/network.h"
 #include "flow/Platform.h"
@@ -29,6 +29,10 @@
 #include "flow/UnitTest.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+#ifdef FDBCLIENT_NATIVEAPI_ACTOR_H
+#error "MVC should not depend on the Native API"
+#endif
 
 void throwIfError(FdbCApi::fdb_error_t e) {
 	if (e) {
@@ -139,6 +143,41 @@ ThreadFuture<RangeResult> DLTransaction::getRange(const KeyRangeRef& keys,
                                                   bool snapshot,
                                                   bool reverse) {
 	return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
+}
+
+ThreadFuture<RangeResult> DLTransaction::getRangeAndFlatMap(const KeySelectorRef& begin,
+                                                            const KeySelectorRef& end,
+                                                            const StringRef& mapper,
+                                                            GetRangeLimits limits,
+                                                            bool snapshot,
+                                                            bool reverse) {
+	FdbCApi::FDBFuture* f = api->transactionGetRangeAndFlatMap(tr,
+	                                                           begin.getKey().begin(),
+	                                                           begin.getKey().size(),
+	                                                           begin.orEqual,
+	                                                           begin.offset,
+	                                                           end.getKey().begin(),
+	                                                           end.getKey().size(),
+	                                                           end.orEqual,
+	                                                           end.offset,
+	                                                           mapper.begin(),
+	                                                           mapper.size(),
+	                                                           limits.rows,
+	                                                           limits.bytes,
+	                                                           FDB_STREAMING_MODE_EXACT,
+	                                                           0,
+	                                                           snapshot,
+	                                                           reverse);
+	return toThreadFuture<RangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const FdbCApi::FDBKeyValue* kvs;
+		int count;
+		FdbCApi::fdb_bool_t more;
+		FdbCApi::fdb_error_t error = api->futureGetKeyValueArray(f, &kvs, &count, &more);
+		ASSERT(!error);
+
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
+		return RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena());
+	});
 }
 
 ThreadFuture<Standalone<VectorRef<const char*>>> DLTransaction::getAddressesForKey(const KeyRef& key) {
@@ -452,6 +491,7 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionGetKey, lib, fdbCPath, "fdb_transaction_get_key");
 	loadClientFunction(&api->transactionGetAddressesForKey, lib, fdbCPath, "fdb_transaction_get_addresses_for_key");
 	loadClientFunction(&api->transactionGetRange, lib, fdbCPath, "fdb_transaction_get_range");
+	loadClientFunction(&api->transactionGetRangeAndFlatMap, lib, fdbCPath, "fdb_transaction_get_range_and_flat_map");
 	loadClientFunction(
 	    &api->transactionGetVersionstamp, lib, fdbCPath, "fdb_transaction_get_versionstamp", headerVersion >= 410);
 	loadClientFunction(&api->transactionSet, lib, fdbCPath, "fdb_transaction_set");
@@ -731,6 +771,18 @@ ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& k
 	return abortableFuture(f, tr.onChange);
 }
 
+ThreadFuture<RangeResult> MultiVersionTransaction::getRangeAndFlatMap(const KeySelectorRef& begin,
+                                                                      const KeySelectorRef& end,
+                                                                      const StringRef& mapper,
+                                                                      GetRangeLimits limits,
+                                                                      bool snapshot,
+                                                                      bool reverse) {
+	auto tr = getTransaction();
+	auto f = tr.transaction ? tr.transaction->getRangeAndFlatMap(begin, end, mapper, limits, snapshot, reverse)
+	                        : makeTimeout<RangeResult>();
+	return abortableFuture(f, tr.onChange);
+}
+
 ThreadFuture<Standalone<StringRef>> MultiVersionTransaction::getVersionstamp() {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getVersionstamp() : makeTimeout<Standalone<StringRef>>();
@@ -887,6 +939,30 @@ ACTOR Future<Void> timeoutImpl(Reference<ThreadSingleAssignmentVar<Void>> tsav, 
 	tsav->trySendError(transaction_timed_out());
 	return Void();
 }
+
+namespace {
+
+void validateOptionValuePresent(Optional<StringRef> value) {
+	if (!value.present()) {
+		throw invalid_option_value();
+	}
+}
+
+int64_t extractIntOption(Optional<StringRef> value, int64_t minValue, int64_t maxValue) {
+	validateOptionValuePresent(value);
+	if (value.get().size() != 8) {
+		throw invalid_option_value();
+	}
+
+	int64_t passed = *((int64_t*)(value.get().begin()));
+	if (passed > maxValue || passed < minValue) {
+		throw invalid_option_value();
+	}
+
+	return passed;
+}
+
+} // namespace
 
 // Configure a timeout based on the options set for this transaction. This timeout only applies
 // if we don't have an underlying database object to connect with.
@@ -1467,7 +1543,8 @@ Reference<ClientInfo> MultiVersionApi::getLocalClient() {
 
 void MultiVersionApi::selectApiVersion(int apiVersion) {
 	if (!localClient) {
-		localClient = makeReference<ClientInfo>(ThreadSafeApi::api);
+		localClient = makeReference<ClientInfo>(getLocalClientAPI());
+		ASSERT(localClient);
 	}
 
 	if (this->apiVersion != 0 && this->apiVersion != apiVersion) {
@@ -1482,6 +1559,8 @@ const char* MultiVersionApi::getClientVersion() {
 	return localClient->api->getClientVersion();
 }
 
+namespace {
+
 void validateOption(Optional<StringRef> value, bool canBePresent, bool canBeAbsent, bool canBeEmpty = true) {
 	ASSERT(canBePresent || canBeAbsent);
 
@@ -1492,6 +1571,8 @@ void validateOption(Optional<StringRef> value, bool canBePresent, bool canBeAbse
 		throw invalid_option_value();
 	}
 }
+
+} // namespace
 
 void MultiVersionApi::disableMultiVersionClientApi() {
 	MutexHolder holder(lock);

@@ -217,6 +217,7 @@ public:
 	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(bool useProvisionalProxies);
 	Reference<GrvProxyInfo> getGrvProxies(bool useProvisionalProxies);
 	Future<Void> onProxiesChanged() const;
+	Future<Void> onClientLibStatusChanged() const;
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
 	// Returns the protocol version reported by the coordinator this client is connected to
@@ -307,7 +308,8 @@ public:
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord;
 	AsyncTrigger proxiesChangeTrigger;
-	Future<Void> monitorProxiesInfoChange;
+	AsyncTrigger clientLibChangeTrigger;
+	Future<Void> clientDBInfoMonitor;
 	Future<Void> monitorTssInfoChange;
 	Future<Void> tssMismatchHandler;
 	PromiseStream<std::pair<UID, std::vector<DetailedTSSMismatch>>> tssMismatchStream;
@@ -392,6 +394,7 @@ public:
 	Counter transactionGetKeyRequests;
 	Counter transactionGetValueRequests;
 	Counter transactionGetRangeRequests;
+	Counter transactionGetRangeAndFlatMapRequests;
 	Counter transactionGetRangeStreamRequests;
 	Counter transactionWatchRequests;
 	Counter transactionGetAddressesForKeyRequests;
@@ -427,7 +430,7 @@ public:
 
 	int snapshotRywEnabled;
 
-	int transactionTracingEnabled;
+	bool transactionTracingSample;
 	double verifyCausalReadsProp = 0.0;
 
 	Future<Void> logger;

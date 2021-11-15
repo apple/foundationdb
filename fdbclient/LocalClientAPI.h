@@ -1,9 +1,9 @@
 /*
- * genericactors.actor.cpp
+ * LocalClientAPI.h
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,18 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/flow.h"
-#include "fdbrpc/genericactors.actor.h" // Gets genericactors.actor.g.h indirectly
-#include "flow/network.h"
-#include "fdbrpc/simulator.h"
-#include "flow/actorcompiler.h"
+#ifndef FDBCLIENT_LOCALCLIENTAPI_H
+#define FDBCLIENT_LOCALCLIENTAPI_H
+#pragma once
 
-ACTOR Future<Void> disableConnectionFailuresAfter(double time, std::string context) {
-	if (g_network->isSimulated()) {
-		wait(delayUntil(time));
-		g_simulator.connectionFailuresDisableDuration = 1e6;
-		g_simulator.speedUpSimulation = true;
-		TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
-	}
-	return Void();
-}
+#include "fdbclient/IClientApi.h"
+
+IClientApi* getLocalClientAPI();
+#endif

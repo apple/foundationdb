@@ -128,8 +128,13 @@ public:
 	};
 
 private:
-	typedef Promise<Lock> Slot;
-	typedef Deque<Slot> Queue;
+	struct Waiter {
+		Waiter() : queuedTime(now()) {}
+		Promise<Lock> lockPromise;
+		double queuedTime;
+	};
+
+	typedef Deque<Waiter> Queue;
 
 #if PRIORITYMULTILOCK_DEBUG
 #define prioritylock_printf(...) printf(__VA_ARGS__)
@@ -138,7 +143,8 @@ private:
 #endif
 
 public:
-	PriorityMultiLock(int concurrency, int maxPriority) : concurrency(concurrency), available(concurrency), waiting(0) {
+	PriorityMultiLock(int concurrency, int maxPriority, int launchLimit = std::numeric_limits<int>::max())
+	  : concurrency(concurrency), available(concurrency), waiting(0), launchLimit(launchLimit) {
 		waiters.resize(maxPriority + 1);
 		fRunner = runner(this);
 	}
@@ -157,11 +163,37 @@ public:
 			return p;
 		}
 
-		Slot s;
-		waiters[priority].push_back(s);
+		Waiter w;
+		waiters[priority].push_back(w);
 		++waiting;
 		prioritylock_printf("lock exit queued %s\n", toString().c_str());
-		return s.getFuture();
+		return w.lockPromise.getFuture();
+	}
+
+	std::string toString() const {
+		int runnersDone = 0;
+		for (int i = 0; i < runners.size(); ++i) {
+			if (runners[i].isReady()) {
+				++runnersDone;
+			}
+		}
+
+		std::string s =
+		    format("{ ptr=%p concurrency=%d available=%d running=%d waiting=%d runnersQueue=%d runnersDone=%d ",
+		           this,
+		           concurrency,
+		           available,
+		           concurrency - available,
+		           waiting,
+		           runners.size(),
+		           runnersDone);
+
+		for (int i = 0; i < waiters.size(); ++i) {
+			s += format("p%d_waiters=%u ", i, waiters[i].size());
+		}
+
+		s += "}";
+		return s;
 	}
 
 private:
@@ -181,6 +213,13 @@ private:
 		state Future<Void> error = self->brokenOnDestruct.getFuture();
 		state int maxPriority = self->waiters.size() - 1;
 
+		// Priority to try to run tasks from next
+		state int priority = maxPriority;
+		state Queue* pQueue = &self->waiters[maxPriority];
+
+		// Track the number of waiters unlocked at the same priority in a row
+		state int lastPriorityCount = 0;
+
 		loop {
 			// Cleanup finished runner futures at the front of the runner queue.
 			while (!self->runners.empty() && self->runners.front().isReady()) {
@@ -197,20 +236,22 @@ private:
 			}
 
 			// While there are available slots and there are waiters, launch tasks
-			int priority = maxPriority;
-
 			while (self->available > 0 && self->waiting > 0) {
-				auto& q = self->waiters[priority];
-				prioritylock_printf(
-				    "Checking priority=%d prioritySize=%d %s\n", priority, q.size(), self->toString().c_str());
+				prioritylock_printf("Checking priority=%d lastPriorityCount=%d %s\n",
+				                    priority,
+				                    lastPriorityCount,
+				                    self->toString().c_str());
 
-				while (!q.empty()) {
-					Slot s = q.front();
-					q.pop_front();
+				while (!pQueue->empty() && ++lastPriorityCount < self->launchLimit) {
+					Waiter w = pQueue->front();
+					pQueue->pop_front();
 					--self->waiting;
 					Lock lock;
-					prioritylock_printf("  Running waiter priority=%d prioritySize=%d\n", priority, q.size());
-					s.send(lock);
+					prioritylock_printf("  Running waiter priority=%d wait=%f %s\n",
+					                    priority,
+					                    now() - w.queuedTime,
+					                    self->toString().c_str());
+					w.lockPromise.send(lock);
 
 					// Self may have been destructed during the lock callback
 					if (error.isReady()) {
@@ -228,24 +269,28 @@ private:
 					}
 				}
 
-				// Wrap around to highest priority
+				// If there are no more slots available, then don't move to the next priority
+				if (self->available == 0) {
+					break;
+				}
+
+				// Decrease priority, wrapping around to max from 0
 				if (priority == 0) {
 					priority = maxPriority;
 				} else {
 					--priority;
 				}
+
+				pQueue = &self->waiters[priority];
+				lastPriorityCount = 0;
 			}
 		}
-	}
-
-	std::string toString() const {
-		return format(
-		    "{ slots=%d/%d waiting=%d runners=%d }", (concurrency - available), concurrency, waiting, runners.size());
 	}
 
 	int concurrency;
 	int available;
 	int waiting;
+	int launchLimit;
 	std::vector<Queue> waiters;
 	Deque<Future<Void>> runners;
 	Future<Void> fRunner;
@@ -371,7 +416,7 @@ std::string toString(const std::pair<F, S>& o) {
 
 static constexpr int ioMinPriority = 0;
 static constexpr int ioLeafPriority = 1;
-static constexpr int ioMaxPriority = 2;
+static constexpr int ioMaxPriority = 3;
 
 // A FIFO queue of T stored as a linked list of pages.
 // Main operations are pop(), pushBack(), pushFront(), and flush().
@@ -2102,10 +2147,10 @@ public:
 	          int concurrentExtentReads,
 	          bool memoryOnly = false,
 	          Promise<Void> errorPromise = {})
-	  : ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority), pageCacheBytes(pageCacheSizeBytes), pHeader(nullptr),
-	    desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize), filename(filename),
-	    memoryOnly(memoryOnly), errorPromise(errorPromise), remapCleanupWindow(remapCleanupWindow),
-	    concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
+	  : ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2),
+	    pageCacheBytes(pageCacheSizeBytes), pHeader(nullptr), desiredPageSize(desiredPageSize),
+	    desiredExtentSize(desiredExtentSize), filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
+	    remapCleanupWindow(remapCleanupWindow), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
 
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
@@ -2175,6 +2220,8 @@ public:
 			wait(store(fileSize, self->pageFile->size()));
 		}
 
+		self->fileExtension = Void();
+
 		debug_printf(
 		    "DWALPager(%s) recover exists=%d fileSize=%" PRId64 "\n", self->filename.c_str(), exists, fileSize);
 		// TODO:  If the file exists but appears to never have been successfully committed is this an error or
@@ -2221,6 +2268,9 @@ public:
 			}
 
 			self->setPageSize(self->pHeader->pageSize);
+			self->filePageCount = fileSize / self->physicalPageSize;
+			self->filePageCountPending = self->filePageCount;
+
 			if (self->logicalPageSize != self->desiredPageSize) {
 				TraceEvent(SevWarn, "RedwoodPageSizeNotDesired")
 				    .detail("Filename", self->filename)
@@ -2320,6 +2370,8 @@ public:
 
 			// Now that the header page has been allocated, set page size to desired
 			self->setPageSize(self->desiredPageSize);
+			self->filePageCount = 0;
+			self->filePageCountPending = 0;
 
 			// Now set the extent size, do this always after setting the page size as
 			// extent size is a multiple of page size
@@ -2397,7 +2449,10 @@ public:
 		             self->recoveryVersion,
 		             self->pHeader->oldestVersion,
 		             self->logicalPageSize,
-		             self->physicalPageSize);
+		             self->physicalPageSize,
+		             self->pHeader->pageCount,
+		             self->filePageCount);
+
 		return Void();
 	}
 
@@ -2486,11 +2541,13 @@ public:
 	// Grow the pager file by one page and return it
 	LogicalPageID newLastPageID() {
 		LogicalPageID id = pHeader->pageCount;
-		++pHeader->pageCount;
+		growPager(1);
 		return id;
 	}
 
 	Future<LogicalPageID> newPageID() override { return newPageID_impl(this); }
+
+	void growPager(int64_t pages) { pHeader->pageCount += pages; }
 
 	// Get a new, previously available extent and it's first page ID.  The page will be considered in-use after the next
 	// commit regardless of whether or not it was written to, until it is returned to the pager via freePage()
@@ -2521,7 +2578,7 @@ public:
 	// That translates to extentID being same as the return first pageID
 	LogicalPageID newLastExtentID() {
 		LogicalPageID id = pHeader->pageCount;
-		pHeader->pageCount += pagesPerExtent;
+		growPager(pagesPerExtent);
 		return id;
 	}
 
@@ -2541,8 +2598,41 @@ public:
 		if (self->memoryOnly) {
 			return Void();
 		}
+
+		// If a truncation up to include pageID has not yet been completed
+		if (pageID >= self->filePageCount) {
+			// And no extension pending will include pageID
+			if (pageID >= self->filePageCountPending) {
+				// Update extension to a new one that waits on the old one and extends further
+				self->fileExtension = extendToCover(self, pageID, self->fileExtension);
+			}
+
+			// Wait for extension that covers pageID to complete;
+			wait(self->fileExtension);
+		}
+
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
 		wait(self->pageFile->write(data, blockSize, (int64_t)pageID * blockSize));
+		return Void();
+	}
+
+	ACTOR static Future<Void> extendToCover(DWALPager* self, uint64_t pageID, Future<Void> previousExtension) {
+		// Calculate new page count, round up to nearest multiple of growth size > pageID
+		state int64_t newPageCount = pageID + SERVER_KNOBS->REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES -
+		                             (pageID % SERVER_KNOBS->REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES);
+
+		// Indicate that extension to this new count has been started
+		self->filePageCountPending = newPageCount;
+
+		// Wait for any previous extensions to complete
+		wait(previousExtension);
+
+		// Grow the file
+		wait(self->pageFile->truncate(newPageCount * self->physicalPageSize));
+
+		// Indicate that extension to the new count has been completed
+		self->filePageCount = newPageCount;
+
 		return Void();
 	}
 
@@ -3698,6 +3788,13 @@ private:
 	// The header will be written to / read from disk as a smallestPhysicalBlock sized chunk.
 	Reference<ArenaPage> headerPage;
 	Header* pHeader;
+
+	// Pages - pages known to be in the file, truncations complete to that size
+	int64_t filePageCount;
+	// Pages that will be in file once fileExtension is ready
+	int64_t filePageCountPending;
+	// Future representing the end of all pending truncations
+	Future<Void> fileExtension;
 
 	int desiredPageSize;
 	int desiredExtentSize;
@@ -4941,6 +5038,7 @@ private:
 		bool clearAfterBoundary;
 
 		bool boundaryCleared() const { return boundaryChanged && !boundaryValue.present(); }
+		bool boundarySet() const { return boundaryChanged && boundaryValue.present(); }
 
 		// Returns true if this RangeMutation doesn't actually mutate anything
 		bool noChanges() const { return !boundaryChanged && !clearAfterBoundary; }
@@ -4959,8 +5057,6 @@ private:
 			boundaryChanged = true;
 			boundaryValue = v;
 		}
-
-		bool boundarySet() const { return boundaryChanged && boundaryValue.present(); }
 
 		std::string toString() const {
 			return format("boundaryChanged=%d clearAfterBoundary=%d boundaryValue=%s",
@@ -6077,21 +6173,21 @@ private:
 
 		// Leaf Page
 		if (btPage->isLeaf()) {
-			bool updating = tryToUpdate;
+			// When true, we are modifying the existing DeltaTree
+			// When false, we are accumulating retained and added records in merged vector to build pages from them.
+			bool updatingDeltaTree = tryToUpdate;
 			bool changesMade = false;
 
-			state Standalone<VectorRef<RedwoodRecordRef>> merged;
-			auto switchToLinearMerge = [&]() {
-				// Couldn't make changes in place, so now do a linear merge and build new pages.
-				updating = false;
-				auto c = cursor;
-				c.moveFirst();
-				while (c != cursor) {
-					debug_printf("%s catch-up adding %s\n", context.c_str(), c.get().toString().c_str());
-					merged.push_back(merged.arena(), c.get());
-					c.moveNext();
+			// Copy page for modification if not already copied
+			auto copyForUpdate = [&]() {
+				if (!pageCopy.isValid()) {
+					pageCopy = clonePageForUpdate(page);
+					btPage = (BTreePage*)pageCopy->begin();
+					cursor.switchTree(btPage->tree());
 				}
 			};
+
+			state Standalone<VectorRef<RedwoodRecordRef>> merged;
 
 			// The first mutation buffer boundary has a key <= the first key in the page.
 
@@ -6100,48 +6196,59 @@ private:
 
 			// Now, process each mutation range and merge changes with existing data.
 			bool firstMutationBoundary = true;
-			while (mBegin != mEnd) {
-				debug_printf("%s New mutation boundary: '%s': %s\n",
-				             context.c_str(),
-				             printable(mBegin.key()).c_str(),
-				             mBegin.mutation().toString().c_str());
+			constexpr int maxHeightAllowed = 8;
 
+			while (mBegin != mEnd) {
 				// Apply the change to the mutation buffer start boundary key only if
-				//   - there actually is a change (whether a set or a clear, old records are to be removed)
+				//   - there actually is a change (clear or set to new value)
 				//   - either this is not the first boundary or it is but its key matches our lower bound key
 				bool applyBoundaryChange = mBegin.mutation().boundaryChanged &&
 				                           (!firstMutationBoundary || mBegin.key() == update->subtreeLowerBound.key);
+				bool boundaryExists = cursor.valid() && cursor.get().key == mBegin.key();
+
+				debug_printf("%s New mutation boundary: '%s': %s  applyBoundaryChange=%d  boundaryExists=%d "
+				             "updatingDeltaTree=%d\n",
+				             context.c_str(),
+				             printable(mBegin.key()).c_str(),
+				             mBegin.mutation().toString().c_str(),
+				             applyBoundaryChange,
+				             boundaryExists,
+				             updatingDeltaTree);
+
 				firstMutationBoundary = false;
 
-				// Iterate over records for the mutation boundary key, keep them unless the boundary key was changed or
-				// we are not applying it
-				while (cursor.valid() && cursor.get().key == mBegin.key()) {
-					// If there were no changes to the key or we're not applying it
-					if (!applyBoundaryChange) {
-						// If not updating, add to the output set, otherwise skip ahead past the records for the
-						// mutation boundary
-						if (!updating) {
-							merged.push_back(merged.arena(), cursor.get());
-							debug_printf("%s Added %s [existing, boundary start]\n",
-							             context.c_str(),
-							             cursor.get().toString().c_str());
-						}
-						cursor.moveNext();
-					} else {
+				if (applyBoundaryChange) {
+					// If the boundary is being set to a value, the new KV record will be inserted
+					bool shouldInsertBoundary = mBegin.mutation().boundarySet();
+
+					// Optimization:  In-place value update of new same-sized value
+					// If the boundary exists in the page and we're in update mode and the boundary is being set to a
+					// new value of the same length as the old value then just update the value bytes.
+					if (boundaryExists && updatingDeltaTree && shouldInsertBoundary &&
+					    mBegin.mutation().boundaryValue.get().size() == cursor.get().value.get().size()) {
 						changesMade = true;
+						shouldInsertBoundary = false;
+
+						debug_printf("%s In-place value update for %s [existing, boundary start]\n",
+						             context.c_str(),
+						             cursor.get().toString().c_str());
+
+						copyForUpdate();
+						memcpy((uint8_t*)cursor.get().value.get().begin(),
+						       mBegin.mutation().boundaryValue.get().begin(),
+						       cursor.get().value.get().size());
+						cursor.moveNext();
+					} else if (boundaryExists) {
+						// An in place update can't be done, so if the boundary exists then erase or skip the record
+						changesMade = true;
+
 						// If updating, erase from the page, otherwise do not add to the output set
-						if (updating) {
+						if (updatingDeltaTree) {
 							debug_printf("%s Erasing %s [existing, boundary start]\n",
 							             context.c_str(),
 							             cursor.get().toString().c_str());
 
-							// Copy page for modification if not already copied
-							if (!pageCopy.isValid()) {
-								pageCopy = clonePageForUpdate(page);
-								btPage = (BTreePage*)pageCopy->begin();
-								cursor.tree = btPage->tree();
-							}
-
+							copyForUpdate();
 							btPage->kvBytes -= cursor.get().kvBytes();
 							cursor.erase();
 						} else {
@@ -6151,42 +6258,59 @@ private:
 							cursor.moveNext();
 						}
 					}
-				}
 
-				constexpr int maxHeightAllowed = 8;
+					// If the boundary value is being set and we must insert it, add it to the page or the output set
+					if (shouldInsertBoundary) {
+						RedwoodRecordRef rec(mBegin.key(), mBegin.mutation().boundaryValue.get());
+						changesMade = true;
 
-				// Write the new record(s) for the mutation boundary start key if its value has been set
-				// Clears of this key will have been processed above by not being erased from the updated page or
-				// excluded from the merge output
-				if (applyBoundaryChange && mBegin.mutation().boundarySet()) {
-					RedwoodRecordRef rec(mBegin.key(), mBegin.mutation().boundaryValue.get());
-					changesMade = true;
+						// If updating, first try to add the record to the page
+						if (updatingDeltaTree) {
+							copyForUpdate();
+							if (cursor.insert(rec, update->skipLen, maxHeightAllowed)) {
+								btPage->kvBytes += rec.kvBytes();
+								debug_printf("%s Inserted %s [mutation, boundary start]\n",
+								             context.c_str(),
+								             rec.toString().c_str());
+							} else {
+								debug_printf("%s Insert failed for %s [mutation, boundary start]\n",
+								             context.c_str(),
+								             rec.toString().c_str());
 
-					// If updating, add to the page, else add to the output set
-					if (updating) {
-						// Copy page for modification if not already copied
-						if (!pageCopy.isValid()) {
-							pageCopy = clonePageForUpdate(page);
-							btPage = (BTreePage*)pageCopy->begin();
-							cursor.tree = btPage->tree();
+								// Since the insert failed we must switch to a linear merge of existing data and
+								// mutations, accumulating the new record set in the merge vector and build new pages
+								// from it. First, we must populate the merged vector with all the records up to but not
+								// including the current mutation boundary key.
+								auto c = cursor;
+								c.moveFirst();
+								while (c != cursor) {
+									debug_printf(
+									    "%s catch-up adding %s\n", context.c_str(), c.get().toString().c_str());
+									merged.push_back(merged.arena(), c.get());
+									c.moveNext();
+								}
+								updatingDeltaTree = false;
+							}
 						}
 
-						if (cursor.insert(rec, update->skipLen, maxHeightAllowed)) {
-							btPage->kvBytes += rec.kvBytes();
+						// If not updating, possibly due to insert failure above, then add record to the output set
+						if (!updatingDeltaTree) {
+							merged.push_back(merged.arena(), rec);
 							debug_printf(
-							    "%s Inserted %s [mutation, boundary start]\n", context.c_str(), rec.toString().c_str());
-						} else {
-							debug_printf("%s Insert failed for %s [mutation, boundary start]\n",
-							             context.c_str(),
-							             rec.toString().c_str());
-							switchToLinearMerge();
+							    "%s Added %s [mutation, boundary start]\n", context.c_str(), rec.toString().c_str());
 						}
 					}
-
-					if (!updating) {
-						merged.push_back(merged.arena(), rec);
-						debug_printf(
-						    "%s Added %s [mutation, boundary start]\n", context.c_str(), rec.toString().c_str());
+				} else if (boundaryExists) {
+					// If the boundary exists in the page but there is no pending change,
+					// then if updating move past it, otherwise add it to the output set.
+					if (updatingDeltaTree) {
+						cursor.moveNext();
+					} else {
+						merged.push_back(merged.arena(), cursor.get());
+						debug_printf("%s Added %s [existing, boundary start]\n",
+						             context.c_str(),
+						             cursor.get().toString().c_str());
+						cursor.moveNext();
 					}
 				}
 
@@ -6205,35 +6329,29 @@ private:
 
 				// If the records are being removed and we're not doing an in-place update
 				// OR if we ARE doing an update but the records are NOT being removed, then just skip them.
-				if (remove != updating) {
+				if (remove != updatingDeltaTree) {
 					// If not updating, then the records, if any exist, are being removed.  We don't know if there
 					// actually are any but we must assume there are.
-					if (!updating) {
+					if (!updatingDeltaTree) {
 						changesMade = true;
 					}
 
 					debug_printf("%s Seeking forward to next boundary (remove=%d updating=%d) %s\n",
 					             context.c_str(),
 					             remove,
-					             updating,
+					             updatingDeltaTree,
 					             mBegin.key().toString().c_str());
 					cursor.seekGreaterThanOrEqual(end, update->skipLen);
 				} else {
 					// Otherwise we must visit the records.  If updating, the visit is to erase them, and if doing a
 					// linear merge than the visit is to add them to the output set.
 					while (cursor.valid() && cursor.get().compare(end, update->skipLen) < 0) {
-						if (updating) {
+						if (updatingDeltaTree) {
 							debug_printf("%s Erasing %s [existing, boundary start]\n",
 							             context.c_str(),
 							             cursor.get().toString().c_str());
 
-							// Copy page for modification if not already copied
-							if (!pageCopy.isValid()) {
-								pageCopy = clonePageForUpdate(page);
-								btPage = (BTreePage*)pageCopy->begin();
-								cursor.tree = btPage->tree();
-							}
-
+							copyForUpdate();
 							btPage->kvBytes -= cursor.get().kvBytes();
 							cursor.erase();
 							changesMade = true;
@@ -6257,27 +6375,23 @@ private:
 
 				// If we don't have to remove the records and we are updating, do nothing.
 				// If we do have to remove the records and we are not updating, do nothing.
-				if (remove != updating) {
-					debug_printf(
-					    "%s Ignoring remaining records, remove=%d updating=%d\n", context.c_str(), remove, updating);
+				if (remove != updatingDeltaTree) {
+					debug_printf("%s Ignoring remaining records, remove=%d updating=%d\n",
+					             context.c_str(),
+					             remove,
+					             updatingDeltaTree);
 				} else {
 					// If updating and the key is changing, we must visit the records to erase them.
 					// If not updating and the key is not changing, we must visit the records to add them to the output
 					// set.
 					while (cursor.valid()) {
-						if (updating) {
+						if (updatingDeltaTree) {
 							debug_printf(
 							    "%s Erasing %s and beyond [existing, matches changed upper mutation boundary]\n",
 							    context.c_str(),
 							    cursor.get().toString().c_str());
 
-							// Copy page for modification if not already copied
-							if (!pageCopy.isValid()) {
-								pageCopy = clonePageForUpdate(page);
-								btPage = (BTreePage*)pageCopy->begin();
-								cursor.tree = btPage->tree();
-							}
-
+							copyForUpdate();
 							btPage->kvBytes -= cursor.get().kvBytes();
 							cursor.erase();
 						} else {
@@ -6305,7 +6419,7 @@ private:
 				    context.c_str());
 			}
 
-			if (updating) {
+			if (updatingDeltaTree) {
 				// If the tree is now empty, delete the page
 				if (cursor.tree->numItems == 0) {
 					update->cleared();
@@ -6581,7 +6695,7 @@ private:
 			if (modifier.clonedPage) {
 				pageCopy = modifier.page;
 				btPage = modifier.btPage();
-				cursor.tree = btPage->tree();
+				cursor.switchTree(btPage->tree());
 			}
 
 			// If page contents have changed
@@ -7137,7 +7251,7 @@ RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"))
 class KeyValueStoreRedwood : public IKeyValueStore {
 public:
 	KeyValueStoreRedwood(std::string filePrefix, UID logID)
-	  : m_filePrefix(filePrefix), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS, 0),
+	  : m_filename(filePrefix), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS, 0),
 	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 
 		int pageSize =
@@ -7167,17 +7281,17 @@ public:
 	Future<Void> init() override { return m_init; }
 
 	ACTOR Future<Void> init_impl(KeyValueStoreRedwood* self) {
-		TraceEvent(SevInfo, "RedwoodInit").detail("FilePrefix", self->m_filePrefix);
+		TraceEvent(SevInfo, "RedwoodInit").detail("FilePrefix", self->m_filename);
 		wait(self->m_tree->init());
 		TraceEvent(SevInfo, "RedwoodInitComplete")
-		    .detail("FilePrefix", self->m_filePrefix)
+		    .detail("Filename", self->m_filename)
 		    .detail("Version", self->m_tree->getLastCommittedVersion());
 		self->m_nextCommitVersion = self->m_tree->getLastCommittedVersion() + 1;
 		return Void();
 	}
 
 	ACTOR void shutdown(KeyValueStoreRedwood* self, bool dispose) {
-		TraceEvent(SevInfo, "RedwoodShutdown").detail("FilePrefix", self->m_filePrefix).detail("Dispose", dispose);
+		TraceEvent(SevInfo, "RedwoodShutdown").detail("Filename", self->m_filename).detail("Dispose", dispose);
 		if (self->m_error.canBeSet()) {
 			self->m_error.sendError(actor_cancelled()); // Ideally this should be shutdown_in_progress
 		}
@@ -7189,9 +7303,7 @@ public:
 			self->m_tree->close();
 		wait(closedFuture);
 		self->m_closed.send(Void());
-		TraceEvent(SevInfo, "RedwoodShutdownComplete")
-		    .detail("FilePrefix", self->m_filePrefix)
-		    .detail("Dispose", dispose);
+		TraceEvent(SevInfo, "RedwoodShutdownComplete").detail("Filename", self->m_filename).detail("Dispose", dispose);
 		delete self;
 	}
 
@@ -7411,7 +7523,7 @@ public:
 	~KeyValueStoreRedwood() override{};
 
 private:
-	std::string m_filePrefix;
+	std::string m_filename;
 	VersionedBTree* m_tree;
 	Future<Void> m_init;
 	Promise<Void> m_closed;
@@ -8065,7 +8177,7 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	return Void();
 }
 
-TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
+TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	// Sanity check on delta tree node format
 	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(false) == 4);
 	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(true) == 8);
@@ -8241,7 +8353,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	return Void();
 }
 
-TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
+TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 	// Sanity check on delta tree node format
 	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(false) == 4);
 	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(true) == 8);
@@ -8420,7 +8532,7 @@ TEST_CASE("/redwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 	return Void();
 }
 
-TEST_CASE("/redwood/correctness/unit/deltaTree/IntIntPair") {
+TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 	const int N = 200;
 	IntIntPair lowerBound = { 0, 0 };
 	IntIntPair upperBound = { 1000, 1000 };
@@ -9017,11 +9129,11 @@ TEST_CASE(":/redwood/pager/ArenaPage") {
 	return Void();
 }
 
-TEST_CASE("/redwood/correctness/btree") {
+TEST_CASE("Lredwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
-	state std::string fileName = params.get("fileName").orDefault("unittest_pageFile.redwood");
+	state std::string fileName = params.get("Filename").orDefault("unittest_pageFile.redwood");
 	IPager2* pager;
 
 	state bool serialTest = params.getInt("serialTest").orDefault(deterministicRandom()->random01() < 0.25);
@@ -9611,7 +9723,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 TEST_CASE(":/redwood/performance/set") {
 	state SignalableActorCollection actors;
 
-	state std::string fileName = params.get("fileName").orDefault("unittest.redwood");
+	state std::string fileName = params.get("Filename").orDefault("unittest.redwood");
 	state int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
 	state int extentSize = params.getInt("extentSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE);
 	state int64_t pageCacheBytes = params.getInt("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
@@ -10254,7 +10366,7 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
 	return Void();
 }
 
-TEST_CASE("!/redwood/performance/randomRangeScans") {
+TEST_CASE(":/redwood/performance/randomRangeScans") {
 	state int prefixLen = 30;
 	state int suffixSize = 12;
 	state int valueSize = 100;
