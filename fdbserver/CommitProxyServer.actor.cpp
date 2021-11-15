@@ -2036,8 +2036,8 @@ struct TransactionStateResolveContext {
 };
 
 // Called once all parts of TxnStateStore are received via TxnStateRequests. Goes through all KV pairs in TxnStateStore
-// and (1) Updates the ServerCacheInfo which keeps tracks of shards and the related storage team info (including SSID and tags)
-// (2) Calls applyMetadataMutations.
+// and (1) Updates the ServerCacheInfo which keeps tracks of shards and the related storage team info (including SSID
+// and tags) (2) Calls applyMetadataMutations.
 ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveContext* pContext) {
 	state KeyRange txnKeys = allKeys;
 	state std::map<Tag, UID> tag_uid;

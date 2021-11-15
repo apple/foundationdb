@@ -1493,6 +1493,7 @@ void seedShardServers(Arena& arena,
 
 	// Create seed teams. Initially all storage servers belong to same team.
 	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		ASSERT(teamToServers.size() == 1);
 		for (auto& [teamId, servers] : teamToServers) {
 			tr.set(arena, storageTeamIdKey(teamId), encodeStorageTeams(servers)); // TeamId -> Vec<StorageServers>
 			Key teamListKey = storageServerListToTeamIdKey(servers);
@@ -1527,7 +1528,8 @@ void seedShardServers(Arena& arena,
 		auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS
 		                   ? keyServersValue(serverTags)
 		                   : keyServersValue(RangeResult(), serverSrcUID, serverTeamIDs[0]);
-		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, serverKeysFalse);
+		krmSetPreviouslyEmptyRange(
+		    tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, serverKeysFalse);
 
 		for (const auto& [s, _] : servers) {
 			krmSetPreviouslyEmptyRange(
@@ -1536,7 +1538,7 @@ void seedShardServers(Arena& arena,
 		return;
 	}
 
-	//TODO: Remove key-splits code.
+	// TODO: Remove key-splits code.
 
 	auto getServersValue = [&](int serverIndex) -> Value {
 		// TODO: encode team into keyServersValue with tags
