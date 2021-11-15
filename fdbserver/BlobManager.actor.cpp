@@ -1039,11 +1039,6 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 				Key granuleStartKey = results[rangeIdx].key;
 				Key granuleEndKey = results[rangeIdx + 1].key;
 				if (results[rangeIdx].value.size()) {
-					if (granuleStartKey == allKeys.begin && granuleEndKey == allKeys.end) {
-						// in this case, a second manager started before the first manager assigned any ranges. This
-						// gets the only range as [ - \xff\xff), so we clamp it to [ - \xff)
-						granuleEndKey = normalKeys.end;
-					}
 					// note: if the old owner is dead, we handle this in rangeAssigner
 					UID existingOwner = decodeBlobGranuleMappingValue(results[rangeIdx].value);
 					bmData->workerAssignments.insert(KeyRangeRef(granuleStartKey, granuleEndKey), existingOwner);
@@ -1100,10 +1095,14 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 
 	// Step 3. Send assign requests for all the granules
 	for (auto& range : bmData->workerAssignments.intersectingRanges(normalKeys)) {
+		// a second manager started before the first manager assigned any ranges so the
+		// the only range is [ - \xff\xff), so we clamp it to [ - \xff)
+		Key end = range.end() == allKeys.end ? normalKeys.end : range.end();
+
 		RangeAssignment raAssign;
 		raAssign.isAssign = true;
 		raAssign.worker = range.value();
-		raAssign.keyRange = range.range();
+		raAssign.keyRange = KeyRangeRef(range.begin(), end);
 		raAssign.assign = RangeAssignmentData(AssignRequestType::Reassign);
 		bmData->rangesToAssign.send(raAssign);
 	}
