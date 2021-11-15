@@ -51,10 +51,12 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	ContinuousSample<double> SSgetValueLatency;
 	ContinuousSample<double> SSgetKeyLatency;
 	ContinuousSample<double> SSgetKeyValuesLatency;
+	ContinuousSample<double> SSgetKeyValuesAndFlatMapLatency;
 
 	ContinuousSample<double> TSSgetValueLatency;
 	ContinuousSample<double> TSSgetKeyLatency;
 	ContinuousSample<double> TSSgetKeyValuesLatency;
+	ContinuousSample<double> TSSgetKeyValuesAndFlatMapLatency;
 
 	std::unordered_map<int, uint64_t> ssErrorsByCode;
 	std::unordered_map<int, uint64_t> tssErrorsByCode;
@@ -103,7 +105,8 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	  : cc("TSSClientMetrics"), requests("Requests", cc), streamComparisons("StreamComparisons", cc),
 	    ssErrors("SSErrors", cc), tssErrors("TSSErrors", cc), tssTimeouts("TSSTimeouts", cc),
 	    mismatches("Mismatches", cc), SSgetValueLatency(1000), SSgetKeyLatency(1000), SSgetKeyValuesLatency(1000),
-	    TSSgetValueLatency(1000), TSSgetKeyLatency(1000), TSSgetKeyValuesLatency(1000) {}
+	    SSgetKeyValuesAndFlatMapLatency(1000), TSSgetValueLatency(1000), TSSgetKeyLatency(1000),
+	    TSSgetKeyValuesLatency(1000), TSSgetKeyValuesAndFlatMapLatency(1000) {}
 };
 
 template <class Rep>
