@@ -1,0 +1,6 @@
+[[test]]
+testTitle = 'IndexPrefetchDemo'
+useDB = true
+
+    [[test.workload]]
+    testName = 'IndexPrefetchDemo'

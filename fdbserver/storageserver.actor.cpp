@@ -42,6 +42,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StatusClient.h"
+#include "fdbclient/Tuple.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/VersionedMap.h"
 #include "fdbserver/FDBExecHelper.actor.h"
@@ -81,6 +82,13 @@ bool canReplyWith(Error e) {
 	case error_code_wrong_shard_server:
 	case error_code_process_behind:
 	case error_code_watch_cancelled:
+	// getRangeAndMap related exceptions that are not retriable:
+	case error_code_mapper_bad_index:
+	case error_code_mapper_no_such_key:
+	case error_code_mapper_bad_range_decriptor:
+	case error_code_quick_get_key_values_has_more:
+	case error_code_quick_get_value_miss:
+	case error_code_quick_get_key_values_miss:
 		// case error_code_all_alternatives_failed:
 		return true;
 	default:
@@ -181,15 +189,25 @@ struct StorageServerDisk {
 	Future<Void> commit() { return storage->commit(); }
 
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
-	Future<Key> readNextKeyInclusive(KeyRef key) { return readFirstKey(storage, KeyRangeRef(key, allKeys.end)); }
-	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) {
-		return storage->readValue(key, debugID);
+	Future<Key> readNextKeyInclusive(KeyRef key, IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL) {
+		return readFirstKey(storage, KeyRangeRef(key, allKeys.end), type);
 	}
-	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID = Optional<UID>()) {
-		return storage->readValuePrefix(key, maxLength, debugID);
+	Future<Optional<Value>> readValue(KeyRef key,
+	                                  IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL,
+	                                  Optional<UID> debugID = Optional<UID>()) {
+		return storage->readValue(key, type, debugID);
 	}
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) {
-		return storage->readRange(keys, rowLimit, byteLimit);
+	Future<Optional<Value>> readValuePrefix(KeyRef key,
+	                                        int maxLength,
+	                                        IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL,
+	                                        Optional<UID> debugID = Optional<UID>()) {
+		return storage->readValuePrefix(key, maxLength, type, debugID);
+	}
+	Future<RangeResult> readRange(KeyRangeRef keys,
+	                              int rowLimit = 1 << 30,
+	                              int byteLimit = 1 << 30,
+	                              IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL) {
+		return storage->readRange(keys, rowLimit, byteLimit, type);
 	}
 
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
@@ -202,8 +220,8 @@ private:
 
 	void writeMutations(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
 
-	ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage, KeyRangeRef range) {
-		RangeResult r = wait(storage->readRange(range, 1));
+	ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage, KeyRangeRef range, IKeyValueStore::ReadType type) {
+		RangeResult r = wait(storage->readRange(range, 1, 1 << 30, type));
 		if (r.size())
 			return r[0].key;
 		else
@@ -726,8 +744,9 @@ public:
 
 	struct Counters {
 		CounterCollection cc;
-		Counter allQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeStreamQueries, finishedQueries,
-		    lowPriorityQueries, rowsQueried, bytesQueried, watchQueries, emptyQueries;
+		Counter allQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeAndFlatMapQueries,
+		    getRangeStreamQueries, finishedQueries, lowPriorityQueries, rowsQueried, bytesQueried, watchQueries,
+		    emptyQueries;
 		Counter bytesInput, bytesDurable, bytesFetched,
 		    mutationBytes; // Like bytesInput but without MVCC accounting
 		Counter sampledBytesCleared;
@@ -739,6 +758,10 @@ public:
 		Counter wrongShardServer;
 		Counter fetchedVersions;
 		Counter fetchesFromLogs;
+		// The following counters measure how many of lookups in the getRangeAndFlatMapQueries are effective. "Miss"
+		// means fallback if fallback is enabled, otherwise means failure (so that another layer could implement
+		// fallback).
+		Counter quickGetValueHit, quickGetValueMiss, quickGetKeyValuesHit, quickGetKeyValuesMiss;
 
 		LatencySample readLatencySample;
 		LatencyBands readLatencyBands;
@@ -746,6 +769,7 @@ public:
 		Counters(StorageServer* self)
 		  : cc("StorageServer", self->thisServerID.toString()), getKeyQueries("GetKeyQueries", cc),
 		    getValueQueries("GetValueQueries", cc), getRangeQueries("GetRangeQueries", cc),
+		    getRangeAndFlatMapQueries("GetRangeAndFlatMapQueries", cc),
 		    getRangeStreamQueries("GetRangeStreamQueries", cc), allQueries("QueryQueue", cc),
 		    finishedQueries("FinishedQueries", cc), lowPriorityQueries("LowPriorityQueries", cc),
 		    rowsQueried("RowsQueried", cc), bytesQueried("BytesQueried", cc), watchQueries("WatchQueries", cc),
@@ -758,10 +782,13 @@ public:
 		    fetchWaitingCount("FetchWaitingCount", cc), fetchExecutingMS("FetchExecutingMS", cc),
 		    fetchExecutingCount("FetchExecutingCount", cc), readsRejected("ReadsRejected", cc),
 		    wrongShardServer("WrongShardServer", cc), fetchedVersions("FetchedVersions", cc),
-		    fetchesFromLogs("FetchesFromLogs", cc), readLatencySample("ReadLatencyMetrics",
-		                                                              self->thisServerID,
-		                                                              SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                                                              SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    fetchesFromLogs("FetchesFromLogs", cc), quickGetValueHit("QuickGetValueHit", cc),
+		    quickGetValueMiss("QuickGetValueMiss", cc), quickGetKeyValuesHit("QuickGetKeyValuesHit", cc),
+		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc),
+		    readLatencySample("ReadLatencyMetrics",
+		                      self->thisServerID,
+		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
@@ -1246,7 +1273,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			path = 1;
 		} else if (!i || !i->isClearTo() || i->getEndKey() <= req.key) {
 			path = 2;
-			Optional<Value> vv = wait(data->storage.readValue(req.key, req.debugID));
+			Optional<Value> vv = wait(data->storage.readValue(req.key, IKeyValueStore::ReadType::NORMAL, req.debugID));
 			// Validate that while we were reading the data we didn't lose the version or shard
 			if (version < data->storageVersion()) {
 				TEST(true); // transaction_too_old after readValue
@@ -1585,6 +1612,37 @@ void merge(Arena& arena,
 	}
 }
 
+ACTOR Future<Optional<Value>> quickGetValue(StorageServer* data, StringRef key, Version version) {
+	if (data->shards[key]->isReadable()) {
+		try {
+			// TODO: Use a lower level API may be better? Or tweak priorities?
+			GetValueRequest req(Span().context, key, version, Optional<TagSet>(), Optional<UID>());
+			data->actors.add(data->readGuard(req, getValueQ));
+			GetValueReply reply = wait(req.reply.getFuture());
+			++data->counters.quickGetValueHit;
+			return reply.value;
+		} catch (Error& e) {
+			// Fallback.
+		}
+	} else {
+		//	Fallback.
+	}
+
+	++data->counters.quickGetValueMiss;
+	if (SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK) {
+		state Transaction tr(data->cx);
+		tr.setVersion(version);
+		// TODO: is DefaultPromiseEndpoint the best priority for this?
+		tr.info.taskID = TaskPriority::DefaultPromiseEndpoint;
+		Future<Optional<Value>> valueFuture = tr.get(key, true);
+		// TODO: async in case it needs to read from other servers.
+		state Optional<Value> valueOption = wait(valueFuture);
+		return valueOption;
+	} else {
+		throw quick_get_value_miss();
+	}
+};
+
 // If limit>=0, it returns the first rows in the range (sorted ascending), otherwise the last rows (sorted descending).
 // readRange has O(|result|) + O(log |data|) cost
 ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
@@ -1592,7 +1650,8 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
                                           KeyRange range,
                                           int limit,
                                           int* pLimitBytes,
-                                          SpanID parentSpan) {
+                                          SpanID parentSpan,
+                                          IKeyValueStore::ReadType type) {
 	state GetKeyValuesReply result;
 	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
 	state StorageServer::VersionedData::iterator vCurrent = view.end();
@@ -1656,7 +1715,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			// Read the data on disk up to vCurrent (or the end of the range)
 			readEnd = vCurrent ? std::min(vCurrent.key(), range.end) : range.end;
 			RangeResult atStorageVersion =
-			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes));
+			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
 
 			ASSERT(atStorageVersion.size() <= limit);
 			if (data->storageVersion() > version)
@@ -1737,7 +1796,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			readBegin = vCurrent ? std::max(vCurrent->isClearTo() ? vCurrent->getEndKey() : vCurrent.key(), range.begin)
 			                     : range.begin;
 			RangeResult atStorageVersion =
-			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes));
+			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
 
 			ASSERT(atStorageVersion.size() <= -limit);
 			if (data->storageVersion() > version)
@@ -1794,7 +1853,8 @@ ACTOR Future<Key> findKey(StorageServer* data,
                           Version version,
                           KeyRange range,
                           int* pOffset,
-                          SpanID parentSpan)
+                          SpanID parentSpan,
+                          IKeyValueStore::ReadType type)
 // Attempts to find the key indicated by sel in the data at version, within range.
 // Precondition: selectorInRange(sel, range)
 // If it is found, offset is set to 0 and a key is returned which falls inside range.
@@ -1832,7 +1892,8 @@ ACTOR Future<Key> findKey(StorageServer* data,
 	              forward ? KeyRangeRef(sel.getKey(), range.end) : KeyRangeRef(range.begin, keyAfter(sel.getKey())),
 	              (distance + skipEqualKey) * sign,
 	              &maxBytes,
-	              span.context));
+	              span.context,
+	              type));
 	state bool more = rep.more && rep.data.size() != distance + skipEqualKey;
 
 	// If we get only one result in the reverse direction as a result of the data being too large, we could get stuck in
@@ -1840,8 +1901,8 @@ ACTOR Future<Key> findKey(StorageServer* data,
 	if (more && !forward && rep.data.size() == 1) {
 		TEST(true); // Reverse key selector returned only one result in range read
 		maxBytes = std::numeric_limits<int>::max();
-		GetKeyValuesReply rep2 = wait(
-		    readRange(data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes, span.context));
+		GetKeyValuesReply rep2 = wait(readRange(
+		    data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes, span.context, type));
 		rep = rep2;
 		more = rep.more && rep.data.size() != distance + skipEqualKey;
 		ASSERT(rep.data.size() == 2 || !more);
@@ -1906,6 +1967,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 {
 	state Span span("SS:getKeyValues"_loc, { req.spanContext });
 	state int64_t resultSize = 0;
+	state IKeyValueStore::ReadType type =
+	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
 
 	++data->counters.getRangeQueries;
 	++data->counters.allQueries;
@@ -1949,10 +2012,10 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		state int offset2;
 		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
 		                               ? Future<Key>(req.begin.getKey())
-		                               : findKey(data, req.begin, version, shard, &offset1, span.context);
+		                               : findKey(data, req.begin, version, shard, &offset1, span.context, type);
 		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
 		                             ? Future<Key>(req.end.getKey())
-		                             : findKey(data, req.end, version, shard, &offset2, span.context);
+		                             : findKey(data, req.end, version, shard, &offset2, span.context, type);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 
@@ -1992,8 +2055,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
 
-			GetKeyValuesReply _r =
-			    wait(readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span.context));
+			GetKeyValuesReply _r = wait(
+			    readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span.context, type));
 			GetKeyValuesReply r = _r;
 
 			if (req.debugID.present())
@@ -2064,12 +2127,454 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	return Void();
 }
 
+ACTOR Future<RangeResult> quickGetKeyValues(StorageServer* data, StringRef prefix, Version version) {
+	try {
+		// TODO: Use a lower level API may be better? Or tweak priorities?
+		GetKeyValuesRequest req;
+		req.spanContext = Span().context;
+		req.arena = Arena();
+		req.begin = firstGreaterOrEqual(KeyRef(req.arena, prefix));
+		req.end = firstGreaterOrEqual(strinc(prefix, req.arena));
+		req.version = version;
+
+		data->actors.add(data->readGuard(req, getKeyValuesQ));
+		GetKeyValuesReply reply = wait(req.reply.getFuture());
+		++data->counters.quickGetKeyValuesHit;
+
+		// Convert GetKeyValuesReply to RangeResult.
+		return RangeResult(RangeResultRef(reply.data, reply.more), reply.arena);
+	} catch (Error& e) {
+		// Fallback.
+	}
+
+	++data->counters.quickGetKeyValuesMiss;
+	if (SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK) {
+		state Transaction tr(data->cx);
+		tr.setVersion(version);
+		// TODO: is DefaultPromiseEndpoint the best priority for this?
+		tr.info.taskID = TaskPriority::DefaultPromiseEndpoint;
+		Future<RangeResult> rangeResultFuture = tr.getRange(prefixRange(prefix), true);
+		// TODO: async in case it needs to read from other servers.
+		RangeResult rangeResult = wait(rangeResultFuture);
+		return rangeResult;
+	} else {
+		throw quick_get_key_values_miss();
+	}
+};
+
+Key constructMappedKey(KeyValueRef* keyValue, Tuple& mappedKeyFormatTuple, bool& isRangeQuery) {
+	// Lazily parse key and/or value to tuple because they may not need to be a tuple if not used.
+	Optional<Tuple> keyTuple;
+	Optional<Tuple> valueTuple;
+
+	Tuple mappedKeyTuple;
+	for (int i = 0; i < mappedKeyFormatTuple.size(); i++) {
+		Tuple::ElementType type = mappedKeyFormatTuple.getType(i);
+		if (type == Tuple::BYTES || type == Tuple::UTF8) {
+			std::string s = mappedKeyFormatTuple.getString(i).toString();
+			auto sz = s.size();
+
+			// Handle escape.
+			bool escaped = false;
+			size_t p = 0;
+			while (true) {
+				size_t found = s.find("{{", p);
+				if (found == std::string::npos) {
+					break;
+				}
+				s.replace(found, 2, "{");
+				p += 1;
+				escaped = true;
+			}
+			p = 0;
+			while (true) {
+				size_t found = s.find("}}", p);
+				if (found == std::string::npos) {
+					break;
+				}
+				s.replace(found, 2, "}");
+				p += 1;
+				escaped = true;
+			}
+			if (escaped) {
+				// If the element uses escape, cope the escaped version.
+				mappedKeyTuple.append(s);
+			}
+			// {K[??]} or {V[??]}
+			else if (sz > 5 && s[0] == '{' && (s[1] == 'K' || s[1] == 'V') && s[2] == '[' && s[sz - 2] == ']' &&
+			         s[sz - 1] == '}') {
+				int idx;
+				try {
+					idx = std::stoi(s.substr(3, sz - 5));
+				} catch (std::exception& e) {
+					throw mapper_bad_index();
+				}
+				Tuple* referenceTuple;
+				if (s[1] == 'K') {
+					// Use keyTuple as reference.
+					if (!keyTuple.present()) {
+						// May throw exception if the key is not parsable as a tuple.
+						keyTuple = Tuple::unpack(keyValue->key);
+					}
+					referenceTuple = &keyTuple.get();
+				} else if (s[1] == 'V') {
+					// Use valueTuple as reference.
+					if (!valueTuple.present()) {
+						// May throw exception if the value is not parsable as a tuple.
+						valueTuple = Tuple::unpack(keyValue->value);
+					}
+					referenceTuple = &valueTuple.get();
+				} else {
+					ASSERT(false);
+					throw internal_error();
+				}
+
+				if (idx < 0 || idx >= referenceTuple->size()) {
+					throw mapper_bad_index();
+				}
+				mappedKeyTuple.append(referenceTuple->subTuple(idx, idx + 1));
+			} else if (s == "{...}") {
+				// Range query.
+				if (i != mappedKeyFormatTuple.size() - 1) {
+					// It must be the last element of the mapper tuple
+					throw mapper_bad_range_decriptor();
+				}
+				// Every record will try to set it. It's ugly, but not wrong.
+				isRangeQuery = true;
+				// Do not add it to the mapped key.
+			} else {
+				// If the element is a string but neither escaped nor descriptors, just copy it.
+				mappedKeyTuple.append(mappedKeyFormatTuple.subTuple(i, i + 1));
+			}
+		} else {
+			// If the element not a string, just copy it.
+			mappedKeyTuple.append(mappedKeyFormatTuple.subTuple(i, i + 1));
+		}
+	}
+	return mappedKeyTuple.getDataAsStandalone();
+}
+
+TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
+	Key key = Tuple().append("key-0"_sr).append("key-1"_sr).append("key-2"_sr).getDataAsStandalone();
+	Value value = Tuple().append("value-0"_sr).append("value-1"_sr).append("value-2"_sr).getDataAsStandalone();
+	state KeyValueRef kvr(key, value);
+	{
+		Tuple mapperTuple = Tuple()
+		                        .append("normal"_sr)
+		                        .append("{{escaped}}"_sr)
+		                        .append("{K[2]}"_sr)
+		                        .append("{V[0]}"_sr)
+		                        .append("{...}"_sr);
+
+		bool isRangeQuery = false;
+		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+
+		Key expectedMappedKey = Tuple()
+		                            .append("normal"_sr)
+		                            .append("{escaped}"_sr)
+		                            .append("key-2"_sr)
+		                            .append("value-0"_sr)
+		                            .getDataAsStandalone();
+		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
+		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
+		ASSERT(isRangeQuery == true);
+	}
+	{
+		Tuple mapperTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
+
+		bool isRangeQuery = false;
+		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+
+		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
+		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
+		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
+		ASSERT(isRangeQuery == false);
+	}
+	{
+		Tuple mapperTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
+
+		bool isRangeQuery = false;
+		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+
+		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
+		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
+		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
+		ASSERT(isRangeQuery == false);
+	}
+	{
+		Tuple mapperTuple = Tuple().append("{K[100]}"_sr);
+		bool isRangeQuery = false;
+		state bool throwException = false;
+		try {
+			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_mapper_bad_index);
+			throwException = true;
+		}
+		ASSERT(throwException);
+	}
+	{
+		Tuple mapperTuple = Tuple().append("{...}"_sr).append("last-element"_sr);
+		bool isRangeQuery = false;
+		state bool throwException2 = false;
+		try {
+			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_mapper_bad_range_decriptor);
+			throwException2 = true;
+		}
+		ASSERT(throwException2);
+	}
+	{
+		Tuple mapperTuple = Tuple().append("{K[not-a-number]}"_sr);
+		bool isRangeQuery = false;
+		state bool throwException3 = false;
+		try {
+			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_mapper_bad_index);
+			throwException3 = true;
+		}
+		ASSERT(throwException3);
+	}
+	return Void();
+}
+
+ACTOR Future<GetKeyValuesAndFlatMapReply> flatMap(StorageServer* data, GetKeyValuesReply input, StringRef mapper) {
+	state GetKeyValuesAndFlatMapReply result;
+	result.version = input.version;
+	result.more = input.more;
+	result.cached = input.cached;
+	result.arena.dependsOn(input.arena);
+
+	result.data.reserve(result.arena, input.data.size());
+	state bool isRangeQuery = false;
+	state Tuple mappedKeyFormatTuple = Tuple::unpack(mapper);
+	state KeyValueRef* it = input.data.begin();
+	for (; it != input.data.end(); it++) {
+		state StringRef key = it->key;
+
+		state Key mappedKey = constructMappedKey(it, mappedKeyFormatTuple, isRangeQuery);
+		// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
+		result.arena.dependsOn(mappedKey.arena());
+
+		if (isRangeQuery) {
+			// Use the mappedKey as the prefix of the range query.
+			RangeResult rangeResult = wait(quickGetKeyValues(data, mappedKey, input.version));
+
+			if (rangeResult.more) {
+				// Probably the fan out is too large. The user should use the old way to query.
+				throw quick_get_key_values_has_more();
+			}
+			result.arena.dependsOn(rangeResult.arena());
+			for (int i = 0; i < rangeResult.size(); i++) {
+				result.data.emplace_back(result.arena, rangeResult[i].key, rangeResult[i].value);
+			}
+		} else {
+			Optional<Value> valueOption = wait(quickGetValue(data, mappedKey, input.version));
+
+			if (valueOption.present()) {
+				Value value = valueOption.get();
+				result.arena.dependsOn(value.arena());
+				result.data.emplace_back(result.arena, mappedKey, value);
+			} else {
+				// TODO: Shall we throw exception if the key doesn't exist or the range is empty?
+			}
+		}
+	}
+	return result;
+}
+
+// Most of the actor is copied from getKeyValuesQ. I tried to use templates but things become nearly impossible after
+// combining actor shenanigans with template shenanigans.
+ACTOR Future<Void> getKeyValuesAndFlatMapQ(StorageServer* data, GetKeyValuesAndFlatMapRequest req)
+// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
+// selector offset prevents all data from being read in one range read
+{
+	state Span span("SS:getKeyValuesAndFlatMap"_loc, { req.spanContext });
+	state int64_t resultSize = 0;
+	state IKeyValueStore::ReadType type =
+	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
+
+	++data->counters.getRangeAndFlatMapQueries;
+	++data->counters.allQueries;
+	++data->readQueueSizeMetric;
+	data->maxQueryQueue = std::max<int>(
+	    data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
+
+	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
+	// so we need to downgrade here
+	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.isFetchKeys) {
+		wait(delay(0, TaskPriority::FetchKeys));
+	} else {
+		wait(data->getQueryDelay());
+	}
+
+	try {
+		if (req.debugID.present())
+			g_traceBatch.addEvent(
+			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesAndFlatMap.Before");
+		state Version version = wait(waitForVersion(data, req.version, span.context));
+
+		state uint64_t changeCounter = data->shardChangeCounter;
+		//		try {
+		state KeyRange shard = getShardKeyRange(data, req.begin);
+
+		if (req.debugID.present())
+			g_traceBatch.addEvent(
+			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesAndFlatMap.AfterVersion");
+		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
+		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
+		// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
+		//"None").detail("In", "getKeyValuesAndFlatMap>getShardKeyRange"); throw e; }
+
+		if (!selectorInRange(req.end, shard) && !(req.end.isFirstGreaterOrEqual() && req.end.getKey() == shard.end)) {
+			//			TraceEvent("WrongShardServer1", data->thisServerID).detail("Begin",
+			// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
+			// shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValuesAndFlatMap>checkShardExtents");
+			throw wrong_shard_server();
+		}
+
+		state int offset1 = 0;
+		state int offset2;
+		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
+		                               ? Future<Key>(req.begin.getKey())
+		                               : findKey(data, req.begin, version, shard, &offset1, span.context, type);
+		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
+		                             ? Future<Key>(req.end.getKey())
+		                             : findKey(data, req.end, version, shard, &offset2, span.context, type);
+		state Key begin = wait(fBegin);
+		state Key end = wait(fEnd);
+
+		if (req.debugID.present())
+			g_traceBatch.addEvent(
+			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesAndFlatMap.AfterKeys");
+		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
+
+		// Offsets of zero indicate begin/end keys in this shard, which obviously means we can answer the query
+		// An end offset of 1 is also OK because the end key is exclusive, so if the first key of the next shard is the
+		// end the last actual key returned must be from this shard. A begin offset of 1 is also OK because then either
+		// begin is past end or equal to end (so the result is definitely empty)
+		if ((offset1 && offset1 != 1) || (offset2 && offset2 != 1)) {
+			TEST(true); // wrong_shard_server due to offset in getKeyValuesAndFlatMapQ
+			// We could detect when offset1 takes us off the beginning of the database or offset2 takes us off the end,
+			// and return a clipped range rather than an error (since that is what the NativeAPI.getRange will do anyway
+			// via its "slow path"), but we would have to add some flags to the response to encode whether we went off
+			// the beginning and the end, since it needs that information.
+			//TraceEvent("WrongShardServer2", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValuesAndFlatMap>checkOffsets").detail("BeginKey", begin).detail("EndKey", end).detail("BeginOffset", offset1).detail("EndOffset", offset2);
+			throw wrong_shard_server();
+		}
+
+		if (begin >= end) {
+			if (req.debugID.present())
+				g_traceBatch.addEvent(
+				    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesAndFlatMap.Send");
+			//.detail("Begin",begin).detail("End",end);
+
+			GetKeyValuesAndFlatMapReply none;
+			none.version = version;
+			none.more = false;
+			none.penalty = data->getPenalty();
+
+			data->checkChangeCounter(changeCounter,
+			                         KeyRangeRef(std::min<KeyRef>(req.begin.getKey(), req.end.getKey()),
+			                                     std::max<KeyRef>(req.begin.getKey(), req.end.getKey())));
+			req.reply.send(none);
+		} else {
+			state int remainingLimitBytes = req.limitBytes;
+
+			GetKeyValuesReply getKeyValuesReply = wait(
+			    readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span.context, type));
+
+			state GetKeyValuesAndFlatMapReply r;
+			try {
+				// Map the scanned range to another list of keys and look up.
+				GetKeyValuesAndFlatMapReply _r = wait(flatMap(data, getKeyValuesReply, req.mapper));
+				r = _r;
+			} catch (Error& e) {
+				TraceEvent("FlatMapError").error(e);
+				throw;
+			}
+
+			if (req.debugID.present())
+				g_traceBatch.addEvent("TransactionDebug",
+				                      req.debugID.get().first(),
+				                      "storageserver.getKeyValuesAndFlatMap.AfterReadRange");
+			//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
+			data->checkChangeCounter(
+			    changeCounter,
+			    KeyRangeRef(std::min<KeyRef>(begin, std::min<KeyRef>(req.begin.getKey(), req.end.getKey())),
+			                std::max<KeyRef>(end, std::max<KeyRef>(req.begin.getKey(), req.end.getKey()))));
+			if (EXPENSIVE_VALIDATION) {
+				// TODO: Only mapped keys are returned, which are not supposed to be in the range.
+				//				for (int i = 0; i < r.data.size(); i++)
+				//					ASSERT(r.data[i].key >= begin && r.data[i].key < end);
+				// TODO: GetKeyValuesWithFlatMapRequest doesn't respect limit yet.
+				//                ASSERT(r.data.size() <= std::abs(req.limit));
+			}
+
+			/*for( int i = 0; i < r.data.size(); i++ ) {
+			    StorageMetrics m;
+			    m.bytesPerKSecond = r.data[i].expectedSize();
+			    m.iosPerKSecond = 1; //FIXME: this should be 1/r.data.size(), but we cannot do that because it is an int
+			    data->metrics.notify(r.data[i].key, m);
+			}*/
+
+			// For performance concerns, the cost of a range read is billed to the start key and end key of the range.
+			int64_t totalByteSize = 0;
+			for (int i = 0; i < r.data.size(); i++) {
+				totalByteSize += r.data[i].expectedSize();
+			}
+			if (totalByteSize > 0 && SERVER_KNOBS->READ_SAMPLING_ENABLED) {
+				int64_t bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY) / 2;
+				data->metrics.notifyBytesReadPerKSecond(r.data[0].key, bytesReadPerKSecond);
+				data->metrics.notifyBytesReadPerKSecond(r.data[r.data.size() - 1].key, bytesReadPerKSecond);
+			}
+
+			r.penalty = data->getPenalty();
+			req.reply.send(r);
+
+			resultSize = req.limitBytes - remainingLimitBytes;
+			data->counters.bytesQueried += resultSize;
+			data->counters.rowsQueried += r.data.size();
+			if (r.data.size() == 0) {
+				++data->counters.emptyQueries;
+			}
+		}
+	} catch (Error& e) {
+		if (!canReplyWith(e))
+			throw;
+		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
+	}
+
+	data->transactionTagCounter.addRequest(req.tags, resultSize);
+	++data->counters.finishedQueries;
+	--data->readQueueSizeMetric;
+
+	double duration = g_network->timer() - req.requestTime();
+	data->counters.readLatencySample.addMeasurement(duration);
+	if (data->latencyBandConfig.present()) {
+		int maxReadBytes =
+		    data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
+		int maxSelectorOffset =
+		    data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
+		data->counters.readLatencyBands.addMeasurement(duration,
+		                                               resultSize > maxReadBytes ||
+		                                                   abs(req.begin.offset) > maxSelectorOffset ||
+		                                                   abs(req.end.offset) > maxSelectorOffset);
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest req)
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 // selector offset prevents all data from being read in one range read
 {
 	state Span span("SS:getKeyValuesStream"_loc, { req.spanContext });
 	state int64_t resultSize = 0;
+	state IKeyValueStore::ReadType type =
+	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
 
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 	++data->counters.getRangeStreamQueries;
@@ -2115,10 +2620,10 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		state int offset2;
 		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
 		                               ? Future<Key>(req.begin.getKey())
-		                               : findKey(data, req.begin, version, shard, &offset1, span.context);
+		                               : findKey(data, req.begin, version, shard, &offset1, span.context, type);
 		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
 		                             ? Future<Key>(req.end.getKey())
-		                             : findKey(data, req.end, version, shard, &offset2, span.context);
+		                             : findKey(data, req.end, version, shard, &offset2, span.context, type);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 		if (req.debugID.present())
@@ -2165,7 +2670,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 				state int byteLimit = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 				GetKeyValuesReply _r =
-				    wait(readRange(data, version, KeyRangeRef(begin, end), req.limit, &byteLimit, span.context));
+				    wait(readRange(data, version, KeyRangeRef(begin, end), req.limit, &byteLimit, span.context, type));
 				GetKeyValuesStreamReply r(_r);
 
 				if (req.debugID.present())
@@ -2265,7 +2770,8 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		state KeyRange shard = getShardKeyRange(data, req.sel);
 
 		state int offset;
-		Key k = wait(findKey(data, req.sel, version, shard, &offset, req.spanContext));
+		Key k =
+		    wait(findKey(data, req.sel, version, shard, &offset, req.spanContext, IKeyValueStore::ReadType::NORMAL));
 
 		data->checkChangeCounter(
 		    changeCounter, KeyRangeRef(std::min<KeyRef>(req.sel.getKey(), k), std::max<KeyRef>(req.sel.getKey(), k)));
@@ -2360,15 +2866,16 @@ void getQueuingMetrics(StorageServer* self, StorageQueuingMetricsRequest const& 
 ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager) {
 	eager->finishKeyBegin();
 
-	vector<Future<Key>> keyEnd(eager->keyBegin.size());
+	std::vector<Future<Key>> keyEnd(eager->keyBegin.size());
 	for (int i = 0; i < keyEnd.size(); i++)
-		keyEnd[i] = data->storage.readNextKeyInclusive(eager->keyBegin[i]);
+		keyEnd[i] = data->storage.readNextKeyInclusive(eager->keyBegin[i], IKeyValueStore::ReadType::EAGER);
 
 	state Future<vector<Key>> futureKeyEnds = getAll(keyEnd);
 
 	vector<Future<Optional<Value>>> value(eager->keys.size());
 	for (int i = 0; i < value.size(); i++)
-		value[i] = data->storage.readValuePrefix(eager->keys[i].first, eager->keys[i].second);
+		value[i] =
+		    data->storage.readValuePrefix(eager->keys[i].first, eager->keys[i].second, IKeyValueStore::ReadType::EAGER);
 
 	state Future<vector<Optional<Value>>> futureValues = getAll(value);
 	state vector<Key> keyEndVal = wait(futureKeyEnds);
@@ -4761,6 +5268,18 @@ ACTOR Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<G
 	}
 }
 
+ACTOR Future<Void> serveGetKeyValuesAndFlatMapRequests(
+    StorageServer* self,
+    FutureStream<GetKeyValuesAndFlatMapRequest> getKeyValuesAndFlatMap) {
+	loop {
+		GetKeyValuesAndFlatMapRequest req = waitNext(getKeyValuesAndFlatMap);
+
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
+		// before doing real work
+		self->actors.add(self->readGuard(req, getKeyValuesAndFlatMapQ));
+	}
+}
+
 ACTOR Future<Void> serveGetKeyValuesStreamRequests(StorageServer* self,
                                                    FutureStream<GetKeyValuesStreamRequest> getKeyValuesStream) {
 	loop {
@@ -4931,6 +5450,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(checkBehind(self));
 	self->actors.add(serveGetValueRequests(self, ssi.getValue.getFuture()));
 	self->actors.add(serveGetKeyValuesRequests(self, ssi.getKeyValues.getFuture()));
+	self->actors.add(serveGetKeyValuesAndFlatMapRequests(self, ssi.getKeyValuesAndFlatMap.getFuture()));
 	self->actors.add(serveGetKeyValuesStreamRequests(self, ssi.getKeyValuesStream.getFuture()));
 	self->actors.add(serveGetKeyRequests(self, ssi.getKey.getFuture()));
 	self->actors.add(serveWatchValueRequests(self, ssi.watchValue.getFuture()));
