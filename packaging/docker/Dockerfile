@@ -16,30 +16,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-FROM amazonlinux:2.0.20210326.0 as base
+FROM centos:7.9.2009 as base
 
 RUN yum install -y \
-    bind-utils-9.11.4-26.P2.amzn2.5.2 \
-    binutils-2.29.1-30.amzn2 \
-    curl-7.76.1-7.amzn2.0.2 \
-    gdb-8.0.1-36.amzn2.0.1 \
-    hostname-3.13-3.amzn2.0.2 \
-    jq-1.5-1.amzn2.0.2 \
-    less-458-9.amzn2.0.2 \
-    lsof-4.87-6.amzn2 \
-    net-tools-2.0-0.22.20131004git.amzn2.0.2  \
-    nmap-ncat-6.40-13.amzn2 \
-    perf-4.14.252-195.483.amzn2 \
-    perl-5.16.3-299.amzn2.0.1 \
-    procps-ng-3.3.10-26.amzn2 \
-    strace-4.26-1.amzn2.0.1 \
-    sysstat-10.1.5-12.amzn2 \
-    tar-1.26-35.amzn2 \
-    tcpdump-4.9.2-4.amzn2.1 \
-    telnet-0.17-65.amzn2 \
-    traceroute-2.0.22-2.amzn2.0.1 \
-    unzip-6.0-43.amzn2 \
-    vim-enhanced-8.1.1602-1.amzn2 && \
+    epel-release-7-11 \
+    centos-release-scl-2-3.el7.centos && \
+    yum install -y \
+    bind-utils-9.11.4-26.P2.el7_9.7 \
+    binutils-2.27-44.base.el7_9.1 \
+    curl-7.29.0-59.el7_9.1 \
+    gdb-7.6.1-120.el7 \
+    hostname-3.13-3.el7_7.1 \
+    jq-1.6-2.el7  \
+    less-458-9.el7 \
+    lsof-4.87-6.el7 \
+    net-tools-2.0-0.25.20131004git.el7 \
+    nmap-ncat-6.40-19.el7 \
+    perf-3.10.0-1160.45.1.el7 \
+    perl-5.16.3-299.el7_9 \
+    procps-ng-3.3.10-28.el7 \
+    strace-4.24-6.el7 \
+    sysstat-10.1.5-19.el7 \
+    tar-1.26-35.el7 \
+    tcpdump-4.9.2-4.el7_7.1 \
+    telnet-0.17-66.el7 \
+    traceroute-2.0.22-2.el7 \
+    unzip-6.0-22.el7_9 \
+    vim-enhanced-7.4.629-8.el7_9 && \
     yum clean all && \
     rm -rf /var/cache/yum
 
@@ -115,10 +118,10 @@ ENTRYPOINT ["/usr/bin/fdb-kubernetes-monitor"]
 FROM foundationdb-base as foundationdb-kubernetes-sidecar
 
 RUN yum -y install \
-    python3-3.7.10-1.amzn2.0.1 \
-    python3-pip-20.2.2-1.amzn2.0.3 && \
+    rh-python38-2.0-4.el7 \
     yum clean all && \
     rm -rf /var/cache/yum && \
+    source /opt/rh/rh-python38/enable && \
     pip3 install watchdog==0.9.0
 
 WORKDIR /
@@ -158,7 +161,7 @@ ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/var/fdb/scripts/fdb.bash"]
 FROM base as ycsb
 
 RUN yum -y install \
-    java-11-amazon-corretto-11.0.13+8-1.amzn2 && \
+    java-11-openjdk-11.0.13.0.8-1.el7_9 && \
     yum clean all && \
     rm -rf /var/cache/yum
 
