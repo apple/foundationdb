@@ -40,6 +40,7 @@
 #include "flow/ObjectSerializer.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
+#define XXH_INLINE_ALL
 #include "flow/xxhash.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -1581,16 +1582,17 @@ static ReliablePacket* sendPacket(TransportData* self,
 	// Reserve some space for packet length and checksum, write them after serializing data
 	SplitBuffer packetInfoBuffer;
 	uint32_t len;
-	XXH64_hash_t checksum = 0;
-	XXH3_state_t* checksumState = nullptr;
+
+	// This is technically abstraction breaking but avoids XXH3_createState() and XXH3_freeState() which are just
+	// malloc/free
+	XXH3_state_t checksumState;
+	// Checksum will be calculated with buffer API if contiguous, else using stream API.  Mode is tracked here.
+	bool checksumStream = false;
+	XXH64_hash_t checksum;
 
 	int packetInfoSize = PACKET_LEN_WIDTH;
 	if (checksumEnabled) {
 		packetInfoSize += sizeof(checksum);
-		checksumState = XXH3_createState();
-		if (XXH3_64bits_reset(checksumState) != XXH_OK) {
-			throw internal_error();
-		}
 	}
 
 	wr.writeAhead(packetInfoSize, &packetInfoBuffer);
@@ -1612,19 +1614,37 @@ static ReliablePacket* sendPacket(TransportData* self,
 		while (checksumUnprocessedLength > 0) {
 			uint32_t processLength =
 			    std::min(checksumUnprocessedLength, (uint32_t)(checksumPb->bytes_written - prevBytesWritten));
-			// This won't fail if inputs are non null
-			if (XXH3_64bits_update(checksumState, checksumPb->data() + prevBytesWritten, processLength) != XXH_OK) {
-				throw internal_error();
+
+			// If not in checksum stream mode yet
+			if (!checksumStream) {
+				// If there is nothing left to process then calculate checksum directly
+				if (processLength == checksumUnprocessedLength) {
+					checksum = XXH3_64bits(checksumPb->data() + prevBytesWritten, processLength);
+				} else {
+					// Otherwise, initialize checksum state and switch to stream mode
+					if (XXH3_64bits_reset(&checksumState) != XXH_OK) {
+						throw internal_error();
+					}
+					checksumStream = true;
+				}
 			}
+
+			// If in checksum stream mode, update the checksum state
+			if (checksumStream) {
+				if (XXH3_64bits_update(&checksumState, checksumPb->data() + prevBytesWritten, processLength) !=
+				    XXH_OK) {
+					throw internal_error();
+				}
+			}
+
 			checksumUnprocessedLength -= processLength;
 			checksumPb = checksumPb->nextPacketBuffer();
 			prevBytesWritten = 0;
 		}
 
-		checksum = XXH3_64bits_digest(checksumState);
-		// This always returns OK
-		if (XXH3_freeState(checksumState) != XXH_OK) {
-			throw internal_error();
+		// If in checksum stream mode, get the final checksum
+		if (checksumStream) {
+			checksum = XXH3_64bits_digest(&checksumState);
 		}
 	}
 
