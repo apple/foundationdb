@@ -95,12 +95,6 @@ install(DIRECTORY "${script_dir}/clients/usr/lib/cmake"
   COMPONENT clients-versioned)
 
 ################################################################################
-# Move Docker Setup
-################################################################################
-
-file(COPY "${PROJECT_SOURCE_DIR}/packaging/docker" DESTINATION "${PROJECT_BINARY_DIR}/packages/")
-
-################################################################################
 # General CPack configuration
 ################################################################################
 
@@ -137,7 +131,7 @@ set(CPACK_COMPONENT_CLIENTS-TGZ_DISPLAY_NAME "foundationdb-clients")
 set(CPACK_COMPONENT_CLIENTS-VERSIONED_DISPLAY_NAME "foundationdb${PROJECT_VERSION}-clients")
 
 
-# MacOS needs a file exiension for the LICENSE file
+# MacOS needs a file extension for the LICENSE file
 configure_file(${CMAKE_SOURCE_DIR}/LICENSE ${CMAKE_BINARY_DIR}/License.txt COPYONLY)
 
 ################################################################################
