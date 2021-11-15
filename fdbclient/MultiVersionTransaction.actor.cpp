@@ -1784,16 +1784,15 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 	} else if (option == FDBNetworkOptions::CLIENT_THREADS_PER_VERSION) {
 		MutexHolder holder(lock);
 		validateOption(value, true, false, false);
-		ASSERT(!networkStartSetup);
+		if (networkStartSetup) {
+			throw invalid_option();
+		}
 #if defined(__unixish__)
 		threadCount = extractIntOption(value, 1, 1024);
 #else
 		// multiple client threads are not supported on windows.
 		threadCount = extractIntOption(value, 1, 1);
 #endif
-		if (threadCount > 1) {
-			disableLocalClient();
-		}
 	} else {
 		MutexHolder holder(lock);
 		localClient->api->setNetworkOption(option, value);
@@ -1819,6 +1818,10 @@ void MultiVersionApi::setupNetwork() {
 		MutexHolder holder(lock);
 		if (networkStartSetup) {
 			throw network_already_setup();
+		}
+
+		if (threadCount > 1) {
+			disableLocalClient();
 		}
 
 		for (auto i : externalClientDescriptions) {
