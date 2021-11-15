@@ -2253,6 +2253,14 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			// If UNICAST is set, keep refreshing list TLog's recovery versions as maxEnd will vary
 			if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 				lastEnd = minEnd;
+				logSystem->recoverAt = minEnd;
+			} else {
+				logSystem->recoverAt = invalidVersion;
+				for (auto const& [key, val] : rvLogs) {
+					if (val > logSystem->recoverAt.get()) {
+						logSystem->recoverAt = val;
+					}
+				}
 			}
 			logSystem->rvLogs = rvLogs;
 			logSystem->tLogs = logServers;
@@ -2265,7 +2273,6 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			if (knownCommittedVersion > minEnd) {
 				knownCommittedVersion = minEnd;
 			}
-			logSystem->recoverAt = minEnd;
 			logSystem->knownCommittedVersion = knownCommittedVersion;
 			TraceEvent(SevDebug, "FinalRecoveryVersionInfo")
 			    .detail("KCV", knownCommittedVersion)
