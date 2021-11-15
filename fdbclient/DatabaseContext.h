@@ -351,6 +351,7 @@ public:
 	Counter transactionGetKeyRequests;
 	Counter transactionGetValueRequests;
 	Counter transactionGetRangeRequests;
+	Counter transactionGetRangeAndFlatMapRequests;
 	Counter transactionGetRangeStreamRequests;
 	Counter transactionWatchRequests;
 	Counter transactionGetAddressesForKeyRequests;
@@ -386,7 +387,7 @@ public:
 
 	int snapshotRywEnabled;
 
-	int transactionTracingEnabled;
+	bool transactionTracingSample;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;

@@ -5,10 +5,17 @@
 #include <rocksdb/filter_policy.h>
 #include <rocksdb/options.h>
 #include <rocksdb/slice_transform.h>
+#include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
+#include <rocksdb/version.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
+#include "flow/ThreadHelper.actor.h"
+
+#include <memory>
+#include <tuple>
+#include <vector>
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
@@ -16,6 +23,13 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
+
+// Enforcing rocksdb version to be 6.22.1 or greater.
+static_assert(ROCKSDB_MAJOR >= 6, "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
+static_assert(ROCKSDB_MAJOR == 6 ? ROCKSDB_MINOR >= 22 : true,
+              "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
+static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 22) ? ROCKSDB_PATCH >= 1 : true,
+              "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
 
 namespace {
 
@@ -46,6 +60,9 @@ rocksdb::Options getOptions() {
 	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
 		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
 	}
+
+	options.statistics = rocksdb::CreateDBStatistics();
+	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
 
 	rocksdb::BlockBasedTableOptions bbOpts;
 	// TODO: Add a knob for the block cache size. (Default is 8 MB)
@@ -89,6 +106,105 @@ rocksdb::ReadOptions getReadOptions() {
 	return options;
 }
 
+void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
+	TraceEvent e(SevError, "RocksDBError");
+	e.detail("Error", status.ToString()).detail("Method", method).detail("RocksDBSeverity", status.severity());
+	if (status.IsIOError()) {
+		e.detail("SubCode", status.subcode());
+	}
+}
+
+Error statusToError(const rocksdb::Status& s) {
+	if (s.IsIOError()) {
+		return io_error();
+	} else if (s.IsTimedOut()) {
+		return transaction_too_old();
+	} else {
+		return unknown_error();
+	}
+}
+ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> statistics, rocksdb::DB* db) {
+	state std::vector<std::tuple<const char*, uint32_t, uint64_t>> tickerStats = {
+		{ "StallMicros", rocksdb::STALL_MICROS, 0 },
+		{ "BytesRead", rocksdb::BYTES_READ, 0 },
+		{ "IterBytesRead", rocksdb::ITER_BYTES_READ, 0 },
+		{ "BytesWritten", rocksdb::BYTES_WRITTEN, 0 },
+		{ "BlockCacheMisses", rocksdb::BLOCK_CACHE_MISS, 0 },
+		{ "BlockCacheHits", rocksdb::BLOCK_CACHE_HIT, 0 },
+		{ "BloomFilterUseful", rocksdb::BLOOM_FILTER_USEFUL, 0 },
+		{ "BloomFilterFullPositive", rocksdb::BLOOM_FILTER_FULL_POSITIVE, 0 },
+		{ "BloomFilterTruePositive", rocksdb::BLOOM_FILTER_FULL_TRUE_POSITIVE, 0 },
+		{ "BloomFilterMicros", rocksdb::BLOOM_FILTER_MICROS, 0 },
+		{ "MemtableHit", rocksdb::MEMTABLE_HIT, 0 },
+		{ "MemtableMiss", rocksdb::MEMTABLE_MISS, 0 },
+		{ "GetHitL0", rocksdb::GET_HIT_L0, 0 },
+		{ "GetHitL1", rocksdb::GET_HIT_L1, 0 },
+		{ "GetHitL2AndUp", rocksdb::GET_HIT_L2_AND_UP, 0 },
+		{ "CountKeysWritten", rocksdb::NUMBER_KEYS_WRITTEN, 0 },
+		{ "CountKeysRead", rocksdb::NUMBER_KEYS_READ, 0 },
+		{ "CountDBSeek", rocksdb::NUMBER_DB_SEEK, 0 },
+		{ "CountDBNext", rocksdb::NUMBER_DB_NEXT, 0 },
+		{ "CountDBPrev", rocksdb::NUMBER_DB_PREV, 0 },
+		{ "BloomFilterPrefixChecked", rocksdb::BLOOM_FILTER_PREFIX_CHECKED, 0 },
+		{ "BloomFilterPrefixUseful", rocksdb::BLOOM_FILTER_PREFIX_USEFUL, 0 },
+		{ "BlockCacheCompressedMiss", rocksdb::BLOCK_CACHE_COMPRESSED_MISS, 0 },
+		{ "BlockCacheCompressedHit", rocksdb::BLOCK_CACHE_COMPRESSED_HIT, 0 },
+		{ "CountWalFileSyncs", rocksdb::WAL_FILE_SYNCED, 0 },
+		{ "CountWalFileBytes", rocksdb::WAL_FILE_BYTES, 0 },
+		{ "CompactReadBytes", rocksdb::COMPACT_READ_BYTES, 0 },
+		{ "CompactWriteBytes", rocksdb::COMPACT_WRITE_BYTES, 0 },
+		{ "FlushWriteBytes", rocksdb::FLUSH_WRITE_BYTES, 0 },
+		{ "CountBlocksCompressed", rocksdb::NUMBER_BLOCK_COMPRESSED, 0 },
+		{ "CountBlocksDecompressed", rocksdb::NUMBER_BLOCK_DECOMPRESSED, 0 },
+		{ "RowCacheHit", rocksdb::ROW_CACHE_HIT, 0 },
+		{ "RowCacheMiss", rocksdb::ROW_CACHE_MISS, 0 },
+		{ "CountIterSkippedKeys", rocksdb::NUMBER_ITER_SKIP, 0 },
+
+	};
+	state std::vector<std::pair<const char*, std::string>> propertyStats = {
+		{ "NumCompactionsRunning", rocksdb::DB::Properties::kNumRunningCompactions },
+		{ "NumImmutableMemtables", rocksdb::DB::Properties::kNumImmutableMemTable },
+		{ "NumImmutableMemtablesFlushed", rocksdb::DB::Properties::kNumImmutableMemTableFlushed },
+		{ "IsMemtableFlushPending", rocksdb::DB::Properties::kMemTableFlushPending },
+		{ "NumRunningFlushes", rocksdb::DB::Properties::kNumRunningFlushes },
+		{ "IsCompactionPending", rocksdb::DB::Properties::kCompactionPending },
+		{ "NumRunningCompactions", rocksdb::DB::Properties::kNumRunningCompactions },
+		{ "CumulativeBackgroundErrors", rocksdb::DB::Properties::kBackgroundErrors },
+		{ "CurrentSizeActiveMemtable", rocksdb::DB::Properties::kCurSizeActiveMemTable },
+		{ "AllMemtablesBytes", rocksdb::DB::Properties::kCurSizeAllMemTables },
+		{ "ActiveMemtableBytes", rocksdb::DB::Properties::kSizeAllMemTables },
+		{ "CountEntriesActiveMemtable", rocksdb::DB::Properties::kNumEntriesActiveMemTable },
+		{ "CountEntriesImmutMemtables", rocksdb::DB::Properties::kNumEntriesImmMemTables },
+		{ "CountDeletesActiveMemtable", rocksdb::DB::Properties::kNumDeletesActiveMemTable },
+		{ "CountDeletesImmutMemtables", rocksdb::DB::Properties::kNumDeletesImmMemTables },
+		{ "EstimatedCountKeys", rocksdb::DB::Properties::kEstimateNumKeys },
+		{ "EstimateSstReaderBytes", rocksdb::DB::Properties::kEstimateTableReadersMem },
+		{ "CountActiveSnapshots", rocksdb::DB::Properties::kNumSnapshots },
+		{ "OldestSnapshotTime", rocksdb::DB::Properties::kOldestSnapshotTime },
+		{ "CountLiveVersions", rocksdb::DB::Properties::kNumLiveVersions },
+		{ "EstimateLiveDataSize", rocksdb::DB::Properties::kEstimateLiveDataSize },
+		{ "BaseLevel", rocksdb::DB::Properties::kBaseLevel },
+		{ "EstPendCompactBytes", rocksdb::DB::Properties::kEstimatePendingCompactionBytes },
+	};
+	loop {
+		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
+		TraceEvent e("RocksDBMetrics");
+		for (auto& t : tickerStats) {
+			auto& [name, ticker, cum] = t;
+			uint64_t val = statistics->getTickerCount(ticker);
+			e.detail(name, val - cum);
+			cum = val;
+		}
+
+		for (auto& p : propertyStats) {
+			auto& [name, property] = p;
+			uint64_t stat = 0;
+			ASSERT(db->GetIntProperty(property, &stat));
+			e.detail(name, stat);
+		}
+	}
+}
+
 struct RocksDBKeyValueStore : IKeyValueStore {
 	using DB = rocksdb::DB*;
 	using CF = rocksdb::ColumnFamilyHandle*;
@@ -107,40 +223,29 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		void init() override {}
 
-		Error statusToError(const rocksdb::Status& s) {
-			if (s == rocksdb::Status::IOError()) {
-				return io_error();
-			} else {
-				return unknown_error();
-			}
-		}
-
 		struct OpenAction : TypedAction<Writer, OpenAction> {
 			std::string path;
 			ThreadReturnPromise<Void> done;
+			Optional<Future<Void>>& metrics;
+			OpenAction(std::string path, Optional<Future<Void>>& metrics) : path(std::move(path)), metrics(metrics) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(OpenAction& a) {
-			// If the DB has already been initialized, this should be a no-op.
-			if (db != nullptr) {
-				TraceEvent(SevInfo, "RocksDB")
-				    .detail("Path", a.path)
-				    .detail("Method", "Open")
-				    .detail("Skipping", "Already Open");
-				a.done.send(Void());
-				return;
-			}
-
 			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
 				"default", getCFOptions() } };
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
-			auto status = rocksdb::DB::Open(getOptions(), a.path, defaultCF, &handle, &db);
+			auto options = getOptions();
+			auto status = rocksdb::DB::Open(options, a.path, defaultCF, &handle, &db);
 			if (!status.ok()) {
-				TraceEvent(SevError, "RocksDBError").detail("Error", status.ToString()).detail("Method", "Open");
+				logRocksDBError(status, "Open");
 				a.done.sendError(statusToError(status));
 			} else {
 				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
+				onMainThread([&] {
+					a.metrics = rocksDBMetricLogger(options.statistics, db);
+					return Future<bool>(true);
+				}).blockUntilReady();
 				a.done.send(Void());
 			}
 		}
@@ -175,7 +280,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 			auto s = db->Write(options, a.batchToCommit.get());
 			if (!s.ok()) {
-				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Commit");
+				logRocksDBError(s, "Commit");
 				a.done.sendError(statusToError(s));
 			} else {
 				a.done.send(Void());
@@ -201,14 +306,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			auto s = db->Close();
 			if (!s.ok()) {
-				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Close");
+				logRocksDBError(s, "Close");
 			}
 			if (a.deleteOnClose) {
 				std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
 					"default", getCFOptions() } };
 				s = rocksdb::DestroyDB(a.path, getOptions(), defaultCF);
 				if (!s.ok()) {
-					TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Destroy");
+					logRocksDBError(s, "Destroy");
 				} else {
 					TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Destroy");
 				}
@@ -246,11 +351,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			if (s.ok()) {
 				a.result.send(Value(toStringRef(value)));
-			} else {
-				if (!s.IsNotFound()) {
-					TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValue");
-				}
+			} else if (s.IsNotFound()) {
 				a.result.send(Optional<Value>());
+			} else {
+				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValue");
+				a.result.sendError(statusToError(s));
 			}
 		}
 
@@ -282,13 +387,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (s.ok()) {
 				a.result.send(Value(StringRef(reinterpret_cast<const uint8_t*>(value.data()),
 				                              std::min(value.size(), size_t(a.maxLength)))));
-			} else {
-				if (!s.IsNotFound()) {
-					TraceEvent(SevError, "RocksDBError")
-					    .detail("Error", s.ToString())
-					    .detail("Method", "ReadValuePrefix");
-				}
+			} else if (s.IsNotFound()) {
 				a.result.send(Optional<Value>());
+			} else {
+				logRocksDBError(s, "ReadValuePrefix");
+				a.result.sendError(statusToError(s));
 			}
 		}
 
@@ -349,7 +452,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			if (!s.ok()) {
-				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadRange");
+				logRocksDBError(s, "ReadRange");
+				a.result.sendError(statusToError(s));
+				return;
 			}
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
@@ -367,7 +472,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Reference<IThreadPool> readThreads;
 	Promise<Void> errorPromise;
 	Promise<Void> closePromise;
+	Future<Void> openFuture;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
+	Optional<Future<Void>> metrics;
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id) : path(path), id(id) {
 		writeThread = createGenericThreadPool();
@@ -381,6 +488,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> getError() override { return errorPromise.getFuture(); }
 
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
+		// The metrics future retains a reference to the DB, so stop it before we delete it.
+		self->metrics.reset();
+
 		wait(self->readThreads->stop());
 		auto a = new Writer::CloseAction(self->path, deleteOnClose);
 		auto f = a->done.getFuture();
@@ -403,11 +513,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	KeyValueStoreType getType() const override { return KeyValueStoreType(KeyValueStoreType::SSD_ROCKSDB_V1); }
 
 	Future<Void> init() override {
-		std::unique_ptr<Writer::OpenAction> a(new Writer::OpenAction());
-		a->path = path;
-		auto res = a->done.getFuture();
+		if (openFuture.isValid()) {
+			return openFuture;
+		}
+		auto a = std::make_unique<Writer::OpenAction>(path, metrics);
+		openFuture = a->done.getFuture();
 		writeThread->post(a.release());
-		return res;
+		return openFuture;
 	}
 
 	void set(KeyValueRef kv, const Arena*) override {
@@ -437,21 +549,24 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID) override {
+	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) override {
 		auto a = new Reader::ReadValueAction(key, debugID);
 		auto res = a->result.getFuture();
 		readThreads->post(a);
 		return res;
 	}
 
-	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID) override {
+	Future<Optional<Value>> readValuePrefix(KeyRef key,
+	                                        int maxLength,
+	                                        IKeyValueStore::ReadType,
+	                                        Optional<UID> debugID) override {
 		auto a = new Reader::ReadValuePrefixAction(key, maxLength, debugID);
 		auto res = a->result.getFuture();
 		readThreads->post(a);
 		return res;
 	}
 
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit) override {
+	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, IKeyValueStore::ReadType) override {
 		auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 		auto res = a->result.getFuture();
 		readThreads->post(a);

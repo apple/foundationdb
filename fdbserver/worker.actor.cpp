@@ -1055,6 +1055,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(Future<Void> prevStorageServer,
 		DUMPTOKEN(recruited.getValue);
 		DUMPTOKEN(recruited.getKey);
 		DUMPTOKEN(recruited.getKeyValues);
+		DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
 		DUMPTOKEN(recruited.getShardState);
 		DUMPTOKEN(recruited.waitMetrics);
 		DUMPTOKEN(recruited.splitMetrics);
@@ -1066,6 +1067,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(Future<Void> prevStorageServer,
 		DUMPTOKEN(recruited.getKeyValueStoreType);
 		DUMPTOKEN(recruited.watchValue);
 		DUMPTOKEN(recruited.getKeyValuesStream);
+		DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
 
 		prevStorageServer =
 		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<ClusterConnectionFile>(nullptr));
@@ -1429,6 +1431,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				DUMPTOKEN(recruited.getKeyValueStoreType);
 				DUMPTOKEN(recruited.watchValue);
 				DUMPTOKEN(recruited.getKeyValuesStream);
+				DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
 
 				Promise<Void> recovery;
 				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connFile);
@@ -1522,6 +1525,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 			DUMPTOKEN(recruited.getValue);
 			DUMPTOKEN(recruited.getKey);
 			DUMPTOKEN(recruited.getKeyValues);
+			DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
 			DUMPTOKEN(recruited.getShardState);
 			DUMPTOKEN(recruited.waitMetrics);
 			DUMPTOKEN(recruited.splitMetrics);
@@ -1830,6 +1834,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					DUMPTOKEN(recruited.getKeyValueStoreType);
 					DUMPTOKEN(recruited.watchValue);
 					DUMPTOKEN(recruited.getKeyValuesStream);
+					DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
 					// printf("Recruited as storageServer\n");
 
 					std::string filename =
