@@ -4577,6 +4577,46 @@ void changeServerKeys(StorageServer* data,
 		setAvailableStatus(data, range, true);
 	}
 	validate(data);
+
+	if (!nowAssigned) {
+		std::map<Key, KeyRange> candidateFeeds;
+		auto ranges = data->keyChangeFeed.intersectingRanges(keys);
+		for (auto r : ranges) {
+			for (auto feed : r.value()) {
+				candidateFeeds[feed->id] = feed->range;
+			}
+		}
+		for (auto f : candidateFeeds) {
+			bool foundAssigned = false;
+			auto shards = data->shards.intersectingRanges(f.second);
+			for (auto shard : shards) {
+				if (shard->value()->assigned()) {
+					foundAssigned = true;
+					break;
+				}
+			}
+			if (!foundAssigned) {
+				Key beginClearKey = f.first.withPrefix(persistChangeFeedKeys.begin);
+				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+				data->addMutationToMutationLog(
+				    mLV, MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
+				data->addMutationToMutationLog(mLV,
+				                               MutationRef(MutationRef::ClearRange,
+				                                           changeFeedDurableKey(f.first, 0),
+				                                           changeFeedDurableKey(f.first, version)));
+				auto rs = data->keyChangeFeed.modify(f.second);
+				for (auto r = rs.begin(); r != rs.end(); ++r) {
+					auto& feedList = r->value();
+					for (int i = 0; i < feedList.size(); i++) {
+						if (feedList[i]->id == f.first) {
+							swapAndPop(&feedList, i--);
+						}
+					}
+				}
+				data->uidChangeFeed.erase(f.first);
+			}
+		}
+	}
 }
 
 void rollback(StorageServer* data, Version rollbackVersion, Version nextVersion) {
