@@ -5736,6 +5736,9 @@ ACTOR Future<Version> extractReadVersion(Location location,
 	TraceEvent("DebugGrvTimeThrottled").detail("TimeThrottled", rep.timeThrottled);
 	if (rep.timeThrottled > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD &&
 	    priority != TransactionPriority::IMMEDIATE) {
+		TraceEvent("DebugGrvThrottleObserved")
+			.detail("TimeThrottled", rep.timeThrottled)
+			.detail("Threshold", CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD);
 		cx->lastTimedRkThrottle = now();
 	}
 	cx->GRVLatencies.addSample(latency);
@@ -5807,6 +5810,7 @@ bool rkThrottlingCooledDown(DatabaseContext* cx) {
 		return true;
 	}
 	TraceEvent("DebugGrvRkCd")
+		.detail("LastTimedRkThrottle", cx->lastTimedRkThrottle)
 	    .detail("TimeElapsed", now() - cx->lastTimedRkThrottle)
 	    .detail("CooldownTime", CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
 	return (now() - cx->lastTimedRkThrottle > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
@@ -5816,7 +5820,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	if (!readVersion.isValid()) {
 		if (!options.skipGrvCache && rkThrottlingCooledDown(getDatabase().getPtr()) &&
 		    (CLIENT_KNOBS->DEBUG_USE_GRV_CACHE || options.useGrvCache)) {
-			TraceEvent("DebugGrvUseCache").detail("LastRV", cx->cachedRv).detail("LastTime", cx->lastTimedGrv.get());
+			TraceEvent("DebugGrvUseCache").detail("LastRV", cx->cachedRv).detail("LastTime", format("%.6f", cx->lastTimedGrv.get()));
 			// Upon our first request to use cached RVs, start the background updater
 			if (!cx->grvUpdateHandler.isValid()) {
 				cx->grvUpdateHandler = backgroundGrvUpdater(getDatabase().getPtr());
