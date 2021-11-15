@@ -328,8 +328,13 @@ struct FetchInjectionInfo {
 
 struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	std::deque<Standalone<MutationsAndVersionRef>> mutations;
+	Version fetchVersion =
+	    invalidVersion; // The version that commits from a fetch have been written to storage, but have not yet been
+	                    // committed as part of updateStorage. Because a fetch can merge mutations with incoming data
+	                    // before updateStorage updates the storage version, updateStorage must know to skip mutations
+	                    // that have already been written to storage by change feed fetch.
 	Version storageVersion = invalidVersion; // The version between the storage version and the durable version are
-	                                         // currently being written to disk
+	                                         // being written to disk as part of the current commit in updateStorage
 	Version durableVersion = invalidVersion; // All versions before the durable version are durable on disk
 	Version emptyVersion = 0; // The change feed does not have any mutations before emptyVersion
 	KeyRange range;
@@ -1587,6 +1592,7 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 			if (req.version > feed->second->storageVersion) {
 				feed->second->storageVersion = invalidVersion;
 				feed->second->durableVersion = invalidVersion;
+				feed->second->fetchVersion = invalidVersion;
 			}
 			wait(self->durableVersion.whenAtLeast(self->storageVersion() + 1));
 		}
@@ -3307,8 +3313,8 @@ ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
 						data->storage.writeKeyValue(
 						    KeyValueRef(changeFeedDurableKey(rangeId, it.version),
 						                changeFeedDurableValue(it.mutations, it.knownCommittedVersion)));
-						changeFeedInfo->storageVersion = std::max(changeFeedInfo->durableVersion, it.version);
-						changeFeedInfo->durableVersion = changeFeedInfo->storageVersion;
+
+						changeFeedInfo->fetchVersion = std::max(changeFeedInfo->fetchVersion, it.version);
 					}
 				}
 				wait(yield());
@@ -3341,9 +3347,8 @@ ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
 						    KeyValueRef(changeFeedDurableKey(rangeId, remoteResult[remoteLoc].version),
 						                changeFeedDurableValue(remoteResult[remoteLoc].mutations,
 						                                       remoteResult[remoteLoc].knownCommittedVersion)));
-						changeFeedInfo->storageVersion =
-						    std::max(changeFeedInfo->durableVersion, remoteResult[remoteLoc].version);
-						changeFeedInfo->durableVersion = changeFeedInfo->storageVersion;
+						changeFeedInfo->fetchVersion =
+						    std::max(changeFeedInfo->fetchVersion, remoteResult[remoteLoc].version);
 					}
 					remoteLoc++;
 				} else if (remoteResult[remoteLoc].version == localResult.version) {
@@ -3355,9 +3360,9 @@ ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
 						    KeyValueRef(changeFeedDurableKey(rangeId, remoteResult[remoteLoc].version),
 						                changeFeedDurableValue(remoteResult[remoteLoc].mutations,
 						                                       remoteResult[remoteLoc].knownCommittedVersion)));
-						changeFeedInfo->storageVersion =
-						    std::max(changeFeedInfo->durableVersion, remoteResult[remoteLoc].version);
-						changeFeedInfo->durableVersion = changeFeedInfo->storageVersion;
+
+						changeFeedInfo->fetchVersion =
+						    std::max(changeFeedInfo->fetchVersion, remoteResult[remoteLoc].version);
 					}
 					remoteLoc++;
 					Standalone<MutationsAndVersionRef> _localResult = waitNext(localResults.getFuture());
@@ -4297,6 +4302,7 @@ private:
 							if (popVersion > feed->second->storageVersion) {
 								feed->second->storageVersion = invalidVersion;
 								feed->second->durableVersion = invalidVersion;
+								// don't set fetchVersion to invalidVersion here because there could be an active fetch
 							}
 						}
 					}
@@ -4850,14 +4856,22 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		while (curFeed < updatedChangeFeeds.size()) {
 			auto info = data->uidChangeFeed.find(updatedChangeFeeds[curFeed]);
 			if (info != data->uidChangeFeed.end()) {
+				// Cannot yield in mutation updating loop because of race between fetchVersion and storageVersion
 				for (auto& it : info->second->mutations) {
-					if (it.version > newOldestVersion) {
+					if (it.version <= info->second->fetchVersion) {
+						continue;
+					} else if (it.version > newOldestVersion) {
 						break;
 					}
 					data->storage.writeKeyValue(
 					    KeyValueRef(changeFeedDurableKey(info->second->id, it.version),
 					                changeFeedDurableValue(it.mutations, it.knownCommittedVersion)));
+					ASSERT(it.version > info->second->storageVersion);
 					info->second->storageVersion = it.version;
+				}
+				// handle case where fetch had version ahead of last in-memory mutation
+				if (info->second->fetchVersion > info->second->storageVersion) {
+					info->second->storageVersion = std::min(info->second->fetchVersion, newOldestVersion);
 				}
 				wait(yield(TaskPriority::UpdateStorage));
 			}
@@ -4904,6 +4918,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				while (!info->second->mutations.empty() && info->second->mutations.front().version < newOldestVersion) {
 					info->second->mutations.pop_front();
 				}
+				ASSERT(info->second->storageVersion >= info->second->durableVersion);
 				info->second->durableVersion = info->second->storageVersion;
 				wait(yield(TaskPriority::UpdateStorage));
 			}
