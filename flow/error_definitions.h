@@ -252,11 +252,11 @@ ERROR( json_malformed, 2401, "JSON string was malformed")
 ERROR( json_eof_expected, 2402, "JSON string did not terminate where expected")
 
 // 2500 - disk snapshot based backup errors
-ERROR( snap_disable_tlog_pop_failed,  2500, "Disk Snapshot error")
+ERROR( snap_disable_tlog_pop_failed,  2500, "Failed to disable tlog pops")
 ERROR( snap_storage_failed,  2501, "Failed to snapshot storage nodes")
 ERROR( snap_tlog_failed,  2502, "Failed to snapshot TLog nodes")
 ERROR( snap_coord_failed,  2503, "Failed to snapshot coordinator nodes")
-ERROR( snap_enable_tlog_pop_failed,  2504, "Disk Snapshot error")
+ERROR( snap_enable_tlog_pop_failed,  2504, "Failed to enable tlog pops")
 ERROR( snap_path_not_whitelisted, 2505, "Snapshot create binary path not whitelisted")
 ERROR( snap_not_fully_recovered_unsupported, 2506, "Unsupported when the cluster is not fully recovered")
 ERROR( snap_log_anti_quorum_unsupported, 2507, "Unsupported when log anti quorum is configured")
