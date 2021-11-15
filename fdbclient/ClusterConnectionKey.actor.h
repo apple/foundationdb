@@ -47,10 +47,6 @@ public:
 	// format is invalid.
 	ACTOR static Future<Reference<ClusterConnectionKey>> loadClusterConnectionKey(Database db, Key connectionStringKey);
 
-	// Returns the connection string currently held in this object. This may not match the string in the database if it
-	// hasn't been persisted or if the key has been modified externally.
-	ClusterConnectionString const& getConnectionString() const override;
-
 	// Sets the connections string held by this object and persists it.
 	Future<Void> setConnectionString(ClusterConnectionString const&) override;
 

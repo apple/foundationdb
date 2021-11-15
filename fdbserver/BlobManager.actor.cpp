@@ -41,7 +41,7 @@
 
 // TODO add comments + documentation
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
-                           Arena ar,
+                           Arena& ar,
                            VectorRef<KeyRangeRef>* rangesToAdd,
                            VectorRef<KeyRangeRef>* rangesToRemove,
                            KeyRef rangeStart,
@@ -82,7 +82,7 @@ void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
 
 void updateClientBlobRanges(KeyRangeMap<bool>* knownBlobRanges,
                             RangeResult dbBlobRanges,
-                            Arena ar,
+                            Arena& ar,
                             VectorRef<KeyRangeRef>* rangesToAdd,
                             VectorRef<KeyRangeRef>* rangesToRemove) {
 	if (BM_DEBUG) {
@@ -1396,9 +1396,9 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 // DB has [B - D). It should show up coalesced in knownBlobRanges, and [C - D) should be removed.
 // DB has [A - D). It should show up coalesced in knownBlobRanges, and [A - B) should be removed.
 // DB has [A - B) and [C - D). They should show up in knownBlobRanges, and [B - C) should be in removed.
-// DB has [B - C). It should show up in knownBlobRanges, [B - C) should be in added, and [A - B) and [C - D)
-// should be in removed.
-TEST_CASE("/blobmanager/updateranges") {
+// DB has [B - C). It should show up in knownBlobRanges, [B - C) should be in added, and [A - B) and [C - D) should
+// be in removed.
+TEST_CASE(":/blobmanager/updateranges") {
 	KeyRangeMap<bool> knownBlobRanges(false, normalKeys.end);
 	Arena ar;
 

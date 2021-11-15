@@ -1,8 +1,9 @@
 set(FLOWBENCH_SRCS
   flowbench.actor.cpp
-  BenchMetadataCheck.cpp
   BenchHash.cpp
   BenchIterate.cpp
+  BenchMem.cpp
+  BenchMetadataCheck.cpp
   BenchPopulate.cpp
   BenchRandom.cpp
   BenchRef.cpp

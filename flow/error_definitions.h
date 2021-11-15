@@ -82,6 +82,7 @@ ERROR( wrong_format_version, 1058, "Format version not recognized" )
 ERROR( unknown_change_feed, 1059, "Change feed not found" )
 ERROR( change_feed_not_registered, 1060, "Change feed not registered" )
 ERROR( granule_assignment_conflict, 1061, "Conflicting attempts to assign blob granules" )
+ERROR( change_feed_cancelled, 1062, "Change feed was cancelled" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -159,6 +160,12 @@ ERROR( blocked_from_network_thread, 2026, "Detected a deadlock in a callback cal
 ERROR( invalid_config_db_range_read, 2027, "Invalid configuration database range read" )
 ERROR( invalid_config_db_key, 2028, "Invalid configuration database key provided" )
 ERROR( invalid_config_path, 2029, "Invalid configuration path" )
+ERROR( mapper_bad_index, 2030, "The index in K[] or V[] is not a valid number or out of range" )
+ERROR( mapper_no_such_key, 2031, "A mapped key is not set in database" )
+ERROR( mapper_bad_range_decriptor, 2032, "\"{...}\" must be the last element of the mapper tuple" )
+ERROR( quick_get_key_values_has_more, 2033, "One of the mapped range queries is too large" )
+ERROR( quick_get_value_miss, 2034, "Found a mapped key that is not served in the same SS" )
+ERROR( quick_get_key_values_miss, 2035, "Found a mapped range that is not served in the same SS" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )
@@ -178,6 +185,11 @@ ERROR( special_keys_write_disabled, 2114, "Special Key space is not allowed to w
 ERROR( special_keys_no_write_module_found, 2115, "Special key space key or keyrange in set or clear does not intersect a module" )
 ERROR( special_keys_cross_module_clear, 2116, "Special key space clear crosses modules" )
 ERROR( special_keys_api_failure, 2117, "Api call through special keys failed. For more information, call get on special key 0xff0xff/error_message to get a json string of the error message." )
+ERROR( client_lib_invalid_metadata, 2118, "Invalid client library metadata." )
+ERROR( client_lib_already_exists, 2119, "Client library with same identifier already exists on the cluster." )
+ERROR( client_lib_not_found, 2120, "Client library for the given identifier not found." )
+ERROR( client_lib_not_available, 2121, "Client library exists, but is not available for download." )
+ERROR( client_lib_invalid_binary, 2122, "Invalid client library binary." )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

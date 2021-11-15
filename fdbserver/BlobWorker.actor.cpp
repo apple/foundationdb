@@ -1137,8 +1137,8 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
                                           Reference<GranuleMetadata> metadata,
                                           Future<GranuleStartState> assignFuture) {
-	state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> oldChangeFeedStream;
-	state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> changeFeedStream;
+	state Reference<ChangeFeedData> oldChangeFeedStream = makeReference<ChangeFeedData>();
+	state Reference<ChangeFeedData> changeFeedStream = makeReference<ChangeFeedData>();
 	state std::deque<InFlightFile> inFlightFiles;
 	state Future<Void> oldChangeFeedFuture;
 	state Future<Void> changeFeedFuture;
@@ -1298,11 +1298,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				if (readOldChangeFeed) {
 					// TODO efficient way to store next in mutations?
 					Standalone<VectorRef<MutationsAndVersionRef>> oldMutations =
-					    waitNext(oldChangeFeedStream.getFuture());
+					    waitNext(oldChangeFeedStream->mutations.getFuture());
 					mutations = oldMutations;
 					ASSERT(mutations.back().version < startState.changeFeedStartVersion);
 				} else {
-					Standalone<VectorRef<MutationsAndVersionRef>> newMutations = waitNext(changeFeedStream.getFuture());
+					Standalone<VectorRef<MutationsAndVersionRef>> newMutations =
+					    waitNext(changeFeedStream->mutations.getFuture());
 					mutations = newMutations;
 					ASSERT(mutations.front().version >= startState.changeFeedStartVersion);
 				}
@@ -1395,8 +1396,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									// because the transaction creating the child change feed had to commit before we
 									// got here.
 									ASSERT(cfRollbackVersion < startState.changeFeedStartVersion);
-									oldChangeFeedStream =
-									    PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>();
+									oldChangeFeedStream = makeReference<ChangeFeedData>();
 									oldChangeFeedFuture =
 									    bwData->db->getChangeFeedStream(oldChangeFeedStream,
 									                                    oldCFKey.get(),
@@ -1405,7 +1405,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									                                    metadata->keyRange);
 								} else {
 									ASSERT(cfRollbackVersion > startState.changeFeedStartVersion);
-									changeFeedStream = PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>();
+									changeFeedStream = makeReference<ChangeFeedData>();
 									changeFeedFuture = bwData->db->getChangeFeedStream(changeFeedStream,
 									                                                   cfKey,
 									                                                   cfRollbackVersion + 1,
