@@ -416,17 +416,19 @@ typedef struct {
 dev_t getDeviceId(std::string path);
 #endif
 
-#ifdef __linux__
-#ifndef __aarch64__
-#include <x86intrin.h>
-#else
+#if defined(__aarch64__)
 #include "sse2neon.h"
-#endif
-#include <features.h>
-#include <sys/stat.h>
-#endif
-
-#if defined(__APPLE__)
+// aarch64 does not have rdtsc counter
+// Use cntvct_el0 virtual counter instead
+inline static uint64_t timestampCounter() {
+	uint64_t timer;
+	asm volatile("mrs %0, cntvct_el0" : "=r"(timer));
+	return timer;
+}
+#elif defined(__linux__)
+#include <x86intrin.h>
+#define timestampCounter() __rdtsc()
+#elif defined(__APPLE__) // macOS on Intel
 // Version of CLang bundled with XCode doesn't yet include ia32intrin.h.
 #if !(__has_builtin(__rdtsc))
 inline static uint64_t timestampCounter() {
@@ -437,16 +439,7 @@ inline static uint64_t timestampCounter() {
 #else
 #define timestampCounter() __rdtsc()
 #endif
-#elif defined(__aarch64__)
-// aarch64 does not have rdtsc counter
-// Use cntvct_el0 virtual counter instead
-inline static uint64_t timestampCounter() {
-	uint64_t timer;
-	asm volatile("mrs %0, cntvct_el0" : "=r"(timer));
-	return timer;
-}
 #else
-// all other platforms including Linux x86_64
 #define timestampCounter() __rdtsc()
 #endif
 
@@ -459,6 +452,11 @@ inline static uint64_t __rdtsc() {
 }
 #endif
 #endif
+
+#if defined(__linux__)
+#include <features.h>
+#endif
+#include <sys/stat.h>
 
 #ifdef _WIN32
 #include <intrin.h>
