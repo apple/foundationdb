@@ -2150,6 +2150,7 @@ void setupNetwork(uint64_t transportId, UseMetrics useMetrics) {
 	g_network->addStopCallback(TLS::DestroyOpenSSLGlobalState);
 	FlowTransport::createInstance(true, transportId, WLTOKEN_RESERVED_COUNT);
 	Net2FileSystem::newFileSystem();
+	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::False, IsSimulated::False);
 
 	uncancellable(monitorNetworkBusyness());
 }

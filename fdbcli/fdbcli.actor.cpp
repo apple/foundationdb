@@ -2432,8 +2432,6 @@ int main(int argc, char** argv) {
 
 	registerCrashHandler();
 
-	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::False, IsSimulated::False);
-
 #ifdef __unixish__
 	struct sigaction act;
 
