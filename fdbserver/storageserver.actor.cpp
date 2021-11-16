@@ -89,7 +89,6 @@ bool canReplyWith(Error e) {
 	case error_code_quick_get_key_values_has_more:
 	case error_code_quick_get_value_miss:
 	case error_code_quick_get_key_values_miss:
-	case error_code_unknown_change_feed:
 	case error_code_server_overloaded:
 		// case error_code_all_alternatives_failed:
 		return true;
