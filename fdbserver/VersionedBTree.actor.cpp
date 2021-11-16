@@ -9133,7 +9133,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
-	state std::string fileName = params.get("Filename").orDefault("unittest_pageFile.redwood");
+	state std::string fileName = params.get("Filename").orDefault("unittest_pageFile.redwood-v1");
 	IPager2* pager;
 
 	state bool serialTest = params.getInt("serialTest").orDefault(deterministicRandom()->random01() < 0.25);
@@ -9524,7 +9524,7 @@ ACTOR Future<Void> randomScans(VersionedBTree* btree,
 }
 
 TEST_CASE(":/redwood/correctness/pager/cow") {
-	state std::string pagerFile = "unittest_pageFile.redwood";
+	state std::string pagerFile = "unittest_pageFile.redwood-v1";
 	printf("Deleting old test data\n");
 	deleteFile(pagerFile);
 
@@ -9573,7 +9573,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	state DWALPager* pager;
 	// If a test file is passed in by environment then don't write new data to it.
 	state bool reload = getenv("TESTFILE") == nullptr;
-	state std::string fileName = reload ? "unittest.redwood" : getenv("TESTFILE");
+	state std::string fileName = reload ? "unittest.redwood-v1" : getenv("TESTFILE");
 
 	if (reload) {
 		printf("Deleting old test data\n");
@@ -9723,7 +9723,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 TEST_CASE(":/redwood/performance/set") {
 	state SignalableActorCollection actors;
 
-	state std::string fileName = params.get("Filename").orDefault("unittest.redwood");
+	state std::string fileName = params.get("Filename").orDefault("unittest.redwood-v1");
 	state int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
 	state int extentSize = params.getInt("extentSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE);
 	state int64_t pageCacheBytes = params.getInt("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
@@ -10254,9 +10254,9 @@ ACTOR Future<Void> doPrefixInsertComparison(int suffixSize,
                                             bool usePrefixesInOrder,
                                             KVSource source) {
 
-	deleteFile("test.redwood");
+	deleteFile("test.redwood-v1");
 	wait(delay(5));
-	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood", UID(), 0);
+	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood-v1", UID(), 0);
 	wait(prefixClusteredInsert(redwood, suffixSize, valueSize, source, recordCountTarget, usePrefixesInOrder, true));
 	wait(closeKVS(redwood));
 	printf("\n");
@@ -10298,9 +10298,9 @@ TEST_CASE(":/redwood/performance/sequentialInsert") {
 	state int valueSize = params.getInt("valueSize").orDefault(100);
 	state int recordCountTarget = params.getInt("recordCountTarget").orDefault(100e6);
 
-	deleteFile("test.redwood");
+	deleteFile("test.redwood-v1");
 	wait(delay(5));
-	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood", UID(), 0);
+	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood-v1", UID(), 0);
 	wait(sequentialInsert(redwood, prefixLen, valueSize, recordCountTarget));
 	wait(closeKVS(redwood));
 	printf("\n");
@@ -10378,9 +10378,9 @@ TEST_CASE(":/redwood/performance/randomRangeScans") {
 
 	state KVSource source({ { prefixLen, 1000 } });
 
-	deleteFile("test.redwood");
+	deleteFile("test.redwood-v1");
 	wait(delay(5));
-	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood", UID(), 0);
+	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood-v1", UID(), 0);
 	wait(prefixClusteredInsert(
 	    redwood, suffixSize, valueSize, source, writeRecordCountTarget, writePrefixesInOrder, false));
 
