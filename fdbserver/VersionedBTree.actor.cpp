@@ -9133,7 +9133,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
-	state std::string fileName = params.get("Filename").orDefault("unittest_pageFile.redwood-v1");
+	state std::string fileName = params.get("fileName").orDefault("unittest_pageFile.redwood-v1");
 	IPager2* pager;
 
 	state bool serialTest = params.getInt("serialTest").orDefault(deterministicRandom()->random01() < 0.25);
