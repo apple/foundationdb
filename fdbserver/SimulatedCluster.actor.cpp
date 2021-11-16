@@ -929,7 +929,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	}
 	case 3: {
 		TEST(true); // Simulated cluster using redwood storage engine
-		set_config("ssd-redwood-experimental");
+		set_config("ssd-redwood-1-experimental");
 		break;
 	}
 	default:
