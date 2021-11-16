@@ -5639,7 +5639,7 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 	state bool send_batch;
 	state Reference<Histogram> batchSizeDist = Histogram::getHistogram(LiteralStringRef("GrvBatcher"),
 	                                                                   LiteralStringRef("ClientGrvBatchSize"),
-	                                                                   Histogram::Unit::count,
+	                                                                   Histogram::Unit::countLinear,
 	                                                                   0,
 	                                                                   CLIENT_KNOBS->MAX_BATCH_SIZE * 2);
 	state Reference<Histogram> batchIntervalDist =
