@@ -254,7 +254,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		                          self->txnStateStore,
 		                          &self->keyInfo,
 		                          &toCommit,
-		                          self->forceRecovery,
+		                          &self->forceRecovery,
 		                          req.version + 1,
 		                          &self->storageCache,
 		                          &self->tssMapping);
@@ -483,7 +483,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 
 		bool confChanges; // Ignore configuration changes for initial commits.
 		ResolverData resolverData(
-		    pContext->pResolverData->dbgid, pContext->pTxnStateStore, &pContext->pResolverData->keyInfo, confChanges);
+		    pContext->pResolverData->dbgid, pContext->pTxnStateStore, &pContext->pResolverData->keyInfo, &confChanges);
 
 		applyMetadataMutations(SpanID(), resolverData, mutations);
 	} // loop

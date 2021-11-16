@@ -106,8 +106,8 @@ public:
 	                           const VectorRef<MutationRef>& mutations_)
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
 	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
-	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
-	    keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
+	    confChange(*resolverData_.confChanges), logSystem(resolverData_.logSystem),
+	    popVersion(resolverData_.popVersion), keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
 	    initialCommit(resolverData_.initialCommit), forResolver(true), tagToServer(&resolverData_.tagToServer),
 	    ssToStorageTeam(&resolverData_.ssToStorageTeam), changedTeams(&resolverData_.changedTeams) {}
 
@@ -799,11 +799,11 @@ private:
 				    .detail("PopVersion", popVersion)
 				    .detail("Tag", tag.toString())
 				    .detail("Server", decodeServerTagKey(kv.key));
+				ASSERT_WE_THINK(forResolver ^ (tag_popped != nullptr));
 				if (!forResolver) {
 					logSystem->pop(popVersion, decodeServerTagValue(kv.value));
 					(*tag_popped)[tag] = popVersion;
 				}
-				ASSERT_WE_THINK(forResolver ^ (tag_popped != nullptr));
 
 				if (toCommit) {
 					MutationRef privatized = m;
@@ -879,11 +879,11 @@ private:
 				    .detail("PopVersion", popVersion)
 				    .detail("Tag", tag.toString())
 				    .detail("Version", decodeServerTagHistoryKey(kv.key));
+				ASSERT_WE_THINK(forResolver ^ (tag_popped != nullptr));
 				if (!forResolver) {
 					logSystem->pop(popVersion, tag);
 					(*tag_popped)[tag] = popVersion;
 				}
-				ASSERT_WE_THINK(forResolver ^ (tag_popped != nullptr));
 			}
 		}
 		if (!initialCommit)

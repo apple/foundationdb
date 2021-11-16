@@ -42,7 +42,7 @@ struct ResolverData {
 	KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr;
 	Arena arena;
 	// Whether configuration changes. If so, a recovery is forced.
-	bool& confChanges;
+	bool* confChanges;
 	bool initialCommit = false;
 	Reference<ILogSystem> logSystem = Reference<ILogSystem>();
 	LogPushData* toCommit = nullptr;
@@ -54,7 +54,7 @@ struct ResolverData {
 	std::unordered_map<UID, std::vector<std::pair<ptxn::StorageTeamID, bool>>> changedTeams;
 
 	// For initial broadcast
-	ResolverData(UID debugId, IKeyValueStore* store, KeyRangeMap<ServerCacheInfo>* info, bool& forceRecovery)
+	ResolverData(UID debugId, IKeyValueStore* store, KeyRangeMap<ServerCacheInfo>* info, bool* forceRecovery)
 	  : dbgid(debugId), txnStateStore(store), keyInfo(info), confChanges(forceRecovery), initialCommit(true) {}
 
 	// For transaction batches that contain metadata mutations
@@ -63,7 +63,7 @@ struct ResolverData {
 	             IKeyValueStore* store,
 	             KeyRangeMap<ServerCacheInfo>* info,
 	             LogPushData* toCommit,
-	             bool& forceRecovery,
+	             bool* forceRecovery,
 	             Version popVersion,
 	             std::map<UID, Reference<StorageInfo>>* storageCache,
 	             std::unordered_map<UID, StorageServerInterface>* tssMapping)
