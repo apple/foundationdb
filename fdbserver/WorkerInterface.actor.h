@@ -238,6 +238,7 @@ struct RegisterMasterRequest {
 	std::vector<UID> priorCommittedLogServers;
 	RecoveryState recoveryState;
 	bool recoveryStalled;
+	UID clusterId;
 
 	ReplyPromise<Void> reply;
 
@@ -261,6 +262,7 @@ struct RegisterMasterRequest {
 		           priorCommittedLogServers,
 		           recoveryState,
 		           recoveryStalled,
+		           clusterId,
 		           reply);
 	}
 };
@@ -499,6 +501,7 @@ struct InitializeTLogRequest {
 	Version startVersion;
 	int logRouterTags;
 	int txsTags;
+	UID clusterId;
 
 	ReplyPromise<struct TLogInterface> reply;
 
@@ -523,7 +526,8 @@ struct InitializeTLogRequest {
 		           reply,
 		           logVersion,
 		           spillType,
-		           txsTags);
+		           txsTags,
+		           clusterId);
 	}
 };
 
@@ -693,11 +697,12 @@ struct InitializeStorageRequest {
 	KeyValueStoreType storeType;
 	Optional<std::pair<UID, Version>>
 	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
+	UID clusterId; // Unique cluster identifier. Only needed at recruitment, will be read from txnStateStore on recovery
 	ReplyPromise<InitializeStorageReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion);
+		serializer(ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, clusterId);
 	}
 };
 
@@ -992,6 +997,7 @@ class IDiskQueue;
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
+                                 UID clusterId,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
@@ -1093,6 +1099,66 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 }
 
 typedef decltype(&tLog) TLogFn;
+
+ACTOR template <class T>
+Future<T> ioTimeoutError(Future<T> what, double time) {
+	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
+	// to not end until at least time after simulation is sped up.
+	if (g_network->isSimulated() && !g_simulator.speedUpSimulation) {
+		time += std::max(0.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
+	}
+	Future<Void> end = lowPriorityDelay(time);
+	choose {
+		when(T t = wait(what)) { return t; }
+		when(wait(end)) {
+			Error err = io_timeout();
+			if (g_network->isSimulated() && !g_simulator.getCurrentProcess()->isReliable()) {
+				err = err.asInjectedFault();
+			}
+			TraceEvent(SevError, "IoTimeoutError").error(err);
+			throw err;
+		}
+	}
+}
+
+ACTOR template <class T>
+Future<T> ioDegradedOrTimeoutError(Future<T> what,
+                                   double errTime,
+                                   Reference<AsyncVar<bool>> degraded,
+                                   double degradedTime) {
+	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
+	// to not end until at least time after simulation is sped up.
+	if (g_network->isSimulated() && !g_simulator.speedUpSimulation) {
+		double timeShift = std::max(0.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
+		errTime += timeShift;
+		degradedTime += timeShift;
+	}
+
+	if (degradedTime < errTime) {
+		Future<Void> degradedEnd = lowPriorityDelay(degradedTime);
+		choose {
+			when(T t = wait(what)) { return t; }
+			when(wait(degradedEnd)) {
+				TEST(true); // TLog degraded
+				TraceEvent(SevWarnAlways, "IoDegraded").log();
+				degraded->set(true);
+			}
+		}
+	}
+
+	Future<Void> end = lowPriorityDelay(errTime - degradedTime);
+	choose {
+		when(T t = wait(what)) { return t; }
+		when(wait(end)) {
+			Error err = io_timeout();
+			if (g_network->isSimulated() && !g_simulator.getCurrentProcess()->isReliable()) {
+				err = err.asInjectedFault();
+			}
+			TraceEvent(SevError, "IoTimeoutError").error(err);
+			throw err;
+		}
+	}
+}
 
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/unactorcompiler.h"

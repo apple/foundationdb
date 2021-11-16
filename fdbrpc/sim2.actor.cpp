@@ -946,8 +946,18 @@ public:
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6 = false) override;
 
+	// Add a <hostname, vector<NetworkAddress>> pair to mock DNS in simulation.
+	void addMockTCPEndpoint(const std::string& host,
+	                        const std::string& service,
+	                        const std::vector<NetworkAddress>& addresses) override {
+		mockDNS.addMockTCPEndpoint(host, service, addresses);
+	}
 	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                       const std::string& service) override {
+		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
+		if (mockDNS.findMockTCPEndpoint(host, service)) {
+			return mockDNS.getTCPEndpoint(host, service);
+		}
 		return SimExternalConnection::resolveTCPEndpoint(host, service);
 	}
 	ACTOR static Future<Reference<IConnection>> onConnect(Future<Void> ready, Reference<Sim2Conn> conn) {
@@ -2135,6 +2145,9 @@ public:
 	// Whether or not yield has returned true during the current iteration of the run loop
 	bool yielded;
 	int yield_limit; // how many more times yield may return false before next returning true
+
+private:
+	MockDNS mockDNS;
 
 #ifdef ENABLE_SAMPLING
 	ActorLineageSet actorLineageSet;

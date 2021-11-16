@@ -23,6 +23,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ClientKnobs.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/Platform.h"
@@ -46,7 +47,7 @@ struct ClientLibBinaryInfo {
 #define ASSERT_INDEX_IN_RANGE(idx, arr) ASSERT(idx >= 0 && idx < sizeof(arr) / sizeof(arr[0]))
 
 const std::string& getStatusName(ClientLibStatus status) {
-	static const std::string statusNames[] = { "disabled", "available", "uploading" };
+	static const std::string statusNames[] = { "disabled", "uploading", "download", "active" };
 	int idx = static_cast<int>(status);
 	ASSERT_INDEX_IN_RANGE(idx, statusNames);
 	return statusNames[idx];
@@ -123,7 +124,23 @@ ClientLibChecksumAlg getChecksumAlgByName(std::string_view checksumAlgName) {
 namespace {
 
 bool isValidTargetStatus(ClientLibStatus status) {
-	return status == ClientLibStatus::AVAILABLE || status == ClientLibStatus::DISABLED;
+	return status == ClientLibStatus::DISABLED || status == ClientLibStatus::DOWNLOAD ||
+	       status == ClientLibStatus::ACTIVE;
+}
+
+bool isAvailableForDownload(ClientLibStatus status) {
+	return status == ClientLibStatus::DOWNLOAD || status == ClientLibStatus::ACTIVE;
+}
+
+void updateClientLibChangeCounter(Transaction& tr, ClientLibStatus prevStatus, ClientLibStatus newStatus) {
+	static const int64_t counterIncVal = 1;
+	if ((prevStatus != newStatus) &&
+	    (newStatus == ClientLibStatus::DOWNLOAD || newStatus == ClientLibStatus::ACTIVE ||
+	     prevStatus == ClientLibStatus::DOWNLOAD || prevStatus == ClientLibStatus::ACTIVE)) {
+		tr.atomicOp(clientLibChangeCounterKey,
+		            StringRef(reinterpret_cast<const uint8_t*>(&counterIncVal), sizeof(counterIncVal)),
+		            MutationRef::AddValue);
+	}
 }
 
 json_spirit::mObject parseMetadataJson(StringRef metadataString) {
@@ -198,7 +215,7 @@ KeyRef chunkKeyFromNo(StringRef clientLibBinPrefix, size_t chunkNo, Arena& arena
 	return clientLibBinPrefix.withSuffix(format("%06zu", chunkNo), arena);
 }
 
-ClientLibPlatform getCurrentClientPlatform() {
+[[maybe_unused]] ClientLibPlatform getCurrentClientPlatform() {
 #ifdef __x86_64__
 #if defined(_WIN32)
 	return ClientLibPlatform::X86_64_WINDOWS;
@@ -432,6 +449,7 @@ ACTOR Future<Void> uploadClientLibrary(Database db,
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.set(clientLibMetaKey, ValueRef(jsStr));
+			updateClientLibChangeCounter(tr, ClientLibStatus::DISABLED, targetStatus);
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -488,8 +506,8 @@ ACTOR Future<Void> downloadClientLibrary(Database db,
 		}
 	}
 
-	// Allow downloading only libraries in the available state
-	if (getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS)) != ClientLibStatus::AVAILABLE) {
+	// Prevent downloading not yet uploaded and disabled libraries
+	if (!isAvailableForDownload(getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS)))) {
 		throw client_lib_not_available();
 	}
 
@@ -620,8 +638,11 @@ ACTOR Future<Void> deleteClientLibrary(Database db, Standalone<StringRef> client
 				TraceEvent(SevWarnAlways, "ClientLibraryNotFound").detail("Key", clientLibMetaKey);
 				throw client_lib_not_found();
 			}
+			json_spirit::mObject metadataJson = parseMetadataJson(metadataOpt.get());
+			ClientLibStatus status = getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS));
 			tr.clear(prefixRange(chunkKeyPrefix));
 			tr.clear(clientLibMetaKey);
+			updateClientLibChangeCounter(tr, status, ClientLibStatus::DISABLED);
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -641,8 +662,8 @@ void applyClientLibFilter(const ClientLibFilter& filter,
 	for (const auto& [k, v] : scanResults) {
 		try {
 			json_spirit::mObject metadataJson = parseMetadataJson(v);
-			if (filter.matchAvailableOnly && getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS)) !=
-			                                     ClientLibStatus::AVAILABLE) {
+			if (filter.matchAvailableOnly &&
+			    !isAvailableForDownload(getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS)))) {
 				continue;
 			}
 			if (filter.matchCompatibleAPI &&
@@ -705,6 +726,76 @@ ACTOR Future<Standalone<VectorRef<StringRef>>> listClientLibraries(Database db, 
 		}
 	}
 	return result;
+}
+
+ACTOR Future<ClientLibStatus> getClientLibraryStatus(Database db, Standalone<StringRef> clientLibId) {
+	state Key clientLibMetaKey = metadataKeyFromId(clientLibId);
+	state Transaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			Optional<Value> metadataOpt = wait(tr.get(clientLibMetaKey));
+			if (!metadataOpt.present()) {
+				TraceEvent(SevWarnAlways, "ClientLibraryNotFound").detail("Key", clientLibMetaKey);
+				throw client_lib_not_found();
+			}
+			json_spirit::mObject metadataJson = parseMetadataJson(metadataOpt.get());
+			return getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS));
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<Void> changeClientLibraryStatus(Database db,
+                                             Standalone<StringRef> clientLibId,
+                                             ClientLibStatus newStatus) {
+	state Key clientLibMetaKey = metadataKeyFromId(clientLibId);
+	state json_spirit::mObject metadataJson;
+	state std::string jsStr;
+	state Transaction tr;
+
+	if (!isValidTargetStatus(newStatus)) {
+		TraceEvent(SevWarnAlways, "ClientLibraryInvalidMetadata")
+		    .detail("Reason", "InvalidTargetStatus")
+		    .detail("Status", getStatusName(newStatus));
+		throw client_lib_invalid_metadata();
+	}
+
+	loop {
+		tr = Transaction(db);
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> metadataOpt = wait(tr.get(clientLibMetaKey));
+			if (!metadataOpt.present()) {
+				TraceEvent(SevWarnAlways, "ClientLibraryNotFound").detail("Key", clientLibMetaKey);
+				throw client_lib_not_found();
+			}
+			metadataJson = parseMetadataJson(metadataOpt.get());
+			ClientLibStatus prevStatus = getStatusByName(getMetadataStrAttr(metadataJson, CLIENTLIB_ATTR_STATUS));
+			if (prevStatus == newStatus) {
+				return Void();
+			}
+			metadataJson[CLIENTLIB_ATTR_STATUS] = getStatusName(newStatus);
+			jsStr = json_spirit::write_string(json_spirit::mValue(metadataJson));
+			tr.set(clientLibMetaKey, ValueRef(jsStr));
+
+			updateClientLibChangeCounter(tr, prevStatus, newStatus);
+
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_client_lib_not_found) {
+				throw;
+			}
+			wait(tr.onError(e));
+		}
+	}
+
+	TraceEvent("ClientLibraryStatusChanged").detail("Key", clientLibMetaKey).detail("Status", getStatusName(newStatus));
+	return Void();
 }
 
 } // namespace ClientLibManagement

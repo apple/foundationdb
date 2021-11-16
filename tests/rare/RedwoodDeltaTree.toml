@@ -1,0 +1,17 @@
+[[test]]
+testTitle = 'RedwoodDeltaTree'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = 'Lredwood/correctness/unit/deltaTree/IntIntPair'
+
+[[test]]
+testTitle = "RedwoodRecordRef"
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 2 # there are two of those
+    testsMatching = 'Lredwood/correctness/unit/deltaTree/RedwoodRecordRef'
