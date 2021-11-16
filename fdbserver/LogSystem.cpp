@@ -21,6 +21,7 @@
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/ptxn/test/FakeLogSystem.h"
 #include "fdbserver/TagPartitionedLogSystem.actor.h"
+#include "flow/serialize.h"
 
 #ifndef __INTEL_COMPILER
 #pragma region LogSet
@@ -321,6 +322,15 @@ void LogPushData::writeMessage(StringRef rawMessageWithoutLength, bool usePrevio
 	}
 }
 
+std::vector<Standalone<StringRef>> LogPushData::getAllMessages() {
+	std::vector<Standalone<StringRef>> results;
+	results.reserve(messagesWriter.size());
+	for (int loc = 0; loc < messagesWriter.size(); loc++) {
+		results.push_back(getMessages(loc));
+	}
+	return results;
+}
+
 void LogPushData::recordEmptyMessage(int loc, const Standalone<StringRef>& value) {
 	if (!isEmptyMessage[loc]) {
 		BinaryWriter w(AssumeVersion(g_network->protocolVersion()));
@@ -430,3 +440,17 @@ Reference<ILogSystem> ILogSystem::fromServerDBInfo(UID const& dbgid,
 #ifndef __INTEL_COMPILER
 #pragma endregion
 #endif
+
+void LogPushData::setMutations(uint32_t totalMutations, VectorRef<StringRef> mutations) {
+	ASSERT_EQ(subsequence, 1);
+	subsequence = totalMutations + 1; // set to next mutation number
+
+	ASSERT_EQ(messagesWriter.size(), mutations.size());
+	BinaryWriter w(AssumeVersion(g_network->protocolVersion()));
+	Standalone<StringRef> v = w.toValue();
+	const int header = v.size();
+	for (int i = 0; i < mutations.size(); i++) {
+		BinaryWriter& wr = messagesWriter[i];
+		wr.serializeBytes(mutations[i].substr(header));
+	}
+}

@@ -22,6 +22,7 @@
 #define FDBSERVER_LOGSYSTEM_H
 
 #include <set>
+#include <stdint.h>
 #include <vector>
 #include <unordered_map>
 
@@ -799,6 +800,9 @@ struct LogPushData : NonCopyable {
 
 	Standalone<StringRef> getMessages(int loc) { return messagesWriter[loc].toValue(); }
 
+	// Returns all locations' messages, including empty ones.
+	std::vector<Standalone<StringRef>> getAllMessages();
+
 	// Records if a tlog (specified by "loc") will receive an empty version batch message.
 	// "value" is the message returned by getMessages() call.
 	void recordEmptyMessage(int loc, const Standalone<StringRef>& value);
@@ -809,6 +813,13 @@ struct LogPushData : NonCopyable {
 
 	std::unordered_map<ptxn::TLogGroupID, std::shared_ptr<ptxn::ProxySubsequencedMessageSerializer>>*
 	    pGroupMessageBuilders;
+
+	// Returns the total number of mutations.
+	uint32_t getMutationCount() const { return subsequence; }
+
+	// Sets mutations for all internal writers. "mutations" is the output from
+	// getAllMessages() and is used before writing any other mutations.
+	void setMutations(uint32_t totalMutations, VectorRef<StringRef> mutations);
 
 private:
 	Reference<ILogSystem> logSystem;

@@ -34,7 +34,9 @@
 #pragma once
 
 // This is defined Resolver.actor.cpp
-ACTOR Future<Void> resolverCore(ResolverInterface resolver, InitializeResolverRequest initReq);
+ACTOR Future<Void> resolverCore(ResolverInterface resolver,
+                                InitializeResolverRequest initReq,
+                                Reference<AsyncVar<ServerDBInfo> const> db);
 
 #include "flow/unactorcompiler.h"
 #endif // FDBSERVER_PTXN_TEST_FAKERESOLVER_ACTOR_H

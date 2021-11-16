@@ -23,10 +23,13 @@
 
 #pragma once
 
+#include <stdint.h>
+
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/fdbrpc.h"
 
 struct ResolverInterface {
 	constexpr static FileIdentifier file_identifier = 1755944;
@@ -40,6 +43,8 @@ struct ResolverInterface {
 	RequestStream<struct ResolutionSplitRequest> split;
 
 	RequestStream<ReplyPromise<Void>> waitFailure;
+	// For receiving initial transaction state store broadcast from the master
+	RequestStream<TxnStateRequest> txnState;
 
 	ResolverInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
 	UID id() const { return uniqueID; }
@@ -51,11 +56,14 @@ struct ResolverInterface {
 	void initEndpoints() {
 		metrics.getEndpoint(TaskPriority::ResolutionMetrics);
 		split.getEndpoint(TaskPriority::ResolutionMetrics);
+		waitFailure.getEndpoint();
+		txnState.getEndpoint();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, uniqueID, locality, resolve, metrics, split, waitFailure);
+		// TODO: save space by using getAdjustedEndpoint() as in CommitProxyInterface
+		serializer(ar, uniqueID, locality, resolve, metrics, split, waitFailure, txnState);
 	}
 };
 
@@ -94,9 +102,21 @@ struct ResolveTransactionBatchReply {
 	// Each group's previous commit version
 	std::map<ptxn::TLogGroupID, Version> previousCommitVersions;
 
+	// Privatized mutations with tags, one for each TLog location
+	VectorRef<StringRef> privateMutations;
+	uint32_t privateMutationCount;
+
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, committed, stateMutations, debugID, conflictingKeyRangeMap, previousCommitVersions, arena);
+		serializer(ar,
+		           committed,
+		           stateMutations,
+		           debugID,
+		           conflictingKeyRangeMap,
+		           previousCommitVersions,
+		           privateMutations,
+		           privateMutationCount,
+		           arena);
 	}
 };
 
