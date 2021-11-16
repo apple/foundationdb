@@ -955,7 +955,7 @@ static void printAgentUsage(bool devhelp) {
 	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n");
-	printf("  --loggroup LOG-GROUP\n"
+	printf("  --loggroup LOG_GROUP\n"
 	       "                 Sets the LogGroup field with the specified value for all\n"
 	       "                 events in the trace output (defaults to `default').\n");
 	printf("  --trace-format FORMAT\n"
@@ -1077,7 +1077,7 @@ static void printBackupUsage(bool devhelp) {
 	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n");
-	printf("  --loggroup LOG-GROUP\n"
+	printf("  --loggroup LOG_GROUP\n"
 	       "                 Sets the LogGroup field with the specified value for all\n"
 	       "                 events in the trace output (defaults to `default').\n");
 	printf("  --trace-format FORMAT\n"
@@ -1153,7 +1153,7 @@ static void printRestoreUsage(bool devhelp) {
 	       "  --logdir PATH  Specifies the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n");
-	printf("  --loggroup LOG-GROUP\n"
+	printf("  --loggroup LOG_GROUP\n"
 	       "                 Sets the LogGroup field with the specified value for all\n"
 	       "                 events in the trace output (defaults to `default').\n");
 	printf("  --trace-format FORMAT\n"
@@ -1219,7 +1219,7 @@ static void printDBAgentUsage(bool devhelp) {
 	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n");
-	printf("  --loggroup LOG-GROUP\n"
+	printf("  --loggroup LOG_GROUP\n"
 	       "                 Sets the LogGroup field with the specified value for all\n"
 	       "                 events in the trace output (defaults to `default').\n");
 	printf("  --trace-format FORMAT\n"
@@ -1276,7 +1276,7 @@ static void printDBBackupUsage(bool devhelp) {
 	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n");
-	printf("  --loggroup LOG-GROUP\n"
+	printf("  --loggroup LOG_GROUP\n"
 	       "                 Sets the LogGroup field with the specified value for all\n"
 	       "                 events in the trace output (defaults to `default').\n");
 	printf("  --trace-format FORMAT\n"

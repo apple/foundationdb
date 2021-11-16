@@ -547,7 +547,7 @@ private:
 template <class SOCHAR>
 void CSimpleOptTempl<SOCHAR>::SetOptions(const SOption* a_rgOptions) {
 	m_rgOptions = a_rgOptions;
-	// Change all the hyphens to unserscores
+	// Change all the hyphens to underscores
 	for (int n = 0; m_rgOptions[n].nId >= 0; ++n) {
 		for (SOCHAR* pszArg = const_cast<SOCHAR*>(m_rgOptions[n].pszArg); pszArg && *pszArg; ++pszArg) {
 			if (*pszArg == (SOCHAR)'-') {
@@ -644,6 +644,7 @@ bool CSimpleOptTempl<SOCHAR>::Next() {
 				*m_pszOptionArg++ = (SOCHAR)'\0';
 			}
 		}
+		// TODO maybe we should copy rather than change the pointer
 		nTableIdx = LookupOption(pszArg);
 
 		// if we didn't find this option but if it is a short form
