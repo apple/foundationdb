@@ -2258,7 +2258,7 @@ public:
 			self->pHeader = (Header*)self->headerPage->begin();
 
 			if (self->pHeader->formatVersion != Header::FORMAT_VERSION) {
-				Error e = wrong_format_version();
+				Error e = unsupported_format_version();
 				TraceEvent(SevWarn, "RedwoodRecoveryFailedWrongVersion")
 				    .detail("Filename", self->filename)
 				    .detail("Version", self->pHeader->formatVersion)
@@ -9133,7 +9133,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
 
-	state std::string fileName = params.get("Filename").orDefault("unittest_pageFile.redwood");
+	state std::string file = params.get("file").orDefault("unittest_pageFile.redwood-v1");
 	IPager2* pager;
 
 	state bool serialTest = params.getInt("serialTest").orDefault(deterministicRandom()->random01() < 0.25);
@@ -9177,6 +9177,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	    params.getInt("concurrentExtentReads").orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
 
 	printf("\n");
+	printf("file: %s\n", file.c_str());
 	printf("targetPageOps: %" PRId64 "\n", targetPageOps);
 	printf("pagerMemoryOnly: %d\n", pagerMemoryOnly);
 	printf("serialTest: %d\n", serialTest);
@@ -9198,12 +9199,12 @@ TEST_CASE("Lredwood/correctness/btree") {
 	printf("\n");
 
 	printf("Deleting existing test data...\n");
-	deleteFile(fileName);
+	deleteFile(file);
 
 	printf("Initializing...\n");
 	pager = new DWALPager(
-	    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads, pagerMemoryOnly);
-	state VersionedBTree* btree = new VersionedBTree(pager, fileName);
+	    pageSize, extentSize, file, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads, pagerMemoryOnly);
+	state VersionedBTree* btree = new VersionedBTree(pager, file);
 	wait(btree->init());
 
 	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;
@@ -9410,8 +9411,8 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 				printf("Reopening btree from disk.\n");
 				IPager2* pager = new DWALPager(
-				    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads);
-				btree = new VersionedBTree(pager, fileName);
+				    pageSize, extentSize, file, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads);
+				btree = new VersionedBTree(pager, file);
 				wait(btree->init());
 
 				Version v = btree->getLastCommittedVersion();
@@ -9450,8 +9451,8 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state Future<Void> closedFuture = btree->onClosed();
 	btree->close();
 	wait(closedFuture);
-	btree = new VersionedBTree(new DWALPager(pageSize, extentSize, fileName, cacheSizeBytes, 0, concurrentExtentReads),
-	                           fileName);
+	btree =
+	    new VersionedBTree(new DWALPager(pageSize, extentSize, file, cacheSizeBytes, 0, concurrentExtentReads), file);
 	wait(btree->init());
 
 	wait(btree->clearAllAndCheckSanity());
@@ -9524,7 +9525,7 @@ ACTOR Future<Void> randomScans(VersionedBTree* btree,
 }
 
 TEST_CASE(":/redwood/correctness/pager/cow") {
-	state std::string pagerFile = "unittest_pageFile.redwood";
+	state std::string pagerFile = "unittest_pageFile.redwood-v1";
 	printf("Deleting old test data\n");
 	deleteFile(pagerFile);
 
@@ -9573,7 +9574,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	state DWALPager* pager;
 	// If a test file is passed in by environment then don't write new data to it.
 	state bool reload = getenv("TESTFILE") == nullptr;
-	state std::string fileName = reload ? "unittest.redwood" : getenv("TESTFILE");
+	state std::string fileName = reload ? "unittest.redwood-v1" : getenv("TESTFILE");
 
 	if (reload) {
 		printf("Deleting old test data\n");
@@ -9723,7 +9724,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 TEST_CASE(":/redwood/performance/set") {
 	state SignalableActorCollection actors;
 
-	state std::string fileName = params.get("Filename").orDefault("unittest.redwood");
+	state std::string file = params.get("file").orDefault("unittest.redwood-v1");
 	state int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
 	state int extentSize = params.getInt("extentSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE);
 	state int64_t pageCacheBytes = params.getInt("pageCacheBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
@@ -9754,6 +9755,10 @@ TEST_CASE(":/redwood/performance/set") {
 	state bool traceMetrics = params.getInt("traceMetrics").orDefault(0);
 	state bool destructiveSanityCheck = params.getInt("destructiveSanityCheck").orDefault(0);
 
+	printf("file: %s\n", file.c_str());
+	printf("openExisting: %d\n", openExisting);
+	printf("insertRecords: %d\n", insertRecords);
+	printf("destructiveSanityCheck: %d\n", destructiveSanityCheck);
 	printf("pagerMemoryOnly: %d\n", pagerMemoryOnly);
 	printf("pageSize: %d\n", pageSize);
 	printf("extentSize: %d\n", extentSize);
@@ -9776,10 +9781,6 @@ TEST_CASE(":/redwood/performance/set") {
 	printf("scans: %d\n", scans);
 	printf("scanWidth: %d\n", scanWidth);
 	printf("scanPrefetchBytes: %d\n", scanPrefetchBytes);
-	printf("fileName: %s\n", fileName.c_str());
-	printf("openExisting: %d\n", openExisting);
-	printf("insertRecords: %d\n", insertRecords);
-	printf("destructiveSanityCheck: %d\n", destructiveSanityCheck);
 
 	// If using stdout for metrics, prevent trace event metrics logger from starting
 	if (!traceMetrics) {
@@ -9789,12 +9790,12 @@ TEST_CASE(":/redwood/performance/set") {
 
 	if (!openExisting) {
 		printf("Deleting old test data\n");
-		deleteFile(fileName);
+		deleteFile(file);
 	}
 
 	DWALPager* pager = new DWALPager(
-	    pageSize, extentSize, fileName, pageCacheBytes, remapCleanupWindow, concurrentExtentReads, pagerMemoryOnly);
-	state VersionedBTree* btree = new VersionedBTree(pager, fileName);
+	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindow, concurrentExtentReads, pagerMemoryOnly);
+	state VersionedBTree* btree = new VersionedBTree(pager, file);
 	wait(btree->init());
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 
@@ -10254,9 +10255,9 @@ ACTOR Future<Void> doPrefixInsertComparison(int suffixSize,
                                             bool usePrefixesInOrder,
                                             KVSource source) {
 
-	deleteFile("test.redwood");
+	deleteFile("test.redwood-v1");
 	wait(delay(5));
-	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood", UID(), 0);
+	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood-v1", UID(), 0);
 	wait(prefixClusteredInsert(redwood, suffixSize, valueSize, source, recordCountTarget, usePrefixesInOrder, true));
 	wait(closeKVS(redwood));
 	printf("\n");
@@ -10298,9 +10299,9 @@ TEST_CASE(":/redwood/performance/sequentialInsert") {
 	state int valueSize = params.getInt("valueSize").orDefault(100);
 	state int recordCountTarget = params.getInt("recordCountTarget").orDefault(100e6);
 
-	deleteFile("test.redwood");
+	deleteFile("test.redwood-v1");
 	wait(delay(5));
-	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood", UID(), 0);
+	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood-v1", UID(), 0);
 	wait(sequentialInsert(redwood, prefixLen, valueSize, recordCountTarget));
 	wait(closeKVS(redwood));
 	printf("\n");
@@ -10378,9 +10379,9 @@ TEST_CASE(":/redwood/performance/randomRangeScans") {
 
 	state KVSource source({ { prefixLen, 1000 } });
 
-	deleteFile("test.redwood");
+	deleteFile("test.redwood-v1");
 	wait(delay(5));
-	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood", UID(), 0);
+	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood-v1", UID(), 0);
 	wait(prefixClusteredInsert(
 	    redwood, suffixSize, valueSize, source, writeRecordCountTarget, writePrefixesInOrder, false));
 

@@ -288,7 +288,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		result["storage_engine"] = "ssd-2";
 	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
 	           storageServerStoreType == KeyValueStoreType::SSD_REDWOOD_V1) {
-		result["storage_engine"] = "ssd-redwood-experimental";
+		result["storage_engine"] = "ssd-redwood-1-experimental";
 	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
 	           storageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
 		result["storage_engine"] = "ssd-rocksdb-experimental";
@@ -311,7 +311,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		} else if (testingStorageServerStoreType == KeyValueStoreType::SSD_BTREE_V2) {
 			result["tss_storage_engine"] = "ssd-2";
 		} else if (testingStorageServerStoreType == KeyValueStoreType::SSD_REDWOOD_V1) {
-			result["tss_storage_engine"] = "ssd-redwood-experimental";
+			result["tss_storage_engine"] = "ssd-redwood-1-experimental";
 		} else if (testingStorageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
 			result["tss_storage_engine"] = "ssd-rocksdb-experimental";
 		} else if (testingStorageServerStoreType == KeyValueStoreType::MEMORY_RADIXTREE) {
