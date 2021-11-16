@@ -1402,7 +1402,9 @@ struct CLIOptions {
 			exit_code = FDB_EXIT_ERROR;
 			return;
 		}
+	}
 
+	void setupKnobs() {
 		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 		for (const auto& [knobName, knobValueString] : knobs) {
 			try {
@@ -2532,6 +2534,10 @@ int main(int argc, char** argv) {
 	try {
 		API->selectApiVersion(opt.api_version);
 		API->setupNetwork();
+		opt.setupKnobs();
+		if (opt.exit_code != -1) {
+			return opt.exit_code;
+		}
 		Future<int> cliFuture = runCli(opt);
 		Future<Void> timeoutFuture = opt.exit_timeout ? timeExit(opt.exit_timeout) : Never();
 		auto f = stopNetworkAfter(success(cliFuture) || timeoutFuture);
