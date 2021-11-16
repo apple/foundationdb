@@ -522,7 +522,8 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
                                       Reference<AsyncVar<bool> const> degraded,
                                       Reference<IClusterConnectionRecord> connRecord,
                                       Reference<AsyncVar<std::set<std::string>> const> issues,
-                                      Reference<LocalConfiguration> localConfig) {
+                                      Reference<LocalConfiguration> localConfig,
+                                      Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply
 	// (requiring us to re-register) The registration request piggybacks optional distributor interface if it exists.
@@ -533,6 +534,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 	state Future<Void> cacheProcessFuture;
 	state Future<Void> cacheErrorsFuture;
 	state Optional<double> incorrectTime;
+	state bool firstReg = true;
 	loop {
 		state ClusterConnectionString storedConnectionString;
 		state bool upToDate = true;
@@ -585,6 +587,13 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		}
 
 		state bool ccInterfacePresent = ccInterface->get().present();
+		if (ccInterfacePresent) {
+			request.requestDbInfo = (ccInterface->get().get().id() != dbInfo->get().clusterInterface.id());
+			if (firstReg) {
+				request.requestDbInfo = true;
+				firstReg = false;
+			}
+		}
 		state Future<RegisterWorkerReply> registrationReply =
 		    ccInterfacePresent ? brokenPromiseToNever(ccInterface->get().get().registerWorker.getReply(request))
 		                       : Never();
@@ -1613,7 +1622,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       degraded,
 		                                       connRecord,
 		                                       issues,
-		                                       localConfig));
+		                                       localConfig,
+		                                       dbInfo));
 
 		if (configDBType != ConfigDBType::DISABLED) {
 			errorForwarders.add(localConfig->consume(interf.configBroadcastInterface));
