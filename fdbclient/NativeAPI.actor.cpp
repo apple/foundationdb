@@ -195,11 +195,11 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 
 void DatabaseContext::updateCachedRV(double t, Version v) {
 	if (t > lastTimedGrv.get() && v >= cachedRv) {
-		// TraceEvent("CheckpointCacheUpdate")
-		// 	.detail("Version", v)
-		// 	.detail("CurTime", t)
-		// 	.detail("LastVersion", cachedRv)
-		// 	.detail("LastTime", lastTimedGrv.get());
+		TraceEvent("CheckpointCacheUpdate")
+		    .detail("Version", v)
+		    .detail("CurTime", t)
+		    .detail("LastVersion", cachedRv)
+		    .detail("LastTime", lastTimedGrv.get());
 		cachedRv = v;
 		lastTimedGrv = t;
 	}
@@ -5145,6 +5145,7 @@ ACTOR static Future<Void> tryCommit(Database cx,
 			}
 			when(CommitID ci = wait(reply)) {
 				Version v = ci.version;
+				TraceEvent("DebugGrvCommitSuccess");
 				cx->updateCachedRV(grvTime, v);
 				if (v != invalidVersion) {
 					if (CLIENT_BUGGIFY) {
@@ -5819,7 +5820,7 @@ bool rkThrottlingCooledDown(DatabaseContext* cx) {
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	if (!readVersion.isValid()) {
 		if (!options.skipGrvCache && rkThrottlingCooledDown(getDatabase().getPtr()) &&
-		    (CLIENT_KNOBS->DEBUG_USE_GRV_CACHE || options.useGrvCache)) {
+		    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE || options.useGrvCache)) {
 			TraceEvent("DebugGrvUseCache").detail("LastRV", cx->cachedRv).detail("LastTime", format("%.6f", cx->lastTimedGrv.get()));
 			// Upon our first request to use cached RVs, start the background updater
 			if (!cx->grvUpdateHandler.isValid()) {

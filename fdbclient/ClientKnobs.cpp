@@ -114,7 +114,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( LOG_RANGE_BLOCK_SIZE, CORE_VERSIONSPERSECOND );
 	init( MUTATION_BLOCK_SIZE,	            	  10000);
 	init( MAX_VERSION_CACHE_LAG,                    0.1 );
-	init( DEBUG_USE_GRV_CACHE,                    false );
+	init( DEBUG_USE_GRV_CACHE_CHANCE,              -0.1 ); // Since we check <= for 100% chance at 1.0, we don't want the default to be 0. This also means 0 is not 0%.
 	init( GRV_CACHE_RK_COOLDOWN,                    5.0 );
 	init( GRV_SUSTAINED_THROTTLING_THRESHOLD,      0.01 );
 

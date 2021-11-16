@@ -117,7 +117,7 @@ public:
 	int LOG_RANGE_BLOCK_SIZE;
 	int MUTATION_BLOCK_SIZE;
 	double MAX_VERSION_CACHE_LAG;
-	bool DEBUG_USE_GRV_CACHE; // Turn on to have all GRVs request to use the cache
+	double DEBUG_USE_GRV_CACHE_CHANCE; // Debug setting to change the chance for a regular GRV request to use the cache
 	double GRV_CACHE_RK_COOLDOWN; // Required number of seconds to pass after throttling to re-allow cache use
 	double GRV_SUSTAINED_THROTTLING_THRESHOLD; // Adjust what amount of time is considered "sustained" throttling on
 	                                           // proxy for a GRV
