@@ -401,6 +401,7 @@ private:
 	void checkSetStorageCachePrefix(MutationRef m) {
 		if (!m.param1.startsWith(storageCachePrefix))
 			return;
+		// On commit proxies cacheInfo is never nullptr; while Resolver always has nullptr for cacheInfo.
 		if (cacheInfo || forResolver) {
 			KeyRef k = m.param1.removePrefix(storageCachePrefix);
 
@@ -409,7 +410,7 @@ private:
 			if (toCommit) {
 				MutationRef privatized = m;
 				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-				//TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString());
+				//TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m).detail("Privatized", privatized);
 				cachedRangeInfo[k] = privatized;
 			}
 			if (cacheInfo && k != allKeys.end) {
