@@ -648,11 +648,69 @@ TEST_CASE("/fdbserver/ptxn/test/lock_tlog") {
 	return Void();
 }
 
+ACTOR Future<std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>>> commitInjectReturnVersions(
+    std::shared_ptr<ptxn::test::TestDriverContext> pContext,
+    ptxn::StorageTeamID storageTeamID,
+    int numCommits) {
+	state ptxn::test::print::PrintTiming printTiming("tlog/commitInject");
+
+	state const ptxn::TLogGroupID tLogGroupID = pContext->storageTeamIDTLogGroupIDMapper.at(storageTeamID);
+	state std::shared_ptr<ptxn::TLogInterfaceBase> pInterface = pContext->getTLogLeaderByStorageTeamID(storageTeamID);
+	ASSERT(pInterface);
+
+	state Version currVersion = 0;
+	state Version prevVersion = currVersion;
+	increaseVersion(currVersion);
+
+	state std::vector<ptxn::TLogCommitRequest> requests;
+	state std::vector<Standalone<StringRef>> writtenMessages;
+	state std::vector<Version> versions;
+	for (auto i = 0; i < numCommits; ++i) {
+		generateMutations(currVersion, 16, { storageTeamID }, pContext->commitRecord);
+		auto serialized = serializeMutations(currVersion, storageTeamID, pContext->commitRecord);
+		std::unordered_map<ptxn::StorageTeamID, StringRef> messages = { { storageTeamID, serialized } };
+		requests.emplace_back(ptxn::test::randomUID(),
+		                      pContext->storageTeamIDTLogGroupIDMapper[storageTeamID],
+		                      serialized.arena(),
+		                      messages,
+		                      prevVersion,
+		                      currVersion,
+		                      0,
+		                      0,
+		                      std::set<ptxn::StorageTeamID>{},
+		                      std::set<ptxn::StorageTeamID>{},
+		                      std::map<ptxn::StorageTeamID, vector<Tag>>(),
+		                      Optional<UID>());
+		writtenMessages.emplace_back(getLogEntryContent(requests.back(), pInterface->id()));
+		versions.push_back(currVersion);
+		prevVersion = currVersion;
+		increaseVersion(currVersion);
+	}
+	printTiming << "Generated " << numCommits << " commit requests" << std::endl;
+	{
+		std::mt19937 g(deterministicRandom()->randomUInt32());
+		std::shuffle(std::begin(requests), std::end(requests), g);
+	}
+
+	state std::vector<Future<ptxn::TLogCommitReply>> replies;
+	state int index = 0;
+	for (index = 0; index < numCommits; ++index) {
+		printTiming << "Sending version " << requests[index].version << std::endl;
+		replies.push_back(pInterface->commit.getReply(requests[index]));
+		wait(delay(0.5));
+	}
+	wait(waitForAll(replies));
+	printTiming << "Received all replies" << std::endl;
+
+	return std::make_pair(writtenMessages, versions);
+}
+
 TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
-	state const int NUM_COMMITS = 10;
 	state ptxn::test::TestDriverOptions options(params);
 	state std::vector<Future<Void>> actors;
 	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 0;
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL = 0.5;
 
 	for (const auto& group : pContext->tLogGroups) {
 		ptxn::test::print::print(group);
@@ -666,6 +724,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	state std::vector<ptxn::InitializePtxnTLogRequest> tLogInitializations;
 	state std::unordered_map<ptxn::TLogGroupID, IDiskQueue*> qs;
 	pContext->groupsPerTLog.resize(pContext->numTLogs);
+	state std::unordered_map<ptxn::TLogGroupID, IKeyValueStore*> ds;
 	state std::unordered_map<ptxn::TLogGroupID, int> groupToLeaderId;
 	for (int i = 0, index = 0; i < pContext->numTLogGroups; ++i) {
 		ptxn::TLogGroup& tLogGroup = pContext->tLogGroups[i];
@@ -697,6 +756,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 			IKeyValueStore* data = openKVStore(req.storeType, filename, tlogGroup.logGroupId, 500e6);
 			state IDiskQueue* queue = new InMemoryDiskQueue(tlogGroup.logGroupId);
 			qs[tlogGroup.logGroupId] = queue;
+			ds[tlogGroup.logGroupId] = data;
 			persistentDataAndQueues[tlogGroup.logGroupId] = std::make_pair(data, queue);
 		}
 
@@ -731,17 +791,34 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 		tLogGroupLeader = pContext->tLogInterfaces[groupToLeaderId[tLogGroupID]];
 	}
 
-	state std::vector<Standalone<StringRef>> expectedMessages =
-	    wait(commitInject(pContext, storageTeamID, NUM_COMMITS));
-	wait(verifyPeek(pContext, storageTeamID, NUM_COMMITS));
+	state IKeyValueStore* d = ds[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
+
+	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>> res =
+	    wait(commitInjectReturnVersions(pContext, storageTeamID, pContext->numCommits));
+	state std::vector<Standalone<StringRef>> expectedMessages = res.first;
+	wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
+
+	// wait 1s so that actors who update persistent data can do their job.
+	wait(delay(1.5));
 
 	// only wrote to a single storageTeamId, thus only 1 tlogGroup, while each tlogGroup has their own disk queue.
 	state IDiskQueue* q = qs[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
+	state bool exist = false;
+	// commit to IKeyValueStore might happen in any version of our commits(might happen more than time)
+	for (i = 0; i < res.second.size(); i++) {
+		state Key k = ptxn::persistStorageTeamMessageRefsKey(
+		    pContext->getTLogLeaderByStorageTeamID(storageTeamID)->id(), storageTeamID, res.second[i]);
+		state Optional<Value> v = wait(d->readValue(k));
+		exist = exist || v.present();
+	}
 
+	// we can only assert v is present, because its value is encoded by TLog and it is hard to decode it
+	ASSERT(exist);
 	// in this test, Location must has the same `lo` and `hi`
 	// because I did not implement merging multiple location into a single StringRef and return for InMemoryDiskQueue
-	ASSERT(q->getNextReadLocation().hi + NUM_COMMITS == q->getNextCommitLocation().hi);
+	ASSERT(q->getNextReadLocation().hi + pContext->numCommits == q->getNextCommitLocation().hi);
 	state int commitCnt = 0;
+
 	loop {
 		state IDiskQueue::location nextLoc = q->getNextReadLocation();
 		state Standalone<StringRef> actual = wait(q->read(nextLoc, nextLoc, CheckHashes::False));

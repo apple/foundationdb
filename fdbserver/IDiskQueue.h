@@ -141,7 +141,7 @@ public:
 	location getNextCommitLocation() const override { return location(cursorCommit + 1, cursorCommit + 1); }
 	location getNextPushLocation() const override {
 		// ASSERT(initialized);
-		return location(cursorWrite + 1, cursorWrite + 1);
+		return location(cursorWrite, cursorWrite + 1);
 	}
 
 	Future<Void> getError() override { return Future<Void>(); }
