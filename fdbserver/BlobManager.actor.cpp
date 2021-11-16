@@ -1080,6 +1080,7 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 				std::tie(splitState, version) = decodeBlobGranuleSplitValue(split.value);
 				const KeyRange range = blobGranuleSplitKeyRangeFor(parentGranuleID);
 				if (splitState <= BlobGranuleSplitState::Initialized) {
+					// the empty UID signifies that we need to find an owner (worker) for this range
 					workerAssignments.insert(range, UID());
 				}
 			}
