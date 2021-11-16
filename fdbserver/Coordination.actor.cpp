@@ -543,6 +543,7 @@ struct LeaderRegisterCollection {
 		store->set(KeyValueRef(key.withPrefix(fwdKeys.begin), conn.toString()));
 		store->set(KeyValueRef(key.withPrefix(fwdTimeKeys.begin), BinaryWriter::toValue(forwardTime, Unversioned())));
 		wait(store->commit());
+		// Do not process a forwarding request until after it has been made durable in case the coordinator restarts
 		self->getInterface(req.key, id).forward.send(req);
 		return Void();
 	}
