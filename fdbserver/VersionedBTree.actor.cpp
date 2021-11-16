@@ -2258,7 +2258,7 @@ public:
 			self->pHeader = (Header*)self->headerPage->begin();
 
 			if (self->pHeader->formatVersion != Header::FORMAT_VERSION) {
-				Error e = wrong_format_version();
+				Error e = unsupported_format_version();
 				TraceEvent(SevWarn, "RedwoodRecoveryFailedWrongVersion")
 				    .detail("Filename", self->filename)
 				    .detail("Version", self->pHeader->formatVersion)
