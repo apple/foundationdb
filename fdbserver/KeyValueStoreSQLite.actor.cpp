@@ -1567,8 +1567,8 @@ public:
 	void dispose() override { doClose(this, true); }
 	void close() override { doClose(this, false); }
 
-	Future<Void> getError() override { return delayed(readThreads->getError() || writeThread->getError()); }
-	Future<Void> onClosed() override { return stopped.getFuture(); }
+	Future<Void> getError() const override { return delayed(readThreads->getError() || writeThread->getError()); }
+	Future<Void> onClosed() const override { return stopped.getFuture(); }
 
 	KeyValueStoreType getType() const override { return type; }
 	StorageBytes getStorageBytes() const override;
