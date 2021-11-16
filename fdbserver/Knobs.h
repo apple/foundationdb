@@ -164,6 +164,7 @@ public:
 	double INITIAL_FAILURE_REACTION_DELAY;
 	double CHECK_TEAM_DELAY;
 	double PERPETUAL_WIGGLE_DELAY;
+	bool PERPETUAL_WIGGLE_DISABLE_REMOVER;
 	double LOG_ON_COMPLETION_DELAY;
 	int BEST_TEAM_MAX_TEAM_TRIES;
 	int BEST_TEAM_OPTION_COUNT;
@@ -274,6 +275,7 @@ public:
 	int64_t ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	int ROCKSDB_PREFIX_LEN;
 	int64_t ROCKSDB_BLOCK_CACHE_SIZE;
+	double ROCKSDB_METRICS_DELAY;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -572,6 +574,8 @@ public:
 	double FETCH_KEYS_TOO_LONG_TIME_CRITERIA;
 	double MAX_STORAGE_COMMIT_TIME;
 	int64_t RANGESTREAM_LIMIT_BYTES;
+	bool QUICK_GET_VALUE_FALLBACK;
+	bool QUICK_GET_KEY_VALUES_FALLBACK;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -695,7 +699,9 @@ public:
 	int64_t REDWOOD_REMAP_CLEANUP_WINDOW; // Remap remover lag interval in which to coalesce page writes
 	double REDWOOD_REMAP_CLEANUP_LAG; // Maximum allowed remap remover lag behind the cleanup window as a multiple of
 	                                  // the window size
-	double REDWOOD_LOGGING_INTERVAL;
+	int REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES; // Number of pages to grow page file by
+	double REDWOOD_METRICS_INTERVAL;
+	double REDWOOD_HISTOGRAM_INTERVAL;
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
