@@ -710,6 +710,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	state std::vector<Future<Void>> actors;
 	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
 	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 0;
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL = 0.5;
 
 	for (const auto& group : pContext->tLogGroups) {
 		ptxn::test::print::print(group);
@@ -798,7 +799,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
 
 	// wait 1s so that actors who update persistent data can do their job.
-	wait(delay(1.0));
+	wait(delay(1.5));
 
 	// only wrote to a single storageTeamId, thus only 1 tlogGroup, while each tlogGroup has their own disk queue.
 	state IDiskQueue* q = qs[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
