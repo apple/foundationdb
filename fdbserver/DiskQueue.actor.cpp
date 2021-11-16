@@ -997,8 +997,8 @@ public:
 		return endLocation();
 	}
 
-	Future<Void> getError() override { return rawQueue->getError(); }
-	Future<Void> onClosed() override { return rawQueue->onClosed(); }
+	Future<Void> getError() const override { return rawQueue->getError(); }
+	Future<Void> onClosed() const override { return rawQueue->onClosed(); }
 
 	void dispose() override {
 		TraceEvent("DQDestroy", dbgid)
@@ -1549,8 +1549,8 @@ public:
 	    popped(0), committed(0){};
 
 	// IClosable
-	Future<Void> getError() override { return queue->getError(); }
-	Future<Void> onClosed() override { return queue->onClosed(); }
+	Future<Void> getError() const override { return queue->getError(); }
+	Future<Void> onClosed() const override { return queue->onClosed(); }
 	void dispose() override {
 		queue->dispose();
 		delete this;
