@@ -392,7 +392,7 @@ public:
 
 	    @param a_rgOptions  Valid option array
 	 */
-	inline void SetOptions(const SOption* a_rgOptions) { m_rgOptions = a_rgOptions; }
+	void SetOptions(const SOption* a_rgOptions);
 
 	/*! @brief Change the current flags during option parsing.
 
@@ -544,13 +544,25 @@ private:
 // ---------------------------------------------------------------------------
 //                                  IMPLEMENTATION
 // ---------------------------------------------------------------------------
+template <class SOCHAR>
+void CSimpleOptTempl<SOCHAR>::SetOptions(const SOption* a_rgOptions) {
+	m_rgOptions = a_rgOptions;
+	// Change all the hyphens to unserscores
+	for (int n = 0; m_rgOptions[n].nId >= 0; ++n) {
+		for (SOCHAR* pszArg = const_cast<SOCHAR*>(m_rgOptions[n].pszArg); pszArg && *pszArg; ++pszArg) {
+			if (*pszArg == (SOCHAR)'-') {
+				*pszArg = (SOCHAR)'_';
+			}
+		}
+	}
+}
 
 template <class SOCHAR>
 bool CSimpleOptTempl<SOCHAR>::Init(int a_argc, SOCHAR* a_argv[], const SOption* a_rgOptions, int a_nFlags) {
 	m_argc = a_argc;
 	m_nLastArg = a_argc;
 	m_argv = a_argv;
-	m_rgOptions = a_rgOptions;
+	SetOptions(a_rgOptions);
 	m_nLastError = SO_SUCCESS;
 	m_nOptionIdx = 0;
 	m_nOptionId = -1;
@@ -848,6 +860,12 @@ int CSimpleOptTempl<SOCHAR>::LookupOption(const SOCHAR* a_pszOption) const {
 	int nBestMatchLen = 0; // matching characters of best match
 	int nLastMatchLen = 0; // matching characters of last best match
 
+	// Convert the a_pszOption's hyphens to underscores
+	for (SOCHAR* ptr = const_cast<SOCHAR*>(a_pszOption); ptr && *ptr; ++ptr) {
+		if (*ptr == (SOCHAR)'-') {
+			*ptr = (SOCHAR)'_';
+		}
+	}
 	for (int n = 0; m_rgOptions[n].nId >= 0; ++n) {
 		// the option table must use hyphens as the option character,
 		// the slash character is converted to a hyphen for testing.
@@ -882,18 +900,18 @@ int CSimpleOptTempl<SOCHAR>::CalcMatch(const SOCHAR* a_pszSource, const SOCHAR* 
 
 	// determine the argument type
 	int nArgType = SO_O_ICASE_LONG;
-	if (a_pszSource[0] != '-') {
+	if (a_pszSource[0] != '_') {
 		nArgType = SO_O_ICASE_WORD;
-	} else if (a_pszSource[1] != '-' && !a_pszSource[2]) {
+	} else if (a_pszSource[1] != '_' && !a_pszSource[2]) {
 		nArgType = SO_O_ICASE_SHORT;
 	}
 
 	// match and skip leading hyphens
-	while (*a_pszSource == (SOCHAR)'-' && *a_pszSource == *a_pszTest) {
+	while (*a_pszSource == (SOCHAR)'_' && *a_pszSource == *a_pszTest) {
 		++a_pszSource;
 		++a_pszTest;
 	}
-	if (*a_pszSource == (SOCHAR)'-' || *a_pszTest == (SOCHAR)'-') {
+	if (*a_pszSource == (SOCHAR)'_' || *a_pszTest == (SOCHAR)'_') {
 		return 0;
 	}
 

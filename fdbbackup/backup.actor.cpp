@@ -955,10 +955,10 @@ static void printAgentUsage(bool devhelp) {
 	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n");
-	printf("  --loggroup LOG_GROUP\n"
+	printf("  --loggroup LOG-GROUP\n"
 	       "                 Sets the LogGroup field with the specified value for all\n"
 	       "                 events in the trace output (defaults to `default').\n");
-	printf("  --trace_format FORMAT\n"
+	printf("  --trace-format FORMAT\n"
 	       "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 	       "                 Has no effect unless --log is specified.\n");
 	printf("  -m SIZE, --memory SIZE\n"
@@ -967,7 +967,7 @@ static void printAgentUsage(bool devhelp) {
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
-	printf("  --build_flags  Print build information and exit.\n");
+	printf("  --build-flags  Print build information and exit.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 
@@ -1000,7 +1000,7 @@ static void printBackupUsage(bool devhelp) {
 	       "delete | describe | list | query | cleanup) [ACTION_OPTIONS]\n\n",
 	       exeBackup.toString().c_str());
 	printf(" TOP LEVEL OPTIONS:\n");
-	printf("  --build_flags  Print build information and exit.\n");
+	printf("  --build-flags  Print build information and exit.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	printf("\n");
@@ -1015,84 +1015,84 @@ static void printBackupUsage(bool devhelp) {
 	       "                 The Backup container URL for start, modify, describe, query, expire, and delete "
 	       "operations.\n");
 	printBackupContainerInfo();
-	printf("  -b, --base_url BASEURL\n"
+	printf("  -b, --base-url BASEURL\n"
 	       "                 Base backup URL for list operations.  This looks like a Backup URL but without a backup "
 	       "name.\n");
-	printf("  --blob_credentials FILE\n"
+	printf("  --blob-credentials FILE\n"
 	       "                 File containing blob credentials in JSON format.  Can be specified multiple times for "
 	       "multiple files.  See below for more details.\n");
-	printf("  --expire_before_timestamp DATETIME\n"
+	printf("  --expire-before-timestamp DATETIME\n"
 	       "                 Datetime cutoff for expire operations.  Requires a cluster file and will use "
 	       "version/timestamp metadata\n"
 	       "                 in the database to obtain a cutoff version very close to the timestamp given in %s.\n",
 	       BackupAgentBase::timeFormat().c_str());
-	printf("  --expire_before_version VERSION\n"
+	printf("  --expire-before-version VERSION\n"
 	       "                 Version cutoff for expire operations.  Deletes data files containing no data at or after "
 	       "VERSION.\n");
-	printf("  --delete_before_days NUM_DAYS\n"
+	printf("  --delete-before-days NUM_DAYS\n"
 	       "                 Another way to specify version cutoff for expire operations.  Deletes data files "
 	       "containing no data at or after a\n"
 	       "                 version approximately NUM_DAYS days worth of versions prior to the latest log version in "
 	       "the backup.\n");
-	printf("  -qrv --query_restore_version VERSION\n"
+	printf("  -qrv --query-restore-version VERSION\n"
 	       "                 For query operations, set target version for restoring a backup. Set -1 for maximum\n"
 	       "                 restorable version (default) and -2 for minimum restorable version.\n");
 	printf(
-	    "  --query_restore_timestamp DATETIME\n"
+	    "  --query-restore-timestamp DATETIME\n"
 	    "                 For query operations, instead of a numeric version, use this to specify a timestamp in %s\n",
 	    BackupAgentBase::timeFormat().c_str());
 	printf(
 	    "                 and it will be converted to a version from that time using metadata in the cluster file.\n");
-	printf("  --restorable_after_timestamp DATETIME\n"
+	printf("  --restorable-after-timestamp DATETIME\n"
 	       "                 For expire operations, set minimum acceptable restorability to the version equivalent of "
 	       "DATETIME and later.\n");
-	printf("  --restorable_after_version VERSION\n"
+	printf("  --restorable-after-version VERSION\n"
 	       "                 For expire operations, set minimum acceptable restorability to the VERSION and later.\n");
-	printf("  --min_restorable_days NUM_DAYS\n"
+	printf("  --min-restorable-days NUM-DAYS\n"
 	       "                 For expire operations, set minimum acceptable restorability to approximately NUM_DAYS "
 	       "days worth of versions\n"
 	       "                 prior to the latest log version in the backup.\n");
-	printf("  --version_timestamps\n");
+	printf("  --version-timestamps\n");
 	printf("                 For describe operations, lookup versions in the database to obtain timestamps.  A cluster "
 	       "file is required.\n");
 	printf(
 	    "  -f, --force    For expire operations, force expiration even if minimum restorability would be violated.\n");
-	printf("  -s, --snapshot_interval DURATION\n"
+	printf("  -s, --snapshot-interval DURATION\n"
 	       "                 For start or modify operations, specifies the backup's default target snapshot interval "
 	       "as DURATION seconds.  Defaults to %d for start operations.\n",
 	       CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC);
-	printf("  --active_snapshot_interval DURATION\n"
+	printf("  --active-snapshot-interval DURATION\n"
 	       "                 For modify operations, sets the desired interval for the backup's currently active "
 	       "snapshot, relative to the start of the snapshot.\n");
-	printf("  --verify_uid UID\n"
+	printf("  --verify-uid UID\n"
 	       "                 Specifies a UID to verify against the BackupUID of the running backup.  If provided, the "
 	       "UID is verified in the same transaction\n"
 	       "                 which sets the new backup parameters (if the UID matches).\n");
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup or to filter the backup in query operations.\n"
 	       "                 If not specified, the entire database will be backed up or no filter will be applied.\n");
-	printf("  --partitioned_log_experimental  Starts with new type of backup system using partitioned logs.\n");
+	printf("  --partitioned-log-experimental  Starts with new type of backup system using partitioned logs.\n");
 	printf("  -n, --dryrun   For backup start or restore start, performs a trial run with no actual changes made.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
 	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n");
-	printf("  --loggroup LOG_GROUP\n"
+	printf("  --loggroup LOG-GROUP\n"
 	       "                 Sets the LogGroup field with the specified value for all\n"
 	       "                 events in the trace output (defaults to `default').\n");
-	printf("  --trace_format FORMAT\n"
+	printf("  --trace-format FORMAT\n"
 	       "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 	       "                 Has no effect unless --log is specified.\n");
-	printf("  --max_cleanup_seconds SECONDS\n"
+	printf("  --max-cleanup-seconds SECONDS\n"
 	       "                 Specifies the amount of time a backup or DR needs to be stale before cleanup will\n"
 	       "                 remove mutations for it. By default this is set to one hour.\n");
-	printf("  --delete_data\n"
+	printf("  --delete-data\n"
 	       "                 This flag will cause cleanup to remove mutations for the most stale backup or DR.\n");
 	printf("  --incremental\n"
 	       "                 Performs incremental backup without the base backup.\n"
 	       "                 This option indicates to the backup agent that it will only need to record the log files, "
 	       "and ignore the range files.\n");
-	printf("  --encryption_key_file"
+	printf("  --encryption-key-file"
 	       "                 The AES-128-GCM key in the provided file is used for encrypting backup files.\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
@@ -1125,7 +1125,7 @@ static void printRestoreUsage(bool devhelp) {
 	       exeRestore.toString().c_str());
 
 	printf(" TOP LEVEL OPTIONS:\n");
-	printf("  --build_flags  Print build information and exit.\n");
+	printf("  --build-flags  Print build information and exit.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	printf("\n");
@@ -1133,7 +1133,7 @@ static void printRestoreUsage(bool devhelp) {
 	printf(" ACTION OPTIONS:\n");
 	// printf("  FOLDERS        Paths to folders containing the backup files.\n");
 	printf("  Options for all commands:\n\n");
-	printf("  --dest_cluster_file CONNFILE\n");
+	printf("  --dest-cluster-file CONNFILE\n");
 	printf("                 The cluster file to restore data into.\n");
 	printf("  -t, --tagname TAGNAME\n");
 	printf("                 The restore tag to act on.  Default is 'default'\n");
@@ -1144,30 +1144,30 @@ static void printRestoreUsage(bool devhelp) {
 	printf("  -w, --waitfordone\n");
 	printf("                 Wait for the restore to complete before exiting.  Prints progress updates.\n");
 	printf("  -k KEYS        List of key ranges from the backup to restore.\n");
-	printf("  --remove_prefix PREFIX\n");
+	printf("  --remove-prefix PREFIX\n");
 	printf("                 Prefix to remove from the restored keys.\n");
-	printf("  --add_prefix PREFIX\n");
+	printf("  --add-prefix PREFIX\n");
 	printf("                 Prefix to add to the restored keys\n");
 	printf("  -n, --dryrun   Perform a trial run with no changes made.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
 	       "  --logdir PATH  Specifies the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n");
-	printf("  --loggroup LOG_GROUP\n"
+	printf("  --loggroup LOG-GROUP\n"
 	       "                 Sets the LogGroup field with the specified value for all\n"
 	       "                 events in the trace output (defaults to `default').\n");
-	printf("  --trace_format FORMAT\n"
+	printf("  --trace-format FORMAT\n"
 	       "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 	       "                 Has no effect unless --log is specified.\n");
 	printf("  --incremental\n"
 	       "                 Performs incremental restore without the base backup.\n"
 	       "                 This tells the backup agent to only replay the log files from the backup source.\n"
 	       "                 This also allows a restore to be performed into a non-empty destination database.\n");
-	printf("  --begin_version\n"
+	printf("  --begin-version\n"
 	       "                 To be used in conjunction with incremental restore.\n"
 	       "                 Indicates to the backup agent to only begin replaying log files from a certain version, "
 	       "instead of the entire set.\n");
-	printf("  --encryption_key_file"
+	printf("  --encryption-key-file"
 	       "                 The AES-128-GCM key in the provided file is used for decrypting backup files.\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
@@ -1177,7 +1177,7 @@ static void printRestoreUsage(bool devhelp) {
 	       BackupAgentBase::timeFormat().c_str());
 	printf(
 	    "                 and it will be converted to a version from that time using metadata in orig_cluster_file.\n");
-	printf("  --orig_cluster_file CONNFILE\n");
+	printf("  --orig-cluster-file CONNFILE\n");
 	printf("                 The cluster file for the original database from which the backup was created.  The "
 	       "original database\n");
 	printf("                 is only needed to convert a --timestamp argument to a database version.\n");
@@ -1219,10 +1219,10 @@ static void printDBAgentUsage(bool devhelp) {
 	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n");
-	printf("  --loggroup LOG_GROUP\n"
+	printf("  --loggroup LOG-GROUP\n"
 	       "                 Sets the LogGroup field with the specified value for all\n"
 	       "                 events in the trace output (defaults to `default').\n");
-	printf("  --trace_format FORMAT\n"
+	printf("  --trace-format FORMAT\n"
 	       "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 	       "                 Has no effect unless --log is specified.\n");
 	printf("  -m, --memory SIZE\n"
@@ -1231,7 +1231,7 @@ static void printDBAgentUsage(bool devhelp) {
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
-	printf("  --build_flags  Print build information and exit.\n");
+	printf("  --build-flags  Print build information and exit.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	if (devhelp) {
@@ -1252,7 +1252,7 @@ static void printDBBackupUsage(bool devhelp) {
 	       exeDatabaseBackup.toString().c_str());
 
 	printf(" TOP LEVEL OPTIONS:\n");
-	printf("  --build_flags  Print build information and exit.\n");
+	printf("  --build-flags  Print build information and exit.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	printf("\n");
@@ -1276,10 +1276,10 @@ static void printDBBackupUsage(bool devhelp) {
 	       "  --logdir PATH  Specifes the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n");
-	printf("  --loggroup LOG_GROUP\n"
+	printf("  --loggroup LOG-GROUP\n"
 	       "                 Sets the LogGroup field with the specified value for all\n"
 	       "                 events in the trace output (defaults to `default').\n");
-	printf("  --trace_format FORMAT\n"
+	printf("  --trace-format FORMAT\n"
 	       "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 	       "                 Has no effect unless --log is specified.\n");
 	printf("  -h, --help     Display this help and exit.\n");
