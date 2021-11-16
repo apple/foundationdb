@@ -65,10 +65,10 @@ ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> readMutations(Databa
 	state Standalone<VectorRef<MutationsAndVersionRef>> output;
 	loop {
 		try {
-			state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> results;
+			state Reference<ChangeFeedData> results = makeReference<ChangeFeedData>();
 			state Future<Void> stream = cx->getChangeFeedStream(results, rangeID, begin, end, normalKeys);
 			loop {
-				Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(results.getFuture());
+				Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(results->mutations.getFuture());
 				output.arena().dependsOn(res.arena());
 				for (auto& it : res) {
 					if (it.mutations.size() == 1 && it.mutations.back().param1 == lastEpochEndPrivateKey) {
