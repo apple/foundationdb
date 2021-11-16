@@ -1990,7 +1990,11 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 
 		try {
 			auto knobValue = IKnobCollection::parseKnobValue(knobName, knobValueString, IKnobCollection::Type::CLIENT);
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob(knobName, knobValue);
+			if (g_network) {
+				IKnobCollection::getMutableGlobalKnobCollection().setKnob(knobName, knobValue);
+			} else {
+				networkOptions.knobs[knobName] = knobValue;
+			}
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "UnrecognizedKnob").detail("Knob", knobName.c_str());
 			fprintf(stderr, "FoundationDB client ignoring unrecognized knob option '%s'\n", knobName.c_str());
@@ -2136,6 +2140,13 @@ ACTOR Future<Void> monitorNetworkBusyness() {
 	}
 }
 
+static void setupGlobalKnobs() {
+	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::False, IsSimulated::False);
+	for (const auto& [knobName, knobValue] : networkOptions.knobs) {
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob(knobName, knobValue);
+	}
+}
+
 // Setup g_network and start monitoring for network busyness
 void setupNetwork(uint64_t transportId, UseMetrics useMetrics) {
 	if (g_network)
@@ -2144,13 +2155,13 @@ void setupNetwork(uint64_t transportId, UseMetrics useMetrics) {
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
+	setupGlobalKnobs();
 	TLS::DisableOpenSSLAtExitHandler();
 	g_network = newNet2(tlsConfig, false, useMetrics || networkOptions.traceDirectory.present());
 	g_network->addStopCallback(Net2FileSystem::stop);
 	g_network->addStopCallback(TLS::DestroyOpenSSLGlobalState);
 	FlowTransport::createInstance(true, transportId, WLTOKEN_RESERVED_COUNT);
 	Net2FileSystem::newFileSystem();
-	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::False, IsSimulated::False);
 
 	uncancellable(monitorNetworkBusyness());
 }
