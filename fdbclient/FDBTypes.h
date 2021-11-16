@@ -750,7 +750,7 @@ struct KeyValueStoreType {
 		case SSD_BTREE_V2:
 			return "ssd-2";
 		case SSD_REDWOOD_V1:
-			return "ssd-redwood-experimental";
+			return "ssd-redwood-1-experimental";
 		case SSD_ROCKSDB_V1:
 			return "ssd-rocksdb-experimental";
 		case MEMORY:
@@ -903,6 +903,14 @@ struct StorageBytes {
 		              available / 1e6,
 		              used / 1e6,
 		              temp / 1e6);
+	}
+
+	void toTraceEvent(TraceEvent& e) const {
+		e.detail("StorageBytesUsed", used)
+		    .detail("StorageBytesTemp", temp)
+		    .detail("StorageBytesTotal", total)
+		    .detail("StorageBytesFree", free)
+		    .detail("StorageBytesAvailable", available);
 	}
 };
 struct LogMessageVersion {
