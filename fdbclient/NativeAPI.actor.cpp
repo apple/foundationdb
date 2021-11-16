@@ -942,7 +942,7 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 	    .detail("GrvSustainedThrottlingThreshold", CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD)
 	    .detail("GrvCacheRkCooldown", CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN)
 	    .detail("MaxVersionCacheLag", CLIENT_KNOBS->MAX_VERSION_CACHE_LAG)
-	    .detail("DebugUseGrvCache", CLIENT_KNOBS->DEBUG_USE_GRV_CACHE);
+	    .detail("DebugUseGrvCacheChance", CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE);
 	try {
 		loop {
 			wait(refreshTransaction(cx, &tr));
