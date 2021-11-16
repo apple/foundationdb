@@ -89,6 +89,8 @@ bool canReplyWith(Error e) {
 	case error_code_quick_get_key_values_has_more:
 	case error_code_quick_get_value_miss:
 	case error_code_quick_get_key_values_miss:
+	case error_code_unknown_change_feed:
+	case error_code_server_overloaded:
 		// case error_code_all_alternatives_failed:
 		return true;
 	default:
@@ -3440,7 +3442,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			} catch (Error& e) {
 				if (e.code() != error_code_end_of_stream && e.code() != error_code_connection_failed &&
 				    e.code() != error_code_transaction_too_old && e.code() != error_code_future_version &&
-				    e.code() != error_code_process_behind) {
+				    e.code() != error_code_process_behind && e.code() != error_code_server_overloaded) {
 					throw;
 				}
 				if (nfk == keys.begin) {
