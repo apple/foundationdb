@@ -33,7 +33,7 @@
 #include "flow/Error.h"
 #include "flow/ITrace.h"
 
-#define TRACE_DEFAULT_ROLL_SIZE (10 << 20)
+#define TRACE_DEFAULT_ROLL_SIZE (10 << 40)
 #define TRACE_DEFAULT_MAX_LOGS_SIZE (10 * TRACE_DEFAULT_ROLL_SIZE)
 
 inline int fastrand() {
