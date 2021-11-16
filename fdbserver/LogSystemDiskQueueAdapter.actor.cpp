@@ -242,6 +242,7 @@ Future<LogSystemDiskQueueAdapter::CommitMessage> LogSystemDiskQueueAdapter::getC
 
 LogSystemDiskQueueAdapter* openDiskQueueAdapter(Reference<ILogSystem> logSystem,
                                                 Reference<AsyncVar<PeekTxsInfo>> peekLocality,
-                                                Version txsPoppedVersion) {
-	return new LogSystemDiskQueueAdapter(logSystem, peekLocality, txsPoppedVersion, true);
+                                                Version txsPoppedVersion,
+												Optional<UID> dbgId) {
+	return new LogSystemDiskQueueAdapter(logSystem, peekLocality, txsPoppedVersion, true, dbgId);
 }

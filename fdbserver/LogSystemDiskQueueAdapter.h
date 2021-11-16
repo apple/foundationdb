@@ -59,13 +59,14 @@ public:
 	LogSystemDiskQueueAdapter(Reference<ILogSystem> logSystem,
 	                          Reference<AsyncVar<PeekTxsInfo>> peekLocality,
 	                          Version txsPoppedVersion,
-	                          bool recover)
+	                          bool recover,
+							  Optional<UID> dbgId)
 	  : peekLocality(peekLocality), peekTypeSwitches(0), enableRecovery(recover), logSystem(logSystem),
 	    recoveryLoc(txsPoppedVersion), recoveryQueueLoc(txsPoppedVersion), recoveryQueueDataSize(0), poppedUpTo(0),
 	    nextCommit(1), hasDiscardedData(false), totalRecoveredBytes(0) {
 		if (enableRecovery) {
 			localityChanged = peekLocality ? peekLocality->onChange() : Never();
-			cursor = logSystem->peekTxs(UID(),
+			cursor = logSystem->peekTxs(dbgId.present() ? dbgId.get() : UID(),
 			                            txsPoppedVersion,
 			                            peekLocality ? peekLocality->get().primaryLocality : tagLocalityInvalid,
 			                            peekLocality ? peekLocality->get().knownCommittedVersion : invalidVersion,
@@ -144,6 +145,7 @@ private:
 
 LogSystemDiskQueueAdapter* openDiskQueueAdapter(Reference<ILogSystem> logSystem,
                                                 Reference<AsyncVar<PeekTxsInfo>> peekLocality,
-                                                Version txsPoppedVersion);
+                                                Version txsPoppedVersion,
+												Optional<UID> dbgId=Optional<UID>());
 
 #endif

@@ -1538,7 +1538,7 @@ void peekMessagesFromMemory(Reference<LogData> self,
 		if (it->first != currentVersion) {
 			if (messages.getLength() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
 				endVersion = currentVersion + 1;
-				//TraceEvent("TLogPeekMessagesReached2", self->dbgid);
+				TraceEvent("TLogPeekMessagesReached2", self->logId);
 				break;
 			}
 
@@ -1599,10 +1599,24 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		reqTag.id = reqTag.id % logData->txsTags;
 	}
 
+	TraceEvent("TLogPeekMessages")
+	    .detail("LogId", logData->logId)
+	    .detail("Tag", reqTag.toString())
+	    .detail("Begin", reqBegin)
+	    .detail("ReturnOnBlocked", reqReturnIfBlocked)
+	    .detail("Sequence", reqSequence.present());
+
 	if (reqSequence.present()) {
 		try {
 			peekId = reqSequence.get().first;
 			sequence = reqSequence.get().second;
+			TraceEvent("TLogPeekMessages")
+			    .detail("LogId", logData->logId)
+			    .detail("Tag", reqTag.toString())
+			    .detail("Begin", reqBegin)
+			    .detail("PeekId", peekId)
+			    .detail("Sequence", sequence);
+
 			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS &&
 			    logData->peekTracker.find(peekId) == logData->peekTracker.end()) {
 				throw operation_obsolete();
@@ -1641,6 +1655,14 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			reqOnlySpilled = prevPeekData.second;
 			wait(yield());
 		} catch (Error& e) {
+			TraceEvent("TLogPeekMessages")
+			    .detail("LogId", logData->logId)
+			    .detail("Tag", reqTag.toString())
+			    .detail("Begin", reqBegin)
+			    .detail("PeekId", peekId)
+			    .detail("Sequence", sequence)
+				.error(e, true);
+
 			if (e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
 				replyPromise.sendError(e);
 				return Void();
@@ -1677,6 +1699,12 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		state FlowLock::Releaser globalReleaser(self->concurrentLogRouterReads);
 		wait(delay(0.0, TaskPriority::Low));
 	}
+	TraceEvent("TLogPeekMessages")
+	    .detail("LogId", logData->logId)
+	    .detail("Tag", reqTag.toString())
+	    .detail("Begin", reqBegin)
+		.detail("PersistentDurableVersion", logData->persistentDataDurableVersion)
+		.detail("TxnTags", txsTag.toString());
 
 	if (reqBegin <= logData->persistentDataDurableVersion && reqTag.locality != tagLocalityTxs && reqTag != txsTag) {
 		// Reading spilled data will almost always imply that the storage server is >5s behind the rest
@@ -1690,6 +1718,12 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	state double workStart = now();
 
 	Version poppedVer = poppedVersion(logData, reqTag);
+	TraceEvent("TLogPeekMessages")
+	    .detail("LogId", logData->logId)
+	    .detail("Tag", reqTag.toString())
+	    .detail("Begin", reqBegin)
+		.detail("PoppedVersion", poppedVer);
+
 	if (poppedVer > reqBegin) {
 		TLogPeekReply rep;
 		rep.maxKnownVersion = logData->version.get();
@@ -1719,6 +1753,13 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			}
 			rep.begin = reqBegin;
 		}
+
+		TraceEvent("TLogPeekMessages Response")
+		    .detail("LogId", logData->logId)
+		    .detail("Tag", reqTag.toString())
+		    .detail("Begin", reqBegin)
+		    .detail("PoppedVersion", poppedVer)
+			.detail("RepEnd", rep.end);
 
 		replyPromise.send(rep);
 		return Void();
@@ -1867,12 +1908,12 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	reply.end = endVersion;
 	reply.onlySpilled = onlySpilled;
 
-	// TraceEvent("TlogPeek", self->dbgid)
-	//    .detail("LogId", logData->logId)
-	//    .detail("Tag", req.tag.toString())
-	//    .detail("BeginVer", req.begin)
-	//    .detail("EndVer", reply.end)
-	//    .detail("MsgBytes", reply.messages.expectedSize())
+	TraceEvent("TlogPeek", self->dbgid)
+	    .detail("LogId", logData->logId)
+	    .detail("Tag", reqTag.toString())
+	    .detail("BeginVer", reqBegin)
+	    .detail("EndVer", reply.end)
+	    .detail("MsgBytes", reply.messages.expectedSize());
 	//    .detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
 
 	if (reqSequence.present()) {
@@ -2466,10 +2507,14 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		}
 		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
 			TraceEvent(SevDebug, "TLogPeekStream", logData->logId)
-			    .detail("Token", tli.peekStreamMessages.getEndpoint().token);
+			    .detail("Token", tli.peekStreamMessages.getEndpoint().token)
+				.detail("Address", tli.peekStreamMessages.getEndpoint().addresses.address);
 			logData->addActor.send(tLogPeekStream(self, req, logData));
 		}
 		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {
+			TraceEvent(SevDebug, "TLogPeekRequest", logData->logId)
+			    .detail("Token", tli.peekStreamMessages.getEndpoint().token)
+				.detail("Address", tli.peekMessages.getEndpoint().addresses.address);
 			logData->addActor.send(tLogPeekMessages(
 			    req.reply, self, logData, req.begin, req.tag, req.returnIfBlocked, req.onlySpilled, req.sequence));
 		}

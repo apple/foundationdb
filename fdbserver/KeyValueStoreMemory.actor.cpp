@@ -479,6 +479,10 @@ private:
 			try {
 				loop {
 					{
+						TraceEvent("KVSMemRecoveryLoop", self->id)
+						    .detail("SnapshotEndLocation", uncommittedSnapshotEnd)
+						    .detail("NextReadLoc", self->log->getNextReadLocation());
+
 						Standalone<StringRef> data = wait(self->log->readNext(sizeof(OpHeader)));
 						if (data.size() != sizeof(OpHeader)) {
 							if (data.size()) {
@@ -497,6 +501,12 @@ private:
 						}
 						h = *(OpHeader*)data.begin();
 					}
+
+					TraceEvent("KVSMemRecoveryLoop", self->id)
+					    .detail("SnapshotEndLocation", uncommittedSnapshotEnd)
+					    .detail("NextReadLoc", self->log->getNextReadLocation())
+						.detail("Op", h.op);
+
 					Standalone<StringRef> data = wait(self->log->readNext(h.len1 + h.len2 + 1));
 					if (data.size() != h.len1 + h.len2 + 1) {
 						zeroFillSize = h.len1 + h.len2 + 1 - data.size();
@@ -872,6 +882,7 @@ KeyValueStoreMemory<Container>::KeyValueStoreMemory(IDiskQueue* log,
 	if (this->reserved_buffer != nullptr)
 		memset(this->reserved_buffer, 0, CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 
+	TraceEvent("KVMemStore init", id);
 	recovering = recover(this, exactRecovery);
 	snapshotting = snapshot(this);
 	commitActors = actorCollection(addActor.getFuture());
@@ -901,6 +912,7 @@ IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
                                        bool disableSnapshot,
                                        bool replaceContent,
                                        bool exactRecovery) {
+	TraceEvent("KVStoreLogSystem init", logID);
 	return new KeyValueStoreMemory<IKeyValueContainer>(
 	    queue, logID, memoryLimit, KeyValueStoreType::MEMORY, disableSnapshot, replaceContent, exactRecovery);
 }
