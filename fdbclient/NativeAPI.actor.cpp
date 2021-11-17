@@ -948,6 +948,7 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 			wait(refreshTransaction(cx, &tr));
 			state double curTime = now();
 			state double lastTime = cx->lastTimedGrv.get();
+			state double lastProxyTime = cx->lastProxyRequest;
 			TraceEvent("BackgroundGrvUpdaterBefore")
 			    .detail("CurTime", curTime)
 			    .detail("LastTime", lastTime)
@@ -956,10 +957,12 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 			    .detail("CachedTime", cx->lastTimedGrv.get())
 			    .detail("Gap", curTime - lastTime)
 			    .detail("Bound", CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay);
-			if (curTime - lastTime >= (CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay)) {
+			if (curTime - lastTime >= (CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay) ||
+			    curTime - lastProxyTime > CLIENT_KNOBS->MAX_PROXY_CONTACT_LAG) {
 				try {
 					tr.setOption(FDBTransactionOptions::SKIP_GRV_CACHE);
 					wait(success(tr.getReadVersion()));
+					cx->lastProxyRequest = curTime;
 					grvDelay = (grvDelay + (now() - curTime)) / 2.0;
 					TraceEvent("BackgroundGrvUpdaterSuccess")
 					    .detail("GrvDelay", grvDelay)
@@ -1205,9 +1208,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), outstandingWatches(0),
-    lastTimedGrv(0.0), cachedRv(0), lastTimedRkThrottle(0.0), transactionTracingEnabled(true), taskID(taskID),
-    clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion),
-    mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    lastTimedGrv(0.0), cachedRv(0), lastTimedRkThrottle(0.0), lastProxyRequest(0.0), transactionTracingEnabled(true),
+    taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator),
+    apiVersion(apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
@@ -5731,6 +5734,7 @@ ACTOR Future<Version> extractReadVersion(Location location,
 	state Span span(spanContext, location, { parent });
 	GetReadVersionReply rep = wait(f);
 	double latency = now() - startTime;
+	cx->lastProxyRequest = startTime;
 	cx->updateCachedRV(startTime, rep.version);
 	// use startTime instead?
 	// maybe this also requires tracking number of loops processed in queue?
