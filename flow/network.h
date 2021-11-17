@@ -727,7 +727,7 @@ struct DiskFailureInjector {
 	double getThrottleDelay() {
 		// If we are in the throttle period, insert a random delay (in ms)
 		if ((throttleUntil - g_network->now()) > 0.0)
-			return (0.001 * deterministicRandom()->randomInt(1, 5));
+			return (0.001 * deterministicRandom()->randomInt(1, 3));
 
 		return 0.0;
 	}

@@ -66,48 +66,42 @@ struct TargetedKillWorkload : TestWorkload {
 			return Void();
 		}
 
+		int killed = 0;
 		RebootRequest rbReq;
 		if (self->reboot) {
 			rbReq.waitForDuration = self->suspendDuration;
 		} else {
 			rbReq.waitForDuration = std::numeric_limits<uint32_t>::max();
 		}
-		try {
-			int killed = 0;
-			for (int i = 0; i < workers.size(); i++) {
-				if (workers[i].interf.master.getEndpoint().getPrimaryAddress() == address ||
-				    (self->killAllMachineProcesses &&
-				     workers[i].interf.master.getEndpoint().getPrimaryAddress().ip == address.ip &&
-				     workers[i].processClass != ProcessClass::TesterClass)) {
-					TraceEvent("TargetedWorkerKill")
-					    .detail("TargetedMachine", address)
-					    .detail("Worker", workers[i].interf.id());
-					workers[i].interf.clientInterface.reboot.send(rbReq);
-					killed++;
-				}
+		for (int i = 0; i < workers.size(); i++) {
+			if (workers[i].interf.master.getEndpoint().getPrimaryAddress() == address ||
+			    (self->killAllMachineProcesses &&
+			     workers[i].interf.master.getEndpoint().getPrimaryAddress().ip == address.ip &&
+			     workers[i].processClass != ProcessClass::TesterClass)) {
+				TraceEvent("WorkerKill").detail("TargetedMachine", address).detail("Worker", workers[i].interf.id());
+				workers[i].interf.clientInterface.reboot.send(rbReq);
+				killed++;
 			}
-			if (!killed)
-				TraceEvent(SevWarn, "WorkerNotFoundAtEndpoint").detail("Address", address);
-			else
-				TraceEvent("WorkersKilledAtEndpoint").detail("Address", address).detail("KilledProcesses", killed);
-		} catch (Error& e) {
-			TraceEvent("ErrorTargetedWorkerKill").error(e);
 		}
+
+		if (!killed)
+			TraceEvent(SevWarn, "WorkerNotFoundAtEndpoint").detail("Address", address);
+		else
+			TraceEvent("WorkersKilledAtEndpoint").detail("Address", address).detail("KilledProcesses", killed);
 
 		return Void();
 	}
 
 	ACTOR Future<Void> assassin(Database cx, TargetedKillWorkload* self) {
 		wait(delay(self->killAt));
+		state vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+		state vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+
+		state NetworkAddress machine;
+		state NetworkAddress ccAddr;
 		state int killed = 0;
 		state int s = 0;
 		state int j = 0;
-		state NetworkAddress machineSS;
-		state NetworkAddress machine;
-		state NetworkAddress ccAddr;
-		state vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
-		state vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
-
 		if (self->machineToKill == "master") {
 			machine = self->dbInfo->get().master.address();
 		} else if (self->machineToKill == "commitproxy") {
@@ -146,9 +140,10 @@ struct TargetedKillWorkload : TestWorkload {
 			ccAddr = self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress();
 			for (j = 0; j < storageServers.size(); j++) {
 				StorageServerInterface ssi = storageServers[s];
-				machineSS = ssi.address();
-				if (machineSS != ccAddr) {
-					wait(self->killEndpoint(workers, machineSS, cx, self));
+				machine = ssi.address();
+				if (machine != ccAddr) {
+					TraceEvent("IsolatedMark").detail("TargetedMachine", machine).detail("Role", self->machineToKill);
+					wait(self->killEndpoint(workers, machine, cx, self));
 					killed++;
 					if (killed == self->numKillStorages)
 						return Void();

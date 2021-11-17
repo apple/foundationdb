@@ -57,7 +57,6 @@ struct MakoWorkload : TestWorkload {
 		// init parameters from test file
 		// Number of rows populated
 		rowCount = getOption(options, LiteralStringRef("rows"), (uint64_t)10000);
-		TraceEvent("MakoWorkload").detail("RowCount", rowCount);
 		// Test duration in seconds
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 30.0);
 		warmingDelay = getOption(options, LiteralStringRef("warmingDelay"), 0.0);
