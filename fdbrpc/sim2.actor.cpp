@@ -36,6 +36,7 @@
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
+#include "fdbrpc/AsyncFileChaos.actor.h"
 #include "flow/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
@@ -1205,6 +1206,9 @@ public:
 		m->protocolVersion = protocol;
 
 		m->setGlobal(enTDMetrics, (flowGlobalType)&m->tdmetrics);
+		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
+			m->setGlobal(enChaosMetrics, (flowGlobalType)&m->chaosMetrics);
+		}
 		m->setGlobal(enNetworkConnections, (flowGlobalType)m->network);
 		m->setGlobal(enASIOTimedOut, (flowGlobalType) false);
 
@@ -2501,6 +2505,8 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 		f = AsyncFileDetachable::open(f);
 		if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
+		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
+			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileChaos(r)); });
 #if ENCRYPTION_ENABLED
 		if (flags & IAsyncFile::OPEN_ENCRYPTED)
 			f = map(f, [flags](Reference<IAsyncFile> r) {
