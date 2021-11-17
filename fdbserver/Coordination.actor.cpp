@@ -528,7 +528,11 @@ struct LeaderRegisterCollection {
 	// When the lead coordinator changes, store the new connection ID in the "fwd" keyspace.
 	// If a request arrives using an old connection id, resend it to the new coordinator using the stored connection id.
 	// Store when this change took place in the fwdTime keyspace.
-	ACTOR static Future<Void> setForward(LeaderRegisterCollection* self, KeyRef key, ClusterConnectionString conn) {
+	ACTOR static Future<Void> setForward(LeaderRegisterCollection* self,
+	                                     KeyRef key,
+	                                     ClusterConnectionString conn,
+	                                     ForwardRequest req,
+	                                     UID id) {
 		double forwardTime = now();
 		LeaderInfo forwardInfo;
 		forwardInfo.forward = true;
@@ -539,6 +543,8 @@ struct LeaderRegisterCollection {
 		store->set(KeyValueRef(key.withPrefix(fwdKeys.begin), conn.toString()));
 		store->set(KeyValueRef(key.withPrefix(fwdTimeKeys.begin), BinaryWriter::toValue(forwardTime, Unversioned())));
 		wait(store->commit());
+		// Do not process a forwarding request until after it has been made durable in case the coordinator restarts
+		self->getInterface(req.key, id).forward.send(req);
 		return Void();
 	}
 
@@ -708,8 +714,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 					req.reply.sendError(wrong_connection_file());
 				} else {
 					forwarders.add(LeaderRegisterCollection::setForward(
-					    &regs, req.key, ClusterConnectionString(req.conn.toString())));
-					regs.getInterface(req.key, id).forward.send(req);
+					    &regs, req.key, ClusterConnectionString(req.conn.toString()), req, id));
 				}
 			}
 		}

@@ -1054,8 +1054,8 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
                                           Reference<GranuleMetadata> metadata,
                                           Future<GranuleStartState> assignFuture) {
-	state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> oldChangeFeedStream;
-	state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> changeFeedStream;
+	state Reference<ChangeFeedData> oldChangeFeedStream = makeReference<ChangeFeedData>();
+	state Reference<ChangeFeedData> changeFeedStream = makeReference<ChangeFeedData>();
 	state Future<BlobFileIndex> inFlightBlobSnapshot;
 	state std::deque<InFlightDeltaFile> inFlightDeltaFiles;
 	state Future<Void> oldChangeFeedFuture;
@@ -1220,7 +1220,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 			state Standalone<VectorRef<MutationsAndVersionRef>> mutations;
 			if (readOldChangeFeed) {
-				Standalone<VectorRef<MutationsAndVersionRef>> oldMutations = waitNext(oldChangeFeedStream.getFuture());
+				Standalone<VectorRef<MutationsAndVersionRef>> oldMutations =
+				    waitNext(oldChangeFeedStream->mutations.getFuture());
 				// TODO filter old mutations won't be necessary, SS does it already
 				if (filterOldMutations(
 				        metadata->keyRange, &oldMutations, &mutations, startState.changeFeedStartVersion)) {
@@ -1235,10 +1236,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 					// now that old change feed is cancelled, clear out any mutations still in buffer by replacing
 					// promise stream
-					oldChangeFeedStream = PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>();
+					oldChangeFeedStream = makeReference<ChangeFeedData>();
 				}
 			} else {
-				Standalone<VectorRef<MutationsAndVersionRef>> newMutations = waitNext(changeFeedStream.getFuture());
+				Standalone<VectorRef<MutationsAndVersionRef>> newMutations =
+				    waitNext(changeFeedStream->mutations.getFuture());
 				mutations = newMutations;
 			}
 
@@ -1504,8 +1506,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 								// reset change feeds to cfRollbackVersion
 								if (readOldChangeFeed) {
-									oldChangeFeedStream =
-									    PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>();
+									oldChangeFeedStream = makeReference<ChangeFeedData>();
 									oldChangeFeedFuture = bwData->db->getChangeFeedStream(
 									    oldChangeFeedStream,
 									    oldCFKey.get(),
@@ -1513,7 +1514,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									    MAX_VERSION,
 									    startState.parentGranule.get().first /*metadata->keyRange*/);
 								} else {
-									changeFeedStream = PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>();
+									changeFeedStream = makeReference<ChangeFeedData>();
 									changeFeedFuture = bwData->db->getChangeFeedStream(changeFeedStream,
 									                                                   cfKey,
 									                                                   cfRollbackVersion + 1,

@@ -180,9 +180,10 @@ class RangeAndFlatMapQueryIntegrationTest {
 		try {
 			tr.options().setReadYourWritesDisable();
 			List<KeyValue> kvs =
-			    tr.getRangeAndFlatMap(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
-			                          KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
-			                          ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
+			    tr.snapshot()
+			        .getRangeAndFlatMap(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
+			                            KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
+			                            ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
 			        .asList()
 			        .get();
 			Assertions.assertEquals(end - begin, kvs.size());
@@ -219,10 +220,12 @@ class RangeAndFlatMapQueryIntegrationTest {
 				// getRangeAndFlatMap is only support without RYW. This is a must!!!
 				tr.options().setReadYourWritesDisable();
 
+				// getRangeAndFlatMap is only supported with snapshot.
 				Iterator<KeyValue> kvs =
-				    tr.getRangeAndFlatMap(KeySelector.firstGreaterOrEqual(indexEntryKey(0)),
-				                          KeySelector.firstGreaterThan(indexEntryKey(1)), MAPPER,
-				                          ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
+				    tr.snapshot()
+				        .getRangeAndFlatMap(KeySelector.firstGreaterOrEqual(indexEntryKey(0)),
+				                            KeySelector.firstGreaterThan(indexEntryKey(1)), MAPPER,
+				                            ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
 				        .iterator();
 				Iterator<byte[]> expected_data_of_records_iter = expected_data_of_records.iterator();
 				while (expected_data_of_records_iter.hasNext()) {

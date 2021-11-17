@@ -152,6 +152,12 @@ public:
 	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string& host) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6) override;
+	// This method should only be used in simulation.
+	void addMockTCPEndpoint(const std::string& host,
+	                        const std::string& service,
+	                        const std::vector<NetworkAddress>& addresses) override {
+		throw operation_failed();
+	}
 	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                       const std::string& service) override;
 	Reference<IListener> listen(NetworkAddress localAddr) override;
@@ -231,6 +237,7 @@ public:
 	TaskPriority currentTaskID;
 	uint64_t tasksIssued;
 	TDMetricCollection tdmetrics;
+	ChaosMetrics chaosMetrics;
 	// we read now() from a different thread. On Intel, reading a double is atomic anyways, but on other platforms it's
 	// not. For portability this should be atomic
 	std::atomic<double> currentTime;
@@ -1195,6 +1202,9 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	// Set the global members
 	if (useMetrics) {
 		setGlobal(INetwork::enTDMetrics, (flowGlobalType)&tdmetrics);
+	}
+	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
+		setGlobal(INetwork::enChaosMetrics, (flowGlobalType)&chaosMetrics);
 	}
 	setGlobal(INetwork::enNetworkConnections, (flowGlobalType)network);
 	setGlobal(INetwork::enASIOService, (flowGlobalType)&reactor.ios);
