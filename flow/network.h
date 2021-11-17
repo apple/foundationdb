@@ -540,7 +540,8 @@ public:
 		enGlobalConfig = 14,
 		enChaosMetrics = 15,
 		enDiskFailureInjector = 16,
-		enBitFlipper = 17
+		enBitFlipper = 17,
+		COUNT // Add new fields before this enumerator
 	};
 
 	virtual void longTaskCheck(const char* name) {}
