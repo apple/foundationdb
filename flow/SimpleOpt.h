@@ -203,7 +203,7 @@ ShowFiles(args.FileCount(), args.Files());
 #define SO_STATICBUF SO_MAX_ARGS
 #else
 #include <stdlib.h> // malloc, free
-#include <string.h> // memcpy
+#include <string.h> // memcpy, strlen
 #define SO_STATICBUF 50
 #endif
 
@@ -648,7 +648,6 @@ bool CSimpleOptTempl<SOCHAR>::Next() {
 				*m_pszOptionArg++ = (SOCHAR)'\0';
 			}
 		}
-		// TODO maybe we should copy rather than change the pointer
 		nTableIdx = LookupOption(pszArg);
 
 		// if we didn't find this option but if it is a short form
@@ -865,8 +864,13 @@ int CSimpleOptTempl<SOCHAR>::LookupOption(const SOCHAR* a_pszOption) const {
 	int nBestMatchLen = 0; // matching characters of best match
 	int nLastMatchLen = 0; // matching characters of last best match
 
-	// Convert the a_pszOption's hyphens to underscores, except the leading hyphens
-	SOCHAR* psz_ptr = const_cast<SOCHAR*>(a_pszOption);
+	// use a deep copy of the a_pszOption to do the conversion(- to _ except the leading -), and match
+	size_t pszOptionSize = strlen(a_pszOption);
+	SOCHAR* pszOptionCopy = (SOCHAR*)malloc(pszOptionSize * sizeof(SOCHAR));
+	memcpy(pszOptionCopy, a_pszOption, pszOptionSize);
+
+	// Convert the pszOptionCopy's hyphens to underscores, except the leading hyphens
+	SOCHAR* psz_ptr = pszOptionCopy;
 	while (psz_ptr && *psz_ptr && *psz_ptr == (SOCHAR)'-') {
 		++psz_ptr;
 	}
@@ -881,8 +885,9 @@ int CSimpleOptTempl<SOCHAR>::LookupOption(const SOCHAR* a_pszOption) const {
 		// the slash character is converted to a hyphen for testing.
 		SO_ASSERT(m_rgOptions[n].pszArg[0] != (SOCHAR)'/');
 
-		int nMatchLen = CalcMatch(m_rgOptions[n].pszArg, a_pszOption);
+		int nMatchLen = CalcMatch(m_rgOptions[n].pszArg, pszOptionCopy);
 		if (nMatchLen == -1) {
+			free(pszOptionCopy);
 			return n;
 		}
 		if (nMatchLen > 0 && nMatchLen >= nBestMatchLen) {
@@ -891,6 +896,7 @@ int CSimpleOptTempl<SOCHAR>::LookupOption(const SOCHAR* a_pszOption) const {
 			nBestMatch = n;
 		}
 	}
+	free(pszOptionCopy);
 
 	// only partial matches or no match gets to here, ensure that we
 	// don't return a partial match unless it is a clear winner
