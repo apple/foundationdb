@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
 #include "flow/IRandom.h"
@@ -8040,7 +8041,7 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[2] == 6);
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[3] == 8);
 
-	printf("sizeof(RedwoodRecordRef) = %lu\n", sizeof(RedwoodRecordRef));
+	fmt::print("sizeof(RedwoodRecordRef) = {}\n", sizeof(RedwoodRecordRef));
 
 	// Test pageID stuff.
 	{
@@ -8973,14 +8974,15 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 			pos = newPos;
 		}
 		double elapsed = timer() - start;
-		printf("Seek/skip test, count=%d jumpMax=%d, items=%lu, oldSeek=%d useHint=%d:  Elapsed %f seconds  %.2f M/s\n",
-		       count,
-		       jumpMax,
-		       items.size(),
-		       old,
-		       useHint,
-		       elapsed,
-		       double(count) / elapsed / 1e6);
+		fmt::print("Seek/skip test, count={0} jumpMax={1}, items={2}, oldSeek={3} useHint={4}:  Elapsed {5} seconds "
+		           "{6:.2f} M/s\n",
+		           count,
+		           jumpMax,
+		           items.size(),
+		           old,
+		           useHint,
+		           elapsed,
+		           double(count) / elapsed / 1e6);
 	};
 
 	auto skipSeekPerformance2 = [&](int jumpMax, bool old, bool useHint, int count) {
@@ -9016,15 +9018,16 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 			pos = newPos;
 		}
 		double elapsed = timer() - start;
-		printf("DeltaTree2 Seek/skip test, count=%d jumpMax=%d, items=%lu, oldSeek=%d useHint=%d:  Elapsed %f seconds  "
-		       "%.2f M/s\n",
-		       count,
-		       jumpMax,
-		       items.size(),
-		       old,
-		       useHint,
-		       elapsed,
-		       double(count) / elapsed / 1e6);
+		fmt::print("DeltaTree2 Seek/skip test, count={0} jumpMax={1}, items={2}, oldSeek={3} useHint={4}:  Elapsed {5} "
+		           "seconds  "
+		           "{6:.2f} M/s\n",
+		           count,
+		           jumpMax,
+		           items.size(),
+		           old,
+		           useHint,
+		           elapsed,
+		           double(count) / elapsed / 1e6);
 	};
 
 	// Compare seeking to nearby elements with and without hints, using the old and new SeekLessThanOrEqual methods.
@@ -9094,7 +9097,7 @@ TEST_CASE(":/redwood/performance/mutationBuffer") {
 		strings.push_back(randomString(arena, 5));
 	}
 
-	printf("Inserting %d elements and then finding each string...\n", count);
+	fmt::print("Inserting {} elements and then finding each string...\n", count);
 	double start = timer();
 	VersionedBTree::MutationBuffer m;
 	for (int i = 0; i < count; ++i) {
@@ -9366,14 +9369,14 @@ TEST_CASE("Lredwood/correctness/btree") {
 			commit = map(btree->commit(version), [=, &ops = totalPageOps, v = version](Void) {
 				// Update pager ops before clearing metrics
 				ops += g_redwoodMetrics.pageOps();
-				printf("Committed %s PageOps %" PRId64 "/%" PRId64 " (%.2f%%) VerificationMapEntries %lu/%d (%.2f%%)\n",
-				       toString(v).c_str(),
-				       ops,
-				       targetPageOps,
-				       ops * 100.0 / targetPageOps,
-				       written.size(),
-				       maxVerificationMapEntries,
-				       written.size() * 100.0 / maxVerificationMapEntries);
+				fmt::print("Committed {0} PageOps {1}/{2} ({3:.2f}) VerificationMapEntries {4}/{5} ({6:.2f})\n",
+				           toString(v).c_str(),
+				           ops,
+				           targetPageOps,
+				           ops * 100.0 / targetPageOps,
+				           written.size(),
+				           maxVerificationMapEntries,
+				           written.size() * 100.0 / maxVerificationMapEntries);
 				printf("Committed:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 				// Notify the background verifier that version is committed and therefore readable
@@ -9517,13 +9520,14 @@ ACTOR Future<Void> randomScans(VersionedBTree* btree,
 		}
 	}
 	double elapsed = timer() - readStart;
-	printf("Completed %d scans: width=%d totalbytesRead=%d prefetchBytes=%d scansRate=%d scans/s  %.2f MB/s\n",
-	       count,
-	       width,
-	       totalScanBytes,
-	       prefetchBytes,
-	       int(count / elapsed),
-	       double(totalScanBytes) / 1e6 / elapsed);
+	fmt::print(
+	    "Completed {0} scans: width={1} totalbytesRead={2} prefetchBytes={3} scansRate={4} scans/s  {5:.2f} MB/s\n",
+	    count,
+	    width,
+	    totalScanBytes,
+	    prefetchBytes,
+	    int(count / elapsed),
+	    double(totalScanBytes) / 1e6 / elapsed);
 	return Void();
 }
 
@@ -9620,10 +9624,10 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 		for (v = 1; v <= numEntries; ++v) {
 			// Sometimes do a commit
 			if (currentCommitSize >= targetCommitSize) {
-				printf("currentCommitSize: %d, cumulativeCommitSize: %ld, pageCacheCount: %ld\n",
-				       currentCommitSize,
-				       cumulativeCommitSize,
-				       pager->getPageCacheCount());
+				fmt::print("currentCommitSize: {0}, cumulativeCommitSize: {1}, pageCacheCount: {2}\n",
+				           currentCommitSize,
+				           cumulativeCommitSize,
+				           pager->getPageCacheCount());
 				wait(m_extentQueue.flush());
 				wait(pager->commit(pager->getLastCommittedVersion() + 1));
 				cumulativeCommitSize += currentCommitSize;
@@ -9642,8 +9646,8 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 			}
 		}
 		cumulativeCommitSize += currentCommitSize;
-		printf(
-		    "Final cumulativeCommitSize: %ld, pageCacheCount: %ld\n", cumulativeCommitSize, pager->getPageCacheCount());
+		fmt::print(
+		    "Final cumulativeCommitSize: {0}, pageCacheCount: {1}\n", cumulativeCommitSize, pager->getPageCacheCount());
 		wait(m_extentQueue.flush());
 		extentQueueState = m_extentQueue.getState();
 		printf("Commit ExtentQueue getState(): %s\n", extentQueueState.toString().c_str());
@@ -10097,16 +10101,16 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore* kvs,
 	state int64_t kvBytesTarget = (int64_t)recordCountTarget * recordSize;
 	state int recordsPerPrefix = recordCountTarget / source.numPrefixes();
 
-	printf("\nstoreType: %d\n", static_cast<int>(kvs->getType()));
-	printf("commitTarget: %d\n", commitTarget);
-	printf("prefixSource: %s\n", source.toString().c_str());
-	printf("usePrefixesInOrder: %d\n", usePrefixesInOrder);
-	printf("suffixSize: %d\n", suffixSize);
-	printf("valueSize: %d\n", valueSize);
-	printf("recordSize: %d\n", recordSize);
-	printf("recordsPerPrefix: %d\n", recordsPerPrefix);
-	printf("recordCountTarget: %d\n", recordCountTarget);
-	printf("kvBytesTarget: %" PRId64 "\n", kvBytesTarget);
+	fmt::print("\nstoreType: {}\n", static_cast<int>(kvs->getType()));
+	fmt::print("commitTarget: {}\n", commitTarget);
+	fmt::print("prefixSource: {}\n", source.toString());
+	fmt::print("usePrefixesInOrder: {}\n", usePrefixesInOrder);
+	fmt::print("suffixSize: {}\n", suffixSize);
+	fmt::print("valueSize: {}\n", valueSize);
+	fmt::print("recordSize: {}\n", recordSize);
+	fmt::print("recordsPerPrefix: {}\n", recordsPerPrefix);
+	fmt::print("recordCountTarget: {}\n", recordCountTarget);
+	fmt::print("kvBytesTarget: {}\n", kvBytesTarget);
 
 	state int64_t kvBytes = 0;
 	state int64_t kvBytesTotal = 0;
@@ -10186,12 +10190,12 @@ ACTOR Future<Void> sequentialInsert(IKeyValueStore* kvs, int prefixLen, int valu
 	state int recordSize = source.prefixLen + sizeof(uint64_t) + valueSize;
 	state int64_t kvBytesTarget = (int64_t)recordCountTarget * recordSize;
 
-	printf("\nstoreType: %d\n", static_cast<int>(kvs->getType()));
-	printf("commitTarget: %d\n", commitTarget);
-	printf("valueSize: %d\n", valueSize);
-	printf("recordSize: %d\n", recordSize);
-	printf("recordCountTarget: %d\n", recordCountTarget);
-	printf("kvBytesTarget: %" PRId64 "\n", kvBytesTarget);
+	fmt::print("\nstoreType: {}\n", static_cast<int>(kvs->getType()));
+	fmt::print("commitTarget: {}\n", commitTarget);
+	fmt::print("valueSize: {}\n", valueSize);
+	fmt::print("recordSize: {}\n", recordSize);
+	fmt::print("recordCountTarget: {}\n", recordCountTarget);
+	fmt::print("kvBytesTarget: {}\n", kvBytesTarget);
 
 	state int64_t kvBytes = 0;
 	state int64_t kvBytesTotal = 0;
@@ -10320,12 +10324,12 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
                                     int recordCountTarget,
                                     bool singlePrefix,
                                     int rowLimit) {
-	printf("\nstoreType: %d\n", static_cast<int>(kvs->getType()));
-	printf("prefixSource: %s\n", source.toString().c_str());
-	printf("suffixSize: %d\n", suffixSize);
-	printf("recordCountTarget: %d\n", recordCountTarget);
-	printf("singlePrefix: %d\n", singlePrefix);
-	printf("rowLimit: %d\n", rowLimit);
+	fmt::print("\nstoreType: {}\n", static_cast<int>(kvs->getType()));
+	fmt::print("prefixSource: {}\n", source.toString());
+	fmt::print("suffixSize: {}\n", suffixSize);
+	fmt::print("recordCountTarget: {}\n", recordCountTarget);
+	fmt::print("singlePrefix: {}\n", singlePrefix);
+	fmt::print("rowLimit: {}\n", rowLimit);
 
 	state int64_t recordSize = source.prefixLen + suffixSize + valueSize;
 	state int64_t bytesRead = 0;
@@ -10336,14 +10340,15 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
 	state double start = timer();
 	state std::function<void()> stats = [&]() {
 		double elapsed = timer() - start;
-		printf("Cumulative stats: %.2f seconds  %d queries %.2f MB %ld records  %.2f qps %.2f MB/s  %.2f rec/s\r\n",
-		       elapsed,
-		       queries,
-		       bytesRead / 1e6,
-		       recordsRead,
-		       queries / elapsed,
-		       bytesRead / elapsed / 1e6,
-		       recordsRead / elapsed);
+		fmt::print("Cumulative stats: {0:.2f} seconds  {1} queries {2:.2f} MB {3} records  {4:.2f} qps {5:.2f} MB/s  "
+		           "{6:.2f} rec/s\r\n",
+		           elapsed,
+		           queries,
+		           bytesRead / 1e6,
+		           recordsRead,
+		           queries / elapsed,
+		           bytesRead / elapsed / 1e6,
+		           recordsRead / elapsed);
 		fflush(stdout);
 	};
 

@@ -20,6 +20,7 @@
 
 #include "fdbcli/fdbcli.actor.h"
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
@@ -67,9 +68,9 @@ ACTOR Future<Void> requestVersionUpdate(Database localDb, Reference<ChangeFeedDa
 		wait(delay(5.0));
 		Transaction tr(localDb);
 		state Version ver = wait(tr.getReadVersion());
-		printf("Requesting version %d\n", ver);
+		fmt::print("Requesting version {}\n", ver);
 		wait(feedData->whenAtLeast(ver));
-		printf("Feed at version %d\n", ver);
+		fmt::print("Feed at version {}\n", ver);
 	}
 }
 
@@ -120,7 +121,7 @@ ACTOR Future<bool> changeFeedCommandActor(Database localDb, std::vector<StringRe
 		}
 		if (tokens.size() > 4) {
 			int n = 0;
-			if (sscanf(tokens[4].toString().c_str(), "%ld%n", &end, &n) != 1 || n != tokens[4].size()) {
+			if (sscanf(tokens[4].toString().c_str(), "%" PRId64 "%n", &end, &n) != 1 || n != tokens[4].size()) {
 				printUsage(tokens[0]);
 				return false;
 			}

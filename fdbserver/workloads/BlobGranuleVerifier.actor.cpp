@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -237,13 +238,13 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			    .detail("BlobSize", blob.first.size());
 
 			if (BGV_DEBUG) {
-				printf("\nMismatch for [%s - %s) @ %ld (%s). F(%d) B(%d):\n",
-				       range.begin.printable().c_str(),
-				       range.end.printable().c_str(),
-				       v,
-				       initialRequest ? "RealTime" : "TimeTravel",
-				       fdb.size(),
-				       blob.first.size());
+				fmt::print("\nMismatch for [{0} - {1}) @ {2} ({3}). F({4}) B({5}):\n",
+				           range.begin.printable(),
+				           range.end.printable(),
+				           v,
+				           initialRequest ? "RealTime" : "TimeTravel",
+				           fdb.size(),
+				           blob.first.size());
 
 				Optional<KeyValueRef> lastCorrect;
 				for (int i = 0; i < std::max(fdb.size(), blob.first.size()); i++) {
@@ -291,11 +292,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					}
 					printf("  Deltas: (%d)", chunk.newDeltas.size());
 					if (chunk.newDeltas.size() > 0) {
-						printf(" with version [%ld - %ld]",
-						       chunk.newDeltas[0].version,
-						       chunk.newDeltas[chunk.newDeltas.size() - 1].version);
+						fmt::print(" with version [{0} - {1}]",
+						           chunk.newDeltas[0].version,
+						           chunk.newDeltas[chunk.newDeltas.size() - 1].version);
 					}
-					printf("  IncludedVersion: %ld\n", chunk.includedVersion);
+					fmt::print("  IncludedVersion: {}\n", chunk.includedVersion);
 				}
 				printf("\n");
 			}
@@ -416,10 +417,10 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			state KeyRange r = range;
 			state PromiseStream<Standalone<BlobGranuleChunkRef>> chunkStream;
 			if (BGV_DEBUG) {
-				printf("Final availability check [%s - %s) @ %ld\n",
-				       r.begin.printable().c_str(),
-				       r.end.printable().c_str(),
-				       readVersion);
+				fmt::print("Final availability check [{0} - {1}) @ {2}\n",
+				           r.begin.printable(),
+				           r.end.printable(),
+				           readVersion);
 			}
 			state KeyRange last;
 			state Future<Void> requester = cx->readBlobGranulesStream(chunkStream, r, 0, readVersion);
@@ -435,30 +436,31 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						break;
 					}
 					if (BGV_DEBUG) {
-						printf("BG Verifier failed final availability check for [%s - %s) @ %ld with error %s. Last "
-						       "Success=[%s - %s)\n",
-						       r.begin.printable().c_str(),
-						       r.end.printable().c_str(),
-						       readVersion,
-						       e.name(),
-						       last.begin.printable().c_str(),
-						       last.end.printable().c_str());
+						fmt::print(
+						    "BG Verifier failed final availability check for [{0} - {1}) @ {2} with error {3}. Last "
+						    "Success=[{4} - {5})\n",
+						    r.begin.printable(),
+						    r.end.printable(),
+						    readVersion,
+						    e.name(),
+						    last.begin.printable(),
+						    last.end.printable());
 					}
 					availabilityPassed = false;
 					break;
 				}
 			}
 		}
-		printf("Blob Granule Verifier finished with:\n");
-		printf("  %d successful final granule checks\n", checks);
-		printf("  %d failed final granule checks\n", availabilityPassed ? 0 : 1);
-		printf("  %ld mismatches\n", self->mismatches);
-		printf("  %ld time travel too old\n", self->timeTravelTooOld);
-		printf("  %ld errors\n", self->errors);
-		printf("  %ld initial reads\n", self->initialReads);
-		printf("  %ld time travel reads\n", self->timeTravelReads);
-		printf("  %ld rows\n", self->rowsRead);
-		printf("  %ld bytes\n", self->bytesRead);
+		fmt::print("Blob Granule Verifier finished with:\n");
+		fmt::print("  {} successful final granule checks\n", checks);
+		fmt::print("  {} failed final granule checks\n", availabilityPassed ? 0 : 1);
+		fmt::print("  {} mismatches\n", self->mismatches);
+		fmt::print("  {} time travel too old\n", self->timeTravelTooOld);
+		fmt::print("  {} errors\n", self->errors);
+		fmt::print("  {} initial reads\n", self->initialReads);
+		fmt::print("  {} time travel reads\n", self->timeTravelReads);
+		fmt::print("  {} rows\n", self->rowsRead);
+		fmt::print("  {} bytes\n", self->bytesRead);
 		// FIXME: add above as details
 		TraceEvent("BlobGranuleVerifierChecked");
 		return availabilityPassed && self->mismatches == 0 && checks > 0 && self->timeTravelTooOld == 0;
