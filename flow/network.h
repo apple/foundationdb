@@ -702,7 +702,7 @@ struct DiskFailureInjector {
 		stallPeriod = stallFor;
 		stallUntil = std::max(stallUntil, g_network->now() + stallFor);
 		// random stall duration in ms (chosen once)
-		stallDuration = 0.001 * deterministicRandom()->randomInt(100, 500);
+		stallDuration = 0.001 * deterministicRandom()->randomInt(1, 5);
 		throttlePeriod = throttleFor;
 		throttleUntil = std::max(throttleUntil, g_network->now() + throttleFor);
 		TraceEvent("SetDiskFailure")
@@ -727,7 +727,7 @@ struct DiskFailureInjector {
 	double getThrottleDelay() {
 		// If we are in the throttle period, insert a random delay (in ms)
 		if ((throttleUntil - g_network->now()) > 0.0)
-			return (0.001 * deterministicRandom()->randomInt(100, 500));
+			return (0.001 * deterministicRandom()->randomInt(1, 5));
 
 		return 0.0;
 	}

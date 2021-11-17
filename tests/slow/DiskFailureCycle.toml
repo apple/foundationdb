@@ -1,4 +1,3 @@
-[configuration]
 buggify = false
 minimumReplication = 3
 minimumRegions = 3
