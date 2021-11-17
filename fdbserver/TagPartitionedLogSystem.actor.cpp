@@ -595,7 +595,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 		    .detail("End", end)
 		    .detail("BestLogs", localSets[bestSet]->logServerString());
 		return makeReference<ILogSystem::SetPeekCursor>(
-		    localSets, bestSet, localSets[bestSet]->bestLocationFor(tag), tag, begin, end, parallelGetMore);
+		    localSets, bestSet, localSets[bestSet]->bestLocationFor(tag), tag, begin, end, parallelGetMore, dbgid);
 	} else {
 		std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
@@ -607,7 +607,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 			    .detail("End", end)
 			    .detail("BestLogs", localSets[bestSet]->logServerString());
 			cursors.push_back(makeReference<ILogSystem::SetPeekCursor>(
-			    localSets, bestSet, localSets[bestSet]->bestLocationFor(tag), tag, lastBegin, end, parallelGetMore));
+			    localSets, bestSet, localSets[bestSet]->bestLocationFor(tag), tag, lastBegin, end, parallelGetMore, dbgid));
 		}
 		for (int i = 0; begin < lastBegin; i++) {
 			if (i == oldLogData.size()) {
@@ -678,7 +678,8 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 					                                             tag,
 					                                             thisBegin,
 					                                             std::min(lastBegin, end),
-					                                             parallelGetMore));
+					                                             parallelGetMore,
+																 dbgid));
 					epochEnds.push_back(LogMessageVersion(std::min(lastBegin, end)));
 				}
 				lastBegin = thisBegin;
@@ -1219,7 +1220,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID db
 			// FIXME: do this merge on one of the logs in the other data center to avoid sending multiple copies
 			// across the WAN
 			return makeReference<ILogSystem::SetPeekCursor>(
-			    localSets, bestSet, localSets[bestSet]->bestLocationFor(tag), tag, begin, getPeekEnd(), true);
+			    localSets, bestSet, localSets[bestSet]->bestLocationFor(tag), tag, begin, getPeekEnd(), true, dbgid);
 		} else {
 			int bestPrimarySet = -1;
 			int bestSatelliteSet = -1;
@@ -1297,7 +1298,8 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID db
 			                                                begin,
 			                                                firstOld && recoveredAt.present() ? recoveredAt.get() + 1
 			                                                                                  : old.epochEnd,
-			                                                true);
+			                                                true,
+															dbgid);
 		}
 		firstOld = false;
 	}

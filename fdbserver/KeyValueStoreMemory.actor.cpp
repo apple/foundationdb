@@ -480,6 +480,8 @@ private:
 				loop {
 					{
 						TraceEvent("KVSMemRecoveryLoop", self->id)
+						    .detail("SnapshotNextKey", uncommittedNextKey)
+						    .detail("SnapshotPrvKey", uncommittedPrevSnapshotEnd)
 						    .detail("SnapshotEndLocation", uncommittedSnapshotEnd)
 						    .detail("NextReadLoc", self->log->getNextReadLocation());
 

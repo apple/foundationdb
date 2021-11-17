@@ -61,6 +61,7 @@
 #include "fdbclient/KeyBackedTypes.h"
 #include "flow/Util.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/flow.h"
 
 void failAfter(Future<Void> trigger, Endpoint e);
 
@@ -3179,6 +3180,7 @@ public:
 	bool gotProcessClasses;
 	bool gotFullyRecoveredConfig;
 	bool shouldCommitSuicide;
+	bool killOnce;
 	Optional<Standalone<StringRef>> masterProcessId;
 	Optional<Standalone<StringRef>> clusterControllerProcessId;
 	Optional<Standalone<StringRef>> clusterControllerDcId;
@@ -3258,7 +3260,7 @@ public:
 	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
 	                      LocalityData const& locality,
 	                      ServerCoordinators const& coordinators)
-	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), shouldCommitSuicide(false),
+	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), shouldCommitSuicide(false), killOnce(false),
 	    clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
 	    ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), startTime(now()),
 	    goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0),
@@ -5353,6 +5355,19 @@ ACTOR Future<Void> handleLeaderReplacement(Reference<ClusterControllerRecovery::
 	}
 }
 
+ACTOR Future<Void> waitForKill(Reference<ClusterControllerRecovery::ClusterRecoveryData> self) {
+	if (self->controllerData->killOnce)
+		return Never();
+	while (true) {
+		if (now() < 600) {
+			wait(delay(1));
+		} else {
+			self->controllerData->killOnce = true;
+			throw master_recovery_failed();
+		}
+	}
+}
+
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ClusterControllerData::DBInfo* db,
                                         ServerCoordinators coordinators,
@@ -5449,6 +5464,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				}
 				when(wait(collection)) { throw internal_error(); }
 				when(wait(handleLeaderReplacement(recoveryData, leaderFail))) { throw internal_error(); }
+				when(wait(waitForKill(recoveryData))) {}
 			}
 			// failed master (better master exists) could happen while change-coordinators request processing is
 			// in-progress

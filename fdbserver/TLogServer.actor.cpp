@@ -1614,7 +1614,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			    .detail("LogId", logData->logId)
 			    .detail("Tag", reqTag.toString())
 			    .detail("Begin", reqBegin)
-			    .detail("PeekId", peekId)
+			    .detail("PeekId", peekId.toString())
 			    .detail("Sequence", sequence);
 
 			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS &&
@@ -1659,7 +1659,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			    .detail("LogId", logData->logId)
 			    .detail("Tag", reqTag.toString())
 			    .detail("Begin", reqBegin)
-			    .detail("PeekId", peekId)
+			    .detail("PeekId", peekId.toString())
 			    .detail("Sequence", sequence)
 				.error(e, true);
 

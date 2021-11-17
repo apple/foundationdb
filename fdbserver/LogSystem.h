@@ -337,6 +337,7 @@ struct ILogSystem {
 		bool hasNextMessage;
 		bool useBestSet;
 		UID randomID;
+		Optional<UID> debugId;
 		Future<Void> more;
 
 		SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
@@ -345,7 +346,8 @@ struct ILogSystem {
 		              Tag tag,
 		              Version begin,
 		              Version end,
-		              bool parallelGetMore);
+		              bool parallelGetMore,
+					  Optional<UID> dbgId);
 		SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
 		              std::vector<std::vector<Reference<IPeekCursor>>> const& serverCursors,
 		              LogMessageVersion const& messageVersion,
