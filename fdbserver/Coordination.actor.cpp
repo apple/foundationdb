@@ -500,7 +500,11 @@ struct LeaderRegisterCollection {
 		return i->value;
 	}
 
-	ACTOR static Future<Void> setForward(LeaderRegisterCollection* self, KeyRef key, ClusterConnectionString conn) {
+	ACTOR static Future<Void> setForward(LeaderRegisterCollection* self,
+	                                     KeyRef key,
+	                                     ClusterConnectionString conn,
+	                                     ForwardRequest req,
+	                                     UID id) {
 		LeaderInfo forwardInfo;
 		forwardInfo.forward = true;
 		forwardInfo.serializedInfo = conn.toString();
@@ -508,6 +512,7 @@ struct LeaderRegisterCollection {
 		OnDemandStore& store = *self->pStore;
 		store->set(KeyValueRef(key.withPrefix(fwdKeys.begin), conn.toString()));
 		wait(store->commit());
+		self->getInterface(req.key, id).forward.send(req);
 		return Void();
 	}
 
@@ -600,9 +605,8 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 			if (forward.present())
 				req.reply.send(Void());
 			else {
-				forwarders.add(
-				    LeaderRegisterCollection::setForward(&regs, req.key, ClusterConnectionString(req.conn.toString())));
-				regs.getInterface(req.key, id).forward.send(req);
+				forwarders.add(LeaderRegisterCollection::setForward(
+				    &regs, req.key, ClusterConnectionString(req.conn.toString()), req, id));
 			}
 		}
 		when(wait(forwarders.getResult())) {
