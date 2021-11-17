@@ -109,7 +109,8 @@ rocksdb::ReadOptions getReadOptions() {
 }
 
 void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
-	TraceEvent e(SevError, "RocksDBError");
+	auto level = status.IsTimedOut() ? SevWarn : SevError;
+	TraceEvent e(level, "RocksDBError");
 	e.detail("Error", status.ToString()).detail("Method", method).detail("RocksDBSeverity", status.severity());
 	if (status.IsIOError()) {
 		e.detail("SubCode", status.subcode());
@@ -356,7 +357,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			} else if (s.IsNotFound()) {
 				a.result.send(Optional<Value>());
 			} else {
-				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValue");
+				logRocksDBError(s, "ReadValue");
 				a.result.sendError(statusToError(s));
 			}
 		}
