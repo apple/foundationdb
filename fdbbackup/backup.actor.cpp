@@ -182,7 +182,7 @@ enum {
 // Top level binary commands.
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_VERSION, "-v", SO_NONE },
 	                                  { OPT_VERSION, "--version", SO_NONE },
-	                                  { OPT_BUILD_FLAGS, "--build_flags", SO_NONE },
+	                                  { OPT_BUILD_FLAGS, "--build-flags", SO_NONE },
 	                                  { OPT_HELP, "-?", SO_NONE },
 	                                  { OPT_HELP, "-h", SO_NONE },
 	                                  { OPT_HELP, "--help", SO_NONE },
@@ -194,26 +194,26 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	{ OPT_VERSION, "--version", SO_NONE },
 	{ OPT_VERSION, "-v", SO_NONE },
-	{ OPT_BUILD_FLAGS, "--build_flags", SO_NONE },
+	{ OPT_BUILD_FLAGS, "--build-flags", SO_NONE },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_LOCALITY, "--locality_", SO_REQ_SEP },
+	{ OPT_LOCALITY, "--locality-", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -225,7 +225,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_WAITFORDONE, "-w", SO_NONE },
 	{ OPT_WAITFORDONE, "--waitfordone", SO_NONE },
 	{ OPT_NOSTOPWHENDONE, "-z", SO_NONE },
@@ -234,10 +234,10 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	// Enable "-p" option after GA
 	// { OPT_USE_PARTITIONED_LOG, "-p",                 SO_NONE },
-	{ OPT_USE_PARTITIONED_LOG, "--partitioned_log_experimental", SO_NONE },
+	{ OPT_USE_PARTITIONED_LOG, "--partitioned-log-experimental", SO_NONE },
 	{ OPT_SNAPSHOTINTERVAL, "-s", SO_REQ_SEP },
-	{ OPT_SNAPSHOTINTERVAL, "--snapshot_interval", SO_REQ_SEP },
-	{ OPT_INITIAL_SNAPSHOT_INTERVAL, "--initial_snapshot_interval", SO_REQ_SEP },
+	{ OPT_SNAPSHOTINTERVAL, "--snapshot-interval", SO_REQ_SEP },
+	{ OPT_INITIAL_SNAPSHOT_INTERVAL, "--initial-snapshot-interval", SO_REQ_SEP },
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
@@ -246,7 +246,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_DRYRUN, "--dryrun", SO_NONE },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -257,10 +257,10 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
-	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
-	{ OPT_ENCRYPTION_KEY_FILE, "--encryption_key_file", SO_REQ_SEP },
+	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -283,18 +283,18 @@ CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
-	{ OPT_MOD_VERIFY_UID, "--verify_uid", SO_REQ_SEP },
+	{ OPT_MOD_VERIFY_UID, "--verify-uid", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "-s", SO_REQ_SEP },
-	{ OPT_SNAPSHOTINTERVAL, "--snapshot_interval", SO_REQ_SEP },
-	{ OPT_MOD_ACTIVE_INTERVAL, "--active_snapshot_interval", SO_REQ_SEP },
+	{ OPT_SNAPSHOTINTERVAL, "--snapshot-interval", SO_REQ_SEP },
+	{ OPT_MOD_ACTIVE_INTERVAL, "--active-snapshot-interval", SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
 };
@@ -304,14 +304,14 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_ERRORLIMIT, "-e", SO_REQ_SEP },
 	{ OPT_ERRORLIMIT, "--errorlimit", SO_REQ_SEP },
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -323,7 +323,7 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_JSON, "--json", SO_NONE },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -335,12 +335,12 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -351,7 +351,7 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -363,10 +363,10 @@ CSimpleOpt::SOption g_rgBackupCleanupOptions[] = {
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -377,9 +377,9 @@ CSimpleOpt::SOption g_rgBackupCleanupOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
-	{ OPT_DELETE_DATA, "--delete_data", SO_NONE },
-	{ OPT_MIN_CLEANUP_SECONDS, "--min_cleanup_seconds", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
+	{ OPT_DELETE_DATA, "--delete-data", SO_NONE },
+	{ OPT_MIN_CLEANUP_SECONDS, "--min-cleanup-seconds", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -391,14 +391,14 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_WAITFORDONE, "-w", SO_NONE },
 	{ OPT_WAITFORDONE, "--waitfordone", SO_NONE },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -409,7 +409,7 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -421,7 +421,7 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_NOSTOPWHENDONE, "-z", SO_NONE },
@@ -439,7 +439,7 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -451,10 +451,10 @@ CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -465,7 +465,7 @@ CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -477,12 +477,12 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -493,16 +493,16 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	{ OPT_FORCE, "-f", SO_NONE },
 	{ OPT_FORCE, "--force", SO_NONE },
-	{ OPT_EXPIRE_RESTORABLE_AFTER_VERSION, "--restorable_after_version", SO_REQ_SEP },
-	{ OPT_EXPIRE_RESTORABLE_AFTER_DATETIME, "--restorable_after_timestamp", SO_REQ_SEP },
-	{ OPT_EXPIRE_BEFORE_VERSION, "--expire_before_version", SO_REQ_SEP },
-	{ OPT_EXPIRE_BEFORE_DATETIME, "--expire_before_timestamp", SO_REQ_SEP },
-	{ OPT_EXPIRE_MIN_RESTORABLE_DAYS, "--min_restorable_days", SO_REQ_SEP },
-	{ OPT_EXPIRE_DELETE_BEFORE_DAYS, "--delete_before_days", SO_REQ_SEP },
+	{ OPT_EXPIRE_RESTORABLE_AFTER_VERSION, "--restorable-after-version", SO_REQ_SEP },
+	{ OPT_EXPIRE_RESTORABLE_AFTER_DATETIME, "--restorable-after-timestamp", SO_REQ_SEP },
+	{ OPT_EXPIRE_BEFORE_VERSION, "--expire-before-version", SO_REQ_SEP },
+	{ OPT_EXPIRE_BEFORE_DATETIME, "--expire-before-timestamp", SO_REQ_SEP },
+	{ OPT_EXPIRE_MIN_RESTORABLE_DAYS, "--min-restorable-days", SO_REQ_SEP },
+	{ OPT_EXPIRE_DELETE_BEFORE_DAYS, "--delete-before-days", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -517,7 +517,7 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -528,7 +528,7 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -541,12 +541,12 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -557,10 +557,10 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	{ OPT_DESCRIBE_DEEP, "--deep", SO_NONE },
-	{ OPT_DESCRIBE_TIMESTAMPS, "--version_timestamps", SO_NONE },
+	{ OPT_DESCRIBE_TIMESTAMPS, "--version-timestamps", SO_NONE },
 	{ OPT_JSON, "--json", SO_NONE },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -573,7 +573,7 @@ CSimpleOpt::SOption g_rgBackupDumpOptions[] = {
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
-	{ OPT_CLUSTERFILE, "--cluster_file", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
@@ -588,8 +588,8 @@ CSimpleOpt::SOption g_rgBackupDumpOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	{ OPT_DUMP_BEGIN, "--begin", SO_REQ_SEP },
 	{ OPT_DUMP_END, "--end", SO_REQ_SEP },
 #ifndef TLS_DISABLED
@@ -603,10 +603,10 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_BASEURL, "-b", SO_REQ_SEP },
-	{ OPT_BASEURL, "--base_url", SO_REQ_SEP },
+	{ OPT_BASEURL, "--base-url", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -617,8 +617,8 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -629,16 +629,16 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_RESTORE_TIMESTAMP, "--query_restore_timestamp", SO_REQ_SEP },
+	{ OPT_RESTORE_TIMESTAMP, "--query-restore-timestamp", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "-qrv", SO_REQ_SEP },
-	{ OPT_RESTORE_VERSION, "--query_restore_version", SO_REQ_SEP },
+	{ OPT_RESTORE_VERSION, "--query-restore-version", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS_FILTER, "-k", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS_FILTER, "--keys", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -651,8 +651,8 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -664,13 +664,13 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_RESTORE_CLUSTERFILE_DEST, "--dest_cluster_file", SO_REQ_SEP },
-	{ OPT_RESTORE_CLUSTERFILE_ORIG, "--orig_cluster_file", SO_REQ_SEP },
+	{ OPT_RESTORE_CLUSTERFILE_DEST, "--dest-cluster-file", SO_REQ_SEP },
+	{ OPT_RESTORE_CLUSTERFILE_ORIG, "--orig-cluster-file", SO_REQ_SEP },
 	{ OPT_RESTORE_TIMESTAMP, "--timestamp", SO_REQ_SEP },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	{ OPT_RESTORECONTAINER, "-r", SO_REQ_SEP },
-	{ OPT_PREFIX_ADD, "--add_prefix", SO_REQ_SEP },
-	{ OPT_PREFIX_REMOVE, "--remove_prefix", SO_REQ_SEP },
+	{ OPT_PREFIX_ADD, "--add-prefix", SO_REQ_SEP },
+	{ OPT_PREFIX_REMOVE, "--remove-prefix", SO_REQ_SEP },
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
@@ -681,7 +681,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_RESTORE_VERSION, "-v", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -695,11 +695,11 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
-	{ OPT_RESTORE_BEGIN_VERSION, "--begin_version", SO_REQ_SEP },
-	{ OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY, "--inconsistent_snapshot_only", SO_NONE },
-	{ OPT_ENCRYPTION_KEY_FILE, "--encryption_key_file", SO_REQ_SEP },
+	{ OPT_RESTORE_BEGIN_VERSION, "--begin-version", SO_REQ_SEP },
+	{ OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY, "--inconsistent-snapshot-only", SO_NONE },
+	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -717,15 +717,15 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
 	{ OPT_VERSION, "--version", SO_NONE },
 	{ OPT_VERSION, "-v", SO_NONE },
-	{ OPT_BUILD_FLAGS, "--build_flags", SO_NONE },
+	{ OPT_BUILD_FLAGS, "--build-flags", SO_NONE },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
-	{ OPT_LOCALITY, "--locality_", SO_REQ_SEP },
+	{ OPT_LOCALITY, "--locality-", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
@@ -752,7 +752,7 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -763,7 +763,7 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -784,7 +784,7 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -795,7 +795,7 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -814,7 +814,7 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -826,7 +826,7 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -847,7 +847,7 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -858,7 +858,7 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -875,7 +875,7 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -886,7 +886,7 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
