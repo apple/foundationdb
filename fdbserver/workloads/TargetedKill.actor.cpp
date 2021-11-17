@@ -32,19 +32,24 @@
 struct TargetedKillWorkload : TestWorkload {
 	std::string machineToKill;
 	bool enabled, killAllMachineProcesses;
+	int numKillStorages;
 	double killAt;
+	bool reboot;
+	double suspendDuration;
 
 	TargetedKillWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 		killAt = getOption(options, LiteralStringRef("killAt"), 5.0);
+		reboot = getOption(options, LiteralStringRef("reboot"), false);
+		suspendDuration = getOption(options, LiteralStringRef("suspendDuration"), 1.0);
 		machineToKill = getOption(options, LiteralStringRef("machineToKill"), LiteralStringRef("master")).toString();
 		killAllMachineProcesses = getOption(options, LiteralStringRef("killWholeMachine"), false);
+		numKillStorages = getOption(options, LiteralStringRef("numKillStorages"), 1);
 	}
 
 	std::string description() const override { return "TargetedKillWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
-		TraceEvent("StartTargetedKill").detail("Enabled", enabled);
 		if (enabled)
 			return assassin(cx, this);
 		return Void();
@@ -52,22 +57,30 @@ struct TargetedKillWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(vector<PerfMetric>& m) override {}
 
-	ACTOR Future<Void> killEndpoint(NetworkAddress address, Database cx, TargetedKillWorkload* self) {
+	Future<Void> killEndpoint(vector<WorkerDetails> workers,
+	                          NetworkAddress address,
+	                          Database cx,
+	                          TargetedKillWorkload* self) {
 		if (&g_simulator == g_network) {
 			g_simulator.killInterface(address, ISimulator::KillInstantly);
 			return Void();
 		}
 
-		state vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
-
 		int killed = 0;
+		RebootRequest rbReq;
+		if (self->reboot) {
+			rbReq.waitForDuration = self->suspendDuration;
+		} else {
+			rbReq.waitForDuration = std::numeric_limits<uint32_t>::max();
+		}
 		for (int i = 0; i < workers.size(); i++) {
 			if (workers[i].interf.master.getEndpoint().getPrimaryAddress() == address ||
 			    (self->killAllMachineProcesses &&
 			     workers[i].interf.master.getEndpoint().getPrimaryAddress().ip == address.ip &&
 			     workers[i].processClass != ProcessClass::TesterClass)) {
 				TraceEvent("WorkerKill").detail("TargetedMachine", address).detail("Worker", workers[i].interf.id());
-				workers[i].interf.clientInterface.reboot.send(RebootRequest());
+				workers[i].interf.clientInterface.reboot.send(rbReq);
+				killed++;
 			}
 		}
 
@@ -82,8 +95,13 @@ struct TargetedKillWorkload : TestWorkload {
 	ACTOR Future<Void> assassin(Database cx, TargetedKillWorkload* self) {
 		wait(delay(self->killAt));
 		state vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+		state vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 
-		NetworkAddress machine;
+		state NetworkAddress machine;
+		state NetworkAddress ccAddr;
+		state int killed = 0;
+		state int s = 0;
+		state int j = 0;
 		if (self->machineToKill == "master") {
 			machine = self->dbInfo->get().master.address();
 		} else if (self->machineToKill == "commitproxy") {
@@ -118,13 +136,19 @@ struct TargetedKillWorkload : TestWorkload {
 			}
 		} else if (self->machineToKill == "storage" || self->machineToKill == "ss" ||
 		           self->machineToKill == "storageserver") {
-			int o = deterministicRandom()->randomInt(0, storageServers.size());
-			for (int i = 0; i < storageServers.size(); i++) {
-				StorageServerInterface ssi = storageServers[o];
+			s = deterministicRandom()->randomInt(0, storageServers.size());
+			ccAddr = self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress();
+			for (j = 0; j < storageServers.size(); j++) {
+				StorageServerInterface ssi = storageServers[s];
 				machine = ssi.address();
-				if (machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
-					break;
-				o = ++o % storageServers.size();
+				if (machine != ccAddr) {
+					TraceEvent("IsolatedMark").detail("TargetedMachine", machine).detail("Role", self->machineToKill);
+					wait(self->killEndpoint(workers, machine, cx, self));
+					killed++;
+					if (killed == self->numKillStorages)
+						return Void();
+				}
+				s = ++s % storageServers.size();
 			}
 		} else if (self->machineToKill == "clustercontroller" || self->machineToKill == "cc") {
 			machine = self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress();
@@ -132,7 +156,7 @@ struct TargetedKillWorkload : TestWorkload {
 
 		TraceEvent("IsolatedMark").detail("TargetedMachine", machine).detail("Role", self->machineToKill);
 
-		wait(self->killEndpoint(machine, cx, self));
+		wait(self->killEndpoint(workers, machine, cx, self));
 
 		return Void();
 	}
