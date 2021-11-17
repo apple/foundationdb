@@ -3876,8 +3876,6 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 	        : waitFailureClient(worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME);
 	cluster->updateWorkerList.set(worker.locality.processId(),
 	                              ProcessData(worker.locality, startingClass, worker.stableAddress()));
-	cluster->updateDBInfoEndpoints.insert(worker.updateServerDBInfo.getEndpoint());
-	cluster->updateDBInfo.trigger();
 	// This switching avoids a race where the worker can be added to id_worker map after the workerAvailabilityWatch
 	// fails for the worker.
 	wait(delay(0));
@@ -4301,6 +4299,8 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 			    self->id_worker[w.locality.processId()].watcher,
 			    self->id_worker[w.locality.processId()].details.interf.configBroadcastInterface));
 		}
+		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
+		self->updateDBInfo.trigger();
 		checkOutstandingRequests(self);
 	} else if (info->second.details.interf.id() != w.id() || req.generation >= info->second.gen) {
 		if (!info->second.reply.isSet()) {
@@ -4318,6 +4318,10 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 			self->removedDBInfoEndpoints.insert(info->second.details.interf.updateServerDBInfo.getEndpoint());
 			info->second.details.interf = w;
 			info->second.watcher = workerAvailabilityWatch(w, newProcessClass, self);
+		}
+		if (req.requestDbInfo) {
+			self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
+			self->updateDBInfo.trigger();
 		}
 		if (configBroadcaster != nullptr) {
 			self->addActor.send(
