@@ -547,9 +547,13 @@ private:
 template <class SOCHAR>
 void CSimpleOptTempl<SOCHAR>::SetOptions(const SOption* a_rgOptions) {
 	m_rgOptions = a_rgOptions;
-	// Change all the hyphens to underscores
+	// Change all the hyphens to underscores, except the leading hyphens
 	for (int n = 0; m_rgOptions[n].nId >= 0; ++n) {
-		for (SOCHAR* pszArg = const_cast<SOCHAR*>(m_rgOptions[n].pszArg); pszArg && *pszArg; ++pszArg) {
+		SOCHAR* pszArg = const_cast<SOCHAR*>(m_rgOptions[n].pszArg);
+		while (pszArg && *pszArg && *pszArg == (SOCHAR)'-') {
+			++pszArg;
+		}
+		for (; pszArg && *pszArg; ++pszArg) {
 			if (*pszArg == (SOCHAR)'-') {
 				*pszArg = (SOCHAR)'_';
 			}
@@ -861,12 +865,17 @@ int CSimpleOptTempl<SOCHAR>::LookupOption(const SOCHAR* a_pszOption) const {
 	int nBestMatchLen = 0; // matching characters of best match
 	int nLastMatchLen = 0; // matching characters of last best match
 
-	// Convert the a_pszOption's hyphens to underscores
-	for (SOCHAR* ptr = const_cast<SOCHAR*>(a_pszOption); ptr && *ptr; ++ptr) {
-		if (*ptr == (SOCHAR)'-') {
-			*ptr = (SOCHAR)'_';
+	// Convert the a_pszOption's hyphens to underscores, except the leading hyphens
+	SOCHAR* psz_ptr = const_cast<SOCHAR*>(a_pszOption);
+	while (psz_ptr && *psz_ptr && *psz_ptr == (SOCHAR)'-') {
+		++psz_ptr;
+	}
+	for (; psz_ptr && *psz_ptr; ++psz_ptr) {
+		if (*psz_ptr == (SOCHAR)'-') {
+			*psz_ptr = (SOCHAR)'_';
 		}
 	}
+
 	for (int n = 0; m_rgOptions[n].nId >= 0; ++n) {
 		// the option table must use hyphens as the option character,
 		// the slash character is converted to a hyphen for testing.
@@ -901,18 +910,18 @@ int CSimpleOptTempl<SOCHAR>::CalcMatch(const SOCHAR* a_pszSource, const SOCHAR* 
 
 	// determine the argument type
 	int nArgType = SO_O_ICASE_LONG;
-	if (a_pszSource[0] != '_') {
+	if (a_pszSource[0] != '-') {
 		nArgType = SO_O_ICASE_WORD;
-	} else if (a_pszSource[1] != '_' && !a_pszSource[2]) {
+	} else if (a_pszSource[1] != '-' && !a_pszSource[2]) {
 		nArgType = SO_O_ICASE_SHORT;
 	}
 
 	// match and skip leading hyphens
-	while (*a_pszSource == (SOCHAR)'_' && *a_pszSource == *a_pszTest) {
+	while (*a_pszSource == (SOCHAR)'-' && *a_pszSource == *a_pszTest) {
 		++a_pszSource;
 		++a_pszTest;
 	}
-	if (*a_pszSource == (SOCHAR)'_' || *a_pszTest == (SOCHAR)'_') {
+	if (*a_pszSource == (SOCHAR)'-' || *a_pszTest == (SOCHAR)'-') {
 		return 0;
 	}
 
