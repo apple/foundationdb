@@ -70,7 +70,7 @@ struct VFSAsyncFile {
 		bool e = g_network->global(INetwork::enSQLiteInjectedError) != (flowGlobalType)0;
 		bool f = g_simulator.checkInjectedCorruption();
 		TraceEvent("VFSCheckInjectedError")
-			.detail("InjectedIOError", e)
+		    .detail("InjectedIOError", e)
 		    .detail("InjectedCorruption", f)
 		    .detail("ErrorCode", (int64_t)g_network->global(INetwork::enSQLiteInjectedError))
 		    .backtrace();
