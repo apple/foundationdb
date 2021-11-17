@@ -50,7 +50,6 @@ struct TargetedKillWorkload : TestWorkload {
 	std::string description() const override { return "TargetedKillWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
-		TraceEvent("StartTargetedKill").detail("Enabled", enabled);
 		if (enabled)
 			return assassin(cx, this);
 		return Void();
@@ -142,13 +141,10 @@ struct TargetedKillWorkload : TestWorkload {
 			for (j = 0; j < storageServers.size(); j++) {
 				StorageServerInterface ssi = storageServers[s];
 				machine = ssi.address();
-				if (machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress()) {
+				if (machine != ccAddr) {
 					TraceEvent("IsolatedMark").detail("TargetedMachine", machine).detail("Role", self->machineToKill);
 					wait(self->killEndpoint(workers, machine, cx, self));
 					killed++;
-					TraceEvent("SentKillEndpoint")
-					    .detail("Killed", killed)
-					    .detail("NumKillStorages", self->numKillStorages);
 					if (killed == self->numKillStorages)
 						return Void();
 				}
