@@ -1028,6 +1028,9 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	virtual void cancel() {}
 
 	void addCallbackAndDelFutureRef(SingleCallback<T>* cb) {
+		if (SingleCallback<T>::next != this) {
+			TraceEvent("hfu5NotEqual");
+		}
 		ASSERT(SingleCallback<T>::next == this);
 		cb->insert(this);
 	}
@@ -1063,6 +1066,9 @@ public:
 		return queue->isError();
 	}
 	void addCallbackAndClear(SingleCallback<T>* cb) {
+		if (queue == 0 || queue->isError()) {
+			TraceEvent("hfu5ErrorQueue");
+		}
 		queue->addCallbackAndDelFutureRef(cb);
 		queue = 0;
 	}

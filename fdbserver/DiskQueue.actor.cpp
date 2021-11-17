@@ -1555,11 +1555,11 @@ public:
 	Future<Void> onClosed() override { return queue->onClosed(); }
 	void dispose() override {
 		queue->dispose();
-		// delete this;
+		delete this;
 	}
 	void close() override {
 		queue->close();
-		// delete this;
+		delete this;
 	}
 
 	// IDiskQueue

@@ -1352,7 +1352,7 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 				logData->removeStorageTeam(t);
 			}
 
-			self->addActors.send(tLogCommit(logData->tlogGroupData, req, logData));
+			logData->addActor.send(tLogCommit(logData->tlogGroupData, req, logData));
 		}
 		when(TLogPeekRequest req = waitNext(tli.peek.getFuture())) {
 			auto tlogGroup = activeGeneration->find(req.tLogGroupID);
@@ -1414,7 +1414,7 @@ ACTOR Future<Void> tLogCore(
 	}
 
 	TraceEvent("TLogCore", self->dbgid).detail("WorkerID", self->workerID);
-	self->addActors.send(self->removed);
+	// self->addActors.send(self->removed);
 
 	// FIXME: update tlogMetrics to include new information, or possibly only have one copy for the shared instance
 	TraceEvent("hfu5TLogCore2222").detail("removed", self->removed.isValid());
@@ -1428,11 +1428,10 @@ ACTOR Future<Void> tLogCore(
 	startRole(Role::TRANSACTION_LOG, tli.id(), self->workerID, { { "SharedTLog", self->dbgid.shortString() } });
 
 	// TODO: remove this so that a log generation is only tracked once
-	self->addActors.send(traceRole(Role::TRANSACTION_LOG, tli.id()));
-	TraceEvent("hfu5PassivelyPull");
-	self->addActors.send(serveTLogInterface_PassivelyPull(self, tli, activeGeneration));
-	self->addActors.send(waitFailureServer(tli.waitFailure.getFuture()));
-	// line below error
+	// self->addActors.send(traceRole(Role::TRANSACTION_LOG, tli.id()));
+	// self->addActors.send(serveTLogInterface_PassivelyPull(self, tli, activeGeneration));
+	// self->addActors.send(waitFailureServer(tli.waitFailure.getFuture()));
+	// line below error, only in GDB, not when running directly.
 	TraceEvent("hfu5TLogCorepppppppppp");
 	state Future<Void> error = actorCollection(self->addActors.getFuture());
 	TraceEvent("hfu5TLogCoreqqqqqqqq");
@@ -1493,22 +1492,22 @@ bool tlogTerminated(Reference<TLogGroupData> self,
 			.detail("error", e.code())
 			.detail("persistentQueueNull", persistentQueue == 0)
 			.detail("persistentDataNull", persistentData == 0);
-		// persistentData->dispose();
+		persistentData->dispose();
 		TraceEvent("hfu5TLogDispose3333").detail("group", self->tlogGroupID);
-		// persistentQueue->dispose();
+		persistentQueue->dispose();
 	} else {
 		TraceEvent("hfu5TLogTerminated2222").detail("group", self->tlogGroupID)
 			.detail("error", e.code())
 			.detail("persistentQueueNull", persistentQueue == 0)
 			.detail("persistentDataNull", persistentData == 0);
-		// persistentData->close();
+		persistentData->close();
 		TraceEvent("hfu5TLogTerminated3333").detail("group", self->tlogGroupID)
 			.detail("error", e.code());
-		// persistentQueue->close();
-		TraceEvent("hfu5TLogTerminate多4444").detail("group", self->tlogGroupID)
+		persistentQueue->close();
+		TraceEvent("hfu5TLogTerminate4444").detail("group", self->tlogGroupID)
 			.detail("error", e.code());
-
 	}
+	TraceEvent("hfu5TLogTerminatedFinish").detail("group", self->tlogGroupID).detail("error", e.code());
 
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
 	    e.code() == error_code_file_not_found || e.code() == error_code_operation_cancelled) {
@@ -1828,6 +1827,8 @@ ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
 		it.second->recoveryComplete.sendError(end_of_stream());
 		// in old code path, tLogCore is called for each generation for each tlog.
 		// why we need to start a tLogCore for each generation of of each group?
+		TraceEvent("hfu5BeforeTLogCore1").detail("recruitment", req.recruitmentID).detail("id", it.first);
+
 		self->sharedActors.send(tLogCore(serverData, activeGeneration, id_interf[it.first]));
 	}
 
@@ -1846,8 +1847,8 @@ ACTOR Future<Void> tlogGroupRecovery(Reference<TLogGroupData> self,
                                      Reference<TLogServerData> serverData,
                                      bool restoreFromDisk,
                                      Promise<Void> recovered) {
-	TraceEvent("hfu5Restore").detail("disk", restoreFromDisk);
 	if (restoreFromDisk) {
+		TraceEvent("hfu5Restore").detail("disk", restoreFromDisk);
 		// i do not want this call to be blocked because i have batch waiting, does it work now?
 		wait(restorePersistentState(self, req, group, locality, serverData));
 	} else {
@@ -1943,7 +1944,7 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializePtxnTLogR
 
 	req.reply.send(recruited);
 
-	TraceEvent("hfu5BeforeTLogCore2222").detail("recruitment", req.recruitmentID)
+	TraceEvent("hfu5BeforeTLogCore2").detail("recruitment", req.recruitmentID)
 				.detail("size", activeGeneration->size());
 
 	wait(tLogCore(self, activeGeneration, recruited));
