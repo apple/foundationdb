@@ -44,4 +44,8 @@ Future<StatusReply> clusterGetStatus(
     std::vector<NetworkAddress> const& incompatibleConnections,
     Version const& datacenterVersionDifference);
 
+struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
+Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
+    std::vector<WorkerDetails> const& workers,
+    std::string const& eventName);
 #endif
