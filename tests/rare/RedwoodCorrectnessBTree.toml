@@ -5,5 +5,5 @@ startDelay = 0
 
     [[test.workload]]
     testName = 'UnitTests'
-    maxTestCases = 0
-    testsMatching = '/redwood/correctness/btree'
+    maxTestCases = 1
+    testsMatching = 'Lredwood/correctness/btree'

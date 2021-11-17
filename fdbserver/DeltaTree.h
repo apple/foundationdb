@@ -94,7 +94,7 @@ static int __lessOrEqualPowerOfTwo(unsigned int n) {
 }
 */
 
-static int perfectSubtreeSplitPoint(int subtree_size) {
+static inline int perfectSubtreeSplitPoint(int subtree_size) {
 	// return the inorder index of the root node in a subtree of the given size
 	// consistent with the resulting binary search tree being "perfect" (having minimal height
 	// and all missing nodes as far right as possible).
@@ -103,7 +103,7 @@ static int perfectSubtreeSplitPoint(int subtree_size) {
 	return std::min(s * 2 + 1, subtree_size - s - 1);
 }
 
-static int perfectSubtreeSplitPointCached(int subtree_size) {
+static inline int perfectSubtreeSplitPointCached(int subtree_size) {
 	static uint16_t* points = nullptr;
 	static const int max = 500;
 	if (points == nullptr) {
@@ -239,19 +239,19 @@ public:
 
 		// construct root node
 		DecodedNode(Node* raw, const T* prev, const T* next, Arena& arena, bool large)
-		  : raw(raw), parent(nullptr), otherAncestor(nullptr), leftChild(nullptr), rightChild(nullptr), prev(prev),
-		    next(next), item(raw->delta(large).apply(raw->delta(large).getPrefixSource() ? *prev : *next, arena)),
-		    large(large) {
+		  : large(large), raw(raw), parent(nullptr), otherAncestor(nullptr), leftChild(nullptr), rightChild(nullptr),
+		    prev(prev), next(next),
+		    item(raw->delta(large).apply(raw->delta(large).getPrefixSource() ? *prev : *next, arena)) {
 			// printf("DecodedNode1 raw=%p delta=%s\n", raw, raw->delta(large).toString().c_str());
 		}
 
 		// Construct non-root node
 		// wentLeft indicates that we've gone left to get to the raw node.
 		DecodedNode(Node* raw, DecodedNode* parent, bool wentLeft, Arena& arena)
-		  : parent(parent), large(parent->large),
-		    otherAncestor(wentLeft ? parent->getPrevAncestor() : parent->getNextAncestor()),
-		    prev(wentLeft ? parent->prev : &parent->item), next(wentLeft ? &parent->item : parent->next),
-		    leftChild(nullptr), rightChild(nullptr), raw(raw),
+		  : large(parent->large), raw(raw), parent(parent),
+		    otherAncestor(wentLeft ? parent->getPrevAncestor() : parent->getNextAncestor()), leftChild(nullptr),
+		    rightChild(nullptr), prev(wentLeft ? parent->prev : &parent->item),
+		    next(wentLeft ? &parent->item : parent->next),
 		    item(raw->delta(large).apply(raw->delta(large).getPrefixSource() ? *prev : *next, arena)) {
 			// printf("DecodedNode2 raw=%p delta=%s\n", raw, raw->delta(large).toString().c_str());
 		}
@@ -349,7 +349,7 @@ public:
 		}
 	};
 
-	struct Cursor;
+	class Cursor;
 
 	// A Mirror is an accessor for a DeltaTree which allows insertion and reading.  Both operations are done
 	// using cursors which point to and share nodes in an tree that is built on-demand and mirrors the compressed
@@ -515,7 +515,8 @@ public:
 
 	// Cursor provides a way to seek into a DeltaTree and iterate over its contents
 	// All Cursors from a Mirror share the same decoded node 'cache' (tree of DecodedNodes)
-	struct Cursor {
+	class Cursor {
+	public:
 		Cursor() : mirror(nullptr), node(nullptr) {}
 
 		Cursor(Mirror* r) : mirror(r), node(mirror->root) {}
@@ -1134,12 +1135,12 @@ public:
 	struct Cursor {
 		Cursor() : cache(nullptr), nodeIndex(-1) {}
 
-		Cursor(DecodeCache* cache, DeltaTree2* tree) : cache(cache), tree(tree), nodeIndex(-1) {}
+		Cursor(DecodeCache* cache, DeltaTree2* tree) : tree(tree), cache(cache), nodeIndex(-1) {}
 
-		Cursor(DecodeCache* cache, DeltaTree2* tree, int nodeIndex) : cache(cache), tree(tree), nodeIndex(nodeIndex) {}
+		Cursor(DecodeCache* cache, DeltaTree2* tree, int nodeIndex) : tree(tree), cache(cache), nodeIndex(nodeIndex) {}
 
 		// Copy constructor does not copy item because normally a copied cursor will be immediately moved.
-		Cursor(const Cursor& c) : cache(c.cache), tree(c.tree), nodeIndex(c.nodeIndex) {}
+		Cursor(const Cursor& c) : tree(c.tree), cache(c.cache), nodeIndex(c.nodeIndex) {}
 
 		Cursor next() const {
 			Cursor c = *this;
@@ -1225,7 +1226,11 @@ public:
 			return item.get();
 		}
 
-		void switchTree(DeltaTree2* newTree) { tree = newTree; }
+		void switchTree(DeltaTree2* newTree) {
+			tree = newTree;
+			// Reset item because it may point into tree memory
+			item.reset();
+		}
 
 		// If the cursor is valid, return a reference to the cursor's internal T.
 		// Otherwise, returns a reference to the cache's upper boundary.
