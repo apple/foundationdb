@@ -122,26 +122,28 @@ ACTOR Future<Void> simulationStartServer() {
 	}
 }
 
+/*
 // Runs on an interval, printing debug information and performing other
 // connection tasks.
 ACTOR Future<Void> traceLog(int* pendingMessages, bool* sendError) {
-	state bool sendErrorReset = false;
+    state bool sendErrorReset = false;
 
-	loop {
-		TraceEvent("TracingSpanQueueSize").detail("PendingMessages", *pendingMessages);
+    loop {
+        TraceEvent("TracingSpanQueueSize").detail("PendingMessages", *pendingMessages);
 
-		// Wait at least one full loop before attempting to send messages
-		// again.
-		if (sendErrorReset) {
-			sendErrorReset = false;
-			*sendError = false;
-		} else if (*sendError) {
-			sendErrorReset = true;
-		}
+        // Wait at least one full loop before attempting to send messages
+        // again.
+        if (sendErrorReset) {
+            sendErrorReset = false;
+            *sendError = false;
+        } else if (*sendError) {
+            sendErrorReset = true;
+        }
 
-		wait(delay(kQueueSizeLogInterval));
-	}
+        wait(delay(kQueueSizeLogInterval));
+    }
 }
+*/
 
 struct UDPTracer : public ITracer {
 protected:

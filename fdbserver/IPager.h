@@ -26,7 +26,7 @@
 
 #include "flow/flow.h"
 #include "fdbclient/FDBTypes.h"
-#include "flow/crc32c.h"
+#include "flow/xxhash.h"
 
 #ifndef VALGRIND
 #define VALGRIND_MAKE_MEM_UNDEFINED(x, y)
@@ -101,7 +101,7 @@ public:
 
 	uint8_t* mutate() { return (uint8_t*)buffer; }
 
-	typedef uint32_t Checksum;
+	typedef XXH64_hash_t Checksum;
 
 	// Usable size, without checksum
 	int size() const { return logicalSize - sizeof(Checksum); }
@@ -143,7 +143,7 @@ public:
 
 	Checksum& getChecksum() { return *(Checksum*)(buffer + size()); }
 
-	Checksum calculateChecksum(LogicalPageID pageID) { return crc32c_append(pageID, buffer, size()); }
+	Checksum calculateChecksum(LogicalPageID pageID) { return XXH3_64bits_withSeed(buffer, size(), pageID); }
 
 	void updateChecksum(LogicalPageID pageID) { getChecksum() = calculateChecksum(pageID); }
 
