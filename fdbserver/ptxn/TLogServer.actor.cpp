@@ -507,9 +507,10 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 
 		StorageTeamData(StorageTeamData&& r) noexcept
 		  : storageTeamId(r.storageTeamId), tags(r.tags), versionMessages(std::move(r.versionMessages)),
-		    popped(r.popped), poppedLocation(r.poppedLocation), persistentPopped(r.persistentPopped),
-		    versionForPoppedLocation(r.versionForPoppedLocation), poppedRecently(r.poppedRecently),
-		    unpoppedRecovered(r.unpoppedRecovered), nothingPersistent(r.nothingPersistent) {}
+		    nothingPersistent(r.nothingPersistent), poppedRecently(r.poppedRecently), popped(r.popped),
+		    persistentPopped(r.persistentPopped), versionForPoppedLocation(r.versionForPoppedLocation),
+		    poppedLocation(r.poppedLocation),
+		    unpoppedRecovered(r.unpoppedRecovered) {}
 		void operator=(StorageTeamData&& r) noexcept {
 			storageTeamId = r.storageTeamId;
 			nothingPersistent = r.nothingPersistent;
@@ -583,8 +584,8 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	// The maximum version that a proxy has told us that is committed (all TLogs have ack'd a commit for this version).
 	Version knownCommittedVersion = 0;
 
-	Version durableKnownCommittedVersion;
-	Version minKnownCommittedVersion;
+	Version durableKnownCommittedVersion = 0;
+	Version minKnownCommittedVersion = 0;
 
 	Version newPersistentDataVersion;
 
@@ -604,7 +605,8 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	Promise<Void> recoveryComplete, committingQueue;
 	Future<Void> terminated;
 
-	Version unrecoveredBefore, recoveredAt;
+	Version unrecoveredBefore = 1;
+	Version recoveredAt = 1;
 
 	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
 
@@ -644,11 +646,10 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	                           int8_t locality,
 	                           DBRecoveryCount epoch,
 	                           const std::string& context)
-	  : tlogGroupData(tlogGroupData), knownCommittedVersion(0), logId(interf.id()), cc("TLog", interf.id().toString()),
-	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), protocolVersion(protocolVersion),
-	    storageTeams(storageTeams), logSystem(new AsyncVar<Reference<ILogSystem>>()), durableKnownCommittedVersion(0),
-	    minKnownCommittedVersion(0), unrecoveredBefore(1), recoveredAt(1),
-	    terminated(tlogGroupData->terminated.getFuture()),
+	  : tlogGroupData(tlogGroupData), storageTeams(storageTeams), cc("TLog", interf.id().toString()),
+	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), logId(interf.id()),
+	    protocolVersion(protocolVersion), terminated(tlogGroupData->terminated.getFuture()),
+	    logSystem(new AsyncVar<Reference<ILogSystem>>()),
 	    // These are initialized differently on init() or recovery
 	    locality(locality), recruitmentID(recruitmentID), logSpillType(logSpillType) {
 		specialCounter(cc, "Version", [this]() { return this->version.get(); });
