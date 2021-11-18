@@ -395,7 +395,8 @@ std::map<ptxn::TLogGroupID, ptxn::SerializedTeamData> LogPushData::getGroupMutat
 // It would be nice that ProxySubsequencedMessageSerializer can be set with
 // serialized data.
 void LogPushData::setGroupMutations(
-    const std::map<ptxn::TLogGroupID, std::unordered_map<ptxn::StorageTeamID, StringRef>>& groupMutations, Version commitVersion) {
+    const std::map<ptxn::TLogGroupID, std::unordered_map<ptxn::StorageTeamID, StringRef>>& groupMutations,
+    Version commitVersion) {
 	for (const auto& [group, teamData] : groupMutations) {
 		if (pGroupMessageBuilders->count(group) == 0) {
 			pGroupMessageBuilders->emplace(group,
