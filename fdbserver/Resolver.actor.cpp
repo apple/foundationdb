@@ -77,7 +77,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 	std::unordered_map<UID, StorageServerInterface> tssMapping;
 	bool forceRecovery = false;
 
-	Reference<TLogGroupCollection> tLogGroupCollection;
+	Reference<TLogGroupCollection> tLogGroupCollection = Reference<TLogGroupCollection>(nullptr);
 	// Each storage server's own team.
 	std::unordered_map<UID, ptxn::StorageTeamID> ssToStorageTeam;
 
