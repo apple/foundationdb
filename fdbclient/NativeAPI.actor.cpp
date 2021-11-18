@@ -6839,9 +6839,11 @@ ACTOR Future<Void> changeFeedWhenAtLatest(ChangeFeedData* self, Version version)
 						}
 						when(wait(lastReturned)) { return Void(); }
 						when(wait(self->refresh.getFuture())) {}
+						when(wait(self->notAtLatest.onChange())) {}
 					}
 				}
 				when(wait(self->refresh.getFuture())) {}
+				when(wait(self->notAtLatest.onChange())) {}
 			}
 		} else {
 			choose {
@@ -7168,6 +7170,10 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				results->refresh.sendError(change_feed_cancelled());
 				throw;
 			}
+			if (results->notAtLatest.get() == 0) {
+				results->notAtLatest.set(1);
+			}
+
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_unknown_change_feed ||
 			    e.code() == error_code_broken_promise) {
