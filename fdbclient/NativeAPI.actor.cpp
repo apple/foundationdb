@@ -28,6 +28,8 @@
 #include <utility>
 #include <vector>
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
+
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/MultiInterface.h"
@@ -7460,8 +7462,8 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 					}
 
 					if (BG_REQUEST_DEBUG) {
-						printf("Doing blob granule request @ %ld\n", endVersion);
-						printf("blob worker assignments:\n");
+						fmt::print("Doing blob granule request @ {}\n", endVersion);
+						fmt::print("blob worker assignments:\n");
 					}
 
 					for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
@@ -7535,12 +7537,12 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 				                                            nullptr));
 
 				if (BG_REQUEST_DEBUG) {
-					printf("Blob granule request for [%s - %s) @ %ld - %ld got reply from %s:\n",
-					       granuleStartKey.printable().c_str(),
-					       granuleEndKey.printable().c_str(),
-					       begin,
-					       endVersion,
-					       workerId.toString().c_str());
+					fmt::print("Blob granule request for [{0} - {1}) @ {2} - {3} got reply from {4}:\n",
+					           granuleStartKey.printable(),
+					           granuleEndKey.printable(),
+					           begin,
+					           endVersion,
+					           workerId.toString());
 				}
 				for (auto& chunk : rep.chunks) {
 					if (BG_REQUEST_DEBUG) {
@@ -7556,11 +7558,11 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 						}
 						printf("  Deltas: (%d)", chunk.newDeltas.size());
 						if (chunk.newDeltas.size() > 0) {
-							printf(" with version [%ld - %ld]",
-							       chunk.newDeltas[0].version,
-							       chunk.newDeltas[chunk.newDeltas.size() - 1].version);
+							fmt::print(" with version [{0} - {1}]",
+							           chunk.newDeltas[0].version,
+							           chunk.newDeltas[chunk.newDeltas.size() - 1].version);
 						}
-						printf("  IncludedVersion: %ld\n", chunk.includedVersion);
+						fmt::print("  IncludedVersion: {}\n", chunk.includedVersion);
 						printf("\n\n");
 					}
 					Arena a;

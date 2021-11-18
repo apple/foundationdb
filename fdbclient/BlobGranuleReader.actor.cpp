@@ -21,6 +21,7 @@
 #include <map>
 #include <vector>
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/BlobGranuleCommon.h"
@@ -97,11 +98,11 @@ ACTOR Future<Arena> readSnapshotFile(Reference<BackupContainerFileSystem> bstore
 		    }
 		}*/
 		if (BG_READ_DEBUG) {
-			printf("Started with %lu rows from snapshot file %s after pruning to [%s - %s)\n",
-			       dataMap->size(),
-			       f.toString().c_str(),
-			       keyRange.begin.printable().c_str(),
-			       keyRange.end.printable().c_str());
+			fmt::print("Started with {0} rows from snapshot file {1} after pruning to [{2} - {3})\n",
+			           dataMap->size(),
+			           f.toString(),
+			           keyRange.begin.printable(),
+			           keyRange.end.printable());
 		}
 
 		return arena;
@@ -143,9 +144,9 @@ ACTOR Future<Standalone<GranuleDeltas>> readDeltaFile(Reference<BackupContainerF
 		// TODO REMOVE sanity check
 		for (int i = 0; i < result.size() - 1; i++) {
 			if (result[i].version > result[i + 1].version) {
-				printf("BG VERSION ORDER VIOLATION IN DELTA FILE: '%ld', '%ld'\n",
-				       result[i].version,
-				       result[i + 1].version);
+				fmt::print("BG VERSION ORDER VIOLATION IN DELTA FILE: '{0}', '{1}'\n",
+				           result[i].version,
+				           result[i + 1].version);
 			}
 			ASSERT(result[i].version <= result[i + 1].version);
 		}
@@ -313,7 +314,7 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 		arena.dependsOn(snapshotArena);
 
 		if (BG_READ_DEBUG) {
-			printf("Applying %lu delta files\n", readDeltaFutures.size());
+			fmt::print("Applying {} delta files\n", readDeltaFutures.size());
 		}
 		for (Future<Standalone<GranuleDeltas>> deltaFuture : readDeltaFutures) {
 			Standalone<GranuleDeltas> result = wait(deltaFuture);

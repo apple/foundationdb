@@ -9708,7 +9708,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	       entriesRead,
 	       cumulativeCommitSize / elapsed / 1e6);
 
-	printf("pageCacheCount: %ld extentCacheCount: %ld\n", pager->getPageCacheCount(), pager->getExtentCacheCount());
+	fmt::print("pageCacheCount: {0} extentCacheCount: {1}\n", pager->getPageCacheCount(), pager->getExtentCacheCount());
 
 	pager->extentCacheClear();
 	m_extentQueue.resetHeadReader();

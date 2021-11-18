@@ -18,9 +18,10 @@
  * limitations under the License.
  */
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
+
 #include "fdbcli/fdbcli.actor.h"
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
@@ -141,7 +142,7 @@ ACTOR Future<bool> changeFeedCommandActor(Database localDb, std::vector<StringRe
 					         waitNext(feedData->mutations.getFuture())) {
 						for (auto& it : res) {
 							for (auto& it2 : it.mutations) {
-								printf("%ld %s\n", it.version, it2.toString().c_str());
+								fmt::print("{0} {1}\n", it.version, it2.toString());
 							}
 						}
 					}

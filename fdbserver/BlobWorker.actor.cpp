@@ -1561,11 +1561,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				ASSERT(startState.parentGranule.present());
 				oldChangeFeedDataComplete = startState.parentGranule.get();
 				if (BW_DEBUG) {
-					printf("Granule [%s - %s) switching to new change feed %s @ %ld\n",
-					       metadata->keyRange.begin.printable().c_str(),
-					       metadata->keyRange.end.printable().c_str(),
-					       startState.granuleID.toString().c_str(),
-					       metadata->bufferedDeltaVersion.get());
+					fmt::print("Granule [{0} - {1}) switching to new change feed {2} @ {3}\n",
+					           metadata->keyRange.begin.printable(),
+					           metadata->keyRange.end.printable(),
+					           startState.granuleID.toString(),
+					           metadata->bufferedDeltaVersion.get());
 				}
 			}
 			justDidRollback = false;
