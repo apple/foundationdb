@@ -1754,7 +1754,7 @@ ACTOR Future<ChangeFeedStreamReply> getChangeFeedMutations(StorageServer* data,
 
 	if (req.end > feed->second->emptyVersion + 1) {
 		for (auto& it : feed->second->mutations) {
-			if (it.version >= req.end || remainingLimitBytes <= 0) {
+			if (it.version >= req.end || it.version > dequeVersion || remainingLimitBytes <= 0) {
 				break;
 			}
 			if (it.version >= req.begin) {
