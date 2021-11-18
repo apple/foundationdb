@@ -51,6 +51,7 @@ var (
 	mainContainerVersion    string
 	currentContainerVersion string
 	additionalEnvFile       string
+	processCount            int
 )
 
 type executionMode string
@@ -78,6 +79,7 @@ func main() {
 	pflag.StringArrayVar(&requiredCopyFiles, "require-not-empty", nil, "When copying this file, exit with an error if the file is empty")
 	pflag.StringVar(&mainContainerVersion, "main-container-version", "", "For sidecar mode, this specifies the version of the main container. If this is equal to the current container version, no files will be copied")
 	pflag.StringVar(&additionalEnvFile, "additional-env-file", "", "A file with additional environment variables to use when interpreting the monitor configuration")
+	pflag.IntVar(&processCount, "process-count", 1, "The number of processes to start")
 	pflag.Parse()
 
 	zapConfig := zap.NewProductionConfig()
@@ -110,7 +112,7 @@ func main() {
 			logger.Error(err, "Error loading additional environment")
 			os.Exit(1)
 		}
-		StartMonitor(logger, fmt.Sprintf("%s/%s", inputDir, monitorConfFile), customEnvironment)
+		StartMonitor(logger, fmt.Sprintf("%s/%s", inputDir, monitorConfFile), customEnvironment, processCount)
 	case executionModeInit:
 		err = CopyFiles(logger, outputDir, copyDetails, requiredCopies)
 		if err != nil {
@@ -124,9 +126,10 @@ func main() {
 				logger.Error(err, "Error copying files")
 				os.Exit(1)
 			}
-			done := make(chan bool)
-			<-done
 		}
+		logger.Info("Waiting for process to be terminated")
+		done := make(chan bool)
+		<-done
 	default:
 		logger.Error(nil, "Unknown execution mode", "mode", mode)
 		os.Exit(1)

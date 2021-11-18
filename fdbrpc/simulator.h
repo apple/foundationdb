@@ -73,6 +73,7 @@ public:
 		LocalityData locality;
 		ProcessClass startingClass;
 		TDMetricCollection tdmetrics;
+		ChaosMetrics chaosMetrics;
 		HistogramRegistry histograms;
 		std::map<NetworkAddress, Reference<IListener>> listenerMap;
 		std::map<NetworkAddress, Reference<IUDPSocket>> boundUDPSockets;
@@ -411,6 +412,7 @@ public:
 	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;
 	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
 	TSSMode tssMode;
+	std::map<NetworkAddress, bool> corruptWorkerMap;
 	ConfigDBType configDBType;
 
 	// Used by workloads that perform reconfigurations
@@ -443,6 +445,13 @@ public:
 	}
 
 	static thread_local ProcessInfo* currentProcess;
+
+	bool checkInjectedCorruption() {
+		auto iter = corruptWorkerMap.find(currentProcess->address);
+		if (iter != corruptWorkerMap.end())
+			return iter->second;
+		return false;
+	}
 
 protected:
 	Mutex mutex;

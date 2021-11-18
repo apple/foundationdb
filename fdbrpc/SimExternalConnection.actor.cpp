@@ -108,8 +108,6 @@ void MockDNS::clearMockTCPEndpoints() {
 	hostnameToAddresses.clear();
 }
 
-MockDNS SimExternalConnection::mockDNS;
-
 void SimExternalConnection::close() {
 	socket.close();
 }
@@ -195,9 +193,6 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpointImpl(std::str
 
 Future<std::vector<NetworkAddress>> SimExternalConnection::resolveTCPEndpoint(const std::string& host,
                                                                               const std::string& service) {
-	if (mockDNS.findMockTCPEndpoint(host, service)) {
-		return mockDNS.getTCPEndpoint(host, service);
-	}
 	return resolveTCPEndpointImpl(host, service);
 }
 

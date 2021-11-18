@@ -67,6 +67,11 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( HUGE_ARENA_LOGGING_BYTES,                          100e6 );
 	init( HUGE_ARENA_LOGGING_INTERVAL,                         5.0 );
 
+	// Chaos testing - enabled for simulation by default
+	init( ENABLE_CHAOS_FEATURES,                       isSimulated );
+	init( CHAOS_LOGGING_INTERVAL,                              5.0 );
+
+
 	init( WRITE_TRACING_ENABLED,                              true ); if( randomize && BUGGIFY ) WRITE_TRACING_ENABLED = false;
 	init( TRACING_SAMPLE_RATE,                                 0.0 ); // Fraction of distributed traces (not spans) to sample (0 means ignore all traces)
 	init( TRACING_UDP_LISTENER_PORT,                          8889 ); // Only applicable if TracerType is set to a network option
