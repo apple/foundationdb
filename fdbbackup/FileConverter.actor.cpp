@@ -49,10 +49,10 @@ void printConvertUsage() {
 	          << "  --loggroup LOG_GROUP\n"
 	          << "                  Sets the LogGroup field with the specified value for all\n"
 	          << "                  events in the trace output (defaults to `default').\n"
-	          << "  --trace_format FORMAT\n"
+	          << "  --trace-format FORMAT\n"
 	          << "                  Select the format of the trace files. xml (the default) and json are supported.\n"
 	          << "                  Has no effect unless --log is specified.\n"
-	          << "  --build_flags   Print build information and exit.\n"
+	          << "  --build-flags   Print build information and exit.\n"
 	          << "  -h, --help      Display this help and exit.\n"
 	          << "\n";
 
