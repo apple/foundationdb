@@ -6822,11 +6822,20 @@ ACTOR Future<Void> changeFeedWhenAtLatest(ChangeFeedData* self, Version version)
 			choose {
 				when(wait(lastReturned)) { return Void(); }
 				when(wait(waitForAll(allAtLeast))) {
-					if (self->mutations.isEmpty()) {
+					std::vector<Future<Void>> onEmpty;
+					if (!self->mutations.isEmpty()) {
+						onEmpty.push_back(self->mutations.onEmpty());
+					}
+					for (auto& it : self->streams) {
+						if (!it.results.isEmpty()) {
+							onEmpty.push_back(it.results.onEmpty());
+						}
+					}
+					if (!onEmpty.size()) {
 						return Void();
 					}
 					choose {
-						when(wait(self->mutations.onEmpty())) {
+						when(wait(waitForAll(onEmpty))) {
 							wait(delay(0));
 							return Void();
 						}
@@ -6909,12 +6918,6 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
 	}
 }
 
-struct MutationAndVersionStream {
-	Standalone<MutationsAndVersionRef> next;
-	PromiseStream<Standalone<MutationsAndVersionRef>> results;
-	bool operator<(MutationAndVersionStream const& rhs) const { return next.version > rhs.next.version; }
-};
-
 ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
                                          std::vector<std::pair<StorageServerInterface, KeyRange>> interfs,
                                          Reference<ChangeFeedData> results,
@@ -6923,7 +6926,7 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
                                          Version end) {
 	state std::priority_queue<MutationAndVersionStream, std::vector<MutationAndVersionStream>> mutations;
 	state std::vector<Future<Void>> fetchers(interfs.size());
-	state std::vector<MutationAndVersionStream> streams(interfs.size());
+	results->streams = std::vector<MutationAndVersionStream>(interfs.size());
 
 	for (auto& it : results->storageData) {
 		if (it->debugGetReferenceCount() == 2) {
@@ -6941,7 +6944,7 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 
 	for (int i = 0; i < interfs.size(); i++) {
 		fetchers[i] = singleChangeFeedStream(interfs[i].first,
-		                                     streams[i].results,
+		                                     results->streams[i].results,
 		                                     rangeID,
 		                                     *begin,
 		                                     end,
@@ -6952,9 +6955,9 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	state int interfNum = 0;
 	while (interfNum < interfs.size()) {
 		try {
-			Standalone<MutationsAndVersionRef> res = waitNext(streams[interfNum].results.getFuture());
-			streams[interfNum].next = res;
-			mutations.push(streams[interfNum]);
+			Standalone<MutationsAndVersionRef> res = waitNext(results->streams[interfNum].results.getFuture());
+			results->streams[interfNum].next = res;
+			mutations.push(results->streams[interfNum]);
 		} catch (Error& e) {
 			if (e.code() != error_code_end_of_stream) {
 				throw e;
@@ -7125,6 +7128,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 						db->changeFeedUpdaters.erase(it->id);
 					}
 				}
+				results->streams.clear();
 				results->storageData.clear();
 				results->storageData.push_back(db->getStorageData(interf));
 				Promise<Void> refresh = results->refresh;
@@ -7159,6 +7163,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 						db->changeFeedUpdaters.erase(it->id);
 					}
 				}
+				results->streams.clear();
 				results->storageData.clear();
 				results->refresh.sendError(change_feed_cancelled());
 				throw;
@@ -7181,6 +7186,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 						db->changeFeedUpdaters.erase(it->id);
 					}
 				}
+				results->streams.clear();
 				results->storageData.clear();
 				return Void();
 			}

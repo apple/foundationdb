@@ -147,6 +147,12 @@ public:
 	WatchMetadata(Key key, Optional<Value> value, Version version, TransactionInfo info, TagSet tags);
 };
 
+struct MutationAndVersionStream {
+	Standalone<MutationsAndVersionRef> next;
+	PromiseStream<Standalone<MutationsAndVersionRef>> results;
+	bool operator<(MutationAndVersionStream const& rhs) const { return next.version > rhs.next.version; }
+};
+
 struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
 	UID id;
 	Future<Void> updater;
@@ -159,6 +165,7 @@ struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
 
 struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> mutations;
+	std::vector<MutationAndVersionStream> streams;
 
 	Version getVersion();
 	Future<Void> whenAtLeast(Version version);
