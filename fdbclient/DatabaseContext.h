@@ -164,6 +164,8 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	std::vector<Reference<ChangeFeedStorageData>> storageData;
 	AsyncVar<int> notAtLatest;
 	Promise<Void> refresh;
+
+	ChangeFeedData() : notAtLatest(1) {}
 };
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
