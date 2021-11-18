@@ -10,6 +10,8 @@ bindings/java/fdb-java-*-sources.jar
 packaging/msi/FDBInstaller.msi
 build/
 cmake-build-debug/
+cmake-build-release/
+
 # Generated source, build, and packaging files
 *.g.cpp
 *.g.h
@@ -105,3 +107,4 @@ temp/
 /compile_commands.json
 /.ccls-cache
 .clangd/
+.stignore
