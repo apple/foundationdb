@@ -7,6 +7,9 @@ bindings/java/foundationdb-client*.jar
 bindings/java/foundationdb-tests*.jar
 bindings/java/fdb-java-*-sources.jar
 packaging/msi/FDBInstaller.msi
+build/
+cmake-build-debug/
+cmake-build-release/
 
 # Generated source, build, and packaging files
 *.g.cpp
@@ -71,6 +74,8 @@ trace.*.xml
 *.user
 .idea/
 .project
+.projectile
+.dir-locals.el
 .pydevproject
 .vscode
 .vs/
@@ -82,6 +87,7 @@ ipch/
 compile_commands.json
 flow/actorcompiler/obj
 flow/coveragetool/obj
+*.code-workspace
 
 # IDE indexing (commonly used tools)
 /compile_commands.json
@@ -102,3 +108,4 @@ temp/
 /.ccls-cache
 .clangd/
 .cache/
+.stignore
