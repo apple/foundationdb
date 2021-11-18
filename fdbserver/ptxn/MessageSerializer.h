@@ -18,9 +18,11 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_PTXN_TLOGSTORAGESERVERPEEKMESSAGESERIALIZER_H
-#define FDBSERVER_PTXN_TLOGSTORAGESERVERPEEKMESSAGESERIALIZER_H
+#ifndef FDBSERVER_PTXN_MESSAGESERIALIZER_H
+#define FDBSERVER_PTXN_MESSAGESERIALIZER_H
 
+#include "fdbclient/FDBTypes.h"
+#include "fdbserver/SpanContextMessage.h"
 #pragma once
 
 #include <cstdint>
@@ -34,6 +36,7 @@
 
 namespace ptxn {
 
+using SerializedTeamData = std::pair<Arena, std::unordered_map<StorageTeamID, StringRef>>;
 const SerializationProtocolVersion MessageSerializationProtocolVersion = 1;
 
 namespace details {
@@ -259,6 +262,9 @@ public:
 	// write will always prepend this SpanContextMessage before the mutation.
 	void broadcastSpanContext(const SpanContextMessage&);
 
+	// Writes a SpanContextMessage for the specified team.
+	void writeTeamSpanContext(const SpanContextMessage&, const StorageTeamID&);
+
 	// Writes a mutation to a given stoarge team.
 	void write(const MutationRef&, const StorageTeamID&);
 
@@ -281,8 +287,8 @@ public:
 	// Get serialized data for a given storage team ID
 	Standalone<StringRef> getSerialized(const StorageTeamID& storageTeamID);
 
-	// Get all serialized data
-	std::pair<Arena, std::unordered_map<StorageTeamID, StringRef>> getAllSerialized();
+	// Returns all teams' serialized data
+	SerializedTeamData getAllSerialized();
 };
 
 template <typename T>
@@ -398,4 +404,4 @@ public:
 
 } // namespace ptxn
 
-#endif // FDBSERVER_PTXN_TLOGSTORAGESERVERPEEKMESSAGESERIALIZER_H
+#endif // FDBSERVER_PTXN_MESSAGESERIALIZER_H

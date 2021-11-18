@@ -35,7 +35,6 @@
 #include "fdbserver/ptxn/MessageSerializer.h"
 #include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/TLogGroup.actor.h"
-#include "fdbserver/TLogGroup.actor.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/Arena.h"
@@ -827,6 +826,15 @@ struct LogPushData : NonCopyable {
 	// Sets mutations for all internal writers. "mutations" is the output from
 	// getAllMessages() and is used before writing any other mutations.
 	void setMutations(uint32_t totalMutations, VectorRef<StringRef> mutations);
+
+	// Returns messages for specified groups
+	std::map<ptxn::TLogGroupID, ptxn::SerializedTeamData> getGroupMutations(const std::set<ptxn::TLogGroupID>& groups);
+
+	// Sets mutations for internal group writers. "groupMutations" is the output from
+	// getGroupMutations() and is used before writing any other mutations.
+	void setGroupMutations(
+	    const std::map<ptxn::TLogGroupID, std::unordered_map<ptxn::StorageTeamID, StringRef>>& groupMutations,
+	    Version commitVersion);
 
 private:
 	Reference<ILogSystem> logSystem;

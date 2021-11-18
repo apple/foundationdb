@@ -1003,7 +1003,6 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
-			// TODO: pass self->pGroupMessageBuilder in as well?
 			applyMetadataMutations(trs[t].spanContext,
 			                       *pProxyCommitData,
 			                       self->arena,
@@ -1029,7 +1028,11 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		// Resolver also calculates forceRecovery and only applies metadata mutations
 		// in the same set of transactions as this proxy.
 		ResolveTransactionBatchReply& reply = self->resolution[0];
-		self->toCommit.setMutations(reply.privateMutationCount, reply.privateMutations);
+		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			self->toCommit.setGroupMutations(reply.groupPrivateMutations, self->commitVersion);
+		} else {
+			self->toCommit.setMutations(reply.privateMutationCount, reply.privateMutations);
+		}
 	}
 
 	self->lockedKey = pProxyCommitData->txnStateStore->readValue(databaseLockedKey).get();

@@ -102,6 +102,9 @@ struct ResolveTransactionBatchReply {
 	// Each group's previous commit version
 	std::map<ptxn::TLogGroupID, Version> previousCommitVersions;
 
+	// Each group's private mutations, serialized by ProxySubsequencedMessageSerializer
+	std::map<ptxn::TLogGroupID, std::unordered_map<ptxn::StorageTeamID, StringRef>> groupPrivateMutations;
+
 	// Privatized mutations with tags, one for each TLog location
 	VectorRef<StringRef> privateMutations;
 	uint32_t privateMutationCount;
@@ -114,6 +117,7 @@ struct ResolveTransactionBatchReply {
 		           debugID,
 		           conflictingKeyRangeMap,
 		           previousCommitVersions,
+		           groupPrivateMutations,
 		           privateMutations,
 		           privateMutationCount,
 		           arena);

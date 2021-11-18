@@ -285,24 +285,35 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			TEST(self->forceRecovery); // Resolver detects forced recovery
 		}
 
-		// Adds private mutation messages to the reply message.
-		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
-			auto privateMutations = toCommit.getAllMessages();
-			for (const auto& mutations : privateMutations) {
-				reply.privateMutations.push_back(reply.arena, mutations);
-				reply.arena.dependsOn(mutations.arena());
-			}
-			reply.privateMutationCount = toCommit.getMutationCount();
+		// Update group versions
+		std::set<ptxn::TLogGroupID> writtenGroups; // TLog groups been written
+		if (SERVER_KNOBS->TLOG_NEW_INTERFACE && req.prevVersion >= 0) { // Not first request
+			writtenGroups.insert(req.updatedGroups.begin(), req.updatedGroups.end());
+			auto& more = toCommit.getWrittenTLogGroups();
+			writtenGroups.insert(more.begin(), more.end());
+			// TODO(jingyu): shardChange could happen in the txnStateTransactions from
+			// earlier versions, so need to take those into account--scanning through
+			// any previous versions that are sent back in txnStateTransactions.
+			reply.previousCommitVersions = self->versionTracker.updateGroups(
+			    writtenGroups, req.version, toCommit.isShardChanged() ? UpdateAllGroups::True : UpdateAllGroups::False);
 		}
 
-		// Update group versions
-		if (req.prevVersion >= 0) { // Not first request
-			std::set<ptxn::TLogGroupID> groups;
-			groups.insert(req.updatedGroups.begin(), req.updatedGroups.end());
-			auto& more = toCommit.getWrittenTLogGroups();
-			groups.insert(more.begin(), more.end());
-			reply.previousCommitVersions = self->versionTracker.updateGroups(
-			    groups, req.version, toCommit.isShardChanged() ? UpdateAllGroups::True : UpdateAllGroups::False);
+		// Adds private mutation messages to the reply message.
+		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+				auto groupPrivateMutations = toCommit.getGroupMutations(writtenGroups);
+				for (const auto& [group, teamData] : groupPrivateMutations) {
+					reply.groupPrivateMutations.emplace(group, teamData.second);
+					reply.arena.dependsOn(teamData.first);
+				}
+			} else {
+				auto privateMutations = toCommit.getAllMessages();
+				for (const auto& mutations : privateMutations) {
+					reply.privateMutations.push_back(reply.arena, mutations);
+					reply.arena.dependsOn(mutations.arena());
+				}
+				reply.privateMutationCount = toCommit.getMutationCount();
+			}
 		}
 
 		self->resolvedStateTransactions += req.txnStateTransactions.size();
