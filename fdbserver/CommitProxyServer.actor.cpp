@@ -2132,14 +2132,13 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		std::vector<std::pair<MapPair<Key, ServerCacheInfo>, int>> keyInfoData;
 		// NOTE: An ACTOR will be compiled into several classes, the this pointer is from one of them.
 		auto updateTagInfo = [this](const std::vector<UID>& uids,
-		                            std::vector<Tag>& tags,
 		                            ServerCacheInfo& info,
 		                            const std::vector<ptxn::StorageTeamID>& srcDstTeams,
 		                            std::vector<Reference<StorageInfo>>& storageInfoItems) {
 			for (const auto& id : uids) {
 				auto storageInfo = getStorageInfo(id, &pContext->pCommitData->storageCache, pContext->pTxnStateStore);
 				ASSERT(storageInfo->tag != invalidTag);
-				tags.push_back(storageInfo->tag);
+				info.tags.push_back(storageInfo->tag);
 				storageInfoItems.push_back(storageInfo);
 
 				if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
@@ -2177,8 +2176,8 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 			ServerCacheInfo info;
 			std::vector<ptxn::StorageTeamID> srcDstTeams = decodeKeyServersValue(tag_uid, kv.value, src, dest);
 
-			updateTagInfo(src, info.tags, info, srcDstTeams, info.src_info);
-			updateTagInfo(dest, info.tags, info, srcDstTeams, info.dest_info);
+			updateTagInfo(src, info, srcDstTeams, info.src_info);
+			updateTagInfo(dest, info, srcDstTeams, info.dest_info);
 			uniquify(info.tags);
 			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 				// A shard can only correspond to single storage team in the primary DC for now
