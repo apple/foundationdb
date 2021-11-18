@@ -26,6 +26,7 @@ RUN yum install -y \
     hostname-3.13-3.amzn2.0.2 \
     jq-1.5-1.amzn2.0.2 \
     less-458-9.amzn2.0.2 \
+    libsanitizer-7.3.1-13.amzn2 \
     lsof-4.87-6.amzn2 \
     net-tools-2.0-0.22.20131004git.amzn2.0.2  \
     nmap-ncat-6.40-13.amzn2 \
@@ -58,7 +59,7 @@ FROM golang:1.16.7-bullseye AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
-RUN go build -o /fdb-kubernetes-monitor ./...
+RUN go build -o /fdb-kubernetes-monitor *.go
 
 FROM base as foundationdb-base
 
