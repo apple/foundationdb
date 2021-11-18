@@ -325,7 +325,7 @@ protected:
 		LogEvent(EVENTLOG_INFORMATION_TYPE, format("Default config file at %s", _confpath.c_str()));
 
 		// Parse "command line" options
-		CSimpleOpt args(argc, argv, g_rgOptions, SO_O_NOERR | SO_O_ICASE_HYPHEN_AND_UNDERSCORE);
+		CSimpleOpt args(argc, argv, g_rgOptions, SO_O_NOERR | SO_O_HYPHEN_TO_UNDERSCORE);
 
 		while (args.Next()) {
 			if (args.LastError() == SO_SUCCESS) {

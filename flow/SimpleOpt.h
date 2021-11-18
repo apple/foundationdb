@@ -203,7 +203,7 @@ ShowFiles(args.FileCount(), args.Files());
 #define SO_STATICBUF SO_MAX_ARGS
 #else
 #include <stdlib.h> // malloc, free
-#include <string.h> // memcpy, strlen
+#include <string.h> // memcpy
 #define SO_STATICBUF 50
 #endif
 
@@ -282,8 +282,9 @@ enum _ESOFlags {
 	/*! Case-insensitive comparisons for all arg types */
 	SO_O_ICASE = 0x0700,
 
-	/*! Case-insensitive comparisons for all hyphens and underscores after leading hyphens */
-	SO_O_ICASE_HYPHEN_AND_UNDERSCORE = 0x1000
+	/*! Transfer all hyphens of users' input flags and internal flags to underscores excetp leading hyphens
+	    For example: --cluster-file ==> --cluster-file while comparing. */
+	SO_O_HYPHEN_TO_UNDERSCORE = 0x1000
 };
 
 /*! Types of arguments that options may have. Note that some of the _ESOFlags
@@ -944,7 +945,7 @@ bool CSimpleOptTempl<SOCHAR>::IsEqual(SOCHAR a_cLeft, SOCHAR a_cRight, int a_nAr
 		if (a_cRight >= 'A' && a_cRight <= 'Z')
 			a_cRight += 'a' - 'A';
 	}
-	if (m_nFlags & SO_O_ICASE_HYPHEN_AND_UNDERSCORE) {
+	if (m_nFlags & SO_O_HYPHEN_TO_UNDERSCORE) {
 		if (a_cLeft == (SOCHAR)'-') {
 			a_cLeft = (SOCHAR)'_';
 		}

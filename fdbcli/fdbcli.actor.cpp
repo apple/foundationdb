@@ -1389,7 +1389,7 @@ struct CLIOptions {
 			commandLine += argv[a];
 		}
 
-		CSimpleOpt args(argc, argv, g_rgOptions, SO_O_ICASE_HYPHEN_AND_UNDERSCORE);
+		CSimpleOpt args(argc, argv, g_rgOptions, SO_O_HYPHEN_TO_UNDERSCORE);
 
 		while (args.Next()) {
 			int ec = processArg(args);

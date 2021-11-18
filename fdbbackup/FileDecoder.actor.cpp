@@ -514,8 +514,8 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 
 int main(int argc, char** argv) {
 	try {
-		CSimpleOpt* args = new CSimpleOpt(
-		    argc, argv, file_converter::gConverterOptions, SO_O_EXACT | SO_O_ICASE_HYPHEN_AND_UNDERSCORE);
+		CSimpleOpt* args =
+		    new CSimpleOpt(argc, argv, file_converter::gConverterOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 		file_converter::DecodeParams param;
 		int status = file_converter::parseDecodeCommandLine(&param, args);
 		std::cout << "Params: " << param.toString() << "\n";

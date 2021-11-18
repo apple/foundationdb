@@ -1227,7 +1227,7 @@ int main(int argc, char** argv) {
 
 	std::vector<const char*> additional_watch_paths;
 
-	CSimpleOpt args(argc, argv, g_rgOptions, SO_O_NOERR | SO_O_ICASE_HYPHEN_AND_UNDERSCORE);
+	CSimpleOpt args(argc, argv, g_rgOptions, SO_O_NOERR | SO_O_HYPHEN_TO_UNDERSCORE);
 
 	while (args.Next()) {
 		if (args.LastError() == SO_SUCCESS) {

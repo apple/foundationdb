@@ -571,7 +571,8 @@ int parseCommandLine(ConvertParams* param, CSimpleOpt* args) {
 
 int main(int argc, char** argv) {
 	try {
-		CSimpleOpt* args = new CSimpleOpt(argc, argv, file_converter::gConverterOptions, SO_O_EXACT);
+		CSimpleOpt* args =
+		    new CSimpleOpt(argc, argv, file_converter::gConverterOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 		file_converter::ConvertParams param;
 		int status = file_converter::parseCommandLine(&param, args);
 		std::cout << "Params: " << param.toString() << "\n";
