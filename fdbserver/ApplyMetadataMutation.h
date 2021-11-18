@@ -51,7 +51,7 @@ struct ResolverData {
 	std::map<UID, Reference<StorageInfo>>* storageCache = nullptr;
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 	std::map<Tag, UID> tagToServer;
-	std::unordered_map<UID, ptxn::StorageTeamID> ssToStorageTeam;
+	std::unordered_map<UID, ptxn::StorageTeamID>* ssToStorageTeam = nullptr;
 	std::unordered_map<UID, std::vector<std::pair<ptxn::StorageTeamID, bool>>> changedTeams;
 	Reference<TLogGroupCollection> tLogGroupCollection;
 
@@ -60,9 +60,10 @@ struct ResolverData {
 	             IKeyValueStore* store,
 	             KeyRangeMap<ServerCacheInfo>* info,
 	             bool* forceRecovery,
-	             Reference<TLogGroupCollection> collection)
+	             Reference<TLogGroupCollection> collection,
+	             std::unordered_map<UID, ptxn::StorageTeamID>* pSsToStorageTeam)
 	  : dbgid(debugId), txnStateStore(store), keyInfo(info), confChanges(forceRecovery), initialCommit(true),
-	    tLogGroupCollection(collection) {}
+	    ssToStorageTeam(pSsToStorageTeam), tLogGroupCollection(collection) {}
 
 	// For transaction batches that contain metadata mutations
 	ResolverData(UID debugId,
@@ -75,10 +76,11 @@ struct ResolverData {
 	             std::map<UID, Reference<StorageInfo>>* storageCache,
 	             std::unordered_map<UID, StorageServerInterface>* tssMapping,
 	             Version commitVersion,
-	             Reference<TLogGroupCollection> collection)
+	             Reference<TLogGroupCollection> collection,
+	             std::unordered_map<UID, ptxn::StorageTeamID>* ssToStorageTeam)
 	  : dbgid(debugId), txnStateStore(store), keyInfo(info), confChanges(forceRecovery), logSystem(logSystem),
 	    toCommit(toCommit), popVersion(popVersion), storageCache(storageCache), tssMapping(tssMapping),
-	    tLogGroupCollection(collection) {
+	    ssToStorageTeam(ssToStorageTeam), tLogGroupCollection(collection) {
 		initGroupMessageBuilders(commitVersion);
 	}
 

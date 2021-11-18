@@ -78,6 +78,8 @@ struct Resolver : ReferenceCounted<Resolver> {
 	bool forceRecovery = false;
 
 	Reference<TLogGroupCollection> tLogGroupCollection;
+	// Each storage server's own team.
+	std::unordered_map<UID, ptxn::StorageTeamID> ssToStorageTeam;
 
 	Version debugMinRecentStateVersion = 0;
 
@@ -259,7 +261,8 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		                          &self->storageCache,
 		                          &self->tssMapping,
 		                          req.version,
-		                          self->tLogGroupCollection);
+		                          self->tLogGroupCollection,
+		                          &self->ssToStorageTeam);
 		bool isLocked = false;
 		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 			auto lockedKey = self->txnStateStore->readValue(databaseLockedKey).get();
@@ -463,21 +466,40 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 
 		MutationsVec mutations;
 		std::vector<std::pair<MapPair<Key, ServerCacheInfo>, int>> keyInfoData;
-		std::vector<UID> src, dest;
-		ServerCacheInfo info;
 		// NOTE: An ACTOR will be compiled into several classes, the this pointer is from one of them.
 		auto updateTagInfo = [this](const std::vector<UID>& uids,
-		                            std::vector<Tag>& tags,
+		                            ServerCacheInfo& info,
+		                            const std::vector<ptxn::StorageTeamID>& srcDstTeams,
 		                            std::vector<Reference<StorageInfo>>& storageInfoItems) {
 			for (const auto& id : uids) {
 				auto storageInfo = getStorageInfo(id, &pContext->pResolverData->storageCache, pContext->pTxnStateStore);
 				ASSERT(storageInfo->tag != invalidTag);
-				tags.push_back(storageInfo->tag);
+				info.tags.push_back(storageInfo->tag);
 				storageInfoItems.push_back(storageInfo);
+
+				if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+					// Add storage teams of storage servers
+					ASSERT(pContext->pResolverData->ssToStorageTeam.count(id));
+					if (pContext->pResolverData->ssToStorageTeam[id] == srcDstTeams[0]) {
+						info.storageTeams.insert(srcDstTeams[0]);
+					} else if (pContext->pResolverData->ssToStorageTeam[id] == srcDstTeams[1]) {
+						info.storageTeams.insert(srcDstTeams[1]);
+					} else {
+						ASSERT(false);
+					}
+				}
 			}
 		};
 		for (auto& kv : data) {
-			if (!kv.key.startsWith(keyServersPrefix)) {
+			if (kv.key.startsWith(storageServerToTeamIdKeyPrefix)) {
+				UID k = decodeStorageServerToTeamIdKey(kv.key);
+				std::set<ptxn::StorageTeamID> storageTeamIDs = decodeStorageServerToTeamIdValue(kv.value);
+				// For demo purpose, each storage server can only belong to single storage team.
+				ASSERT(storageTeamIDs.size() == 1);
+				// The first team of a storage server is its own team.
+				pContext->pResolverData->ssToStorageTeam.emplace(k, *storageTeamIDs.begin());
+				continue;
+			} else if (!kv.key.startsWith(keyServersPrefix)) {
 				mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);
 				continue;
 			}
@@ -486,17 +508,18 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 			if (k == allKeys.end) {
 				continue;
 			}
+			std::vector<UID> src, dest;
+			ServerCacheInfo info;
+			std::vector<ptxn::StorageTeamID> srcDstTeams = decodeKeyServersValue(tag_uid, kv.value, src, dest);
 			decodeKeyServersValue(tag_uid, kv.value, src, dest);
 
-			info.tags.clear();
-
-			info.src_info.clear();
-			updateTagInfo(src, info.tags, info.src_info);
-
-			info.dest_info.clear();
-			updateTagInfo(dest, info.tags, info.dest_info);
-
+			updateTagInfo(src, info, srcDstTeams, info.src_info);
+			updateTagInfo(dest, info, srcDstTeams, info.dest_info);
 			uniquify(info.tags);
+			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+				// A shard can only correspond to single storage team in the primary DC for now
+				ASSERT(info.storageTeams.size() == 1);
+			}
 			keyInfoData.emplace_back(MapPair<Key, ServerCacheInfo>(k, info), 1);
 		}
 
@@ -509,7 +532,8 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		                          pContext->pTxnStateStore,
 		                          &pContext->pResolverData->keyInfo,
 		                          &confChanges,
-		                          pContext->pResolverData->tLogGroupCollection);
+		                          pContext->pResolverData->tLogGroupCollection,
+		                          &pContext->pResolverData->ssToStorageTeam);
 
 		applyMetadataMutations(SpanID(), resolverData, mutations);
 	} // loop

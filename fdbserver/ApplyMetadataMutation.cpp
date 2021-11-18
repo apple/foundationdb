@@ -109,7 +109,7 @@ public:
 	    confChange(*resolverData_.confChanges), logSystem(resolverData_.logSystem),
 	    popVersion(resolverData_.popVersion), keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
 	    tLogGroupCollection(resolverData_.tLogGroupCollection), initialCommit(resolverData_.initialCommit),
-	    forResolver(true), tagToServer(&resolverData_.tagToServer), ssToStorageTeam(&resolverData_.ssToStorageTeam),
+	    forResolver(true), tagToServer(&resolverData_.tagToServer), ssToStorageTeam(resolverData_.ssToStorageTeam),
 	    changedTeams(&resolverData_.changedTeams) {}
 
 private:
