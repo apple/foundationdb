@@ -21,7 +21,8 @@
 #include <iterator>
 
 #include "fdbclient/FDBTypes.h"
-#include <fdbserver/Knobs.h>
+#include "fdbserver/Knobs.h"
+#include "fdbserver/ptxn/test/Utils.h"
 #include "fdbserver/ptxn/TLogGroupVersionTracker.h"
 #include "flow/BooleanParam.h"
 #include "flow/Trace.h"
@@ -106,12 +107,16 @@ std::pair<TLogGroupID, Version> TLogGroupVersionTracker::mostLaggingGroup() cons
 } // namespace ptxn
 
 TEST_CASE("fdbserver/ptxn/test/versiontracker") {
-	std::vector<Version> beginVersions(3, -1);
-	beginVersions[1] = 0;
-	beginVersions[2] = 3;
+	state ptxn::test::print::PrintTiming printTiming("versiontracker");
 
-	for (auto beginVersion : beginVersions) {
-		std::cout << "beginVersion: " << beginVersion << "\n";
+	// This test is not compatible with BROADCAST_TLOG_GROUPS
+	if (SERVER_KNOBS->INSERT_EMPTY_TRANSACTION || SERVER_KNOBS->BROADCAST_TLOG_GROUPS) {
+		return Void();
+	}
+
+
+	for (auto beginVersion : std::vector<Version>{ -1, 0, 3 }) {
+		printTiming << "Testing version: " << beginVersion << "\n";
 
 		ptxn::TLogGroupVersionTracker tracker;
 		std::vector<ptxn::TLogGroupID> groups;
@@ -121,17 +126,17 @@ TEST_CASE("fdbserver/ptxn/test/versiontracker") {
 		tracker.addGroups(groups, beginVersion);
 
 		ptxn::TLogGroupID a(0, 0), b(0, 1), c(0, 2), d(0, 3), e(0, 4);
-		groups.clear();
-		groups.push_back(a);
+
+		printTiming << "Group test 1" << std::endl;
+		groups = { a };
 		const Version cv1 = 10;
 		auto results = tracker.updateGroups(groups, cv1, UpdateAllGroups::False);
 		ASSERT(results.size() == 1 && results[a] == beginVersion);
 		ASSERT_EQ(tracker.getCommitVersion(a), cv1);
 		ASSERT_EQ(tracker.getMaxCommitVersion(), cv1);
 
-		groups.clear();
-		groups.push_back(b);
-		groups.push_back(c);
+		printTiming << "Group test 2" << std::endl;
+		groups = { b, c };
 		const Version cv2 = 20;
 		results = tracker.updateGroups(groups, cv2, UpdateAllGroups::False);
 		ASSERT(results.size() == 2);
@@ -140,10 +145,8 @@ TEST_CASE("fdbserver/ptxn/test/versiontracker") {
 		ASSERT_EQ(tracker.getCommitVersion(c), cv2);
 		ASSERT_EQ(tracker.getMaxCommitVersion(), cv2);
 
-		groups.clear();
-		groups.push_back(b);
-		groups.push_back(d);
-		groups.push_back(e);
+		printTiming << "Group test 3" << std::endl;
+		groups = { b, d, e };
 		const Version cv3 = 30;
 		results = tracker.updateGroups(groups, cv3, UpdateAllGroups::False);
 		ASSERT(results.size() == 3);
