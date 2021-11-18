@@ -491,14 +491,14 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 		StorageTeamID storageTeamId;
 		std::vector<Tag> tags;
 		std::map<Version, std::pair<StringRef, Arena>> versionMessages;
-		bool nothingPersistent =
-		    false; // true means tag is *known* to have no messages in persistentData.  false means nothing.
-		bool poppedRecently = false; // `popped` has changed since last updatePersistentData
 		Version popped = 0; // see popped version tracking contract below
+		IDiskQueue::location poppedLocation = 0; // The location of the earliest commit with data for this tag.
 		Version persistentPopped = 0; // The popped version recorded in the btree.
 		Version versionForPoppedLocation = 0; // `poppedLocation` was calculated at this popped version
-		IDiskQueue::location poppedLocation = 0; // The location of the earliest commit with data for this tag.
+		bool poppedRecently = false; // `popped` has changed since last updatePersistentData
 		bool unpoppedRecovered = false;
+		bool nothingPersistent =
+		    false; // true means tag is *known* to have no messages in persistentData.  false means nothing.
 
 		StorageTeamData(StorageTeamID storageTeam, std::vector<Tag> tags) : storageTeamId(storageTeam), tags(tags) {}
 
@@ -563,6 +563,19 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	// Tlog group that this LogGeneration belongs to.
 	Reference<TLogGroupData> tlogGroupData;
 
+	// The maximum version that a proxy has told us that is committed (all TLogs have ack'd a commit for this version).
+	Version knownCommittedVersion = 0;
+
+	// Log interface id for this generation.
+	// Different TLogGroups in the same generation in the same tlog server share the same log ID.
+	UID logId;
+
+	CounterCollection cc;
+	Counter bytesInput;
+	Counter bytesDurable;
+
+	ProtocolVersion protocolVersion;
+
 	// Storage teams tracker
 	std::unordered_map<StorageTeamID, Reference<StorageTeamData>> storageTeamData;
 	std::unordered_map<ptxn::StorageTeamID, std::vector<Tag>> storageTeams;
@@ -580,34 +593,23 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 
 	Version queueCommittingVersion = 0;
 
-	// The maximum version that a proxy has told us that is committed (all TLogs have ack'd a commit for this version).
-	Version knownCommittedVersion = 0;
+	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
 
 	Version durableKnownCommittedVersion = 0;
 	Version minKnownCommittedVersion = 0;
 
 	Version newPersistentDataVersion;
 
-	CounterCollection cc;
-	Counter bytesInput;
-	Counter bytesDurable;
-
-	// Log interface id for this generation.
-	// Different TLogGroups in the same generation in the same tlog server share the same log ID.
-	UID logId;
-	ProtocolVersion protocolVersion;
-
 	// Whether this tlog interface is removed, this can happen when a new master is elected and tlog interface recruited
 	// by the old master gets removed.
 	Future<Void> removed;
 	PromiseStream<Future<Void>> addActor;
 	Promise<Void> recoveryComplete, committingQueue;
-	Future<Void> terminated;
 
 	Version unrecoveredBefore = 1;
 	Version recoveredAt = 1;
 
-	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
+	Future<Void> terminated;
 
 	int8_t locality; // data center id?
 	UID recruitmentID;
