@@ -509,8 +509,7 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 		  : storageTeamId(r.storageTeamId), tags(r.tags), versionMessages(std::move(r.versionMessages)),
 		    nothingPersistent(r.nothingPersistent), poppedRecently(r.poppedRecently), popped(r.popped),
 		    persistentPopped(r.persistentPopped), versionForPoppedLocation(r.versionForPoppedLocation),
-		    poppedLocation(r.poppedLocation),
-		    unpoppedRecovered(r.unpoppedRecovered) {}
+		    poppedLocation(r.poppedLocation), unpoppedRecovered(r.unpoppedRecovered) {}
 		void operator=(StorageTeamData&& r) noexcept {
 			storageTeamId = r.storageTeamId;
 			nothingPersistent = r.nothingPersistent;
