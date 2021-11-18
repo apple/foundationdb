@@ -7336,16 +7336,15 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 		return Void();
 	}
 
-	// FIXME: lookup both the src and dest shards as of the pop version to ensure all locations are popped
-	state std::vector<Future<Void>> popRequests;
-	for (int i = 0; i < locations.size(); i++) {
-		for (int j = 0; j < locations[i].second->size(); j++) {
-			popRequests.push_back(locations[i].second->getInterface(j).changeFeedPop.getReply(
-			    ChangeFeedPopRequest(rangeID, version, locations[i].first)));
-		}
-	}
-
 	try {
+		// FIXME: lookup both the src and dest shards as of the pop version to ensure all locations are popped
+		std::vector<Future<Void>> popRequests;
+		for (int i = 0; i < locations.size(); i++) {
+			for (int j = 0; j < locations[i].second->size(); j++) {
+				popRequests.push_back(locations[i].second->getInterface(j).changeFeedPop.getReply(
+				    ChangeFeedPopRequest(rangeID, version, locations[i].first)));
+			}
+		}
 		choose {
 			when(wait(waitForAll(popRequests))) {}
 			when(wait(delay(CLIENT_KNOBS->CHANGE_FEED_POP_TIMEOUT))) {
