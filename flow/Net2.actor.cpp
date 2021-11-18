@@ -199,7 +199,7 @@ public:
 
 	flowGlobalType global(int id) const override { return (globals.size() > id) ? globals[id] : nullptr; }
 	void setGlobal(size_t id, flowGlobalType v) override {
-		globals.resize(std::max(globals.size(), id + 1));
+		ASSERT(id < globals.size());
 		globals[id] = v;
 	}
 
@@ -1187,7 +1187,7 @@ struct PromiseTask final : public Task, public FastAllocated<PromiseTask> {
 // 5MB for loading files into memory
 
 Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
-  : useThreadPool(useThreadPool), reactor(this),
+  : globals(enumGlobal::COUNT), useThreadPool(useThreadPool), reactor(this),
 #ifndef TLS_DISABLED
     sslContextVar({ ReferencedObject<boost::asio::ssl::context>::from(
         boost::asio::ssl::context(boost::asio::ssl::context::tls)) }),

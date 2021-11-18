@@ -287,6 +287,7 @@ else()
       -Wno-undefined-var-template
       -Wno-unknown-warning-option
       -Wno-unused-parameter
+      -Wno-constant-logical-operand
       )
     if (USE_CCACHE)
       add_compile_options(
