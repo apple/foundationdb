@@ -29,6 +29,7 @@ RUN yum install -y \
     hostname-3.13-3.el7_7.1 \
     jq-1.6-2.el7  \
     less-458-9.el7 \
+    libubsan-7.3.1-5.16.el7 \
     lsof-4.87-6.el7 \
     net-tools-2.0-0.25.20131004git.el7 \
     nmap-ncat-6.40-19.el7 \
@@ -61,7 +62,7 @@ FROM golang:1.16.7-bullseye AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
-RUN go build -o /fdb-kubernetes-monitor ./...
+RUN go build -o /fdb-kubernetes-monitor *.go
 
 FROM base as foundationdb-base
 
