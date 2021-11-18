@@ -19,8 +19,13 @@
  */
 
 #include "fdbserver/LogSystem.h"
+#include "fdbserver/LogProtocolMessage.h"
+#include "fdbserver/SpanContextMessage.h"
+#include "fdbserver/ptxn/MessageSerializer.h"
+#include "fdbserver/ptxn/MessageTypes.h"
 #include "fdbserver/ptxn/test/FakeLogSystem.h"
 #include "fdbserver/TagPartitionedLogSystem.actor.h"
+#include "flow/Error.h"
 #include "flow/serialize.h"
 
 #ifndef __INTEL_COMPILER
@@ -373,6 +378,44 @@ void LogPushData::addTLogGroups(const std::vector<TLogGroupRef>& groups, Version
 	for (const auto& group : groups) {
 		pGroupMessageBuilders->emplace(group->id(),
 		                               std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(commitVersion));
+	}
+}
+
+std::map<ptxn::TLogGroupID, ptxn::SerializedTeamData> LogPushData::getGroupMutations(
+    const std::set<ptxn::TLogGroupID>& groups) {
+	std::map<ptxn::TLogGroupID, ptxn::SerializedTeamData> results;
+	for (const auto& [group, serializer] : *pGroupMessageBuilders) {
+		auto teamData = serializer->getAllSerialized();
+		results.emplace(group, teamData);
+	}
+	return results;
+}
+
+// TODO: we deserialize mutations sent from Resolvers and serialized to pGroupMessageBuilders.
+// It would be nice that ProxySubsequencedMessageSerializer can be set with
+// serialized data.
+void LogPushData::setGroupMutations(
+    const std::map<ptxn::TLogGroupID, std::unordered_map<ptxn::StorageTeamID, StringRef>>& groupMutations, Version commitVersion) {
+	for (const auto& [group, teamData] : groupMutations) {
+		if (pGroupMessageBuilders->count(group) == 0) {
+			pGroupMessageBuilders->emplace(group,
+			                               std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(commitVersion));
+		}
+		auto& writer = (*pGroupMessageBuilders)[group];
+		for (const auto& [team, mutations] : teamData) {
+			ptxn::SubsequencedMessageDeserializer deserializer(mutations);
+			for (const auto& item : deserializer) {
+				if (item.message.getType() == ptxn::Message::Type::SPAN_CONTEXT_MESSAGE) {
+					writer->writeTeamSpanContext(std::get<SpanContextMessage>(item.message), team);
+				} else if (item.message.getType() == ptxn::Message::Type::MUTATION_REF) {
+					writer->write(std::get<MutationRef>(item.message), team);
+				} else if (item.message.getType() == ptxn::Message::Type::LOG_PROTOCOL_MESSAGE) {
+					writer->write(std::get<LogProtocolMessage>(item.message), team);
+				} else {
+					UNREACHABLE();
+				}
+			}
+		}
 	}
 }
 

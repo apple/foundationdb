@@ -203,6 +203,12 @@ void ProxySubsequencedMessageSerializer::broadcastSpanContext(const SpanContextM
 	storageTeamInjectedSpanContext.clear();
 }
 
+void ProxySubsequencedMessageSerializer::writeTeamSpanContext(const SpanContextMessage& spanContext,
+                                                              const StorageTeamID& team) {
+	prepareWriteMessage(team);
+	serializers.at(team).write(SubsequenceSpanContextItem{ subsequence++, spanContext });
+}
+
 void ProxySubsequencedMessageSerializer::write(const MutationRef& mutation, const StorageTeamID& storageTeamID) {
 	prepareWriteMessage(storageTeamID);
 	serializers.at(storageTeamID).write(subsequence++, mutation);
