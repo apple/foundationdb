@@ -31,6 +31,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/serialize.h"
 #include <cstring>
+#include <limits>
 
 ACTOR Future<std::pair<Standalone<VectorRef<KeyValueRef>>, Version>> readDatabase(Database cx) {
 	state Transaction tr(cx);
@@ -60,45 +61,52 @@ ACTOR Future<std::pair<Standalone<VectorRef<KeyValueRef>>, Version>> readDatabas
 
 ACTOR Future<Standalone<VectorRef<MutationsAndVersionRef>>> readMutations(Database cx,
                                                                           Key rangeID,
-                                                                          Version begin,
-                                                                          Version end) {
+                                                                          Promise<Version> end) {
+	state Version begin = 0;
 	state Standalone<VectorRef<MutationsAndVersionRef>> output;
 	loop {
 		try {
 			state Reference<ChangeFeedData> results = makeReference<ChangeFeedData>();
-			state Future<Void> stream = cx->getChangeFeedStream(results, rangeID, begin, end, normalKeys);
+			state Future<Void> stream =
+			    cx->getChangeFeedStream(results, rangeID, begin, std::numeric_limits<Version>::max(), normalKeys);
 			loop {
-				Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(results->mutations.getFuture());
-				output.arena().dependsOn(res.arena());
-				for (auto& it : res) {
-					if (it.mutations.size() == 1 && it.mutations.back().param1 == lastEpochEndPrivateKey) {
-						Version rollbackVersion;
-						BinaryReader br(it.mutations.back().param2, Unversioned());
-						br >> rollbackVersion;
-						TraceEvent("ChangeFeedRollback")
-						    .detail("Ver", it.version)
-						    .detail("RollbackVer", rollbackVersion);
-						while (output.size() && output.back().version > rollbackVersion) {
-							TraceEvent("ChangeFeedRollbackVer").detail("Ver", output.back().version);
-							output.pop_back();
+				choose {
+					when(Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(results->mutations.getFuture())) {
+						output.arena().dependsOn(res.arena());
+						for (auto& it : res) {
+							if (it.mutations.size() == 1 && it.mutations.back().param1 == lastEpochEndPrivateKey) {
+								Version rollbackVersion;
+								BinaryReader br(it.mutations.back().param2, Unversioned());
+								br >> rollbackVersion;
+								TraceEvent("ChangeFeedRollback")
+								    .detail("Ver", it.version)
+								    .detail("RollbackVer", rollbackVersion);
+								while (output.size() && output.back().version > rollbackVersion) {
+									TraceEvent("ChangeFeedRollbackVer").detail("Ver", output.back().version);
+									output.pop_back();
+								}
+							} else {
+								output.push_back(output.arena(), it);
+							}
 						}
-					} else {
-						output.push_back(output.arena(), it);
+						begin = res.back().version + 1;
+					}
+					when(wait(end.isSet() ? Future<Void>(Never()) : success(end.getFuture()))) {}
+					when(wait(!end.isSet() ? Future<Void>(Never()) : results->whenAtLeast(end.getFuture().get()))) {
+						return output;
 					}
 				}
-				begin = res.back().version + 1;
 			}
 		} catch (Error& e) {
-			if (e.code() == error_code_end_of_stream) {
-				return output;
-			}
 			throw;
 		}
 	}
 }
 
 Standalone<VectorRef<KeyValueRef>> advanceData(Standalone<VectorRef<KeyValueRef>> source,
-                                               Standalone<VectorRef<MutationsAndVersionRef>> mutations) {
+                                               Standalone<VectorRef<MutationsAndVersionRef>> mutations,
+                                               Version begin,
+                                               Version end) {
 	StringRef dbgKey = LiteralStringRef("");
 	std::map<KeyRef, ValueRef> data;
 	for (auto& kv : source) {
@@ -107,22 +115,24 @@ Standalone<VectorRef<KeyValueRef>> advanceData(Standalone<VectorRef<KeyValueRef>
 		data[kv.key] = kv.value;
 	}
 	for (auto& it : mutations) {
-		for (auto& m : it.mutations) {
-			if (m.type == MutationRef::SetValue) {
-				if (m.param1 == dbgKey)
-					TraceEvent("ChangeFeedDbgSet")
-					    .detail("Ver", it.version)
-					    .detail("K", m.param1)
-					    .detail("V", m.param2);
-				data[m.param1] = m.param2;
-			} else {
-				ASSERT(m.type == MutationRef::ClearRange);
-				if (KeyRangeRef(m.param1, m.param2).contains(dbgKey))
-					TraceEvent("ChangeFeedDbgClear")
-					    .detail("Ver", it.version)
-					    .detail("Begin", m.param1)
-					    .detail("End", m.param2);
-				data.erase(data.lower_bound(m.param1), data.lower_bound(m.param2));
+		if (it.version > begin && it.version <= end) {
+			for (auto& m : it.mutations) {
+				if (m.type == MutationRef::SetValue) {
+					if (m.param1 == dbgKey)
+						TraceEvent("ChangeFeedDbgSet")
+						    .detail("Ver", it.version)
+						    .detail("K", m.param1)
+						    .detail("V", m.param2);
+					data[m.param1] = m.param2;
+				} else {
+					ASSERT(m.type == MutationRef::ClearRange);
+					if (KeyRangeRef(m.param1, m.param2).contains(dbgKey))
+						TraceEvent("ChangeFeedDbgClear")
+						    .detail("Ver", it.version)
+						    .detail("Begin", m.param1)
+						    .detail("End", m.param2);
+					data.erase(data.lower_bound(m.param1), data.lower_bound(m.param2));
+				}
 			}
 		}
 	}
@@ -182,6 +192,10 @@ struct ChangeFeedsWorkload : TestWorkload {
 		wait(updateChangeFeed(cx, rangeID, ChangeFeedStatus::CHANGE_FEED_CREATE, normalKeys));
 
 		loop {
+			state Promise<Version> endVersion;
+			state Future<Standalone<VectorRef<MutationsAndVersionRef>>> fMutations =
+			    readMutations(cx, rangeID, endVersion);
+
 			wait(delay(deterministicRandom()->random01()));
 
 			state std::pair<Standalone<VectorRef<KeyValueRef>>, Version> firstResults = wait(readDatabase(cx));
@@ -191,10 +205,10 @@ struct ChangeFeedsWorkload : TestWorkload {
 
 			state std::pair<Standalone<VectorRef<KeyValueRef>>, Version> secondResults = wait(readDatabase(cx));
 			TraceEvent("ChangeFeedReadDB").detail("Ver2", secondResults.second);
-			state Standalone<VectorRef<MutationsAndVersionRef>> mutations =
-			    wait(readMutations(cx, rangeID, firstResults.second, secondResults.second + 1));
-
-			Standalone<VectorRef<KeyValueRef>> advancedResults = advanceData(firstResults.first, mutations);
+			endVersion.send(secondResults.second + 1);
+			Standalone<VectorRef<MutationsAndVersionRef>> mutations = wait(fMutations);
+			Standalone<VectorRef<KeyValueRef>> advancedResults =
+			    advanceData(firstResults.first, mutations, firstResults.second, secondResults.second);
 
 			if (!compareData(secondResults.first, advancedResults)) {
 				TraceEvent(SevError, "ChangeFeedMismatch")
