@@ -105,7 +105,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TLOG_POP_BATCH_SIZE,                                  1000 ); if ( randomize && BUGGIFY ) TLOG_POP_BATCH_SIZE = 10;
 	init( TLOG_SERVER_TEAM_PARTITIONED,                        false );
 	init( TLOG_NEW_INTERFACE,                                  false );
-	init( BROADCAST_TLOG_GROUPS,                                true );
+	init( BROADCAST_TLOG_GROUPS,                                true ); //BROADCAST_TLOG_GROUPS = !PROXY_USE_RESOLVER_PRIVATE_MUTATIONS;
 	init( PTXN_DISABLE_DD,                                     false ); if (TLOG_NEW_INTERFACE) PTXN_DISABLE_DD = true;
 	init( TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE,     250e6 );
 	init( ENABLE_DETAILED_TLOG_POP_TRACE,                       true );
@@ -414,7 +414,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TXN_STATE_SEND_AMOUNT,                                    4 );
 	init( REPORT_TRANSACTION_COST_ESTIMATION_DELAY,               0.1 );
 	init( PROXY_REJECT_BATCH_QUEUED_TOO_LONG,                    true );
-	init( PROXY_USE_RESOLVER_PRIVATE_MUTATIONS,                 false ); if( randomize && BUGGIFY ) PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = deterministicRandom()->coinflip();
+	init( PROXY_USE_RESOLVER_PRIVATE_MUTATIONS,                 false ); PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = TLOG_NEW_INTERFACE || (randomize && BUGGIFY && deterministicRandom()->coinflip());
 
 	init( RESET_MASTER_BATCHES,                                   200 );
 	init( RESET_RESOLVER_BATCHES,                                 200 );

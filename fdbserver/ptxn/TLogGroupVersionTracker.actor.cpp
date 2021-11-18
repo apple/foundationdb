@@ -18,12 +18,16 @@
  * limitations under the License.
  */
 
-#include <fdbserver/Knobs.h>
-#include "fdbserver/ptxn/TLogGroupVersionTracker.h"
+#include <iterator>
 
 #include "fdbclient/FDBTypes.h"
+#include <fdbserver/Knobs.h>
+#include "fdbserver/ptxn/TLogGroupVersionTracker.h"
+#include "flow/BooleanParam.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
+
+FDB_DEFINE_BOOLEAN_PARAM(UpdateAllGroups);
 
 namespace ptxn {
 
@@ -46,7 +50,8 @@ void TLogGroupVersionTracker::removeGroups(const std::vector<TLogGroupID>& group
 }
 
 std::map<TLogGroupID, Version> TLogGroupVersionTracker::updateGroups(const std::vector<TLogGroupID>& groups,
-                                                                     Version commitVersion) {
+                                                                     Version commitVersion,
+                                                                     UpdateAllGroups returnAllGroups) {
 	if (commitVersion > maxCV) {
 		maxCV = commitVersion;
 	}
@@ -60,9 +65,10 @@ std::map<TLogGroupID, Version> TLogGroupVersionTracker::updateGroups(const std::
 		it->second = commitVersion;
 	}
 
-	if (SERVER_KNOBS->INSERT_EMPTY_TRANSACTION || SERVER_KNOBS->BROADCAST_TLOG_GROUPS) {
+	if (SERVER_KNOBS->INSERT_EMPTY_TRANSACTION || SERVER_KNOBS->BROADCAST_TLOG_GROUPS ||
+	    returnAllGroups == UpdateAllGroups::True) {
 		for (auto& [gid, version] : versions) {
-			if (SERVER_KNOBS->BROADCAST_TLOG_GROUPS ||
+			if (returnAllGroups == UpdateAllGroups::True || SERVER_KNOBS->BROADCAST_TLOG_GROUPS ||
 			    (results.count(gid) == 0 &&
 			     commitVersion - version >= SERVER_KNOBS->LAGGING_TLOG_GROUP_VERSION_LIMIT)) {
 				results.emplace(gid, version);
@@ -72,6 +78,15 @@ std::map<TLogGroupID, Version> TLogGroupVersionTracker::updateGroups(const std::
 	}
 
 	return results;
+}
+
+std::map<TLogGroupID, Version> TLogGroupVersionTracker::updateGroups(const std::set<TLogGroupID>& groups,
+                                                                     Version commitVersion,
+                                                                     UpdateAllGroups returnAllGroups) {
+	std::vector<ptxn::TLogGroupID> vGroups;
+	vGroups.reserve(groups.size());
+	std::copy(groups.begin(), groups.end(), std::back_inserter(vGroups));
+	return updateGroups(vGroups, commitVersion, returnAllGroups);
 }
 
 // TODO: reduce O(N) to O(1).
@@ -109,7 +124,7 @@ TEST_CASE("fdbserver/ptxn/test/versiontracker") {
 		groups.clear();
 		groups.push_back(a);
 		const Version cv1 = 10;
-		auto results = tracker.updateGroups(groups, cv1);
+		auto results = tracker.updateGroups(groups, cv1, UpdateAllGroups::False);
 		ASSERT(results.size() == 1 && results[a] == beginVersion);
 		ASSERT_EQ(tracker.getCommitVersion(a), cv1);
 		ASSERT_EQ(tracker.getMaxCommitVersion(), cv1);
@@ -118,7 +133,7 @@ TEST_CASE("fdbserver/ptxn/test/versiontracker") {
 		groups.push_back(b);
 		groups.push_back(c);
 		const Version cv2 = 20;
-		results = tracker.updateGroups(groups, cv2);
+		results = tracker.updateGroups(groups, cv2, UpdateAllGroups::False);
 		ASSERT(results.size() == 2);
 		ASSERT(results[b] == beginVersion && results[c] == beginVersion);
 		ASSERT_EQ(tracker.getCommitVersion(b), cv2);
@@ -130,7 +145,7 @@ TEST_CASE("fdbserver/ptxn/test/versiontracker") {
 		groups.push_back(d);
 		groups.push_back(e);
 		const Version cv3 = 30;
-		results = tracker.updateGroups(groups, cv3);
+		results = tracker.updateGroups(groups, cv3, UpdateAllGroups::False);
 		ASSERT(results.size() == 3);
 		ASSERT(results[b] == cv2 && results[d] == beginVersion && results[e] == beginVersion);
 		ASSERT_EQ(tracker.getCommitVersion(b), cv3);

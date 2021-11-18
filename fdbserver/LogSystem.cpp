@@ -369,6 +369,13 @@ bool LogPushData::writeTransactionInfo(int location, uint32_t subseq) {
 	return true;
 }
 
+void LogPushData::addTLogGroups(const std::vector<TLogGroupRef>& groups, Version commitVersion) {
+	for (const auto& group : groups) {
+		pGroupMessageBuilders->emplace(group->id(),
+		                               std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(commitVersion));
+	}
+}
+
 #ifndef __INTEL_COMPILER
 #pragma endregion
 #endif

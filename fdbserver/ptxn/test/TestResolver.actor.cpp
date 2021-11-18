@@ -102,7 +102,7 @@ bool trackerTest() {
 		removedGroups.emplace_back(0, totalGroups - i - 1);
 	}
 	const Version cv1 = 200, cv2 = 200;
-	tracker.updateGroups(updatedGroups, cv1);
+	tracker.updateGroups(updatedGroups, cv1, UpdateAllGroups::False);
 	tracker.addGroups(newGroups, cv2);
 	tracker.removeGroups(removedGroups);
 
