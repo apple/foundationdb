@@ -108,8 +108,9 @@ public:
 	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
 	    confChange(*resolverData_.confChanges), logSystem(resolverData_.logSystem),
 	    popVersion(resolverData_.popVersion), keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
-	    initialCommit(resolverData_.initialCommit), forResolver(true), tagToServer(&resolverData_.tagToServer),
-	    ssToStorageTeam(&resolverData_.ssToStorageTeam), changedTeams(&resolverData_.changedTeams) {}
+	    tLogGroupCollection(resolverData_.tLogGroupCollection), initialCommit(resolverData_.initialCommit),
+	    forResolver(true), tagToServer(&resolverData_.tagToServer), ssToStorageTeam(&resolverData_.ssToStorageTeam),
+	    changedTeams(&resolverData_.changedTeams) {}
 
 private:
 	// The following variables are incoming parameters
@@ -255,6 +256,9 @@ private:
 		uniquify(info.tags);
 		//TraceEvent("ProxyApply", dbgid).detail("Range", insertRange.toString()).detail("CacheInfo", info.toString());
 		keyInfo->insert(insertRange, info);
+		if (toCommit && SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			toCommit->setShardChanged();
+		}
 	}
 
 	void checkSetServerKeysPrefix(MutationRef m) {
@@ -739,6 +743,9 @@ private:
 			                clearRange.begin == StringRef()
 			                    ? ServerCacheInfo()
 			                    : keyInfo->rangeContainingKeyBefore(clearRange.begin).value());
+			if (toCommit && SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+				toCommit->setShardChanged();
+			}
 		}
 
 		if (!initialCommit)
@@ -1238,6 +1245,12 @@ public:
 };
 
 } // anonymous namespace
+
+void ResolverData::initGroupMessageBuilders(Version commitVersion) {
+	const auto& groups = tLogGroupCollection->groups();
+	ASSERT_WE_THINK(toCommit && toCommit->pGroupMessageBuilders->empty());
+	toCommit->addTLogGroups(groups, commitVersion);
+}
 
 void applyMetadataMutations(SpanID const& spanContext,
                             ProxyCommitData& proxyCommitData,

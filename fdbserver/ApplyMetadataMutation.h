@@ -25,6 +25,7 @@
 #include <cstddef>
 
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -52,10 +53,16 @@ struct ResolverData {
 	std::map<Tag, UID> tagToServer;
 	std::unordered_map<UID, ptxn::StorageTeamID> ssToStorageTeam;
 	std::unordered_map<UID, std::vector<std::pair<ptxn::StorageTeamID, bool>>> changedTeams;
+	Reference<TLogGroupCollection> tLogGroupCollection;
 
 	// For initial broadcast
-	ResolverData(UID debugId, IKeyValueStore* store, KeyRangeMap<ServerCacheInfo>* info, bool* forceRecovery)
-	  : dbgid(debugId), txnStateStore(store), keyInfo(info), confChanges(forceRecovery), initialCommit(true) {}
+	ResolverData(UID debugId,
+	             IKeyValueStore* store,
+	             KeyRangeMap<ServerCacheInfo>* info,
+	             bool* forceRecovery,
+	             Reference<TLogGroupCollection> collection)
+	  : dbgid(debugId), txnStateStore(store), keyInfo(info), confChanges(forceRecovery), initialCommit(true),
+	    tLogGroupCollection(collection) {}
 
 	// For transaction batches that contain metadata mutations
 	ResolverData(UID debugId,
@@ -66,9 +73,17 @@ struct ResolverData {
 	             bool* forceRecovery,
 	             Version popVersion,
 	             std::map<UID, Reference<StorageInfo>>* storageCache,
-	             std::unordered_map<UID, StorageServerInterface>* tssMapping)
+	             std::unordered_map<UID, StorageServerInterface>* tssMapping,
+	             Version commitVersion,
+	             Reference<TLogGroupCollection> collection)
 	  : dbgid(debugId), txnStateStore(store), keyInfo(info), confChanges(forceRecovery), logSystem(logSystem),
-	    toCommit(toCommit), popVersion(popVersion), storageCache(storageCache), tssMapping(tssMapping) {}
+	    toCommit(toCommit), popVersion(popVersion), storageCache(storageCache), tssMapping(tssMapping),
+	    tLogGroupCollection(collection) {
+		initGroupMessageBuilders(commitVersion);
+	}
+
+private:
+	void initGroupMessageBuilders(Version commitVersion);
 };
 
 inline bool isMetadataMutation(MutationRef const& m) {

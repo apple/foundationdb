@@ -77,6 +77,8 @@ struct Resolver : ReferenceCounted<Resolver> {
 	std::unordered_map<UID, StorageServerInterface> tssMapping;
 	bool forceRecovery = false;
 
+	Reference<TLogGroupCollection> tLogGroupCollection;
+
 	Version debugMinRecentStateVersion = 0;
 
 	CounterCollection cc;
@@ -200,11 +202,6 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		std::vector<int> commitList;
 		std::vector<int> tooOldList;
 
-		// Update group versions
-		if (req.prevVersion >= 0) { // Not first request
-			reply.previousCommitVersions = self->versionTracker.updateGroups(req.updatedGroups, req.version);
-		}
-
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;
 		ConflictBatch conflictBatch(self->conflictSet, &reply.conflictingKeyRangeMap, &reply.arena);
@@ -249,6 +246,9 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		int64_t stateMutations = 0;
 		int64_t stateBytes = 0;
 		LogPushData toCommit(self->logSystem); // For accumulating private mutations
+		std::unordered_map<ptxn::TLogGroupID, std::shared_ptr<ptxn::ProxySubsequencedMessageSerializer>>
+		    groupMessageBuilders;
+		toCommit.pGroupMessageBuilders = &groupMessageBuilders;
 		ResolverData resolverData(self->dbgid,
 		                          self->logSystem,
 		                          self->txnStateStore,
@@ -257,7 +257,9 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		                          &self->forceRecovery,
 		                          req.version + 1,
 		                          &self->storageCache,
-		                          &self->tssMapping);
+		                          &self->tssMapping,
+		                          req.version,
+		                          self->tLogGroupCollection);
 		bool isLocked = false;
 		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 			auto lockedKey = self->txnStateStore->readValue(databaseLockedKey).get();
@@ -291,6 +293,16 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 				reply.arena.dependsOn(mutations.arena());
 			}
 			reply.privateMutationCount = toCommit.getMutationCount();
+		}
+
+		// Update group versions
+		if (req.prevVersion >= 0) { // Not first request
+			std::set<ptxn::TLogGroupID> groups;
+			groups.insert(req.updatedGroups.begin(), req.updatedGroups.end());
+			auto& more = toCommit.getWrittenTLogGroups();
+			groups.insert(more.begin(), more.end());
+			reply.previousCommitVersions = self->versionTracker.updateGroups(
+			    groups, req.version, toCommit.isShardChanged() ? UpdateAllGroups::True : UpdateAllGroups::False);
 		}
 
 		self->resolvedStateTransactions += req.txnStateTransactions.size();
@@ -482,8 +494,11 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		pContext->pResolverData->keyInfo.rawInsert(keyInfoData);
 
 		bool confChanges; // Ignore configuration changes for initial commits.
-		ResolverData resolverData(
-		    pContext->pResolverData->dbgid, pContext->pTxnStateStore, &pContext->pResolverData->keyInfo, &confChanges);
+		ResolverData resolverData(pContext->pResolverData->dbgid,
+		                          pContext->pTxnStateStore,
+		                          &pContext->pResolverData->keyInfo,
+		                          &confChanges,
+		                          pContext->pResolverData->tLogGroupCollection);
 
 		applyMetadataMutations(SpanID(), resolverData, mutations);
 	} // loop
@@ -570,6 +585,14 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 
 		// This has to be declared after the self->txnStateStore get initialized
 		transactionStateResolveContext = TransactionStateResolveContext(self, &addActor);
+
+		// Add TLog groups to collection
+		self->tLogGroupCollection = makeReference<TLogGroupCollection>(db);
+		const auto& logset = db->get().logSystemConfig.tLogs[0];
+		for (const auto& gid : logset.tLogGroupIDs) {
+			TLogGroupRef group = makeReference<TLogGroup>(gid);
+			self->tLogGroupCollection->addTLogGroup(self->dbgid, group);
+		}
 	}
 
 	loop choose {
