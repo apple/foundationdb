@@ -1247,6 +1247,9 @@ public:
 } // anonymous namespace
 
 void ResolverData::initGroupMessageBuilders(Version commitVersion) {
+	if (!SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS)
+		return;
+
 	const auto& groups = tLogGroupCollection->groups();
 	ASSERT_WE_THINK(toCommit && toCommit->pGroupMessageBuilders->empty());
 	toCommit->addTLogGroups(groups, commitVersion);
