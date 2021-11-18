@@ -24,9 +24,15 @@
 #include "fdbclient/libb64/encode.h"
 #include "fdbclient/sha1/SHA1.h"
 #include <time.h>
+#include <iomanip>
+#include <openssl/sha.h>
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
+#include <boost/algorithm/string.hpp>
 #include "fdbrpc/IAsyncFile.h"
+#include "flow/UnitTest.h"
 #include "fdbclient/rapidxml/rapidxml.hpp"
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -240,10 +246,10 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const& ur
 
 		StringRef c(cred);
 		StringRef key = c.eat(":");
-		StringRef secret = c.eat();
-
+		StringRef secret = c.eat(":");
+		StringRef securityToken = c.eat();
 		return Reference<BlobStoreEndpoint>(new BlobStoreEndpoint(
-		    host.toString(), service.toString(), key.toString(), secret.toString(), knobs, extraHeaders));
+		    host.toString(), service.toString(), key.toString(), secret.toString(), securityToken.toString(), knobs, extraHeaders));
 
 	} catch (std::string& err) {
 		if (error != nullptr)
@@ -266,10 +272,15 @@ std::string BlobStoreEndpoint::getResourceURL(std::string resource, std::string 
 
 	// If secret isn't being looked up from credentials files then it was passed explicitly in th URL so show it here.
 	std::string s;
-	if (!lookupSecret)
-		s = std::string(":") + secret;
+	if (!lookupKey) {
+		s = key;
+	}
+	if (!lookupSecret) {
+		s += securityToken.empty() ? std::string(":") + secret : std::string(":") + secret + std::string(":") + securityToken;
+	}
 
-	std::string r = format("blobstore://%s%s@%s/%s", key.c_str(), s.c_str(), hostPort.c_str(), resource.c_str());
+
+	std::string r = format("blobstore://%s@%s/%s", s.c_str(), hostPort.c_str(), resource.c_str());
 
 	// Get params that are deviations from knob defaults
 	std::string knobParams = knobs.getURLParameters();
@@ -490,7 +501,8 @@ ACTOR Future<Void> updateSecret_impl(Reference<BlobStoreEndpoint> b) {
 
 	wait(waitForAll(reads));
 
-	std::string key = b->key + "@" + b->host;
+	std::string key = b->lookupKey ?  "@" + b->host : b->key + "@" + b->host;
+
 
 	int invalid = 0;
 
@@ -506,12 +518,24 @@ ACTOR Future<Void> updateSecret_impl(Reference<BlobStoreEndpoint> b) {
 			JSONDoc accounts(doc.last().get_obj());
 			if (accounts.has(key, false) && accounts.last().type() == json_spirit::obj_type) {
 				JSONDoc account(accounts.last());
-				std::string secret;
-				// Once we find a matching account, use it.
-				if (account.tryGet("secret", secret)) {
-					b->secret = secret;
-					return Void();
+				if (b->lookupKey) {
+					std::string apiKey;
+					if (account.tryGet("api_key", apiKey))
+						b->key = apiKey;
+					else
+						continue;
 				}
+				if (b->lookupSecret) {
+					std::string secret;
+					if (account.tryGet("secret", secret))
+						b->secret = secret;
+					else
+						continue;
+				}
+				std::string token;
+				if (account.tryGet("token", token))
+					b->securityToken = token;
+				return Void();
 			}
 		}
 	}
@@ -555,7 +579,7 @@ ACTOR Future<BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<BlobS
 	    .detail("RemoteEndpoint", conn->getPeerAddress())
 	    .detail("ExpiresIn", b->knobs.max_connection_life);
 
-	if (b->lookupSecret)
+	if (b->lookupKey || b->lookupSecret)
 		wait(b->updateSecret());
 
 	return BlobStoreEndpoint::ReusableConnection({ conn, now() + b->knobs.max_connection_life });
@@ -643,7 +667,13 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			// Finish/update the request headers (which includes Date header)
 			// This must be done AFTER the connection is ready because if credentials are coming from disk they are
 			// refreshed when a new connection is established and setAuthHeaders() would need the updated secret.
-			bstore->setAuthHeaders(verb, resource, headers);
+			if(!bstore->securityToken.empty())
+				headers["x-amz-security-token"] = bstore->securityToken;
+			if(CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER) {
+				bstore->setV4AuthHeaders(verb, resource, headers);
+			} else {
+				bstore->setAuthHeaders(verb, resource, headers);
+			}
 			remoteAddress = rconn.conn->getPeerAddress();
 			wait(bstore->requestRate->getAllowance(1));
 			Reference<HTTP::Response> _r = wait(timeoutError(HTTP::doRequest(rconn.conn,
@@ -1066,6 +1096,153 @@ std::string BlobStoreEndpoint::hmac_sha1(std::string const& msg) {
 	return SHA1::from_string(kopad);
 }
 
+std::string sha256_hex(std::string str)
+{
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256_CTX sha256;
+    SHA256_Init(&sha256);
+    SHA256_Update(&sha256, str.c_str(), str.size());
+    SHA256_Final(hash, &sha256);
+    std::stringstream ss;
+    for(int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+    {
+        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
+    }
+    return ss.str();
+}
+
+std::string hmac_sha256_hex(std::string key, std::string msg)
+{
+    unsigned char hash[32];
+
+    HMAC_CTX *hmac =HMAC_CTX_new();
+    HMAC_Init_ex(hmac, &key[0], key.length(), EVP_sha256(), NULL);
+    HMAC_Update(hmac, (unsigned char*)&msg[0], msg.length());
+    unsigned int len = 32;
+    HMAC_Final(hmac, hash, &len);
+    HMAC_CTX_free(hmac);
+
+    std::stringstream ss;
+    ss << std::hex << std::setfill('0');
+    for (int i = 0; i < len; i++)
+    {   
+        ss << std::hex << std::setw(2)  << (unsigned int)hash[i];
+    }
+    return (ss.str());
+}
+
+std::string hmac_sha256(std::string key, std::string msg)
+{
+    unsigned char hash[32];
+
+    HMAC_CTX *hmac = HMAC_CTX_new();
+    HMAC_Init_ex(hmac, &key[0], key.length(), EVP_sha256(), NULL);
+    HMAC_Update(hmac, ( unsigned char* )&msg[0], msg.length());
+    unsigned int len = 32;
+    HMAC_Final(hmac, hash, &len);
+    HMAC_CTX_free(hmac);
+
+    std::stringstream ss;
+    ss << std::setfill('0');
+    for (int i = 0; i < len; i++)
+    {
+        ss  << hash[i];
+    }
+    return (ss.str());
+}
+
+// Date and Time parameters are used for unit testing
+void BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers, std::string date, std::string datestamp) {
+	
+	//std::cout << "========== Starting===========" << std::endl;
+	std::string accessKey = key;
+	std::string secretKey = secret;		
+	// Create a date for headers and the credential string
+	std::string amzDate;
+	std::string dateStamp;
+	if(date.empty() || datestamp.empty()) {
+		time_t ts;
+		time(&ts);
+		char dateBuf[20];
+		// ISO 8601 format YYYYMMDD'T'HHMMSS'Z'
+		strftime(dateBuf, 20, "%Y%m%dT%H%M%SZ", gmtime(&ts));
+		amzDate = dateBuf;
+		strftime(dateBuf, 20, "%Y%m%d", gmtime(&ts));
+		dateStamp = dateBuf;		
+	} else {
+		amzDate = date;
+		dateStamp = datestamp;
+	}
+	// Extract service and region
+	StringRef hostRef(host);
+	std::string service = hostRef.eat(".").toString();
+	std::string region = hostRef.eat(".").toString();
+
+// ************* TASK 1: CREATE A CANONICAL REQUEST *************
+	// Create Create canonical URI--the part of the URI from domain to query string (use '/' if no path)
+	StringRef resourceRef(resource);
+	resourceRef.eat("/");
+	std::string canonicalURI("/" + resourceRef.toString());
+	size_t q = canonicalURI.find_last_of('?');
+	if (q != canonicalURI.npos)
+		canonicalURI.resize(q);
+	canonicalURI = HTTP::awsV4URIEncode(canonicalURI, false);
+	// Create the canonical query string
+	std::string queryString;
+	q = resource.find_last_of('?');
+	if (q != queryString.npos)
+		queryString = resource.substr(q+1);
+	std::vector<std::string> queryParameters;
+	StringRef qStr(queryString);
+	StringRef queryParameter;
+	while((queryParameter = qStr.eat("&")) != StringRef()) {
+		StringRef param = queryParameter.eat("=");
+		StringRef value = queryParameter.eat();
+		queryParameters.push_back(HTTP::awsV4URIEncode(param.toString(), true) + "=" + HTTP::awsV4URIEncode(value.toString(), true));
+	}
+	std::sort(queryParameters.begin(), queryParameters.end());
+	std::string canonicalQueryString = boost::algorithm::join(queryParameters, "&");
+	using namespace boost::algorithm;
+	// Create the canonical headers and signed headers
+	ASSERT(!headers["Host"].empty());
+	// Using unsigned payload here and adding content-md5 to the signed headers. It may be better to also include sha256 sum for added security.
+	headers["x-amz-content-sha256"] = "UNSIGNED-PAYLOAD";
+	headers["x-amz-date"] = amzDate;
+	std::vector<std::pair<std::string, std::string>> headersList;
+	headersList.push_back({"host", trim_copy(headers["Host"]) + "\n"});
+	if (headers.find("Content-Type") != headers.end())
+		headersList.push_back({"content-type", trim_copy(headers["Content-Type"]) + "\n"});
+	if (headers.find("Content-MD5") != headers.end())
+		headersList.push_back({"content-md5", trim_copy(headers["Content-MD5"]) + "\n"});	
+	for (auto h : headers) {
+		if (StringRef(h.first).startsWith(LiteralStringRef("x-amz")))
+			headersList.push_back({to_lower_copy(h.first), trim_copy(h.second) + "\n"});
+	}
+	std::sort(headersList.begin(), headersList.end());
+	std::string canonicalHeaders;
+	std::string signedHeaders;
+	for(auto &i : headersList) {
+		canonicalHeaders += i.first + ":" + i.second;
+		signedHeaders += i.first + ";";
+	}
+	signedHeaders.pop_back();
+	std::string canonicalRequest = verb + "\n" + canonicalURI + "\n" + canonicalQueryString + "\n" + canonicalHeaders + "\n" + signedHeaders + "\n" +  headers["x-amz-content-sha256"];
+
+// ************* TASK 2: CREATE THE STRING TO SIGN*************
+	std::string algorithm = "AWS4-HMAC-SHA256";
+	std::string credentialScope = dateStamp + "/" + region + "/" + service + "/" + "aws4_request";
+	std::string stringToSign = algorithm + "\n" +  amzDate + "\n" +  credentialScope + "\n" +  sha256_hex(canonicalRequest);
+
+// ************* TASK 3: CALCULATE THE SIGNATURE *************
+	//Create the signing key using the function defined above.
+	std::string signingKey = hmac_sha256(hmac_sha256(hmac_sha256(hmac_sha256("AWS4"+secretKey, dateStamp), region), service), "aws4_request");
+	//Sign the string_to_sign using the signing_key
+	std::string signature = hmac_sha256_hex(signingKey, stringToSign);
+// ************* TASK 4: ADD SIGNING INFORMATION TO THE Header *************
+	std::string authorizationHeader = algorithm + " " + "Credential=" + accessKey + "/" + credentialScope + ", " +  "SignedHeaders=" + signedHeaders + ", " + "Signature=" + signature;
+	headers["Authorization"] = authorizationHeader;
+}
+
 void BlobStoreEndpoint::setAuthHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers) {
 	std::string& date = headers["Date"];
 
@@ -1150,6 +1327,8 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<BlobStoreEndpoint> b
 	HTTP::Headers headers;
 	// Send MD5 sum for content so blobstore can verify it
 	headers["Content-MD5"] = contentMD5;
+	if (!CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE.empty())
+		headers["x-amz-server-side-encryption"] = CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;
 	state Reference<HTTP::Response> r =
 	    wait(bstore->doRequest("PUT", resource, headers, pContent, contentLen, { 200 }));
 
@@ -1243,6 +1422,8 @@ ACTOR static Future<std::string> beginMultiPartUpload_impl(Reference<BlobStoreEn
 
 	std::string resource = std::string("/") + bucket + "/" + object + "?uploads";
 	HTTP::Headers headers;
+	if (!CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE.empty())
+		headers["x-amz-server-side-encryption"] = CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;
 	Reference<HTTP::Response> r = wait(bstore->doRequest("POST", resource, headers, NULL, 0, { 200 }));
 
 	try {
@@ -1352,4 +1533,48 @@ Future<Void> BlobStoreEndpoint::finishMultiPartUpload(std::string const& bucket,
                                                       std::string const& uploadID,
                                                       MultiPartSetT const& parts) {
 	return finishMultiPartUpload_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, object, uploadID, parts);
+}
+
+
+TEST_CASE("/backup/s3/v4headers") {
+	// GET without query parameters
+	{
+	BlobStoreEndpoint s3("s3.amazonaws.com", "s3", "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
+	std::string verb("GET");
+	std::string resource("/test.txt");
+	HTTP::Headers headers;
+	headers["Host"] = "s3.amazonaws.com";
+	s3.setV4AuthHeaders(verb, resource, headers, "20130524T000000Z", "20130524");
+	ASSERT(headers["Authorization"] == "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/amazonaws/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=c6037f4b174f2019d02d7085a611cef8adfe1efe583e220954dc85d59cd31ba3");	
+	ASSERT(headers["x-amz-date"] == "20130524T000000Z");
+	}
+	
+	// GET with query parameters
+	{
+	BlobStoreEndpoint s3("s3.amazonaws.com", "s3", "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
+	std::string verb("GET");
+	std::string resource("/test/examplebucket?Action=DescribeRegions&Version=2013-10-15");
+	HTTP::Headers headers;
+	headers["Host"] = "s3.amazonaws.com";
+	s3.setV4AuthHeaders(verb, resource, headers, "20130524T000000Z", "20130524");
+	ASSERT(headers["Authorization"] == "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/amazonaws/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=426f04e71e191fbc30096c306fe1b11ce8f026a7be374541862bbee320cce71c");	
+	ASSERT(headers["x-amz-date"] == "20130524T000000Z");
+	}
+
+	// POST
+	{
+	BlobStoreEndpoint s3("s3.us-west-2.amazonaws.com", "s3", "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
+	std::string verb("POST");
+	std::string resource("/simple.json");
+	HTTP::Headers headers;
+	headers["Host"] = "s3.us-west-2.amazonaws.com";
+	headers["Content-Type"] = "Application/x-amz-json-1.0";
+	s3.setV4AuthHeaders(verb, resource, headers, "20130524T000000Z", "20130524");
+	ASSERT(headers["Authorization"] == "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-west-2/s3/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=cf095e36bed9cd3139c2e8b3e20c296a79d8540987711bf3a0d816b19ae00314");	
+	ASSERT(headers["x-amz-date"] == "20130524T000000Z");
+	ASSERT(headers["Host"] == "s3.us-west-2.amazonaws.com");
+	ASSERT(headers["Content-Type"] == "Application/x-amz-json-1.0"); 
+	}
+
+	return Void();
 }

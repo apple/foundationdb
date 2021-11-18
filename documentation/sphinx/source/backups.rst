@@ -83,10 +83,11 @@ For blob store backup locations, the Backup URL format is
 
 ::
 
-    blobstore://<api_key>[:<secret>]@<hostname>[:<port>]/<name>?bucket=<bucket_name>[&<param>=<value>]...]
+    blobstore://<api_key>[:<secret>[:<security_token>]]@<hostname>[:<port>]/<name>?bucket=<bucket_name>[&<param>=<value>]...]
 
       <api_key> - API key to use for authentication
       <secret> - API key's secret.  Optional.
+      <security_token> - Security token if temporary credentials are used. Optional.
       <hostname> - Remote hostname or IP address to connect to
       <port> - Remote port to connect to.  Optional.  Default is 80.
       <name> - Name of the backup within the backup bucket.  It can contain '/' characters in order to organize backups into a folder-like structure.
