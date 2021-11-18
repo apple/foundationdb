@@ -6772,9 +6772,16 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 }
 
 ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, ChangeFeedStorageData* self) {
+	state Promise<Void> destroyed = self->destroyed;
 	loop {
+		if (destroyed.isSet()) {
+			return Void();
+		}
 		if (self->version.get() < self->desired.get()) {
 			wait(delay(CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME) || self->version.whenAtLeast(self->desired.get()));
+			if (destroyed.isSet()) {
+				return Void();
+			}
 			if (self->version.get() < self->desired.get()) {
 				ChangeFeedVersionUpdateReply rep = wait(brokenPromiseToNever(
 				    interf.changeFeedVersionUpdate.getReply(ChangeFeedVersionUpdateRequest(self->desired.get()))));

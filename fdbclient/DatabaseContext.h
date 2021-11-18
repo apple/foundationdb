@@ -152,6 +152,9 @@ struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
 	Future<Void> updater;
 	NotifiedVersion version;
 	NotifiedVersion desired;
+	Promise<Void> destroyed;
+
+	~ChangeFeedStorageData() { destroyed.send(Void()); }
 };
 
 struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
