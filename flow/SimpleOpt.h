@@ -280,7 +280,10 @@ enum _ESOFlags {
 	SO_O_ICASE_WORD = 0x0400,
 
 	/*! Case-insensitive comparisons for all arg types */
-	SO_O_ICASE = 0x0700
+	SO_O_ICASE = 0x0700,
+
+	/*! Case-insensitive comparisons for all hyphens and underscores after leading hyphens */
+	SO_O_ICASE_HYPHEN_AND_UNDERSCORE = 0x1000
 };
 
 /*! Types of arguments that options may have. Note that some of the _ESOFlags
@@ -392,7 +395,7 @@ public:
 
 	    @param a_rgOptions  Valid option array
 	 */
-	void SetOptions(const SOption* a_rgOptions);
+	inline void SetOptions(const SOption* a_rgOptions) { m_rgOptions = a_rgOptions; }
 
 	/*! @brief Change the current flags during option parsing.
 
@@ -544,29 +547,13 @@ private:
 // ---------------------------------------------------------------------------
 //                                  IMPLEMENTATION
 // ---------------------------------------------------------------------------
-template <class SOCHAR>
-void CSimpleOptTempl<SOCHAR>::SetOptions(const SOption* a_rgOptions) {
-	m_rgOptions = a_rgOptions;
-	// Change all the hyphens to underscores, except the leading hyphens
-	for (int n = 0; m_rgOptions[n].nId >= 0; ++n) {
-		SOCHAR* pszArg = const_cast<SOCHAR*>(m_rgOptions[n].pszArg);
-		while (pszArg && *pszArg && *pszArg == (SOCHAR)'-') {
-			++pszArg;
-		}
-		for (; pszArg && *pszArg; ++pszArg) {
-			if (*pszArg == (SOCHAR)'-') {
-				*pszArg = (SOCHAR)'_';
-			}
-		}
-	}
-}
 
 template <class SOCHAR>
 bool CSimpleOptTempl<SOCHAR>::Init(int a_argc, SOCHAR* a_argv[], const SOption* a_rgOptions, int a_nFlags) {
 	m_argc = a_argc;
 	m_nLastArg = a_argc;
 	m_argv = a_argv;
-	SetOptions(a_rgOptions);
+	m_rgOptions = a_rgOptions;
 	m_nLastError = SO_SUCCESS;
 	m_nOptionIdx = 0;
 	m_nOptionId = -1;
@@ -864,30 +851,13 @@ int CSimpleOptTempl<SOCHAR>::LookupOption(const SOCHAR* a_pszOption) const {
 	int nBestMatchLen = 0; // matching characters of best match
 	int nLastMatchLen = 0; // matching characters of last best match
 
-	// use a deep copy of the a_pszOption to do the conversion(- to _ except the leading -), and match
-	size_t pszOptionSize = strlen(a_pszOption);
-	SOCHAR* pszOptionCopy = (SOCHAR*)malloc(pszOptionSize * sizeof(SOCHAR));
-	memcpy(pszOptionCopy, a_pszOption, pszOptionSize);
-
-	// Convert the pszOptionCopy's hyphens to underscores, except the leading hyphens
-	SOCHAR* psz_ptr = pszOptionCopy;
-	while (psz_ptr && *psz_ptr && *psz_ptr == (SOCHAR)'-') {
-		++psz_ptr;
-	}
-	for (; psz_ptr && *psz_ptr; ++psz_ptr) {
-		if (*psz_ptr == (SOCHAR)'-') {
-			*psz_ptr = (SOCHAR)'_';
-		}
-	}
-
 	for (int n = 0; m_rgOptions[n].nId >= 0; ++n) {
 		// the option table must use hyphens as the option character,
 		// the slash character is converted to a hyphen for testing.
 		SO_ASSERT(m_rgOptions[n].pszArg[0] != (SOCHAR)'/');
 
-		int nMatchLen = CalcMatch(m_rgOptions[n].pszArg, pszOptionCopy);
+		int nMatchLen = CalcMatch(m_rgOptions[n].pszArg, a_pszOption);
 		if (nMatchLen == -1) {
-			free(pszOptionCopy);
 			return n;
 		}
 		if (nMatchLen > 0 && nMatchLen >= nBestMatchLen) {
@@ -896,7 +866,6 @@ int CSimpleOptTempl<SOCHAR>::LookupOption(const SOCHAR* a_pszOption) const {
 			nBestMatch = n;
 		}
 	}
-	free(pszOptionCopy);
 
 	// only partial matches or no match gets to here, ensure that we
 	// don't return a partial match unless it is a clear winner
@@ -974,6 +943,14 @@ bool CSimpleOptTempl<SOCHAR>::IsEqual(SOCHAR a_cLeft, SOCHAR a_cRight, int a_nAr
 			a_cLeft += 'a' - 'A';
 		if (a_cRight >= 'A' && a_cRight <= 'Z')
 			a_cRight += 'a' - 'A';
+	}
+	if (m_nFlags & SO_O_ICASE_HYPHEN_AND_UNDERSCORE) {
+		if (a_cLeft == (SOCHAR)'-') {
+			a_cLeft = (SOCHAR)'_';
+		}
+		if (a_cRight == (SOCHAR)'-') {
+			a_cRight = (SOCHAR)'_';
+		}
 	}
 	return a_cLeft == a_cRight;
 }
