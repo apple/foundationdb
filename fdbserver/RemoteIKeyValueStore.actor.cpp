@@ -101,10 +101,11 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "RemoteKVStoreError").detail("Error", e.code());
 			// kvStore->close();
+			// TraceEvent(SevDebug, "RemoteKVStoreError").detail("Event", "after kvStore close");
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
-			throw;
+			throw actor_cancelled();
 			// TODO: Error handling
 		}
 	}

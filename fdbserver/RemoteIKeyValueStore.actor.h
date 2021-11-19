@@ -270,13 +270,9 @@ struct KeyValueStoreProcess : FlowProcess {
 	Standalone<StringRef> serializedIf;
 
 	KeyValueStoreProcess() {
-		std::cout << "Init KeyValueStoreProcess\n";
 		ObjectWriter writer(IncludeVersion());
-		std::cout << "ObjectWriter initialized\n";
 		writer.serialize(kvsIf);
-		std::cout << "Interface serialized\n";
 		serializedIf = writer.toString();
-		std::cout << "Writer toString\n";
 	}
 
 	StringRef name() const override { return "KeyValueStoreProcess"_sr; }
@@ -288,28 +284,20 @@ struct KeyValueStoreProcess : FlowProcess {
 
 	ACTOR static Future<Void> _run(KeyValueStoreProcess* self) {
 		state ActorCollection actors(true);
-		std::cout << "In _run KeyValueStoreProcess\n";
 		TraceEvent(SevDebug, "WaitingForOpenKVStoreRequest").log();
 		loop {
 			choose {
 				when(OpenKVStoreRequest req = waitNext(self->kvsIf.openKVStore.getFuture())) {
 					TraceEvent(SevDebug, "OpenKVStoreRequestReceived").log();
-					std::cout << "OpenKVStoreRequestReceived\n";
 					IKVSInterface reply;
 					actors.add(runIKVS(req, reply));
 				}
-				when(wait(actors.getResult())) {
-					std::cout << "Actor got result\n";
-					return Void();
-				}
+				when(wait(actors.getResult())) { return Void(); }
 			}
 		}
 	}
 
-	Future<Void> run() override {
-		std::cout << "In run KeyValueStoreProcess\n";
-		return _run(this);
-	}
+	Future<Void> run() override { return _run(this); }
 };
 
 struct IKVSProcess {
@@ -382,7 +370,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	}
 	void close() override {
 		interf.close.send(IKVSCloseRequest{});
-		// TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote close");
+		TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote close");
 	}
 
 	KeyValueStoreType getType() const override {
@@ -448,7 +436,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 		// // TraceEvent(SevDebug, "RemoteKVStore").detail("Event", "post init, before getError");
 		choose {
 			when(wait(self->interf.getError.getReply(IKVSGetErrorRequest{}))) {
-				// TraceEvent(SevDebug, "RemoteIKVSGetError").log();
+				TraceEvent(SevDebug, "RemoteIKVSGetError").log();
 				UNSTOPPABLE_ASSERT(false);
 			}
 			when(int res = wait(self->ikvsProcess.returnCode())) {

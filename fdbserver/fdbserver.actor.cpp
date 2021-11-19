@@ -1191,6 +1191,7 @@ private:
 				break;
 			case OPT_PUBLICADDR:
 				argStr = args.OptionArg();
+				std::cout << argStr << "\n";
 				boost::split(tmpStrings, argStr, [](char c) { return c == ','; });
 				publicAddressStrs.insert(publicAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
 				break;
@@ -1852,8 +1853,9 @@ int main(int argc, char* argv[]) {
 			g_network->addStopCallback(Net2FileSystem::stop);
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
 
-			const bool expectsPublicAddress = (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer ||
-			                                   role == ServerRole::Restore || role == ServerRole::RemoteIKVS);
+			const bool expectsPublicAddress =
+			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::Restore ||
+			     role == ServerRole::RemoteIKVS || role == ServerRole::FlowProcess);
 			if (opts.publicAddressStrs.empty()) {
 				if (expectsPublicAddress) {
 					fprintf(stderr, "ERROR: The -p or --public_address option is required\n");
@@ -2194,12 +2196,14 @@ int main(int argc, char* argv[]) {
 			std::cout << opts.flowProcessEndpoint.getPrimaryAddress().toString() << "\n";
 			if (opts.flowProcessName == "KeyValueStoreProcess") {
 				std::cout << "Factory set\n";
-				ProcessFactory<KeyValueStoreProcess> process(opts.flowProcessName.c_str());
+				ProcessFactory<KeyValueStoreProcess>(opts.flowProcessName.c_str()).create();
 			}
+			std::cout << g_network->getLocalAddress().toString() << "\n";
 			f = stopAfter(runFlowProcess(opts.flowProcessName, opts.flowProcessEndpoint));
 			g_network->run();
 		} else if (role == ServerRole::RemoteIKVS) {
 			TraceEvent(SevDebug, "StartingRemoteIKVSServer").detail("From", "fdbserver");
+			std::cout << g_network->getLocalAddress().toString() << "\n";
 			f = stopAfter(runRemoteServer());
 			g_network->run();
 		} else if (role == ServerRole::SpawnRemoteIKVS) {
