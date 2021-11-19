@@ -4,6 +4,11 @@
 Release Notes
 #############
 
+
+6.3.23
+======
+* Add AWS v4 header support for backup. `(PR #6025) <https://github.com/apple/foundationdb/pull/6025>`_
+
 6.3.22
 ======
 * Added histograms to client GRV batcher. `(PR #5760) <https://github.com/apple/foundationdb/pull/5760>`_
