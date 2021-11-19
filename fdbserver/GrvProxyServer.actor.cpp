@@ -46,6 +46,9 @@ struct GrvProxyStats {
 	double percentageOfDefaultGRVQueueProcessed;
 	double percentageOfBatchGRVQueueProcessed;
 
+	bool lastTxnThrottled;
+	double throttleStartTime;
+
 	LatencySample defaultTxnGRVTimeInQueue;
 	LatencySample batchTxnGRVTimeInQueue;
 
@@ -98,10 +101,11 @@ struct GrvProxyStats {
 	    updatesFromRatekeeper("UpdatesFromRatekeeper", cc), leaseTimeouts("LeaseTimeouts", cc), systemGRVQueueSize(0),
 	    defaultGRVQueueSize(0), batchGRVQueueSize(0), transactionRateAllowed(0), batchTransactionRateAllowed(0),
 	    transactionLimit(0), batchTransactionLimit(0), percentageOfDefaultGRVQueueProcessed(0),
-	    percentageOfBatchGRVQueueProcessed(0), defaultTxnGRVTimeInQueue("DefaultTxnGRVTimeInQueue",
-	                                                                    id,
-	                                                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                                                                    SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    percentageOfBatchGRVQueueProcessed(0), lastTxnThrottled(false), throttleStartTime(0.0),
+	    defaultTxnGRVTimeInQueue("DefaultTxnGRVTimeInQueue",
+	                             id,
+	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    batchTxnGRVTimeInQueue("BatchTxnGRVTimeInQueue",
 	                           id,
 	                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -649,6 +653,21 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		}
 
 		reply.timeThrottled = request.reqProcessEnd - request.reqProcessStart;
+		if (reply.timeThrottled > CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD) {
+			if (stats->lastTxnThrottled) {
+				// Check if this throttling has been sustained for a certain amount of time to avoid false positives
+				if (now() - stats->throttleStartTime > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD) {
+					reply.rkThrottled = true;
+				}
+			} else { // !stats->lastTxnThrottled
+				// If not previously throttled, this request/reply is our new starting point
+				// for judging whether we are being actively throttled by ratekeeper now
+				stats->lastTxnThrottled = true;
+				stats->throttleStartTime = now();
+			}
+		} else { // reply.timeThrottled <= CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD
+			stats->lastTxnThrottled = false;
+		}
 		request.reply.send(reply);
 		++stats->txnRequestOut;
 	}

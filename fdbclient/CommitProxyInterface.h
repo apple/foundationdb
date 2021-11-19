@@ -196,10 +196,11 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	Optional<Value> metadataVersion;
 	int64_t midShardSize = 0;
 	double timeThrottled;
+	bool rkThrottled;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 
-	GetReadVersionReply() : version(invalidVersion), locked(false) {}
+	GetReadVersionReply() : version(invalidVersion), locked(false), rkThrottled(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -210,7 +211,8 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           metadataVersion,
 		           tagThrottleInfo,
 		           midShardSize,
-		           timeThrottled);
+		           timeThrottled,
+		           rkThrottled);
 	}
 };
 

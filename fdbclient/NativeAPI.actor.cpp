@@ -5736,14 +5736,11 @@ ACTOR Future<Version> extractReadVersion(Location location,
 	double latency = now() - startTime;
 	cx->lastProxyRequest = startTime;
 	cx->updateCachedRV(startTime, rep.version);
-	// use startTime instead?
-	// maybe this also requires tracking number of loops processed in queue?
 	TraceEvent("DebugGrvTimeThrottled").detail("TimeThrottled", rep.timeThrottled);
-	if (rep.timeThrottled > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD &&
-	    priority != TransactionPriority::IMMEDIATE) {
+	if (rep.rkThrottled && priority != TransactionPriority::IMMEDIATE) {
 		TraceEvent("DebugGrvThrottleObserved")
-			.detail("TimeThrottled", rep.timeThrottled)
-			.detail("Threshold", CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD);
+		    .detail("TimeThrottled", rep.timeThrottled)
+		    .detail("Threshold", CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD);
 		cx->lastTimedRkThrottle = now();
 	}
 	cx->GRVLatencies.addSample(latency);

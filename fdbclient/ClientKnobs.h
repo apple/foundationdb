@@ -120,8 +120,9 @@ public:
 	double MAX_PROXY_CONTACT_LAG; // The upper bound in seconds for how often we want a response from the GRV proxies
 	double DEBUG_USE_GRV_CACHE_CHANCE; // Debug setting to change the chance for a regular GRV request to use the cache
 	double GRV_CACHE_RK_COOLDOWN; // Required number of seconds to pass after throttling to re-allow cache use
-	double GRV_SUSTAINED_THROTTLING_THRESHOLD; // Adjust what amount of time is considered "sustained" throttling on
-	                                           // proxy for a GRV which leads to disabling the cache
+	double GRV_THROTTLING_THRESHOLD; // Number of seconds spent in the request queue which is considered throttling
+	double GRV_SUSTAINED_THROTTLING_THRESHOLD; // If ALL GRV requests have been throttled in the last number of seconds
+	                                           // specified here, ratekeeper is throttling and not a false positive
 
 	// Taskbucket
 	double TASKBUCKET_LOGGING_DELAY;

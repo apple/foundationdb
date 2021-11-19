@@ -115,9 +115,10 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( MUTATION_BLOCK_SIZE,	            	  10000);
 	init( MAX_VERSION_CACHE_LAG,                    0.1 );
 	init( MAX_PROXY_CONTACT_LAG,                    1.0 );
-	init( DEBUG_USE_GRV_CACHE_CHANCE,              -0.1 ); // Since we check <= for 100% chance at 1.0, we don't want the default to be 0. This also means 0 is not 0%.
-	init( GRV_CACHE_RK_COOLDOWN,                    5.0 );
-	init( GRV_SUSTAINED_THROTTLING_THRESHOLD,      0.01 );
+	init( DEBUG_USE_GRV_CACHE_CHANCE,              -1.0 ); // Since we check <= for 100% chance at 1.0, we don't want the default to be 0. This also means 0 is not 0%.
+	init( GRV_CACHE_RK_COOLDOWN,                   60.0 );
+	init( GRV_THROTTLING_THRESHOLD,              0.0001 );
+	init( GRV_SUSTAINED_THROTTLING_THRESHOLD,       1.0 );
 
 	// TaskBucket
 	init( TASKBUCKET_LOGGING_DELAY,                5.0 );
