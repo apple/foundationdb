@@ -529,7 +529,7 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
