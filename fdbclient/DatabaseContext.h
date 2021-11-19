@@ -165,7 +165,7 @@ struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
 
 struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> mutations;
-	std::vector<MutationAndVersionStream> streams;
+	std::vector<ReplyPromiseStream<ChangeFeedStreamReply>> streams;
 
 	Version getVersion();
 	Future<Void> whenAtLeast(Version version);
