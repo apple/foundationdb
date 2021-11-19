@@ -282,8 +282,8 @@ enum _ESOFlags {
 	/*! Case-insensitive comparisons for all arg types */
 	SO_O_ICASE = 0x0700,
 
-	/*! Transfer all hyphens of users' input flags and internal flags to underscores excetp leading hyphens
-	    For example: --cluster-file ==> --cluster-file while comparing. */
+	/*! Treat all hyphens from flag names as underscores except leading hyphens
+	    For example: --cluster-file ==> --cluster_file while comparing. */
 	SO_O_HYPHEN_TO_UNDERSCORE = 0x1000
 };
 
