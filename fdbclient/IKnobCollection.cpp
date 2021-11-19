@@ -83,6 +83,7 @@ std::unique_ptr<IKnobCollection>& IKnobCollection::globalKnobCollection() {
 
 void IKnobCollection::setGlobalKnobCollection(Type type, Randomize randomize, IsSimulated isSimulated) {
 	globalKnobCollection() = create(type, randomize, isSimulated);
+	ASSERT(FLOW_KNOBS == &bootstrapGlobalFlowKnobs);
 	FLOW_KNOBS = &globalKnobCollection()->getFlowKnobs();
 }
 
