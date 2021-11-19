@@ -1925,9 +1925,13 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					req.reply.sendError(unknown_change_feed());
 					return Void();
 				}
-				wait(feed->second->newMutations
-				         .onTrigger()); // FIXME: check that this is triggered when the range is moved to a different
-				                        // server, also check that the stream is closed
+				choose {
+					when(wait(feed->second->newMutations.onTrigger())) {
+					} // FIXME: check that this is triggered when the range is moved to a different
+					  // server, also check that the stream is closed
+					when(wait(req.end == std::numeric_limits<Version>::max() ? Future<Void>(Never())
+					                                                         : data->version.whenAtLeast(req.end))) {}
+				}
 				auto feed = data->uidChangeFeed.find(req.rangeID);
 				if (feed == data->uidChangeFeed.end() || feed->second->removing) {
 					req.reply.sendError(unknown_change_feed());
