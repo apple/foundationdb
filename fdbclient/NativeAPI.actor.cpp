@@ -6827,8 +6827,8 @@ ACTOR Future<Void> changeFeedWhenAtLatest(ChangeFeedData* self, Version version)
 						onEmpty.push_back(self->mutations.onEmpty());
 					}
 					for (auto& it : self->streams) {
-						if (!it.results.isEmpty()) {
-							onEmpty.push_back(it.results.onEmpty());
+						if (!it.isEmpty()) {
+							onEmpty.push_back(it.onEmpty());
 						}
 					}
 					if (!onEmpty.size()) {
@@ -6863,58 +6863,59 @@ Future<Void> ChangeFeedData::whenAtLeast(Version version) {
 
 ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
                                           PromiseStream<Standalone<MutationsAndVersionRef>> results,
-                                          Key rangeID,
-                                          Version begin,
+                                          ReplyPromiseStream<ChangeFeedStreamReply> replyStream,
                                           Version end,
-                                          KeyRange range,
                                           Reference<ChangeFeedData> feedData,
                                           Reference<ChangeFeedStorageData> storageData) {
 	state bool atLatestVersion = false;
-	loop {
-		try {
-			state Version lastEmpty = invalidVersion;
-			state ChangeFeedStreamRequest req;
-			req.rangeID = rangeID;
-			req.begin = begin;
-			req.end = end;
-			req.range = range;
+	state Version nextVersion = 0;
+	try {
+		loop {
+			if (nextVersion >= end) {
+				results.sendError(end_of_stream());
+				return Void();
+			}
+			choose {
+				when(state ChangeFeedStreamReply rep = waitNext(replyStream.getFuture())) {
 
-			state ReplyPromiseStream<ChangeFeedStreamReply> replyStream = interf.changeFeedStream.getReplyStream(req);
-
-			loop {
-				state ChangeFeedStreamReply rep = waitNext(replyStream.getFuture());
-				begin = rep.mutations.back().version + 1;
-
-				state int resultLoc = 0;
-				// FIXME: handle empty versions properly
-				while (resultLoc < rep.mutations.size()) {
-					if (rep.mutations[resultLoc].mutations.size() || rep.mutations[resultLoc].version + 1 == end ||
-					    (rep.mutations[resultLoc].mutations.empty() &&
-					     rep.mutations[resultLoc].version >= lastEmpty + 5000000)) {
+					state int resultLoc = 0;
+					// FIXME: handle empty versions properly
+					while (resultLoc < rep.mutations.size()) {
 						wait(results.onEmpty());
 						results.send(rep.mutations[resultLoc]);
+						resultLoc++;
 					}
-					resultLoc++;
+					nextVersion = rep.mutations.back().version + 1;
+
+					if (!atLatestVersion && rep.atLatestVersion) {
+						atLatestVersion = true;
+						feedData->notAtLatest.set(feedData->notAtLatest.get() - 1);
+					}
+					if (rep.minStreamVersion > storageData->version.get()) {
+						storageData->version.set(rep.minStreamVersion);
+					}
+
+					for (auto& it : feedData->storageData) {
+						if (rep.mutations.back().version > it->desired.get()) {
+							it->desired.set(rep.mutations.back().version);
+						}
+					}
 				}
-				if (begin == end) {
-					results.sendError(end_of_stream());
-					return Void();
-				}
-				if (!atLatestVersion && rep.atLatestVersion) {
-					atLatestVersion = true;
-					feedData->notAtLatest.set(feedData->notAtLatest.get() - 1);
-				}
-				if (rep.minStreamVersion > storageData->version.get()) {
-					storageData->version.set(rep.minStreamVersion);
+				when(wait(atLatestVersion ? storageData->version.whenAtLeast(nextVersion) : Future<Void>(Never()))) {
+					wait(results.onEmpty());
+					MutationsAndVersionRef empty;
+					empty.version = std::min(storageData->version.get(), end);
+					results.send(empty);
+					nextVersion = storageData->version.get() + 1;
 				}
 			}
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw;
-			}
-			results.sendError(e);
-			return Void();
 		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		results.sendError(e);
+		return Void();
 	}
 }
 
@@ -6926,7 +6927,16 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
                                          Version end) {
 	state std::priority_queue<MutationAndVersionStream, std::vector<MutationAndVersionStream>> mutations;
 	state std::vector<Future<Void>> fetchers(interfs.size());
-	results->streams = std::vector<MutationAndVersionStream>(interfs.size());
+	state std::vector<MutationAndVersionStream> streams(interfs.size());
+
+	for (auto& it : interfs) {
+		ChangeFeedStreamRequest req;
+		req.rangeID = rangeID;
+		req.begin = *begin;
+		req.end = end;
+		req.range = it.second;
+		results->streams.push_back(it.first.changeFeedStream.getReplyStream(req));
+	}
 
 	for (auto& it : results->storageData) {
 		if (it->debugGetReferenceCount() == 2) {
@@ -6943,21 +6953,15 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	refresh.send(Void());
 
 	for (int i = 0; i < interfs.size(); i++) {
-		fetchers[i] = singleChangeFeedStream(interfs[i].first,
-		                                     results->streams[i].results,
-		                                     rangeID,
-		                                     *begin,
-		                                     end,
-		                                     interfs[i].second,
-		                                     results,
-		                                     results->storageData[i]);
+		fetchers[i] = singleChangeFeedStream(
+		    interfs[i].first, streams[i].results, results->streams[i], end, results, results->storageData[i]);
 	}
 	state int interfNum = 0;
 	while (interfNum < interfs.size()) {
 		try {
-			Standalone<MutationsAndVersionRef> res = waitNext(results->streams[interfNum].results.getFuture());
-			results->streams[interfNum].next = res;
-			mutations.push(results->streams[interfNum]);
+			Standalone<MutationsAndVersionRef> res = waitNext(streams[interfNum].results.getFuture());
+			streams[interfNum].next = res;
+			mutations.push(streams[interfNum]);
 		} catch (Error& e) {
 			if (e.code() != error_code_end_of_stream) {
 				throw e;
