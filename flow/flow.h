@@ -1032,7 +1032,6 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 			TraceEvent("hfu5NotEqual");
 		}
 		ASSERT(SingleCallback<T>::next == this);
-		TraceEvent("hfu5NotEqualAfter");
 		cb->insert(this);
 	}
 	virtual void unwait() override { delFutureRef(); }

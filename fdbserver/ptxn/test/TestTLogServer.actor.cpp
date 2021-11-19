@@ -835,7 +835,11 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	// }
 
 	// ASSERT(q->getNextReadLocation() == q->getNextCommitLocation());
-
+	for (auto& a : actors) {
+		a.cancel();
+	}
+	actors.clear();
+	
 	std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> dqs;
 	state int writtenTLogID = pContext->groupToLeaderId[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
 
