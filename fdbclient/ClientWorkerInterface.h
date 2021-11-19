@@ -31,8 +31,10 @@
 // A ClientWorkerInterface is embedded as the first element of a WorkerInterface.
 struct ClientWorkerInterface {
 	constexpr static FileIdentifier file_identifier = 12418152;
+
 	RequestStream<struct RebootRequest> reboot;
 	RequestStream<struct ProfilerRequest> profiler;
+	RequestStream<struct SetFailureInjection> setFailureInjection;
 
 	bool operator==(ClientWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ClientWorkerInterface const& r) const { return id() != r.id(); }
@@ -43,7 +45,7 @@ struct ClientWorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reboot, profiler);
+		serializer(ar, reboot, profiler, setFailureInjection);
 	}
 };
 
@@ -88,4 +90,39 @@ struct ProfilerRequest {
 	}
 };
 
+struct SetFailureInjection {
+	constexpr static FileIdentifier file_identifier = 15439864;
+	ReplyPromise<Void> reply;
+	struct DiskFailureCommand {
+		// how often should the disk be stalled (0 meaning once, 10 meaning every 10 secs)
+		double stallInterval;
+		// Period of time disk stalls will be injected for
+		double stallPeriod;
+		// Period of time the disk will be slowed down for
+		double throttlePeriod;
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, stallInterval, stallPeriod, throttlePeriod);
+		}
+	};
+
+	struct FlipBitsCommand {
+		// percent of bits to flip in the given file
+		double percentBitFlips;
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, percentBitFlips);
+		}
+	};
+
+	Optional<DiskFailureCommand> diskFailure;
+	Optional<FlipBitsCommand> flipBits;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply, diskFailure, flipBits);
+	}
+};
 #endif

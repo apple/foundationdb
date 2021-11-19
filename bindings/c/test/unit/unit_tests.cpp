@@ -40,6 +40,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest.h"
 #include "fdbclient/rapidjson/document.h"
+#include "fdbclient/Tuple.h"
 
 #include "flow/config.h"
 
@@ -76,7 +77,7 @@ fdb_error_t wait_future(fdb::Future& f) {
 // Given a string s, returns the "lowest" string greater than any string that
 // starts with s. Taken from
 // https://github.com/apple/foundationdb/blob/e7d72f458c6a985fdfa677ae021f357d6f49945b/flow/flow.cpp#L223.
-std::string strinc(const std::string& s) {
+std::string strinc_str(const std::string& s) {
 	int index = -1;
 	for (index = s.size() - 1; index >= 0; --index) {
 		if ((uint8_t)s[index] != 255) {
@@ -92,16 +93,16 @@ std::string strinc(const std::string& s) {
 	return r;
 }
 
-TEST_CASE("strinc") {
-	CHECK(strinc("a").compare("b") == 0);
-	CHECK(strinc("y").compare("z") == 0);
-	CHECK(strinc("!").compare("\"") == 0);
-	CHECK(strinc("*").compare("+") == 0);
-	CHECK(strinc("fdb").compare("fdc") == 0);
-	CHECK(strinc("foundation database 6").compare("foundation database 7") == 0);
+TEST_CASE("strinc_str") {
+	CHECK(strinc_str("a").compare("b") == 0);
+	CHECK(strinc_str("y").compare("z") == 0);
+	CHECK(strinc_str("!").compare("\"") == 0);
+	CHECK(strinc_str("*").compare("+") == 0);
+	CHECK(strinc_str("fdb").compare("fdc") == 0);
+	CHECK(strinc_str("foundation database 6").compare("foundation database 7") == 0);
 
 	char terminated[] = { 'a', 'b', '\xff' };
-	CHECK(strinc(std::string(terminated, 3)).compare("ac") == 0);
+	CHECK(strinc_str(std::string(terminated, 3)).compare("ac") == 0);
 }
 
 // Helper function to add `prefix` to all keys in the given map. Returns a new
@@ -117,7 +118,7 @@ std::map<std::string, std::string> create_data(std::map<std::string, std::string
 // Clears all data in the database, then inserts the given key value pairs.
 void insert_data(FDBDatabase* db, const std::map<std::string, std::string>& data) {
 	fdb::Transaction tr(db);
-	auto end_key = strinc(prefix);
+	auto end_key = strinc_str(prefix);
 	while (1) {
 		tr.clear_range(prefix, end_key);
 		for (const auto& [key, val] : data) {
@@ -204,6 +205,59 @@ GetRangeResult get_range(fdb::Transaction& tr,
 	                                           iteration,
 	                                           snapshot,
 	                                           reverse);
+
+	fdb_error_t err = wait_future(f1);
+	if (err) {
+		return GetRangeResult{ {}, false, err };
+	}
+
+	const FDBKeyValue* out_kv;
+	int out_count;
+	fdb_bool_t out_more;
+	fdb_check(f1.get(&out_kv, &out_count, &out_more));
+
+	std::vector<std::pair<std::string, std::string>> results;
+	for (int i = 0; i < out_count; ++i) {
+		std::string key((const char*)out_kv[i].key, out_kv[i].key_length);
+		std::string value((const char*)out_kv[i].value, out_kv[i].value_length);
+		results.emplace_back(key, value);
+	}
+	return GetRangeResult{ results, out_more != 0, 0 };
+}
+
+GetRangeResult get_range_and_flat_map(fdb::Transaction& tr,
+                                      const uint8_t* begin_key_name,
+                                      int begin_key_name_length,
+                                      fdb_bool_t begin_or_equal,
+                                      int begin_offset,
+                                      const uint8_t* end_key_name,
+                                      int end_key_name_length,
+                                      fdb_bool_t end_or_equal,
+                                      int end_offset,
+                                      const uint8_t* mapper_name,
+                                      int mapper_name_length,
+                                      int limit,
+                                      int target_bytes,
+                                      FDBStreamingMode mode,
+                                      int iteration,
+                                      fdb_bool_t snapshot,
+                                      fdb_bool_t reverse) {
+	fdb::KeyValueArrayFuture f1 = tr.get_range_and_flat_map(begin_key_name,
+	                                                        begin_key_name_length,
+	                                                        begin_or_equal,
+	                                                        begin_offset,
+	                                                        end_key_name,
+	                                                        end_key_name_length,
+	                                                        end_or_equal,
+	                                                        end_offset,
+	                                                        mapper_name,
+	                                                        mapper_name_length,
+	                                                        limit,
+	                                                        target_bytes,
+	                                                        mode,
+	                                                        iteration,
+	                                                        snapshot,
+	                                                        reverse);
 
 	fdb_error_t err = wait_future(f1);
 	if (err) {
@@ -817,6 +871,124 @@ TEST_CASE("fdb_transaction_set_read_version future_version") {
 
 	fdb_error_t err = wait_future(f1);
 	CHECK(err == 1009); // future_version
+}
+
+const std::string EMPTY = Tuple().pack().toString();
+const KeyRef RECORD = "RECORD"_sr;
+const KeyRef INDEX = "INDEX"_sr;
+static Key primaryKey(const int i) {
+	return Key(format("primary-key-of-record-%08d", i));
+}
+static Key indexKey(const int i) {
+	return Key(format("index-key-of-record-%08d", i));
+}
+static Value dataOfRecord(const int i) {
+	return Value(format("data-of-record-%08d", i));
+}
+static std::string indexEntryKey(const int i) {
+	return Tuple().append(StringRef(prefix)).append(INDEX).append(indexKey(i)).append(primaryKey(i)).pack().toString();
+}
+static std::string recordKey(const int i) {
+	return Tuple().append(prefix).append(RECORD).append(primaryKey(i)).pack().toString();
+}
+static std::string recordValue(const int i) {
+	return Tuple().append(dataOfRecord(i)).pack().toString();
+}
+
+TEST_CASE("fdb_transaction_get_range_and_flat_map") {
+	// Note: The user requested `prefix` should be added as the first element of the tuple that forms the key, rather
+	// than the prefix of the key. So we don't use key() or create_data() in this test.
+	std::map<std::string, std::string> data;
+	for (int i = 0; i < 3; i++) {
+		data[indexEntryKey(i)] = EMPTY;
+		data[recordKey(i)] = recordValue(i);
+	}
+	insert_data(db, data);
+
+	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).pack().toString();
+
+	fdb::Transaction tr(db);
+	// get_range_and_flat_map is only support without RYW. This is a must!!!
+	fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+	while (1) {
+		auto result = get_range_and_flat_map(
+		    tr,
+		    // [0, 1]
+		    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKey(0).c_str(), indexEntryKey(0).size()),
+		    FDB_KEYSEL_FIRST_GREATER_THAN((const uint8_t*)indexEntryKey(1).c_str(), indexEntryKey(1).size()),
+		    (const uint8_t*)mapper.c_str(),
+		    mapper.size(),
+		    /* limit */ 0,
+		    /* target_bytes */ 0,
+		    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+		    /* iteration */ 0,
+		    /* snapshot */ true,
+		    /* reverse */ 0);
+
+		if (result.err) {
+			fdb::EmptyFuture f1 = tr.on_error(result.err);
+			fdb_check(wait_future(f1));
+			continue;
+		}
+
+		// Only the first 2 records are supposed to be returned.
+		if (result.kvs.size() < 2) {
+			CHECK(result.more);
+			// Retry.
+			continue;
+		}
+
+		CHECK(result.kvs.size() == 2);
+		CHECK(!result.more);
+		for (int i = 0; i < 2; i++) {
+			const auto& [key, value] = result.kvs[i];
+			std::cout << "result[" << i << "]: key=" << key << ", value=" << value << std::endl;
+			// OUTPUT:
+			// result[0]: key=fdbRECORDprimary-key-of-record-00000000, value=data-of-record-00000000
+			// result[1]: key=fdbRECORDprimary-key-of-record-00000001, value=data-of-record-00000001
+			CHECK(recordKey(i).compare(key) == 0);
+			CHECK(recordValue(i).compare(value) == 0);
+		}
+		break;
+	}
+}
+
+TEST_CASE("fdb_transaction_get_range_and_flat_map_restricted_to_snapshot") {
+	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).pack().toString();
+	fdb::Transaction tr(db);
+	fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+	auto result = get_range_and_flat_map(
+	    tr,
+	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKey(0).c_str(), indexEntryKey(0).size()),
+	    FDB_KEYSEL_FIRST_GREATER_THAN((const uint8_t*)indexEntryKey(1).c_str(), indexEntryKey(1).size()),
+	    (const uint8_t*)mapper.c_str(),
+	    mapper.size(),
+	    /* limit */ 0,
+	    /* target_bytes */ 0,
+	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+	    /* iteration */ 0,
+	    /* snapshot */ false, // Set snapshot to false
+	    /* reverse */ 0);
+	ASSERT(result.err == error_code_client_invalid_operation);
+}
+
+TEST_CASE("fdb_transaction_get_range_and_flat_map_restricted_to_ryw_disable") {
+	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).pack().toString();
+	fdb::Transaction tr(db);
+	// Not set FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE.
+	auto result = get_range_and_flat_map(
+	    tr,
+	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKey(0).c_str(), indexEntryKey(0).size()),
+	    FDB_KEYSEL_FIRST_GREATER_THAN((const uint8_t*)indexEntryKey(1).c_str(), indexEntryKey(1).size()),
+	    (const uint8_t*)mapper.c_str(),
+	    mapper.size(),
+	    /* limit */ 0,
+	    /* target_bytes */ 0,
+	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+	    /* iteration */ 0,
+	    /* snapshot */ true,
+	    /* reverse */ 0);
+	ASSERT(result.err == error_code_client_invalid_operation);
 }
 
 TEST_CASE("fdb_transaction_get_range reverse") {
@@ -1726,7 +1898,7 @@ TEST_CASE("fdb_transaction_add_conflict_range") {
 
 		fdb::Transaction tr2(db);
 		while (1) {
-			fdb_check(tr2.add_conflict_range(key("a"), strinc(key("a")), FDB_CONFLICT_RANGE_TYPE_WRITE));
+			fdb_check(tr2.add_conflict_range(key("a"), strinc_str(key("a")), FDB_CONFLICT_RANGE_TYPE_WRITE));
 			fdb::EmptyFuture f1 = tr2.commit();
 
 			fdb_error_t err = wait_future(f1);
@@ -1739,8 +1911,8 @@ TEST_CASE("fdb_transaction_add_conflict_range") {
 		}
 
 		while (1) {
-			fdb_check(tr.add_conflict_range(key("a"), strinc(key("a")), FDB_CONFLICT_RANGE_TYPE_READ));
-			fdb_check(tr.add_conflict_range(key("a"), strinc(key("a")), FDB_CONFLICT_RANGE_TYPE_WRITE));
+			fdb_check(tr.add_conflict_range(key("a"), strinc_str(key("a")), FDB_CONFLICT_RANGE_TYPE_READ));
+			fdb_check(tr.add_conflict_range(key("a"), strinc_str(key("a")), FDB_CONFLICT_RANGE_TYPE_WRITE));
 			fdb::EmptyFuture f1 = tr.commit();
 
 			fdb_error_t err = wait_future(f1);
@@ -1828,41 +2000,6 @@ TEST_CASE("special-key-space set transaction ID after write") {
 	}
 }
 
-TEST_CASE("special-key-space set token after write") {
-	fdb::Transaction tr(db);
-	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-	while (1) {
-		tr.set(key("foo"), "bar");
-		tr.set("\xff\xff/tracing/token", "false");
-		fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/token",
-		                             /* snapshot */ false);
-
-		fdb_error_t err = wait_future(f1);
-		if (err) {
-			fdb::EmptyFuture f2 = tr.on_error(err);
-			fdb_check(wait_future(f2));
-			continue;
-		}
-
-		int out_present;
-		char* val;
-		int vallen;
-		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-
-		REQUIRE(out_present);
-		uint64_t token = std::stoul(std::string(val, vallen));
-		CHECK(token != 0);
-		break;
-	}
-}
-
-TEST_CASE("special-key-space valid token") {
-	auto value = get_value("\xff\xff/tracing/token", /* snapshot */ false, {});
-	REQUIRE(value.has_value());
-	uint64_t token = std::stoul(value.value());
-	CHECK(token > 0);
-}
-
 TEST_CASE("special-key-space disable tracing") {
 	fdb::Transaction tr(db);
 	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
@@ -1888,48 +2025,6 @@ TEST_CASE("special-key-space disable tracing") {
 		CHECK(token == 0);
 		break;
 	}
-}
-
-TEST_CASE("FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE") {
-	fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE, nullptr, 0));
-
-	auto value = get_value("\xff\xff/tracing/token", /* snapshot */ false, {});
-	REQUIRE(value.has_value());
-	uint64_t token = std::stoul(value.value());
-	CHECK(token == 0);
-
-	fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_ENABLE, nullptr, 0));
-}
-
-TEST_CASE("FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE enable tracing for transaction") {
-	fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE, nullptr, 0));
-
-	fdb::Transaction tr(db);
-	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-	while (1) {
-		tr.set("\xff\xff/tracing/token", "true");
-		fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/token",
-		                             /* snapshot */ false);
-
-		fdb_error_t err = wait_future(f1);
-		if (err) {
-			fdb::EmptyFuture f2 = tr.on_error(err);
-			fdb_check(wait_future(f2));
-			continue;
-		}
-
-		int out_present;
-		char* val;
-		int vallen;
-		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-
-		REQUIRE(out_present);
-		uint64_t token = std::stoul(std::string(val, vallen));
-		CHECK(token > 0);
-		break;
-	}
-
-	fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_ENABLE, nullptr, 0));
 }
 
 TEST_CASE("special-key-space tracing get range") {
@@ -1964,8 +2059,6 @@ TEST_CASE("special-key-space tracing get range") {
 		CHECK(!out_more);
 		CHECK(out_count == 2);
 
-		CHECK(std::string((char*)out_kv[0].key, out_kv[0].key_length) == tracingBegin + "token");
-		CHECK(std::stoul(std::string((char*)out_kv[0].value, out_kv[0].value_length)) > 0);
 		CHECK(std::string((char*)out_kv[1].key, out_kv[1].key_length) == tracingBegin + "transaction_id");
 		CHECK(std::stoul(std::string((char*)out_kv[1].value, out_kv[1].value_length)) > 0);
 		break;
@@ -2217,7 +2310,7 @@ TEST_CASE("commit_does_not_reset") {
 			continue;
 		}
 
-		fdb_check(tr2.add_conflict_range(key("foo"), strinc(key("foo")), FDB_CONFLICT_RANGE_TYPE_READ));
+		fdb_check(tr2.add_conflict_range(key("foo"), strinc_str(key("foo")), FDB_CONFLICT_RANGE_TYPE_READ));
 		tr2.set(key("foo"), "bar");
 		fdb::EmptyFuture tr2CommitFuture = tr2.commit();
 		err = wait_future(tr2CommitFuture);

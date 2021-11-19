@@ -36,6 +36,7 @@
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
+#include "fdbrpc/AsyncFileChaos.actor.h"
 #include "flow/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
@@ -945,8 +946,18 @@ public:
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6 = false) override;
 
+	// Add a <hostname, vector<NetworkAddress>> pair to mock DNS in simulation.
+	void addMockTCPEndpoint(const std::string& host,
+	                        const std::string& service,
+	                        const std::vector<NetworkAddress>& addresses) override {
+		mockDNS.addMockTCPEndpoint(host, service, addresses);
+	}
 	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                       const std::string& service) override {
+		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
+		if (mockDNS.findMockTCPEndpoint(host, service)) {
+			return mockDNS.getTCPEndpoint(host, service);
+		}
 		return SimExternalConnection::resolveTCPEndpoint(host, service);
 	}
 	ACTOR static Future<Reference<IConnection>> onConnect(Future<Void> ready, Reference<Sim2Conn> conn) {
@@ -1070,7 +1081,6 @@ public:
 	bool isAddressOnThisHost(NetworkAddress const& addr) const override {
 		return addr.ip == getCurrentProcess()->address.ip;
 	}
-	virtual bool isAddressOnThisHost(NetworkAddress const& addr) { return addr.ip == getCurrentProcess()->address.ip; }
 
 	ACTOR static Future<Void> deleteFileImpl(Sim2* self, std::string filename, bool mustBeDurable) {
 		// This is a _rudimentary_ simulation of the untrustworthiness of non-durable deletes and the possibility of
@@ -1196,6 +1206,9 @@ public:
 		m->protocolVersion = protocol;
 
 		m->setGlobal(enTDMetrics, (flowGlobalType)&m->tdmetrics);
+		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
+			m->setGlobal(enChaosMetrics, (flowGlobalType)&m->chaosMetrics);
+		}
 		m->setGlobal(enNetworkConnections, (flowGlobalType)m->network);
 		m->setGlobal(enASIOTimedOut, (flowGlobalType) false);
 
@@ -2103,7 +2116,7 @@ public:
 		return delay(0, taskID, process->machine->machineProcess);
 	}
 
-	ProtocolVersion protocolVersion() override { return getCurrentProcess()->protocolVersion; }
+	ProtocolVersion protocolVersion() const override { return getCurrentProcess()->protocolVersion; }
 
 	// time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	// time should only be modified from the main thread.
@@ -2132,6 +2145,9 @@ public:
 	// Whether or not yield has returned true during the current iteration of the run loop
 	bool yielded;
 	int yield_limit; // how many more times yield may return false before next returning true
+
+private:
+	MockDNS mockDNS;
 
 #ifdef ENABLE_SAMPLING
 	ActorLineageSet actorLineageSet;
@@ -2489,6 +2505,8 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 		f = AsyncFileDetachable::open(f);
 		if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
+		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
+			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileChaos(r)); });
 #if ENCRYPTION_ENABLED
 		if (flags & IAsyncFile::OPEN_ENCRYPTED)
 			f = map(f, [flags](Reference<IAsyncFile> r) {

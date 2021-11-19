@@ -24,10 +24,12 @@
 #include "flow/FastRef.h"
 #pragma once
 
+#ifdef _MSC_VER
 #pragma warning(disable : 4244 4267) // SOMEDAY: Carefully check for integer overflow issues (e.g. size_t to int
 // conversions like this suppresses)
 #pragma warning(disable : 4345)
 #pragma warning(error : 4239)
+#endif
 
 #include <vector>
 #include <queue>
@@ -445,7 +447,8 @@ struct LineageProperties : LineagePropertiesBase {
 	}
 };
 
-struct ActorLineage : ThreadSafeReferenceCounted<ActorLineage> {
+class ActorLineage : public ThreadSafeReferenceCounted<ActorLineage> {
+public:
 	friend class LineageReference;
 
 	struct Property {
@@ -545,6 +548,11 @@ public:
 	LineageReference() : Reference<ActorLineage>(nullptr), actorName_(""), allocated_(false) {}
 	explicit LineageReference(ActorLineage* ptr) : Reference<ActorLineage>(ptr), actorName_(""), allocated_(false) {}
 	LineageReference(const LineageReference& r) : Reference<ActorLineage>(r), actorName_(""), allocated_(false) {}
+	LineageReference(LineageReference&& r)
+	  : Reference<ActorLineage>(std::forward<LineageReference>(r)), actorName_(r.actorName_), allocated_(r.allocated_) {
+		r.actorName_ = "";
+		r.allocated_ = false;
+	}
 
 	void setActorName(const char* name) { actorName_ = name; }
 	const char* actorName() { return actorName_; }

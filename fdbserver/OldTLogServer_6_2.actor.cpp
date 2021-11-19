@@ -127,8 +127,8 @@ public:
 	Future<Void> commit() { return queue->commit(); }
 
 	// Implements IClosable
-	Future<Void> getError() override { return queue->getError(); }
-	Future<Void> onClosed() override { return queue->onClosed(); }
+	Future<Void> getError() const override { return queue->getError(); }
+	Future<Void> onClosed() const override { return queue->onClosed(); }
 	void dispose() override {
 		queue->dispose();
 		delete this;
@@ -267,7 +267,7 @@ static StringRef stripTagMessagesKey(StringRef key) {
 	return key.substr(sizeof(UID) + sizeof(Tag) + persistTagMessagesKeys.begin.size());
 }
 
-static StringRef stripTagMessageRefsKey(StringRef key) {
+[[maybe_unused]] static StringRef stripTagMessageRefsKey(StringRef key) {
 	return key.substr(sizeof(UID) + sizeof(Tag) + persistTagMessageRefsKeys.begin.size());
 }
 
@@ -3374,7 +3374,7 @@ struct DequeAllocator : std::allocator<T> {
 	}
 };
 
-TEST_CASE("/fdbserver/tlogserver/VersionMessagesOverheadFactor") {
+TEST_CASE("Lfdbserver/tlogserver/VersionMessagesOverheadFactor") {
 
 	typedef std::pair<Version, LengthPrefixedStringRef> TestType; // type used by versionMessages
 

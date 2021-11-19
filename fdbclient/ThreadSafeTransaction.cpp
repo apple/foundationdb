@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
@@ -256,6 +257,23 @@ ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& 
 	});
 }
 
+ThreadFuture<RangeResult> ThreadSafeTransaction::getRangeAndFlatMap(const KeySelectorRef& begin,
+                                                                    const KeySelectorRef& end,
+                                                                    const StringRef& mapper,
+                                                                    GetRangeLimits limits,
+                                                                    bool snapshot,
+                                                                    bool reverse) {
+	KeySelector b = begin;
+	KeySelector e = end;
+	Key h = mapper;
+
+	ISingleThreadTransaction* tr = this->tr;
+	return onMainThread([tr, b, e, h, limits, snapshot, reverse]() -> Future<RangeResult> {
+		tr->checkDeferredError();
+		return tr->getRangeAndFlatMap(b, e, h, limits, Snapshot{ snapshot }, Reverse{ reverse });
+	});
+}
+
 ThreadFuture<Standalone<VectorRef<const char*>>> ThreadSafeTransaction::getAddressesForKey(const KeyRef& key) {
 	Key k = key;
 
@@ -443,7 +461,14 @@ void ThreadSafeApi::runNetwork() {
 	try {
 		::runNetwork();
 	} catch (Error& e) {
+		TraceEvent(SevError, "RunNetworkError").error(e);
 		runErr = e;
+	} catch (std::exception& e) {
+		runErr = unknown_error();
+		TraceEvent(SevError, "RunNetworkError").error(unknown_error()).detail("RootException", e.what());
+	} catch (...) {
+		runErr = unknown_error();
+		TraceEvent(SevError, "RunNetworkError").error(unknown_error());
 	}
 
 	for (auto& hook : threadCompletionHooks) {
@@ -451,6 +476,8 @@ void ThreadSafeApi::runNetwork() {
 			hook.first(hook.second);
 		} catch (Error& e) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
+		} catch (std::exception& e) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error()).detail("RootException", e.what());
 		} catch (...) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
 		}
@@ -459,6 +486,8 @@ void ThreadSafeApi::runNetwork() {
 	if (runErr.present()) {
 		throw runErr.get();
 	}
+
+	TraceEvent("RunNetworkTerminating");
 }
 
 void ThreadSafeApi::stopNetwork() {
@@ -478,5 +507,3 @@ void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* ho
 	                          // upon return that the hook is set.
 	threadCompletionHooks.emplace_back(hook, hookParameter);
 }
-
-IClientApi* ThreadSafeApi::api = new ThreadSafeApi();

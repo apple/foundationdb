@@ -36,6 +36,7 @@
 #include <boost/interprocess/managed_shared_memory.hpp>
 
 #include "fdbclient/ActorLineageProfiler.h"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
@@ -528,7 +529,7 @@ static void printOptionUsage(std::string option, std::string description) {
 
 	std::stringstream sstream(description);
 	if (sstream.eof()) {
-		printf(result.c_str());
+		printf("%s", result.c_str());
 		return;
 	}
 
@@ -551,7 +552,7 @@ static void printOptionUsage(std::string option, std::string description) {
 	}
 	result += currLine + '\n';
 
-	printf(result.c_str());
+	printf("%s", result.c_str());
 }
 
 static void printUsage(const char* name, bool devhelp) {
@@ -805,7 +806,7 @@ Optional<bool> checkBuggifyOverride(const char* testFile) {
 // Takes a vector of public and listen address strings given via command line, and returns vector of NetworkAddress
 // objects.
 std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
-    const ClusterConnectionFile& connectionFile,
+    const IClusterConnectionRecord& connectionRecord,
     const std::vector<std::string>& publicAddressStrs,
     std::vector<std::string>& listenAddressStrs) {
 	if (listenAddressStrs.size() > 0 && publicAddressStrs.size() != listenAddressStrs.size()) {
@@ -823,7 +824,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 	NetworkAddressList publicNetworkAddresses;
 	NetworkAddressList listenNetworkAddresses;
 
-	auto& coordinators = connectionFile.getConnectionString().coordinators();
+	auto& coordinators = connectionRecord.getConnectionString().coordinators();
 	ASSERT(coordinators.size() > 0);
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
@@ -833,7 +834,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 		if (autoPublicAddress) {
 			try {
 				const NetworkAddress& parsedAddress = NetworkAddress::parse("0.0.0.0:" + publicAddressStr.substr(5));
-				const IPAddress publicIP = determinePublicIPAutomatically(connectionFile.getConnectionString());
+				const IPAddress publicIP = determinePublicIPAutomatically(connectionRecord.getConnectionString());
 				currentPublicAddress = NetworkAddress(publicIP, parsedAddress.port, true, parsedAddress.isTLS());
 			} catch (Error& e) {
 				fprintf(stderr,
@@ -998,7 +999,7 @@ struct CLIOptions {
 	std::string configPath;
 	ConfigDBType configDBType{ ConfigDBType::DISABLED };
 
-	Reference<ClusterConnectionFile> connectionFile;
+	Reference<IClusterConnectionRecord> connectionFile;
 	Standalone<StringRef> machineId;
 	UnitTestParameters testParams;
 
@@ -1849,7 +1850,7 @@ int main(int argc, char* argv[]) {
 		    .detail("FileSystem", opts.fileSystemPath)
 		    .detail("DataFolder", opts.dataFolder)
 		    .detail("WorkingDirectory", cwd)
-		    .detail("ClusterFile", opts.connectionFile ? opts.connectionFile->getFilename().c_str() : "")
+		    .detail("ClusterFile", opts.connectionFile ? opts.connectionFile->toString() : "")
 		    .detail("ConnectionString",
 		            opts.connectionFile ? opts.connectionFile->getConnectionString().toString() : "")
 		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))

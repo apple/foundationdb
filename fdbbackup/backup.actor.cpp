@@ -37,6 +37,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/RunTransaction.actor.h"
@@ -3095,7 +3096,7 @@ Optional<Database> connectToCluster(std::string const& clusterFile,
 	} catch (Error& e) {
 		if (!quiet) {
 			fprintf(stderr, "ERROR: %s\n", e.what());
-			fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
+			fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", ccf->getLocation().c_str());
 		}
 		return db;
 	}
@@ -3761,35 +3762,6 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::False, IsSimulated::False);
-		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-		for (const auto& [knobName, knobValueString] : knobs) {
-			try {
-				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
-				g_knobs.setKnob(knobName, knobValue);
-			} catch (Error& e) {
-				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr,
-					        "WARNING: Invalid value '%s' for knob option '%s'\n",
-					        knobValueString.c_str(),
-					        knobName.c_str());
-					TraceEvent(SevWarnAlways, "InvalidKnobValue")
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-				} else {
-					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
-					TraceEvent(SevError, "FailedToSetKnob")
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString))
-					    .error(e);
-					throw;
-				}
-			}
-		}
-
-		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs.initialize(Randomize::False, IsSimulated::False);
-
 		if (trace) {
 			if (!traceLogGroup.empty())
 				setNetworkOption(FDBNetworkOptions::TRACE_LOG_GROUP, StringRef(traceLogGroup));
@@ -3829,6 +3801,34 @@ int main(int argc, char* argv[]) {
 			fprintf(stderr, "ERROR: %s\n", e.what());
 			return FDB_EXIT_ERROR;
 		}
+
+		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+		for (const auto& [knobName, knobValueString] : knobs) {
+			try {
+				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
+				g_knobs.setKnob(knobName, knobValue);
+			} catch (Error& e) {
+				if (e.code() == error_code_invalid_option_value) {
+					fprintf(stderr,
+					        "WARNING: Invalid value '%s' for knob option '%s'\n",
+					        knobValueString.c_str(),
+					        knobName.c_str());
+					TraceEvent(SevWarnAlways, "InvalidKnobValue")
+					    .detail("Knob", printable(knobName))
+					    .detail("Value", printable(knobValueString));
+				} else {
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
+					TraceEvent(SevError, "FailedToSetKnob")
+					    .detail("Knob", printable(knobName))
+					    .detail("Value", printable(knobValueString))
+					    .error(e);
+					throw;
+				}
+			}
+		}
+
+		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
+		g_knobs.initialize(Randomize::False, IsSimulated::False);
 
 		TraceEvent("ProgramStart")
 		    .setMaxEventLength(12000)

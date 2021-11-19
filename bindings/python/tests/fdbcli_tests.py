@@ -385,7 +385,7 @@ def coordinators(logger):
     # verify now we have 5 coordinators and the description is updated
     output2 = run_fdbcli_command('coordinators')
     assert output2.split('\n')[0].split(': ')[-1] == new_cluster_description
-    assert output2.split('\n')[1] == 'Cluster coordinators ({}): {}'.format(5, ','.join(addresses))
+    assert output2.split('\n')[1] == 'Cluster coordinators ({}): {}'.format(args.process_number, ','.join(addresses))
     # auto change should go back to 1 coordinator
     run_fdbcli_command('coordinators', 'auto')
     assert len(get_value_from_status_json(True, 'client', 'coordinators', 'coordinators')) == 1

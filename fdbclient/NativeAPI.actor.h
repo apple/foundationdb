@@ -72,6 +72,7 @@ struct NetworkOptions {
 	Optional<bool> logClientInfo;
 	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
 	bool runLoopProfilingEnabled;
+	std::map<std::string, KnobValue> knobs;
 
 	NetworkOptions();
 };
@@ -83,7 +84,7 @@ public:
 	// Creates a database object that represents a connection to a cluster
 	// This constructor uses a preallocated DatabaseContext that may have been created
 	// on another thread
-	static Database createDatabase(Reference<ClusterConnectionFile> connFile,
+	static Database createDatabase(Reference<IClusterConnectionRecord> connRecord,
 	                               int apiVersion,
 	                               IsInternal internal = IsInternal::True,
 	                               LocalityData const& clientLocality = LocalityData(),
@@ -291,6 +292,23 @@ public:
 		                reverse);
 	}
 
+	[[nodiscard]] Future<RangeResult> getRangeAndFlatMap(const KeySelector& begin,
+	                                                     const KeySelector& end,
+	                                                     const Key& mapper,
+	                                                     GetRangeLimits limits,
+	                                                     Snapshot = Snapshot::False,
+	                                                     Reverse = Reverse::False);
+
+private:
+	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
+	Future<RangeResult> getRangeInternal(const KeySelector& begin,
+	                                     const KeySelector& end,
+	                                     const Key& mapper,
+	                                     GetRangeLimits limits,
+	                                     Snapshot snapshot,
+	                                     Reverse reverse);
+
+public:
 	// A method for streaming data from the storage server that is more efficient than getRange when reading large
 	// amounts of data
 	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,

@@ -436,21 +436,12 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_addresses_for_key(FDBTransac
 	return (FDBFuture*)(TXN(tr)->getAddressesForKey(KeyRef(key_name, key_name_length)).extractPtr());
 }
 
-FDBFuture* fdb_transaction_get_range_impl(FDBTransaction* tr,
-                                          uint8_t const* begin_key_name,
-                                          int begin_key_name_length,
-                                          fdb_bool_t begin_or_equal,
-                                          int begin_offset,
-                                          uint8_t const* end_key_name,
-                                          int end_key_name_length,
-                                          fdb_bool_t end_or_equal,
-                                          int end_offset,
-                                          int limit,
-                                          int target_bytes,
+// Set to the actual limit, target_bytes, and reverse.
+FDBFuture* validate_and_update_parameters(int& limit,
+                                          int& target_bytes,
                                           FDBStreamingMode mode,
                                           int iteration,
-                                          fdb_bool_t snapshot,
-                                          fdb_bool_t reverse) {
+                                          fdb_bool_t& reverse) {
 	/* This method may be called with a runtime API version of 13, in
 	   which negative row limits are a reverse range read */
 	if (g_api_version <= 13 && limit < 0) {
@@ -500,6 +491,27 @@ FDBFuture* fdb_transaction_get_range_impl(FDBTransaction* tr,
 	else if (mode_bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED)
 		target_bytes = std::min(target_bytes, mode_bytes);
 
+	return nullptr;
+}
+
+FDBFuture* fdb_transaction_get_range_impl(FDBTransaction* tr,
+                                          uint8_t const* begin_key_name,
+                                          int begin_key_name_length,
+                                          fdb_bool_t begin_or_equal,
+                                          int begin_offset,
+                                          uint8_t const* end_key_name,
+                                          int end_key_name_length,
+                                          fdb_bool_t end_or_equal,
+                                          int end_offset,
+                                          int limit,
+                                          int target_bytes,
+                                          FDBStreamingMode mode,
+                                          int iteration,
+                                          fdb_bool_t snapshot,
+                                          fdb_bool_t reverse) {
+	FDBFuture* r = validate_and_update_parameters(limit, target_bytes, mode, iteration, reverse);
+	if (r != nullptr)
+		return r;
 	return (
 	    FDBFuture*)(TXN(tr)
 	                    ->getRange(
@@ -509,6 +521,60 @@ FDBFuture* fdb_transaction_get_range_impl(FDBTransaction* tr,
 	                        snapshot,
 	                        reverse)
 	                    .extractPtr());
+}
+
+FDBFuture* fdb_transaction_get_range_and_flat_map_impl(FDBTransaction* tr,
+                                                       uint8_t const* begin_key_name,
+                                                       int begin_key_name_length,
+                                                       fdb_bool_t begin_or_equal,
+                                                       int begin_offset,
+                                                       uint8_t const* end_key_name,
+                                                       int end_key_name_length,
+                                                       fdb_bool_t end_or_equal,
+                                                       int end_offset,
+                                                       uint8_t const* mapper_name,
+                                                       int mapper_name_length,
+                                                       int limit,
+                                                       int target_bytes,
+                                                       FDBStreamingMode mode,
+                                                       int iteration,
+                                                       fdb_bool_t snapshot,
+                                                       fdb_bool_t reverse) {
+	FDBFuture* r = validate_and_update_parameters(limit, target_bytes, mode, iteration, reverse);
+	if (r != nullptr)
+		return r;
+	return (
+	    FDBFuture*)(TXN(tr)
+	                    ->getRangeAndFlatMap(
+	                        KeySelectorRef(KeyRef(begin_key_name, begin_key_name_length), begin_or_equal, begin_offset),
+	                        KeySelectorRef(KeyRef(end_key_name, end_key_name_length), end_or_equal, end_offset),
+	                        StringRef(mapper_name, mapper_name_length),
+	                        GetRangeLimits(limit, target_bytes),
+	                        snapshot,
+	                        reverse)
+	                    .extractPtr());
+}
+
+// TODO: Support FDB_API_ADDED in generate_asm.py and then this can be replaced with fdb_api_ptr_unimpl.
+FDBFuture* fdb_transaction_get_range_and_flat_map_v699(FDBTransaction* tr,
+                                                       uint8_t const* begin_key_name,
+                                                       int begin_key_name_length,
+                                                       fdb_bool_t begin_or_equal,
+                                                       int begin_offset,
+                                                       uint8_t const* end_key_name,
+                                                       int end_key_name_length,
+                                                       fdb_bool_t end_or_equal,
+                                                       int end_offset,
+                                                       uint8_t const* mapper_name,
+                                                       int mapper_name_length,
+                                                       int limit,
+                                                       int target_bytes,
+                                                       FDBStreamingMode mode,
+                                                       int iteration,
+                                                       fdb_bool_t snapshot,
+                                                       fdb_bool_t reverse) {
+	fprintf(stderr, "UNIMPLEMENTED FDB API FUNCTION\n");
+	abort();
 }
 
 FDBFuture* fdb_transaction_get_range_selector_v13(FDBTransaction* tr,
@@ -702,6 +768,7 @@ extern "C" DLLEXPORT fdb_error_t fdb_select_api_version_impl(int runtime_version
 	// WARNING: use caution when implementing removed functions by calling public API functions. This can lead to
 	// undesired behavior when using the multi-version API. Instead, it is better to have both the removed and public
 	// functions call an internal implementation function. See fdb_create_database_impl for an example.
+	FDB_API_CHANGED(fdb_transaction_get_range_and_flat_map, 700);
 	FDB_API_REMOVED(fdb_future_get_version, 620);
 	FDB_API_REMOVED(fdb_create_cluster, 610);
 	FDB_API_REMOVED(fdb_cluster_create_database, 610);

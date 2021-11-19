@@ -47,7 +47,7 @@
 #include "flow/serialize.h"
 
 class TCTeamInfo;
-struct TCMachineInfo;
+class TCMachineInfo;
 class TCMachineTeamInfo;
 
 namespace {
@@ -645,6 +645,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	bool lastBuildTeamsFailed;
 	Future<Void> teamBuilder;
 	AsyncTrigger restartTeamBuilder;
+	AsyncVar<bool> waitUntilRecruited; // make teambuilder wait until one new SS is recruited
 
 	MoveKeysLock lock;
 	PromiseStream<RelocateShard> output;
@@ -661,6 +662,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	AsyncVar<bool> disableFailingLaggingServers;
 	Optional<Key> wigglingPid; // Process id of current wiggling storage server;
     Reference<AsyncVar<bool>> pauseWiggle;
+	Reference<AsyncVar<bool>> processingWiggle; // track whether wiggling relocation is being processed
 
 	// machine_info has all machines info; key must be unique across processes on the same machine
 	std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
@@ -767,12 +769,13 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 Reference<AsyncVar<bool>> zeroHealthyTeams,
 	                 IsPrimary primary,
 	                 Reference<AsyncVar<bool>> processingUnhealthy,
+	                 Reference<AsyncVar<bool>> processingWiggle,
 	                 PromiseStream<GetMetricsRequest> getShardMetrics,
 	                 Promise<UID> removeFailedServer,
 	                 PromiseStream<Promise<int>> getUnhealthyRelocationCount)
 	  : cx(cx), distributorId(distributorId), configuration(configuration), doBuildTeams(true),
 	    lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output), unhealthyServers(0),
-	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
+	    processingWiggle(processingWiggle), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
 	    initialFailureReactionDelay(
 	        delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
 	    initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)),
@@ -922,14 +925,19 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		// Prefer a healthy team not containing excludeServer.
 		if (candidates.size() > 0) {
-			return teams[deterministicRandom()->randomInt(0, candidates.size())]->getServerIDs();
-		}
-
-		// The backup choice is a team with at least one server besides excludeServer, in this
-		// case, the team  will be possibily relocated to a healthy destination later by DD.
-		if (backup.size() > 0) {
-			std::vector<UID> res = teams[deterministicRandom()->randomInt(0, backup.size())]->getServerIDs();
-			std::remove(res.begin(), res.end(), excludeServer);
+			return teams[candidates[deterministicRandom()->randomInt(0, candidates.size())]]->getServerIDs();
+		} else if (backup.size() > 0) {
+			// The backup choice is a team with at least one server besides excludeServer, in this
+			// case, the team  will be possibily relocated to a healthy destination later by DD.
+			std::vector<UID> servers =
+			    teams[backup[deterministicRandom()->randomInt(0, backup.size())]]->getServerIDs();
+			std::vector<UID> res;
+			for (const UID& id : servers) {
+				if (id != excludeServer) {
+					res.push_back(id);
+				}
+			}
+			TraceEvent("FoundNonoptimalTeamForDroppedShard", excludeServer).detail("Team", describe(res));
 			return res;
 		}
 
@@ -2388,9 +2396,20 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// buildTeams will not count teams larger than teamSize against the desired teams.
 	ACTOR static Future<Void> buildTeams(DDTeamCollection* self) {
 		state int desiredTeams;
-		int serverCount = 0;
-		int uniqueMachines = 0;
-		std::set<Optional<Standalone<StringRef>>> machines;
+		state int serverCount = 0;
+		state int uniqueMachines = 0;
+		state std::set<Optional<Standalone<StringRef>>> machines;
+
+		// wait to see whether restartTeamBuilder is triggered
+		wait(delay(0, g_network->getCurrentTask()));
+		// make team builder don't build team during the interval between excluding the wiggled process and recruited a
+		// new SS to avoid redundant teams
+		while (self->pauseWiggle && !self->pauseWiggle->get() && self->waitUntilRecruited.get()) {
+			choose {
+				when(wait(self->waitUntilRecruited.onChange() || self->pauseWiggle->onChange())) {}
+				when(wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY, g_network->getCurrentTask()))) { break; }
+			}
+		}
 
 		for (auto i = self->server_info.begin(); i != self->server_info.end(); ++i) {
 			if (!self->server_status.get(i->first).isUnhealthy()) {
@@ -2415,6 +2434,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// Exclude teams who have members in the wrong configuration, since we don't want these teams
 			int teamCount = 0;
 			int totalTeamCount = 0;
+			int wigglingTeams = 0;
 			for (int i = 0; i < self->teams.size(); ++i) {
 				if (!self->teams[i]->isWrongConfiguration()) {
 					if (self->teams[i]->isHealthy()) {
@@ -2422,17 +2442,22 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					}
 					totalTeamCount++;
 				}
+				if (self->teams[i]->getPriority() == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE) {
+					wigglingTeams++;
+				}
 			}
 
 			// teamsToBuild is calculated such that we will not build too many teams in the situation
 			// when all (or most of) teams become unhealthy temporarily and then healthy again
-			state int teamsToBuild = std::max(0, std::min(desiredTeams - teamCount, maxTeams - totalTeamCount));
+			state int teamsToBuild;
+			teamsToBuild = std::max(0, std::min(desiredTeams - teamCount, maxTeams - totalTeamCount));
 
 			TraceEvent("BuildTeamsBegin", self->distributorId)
 			    .detail("TeamsToBuild", teamsToBuild)
 			    .detail("DesiredTeams", desiredTeams)
 			    .detail("MaxTeams", maxTeams)
 			    .detail("BadServerTeams", self->badTeams.size())
+			    .detail("PerpetualWigglingTeams", wigglingTeams)
 			    .detail("UniqueMachines", uniqueMachines)
 			    .detail("TeamSize", self->configuration.storageTeamSize)
 			    .detail("Servers", serverCount)
@@ -3020,23 +3045,30 @@ ACTOR Future<Void> updateServerMetrics(Reference<TCServerInfo> server) {
 	return Void();
 }
 
-ACTOR Future<Void> waitUntilHealthy(DDTeamCollection* self, double extraDelay = 0) {
+// NOTE: this actor returns when the cluster is healthy and stable (no server is expected to be removed in a period)
+// processingWiggle and processingUnhealthy indicate that some servers are going to be removed.
+ACTOR Future<Void> waitUntilHealthy(DDTeamCollection* self, double extraDelay = 0, bool waitWiggle = false) {
 	state int waitCount = 0;
 	loop {
-		while (self->zeroHealthyTeams->get() || self->processingUnhealthy->get()) {
+		while (self->zeroHealthyTeams->get() || self->processingUnhealthy->get() ||
+		       (waitWiggle && self->processingWiggle->get())) {
 			// processingUnhealthy: true when there exists data movement
+			// processingWiggle: true when there exists data movement because we want to wiggle a SS
 			TraceEvent("WaitUntilHealthyStalled", self->distributorId)
 			    .detail("Primary", self->primary)
 			    .detail("ZeroHealthy", self->zeroHealthyTeams->get())
-			    .detail("ProcessingUnhealthy", self->processingUnhealthy->get());
-			wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange());
+			    .detail("ProcessingUnhealthy", self->processingUnhealthy->get())
+			    .detail("ProcessingPerpetualWiggle", self->processingWiggle->get());
+			wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange() ||
+			     self->processingWiggle->onChange());
 			waitCount = 0;
 		}
 		wait(delay(SERVER_KNOBS->DD_STALL_CHECK_DELAY,
 		           TaskPriority::Low)); // After the team trackers wait on the initial failure reaction delay, they
 		                                // yield. We want to make sure every tracker has had the opportunity to send
 		                                // their relocations to the queue.
-		if (!self->zeroHealthyTeams->get() && !self->processingUnhealthy->get()) {
+		if (!self->zeroHealthyTeams->get() && !self->processingUnhealthy->get() &&
+		    (!waitWiggle || !self->processingWiggle->get())) {
 			if (extraDelay <= 0.01 || waitCount >= 1) {
 				// Return healthy if we do not need extraDelay or when DD are healthy in at least two consecutive check
 				return Void();
@@ -3096,7 +3128,8 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 
 			auto const& keys = self->server_status.getKeys();
 			for (auto const& key : keys) {
-				server_status.emplace(key, self->server_status.get(key));
+				// Add to or update the local server_status map
+				server_status[key] = self->server_status.get(key);
 			}
 
 			TraceEvent("DDPrintSnapshotTeasmInfo", self->distributorId)
@@ -3131,13 +3164,22 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 			server = server_info.begin();
 			for (i = 0; i < server_info.size(); i++) {
 				const UID& uid = server->first;
-				TraceEvent("ServerStatus", self->distributorId)
-				    .detail("ServerUID", uid)
-				    .detail("Healthy", !get(server_status, uid).isUnhealthy())
+
+				TraceEvent e("ServerStatus", self->distributorId);
+				e.detail("ServerUID", uid)
 				    .detail("MachineIsValid", server_info[uid]->machine.isValid())
 				    .detail("MachineTeamSize",
 				            server_info[uid]->machine.isValid() ? server_info[uid]->machine->machineTeams.size() : -1)
 				    .detail("Primary", self->primary);
+
+				// ServerStatus might not be known if server was very recently added and storageServerFailureTracker()
+				// has not yet updated self->server_status
+				// If the UID is not found, do not assume the server is healthy or unhealthy
+				auto it = server_status.find(uid);
+				if (it != server_status.end()) {
+					e.detail("Healthy", !it->second.isUnhealthy());
+				}
+
 				server++;
 				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 					wait(yield());
@@ -3174,7 +3216,11 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 
 				// Healthy machine has at least one healthy server
 				for (auto& server : _machine->serversOnMachine) {
-					if (!get(server_status, server->id).isUnhealthy()) {
+					// ServerStatus might not be known if server was very recently added and
+					// storageServerFailureTracker() has not yet updated self->server_status If the UID is not found, do
+					// not assume the server is healthy
+					auto it = server_status.find(server->id);
+					if (it != server_status.end() && !it->second.isUnhealthy()) {
 						isMachineHealthy = true;
 					}
 				}
@@ -3324,6 +3370,7 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 		wait(delay(SERVER_KNOBS->TR_REMOVE_MACHINE_TEAM_DELAY, TaskPriority::DataDistribution));
 
 		wait(waitUntilHealthy(self, SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY));
+
 		// Wait for the badTeamRemover() to avoid the potential race between adding the bad team (add the team tracker)
 		// and remove bad team (cancel the team tracker).
 		wait(self->badTeamRemover);
@@ -3447,7 +3494,13 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 		// To avoid removing server teams too fast, which is unlikely happen though
 		wait(delay(removeServerTeamDelay, TaskPriority::DataDistribution));
 
-		wait(waitUntilHealthy(self, SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY));
+		if (SERVER_KNOBS->PERPETUAL_WIGGLE_DISABLE_REMOVER && self->pauseWiggle) {
+			while (!self->pauseWiggle->get()) {
+				wait(self->pauseWiggle->onChange());
+			}
+		} else {
+			wait(waitUntilHealthy(self, SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY));
+		}
 		// Wait for the badTeamRemover() to avoid the potential race between
 		// adding the bad team (add the team tracker) and remove bad team (cancel the team tracker).
 		wait(self->badTeamRemover);
@@ -3733,6 +3786,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				           serverWiggling == serverUndesired) {
 					// the wrong configured and undesired server is the wiggling server
 					team->setPriority(SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE);
+
 				} else if (badTeam || anyWrongConfiguration) {
 					if (redundantTeam) {
 						team->setPriority(SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT);
@@ -4115,7 +4169,6 @@ ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
 					// there must not have other teams to place wiggled data
 					takeRest = teamCollection->server_info.size() <= teamCollection->configuration.storageTeamSize ||
 					           teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize;
-					teamCollection->doBuildTeams = true;
 					if (takeRest &&
 					    teamCollection->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
 						TraceEvent(SevWarn, "PerpetualWiggleSleep", teamCollection->distributorId)
@@ -4207,13 +4260,11 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 
 	loop {
 		if (self->wigglingPid.present()) {
-			StringRef pid = self->wigglingPid.get();
+			state StringRef pid = self->wigglingPid.get();
 			if (self->pauseWiggle->get()) {
 				TEST(true); // paused because cluster is unhealthy
 				moveFinishFuture = Never();
 				self->includeStorageServersForWiggle();
-				self->doBuildTeams = true;
-
 				TraceEvent(self->configuration.storageMigrationType == StorageMigrationType::AGGRESSIVE ? SevInfo
 				                                                                                        : SevWarn,
 				           "PerpetualStorageWigglePause",
@@ -4226,6 +4277,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				    .detail("StorageCount", movingCount);
 			} else {
 				TEST(true); // start wiggling
+				wait(waitUntilHealthy(self));
 				auto fv = self->excludeStorageServersForWiggle(pid);
 				movingCount = fv.size();
 				moveFinishFuture = waitForAll(fv);
@@ -4253,6 +4305,9 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				ASSERT(self->wigglingPid.present());
 				StringRef pid = self->wigglingPid.get();
 				TEST(pid != LiteralStringRef("")); // finish wiggling this process
+
+				self->waitUntilRecruited.set(true);
+				self->restartTeamBuilder.trigger();
 
 				moveFinishFuture = Never();
 				self->includeStorageServersForWiggle();
@@ -4382,9 +4437,6 @@ ACTOR Future<Void> waitServerListChange(DDTeamCollection* self,
 							                self->serverTrackerErrorOut,
 							                tr.getReadVersion().get(),
 							                ddEnabledState);
-							if (!ssi.isTss()) {
-								self->doBuildTeams = true;
-							}
 						}
 					}
 
@@ -4575,10 +4627,6 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self,
 		choose {
 			when(wait(healthChanged)) {
 				status->isFailed = !status->isFailed;
-				if (!status->isFailed && !server->lastKnownInterface.isTss() &&
-				    (server->teams.size() < targetTeamNumPerServer || self->lastBuildTeamsFailed)) {
-					self->doBuildTeams = true;
-				}
 				if (status->isFailed && self->healthyZone.get().present()) {
 					if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
 						// Ignore the failed storage server
@@ -4593,12 +4641,18 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self,
 						self->healthyZone.set(Optional<Key>());
 					}
 				}
+				if (!status->isUnhealthy()) {
+					// On server transistion from unhealthy -> healthy, trigger buildTeam check,
+					// handles scenario when team building failed due to insufficient healthy servers.
+					// Operaton cost is minimal if currentTeamCount == desiredTeamCount/maxTeamCount.
+					self->doBuildTeams = true;
+				}
 
-				// TraceEvent("StatusMapChange", self->distributorId)
-				//     .detail("ServerID", interf.id())
-				//     .detail("Status", status->toString())
-				//     .detail("Available",
-				//             IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
+				TraceEvent(SevDebug, "StatusMapChange", self->distributorId)
+				    .detail("ServerID", interf.id())
+				    .detail("Status", status->toString())
+				    .detail("Available",
+				            IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
 			}
 			when(wait(status->isUnhealthy() ? waitForAllDataRemoved(cx, interf.id(), addedVersion, self) : Never())) {
 				break;
@@ -5213,6 +5267,21 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 	Future<Void> waitComplete() { return complete.getFuture(); }
 };
 
+ACTOR Future<UID> getClusterId(DDTeamCollection* self) {
+	state ReadYourWritesTransaction tr(self->cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> clusterId = wait(tr.get(clusterIdKey));
+			ASSERT(clusterId.present());
+			return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
                                      RecruitStorageReply candidateWorker,
                                      const DDEnabledState* ddEnabledState,
@@ -5230,12 +5299,15 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 		// Ask the candidateWorker to initialize a SS only if the worker does not have a pending request
 		state UID interfaceId = deterministicRandom()->randomUniqueID();
 
+		UID clusterId = wait(getClusterId(self));
+
 		state InitializeStorageRequest isr;
 		isr.storeType =
 		    recruitTss ? self->configuration.testingStorageServerStoreType : self->configuration.storageServerStoreType;
 		isr.seedTag = invalidTag;
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = interfaceId;
+		isr.clusterId = clusterId;
 
 		self->recruitingIds.insert(interfaceId);
 		self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
@@ -5348,6 +5420,7 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 					                self->serverTrackerErrorOut,
 					                newServer.get().addedVersion,
 					                ddEnabledState);
+					self->waitUntilRecruited.set(false);
 					// signal all done after adding tss to tracking info
 					tssState->markComplete();
 				}
@@ -5355,9 +5428,6 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 				TraceEvent(SevWarn, "DDRecruitmentError")
 				    .detail("Reason", "Server ID already recruited")
 				    .detail("ServerID", id);
-			}
-			if (!recruitTss) {
-				self->doBuildTeams = true;
 			}
 		}
 	}
@@ -6108,6 +6178,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			state PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 			state PromiseStream<GetMetricsRequest> getShardMetrics;
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
+			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 			state Promise<Void> readyToStart;
 			state Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure);
 
@@ -6185,6 +6256,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                          input.getFuture(),
 			                                                          getShardMetrics,
 			                                                          processingUnhealthy,
+			                                                          processingWiggle,
 			                                                          tcis,
 			                                                          shardsAffectedByTeamFailure,
 			                                                          lock,
@@ -6213,6 +6285,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			    zeroHealthyTeams[0],
 			    IsPrimary::True,
 			    processingUnhealthy,
+			    processingWiggle,
 			    getShardMetrics,
 			    removeFailedServer,
 			    getUnhealthyRelocationCount);
@@ -6233,6 +6306,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				                                    zeroHealthyTeams[1],
 				                                    IsPrimary::False,
 				                                    processingUnhealthy,
+				                                    processingWiggle,
 				                                    getShardMetrics,
 				                                    removeFailedServer,
 				                                    getUnhealthyRelocationCount);
@@ -6278,7 +6352,18 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			self->teamCollection = nullptr;
 			primaryTeamCollection = Reference<DDTeamCollection>();
 			remoteTeamCollection = Reference<DDTeamCollection>();
-			wait(shards.clearAsync());
+			if (err.code() == error_code_actor_cancelled) {
+				// When cancelled, we cannot clear asyncronously because
+				// this will result in invalid memory access. This should only
+				// be an issue in simulation.
+				if (!g_network->isSimulated()) {
+					TraceEvent(SevWarnAlways, "DataDistributorCancelled");
+				}
+				shards.clear();
+				throw e;
+			} else {
+				wait(shards.clearAsync());
+			}
 			TraceEvent("DataDistributorTeamCollectionsDestroyed").error(err);
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				TraceEvent("RemoveFailedServer", removeFailedServer.getFuture().get()).error(err);
@@ -6313,6 +6398,19 @@ static std::set<int> const& normalDataDistributorErrors() {
 	return s;
 }
 
+ACTOR template <class Req>
+Future<Void> sendSnapReq(RequestStream<Req> stream, Req req, Error e) {
+	ErrorOr<REPLY_TYPE(Req)> reply = wait(stream.tryGetReply(req));
+	if (reply.isError()) {
+		TraceEvent("SnapDataDistributor_ReqError")
+		    .error(reply.getError(), true)
+		    .detail("ConvertedErrorType", e.what())
+		    .detail("Peer", stream.getEndpoint().getPrimaryAddress());
+		throw e;
+	}
+	return Void();
+}
+
 ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<ServerDBInfo> const> db) {
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
 	state ReadYourWritesTransaction tr(cx);
@@ -6340,9 +6438,8 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		std::vector<Future<Void>> disablePops;
 		disablePops.reserve(tlogs.size());
 		for (const auto& tlog : tlogs) {
-			disablePops.push_back(transformErrors(
-			    throwErrorOr(tlog.disablePopRequest.tryGetReply(TLogDisablePopRequest(snapReq.snapUID))),
-			    snap_disable_tlog_pop_failed()));
+			disablePops.push_back(sendSnapReq(
+			    tlog.disablePopRequest, TLogDisablePopRequest{ snapReq.snapUID }, snap_disable_tlog_pop_failed()));
 		}
 		wait(waitForAll(disablePops));
 
@@ -6358,10 +6455,9 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		std::vector<Future<Void>> storageSnapReqs;
 		storageSnapReqs.reserve(storageWorkers.size());
 		for (const auto& worker : storageWorkers) {
-			storageSnapReqs.push_back(
-			    transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(
-			                        snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("storage")))),
-			                    snap_storage_failed()));
+			storageSnapReqs.push_back(sendSnapReq(worker.workerSnapReq,
+			                                      WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "storage"_sr),
+			                                      snap_storage_failed()));
 		}
 		wait(waitForAll(storageSnapReqs));
 
@@ -6372,10 +6468,9 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		std::vector<Future<Void>> tLogSnapReqs;
 		tLogSnapReqs.reserve(tlogs.size());
 		for (const auto& tlog : tlogs) {
-			tLogSnapReqs.push_back(
-			    transformErrors(throwErrorOr(tlog.snapRequest.tryGetReply(
-			                        TLogSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("tlog")))),
-			                    snap_tlog_failed()));
+			tLogSnapReqs.push_back(sendSnapReq(tlog.snapRequest,
+			                                   TLogSnapRequest{ snapReq.snapPayload, snapReq.snapUID, "tlog"_sr },
+			                                   snap_tlog_failed()));
 		}
 		wait(waitForAll(tLogSnapReqs));
 
@@ -6386,9 +6481,8 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		std::vector<Future<Void>> enablePops;
 		enablePops.reserve(tlogs.size());
 		for (const auto& tlog : tlogs) {
-			enablePops.push_back(
-			    transformErrors(throwErrorOr(tlog.enablePopRequest.tryGetReply(TLogEnablePopRequest(snapReq.snapUID))),
-			                    snap_enable_tlog_pop_failed()));
+			enablePops.push_back(sendSnapReq(
+			    tlog.enablePopRequest, TLogEnablePopRequest{ snapReq.snapUID }, snap_enable_tlog_pop_failed()));
 		}
 		wait(waitForAll(enablePops));
 
@@ -6403,10 +6497,9 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		std::vector<Future<Void>> coordSnapReqs;
 		coordSnapReqs.reserve(coordWorkers.size());
 		for (const auto& worker : coordWorkers) {
-			coordSnapReqs.push_back(
-			    transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(
-			                        snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("coord")))),
-			                    snap_coord_failed()));
+			coordSnapReqs.push_back(sendSnapReq(worker.workerSnapReq,
+			                                    WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "coord"_sr),
+			                                    snap_coord_failed()));
 		}
 		wait(waitForAll(coordSnapReqs));
 		TraceEvent("SnapDataDistributor_AfterSnapCoords")
@@ -6726,6 +6819,7 @@ std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
 	                                                           makeReference<AsyncVar<bool>>(true),
 	                                                           IsPrimary::True,
 	                                                           makeReference<AsyncVar<bool>>(false),
+	                                                           makeReference<AsyncVar<bool>>(false),
 	                                                           PromiseStream<GetMetricsRequest>(),
 	                                                           Promise<UID>(),
 	                                                           PromiseStream<Promise<int>>()));
@@ -6768,6 +6862,7 @@ std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize,
 	                                                           Future<Void>(Void()),
 	                                                           makeReference<AsyncVar<bool>>(true),
 	                                                           IsPrimary::True,
+	                                                           makeReference<AsyncVar<bool>>(false),
 	                                                           makeReference<AsyncVar<bool>>(false),
 	                                                           PromiseStream<GetMetricsRequest>(),
 	                                                           Promise<UID>(),

@@ -1,0 +1,7 @@
+[[test]]
+testTitle = 'ClientLibManagement'
+
+    [[test.workload]]
+    testName = 'ClientLibManagement'
+    minTestFileSize = 0
+    maxTestFileSize = 1048576

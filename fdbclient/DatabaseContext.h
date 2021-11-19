@@ -20,6 +20,7 @@
 
 #ifndef DatabaseContext_h
 #define DatabaseContext_h
+#include "fdbclient/Notified.h"
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -147,6 +148,25 @@ public:
 	WatchMetadata(Key key, Optional<Value> value, Version version, TransactionInfo info, TagSet tags);
 };
 
+struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
+	UID id;
+	Future<Void> updater;
+	NotifiedVersion version;
+	NotifiedVersion desired;
+};
+
+struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
+	PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> mutations;
+
+	Version getVersion();
+	Future<Void> whenAtLeast(Version version);
+
+	NotifiedVersion lastReturnedVersion;
+	std::vector<Reference<ChangeFeedStorageData>> storageData;
+	AsyncVar<int> notAtLatest;
+	Promise<Void> refresh;
+};
+
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -168,7 +188,7 @@ public:
 
 	// Constructs a new copy of this DatabaseContext from the parameters of this DatabaseContext
 	Database clone() const {
-		return Database(new DatabaseContext(connectionFile,
+		return Database(new DatabaseContext(connectionRecord,
 		                                    clientInfo,
 		                                    coordinator,
 		                                    clientInfoMonitor,
@@ -198,6 +218,7 @@ public:
 	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(bool useProvisionalProxies);
 	Reference<GrvProxyInfo> getGrvProxies(bool useProvisionalProxies);
 	Future<Void> onProxiesChanged() const;
+	Future<Void> onClientLibStatusChanged() const;
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
 	// Returns the protocol version reported by the coordinator this client is connected to
@@ -232,16 +253,16 @@ public:
 
 	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a
 	                            // leader. The cluster file therefore is valid, but the database might be unavailable.
-	Reference<ClusterConnectionFile> getConnectionFile();
+	Reference<IClusterConnectionRecord> getConnectionRecord();
 
 	// Switch the database to use the new connection file, and recreate all pending watches for committed transactions.
 	//
 	// Meant to be used as part of a 'hot standby' solution to switch to the standby. A correct switch will involve
 	// advancing the version on the new cluster sufficiently far that any transaction begun with a read version from the
 	// old cluster will fail to commit. Assuming the above version-advancing is done properly, a call to
-	// switchConnectionFile guarantees that any read with a version from the old cluster will not be attempted on the
+	// switchConnectionRecord guarantees that any read with a version from the old cluster will not be attempted on the
 	// new cluster.
-	Future<Void> switchConnectionFile(Reference<ClusterConnectionFile> standby);
+	Future<Void> switchConnectionRecord(Reference<IClusterConnectionRecord> standby);
 	Future<Void> connectionFileChanged();
 	IsSwitchable switchable{ false };
 
@@ -253,8 +274,23 @@ public:
 	// Management API, create snapshot
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
+	Future<Void> getChangeFeedStream(Reference<ChangeFeedData> results,
+	                                 Key rangeID,
+	                                 Version begin = 0,
+	                                 Version end = std::numeric_limits<Version>::max(),
+	                                 KeyRange range = allKeys);
+
+	Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
+	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
+
+	Future<Void> getBlobGranuleRangesStream(const PromiseStream<KeyRange>& results, KeyRange range);
+	Future<Void> readBlobGranulesStream(const PromiseStream<Standalone<BlobGranuleChunkRef>>& results,
+	                                    KeyRange range,
+	                                    Version begin,
+	                                    Optional<Version> end);
+
 	// private:
-	explicit DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
+	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
 	                         Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
 	                         Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
 	                         Future<Void> clientInfoMonitor,
@@ -271,9 +307,10 @@ public:
 	void expireThrottles();
 
 	// Key DB-specific information
-	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
+	Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord;
 	AsyncTrigger proxiesChangeTrigger;
-	Future<Void> monitorProxiesInfoChange;
+	AsyncTrigger clientLibChangeTrigger;
+	Future<Void> clientDBInfoMonitor;
 	Future<Void> monitorTssInfoChange;
 	Future<Void> tssMismatchHandler;
 	PromiseStream<std::pair<UID, std::vector<DetailedTSSMismatch>>> tssMismatchStream;
@@ -324,11 +361,17 @@ public:
 	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 
 	std::map<UID, StorageServerInfo*> server_interf;
+	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
 
 	// map from ssid -> tss interface
 	std::unordered_map<UID, StorageServerInterface> tssMapping;
 	// map from tssid -> metrics for that tss pair
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
+	// map from changeFeedId -> changeFeedRange
+	std::unordered_map<Key, KeyRange> changeFeedCache;
+	std::unordered_map<UID, Reference<ChangeFeedStorageData>> changeFeedUpdaters;
+
+	Reference<ChangeFeedStorageData> getStorageData(StorageServerInterface interf);
 
 	UID dbId;
 	IsInternal internal; // Only contexts created through the C client and fdbcli are non-internal
@@ -353,6 +396,7 @@ public:
 	Counter transactionGetKeyRequests;
 	Counter transactionGetValueRequests;
 	Counter transactionGetRangeRequests;
+	Counter transactionGetRangeAndFlatMapRequests;
 	Counter transactionGetRangeStreamRequests;
 	Counter transactionWatchRequests;
 	Counter transactionGetAddressesForKeyRequests;
@@ -377,6 +421,8 @@ public:
 	Counter transactionsProcessBehind;
 	Counter transactionsThrottled;
 	Counter transactionsExpensiveClearCostEstCount;
+	Counter transactionGrvFullBatches;
+	Counter transactionGrvTimedOutBatches;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
 	    bytesPerCommit;
@@ -397,7 +443,8 @@ public:
 
 	int snapshotRywEnabled;
 
-	int transactionTracingEnabled;
+	bool transactionTracingSample;
+	double verifyCausalReadsProp = 0.0;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;

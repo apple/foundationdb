@@ -308,6 +308,32 @@ private:
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 	}
 
+	void checkSetChangeFeedPrefix(MutationRef m) {
+		if (!m.param1.startsWith(changeFeedPrefix)) {
+			return;
+		}
+		if (toCommit && keyInfo) {
+			KeyRange r = std::get<0>(decodeChangeFeedValue(m.param2));
+			MutationRef privatized = m;
+			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+			auto ranges = keyInfo->intersectingRanges(r);
+			auto firstRange = ranges.begin();
+			++firstRange;
+			if (firstRange == ranges.end()) {
+				ranges.begin().value().populateTags();
+				toCommit->addTags(ranges.begin().value().tags);
+			} else {
+				std::set<Tag> allSources;
+				for (auto r : ranges) {
+					r.value().populateTags();
+					allSources.insert(r.value().tags.begin(), r.value().tags.end());
+				}
+				toCommit->addTags(allSources);
+			}
+			toCommit->writeTypedMessage(privatized);
+		}
+	}
+
 	void checkSetServerListPrefix(MutationRef m) {
 		if (!m.param1.startsWith(serverListPrefix)) {
 			return;
@@ -517,7 +543,7 @@ private:
 		    m.param1.startsWith(applyMutationsAddPrefixRange.begin) ||
 		    m.param1.startsWith(applyMutationsRemovePrefixRange.begin) || m.param1.startsWith(tagLocalityListPrefix) ||
 		    m.param1.startsWith(serverTagHistoryPrefix) ||
-		    m.param1.startsWith(testOnlyTxnStateStorePrefixRange.begin)) {
+		    m.param1.startsWith(testOnlyTxnStateStorePrefixRange.begin) || m.param1 == clusterIdKey) {
 
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		}
@@ -833,6 +859,7 @@ private:
 		if (Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get(); tagV.present()) {
 			MutationRef privatized = m;
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+			privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
 			toCommit->writeTypedMessage(privatized);
 		}
@@ -858,6 +885,7 @@ private:
 
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+					privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
 					toCommit->addTag(decodeServerTagValue(tagV.get()));
 					toCommit->writeTypedMessage(privatized);
 				}
@@ -972,6 +1000,7 @@ public:
 				checkSetCacheKeysPrefix(m);
 				checkSetConfigKeys(m);
 				checkSetServerListPrefix(m);
+				checkSetChangeFeedPrefix(m);
 				checkSetTSSMappingKeys(m);
 				checkSetTSSQuarantineKeys(m);
 				checkSetApplyMutationsEndRange(m);
