@@ -29,6 +29,7 @@
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+const Value EMPTY = Tuple().pack();
 const KeyRef prefix = "prefix"_sr;
 const KeyRef RECORD = "RECORD"_sr;
 const KeyRef INDEX = "INDEX"_sr;
@@ -50,9 +51,15 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 		return Void();
 	}
 
-	static Key primaryKey(int i) { return KeyRef("primary-key-of-record-" + std::to_string(i)); }
-	static Key indexKey(int i) { return KeyRef("index-key-of-record-" + std::to_string(i)); }
-	static Key data(int i) { return KeyRef("data-of-record-" + std::to_string(i)); }
+	static Key primaryKey(int i) { return Key(format("primary-key-of-record-%08d", i)); }
+	static Key indexKey(int i) { return Key(format("index-key-of-record-%08d", i)); }
+	static Value dataOfRecord(int i) { return Key(format("data-of-record-%08d", i)); }
+
+	static Key indexEntryKey(int i) {
+		return Tuple().append(prefix).append(INDEX).append(indexKey(i)).append(primaryKey(i)).pack();
+	}
+	static Key recordKey(int i) { return Tuple().append(prefix).append(RECORD).append(primaryKey(i)).pack(); }
+	static Value recordValue(int i) { return Tuple().append(dataOfRecord(i)).pack(); }
 
 	ACTOR Future<Void> fillInRecords(Database cx, int n) {
 		std::cout << "start fillInRecords n=" << n << std::endl;
@@ -61,10 +68,8 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 		try {
 			tr.reset();
 			for (int i = 0; i < n; i++) {
-				tr.set(Tuple().append(prefix).append(RECORD).append(primaryKey(i)).pack(),
-				       Tuple().append(data(i)).pack());
-				tr.set(Tuple().append(prefix).append(INDEX).append(indexKey(i)).append(primaryKey(i)).pack(),
-				       Tuple().pack());
+				tr.set(recordKey(i), recordValue(i));
+				tr.set(indexEntryKey(i), EMPTY);
 			}
 			wait(tr.commit());
 			std::cout << "finished fillInRecords" << std::endl;
@@ -90,7 +95,7 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 		try {
 			tr.reset();
 			RangeResult result = wait(tr.getRange(range, CLIENT_KNOBS->TOO_MANY));
-			showResult(result);
+			//			showResult(result);
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -98,7 +103,15 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> scanRangeAndFlatMap(Database cx, KeyRange range, Key mapper, IndexPrefetchDemoWorkload* self) {
+	ACTOR Future<Void> scanRangeAndFlatMap(Database cx,
+	                                       int beginId,
+	                                       int endId,
+	                                       Key mapper,
+	                                       IndexPrefetchDemoWorkload* self) {
+		Key someIndexesBegin = Tuple().append(prefix).append(INDEX).append(indexKey(beginId)).getDataAsStandalone();
+		Key someIndexesEnd = Tuple().append(prefix).append(INDEX).append(indexKey(endId)).getDataAsStandalone();
+		state KeyRange range = KeyRangeRef(someIndexesBegin, someIndexesEnd);
+
 		std::cout << "start scanRangeAndFlatMap " << range.toString() << std::endl;
 		// TODO: When n is large, split into multiple transactions.
 		state Transaction tr(cx);
@@ -110,13 +123,23 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 			                               mapper,
 			                               GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
 			                               Snapshot::True));
-			showResult(result);
+			//			showResult(result);
 			if (self->BAD_MAPPER) {
 				TraceEvent("IndexPrefetchDemoWorkloadShouldNotReachable").detail("ResultSize", result.size());
 			}
-			// result size: 2
+			// Examples:
 			// key=\x01prefix\x00\x01RECORD\x00\x01primary-key-of-record-2\x00, value=\x01data-of-record-2\x00
 			// key=\x01prefix\x00\x01RECORD\x00\x01primary-key-of-record-3\x00, value=\x01data-of-record-3\x00
+			std::cout << "result.size()=" << result.size() << std::endl;
+			std::cout << "result.more=" << result.more << std::endl;
+			ASSERT(result.size() == endId - beginId);
+			const KeyValueRef* it = result.begin();
+			int id = beginId;
+			for (; it != result.end(); it++) {
+				ASSERT(it->key == recordKey(id));
+				ASSERT(it->value == recordValue(id));
+				id++;
+			}
 		} catch (Error& e) {
 			if (self->BAD_MAPPER && e.code() == error_code_mapper_bad_index) {
 				TraceEvent("IndexPrefetchDemoWorkloadBadMapperDetected").error(e);
@@ -132,14 +155,11 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 		TraceEvent("IndexPrefetchDemoWorkloadConfig").detail("BadMapper", self->BAD_MAPPER);
 
 		// TODO: Use toml to config
-		wait(self->fillInRecords(cx, 5));
+		wait(self->fillInRecords(cx, 200));
 
 		wait(self->scanRange(cx, normalKeys));
 
-		Key someIndexesBegin = Tuple().append(prefix).append(INDEX).append(indexKey(2)).getDataAsStandalone();
-		Key someIndexesEnd = Tuple().append(prefix).append(INDEX).append(indexKey(4)).getDataAsStandalone();
-		state KeyRange someIndexes = KeyRangeRef(someIndexesBegin, someIndexesEnd);
-		wait(self->scanRange(cx, someIndexes));
+		//		wait(self->scanRange(cx, someIndexes));
 
 		Tuple mapperTuple;
 		if (self->BAD_MAPPER) {
@@ -148,7 +168,9 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 			mapperTuple << prefix << RECORD << "{K[3]}"_sr;
 		}
 		Key mapper = mapperTuple.getDataAsStandalone();
-		wait(self->scanRangeAndFlatMap(cx, someIndexes, mapper, self));
+		// The scanned range cannot be too large to hit get_key_values_and_map_has_more. We have a unit validating the
+		// error is thrown when the range is large.
+		wait(self->scanRangeAndFlatMap(cx, 10, 190, mapper, self));
 		return Void();
 	}
 

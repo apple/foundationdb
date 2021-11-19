@@ -92,6 +92,7 @@ bool canReplyWith(Error e) {
 	case error_code_quick_get_key_values_has_more:
 	case error_code_quick_get_value_miss:
 	case error_code_quick_get_key_values_miss:
+	case error_code_get_key_values_and_map_has_more:
 		// case error_code_all_alternatives_failed:
 		return true;
 	default:
@@ -2804,6 +2805,9 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 ACTOR Future<GetKeyValuesAndFlatMapReply> flatMap(StorageServer* data, GetKeyValuesReply input, StringRef mapper) {
 	state GetKeyValuesAndFlatMapReply result;
 	result.version = input.version;
+	if (input.more) {
+		throw get_key_values_and_map_has_more();
+	}
 	result.more = input.more;
 	result.cached = input.cached;
 	result.arena.dependsOn(input.arena);
