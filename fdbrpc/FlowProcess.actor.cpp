@@ -19,6 +19,7 @@
  */
 #include "fdbrpc/FlowProcess.actor.h"
 #include "flow/flow.h"
+#include "fdbserver/RemoteIKeyValueStore.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -39,7 +40,8 @@ ACTOR Future<int> flowProcessRunner(FlowProcess* self, Promise<Void> ready) {
 	auto address = endpoint.addresses.address.toString();
 	auto token = endpoint.token;
 
-	std::vector<std::string> args = { "bin/fdbserver", "-r", "flowprocess", "--process_name" };
+	std::string flowProcessAddr = g_network->getLocalAddress().ip.toString().append(":0");
+	std::vector<std::string> args = { "bin/fdbserver", "-r", "flowprocess", "-p", flowProcessAddr, "--process_name" };
 	args.emplace_back(self->name().toString());
 	args.emplace_back("--process_endpoint");
 	args.emplace_back(format("%s,%lu,%lu", address.c_str(), token.first(), token.second()));
@@ -70,7 +72,9 @@ void FlowProcess::start() {
 
 Future<Void> runFlowProcess(std::string name, Endpoint endpoint) {
 	std::cout << "In runFlowProcess\n";
-	FlowProcess* self = IProcessFactory::create(name.c_str());
+	// FlowProcess* self = IProcessFactory::create(name.c_str()); // it->second->create() segfaulting?
+	FlowProcess* self = new KeyValueStoreProcess();
+	std::cout << "Check\n";
 	std::cout << "endpoint address is: " << endpoint.getPrimaryAddress().toString() << std::endl;
 	RequestStream<FlowProcessRegistrationRequest> registerProcess(endpoint);
 	std::cout << "registeredProcess with endpoint: " << endpoint.getPrimaryAddress().toString() << std::endl;
