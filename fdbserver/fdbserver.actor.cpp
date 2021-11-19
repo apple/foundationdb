@@ -529,7 +529,7 @@ static void printOptionUsage(std::string option, std::string description) {
 
 	std::stringstream sstream(description);
 	if (sstream.eof()) {
-		printf(result.c_str());
+		printf("%s", result.c_str());
 		return;
 	}
 
@@ -552,7 +552,7 @@ static void printOptionUsage(std::string option, std::string description) {
 	}
 	result += currLine + '\n';
 
-	printf(result.c_str());
+	printf("%s", result.c_str());
 }
 
 static void printUsage(const char* name, bool devhelp) {
