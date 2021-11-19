@@ -183,10 +183,10 @@ If temporary credentials are being used, the following schema is also supported
 ::
    {
     "accounts" : {
-      "@host" :  { "api_key" : user, "secret" : "SECRETKEY", token: "TOKEN1" },
-      "@host2" : { "api_key" : user2, "secret" : "SECRETKEY2", token: "TOKEN2" }
+      "@host" :     { "api_key" : user, "secret" : "SECRETKEY", token: "TOKEN1" },
+      "@host2" :    { "api_key" : user2, "secret" : "SECRETKEY2", token: "TOKEN2" }
     }
-  } 
+  }
 
 TLS Support
 ===========
