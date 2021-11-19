@@ -6880,8 +6880,11 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
 					state int resultLoc = 0;
 					while (resultLoc < rep.mutations.size()) {
 						wait(results.onEmpty());
-						ASSERT(rep.mutations[resultLoc].version >= nextVersion);
-						results.send(rep.mutations[resultLoc]);
+						if (rep.mutations[resultLoc].version >= nextVersion) {
+							results.send(rep.mutations[resultLoc]);
+						} else {
+							ASSERT(rep.mutations[resultLoc].mutations.empty());
+						}
 						resultLoc++;
 					}
 					nextVersion = rep.mutations.back().version + 1;

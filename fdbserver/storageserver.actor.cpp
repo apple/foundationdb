@@ -1726,9 +1726,9 @@ MutationsAndVersionRef filterMutations(Arena& arena,
 	return m;
 }
 
-ACTOR Future<ChangeFeedStreamReply> getChangeFeedMutations(StorageServer* data,
-                                                           ChangeFeedStreamRequest req,
-                                                           bool inverted) {
+ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(StorageServer* data,
+                                                                            ChangeFeedStreamRequest req,
+                                                                            bool inverted) {
 	state ChangeFeedStreamReply reply;
 	state ChangeFeedStreamReply memoryReply;
 	state int remainingLimitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
@@ -1828,7 +1828,7 @@ ACTOR Future<ChangeFeedStreamReply> getChangeFeedMutations(StorageServer* data,
 		}
 	}
 
-	return reply;
+	return std::make_pair(reply, remainingLimitBytes > 0 && remainingDurableBytes > 0);
 }
 
 ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
@@ -1844,14 +1844,15 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
 			feedRequest.begin = begin;
 			feedRequest.end = end;
 			feedRequest.range = range;
-			state ChangeFeedStreamReply feedReply = wait(getChangeFeedMutations(data, feedRequest, true));
-			begin = feedReply.mutations.back().version + 1;
+			state std::pair<ChangeFeedStreamReply, bool> feedReply =
+			    wait(getChangeFeedMutations(data, feedRequest, true));
+			begin = feedReply.first.mutations.back().version + 1;
 			state int resultLoc = 0;
-			while (resultLoc < feedReply.mutations.size()) {
-				if (feedReply.mutations[resultLoc].mutations.size() ||
-				    feedReply.mutations[resultLoc].version == end - 1) {
+			while (resultLoc < feedReply.first.mutations.size()) {
+				if (feedReply.first.mutations[resultLoc].mutations.size() ||
+				    feedReply.first.mutations[resultLoc].version == end - 1) {
 					wait(results.onEmpty());
-					results.send(feedReply.mutations[resultLoc]);
+					results.send(feedReply.first.mutations[resultLoc]);
 				}
 				resultLoc++;
 			}
@@ -1885,17 +1886,19 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 				removeUID = true;
 			}
 			wait(onReady);
-			state Future<ChangeFeedStreamReply> feedReplyFuture = getChangeFeedMutations(data, req, false);
+			state Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture =
+			    getChangeFeedMutations(data, req, false);
 			if (atLatest && !removeUID && !feedReplyFuture.isReady()) {
 				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
 				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
 				removeUID = true;
 			}
-			ChangeFeedStreamReply _feedReply = wait(feedReplyFuture);
-			ChangeFeedStreamReply feedReply = _feedReply;
+			std::pair<ChangeFeedStreamReply, bool> _feedReply = wait(feedReplyFuture);
+			ChangeFeedStreamReply feedReply = _feedReply.first;
+			bool gotAll = _feedReply.second;
 
 			req.begin = feedReply.mutations.back().version + 1;
-			if (!atLatest && feedReply.mutations.back().mutations.empty()) {
+			if (!atLatest && gotAll) {
 				atLatest = true;
 			}
 			auto& clientVersions = data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()];
@@ -1909,14 +1912,13 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 				minVersion = std::min(minVersion, it.second);
 			}
 			feedReply.atLatestVersion = atLatest;
-			feedReply.minStreamVersion =
-			    feedReply.mutations.back().mutations.empty() ? minVersion : feedReply.mutations.back().version;
+			feedReply.minStreamVersion = gotAll ? minVersion : feedReply.mutations.back().version;
 			req.reply.send(feedReply);
 			if (feedReply.mutations.back().version == req.end - 1) {
 				req.reply.sendError(end_of_stream());
 				return Void();
 			}
-			if (feedReply.mutations.back().mutations.empty()) {
+			if (gotAll) {
 				blockedVersion = Optional<Version>();
 				auto feed = data->uidChangeFeed.find(req.rangeID);
 				if (feed == data->uidChangeFeed.end() || feed->second->removing) {
