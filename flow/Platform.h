@@ -392,7 +392,13 @@ std::string getDefaultConfigPath();
 // Returns the absolute platform-dependant path for the default fdb.cluster file
 std::string getDefaultClusterFilePath();
 
-void* getImageOffset();
+struct ImageInfo {
+	void* offset = nullptr;
+	std::string fileName = "unknown";
+	std::string symbolFileName = "unknown";
+};
+
+ImageInfo getImageInfo();
 
 // Places the frame pointers in a string formatted as parameters for addr2line.
 size_t raw_backtrace(void** addresses, int maxStackDepth);

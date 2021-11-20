@@ -118,7 +118,7 @@ NetworkOptions::NetworkOptions()
   : localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()), traceRollSize(TRACE_DEFAULT_ROLL_SIZE),
     traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"), traceFormat("xml"),
     traceClockSource("now"), runLoopProfilingEnabled(false),
-    supportedVersions(new ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>()) {}
+    supportedVersions(new ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>()), primaryClient(true) {}
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
@@ -1141,7 +1141,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     internal(internal), transactionTracingSample(false), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
-    specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
+    specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
+    connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size())
 	                ? Void()
@@ -1385,7 +1386,8 @@ DatabaseContext::DatabaseContext(const Error& err)
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
-    internal(false), transactionTracingSample(true) {}
+    internal(false), transactionTracingSample(true),
+    connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {}
 
 // Static constructor used by server processes to create a DatabaseContext
 // For internal (fdbserver) use only
@@ -1687,6 +1689,8 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 	if (!g_network)
 		throw network_not_setup();
 
+	platform::ImageInfo imageInfo = platform::getImageInfo();
+
 	if (connFile) {
 		if (networkOptions.traceDirectory.present() && !traceFileIsOpen()) {
 			g_network->initMetrics();
@@ -1709,11 +1713,11 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 			    .detail("SourceVersion", getSourceVersion())
 			    .detail("Version", FDB_VT_VERSION)
 			    .detail("PackageName", FDB_VT_PACKAGE_NAME)
-			    .detail("ClusterFile", connFile->getFilename().c_str())
-			    .detail("ConnectionString", connFile->getConnectionString().toString())
 			    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 			    .detail("ApiVersion", apiVersion)
-			    .detailf("ImageOffset", "%p", platform::getImageOffset())
+			    .detail("ClientLibrary", imageInfo.fileName)
+			    .detailf("ImageOffset", "%p", imageInfo.offset)
+			    .detail("Primary", networkOptions.primaryClient)
 			    .trackLatest("ClientStart");
 
 			initializeSystemMonitorMachineState(SystemMonitorMachineState(IPAddress(publicIP)));
@@ -1764,6 +1768,16 @@ Database Database::createDatabase(Reference<ClusterConnectionFile> connFile,
 
 	auto database = Database(db);
 	GlobalConfig::create(database, clientInfo, std::addressof(clientInfo->get()));
+
+	TraceEvent("ConnectToDatabase", database->dbId)
+	    .detail("Version", FDB_VT_VERSION)
+	    .detail("ClusterFile", connFile->getFilename())
+	    .detail("ConnectionString", connFile->getConnectionString().toString())
+	    .detail("ClientLibrary", imageInfo.fileName)
+	    .detail("Primary", networkOptions.primaryClient)
+	    .detail("Internal", internal)
+	    .trackLatest(database->connectToDatabaseEventCacheHolder.trackingKey);
+
 	return database;
 }
 
@@ -1984,6 +1998,9 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		}
 		break;
 	}
+	case FDBNetworkOptions::EXTERNAL_CLIENT:
+		networkOptions.primaryClient = false;
+		break;
 	default:
 		break;
 	}
@@ -4020,7 +4037,6 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results,
                                   bool reverse,
                                   TransactionInfo info,
                                   TagSet tags) {
-
 	state ParallelStream<RangeResult> results(_results, CLIENT_KNOBS->RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT);
 
 	// FIXME: better handling to disable row limits
@@ -4485,7 +4501,6 @@ Future<RangeResult> Transaction::getRangeAndFlatMap(const KeySelector& begin,
                                                     GetRangeLimits limits,
                                                     bool snapshot,
                                                     bool reverse) {
-
 	return getRangeInternal<GetKeyValuesAndFlatMapRequest, GetKeyValuesAndFlatMapReply>(
 	    begin, end, mapper, limits, snapshot, reverse);
 }
@@ -5904,7 +5919,6 @@ ACTOR Future<ProtocolVersion> getCoordinatorProtocol(NetworkAddressList coordina
 ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
     NetworkAddress coordinatorAddress,
     Optional<ProtocolVersion> expectedVersion) {
-
 	state Reference<AsyncVar<Optional<ProtocolVersion>>> protocolVersion =
 	    FlowTransport::transport().getPeerProtocolAsyncVar(coordinatorAddress);
 
@@ -5932,7 +5946,6 @@ ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
 ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
     Optional<ProtocolVersion> expectedVersion) {
-
 	state bool needToConnect = true;
 	state Future<ProtocolVersion> protocolVersion = Never();
 
