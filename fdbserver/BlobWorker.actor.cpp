@@ -46,35 +46,6 @@
 #define BW_DEBUG true
 #define BW_REQUEST_DEBUG false
 
-// TODO add comments + documentation
-struct BlobFileIndex {
-	Version version;
-	std::string filename;
-	int64_t offset;
-	int64_t length;
-
-	BlobFileIndex() {}
-
-	BlobFileIndex(Version version, std::string filename, int64_t offset, int64_t length)
-	  : version(version), filename(filename), offset(offset), length(length) {}
-};
-
-struct GranuleFiles {
-	std::deque<BlobFileIndex> snapshotFiles;
-	std::deque<BlobFileIndex> deltaFiles;
-};
-
-struct GranuleHistory {
-	KeyRange range;
-	Version version;
-	Standalone<BlobGranuleHistoryValue> value;
-
-	GranuleHistory() {}
-
-	GranuleHistory(KeyRange range, Version version, Standalone<BlobGranuleHistoryValue> value)
-	  : range(range), version(version), value(value) {}
-};
-
 struct GranuleStartState {
 	UID granuleID;
 	Version changeFeedStartVersion;
@@ -154,25 +125,6 @@ struct GranuleRangeMetadata {
 
 	// TODO REMOVE
 	// ~GranuleRangeMetadata() { printf("Destroying granule metadata\n"); }
-};
-
-// represents a previous version of a granule, and optionally the files that compose it
-struct GranuleHistoryEntry : NonCopyable, ReferenceCounted<GranuleHistoryEntry> {
-	KeyRange range;
-	UID granuleID;
-	Version startVersion; // version of the first snapshot
-	Version endVersion; // version of the last delta file
-
-	// load files lazily, and allows for clearing old cold-queried files to save memory
-	Future<GranuleFiles> files;
-
-	// FIXME: do skip pointers with single back-pointer and neighbor pointers
-	// Just parent reference for now (assumes no merging)
-	Reference<GranuleHistoryEntry> parentGranule;
-
-	GranuleHistoryEntry() : startVersion(invalidVersion), endVersion(invalidVersion) {}
-	GranuleHistoryEntry(KeyRange range, UID granuleID, Version startVersion, Version endVersion)
-	  : range(range), granuleID(granuleID), startVersion(startVersion), endVersion(endVersion) {}
 };
 
 struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
@@ -502,7 +454,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
 	// TODO some sort of directory structure would be useful?
-	state std::string fname = deterministicRandom()->randomUniqueID().toString() + "_T" +
+	state std::string fname = granuleID.toString() + "_" deterministicRandom()->randomUniqueID().toString() + "_T" +
 	                          std::to_string((uint64_t)(1000.0 * now())) + "_V" + std::to_string(currentDeltaVersion) +
 	                          ".delta";
 
@@ -603,7 +555,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
                                           PromiseStream<RangeResult> rows,
                                           bool createGranuleHistory) {
 	// TODO some sort of directory structure would be useful maybe?
-	state std::string fname = deterministicRandom()->randomUniqueID().toString() + "_T" +
+	state std::string fname = granuleID.toString() + "_" deterministicRandom()->randomUniqueID().toString() + "_T" +
 	                          std::to_string((uint64_t)(1000.0 * now())) + "_V" + std::to_string(version) + ".snapshot";
 	state Arena arena;
 	state GranuleSnapshot snapshot;

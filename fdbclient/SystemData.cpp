@@ -1130,6 +1130,7 @@ const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff\x02/bgm/"), Lite
 const KeyRangeRef blobGranuleLockKeys(LiteralStringRef("\xff\x02/bgl/"), LiteralStringRef("\xff\x02/bgl0"));
 const KeyRangeRef blobGranuleSplitKeys(LiteralStringRef("\xff\x02/bgs/"), LiteralStringRef("\xff\x02/bgs0"));
 const KeyRangeRef blobGranuleHistoryKeys(LiteralStringRef("\xff\x02/bgh/"), LiteralStringRef("\xff\x02/bgh0"));
+const KeyRangeRef blobGranulePruneKeys(LiteralStringRef("\xff\x02/bgp/"), LiteralStringRef("\xff\x02/bgp0"));
 
 const uint8_t BG_FILE_TYPE_DELTA = 'D';
 const uint8_t BG_FILE_TYPE_SNAPSHOT = 'S';
@@ -1181,6 +1182,22 @@ std::tuple<Standalone<StringRef>, int64_t, int64_t> decodeBlobGranuleFileValue(V
 	reader >> offset;
 	reader >> length;
 	return std::tuple(filename, offset, length);
+}
+
+const Value blobGranulePruneValueFor(Version version, bool force) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	wr << version;
+	wr << force;
+	return wr.toValue();
+}
+
+std::pair<Version, bool> decodeBlobGranulePruneValue(ValueRef const& value) {
+	Version version;
+	bool force;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> version;
+	reader >> force;
+	return std::pair(version, force);
 }
 
 const Value blobGranuleMappingValueFor(UID const& workerID) {
