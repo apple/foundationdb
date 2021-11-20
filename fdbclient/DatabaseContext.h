@@ -439,6 +439,8 @@ public:
 	// Removes the storage server and its TSS pair from the TSS mapping (if present).
 	// Requests to the storage server will no longer be duplicated to its pair TSS.
 	void removeTssMapping(StorageServerInterface const& ssi);
+
+	EventCacheHolder connectToDatabaseEventCacheHolder;
 };
 
 #endif
