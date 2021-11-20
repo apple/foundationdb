@@ -1754,6 +1754,8 @@ void MultiVersionApi::setNetworkOption(FDBNetworkOptions::Option option, Optiona
 }
 
 void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option, Optional<StringRef> value) {
+	bool forwardOption = false;
+
 	auto itr = FDBNetworkOptions::optionInfo.find(option);
 	if (itr != FDBNetworkOptions::optionInfo.end()) {
 		TraceEvent("SetNetworkOption").detail("Option", itr->second.name);
@@ -1785,6 +1787,7 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		ASSERT(!value.present() && !networkStartSetup);
 		externalClient = true;
 		bypassMultiClientApi = true;
+		forwardOption = true;
 	} else if (option == FDBNetworkOptions::CLIENT_THREADS_PER_VERSION) {
 		MutexHolder holder(lock);
 		validateOption(value, true, false, false);
@@ -1798,6 +1801,10 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		threadCount = extractIntOption(value, 1, 1);
 #endif
 	} else {
+		forwardOption = true;
+	}
+
+	if (forwardOption) {
 		MutexHolder holder(lock);
 		localClient->api->setNetworkOption(option, value);
 
@@ -1871,13 +1878,13 @@ void MultiVersionApi::setupNetwork() {
 		localClient->api->setupNetwork();
 	}
 
-	localClient->loadProtocolVersion();
+	localClient->loadVersion();
 
 	if (!bypassMultiClientApi) {
 		runOnExternalClientsAllThreads([this](Reference<ClientInfo> client) {
 			TraceEvent("InitializingExternalClient").detail("LibraryPath", client->libPath);
 			client->api->selectApiVersion(apiVersion);
-			client->loadProtocolVersion();
+			client->loadVersion();
 		});
 
 		MutexHolder holder(lock);
@@ -1925,11 +1932,16 @@ void MultiVersionApi::runNetwork() {
 
 	std::vector<THREAD_HANDLE> handles;
 	if (!bypassMultiClientApi) {
-		runOnExternalClientsAllThreads([&handles](Reference<ClientInfo> client) {
-			if (client->external) {
-				handles.push_back(g_network->startThread(&runNetworkThread, client.getPtr()));
-			}
-		});
+		for (int threadNum = 0; threadNum < threadCount; threadNum++) {
+			runOnExternalClients(threadNum, [&handles, threadNum](Reference<ClientInfo> client) {
+				if (client->external) {
+					std::string threadName =
+					    format("fdb-external-network-thread-%s-%d", client->releaseVersion.c_str(), threadNum);
+					handles.push_back(
+					    g_network->startThread(&runNetworkThread, client.getPtr(), 0, threadName.c_str()));
+				}
+			});
+		}
 	}
 
 	localClient->api->runNetwork();
@@ -2133,19 +2145,24 @@ MultiVersionApi::MultiVersionApi()
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 
 // ClientInfo
-void ClientInfo::loadProtocolVersion() {
+void ClientInfo::loadVersion() {
 	std::string version = api->getClientVersion();
 	if (version == "unknown") {
 		protocolVersion = ProtocolVersion(0);
+		releaseVersion = "unknown";
 		return;
 	}
 
+	Standalone<ClientVersionRef> clientVersion = ClientVersionRef(StringRef(version));
+
 	char* next;
-	std::string protocolVersionStr = ClientVersionRef(StringRef(version)).protocolVersion.toString();
+	std::string protocolVersionStr = clientVersion.protocolVersion.toString();
 	protocolVersion = ProtocolVersion(strtoull(protocolVersionStr.c_str(), &next, 16));
 
 	ASSERT(protocolVersion.version() != 0 && protocolVersion.version() != ULLONG_MAX);
 	ASSERT_EQ(next, &protocolVersionStr[protocolVersionStr.length()]);
+
+	releaseVersion = clientVersion.clientVersion.toString();
 }
 
 bool ClientInfo::canReplace(Reference<ClientInfo> other) const {

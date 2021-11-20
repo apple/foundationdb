@@ -500,6 +500,8 @@ public:
 	using TransactionT = ReadYourWritesTransaction;
 	Reference<TransactionT> createTransaction();
 
+	EventCacheHolder connectToDatabaseEventCacheHolder;
+
 private:
 	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
 };
