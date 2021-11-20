@@ -7266,7 +7266,6 @@ public:
 		                   : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
 		        : FLOW_KNOBS->PAGE_CACHE_4K;
 		Version remapCleanupWindow =
-		    SERVER_KNOBS->VERSIONS_PER_SECOND *
 		    (BUGGIFY ? deterministicRandom()->randomInt64(0, 100) : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW);
 
 		IPager2* pager = new DWALPager(pageSize,
