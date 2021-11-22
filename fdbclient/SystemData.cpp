@@ -1131,6 +1131,7 @@ const KeyRangeRef blobGranuleLockKeys(LiteralStringRef("\xff\x02/bgl/"), Literal
 const KeyRangeRef blobGranuleSplitKeys(LiteralStringRef("\xff\x02/bgs/"), LiteralStringRef("\xff\x02/bgs0"));
 const KeyRangeRef blobGranuleHistoryKeys(LiteralStringRef("\xff\x02/bgh/"), LiteralStringRef("\xff\x02/bgh0"));
 const KeyRangeRef blobGranulePruneKeys(LiteralStringRef("\xff\x02/bgp/"), LiteralStringRef("\xff\x02/bgp0"));
+const KeyRef blobGranulePruneChangeKey = LiteralStringRef("\xff\x02/bgpChange");
 
 const uint8_t BG_FILE_TYPE_DELTA = 'D';
 const uint8_t BG_FILE_TYPE_SNAPSHOT = 'S';
