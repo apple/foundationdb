@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/TransactionLineage.h"
 #include "fdbserver/LogSystem.h"
@@ -653,19 +654,30 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		}
 
 		reply.timeThrottled = request.reqProcessEnd - request.reqProcessStart;
+		TraceEvent("DebugGrvProxyThrottleCheck")
+		    .detail("TimeThrottled", reply.timeThrottled)
+		    .detail("ThrottleThreshold", CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD)
+		    .detail("LastTxnThrottled", stats->lastTxnThrottled)
+		    .detail("ThrottleStartTime", stats->throttleStartTime)
+		    .detail("SustainedThrottlingThreshold", CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD);
 		if (reply.timeThrottled > CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD) {
+			TraceEvent("DebugGrvProxyThrottled");
 			if (stats->lastTxnThrottled) {
+				TraceEvent("DebugGrvProxyLastTxnThrottled");
 				// Check if this throttling has been sustained for a certain amount of time to avoid false positives
 				if (now() - stats->throttleStartTime > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD) {
+					TraceEvent("DebugGrvProxyRkThrottled");
 					reply.rkThrottled = true;
 				}
 			} else { // !stats->lastTxnThrottled
+				TraceEvent("DebugGrvProxyLastTxnNotThrottled");
 				// If not previously throttled, this request/reply is our new starting point
 				// for judging whether we are being actively throttled by ratekeeper now
 				stats->lastTxnThrottled = true;
 				stats->throttleStartTime = now();
 			}
 		} else { // reply.timeThrottled <= CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD
+			TraceEvent("DebugGrvProxyNotThrottled");
 			stats->lastTxnThrottled = false;
 		}
 		request.reply.send(reply);
