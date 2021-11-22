@@ -33,6 +33,7 @@
 #define FLOW_ASYNCFILEWINASIO_ACTOR_H
 
 #include <Windows.h>
+#include <boost/bind/bind.hpp>
 #undef min
 #undef max
 
