@@ -2743,19 +2743,12 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	}
 
 	try {
-		if (g_network->isSimulated()) {
-			if (BW_DEBUG) {
-				printf("BW constructing simulated backup container\n");
-			}
-			self->bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/");
-		} else {
-			if (BW_DEBUG) {
-				printf("BW constructing backup container from %s\n", SERVER_KNOBS->BG_URL.c_str());
-			}
-			self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
-			if (BW_DEBUG) {
-				printf("BW constructed backup container\n");
-			}
+		if (BW_DEBUG) {
+			printf("BW constructing backup container from %s\n", SERVER_KNOBS->BG_URL.c_str());
+		}
+		self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
+		if (BW_DEBUG) {
+			printf("BW constructed backup container\n");
 		}
 
 		// register the blob worker to the system keyspace
