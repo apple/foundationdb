@@ -6934,6 +6934,7 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	state std::vector<Future<Void>> fetchers(interfs.size());
 	state std::vector<MutationAndVersionStream> streams(interfs.size());
 
+	results->streams.clear();
 	for (auto& it : interfs) {
 		ChangeFeedStreamRequest req;
 		req.rangeID = rangeID;
