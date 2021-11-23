@@ -85,11 +85,19 @@ message(STATUS "Current git version ${CURRENT_GIT_VERSION}")
 ################################################################################
 # Version information
 ################################################################################
-
-set(FDB_PACKAGE_NAME "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
-set(FDB_VERSION ${PROJECT_VERSION})
+if (FDB_RELEASE_CANDIDATE)
+    set(FDB_VERSION ${PROJECT_VERSION}-rc1)
+else()
+    set(FDB_VERSION ${PROJECT_VERSION})
+endif()
 set(FDB_VERSION_PLAIN ${FDB_VERSION})
+string(REPLACE "." ";" FDB_VERSION_LIST ${FDB_VERSION_PLAIN})
+list(GET FDB_VERSION_LIST 0 FDB_MAJOR)
+list(GET FDB_VERSION_LIST 1 FDB_MINOR)
+list(GET FDB_VERSION_LIST 2 FDB_PATCH)
+set(FDB_PACKAGE_NAME "${FDB_MAJOR}.${FDB_MINOR}")
 configure_file(${CMAKE_SOURCE_DIR}/versions.target.cmake ${CMAKE_CURRENT_BINARY_DIR}/versions.target)
+file(WRITE ${CMAKE_BINARY_DIR}/version.txt ${FDB_VERSION})
 
 message(STATUS "FDB version is ${FDB_VERSION}")
 message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
@@ -158,7 +166,6 @@ endif()
 
 include(CompileBoost)
 include(GetMsgpack)
-add_subdirectory(contrib)
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)
 add_subdirectory(fdbclient)
@@ -170,6 +177,7 @@ else()
   add_subdirectory(fdbservice)
 endif()
 add_subdirectory(fdbbackup)
+add_subdirectory(contrib)
 add_subdirectory(tests)
 add_subdirectory(flowbench EXCLUDE_FROM_ALL)
 if(WITH_PYTHON AND WITH_C_BINDING)
@@ -198,7 +206,6 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/BuildFlags.h.in ${CMAKE_CUR
 ################################################################################
 # process compile commands for IDE
 ################################################################################
-
 if (CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
   add_custom_command(
 	  OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
