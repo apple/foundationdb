@@ -4155,16 +4155,20 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				    .detail("StorageCount", movingCount);
 			} else {
 				TEST(true); // start wiggling
-				wait(waitUntilHealthy(self));
-				auto fv = self->excludeStorageServersForWiggle(pid);
-				movingCount = fv.size();
-				moveFinishFuture = waitForAll(fv);
-				TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
-				    .detail("Primary", self->primary)
-				    .detail("ProcessId", pid)
-				    .detail("ExtraHealthyTeamCount", extraTeamCount)
-				    .detail("HealthyTeamCount", self->healthyTeamCount)
-				    .detail("StorageCount", movingCount);
+				choose {
+					when(wait(waitUntilHealthy(self))) {
+						auto fv = self->excludeStorageServersForWiggle(pid);
+						movingCount = fv.size();
+						moveFinishFuture = waitForAll(fv);
+						TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
+						    .detail("Primary", self->primary)
+						    .detail("ProcessId", pid)
+						    .detail("ExtraHealthyTeamCount", extraTeamCount)
+						    .detail("HealthyTeamCount", self->healthyTeamCount)
+						    .detail("StorageCount", movingCount);
+					}
+					when(wait(self->pauseWiggle->onChange())) { continue; }
+				}
 			}
 		}
 
