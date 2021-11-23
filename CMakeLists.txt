@@ -80,11 +80,19 @@ message(STATUS "Current git version ${CURRENT_GIT_VERSION}")
 ################################################################################
 # Version information
 ################################################################################
-
-set(FDB_PACKAGE_NAME "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
-set(FDB_VERSION ${PROJECT_VERSION})
+if (FDB_RELEASE_CANDIDATE)
+    set(FDB_VERSION ${PROJECT_VERSION}-rc1)
+else()
+    set(FDB_VERSION ${PROJECT_VERSION})
+endif()
 set(FDB_VERSION_PLAIN ${FDB_VERSION})
+string(REPLACE "." ";" FDB_VERSION_LIST ${FDB_VERSION_PLAIN})
+list(GET FDB_VERSION_LIST 0 FDB_MAJOR)
+list(GET FDB_VERSION_LIST 1 FDB_MINOR)
+list(GET FDB_VERSION_LIST 2 FDB_PATCH)
+set(FDB_PACKAGE_NAME "${FDB_MAJOR}.${FDB_MINOR}")
 configure_file(${CMAKE_SOURCE_DIR}/versions.target.cmake ${CMAKE_SOURCE_DIR}/versions.target)
+file(WRITE ${CMAKE_BINARY_DIR}/version.txt ${FDB_VERSION})
 
 message(STATUS "FDB version is ${FDB_VERSION}")
 message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
