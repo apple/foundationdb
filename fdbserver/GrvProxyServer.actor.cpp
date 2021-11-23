@@ -658,7 +658,8 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		    .detail("TimeThrottled", reply.timeThrottled)
 		    .detail("ThrottleThreshold", CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD)
 		    .detail("LastTxnThrottled", stats->lastTxnThrottled)
-		    .detail("ThrottleStartTime", stats->throttleStartTime)
+		    .detail("ThrottleStartTime", format("%.6f", stats->throttleStartTime))
+		    .detail("Diff", now() - stats->throttleStartTime)
 		    .detail("SustainedThrottlingThreshold", CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD);
 		if (reply.timeThrottled > CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD) {
 			TraceEvent("DebugGrvProxyThrottled");
