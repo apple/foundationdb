@@ -3,7 +3,7 @@ includedir=/@INCLUDE_DIR@
 
 Name: foundationdb-client
 Description: FoundationDB c client
-Version: @PROJECT_VERSION@
+Version: @FDB_VERSION@
 
 Libs: -L${libdir} -lfdb_c
 Cflags: -I${includedir}
