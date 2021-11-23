@@ -143,27 +143,27 @@ if(NOT FDB_RELEASE)
     set(git_string ".${CURRENT_GIT_VERSION}")
   endif()
   set(CPACK_RPM_PACKAGE_RELEASE 0)
-  set(prerelease_string "-0${git_string}.PRERELEASE")
+  set(not_fdb_release_string "-0${git_string}.SNAPSHOT")
 else()
   set(CPACK_RPM_PACKAGE_RELEASE 1)
-  set(prerelease_string "-1")
+  set(not_fdb_release_string "-1")
 endif()
 
 #############
 # Filenames #
 #############
-set(unversioned_postfix "${PROJECT_VERSION}${prerelease_string}")
+set(unversioned_postfix "${PROJECT_VERSION}${not_fdb_release_string}")
 # RPM filenames
 set(rpm-clients-filename "foundationdb-clients-${unversioned_postfix}")
 set(rpm-server-filename "foundationdb-server-${unversioned_postfix}")
-set(rpm-clients-versioned-filename "foundationdb${PROJECT_VERSION}-clients${prerelease_string}")
-set(rpm-server-versioned-filename "foundationdb${PROJECT_VERSION}-server${prerelease_string}")
+set(rpm-clients-versioned-filename "foundationdb${PROJECT_VERSION}-clients${not_fdb_release_string}")
+set(rpm-server-versioned-filename "foundationdb${PROJECT_VERSION}-server${not_fdb_release_string}")
 
 # Deb filenames
 set(deb-clients-filename "foundationdb-clients_${unversioned_postfix}")
 set(deb-server-filename "foundationdb-server_${unversioned_postfix}")
-set(deb-clients-versioned-filename "foundationdb${PROJECT_VERSION}-clients${prerelease_string}")
-set(deb-server-versioned-filename "foundationdb${PROJECT_VERSION}-server${prerelease_string}")
+set(deb-clients-versioned-filename "foundationdb${PROJECT_VERSION}-clients${not_fdb_release_string}")
+set(deb-server-versioned-filename "foundationdb${PROJECT_VERSION}-server${not_fdb_release_string}")
 
 ################################################################################
 # Configuration for RPM

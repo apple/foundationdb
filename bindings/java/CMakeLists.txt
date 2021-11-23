@@ -242,11 +242,11 @@ if(NOT OPEN_FOR_IDE)
   add_custom_target(copy_lib DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied)
   add_dependencies(copy_lib unpack_jar)
   if(NOT FDB_RELEASE)
-    set(prerelease_string "-PRERELEASE")
+    set(not_fdb_release_string "-SNAPSHOT")
   else()
-    set(prerelease_string "")
+    set(not_fdb_release_string "")
   endif()
-  set(target_jar ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}${prerelease_string}.jar)
+  set(target_jar ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}${not_fdb_release_string}.jar)
   add_custom_command(OUTPUT ${target_jar}
     COMMAND ${Java_JAR_EXECUTABLE} cfm ${target_jar} ${unpack_dir}/META-INF/MANIFEST.MF .
     WORKING_DIRECTORY ${unpack_dir}
@@ -254,7 +254,7 @@ if(NOT OPEN_FOR_IDE)
     COMMENT "Build ${target_jar}")
   add_jar(foundationdb-tests SOURCES ${JAVA_TESTS_SRCS} INCLUDE_JARS fdb-java)
   add_dependencies(foundationdb-tests fdb_java_options)
-  set(tests_jar ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}${prerelease_string}-tests.jar)
+  set(tests_jar ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}${not_fdb_release_string}-tests.jar)
   add_custom_command(OUTPUT ${tests_jar}
     COMMAND ${CMAKE_COMMAND} -E copy foundationdb-tests.jar "${tests_jar}"
     WORKING_DIRECTORY .
