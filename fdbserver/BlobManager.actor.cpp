@@ -1375,18 +1375,49 @@ ACTOR Future<Void> haltBlobGranules(BlobManagerData* bmData) {
 	return Void();
 }
 
-// TODO: bring blob store to blob manager
-ACTOR Future<Void> fullyDeleteGranule(BlobManagerData* self,
-                                      UID granuleId,
-                                      KeyRange granuleRange,
-                                      Version granuleStartVersion) {
+// TODO: refactor this into a common file
+ACTOR Future<Optional<GranuleHistory>> getLatestGranuleHistory(Transaction* tr, KeyRange range) {
+	KeyRange historyRange = blobGranuleHistoryKeyRangeFor(range);
+	RangeResult result = wait(tr->getRange(historyRange, 1, Snapshot::False, Reverse::True));
+	ASSERT(result.size() <= 1);
+
+	Optional<GranuleHistory> history;
+	if (!result.empty()) {
+		std::pair<KeyRange, Version> decodedKey = decodeBlobGranuleHistoryKey(result[0].key);
+		ASSERT(range == decodedKey.first);
+		history = GranuleHistory(range, decodedKey.second, decodeBlobGranuleHistoryValue(result[0].value));
+	}
+	return history;
+}
+
+ACTOR Future<GranuleFiles> loadHistoryFiles(BlobManagerData* bmData, UID granuleID) {
+	state Transaction tr(bmData->db);
+	state KeyRange range = blobGranuleFileKeyRangeFor(granuleID);
+	state Key startKey = range.begin;
+	state GranuleFiles files;
+	loop {
+		try {
+			wait(readGranuleFiles(&tr, &startKey, range.end, &files, granuleID));
+			return files;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+/*
+ * Deletes all files pertaining to the granule with id granuleId and
+ * also removes the history entry for this granule from the system keyspace
+ */
+ACTOR Future<Void> fullyDeleteGranule(BlobManagerData* self, UID granuleId, KeyRef historyKey) {
 	state Transaction tr(self->db);
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-	// delete files
-	state GranuleFiles files;
-	wait(readGranuleFiles(&tr, granuleRange.begin, granuleRange.end, &files, granuleId));
+	KeyRange filesRange = blobGranuleFileKeyRangeFor(granuleId);
+
+	// get files
+	GranuleFiles files = wait(loadHistoryFiles(self, granuleId));
 
 	std::vector<Future<Void>> deletions;
 
@@ -1405,7 +1436,6 @@ ACTOR Future<Void> fullyDeleteGranule(BlobManagerData* self,
 	// delete metadata in FDB (history entry and file keys)
 	loop {
 		try {
-			KeyRef historyKey = blobGranuleHistoryKeyFor(granuleRange, granuleStartVersion);
 			KeyRange fileRangeKey = blobGranuleFileKeyRangeFor(granuleId);
 			tr.clear(historyKey);
 			tr.clear(fileRangeKey);
@@ -1419,17 +1449,18 @@ ACTOR Future<Void> fullyDeleteGranule(BlobManagerData* self,
 	return Void();
 }
 
-ACTOR Future<Void> partiallyDeleteGranule(BlobManagerData* self,
-                                          UID granuleId,
-                                          KeyRange granuleRange,
-                                          Version granuleStartVersion,
-                                          Version pruneVersion) {
+/*
+ * For the granule with id granuleId, finds the first snapshot file at a
+ * version <= pruneVersion and deletes all files older than it.
+ */
+ACTOR Future<Void> partiallyDeleteGranule(BlobManagerData* self, UID granuleId, Version pruneVersion) {
 	state Transaction tr(self->db);
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-	state GranuleFiles files;
-	wait(readGranuleFiles(&tr, granuleRange.begin, granuleRange.end, &files, granuleId));
+	KeyRange filesRange = blobGranuleFileKeyRangeFor(granuleId);
+
+	GranuleFiles files = wait(loadHistoryFiles(self, granuleId));
 
 	Version latestSnaphotVersion = invalidVersion;
 
@@ -1440,7 +1471,7 @@ ACTOR Future<Void> partiallyDeleteGranule(BlobManagerData* self,
 		if (latestSnaphotVersion != invalidVersion) {
 			std::string fname = files.snapshotFiles[idx].filename;
 			deletions.emplace_back(self->bstore->deleteFile(fname));
-		} else if (files.snapshotFiles[idx].version < pruneVersion) {
+		} else if (files.snapshotFiles[idx].version <= pruneVersion) {
 			// otherwise if this is the FIRST snapshot file with version < pruneVersion,
 			// then we found our latestSnapshotVersion (FIRST since we are traversing in reverse)
 			latestSnaphotVersion = files.snapshotFiles[idx].version;
@@ -1461,29 +1492,24 @@ ACTOR Future<Void> partiallyDeleteGranule(BlobManagerData* self,
 	return Void();
 }
 
-// TODO: refactor this into a common file
-ACTOR Future<Optional<GranuleHistory>> getLatestGranuleHistory(Transaction* tr, KeyRange range) {
-	KeyRange historyRange = blobGranuleHistoryKeyRangeFor(range);
-	RangeResult result = wait(tr->getRange(historyRange, 1, Snapshot::False, Reverse::True));
-	ASSERT(result.size() <= 1);
-
-	Optional<GranuleHistory> history;
-	if (!result.empty()) {
-		std::pair<KeyRange, Version> decodedKey = decodeBlobGranuleHistoryKey(result[0].key);
-		ASSERT(range == decodedKey.first);
-		history = GranuleHistory(range, decodedKey.second, decodeBlobGranuleHistoryValue(result[0].value));
-	}
-	return history;
-}
-
-// TODO: tell blob workers to clean up local memory
+/*
+ * This method is used to prune the range [startKey, endKey) at (and including) pruneVersion.
+ * To do this, we do a BFS traversal starting at the active granules. Then we classify granules
+ * in the history as nodes that can be fully deleted (i.e. their files and history can be deleted)
+ * and nodes that can be partially deleted (i.e. some of their files can be deleted).
+ * Once all this is done, we finally clear the pruneIntent key, if possible, to indicate we are done
+ * processing this prune intent.
+ *
+ * TODO: communicate the prune to blob workers so they can clean up local memory
+ */
 ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef endKey, Version pruneVersion, bool force) {
 	// queue of <range, startVersion, endVersion> for BFS traversal of history
-	// TODO: consider using GranuleHistoryEntry but it's a little messy
+	// TODO: consider using GranuleHistoryEntry, but that also makes it a little messy
 	state std::queue<std::tuple<KeyRange, Version, Version>> historyEntryQueue;
 
-	// stacks of <granuleId, range, startVersion> to track which granules to delete
-	state std::vector<std::tuple<UID, KeyRange, Version>> toFullyDelete, toPartiallyDelete;
+	// stacks of <granuleId, historyKey> and <granuleId> to track which granules to delete
+	state std::vector<std::tuple<UID, KeyRef>> toFullyDelete;
+	state std::vector<UID> toPartiallyDelete;
 
 	// set of granuleIds to track which granules we have already visited in traversal
 	state std::unordered_set<UID> visited; // track which granules we have already visited in traversal
@@ -1497,25 +1523,42 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 	for (auto& activeRange : activeRanges) {
+		// only want to prune exact granules
 		if (activeRange.begin() < startKey || activeRange.end() >= endKey) {
 			continue;
 		}
-		Optional<GranuleHistory> history = wait(getLatestGranuleHistory(&tr, activeRange.range()));
-		ASSERT(history.present());
-		historyEntryQueue.push({ activeRange.range(), history.get().version, MAX_VERSION });
+		loop {
+			try {
+				Optional<GranuleHistory> history = wait(getLatestGranuleHistory(&tr, activeRange.range()));
+				ASSERT(history.present());
+				historyEntryQueue.push({ activeRange.range(), history.get().version, MAX_VERSION });
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
 	}
 
 	while (!historyEntryQueue.empty()) {
-		// process the node at the front of the queue
+		// process the node at the front of the queue and remove it
 		KeyRange currRange;
 		Version startVersion, endVersion;
 		std::tie(currRange, startVersion, endVersion) = historyEntryQueue.front();
 		historyEntryQueue.pop();
 
 		// get the persisted history entry for this granule
-		Optional<Value> persistedHistory = wait(tr.get(blobGranuleHistoryKeyFor(currRange, startVersion)));
-		ASSERT(persistedHistory.present());
-		auto currHistoryNode = decodeBlobGranuleHistoryValue(persistedHistory.get());
+		state Standalone<BlobGranuleHistoryValue> currHistoryNode;
+		state KeyRef historyKey = blobGranuleHistoryKeyFor(currRange, startVersion);
+		loop {
+			try {
+				Optional<Value> persistedHistory = wait(tr.get(historyKey));
+				ASSERT(persistedHistory.present());
+				currHistoryNode = decodeBlobGranuleHistoryValue(persistedHistory.get());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
 
 		// if we already saw this node, skip it; otherwise, mark it as visited
 		if (visited.count(currHistoryNode.granuleID)) {
@@ -1524,15 +1567,15 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 		visited.insert(currHistoryNode.granuleID);
 
 		// There are three cases this granule can fall into:
-		// - if the granule's end version is before the prune version or this is a force delete,
+		// - if the granule's end version is at or before the prune version or this is a force delete,
 		//   this granule should be completely deleted
-		// - else if the startVersion <= pruneVersion, then G.startVersion <= pruneVersion <= G.endVersion
+		// - else if the startVersion <= pruneVersion, then G.startVersion <= pruneVersion < G.endVersion
 		//   and so this granule should be partially deleted
 		// - otherwise, this granule is active, so don't schedule it for deletion
-		if (force || endVersion < pruneVersion) {
-			toFullyDelete.push_back({ currHistoryNode.granuleID, currRange, startVersion });
+		if (force || endVersion <= pruneVersion) {
+			toFullyDelete.push_back({ currHistoryNode.granuleID, historyKey });
 		} else if (startVersion <= pruneVersion) {
-			toPartiallyDelete.push_back({ currHistoryNode.granuleID, currRange, startVersion });
+			toPartiallyDelete.push_back({ currHistoryNode.granuleID });
 		}
 
 		// add all of the node's parents to the queue
@@ -1548,29 +1591,26 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 	// nodes in the persisted history. Moreover, for any node that must be fully deleted,
 	// any node that must be partially deleted must occur later on in the history. Thus,
 	// we delete the 'toFullyDelete' granules first.
+	//
+	// Unfortunately we can't do multiple deletions in parallel because they might
+	// race and we'll end up with unreachable nodes in the case of a crash
 
 	for (int i = toFullyDelete.size() - 1; i >= 0; --i) {
 		UID granuleId;
-		KeyRange granuleRange;
-		Version startVersion;
-		std::tie(granuleId, granuleRange, startVersion) = toFullyDelete[i];
-		wait(fullyDeleteGranule(self, granuleId, granuleRange, startVersion));
+		KeyRef historyKey;
+		std::tie(granuleId, historyKey) = toFullyDelete[i];
+		wait(fullyDeleteGranule(self, granuleId, historyKey));
 	}
 
+	// TODO: could possibly do the partial deletes in parallel?
 	for (int i = toPartiallyDelete.size() - 1; i >= 0; --i) {
-		UID granuleId;
-		KeyRange granuleRange;
-		Version startVersion;
-		std::tie(granuleId, granuleRange, startVersion) = toPartiallyDelete[i];
-		wait(partiallyDeleteGranule(self, granuleId, granuleRange, startVersion, pruneVersion));
+		UID granuleId = toPartiallyDelete[i];
+		wait(partiallyDeleteGranule(self, granuleId, pruneVersion));
 	}
 
 	// There could have been another pruneIntent that got written for this table while we
 	// were processing this one. If that is the case, we should not clear the key. Otherwise,
 	// we should clear the key to indicate the work is done.
-	//
-	// TODO: Probably should also check that the force value stayed consistent?
-	// though I don't think we can have two different pruneIntents at the same version but different force's...
 	state Reference<ReadYourWritesTransaction> rywTr = makeReference<ReadYourWritesTransaction>(self->db);
 	rywTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	rywTr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -1592,71 +1632,94 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 }
 
 /*
- * Watch for changes to a key K that gets updated whenever there is an update to a blobGranulePruneKey
- * On this change, scan through all blobGranulePruneKeys (which look like <startKey, endKey>=<version, force>) and prune
- * Once the prune has succeeded, clear the key IF the version is still the same one that was pruned. If not, don't clear
- * it.
- * - this will add a conflict range on the key so even if there was a concurrent write,
- *   the txn will fail the first time and then the second time around, the version won't be the same, so it'll abort
+ * This monitor watches for changes to a key K that gets updated whenever there is a new prune intent.
+ * On this change, we scan through all blobGranulePruneKeys (which look like <startKey, endKey>=<prune_version,
+ * force>) and prune any intents.
  *
- * We can't watch on a key to do this. We will fall short if there's only one table for example and we fail on pruning
- * that table a couple of times in a row. Instead, we'd need to (on some cadence) run the blob pruner to cycle through
- * all blobGranulePruneKeys and prune per granule and clear the key once it's done.
+ * Once the prune has succeeded, we clear the key IF the version is still the same one that was pruned.
+ * That way, if another prune intent arrived for the same range while we were working on an older one,
+ * we wouldn't end up clearing the intent.
  *
- * could also do a wait on a change in blob keys along with a timeout so that we definitely do the work in an hr
-
+ * When watching for changes, we might end up in scenarios where we failed to do the work
+ * for a prune intent even though the watch was triggered (maybe the BM had a blip). This is problematic
+ * if the intent is a force and there isn't another prune intent for quite some time. To remedy this,
+ * if we don't see a watch change in X (configurable) seconds, we will just sweep through the prune intents,
+ * consolidating any work we might have missed before.
  *
- * What happens if a prune comes in for key A-C and then another one for A-D.
- * Check key boundaries and version before removing from persisted intents
+ * Note: we could potentially use a changefeed here to get the exact pruneIntent that was added
+ * rather than iterating through all of them, but this might have too much overhead for latency
+ * improvements we don't really need here (also we need to go over all prune intents anyways in the
+ * case that the timer is up before any new prune intents arrive).
  */
 ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
-	loop {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
+	try {
 		loop {
-			try {
-				state Future<Void> watchPruneIntentsChange = tr->watch(fdbShouldConsistencyCheckBeSuspended);
-				wait(tr->commit());
-				wait(timeout(watchPruneIntentsChange, 60 * 60 * 24, Void())); // TODO: knobify
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
+			state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			// Wait for the watch to change, or some time to expire (whichever comes first)
+			// before checking through the prune intents
+			loop {
+				try {
+					state Future<Void> watchPruneIntentsChange = tr->watch(blobGranulePruneChangeKey);
+					wait(tr->commit());
+					wait(timeout(watchPruneIntentsChange, SERVER_KNOBS->BG_PRUNE_TIMEOUT, Void()));
+					break;
+				} catch (Error& e) {
+					wait(tr->onError(e));
+				}
 			}
-		}
 
-		state KeyRef beginKey = normalKeys.begin;
-		loop {
-			try {
-				// TODO: refactor into a krmGetAllRanges
-				// TODO: replace 10000 with a knob
-				KeyRange nextRange(KeyRangeRef(beginKey, normalKeys.end));
-				state RangeResult pruneIntents = wait(krmGetRanges(
-				    tr, blobGranulePruneKeys.begin, nextRange, 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+			// loop through all prune intentions and do prune work accordingly
+			state KeyRef beginKey = normalKeys.begin;
+			loop {
+				try {
+					// TODO: replace 10000 with a knob
+					KeyRange nextRange(KeyRangeRef(beginKey, normalKeys.end));
+					state RangeResult pruneIntents = wait(krmGetRanges(
+					    tr, blobGranulePruneKeys.begin, nextRange, 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
 
-				// TODO: wouldn't we miss a range [pruneIntents[9999], pruneIntents[10000]) because of the `more`?
-				// We also do this incorrectly in recoverBlobManager
-				for (int rangeIdx = 0; rangeIdx < pruneIntents.size() - 1; ++rangeIdx) {
-					KeyRef startKey = pruneIntents[rangeIdx].key;
-					KeyRef endKey = pruneIntents[rangeIdx + 1].key;
-					Version version;
-					bool force;
-					std::tie(version, force) = decodeBlobGranulePruneValue(pruneIntents[rangeIdx].value);
+					// TODO: would we miss a range [pruneIntents[9999], pruneIntents[10000]) because of the `more`?
+					//       Or does `readThrough` take care of this? We also do this in recoverBlobManager
+					for (int rangeIdx = 0; rangeIdx < pruneIntents.size() - 1; ++rangeIdx) {
+						if (pruneIntents[rangeIdx].value.size() == 0) {
+							continue;
+						}
+						KeyRef rangeStartKey = pruneIntents[rangeIdx].key;
+						KeyRef rangeEndKey = pruneIntents[rangeIdx + 1].key;
+						Version pruneVersion;
+						bool force;
+						std::tie(pruneVersion, force) = decodeBlobGranulePruneValue(pruneIntents[rangeIdx].value);
 
-					// TODO: should we add this to an actor collection?
-					pruneRange(self, startKey, endKey, version, force);
+						// TODO: should we add this to an actor collection or a list of futures?
+						// Probably because still need to handle the case of one prune at version V and then timer
+						// expires and we start another prune again at version V. we need to keep track of what's in
+						// progress. That brings another problem though: what happens if something is in progress and
+						// fails... One way to prevent this is to not iterate over the prunes until the last iteration
+						// is done (i.e waitForAll)
+						//
+						// ErrorOr would prob be what we need here
+
+						pruneRange(self, rangeStartKey, rangeEndKey, pruneVersion, force);
+					}
 
 					if (!pruneIntents.more) {
 						break;
 					}
 
 					beginKey = pruneIntents.readThrough.get();
+				} catch (Error& e) {
+					// TODO: other errors here from pruneRange?
+					wait(tr->onError(e));
 				}
-			} catch (Error& e) {
-				wait(tr->onError(e));
 			}
 		}
+	} catch (Error& e) {
+		if (BM_DEBUG) {
+			printf("monitorPruneKeys got error %s\n", e.name());
+		}
+		throw e;
 	}
 }
 

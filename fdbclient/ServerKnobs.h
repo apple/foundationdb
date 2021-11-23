@@ -742,6 +742,8 @@ public:
 	int BG_DELTA_FILE_TARGET_BYTES;
 	int BG_DELTA_BYTES_BEFORE_COMPACT;
 
+	double BG_PRUNE_TIMEOUT;
+
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
 	double BLOB_WORKERLIST_FETCH_INTERVAL;
 
