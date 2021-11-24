@@ -29,7 +29,7 @@
 
 // Gets the latest granule history node for range that was persisted
 ACTOR Future<Optional<GranuleHistory>> getLatestGranuleHistory(Transaction* tr, KeyRange range) {
-	KeyRange historyRange = blobGranuleHistoryKeyRangeFor(range);
+	state KeyRange historyRange = blobGranuleHistoryKeyRangeFor(range);
 	state RangeResult result;
 
 	loop {
