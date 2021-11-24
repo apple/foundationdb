@@ -35,6 +35,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -45,6 +46,25 @@
 
 #define BW_DEBUG true
 #define BW_REQUEST_DEBUG false
+
+// represents a previous version of a granule, and optionally the files that compose it
+struct GranuleHistoryEntry : NonCopyable, ReferenceCounted<GranuleHistoryEntry> {
+	KeyRange range;
+	UID granuleID;
+	Version startVersion; // version of the first snapshot
+	Version endVersion; // version of the last delta file
+
+	// load files lazily, and allows for clearing old cold-queried files to save memory
+	Future<GranuleFiles> files;
+
+	// FIXME: do skip pointers with single back-pointer and neighbor pointers
+	// Just parent reference for now (assumes no merging)
+	Reference<GranuleHistoryEntry> parentGranule;
+
+	GranuleHistoryEntry() : startVersion(invalidVersion), endVersion(invalidVersion) {}
+	GranuleHistoryEntry(KeyRange range, UID granuleID, Version startVersion, Version endVersion)
+	  : range(range), granuleID(granuleID), startVersion(startVersion), endVersion(endVersion) {}
+};
 
 struct GranuleStartState {
 	UID granuleID;
@@ -230,6 +250,7 @@ ACTOR Future<Void> readAndCheckGranuleLock(Reference<ReadYourWritesTransaction> 
 	return Void();
 }
 
+<<<<<<< HEAD
 // used for "business logic" of both versions of loading granule files
 ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, GranuleFiles* files, UID granuleID) {
 
@@ -299,7 +320,7 @@ ACTOR Future<GranuleFiles> loadPreviousFiles(Transaction* tr, UID granuleID) {
 	// no need to add conflict range for read b/c of granule lock
 	state Key startKey = range.begin;
 	state GranuleFiles files;
-	wait(readGranuleFiles(tr, &startKey, range.end, &files, granuleID));
+	wait(readGranuleFiles(tr, &startKey, range.end, &files, granuleID, BW_DEBUG));
 	return files;
 }
 
@@ -454,7 +475,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
 	// TODO some sort of directory structure would be useful?
-	state std::string fname = granuleID.toString() + "_" deterministicRandom()->randomUniqueID().toString() + "_T" +
+	state std::string fname = deterministicRandom()->randomUniqueID().toString() + "_T" +
 	                          std::to_string((uint64_t)(1000.0 * now())) + "_V" + std::to_string(currentDeltaVersion) +
 	                          ".delta";
 
@@ -555,7 +576,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
                                           PromiseStream<RangeResult> rows,
                                           bool createGranuleHistory) {
 	// TODO some sort of directory structure would be useful maybe?
-	state std::string fname = granuleID.toString() + "_" deterministicRandom()->randomUniqueID().toString() + "_T" +
+	state std::string fname = deterministicRandom()->randomUniqueID().toString() + "_T" +
 	                          std::to_string((uint64_t)(1000.0 * now())) + "_V" + std::to_string(version) + ".snapshot";
 	state Arena arena;
 	state GranuleSnapshot snapshot;
@@ -2038,7 +2059,10 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 				// lazily load files for old granule if not present
 				chunkRange = cur->range;
 				if (!cur->files.isValid() || cur->files.isError()) {
-					cur->files = loadHistoryFiles(bwData, cur->granuleID);
+					Transaction tr(bwData->db);
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					cur->files = loadHistoryFiles(&tr, cur->granuleID, BW_DEBUG);
 				}
 
 				choose {
@@ -2203,20 +2227,6 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 		}
 	}
 	return Void();
-}
-
-ACTOR Future<Optional<GranuleHistory>> getLatestGranuleHistory(Transaction* tr, KeyRange range) {
-	KeyRange historyRange = blobGranuleHistoryKeyRangeFor(range);
-	RangeResult result = wait(tr->getRange(historyRange, 1, Snapshot::False, Reverse::True));
-	ASSERT(result.size() <= 1);
-
-	Optional<GranuleHistory> history;
-	if (!result.empty()) {
-		std::pair<KeyRange, Version> decodedKey = decodeBlobGranuleHistoryKey(result[0].key);
-		ASSERT(range == decodedKey.first);
-		history = GranuleHistory(range, decodedKey.second, decodeBlobGranuleHistoryValue(result[0].value));
-	}
-	return history;
 }
 
 ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, AssignBlobRangeRequest req) {

@@ -31,6 +31,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -1417,7 +1418,7 @@ ACTOR Future<Void> fullyDeleteGranule(BlobManagerData* self, UID granuleId, KeyR
 	KeyRange filesRange = blobGranuleFileKeyRangeFor(granuleId);
 
 	// get files
-	GranuleFiles files = wait(loadHistoryFiles(self, granuleId));
+	GranuleFiles files = wait(loadHistoryFiles(&tr, granuleId, BM_DEBUG));
 
 	std::vector<Future<Void>> deletions;
 
@@ -1460,17 +1461,20 @@ ACTOR Future<Void> partiallyDeleteGranule(BlobManagerData* self, UID granuleId, 
 
 	KeyRange filesRange = blobGranuleFileKeyRangeFor(granuleId);
 
-	GranuleFiles files = wait(loadHistoryFiles(self, granuleId));
+	GranuleFiles files = wait(loadHistoryFiles(&tr, granuleId, BM_DEBUG));
 
 	Version latestSnaphotVersion = invalidVersion;
 
 	state std::vector<Future<Void>> deletions;
+	state std::vector<KeyRef> deletedFileKeys;
 
+	// TODO: binary search these snapshot files for latestSnapshotVersion
 	for (int idx = files.snapshotFiles.size() - 1; idx >= 0; --idx) {
 		// if we already found the latestSnapshotVersion, this snapshot can be deleted
 		if (latestSnaphotVersion != invalidVersion) {
 			std::string fname = files.snapshotFiles[idx].filename;
 			deletions.emplace_back(self->bstore->deleteFile(fname));
+			deletedFileKeys.emplace_back(blobGranuleFileKeyFor(granuleId, 'S', files.snapshotFiles[idx].version));
 		} else if (files.snapshotFiles[idx].version <= pruneVersion) {
 			// otherwise if this is the FIRST snapshot file with version < pruneVersion,
 			// then we found our latestSnapshotVersion (FIRST since we are traversing in reverse)
@@ -1485,10 +1489,24 @@ ACTOR Future<Void> partiallyDeleteGranule(BlobManagerData* self, UID granuleId, 
 		if (deltaFile.version < latestSnaphotVersion) {
 			std::string fname = deltaFile.filename;
 			deletions.emplace_back(self->bstore->deleteFile(fname));
+			deletedFileKeys.emplace_back(blobGranuleFileKeyFor(granuleId, 'D', deltaFile.version));
 		}
 	}
 
 	wait(waitForAll(deletions));
+
+	// delete metadata in FDB (deleted file keys)
+	loop {
+		try {
+			for (auto key : deletedFileKeys) {
+				tr.clear(key);
+			}
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 	return Void();
 }
 
@@ -1501,6 +1519,7 @@ ACTOR Future<Void> partiallyDeleteGranule(BlobManagerData* self, UID granuleId, 
  * processing this prune intent.
  *
  * TODO: communicate the prune to blob workers so they can clean up local memory
+ * maybe BWs can just watch the prune keys as well!
  */
 ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef endKey, Version pruneVersion, bool force) {
 	// queue of <range, startVersion, endVersion> for BFS traversal of history
@@ -1514,19 +1533,20 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 	// set of granuleIds to track which granules we have already visited in traversal
 	state std::unordered_set<UID> visited; // track which granules we have already visited in traversal
 
-	KeyRange range(KeyRangeRef(startKey, endKey)); // range for [startKey, endKey)
+	state KeyRange range(KeyRangeRef(startKey, endKey)); // range for [startKey, endKey)
 
 	// find all active granules (that comprise the range) and add to the queue
-	auto activeRanges = self->workerAssignments.intersectingRanges(range);
+	state KeyRangeMap<UID>::Ranges activeRanges = self->workerAssignments.intersectingRanges(range);
+
 	state Transaction tr(self->db);
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-	for (auto& activeRange : activeRanges) {
+	state KeyRangeMap<UID>::iterator activeRange;
+	for (activeRange = activeRanges.begin(); activeRange != activeRanges.end(); ++activeRange) {
 		// only want to prune exact granules
-		if (activeRange.begin() < startKey || activeRange.end() >= endKey) {
-			continue;
-		}
+		ASSERT(activeRange.begin() >= startKey && activeRange.end() < endKey);
+
 		loop {
 			try {
 				Optional<GranuleHistory> history = wait(getLatestGranuleHistory(&tr, activeRange.range()));
@@ -1542,7 +1562,8 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 	while (!historyEntryQueue.empty()) {
 		// process the node at the front of the queue and remove it
 		KeyRange currRange;
-		Version startVersion, endVersion;
+		state Version startVersion;
+		state Version endVersion;
 		std::tie(currRange, startVersion, endVersion) = historyEntryQueue.front();
 		historyEntryQueue.pop();
 
@@ -1595,15 +1616,17 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 	// Unfortunately we can't do multiple deletions in parallel because they might
 	// race and we'll end up with unreachable nodes in the case of a crash
 
-	for (int i = toFullyDelete.size() - 1; i >= 0; --i) {
+	state int i;
+	for (i = toFullyDelete.size() - 1; i >= 0; --i) {
 		UID granuleId;
 		KeyRef historyKey;
 		std::tie(granuleId, historyKey) = toFullyDelete[i];
+		// TODO: can possibly batch into a single txn
 		wait(fullyDeleteGranule(self, granuleId, historyKey));
 	}
 
 	// TODO: could possibly do the partial deletes in parallel?
-	for (int i = toPartiallyDelete.size() - 1; i >= 0; --i) {
+	for (i = toPartiallyDelete.size() - 1; i >= 0; --i) {
 		UID granuleId = toPartiallyDelete[i];
 		wait(partiallyDeleteGranule(self, granuleId, pruneVersion));
 	}
@@ -1611,6 +1634,8 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 	// There could have been another pruneIntent that got written for this table while we
 	// were processing this one. If that is the case, we should not clear the key. Otherwise,
 	// we should clear the key to indicate the work is done.
+
+	// TODO: reuse tr
 	state Reference<ReadYourWritesTransaction> rywTr = makeReference<ReadYourWritesTransaction>(self->db);
 	rywTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	rywTr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -1629,7 +1654,14 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 			wait(rywTr->onError(e));
 		}
 	}
+
+	return Void();
 }
+
+/*
+TODO: We need to revoke range from BW so that it doesn't try to add to a granule that we dropped
+Will SnowTram reuse table IDs; do we unhybridize a range once it's been revoked/dropped?
+*/
 
 /*
  * This monitor watches for changes to a key K that gets updated whenever there is a new prune intent.
@@ -1660,6 +1692,10 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 
 			// Wait for the watch to change, or some time to expire (whichever comes first)
 			// before checking through the prune intents
+
+			// TODO: pruneIntent written, watch triggered, prune work scheduled, before work is done another prune
+			// intent is written, then we'd wait a whole timeout to do the next pruneintent
+			// Use a UID to prevent this
 			loop {
 				try {
 					state Future<Void> watchPruneIntentsChange = tr->watch(blobGranulePruneChangeKey);
@@ -1674,6 +1710,7 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 			// loop through all prune intentions and do prune work accordingly
 			state KeyRef beginKey = normalKeys.begin;
 			loop {
+				state std::vector<Future<Void>> prunes;
 				try {
 					// TODO: replace 10000 with a knob
 					KeyRange nextRange(KeyRangeRef(beginKey, normalKeys.end));
@@ -1701,8 +1738,20 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 						//
 						// ErrorOr would prob be what we need here
 
-						pruneRange(self, rangeStartKey, rangeEndKey, pruneVersion, force);
+						prunes.emplace_back(pruneRange(self, rangeStartKey, rangeEndKey, pruneVersion, force));
+
+						// TODO: maybe clear the key here if pruneRange succeeded
 					}
+
+					// wait for this set of prunes to complete before starting the next ones since if we prune
+					// a range R at version V and while we are doing that, the time expires, we will end up
+					// trying to prune the same range again since the work isn't finished
+					//
+					// TODO: this isn't that efficient though. Instead we could keep metadata as part of the BM's
+					// memory that tracks which prunes are active. Once done, we can mark that work as done. If the BM
+					// fails then all prunes will fail and so the next BM will have a clear set of metadata (i.e. no
+					// work in progress) so we will end up doing the work in the new BM
+					wait(waitForAll(prunes));
 
 					if (!pruneIntents.more) {
 						break;
