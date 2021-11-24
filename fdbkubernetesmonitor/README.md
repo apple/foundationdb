@@ -5,8 +5,8 @@ To test this, run the following commands from the root of the FoundationDB
 repository:
 
 ```bash
-docker build -t foundationdb/foundationdb-kubernetes:6.3.13-local --build-arg FDB_VERSION=6.3.13 --build-arg FDB_LIBRARY_VERSIONS="6.3.13 6.2.30 6.1.13" -f packaging/docker/kubernetes/Dockerfile .
-docker build -t foundationdb/foundationdb-kubernetes:6.3.15-local --build-arg FDB_VERSION=6.3.15 --build-arg FDB_LIBRARY_VERSIONS="6.3.15 6.2.30 6.1.13" -f packaging/docker/kubernetes/Dockerfile .
+docker build -t foundationdb/foundationdb-kubernetes:6.3.13-local --target fdb-kubernetes-monitor --build-arg FDB_VERSION=6.3.13 --build-arg FDB_LIBRARY_VERSIONS="6.3.13 6.2.30 6.1.13" -f packaging/docker/Dockerfile .
+docker build -t foundationdb/foundationdb-kubernetes:6.3.15-local --target fdb-kubernetes-monitor --build-arg FDB_VERSION=6.3.15 --build-arg FDB_LIBRARY_VERSIONS="6.3.15 6.2.30 6.1.13" -f packaging/docker/Dockerfile .
 kubectl apply -f packaging/docker/kubernetes/test_config.yaml
 # Wait for the pods to become ready
 ips=$(kubectl get pod -l app=fdb-kubernetes-example -o json | jq -j '[[.items|.[]|select(.status.podIP!="")]|limit(3;.[])|.status.podIP+":4501"]|join(",")')

@@ -345,6 +345,7 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	Key id;
 	AsyncTrigger newMutations;
 	bool stopped = false; // A stopped change feed no longer adds new mutations, but is still queriable
+	bool removing = false;
 };
 
 class ServerWatchMetadata : public ReferenceCounted<ServerWatchMetadata> {
@@ -1725,9 +1726,9 @@ MutationsAndVersionRef filterMutations(Arena& arena,
 	return m;
 }
 
-ACTOR Future<ChangeFeedStreamReply> getChangeFeedMutations(StorageServer* data,
-                                                           ChangeFeedStreamRequest req,
-                                                           bool inverted) {
+ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(StorageServer* data,
+                                                                            ChangeFeedStreamRequest req,
+                                                                            bool inverted) {
 	state ChangeFeedStreamReply reply;
 	state ChangeFeedStreamReply memoryReply;
 	state int remainingLimitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
@@ -1753,7 +1754,7 @@ ACTOR Future<ChangeFeedStreamReply> getChangeFeedMutations(StorageServer* data,
 
 	if (req.end > feed->second->emptyVersion + 1) {
 		for (auto& it : feed->second->mutations) {
-			if (it.version >= req.end || remainingLimitBytes <= 0) {
+			if (it.version >= req.end || it.version > dequeVersion || remainingLimitBytes <= 0) {
 				break;
 			}
 			if (it.version >= req.begin) {
@@ -1827,7 +1828,7 @@ ACTOR Future<ChangeFeedStreamReply> getChangeFeedMutations(StorageServer* data,
 		}
 	}
 
-	return reply;
+	return std::make_pair(reply, remainingLimitBytes > 0 && remainingDurableBytes > 0);
 }
 
 ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
@@ -1843,14 +1844,15 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
 			feedRequest.begin = begin;
 			feedRequest.end = end;
 			feedRequest.range = range;
-			state ChangeFeedStreamReply feedReply = wait(getChangeFeedMutations(data, feedRequest, true));
-			begin = feedReply.mutations.back().version + 1;
+			state std::pair<ChangeFeedStreamReply, bool> feedReply =
+			    wait(getChangeFeedMutations(data, feedRequest, true));
+			begin = feedReply.first.mutations.back().version + 1;
 			state int resultLoc = 0;
-			while (resultLoc < feedReply.mutations.size()) {
-				if (feedReply.mutations[resultLoc].mutations.size() ||
-				    feedReply.mutations[resultLoc].version == end - 1) {
+			while (resultLoc < feedReply.first.mutations.size()) {
+				if (feedReply.first.mutations[resultLoc].mutations.size() ||
+				    feedReply.first.mutations[resultLoc].version == end - 1) {
 					wait(results.onEmpty());
-					results.send(feedReply.mutations[resultLoc]);
+					results.send(feedReply.first.mutations[resultLoc]);
 				}
 				resultLoc++;
 			}
@@ -1870,6 +1872,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 	state bool atLatest = false;
 	state UID streamUID = deterministicRandom()->randomUniqueID();
 	state bool removeUID = false;
+	state Optional<Version> blockedVersion;
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 
 	wait(delay(0, TaskPriority::DefaultEndpoint));
@@ -1879,21 +1882,23 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			Future<Void> onReady = req.reply.onReady();
 			if (atLatest && !onReady.isReady()) {
 				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
-				    data->version.get();
+				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
 				removeUID = true;
 			}
 			wait(onReady);
-			state Future<ChangeFeedStreamReply> feedReplyFuture = getChangeFeedMutations(data, req, false);
+			state Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture =
+			    getChangeFeedMutations(data, req, false);
 			if (atLatest && !removeUID && !feedReplyFuture.isReady()) {
 				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
-				    data->prevVersion;
+				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
 				removeUID = true;
 			}
-			ChangeFeedStreamReply _feedReply = wait(feedReplyFuture);
-			ChangeFeedStreamReply feedReply = _feedReply;
+			std::pair<ChangeFeedStreamReply, bool> _feedReply = wait(feedReplyFuture);
+			ChangeFeedStreamReply feedReply = _feedReply.first;
+			bool gotAll = _feedReply.second;
 
 			req.begin = feedReply.mutations.back().version + 1;
-			if (!atLatest && feedReply.mutations.back().mutations.empty()) {
+			if (!atLatest && gotAll) {
 				atLatest = true;
 			}
 			auto& clientVersions = data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()];
@@ -1907,21 +1912,33 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 				minVersion = std::min(minVersion, it.second);
 			}
 			feedReply.atLatestVersion = atLatest;
-			feedReply.minStreamVersion = minVersion;
+			feedReply.minStreamVersion = gotAll ? minVersion : feedReply.mutations.back().version;
 			req.reply.send(feedReply);
 			if (feedReply.mutations.back().version == req.end - 1) {
 				req.reply.sendError(end_of_stream());
 				return Void();
 			}
-			if (feedReply.mutations.back().mutations.empty()) {
+			if (gotAll) {
+				blockedVersion = Optional<Version>();
 				auto feed = data->uidChangeFeed.find(req.rangeID);
-				if (feed == data->uidChangeFeed.end()) {
+				if (feed == data->uidChangeFeed.end() || feed->second->removing) {
 					req.reply.sendError(unknown_change_feed());
 					return Void();
 				}
-				wait(feed->second->newMutations
-				         .onTrigger()); // FIXME: check that this is triggered when the range is moved to a different
-				                        // server, also check that the stream is closed
+				choose {
+					when(wait(feed->second->newMutations.onTrigger())) {
+					} // FIXME: check that this is triggered when the range is moved to a different
+					  // server, also check that the stream is closed
+					when(wait(req.end == std::numeric_limits<Version>::max() ? Future<Void>(Never())
+					                                                         : data->version.whenAtLeast(req.end))) {}
+				}
+				auto feed = data->uidChangeFeed.find(req.rangeID);
+				if (feed == data->uidChangeFeed.end() || feed->second->removing) {
+					req.reply.sendError(unknown_change_feed());
+					return Void();
+				}
+			} else {
+				blockedVersion = feedReply.mutations.back().version;
 			}
 		}
 	} catch (Error& e) {
@@ -4615,7 +4632,12 @@ void changeServerKeys(StorageServer* data,
 						}
 					}
 				}
-				data->uidChangeFeed.erase(f.first);
+				auto feed = data->uidChangeFeed.find(f.first);
+				if (feed != data->uidChangeFeed.end()) {
+					feed->second->removing = true;
+					feed->second->newMutations.trigger();
+					data->uidChangeFeed.erase(feed);
+				}
 			}
 		}
 	}
@@ -6728,6 +6750,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder) {
 	state StorageServer self(persistentData, db, ssi);
+	state Future<Void> ssCore;
 	self.clusterId.send(clusterId);
 	if (ssi.isTss()) {
 		self.setTssPair(ssi.tssPairID.get());
@@ -6768,7 +6791,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		recruitReply.send(rep);
 		self.byteSampleRecovery = Void();
 
-		wait(storageServerCore(&self, ssi));
+		ssCore = storageServerCore(&self, ssi);
+		wait(ssCore);
 
 		throw internal_error();
 	} catch (Error& e) {
@@ -6776,9 +6800,20 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		// (ClusterController, and from there to the DataDistributionTeamCollection)
 		if (!recruitReply.isSet())
 			recruitReply.sendError(recruitment_failed());
-		if (storageServerTerminated(self, persistentData, e))
+
+		// If the storage server dies while something that uses self is still on the stack,
+		// we want that actor to complete before we terminate and that memory goes out of scope
+		state Error err = e;
+		if (storageServerTerminated(self, persistentData, err)) {
+			ssCore.cancel();
+			self.actors.clear(true);
+			wait(delay(0));
 			return Void();
-		throw e;
+		}
+		ssCore.cancel();
+		self.actors.clear(true);
+		wait(delay(0));
+		throw err;
 	}
 }
 
@@ -6926,6 +6961,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Promise<Void> recovered,
                                  Reference<IClusterConnectionRecord> connRecord) {
 	state StorageServer self(persistentData, db, ssi);
+	state Future<Void> ssCore;
 	self.folder = folder;
 
 	try {
@@ -7002,15 +7038,27 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		TraceEvent("StorageServerStartingCore", self.thisServerID).detail("TimeTaken", now() - start);
 
 		// wait( delay(0) );  // To make sure self->zkMasterInfo.onChanged is available to wait on
-		wait(storageServerCore(&self, ssi));
+		ssCore = storageServerCore(&self, ssi);
+		wait(ssCore);
 
 		throw internal_error();
 	} catch (Error& e) {
 		if (recovered.canBeSet())
 			recovered.send(Void());
-		if (storageServerTerminated(self, persistentData, e))
+
+		// If the storage server dies while something that uses self is still on the stack,
+		// we want that actor to complete before we terminate and that memory goes out of scope
+		state Error err = e;
+		if (storageServerTerminated(self, persistentData, err)) {
+			ssCore.cancel();
+			self.actors.clear(true);
+			wait(delay(0));
 			return Void();
-		throw e;
+		}
+		ssCore.cancel();
+		self.actors.clear(true);
+		wait(delay(0));
+		throw err;
 	}
 }
 
