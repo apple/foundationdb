@@ -21,6 +21,7 @@
 #include <vector>
 #include <unordered_map>
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -238,10 +239,10 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 			StorageMetrics estimated = wait(tr->getTransaction().getStorageMetrics(range, CLIENT_KNOBS->TOO_MANY));
 
 			if (BM_DEBUG) {
-				printf("Estimated bytes for [%s - %s): %lld\n",
-				       range.begin.printable().c_str(),
-				       range.end.printable().c_str(),
-				       estimated.bytes);
+				fmt::print("Estimated bytes for [{0} - {1}): {2}\n",
+				           range.begin.printable(),
+				           range.end.printable(),
+				           estimated.bytes);
 			}
 
 			if (estimated.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
@@ -310,13 +311,13 @@ ACTOR Future<UID> pickWorkerForAssign(BlobManagerData* bmData) {
 ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment assignment, UID workerID, int64_t seqNo) {
 
 	if (BM_DEBUG) {
-		printf("BM %s %s range [%s - %s) @ (%lld, %lld)\n",
-		       bmData->id.toString().c_str(),
-		       assignment.isAssign ? "assigning" : "revoking",
-		       assignment.keyRange.begin.printable().c_str(),
-		       assignment.keyRange.end.printable().c_str(),
-		       bmData->epoch,
-		       seqNo);
+		fmt::print("BM {0} {1} range [{2} - {3}) @ ({4}, {5})\n",
+		           bmData->id.toString(),
+		           assignment.isAssign ? "assigning" : "revoking",
+		           assignment.keyRange.begin.printable(),
+		           assignment.keyRange.end.printable(),
+		           bmData->epoch,
+		           seqNo);
 	}
 
 	try {
@@ -392,7 +393,7 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 			// FIXME: improvement would be to add history of failed workers to assignment so it can try other ones first
 		} else {
 			if (BM_DEBUG) {
-				printf("BM got error revoking range [%s - %s) from worker %s",
+				printf("BM got error revoking range [%s - %s) from worker",
 				       assignment.keyRange.begin.printable().c_str(),
 				       assignment.keyRange.end.printable().c_str());
 			}
@@ -498,10 +499,8 @@ ACTOR Future<Void> checkManagerLock(Reference<ReadYourWritesTransaction> tr, Blo
 		ASSERT(currentEpoch > bmData->epoch);
 
 		if (BM_DEBUG) {
-			printf("BM %s found new epoch %d > %d in lock check\n",
-			       bmData->id.toString().c_str(),
-			       currentEpoch,
-			       bmData->epoch);
+			fmt::print(
+			    "BM {0} found new epoch {1} > {2} in lock check\n", bmData->id.toString(), currentEpoch, bmData->epoch);
 		}
 		if (bmData->iAmReplaced.canBeSet()) {
 			bmData->iAmReplaced.send(Void());
@@ -662,12 +661,12 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
 			std::tuple<int64_t, int64_t, UID> prevGranuleLock = decodeBlobGranuleLockValue(lockValue.get());
 			if (std::get<0>(prevGranuleLock) > bmData->epoch) {
 				if (BM_DEBUG) {
-					printf("BM %s found a higher epoch %d than %d for granule lock of [%s - %s)\n",
-					       bmData->id.toString().c_str(),
-					       std::get<0>(prevGranuleLock),
-					       bmData->epoch,
-					       granuleRange.begin.printable().c_str(),
-					       granuleRange.end.printable().c_str());
+					fmt::print("BM {0} found a higher epoch {1} than {2} for granule lock of [{3} - {4})\n",
+					           bmData->id.toString(),
+					           std::get<0>(prevGranuleLock),
+					           bmData->epoch,
+					           granuleRange.begin.printable(),
+					           granuleRange.end.printable());
 				}
 
 				if (bmData->iAmReplaced.canBeSet()) {
@@ -836,14 +835,14 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 				GranuleStatusReply rep = waitNext(statusStream.getFuture());
 
 				if (BM_DEBUG) {
-					printf("BM %lld got status of [%s - %s) @ (%lld, %lld) from BW %s: %s\n",
-					       bmData->epoch,
-					       rep.granuleRange.begin.printable().c_str(),
-					       rep.granuleRange.end.printable().c_str(),
-					       rep.epoch,
-					       rep.seqno,
-					       bwInterf.id().toString().c_str(),
-					       rep.doSplit ? "split" : "");
+					fmt::print("BM {0} got status of [{1} - {2}) @ ({3}, {4}) from BW {5}: {6}\n",
+					           bmData->epoch,
+					           rep.granuleRange.begin.printable(),
+					           rep.granuleRange.end.printable(),
+					           rep.epoch,
+					           rep.seqno,
+					           bwInterf.id().toString(),
+					           rep.doSplit ? "split" : "");
 				}
 				if (rep.epoch > bmData->epoch) {
 					if (BM_DEBUG) {
@@ -878,17 +877,17 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 				    rep.granuleRange.end == lastReqForGranule.end() && rep.epoch == lastReqForGranule.value().first &&
 				    rep.seqno == lastReqForGranule.value().second) {
 					if (BM_DEBUG) {
-						printf("Manager %lld received repeat status for the same granule [%s - %s) @ %lld, ignoring.",
-						       bmData->epoch,
-						       rep.granuleRange.begin.printable().c_str(),
-						       rep.granuleRange.end.printable().c_str());
+						fmt::print("Manager {0} received repeat status for the same granule [{1} - {2}), ignoring.",
+						           bmData->epoch,
+						           rep.granuleRange.begin.printable(),
+						           rep.granuleRange.end.printable());
 					}
 				} else {
 					if (BM_DEBUG) {
-						printf("Manager %lld evaluating [%s - %s) for split\n",
-						       bmData->epoch,
-						       rep.granuleRange.begin.printable().c_str(),
-						       rep.granuleRange.end.printable().c_str());
+						fmt::print("Manager {0} evaluating [{1} - {2}) for split\n",
+						           bmData->epoch,
+						           rep.granuleRange.begin.printable().c_str(),
+						           rep.granuleRange.end.printable().c_str());
 					}
 					lastSeenSeqno.insert(rep.granuleRange, std::pair(rep.epoch, rep.seqno));
 					bmData->addActor.send(maybeSplitRange(
@@ -934,7 +933,7 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 		choose {
 			when(wait(waitFailure)) {
 				if (BM_DEBUG) {
-					printf("BM %lld detected BW %s is dead\n", bmData->epoch, bwInterf.id().toString().c_str());
+					fmt::print("BM {0} detected BW {1} is dead\n", bmData->epoch, bwInterf.id().toString());
 				}
 				TraceEvent("BlobWorkerFailed", bmData->id).detail("BlobWorkerID", bwInterf.id());
 			}
@@ -1340,7 +1339,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	}
 
 	if (BM_DEBUG) {
-		printf("Blob manager acquired lock at epoch %lld\n", epoch);
+		fmt::print("Blob manager acquired lock at epoch {}\n", epoch);
 	}
 
 	// although we start the recruiter, we wait until existing workers are ack'd

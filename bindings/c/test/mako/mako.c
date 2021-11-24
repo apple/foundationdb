@@ -943,7 +943,7 @@ int run_workload(FDBTransaction* transaction,
 					if (tracetimer == dotrace) {
 						fdb_error_t err;
 						tracetimer = 0;
-						snprintf(traceid, 32, "makotrace%019lld", total_xacts);
+						snprintf(traceid, 32, "makotrace%019ld", total_xacts);
 						fprintf(debugme, "DEBUG: txn tracing %s\n", traceid);
 						err = fdb_transaction_set_option(transaction,
 						                                 FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER,
@@ -1101,7 +1101,7 @@ void* worker_thread(void* thread_args) {
 	}
 
 	fprintf(debugme,
-	        "DEBUG: worker_id:%d (%d) thread_id:%d (%d) database_index:%d (tid:%lld)\n",
+	        "DEBUG: worker_id:%d (%d) thread_id:%d (%d) database_index:%lu (tid:%lu)\n",
 	        worker_id,
 	        args->num_processes,
 	        thread_id,
@@ -1301,7 +1301,7 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 		if (err) {
 			fprintf(stderr,
 			        "ERROR: fdb_network_set_option (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) (%d): %s\n",
-			        (uint8_t*)&args->client_threads_per_version,
+			        args->client_threads_per_version,
 			        fdb_get_error(err));
 			// let's exit here since we do not want to confuse users
 			// that mako is running with multi-threaded client enabled
@@ -2038,9 +2038,9 @@ void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, s
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0) {
 			uint64_t ops_total_diff = ops_total[op] - ops_total_prev[op];
-			printf("%" STR(STATS_FIELD_WIDTH) "lld ", ops_total_diff);
+			printf("%" STR(STATS_FIELD_WIDTH) "lu ", ops_total_diff);
 			if (fp) {
-				fprintf(fp, "\"%s\": %lld,", get_ops_name(op), ops_total_diff);
+				fprintf(fp, "\"%s\": %lu,", get_ops_name(op), ops_total_diff);
 			}
 			errors_diff[op] = errors_total[op] - errors_total_prev[op];
 			print_err = (errors_diff[op] > 0);
@@ -2068,7 +2068,7 @@ void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, s
 		printf("%" STR(STATS_TITLE_WIDTH) "s ", "Errors");
 		for (op = 0; op < MAX_OP; op++) {
 			if (args->txnspec.ops[op][OP_COUNT] > 0) {
-				printf("%" STR(STATS_FIELD_WIDTH) "lld ", errors_diff[op]);
+				printf("%" STR(STATS_FIELD_WIDTH) "lu ", errors_diff[op]);
 				if (fp) {
 					fprintf(fp, "\"errors\": %.2f", conflicts_diff);
 				}
@@ -2213,10 +2213,10 @@ void print_report(mako_args_t* args,
 			break;
 		}
 	}
-	printf("Total Xacts:      %8lld\n", totalxacts);
-	printf("Total Conflicts:  %8lld\n", conflicts);
-	printf("Total Errors:     %8lld\n", totalerrors);
-	printf("Overall TPS:      %8lld\n\n", totalxacts * 1000000000 / duration_nsec);
+	printf("Total Xacts:      %8lu\n", totalxacts);
+	printf("Total Conflicts:  %8lu\n", conflicts);
+	printf("Total Errors:     %8lu\n", totalerrors);
+	printf("Overall TPS:      %8lu\n\n", totalxacts * 1000000000 / duration_nsec);
 
 	if (fp) {
 		fprintf(fp, "\"results\": {");
@@ -2224,10 +2224,10 @@ void print_report(mako_args_t* args,
 		fprintf(fp, "\"totalProcesses\": %d,", args->num_processes);
 		fprintf(fp, "\"totalThreads\": %d,", args->num_threads);
 		fprintf(fp, "\"targetTPS\": %d,", args->tpsmax);
-		fprintf(fp, "\"totalXacts\": %lld,", totalxacts);
-		fprintf(fp, "\"totalConflicts\": %lld,", conflicts);
-		fprintf(fp, "\"totalErrors\": %lld,", totalerrors);
-		fprintf(fp, "\"overallTPS\": %lld,", totalxacts * 1000000000 / duration_nsec);
+		fprintf(fp, "\"totalXacts\": %lu,", totalxacts);
+		fprintf(fp, "\"totalConflicts\": %lu,", conflicts);
+		fprintf(fp, "\"totalErrors\": %lu,", totalerrors);
+		fprintf(fp, "\"overallTPS\": %lu,", totalxacts * 1000000000 / duration_nsec);
 	}
 
 	/* per-op stats */
@@ -2240,9 +2240,9 @@ void print_report(mako_args_t* args,
 	}
 	for (op = 0; op < MAX_OP; op++) {
 		if ((args->txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) || op == OP_COMMIT) {
-			printf("%" STR(STATS_FIELD_WIDTH) "lld ", ops_total[op]);
+			printf("%" STR(STATS_FIELD_WIDTH) "lu ", ops_total[op]);
 			if (fp) {
-				fprintf(fp, "\"%s\": %lld,", get_ops_name(op), ops_total[op]);
+				fprintf(fp, "\"%s\": %lu,", get_ops_name(op), ops_total[op]);
 			}
 		}
 	}
@@ -2263,9 +2263,9 @@ void print_report(mako_args_t* args,
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Errors");
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) {
-			printf("%" STR(STATS_FIELD_WIDTH) "lld ", errors_total[op]);
+			printf("%" STR(STATS_FIELD_WIDTH) "lu ", errors_total[op]);
 			if (fp) {
-				fprintf(fp, "\"%s\": %lld,", get_ops_name(op), errors_total[op]);
+				fprintf(fp, "\"%s\": %lu,", get_ops_name(op), errors_total[op]);
 			}
 		}
 	}
@@ -2282,12 +2282,12 @@ void print_report(mako_args_t* args,
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (lat_total[op]) {
-				printf("%" STR(STATS_FIELD_WIDTH) "lld ", lat_samples[op]);
+				printf("%" STR(STATS_FIELD_WIDTH) "lu ", lat_samples[op]);
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
 			}
 			if (fp) {
-				fprintf(fp, "\"%s\": %lld,", get_ops_name(op), lat_samples[op]);
+				fprintf(fp, "\"%s\": %lu,", get_ops_name(op), lat_samples[op]);
 			}
 		}
 	}
@@ -2303,9 +2303,9 @@ void print_report(mako_args_t* args,
 			if (lat_min[op] == -1) {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
 			} else {
-				printf("%" STR(STATS_FIELD_WIDTH) "lld ", lat_min[op]);
+				printf("%" STR(STATS_FIELD_WIDTH) "lu ", lat_min[op]);
 				if (fp) {
-					fprintf(fp, "\"%s\": %lld,", get_ops_name(op), lat_min[op]);
+					fprintf(fp, "\"%s\": %lu,", get_ops_name(op), lat_min[op]);
 				}
 			}
 		}
@@ -2320,9 +2320,9 @@ void print_report(mako_args_t* args,
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (lat_total[op]) {
-				printf("%" STR(STATS_FIELD_WIDTH) "lld ", lat_total[op] / lat_samples[op]);
+				printf("%" STR(STATS_FIELD_WIDTH) "lu ", lat_total[op] / lat_samples[op]);
 				if (fp) {
-					fprintf(fp, "\"%s\": %lld,", get_ops_name(op), lat_total[op] / lat_samples[op]);
+					fprintf(fp, "\"%s\": %lu,", get_ops_name(op), lat_total[op] / lat_samples[op]);
 				}
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
@@ -2341,9 +2341,9 @@ void print_report(mako_args_t* args,
 			if (lat_max[op] == 0) {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
 			} else {
-				printf("%" STR(STATS_FIELD_WIDTH) "lld ", lat_max[op]);
+				printf("%" STR(STATS_FIELD_WIDTH) "lu ", lat_max[op]);
 				if (fp) {
-					fprintf(fp, "\"%s\": %lld,", get_ops_name(op), lat_max[op]);
+					fprintf(fp, "\"%s\": %lu,", get_ops_name(op), lat_max[op]);
 				}
 			}
 		}
@@ -2393,9 +2393,9 @@ void print_report(mako_args_t* args,
 				} else {
 					median = (dataPoints[op][num_points[op] / 2] + dataPoints[op][num_points[op] / 2 - 1]) >> 1;
 				}
-				printf("%" STR(STATS_FIELD_WIDTH) "lld ", median);
+				printf("%" STR(STATS_FIELD_WIDTH) "lu ", median);
 				if (fp) {
-					fprintf(fp, "\"%s\": %lld,", get_ops_name(op), median);
+					fprintf(fp, "\"%s\": %lu,", get_ops_name(op), median);
 				}
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
@@ -2417,9 +2417,9 @@ void print_report(mako_args_t* args,
 			}
 			if (lat_total[op]) {
 				point_95pct = ((float)(num_points[op]) * 0.95) - 1;
-				printf("%" STR(STATS_FIELD_WIDTH) "lld ", dataPoints[op][point_95pct]);
+				printf("%" STR(STATS_FIELD_WIDTH) "lu ", dataPoints[op][point_95pct]);
 				if (fp) {
-					fprintf(fp, "\"%s\": %lld,", get_ops_name(op), dataPoints[op][point_95pct]);
+					fprintf(fp, "\"%s\": %lu,", get_ops_name(op), dataPoints[op][point_95pct]);
 				}
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
@@ -2441,9 +2441,9 @@ void print_report(mako_args_t* args,
 			}
 			if (lat_total[op]) {
 				point_99pct = ((float)(num_points[op]) * 0.99) - 1;
-				printf("%" STR(STATS_FIELD_WIDTH) "lld ", dataPoints[op][point_99pct]);
+				printf("%" STR(STATS_FIELD_WIDTH) "lu ", dataPoints[op][point_99pct]);
 				if (fp) {
-					fprintf(fp, "\"%s\": %lld,", get_ops_name(op), dataPoints[op][point_99pct]);
+					fprintf(fp, "\"%s\": %lu,", get_ops_name(op), dataPoints[op][point_99pct]);
 				}
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
@@ -2465,9 +2465,9 @@ void print_report(mako_args_t* args,
 			}
 			if (lat_total[op]) {
 				point_99_9pct = ((float)(num_points[op]) * 0.999) - 1;
-				printf("%" STR(STATS_FIELD_WIDTH) "lld ", dataPoints[op][point_99_9pct]);
+				printf("%" STR(STATS_FIELD_WIDTH) "lu ", dataPoints[op][point_99_9pct]);
 				if (fp) {
-					fprintf(fp, "\"%s\": %lld,", get_ops_name(op), dataPoints[op][point_99_9pct]);
+					fprintf(fp, "\"%s\": %lu,", get_ops_name(op), dataPoints[op][point_99_9pct]);
 				}
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
@@ -2529,7 +2529,7 @@ int stats_process_main(mako_args_t* args,
 		fprintf(fp, "\"value_length\": %d,", args->value_length);
 		fprintf(fp, "\"commit_get\": %d,", args->commit_get);
 		fprintf(fp, "\"verbose\": %d,", args->verbose);
-		fprintf(fp, "\"cluster_files\": \"%s\",", args->cluster_files);
+		fprintf(fp, "\"cluster_files\": \"%s\",", args->cluster_files[0]);
 		fprintf(fp, "\"log_group\": \"%s\",", args->log_group);
 		fprintf(fp, "\"prefixpadding\": %d,", args->prefixpadding);
 		fprintf(fp, "\"trace\": %d,", args->trace);
@@ -2818,6 +2818,7 @@ failExit:
 	if (shmfd) {
 		close(shmfd);
 		shm_unlink(shmpath);
+		unlink(shmpath);
 	}
 
 	return 0;

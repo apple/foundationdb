@@ -491,7 +491,11 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionGetKey, lib, fdbCPath, "fdb_transaction_get_key");
 	loadClientFunction(&api->transactionGetAddressesForKey, lib, fdbCPath, "fdb_transaction_get_addresses_for_key");
 	loadClientFunction(&api->transactionGetRange, lib, fdbCPath, "fdb_transaction_get_range");
-	loadClientFunction(&api->transactionGetRangeAndFlatMap, lib, fdbCPath, "fdb_transaction_get_range_and_flat_map");
+	loadClientFunction(&api->transactionGetRangeAndFlatMap,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_get_range_and_flat_map",
+	                   headerVersion >= 700);
 	loadClientFunction(
 	    &api->transactionGetVersionstamp, lib, fdbCPath, "fdb_transaction_get_versionstamp", headerVersion >= 410);
 	loadClientFunction(&api->transactionSet, lib, fdbCPath, "fdb_transaction_set");
