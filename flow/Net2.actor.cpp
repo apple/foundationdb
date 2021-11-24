@@ -728,6 +728,9 @@ class Listener final : public IListener, ReferenceCounted<Listener> {
 public:
 	Listener(boost::asio::io_context& io_service, NetworkAddress listenAddress)
 	  : io_service(io_service), listenAddress(listenAddress), acceptor(io_service, tcpEndpoint(listenAddress)) {
+		// clean up a little?
+		this->listenAddress = NetworkAddress::parse(acceptor.local_endpoint().address().to_string().append(":").append(
+		    std::to_string(acceptor.local_endpoint().port())));
 		platform::setCloseOnExec(acceptor.native_handle());
 	}
 
