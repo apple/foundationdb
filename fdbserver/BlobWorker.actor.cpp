@@ -1456,7 +1456,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				// Write a new delta file IF we have enough bytes
 				if (metadata->bufferedDeltaBytes >= SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES) {
 					if (BW_DEBUG) {
-						fmt::print("Granule [{0} - {1}) flushing delta file after {2} bytes @ {3} {5}\n",
+						fmt::print("Granule [{0} - {1}) flushing delta file after {2} bytes @ {3} {4}\n",
 						           metadata->keyRange.begin.printable(),
 						           metadata->keyRange.end.printable(),
 						           metadata->bufferedDeltaBytes,
