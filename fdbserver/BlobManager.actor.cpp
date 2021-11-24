@@ -1018,6 +1018,7 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 	//    If the worker already had the range, this is a no-op. If the worker didn't have it, it will
 	//    begin persisting it. The worker that had the same range before will now be at a lower seqno.
 
+	state KeyRangeMap<Optional<UID>> workerAssignments;
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 
 	// Step 1. Get the latest known mapping of granules to blob workers (i.e. assignments)
@@ -1038,14 +1039,9 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 				Key granuleStartKey = results[rangeIdx].key;
 				Key granuleEndKey = results[rangeIdx + 1].key;
 				if (results[rangeIdx].value.size()) {
-					if (granuleStartKey == allKeys.begin && granuleEndKey == allKeys.end) {
-						// in this case, a second manager started before the first manager assigned any ranges. This
-						// gets the only range as [ - \xff\xff), so we clamp it to [ - \xff)
-						granuleEndKey = normalKeys.end;
-					}
 					// note: if the old owner is dead, we handle this in rangeAssigner
 					UID existingOwner = decodeBlobGranuleMappingValue(results[rangeIdx].value);
-					bmData->workerAssignments.insert(KeyRangeRef(granuleStartKey, granuleEndKey), existingOwner);
+					workerAssignments.insert(KeyRangeRef(granuleStartKey, granuleEndKey), existingOwner);
 				}
 			}
 
@@ -1083,7 +1079,8 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 				std::tie(splitState, version) = decodeBlobGranuleSplitValue(split.value);
 				const KeyRange range = blobGranuleSplitKeyRangeFor(parentGranuleID);
 				if (splitState <= BlobGranuleSplitState::Initialized) {
-					bmData->workerAssignments.insert(range, UID());
+					// the empty UID signifies that we need to find an owner (worker) for this range
+					workerAssignments.insert(range, UID());
 				}
 			}
 
@@ -1097,11 +1094,18 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 		}
 	}
 
-	// Step 3. Send assign requests for all the granules
-	for (auto& range : bmData->workerAssignments.intersectingRanges(normalKeys)) {
+	// Step 3. Send assign requests for all the granules and transfer assignments
+	// from local workerAssignments to bmData
+	for (auto& range : workerAssignments.intersectingRanges(normalKeys)) {
+		if (!range.value().present()) {
+			continue;
+		}
+
+		bmData->workerAssignments.insert(range.range(), range.value().get());
+
 		RangeAssignment raAssign;
 		raAssign.isAssign = true;
-		raAssign.worker = range.value();
+		raAssign.worker = range.value().get();
 		raAssign.keyRange = range.range();
 		raAssign.assign = RangeAssignmentData(AssignRequestType::Reassign);
 		bmData->rangesToAssign.send(raAssign);
