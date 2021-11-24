@@ -1831,6 +1831,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 
 	self.addActor.send(monitorClientRanges(&self));
 	self.addActor.send(rangeAssigner(&self));
+	self.addActor.send(monitorPruneKeys(&self));
 
 	if (BUGGIFY) {
 		self.addActor.send(chaosRangeMover(&self));
