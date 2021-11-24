@@ -5,6 +5,8 @@ set(FDBSERVER_SRCS
   BackupProgress.actor.cpp
   BackupProgress.actor.h
   BackupWorker.actor.cpp
+  BlobGranuleServerCommon.actor.cpp
+  BlobGranuleServerCommon.actor.h
   BlobManager.actor.cpp
   BlobManagerInterface.h
   BlobWorker.actor.cpp
