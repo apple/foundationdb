@@ -270,8 +270,7 @@ set(FDBSERVER_SRCS
   workloads/WriteTagThrottling.actor.cpp
 )
 
-# ugly hack to make Windows work for now
-if(WIN32)
+if(${COROUTINE_IMPL} STREQUAL libcoro)
   list(APPEND FDBSERVER_SRCS CoroFlowCoro.actor.cpp)
 else()
   list(APPEND FDBSERVER_SRCS CoroFlow.actor.cpp)
