@@ -1339,6 +1339,7 @@ ACTOR static Future<Void> listen(TransportData* self, NetworkAddress listenAddr)
 	state ActorCollectionNoErrors
 	    incoming; // Actors monitoring incoming connections that haven't yet been associated with a peer
 	state Reference<IListener> listener = INetworkConnections::net()->listen(listenAddr);
+	self->localAddresses.address = listener->getListenAddress();
 	state uint64_t connectionCount = 0;
 	try {
 		loop {
@@ -1470,6 +1471,7 @@ Future<Void> FlowTransport::bind(NetworkAddress publicAddress, NetworkAddress li
 
 	Future<Void> listenF = listen(self, listenAddress);
 	self->listeners.push_back(listenF);
+	std::cout << "publicAddress: " << publicAddress.toString() << "\n";
 	return listenF;
 }
 
