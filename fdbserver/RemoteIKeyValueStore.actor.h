@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdio>
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_REMOTE_IKEYVALUESTORE_ACTOR_G_H)
 #define FDBSERVER_REMOTE_IKEYVALUESTORE_ACTOR_G_H
 #include "fdbserver/RemoteIKeyValueStore.actor.g.h"
@@ -285,10 +286,12 @@ struct KeyValueStoreProcess : FlowProcess {
 	ACTOR static Future<Void> _run(KeyValueStoreProcess* self) {
 		state ActorCollection actors(true);
 		TraceEvent(SevDebug, "WaitingForOpenKVStoreRequest").log();
+		std::fputs("WaitingForOpenKVStoreRequest\n", stdout);
 		loop {
 			choose {
 				when(OpenKVStoreRequest req = waitNext(self->kvsIf.openKVStore.getFuture())) {
 					TraceEvent(SevDebug, "OpenKVStoreRequestReceived").log();
+					std::fputs("OpenKVStoreRequestReceived\n", stdout);
 					IKVSInterface reply;
 					actors.add(runIKVS(req, reply));
 				}

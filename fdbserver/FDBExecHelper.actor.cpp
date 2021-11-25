@@ -1,17 +1,18 @@
-#include "flow/genericactors.actor.h"
-#include <string>
 #if !defined(_WIN32) && !defined(__APPLE__) && !defined(__INTEL_COMPILER)
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #include <boost/process.hpp>
 #endif
+#include "boost/algorithm/string.hpp"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/Trace.h"
+#include "flow/genericactors.actor.h"
 #include "flow/flow.h"
 #include "fdbclient/versions.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RemoteIKeyValueStore.actor.h"
+#include "fdbrpc/FlowProcess.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/WellKnownEndpoints.h"
 #include "flow/Platform.h"
@@ -86,11 +87,51 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
                                  double maxSimDelayTime) {
 	state ISimulator::ProcessInfo* self = g_pSimulator->getCurrentProcess();
 	state ISimulator::ProcessInfo* child;
+
+	state std::string role;
+	state std::string addr;
+	state std::string flowProcessName;
+	state Endpoint flowProcessEndpoint;
+	state int i = 0;
+	for (; i < paramList.size(); i++) {
+		if (paramList.size() > i + 1) {
+			// temporary args parser that only supports the flowprocess role
+			if (paramList[i] == "-r") {
+				role = paramList[i + 1];
+			} else if (paramList[i] == "-p" || paramList[i] == "--public_address") {
+				addr = paramList[i + 1];
+			} else if (paramList[i] == "--process_name") {
+				flowProcessName = paramList[i + 1];
+			} else if (paramList[i] == "--process_endpoint") {
+				state std::vector<std::string> addressArray;
+				boost::split(addressArray, paramList[i + 1], [](char c) { return c == ','; });
+				if (addressArray.size() != 3) {
+					std::cerr << "Invalid argument, expected 3 elements in --process_endpoint got "
+					          << addressArray.size() << std::endl;
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				try {
+					auto addr = NetworkAddress::parse(addressArray[0]);
+					uint64_t fst = std::stoul(addressArray[1]);
+					uint64_t snd = std::stoul(addressArray[2]);
+					UID token(fst, snd);
+					NetworkAddressList l;
+					l.address = addr;
+					flowProcessEndpoint = Endpoint(l, token);
+					std::cout << "flowProcessEndpoint: " << flowProcessEndpoint.getPrimaryAddress().toString()
+					          << ", token: " << flowProcessEndpoint.token.toString() << "\n";
+				} catch (Error& e) {
+					std::cerr << "Could not parse network address " << addressArray[0] << std::endl;
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+			}
+		}
+	}
 	state int result = 0;
 	// short port = 8716;
-	child = g_pSimulator->newProcess("remote ikvs process",
+	child = g_pSimulator->newProcess("remote flow process",
 	                                 self->address.ip,
-	                                 SERVER_KNOBS->IKVS_PORT,
+	                                 0,
 	                                 false,
 	                                 1,
 	                                 self->locality,
@@ -106,16 +147,17 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 		// TODO: parse paramList
 		TraceEvent(SevDebug, "SpawnedChildProcess").detail("IP", child->toString());
 		std::string role = "";
+		std::string addr = "";
 		for (int i = 0; i < paramList.size(); i++) {
 			if (paramList.size() > i + 1 && paramList[i] == "-r") {
 				role = paramList[i + 1];
 			}
 		}
-		if (role == "remoteIKVS") {
+		if (role == "flowprocess") {
 			FlowTransport::createInstance(false, 1, WLTOKEN_IKVS_RESERVED_COUNT);
 			FlowTransport::transport().bind(child->address, child->address);
 			Sim2FileSystem::newFileSystem();
-			Future<Void> f = runRemoteServer();
+			Future<Void> f = runFlowProcess(flowProcessName, flowProcessEndpoint);
 
 			choose {
 				when(wait(success(onShutdown) || f)) { TraceEvent(SevDebug, "ChildProcessKilled").log(); }
@@ -124,7 +166,6 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 					g_pSimulator->killProcess(child, ISimulator::KillInstantly);
 				}
 			}
-			// wait(success(onShutdown) || f);
 		} else {
 			ASSERT(false);
 		}
@@ -275,8 +316,8 @@ ACTOR Future<int> spawnProcess(std::string path,
 					break;
 				bytesRead += bytes;
 			}
-			// TraceEvent(SevDebug, "SpawnPID").detail("PID", pid);
-			// TraceEvent(SevDebug, "errorPID").detail("errno", err);
+			TraceEvent(SevDebug, "SpawnPID").detail("PID", pid);
+			TraceEvent(SevDebug, "errorPID").detail("errno", err);
 			if (err < 0) {
 				TraceEvent event(SevWarnAlways, "SpawnProcessFailure");
 				setupTraceWithOutput(event, bytesRead, outputBuffer);

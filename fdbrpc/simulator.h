@@ -21,6 +21,7 @@
 #ifndef FLOW_SIMULATOR_H
 #define FLOW_SIMULATOR_H
 #include "flow/ProtocolVersion.h"
+#include <algorithm>
 #include <string>
 #pragma once
 
@@ -91,6 +92,7 @@ public:
 		UID uid;
 
 		ProtocolVersion protocolVersion;
+		short lastRandomPort;
 
 		ProcessInfo(const char* name,
 		            LocalityData locality,
@@ -102,7 +104,7 @@ public:
 		  : name(name), coordinationFolder(coordinationFolder), dataFolder(dataFolder), machine(nullptr),
 		    addresses(addresses), address(addresses.address), locality(locality), startingClass(startingClass),
 		    failed(false), excluded(false), cleared(false), rebooting(false), network(net), fault_injection_r(0),
-		    fault_injection_p1(0), fault_injection_p2(0), failedDisk(false) {
+		    fault_injection_p1(0), fault_injection_p2(0), failedDisk(false), lastRandomPort(1000) {
 			uid = deterministicRandom()->randomUniqueID();
 		}
 
@@ -203,7 +205,33 @@ public:
 		std::set<std::string> closingFiles;
 		Optional<Standalone<StringRef>> machineId;
 
-		MachineInfo() : machineProcess(nullptr) {}
+		const uint16_t remotePortStart;
+		std::vector<uint16_t> usedRemotePorts;
+
+		MachineInfo() : machineProcess(nullptr), remotePortStart(1000) {}
+
+		short getRandomPort() {
+			for (uint16_t i = remotePortStart; i < 60000; i++) {
+				if (std::find(usedRemotePorts.begin(), usedRemotePorts.end(), i) == usedRemotePorts.end()) {
+					TraceEvent(SevDebug, "RandomPortOpened").detail("PortNum", i);
+					usedRemotePorts.push_back(i);
+					return i;
+				}
+			}
+			UNREACHABLE();
+		}
+
+		void removeRemotePort(uint16_t port) {
+			if (port < remotePortStart)
+				return;
+			auto pos = std::find(usedRemotePorts.begin(), usedRemotePorts.end(), port);
+			if (pos != usedRemotePorts.end()) {
+				usedRemotePorts.erase(pos);
+				TraceEvent(SevDebug, "RandomPortClosed").detail("PortNum", port);
+			} else {
+				TraceEvent(SevDebug, "RemotePortRemovedFailure").detail("Reason", "port not found");
+			}
+		}
 	};
 
 	ProcessInfo* getProcess(Endpoint const& endpoint) { return getProcessByAddress(endpoint.getPrimaryAddress()); }

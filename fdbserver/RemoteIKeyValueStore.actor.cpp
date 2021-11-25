@@ -117,7 +117,9 @@ ACTOR Future<Void> spawnRemoteIKVS(RemoteIKeyValueStore* self, OpenKVStoreReques
 	process.start();
 	wait(process.onReady());
 	TraceEvent(SevDebug, "FlowProcessReady").log();
+	std::fputs("FlowProcessReady\n", stdout);
 	IKVSInterface ikvsInterface = wait(process.kvsIf.openKVStore.getReply(openKVSReq));
+	std::fputs("IKVSInterfaceReceived\n", stdout);
 	TraceEvent(SevDebug, "IKVSInterfaceReceived").detail("UID", ikvsInterface.id());
 	std::cout << "kv store opened\n";
 	self->ikvsProcess = process;

@@ -1153,6 +1153,9 @@ public:
 		MachineInfo& machine = machines[locality.machineId().get()];
 		if (!machine.machineId.present())
 			machine.machineId = locality.machineId();
+		if (port == 0) {
+			port = machine.getRandomPort();
+		}
 		for (int i = 0; i < machine.processes.size(); i++) {
 			if (machine.processes[i]->locality.machineId() !=
 			    locality.machineId()) { // SOMEDAY: compute ip from locality to avoid this check
@@ -1174,7 +1177,9 @@ public:
 			}
 			tEvent.log();
 			if (machine.processes[i]->address.port == port) {
-				TraceEvent(SevDebug, "ConflictingPort").detail("PortNum", port);
+				TraceEvent(SevDebug, "ConflictingPort")
+				    .detail("PortNum", port)
+				    .detail("Address", machine.processes[i]->address);
 			}
 			ASSERT(machine.processes[i]->address.port != port);
 		}
@@ -1496,6 +1501,7 @@ public:
 		    .detail("MachineId", p->locality.machineId());
 		currentlyRebootingProcesses.insert(std::pair<NetworkAddress, ProcessInfo*>(p->address, p));
 		std::vector<ProcessInfo*>& processes = machines[p->locality.machineId().get()].processes;
+		machines[p->locality.machineId().get()].removeRemotePort(p->address.port);
 		if (p != processes.back()) {
 			auto it = std::find(processes.begin(), processes.end(), p);
 			std::swap(*it, processes.back());
