@@ -31,6 +31,7 @@
 #include "contrib/fmt-8.0.1/include/fmt/format.h"
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/Knobs.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/MultiInterface.h"
 
@@ -6033,8 +6034,9 @@ bool rkThrottlingCooledDown(DatabaseContext* cx) {
 
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	if (!readVersion.isValid()) {
-		if (!options.skipGrvCache && rkThrottlingCooledDown(getDatabase().getPtr()) &&
-		    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE || options.useGrvCache)) {
+		if (!CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && !options.skipGrvCache &&
+		    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE || options.useGrvCache) &&
+		    rkThrottlingCooledDown(getDatabase().getPtr())) {
 			TraceEvent("DebugGrvUseCache").detail("LastRV", cx->cachedRv).detail("LastTime", format("%.6f", cx->lastTimedGrv.get()));
 			// Upon our first request to use cached RVs, start the background updater
 			if (!cx->grvUpdateHandler.isValid()) {
@@ -6042,6 +6044,9 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 			}
 			readVersion = getDBCachedReadVersion(getDatabase().getPtr(), now());
 			return readVersion;
+		}
+		if (CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && cx->grvUpdateHandler.isValid()) {
+			cx->grvUpdateHandler.cancel();
 		}
 		++cx->transactionReadVersions;
 		flags |= options.getReadVersionFlags;

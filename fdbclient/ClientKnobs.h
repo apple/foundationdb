@@ -123,7 +123,7 @@ public:
 	double MAX_VERSION_CACHE_LAG; // The upper bound in seconds for OK amount of staleness when using a cached RV
 	double MAX_PROXY_CONTACT_LAG; // The upper bound in seconds for how often we want a response from the GRV proxies
 	double DEBUG_USE_GRV_CACHE_CHANCE; // Debug setting to change the chance for a regular GRV request to use the cache
-
+	bool FORCE_GRV_CACHE_OFF; // Panic button to turn off cache. Holds priority over other options.
 	// should these be server knobs?
 	double GRV_CACHE_RK_COOLDOWN; // Required number of seconds to pass after throttling to re-allow cache use
 	double GRV_THROTTLING_THRESHOLD; // Number of seconds spent in the request queue which is considered throttling
