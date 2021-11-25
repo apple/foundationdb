@@ -5333,7 +5333,6 @@ ACTOR static Future<Void> tryCommit(Database cx,
 			}
 			when(CommitID ci = wait(reply)) {
 				Version v = ci.version;
-				TraceEvent("DebugGrvCommitSuccess");
 				cx->updateCachedRV(grvTime, v);
 				if (v != invalidVersion) {
 					if (CLIENT_BUGGIFY) {
@@ -5950,10 +5949,10 @@ ACTOR Future<Version> extractReadVersion(Location location,
 	double latency = now() - startTime;
 	cx->lastProxyRequest = startTime;
 	cx->updateCachedRV(startTime, rep.version);
-	TraceEvent("DebugGrvTimeThrottled").detail("TimeThrottled", rep.timeThrottled);
+	TraceEvent("DebugGrvQueueIterations").detail("TimeThrottled", rep.queueIterations);
 	if (rep.rkThrottled && priority != TransactionPriority::IMMEDIATE) {
 		TraceEvent("DebugGrvThrottleObserved")
-		    .detail("TimeThrottled", rep.timeThrottled)
+		    .detail("TimeThrottled", rep.queueIterations)
 		    .detail("Threshold", CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD);
 		cx->lastTimedRkThrottle = now();
 	}

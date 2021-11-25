@@ -198,7 +198,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 	int64_t midShardSize = 0;
-	double timeThrottled;
+	uint32_t queueIterations = 0;
 	bool rkThrottled;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
@@ -214,7 +214,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           metadataVersion,
 		           tagThrottleInfo,
 		           midShardSize,
-		           timeThrottled,
+		           queueIterations,
 		           rkThrottled);
 	}
 };
@@ -238,14 +238,14 @@ struct GetReadVersionRequest : TimedRequest {
 	uint32_t transactionCount;
 	uint32_t flags;
 	TransactionPriority priority;
-	double reqProcessStart, reqProcessEnd;
+	uint32_t queueIterations;
 
 	TransactionTagMap<uint32_t> tags;
 
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
 
-	GetReadVersionRequest() : transactionCount(1), flags(0), reqProcessStart(0.0), reqProcessEnd(0.0) {}
+	GetReadVersionRequest() : transactionCount(1), flags(0), queueIterations(0) {}
 	GetReadVersionRequest(SpanID spanContext,
 	                      uint32_t transactionCount,
 	                      TransactionPriority priority,
@@ -253,7 +253,7 @@ struct GetReadVersionRequest : TimedRequest {
 	                      TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(),
 	                      Optional<UID> debugID = Optional<UID>())
 	  : spanContext(spanContext), transactionCount(transactionCount), flags(flags), priority(priority),
-	    reqProcessStart(0.0), reqProcessEnd(0.0), tags(tags), debugID(debugID) {
+	    queueIterations(0), tags(tags), debugID(debugID) {
 		flags = flags & ~FLAG_PRIORITY_MASK;
 		switch (priority) {
 		case TransactionPriority::BATCH:
@@ -274,7 +274,7 @@ struct GetReadVersionRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext, reqProcessStart, reqProcessEnd);
+		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext, queueIterations);
 
 		if (ar.isDeserializing) {
 			if ((flags & PRIORITY_SYSTEM_IMMEDIATE) == PRIORITY_SYSTEM_IMMEDIATE) {

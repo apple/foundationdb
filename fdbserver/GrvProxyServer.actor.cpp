@@ -653,15 +653,15 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 			}
 		}
 
-		reply.timeThrottled = request.reqProcessEnd - request.reqProcessStart;
+		reply.queueIterations = request.queueIterations;
 		TraceEvent("DebugGrvProxyThrottleCheck")
-		    .detail("TimeThrottled", reply.timeThrottled)
+		    .detail("QueueIterations", reply.queueIterations)
 		    .detail("ThrottleThreshold", CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD)
 		    .detail("LastTxnThrottled", stats->lastTxnThrottled)
 		    .detail("ThrottleStartTime", format("%.6f", stats->throttleStartTime))
 		    .detail("Diff", now() - stats->throttleStartTime)
 		    .detail("SustainedThrottlingThreshold", CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD);
-		if (reply.timeThrottled > CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD) {
+		if (reply.queueIterations >= CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD) {
 			TraceEvent("DebugGrvProxyThrottled");
 			if (stats->lastTxnThrottled) {
 				TraceEvent("DebugGrvProxyLastTxnThrottled");
@@ -842,24 +842,15 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 			// transactionQueue->span.swap(span);
 
 			auto& req = transactionQueue->front();
+			req.queueIterations++;
 			int tc = req.transactionCount;
 
 			if (req.priority < TransactionPriority::DEFAULT &&
 			    !batchRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
-				if (req.reqProcessStart == 0.0) {
-					req.reqProcessStart = g_network->timer();
-				}
 				break;
 			} else if (req.priority < TransactionPriority::IMMEDIATE &&
 			           !normalRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
-				if (req.reqProcessStart == 0.0) {
-					req.reqProcessStart = g_network->timer();
-				}
 				break;
-			}
-			// If not previously set, this is the first time this transaction is being processed.
-			if (req.reqProcessStart == 0.0) {
-				req.reqProcessStart = g_network->timer();
 			}
 
 			if (req.debugID.present()) {
@@ -882,8 +873,6 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 				grvProxyData->stats.batchTxnGRVTimeInQueue.addMeasurement(currentTime - req.requestTime());
 				--grvProxyData->stats.batchGRVQueueSize;
 			}
-
-			req.reqProcessEnd = g_network->timer();
 			start[req.flags & 1].push_back(std::move(req));
 			static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
 			transactionQueue->pop_front();

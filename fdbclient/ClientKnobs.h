@@ -126,7 +126,7 @@ public:
 	bool FORCE_GRV_CACHE_OFF; // Panic button to turn off cache. Holds priority over other options.
 	// should these be server knobs?
 	double GRV_CACHE_RK_COOLDOWN; // Required number of seconds to pass after throttling to re-allow cache use
-	double GRV_THROTTLING_THRESHOLD; // Number of seconds spent in the request queue which is considered throttling
+	int GRV_THROTTLING_THRESHOLD; // Number of iterations spent in the request queue loop which is considered throttling
 	double GRV_SUSTAINED_THROTTLING_THRESHOLD; // If ALL GRV requests have been throttled in the last number of seconds
 	                                           // specified here, ratekeeper is throttling and not a false positive
 
