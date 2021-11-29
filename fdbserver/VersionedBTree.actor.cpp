@@ -9832,11 +9832,10 @@ TEST_CASE(":/redwood/performance/set") {
 	state double intervalStart = timer();
 	state double start = intervalStart;
 	state int sinceYield = 0;
+	state Version version = btree->getLastCommittedVersion();
 
 	if (insertRecords) {
 		while (kvBytesTotal < kvBytesTarget) {
-			Version lastVer = btree->getLastCommittedVersion();
-			state Version version = lastVer + 1;
 			state int changesThisVersion =
 			    deterministicRandom()->randomInt(0, maxRecordsPerCommit - recordsThisCommit + 1);
 
@@ -9884,7 +9883,7 @@ TEST_CASE(":/redwood/performance/set") {
 				// actor state object
 				double* pIntervalStart = &intervalStart;
 
-				commit = map(btree->commit(version), [=](Void result) {
+				commit = map(btree->commit(++version), [=](Void result) {
 					if (!traceMetrics) {
 						printf("%s\n", g_redwoodMetrics.toString(true).c_str());
 					}
