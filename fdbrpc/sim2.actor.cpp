@@ -1009,9 +1009,9 @@ public:
 		THREAD_RETURN;
 	}
 
-	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) override {
+	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override {
 		SimThreadArgs* simArgs = new SimThreadArgs(func, arg);
-		return ::startThread(simStartThread, simArgs);
+		return ::startThread(simStartThread, simArgs, stackSize, name);
 	}
 
 	void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) override {

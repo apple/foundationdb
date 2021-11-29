@@ -544,7 +544,10 @@ public:
 	virtual void onMainThread(Promise<Void>&& signal, TaskPriority taskID) = 0;
 	// Executes signal.send(Void()) on a/the thread belonging to this network
 
-	virtual THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) = 0;
+	virtual THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*),
+	                                  void* arg,
+	                                  int stackSize = 0,
+	                                  const char* name = nullptr) = 0;
 	// Starts a thread and returns a handle to it
 
 	virtual void run() = 0;
