@@ -1935,8 +1935,13 @@ void MultiVersionApi::runNetwork() {
 		for (int threadNum = 0; threadNum < threadCount; threadNum++) {
 			runOnExternalClients(threadNum, [&handles, threadNum](Reference<ClientInfo> client) {
 				if (client->external) {
-					std::string threadName =
-					    format("fdb-external-network-thread-%s-%d", client->releaseVersion.c_str(), threadNum);
+					std::string threadName = format("fdb-%s-%d", client->releaseVersion.c_str(), threadNum);
+					if (threadName.size() > 15) {
+						threadName = format("fdb-%s", client->releaseVersion.c_str());
+						if (threadName.size() > 15) {
+							threadName = "fdb-external";
+						}
+					}
 					handles.push_back(
 					    g_network->startThread(&runNetworkThread, client.getPtr(), 0, threadName.c_str()));
 				}
