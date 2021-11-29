@@ -184,7 +184,7 @@ public:
 	}
 
 	bool isSimulated() const override { return false; }
-	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) override;
+	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override;
 
 	void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) override;
 	bool isAddressOnThisHost(NetworkAddress const& addr) const override;
@@ -1774,8 +1774,8 @@ void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
 	}
 }
 
-THREAD_HANDLE Net2::startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) {
-	return ::startThread(func, arg);
+THREAD_HANDLE Net2::startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) {
+	return ::startThread(func, arg, stackSize, name);
 }
 
 Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, const std::string& host) {
