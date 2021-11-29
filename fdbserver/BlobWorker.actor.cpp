@@ -1205,6 +1205,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				metadata->durableSnapshotVersion.set(startState.blobFilesToSnapshot.get().snapshotFiles.back().version);
 			} else {
 				ASSERT(startState.previousDurableVersion == invalidVersion);
+				printf("About to dump initial snapshot\n");
 				BlobFileIndex fromFDB = wait(dumpInitialSnapshotFromFDB(bwData, metadata, startState.granuleID));
 				newSnapshotFile = fromFDB;
 				ASSERT(startState.changeFeedStartVersion <= fromFDB.version);
