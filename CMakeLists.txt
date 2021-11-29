@@ -86,7 +86,8 @@ message(STATUS "Current git version ${CURRENT_GIT_VERSION}")
 # Version information
 ################################################################################
 if (FDB_RELEASE_CANDIDATE)
-    set(FDB_VERSION ${PROJECT_VERSION}-rc1)
+    set(FDB_RELEASE_CANDIDATE_VERSION 1 CACHE STRING "release candidate version")
+    set(FDB_VERSION ${PROJECT_VERSION}-rc${FDB_RELEASE_CANDIDATE_VERSION})
 else()
     set(FDB_VERSION ${PROJECT_VERSION})
 endif()
