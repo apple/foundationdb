@@ -430,6 +430,7 @@ public:
 
 	void setTransactionID(uint64_t id);
 	void setToken(uint64_t token);
+	Version getRvGeneration() { return rvGeneration; }
 
 	const std::vector<Future<std::pair<Key, Key>>>& getExtraReadConflictRanges() const { return extraConflictRanges; }
 	Standalone<VectorRef<KeyRangeRef>> readConflictRanges() const {
@@ -445,6 +446,7 @@ private:
 
 	double backoff;
 	Version committedVersion{ invalidVersion };
+	Version rvGeneration;
 	CommitTransactionRequest tr;
 	Future<Version> readVersion;
 	Promise<Optional<Value>> metadataVersion;
