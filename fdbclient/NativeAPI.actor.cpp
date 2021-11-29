@@ -1882,8 +1882,8 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 
 	TraceEvent("ConnectToDatabase", database->dbId)
 	    .detail("Version", FDB_VT_VERSION)
-	    .detail("ClusterFile", connRecord->toString())
-	    .detail("ConnectionString", connRecord->getConnectionString().toString())
+	    .detail("ClusterFile", connRecord ? connRecord->toString() : "None")
+	    .detail("ConnectionString", connRecord ? connRecord->getConnectionString().toString() : "None")
 	    .detail("ClientLibrary", imageInfo.fileName)
 	    .detail("Primary", networkOptions.primaryClient)
 	    .detail("Internal", internal)
