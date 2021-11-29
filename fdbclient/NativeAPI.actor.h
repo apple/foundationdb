@@ -446,7 +446,7 @@ private:
 
 	double backoff;
 	Version committedVersion{ invalidVersion };
-	Version rvGeneration;
+	Version rvGeneration{ invalidVersion };
 	CommitTransactionRequest tr;
 	Future<Version> readVersion;
 	Promise<Optional<Value>> metadataVersion;

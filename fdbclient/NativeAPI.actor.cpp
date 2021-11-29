@@ -203,18 +203,18 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 }
 
 void DatabaseContext::updateCachedRV(double t, Version v) {
-	if (t > lastTimedGrv.get() && v >= cachedRv) {
+	if (t > lastTimedGrv && v >= cachedRv) {
 		TraceEvent("CheckpointCacheUpdate")
 		    .detail("Version", v)
 		    .detail("CurTime", t)
 		    .detail("LastVersion", cachedRv)
-		    .detail("LastTime", lastTimedGrv.get());
+		    .detail("LastTime", lastTimedGrv);
 		cachedRv = v;
 		lastTimedGrv = t;
 	}
 }
 
-void DatabaseContext::invalidateCache() {
+void DatabaseContext::invalidateRvCache() {
 	cachedRv = 0;
 	lastTimedGrv = 0.0;
 }
@@ -1032,14 +1032,14 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 		loop {
 			wait(refreshTransaction(cx, &tr));
 			state double curTime = now();
-			state double lastTime = cx->lastTimedGrv.get();
+			state double lastTime = cx->lastTimedGrv;
 			state double lastProxyTime = cx->lastProxyRequest;
 			TraceEvent("BackgroundGrvUpdaterBefore")
 			    .detail("CurTime", curTime)
 			    .detail("LastTime", lastTime)
 			    .detail("GrvDelay", grvDelay)
 			    .detail("CachedRv", cx->cachedRv)
-			    .detail("CachedTime", cx->lastTimedGrv.get())
+			    .detail("CachedTime", cx->lastTimedGrv)
 			    .detail("Gap", curTime - lastTime)
 			    .detail("Bound", CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay);
 			if (curTime - lastTime >= (CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay) ||
@@ -1052,7 +1052,7 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 					TraceEvent("BackgroundGrvUpdaterSuccess")
 					    .detail("GrvDelay", grvDelay)
 					    .detail("CachedRv", cx->cachedRv)
-					    .detail("CachedTime", cx->lastTimedGrv.get());
+					    .detail("CachedTime", cx->lastTimedGrv);
 				} catch (Error& e) {
 					TraceEvent("BackgroundGrvUpdaterTxnError").error(e, true);
 					wait(tr.onError(e));
@@ -5339,7 +5339,7 @@ ACTOR static Future<Void> tryCommit(Database cx,
 			when(CommitID ci = wait(reply)) {
 				Version v = ci.version;
 				if (cx->rvCacheGeneration != tr->getRvGeneration()) {
-					cx->invalidateCache();
+					cx->invalidateRvCache();
 				} else {
 					cx->updateCachedRV(grvTime, v);
 				}
@@ -6021,15 +6021,15 @@ ACTOR Future<Version> extractReadVersion(Location location,
 	return rep.version;
 }
 
-ACTOR Future<Version> getDBCachedReadVersion(DatabaseContext* cx, double requestTime) {
-	if (requestTime - cx->lastTimedGrv.get() > CLIENT_KNOBS->MAX_VERSION_CACHE_LAG) {
-		wait(cx->lastTimedGrv.whenAtLeast(requestTime - CLIENT_KNOBS->MAX_VERSION_CACHE_LAG));
-	}
-	// Want to check that the cached version is at most
-	// MAX_VERSION_CACHE_LAG (100ms) old compared to requestTime.
-	ASSERT(!debug_checkVersionTime(cx->cachedRv, requestTime, "CheckStaleness"));
-	return cx->cachedRv;
-}
+// ACTOR Future<Version> getDBCachedReadVersion(DatabaseContext* cx, double requestTime) {
+// 	if (requestTime - cx->lastTimedGrv.get() > CLIENT_KNOBS->MAX_VERSION_CACHE_LAG) {
+// 		wait(cx->lastTimedGrv.whenAtLeast(requestTime - CLIENT_KNOBS->MAX_VERSION_CACHE_LAG));
+// 	}
+// 	// Want to check that the cached version is at most
+// 	// MAX_VERSION_CACHE_LAG (100ms) old compared to requestTime.
+// 	ASSERT(!debug_checkVersionTime(cx->cachedRv, requestTime, "CheckStaleness"));
+// 	return cx->cachedRv;
+// }
 
 bool rkThrottlingCooledDown(DatabaseContext* cx) {
 	if (cx->lastTimedRkThrottle == 0.0) {
@@ -6043,18 +6043,22 @@ bool rkThrottlingCooledDown(DatabaseContext* cx) {
 }
 
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
+	rvGeneration = cx->rvCacheGeneration;
 	if (!readVersion.isValid()) {
 		if (!CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && !options.skipGrvCache &&
 		    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE || options.useGrvCache) &&
 		    rkThrottlingCooledDown(getDatabase().getPtr())) {
-			TraceEvent("DebugGrvUseCache").detail("LastRV", cx->cachedRv).detail("LastTime", format("%.6f", cx->lastTimedGrv.get()));
+			TraceEvent("DebugGrvUseCache")
+			    .detail("LastRV", cx->cachedRv)
+			    .detail("LastTime", format("%.6f", cx->lastTimedGrv));
 			// Upon our first request to use cached RVs, start the background updater
 			if (!cx->grvUpdateHandler.isValid()) {
 				cx->grvUpdateHandler = backgroundGrvUpdater(getDatabase().getPtr());
 			}
-			readVersion = getDBCachedReadVersion(getDatabase().getPtr(), now());
-			rvGeneration = cx->rvCacheGeneration;
-			return readVersion;
+			if (now() - cx->lastTimedGrv <= CLIENT_KNOBS->MAX_VERSION_CACHE_LAG) {
+				readVersion = cx->cachedRv;
+				return readVersion;
+			} // else go through regular GRV path
 		}
 		if (CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && cx->grvUpdateHandler.isValid()) {
 			cx->grvUpdateHandler.cancel();

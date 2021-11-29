@@ -432,10 +432,10 @@ public:
 
 	// GRV Cache
 	// Database-level read version cache storing the most recent successful GRV as well as the time it was requested.
-	NotifiedDouble lastTimedGrv;
+	double lastTimedGrv;
 	Version cachedRv;
 	void updateCachedRV(double t, Version v);
-	void invalidateCache();
+	void invalidateRvCache();
 	double lastTimedRkThrottle;
 	// Cached RVs can be updated through commits, and using cached RVs avoids the proxies altogether
 	// Because our checks for ratekeeper throttling requires communication with the proxies,
