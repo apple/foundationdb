@@ -318,7 +318,7 @@ public:
 			writer = Reference<IThreadPool>(new DummyThreadPool());
 		else
 			writer = createGenericThreadPool();
-		writer->addThread(new WriterThread(barriers, logWriter, formatter));
+		writer->addThread(new WriterThread(barriers, logWriter, formatter), "fdb-trace-log");
 
 		rollsize = rs;
 
