@@ -1944,10 +1944,10 @@ public:
 		if (entry.is_linked()) {
 			if (!noHit) {
 				++entry.hits;
-				// Move item to the back of the eviction order, regardless of which list it is currently in
-				evictionOrder.splice(evictionOrder.end(),
-				                     entry.evictionPrioritized ? prioritizedEvictions : evictionOrder,
-				                     EvictionOrderT::s_iterator_to(entry));
+				// If item eviction is not prioritized, move to back of eviction order
+				if (!entry.evictionPrioritized) {
+					evictionOrder.splice(evictionOrder.end(), evictionOrder, EvictionOrderT::s_iterator_to(entry));
+				}
 			}
 		} else {
 			// Otherwise it was a cache miss
