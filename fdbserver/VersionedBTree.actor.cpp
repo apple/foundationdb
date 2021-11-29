@@ -1915,23 +1915,6 @@ public:
 		}
 	}
 
-	// Try to evict the item at index from cache
-	// Returns true if item is evicted or was not present in cache
-	bool tryEvict(const IndexType& index) {
-		auto i = cache.find(index);
-		if (i == cache.end() || !i->second.item.evictable()) {
-			return false;
-		}
-		Entry& toEvict = i->second;
-		if (toEvict.hits == 0) {
-			++g_redwoodMetrics.metric.pagerEvictUnhit;
-		}
-		currentSize -= toEvict.size;
-		evictionOrder.erase(evictionOrder.iterator_to(toEvict));
-		cache.erase(i);
-		return true;
-	}
-
 	// Get the object for i or create a new one.
 	// After a get(), the object for i is the last in evictionOrder.
 	// If noHit is set, do not consider this access to be cache hit if the object is present
@@ -2973,11 +2956,6 @@ public:
 		return readPhysicalPage(self, pageID, ioMaxPriority, true);
 	}
 
-	bool tryEvictPage(LogicalPageID logicalID, Version v) {
-		PhysicalPageID physicalID = getPhysicalPageID(logicalID, v);
-		return pageCache.tryEvict(physicalID);
-	}
-
 	// Reads the most recent version of pageID, either previously committed or written using updatePage()
 	// in the current commit
 	Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
@@ -3934,8 +3912,6 @@ public:
 		return map(pager->readMultiPageAtVersion(reason, level, pageIDs, priority, version, cacheable, noHit),
 		           [=](Reference<ArenaPage> p) { return Reference<const ArenaPage>(std::move(p)); });
 	}
-
-	bool tryEvictPage(LogicalPageID id) override { return pager->tryEvictPage(id, version); }
 
 	Key getMetaKey() const override { return metaKey; }
 
@@ -5696,17 +5672,6 @@ private:
 		}
 
 		return records;
-	}
-
-	// Try to evict a BTree page from the pager cache.
-	// Returns true if, at the end of the call, the page is no longer in cache,
-	// so the caller can assume its ArenaPage reference is the only one.
-	bool tryEvictPage(IPagerSnapshot* pager, BTreePageIDRef id) {
-		// If it's an oversized page, currently it cannot be in the cache
-		if (id.size() > 0) {
-			return true;
-		}
-		return pager->tryEvictPage(id.front());
 	}
 
 	ACTOR static Future<Reference<const ArenaPage>> readPage(PagerEventReasons reason,
