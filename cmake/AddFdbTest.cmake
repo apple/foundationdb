@@ -243,7 +243,7 @@ function(create_correctness_package)
   endif()
   set(out_dir "${CMAKE_BINARY_DIR}/correctness")
   stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "correctness" OUT_FILES package_files)
-  set(tar_file ${CMAKE_BINARY_DIR}/packages/correctness-${CMAKE_PROJECT_VERSION}.tar.gz)
+  set(tar_file ${CMAKE_BINARY_DIR}/packages/correctness-${FDB_VERSION}.tar.gz)
   add_custom_command(
     OUTPUT ${tar_file}
     DEPENDS ${package_files}
@@ -270,7 +270,7 @@ function(create_valgrind_correctness_package)
   if(USE_VALGRIND)
     set(out_dir "${CMAKE_BINARY_DIR}/valgrind_correctness")
     stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "valgrind correctness" OUT_FILES package_files)
-    set(tar_file ${CMAKE_BINARY_DIR}/packages/valgrind-${CMAKE_PROJECT_VERSION}.tar.gz)
+    set(tar_file ${CMAKE_BINARY_DIR}/packages/valgrind-${FDB_VERSION}.tar.gz)
     add_custom_command(
       OUTPUT ${tar_file}
       DEPENDS ${package_files}
@@ -332,14 +332,14 @@ function(package_bindingtester)
   set(generated_binding_files python/fdb/fdboptions.py)
   if(WITH_JAVA_BINDING)
     if(NOT FDB_RELEASE)
-      set(prerelease_string "-PRERELEASE")
+      set(not_fdb_release_string "-SNAPSHOT")
     else()
-      set(prerelease_string "")
+      set(not_fdb_release_string "")
     endif()
     add_custom_command(
       TARGET copy_binding_output_files
       COMMAND ${CMAKE_COMMAND} -E copy
-        ${CMAKE_BINARY_DIR}/packages/fdb-java-${CMAKE_PROJECT_VERSION}${prerelease_string}.jar
+        ${CMAKE_BINARY_DIR}/packages/fdb-java-${FDB_VERSION}${not_fdb_release_string}.jar
         ${bdir}/tests/java/foundationdb-client.jar
       COMMENT "Copy Java bindings for bindingtester")
     add_dependencies(copy_binding_output_files fat-jar)
@@ -368,7 +368,7 @@ function(package_bindingtester)
   add_custom_target(copy_bindingtester_binaries
     DEPENDS ${outfiles} "${CMAKE_BINARY_DIR}/bindingtester.touch" copy_binding_output_files)
   add_dependencies(copy_bindingtester_binaries strip_only_fdbserver strip_only_fdbcli strip_only_fdb_c)
-  set(tar_file ${CMAKE_BINARY_DIR}/packages/bindingtester-${CMAKE_PROJECT_VERSION}.tar.gz)
+  set(tar_file ${CMAKE_BINARY_DIR}/packages/bindingtester-${FDB_VERSION}.tar.gz)
   add_custom_command(
     OUTPUT ${tar_file}
     COMMAND ${CMAKE_COMMAND} -E tar czf ${tar_file} *
