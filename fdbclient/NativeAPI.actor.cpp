@@ -5333,7 +5333,6 @@ ACTOR static Future<Void> tryCommit(Database cx,
 		state double grvTime = now();
 		choose {
 			when(wait(cx->onProxiesChanged())) {
-				cx->rvCacheGeneration++;
 				reply.cancel();
 				throw request_maybe_delivered();
 			}
@@ -5382,7 +5381,6 @@ ACTOR static Future<Void> tryCommit(Database cx,
 					return Void();
 				} else {
 					// clear the RYW transaction which contains previous conflicting keys
-					cx->rvCacheGeneration++;
 					tr->info.conflictingKeys.reset();
 					if (ci.conflictingKRIndices.present()) {
 						tr->info.conflictingKeys =
@@ -5411,10 +5409,11 @@ ACTOR static Future<Void> tryCommit(Database cx,
 			}
 		}
 	} catch (Error& e) {
-		cx->rvCacheGeneration++;
 		if (e.code() == error_code_request_maybe_delivered || e.code() == error_code_commit_unknown_result) {
 			// We don't know if the commit happened, and it might even still be in flight.
 
+			// Advance the cached RV generation to create a time boundary where a commit (possibly) failed.
+			cx->rvCacheGeneration++;
 			if (!options.causalWriteRisky) {
 				// Make sure it's not still in flight, either by ensuring the master we submitted to is dead, or the
 				// version we submitted with is dead, or by committing a conflicting transaction successfully
