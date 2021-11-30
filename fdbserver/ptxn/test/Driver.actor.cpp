@@ -262,14 +262,14 @@ void MessageFixture::setUp(const TLogGroupFixture& tLogGroupStorageTeamMapping,
                            const int numVersions,
                            const int numMutationsInVersion) {
 	const std::vector<StorageTeamID>& storageTeamIDs = tLogGroupStorageTeamMapping.storageTeamIDs;
-
-	Version version = initialVersion;
+	Version storageTeamVersion = 0;
+	Version commitVersion = initialVersion;
 	for (int _ = 0; _ < numVersions; ++_) {
 		Arena mutationArena;
 		VectorRef<MutationRef> mutationRefs;
 		generateMutationRefs(numMutationsInVersion, mutationArena, mutationRefs);
-		distributeMutationRefs(mutationRefs, version, storageTeamIDs, commitRecord);
-		version += deterministicRandom()->randomInt(5, 11);
+		distributeMutationRefs(mutationRefs, commitVersion, ++storageTeamVersion, storageTeamIDs, commitRecord);
+		commitVersion += deterministicRandom()->randomInt(5, 11);
 	}
 }
 

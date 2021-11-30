@@ -116,6 +116,7 @@ struct SubsequencedItemsHeader : MultipleItemHeaderBase {
 //
 // In the serialized data, the versions are strictly increasing ordered. And the subsequence with for a given version is
 // also strictly increasing ordered.
+// This serializer is used for TLog stream data to storage servers.
 class SubsequencedMessageSerializer {
 private:
 	// The serializer that generates the final output
@@ -218,8 +219,8 @@ public:
 //      tloggroup2 : version, [team 1 header], team 1 mutations, [team 3 header], team 3 mutations
 class ProxySubsequencedMessageSerializer {
 private:
-	// Mapper between StorageTeamID and SubsequencedMessageSerializer
-	std::unordered_map<StorageTeamID, SubsequencedMessageSerializer> serializers;
+	// Stores the storage team version of the commit
+	const Version storageTeamVersion;
 
 	// Subsequence of the mutation
 	// NOTE: The subsequence is designed to start at 1. This allows a cursor,  which initialized at subsequence 0, not
@@ -236,6 +237,10 @@ private:
 	// This is the sequence by using unsigned integer as subsequence in the old code.
 	Subsequence subsequence = 1;
 
+protected:
+	// Mapper between StorageTeamID and SubsequencedMessageSerializer
+	std::unordered_map<StorageTeamID, SubsequencedMessageSerializer> serializers;
+
 	// SpanContextMessage to be broadcasted
 	Optional<SpanContextMessage> spanContextMessage;
 
@@ -245,16 +250,14 @@ private:
 	// Tries to inject the span context to the serializer with given storage team ID
 	void tryInjectSpanContextMessage(const StorageTeamID& storageTeamID);
 
-	// Stores the version of the commit
-	const Version version;
-
 	// Prepares writing a message:
 	//     * Create a new StorageTeam serializer if necessary.
 	//     * Write SpanContextMessage if exists and is not prepended yet.
 	void prepareWriteMessage(const StorageTeamID& storageTeamID);
 
 public:
-	explicit ProxySubsequencedMessageSerializer(const Version&);
+	// version_ is the storage team version
+	explicit ProxySubsequencedMessageSerializer(const Version& version_);
 
 	// Gets the version the serializer is currently using
 	const Version& getVersion() const;
