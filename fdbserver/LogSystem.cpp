@@ -398,11 +398,13 @@ void LogPushData::setGroupMutations(
     const std::map<ptxn::TLogGroupID, std::unordered_map<ptxn::StorageTeamID, StringRef>>& groupMutations,
     Version commitVersion) {
 	for (const auto& [group, teamData] : groupMutations) {
-		if (pGroupMessageBuilders->count(group) == 0) {
-			pGroupMessageBuilders->emplace(group,
-			                               std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(commitVersion));
+		auto it = pGroupMessageBuilders->find(group);
+		if (it == pGroupMessageBuilders->end()) {
+			it = pGroupMessageBuilders
+			         ->emplace(group, std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(commitVersion))
+			         .first;
 		}
-		auto& writer = (*pGroupMessageBuilders)[group];
+		auto& writer = it->second;
 		for (const auto& [team, mutations] : teamData) {
 			ptxn::SubsequencedMessageDeserializer deserializer(mutations);
 			for (const auto& item : deserializer) {
