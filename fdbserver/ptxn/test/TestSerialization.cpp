@@ -27,6 +27,7 @@
 #include "fdbserver/ptxn/MessageTypes.h"
 #include "fdbserver/ptxn/Serializer.h"
 #include "fdbserver/ptxn/MessageSerializer.h"
+#include "fdbserver/ptxn/test/CommitUtils.h"
 #include "fdbserver/ptxn/test/Utils.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
@@ -290,6 +291,22 @@ TEST_CASE("/fdbserver/ptxn/test/twoLevelHeaderedSerializer/preserialized") {
 
 namespace {
 
+void generateMutations(std::vector<ptxn::VersionSubsequenceMessage>& mutations, Arena& arena, const int numMutations) {
+	Version version = 1;
+	Subsequence subsequence = 0;
+
+	for (int _ = 0; _ < numMutations; ++_) {
+		if (deterministicRandom()->randomInt(0, 20) == 0) {
+			version += deterministicRandom()->randomInt(1, 5);
+			subsequence = 0;
+		}
+
+		mutations.emplace_back(version,
+		                       ++subsequence,
+		                       ptxn::test::generateRandomSetValue(arena));
+	}
+}
+
 // The test is done by serializing data for multiple versions, in each version there are differenty types of objects.
 // Different section should have different versions in order to avoid confusion.
 namespace testSubsequencedMessageSerializer {
@@ -318,7 +335,7 @@ void write(ptxn::SubsequencedMessageSerializer& serializer) {
 	serializer.completeVersionWriting();
 }
 
-void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator) {
+void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator, const bool _) {
 	ASSERT_EQ(iterator->version, version);
 	ASSERT_EQ(iterator->subsequence, 1);
 	ASSERT_EQ(iterator->message.getType(), ptxn::Message::Type::MUTATION_REF);
@@ -352,7 +369,7 @@ void write(ptxn::SubsequencedMessageSerializer& serializer) {
 	serializer.completeVersionWriting();
 }
 
-void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator) {
+void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator, const bool _) {
 	ASSERT_EQ(iterator->version, version);
 	ASSERT_EQ(iterator->subsequence, 5);
 	ASSERT_EQ(iterator->message.getType(), ptxn::Message::Type::SPAN_CONTEXT_MESSAGE);
@@ -386,7 +403,7 @@ void write(ptxn::SubsequencedMessageSerializer& serializer) {
 	serializer.completeVersionWriting();
 }
 
-void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator) {
+void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator, const bool _) {
 	ASSERT(std::get<LogProtocolMessage>(iterator->message) == protocol_1);
 	++iterator;
 
@@ -409,8 +426,16 @@ void write(ptxn::SubsequencedMessageSerializer& serializer) {
 	serializer.completeVersionWriting();
 }
 
-void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator) {
-	// The empty version section should not be touched by iterator
+void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator, const bool iterateEmptyVersion) {
+	if (!iterateEmptyVersion) {
+		// The empty version section should not be touched by iterator
+		// This can be tested by checking later elements the iterator yields, i.e. the next verify part
+	} else {
+		ASSERT_EQ(iterator->version, version);
+		ASSERT_EQ(iterator->subsequence, MAX_SUBSEQUENCE);
+		ASSERT_EQ(iterator->message.getType(), ptxn::Message::Type::EMPTY_VERSION_MESSAGE);
+		++iterator;
+	}
 }
 
 } // namespace S4
@@ -428,7 +453,7 @@ void write(ptxn::SubsequencedMessageSerializer& serializer) {
 	serializer.completeVersionWriting();
 }
 
-void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator) {
+void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator, const bool _) {
 	ASSERT_EQ(iterator->message.getType(), ptxn::Message::Type::MUTATION_REF);
 	auto mutation = std::get<MutationRef>(iterator->message);
 	ASSERT_EQ(mutation.type, MutationRef::SetValue);
@@ -468,7 +493,7 @@ void write(ptxn::SubsequencedMessageSerializer& serializer) {
 	serializer.completeVersionWriting();
 }
 
-void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator) {
+void verify(ptxn::SubsequencedMessageDeserializer::iterator& iterator, const bool _) {
 	ASSERT_EQ(iterator->message.getType(), ptxn::Message::Type::MUTATION_REF);
 	auto mutation = std::get<MutationRef>(iterator->message);
 	ASSERT_EQ(mutation.type, MutationRef::SetValue);
@@ -503,23 +528,28 @@ bool testSerialization() {
 	printTiming << "Serialization, storageTeamID = " << storageTeamID.toString() << std::endl;
 
 	Standalone<StringRef> serialized = serializer.getSerialized();
-	SubsequencedMessageDeserializer deserializer(serialized);
-	SubsequencedMessageDeserializer::iterator iterator = deserializer.cbegin();
-	printTiming << deserializer.getStorageTeamID() << std::endl;
 
-	ASSERT(deserializer.getStorageTeamID() == storageTeamID);
-	ASSERT_EQ(deserializer.getNumVersions(), 6);
-	ASSERT_EQ(deserializer.getFirstVersion(), S1::version);
-	ASSERT_EQ(deserializer.getLastVersion(), S6::version);
+	for (const auto iterateEmptyVersionFlag : std::vector<bool>{ true, false }) {
+		printTiming << "Testing with iterateEmptyVersionFlag = " << std::boolalpha << iterateEmptyVersionFlag
+		            << std::endl;
+		SubsequencedMessageDeserializer deserializer(serialized, iterateEmptyVersionFlag);
+		SubsequencedMessageDeserializer::iterator iterator = deserializer.cbegin();
+		printTiming << deserializer.getStorageTeamID() << std::endl;
 
-	S1::verify(iterator);
-	S2::verify(iterator);
-	S3::verify(iterator);
-	S4::verify(iterator);
-	S5::verify(iterator);
-	S6::verify(iterator);
+		ASSERT(deserializer.getStorageTeamID() == storageTeamID);
+		ASSERT_EQ(deserializer.getNumVersions(), 6);
+		ASSERT_EQ(deserializer.getFirstVersion(), S1::version);
+		ASSERT_EQ(deserializer.getLastVersion(), S6::version);
 
-	ASSERT(iterator == deserializer.cend());
+		S1::verify(iterator, iterateEmptyVersionFlag);
+		S2::verify(iterator, iterateEmptyVersionFlag);
+		S3::verify(iterator, iterateEmptyVersionFlag);
+		S4::verify(iterator, iterateEmptyVersionFlag);
+		S5::verify(iterator, iterateEmptyVersionFlag);
+		S6::verify(iterator, iterateEmptyVersionFlag);
+
+		ASSERT(iterator == deserializer.cend());
+	}
 
 	printTiming << "Deserialization" << std::endl;
 
@@ -669,33 +699,36 @@ bool testDeserializerReset() {
 	using namespace ptxn;
 
 	ptxn::test::print::PrintTiming printTiming(__FUNCTION__);
+	const int NUM_MUTATIONS = 1000;
 
 	SubsequencedMessageSerializer serializer1(deterministicRandom()->randomUniqueID());
-	const std::vector<VersionSubsequenceMessage> DATA1{
-		{ 1, 3, MutationRef(MutationRef::SetValue, "Key1"_sr, "Value1"_sr) },
-		{ 3, 1, MutationRef(MutationRef::SetValue, "Key2"_sr, "Value2"_sr) },
-	};
-	serializeVersionedSubsequencedMutations(serializer1, DATA1);
+	Arena data1Arena;
+	std::vector<VersionSubsequenceMessage> data1;
+	generateMutations(data1, data1Arena, NUM_MUTATIONS);
+	serializeVersionedSubsequencedMutations(serializer1, data1);
 	serializer1.completeMessageWriting();
 	Standalone<StringRef> serialized1 = serializer1.getSerialized();
 
 	SubsequencedMessageSerializer serializer2(deterministicRandom()->randomUniqueID());
-	const std::vector<VersionSubsequenceMessage> DATA2{
-		{ 6, 3, MutationRef(MutationRef::SetValue, "Key3"_sr, "Value3"_sr) },
-	};
-	serializeVersionedSubsequencedMutations(serializer2, DATA2);
+	Arena data2Arena;
+	std::vector<VersionSubsequenceMessage> data2;
+	generateMutations(data2, data2Arena, NUM_MUTATIONS);
+	serializeVersionedSubsequencedMutations(serializer2, data2);
 	serializer2.completeMessageWriting();
 	Standalone<StringRef> serialized2 = serializer2.getSerialized();
 
 	SubsequencedMessageDeserializer deserializer(serialized1);
 	auto iter1 = deserializer.begin();
-	ASSERT(*iter1++ == DATA1[0]);
-	ASSERT(*iter1++ == DATA1[1]);
+	for(int i = 0; i < NUM_MUTATIONS; ++i, ++iter1) {
+		ASSERT(*iter1 == data1[i]);
+	}
 	ASSERT(iter1 == deserializer.end());
 
 	deserializer.reset(serialized2);
 	auto iter2 = deserializer.begin();
-	ASSERT(*iter2++ == DATA2[0]);
+	for(int i = 0; i < NUM_MUTATIONS; ++i, ++iter2) {
+		ASSERT(*iter2 == data2[i]);
+	}
 	ASSERT(iter2 == deserializer.end());
 
 	return true;
@@ -717,32 +750,6 @@ TEST_CASE("/fdbserver/ptxn/test/SubsequencedMessageSerializer/normal") {
 
 	return Void();
 }
-namespace {
-
-namespace testSubsequencedMessageSerializer {
-
-void generateMutations(std::vector<ptxn::VersionSubsequenceMessage>& mutations, Arena& arena, const int numMutations) {
-	Version version = 1;
-	Subsequence subsequence = 0;
-
-	for (int _ = 0; _ < numMutations; ++_) {
-		if (deterministicRandom()->randomInt(0, 20) == 0) {
-			version += deterministicRandom()->randomInt(1, 5);
-			subsequence = 0;
-		}
-
-		mutations.emplace_back(version,
-		                       ++subsequence,
-		                       MutationRef(arena,
-		                                   MutationRef::SetValue,
-		                                   deterministicRandom()->randomAlphaNumeric(10),
-		                                   deterministicRandom()->randomAlphaNumeric(100)));
-	}
-}
-
-} // namespace testSubsequencedMessageSerializer
-
-} // anonymous namespace
 
 // Test serialize huge amount of data
 // This test is inspired by that the fact that the internal Arena in the serializer might reallocate, and could make
