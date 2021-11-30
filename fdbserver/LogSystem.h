@@ -782,7 +782,6 @@ struct LogPushData : NonCopyable {
 	void writeToStorageTeams(TLogGroupCollectionRef tLogGroupCollection,
 	                         const std::set<ptxn::StorageTeamID>& storageTeams,
 	                         T m) {
-		TraceEvent("GroupMessageBuilder").detail("Size", pGroupMessageBuilders->size());
 		for (const auto& team : storageTeams) {
 			auto groupID = tLogGroupCollection->assignStorageTeam(team)->id();
 			ASSERT(pGroupMessageBuilders->count(groupID));
