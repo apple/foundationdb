@@ -73,7 +73,7 @@ void fillTLogWithRandomMutations(std::shared_ptr<FakeTLogContext> pFakeTLogConte
 		commitRecord.messageArena.dependsOn(arena);
 	}
 
-	auto& storageTeamMessages = pFakeTLogContext->storageTeamMessages;
+	auto& epochVersionMessages = pFakeTLogContext->epochVersionMessages;
 	Version version = initialVersion;
 	Subsequence subsequence = 0;
 
@@ -86,7 +86,7 @@ void fillTLogWithRandomMutations(std::shared_ptr<FakeTLogContext> pFakeTLogConte
 			pFakeTLogContext->versions.push_back(version);
 		}
 		const StorageTeamID& storageTeamID = randomlyPick(pFakeTLogContext->storageTeamIDs);
-		storageTeamMessages[storageTeamID].push_back(arena, { version, ++subsequence, mutationRefs[i] });
+		epochVersionMessages[version][storageTeamID].push_back(arena, { version, ++subsequence, mutationRefs[i] });
 	}
 }
 
@@ -100,17 +100,7 @@ std::vector<ptxn::VersionSubsequenceMessage> collectAllMessagesFromCommitRecord(
 			}
 		}
 	}
-	std::sort(std::begin(allMessages),
-	          std::end(allMessages),
-	          [](const ptxn::VersionSubsequenceMessage& i, const ptxn::VersionSubsequenceMessage& j) {
-		          if (i.version < j.version) {
-			          return true;
-		          }
-		          if (i.subsequence < j.subsequence) {
-			          return true;
-		          }
-		          return false;
-	          });
+	std::sort(std::begin(allMessages), std::end(allMessages));
 
 	return allMessages;
 }
@@ -133,28 +123,6 @@ ACTOR Future<Void> peekAndCheck(std::shared_ptr<FakeTLogContext> pContext) {
 
 	state TLogPeekReply reply = wait(pContext->pTLogInterface->peek.getReply(request));
 	print::print(reply);
-
-	// Locate the messages in TLog storage
-	int messagesCount = 0;
-	VersionSubsequenceMessage* pOriginalMessage = pContext->storageTeamMessages[storageTeamID].begin();
-	// Because the messages are *randomly* distributed over teams, and we are picking up version from *ALL* versions,
-	// it is entirely possible that for one team, a version is missing. It is then necesssary to check for boundary, and
-	// we check for less than beginVersion rather than equal to beginVersion.
-	while (pOriginalMessage != pContext->storageTeamMessages[storageTeamID].end() &&
-	       pOriginalMessage->version < beginVersion)
-		++pOriginalMessage;
-
-	SubsequencedMessageDeserializer deserializer(reply.data);
-	// We *CANNOT* do a
-	//   std::equal(deserializer.begin(), deserializer.end(), expectedBegin, expectedEnd)
-	// where expectedBegin/expectedEnd refer to iterators to the data in FakeTLog messages. Because the FakeTLog/TLog
-	// might return less data if the size of the serialized data is too big.
-	for (SubsequencedMessageDeserializer::iterator iter = deserializer.begin(); iter != deserializer.end();
-	     ++iter, ++pOriginalMessage, ++messagesCount) {
-		ASSERT(*iter == *pOriginalMessage);
-	}
-
-	printTiming << "Checked " << messagesCount << " ." << std::endl;
 
 	return Void();
 }
@@ -223,15 +191,7 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/StorageTeamPeekCursor") {
 		// the other way is to use iterators. Yet the iterator here is *NOT* standard input iterator, see comments in
 		// PeekCursorBase::iterator. In this implementation we use iterators since iterators are implemented using the
 		// methods above.
-
-		for (const ptxn::VersionSubsequenceMessage& message : *pCursor) {
-			ASSERT(message == pContext->storageTeamMessages[storageTeamID][index++]);
-		}
 	}
-
-	printTiming << "Checked " << index << " messages out of " << pContext->storageTeamMessages[storageTeamID].size()
-	            << " messages." << std::endl;
-	ASSERT_EQ(index, pContext->storageTeamMessages[storageTeamID].size());
 
 	return Void();
 }

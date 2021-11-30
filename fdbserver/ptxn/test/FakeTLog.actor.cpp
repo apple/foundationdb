@@ -35,125 +35,158 @@
 namespace ptxn::test {
 
 void processTLogCommitRequestByStorageTeam(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
-                                           const Version& version,
+                                           const Version& commitVersion,
                                            const StorageTeamID& storageTeamID,
                                            const StringRef& messages) {
-	SubsequencedMessageDeserializer deserializer(messages);
+	print::PrintTiming printTiming("processTLogCommitRequest");
+	printTiming << "Processing commit " << commitVersion << " for storage team " << storageTeamID << std::endl;
+	SubsequencedMessageDeserializer deserializer(messages, true);
+	auto& commitRecord = pFakeTLogContext->pTestDriverContext->commitRecord;
 
 	// Check the committed data matches the record
+	// FIXME put this part into CommitUtils
 	{
+		// The committer's record of data
+		const auto& recordedData = commitRecord.messages.at(commitVersion);
+
 		int index = 0;
+		Version storageTeamVersion = invalidVersion;
 		for (auto vsm : deserializer) {
-			const auto& message = vsm.message;
+			if (storageTeamVersion == invalidVersion) {
+				storageTeamVersion = vsm.version;
+			}
+
+			if (vsm.message.getType() == Message::Type::EMPTY_VERSION_MESSAGE) {
+				// Empty message is not what we created in CommitRecord, so we skip it
+				continue;
+			}
+
+			// FIXME: Use TestEnvironment
 			// We skip the subsequence check, as SpanContextMessage is broadcasted to all storage teams, it will be
 			// interfering the subsequence of mutationRefs.
-			ASSERT(message ==
-			       pFakeTLogContext->pTestDriverContext->commitRecord.messages[version][storageTeamID][index++].second);
+			const auto& subsequenceMessage = recordedData.at(storageTeamID)[index++];
+
+			ASSERT_EQ(vsm.subsequence, subsequenceMessage.first);
+			ASSERT(vsm.message == subsequenceMessage.second);
 		}
-		pFakeTLogContext->pTestDriverContext->commitRecord.tags[version][storageTeamID].tLogValidated = true;
+		ASSERT_EQ(storageTeamVersion, commitRecord.commitVersionStorageTeamVersionMapper.at(commitVersion));
+		commitRecord.tags[commitVersion][storageTeamID].tLogValidated = true;
 	}
 
 	// "Persist" the data into memory
-	for (const auto& vsm : deserializer) {
-		if (vsm.message.getType() == Message::Type::MUTATION_REF) {
-			const auto& version = vsm.version;
-			const auto& subsequence = vsm.subsequence;
-			const auto& mutation = std::get<MutationRef>(vsm.message);
-			pFakeTLogContext->storageTeamMessages[storageTeamID].push_back(
-			    pFakeTLogContext->persistenceArena,
-			    { version,
-			      subsequence,
-			      Message(MutationRef(pFakeTLogContext->persistenceArena,
-			                          static_cast<MutationRef::Type>(mutation.type),
-			                          mutation.param1,
-			                          mutation.param2)) });
-		} else {
-			pFakeTLogContext->storageTeamMessages[storageTeamID].push_back(pFakeTLogContext->persistenceArena, vsm);
-		}
+	if (pFakeTLogContext->epochVersionRange.empty() ||
+	    pFakeTLogContext->epochVersionRange.back().second != invalidVersion) {
+
+		// New generation
+		pFakeTLogContext->epochVersionRange.emplace_back(commitVersion, invalidVersion);
 	}
+
+	if (pFakeTLogContext->epochVersionMessages.empty() ||
+	    pFakeTLogContext->epochVersionMessages.rbegin()->first != commitVersion) {
+
+		// A new version
+		pFakeTLogContext->epochVersionMessages[commitVersion] = FakeTLogContext::StorageTeamMessages();
+	}
+
+	auto& storageTeamMessages = pFakeTLogContext->epochVersionMessages.rbegin()->second;
+	auto iter = std::begin(deserializer);
+	auto& arena = iter.arena();
+	for (; iter != std::end(deserializer); ++iter) {
+		storageTeamMessages[storageTeamID].push_back(pFakeTLogContext->persistenceArena, *iter);
+	}
+	pFakeTLogContext->persistenceArena.dependsOn(arena);
 }
 
-void processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
-                              const TLogCommitRequest& commitRequest) {
-	for (const auto& message : commitRequest.messages) {
-		processTLogCommitRequestByStorageTeam(pFakeTLogContext, commitRequest.version, message.first, message.second);
+ACTOR Future<Void> processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
+                                            TLogCommitRequest commitRequest) {
+	wait(pFakeTLogContext->latency());
+	for (const auto& [storageTeamID, message] : commitRequest.messages) {
+		processTLogCommitRequestByStorageTeam(pFakeTLogContext, commitRequest.version, storageTeamID, message);
 	}
-	commitRequest.reply.send(TLogCommitReply{ 0 });
+	commitRequest.reply.send(TLogCommitReply{ commitRequest.version });
+	return Void();
 }
 
-Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogContext> pFakeTLogContext) {
-	print::PrintTiming printTiming("FakeTLogPeek");
+ACTOR Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogContext> pFakeTLogContext) {
+	state print::PrintTiming printTiming("FakeTLogPeek");
 
 	const StorageTeamID storageTeamID = request.storageTeamID;
-	if (pFakeTLogContext->storageTeamMessages.find(request.storageTeamID) ==
-	    pFakeTLogContext->storageTeamMessages.end()) {
+	const auto& storageTeamEpochVersionRange =
+	    pFakeTLogContext->pTestDriverContext->commitRecord.storageTeamEpochVersionRange;
+	const std::pair<Version, Version>& versionRange = storageTeamEpochVersionRange.at(storageTeamID);
 
-		printTiming << "Team ID " << request.storageTeamID.toString() << " not found." << std::endl;
-		request.reply.sendError(storage_team_id_not_found());
+	printTiming << "Storage Team ID = " << storageTeamID.toString() << "\tVersion range [" << versionRange.first << ", "
+	            << versionRange.second << ")" << std::endl;
+	printTiming << "Request begin commit version = " << request.beginVersion << std::endl;
+
+	Version firstVersion = std::max(versionRange.first, request.beginVersion);
+	Version lastVersion = invalidVersion;
+	Version endVersion = versionRange.second;
+
+	if (request.endVersion.present() && request.endVersion.get() != invalidVersion) {
+		endVersion = std::min(endVersion, request.endVersion.get());
+	}
+
+	if (request.beginVersion >= endVersion) {
+		printTiming << "End of stream" << std::endl;
+		request.reply.sendError(end_of_stream());
 		return Void();
 	}
 
-	const VectorRef<VersionSubsequenceMessage>& messages = pFakeTLogContext->storageTeamMessages[storageTeamID];
-
-	Version firstVersion = invalidVersion;
-	Version lastVersion = invalidVersion;
-	Version endVersion = MAX_VERSION;
-	bool haveUnclosedVersionSection = false;
-	SubsequencedMessageSerializer serializer(storageTeamID);
-
-	if (request.endVersion.present() && request.endVersion.get() != invalidVersion) {
-		endVersion = request.endVersion.get();
+	auto epochVersionMessagesIter = pFakeTLogContext->epochVersionMessages.lower_bound(request.beginVersion);
+	if (epochVersionMessagesIter != std::end(pFakeTLogContext->epochVersionMessages)) {
+		firstVersion = epochVersionMessagesIter->first;
 	}
 
-	for (const auto& mutation : messages) {
-		const Version currentVersion = mutation.version;
+	SubsequencedMessageSerializer serializer(storageTeamID);
+	int numVersions = 0;
+	while (epochVersionMessagesIter != std::end(pFakeTLogContext->epochVersionMessages)) {
+		if (epochVersionMessagesIter->first >= endVersion) {
+			break;
+		}
+		// No storage team written in this version
+		if (epochVersionMessagesIter->second.count(storageTeamID) != 0) {
+			serializer.startVersionWriting(epochVersionMessagesIter->first);
+			for (auto vsm : epochVersionMessagesIter->second.at(storageTeamID)) {
+				serializer.write(vsm.subsequence, vsm.message);
+			}
+			serializer.completeVersionWriting();
 
-		// Have not reached the expected version
-		if (currentVersion < request.beginVersion) {
-			continue;
+			++numVersions;
 		}
 
-		// The serialized data size is too big, cutoff here
-		if (serializer.getTotalBytes() >= pFakeTLogContext->maxBytesPerPeek && lastVersion != currentVersion) {
+		lastVersion = epochVersionMessagesIter->first;
+
+		if (serializer.getTotalBytes() >= pFakeTLogContext->maxBytesPerPeek) {
 			printTiming << "Stopped serializing due to the reply size limit: Serialized " << serializer.getTotalBytes()
 			            << " Limit " << pFakeTLogContext->maxBytesPerPeek << std::endl;
 			break;
 		}
-
-		// Finished the range
-		if (currentVersion >= endVersion) {
+		if (numVersions >= pFakeTLogContext->maxVersionsPerPeek) {
+			printTiming << "Stopped serializing due to the reply version limit: Serialized " << numVersions << " Limit "
+			            << pFakeTLogContext->maxVersionsPerPeek << std::endl;
 			break;
 		}
 
-		if (currentVersion != lastVersion) {
-			if (haveUnclosedVersionSection) {
-				serializer.completeVersionWriting();
-				haveUnclosedVersionSection = false;
-			}
-
-			serializer.startVersionWriting(currentVersion);
-			haveUnclosedVersionSection = true;
-
-			if (firstVersion == invalidVersion) {
-				firstVersion = currentVersion;
-			}
-		}
-
-		const Subsequence subsequence = mutation.subsequence;
-		const auto& message = mutation.message;
-		serializer.write(subsequence, message);
-
-		lastVersion = currentVersion;
-	}
-
-	if (haveUnclosedVersionSection) {
-		serializer.completeVersionWriting();
-	}
+		++epochVersionMessagesIter;
+	} // while iterate over epochVersionMessages
 
 	serializer.completeMessageWriting();
 
+	if (epochVersionMessagesIter != std::end(pFakeTLogContext->epochVersionMessages)) {
+		printTiming << "Storage Team ID = " << storageTeamID.toString() << " Last processed version = " << lastVersion
+		            << std::endl;
+	} else {
+		printTiming << "Storage Team ID = " << storageTeamID.toString() << " All versions persisted are consumed"
+		            << std::endl;
+	}
+
 	Standalone<StringRef> serialized = serializer.getSerialized();
-	TLogPeekReply reply{ request.debugID, serialized.arena(), serialized };
+	state TLogPeekReply reply(request.debugID, serialized.arena(), serialized);
+	reply.beginVersion = firstVersion;
+	reply.endVersion = lastVersion;
+
+	wait(pFakeTLogContext->latency());
 	request.reply.send(reply);
 
 	return Void();
@@ -183,15 +216,16 @@ ACTOR Future<Void> fakeTLog_ActivelyPush(std::shared_ptr<FakeTLogContext> pFakeT
 	state std::shared_ptr<TestDriverContext> pTestDriverContext = pFakeTLogContext->pTestDriverContext;
 	state std::shared_ptr<TLogInterface_ActivelyPush> pTLogInterface =
 	    std::dynamic_pointer_cast<TLogInterface_ActivelyPush>(pFakeTLogContext->pTLogInterface);
-	state print::PrintTiming printTiming("FakeTLog");
+	state print::PrintTiming printTiming("FakeTLog_ActivelyPush");
+	state std::vector<Future<Void>> peekActors;
 
 	ASSERT(pTLogInterface);
 
 	loop choose {
-		when(TLogCommitRequest commitRequest = waitNext(pTLogInterface->commit.getFuture())) {
+		when(state TLogCommitRequest commitRequest = waitNext(pTLogInterface->commit.getFuture())) {
 			state TLogGroupID tLogGroupID(commitRequest.tLogGroupID);
 			printTiming << "Received commitRequest version = " << commitRequest.version << std::endl;
-			processTLogCommitRequest(pFakeTLogContext, commitRequest);
+			wait(processTLogCommitRequest(pFakeTLogContext, commitRequest));
 
 			printTiming << concatToString("Push the message to storage servers, log group id = ", tLogGroupID)
 			            << std::endl;
@@ -206,7 +240,7 @@ ACTOR Future<Void> fakeTLog_ActivelyPush(std::shared_ptr<FakeTLogContext> pFakeT
 			printTiming << concatToString("Complete push, log group id = ", tLogGroupID) << std::endl;
 		}
 		when(TLogPeekRequest peekRequest = waitNext(pTLogInterface->peek.getFuture())) {
-			fakeTLogPeek(peekRequest, pFakeTLogContext);
+			peekActors.push_back(fakeTLogPeek(peekRequest, pFakeTLogContext));
 		}
 	}
 }
@@ -215,16 +249,17 @@ ACTOR Future<Void> fakeTLog_PassivelyProvide(std::shared_ptr<FakeTLogContext> pF
 	state std::shared_ptr<TestDriverContext> pTestDriverContext = pFakeTLogContext->pTestDriverContext;
 	state std::shared_ptr<TLogInterface_PassivelyPull> pTLogInterface =
 	    std::dynamic_pointer_cast<TLogInterface_PassivelyPull>(pFakeTLogContext->pTLogInterface);
-	state print::PrintTiming printTiming("FakeTLog");
+	state print::PrintTiming printTiming("FakeTLog_PassivelyProvide");
+	state std::vector<Future<Void>> peekActors;
 
 	ASSERT(pTLogInterface);
 
 	loop choose {
-		when(TLogCommitRequest commitRequest = waitNext(pTLogInterface->commit.getFuture())) {
-			processTLogCommitRequest(pFakeTLogContext, commitRequest);
+		when(state TLogCommitRequest commitRequest = waitNext(pTLogInterface->commit.getFuture())) {
+			wait(processTLogCommitRequest(pFakeTLogContext, commitRequest));
 		}
 		when(TLogPeekRequest peekRequest = waitNext(pTLogInterface->peek.getFuture())) {
-			fakeTLogPeek(peekRequest, pFakeTLogContext);
+			peekActors.push_back(fakeTLogPeek(peekRequest, pFakeTLogContext));
 		}
 	}
 }
