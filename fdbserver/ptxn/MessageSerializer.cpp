@@ -183,8 +183,16 @@ size_t TLogSubsequencedMessageSerializer::getTotalBytes() const {
 
 ProxySubsequencedMessageSerializer::ProxySubsequencedMessageSerializer(const Version& version_) : version(version_) {}
 
+const Subsequence& ProxySubsequencedMessageSerializer::getSubsequence() const {
+	return subsequence;
+}
+
 const Version& ProxySubsequencedMessageSerializer::getVersion() const {
 	return version;
+}
+
+void ProxySubsequencedMessageSerializer::setSubsequence(const Subsequence& newSubsequence) {
+	subsequence = newSubsequence;
 }
 
 void ProxySubsequencedMessageSerializer::prepareWriteMessage(const StorageTeamID& storageTeamID) {

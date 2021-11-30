@@ -259,6 +259,12 @@ public:
 	// Gets the version the serializer is currently using
 	const Version& getVersion() const;
 
+	// Gets the current subsequence
+	const Subsequence& getSubsequence() const;
+
+	// Sets the subsequence. It is the caller's obligation to ensure the subsequence is ordered properly.
+	void setSubsequence(const Subsequence& subsequence);
+
 	// Broadcasts the span context to all storage teams. After this function is called, for any storage team, the first
 	// write will always prepend this SpanContextMessage before the mutation.
 	void broadcastSpanContext(const SpanContextMessage&);
