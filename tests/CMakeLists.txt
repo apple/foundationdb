@@ -210,7 +210,7 @@ if(WITH_PYTHON)
                restarting/from_5.0.0_until_6.3.0/StorefrontTestRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapTestAttrition-1.txt
-               restarting/from_6.2.33_until_6.3.0/SnapTestAttrition-2.txt IGNORE) # TODO re-enable once snap test failures are fixed!
+               restarting/from_6.2.33_until_6.3.0/SnapTestAttrition-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapTestSimpleRestart-1.txt
                restarting/from_6.2.33_until_6.3.0/SnapTestSimpleRestart-2.txt)
@@ -237,10 +237,10 @@ if(WITH_PYTHON)
                restarting/from_6.3.13/DrUpgradeRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_6.3.13/SnapCycleRestart-1.txt
-               restarting/from_6.3.13/SnapCycleRestart-2.txt IGNORE) # TODO re-enable once snap test failures are fixed!
+               restarting/from_6.3.13/SnapCycleRestart-2.txt IGNORE)
   add_fdb_test( 
     TEST_FILES restarting/from_6.3.13/SnapTestAttrition-1.txt
-               restarting/from_6.3.13/SnapTestAttrition-2.txt IGNORE) # TODO re-enable once snap test failures are fixed!
+               restarting/from_6.3.13/SnapTestAttrition-2.txt IGNORE)
   add_fdb_test(
     TEST_FILES restarting/from_6.3.13/SnapTestRestart-1.txt
                restarting/from_6.3.13/SnapTestRestart-2.txt)
