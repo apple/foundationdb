@@ -486,6 +486,7 @@ struct InitializeTLogRequest {
 	UID recruitmentID;
 	LogSystemConfig recoverFrom;
 	Version recoverAt;
+	Version maxRv;
 	Version knownCommittedVersion;
 	LogEpoch epoch;
 	std::vector<Tag> recoverTags;
@@ -511,6 +512,7 @@ struct InitializeTLogRequest {
 		           recruitmentID,
 		           recoverFrom,
 		           recoverAt,
+		           maxRv,
 		           knownCommittedVersion,
 		           epoch,
 		           recoverTags,

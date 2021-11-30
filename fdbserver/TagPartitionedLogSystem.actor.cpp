@@ -1679,6 +1679,9 @@ Future<Void> TagPartitionedLogSystem::onLogSystemConfigChange() {
 
 Version TagPartitionedLogSystem::getEnd() const {
 	ASSERT(recoverAt.present());
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		return maxRv + 1;
+	}
 	return recoverAt.get() + 1;
 }
 
@@ -1829,7 +1832,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::monitorLog(Reference<AsyncVar<Option
 	}
 }
 
-Optional<std::tuple<Version, Version, std::map<UID, Version>>> TagPartitionedLogSystem::getDurableVersion(
+Optional<std::tuple<Version, Version, std::vector<TLogLockResult>>> TagPartitionedLogSystem::getDurableVersion(
     UID dbgid,
     LogLockInfo lockInfo,
     std::vector<Reference<AsyncVar<bool>>> failed,
@@ -1916,40 +1919,14 @@ Optional<std::tuple<Version, Version, std::map<UID, Version>>> TagPartitionedLog
 			    .detail("KnownCommittedVersion", knownCommittedVersion)
 			    .detail("EpochEnd", lockInfo.epochEnd);
 
-			std::map<UID, Version> rvPerTLog;
-			std::unordered_map<Version, int> versionRepCount;
-			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				for (auto& result : results) {
-					rvPerTLog[result.id] = results[new_safe_range_begin].end;
-					for (int i = 0; i < result.unknownCommittedVersions.size(); i++) {
-						Version k = std::get<0>(result.unknownCommittedVersions[i]);
-						if (k <= results[new_safe_range_begin].end) {
-							continue;
-						}
-						versionRepCount[k]++;
-					}
-				}
-				int toleratedFailues = logSet->logServers.size() - requiredCount;
-				for (auto& result : results) {
-					for (int i = 0; i < result.unknownCommittedVersions.size(); i++) {
-						Version k = std::get<0>(result.unknownCommittedVersions[i]);
-						if (versionRepCount[k] >= std::get<1>(result.unknownCommittedVersions[i]) - toleratedFailues) {
-							rvPerTLog[result.id] = k;
-						}
-					}
-				}
-				for (auto& result : results) {
-					TraceEvent("GetDurableResultLog").detail("LOG", result.id).detail("RV", rvPerTLog[result.id]);
-				}
-			}
-			return std::make_tuple(knownCommittedVersion, results[new_safe_range_begin].end, rvPerTLog);
+			return std::make_tuple(knownCommittedVersion, results[new_safe_range_begin].end, results);
 		}
 	}
 	TraceEvent("GetDurableResultWaiting", dbgid)
 	    .detail("Required", requiredCount)
 	    .detail("Present", results.size())
 	    .detail("ServerState", sServerState);
-	return Optional<std::tuple<Version, Version, std::map<UID, Version>>>();
+	return Optional<std::tuple<Version, Version, std::vector<TLogLockResult>>>();
 }
 
 ACTOR Future<Void> TagPartitionedLogSystem::getDurableVersionChanged(LogLockInfo lockInfo,
@@ -2230,7 +2207,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 		Version minEnd = std::numeric_limits<Version>::max();
 		Version maxEnd = 0;
 		std::vector<Future<Void>> changes;
-		state std::map<UID, Version> rvLogs;
+		std::vector<TLogLockResult> results;
 		for (int log = 0; log < logServers.size(); log++) {
 			if (!logServers[log]->isLocal) {
 				continue;
@@ -2239,7 +2216,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			    TagPartitionedLogSystem::getDurableVersion(dbgid, lockResults[log], logFailed[log], lastEnd);
 			if (versions.present()) {
 				knownCommittedVersion = std::max(knownCommittedVersion, std::get<0>(versions.get()));
-				rvLogs.merge(std::get<2>(versions.get()));
+				results.insert(results.end(), std::get<2>(versions.get()).begin(), std::get<2>(versions.get()).end());
 				maxEnd = std::max(maxEnd, std::get<1>(versions.get()));
 				minEnd = std::min(minEnd, std::get<1>(versions.get()));
 			}
@@ -2250,18 +2227,47 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 
 			auto logSystem = makeReference<TagPartitionedLogSystem>(dbgid, locality, prevState.recoveryCount);
 
-			// If UNICAST is set, keep refreshing list TLog's recovery versions as maxEnd will vary
-			if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				lastEnd = minEnd;
-				logSystem->recoverAt = minEnd;
-			} else {
-				logSystem->recoverAt = invalidVersion;
-				for (auto const& [key, val] : rvLogs) {
-					if (val > logSystem->recoverAt.get()) {
-						logSystem->recoverAt = val;
+			// If UNICAST is set, keep refreshing list TLog's recovery versions as maxEnd may change as new tLogs are
+			// locked.
+			logSystem->recoverAt = minEnd;
+			logSystem->maxRv = minEnd;
+
+			std::map<UID, Version> rvLogs;
+			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+
+				std::unordered_map<Version, int> versionRepCount;
+				for (auto& result : results) {
+					for (int i = 0; i < result.unknownCommittedVersions.size(); i++) {
+						Version k = std::get<0>(result.unknownCommittedVersions[i]);
+						versionRepCount[k]++;
 					}
 				}
+				for (auto& result : results) {
+					for (int i = 0; i < result.unknownCommittedVersions.size(); i++) {
+						Version k = std::get<0>(result.unknownCommittedVersions[i]);
+						Reference<LogSet> logSet = lockResults[0].logSet;
+						if (versionRepCount[k] >=
+						    std::get<1>(result.unknownCommittedVersions[i]) - logSet->tLogReplicationFactor + 1) {
+							if (k > rvLogs[result.id]) {
+								rvLogs[result.id] = k;
+							}
+						}
+					}
+				}
+
+				for (auto const& [key, val] : rvLogs) {
+					if (val > logSystem->maxRv) {
+						logSystem->maxRv = val;
+						// TraceEvent("RecoveryVersionInfo").detail("MaxRv", logSystem->maxRv);
+					}
+				}
+				for (auto& result : results) {
+					rvLogs[result.id] = logSystem->maxRv;
+				}
+			} else {
+				lastEnd = minEnd;
 			}
+
 			logSystem->rvLogs = rvLogs;
 			logSystem->tLogs = logServers;
 			logSystem->logRouterTags = prevState.logRouterTags;
@@ -2610,7 +2616,6 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 
 	for (int i = 0; i < remoteWorkers.remoteTLogs.size(); i++) {
 		InitializeTLogRequest& req = remoteTLogReqs[i];
-		// req.rvLogs = logSystem->rvLogs;
 		req.recruitmentID = self->recruitmentID;
 		req.logVersion = configuration.tLogVersion;
 		req.storeType = configuration.tLogDataStoreType;
@@ -2886,6 +2891,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		req.recoverFrom = oldLogSystemConfig;
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 			req.rvLogs = oldLogSystem->rvLogs;
+			req.maxRv = oldLogSystem->maxRv;
 		}
 		req.recoverAt = oldLogSystem->recoverAt.get();
 		req.knownCommittedVersion = oldLogSystem->knownCommittedVersion;
@@ -2948,7 +2954,6 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 
 		for (int i = 0; i < recr.satelliteTLogs.size(); i++) {
 			InitializeTLogRequest& req = sreqs[i];
-			// req.rvLogs = logSystem->rvLogs;
 			req.recruitmentID = logSystem->recruitmentID;
 			req.logVersion = configuration.tLogVersion;
 			req.storeType = configuration.tLogDataStoreType;
@@ -2956,6 +2961,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 			req.recoverFrom = oldLogSystemConfig;
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 				req.rvLogs = oldLogSystem->rvLogs;
+				req.maxRv = oldLogSystem->maxRv;
 			}
 			req.recoverAt = oldLogSystem->recoverAt.get();
 			req.knownCommittedVersion = oldLogSystem->knownCommittedVersion;

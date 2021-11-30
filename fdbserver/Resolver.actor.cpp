@@ -286,10 +286,8 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 				reply.privateMutations.push_back(reply.arena, mutations);
 				reply.arena.dependsOn(mutations.arena());
 			}
-			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				// merge mutation tags with sent client tags
-				toCommit.saveTags(reply.writtenTags);
-			}
+			// merge mutation tags with sent client tags
+			toCommit.saveTags(reply.writtenTags);
 			reply.privateMutationCount = toCommit.getMutationCount();
 		}
 
@@ -350,20 +348,24 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		}
 
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			std::set<uint16_t> writtenTLogs;
-			if (reply.privateMutationCount) {
-				for (int i = 0; i < self->numLogs; i++) {
-					writtenTLogs.insert(i);
-				}
+			if (!self->numLogs) {
+				reply.tpcvMap.clear();
 			} else {
-				toCommit.getLocations(reply.writtenTags, writtenTLogs);
-			}
-			if (self->tpcvVector[0] == invalidVersion) {
-				std::fill(self->tpcvVector.begin(), self->tpcvVector.end(), req.prevVersion);
-			}
-			for (uint16_t tLog : writtenTLogs) {
-				reply.tpcvMap[tLog] = self->tpcvVector[tLog];
-				self->tpcvVector[tLog] = req.version;
+				std::set<uint16_t> writtenTLogs;
+				if (reply.privateMutationCount) {
+					for (int i = 0; i < self->numLogs; i++) {
+						writtenTLogs.insert(i);
+					}
+				} else {
+					toCommit.getLocations(reply.writtenTags, writtenTLogs);
+				}
+				if (self->tpcvVector[0] == invalidVersion) {
+					std::fill(self->tpcvVector.begin(), self->tpcvVector.end(), req.prevVersion);
+				}
+				for (uint16_t tLog : writtenTLogs) {
+					reply.tpcvMap[tLog] = self->tpcvVector[tLog];
+					self->tpcvVector[tLog] = req.version;
+				}
 			}
 		}
 		self->version.set(req.version);
