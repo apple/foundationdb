@@ -43,14 +43,15 @@ namespace {
 
 const int NUM_MESSAGE_PER_COMMIT = 100;
 
-void prepareMessageForVersion(const Version& version,
+void prepareMessageForVersion(const Version& commitVersion,
+                              const Version& storageTeamVersion,
                               const int numMessages,
                               const std::vector<StorageTeamID> storageTeamIDs,
                               CommitRecord& commitRecord) {
 	Arena& arena = commitRecord.messageArena;
 	VectorRef<MutationRef> mutationRefs;
 	generateMutationRefs(numMessages, arena, mutationRefs);
-	distributeMutationRefs(mutationRefs, version, storageTeamIDs, commitRecord);
+	distributeMutationRefs(mutationRefs, commitVersion, storageTeamVersion, storageTeamIDs, commitRecord);
 }
 
 } // anonymous namespace
@@ -64,7 +65,8 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 	state std::vector<StorageTeamID>& storageTeamIDs = pFakeProxyContext->pTestDriverContext->storageTeamIDs;
 	state CommitRecord& commitRecord = pFakeProxyContext->pTestDriverContext->commitRecord;
 
-	state int version = 0;
+	state int commitVersion = 0;
+	state int storageTeamVersion = 0;
 	state int commitCount = 0;
 	state std::vector<Future<TLogCommitReply>> tLogCommitReplies;
 
@@ -75,10 +77,12 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 		GetCommitVersionRequest commitVersionRequest(UID(), commitCount, commitCount - 1, UID());
 		state GetCommitVersionReply commitVersionReply =
 		    wait(pSequencerInterface->getCommitVersion.getReply(commitVersionRequest));
-		version = commitVersionReply.version;
+		commitVersion = commitVersionReply.version;
+		++storageTeamVersion;
 
 		// Prepare the mutations -- since this is a test, the mutations are generated *AFTER* the version is retrieved.
-		prepareMessageForVersion(version, NUM_MESSAGE_PER_COMMIT, storageTeamIDs, commitRecord);
+		prepareMessageForVersion(
+		    commitVersion, storageTeamVersion, NUM_MESSAGE_PER_COMMIT, storageTeamIDs, commitRecord);
 
 		// Resolve
 		// FIXME use the resolver role
@@ -93,10 +97,11 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 
 		// TLog
 		std::unordered_map<ptxn::TLogGroupID, std::shared_ptr<ProxySubsequencedMessageSerializer>> tLogGroupSerializers;
-		prepareProxySerializedMessages(commitRecord, version, [&](StorageTeamID storageTeamId) {
+		prepareProxySerializedMessages(commitRecord, commitVersion, [&](const StorageTeamID& storageTeamId) {
 			auto tLogGroup = pTestDriverContext->storageTeamIDTLogGroupIDMapper[storageTeamId];
 			if (!tLogGroupSerializers.count(tLogGroup)) {
-				tLogGroupSerializers.emplace(tLogGroup, std::make_shared<ProxySubsequencedMessageSerializer>(version));
+				tLogGroupSerializers.emplace(tLogGroup,
+				                             std::make_shared<ProxySubsequencedMessageSerializer>(storageTeamVersion));
 			}
 			return tLogGroupSerializers[tLogGroup];
 		});

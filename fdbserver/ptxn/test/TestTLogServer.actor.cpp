@@ -58,6 +58,7 @@ std::string filenameFromId(KeyValueStoreType storeType, std::string folder, std:
 ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
                                     std::shared_ptr<ptxn::test::TestDriverContext> pContext,
                                     std::string folder) {
+	state ptxn::test::print::PrintTiming printTiming("startTLogServers");
 	state std::vector<ptxn::InitializePtxnTLogRequest> tLogInitializations;
 	state std::unordered_map<ptxn::TLogGroupID, int> groupToLeaderId;
 	pContext->groupsPerTLog.resize(pContext->numTLogs);
@@ -107,8 +108,8 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 		                             makeReference<AsyncVar<bool>>(false),
 		                             makeReference<AsyncVar<UID>>(tlogId)));
 		initializeTLog.send(tLogInitializations.back());
-		std::cout << "Recruit tlog " << i << " : " << tlogId.shortString() << ", workerID: " << workerId.shortString()
-		          << "\n";
+		printTiming << "Recruit tlog " << i << " : " << tlogId.shortString() << ", workerID: " << workerId.shortString()
+		            << "\n";
 	}
 
 	// replace fake TLogInterface with recruited interface
@@ -132,14 +133,15 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 	return Void();
 }
 
-void generateMutations(const Version& version,
+void generateMutations(const Version& commitVersion,
+                       const Version& storageTeamVersion,
                        const int numMutations,
                        const std::vector<ptxn::StorageTeamID>& storageTeamIDs,
                        ptxn::test::CommitRecord& commitRecord) {
 	Arena arena;
 	VectorRef<MutationRef> mutationRefs;
 	ptxn::test::generateMutationRefs(numMutations, arena, mutationRefs);
-	ptxn::test::distributeMutationRefs(mutationRefs, version, storageTeamIDs, commitRecord);
+	ptxn::test::distributeMutationRefs(mutationRefs, commitVersion, storageTeamVersion, storageTeamIDs, commitRecord);
 	commitRecord.messageArena.dependsOn(arena);
 }
 
@@ -171,7 +173,11 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 	state Version endVersion(beginVersion + deterministicRandom()->randomInt(5, 20));
 	state Optional<UID> debugID(ptxn::test::randomUID());
 
-	generateMutations(beginVersion, COMMIT_PEEK_CHECK_MUTATIONS, { storageTeamID }, pContext->commitRecord);
+	generateMutations(beginVersion,
+	                  /* storageTeamVersion = */ 1,
+	                  COMMIT_PEEK_CHECK_MUTATIONS,
+	                  { storageTeamID },
+	                  pContext->commitRecord);
 	printTiming << "Generated " << pContext->commitRecord.getNumTotalMessages() << " messages" << std::endl;
 	auto serialized = serializeMutations(beginVersion, storageTeamID, pContext->commitRecord);
 	std::unordered_map<ptxn::StorageTeamID, StringRef> messages = { { storageTeamID, serialized } };
@@ -372,12 +378,13 @@ ACTOR Future<std::vector<Standalone<StringRef>>> commitInject(std::shared_ptr<pt
 
 	state Version currVersion = 0;
 	state Version prevVersion = currVersion;
+	state Version storageTeamVersion = 0;
 	increaseVersion(currVersion);
 
 	state std::vector<ptxn::TLogCommitRequest> requests;
 	state std::vector<Standalone<StringRef>> writtenMessages;
 	for (auto i = 0; i < numCommits; ++i) {
-		generateMutations(currVersion, 16, { storageTeamID }, pContext->commitRecord);
+		generateMutations(currVersion, ++storageTeamVersion, 16, { storageTeamID }, pContext->commitRecord);
 		auto serialized = serializeMutations(currVersion, storageTeamID, pContext->commitRecord);
 		std::unordered_map<ptxn::StorageTeamID, StringRef> messages = { { storageTeamID, serialized } };
 		requests.emplace_back(ptxn::test::randomUID(),
@@ -660,13 +667,15 @@ ACTOR Future<std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>>
 
 	state Version currVersion = 0;
 	state Version prevVersion = currVersion;
+	state Version storageTeamVersion = -1;
 	increaseVersion(currVersion);
+	increaseVersion(storageTeamVersion);
 
 	state std::vector<ptxn::TLogCommitRequest> requests;
 	state std::vector<Standalone<StringRef>> writtenMessages;
 	state std::vector<Version> versions;
 	for (auto i = 0; i < numCommits; ++i) {
-		generateMutations(currVersion, 16, { storageTeamID }, pContext->commitRecord);
+		generateMutations(currVersion, storageTeamVersion, 16, { storageTeamID }, pContext->commitRecord);
 		auto serialized = serializeMutations(currVersion, storageTeamID, pContext->commitRecord);
 		std::unordered_map<ptxn::StorageTeamID, StringRef> messages = { { storageTeamID, serialized } };
 		requests.emplace_back(ptxn::test::randomUID(),

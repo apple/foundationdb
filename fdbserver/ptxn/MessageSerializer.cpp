@@ -164,6 +164,8 @@ size_t SubsequencedMessageSerializer::getTotalBytes() const {
 
 #pragma endregion SubsequencedMessageSerializer
 
+#pragma region TLogSubsequencedMessageSerializer
+
 TLogSubsequencedMessageSerializer::TLogSubsequencedMessageSerializer(const StorageTeamID& storageTeamID_)
   : serializer(storageTeamID_) {}
 
@@ -181,14 +183,18 @@ size_t TLogSubsequencedMessageSerializer::getTotalBytes() const {
 	return serializer.getTotalBytes();
 }
 
-ProxySubsequencedMessageSerializer::ProxySubsequencedMessageSerializer(const Version& version_) : version(version_) {}
+#pragma endregion TLogSubsequencedMessageSerializer
+
+#pragma region ProxySubsequencedMessageSerializer
+
+ProxySubsequencedMessageSerializer::ProxySubsequencedMessageSerializer(const Version& version_) : storageTeamVersion(version_) {}
 
 const Subsequence& ProxySubsequencedMessageSerializer::getSubsequence() const {
 	return subsequence;
 }
 
 const Version& ProxySubsequencedMessageSerializer::getVersion() const {
-	return version;
+	return storageTeamVersion;
 }
 
 void ProxySubsequencedMessageSerializer::setSubsequence(const Subsequence& newSubsequence) {
@@ -199,7 +205,7 @@ void ProxySubsequencedMessageSerializer::prepareWriteMessage(const StorageTeamID
 	// If the storage team ID is unseen, create a serializer for it.
 	if (serializers.find(storageTeamID) == serializers.end()) {
 		serializers.emplace(storageTeamID, storageTeamID);
-		serializers.at(storageTeamID).startVersionWriting(version);
+		serializers.at(storageTeamID).startVersionWriting(storageTeamVersion);
 	}
 
 	// If span context message exists, and not being written to the serializer, then serialize it first.
@@ -216,6 +222,12 @@ void ProxySubsequencedMessageSerializer::prepareWriteMessage(const StorageTeamID
 void ProxySubsequencedMessageSerializer::broadcastSpanContext(const SpanContextMessage& spanContext) {
 	spanContextMessage = spanContext;
 	storageTeamInjectedSpanContext.clear();
+
+	// Broadcast the SpanContext to known storage teams
+	for (auto& [storageTeamID, serializer] : serializers) {
+		storageTeamInjectedSpanContext.insert(storageTeamID);
+		serializer.write(SubsequenceSpanContextItem{ subsequence++, spanContext });
+	}
 }
 
 void ProxySubsequencedMessageSerializer::writeTeamSpanContext(const SpanContextMessage& spanContext,
@@ -252,12 +264,17 @@ std::pair<Arena, std::unordered_map<StorageTeamID, StringRef>> ProxySubsequenced
 	std::unordered_map<StorageTeamID, StringRef> result;
 	Arena sharedArena;
 	for (auto& [storageTeamID, serializer] : serializers) {
+		// FIXME rethink about this memory copy
 		result[storageTeamID] = StringRef(sharedArena, getSerialized(storageTeamID));
 	}
 	return { sharedArena, result };
 }
 
+#pragma endregion ProxySubsequencedMessageSerializer
+
 namespace details {
+
+#pragma region SubsequencedMessageDeserializerBase
 
 void SubsequencedMessageDeserializerBase::resetImpl(const StringRef serialized_) {
 	ASSERT(serialized_.size() > 0);
@@ -281,6 +298,8 @@ const Version& SubsequencedMessageDeserializerBase::getFirstVersion() const {
 const Version& SubsequencedMessageDeserializerBase::getLastVersion() const {
 	return header.lastVersion;
 }
+
+#pragma endregion SubsequencedMessageDeserializerBase
 
 } // namespace details
 
