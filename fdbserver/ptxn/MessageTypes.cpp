@@ -39,6 +39,9 @@ std::string Message::toString() const {
 	case Type::LOG_PROTOCOL_MESSAGE:
 		result = concatToString(result, "Log Protocol ", std::get<LogProtocolMessage>(*this));
 		break;
+	case Type::EMPTY_VERSION_MESSAGE:
+		result = concatToString(result, "Empty version ", std::get<EmptyMessage>(*this));
+		break;
 	case Type::UNDEFINED:
 		result = concatToString(result, "Undefined value");
 	default:
@@ -59,6 +62,8 @@ bool Message::operator==(const Message& another) const {
 		return std::get<SpanContextMessage>(*this) == std::get<SpanContextMessage>(another);
 	case Type::LOG_PROTOCOL_MESSAGE:
 		return std::get<LogProtocolMessage>(*this) == std::get<LogProtocolMessage>(another);
+	case Type::EMPTY_VERSION_MESSAGE:
+		return std::get<EmptyMessage>(*this) == std::get<EmptyMessage>(another);
 	case Type::UNDEFINED:
 		return true;
 	default:

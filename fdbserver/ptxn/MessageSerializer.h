@@ -99,7 +99,7 @@ struct SubsequencedItemsHeader : MultipleItemHeaderBase {
 
 } // namespace details
 
-// Encodes the subsequence/mutations pair, grouped by the version. The format of serialized data would look like
+// Encodes the subsequence/mutations pair, grouped by the commit version. The format of serialized data would look like
 //
 //    | Header | V(1)Data | V(2)Data | ...
 //
@@ -112,6 +112,7 @@ struct SubsequencedItemsHeader : MultipleItemHeaderBase {
 //    * MutationRef
 //    * SpanContext
 //    * LogProtocolMessage
+//    * EmptyVersionMessage
 //
 // In the serialized data, the versions are strictly increasing ordered. And the subsequence with for a given version is
 // also strictly increasing ordered.
@@ -353,10 +354,11 @@ public:
 		// Store the deserialized data
 		VersionSubsequenceMessage currentItem;
 
+	protected:
 		// serialized_ refers to the serialized data
 		// If isEndIterator, then the iterator indicates the end of the serialized data. The behavior of dereferencing
 		// the iterator is undefined.
-		iterator(StringRef serialized_, bool isEndIterator = false);
+		iterator(StringRef serialized_, const bool isEndIterator = false, const bool iterateOverEmptyVersions_ = false);
 
 	public:
 		bool operator==(const iterator& another) const;
@@ -377,16 +379,26 @@ public:
 		// invalidated, i.e. the life cycle will be the same to the iterator. To extend the life cycle, this arena
 		// should be dependent on other arenas.
 		Arena& arena();
+
+		// If true, when the iterator meets a section with no messages, it yields an EmptyMessage
+		bool iterateOverEmptyVersions;
 	};
 
 private:
 	iterator endIterator;
 
+	bool iterateOverEmptyVersions;
+
 public:
 	using const_iterator = iterator;
 
 	// serialized_ refers to the serialized data
-	SubsequencedMessageDeserializer(const StringRef serialized_);
+	// If iterateOverEmptyVersions_ is set to true, the iterator will yield a VersionSubsequencedMessage with message
+	// type EmptyMessage when meet a version that has no messages, instead of skipping it.
+	SubsequencedMessageDeserializer(const StringRef serialized_, const bool iterateOverEmptyVersions_ = false);
+
+	// Returns true if a version without messages will be skipped.
+	bool isEmptyVersionsIgnored() const;
 
 	// Resets the deserializer, this will invalidate all iterators
 	void reset(const StringRef serialized_);
