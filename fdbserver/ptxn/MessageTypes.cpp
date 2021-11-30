@@ -89,15 +89,51 @@ std::string VersionSubsequenceMessage::toString() const {
 }
 
 bool VersionSubsequenceMessage::operator==(const VersionSubsequenceMessage& another) const {
-	if (!(version == another.version && subsequence == another.subsequence &&
-	      message.getType() == another.message.getType())) {
-		return false;
-	}
-	return message == another.message;
+	return operatorSpaceship(another) == 0;
 }
 
 bool VersionSubsequenceMessage::operator!=(const VersionSubsequenceMessage& another) const {
-	return !(*this == another);
+	return operatorSpaceship(another) != 0;
+}
+
+bool VersionSubsequenceMessage::operator<(const VersionSubsequenceMessage& another) const {
+	return operatorSpaceship(another) == -1;
+}
+
+bool VersionSubsequenceMessage::operator>(const VersionSubsequenceMessage& another) const {
+	return operatorSpaceship(another) == 1;
+}
+
+bool VersionSubsequenceMessage::operator<=(const VersionSubsequenceMessage& another) const {
+	return operatorSpaceship(another) <= 0;
+}
+
+bool VersionSubsequenceMessage::operator>=(const VersionSubsequenceMessage& another) const {
+	return operatorSpaceship(another) >= 0;
+}
+
+int VersionSubsequenceMessage::operatorSpaceship(const VersionSubsequenceMessage& another) const {
+	if (version < another.version) {
+		return -1;
+	} else if (version > another.version) {
+		return 1;
+	}
+
+	if (subsequence < another.subsequence) {
+		return -1;
+	} else if (subsequence > another.subsequence) {
+		return 1;
+	}
+
+	if (message.getType() == another.message.getType() && message == another.message) {
+		return 0;
+	}
+
+	// Two different messages cannot share one single (version, subsequnece) pair.
+	ASSERT(false);
+
+	// This return will not be reachable, but to mute the non-void function does not return a value warning.
+	return 0;
 }
 
 std::ostream& operator<<(std::ostream& stream, const Message& message) {
