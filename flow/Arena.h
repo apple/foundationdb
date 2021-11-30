@@ -101,6 +101,7 @@ public:
 	Arena& operator=(const Arena&);
 	Arena& operator=(Arena&&) noexcept;
 
+	// If additional ArenaBlock is added to p, dependsOn will need to be re-called in order to include the new blocks.
 	void dependsOn(const Arena& p);
 	void* allocate4kAlignedBuffer(uint32_t size);
 	size_t getSize() const;
