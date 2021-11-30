@@ -1,5 +1,5 @@
 /*
- * IndexPrefetchDemo.actor.cpp
+ * GetRangeAndMap.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -34,15 +34,15 @@ const KeyRef prefix = "prefix"_sr;
 const KeyRef RECORD = "RECORD"_sr;
 const KeyRef INDEX = "INDEX"_sr;
 
-struct IndexPrefetchDemoWorkload : TestWorkload {
+struct GetRangeAndMapWorkload : TestWorkload {
 	bool enabled;
 	const bool BAD_MAPPER = deterministicRandom()->random01() < 0.1;
 
-	IndexPrefetchDemoWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	GetRangeAndMapWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 	}
 
-	std::string description() const override { return "IndexPrefetchDemo"; }
+	std::string description() const override { return "GetRangeAndMap"; }
 
 	Future<Void> start(Database const& cx) override {
 		if (enabled) {
@@ -62,20 +62,23 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 	static Value recordValue(int i) { return Tuple().append(dataOfRecord(i)).pack(); }
 
 	ACTOR Future<Void> fillInRecords(Database cx, int n) {
-		std::cout << "start fillInRecords n=" << n << std::endl;
-		// TODO: When n is large, split into multiple transactions.
-		state Transaction tr(cx);
-		try {
-			tr.reset();
-			for (int i = 0; i < n; i++) {
-				tr.set(recordKey(i), recordValue(i));
-				tr.set(indexEntryKey(i), EMPTY);
+		loop {
+			std::cout << "start fillInRecords n=" << n << std::endl;
+			// TODO: When n is large, split into multiple transactions.
+			state Transaction tr(cx);
+			try {
+				tr.reset();
+				for (int i = 0; i < n; i++) {
+					tr.set(recordKey(i), recordValue(i));
+					tr.set(indexEntryKey(i), EMPTY);
+				}
+				wait(tr.commit());
+				std::cout << "finished fillInRecords with version " << tr.getCommittedVersion() << std::endl;
+				break;
+			} catch (Error& e) {
+				std::cout << "failed fillInRecords, retry" << std::endl;
+				wait(tr.onError(e));
 			}
-			wait(tr.commit());
-			std::cout << "finished fillInRecords" << std::endl;
-		} catch (Error& e) {
-			std::cout << "failed fillInRecords" << std::endl;
-			wait(tr.onError(e));
 		}
 		return Void();
 	}
@@ -107,7 +110,7 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 	                                       int beginId,
 	                                       int endId,
 	                                       Key mapper,
-	                                       IndexPrefetchDemoWorkload* self) {
+	                                       GetRangeAndMapWorkload* self) {
 		Key someIndexesBegin = Tuple().append(prefix).append(INDEX).append(indexKey(beginId)).getDataAsStandalone();
 		Key someIndexesEnd = Tuple().append(prefix).append(INDEX).append(indexKey(endId)).getDataAsStandalone();
 		state KeyRange range = KeyRangeRef(someIndexesBegin, someIndexesEnd);
@@ -125,7 +128,7 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 			                               Snapshot::True));
 			//			showResult(result);
 			if (self->BAD_MAPPER) {
-				TraceEvent("IndexPrefetchDemoWorkloadShouldNotReachable").detail("ResultSize", result.size());
+				TraceEvent("GetRangeAndMapWorkloadShouldNotReachable").detail("ResultSize", result.size());
 			}
 			// Examples:
 			// key=\x01prefix\x00\x01RECORD\x00\x01primary-key-of-record-2\x00, value=\x01data-of-record-2\x00
@@ -142,7 +145,7 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 			}
 		} catch (Error& e) {
 			if (self->BAD_MAPPER && e.code() == error_code_mapper_bad_index) {
-				TraceEvent("IndexPrefetchDemoWorkloadBadMapperDetected").error(e);
+				TraceEvent("GetRangeAndMapWorkloadBadMapperDetected").error(e);
 			} else {
 				wait(tr.onError(e));
 			}
@@ -151,8 +154,8 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> _start(Database cx, IndexPrefetchDemoWorkload* self) {
-		TraceEvent("IndexPrefetchDemoWorkloadConfig").detail("BadMapper", self->BAD_MAPPER);
+	ACTOR Future<Void> _start(Database cx, GetRangeAndMapWorkload* self) {
+		TraceEvent("GetRangeAndMapWorkloadConfig").detail("BadMapper", self->BAD_MAPPER);
 
 		// TODO: Use toml to config
 		wait(self->fillInRecords(cx, 200));
@@ -179,4 +182,4 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<IndexPrefetchDemoWorkload> IndexPrefetchDemoWorkloadFactory("IndexPrefetchDemo");
+WorkloadFactory<GetRangeAndMapWorkload> GetRangeAndMapWorkloadFactory("GetRangeAndMap");
