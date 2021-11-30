@@ -275,6 +275,12 @@ void MessageFixture::setUp(const TLogGroupFixture& tLogGroupStorageTeamMapping,
 
 #pragma region ptxnTLogFixture
 
+ptxnTLogFixture::~ptxnTLogFixture() {
+	for (auto& actor : actors) {
+	    actor.cancel();
+	}
+}
+
 void ptxnTLogFixture::setUp(const int numTLogs) {
 	int tLogGroupIndex = 0;
 	auto assignTLogGroup = [this](const TLogGroupID& tLogGroupID, std::shared_ptr<FakeTLogContext> pTLogContext) {

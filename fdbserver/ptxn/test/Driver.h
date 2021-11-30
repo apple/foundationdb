@@ -197,6 +197,8 @@ struct ptxnTLogFixture {
 	  : tLogGroupFixture(tLogGroupFixture_), pTestDriverContext(pTestDriverContext_),
 	    tLogGroupLeaders(pTestDriverContext->tLogGroupLeaders), tLogInterfaces(pTestDriverContext->tLogInterfaces) {}
 
+	~ptxnTLogFixture();
+
 	// Returns the shared_ptr of the TLog interface for the given TLogGroupID
 	// The user must explicitly cast/provide the interface type.
 	ptxn::details::TLogInterfaceSharedPtrWrapper getTLogLeaderByTLogGroupID(const TLogGroupID& tLogGroupID) const;
