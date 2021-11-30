@@ -139,8 +139,15 @@ struct VersionSubsequenceMessage {
 
 	std::string toString() const;
 
+	// FIXME use operator spaceship when we use C++20
+	int operatorSpaceship(const VersionSubsequenceMessage& another) const;
+
 	bool operator==(const VersionSubsequenceMessage&) const;
 	bool operator!=(const VersionSubsequenceMessage&) const;
+	bool operator<(const VersionSubsequenceMessage&) const;
+	bool operator<=(const VersionSubsequenceMessage&) const;
+	bool operator>(const VersionSubsequenceMessage&) const;
+	bool operator>=(const VersionSubsequenceMessage&) const;
 };
 
 std::ostream& operator<<(std::ostream&, const VersionSubsequenceMessage&);
