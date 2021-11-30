@@ -24,6 +24,7 @@
 #include "fdbclient/MutationLogReader.actor.h"
 #include "fdbclient/Tuple.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/Knobs.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/flow.h"
@@ -144,8 +145,10 @@ struct GetRangeAndMapWorkload : TestWorkload {
 				id++;
 			}
 		} catch (Error& e) {
-			if (self->BAD_MAPPER && e.code() == error_code_mapper_bad_index) {
-				TraceEvent("GetRangeAndMapWorkloadBadMapperDetected").error(e);
+			if ((self->BAD_MAPPER && e.code() == error_code_mapper_bad_index) ||
+			    (!SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK && e.code() == error_code_quick_get_value_miss) ||
+			    (!SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK && e.code() == error_code_quick_get_key_values_miss)) {
+				TraceEvent("GetRangeAndMapWorkloadExpectedErrorDetected").error(e);
 			} else {
 				wait(tr.onError(e));
 			}
