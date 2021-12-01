@@ -350,7 +350,7 @@ protected:
 };
 
 // Provides a Storage Team ID to StorageTeamPeekCursor mapping functionality
-class StorageTeamIDCursorMapper{
+class StorageTeamIDCursorMapper {
 public:
 	using StorageTeamIDCursorMapper_t = std::unordered_map<StorageTeamID, std::shared_ptr<StorageTeamPeekCursor>>;
 
@@ -396,7 +396,7 @@ protected:
 // In this case, even different teams might have different team versions, they will be informed when the commit version
 // has changed.
 class BroadcastedStorageTeamPeekCursorBase : public ptxn::details::VersionSubsequencePeekCursorBase,
-                                             protected details::StorageTeamIDCursorMapper{
+                                             protected details::StorageTeamIDCursorMapper {
 protected:
 	std::unique_ptr<details::CursorContainerBase> pCursorContainer;
 
