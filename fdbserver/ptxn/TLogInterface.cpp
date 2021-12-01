@@ -73,10 +73,7 @@ namespace {
 template <typename T>
 std::shared_ptr<T> TLogInterfaceCastHelper(std::shared_ptr<TLogInterfaceBase> ptr) {
 	std::shared_ptr<T> result = std::dynamic_pointer_cast<T>(ptr);
-	if (!result) {
-		// std::bad_cast might be a better choice if not using flow
-		throw internal_error_msg("Unable to downcast TLogInterface");
-	}
+	ASSERT(result);
 	return result;
 }
 } // namespace

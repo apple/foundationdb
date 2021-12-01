@@ -218,26 +218,26 @@ int VersionSubsequencePeekCursorBase::operatorSpaceship(const VersionSubsequence
 
 #pragma region StorageTeamPeekCursor
 
-StorageTeamPeekCursor::StorageTeamPeekCursor(const Version& startingVersion_,
+StorageTeamPeekCursor::StorageTeamPeekCursor(const Version& beginVersion_,
                                              const StorageTeamID& storageTeamID_,
                                              TLogInterfaceBase* pTLogInterface_,
                                              Arena* pArena_,
                                              const bool reportEmptyVersion_)
-  : StorageTeamPeekCursor(startingVersion_,
+  : StorageTeamPeekCursor(beginVersion_,
                           storageTeamID_,
                           std::vector<TLogInterfaceBase*>{ pTLogInterface_ },
                           pArena_,
                           reportEmptyVersion_) {}
 
-StorageTeamPeekCursor::StorageTeamPeekCursor(const Version& startingVersion_,
+StorageTeamPeekCursor::StorageTeamPeekCursor(const Version& beginVersion_,
                                              const StorageTeamID& storageTeamID_,
                                              const std::vector<TLogInterfaceBase*>& pTLogInterfaces_,
                                              Arena* pArena_,
                                              const bool reportEmptyVersion_)
   : VersionSubsequencePeekCursorBase(), storageTeamID(storageTeamID_), pTLogInterfaces(pTLogInterfaces_),
     pAttachArena(pArena_), deserializer(emptyCursorHeader(), /* reportEmptyVersion_ */ true),
-    wrappedDeserializerIter(deserializer.begin(), pArena_), startingVersion(startingVersion_),
-    reportEmptyVersion(reportEmptyVersion_), lastVersion(startingVersion_ - 1) {
+    wrappedDeserializerIter(deserializer.begin(), pArena_), beginVersion(beginVersion_),
+    reportEmptyVersion(reportEmptyVersion_), lastVersion(beginVersion_ - 1) {
 
 	for (const auto pTLogInterface : pTLogInterfaces) {
 		ASSERT(pTLogInterface != nullptr);
@@ -248,8 +248,8 @@ const StorageTeamID& StorageTeamPeekCursor::getStorageTeamID() const {
 	return storageTeamID;
 }
 
-const Version& StorageTeamPeekCursor::getStartingVersion() const {
-	return startingVersion;
+const Version& StorageTeamPeekCursor::getBeginVersion() const {
+	return beginVersion;
 }
 
 Future<bool> StorageTeamPeekCursor::remoteMoreAvailableImpl() {
@@ -325,67 +325,64 @@ void UnorderedCursorContainer::popImpl() {
 
 #pragma endregion UnorderedCursorContainer
 
-#pragma region StorageTeamIDCursorMapperMixin
+#pragma region StorageTeamIDCursorMapper
 
-void StorageTeamIDCursorMapperMixin::addCursor(std::shared_ptr<StorageTeamPeekCursor>&& cursor) {
+void StorageTeamIDCursorMapper::addCursor(std::shared_ptr<StorageTeamPeekCursor>&& cursor) {
 	addCursorImpl(std::move(cursor));
 }
 
-void StorageTeamIDCursorMapperMixin::addCursorImpl(std::shared_ptr<StorageTeamPeekCursor>&& cursor) {
+void StorageTeamIDCursorMapper::addCursorImpl(std::shared_ptr<StorageTeamPeekCursor>&& cursor) {
 	const StorageTeamID& storageTeamID = cursor->getStorageTeamID();
 	ASSERT(!isCursorExists(storageTeamID));
 	mapper[storageTeamID] = std::shared_ptr<StorageTeamPeekCursor>(std::move(cursor));
 }
 
-std::shared_ptr<StorageTeamPeekCursor> StorageTeamIDCursorMapperMixin::removeCursor(
-    const StorageTeamID& storageTeamID) {
+std::shared_ptr<StorageTeamPeekCursor> StorageTeamIDCursorMapper::removeCursor(const StorageTeamID& storageTeamID) {
 
 	ASSERT(isCursorExists(storageTeamID));
 	return removeCursorImpl(storageTeamID);
 }
 
-std::shared_ptr<StorageTeamPeekCursor> StorageTeamIDCursorMapperMixin::removeCursorImpl(
-    const StorageTeamID& storageTeamID) {
+std::shared_ptr<StorageTeamPeekCursor> StorageTeamIDCursorMapper::removeCursorImpl(const StorageTeamID& storageTeamID) {
 
 	std::shared_ptr<StorageTeamPeekCursor> result = mapper[storageTeamID];
 	mapper.erase(storageTeamID);
 	return result;
 }
 
-bool StorageTeamIDCursorMapperMixin::isCursorExists(const StorageTeamID& storageTeamID) const {
+bool StorageTeamIDCursorMapper::isCursorExists(const StorageTeamID& storageTeamID) const {
 	return mapper.find(storageTeamID) != mapper.end();
 }
 
-StorageTeamPeekCursor& StorageTeamIDCursorMapperMixin::getCursor(const StorageTeamID& storageTeamID) {
+StorageTeamPeekCursor& StorageTeamIDCursorMapper::getCursor(const StorageTeamID& storageTeamID) {
 	ASSERT(isCursorExists(storageTeamID));
 	return *mapper[storageTeamID];
 }
 
-const StorageTeamPeekCursor& StorageTeamIDCursorMapperMixin::getCursor(const StorageTeamID& storageTeamID) const {
+const StorageTeamPeekCursor& StorageTeamIDCursorMapper::getCursor(const StorageTeamID& storageTeamID) const {
 	ASSERT(isCursorExists(storageTeamID));
 	return *mapper.at(storageTeamID);
 }
 
-std::shared_ptr<StorageTeamPeekCursor> StorageTeamIDCursorMapperMixin::getCursorPtr(
-    const StorageTeamID& storageTeamID) {
+std::shared_ptr<StorageTeamPeekCursor> StorageTeamIDCursorMapper::getCursorPtr(const StorageTeamID& storageTeamID) {
 
 	ASSERT(isCursorExists(storageTeamID));
 	return mapper.at(storageTeamID);
 }
 
-int StorageTeamIDCursorMapperMixin::getNumCursors() const {
+int StorageTeamIDCursorMapper::getNumCursors() const {
 	return mapper.size();
 }
 
-StorageTeamIDCursorMapperMixin::StorageTeamIDCursorMapper::iterator StorageTeamIDCursorMapperMixin::cursorsBegin() {
+StorageTeamIDCursorMapper::StorageTeamIDCursorMapper_t::iterator StorageTeamIDCursorMapper::cursorsBegin() {
 	return std::begin(mapper);
 }
 
-StorageTeamIDCursorMapperMixin::StorageTeamIDCursorMapper::iterator StorageTeamIDCursorMapperMixin::cursorsEnd() {
+StorageTeamIDCursorMapper::StorageTeamIDCursorMapper_t::iterator StorageTeamIDCursorMapper::cursorsEnd() {
 	return std::end(mapper);
 }
 
-#pragma endregion StorageTeamIDCursorMapperMixin
+#pragma endregion StorageTeamIDCursorMapper
 
 namespace BroadcastedStorageTeamPeekCursor {
 
@@ -562,7 +559,7 @@ const VersionSubsequenceMessage& BroadcastedStorageTeamPeekCursorBase::getImpl()
 void BroadcastedStorageTeamPeekCursorBase::addCursorImpl(std::shared_ptr<StorageTeamPeekCursor>&& cursor) {
 	ASSERT(!cursor->isEmptyVersionsIgnored());
 	emptyCursorStorageTeamIDs.push_back(cursor->getStorageTeamID());
-	details::StorageTeamIDCursorMapperMixin::addCursorImpl(std::move(cursor));
+	details::StorageTeamIDCursorMapper::addCursorImpl(std::move(cursor));
 }
 
 bool BroadcastedStorageTeamPeekCursorBase::hasRemainingImpl() const {
