@@ -35,6 +35,10 @@ static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 22) ? ROCKSDB_PATCH >= 1 :
 
 namespace {
 
+const std::string rocksDataFolderSuffix = "-data";
+const KeyRangeRef persistShardMappingKeys = KeyRangeRef("\xff\xff/ShardMapping/"_sr, "\xff\xff/ShardMapping0"_sr);
+const KeyRef persistShardMappingPrefix = persistShardMappingKeys.begin;
+
 rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
 }
@@ -244,41 +248,86 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		struct OpenAction : TypedAction<Writer, OpenAction> {
 			std::string path;
+			std::string dataPath;
 			ThreadReturnPromise<Void> done;
 			Optional<Future<Void>>& metrics;
 			const FlowLock* readLock;
 			const FlowLock* fetchLock;
+			KeyRangeMap<DB>* shardMap;
+
 			OpenAction(std::string path,
 			           Optional<Future<Void>>& metrics,
 			           const FlowLock* readLock,
 			           const FlowLock* fetchLock)
-			  : path(std::move(path)), metrics(metrics), readLock(readLock), fetchLock(fetchLock) {}
+			  : path(std::move(path)), dataPath(""), metrics(metrics), readLock(readLock), fetchLock(fetchLock),
+			    shardMap(nullptr) {}
+
+			OpenAction(std::string path,
+			           std::string dataPath,
+			           Optional<Future<Void>>& metrics,
+			           const FlowLock* readLock,
+			           const FlowLock* fetchLock,
+			           KeyRangeMap<DB>* shardMap)
+			  : path(std::move(path)), dataPath(std::move(dataPath)), metrics(metrics), readLock(readLock),
+			    fetchLock(fetchLock), shardMap(shardMap) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
+
 		void action(OpenAction& a) {
 			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
 				"default", getCFOptions() } };
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
 			auto options = getOptions();
-			auto status = rocksdb::DB::Open(options, a.path, defaultCF, &handle, &db);
+			rocksdb::Status status = rocksdb::DB::Open(options, a.path, defaultCF, &handle, &db);
 			if (!status.ok()) {
 				logRocksDBError(status, "Open");
 				a.done.sendError(statusToError(status));
-			} else {
-				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
-				// The current thread and main thread are same when the code runs in simulation.
-				// blockUntilReady() is getting the thread into deadlock state, so avoiding the
-				// metric logger in simulation.
-				if (!g_network->isSimulated()) {
-					onMainThread([&] {
-						a.metrics =
-						    rocksDBMetricLogger(options.statistics, db) && flowLockLogger(a.readLock, a.fetchLock);
-						return Future<bool>(true);
-					}).blockUntilReady();
-				}
-				a.done.send(Void());
+				return;
 			}
+
+			TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
+
+			auto readOptions = getReadOptions();
+			std::chrono::seconds deadlineSeconds(30);
+			readOptions.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
+			// When using a prefix extractor, ensure that keys are returned in order even if they cross
+			// a prefix boundary.
+			readOptions.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
+			auto endSlice = toSlice(persistShardMappingKeys.end);
+			readOptions.iterate_upper_bound = &endSlice;
+			auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions));
+			cursor->Seek(toSlice(persistShardMappingKeys.begin));
+			while (cursor->Valid() && toStringRef(cursor->key()) < persistShardMappingKeys.end) {
+				KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
+				DB cdb;
+				status = rocksdb::DB::Open(options, dataPath + kv.value.toString(), defaultCF, &handle, &cdb);
+				if (!status.ok()) {
+					logRocksDBError(status, "Open");
+					a.done.sendError(statusToError(status));
+					return;
+				}
+				shardMap->insert(kv.key, cdb);
+				cursor->Next();
+			}
+			status = cursor->status();
+
+			if (!status.ok()) {
+				logRocksDBError(status, "Open");
+				a.done.sendError(statusToError(status));
+				return;
+			}
+
+			// The current thread and main thread are same when the code runs in simulation.
+			// blockUntilReady() is getting the thread into deadlock state, so avoiding the
+			// metric logger in simulation.
+			if (!g_network->isSimulated()) {
+				onMainThread([&] {
+					a.metrics = rocksDBMetricLogger(options.statistics, db) && flowLockLogger(a.readLock, a.fetchLock);
+					return Future<bool>(true);
+				}).blockUntilReady();
+			}
+			a.done.send(Void());
 		}
 
 		struct DeleteVisitor : public rocksdb::WriteBatch::Handler {
@@ -570,21 +619,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	};
 
-	DB db = nullptr;
-	std::string path;
-	UID id;
-	Reference<IThreadPool> writeThread;
-	Reference<IThreadPool> readThreads;
-	Promise<Void> errorPromise;
-	Promise<Void> closePromise;
-	Future<Void> openFuture;
-	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
-	Optional<Future<Void>> metrics;
-	FlowLock readSemaphore;
-	int numReadWaiters;
-	FlowLock fetchSemaphore;
-	int numFetchWaiters;
-
 	struct Counters {
 		CounterCollection cc;
 		Counter immediateThrottle;
@@ -594,10 +628,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("failedToAcquire", cc) {}
 	};
 
-	Counters counters;
-
 	explicit RocksDBKeyValueStore(const std::string& path, UID id)
-	  : path(path), id(id), readSemaphore(SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
+	  : path(path), dataPath(path + rocksDataFolderSuffix), id(id),
+	    readSemaphore(SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX) {
@@ -655,7 +688,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (openFuture.isValid()) {
 			return openFuture;
 		}
-		auto a = std::make_unique<Writer::OpenAction>(path, metrics, &readSemaphore, &fetchSemaphore);
+		auto a =
+		    std::make_unique<Writer::OpenAction>(path, dataPath, metrics, &readSemaphore, &fetchSemaphore, &shardMap);
 		openFuture = a->done.getFuture();
 		writeThread->post(a.release());
 		return openFuture;
@@ -803,6 +837,24 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		return StorageBytes(free, total, live, free);
 	}
+
+	DB db = nullptr;
+	std::string path;
+	const std::string dataPath;
+	UID id;
+	Reference<IThreadPool> writeThread;
+	Reference<IThreadPool> readThreads;
+	Promise<Void> errorPromise;
+	Promise<Void> closePromise;
+	Future<Void> openFuture;
+	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
+	Optional<Future<Void>> metrics;
+	FlowLock readSemaphore;
+	int numReadWaiters;
+	FlowLock fetchSemaphore;
+	int numFetchWaiters;
+	Counters counters;
+	KeyRangeMap<DB> shardMap;
 };
 
 } // namespace
