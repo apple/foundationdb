@@ -187,7 +187,8 @@ size_t TLogSubsequencedMessageSerializer::getTotalBytes() const {
 
 #pragma region ProxySubsequencedMessageSerializer
 
-ProxySubsequencedMessageSerializer::ProxySubsequencedMessageSerializer(const Version& version_) : storageTeamVersion(version_) {}
+ProxySubsequencedMessageSerializer::ProxySubsequencedMessageSerializer(const Version& version_)
+  : storageTeamVersion(version_) {}
 
 const Subsequence& ProxySubsequencedMessageSerializer::getSubsequence() const {
 	return subsequence;

@@ -301,9 +301,7 @@ void generateMutations(std::vector<ptxn::VersionSubsequenceMessage>& mutations, 
 			subsequence = 0;
 		}
 
-		mutations.emplace_back(version,
-		                       ++subsequence,
-		                       ptxn::test::generateRandomSetValue(arena));
+		mutations.emplace_back(version, ++subsequence, ptxn::test::generateRandomSetValue(arena));
 	}
 }
 
@@ -719,14 +717,14 @@ bool testDeserializerReset() {
 
 	SubsequencedMessageDeserializer deserializer(serialized1);
 	auto iter1 = deserializer.begin();
-	for(int i = 0; i < NUM_MUTATIONS; ++i, ++iter1) {
+	for (int i = 0; i < NUM_MUTATIONS; ++i, ++iter1) {
 		ASSERT(*iter1 == data1[i]);
 	}
 	ASSERT(iter1 == deserializer.end());
 
 	deserializer.reset(serialized2);
 	auto iter2 = deserializer.begin();
-	for(int i = 0; i < NUM_MUTATIONS; ++i, ++iter2) {
+	for (int i = 0; i < NUM_MUTATIONS; ++i, ++iter2) {
 		ASSERT(*iter2 == data2[i]);
 	}
 	ASSERT(iter2 == deserializer.end());

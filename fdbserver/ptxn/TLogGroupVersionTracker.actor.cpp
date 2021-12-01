@@ -114,7 +114,6 @@ TEST_CASE("fdbserver/ptxn/test/versiontracker") {
 		return Void();
 	}
 
-
 	for (auto beginVersion : std::vector<Version>{ -1, 0, 3 }) {
 		printTiming << "Testing version: " << beginVersion << "\n";
 

@@ -277,7 +277,7 @@ void MessageFixture::setUp(const TLogGroupFixture& tLogGroupStorageTeamMapping,
 
 ptxnTLogFixture::~ptxnTLogFixture() {
 	for (auto& actor : actors) {
-	    actor.cancel();
+		actor.cancel();
 	}
 }
 
