@@ -1696,7 +1696,7 @@ Future<Standalone<VectorRef<BlobGranuleChunkRef>>> ReadYourWritesTransaction::re
 	ASSERT(begin == 0);
 
 	if (!options.readYourWritesDisabled) {
-		return bg_no_ryw();
+		return blob_granule_no_ryw();
 	}
 
 	if (checkUsedDuringCommit()) {

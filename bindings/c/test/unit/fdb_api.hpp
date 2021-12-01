@@ -154,6 +154,27 @@ private:
 	EmptyFuture(FDBFuture* f) : Future(f) {}
 };
 
+class Result {
+public:
+	virtual ~Result() = 0;
+
+protected:
+	Result(FDBResult* r) : result_(r) {}
+	FDBResult* result_;
+};
+
+class KeyValueArrayResult : public Result {
+public:
+	// Call this function instead of fdb_result_get_keyvalue_array when using
+	// the KeyValueArrayREsult type. It's behavior is identical to
+	// fdb_result_get_keyvalue_array.
+	fdb_error_t get(const FDBKeyValue** out_kv, int* out_count, fdb_bool_t* out_more);
+
+private:
+	friend class Transaction;
+	KeyValueArrayResult(FDBResult* r) : Result(r) {}
+};
+
 // Wrapper around FDBDatabase, providing database-level API
 class Database final {
 public:
@@ -280,7 +301,7 @@ public:
 	fdb_error_t add_conflict_range(std::string_view begin_key, std::string_view end_key, FDBConflictRangeType type);
 
 	KeyRangeArrayFuture get_blob_granule_ranges(std::string_view begin_key, std::string_view end_key);
-	KeyValueArrayFuture read_blob_granules(std::string_view begin_key,
+	KeyValueArrayResult read_blob_granules(std::string_view begin_key,
 	                                       std::string_view end_key,
 	                                       int64_t beginVersion,
 	                                       int64_t endVersion,

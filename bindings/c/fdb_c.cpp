@@ -35,6 +35,7 @@ int g_api_version = 0;
  *
  * type mapping:
  *   FDBFuture -> ThreadSingleAssignmentVarBase
+ *   FDBResult -> ThreadSingleAssignmentVarBase
  *   FDBDatabase -> IDatabase
  *   FDBTransaction -> ITransaction
  */
@@ -273,6 +274,19 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_key_array(FDBFuture* f, FDBKey c
 	CATCH_AND_RETURN(Standalone<VectorRef<KeyRef>> na = TSAV(Standalone<VectorRef<KeyRef>>, f)->get();
 	                 *out_key_array = (FDBKey*)na.begin();
 	                 *out_count = na.size(););
+}
+
+extern "C" DLLEXPORT void fdb_result_destroy(FDBResult* r) {
+	CATCH_AND_DIE(TSAVB(r)->cancel(););
+}
+
+fdb_error_t fdb_result_get_keyvalue_array(FDBResult* r,
+                                          FDBKeyValue const** out_kv,
+                                          int* out_count,
+                                          fdb_bool_t* out_more) {
+	CATCH_AND_RETURN(RangeResult rr = TSAV(RangeResult, r)->get(); *out_kv = (FDBKeyValue*)rr.begin();
+	                 *out_count = rr.size();
+	                 *out_more = rr.more;);
 }
 
 FDBFuture* fdb_create_cluster_v609(const char* cluster_file_path) {
@@ -740,7 +754,7 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_blob_granule_ranges(FDBTrans
 	return (FDBFuture*)(TXN(tr)->getBlobGranuleRanges(range).extractPtr());
 }
 
-extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules(FDBTransaction* tr,
+extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules(FDBTransaction* tr,
                                                                    uint8_t const* begin_key_name,
                                                                    int begin_key_name_length,
                                                                    uint8_t const* end_key_name,
@@ -763,7 +777,7 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules(FDBTransactio
 		rv = readVersion;
 	}
 
-	return (FDBFuture*)(TXN(tr)->readBlobGranules(range, beginVersion, rv, context).extractPtr());
+	return (FDBResult*)(TXN(tr)->readBlobGranules(range, beginVersion, rv, context).extractPtr());
 }
 
 #include "fdb_c_function_pointers.g.h"

@@ -296,12 +296,14 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeTransaction::getBlobG
 	});
 }
 
-ThreadFuture<RangeResult> ThreadSafeTransaction::readBlobGranules(const KeyRangeRef& keyRange,
+ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranules(const KeyRangeRef& keyRange,
                                                                   Version beginVersion,
                                                                   Optional<Version> readVersion,
                                                                   ReadBlobGranuleContext granule_context) {
 	// In V1 of api this is required, field is just for forward compatibility
 	ASSERT(beginVersion == 0);
+
+	// FIXME: prevent from calling this from another main thread!
 
 	bool doMaterialize = !granule_context.debugNoMaterialize;
 
@@ -320,69 +322,16 @@ ThreadFuture<RangeResult> ThreadSafeTransaction::readBlobGranules(const KeyRange
 
 	// propagate error to client
 	if (getFilesFuture.isError()) {
-		return ThreadFuture<RangeResult>(getFilesFuture.getError());
+		return ThreadResult<RangeResult>(getFilesFuture.getError());
 	}
 
 	Standalone<VectorRef<BlobGranuleChunkRef>> files = getFilesFuture.get();
 
-	try {
-		RangeResult results;
-		// FIXME: could submit multiple chunks to start_load_f in parallel?
-		for (BlobGranuleChunkRef& chunk : files) {
-			RangeResult chunkRows;
-
-			int64_t snapshotLoadId;
-			int64_t deltaLoadIds[chunk.deltaFiles.size()];
-
-			// FIXME: move to transactions?
-			if (doMaterialize) {
-				// Start load process for all files in chunk
-				// In V1 of api snapshot is required, optional is just for forward compatibility
-				ASSERT(chunk.snapshotFile.present());
-				std::string snapshotFname = chunk.snapshotFile.get().filename.toString();
-				snapshotLoadId = granule_context.start_load_f(snapshotFname.c_str(),
-				                                              snapshotFname.size(),
-				                                              chunk.snapshotFile.get().offset,
-				                                              chunk.snapshotFile.get().length,
-				                                              granule_context.userContext);
-				int64_t deltaLoadIds[chunk.deltaFiles.size()];
-				int64_t deltaLoadLengths[chunk.deltaFiles.size()];
-				StringRef deltaData[chunk.deltaFiles.size()];
-				for (int deltaFileIdx = 0; deltaFileIdx < chunk.deltaFiles.size(); deltaFileIdx++) {
-					std::string deltaFName = chunk.deltaFiles[deltaFileIdx].filename.toString();
-					deltaLoadIds[deltaFileIdx] = granule_context.start_load_f(deltaFName.c_str(),
-					                                                          deltaFName.size(),
-					                                                          chunk.deltaFiles[deltaFileIdx].offset,
-					                                                          chunk.deltaFiles[deltaFileIdx].length,
-					                                                          granule_context.userContext);
-					deltaLoadLengths[deltaFileIdx] = chunk.deltaFiles[deltaFileIdx].length;
-				}
-
-				// once all loads kicked off, load data for chunk
-				StringRef snapshotData(granule_context.get_load_f(snapshotLoadId, granule_context.userContext),
-				                       chunk.snapshotFile.get().length);
-				for (int i = 0; i < chunk.deltaFiles.size(); i++) {
-					deltaData[i] = StringRef(granule_context.get_load_f(deltaLoadIds[i], granule_context.userContext),
-					                         chunk.deltaFiles[i].length);
-				}
-
-				// materialize rows from chunk
-				chunkRows = materializeBlobGranule(chunk, keyRange, readVersionOut, snapshotData, deltaData);
-			}
-
-			results.arena().dependsOn(chunkRows.arena());
-			results.append(results.arena(), chunkRows.begin(), chunkRows.size());
-
-			if (doMaterialize) {
-				granule_context.free_load_f(snapshotLoadId, granule_context.userContext);
-				for (int i = 0; i < chunk.deltaFiles.size(); i++) {
-					granule_context.free_load_f(deltaLoadIds[i], granule_context.userContext);
-				}
-			}
-		}
-		return results;
-	} catch (Error& e) {
-		return ThreadFuture<RangeResult>(e);
+	// do this work off of fdb network threads for performance!
+	if (doMaterialize) {
+		return loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersionOut, granule_context);
+	} else {
+		return ThreadResult<RangeResult>(blob_granule_not_materialized());
 	}
 }
 

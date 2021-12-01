@@ -90,6 +90,17 @@ void Future::cancel() {
 	return fdb_future_get_keyvalue_array(future_, out_kv, out_count, out_more);
 }
 
+// Result
+
+Result::~Result() {
+	fdb_result_destroy(result_);
+}
+
+// KeyValueArrayResult
+[[nodiscard]] fdb_error_t KeyValueArrayResult::get(const FDBKeyValue** out_kv, int* out_count, fdb_bool_t* out_more) {
+	return fdb_result_get_keyvalue_array(result_, out_kv, out_count, out_more);
+}
+
 // Database
 Int64Future Database::reboot_worker(FDBDatabase* db,
                                     const uint8_t* address,
@@ -281,12 +292,12 @@ KeyRangeArrayFuture Transaction::get_blob_granule_ranges(std::string_view begin_
 	return KeyRangeArrayFuture(fdb_transaction_get_blob_granule_ranges(
 	    tr_, (const uint8_t*)begin_key.data(), begin_key.size(), (const uint8_t*)end_key.data(), end_key.size()));
 }
-KeyValueArrayFuture Transaction::read_blob_granules(std::string_view begin_key,
+KeyValueArrayResult Transaction::read_blob_granules(std::string_view begin_key,
                                                     std::string_view end_key,
                                                     int64_t beginVersion,
                                                     int64_t readVersion,
                                                     FDBReadBlobGranuleContext granuleContext) {
-	return KeyValueArrayFuture(fdb_transaction_read_blob_granules(tr_,
+	return KeyValueArrayResult(fdb_transaction_read_blob_granules(tr_,
 	                                                              (const uint8_t*)begin_key.data(),
 	                                                              begin_key.size(),
 	                                                              (const uint8_t*)end_key.data(),

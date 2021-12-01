@@ -65,6 +65,7 @@ extern "C" {
 
 /* Pointers to these opaque types represent objects in the FDB API */
 typedef struct FDB_future FDBFuture;
+typedef struct FDB_result FDBResult;
 typedef struct FDB_database FDBDatabase;
 typedef struct FDB_transaction FDBTransaction;
 
@@ -179,6 +180,16 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_string_array(FDBFuture* 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_keyrange_array(FDBFuture* f,
                                                                        FDBKeyRange const** out_ranges,
                                                                        int* out_count);
+
+// FDBResult is a synchronous computation result, as opposed to a future that is asynchronous.
+DLLEXPORT void fdb_result_destroy(FDBResult* r);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_result_get_keyvalue_array(FDBResult* r,
+                                                                       FDBKeyValue const** out_kv,
+                                                                       int* out_count,
+                                                                       fdb_bool_t* out_more);
+
+// add other return types as we need them
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_create_database(const char* cluster_file_path, FDBDatabase** out_database);
 
@@ -356,7 +367,7 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_blob_granule_ranges(
 
 /* InvalidVersion (-1) for readVersion means get read version from transaction
    Separated out as optional because BG reads can support longer-lived reads than normal FDB transactions */
-DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_read_blob_granules(FDBTransaction* db,
+DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_transaction_read_blob_granules(FDBTransaction* db,
                                                                            uint8_t const* begin_key_name,
                                                                            int begin_key_name_length,
                                                                            uint8_t const* end_key_name,

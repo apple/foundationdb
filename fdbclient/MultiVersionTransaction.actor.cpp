@@ -262,7 +262,7 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> DLTransaction::getBlobGranuleRa
 	});
 }
 
-ThreadFuture<RangeResult> DLTransaction::readBlobGranules(const KeyRangeRef& keyRange,
+ThreadResult<RangeResult> DLTransaction::readBlobGranules(const KeyRangeRef& keyRange,
                                                           Version beginVersion,
                                                           Optional<Version> readVersion,
                                                           ReadBlobGranuleContext granuleContext) {
@@ -280,7 +280,7 @@ ThreadFuture<RangeResult> DLTransaction::readBlobGranules(const KeyRangeRef& key
 
 	int64_t rv = readVersion.present() ? readVersion.get() : invalidVersion;
 
-	FdbCApi::FDBFuture* f = api->transactionReadBlobGranules(tr,
+	FdbCApi::FDBResult* r = api->transactionReadBlobGranules(tr,
 	                                                         keyRange.begin.begin(),
 	                                                         keyRange.begin.size(),
 	                                                         keyRange.end.begin(),
@@ -288,16 +288,15 @@ ThreadFuture<RangeResult> DLTransaction::readBlobGranules(const KeyRangeRef& key
 	                                                         beginVersion,
 	                                                         rv,
 	                                                         context);
-	return toThreadFuture<RangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const FdbCApi::FDBKeyValue* kvs;
-		int count;
-		FdbCApi::fdb_bool_t more;
-		FdbCApi::fdb_error_t error = api->futureGetKeyValueArray(f, &kvs, &count, &more);
-		ASSERT(!error);
+	const FdbCApi::FDBKeyValue* kvs;
+	int count;
+	FdbCApi::fdb_bool_t more;
+	FdbCApi::fdb_error_t error = api->resultGetKeyValueArray(r, &kvs, &count, &more);
+	ASSERT(!error);
 
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena());
-	});
+	// The memory for this is stored in the FDBResult and is released when the result gets destroyed
+	return ThreadResult<RangeResult>(
+	    RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena()));
 }
 
 void DLTransaction::addReadConflictRange(const KeyRangeRef& keys) {
@@ -599,6 +598,10 @@ void DLApi::init() {
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel");
 	loadClientFunction(&api->futureDestroy, lib, fdbCPath, "fdb_future_destroy");
 
+	loadClientFunction(
+	    &api->resultGetKeyValueArray, lib, fdbCPath, "fdb_result_get_keyvalue_array", headerVersion >= 710);
+	loadClientFunction(&api->resultDestroy, lib, fdbCPath, "fdb_result_destroy", headerVersion >= 710);
+
 	loadClientFunction(&api->futureGetDatabase, lib, fdbCPath, "fdb_future_get_database", headerVersion < 610);
 	loadClientFunction(&api->createCluster, lib, fdbCPath, "fdb_create_cluster", headerVersion < 610);
 	loadClientFunction(&api->clusterCreateDatabase, lib, fdbCPath, "fdb_cluster_create_database", headerVersion < 610);
@@ -890,14 +893,17 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> MultiVersionTransaction::getBlo
 	return abortableFuture(f, tr.onChange);
 }
 
-ThreadFuture<RangeResult> MultiVersionTransaction::readBlobGranules(const KeyRangeRef& keyRange,
+ThreadResult<RangeResult> MultiVersionTransaction::readBlobGranules(const KeyRangeRef& keyRange,
                                                                     Version beginVersion,
                                                                     Optional<Version> readVersion,
                                                                     ReadBlobGranuleContext granuleContext) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->readBlobGranules(keyRange, beginVersion, readVersion, granuleContext)
-	                        : makeTimeout<RangeResult>();
-	return abortableFuture(f, tr.onChange);
+	if (tr.transaction) {
+		return tr.transaction->readBlobGranules(keyRange, beginVersion, readVersion, granuleContext);
+	} else {
+		// FIXME: handle abortable future + timeout properly
+		return ThreadResult<RangeResult>(transaction_cancelled());
+	}
 }
 
 void MultiVersionTransaction::atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) {

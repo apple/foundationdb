@@ -120,7 +120,7 @@ public:
 
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
 
-	ThreadFuture<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
+	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                           Version beginVersion,
 	                                           Optional<Version> readVersion,
 	                                           ReadBlobGranuleContext granuleContext) override;

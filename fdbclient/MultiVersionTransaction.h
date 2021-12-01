@@ -33,6 +33,7 @@
 // All of the required functions loaded from that external library are stored in function pointers in this struct.
 struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	typedef struct FDB_future FDBFuture;
+	typedef struct FDB_result FDBResult;
 	typedef struct FDB_cluster FDBCluster;
 	typedef struct FDB_database FDBDatabase;
 	typedef struct FDB_transaction FDBTransaction;
@@ -190,7 +191,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                              uint8_t const* end_key_name,
 	                                              int end_key_name_length);
 
-	FDBFuture* (*transactionReadBlobGranules)(FDBTransaction* db,
+	FDBResult* (*transactionReadBlobGranules)(FDBTransaction* db,
 	                                          uint8_t const* begin_key_name,
 	                                          int begin_key_name_length,
 	                                          uint8_t const* end_key_name,
@@ -229,6 +230,9 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*futureSetCallback)(FDBFuture* f, FDBCallback callback, void* callback_parameter);
 	void (*futureCancel)(FDBFuture* f);
 	void (*futureDestroy)(FDBFuture* f);
+
+	fdb_error_t (*resultGetKeyValueArray)(FDBResult* f, FDBKeyValue const** outKV, int* outCount, fdb_bool_t* outMore);
+	void (*resultDestroy)(FDBResult* f);
 
 	// Legacy Support
 	FDBFuture* (*createCluster)(const char* clusterFilePath);
@@ -281,7 +285,7 @@ public:
 	                                                                int64_t chunkSize) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
 
-	ThreadFuture<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
+	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                           Version beginVersion,
 	                                           Optional<Version> readVersion,
 	                                           ReadBlobGranuleContext granule_context) override;
@@ -437,7 +441,7 @@ public:
 	                                                                int64_t chunkSize) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
 
-	ThreadFuture<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
+	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                           Version beginVersion,
 	                                           Optional<Version> readVersion,
 	                                           ReadBlobGranuleContext granule_context) override;

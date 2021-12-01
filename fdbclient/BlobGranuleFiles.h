@@ -21,11 +21,17 @@
 #ifndef FDBCLIENT_BLOBGRANULEFILES_H
 #define FDBCLIENT_BLOBGRANULEFILES_H
 
-// This file contains a single function, for readers who want to materialize blob granules from the underlying files
+// This file contains functions for readers who want to materialize blob granules from the underlying files
 
 #include "fdbclient/BlobGranuleCommon.h"
 
-RangeResult materializeBlobGranule(BlobGranuleChunkRef chunk,
+ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<BlobGranuleChunkRef>>& files,
+                                                    const KeyRangeRef& keyRange,
+                                                    Version beginVersion,
+                                                    Version readVersion,
+                                                    ReadBlobGranuleContext granuleContext);
+
+RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
                                    KeyRangeRef keyRange,
                                    Version readVersion,
                                    Optional<StringRef> snapshotData,
