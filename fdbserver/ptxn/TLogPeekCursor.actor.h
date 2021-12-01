@@ -24,10 +24,10 @@
 #elif !defined(FDBSERVER_PTXN_TLOGPEEKCURSOR_ACTOR_H)
 #define FDBSERVER_PTXN_TLOGPEEKCURSOR_ACTOR_H
 
-#include <functional>
+#include <deque>
 #include <list>
+#include <functional>
 #include <memory>
-#include <queue>
 #include <unordered_map>
 #include <vector>
 
@@ -83,13 +83,14 @@ public:
 	// invalidate the existing iterators.
 	Future<bool> remoteMoreAvailable();
 
-	// Gets one mutation
+	// Gets one mutation, the behavior is undefined if hasRemaining is not called or returning false.
 	const VersionSubsequenceMessage& get() const;
 
-	// Moves to the next mutation, return false if there is no more mutation
+	// Moves to the next mutation, the behavior is undefined if hasRemaining is not called or returning false.
 	void next();
 
-	// Any remaining mutation *LOCALLY* available
+	// Any remaining mutation *LOCALLY* available. This *MUST* be verified prior to get or next, otherwise the
+	// behavior is undefined.
 	bool hasRemaining() const;
 
 	// Returns an iterator that represents the begin of the data still undeserialized.
@@ -116,29 +117,123 @@ private:
 	const iterator endIterator;
 };
 
+namespace details {
+
+class VersionSubsequencePeekCursorBase : public PeekCursorBase {
+public:
+	VersionSubsequencePeekCursorBase(const Version version_ = invalidVersion,
+	                                 const Subsequence subsequence_ = invalidSubsequence);
+
+	// Returns the commit version of the current message,
+	// If there is no message under cursor, the behavior is undefined.
+	const Version& getVersion() const;
+
+	// Returns the subsequence of the current message,
+	// If there is no message under cursor, the behavior is undefined.
+	const Subsequence& getSubsequence() const;
+
+	// FIXME use C++20 operator<=>
+	// Orders two cursors using the message version/subsequence
+	int operatorSpaceship(const VersionSubsequencePeekCursorBase& other) const;
+
+	bool operator<(const VersionSubsequencePeekCursorBase& other) { return operatorSpaceship(other) < 0; }
+	bool operator<=(const VersionSubsequencePeekCursorBase& other) { return operatorSpaceship(other) <= 0; }
+	bool operator>(const VersionSubsequencePeekCursorBase& other) { return operatorSpaceship(other) > 0; }
+	bool operator>=(const VersionSubsequencePeekCursorBase& other) { return operatorSpaceship(other) >= 0; }
+	bool operator==(const VersionSubsequencePeekCursorBase& other) { return operatorSpaceship(other) == 0; }
+	bool operator!=(const VersionSubsequencePeekCursorBase& other) { return operatorSpaceship(other) != 0; }
+};
+
+// Stores an object with type ObjectType. The object should have an arena() method which returns a reference to the
+// internal arena it is using.
+// For an arena A, one would expect using B.dependsOn(A) would extent A's lifecycle to B's lifecycle. However this is
+// not quite true. Internally arenas are implemented as linked lists, or
+//
+//  A.impl =      ArenaBlock -> ArenaBlock -> ...
+//
+// where each ArenaBlock is a piece of allocated memory managed by reference counting. Applying B.dependsOn(A) would
+// cause B refers to the first ArenaBlock in A, or
+//
+//            B----|
+//                 V
+//  A.impl =      ArenaBlock -> ArenaBlock -> ...
+//
+// so when A destructs, there is still at least one extra reference to the first ArenaBlock, prevening the release of
+// the chained blocks
+// However, when additional memory is requested to A, A will create additional ArenaBlocks (see
+// Arena.cpp:ArenaBlock::create), and the new ArenaBlock might be inserted *prior* to the existing ArenaBlock, i.e.
+//
+//                           B----|
+//                                V
+//  A.impl =      ArenaBlock -> ArenaBlock -> ArenaBlock ...
+//                   ^- new created
+// and when A is destructed, the unreferrenced (hereby the first one) will be destructed. This causes B depends on only
+// part of A. The only way to ensure all blocks in A have the same life cycle to B is to let B.dependsOn(A) get called
+// when A is stable, or no extra ArenaBlocks will be created. In this implementation, we only call dependsOn when the
+// original object is about to be destructed, thus effectivley extend the lifecycle of the internal arena.
+template <typename ObjectType>
+class ArenaWrapper {
+	ObjectType object;
+	Arena* pAttachArena;
+
+	void attachArena() {
+		if (pAttachArena) {
+			pAttachArena->dependsOn(object.arena());
+		}
+	}
+
+public:
+	explicit ArenaWrapper(const ObjectType& object_, Arena* pAttachArena_ = nullptr)
+	  : object(object_), pAttachArena(pAttachArena_) {}
+	explicit ArenaWrapper(ObjectType&& object_, Arena* pAttachArena_ = nullptr)
+	  : object(std::move(object_)), pAttachArena(pAttachArena_) {}
+	ArenaWrapper& operator=(const ObjectType& object_) {
+		attachArena();
+		object = object_;
+		return *this;
+	}
+	ArenaWrapper& operator=(ObjectType&& object_) {
+		attachArena();
+		object = std::move(object_);
+		return *this;
+	}
+
+	~ArenaWrapper() { attachArena(); }
+
+	ObjectType& get() { return object; }
+	const ObjectType& get() const { return object; }
+};
+
+} // namespace details
+
 // Connect to given TLog server(s) and peeks for mutations with a given TeamID
-class StorageTeamPeekCursor : public PeekCursorBase {
+class StorageTeamPeekCursor : public details::VersionSubsequencePeekCursorBase {
+
+private:
 	const StorageTeamID storageTeamID;
 	std::vector<TLogInterfaceBase*> pTLogInterfaces;
 
 	// The arena used to store incoming serialized data, if not nullptr, TLogPeekReply arenas will be attached to this
 	// arena, enables the access of deserialized data even the cursor is destroyed.
 	Arena* pAttachArena;
+
 	SubsequencedMessageDeserializer deserializer;
-	SubsequencedMessageDeserializer::iterator deserializerIter;
+	mutable details::ArenaWrapper<SubsequencedMessageDeserializer::iterator> wrappedDeserializerIter;
 
 	// When the cursor checks remoteMoreAvailable, it depends on an ACTOR which accepts TLogPeekReply. TLogPeekReply
 	// will include an Arena and a StringRef, representing serialized data. We need to add a reference to the Arena so
 	// it will not be GCed after the ACTOR terminates.
 	Arena workArena;
 
-	// Returns the begin verion for the cursor. The cursor will start from the begin version.
-	const Version& getBeginVersion() const;
+	// The version the cursor starts, all versions that are smaller than startingVersion will be ignored by remote TLog
+	const Version startingVersion;
 
-	// The version the cursor starts
-	const Version beginVersion;
+	// If true, will return a EmptyMessage when the cursor meets a version without messages, Otherwise the empty
+	// version will be ignored
+	bool reportEmptyVersion;
 
-	// Last version processed
+	// The last version that the cursor have received, the next remote RPC will return versions larger than lastVersion,
+	// if available.
 	Version lastVersion;
 
 public:
@@ -148,20 +243,25 @@ public:
 	// pArena_ is used to store the serialized data for further use, e.g. making MutationRefs still available after the
 	// cursor is destroyed. If pArena_ is nullptr, any reference to the peeked data will be invalidated after the cursor
 	// is destructed.
+	// reportEmptyVersion_ flag will allow an empty version trigger an EmptyMessage, if set true
 	StorageTeamPeekCursor(const Version& version_,
 	                      const StorageTeamID& storageTeamID_,
 	                      TLogInterfaceBase* pTLogInterface_,
-	                      Arena* pArena_ = nullptr);
+	                      Arena* pArena_ = nullptr,
+	                      const bool reportEmptyVersion_ = false);
 
 	StorageTeamPeekCursor(const Version& version_,
 	                      const StorageTeamID& storageTeamID_,
 	                      const std::vector<TLogInterfaceBase*>& pTLogInterfaces_,
-	                      Arena* arena_ = nullptr);
+	                      Arena* pArena_ = nullptr,
+	                      const bool reportEmptyVersion_ = false);
+
+	bool isEmptyVersionsIgnored() const { return !reportEmptyVersion; }
 
 	const StorageTeamID& getStorageTeamID() const;
 
-	// Returns the last version being pulled
-	const Version& getLastVersion() const;
+	// Returns the starting verion for the cursor. The cursor will start from the begin version.
+	const Version& getStartingVersion() const;
 
 protected:
 	virtual Future<bool> remoteMoreAvailableImpl() override;
@@ -169,6 +269,191 @@ protected:
 	virtual const VersionSubsequenceMessage& getImpl() const override;
 	virtual bool hasRemainingImpl() const override;
 };
+
+// Cursor that merges multiple cursors into one
+namespace merged {
+
+namespace details {
+
+class CursorContainerBase {
+public:
+	// Type of the cursor
+	using element_t = std::shared_ptr<ptxn::details::VersionSubsequencePeekCursorBase>;
+
+	// Type of the container
+	using container_t = std::deque<element_t>;
+
+	// Type of the container iterator
+	using iterator_t = typename container_t::const_iterator;
+
+protected:
+	container_t container;
+
+	virtual void pushImpl(const element_t& pCursor) = 0;
+	virtual void popImpl() = 0;
+
+public:
+	// Accesses the first element in the container
+	// Here "first" is implementation-specific, see the documentation of subclass
+	element_t& front() { return container.front(); }
+
+	// Accesses the first element in the container
+	// Here "first" is implementation-specific, see the documenation of subclass
+	const element_t& front() const { return container.front(); }
+
+	// Returns an iterator points to the beginning of the container
+	// The iterator does not imply any order of the cursors
+	iterator_t begin() const { return std::cbegin(container); }
+
+	// Returns an iterator points to the end of the container
+	iterator_t end() const { return std::cend(container); }
+
+	// Returns true if there is no element in the container
+	bool empty() const { return container.empty(); }
+
+	// Returns the count of the elements in the container
+	int size() const { return container.size(); }
+
+	// Adds a new cursor (in pointer type) to the container
+	void push(const element_t& pCursor) { pushImpl(pCursor); }
+
+	// Remove the first element in the container
+	// Here "first" is implementation-specific, see the documentation of subclass
+	void pop() { popImpl(); }
+};
+
+// Provides an ordered container of cursors. In the container the first element is defined as the container that is
+// the "smallest" in the container, where `smallest" is defined by the implementation of operator< method of the cursor.
+class OrderedCursorContainer : public CursorContainerBase {
+	// Compare two elements, by default C++ implements max heap, while what needed here is a min heap, the comparator
+	// implements a greater-than algorithm.
+	static bool heapElementComparator(element_t e1, element_t e2);
+
+protected:
+	virtual void pushImpl(const element_t& pCursor) override;
+	virtual void popImpl() override;
+
+public:
+	OrderedCursorContainer();
+};
+
+// Provides an unordered container of cursors, the container behaves like a FIFO-queue. The first element is defined as
+// the earliest element in the container.
+class UnorderedCursorContainer : public CursorContainerBase {
+protected:
+	virtual void pushImpl(const element_t& pCursor) override;
+	virtual void popImpl() override;
+};
+
+// Provides a Storage Team ID to StorageTeamPeekCursor mapping functionality
+class StorageTeamIDCursorMapperMixin {
+public:
+	using StorageTeamIDCursorMapper = std::unordered_map<StorageTeamID, std::shared_ptr<StorageTeamPeekCursor>>;
+
+private:
+	StorageTeamIDCursorMapper mapper;
+
+public:
+	// Moves a cursor to the mapping system, the original cursor is invalidated
+	void addCursor(std::shared_ptr<StorageTeamPeekCursor>&& cursor);
+
+	// Removes a cursor from the mapping system
+	std::shared_ptr<StorageTeamPeekCursor> removeCursor(const StorageTeamID& storageTeamID);
+
+	// Checks if a storage team ID is in the mapping system
+	bool isCursorExists(const StorageTeamID&) const;
+
+	// Gets the cursor for the given storage team ID
+	StorageTeamPeekCursor& getCursor(const StorageTeamID& storageTeamID);
+
+	// Gets the cursor for the given storage team ID
+	const StorageTeamPeekCursor& getCursor(const StorageTeamID& storageTeamID) const;
+
+	// Gets the number of storage teams
+	int getNumCursors() const;
+
+	// Returns the iterator points at the beginning of the (Storage Team ID, cursor) pair list.
+	StorageTeamIDCursorMapper::iterator cursorsBegin();
+
+	// Returns the iterator points at the end of the (Storage Team ID, cursor) pair list.
+	StorageTeamIDCursorMapper::iterator cursorsEnd();
+
+protected:
+	virtual void addCursorImpl(std::shared_ptr<StorageTeamPeekCursor>&& cursor);
+	virtual std::shared_ptr<StorageTeamPeekCursor> removeCursorImpl(const StorageTeamID& cursor);
+
+	// Gets the shared_ptr for the given storage team ID
+	std::shared_ptr<StorageTeamPeekCursor> getCursorPtr(const StorageTeamID&);
+};
+
+} // namespace details
+
+// Base class for peeking data from multiple storage teams, when all storage teams are notified when a commit is done.
+// In this case, even different teams might have different team versions, they will be informed when the commit version
+// has changed.
+class BroadcastedStorageTeamPeekCursorBase : public ptxn::details::VersionSubsequencePeekCursorBase,
+                                             protected details::StorageTeamIDCursorMapperMixin {
+protected:
+	std::unique_ptr<details::CursorContainerBase> pCursorContainer;
+
+	// The current version the cursorContainer is using
+	Version currentVersion;
+
+	// The list of cursors that requires RPC
+	std::list<StorageTeamID> emptyCursorStorageTeamIDs;
+
+	// The list of cursors that has finished epoch
+	std::list<StorageTeamID> retiredCursorStorageTeamIDs;
+
+protected:
+	BroadcastedStorageTeamPeekCursorBase(std::unique_ptr<details::CursorContainerBase>&& pCursorContainer_)
+	  : pCursorContainer(std::move(pCursorContainer_)) {}
+
+	// Tries to fill the cursor heap, returns true if the cursorContainer is filled with cursors.
+	// If cursorContainer is not empty, the behavior is undefined.
+	bool tryFillCursorContainer();
+
+	virtual Future<bool> remoteMoreAvailableImpl() override;
+	virtual const VersionSubsequenceMessage& getImpl() const override;
+	virtual bool hasRemainingImpl() const override;
+
+	virtual void addCursorImpl(std::shared_ptr<StorageTeamPeekCursor>&& cursor) override;
+
+public:
+	using details::StorageTeamIDCursorMapperMixin::addCursor;
+	using details::StorageTeamIDCursorMapperMixin::getNumCursors;
+	using details::StorageTeamIDCursorMapperMixin::isCursorExists;
+};
+
+// Merge multiple storage team peek cursor into one. The version is the barrier, i.e., a version is complete iff all
+// cursors has the version and currently locate at the version. The messages will be iteratived in the order of (commit
+// version, subsequence)
+class BroadcastedStorageTeamPeekCursor_Ordered : public BroadcastedStorageTeamPeekCursorBase {
+protected:
+	virtual void nextImpl() override;
+
+public:
+	BroadcastedStorageTeamPeekCursor_Ordered()
+	  : BroadcastedStorageTeamPeekCursorBase(std::make_unique<details::OrderedCursorContainer>()) {}
+};
+
+// Merge multiple storage team peek cursor into one. The version is the barrier, i.e., a version is complete iff all
+// cursors has the version and currently locate at the version. The messages will be iteratived per storage team. Within
+// the storage team, the messages will be ordered by subsequence; after all messages in the team are consumed, the
+// cursor will move to the next storage team.
+class BroadcastedStorageTeamPeekCursor_Unordered : public BroadcastedStorageTeamPeekCursorBase {
+protected:
+	virtual void nextImpl() override;
+
+public:
+	BroadcastedStorageTeamPeekCursor_Unordered()
+	  : BroadcastedStorageTeamPeekCursorBase(std::make_unique<details::UnorderedCursorContainer>()) {}
+};
+
+} // namespace merged
+
+// Advances the cursor to the given version/subsequence
+ACTOR Future<Void> advanceTo(PeekCursorBase* cursor, Version version, Subsequence subsequence = 0);
 
 //////////////////////////////////////////////////////////////////////////////////
 // ServerPeekCursor used for demo

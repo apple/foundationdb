@@ -136,7 +136,8 @@ void print(const TestDriverOptions& option) {
 void print(const ptxn::test::TestTLogPeekOptions& option) {
 	std::cout << std::endl << ">> ptxn/test/Driver.actor.cpp:DriverTestOptions:" << std::endl;
 
-	std::cout << formatKVPair("Mutations", option.numMutations) << std::endl
+	std::cout << formatKVPair("Versions", option.numVersions) << std::endl
+	          << formatKVPair("Mutations per versions", option.numMutationsPerVersion) << std::endl
 	          << formatKVPair("Teams", option.numStorageTeams) << std::endl
 	          << formatKVPair("Intial version", option.initialVersion) << std::endl;
 }
