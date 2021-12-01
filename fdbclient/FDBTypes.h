@@ -1175,7 +1175,9 @@ inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 
 // matches what's in fdb_c.h
 struct ReadBlobGranuleContext {
+	// User context to pass along to functions
 	void* userContext;
+
 	// Returns a unique id for the load. Asynchronous to support queueing multiple in parallel.
 	int64_t (*start_load_f)(const char* filename, int filenameLength, int64_t offset, int64_t length, void* context);
 
