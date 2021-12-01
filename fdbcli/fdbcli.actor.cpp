@@ -19,6 +19,7 @@
  */
 
 #include "boost/lexical_cast.hpp"
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
@@ -631,9 +632,9 @@ ACTOR Future<Void> commitTransaction(Reference<ITransaction> tr) {
 	wait(makeInterruptable(safeThreadFutureToFuture(tr->commit())));
 	auto ver = tr->getCommittedVersion();
 	if (ver != invalidVersion)
-		printf("Committed (%" PRId64 ")\n", ver);
+		fmt::print("Committed ({})\n", ver);
 	else
-		printf("Nothing to commit\n");
+		fmt::print("Nothing to commit\n");
 	return Void();
 }
 
