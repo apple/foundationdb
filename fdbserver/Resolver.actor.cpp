@@ -55,7 +55,10 @@ struct Resolver : ReferenceCounted<Resolver> {
 	const int commitProxyCount, resolverCount;
 	NotifiedVersion version;
 	AsyncVar<Version> neededVersion;
-	ptxn::TLogGroupVersionTracker versionTracker; // tracks per group commit version
+	// Tracks per group commit version. It is initialized by the master, which
+	// sends all TLogGroup info to all resolvers during initialization, i.e., the
+	// very first ResolveTransactionBatchRequest.
+	ptxn::TLogGroupVersionTracker versionTracker;
 
 	Map<Version, Standalone<VectorRef<StateTransactionRef>>> recentStateTransactions;
 	Deque<std::pair<Version, int64_t>> recentStateTransactionSizes;

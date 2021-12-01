@@ -1250,6 +1250,9 @@ void ResolverData::initGroupMessageBuilders(Version commitVersion) {
 	if (!SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS)
 		return;
 
+	// Initialize all groups' serializers, because we don't know which group will have private mutations.
+	// Resolver calls toCommit.getGroupMutations(writtenGroups) later to only
+	// extract private mutations for the writtenGroups, not all groups.
 	const auto& groups = tLogGroupCollection->groups();
 	ASSERT_WE_THINK(toCommit && toCommit->pGroupMessageBuilders->empty());
 	toCommit->addTLogGroups(groups, commitVersion);

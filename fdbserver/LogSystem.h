@@ -852,7 +852,7 @@ private:
 	SpanID spanContext;
 	// Stores TLog groups updated by the transactions.
 	std::set<ptxn::TLogGroupID> writtenTLogGroups;
-	bool shardChanged; // if keyServers has any changes, i.e., shard boundary modifications.
+	bool shardChanged = false; // if keyServers has any changes, i.e., shard boundary modifications.
 
 	// Writes transaction info to the message stream at the given location if
 	// it has not already been written (for the current transaction). Returns
