@@ -20,6 +20,7 @@
 
 #ifndef DatabaseContext_h
 #define DatabaseContext_h
+#include "fdbclient/Notified.h"
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -146,6 +147,37 @@ public:
 	WatchMetadata(Key key, Optional<Value> value, Version version, TransactionInfo info, TagSet tags);
 };
 
+struct MutationAndVersionStream {
+	Standalone<MutationsAndVersionRef> next;
+	PromiseStream<Standalone<MutationsAndVersionRef>> results;
+	bool operator<(MutationAndVersionStream const& rhs) const { return next.version > rhs.next.version; }
+};
+
+struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
+	UID id;
+	Future<Void> updater;
+	NotifiedVersion version;
+	NotifiedVersion desired;
+	Promise<Void> destroyed;
+
+	~ChangeFeedStorageData() { destroyed.send(Void()); }
+};
+
+struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
+	PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> mutations;
+	std::vector<ReplyPromiseStream<ChangeFeedStreamReply>> streams;
+
+	Version getVersion();
+	Future<Void> whenAtLeast(Version version);
+
+	NotifiedVersion lastReturnedVersion;
+	std::vector<Reference<ChangeFeedStorageData>> storageData;
+	AsyncVar<int> notAtLatest;
+	Promise<Void> refresh;
+
+	ChangeFeedData() : notAtLatest(1) {}
+};
+
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -253,7 +285,7 @@ public:
 	// Management API, create snapshot
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
-	Future<Void> getChangeFeedStream(const PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>& results,
+	Future<Void> getChangeFeedStream(Reference<ChangeFeedData> results,
 	                                 Key rangeID,
 	                                 Version begin = 0,
 	                                 Version end = std::numeric_limits<Version>::max(),
@@ -341,6 +373,9 @@ public:
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
 	// map from changeFeedId -> changeFeedRange
 	std::unordered_map<Key, KeyRange> changeFeedCache;
+	std::unordered_map<UID, Reference<ChangeFeedStorageData>> changeFeedUpdaters;
+
+	Reference<ChangeFeedStorageData> getStorageData(StorageServerInterface interf);
 
 	UID dbId;
 	IsInternal internal; // Only contexts created through the C client and fdbcli are non-internal
@@ -459,6 +494,8 @@ public:
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;
 	Reference<TransactionT> createTransaction();
+
+	EventCacheHolder connectToDatabaseEventCacheHolder;
 
 private:
 	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;

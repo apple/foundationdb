@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "flow/serialize.h"
 #include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/SystemData.h" // for allKeys unit test - could remove
@@ -70,10 +71,10 @@ static Arena loadSnapshotFile(const StringRef& snapshotData,
 	    }
 	}*/
 	if (BG_READ_DEBUG) {
-		printf("Started with %d rows from snapshot after pruning to [%s - %s)\n",
-		       dataMap.size(),
-		       keyRange.begin.printable().c_str(),
-		       keyRange.end.printable().c_str());
+		fmt::print("Started with {0} rows from snapshot after pruning to [{1} - {2})\n",
+		           dataMap.size(),
+		           keyRange.begin.printable(),
+		           keyRange.end.printable());
 	}
 
 	return parseArena;
@@ -150,14 +151,14 @@ static Arena loadDeltaFile(StringRef deltaData,
 	reader.deserialize(FileIdentifierFor<GranuleDeltas>::value, deltas, parseArena);
 
 	if (BG_READ_DEBUG) {
-		printf("Parsed %d deltas from file\n", deltas.size());
+		fmt::print("Parsed {}} deltas from file\n", deltas.size());
 	}
 
 	// TODO REMOVE sanity check
 	for (int i = 0; i < deltas.size() - 1; i++) {
 		if (deltas[i].version > deltas[i + 1].version) {
-			printf(
-			    "BG VERSION ORDER VIOLATION IN DELTA FILE: '%lld', '%lld'\n", deltas[i].version, deltas[i + 1].version);
+			fmt::print(
+			    "BG VERSION ORDER VIOLATION IN DELTA FILE: '{0}', '{1}'\n", deltas[i].version, deltas[i + 1].version);
 		}
 		ASSERT(deltas[i].version <= deltas[i + 1].version);
 	}
@@ -191,14 +192,14 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 	}
 
 	if (BG_READ_DEBUG) {
-		printf("Applying %d delta files\n", chunk.deltaFiles.size());
+		fmt::print("Applying {} delta files\n", chunk.deltaFiles.size());
 	}
 	for (int deltaIdx = 0; deltaIdx < chunk.deltaFiles.size(); deltaIdx++) {
 		Arena deltaArena = loadDeltaFile(deltaFileData[deltaIdx], keyRange, readVersion, lastFileEndVersion, dataMap);
 		arena.dependsOn(deltaArena);
 	}
 	if (BG_READ_DEBUG) {
-		printf("Applying %d memory deltas\n", chunk.newDeltas.size());
+		fmt::print("Applying {} memory deltas\n", chunk.newDeltas.size());
 	}
 	applyDeltas(chunk.newDeltas, keyRange, readVersion, lastFileEndVersion, dataMap);
 

@@ -252,7 +252,8 @@ public:
 	                              fdb_bool_t snapshot,
 	                              fdb_bool_t reverse);
 
-	// Returns a future which will be set to an FDBKeyValue array.
+	// WARNING: This feature is considered experimental at this time. It is only allowed when using snapshot isolation
+	// AND disabling read-your-writes. Returns a future which will be set to an FDBKeyValue array.
 	KeyValueArrayFuture get_range_and_flat_map(const uint8_t* begin_key_name,
 	                                           int begin_key_name_length,
 	                                           fdb_bool_t begin_or_equal,

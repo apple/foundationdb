@@ -397,11 +397,10 @@ public:
 	static inline Future<typename Req::Result> readWithConflictRangeAndFlatMap(ReadYourWritesTransaction* ryw,
 	                                                                           Req const& req,
 	                                                                           Snapshot snapshot) {
-		if (ryw->options.readYourWritesDisabled) {
+		// For now, getRangeAndFlatMap is only supported if transaction use snapshot isolation AND read-your-writes is
+		// disabled.
+		if (snapshot && ryw->options.readYourWritesDisabled) {
 			return readWithConflictRangeThroughAndFlatMap(ryw, req, snapshot);
-		} else if (snapshot && ryw->options.snapshotRywEnabled <= 0) {
-			TEST(true); // readWithConflictRangeSnapshot not supported for getRangeAndFlatMap
-			throw client_invalid_operation();
 		}
 		TEST(true); // readWithConflictRangeRYW not supported for getRangeAndFlatMap
 		throw client_invalid_operation();

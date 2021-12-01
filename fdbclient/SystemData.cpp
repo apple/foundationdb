@@ -213,6 +213,8 @@ const KeyRangeRef writeConflictRangeKeysRange =
     KeyRangeRef(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
                 LiteralStringRef("\xff\xff/transaction/write_conflict_range/\xff\xff"));
 
+const KeyRef clusterIdKey = LiteralStringRef("\xff/clusterId");
+
 // "\xff/cacheServer/[[UID]] := StorageServerInterface"
 const KeyRangeRef storageCacheServerKeys(LiteralStringRef("\xff/cacheServer/"), LiteralStringRef("\xff/cacheServer0"));
 const KeyRef storageCacheServersPrefix = storageCacheServerKeys.begin;

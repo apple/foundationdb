@@ -706,7 +706,7 @@ struct KeyValueStoreType {
 		case SSD_BTREE_V2:
 			return "ssd-2";
 		case SSD_REDWOOD_V1:
-			return "ssd-redwood-experimental";
+			return "ssd-redwood-1-experimental";
 		case SSD_ROCKSDB_V1:
 			return "ssd-rocksdb-experimental";
 		case MEMORY:

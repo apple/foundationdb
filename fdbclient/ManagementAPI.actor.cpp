@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -184,7 +185,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	} else if (mode == "ssd" || mode == "ssd-2") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_BTREE_V2;
-	} else if (mode == "ssd-redwood-experimental") {
+	} else if (mode == "ssd-redwood-1-experimental") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_REDWOOD_V1;
 	} else if (mode == "ssd-rocksdb-experimental") {
@@ -1677,9 +1678,9 @@ ACTOR Future<Void> printHealthyZone(Database cx) {
 				printf("No ongoing maintenance.\n");
 			} else {
 				auto healthyZone = decodeHealthyZoneValue(val.get());
-				printf("Maintenance for zone %s will continue for %" PRId64 " seconds.\n",
-				       healthyZone.first.toString().c_str(),
-				       (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+				fmt::print("Maintenance for zone {0} will continue for {1} seconds.\n",
+				           healthyZone.first.toString(),
+				           (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 			}
 			return Void();
 		} catch (Error& e) {

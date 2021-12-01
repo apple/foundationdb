@@ -19,6 +19,7 @@
  */
 
 #include "boost/lexical_cast.hpp"
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
@@ -631,9 +632,9 @@ ACTOR Future<Void> commitTransaction(Reference<ITransaction> tr) {
 	wait(makeInterruptable(safeThreadFutureToFuture(tr->commit())));
 	auto ver = tr->getCommittedVersion();
 	if (ver != invalidVersion)
-		printf("Committed (%" PRId64 ")\n", ver);
+		fmt::print("Committed ({})\n", ver);
 	else
-		printf("Nothing to commit\n");
+		fmt::print("Nothing to commit\n");
 	return Void();
 }
 
@@ -1402,7 +1403,9 @@ struct CLIOptions {
 			exit_code = FDB_EXIT_ERROR;
 			return;
 		}
+	}
 
+	void setupKnobs() {
 		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 		for (const auto& [knobName, knobValueString] : knobs) {
 			try {
@@ -2432,8 +2435,6 @@ int main(int argc, char** argv) {
 
 	registerCrashHandler();
 
-	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::False, IsSimulated::False);
-
 #ifdef __unixish__
 	struct sigaction act;
 
@@ -2534,6 +2535,10 @@ int main(int argc, char** argv) {
 	try {
 		API->selectApiVersion(opt.api_version);
 		API->setupNetwork();
+		opt.setupKnobs();
+		if (opt.exit_code != -1) {
+			return opt.exit_code;
+		}
 		Future<int> cliFuture = runCli(opt);
 		Future<Void> timeoutFuture = opt.exit_timeout ? timeExit(opt.exit_timeout) : Never();
 		auto f = stopNetworkAfter(success(cliFuture) || timeoutFuture);

@@ -19,6 +19,7 @@
  */
 
 #include <cinttypes>
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbserver/Status.h"
 #include "flow/Trace.h"
@@ -96,7 +97,6 @@ extern int limitReasonEnd;
 extern const char* limitReasonName[];
 extern const char* limitReasonDesc[];
 
-struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
 typedef std::map<std::string, TraceEventFields> EventMap;
 
 ACTOR static Future<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
@@ -116,7 +116,7 @@ ACTOR static Future<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterf
 	}
 }
 
-ACTOR static Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
+ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
     std::vector<WorkerDetails> workers,
     std::string eventName) {
 	try {
@@ -3362,16 +3362,16 @@ TEST_CASE("Lstatus/json/builderPerf") {
 	}
 
 	double elapsed = generated + serialized;
-	printf("RESULT: %" PRId64
-	       " bytes  %d elements  %d levels  %f seconds (%f gen, %f serialize)  %f MB/s  %f items/s\n",
-	       bytes,
-	       iterations * elements,
-	       level,
-	       elapsed,
-	       generated,
-	       elapsed - generated,
-	       bytes / elapsed / 1e6,
-	       iterations * elements / elapsed);
+	fmt::print("RESULT: {0}"
+	           " bytes  {1} elements  {2} levels  {3} seconds ({4} gen, {5} serialize)  {6} MB/s  {7} items/s\n",
+	           bytes,
+	           iterations * elements,
+	           level,
+	           elapsed,
+	           generated,
+	           elapsed - generated,
+	           bytes / elapsed / 1e6,
+	           iterations * elements / elapsed);
 
 	return Void();
 }

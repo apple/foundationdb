@@ -21,6 +21,7 @@
 #include <map>
 #include <vector>
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobGranuleFiles.h"

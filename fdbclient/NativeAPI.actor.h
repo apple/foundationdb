@@ -72,6 +72,8 @@ struct NetworkOptions {
 	Optional<bool> logClientInfo;
 	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
 	bool runLoopProfilingEnabled;
+	bool primaryClient;
+	std::map<std::string, KnobValue> knobs;
 
 	NetworkOptions();
 };

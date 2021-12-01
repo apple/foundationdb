@@ -4277,16 +4277,20 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				    .detail("StorageCount", movingCount);
 			} else {
 				TEST(true); // start wiggling
-				wait(waitUntilHealthy(self));
-				auto fv = self->excludeStorageServersForWiggle(pid);
-				movingCount = fv.size();
-				moveFinishFuture = waitForAll(fv);
-				TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
-				    .detail("Primary", self->primary)
-				    .detail("ProcessId", pid)
-				    .detail("ExtraHealthyTeamCount", extraTeamCount)
-				    .detail("HealthyTeamCount", self->healthyTeamCount)
-				    .detail("StorageCount", movingCount);
+				choose {
+					when(wait(waitUntilHealthy(self))) {
+						auto fv = self->excludeStorageServersForWiggle(pid);
+						movingCount = fv.size();
+						moveFinishFuture = waitForAll(fv);
+						TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
+						    .detail("Primary", self->primary)
+						    .detail("ProcessId", pid)
+						    .detail("ExtraHealthyTeamCount", extraTeamCount)
+						    .detail("HealthyTeamCount", self->healthyTeamCount)
+						    .detail("StorageCount", movingCount);
+					}
+					when(wait(self->pauseWiggle->onChange())) { continue; }
+				}
 			}
 		}
 
@@ -4641,12 +4645,18 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self,
 						self->healthyZone.set(Optional<Key>());
 					}
 				}
+				if (!status->isUnhealthy()) {
+					// On server transistion from unhealthy -> healthy, trigger buildTeam check,
+					// handles scenario when team building failed due to insufficient healthy servers.
+					// Operaton cost is minimal if currentTeamCount == desiredTeamCount/maxTeamCount.
+					self->doBuildTeams = true;
+				}
 
-				// TraceEvent("StatusMapChange", self->distributorId)
-				//     .detail("ServerID", interf.id())
-				//     .detail("Status", status->toString())
-				//     .detail("Available",
-				//             IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
+				TraceEvent(SevDebug, "StatusMapChange", self->distributorId)
+				    .detail("ServerID", interf.id())
+				    .detail("Status", status->toString())
+				    .detail("Available",
+				            IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
 			}
 			when(wait(status->isUnhealthy() ? waitForAllDataRemoved(cx, interf.id(), addedVersion, self) : Never())) {
 				break;
@@ -5261,6 +5271,21 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 	Future<Void> waitComplete() { return complete.getFuture(); }
 };
 
+ACTOR Future<UID> getClusterId(DDTeamCollection* self) {
+	state ReadYourWritesTransaction tr(self->cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> clusterId = wait(tr.get(clusterIdKey));
+			ASSERT(clusterId.present());
+			return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
                                      RecruitStorageReply candidateWorker,
                                      const DDEnabledState* ddEnabledState,
@@ -5278,12 +5303,15 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 		// Ask the candidateWorker to initialize a SS only if the worker does not have a pending request
 		state UID interfaceId = deterministicRandom()->randomUniqueID();
 
+		UID clusterId = wait(getClusterId(self));
+
 		state InitializeStorageRequest isr;
 		isr.storeType =
 		    recruitTss ? self->configuration.testingStorageServerStoreType : self->configuration.storageServerStoreType;
 		isr.seedTag = invalidTag;
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = interfaceId;
+		isr.clusterId = clusterId;
 
 		self->recruitingIds.insert(interfaceId);
 		self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
