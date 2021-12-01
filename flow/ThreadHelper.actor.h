@@ -728,7 +728,7 @@ private:
 };
 
 // Like a future (very similar to ThreadFuture) but only for computations that already completed. Reuses the SAV's
-// implementation for memory management  error handling though. Essentially a future that's returned from a synchronous
+// implementation for memory management error handling though. Essentially a future that's returned from a synchronous
 // computation and guaranteed to be complete.
 
 template <class T>
@@ -745,10 +745,9 @@ public:
 		return sav->error;
 	}
 
-	void cancel() { extractPtr()->cancel(); }
-
 	ThreadResult() : sav(0) {}
 	explicit ThreadResult(ThreadSingleAssignmentVar<T>* sav) : sav(sav) {
+		ASSERT(sav->isReadyUnsafe());
 		// sav->addref();
 	}
 	ThreadResult(const ThreadResult<T>& rhs) : sav(rhs.sav) {
