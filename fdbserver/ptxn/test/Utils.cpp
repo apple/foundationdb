@@ -146,7 +146,8 @@ void printCommitRecords(const CommitRecord& record) {
 	std::cout << ">> ptxn/test/CommitUtils.h:CommitRecord:" << std::endl;
 	for (const auto& [version, storageTeamIDMessageMap] : record.messages) {
 		std::cout << "\n\tCommit version: " << std::setw(10) << version
-		          << "\tStorage Team Version: " << record.commitVersionStorageTeamVersionMapper.at(version) << std::endl;
+		          << "\tStorage Team Version: " << record.commitVersionStorageTeamVersionMapper.at(version)
+		          << std::endl;
 		for (const auto& [storageTeamID, sms] : storageTeamIDMessageMap) {
 			std::cout << "\t\tStorage Team ID: " << storageTeamID.toString() << std::endl;
 			for (const auto& [subsequence, message] : sms) {
