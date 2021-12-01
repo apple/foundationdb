@@ -75,7 +75,7 @@ public:
 
 	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) = 0;
 
-	virtual ThreadFuture<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
+	virtual ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                                   Version beginVersion,
 	                                                   Optional<Version> readVersion,
 	                                                   ReadBlobGranuleContext granuleContext) = 0;

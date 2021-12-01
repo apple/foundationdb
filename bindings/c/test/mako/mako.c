@@ -625,7 +625,7 @@ int run_op_read_blob_granules(FDBTransaction* transaction,
                               char* keystr2,
                               bool doMaterialize,
                               char* bgFilePath) {
-	FDBFuture* f;
+	FDBResult* r;
 	fdb_error_t err;
 	FDBKeyValue const* out_kv;
 	int out_count;
@@ -651,7 +651,7 @@ int run_op_read_blob_granules(FDBTransaction* transaction,
 	granuleContext.free_load_f = &granule_free_load;
 	granuleContext.debugNoMaterialize = !doMaterialize;
 
-	f = fdb_transaction_read_blob_granules(transaction,
+	r = fdb_transaction_read_blob_granules(transaction,
 	                                       (uint8_t*)keystr,
 	                                       strlen(keystr),
 	                                       (uint8_t*)keystr2,
@@ -660,18 +660,22 @@ int run_op_read_blob_granules(FDBTransaction* transaction,
 	                                       -1, /* endVersion. -1 is use txn read version */
 	                                       granuleContext);
 
-	wait_future(f);
-
-	err = fdb_future_get_keyvalue_array(f, &out_kv, &out_count, &out_more);
-
 	free(fileContext.data_by_id);
 
+	err = fdb_result_get_keyvalue_array(r, &out_kv, &out_count, &out_more);
+
 	if (err) {
-		fprintf(stderr, "ERROR: fdb_future_get_keyvalue_array: %s\n", fdb_get_error(err));
-		fdb_future_destroy(f);
-		return FDB_ERROR_RETRY;
+		if (err != 2037 /* blob_granule_not_materialized */) {
+			fprintf(stderr, "ERROR: fdb_result_get_keyvalue_array: %s\n", fdb_get_error(err));
+			fdb_result_destroy(r);
+			return FDB_ERROR_RETRY;
+		} else {
+			return FDB_SUCCESS;
+		}
 	}
-	fdb_future_destroy(f);
+
+	fdb_result_destroy(r);
+
 	return FDB_SUCCESS;
 }
 
