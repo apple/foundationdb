@@ -6583,7 +6583,8 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 	blobGranuleMapping = _bgMapping;
 	if (blobGranuleMapping.more) {
 		if (BG_REQUEST_DEBUG) {
-			printf("BG Mapping for [%s - %s) too large!\n");
+			fmt::print(
+			    "BG Mapping for [{0} - %{1}) too large!\n", keyRange.begin.printable(), keyRange.end.printable());
 		}
 		throw unsupported_operation();
 	}
@@ -6591,13 +6592,13 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 
 	if (blobGranuleMapping.size() == 0) {
 		if (BG_REQUEST_DEBUG) {
-			printf("no blob worker assignments yet \n");
+			printf("no blob worker assignments yet\n");
 		}
 		throw transaction_too_old();
 	}
 
 	if (BG_REQUEST_DEBUG) {
-		fmt::print("Doing blob granule request @ {}\n", endVersion);
+		fmt::print("Doing blob granule request @ {}\n", *readVersionOut);
 		fmt::print("blob worker assignments:\n");
 	}
 
@@ -6680,11 +6681,10 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		results.arena().dependsOn(rep.arena);
 		for (auto& chunk : rep.chunks) {
 			if (BG_REQUEST_DEBUG) {
-				printf("[%s - %s)\n", chunk.keyRange.begin.printable().c_str(), chunk.keyRange.end.printable().c_str());
+				fmt::print("[{0} - {1})\n", chunk.keyRange.begin.printable(), chunk.keyRange.end.printable());
 
-				printf("  SnapshotFile:\n    \n",
-				       chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
-				printf("  DeltaFiles:\n");
+				fmt::print("  SnapshotFile: {0}\n    \n  DeltaFiles:\n",
+				           chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
 				for (auto& df : chunk.deltaFiles) {
 					fmt::print("    {0}\n", df.toString());
 				}
@@ -6694,7 +6694,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 					           chunk.newDeltas[0].version,
 					           chunk.newDeltas[chunk.newDeltas.size() - 1].version);
 				}
-				fmt::print("  IncludedVersion: {}\n\n\n", chunk.includedVersion);
+				fmt::print("  IncludedVersion: {0}\n\n\n", chunk.includedVersion);
 			}
 
 			results.push_back(results.arena(), chunk);

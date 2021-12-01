@@ -584,7 +584,7 @@ int64_t granule_start_load(const char* filename,
 	// don't seek if offset == 0
 	if (offset && fseek(fp, offset, SEEK_SET)) {
 		// if fseek was non-zero, it failed
-		fprintf(stderr, "ERROR: BG could not seek to %lld in file %s\n", offset, full_fname);
+		fprintf(stderr, "ERROR: BG could not seek to %ld in file %s\n", offset, full_fname);
 		fclose(fp);
 		return -1;
 	}
@@ -594,7 +594,7 @@ int64_t granule_start_load(const char* filename,
 	fclose(fp);
 
 	if (readSize != length) {
-		fprintf(stderr, "ERROR: BG could not read %lld bytes from file: %s\n", full_fname);
+		fprintf(stderr, "ERROR: BG could not read %ld bytes from file: %s\n", length, full_fname);
 		return -1;
 	}
 
@@ -605,7 +605,7 @@ int64_t granule_start_load(const char* filename,
 uint8_t* granule_get_load(int64_t loadId, void* userContext) {
 	BGLocalFileContext* context = (BGLocalFileContext*)userContext;
 	if (context->data_by_id[loadId] == 0) {
-		fprintf(stderr, "ERROR: BG loadId invalid for get_load: %lld\n", loadId);
+		fprintf(stderr, "ERROR: BG loadId invalid for get_load: %ld\n", loadId);
 		return 0;
 	}
 	return context->data_by_id[loadId];
@@ -614,7 +614,7 @@ uint8_t* granule_get_load(int64_t loadId, void* userContext) {
 void granule_free_load(int64_t loadId, void* userContext) {
 	BGLocalFileContext* context = (BGLocalFileContext*)userContext;
 	if (context->data_by_id[loadId] == 0) {
-		fprintf(stderr, "ERROR: BG loadId invalid for free_load: %lld\n", loadId);
+		fprintf(stderr, "ERROR: BG loadId invalid for free_load: %ld\n", loadId);
 	}
 	free(context->data_by_id[loadId]);
 	context->data_by_id[loadId] = 0;
