@@ -17,7 +17,7 @@
 // limitations under the License.
 //
 
-package main
+package api
 
 import (
 	"fmt"
@@ -31,8 +31,10 @@ type ProcessConfiguration struct {
 	// Version provides the version of FoundationDB the process should run.
 	Version string `json:"version"`
 
-	// ServerCount defines the number of processes to start.
-	ServerCount int `json:"serverCount,omitempty"`
+	// RunServers defines whether we should run the server processes.
+	// This defaults to true, but you can set it to false to prevent starting
+	// new fdbserver processes.
+	RunServers *bool `json:"runServers,omitempty"`
 
 	// BinaryPath provides the path to the binary to launch.
 	BinaryPath string `json:"-"`

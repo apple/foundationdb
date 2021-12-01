@@ -876,17 +876,17 @@ TEST_CASE("fdb_transaction_set_read_version future_version") {
 const std::string EMPTY = Tuple().pack().toString();
 const KeyRef RECORD = "RECORD"_sr;
 const KeyRef INDEX = "INDEX"_sr;
-static KeyRef primaryKey(const int i) {
-	return KeyRef(format("primary-key-of-record-%08d", i));
+static Key primaryKey(const int i) {
+	return Key(format("primary-key-of-record-%08d", i));
 }
-static KeyRef indexKey(const int i) {
-	return KeyRef(format("index-key-of-record-%08d", i));
+static Key indexKey(const int i) {
+	return Key(format("index-key-of-record-%08d", i));
 }
-static ValueRef dataOfRecord(const int i) {
-	return KeyRef(format("data-of-record-%08d", i));
+static Value dataOfRecord(const int i) {
+	return Value(format("data-of-record-%08d", i));
 }
 static std::string indexEntryKey(const int i) {
-	return Tuple().append(prefix).append(INDEX).append(indexKey(i)).append(primaryKey(i)).pack().toString();
+	return Tuple().append(StringRef(prefix)).append(INDEX).append(indexKey(i)).append(primaryKey(i)).pack().toString();
 }
 static std::string recordKey(const int i) {
 	return Tuple().append(prefix).append(RECORD).append(primaryKey(i)).pack().toString();
@@ -922,7 +922,7 @@ TEST_CASE("fdb_transaction_get_range_and_flat_map") {
 		    /* target_bytes */ 0,
 		    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
 		    /* iteration */ 0,
-		    /* snapshot */ false,
+		    /* snapshot */ true,
 		    /* reverse */ 0);
 
 		if (result.err) {
@@ -951,6 +951,44 @@ TEST_CASE("fdb_transaction_get_range_and_flat_map") {
 		}
 		break;
 	}
+}
+
+TEST_CASE("fdb_transaction_get_range_and_flat_map_restricted_to_snapshot") {
+	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).pack().toString();
+	fdb::Transaction tr(db);
+	fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+	auto result = get_range_and_flat_map(
+	    tr,
+	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKey(0).c_str(), indexEntryKey(0).size()),
+	    FDB_KEYSEL_FIRST_GREATER_THAN((const uint8_t*)indexEntryKey(1).c_str(), indexEntryKey(1).size()),
+	    (const uint8_t*)mapper.c_str(),
+	    mapper.size(),
+	    /* limit */ 0,
+	    /* target_bytes */ 0,
+	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+	    /* iteration */ 0,
+	    /* snapshot */ false, // Set snapshot to false
+	    /* reverse */ 0);
+	ASSERT(result.err == error_code_client_invalid_operation);
+}
+
+TEST_CASE("fdb_transaction_get_range_and_flat_map_restricted_to_ryw_disable") {
+	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).pack().toString();
+	fdb::Transaction tr(db);
+	// Not set FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE.
+	auto result = get_range_and_flat_map(
+	    tr,
+	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKey(0).c_str(), indexEntryKey(0).size()),
+	    FDB_KEYSEL_FIRST_GREATER_THAN((const uint8_t*)indexEntryKey(1).c_str(), indexEntryKey(1).size()),
+	    (const uint8_t*)mapper.c_str(),
+	    mapper.size(),
+	    /* limit */ 0,
+	    /* target_bytes */ 0,
+	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+	    /* iteration */ 0,
+	    /* snapshot */ true,
+	    /* reverse */ 0);
+	ASSERT(result.err == error_code_client_invalid_operation);
 }
 
 TEST_CASE("fdb_transaction_get_range reverse") {
@@ -1962,41 +2000,6 @@ TEST_CASE("special-key-space set transaction ID after write") {
 	}
 }
 
-TEST_CASE("special-key-space set token after write") {
-	fdb::Transaction tr(db);
-	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-	while (1) {
-		tr.set(key("foo"), "bar");
-		tr.set("\xff\xff/tracing/token", "false");
-		fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/token",
-		                             /* snapshot */ false);
-
-		fdb_error_t err = wait_future(f1);
-		if (err) {
-			fdb::EmptyFuture f2 = tr.on_error(err);
-			fdb_check(wait_future(f2));
-			continue;
-		}
-
-		int out_present;
-		char* val;
-		int vallen;
-		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-
-		REQUIRE(out_present);
-		uint64_t token = std::stoul(std::string(val, vallen));
-		CHECK(token != 0);
-		break;
-	}
-}
-
-TEST_CASE("special-key-space valid token") {
-	auto value = get_value("\xff\xff/tracing/token", /* snapshot */ false, {});
-	REQUIRE(value.has_value());
-	uint64_t token = std::stoul(value.value());
-	CHECK(token > 0);
-}
-
 TEST_CASE("special-key-space disable tracing") {
 	fdb::Transaction tr(db);
 	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
@@ -2022,48 +2025,6 @@ TEST_CASE("special-key-space disable tracing") {
 		CHECK(token == 0);
 		break;
 	}
-}
-
-TEST_CASE("FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE") {
-	fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE, nullptr, 0));
-
-	auto value = get_value("\xff\xff/tracing/token", /* snapshot */ false, {});
-	REQUIRE(value.has_value());
-	uint64_t token = std::stoul(value.value());
-	CHECK(token == 0);
-
-	fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_ENABLE, nullptr, 0));
-}
-
-TEST_CASE("FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE enable tracing for transaction") {
-	fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE, nullptr, 0));
-
-	fdb::Transaction tr(db);
-	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-	while (1) {
-		tr.set("\xff\xff/tracing/token", "true");
-		fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/token",
-		                             /* snapshot */ false);
-
-		fdb_error_t err = wait_future(f1);
-		if (err) {
-			fdb::EmptyFuture f2 = tr.on_error(err);
-			fdb_check(wait_future(f2));
-			continue;
-		}
-
-		int out_present;
-		char* val;
-		int vallen;
-		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-
-		REQUIRE(out_present);
-		uint64_t token = std::stoul(std::string(val, vallen));
-		CHECK(token > 0);
-		break;
-	}
-
-	fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_ENABLE, nullptr, 0));
 }
 
 TEST_CASE("special-key-space tracing get range") {
@@ -2098,8 +2059,6 @@ TEST_CASE("special-key-space tracing get range") {
 		CHECK(!out_more);
 		CHECK(out_count == 2);
 
-		CHECK(std::string((char*)out_kv[0].key, out_kv[0].key_length) == tracingBegin + "token");
-		CHECK(std::stoul(std::string((char*)out_kv[0].value, out_kv[0].value_length)) > 0);
 		CHECK(std::string((char*)out_kv[1].key, out_kv[1].key_length) == tracingBegin + "transaction_id");
 		CHECK(std::stoul(std::string((char*)out_kv[1].value, out_kv[1].value_length)) > 0);
 		break;

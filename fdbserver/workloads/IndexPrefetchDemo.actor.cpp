@@ -35,6 +35,7 @@ const KeyRef INDEX = "INDEX"_sr;
 
 struct IndexPrefetchDemoWorkload : TestWorkload {
 	bool enabled;
+	const bool BAD_MAPPER = deterministicRandom()->random01() < 0.1;
 
 	IndexPrefetchDemoWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
@@ -97,7 +98,7 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> scanRangeAndFlatMap(Database cx, KeyRange range, Key mapper) {
+	ACTOR Future<Void> scanRangeAndFlatMap(Database cx, KeyRange range, Key mapper, IndexPrefetchDemoWorkload* self) {
 		std::cout << "start scanRangeAndFlatMap " << range.toString() << std::endl;
 		// TODO: When n is large, split into multiple transactions.
 		state Transaction tr(cx);
@@ -107,19 +108,29 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 			    wait(tr.getRangeAndFlatMap(KeySelector(firstGreaterOrEqual(range.begin), range.arena()),
 			                               KeySelector(firstGreaterOrEqual(range.end), range.arena()),
 			                               mapper,
-			                               GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+			                               GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
+			                               Snapshot::True));
 			showResult(result);
+			if (self->BAD_MAPPER) {
+				TraceEvent("IndexPrefetchDemoWorkloadShouldNotReachable").detail("ResultSize", result.size());
+			}
 			// result size: 2
 			// key=\x01prefix\x00\x01RECORD\x00\x01primary-key-of-record-2\x00, value=\x01data-of-record-2\x00
 			// key=\x01prefix\x00\x01RECORD\x00\x01primary-key-of-record-3\x00, value=\x01data-of-record-3\x00
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			if (self->BAD_MAPPER && e.code() == error_code_mapper_bad_index) {
+				TraceEvent("IndexPrefetchDemoWorkloadBadMapperDetected").error(e);
+			} else {
+				wait(tr.onError(e));
+			}
 		}
 		std::cout << "finished scanRangeAndFlatMap" << std::endl;
 		return Void();
 	}
 
 	ACTOR Future<Void> _start(Database cx, IndexPrefetchDemoWorkload* self) {
+		TraceEvent("IndexPrefetchDemoWorkloadConfig").detail("BadMapper", self->BAD_MAPPER);
+
 		// TODO: Use toml to config
 		wait(self->fillInRecords(cx, 5));
 
@@ -131,9 +142,13 @@ struct IndexPrefetchDemoWorkload : TestWorkload {
 		wait(self->scanRange(cx, someIndexes));
 
 		Tuple mapperTuple;
-		mapperTuple << prefix << RECORD << "{K[3]}"_sr;
+		if (self->BAD_MAPPER) {
+			mapperTuple << prefix << RECORD << "{K[xxx]}"_sr;
+		} else {
+			mapperTuple << prefix << RECORD << "{K[3]}"_sr;
+		}
 		Key mapper = mapperTuple.getDataAsStandalone();
-		wait(self->scanRangeAndFlatMap(cx, someIndexes, mapper));
+		wait(self->scanRangeAndFlatMap(cx, someIndexes, mapper, self));
 		return Void();
 	}
 

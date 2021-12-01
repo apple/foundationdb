@@ -472,6 +472,7 @@ struct ClientDesc {
 
 struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 	ProtocolVersion protocolVersion;
+	std::string releaseVersion = "unknown";
 	IClientApi* api;
 	bool failed;
 	std::atomic_bool initialized;
@@ -484,7 +485,7 @@ struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 	ClientInfo(IClientApi* api, std::string libPath)
 	  : ClientDesc(libPath, true), protocolVersion(0), api(api), failed(false), initialized(false) {}
 
-	void loadProtocolVersion();
+	void loadVersion();
 	bool canReplace(Reference<ClientInfo> other) const;
 };
 

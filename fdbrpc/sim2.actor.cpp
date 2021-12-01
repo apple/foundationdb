@@ -36,6 +36,7 @@
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
+#include "fdbrpc/AsyncFileChaos.actor.h"
 #include "flow/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
@@ -945,8 +946,18 @@ public:
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6 = false) override;
 
+	// Add a <hostname, vector<NetworkAddress>> pair to mock DNS in simulation.
+	void addMockTCPEndpoint(const std::string& host,
+	                        const std::string& service,
+	                        const std::vector<NetworkAddress>& addresses) override {
+		mockDNS.addMockTCPEndpoint(host, service, addresses);
+	}
 	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                       const std::string& service) override {
+		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
+		if (mockDNS.findMockTCPEndpoint(host, service)) {
+			return mockDNS.getTCPEndpoint(host, service);
+		}
 		return SimExternalConnection::resolveTCPEndpoint(host, service);
 	}
 	ACTOR static Future<Reference<IConnection>> onConnect(Future<Void> ready, Reference<Sim2Conn> conn) {
@@ -1195,6 +1206,9 @@ public:
 		m->protocolVersion = protocol;
 
 		m->setGlobal(enTDMetrics, (flowGlobalType)&m->tdmetrics);
+		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
+			m->setGlobal(enChaosMetrics, (flowGlobalType)&m->chaosMetrics);
+		}
 		m->setGlobal(enNetworkConnections, (flowGlobalType)m->network);
 		m->setGlobal(enASIOTimedOut, (flowGlobalType) false);
 
@@ -1996,8 +2010,9 @@ public:
 		machines.erase(machineId);
 	}
 
-	Sim2()
-	  : time(0.0), timerTime(0.0), currentTaskID(TaskPriority::Zero), taskCount(0), yielded(false), yield_limit(0) {
+	Sim2(bool printSimTime)
+	  : time(0.0), timerTime(0.0), currentTaskID(TaskPriority::Zero), taskCount(0), yielded(false), yield_limit(0),
+	    printSimTime(printSimTime) {
 		// Not letting currentProcess be nullptr eliminates some annoying special cases
 		currentProcess =
 		    new ProcessInfo("NoMachine",
@@ -2059,6 +2074,9 @@ public:
 			t.action.send(Never());
 		} else {
 			mutex.enter();
+			if (printSimTime && (int)this->time < (int)t.time) {
+				printf("Time: %d\n", (int)t.time);
+			}
 			this->time = t.time;
 			this->timerTime = std::max(this->timerTime, this->time);
 			mutex.leave();
@@ -2131,6 +2149,10 @@ public:
 	// Whether or not yield has returned true during the current iteration of the run loop
 	bool yielded;
 	int yield_limit; // how many more times yield may return false before next returning true
+	bool printSimTime;
+
+private:
+	MockDNS mockDNS;
 
 #ifdef ENABLE_SAMPLING
 	ActorLineageSet actorLineageSet;
@@ -2336,9 +2358,9 @@ Future<Reference<IUDPSocket>> Sim2::createUDPSocket(bool isV6) {
 	return Reference<IUDPSocket>(new UDPSimSocket(localAddress, Optional<NetworkAddress>{}));
 }
 
-void startNewSimulator() {
+void startNewSimulator(bool printSimTime) {
 	ASSERT(!g_network);
-	g_network = g_pSimulator = new Sim2();
+	g_network = g_pSimulator = new Sim2(printSimTime);
 	g_simulator.connectionFailuresDisableDuration = deterministicRandom()->random01() < 0.5 ? 0 : 1e6;
 }
 
@@ -2488,6 +2510,8 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 		f = AsyncFileDetachable::open(f);
 		if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
+		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
+			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileChaos(r)); });
 #if ENCRYPTION_ENABLED
 		if (flags & IAsyncFile::OPEN_ENCRYPTED)
 			f = map(f, [flags](Reference<IAsyncFile> r) {
