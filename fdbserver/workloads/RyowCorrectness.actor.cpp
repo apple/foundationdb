@@ -299,14 +299,14 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 					       printable(op.beginKey).c_str(),
 					       printable(op.endKey).c_str(),
 					       op.limit,
-					       op.reverse);
+					       static_cast<bool>(op.reverse));
 					break;
 				case Operation::GET_RANGE_SELECTOR:
 					printf("Operation GET_RANGE_SELECTOR failed: begin = %s, end = %s, limit = %d, reverse = %d\n",
 					       op.beginSelector.toString().c_str(),
 					       op.endSelector.toString().c_str(),
 					       op.limit,
-					       op.reverse);
+					       static_cast<bool>(op.reverse));
 					break;
 				case Operation::GET_KEY:
 					printf("Operation GET_KEY failed: selector = %s\n", op.beginSelector.toString().c_str());

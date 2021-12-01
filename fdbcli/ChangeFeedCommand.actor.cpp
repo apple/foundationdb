@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
+
 #include "fdbcli/fdbcli.actor.h"
 
 #include "fdbclient/FDBOptions.g.h"
@@ -61,6 +63,17 @@ ACTOR Future<Void> changeFeedList(Database db) {
 } // namespace
 
 namespace fdb_cli {
+
+ACTOR Future<Void> requestVersionUpdate(Database localDb, Reference<ChangeFeedData> feedData) {
+	loop {
+		wait(delay(5.0));
+		Transaction tr(localDb);
+		state Version ver = wait(tr.getReadVersion());
+		fmt::print("Requesting version {}\n", ver);
+		wait(feedData->whenAtLeast(ver));
+		fmt::print("Feed at version {}\n", ver);
+	}
+}
 
 ACTOR Future<bool> changeFeedCommandActor(Database localDb, std::vector<StringRef> tokens, Future<Void> warn) {
 	if (tokens.size() == 1) {
@@ -109,7 +122,7 @@ ACTOR Future<bool> changeFeedCommandActor(Database localDb, std::vector<StringRe
 		}
 		if (tokens.size() > 4) {
 			int n = 0;
-			if (sscanf(tokens[4].toString().c_str(), "%ld%n", &end, &n) != 1 || n != tokens[4].size()) {
+			if (sscanf(tokens[4].toString().c_str(), "%" PRId64 "%n", &end, &n) != 1 || n != tokens[4].size()) {
 				printUsage(tokens[0]);
 				return false;
 			}
@@ -117,24 +130,26 @@ ACTOR Future<bool> changeFeedCommandActor(Database localDb, std::vector<StringRe
 		if (warn.isValid()) {
 			warn.cancel();
 		}
-		state PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> feedResults;
-		state Future<Void> feed = localDb->getChangeFeedStream(feedResults, tokens[2], begin, end);
+		state Reference<ChangeFeedData> feedData = makeReference<ChangeFeedData>();
+		state Future<Void> feed = localDb->getChangeFeedStream(feedData, tokens[2], begin, end);
+		state Future<Void> versionUpdates = requestVersionUpdate(localDb, feedData);
 		printf("\n");
 		try {
 			state Future<Void> feedInterrupt = LineNoise::onKeyboardInterrupt();
 			loop {
 				choose {
-					when(Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(feedResults.getFuture())) {
+					when(Standalone<VectorRef<MutationsAndVersionRef>> res =
+					         waitNext(feedData->mutations.getFuture())) {
 						for (auto& it : res) {
 							for (auto& it2 : it.mutations) {
-								printf("%lld %s\n", it.version, it2.toString().c_str());
+								fmt::print("{0} {1}\n", it.version, it2.toString());
 							}
 						}
 					}
 					when(wait(feedInterrupt)) {
 						feedInterrupt = Future<Void>();
 						feed.cancel();
-						feedResults = PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>();
+						feedData = makeReference<ChangeFeedData>();
 						break;
 					}
 				}

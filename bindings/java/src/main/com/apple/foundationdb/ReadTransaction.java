@@ -425,9 +425,8 @@ public interface ReadTransaction extends ReadTransactionContext {
 			int limit, boolean reverse, StreamingMode mode);
 
 	/**
-	 * Gets an ordered range of keys and values from the database. The begin
-	 *  and end keys are specified by {@code KeySelector}s, with the begin
-	 *  {@code KeySelector} inclusive and the end {@code KeySelector} exclusive.
+	 * WARNING: This feature is considered experimental at this time. It is only allowed when using snapshot isolation
+	 * AND disabling read-your-writes.
 	 *
 	 * @see KeySelector
 	 * @see AsyncIterator

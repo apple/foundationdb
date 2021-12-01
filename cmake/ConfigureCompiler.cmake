@@ -10,6 +10,7 @@ env_set(USE_GCOV OFF BOOL "Compile with gcov instrumentation")
 env_set(USE_MSAN OFF BOOL "Compile with memory sanitizer. To avoid false positives you need to dynamically link to a msan-instrumented libc++ and libc++abi, which you must compile separately. See https://github.com/google/sanitizers/wiki/MemorySanitizerLibcxxHowTo#instrumented-libc.")
 env_set(USE_TSAN OFF BOOL "Compile with thread sanitizer. It is recommended to dynamically link to a tsan-instrumented libc++ and libc++abi, which you can compile separately.")
 env_set(USE_UBSAN OFF BOOL "Compile with undefined behavior sanitizer")
+env_set(FDB_RELEASE_CANDIDATE OFF BOOL "This is a building of a release candidate")
 env_set(FDB_RELEASE OFF BOOL "This is a building of a final release")
 env_set(USE_CCACHE OFF BOOL "Use ccache for compilation if available")
 env_set(RELATIVE_DEBUG_PATHS OFF BOOL "Use relative file paths in debug info")
@@ -283,11 +284,11 @@ else()
       -Wshift-sign-overflow
       # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 11
       -Wno-delete-non-virtual-dtor
-      -Wno-format
       -Wno-sign-compare
       -Wno-undefined-var-template
       -Wno-unknown-warning-option
       -Wno-unused-parameter
+      -Wno-constant-logical-operand
       )
     if (USE_CCACHE)
       add_compile_options(

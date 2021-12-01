@@ -67,6 +67,8 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
                            std::vector<UID>& src,
                            std::vector<UID>& dest);
 
+extern const KeyRef clusterIdKey;
+
 // "\xff/storageCacheServer/[[UID]] := StorageServerInterface"
 // This will be added by the cache server on initialization and removed by DD
 // TODO[mpilman]: We will need a way to map uint16_t ids to UIDs in a future
@@ -487,6 +489,8 @@ extern const KeyRef clientLibMetadataPrefix;
 
 extern const KeyRangeRef clientLibBinaryKeys;
 extern const KeyRef clientLibBinaryPrefix;
+
+extern const KeyRef clientLibChangeCounterKey;
 
 // All mutations done to this range are blindly copied into txnStateStore.
 // Used to create artifically large txnStateStore instances in testing.

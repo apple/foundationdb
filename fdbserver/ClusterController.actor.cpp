@@ -3438,7 +3438,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 				TEST(true); // clusterWatchDatabase() master failed
 				TraceEvent(SevWarn, "DetectedFailedMaster", cluster->id).detail("OldMaster", iMaster.id());
 			} else {
-				TEST(true); // clusterWatchDatabas() !newMaster.present()
+				TEST(true); // clusterWatchDatabase() !newMaster.present()
 				wait(delay(SERVER_KNOBS->MASTER_SPIN_DELAY));
 			}
 		} catch (Error& e) {
@@ -3876,8 +3876,6 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 	        : waitFailureClient(worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME);
 	cluster->updateWorkerList.set(worker.locality.processId(),
 	                              ProcessData(worker.locality, startingClass, worker.stableAddress()));
-	cluster->updateDBInfoEndpoints.insert(worker.updateServerDBInfo.getEndpoint());
-	cluster->updateDBInfo.trigger();
 	// This switching avoids a race where the worker can be added to id_worker map after the workerAvailabilityWatch
 	// fails for the worker.
 	wait(delay(0));
@@ -4065,7 +4063,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	    .detail("GrvProxies", req.grvProxies.size())
 	    .detail("RecoveryCount", req.recoveryCount)
 	    .detail("Stalled", req.recoveryStalled)
-	    .detail("OldestBackupEpoch", req.logSystemConfig.oldestBackupEpoch);
+	    .detail("OldestBackupEpoch", req.logSystemConfig.oldestBackupEpoch)
+	    .detail("ClusterId", req.clusterId);
 
 	// make sure the request comes from an active database
 	auto db = &self->db;
@@ -4147,6 +4146,11 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	if (dbInfo.recoveryCount != req.recoveryCount) {
 		isChanged = true;
 		dbInfo.recoveryCount = req.recoveryCount;
+	}
+
+	if (dbInfo.clusterId != req.clusterId) {
+		isChanged = true;
+		dbInfo.clusterId = req.clusterId;
 	}
 
 	if (isChanged) {
@@ -4295,6 +4299,8 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 			    self->id_worker[w.locality.processId()].watcher,
 			    self->id_worker[w.locality.processId()].details.interf.configBroadcastInterface));
 		}
+		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
+		self->updateDBInfo.trigger();
 		checkOutstandingRequests(self);
 	} else if (info->second.details.interf.id() != w.id() || req.generation >= info->second.gen) {
 		if (!info->second.reply.isSet()) {
@@ -4312,6 +4318,10 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 			self->removedDBInfoEndpoints.insert(info->second.details.interf.updateServerDBInfo.getEndpoint());
 			info->second.details.interf = w;
 			info->second.watcher = workerAvailabilityWatch(w, newProcessClass, self);
+		}
+		if (req.requestDbInfo) {
+			self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
+			self->updateDBInfo.trigger();
 		}
 		if (configBroadcaster != nullptr) {
 			self->addActor.send(
@@ -4732,6 +4742,48 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 				state Future<Void> globalConfigFuture = tr.watch(globalConfigVersionKey);
 				wait(tr.commit());
 				wait(globalConfigFuture);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+}
+
+ACTOR Future<Void> monitorClientLibChangeCounter(ClusterControllerData::DBInfo* db) {
+	state ClientDBInfo clientInfo;
+	state ReadYourWritesTransaction tr;
+	state Future<Void> clientLibChangeFuture;
+
+	loop {
+		tr = ReadYourWritesTransaction(db->db);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+				Optional<Value> counterVal = wait(tr.get(clientLibChangeCounterKey));
+				if (counterVal.present() && counterVal.get().size() == sizeof(uint64_t)) {
+					uint64_t changeCounter = *reinterpret_cast<const uint64_t*>(counterVal.get().begin());
+
+					clientInfo = db->serverInfo->get().client;
+					if (changeCounter != clientInfo.clientLibChangeCounter) {
+						TraceEvent("ClientLibChangeCounterChanged").detail("Value", changeCounter);
+						clientInfo.id = deterministicRandom()->randomUniqueID();
+						clientInfo.clientLibChangeCounter = changeCounter;
+						db->clientInfo->set(clientInfo);
+
+						ServerDBInfo serverInfo = db->serverInfo->get();
+						serverInfo.id = deterministicRandom()->randomUniqueID();
+						serverInfo.infoGeneration = ++db->dbInfoCount;
+						serverInfo.client = clientInfo;
+						db->serverInfo->set(serverInfo);
+					}
+				}
+
+				clientLibChangeFuture = tr.watch(clientLibChangeCounterKey);
+				wait(tr.commit());
+				wait(clientLibChangeFuture);
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -5437,6 +5489,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorProcessClasses(&self));
 	self.addActor.send(monitorServerInfoConfig(&self.db));
 	self.addActor.send(monitorGlobalConfig(&self.db));
+	self.addActor.send(monitorClientLibChangeCounter(&self.db));
 	self.addActor.send(updatedChangingDatacenters(&self));
 	self.addActor.send(updatedChangedDatacenters(&self));
 	self.addActor.send(updateDatacenterVersionDifference(&self));
