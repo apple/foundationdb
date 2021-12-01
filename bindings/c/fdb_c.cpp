@@ -731,6 +731,7 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_estimated_range_size_bytes(F
                                                                                int begin_key_name_length,
                                                                                uint8_t const* end_key_name,
                                                                                int end_key_name_length) {
+	// FIXME: this can throw inverted_range()
 	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
 	return (FDBFuture*)(TXN(tr)->getEstimatedRangeSizeBytes(range).extractPtr());
 }
@@ -741,6 +742,7 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_range_split_points(FDBTransa
                                                                        uint8_t const* end_key_name,
                                                                        int end_key_name_length,
                                                                        int64_t chunk_size) {
+	// FIXME: this can throw inverted_range()
 	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
 	return (FDBFuture*)(TXN(tr)->getRangeSplitPoints(range, chunk_size).extractPtr());
 }
@@ -750,6 +752,7 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_blob_granule_ranges(FDBTrans
                                                                         int begin_key_name_length,
                                                                         uint8_t const* end_key_name,
                                                                         int end_key_name_length) {
+	// FIXME: this can throw inverted_range()
 	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
 	return (FDBFuture*)(TXN(tr)->getBlobGranuleRanges(range).extractPtr());
 }
@@ -762,6 +765,7 @@ extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules(FDBTransactio
                                                                    int64_t beginVersion,
                                                                    int64_t readVersion,
                                                                    FDBReadBlobGranuleContext granule_context) {
+	// FIXME: this can throw inverted_range()
 	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
 
 	// FIXME: better way to convert?

@@ -1176,9 +1176,15 @@ inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 // matches what's in fdb_c.h
 struct ReadBlobGranuleContext {
 	void* userContext;
-	int64_t (*start_load_f)(const char*, int, int64_t, int64_t, void*);
-	uint8_t* (*get_load_f)(int64_t, void*);
-	void (*free_load_f)(int64_t, void*);
+	// Returns a unique id for the load. Asynchronous to support queueing multiple in parallel.
+	int64_t (*start_load_f)(const char* filename, int filenameLength, int64_t offset, int64_t length, void* context);
+
+	// Returns data for the load. Pass the loadId returned by start_load_f
+	uint8_t* (*get_load_f)(int64_t loadId, void* context);
+
+	// Frees data from load. Pass the loadId returned by start_load_f
+	void (*free_load_f)(int64_t loadId, void* context);
+
 	// Set this to true for testing if you don't want to read the granule files,
 	// just do the request to the blob workers
 	bool debugNoMaterialize;

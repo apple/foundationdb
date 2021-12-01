@@ -241,6 +241,7 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> DLTransaction::getRangeSplitPoints(c
 		int keysArrayLength;
 		FdbCApi::fdb_error_t error = api->futureGetKeyArray(f, &splitKeys, &keysArrayLength);
 		ASSERT(!error);
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
 		return Standalone<VectorRef<KeyRef>>(VectorRef<KeyRef>((KeyRef*)splitKeys, keysArrayLength), Arena());
 	});
 }
@@ -257,6 +258,7 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> DLTransaction::getBlobGranuleRa
 		int keyRangesLength;
 		FdbCApi::fdb_error_t error = api->futureGetKeyRangeArray(f, &keyRanges, &keyRangesLength);
 		ASSERT(!error);
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
 		return Standalone<VectorRef<KeyRangeRef>>(VectorRef<KeyRangeRef>((KeyRangeRef*)keyRanges, keyRangesLength),
 		                                          Arena());
 	});
