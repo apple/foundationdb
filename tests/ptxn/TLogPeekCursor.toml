@@ -1,16 +1,4 @@
 [[test]]
-testTitle = 'Test FakeTLog serialize data to FakeStorageServer'
-useDB = false
-startDelay = 0
-
-    [[test.workload]]
-    testName = 'UnitTests'
-    maxTestCases = 1
-    testsMatching = '/fdbserver/ptxn/test/tLogPeek/readFromSerialization'
-
-    peekTimes = 10
-
-[[test]]
 testTitle = 'Test TLog group peek cursor'
 useDB = false
 startDelay = 0
@@ -20,4 +8,44 @@ startDelay = 0
     maxTestCases = 1
     testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/StorageTeamPeekCursor'
 
-    maxBytesPerPeek = 65536
+    numVersions = 10
+    numMutationsPerVersion = 100
+
+[[test]]
+testTitle = "BroadcastedStorageTeamPeekCursor_Unordered test"
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = "UnitTests"
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/merged/BroadcastedStorageTeamPeekCursor_Unordered'
+
+    numVersions = 10
+    numMutationsPerVersion = 100
+
+[[test]]
+testTitle = "BroadcastedStorageTeamPeekCursor_Ordered test"
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = "UnitTests"
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/merged/BroadcastedStorageTeamPeekCursor_Ordered'
+
+    numVersions = 10
+    numMutationsPerVersion = 100
+
+[[test]]
+testTitle = "Advance To"
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = "UnitTests"
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/advanceTo'
+
+    numVersions = 10
+    numMutationsPerVersion = 100

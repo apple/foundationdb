@@ -301,6 +301,18 @@ public:
 	SerializedTeamData getAllSerialized();
 };
 
+class BroadcastedSubsequencedMessageSerializer : public ProxySubsequencedMessageSerializer {
+public:
+	template <typename Container_t>
+	BroadcastedSubsequencedMessageSerializer(const Version& storageTeamVersion, const Container_t& storageTeamIDs)
+	  : ProxySubsequencedMessageSerializer(storageTeamVersion) {
+
+		for (const auto& storageTeamID : storageTeamIDs) {
+			prepareWriteMessage(storageTeamID);
+		}
+	}
+};
+
 template <typename T>
 using ConstInputIteratorBase = std::iterator<std::input_iterator_tag, T, size_t, const T* const, const T&>;
 

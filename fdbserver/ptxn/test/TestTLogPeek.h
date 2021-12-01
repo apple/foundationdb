@@ -27,14 +27,18 @@
 #include "flow/UnitTest.h"
 
 namespace ptxn::test {
+
 struct TestTLogPeekOptions {
-	static const int DEFAULT_NUM_MUTATIONS = 10000;
+	static const int DEFAULT_NUM_VERSIONS = 100;
+	static const int DEFAULT_NUM_MUTATIONS_PER_VERSION = 100;
 	static const int DEFAULT_NUM_TEAMS = 3;
 	static const int DEFAULT_INITIAL_VERSION = 1000;
 	static const int DEFAULT_PEEK_TIMES = 1000;
 
-	// The number of mutations stored in the TLog before peek
-	int numMutations;
+	// The number of versions for peek
+	int numVersions;
+	// The number of mutations per version
+	int numMutationsPerVersion;
 	// The number of teams in the TLog. Mutations are randomly distributed into teams.
 	int numStorageTeams;
 	// The initial version
@@ -43,6 +47,23 @@ struct TestTLogPeekOptions {
 	int peekTimes;
 
 	explicit TestTLogPeekOptions(const UnitTestParameters&);
+};
+
+struct TestTLogPeekMergeCursorOptions {
+	static const int DEFAULT_INITIAL_VERSION = 1000;
+	static const int DEFAULT_NUM_VERSIONS = 10;
+	static const int DEFAULT_NUM_MUTATIONS_PER_VERSION = 100;
+	static const int DEFAULT_NUM_TLOGS = 5;
+
+	// The number of TLogGroup/StorageTeam/TLog
+	// One TLogGroup has one StorageTeam and one TLog server
+	int numTLogs;
+	// Number mutations per version
+	int numMutationsPerVersion;
+	Version initialVersion;
+	int numVersions;
+
+	explicit TestTLogPeekMergeCursorOptions(const UnitTestParameters&);
 };
 
 } // namespace ptxn::test
