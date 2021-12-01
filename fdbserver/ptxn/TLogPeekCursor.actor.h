@@ -218,6 +218,10 @@ private:
 	Arena* pAttachArena;
 
 	SubsequencedMessageDeserializer deserializer;
+	// The iterator will deserialize the incoming data to an arena on-the-fly. The life-cycle of the arena is the same
+	// to the iterator. If the deserialized data need to be referred in the future, the arena needs to be dependOn
+	// another arena, which is the *pArena in the class. pArena cannot immediately dependOn the arena in the iterator,
+	// so ArenaWrapper has to be used. See the documenation of ArenaWrapper.
 	mutable details::ArenaWrapper<SubsequencedMessageDeserializer::iterator> wrappedDeserializerIter;
 
 	// When the cursor checks remoteMoreAvailable, it depends on an ACTOR which accepts TLogPeekReply. TLogPeekReply
@@ -225,8 +229,8 @@ private:
 	// it will not be GCed after the ACTOR terminates.
 	Arena workArena;
 
-	// The version the cursor starts, all versions that are smaller than startingVersion will be ignored by remote TLog
-	const Version startingVersion;
+	// The version the cursor begins, all versions that are smaller than beginVersion will be ignored by remote TLog
+	const Version beginVersion;
 
 	// If true, will return a EmptyMessage when the cursor meets a version without messages, Otherwise the empty
 	// version will be ignored
@@ -237,7 +241,7 @@ private:
 	Version lastVersion;
 
 public:
-	// version_ is the version the cursor starts with
+	// version_ is the version the cursor begins with
 	// storageTeamID_ is the storageTeamID
 	// pTLogInterface_ is the interface to the specific TLog server
 	// pArena_ is used to store the serialized data for further use, e.g. making MutationRefs still available after the
@@ -260,8 +264,8 @@ public:
 
 	const StorageTeamID& getStorageTeamID() const;
 
-	// Returns the starting verion for the cursor. The cursor will start from the begin version.
-	const Version& getStartingVersion() const;
+	// Returns the beginning verion for the cursor. The cursor will start from the begin version.
+	const Version& getBeginVersion() const;
 
 protected:
 	virtual Future<bool> remoteMoreAvailableImpl() override;
@@ -346,12 +350,12 @@ protected:
 };
 
 // Provides a Storage Team ID to StorageTeamPeekCursor mapping functionality
-class StorageTeamIDCursorMapperMixin {
+class StorageTeamIDCursorMapper{
 public:
-	using StorageTeamIDCursorMapper = std::unordered_map<StorageTeamID, std::shared_ptr<StorageTeamPeekCursor>>;
+	using StorageTeamIDCursorMapper_t = std::unordered_map<StorageTeamID, std::shared_ptr<StorageTeamPeekCursor>>;
 
 private:
-	StorageTeamIDCursorMapper mapper;
+	StorageTeamIDCursorMapper_t mapper;
 
 public:
 	// Moves a cursor to the mapping system, the original cursor is invalidated
@@ -373,10 +377,10 @@ public:
 	int getNumCursors() const;
 
 	// Returns the iterator points at the beginning of the (Storage Team ID, cursor) pair list.
-	StorageTeamIDCursorMapper::iterator cursorsBegin();
+	StorageTeamIDCursorMapper_t::iterator cursorsBegin();
 
 	// Returns the iterator points at the end of the (Storage Team ID, cursor) pair list.
-	StorageTeamIDCursorMapper::iterator cursorsEnd();
+	StorageTeamIDCursorMapper_t::iterator cursorsEnd();
 
 protected:
 	virtual void addCursorImpl(std::shared_ptr<StorageTeamPeekCursor>&& cursor);
@@ -392,7 +396,7 @@ protected:
 // In this case, even different teams might have different team versions, they will be informed when the commit version
 // has changed.
 class BroadcastedStorageTeamPeekCursorBase : public ptxn::details::VersionSubsequencePeekCursorBase,
-                                             protected details::StorageTeamIDCursorMapperMixin {
+                                             protected details::StorageTeamIDCursorMapper{
 protected:
 	std::unique_ptr<details::CursorContainerBase> pCursorContainer;
 
@@ -420,9 +424,9 @@ protected:
 	virtual void addCursorImpl(std::shared_ptr<StorageTeamPeekCursor>&& cursor) override;
 
 public:
-	using details::StorageTeamIDCursorMapperMixin::addCursor;
-	using details::StorageTeamIDCursorMapperMixin::getNumCursors;
-	using details::StorageTeamIDCursorMapperMixin::isCursorExists;
+	using details::StorageTeamIDCursorMapper::addCursor;
+	using details::StorageTeamIDCursorMapper::getNumCursors;
+	using details::StorageTeamIDCursorMapper::isCursorExists;
 };
 
 // Merge multiple storage team peek cursor into one. The version is the barrier, i.e., a version is complete iff all
