@@ -6179,7 +6179,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
 	    db->clientInfo->get().grvProxies != req.grvProxies) {
 		TraceEvent("PublishNewClientInfo", self->id)
-		    .detail("Master", dbInfo.master.id().toString())
+		    .detail("Master", dbInfo.master.id())
 		    .detail("GrvProxies", db->clientInfo->get().grvProxies)
 		    .detail("ReqGrvProxies", req.grvProxies)
 		    .detail("CommitProxies", db->clientInfo->get().commitProxies)
