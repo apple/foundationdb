@@ -1757,7 +1757,7 @@ ACTOR Future<Void> testBackupContainer(std::string url, Optional<std::string> en
 		state Version expireVersion = listing.snapshots[i].endVersion;
 
 		// Expire everything up to but not including the snapshot end version
-		printf("EXPIRE TO %" PRId64 "\n", expireVersion);
+		fmt::print("EXPIRE TO {}\n", expireVersion);
 		state Future<Void> f = c->expireData(expireVersion);
 		wait(ready(f));
 

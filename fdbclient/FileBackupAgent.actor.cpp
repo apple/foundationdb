@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
@@ -5342,10 +5343,7 @@ public:
 			    .detail("BackupContainer", bc->getURL())
 			    .detail("BeginVersion", beginVersion)
 			    .detail("TargetVersion", targetVersion);
-			fprintf(stderr,
-			        "ERROR: Restore version %" PRId64 " is not possible from %s\n",
-			        targetVersion,
-			        bc->getURL().c_str());
+			fmt::print(stderr, "ERROR: Restore version {0} is not possible from {1}\n", targetVersion, bc->getURL());
 			throw restore_invalid_version();
 		}
 

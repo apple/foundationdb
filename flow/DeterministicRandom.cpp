@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "flow/DeterministicRandom.h"
 
 #include <cstring>
@@ -78,7 +79,7 @@ int64_t DeterministicRandom::randomInt64(int64_t min, int64_t maxPlusOne) {
 	else
 		i = v + min;
 	if (randLog && useRandLog)
-		fprintf(randLog, "Rint64 %" PRId64 "\n", i);
+		fmt::print(randLog, "Rint64 {}\n", i);
 	return i;
 }
 
@@ -103,7 +104,7 @@ UID DeterministicRandom::randomUniqueID() {
 	x = gen64();
 	y = gen64();
 	if (randLog && useRandLog)
-		fprintf(randLog, "Ruid %" PRIx64 " %" PRIx64 "\n", x, y);
+		fmt::print(randLog, "Ruid {0} {1}\n", x, y);
 	return UID(x, y);
 }
 
