@@ -1,0 +1,12 @@
+[[test]]
+testTitle = 'BlobGranuleCycleClean'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 250.0
+    testDuration = 60.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'BlobGranuleVerifier'
+    testDuration = 60.0
