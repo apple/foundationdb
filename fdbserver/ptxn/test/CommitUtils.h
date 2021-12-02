@@ -103,7 +103,7 @@ void distributeMutationRefs(VectorRef<MutationRef>& mutationRefs,
                             CommitRecord& commitRecord);
 
 // For a given version, serialize the messages from CommitRecord for Proxy use
-// The lambda function will receive a StorageTeamID, and return the serializer for its corresponding TLogGroupID
+// The function will receive a StorageTeamID, and return the serializer for its corresponding TLogGroupID
 // FIXME: use TestEnvironment for the mapping
 void prepareProxySerializedMessages(
     const CommitRecord& commitRecord,
