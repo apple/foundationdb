@@ -6897,6 +6897,15 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
 						if (rep.mutations[resultLoc].version >= nextVersion) {
 							results.send(rep.mutations[resultLoc]);
 						} else {
+							// TODO REMOVE eventually, useful for debugging for now
+							if (!rep.mutations[resultLoc].mutations.empty()) {
+								printf(
+								    "non-empty mutations (%d), but versions out of order from %s! mv=%lld, nv=%lld\n",
+								    rep.mutations.size(),
+								    interf.id().toString().substr(0, 4).c_str(),
+								    rep.mutations[resultLoc].version,
+								    nextVersion);
+							}
 							ASSERT(rep.mutations[resultLoc].mutations.empty());
 						}
 						resultLoc++;
@@ -6930,6 +6939,8 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
 			}
 		}
 	} catch (Error& e) {
+		// TODO REMOVE eventually, useful for debugging for now
+		printf("NAS: CFError %s\n", e.name());
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
 		}
