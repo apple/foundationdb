@@ -6562,14 +6562,15 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 	state KeyRange keyRange = range;
 	state UID workerId;
 	state int i;
+	state Version rv;
 
 	state Standalone<VectorRef<BlobGranuleChunkRef>> results;
 
 	if (read.present()) {
-		*readVersionOut = read.get();
+		rv = read.get();
 	} else {
 		Version _end = wait(self->getReadVersion());
-		*readVersionOut = _end;
+		rv = _end;
 	}
 	self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
@@ -6597,7 +6598,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 	}
 
 	if (BG_REQUEST_DEBUG) {
-		fmt::print("Doing blob granule request @ {}\n", *readVersionOut);
+		fmt::print("Doing blob granule request @ {}\n", rv);
 		fmt::print("blob worker assignments:\n");
 	}
 
@@ -6658,7 +6659,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		state BlobGranuleFileRequest req;
 		req.keyRange = KeyRangeRef(StringRef(req.arena, granuleStartKey), StringRef(req.arena, granuleEndKey));
 		req.beginVersion = begin;
-		req.readVersion = *readVersionOut;
+		req.readVersion = rv;
 
 		std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>> v;
 		v.push_back(makeReference<ReferencedInterface<BlobWorkerInterface>>(cx->blobWorker_interf[workerId]));
@@ -6677,7 +6678,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			           granuleStartKey.printable(),
 			           granuleEndKey.printable(),
 			           begin,
-			           *readVersionOut,
+			           rv,
 			           workerId.toString());
 		}
 		results.arena().dependsOn(rep.arena);
@@ -6702,6 +6703,9 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			results.push_back(results.arena(), chunk);
 			keyRange = KeyRangeRef(std::min(chunk.keyRange.end, keyRange.end), keyRange.end);
 		}
+	}
+	if (readVersionOut != nullptr) {
+		*readVersionOut = rv;
 	}
 	return results;
 }
@@ -6769,8 +6773,8 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 					                                         req,
 					                                         TaskPriority::DataDistribution));
 					if (res.splits.size() &&
-					    res.splits[0] <= results.back()) { // split points are out of order, possibly because of moving
-						                                   // data, throw error to retry
+					    res.splits[0] <= results.back()) { // split points are out of order, possibly because of
+						                                   // moving data, throw error to retry
 						ASSERT_WE_THINK(
 						    false); // FIXME: This seems impossible and doesn't seem to be covered by testing
 						throw all_alternatives_failed();
@@ -7147,12 +7151,12 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
 						} else {
 							// TODO REMOVE eventually, useful for debugging for now
 							if (!rep.mutations[resultLoc].mutations.empty()) {
-								printf(
-								    "non-empty mutations (%d), but versions out of order from %s! mv=%lld, nv=%lld\n",
-								    rep.mutations.size(),
-								    interf.id().toString().substr(0, 4).c_str(),
-								    rep.mutations[resultLoc].version,
-								    nextVersion);
+								printf("non-empty mutations (%d), but versions out of order from %s! mv=%lld, "
+								       "nv=%lld\n",
+								       rep.mutations.size(),
+								       interf.id().toString().substr(0, 4).c_str(),
+								       rep.mutations[resultLoc].version,
+								       nextVersion);
 							}
 							ASSERT(rep.mutations[resultLoc].mutations.empty());
 						}
