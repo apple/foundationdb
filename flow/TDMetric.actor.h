@@ -345,11 +345,11 @@ auto tuple_map_impl(F f, index_sequence<Is...>, const Tuples&... ts)
 
 // tuple_map( f(a,b), (a1,a2,a3), (b1,b2,b3) ) = (f(a1,b1), f(a2,b2), f(a3,b3))
 template <typename F, typename Tuple, typename... Tuples>
-auto tuple_map(F f, const Tuple& t, const Tuples&... ts) -> decltype(
-    tuple_map_impl(f,
-                   typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type(),
-                   t,
-                   ts...)) {
+auto tuple_map(F f, const Tuple& t, const Tuples&... ts) -> decltype(tuple_map_impl(
+    f,
+    typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type(),
+    t,
+    ts...)) {
 	return tuple_map_impl(
 	    f, typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type(), t, ts...);
 }
