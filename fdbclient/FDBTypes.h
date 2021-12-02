@@ -1173,4 +1173,25 @@ inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 	return ((pos > 0 && pos < locality.size() - 1) || locality == "0");
 }
 
+// Store metadata associated with each storage server
+struct StorageMetadataType {
+	constexpr static FileIdentifier file_identifier = 732123;
+	uint64_t createdTime; // comes from Platform::timer_int()
+	bool expireNow;
+	StorageMetadataType():createdTime(0), expireNow(false) {}
+	StorageMetadataType(uint64_t t, bool expireNow = false): createdTime(t), expireNow(expireNow) {}
+
+	// To change this serialization, ProtocolVersion::StorageMetadata must be updated, and downgrades need
+	// to be considered
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, createdTime, expireNow);
+	}
+
+	std::string getCreatedTimeStr() const {
+		auto time = (time_t)createdTime;
+		return getLocalTimeStr(&time);
+	}
+};
+
 #endif

@@ -369,6 +369,8 @@ UID decodeTssQuarantineKey(KeyRef const& key) {
 
 const KeyRangeRef tssMismatchKeys(LiteralStringRef("\xff/tssMismatch/"), LiteralStringRef("\xff/tssMismatch0"));
 
+const KeyRangeRef serverMetadataKeys(LiteralStringRef("\xff/serverMetadata"), LiteralStringRef("\xff/serverMetadata0"));
+
 const KeyRangeRef serverTagKeys(LiteralStringRef("\xff/serverTag/"), LiteralStringRef("\xff/serverTag0"));
 
 const KeyRef serverTagPrefix = serverTagKeys.begin;

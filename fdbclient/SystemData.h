@@ -131,6 +131,10 @@ UID decodeTssQuarantineKey(KeyRef const&);
 // For recording tss mismatch details in the system keyspace
 extern const KeyRangeRef tssMismatchKeys;
 
+// \xff/serverMetadata/[[storageInterfaceID]] = [[StorageMetadataType]]
+// Note: storageInterfaceID is the one stated in the file name
+extern const KeyRangeRef serverMetadataKeys;
+
 // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
 //	Provides the Tag for the given serverID. Used to access a
 //	storage server's corresponding TLog in order to apply mutations.

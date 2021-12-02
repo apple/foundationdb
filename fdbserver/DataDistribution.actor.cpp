@@ -28,6 +28,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbrpc/Replication.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
@@ -161,6 +162,11 @@ public:
 };
 
 ACTOR Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
+
+// Read storage metadata from database, and do necessary updates
+ACTOR Future<StorageMetadataType> checkStorageMetadata(DDTeamCollection* self,
+                                        Database cx,
+                                        UID interfaceUid);
 
 // TeamCollection's machine team information
 class TCMachineTeamInfo : public ReferenceCounted<TCMachineTeamInfo> {
@@ -1249,21 +1255,29 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		self->healthyZone.set(initTeams->initHealthyZoneValue);
 		// SOMEDAY: If some servers have teams and not others (or some servers have more data than others) and there is
 		// an address/locality collision, should we preferentially mark the least used server as undesirable?
-
-		for (auto i = initTeams->allServers.begin(); i != initTeams->allServers.end(); ++i) {
-			if (self->shouldHandleServer(i->first)) {
-				if (!self->isValidLocality(self->configuration.storagePolicy, i->first.locality)) {
+		state std::vector<std::pair<StorageServerInterface, ProcessClass>>::iterator serverIter = initTeams->allServers.begin();
+		for (; serverIter != initTeams->allServers.end(); ++serverIter) {
+			if (self->shouldHandleServer(serverIter->first)) {
+				if (!self->isValidLocality(self->configuration.storagePolicy, serverIter->first.locality)) {
 					TraceEvent(SevWarnAlways, "MissingLocality")
-					    .detail("Server", i->first.uniqueID)
-					    .detail("Locality", i->first.locality.toString());
-					auto addr = i->first.stableAddress();
+					    .detail("Server", serverIter->first.uniqueID)
+					    .detail("Locality", serverIter->first.locality.toString());
+					auto addr = serverIter->first.stableAddress();
 					self->invalidLocalityAddr.insert(AddressExclusion(addr.ip, addr.port));
 					if (self->checkInvalidLocalities.isReady()) {
 						self->checkInvalidLocalities = checkAndRemoveInvalidLocalityAddr(self);
 						self->addActor.send(self->checkInvalidLocalities);
 					}
 				}
-				self->addServer(i->first, i->second, self->serverTrackerErrorOut, 0, ddEnabledState);
+				if(!serverIter->first.isTss()) {
+					// read or initialize StorageMetadata map
+					StorageMetadataType metadata = wait(checkStorageMetadata(self, self->cx, serverIter->first.id()));
+					self->addServer(serverIter->first,
+					                serverIter->second, self->serverTrackerErrorOut, 0, ddEnabledState, &metadata);
+				} else {
+					self->addServer(
+					    serverIter->first, serverIter->second, self->serverTrackerErrorOut, 0, ddEnabledState);
+				}
 			}
 		}
 
@@ -2557,7 +2571,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	               ProcessClass processClass,
 	               Promise<Void> errorOut,
 	               Version addedVersion,
-	               const DDEnabledState* ddEnabledState) {
+	               const DDEnabledState* ddEnabledState,
+	               const StorageMetadataType* metadata = nullptr) {
 		if (!shouldHandleServer(newServer)) {
 			return;
 		}
@@ -2596,6 +2611,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			ASSERT(r->lastKnownInterface.locality.processId().present());
 			StringRef pid = r->lastKnownInterface.locality.processId().get();
 			pid2server_info[pid].push_back(r);
+			ASSERT(metadata != nullptr);
+			// TODO: add to createdTime based priority_queue
 		}
 
 		r->tracker =
@@ -4411,12 +4428,13 @@ ACTOR Future<Void> waitServerListChange(DDTeamCollection* self,
 					isFetchingResults = true;
 					serverListAndProcessClasses = getServerListAndProcessClasses(&tr);
 				}
-				when(std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
+				when(state std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
 				         wait(serverListAndProcessClasses)) {
 					serverListAndProcessClasses = Never();
 					isFetchingResults = false;
 
-					for (int i = 0; i < results.size(); i++) {
+					state int i = 0;
+					for (; i < results.size(); i++) {
 						UID serverId = results[i].first.id();
 						StorageServerInterface const& ssi = results[i].first;
 						ProcessClass const& processClass = results[i].second;
@@ -4436,11 +4454,13 @@ ACTOR Future<Void> waitServerListChange(DDTeamCollection* self,
 								currentInterfaceChanged.send(std::make_pair(ssi, processClass));
 							}
 						} else if (!self->recruitingIds.count(ssi.id())) {
-							self->addServer(ssi,
-							                processClass,
+							// read or initialize StorageMetadata map
+							StorageMetadataType metadata = wait(checkStorageMetadata(self, self->cx, results[i].first.id()));
+							self->addServer(results[i].first,
+							                results[i].second,
 							                self->serverTrackerErrorOut,
 							                tr.getReadVersion().get(),
-							                ddEnabledState);
+							                ddEnabledState, &metadata);
 						}
 					}
 
@@ -5286,6 +5306,38 @@ ACTOR Future<UID> getClusterId(DDTeamCollection* self) {
 	}
 }
 
+// Read storage metadata from database, and do necessary updates
+ACTOR Future<StorageMetadataType> checkStorageMetadata(DDTeamCollection* self,
+                                        Database cx,
+                                        UID interfaceUid) {
+	state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
+	                                                                                           IncludeVersion());
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	state StorageMetadataType data;
+	loop {
+		try{
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			auto property = metadataMap.getProperty(interfaceUid);
+			Optional<StorageMetadataType> metadata = wait(property.get(tr));
+			if(!metadata.present()) {
+				data.createdTime = timer_int();
+				// write to database
+				metadataMap.set(tr, interfaceUid, data);
+			}
+			else {
+				data = metadata.get();
+			}
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			state Error err = e;
+			wait(tr->onError(e));
+			// TraceEvent("CheckStorageMetadataError").error(err);
+		}
+	}
+	return data;
+}
 ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
                                      RecruitStorageReply candidateWorker,
                                      const DDEnabledState* ddEnabledState,
@@ -5418,14 +5470,23 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 		if (newServer.present()) {
 			UID id = newServer.get().interf.id();
 			if (!self->server_and_tss_info.count(id)) {
-				if (!recruitTss || tssState->tssRecruitSuccess()) {
+				if (!recruitTss) {
+					// read or initialize StorageMetadata map
+					StorageMetadataType metadata = wait(checkStorageMetadata(self, self->cx, newServer.get().interf.id()));
+					self->addServer(newServer.get().interf,
+					                candidateWorker.processClass,
+					                self->serverTrackerErrorOut,
+					                newServer.get().addedVersion,
+					                ddEnabledState, &metadata);
+					self->waitUntilRecruited.set(false);
+				}
+				else if(tssState->tssRecruitSuccess()){
+					// signal all done after adding tss to tracking info
 					self->addServer(newServer.get().interf,
 					                candidateWorker.processClass,
 					                self->serverTrackerErrorOut,
 					                newServer.get().addedVersion,
 					                ddEnabledState);
-					self->waitUntilRecruited.set(false);
-					// signal all done after adding tss to tracking info
 					tssState->markComplete();
 				}
 			} else {

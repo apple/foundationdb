@@ -1001,6 +1001,9 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInterface server) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
+	state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
+	                                                                              IncludeVersion());
+
 	state int maxSkipTags = 1;
 
 	loop {
@@ -1148,6 +1151,9 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 				tr->addReadConflictRange(conflictRange);
 				tr->addWriteConflictRange(conflictRange);
 
+				StorageMetadataType metadata(timer_int());
+				metadataMap.set(tr, server.id(), metadata);
+
 				if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
 					// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
 					TraceEvent(SevError, "TSSIdentityMappingEnabled").log();
@@ -1196,6 +1202,8 @@ ACTOR Future<Void> removeStorageServer(Database cx,
                                        MoveKeysLock lock,
                                        const DDEnabledState* ddEnabledState) {
 	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
+	state KeyBackedObjectMap<UID, StorageMigrationType, decltype(IncludeVersion())> metadataMap(
+	    serverMetadataKeys.begin, IncludeVersion());
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 	state bool retry = false;
 	state int noCanRemoveCount = 0;
@@ -1287,6 +1295,8 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 						tr->clear(tssQuarantineKeyFor(serverID));
 					}
 				}
+
+				metadataMap.erase(tr, serverID);
 
 				retry = true;
 				wait(tr->commit());
