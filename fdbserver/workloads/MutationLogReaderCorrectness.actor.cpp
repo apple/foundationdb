@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <limits>
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
@@ -78,9 +79,9 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 		state Transaction tr(cx);
 		state int iStart = 0;
 		state int batchSize = 1000;
-		printf("Records: %d\n", self->records);
-		printf("BeginVersion: %" PRId64 "\n", self->beginVersion);
-		printf("EndVersion: %" PRId64 "\n", self->endVersion);
+		fmt::print("Records: {}\n", self->records);
+		fmt::print("BeginVersion: {}\n", self->beginVersion);
+		fmt::print("EndVersion: {}\n", self->endVersion);
 
 		while (iStart < self->records) {
 			loop {
