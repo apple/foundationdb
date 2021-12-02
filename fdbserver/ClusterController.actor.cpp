@@ -436,11 +436,11 @@ public:
 
 		// try to avoid fields in the cluster controller datacenter if everything else is equal
 		for (auto& it : field_count) {
-			fieldQueue.push(std::make_tuple(it.second.first, it.second.second, it.first));
+			fieldQueue.emplace(it.second.first, it.second.second, it.first);
 		}
 
 		for (auto& it : zone_count) {
-			field_zoneQueue[it.second.second].push(std::make_pair(it.second.first, it.first));
+			field_zoneQueue[it.second.second].emplace(it.second.first, it.first);
 		}
 
 		// start with the least used field, and try to find a worker with that field
@@ -500,7 +500,7 @@ public:
 		}
 
 		for (auto& it : zone_count) {
-			zoneQueue.push(std::make_pair(it.second, it.first));
+			zoneQueue.emplace(it.second, it.first);
 		}
 
 		while (zoneQueue.size()) {
@@ -3954,7 +3954,7 @@ void clusterRecruitStorage(ClusterControllerData* self, RecruitStorageRequest re
 		req.reply.send(rep);
 	} catch (Error& e) {
 		if (e.code() == error_code_no_more_servers) {
-			self->outstandingStorageRequests.push_back(std::make_pair(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT));
+			self->outstandingStorageRequests.emplace_back(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT);
 			TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
 			    .detail("IsCriticalRecruitment", req.criticalRecruitment)
 			    .error(e);
@@ -3978,8 +3978,7 @@ void clusterRecruitBlobWorker(ClusterControllerData* self, RecruitBlobWorkerRequ
 		req.reply.send(rep);
 	} catch (Error& e) {
 		if (e.code() == error_code_no_more_servers) {
-			self->outstandingBlobWorkerRequests.push_back(
-			    std::make_pair(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT));
+			self->outstandingBlobWorkerRequests.emplace_back(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT);
 			TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", self->id).error(e);
 		} else {
 			TraceEvent(SevError, "RecruitBlobWorkerError", self->id).error(e);
@@ -4486,7 +4485,7 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			for (auto& it : self->id_worker) {
 				workers.push_back(it.second.details);
 				if (it.second.issues.size()) {
-					workerIssues.push_back(ProcessIssues(it.second.details.interf.address(), it.second.issues));
+					workerIssues.emplace_back(it.second.details.interf.address(), it.second.issues);
 				}
 			}
 

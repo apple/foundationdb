@@ -1833,9 +1833,9 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 			    auto endpoint = iter->endpoint();
 			    auto addr = endpoint.address();
 			    if (addr.is_v6()) {
-				    addrs.push_back(NetworkAddress(IPAddress(addr.to_v6().to_bytes()), endpoint.port()));
+				    addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
 			    } else {
-				    addrs.push_back(NetworkAddress(addr.to_v4().to_ulong(), endpoint.port()));
+				    addrs.emplace_back(IPAddress(addr.to_v4().to_ulong(), endpoint.port()));
 			    }
 			    ++iter;
 		    }
