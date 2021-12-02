@@ -21,6 +21,7 @@
 // At the moment, this file just contains tests.  IndexedSet<> is a template
 // and so all the important implementation is in the header file
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "flow/IndexedSet.h"
 #include "flow/IRandom.h"
 #include "flow/ThreadPrimitives.h"
@@ -495,8 +496,9 @@ TEST_CASE("/flow/IndexedSet/all numbers") {
 		auto ii = is.index(n);
 		int ib = ii != is.end() ? *ii : 1000000;
 		ASSERT(ib == b);
-		if (ib != b)
-			printf("%s %" PRId64 " %d %d %" PRId64 "\n", ib == b ? "OK" : "ERROR", n, b, ib, is.sumTo(ii));
+		if (ib != b) {
+			fmt::print("{0} {1} {2} {3} {4} {5}\n", ib == b ? "OK" : "ERROR", n, b, ib, is.sumTo(ii));
+		}
 	}
 
 	for (int i = 0; i < 100000; i++) {
@@ -509,8 +511,9 @@ TEST_CASE("/flow/IndexedSet/all numbers") {
 		// int ntotal = int64_t(b)*(b-1)/2 - int64_t(a)*(a-1)/2;
 		int64_t ntotal = int64_t(b - a) * (a + b - 1) / 2;
 		ASSERT(itotal == ntotal);
-		if (itotal != ntotal)
-			printf("%s %" PRId64 " %" PRId64 "\n", itotal == ntotal ? "OK" : "ERROR", ntotal, itotal);
+		if (itotal != ntotal) {
+			fmt::print("{0} {1} {2}\n", itotal == ntotal ? "OK" : "ERROR", ntotal, itotal);
+		}
 	}
 
 	// double a = timer();

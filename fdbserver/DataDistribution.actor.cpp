@@ -2195,7 +2195,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		ASSERT_WE_THINK(machine_info.size() > 0 || server_info.size() == 0);
 		ASSERT_WE_THINK(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER >= 1 && configuration.storageTeamSize >= 1);
 
-		int addedMachineTeams = 0;
 		int addedTeams = 0;
 
 		// Exclude machine teams who have members in the wrong configuration.
@@ -2210,15 +2209,18 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		int machineTeamsToBuild = std::max(
 		    0, std::min(desiredMachineTeams - healthyMachineTeamCount, maxMachineTeams - totalMachineTeamCount));
 
-		TraceEvent("BuildMachineTeams")
-		    .detail("TotalHealthyMachine", totalHealthyMachineCount)
-		    .detail("HealthyMachineTeamCount", healthyMachineTeamCount)
-		    .detail("DesiredMachineTeams", desiredMachineTeams)
-		    .detail("MaxMachineTeams", maxMachineTeams)
-		    .detail("MachineTeamsToBuild", machineTeamsToBuild);
-		// Pre-build all machine teams until we have the desired number of machine teams
-		if (machineTeamsToBuild > 0 || notEnoughMachineTeamsForAMachine()) {
-			addedMachineTeams = addBestMachineTeams(machineTeamsToBuild);
+		{
+			TraceEvent te("BuildMachineTeams");
+			te.detail("TotalHealthyMachine", totalHealthyMachineCount)
+			    .detail("HealthyMachineTeamCount", healthyMachineTeamCount)
+			    .detail("DesiredMachineTeams", desiredMachineTeams)
+			    .detail("MaxMachineTeams", maxMachineTeams)
+			    .detail("MachineTeamsToBuild", machineTeamsToBuild);
+			// Pre-build all machine teams until we have the desired number of machine teams
+			if (machineTeamsToBuild > 0 || notEnoughMachineTeamsForAMachine()) {
+				auto addedMachineTeams = addBestMachineTeams(machineTeamsToBuild);
+				te.detail("MachineTeamsAdded", addedMachineTeams);
+			}
 		}
 
 		while (addedTeams < teamsToBuild || notEnoughTeamsForAServer()) {
@@ -4277,16 +4279,20 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				    .detail("StorageCount", movingCount);
 			} else {
 				TEST(true); // start wiggling
-				wait(waitUntilHealthy(self));
-				auto fv = self->excludeStorageServersForWiggle(pid);
-				movingCount = fv.size();
-				moveFinishFuture = waitForAll(fv);
-				TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
-				    .detail("Primary", self->primary)
-				    .detail("ProcessId", pid)
-				    .detail("ExtraHealthyTeamCount", extraTeamCount)
-				    .detail("HealthyTeamCount", self->healthyTeamCount)
-				    .detail("StorageCount", movingCount);
+				choose {
+					when(wait(waitUntilHealthy(self))) {
+						auto fv = self->excludeStorageServersForWiggle(pid);
+						movingCount = fv.size();
+						moveFinishFuture = waitForAll(fv);
+						TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
+						    .detail("Primary", self->primary)
+						    .detail("ProcessId", pid)
+						    .detail("ExtraHealthyTeamCount", extraTeamCount)
+						    .detail("HealthyTeamCount", self->healthyTeamCount)
+						    .detail("StorageCount", movingCount);
+					}
+					when(wait(self->pauseWiggle->onChange())) { continue; }
+				}
 			}
 		}
 

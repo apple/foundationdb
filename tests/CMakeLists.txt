@@ -49,7 +49,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES BackupContainers.txt IGNORE)
   add_fdb_test(TEST_FILES BandwidthThrottle.txt IGNORE)
   add_fdb_test(TEST_FILES BigInsert.txt IGNORE)
-  add_fdb_test(TEST_FILES BlobGranuleReaderUnit.txt)
+  add_fdb_test(TEST_FILES BlobGranuleFileUnit.txt)
   add_fdb_test(TEST_FILES BlobManagerUnit.txt)
   add_fdb_test(TEST_FILES ConsistencyCheck.txt IGNORE)
   add_fdb_test(TEST_FILES DDMetricsExclude.txt IGNORE)
@@ -213,18 +213,6 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_5.0.0_until_6.3.0/StorefrontTestRestart-1.txt
                restarting/from_5.0.0_until_6.3.0/StorefrontTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapTestAttrition-1.txt
-               restarting/from_6.2.33_until_6.3.0/SnapTestAttrition-2.txt IGNORE) # TODO re-enable once snap test failures are fixed!
-  add_fdb_test(
-    TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapTestSimpleRestart-1.txt
-               restarting/from_6.2.33_until_6.3.0/SnapTestSimpleRestart-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapTestRestart-1.txt
-               restarting/from_6.2.33_until_6.3.0/SnapTestRestart-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapCycleRestart-1.txt
-               restarting/from_6.2.33_until_6.3.0/SnapCycleRestart-2.txt)
-  add_fdb_test(
     TEST_FILES restarting/from_5.1.7_until_6.3.0/DrUpgradeRestart-1.txt
                restarting/from_5.1.7_until_6.3.0/DrUpgradeRestart-2.txt)
   add_fdb_test(
@@ -240,18 +228,6 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_6.3.13/DrUpgradeRestart-1.txt
                restarting/from_6.3.13/DrUpgradeRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.3.13/SnapCycleRestart-1.txt
-               restarting/from_6.3.13/SnapCycleRestart-2.txt IGNORE) # TODO re-enable once snap test failures are fixed!
-  add_fdb_test( 
-    TEST_FILES restarting/from_6.3.13/SnapTestAttrition-1.txt
-               restarting/from_6.3.13/SnapTestAttrition-2.txt IGNORE) # TODO re-enable once snap test failures are fixed!
-  add_fdb_test(
-    TEST_FILES restarting/from_6.3.13/SnapTestRestart-1.txt
-               restarting/from_6.3.13/SnapTestRestart-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_6.3.13/SnapTestSimpleRestart-1.txt
-               restarting/from_6.3.13/SnapTestSimpleRestart-2.txt)
-  add_fdb_test(
     TEST_FILES restarting/from_6.3.13/StorefrontTestRestart-1.txt
                restarting/from_6.3.13/StorefrontTestRestart-2.txt)
   add_fdb_test(
@@ -260,11 +236,28 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/to_7.0.0/CycleTestRestart-1.txt
                restarting/to_7.0.0/CycleTestRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.0.0/SnapTestAttrition-1.txt
+               restarting/from_7.0.0/SnapTestAttrition-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.0.0/SnapTestSimpleRestart-1.txt
+               restarting/from_7.0.0/SnapTestSimpleRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.0.0/SnapTestRestart-1.txt
+               restarting/from_7.0.0/SnapTestRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.0.0/SnapCycleRestart-1.txt
+               restarting/from_7.0.0/SnapCycleRestart-2.txt)
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.toml)
+<<<<<<< HEAD
   add_fdb_test(TEST_FILES slow/BlobGranuleCorrectnessLarge.toml)
   add_fdb_test(TEST_FILES slow/BlobGranuleCorrectnessLargeClean.toml)
+=======
+  add_fdb_test(TEST_FILES slow/BlobGranuleCorrectnessLarge.toml IGNORE)
+  add_fdb_test(TEST_FILES slow/BlobGranuleCorrectnessLargeClean.toml IGNORE)
+>>>>>>> master
   add_fdb_test(TEST_FILES slow/ClogWithRollbacks.toml)
   add_fdb_test(TEST_FILES slow/CloggedCycleTest.toml)
   add_fdb_test(TEST_FILES slow/CloggedStorefront.toml)

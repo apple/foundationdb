@@ -1880,6 +1880,7 @@ class ObjectCache : NonCopyable {
 		ObjectType item;
 		int hits;
 		int size;
+		bool evictionPrioritized;
 	};
 
 	typedef std::unordered_map<IndexType, Entry> CacheT;
@@ -1905,31 +1906,14 @@ public:
 		return nullptr;
 	}
 
-	// If index is in cache, move it to the front of the eviction order
+	// If index is in cache and not on the prioritized eviction order list, move it there.
 	void prioritizeEviction(const IndexType& index) {
 		auto i = cache.find(index);
-		if (i != cache.end()) {
-			auto ei = evictionOrder.iterator_to(i->second);
-			evictionOrder.erase(ei);
-			evictionOrder.push_front(i->second);
+		if (i != cache.end() && !i->second.evictionPrioritized) {
+			prioritizedEvictions.splice(
+			    prioritizedEvictions.end(), evictionOrder, EvictionOrderT::s_iterator_to(i->second));
+			i->second.evictionPrioritized = true;
 		}
-	}
-
-	// Try to evict the item at index from cache
-	// Returns true if item is evicted or was not present in cache
-	bool tryEvict(const IndexType& index) {
-		auto i = cache.find(index);
-		if (i == cache.end() || !i->second.item.evictable()) {
-			return false;
-		}
-		Entry& toEvict = i->second;
-		if (toEvict.hits == 0) {
-			++g_redwoodMetrics.metric.pagerEvictUnhit;
-		}
-		currentSize -= toEvict.size;
-		evictionOrder.erase(evictionOrder.iterator_to(toEvict));
-		cache.erase(i);
-		return true;
 	}
 
 	// Get the object for i or create a new one.
@@ -1943,9 +1927,10 @@ public:
 		if (entry.is_linked()) {
 			if (!noHit) {
 				++entry.hits;
-				// Move the entry to the back of the eviction order
-				evictionOrder.erase(evictionOrder.iterator_to(entry));
-				evictionOrder.push_back(entry);
+				// If item eviction is not prioritized, move to back of eviction order
+				if (!entry.evictionPrioritized) {
+					evictionOrder.splice(evictionOrder.end(), evictionOrder, EvictionOrderT::s_iterator_to(entry));
+				}
 			}
 		} else {
 			// Otherwise it was a cache miss
@@ -1956,6 +1941,7 @@ public:
 			currentSize += size;
 			// Insert the newly created Entry at the back of the eviction order
 			evictionOrder.push_back(entry);
+			entry.evictionPrioritized = false;
 
 			// While the cache is too big, evict the oldest entry until the oldest entry can't be evicted.
 			while (currentSize > sizeLimit) {
@@ -2003,6 +1989,10 @@ public:
 		state EvictionOrderT evictionOrder;
 		state int64_t currentSize;
 
+		// Flush all prioritized evictions to the main eviction order
+		self->flushPrioritizedEvictions();
+		ASSERT(cache.size() == evictionOrder.size());
+
 		// Swap cache contents to local state vars
 		// After this, no more entries will be added to or read from these
 		// structures so we know for sure that no page will become unevictable
@@ -2029,17 +2019,21 @@ public:
 	}
 
 	Future<Void> clear() {
-		ASSERT(evictionOrder.size() == cache.size());
+		ASSERT(evictionOrder.size() + prioritizedEvictions.size() == cache.size());
 		return clear_impl(this);
 	}
 
 	int count() const { return currentSize; }
+
+	// Move the prioritized evictions queued to the front of the eviction order
+	void flushPrioritizedEvictions() { evictionOrder.splice(evictionOrder.begin(), prioritizedEvictions); }
 
 private:
 	int64_t sizeLimit;
 	int64_t currentSize;
 	CacheT cache;
 	EvictionOrderT evictionOrder;
+	EvictionOrderT prioritizedEvictions;
 };
 
 ACTOR template <class T>
@@ -2742,10 +2736,12 @@ public:
 			remapQueue.pushBack(r);
 			auto& versionedMap = remappedPages[pageID];
 
-			// An update page is unlikely to have its old version read again soon, so prioritize its cache eviction
-			// If the versioned map is empty for this page then the prior version of the page is at stored at the
-			// PhysicalPageID pageID, otherwise it is the last mapped value in the version-ordered map.
-			pageCache.prioritizeEviction(versionedMap.empty() ? pageID : versionedMap.rbegin()->second);
+			if (SERVER_KNOBS->REDWOOD_EVICT_UPDATED_PAGES) {
+				// An update page is unlikely to have its old version read again soon, so prioritize its cache eviction
+				// If the versioned map is empty for this page then the prior version of the page is at stored at the
+				// PhysicalPageID pageID, otherwise it is the last mapped value in the version-ordered map.
+				pageCache.prioritizeEviction(versionedMap.empty() ? pageID : versionedMap.rbegin()->second);
+			}
 			versionedMap[v] = newPageID;
 
 			debug_printf("DWALPager(%s) pushed %s\n", filename.c_str(), RemappedPage(r).toString().c_str());
@@ -2776,7 +2772,9 @@ public:
 		}
 
 		// A freed page is unlikely to be read again soon so prioritize its cache eviction
-		pageCache.prioritizeEviction(pageID);
+		if (SERVER_KNOBS->REDWOOD_EVICT_UPDATED_PAGES) {
+			pageCache.prioritizeEviction(pageID);
+		}
 	}
 
 	LogicalPageID detachRemappedPage(LogicalPageID pageID, Version v) override {
@@ -2830,8 +2828,10 @@ public:
 			remapQueue.pushBack(RemappedPage{ v, pageID, invalidLogicalPageID });
 
 			// A freed page is unlikely to be read again soon so prioritize its cache eviction
-			PhysicalPageID previousPhysicalPage = i->second.rbegin()->second;
-			pageCache.prioritizeEviction(previousPhysicalPage);
+			if (SERVER_KNOBS->REDWOOD_EVICT_UPDATED_PAGES) {
+				PhysicalPageID previousPhysicalPage = i->second.rbegin()->second;
+				pageCache.prioritizeEviction(previousPhysicalPage);
+			}
 
 			i->second[v] = invalidLogicalPageID;
 			return;
@@ -2971,11 +2971,6 @@ public:
 	static Future<Reference<ArenaPage>> readHeaderPage(DWALPager* self, PhysicalPageID pageID) {
 		debug_printf("DWALPager(%s) readHeaderPage %s\n", self->filename.c_str(), toString(pageID).c_str());
 		return readPhysicalPage(self, pageID, ioMaxPriority, true);
-	}
-
-	bool tryEvictPage(LogicalPageID logicalID, Version v) {
-		PhysicalPageID physicalID = getPhysicalPageID(logicalID, v);
-		return pageCache.tryEvict(physicalID);
 	}
 
 	// Reads the most recent version of pageID, either previously committed or written using updatePage()
@@ -3599,6 +3594,9 @@ public:
 		// Start unmapping pages for expired versions
 		self->remapCleanupFuture = remapCleanup(self);
 
+		// If there are prioritized evictions queued, flush them to the regular eviction order.
+		self->pageCache.flushPrioritizedEvictions();
+
 		return Void();
 	}
 
@@ -3934,8 +3932,6 @@ public:
 		return map(pager->readMultiPageAtVersion(reason, level, pageIDs, priority, version, cacheable, noHit),
 		           [=](Reference<ArenaPage> p) { return Reference<const ArenaPage>(std::move(p)); });
 	}
-
-	bool tryEvictPage(LogicalPageID id) override { return pager->tryEvictPage(id, version); }
 
 	Key getMetaKey() const override { return metaKey; }
 
@@ -5696,17 +5692,6 @@ private:
 		}
 
 		return records;
-	}
-
-	// Try to evict a BTree page from the pager cache.
-	// Returns true if, at the end of the call, the page is no longer in cache,
-	// so the caller can assume its ArenaPage reference is the only one.
-	bool tryEvictPage(IPagerSnapshot* pager, BTreePageIDRef id) {
-		// If it's an oversized page, currently it cannot be in the cache
-		if (id.size() > 0) {
-			return true;
-		}
-		return pager->tryEvictPage(id.front());
 	}
 
 	ACTOR static Future<Reference<const ArenaPage>> readPage(PagerEventReasons reason,

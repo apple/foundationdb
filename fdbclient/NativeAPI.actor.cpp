@@ -127,8 +127,8 @@ TLSConfig tlsConfig(TLSEndpointType::CLIENT);
 NetworkOptions::NetworkOptions()
   : traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
     traceFormat("xml"), traceClockSource("now"),
-    supportedVersions(new ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>()), runLoopProfilingEnabled(false) {
-}
+    supportedVersions(new ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>()), runLoopProfilingEnabled(false),
+    primaryClient(true) {}
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
@@ -1228,7 +1228,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion),
     mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
+    specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
+    connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size())
 	                ? Void()
@@ -1480,7 +1481,8 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), transactionTracingSample(false), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT) {}
+    bytesPerCommit(1000), transactionTracingSample(false), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {}
 
 // Static constructor used by server processes to create a DatabaseContext
 // For internal (fdbserver) use only
@@ -1794,6 +1796,8 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	if (!g_network)
 		throw network_not_setup();
 
+	platform::ImageInfo imageInfo = platform::getImageInfo();
+
 	if (connRecord) {
 		if (networkOptions.traceDirectory.present() && !traceFileIsOpen()) {
 			g_network->initMetrics();
@@ -1816,11 +1820,11 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 			    .detail("SourceVersion", getSourceVersion())
 			    .detail("Version", FDB_VT_VERSION)
 			    .detail("PackageName", FDB_VT_PACKAGE_NAME)
-			    .detail("ClusterFile", connRecord->toString())
-			    .detail("ConnectionString", connRecord->getConnectionString().toString())
 			    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 			    .detail("ApiVersion", apiVersion)
-			    .detailf("ImageOffset", "%p", platform::getImageOffset())
+			    .detail("ClientLibrary", imageInfo.fileName)
+			    .detailf("ImageOffset", "%p", imageInfo.offset)
+			    .detail("Primary", networkOptions.primaryClient)
 			    .trackLatest("ClientStart");
 
 			initializeSystemMonitorMachineState(SystemMonitorMachineState(IPAddress(publicIP)));
@@ -1874,6 +1878,16 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	    database, Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
 	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
+
+	TraceEvent("ConnectToDatabase", database->dbId)
+	    .detail("Version", FDB_VT_VERSION)
+	    .detail("ClusterFile", connRecord ? connRecord->toString() : "None")
+	    .detail("ConnectionString", connRecord ? connRecord->getConnectionString().toString() : "None")
+	    .detail("ClientLibrary", imageInfo.fileName)
+	    .detail("Primary", networkOptions.primaryClient)
+	    .detail("Internal", internal)
+	    .trackLatest(database->connectToDatabaseEventCacheHolder.trackingKey);
+
 	return database;
 }
 
@@ -2096,6 +2110,9 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		}
 		break;
 	}
+	case FDBNetworkOptions::EXTERNAL_CLIENT:
+		networkOptions.primaryClient = false;
+		break;
 	default:
 		break;
 	}
@@ -4139,7 +4156,6 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results,
                                   Reverse reverse,
                                   TransactionInfo info,
                                   TagSet tags) {
-
 	state ParallelStream<RangeResult> results(_results, CLIENT_KNOBS->RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT);
 
 	// FIXME: better handling to disable row limits
@@ -4610,7 +4626,6 @@ Future<RangeResult> Transaction::getRangeAndFlatMap(const KeySelector& begin,
                                                     GetRangeLimits limits,
                                                     Snapshot snapshot,
                                                     Reverse reverse) {
-
 	return getRangeInternal<GetKeyValuesAndFlatMapRequest, GetKeyValuesAndFlatMapReply>(
 	    begin, end, mapper, limits, snapshot, reverse);
 }
@@ -6028,7 +6043,6 @@ ACTOR Future<ProtocolVersion> getCoordinatorProtocol(NetworkAddressList coordina
 ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
     NetworkAddress coordinatorAddress,
     Optional<ProtocolVersion> expectedVersion) {
-
 	state Reference<AsyncVar<Optional<ProtocolVersion>> const> protocolVersion =
 	    FlowTransport::transport().getPeerProtocolAsyncVar(coordinatorAddress);
 
@@ -6056,7 +6070,6 @@ ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
 ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
     Optional<ProtocolVersion> expectedVersion) {
-
 	state bool needToConnect = true;
 	state Future<ProtocolVersion> protocolVersion = Never();
 
@@ -6488,6 +6501,238 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Database cx, Key
 
 Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize) {
 	return ::getRangeSplitPoints(cx, keys, chunkSize);
+}
+
+#define BG_REQUEST_DEBUG false
+
+// the blob granule requests are a bit funky because they piggyback off the existing transaction to read from the system
+// keyspace
+ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Transaction* self, KeyRange keyRange) {
+	// FIXME: use streaming range read
+	state KeyRange currentRange = keyRange;
+	state Standalone<VectorRef<KeyRangeRef>> results;
+	if (BG_REQUEST_DEBUG) {
+		printf("Getting Blob Granules for [%s - %s)\n",
+		       keyRange.begin.printable().c_str(),
+		       keyRange.end.printable().c_str());
+	}
+	self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	loop {
+		state RangeResult blobGranuleMapping = wait(
+		    krmGetRanges(self, blobGranuleMappingKeys.begin, currentRange, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+
+		for (int i = 0; i < blobGranuleMapping.size() - 1; i++) {
+			if (blobGranuleMapping[i].value.size()) {
+				results.push_back(results.arena(),
+				                  KeyRangeRef(blobGranuleMapping[i].key, blobGranuleMapping[i + 1].key));
+			}
+		}
+		if (blobGranuleMapping.more) {
+			currentRange = KeyRangeRef(blobGranuleMapping.back().key, currentRange.end);
+		} else {
+			return results;
+		}
+	}
+}
+
+Future<Standalone<VectorRef<KeyRangeRef>>> Transaction::getBlobGranuleRanges(const KeyRange& range) {
+	if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		throw client_invalid_operation();
+	}
+	return ::getBlobGranuleRangesActor(this, range);
+}
+
+// hack (for now) to get blob worker interface into load balance
+struct BWLocationInfo : MultiInterface<ReferencedInterface<BlobWorkerInterface>> {
+	using Locations = MultiInterface<ReferencedInterface<BlobWorkerInterface>>;
+	explicit BWLocationInfo(const std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>>& v) : Locations(v) {}
+};
+
+ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
+    Database cx,
+    Transaction* self,
+    KeyRange range,
+    Version begin,
+    Optional<Version> read,
+    Version* readVersionOut) { // read not present is "use transaction version"
+
+	state RangeResult blobGranuleMapping;
+	state Key granuleStartKey;
+	state Key granuleEndKey;
+	state KeyRange keyRange = range;
+	state UID workerId;
+	state int i;
+
+	state Standalone<VectorRef<BlobGranuleChunkRef>> results;
+
+	if (read.present()) {
+		*readVersionOut = read.get();
+	} else {
+		Version _end = wait(self->getReadVersion());
+		*readVersionOut = _end;
+	}
+	self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+	// Right now just read whole blob range assignments from DB
+	// FIXME: eventually we probably want to cache this and invalidate similarly to storage servers.
+	// Cache misses could still read from the DB, or we could add it to the Transaction State Store and
+	// have proxies serve it from memory.
+	RangeResult _bgMapping =
+	    wait(krmGetRanges(self, blobGranuleMappingKeys.begin, keyRange, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+	blobGranuleMapping = _bgMapping;
+	if (blobGranuleMapping.more) {
+		if (BG_REQUEST_DEBUG) {
+			fmt::print(
+			    "BG Mapping for [{0} - %{1}) too large!\n", keyRange.begin.printable(), keyRange.end.printable());
+		}
+		throw unsupported_operation();
+	}
+	ASSERT(!blobGranuleMapping.more && blobGranuleMapping.size() < CLIENT_KNOBS->TOO_MANY);
+
+	if (blobGranuleMapping.size() == 0) {
+		if (BG_REQUEST_DEBUG) {
+			printf("no blob worker assignments yet\n");
+		}
+		throw transaction_too_old();
+	}
+
+	if (BG_REQUEST_DEBUG) {
+		fmt::print("Doing blob granule request @ {}\n", *readVersionOut);
+		fmt::print("blob worker assignments:\n");
+	}
+
+	for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
+		granuleStartKey = blobGranuleMapping[i].key;
+		granuleEndKey = blobGranuleMapping[i + 1].key;
+		if (!blobGranuleMapping[i].value.size()) {
+			if (BG_REQUEST_DEBUG) {
+				printf("Key range [%s - %s) missing worker assignment!\n",
+				       granuleStartKey.printable().c_str(),
+				       granuleEndKey.printable().c_str());
+				// TODO probably new exception type instead
+			}
+			throw transaction_too_old();
+		}
+
+		workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
+		if (BG_REQUEST_DEBUG) {
+			printf("  [%s - %s): %s\n",
+			       granuleStartKey.printable().c_str(),
+			       granuleEndKey.printable().c_str(),
+			       workerId.toString().c_str());
+		}
+
+		if (!cx->blobWorker_interf.count(workerId)) {
+			Optional<Value> workerInterface = wait(self->get(blobWorkerListKeyFor(workerId)));
+			// from the time the mapping was read from the db, the associated blob worker
+			// could have died and so its interface wouldn't be present as part of the blobWorkerList
+			// we persist in the db. So throw wrong_shard_server to get the new mapping
+			if (!workerInterface.present()) {
+				throw wrong_shard_server();
+			}
+			// FIXME: maybe just want to insert here if there are racing queries for the same worker or something?
+			cx->blobWorker_interf[workerId] = decodeBlobWorkerListValue(workerInterface.get());
+			if (BG_REQUEST_DEBUG) {
+				printf("    decoded worker interface for %s\n", workerId.toString().c_str());
+			}
+		}
+	}
+
+	// Make request for each granule
+	for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
+		granuleStartKey = blobGranuleMapping[i].key;
+		granuleEndKey = blobGranuleMapping[i + 1].key;
+		// if this was a time travel and the request returned larger bounds, skip this chunk
+		if (granuleEndKey <= keyRange.begin) {
+			continue;
+		}
+		workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
+		// prune first/last granules to requested range
+		if (keyRange.begin > granuleStartKey) {
+			granuleStartKey = keyRange.begin;
+		}
+		if (keyRange.end < granuleEndKey) {
+			granuleEndKey = keyRange.end;
+		}
+
+		state BlobGranuleFileRequest req;
+		req.keyRange = KeyRangeRef(StringRef(req.arena, granuleStartKey), StringRef(req.arena, granuleEndKey));
+		req.beginVersion = begin;
+		req.readVersion = *readVersionOut;
+
+		std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>> v;
+		v.push_back(makeReference<ReferencedInterface<BlobWorkerInterface>>(cx->blobWorker_interf[workerId]));
+		state Reference<MultiInterface<ReferencedInterface<BlobWorkerInterface>>> location =
+		    makeReference<BWLocationInfo>(v);
+		// use load balance with one option for now for retry and error handling
+		BlobGranuleFileReply rep = wait(loadBalance(location,
+		                                            &BlobWorkerInterface::blobGranuleFileRequest,
+		                                            req,
+		                                            TaskPriority::DefaultPromiseEndpoint,
+		                                            AtMostOnce::False,
+		                                            nullptr));
+
+		if (BG_REQUEST_DEBUG) {
+			fmt::print("Blob granule request for [{0} - {1}) @ {2} - {3} got reply from {4}:\n",
+			           granuleStartKey.printable(),
+			           granuleEndKey.printable(),
+			           begin,
+			           *readVersionOut,
+			           workerId.toString());
+		}
+		results.arena().dependsOn(rep.arena);
+		for (auto& chunk : rep.chunks) {
+			if (BG_REQUEST_DEBUG) {
+				fmt::print("[{0} - {1})\n", chunk.keyRange.begin.printable(), chunk.keyRange.end.printable());
+
+				fmt::print("  SnapshotFile: {0}\n    \n  DeltaFiles:\n",
+				           chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
+				for (auto& df : chunk.deltaFiles) {
+					fmt::print("    {0}\n", df.toString());
+				}
+				fmt::print("  Deltas: ({0})", chunk.newDeltas.size());
+				if (chunk.newDeltas.size() > 0) {
+					fmt::print(" with version [{0} - {1}]",
+					           chunk.newDeltas[0].version,
+					           chunk.newDeltas[chunk.newDeltas.size() - 1].version);
+				}
+				fmt::print("  IncludedVersion: {0}\n\n\n", chunk.includedVersion);
+			}
+
+			results.push_back(results.arena(), chunk);
+			keyRange = KeyRangeRef(std::min(chunk.keyRange.end, keyRange.end), keyRange.end);
+		}
+	}
+	return results;
+}
+
+Future<Standalone<VectorRef<BlobGranuleChunkRef>>> Transaction::readBlobGranules(const KeyRange& range,
+                                                                                 Version begin,
+                                                                                 Optional<Version> readVersion,
+                                                                                 Version* readVersionOut) {
+	if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		throw client_invalid_operation();
+	}
+	return readBlobGranulesActor(cx, this, range, begin, readVersion, readVersionOut);
+}
+
+ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
+	state ReadYourWritesTransaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			if (lockAware) {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			}
+
+			tr.set(perpetualStorageWiggleKey, enable ? "1"_sr : "0"_sr);
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
 }
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
@@ -7408,276 +7653,6 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 
 Future<Void> DatabaseContext::popChangeFeedMutations(Key rangeID, Version version) {
 	return popChangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, version);
-}
-
-#define BG_REQUEST_DEBUG false
-
-ACTOR Future<Void> getBlobGranuleRangesStreamActor(Reference<DatabaseContext> db,
-                                                   PromiseStream<KeyRange> results,
-                                                   KeyRange keyRange) {
-	// FIXME: use streaming range read
-	state Database cx(db);
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-	state KeyRange currentRange = keyRange;
-	if (BG_REQUEST_DEBUG) {
-		printf("Getting Blob Granules for [%s - %s)\n",
-		       keyRange.begin.printable().c_str(),
-		       keyRange.end.printable().c_str());
-	}
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			state RangeResult blobGranuleMapping = wait(krmGetRanges(
-			    tr, blobGranuleMappingKeys.begin, currentRange, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
-
-			for (int i = 0; i < blobGranuleMapping.size() - 1; i++) {
-				if (blobGranuleMapping[i].value.size()) {
-					results.send(KeyRangeRef(blobGranuleMapping[i].key, blobGranuleMapping[i + 1].key));
-				}
-			}
-			if (blobGranuleMapping.more) {
-				currentRange = KeyRangeRef(blobGranuleMapping.back().key, currentRange.end);
-			} else {
-				results.sendError(end_of_stream());
-				return Void();
-			}
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-}
-
-Future<Void> DatabaseContext::getBlobGranuleRangesStream(const PromiseStream<KeyRange>& results, KeyRange range) {
-	if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
-		throw client_invalid_operation();
-	}
-	return getBlobGranuleRangesStreamActor(Reference<DatabaseContext>::addRef(this), results, range);
-}
-
-// hack (for now) to get blob worker interface into load balance
-struct BWLocationInfo : MultiInterface<ReferencedInterface<BlobWorkerInterface>> {
-	using Locations = MultiInterface<ReferencedInterface<BlobWorkerInterface>>;
-	explicit BWLocationInfo(const std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>>& v) : Locations(v) {}
-};
-
-ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
-                                               PromiseStream<Standalone<BlobGranuleChunkRef>> results,
-                                               KeyRange range,
-                                               Version begin,
-                                               Optional<Version> end) { // end not present is just latest
-	state Database cx(db);
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-	state RangeResult blobGranuleMapping;
-	state Version endVersion;
-	state Key granuleStartKey;
-	state Key granuleEndKey;
-	state KeyRange keyRange = range;
-	state int i, loopCounter = 0;
-	state UID workerId;
-	loop {
-		try {
-			// FIXME: Use streaming parallelism?
-			// Read mapping and worker interfaces from DB
-			loopCounter++;
-			loop {
-				try {
-					tr->reset();
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					if (loopCounter == 1) {
-						// if retrying, use new version for mapping but original version for read version
-						if (end.present()) {
-							endVersion = end.get();
-						} else {
-							Version _end = wait(tr->getReadVersion());
-							endVersion = _end;
-						}
-					}
-
-					// Right now just read whole blob range assignments from DB
-					// FIXME: eventually we probably want to cache this and invalidate similarly to storage servers.
-					// Cache misses could still read from the DB, or we could add it to the Transaction State Store and
-					// have proxies serve it from memory.
-					RangeResult _bgMapping = wait(krmGetRanges(
-					    tr, blobGranuleMappingKeys.begin, keyRange, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
-					blobGranuleMapping = _bgMapping;
-					if (blobGranuleMapping.more) {
-						if (BG_REQUEST_DEBUG) {
-							// printf("BG Mapping for [%s - %s) too large!\n");
-						}
-						throw unsupported_operation();
-					}
-					ASSERT(!blobGranuleMapping.more && blobGranuleMapping.size() < CLIENT_KNOBS->TOO_MANY);
-
-					if (blobGranuleMapping.size() == 0) {
-						if (BG_REQUEST_DEBUG) {
-							printf("no blob worker assignments yet \n");
-						}
-						throw transaction_too_old();
-					}
-
-					if (BG_REQUEST_DEBUG) {
-						fmt::print("Doing blob granule request @ {}\n", endVersion);
-						fmt::print("blob worker assignments:\n");
-					}
-
-					for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
-						granuleStartKey = blobGranuleMapping[i].key;
-						granuleEndKey = blobGranuleMapping[i + 1].key;
-						if (!blobGranuleMapping[i].value.size()) {
-							if (BG_REQUEST_DEBUG) {
-								printf("Key range [%s - %s) missing worker assignment!\n",
-								       granuleStartKey.printable().c_str(),
-								       granuleEndKey.printable().c_str());
-								// TODO probably new exception type instead
-							}
-							throw transaction_too_old();
-						}
-
-						workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
-						if (BG_REQUEST_DEBUG) {
-							printf("  [%s - %s): %s\n",
-							       granuleStartKey.printable().c_str(),
-							       granuleEndKey.printable().c_str(),
-							       workerId.toString().c_str());
-						}
-
-						if (!cx->blobWorker_interf.count(workerId)) {
-							Optional<Value> workerInterface = wait(tr->get(blobWorkerListKeyFor(workerId)));
-							// from the time the mapping was read from the db, the associated blob worker
-							// could have died and so its interface wouldn't be present as part of the blobWorkerList
-							// we persist in the db. So throw wrong_shard_server to get the new mapping
-							if (!workerInterface.present()) {
-								throw wrong_shard_server();
-							}
-							cx->blobWorker_interf[workerId] = decodeBlobWorkerListValue(workerInterface.get());
-							if (BG_REQUEST_DEBUG) {
-								printf("    decoded worker interface for %s\n", workerId.toString().c_str());
-							}
-						}
-					}
-					break;
-				} catch (Error& e) {
-					wait(tr->onError(e));
-				}
-			}
-
-			// Make request for each granule
-			for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
-				granuleStartKey = blobGranuleMapping[i].key;
-				granuleEndKey = blobGranuleMapping[i + 1].key;
-				// if this was a time travel and the request returned larger bounds, skip this chunk
-				if (granuleEndKey <= keyRange.begin) {
-					continue;
-				}
-				workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
-				// prune first/last granules to requested range
-				if (keyRange.begin > granuleStartKey) {
-					granuleStartKey = keyRange.begin;
-				}
-				if (keyRange.end < granuleEndKey) {
-					granuleEndKey = keyRange.end;
-				}
-
-				state BlobGranuleFileRequest req;
-				req.keyRange = KeyRangeRef(StringRef(req.arena, granuleStartKey), StringRef(req.arena, granuleEndKey));
-				req.beginVersion = begin;
-				req.readVersion = endVersion;
-
-				std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>> v;
-				v.push_back(makeReference<ReferencedInterface<BlobWorkerInterface>>(cx->blobWorker_interf[workerId]));
-				state Reference<MultiInterface<ReferencedInterface<BlobWorkerInterface>>> location =
-				    makeReference<BWLocationInfo>(v);
-				// use load balance with one option for now for retry and error handling
-				BlobGranuleFileReply rep = wait(loadBalance(location,
-				                                            &BlobWorkerInterface::blobGranuleFileRequest,
-				                                            req,
-				                                            TaskPriority::DefaultPromiseEndpoint,
-				                                            AtMostOnce::False,
-				                                            nullptr));
-
-				if (BG_REQUEST_DEBUG) {
-					fmt::print("Blob granule request for [{0} - {1}) @ {2} - {3} got reply from {4}:\n",
-					           granuleStartKey.printable(),
-					           granuleEndKey.printable(),
-					           begin,
-					           endVersion,
-					           workerId.toString());
-				}
-				for (auto& chunk : rep.chunks) {
-					if (BG_REQUEST_DEBUG) {
-						printf("[%s - %s)\n",
-						       chunk.keyRange.begin.printable().c_str(),
-						       chunk.keyRange.end.printable().c_str());
-
-						printf("  SnapshotFile:\n    %s\n",
-						       chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
-						printf("  DeltaFiles:\n");
-						for (auto& df : chunk.deltaFiles) {
-							printf("    %s\n", df.toString().c_str());
-						}
-						printf("  Deltas: (%d)", chunk.newDeltas.size());
-						if (chunk.newDeltas.size() > 0) {
-							fmt::print(" with version [{0} - {1}]",
-							           chunk.newDeltas[0].version,
-							           chunk.newDeltas[chunk.newDeltas.size() - 1].version);
-						}
-						fmt::print("  IncludedVersion: {}\n", chunk.includedVersion);
-						printf("\n\n");
-					}
-					Arena a;
-					a.dependsOn(rep.arena);
-					results.send(Standalone<BlobGranuleChunkRef>(chunk, a));
-					keyRange = KeyRangeRef(chunk.keyRange.end, keyRange.end);
-				}
-			}
-			results.sendError(end_of_stream());
-			return Void();
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw;
-			}
-			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-			    e.code() == error_code_connection_failed) {
-				// TODO would invalidate mapping cache here if we had it
-				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
-			} else {
-				if (BG_REQUEST_DEBUG) {
-					printf("blob granule file request got unexpected error %s\n", e.name());
-				}
-				results.sendError(e);
-				return Void();
-			}
-		}
-	}
-}
-
-Future<Void> DatabaseContext::readBlobGranulesStream(const PromiseStream<Standalone<BlobGranuleChunkRef>>& results,
-                                                     KeyRange range,
-                                                     Version begin,
-                                                     Optional<Version> end) {
-	if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
-		throw client_invalid_operation();
-	}
-	return readBlobGranulesStreamActor(Reference<DatabaseContext>::addRef(this), results, range, begin, end);
-}
-
-ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
-	state ReadYourWritesTransaction tr(cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			if (lockAware) {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			}
-
-			tr.set(perpetualStorageWiggleKey, enable ? "1"_sr : "0"_sr);
-			wait(tr.commit());
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-	return Void();
 }
 
 Reference<DatabaseContext::TransactionT> DatabaseContext::createTransaction() {

@@ -13,7 +13,7 @@ if(WIX_FOUND)
             -DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
             -DBUILD_ROOT=${CMAKE_BINARY_DIR}
             -DCURRENT_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
-            -DVERSION=${CMAKE_PROJECT_VERSION}
+            -DVERSION=${FDB_VERSION}
             -DVERSION_NAME=${FDB_VERSION}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/generate_wxs.cmake
     DEPENDS ${CMAKE_SOURCE_DIR}/packaging/msi/FDBInstaller.wxs ${CMAKE_SOURCE_DIR}/packaging/msi/generate_wxs.cmake
@@ -29,9 +29,9 @@ if(WIX_FOUND)
   add_custom_target(wixobj DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/FDBInstaller.wixobj)
   add_dependencies(wixobj fdbserver fdbcli fdbmonitor fdb_c fdbbackup python_binding)
 	if(NOT FDB_RELEASE)
-    set(prerelease_string "-PRERELEASE")
+    set(not_fdb_release_string "-SNAPSHOT")
   else()
-    set(prerelease_string "")
+    set(not_fdb_release_string "")
   endif()
 	# 64 bits
   if(CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -40,7 +40,7 @@ if(WIX_FOUND)
   elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
 		set(arch_string "-x32")
   endif()
-	set(installer-filename "foundationdb-${PROJECT_VERSION}${prerelease_string}${arch_string}.msi")
+	set(installer-filename "foundationdb-${FDB_VERSION}${not_fdb_release_string}${arch_string}.msi")
 	set(installer-filepath "${CMAKE_BINARY_DIR}/packages/${installer-filename}")
 
   string(REPLACE "/" "\\" msi_out_file "${installer-filepath}")
