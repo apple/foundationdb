@@ -1951,7 +1951,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 				j--;
 			}
 			j++;
-			Version latestDeltaVersion = invalidVersion;
+			[[maybe_unused]] Version latestDeltaVersion = invalidVersion;
 			while (j <= i) {
 				BlobFileIndex deltaF = chunkFiles.deltaFiles[j];
 				chunk.deltaFiles.emplace_back_deep(rep.arena, deltaF.filename, deltaF.offset, deltaF.length);
