@@ -6808,7 +6808,8 @@ Reference<ChangeFeedStorageData> DatabaseContext::getStorageData(StorageServerIn
 }
 
 Version ChangeFeedData::getVersion() {
-	if (notAtLatest.get() == 0 && mutations.isEmpty()) {
+	// TODO uncomment?
+	if (notAtLatest.get() == 0 && mutations.isEmpty() /*& storageData.size() > 0*/) {
 		Version v = storageData[0]->version.get();
 		for (int i = 1; i < storageData.size(); i++) {
 			if (storageData[i]->version.get() < v) {
@@ -6834,7 +6835,7 @@ ACTOR Future<Void> changeFeedWhenAtLatest(ChangeFeedData* self, Version version)
 				}
 			}
 			choose {
-				when(wait(lastReturned)) { return Void(); }
+				when(wait(lastReturned)) { break; }
 				when(wait(waitForAll(allAtLeast))) {
 					std::vector<Future<Void>> onEmpty;
 					if (!self->mutations.isEmpty()) {
@@ -6846,14 +6847,14 @@ ACTOR Future<Void> changeFeedWhenAtLatest(ChangeFeedData* self, Version version)
 						}
 					}
 					if (!onEmpty.size()) {
-						return Void();
+						break;
 					}
 					choose {
 						when(wait(waitForAll(onEmpty))) {
 							wait(delay(0));
-							return Void();
+							break;
 						}
-						when(wait(lastReturned)) { return Void(); }
+						when(wait(lastReturned)) { break; }
 						when(wait(self->refresh.getFuture())) {}
 						when(wait(self->notAtLatest.onChange())) {}
 					}
@@ -6863,12 +6864,14 @@ ACTOR Future<Void> changeFeedWhenAtLatest(ChangeFeedData* self, Version version)
 			}
 		} else {
 			choose {
-				when(wait(lastReturned)) { return Void(); }
+				when(wait(lastReturned)) { break; }
 				when(wait(self->notAtLatest.onChange())) {}
 				when(wait(self->refresh.getFuture())) {}
 			}
 		}
 	}
+	ASSERT(self->getVersion() >= version);
+	return Void();
 }
 
 Future<Void> ChangeFeedData::whenAtLeast(Version version) {

@@ -4654,6 +4654,7 @@ void changeServerKeys(StorageServer* data,
 						}
 					}
 				}
+				data->keyChangeFeed.coalesce(f.second.contents());
 				auto feed = data->uidChangeFeed.find(f.first);
 				if (feed != data->uidChangeFeed.end()) {
 					feed->second->removing = true;
@@ -4909,6 +4910,7 @@ private:
 							}
 						}
 					}
+					data->keyChangeFeed.coalesce(feed->second->range.contents());
 					data->uidChangeFeed.erase(feed);
 				} else {
 					// must be pop or stop
