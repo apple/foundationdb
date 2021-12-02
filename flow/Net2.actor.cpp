@@ -1500,7 +1500,7 @@ void Net2::run() {
 		taskBegin = timer_monotonic();
 		numYields = 0;
 		TaskPriority minTaskID = TaskPriority::Max;
-		int queueSize = ready.size();
+		[[maybe_unused]] int queueSize = ready.size();
 
 		FDB_TRACE_PROBE(run_loop_tasks_start, queueSize);
 		while (!ready.empty()) {
