@@ -268,6 +268,12 @@ struct StorageServerDisk {
 	Future<Void> canCommit() { return storage->canCommit(); }
 	Future<Void> commit() { return storage->commit(); }
 
+	Future<Void> commitAsync(Version version) { return storage->commitAsync(version); }
+
+	FutureStream<IKeyValueStore::PersistNotification> getPersistFutureStream() {
+		return storage->getPersistFutureStream();
+	}
+
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
 	// Read the key that is equal or greater then 'key' from the storage engine.
 	// For example, readNextKeyInclusive("a") should return:
@@ -7229,7 +7235,6 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 
 ACTOR Future<Void> updateStorage(StorageServer* data) {
 	loop {
-		ASSERT(data->durableVersion.get() == data->storageVersion());
 		if (g_network->isSimulated()) {
 			double endTime =
 			    g_simulator.checkDisabled(format("%s/updateStorage", data->thisServerID.toString().c_str()));
@@ -7355,7 +7360,10 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
 		state double beforeStorageCommit = now();
 		wait(data->storage.canCommit());
-		state Future<Void> durable = data->storage.commit();
+		state bool async_enabled = (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT &&
+		                            data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1);
+		state Future<Void> durable =
+		    async_enabled ? data->storage.commitAsync(newOldestVersion) : data->storage.commit();
 		++data->counters.kvCommits;
 		state Future<Void> durableDelay = Void();
 
@@ -7379,7 +7387,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			requireCheckpoint = false;
 		}
 
-		if (newOldestVersion > data->rebootAfterDurableVersion) {
+		if (!async_enabled && newOldestVersion > data->rebootAfterDurableVersion) {
 			TraceEvent("RebootWhenDurableTriggered", data->thisServerID)
 			    .detail("NewOldestVersion", newOldestVersion)
 			    .detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
@@ -7458,30 +7466,64 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server to
 		                                             // shut down, so delay to check for cancellation
 
-		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was
-		// effective and are applied after we change the durable version. Also ensure that we have to lock while
-		// calling changeDurableVersion, because otherwise the latest version of mutableData might be partially
-		// loaded.
-		state double beforeSSDurableVersionUpdate = now();
-		wait(data->durableVersionLock.take());
-		data->popVersion(data->durableVersion.get() + 1);
+		if (!async_enabled) {
+			// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was
+			// effective and are applied after we change the durable version. Also ensure that we have to lock while
+			// calling changeDurableVersion, because otherwise the latest version of mutableData might be partially
+			// loaded.
+			state double beforeSSDurableVersionUpdate = now();
+			wait(data->durableVersionLock.take());
+			data->popVersion(data->durableVersion.get() + 1);
 
-		while (!changeDurableVersion(data, newOldestVersion)) {
-			if (g_network->check_yield(TaskPriority::UpdateStorage)) {
-				data->durableVersionLock.release();
-				wait(delay(0, TaskPriority::UpdateStorage));
-				wait(data->durableVersionLock.take());
+			while (!changeDurableVersion(data, newOldestVersion)) {
+				if (g_network->check_yield(TaskPriority::UpdateStorage)) {
+					data->durableVersionLock.release();
+					wait(delay(0, TaskPriority::UpdateStorage));
+					wait(data->durableVersionLock.take());
+				}
 			}
-		}
 
-		data->durableVersionLock.release();
-		data->ssDurableVersionUpdateLatencyHistogram->sampleSeconds(now() - beforeSSDurableVersionUpdate);
+			data->durableVersionLock.release();
+			data->ssDurableVersionUpdateLatencyHistogram->sampleSeconds(now() - beforeSSDurableVersionUpdate);
+		}
 
 		//TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
 		data->fetchKeysBytesBudget = SERVER_KNOBS->STORAGE_FETCH_BYTES;
 		data->fetchKeysBudgetUsed.set(false);
 		if (!data->fetchKeysBudgetUsed.get()) {
 			wait(durableDelay || data->fetchKeysBudgetUsed.onChange());
+		}
+	}
+}
+
+ACTOR Future<Void> onDataPersisted(StorageServer* data,
+                                   FutureStream<IKeyValueStore::PersistNotification> dataPersisted) {
+	loop {
+		try {
+			IKeyValueStore::PersistNotification persistedData = waitNext(dataPersisted);
+			state Version lastPersistedVersion = persistedData.version;
+
+			// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was
+			// effective and are applied after we change the durable version. Also ensure that we have to lock while
+			// calling changeDurableVersion, because otherwise the latest version of mutableData might be partially
+			// loaded.
+			state double beforeSSDurableVersionUpdate = now();
+			wait(data->durableVersionLock.take());
+			data->popVersion(data->durableVersion.get() + 1);
+
+			while (!changeDurableVersion(data, lastPersistedVersion)) {
+				if (g_network->check_yield(TaskPriority::UpdateStorage)) {
+					data->durableVersionLock.release();
+					wait(delay(0, TaskPriority::UpdateStorage));
+					wait(data->durableVersionLock.take());
+				}
+			}
+
+			data->durableVersionLock.release();
+			data->ssDurableVersionUpdateLatencyHistogram->sampleSeconds(now() - beforeSSDurableVersionUpdate);
+		} catch (Error& e) {
+			TraceEvent("OnDataPersisted", data->thisServerID).error(e);
+			throw e;
 		}
 	}
 }
@@ -8628,6 +8670,10 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
 	self->actors.add(updateStorage(self));
+	if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT &&
+	    self->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1) {
+		self->actors.add(onDataPersisted(self, self->storage.getPersistFutureStream()));
+	}
 	self->actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
 	self->actors.add(self->otherError.getFuture());
 	self->actors.add(metricsCore(self, ssi));
@@ -9025,8 +9071,10 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.folder = folder;
 
 	try {
+		state bool async_enabled = (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT &&
+		                            self.storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1);
 		wait(self.storage.init());
-		wait(self.storage.commit());
+		wait(async_enabled ? self.storage.commitAsync(invalidVersion) : self.storage.commit());
 		++self.counters.kvCommits;
 
 		if (seedTag == invalidTag) {
@@ -9049,7 +9097,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		}
 
 		self.storage.makeNewStorageServerDurable();
-		wait(self.storage.commit());
+		wait(async_enabled ? self.storage.commitAsync(invalidVersion) : self.storage.commit());
 		++self.counters.kvCommits;
 
 		self.interfaceRegistered =
@@ -9108,10 +9156,13 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		TraceEvent("StorageServerRebootStart", self.thisServerID).log();
 
 		wait(self.storage.init());
+		state bool async_enabled = (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT &&
+		                            self.storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1);
+
 		choose {
 			// after a rollback there might be uncommitted changes.
 			// for memory storage engine type, wait until recovery is done before commit
-			when(wait(self.storage.commit())) {}
+			when(wait(async_enabled ? self.storage.commitAsync(invalidVersion) : self.storage.commit())) {}
 
 			when(wait(memoryStoreRecover(persistentData, connRecord, self.thisServerID))) {
 				TraceEvent("DisposeStorageServer", self.thisServerID).log();

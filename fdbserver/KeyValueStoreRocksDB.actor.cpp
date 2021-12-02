@@ -23,7 +23,6 @@
 #include <rocksdb/cache.h>
 #include <rocksdb/db.h>
 #include <rocksdb/filter_policy.h>
-#include <rocksdb/listener.h>
 #include <rocksdb/options.h>
 #include <rocksdb/metadata.h>
 #include <rocksdb/slice_transform.h>
@@ -238,6 +237,104 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 	checkpoint->setFormat(RocksDBColumnFamily);
 	checkpoint->serializedCheckpoint = ObjectWriter::toValue(rocksCF, IncludeVersion());
 }
+// This event listener is used as a callback by rocksdb to notify flush events.
+// Rocksdb background thread would call onFlushCompleted on every flush event.
+//
+// In simulation, all threads are expected to have flow related context like
+// currentprocess etc. which rocksdb background threads does not have.
+// Since we cannot use persist->send in the rocks background thread, the
+// code below is having a workaround to make it work in simulation.
+class FlushEventListener : public rocksdb::EventListener {
+public:
+	FlushEventListener(ThreadReturnPromiseStream<IKeyValueStore::PersistNotification>* persist, UID id)
+	  : persist(persist), id(id), lastFlushTime(now()) {
+		TraceEvent("RocksDBFlushEventListenerConstructed", id);
+
+		if (g_network->isSimulated()) {
+			versionNotifierFut = versionNotifier(this);
+		}
+	}
+	~FlushEventListener() override {
+		if (g_network->isSimulated()) {
+			versionNotifierFut.reset();
+		}
+	}
+
+	void OnFlushCompleted(rocksdb::DB* /*db*/, const rocksdb::FlushJobInfo& info) override {
+		std::lock_guard<std::mutex> lock(mutex);
+
+		lastFlushTime = now();
+		if (!g_network->isSimulated()) {
+			const auto it = versionSeqNoMap.lower_bound(info.largest_seqno);
+			if (it != versionSeqNoMap.end()) {
+				persist->send(it->second);
+				versionSeqNoMap.erase(it, versionSeqNoMap.end());
+			}
+		} else {
+			// In simulation: Just set the flushedLargestSeqNo as persist->send()
+			// does not work in this rocksdb background thread context.
+			flushedLargestSeqNo = info.largest_seqno;
+		}
+	}
+
+	void addVersion(const rocksdb::SequenceNumber seqno, const Version version) {
+		std::lock_guard<std::mutex> lock(mutex);
+		auto res = versionSeqNoMap.emplace(seqno, version);
+		if (!res.second) {
+			TraceEvent(SevWarn, "RocksDBFlushListenerSeqNoAlreadyExist")
+			    .detail("RocksDBSeqNum", seqno)
+			    .detail("Version", version);
+			res.first->second = version;
+		}
+	}
+
+	// Used part of hard commit(clearMap, flush, readPersistVersion key) when we are doing SS recovering.
+	void clear() {
+		std::lock_guard<std::mutex> lock(mutex);
+		versionSeqNoMap.clear();
+	}
+
+	double getLastFlushTime() { return lastFlushTime; }
+
+	// Workaround for simulation.
+
+	// Checks if flushedLargestSeqNo is changed.
+	void sendPersistVersion() {
+		ASSERT(g_network->isSimulated());
+
+		std::lock_guard<std::mutex> lock(mutex);
+		if (flushedLargestSeqNo == 0)
+			return;
+
+		const auto it = versionSeqNoMap.lower_bound(flushedLargestSeqNo);
+		if (it != versionSeqNoMap.end()) {
+			persist->send(it->second);
+			versionSeqNoMap.erase(it, versionSeqNoMap.end());
+		}
+		flushedLargestSeqNo = 0;
+	}
+
+	// A busy loop actor which continuously checks and notifies about the flush
+	// which is a workaround in simulation.
+	ACTOR Future<Void> versionNotifier(FlushEventListener* self) {
+		ASSERT(g_network->isSimulated());
+		loop {
+			wait(delay(1.0));
+			self->sendPersistVersion();
+		}
+	}
+
+private:
+	UID id;
+	std::mutex mutex;
+	std::map<rocksdb::SequenceNumber, Version, std::greater<rocksdb::SequenceNumber>> versionSeqNoMap;
+	ThreadReturnPromiseStream<IKeyValueStore::PersistNotification>* persist;
+	double lastFlushTime;
+
+	// Used only in simualtion
+	rocksdb::SequenceNumber flushedLargestSeqNo;
+	Optional<Future<Void>> versionNotifierFut;
+};
 
 rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
@@ -356,12 +453,11 @@ gets deleted as the ref count becomes 0.
 */
 class ReadIteratorPool {
 public:
-	ReadIteratorPool(DB& db, CF& cf, const std::string& path)
+	ReadIteratorPool(DB& db, CF& cf, UID id)
 	  : db(db), cf(cf), index(0), iteratorsReuseCount(0), readRangeOptions(getReadOptions()) {
 		readRangeOptions.background_purge_on_iterator_cleanup = true;
 		readRangeOptions.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
-		TraceEvent("ReadIteratorPool")
-		    .detail("Path", path)
+		TraceEvent("ReadIteratorPoolConstructed", id)
 		    .detail("KnobRocksDBReadRangeReuseIterators", SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS)
 		    .detail("KnobRocksDBPrefixLen", SERVER_KNOBS->ROCKSDB_PREFIX_LEN);
 	}
@@ -769,7 +865,6 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 
 	};
 	state std::vector<std::pair<const char*, std::string>> propertyStats = {
-		{ "NumCompactionsRunning", rocksdb::DB::Properties::kNumRunningCompactions },
 		{ "NumImmutableMemtables", rocksdb::DB::Properties::kNumImmutableMemTable },
 		{ "NumImmutableMemtablesFlushed", rocksdb::DB::Properties::kNumImmutableMemTableFlushed },
 		{ "IsMemtableFlushPending", rocksdb::DB::Properties::kMemTableFlushPending },
@@ -854,6 +949,34 @@ Error statusToError(const rocksdb::Status& s) {
 	}
 }
 
+ACTOR Future<Void> rocksDBFlushTicker(rocksdb::DB* db,
+                                      rocksdb::ColumnFamilyHandle* defaultFdbCF,
+                                      UID id,
+                                      std::shared_ptr<FlushEventListener> flushEventListener) {
+	if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT && SERVER_KNOBS->ROCKSDB_FLUSH_TICKER_DELAY > 0) {
+		state rocksdb::FlushOptions flushOptions;
+		state double delayTime = SERVER_KNOBS->ROCKSDB_FLUSH_TICKER_DELAY;
+		state double lastFlushTime;
+		state rocksdb::Status s;
+
+		loop {
+			wait(delay(delayTime));
+			lastFlushTime = round(now() - flushEventListener->getLastFlushTime());
+			if (lastFlushTime >= SERVER_KNOBS->ROCKSDB_FLUSH_TICKER_DELAY) {
+				s = db->Flush(flushOptions, defaultFdbCF);
+				if (!s.ok()) {
+					logRocksDBError(s, "RocksDBFlushFailure");
+				}
+				delayTime = SERVER_KNOBS->ROCKSDB_FLUSH_TICKER_DELAY;
+			} else {
+				delayTime = SERVER_KNOBS->ROCKSDB_FLUSH_TICKER_DELAY - lastFlushTime;
+			}
+		}
+	}
+
+	return Void();
+}
+
 struct RocksDBKeyValueStore : IKeyValueStore {
 	struct Writer : IThreadPoolReceiver {
 		DB& db;
@@ -867,6 +990,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		ThreadReturnPromiseStream<std::pair<std::string, double>>* metricPromiseStream;
 		// ThreadReturnPromiseStream pair.first stores the histogram name and
 		// pair.second stores the corresponding measured latency (seconds)
+		std::shared_ptr<FlushEventListener> flushEventListener;
+		Optional<Future<Void>> flushTicker;
 
 		explicit Writer(DB& db,
 		                CF& cf,
@@ -874,9 +999,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                std::shared_ptr<ReadIteratorPool> readIterPool,
 		                std::shared_ptr<PerfContextMetrics> perfContextMetrics,
 		                int threadIndex,
-		                ThreadReturnPromiseStream<std::pair<std::string, double>>* metricPromiseStream)
+		                ThreadReturnPromiseStream<std::pair<std::string, double>>* metricPromiseStream,
+		                std::shared_ptr<FlushEventListener> flushEventListener)
 		  : db(db), cf(cf), id(id), readIterPool(readIterPool), perfContextMetrics(perfContextMetrics),
-		    threadIndex(threadIndex), metricPromiseStream(metricPromiseStream),
+		    threadIndex(threadIndex), metricPromiseStream(metricPromiseStream), flushEventListener(flushEventListener),
 		    rateLimiter(SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0
 		                    ? rocksdb::NewGenericRateLimiter(
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC, // rate_bytes_per_sec
@@ -934,6 +1060,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			options.listeners.push_back(a.errorListener);
+			if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT) {
+				TraceEvent("AddingFlushEventListener", id);
+				options.listeners.push_back(flushEventListener);
+				options.env->SetBackgroundThreads(2, rocksdb::Env::Priority::HIGH);
+			}
 			if (SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0) {
 				options.rate_limiter = rateLimiter;
 			}
@@ -962,7 +1093,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				}
 			}
 
-			TraceEvent(SevInfo, "RocksDB")
+			TraceEvent("RocksDB")
 			    .detail("Path", a.path)
 			    .detail("Method", "Open")
 			    .detail("KnobRocksDBWriteRateLimiterBytesPerSec",
@@ -974,11 +1105,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				// blockUntilReady() is getting the thread into deadlock state, so directly calling
 				// the metricsLogger.
 				a.metrics = rocksDBMetricLogger(options.statistics, perfContextMetrics, db, readIterPool) &&
-				            flowLockLogger(a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool);
+				            flowLockLogger(a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool) &&
+				            rocksDBFlushTicker(db, cf, id, flushEventListener);
 			} else {
 				onMainThread([&] {
 					a.metrics = rocksDBMetricLogger(options.statistics, perfContextMetrics, db, readIterPool) &&
-					            flowLockLogger(a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool);
+					            flowLockLogger(a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool) &&
+					            rocksDBFlushTicker(db, cf, id, flushEventListener);
 					return Future<bool>(true);
 				}).blockUntilReady();
 			}
@@ -1025,8 +1158,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ThreadReturnPromise<Void> done;
 			double startTime;
 			bool getHistograms;
+			Version version;
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
-			CommitAction() {
+			CommitAction() : version(invalidVersion) {
 				if (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) {
 					getHistograms = true;
 					startTime = timer_monotonic();
@@ -1059,7 +1193,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			// If there are any range deletes, we should have added them to be deleted.
 			ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
 			rocksdb::WriteOptions options;
-			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
+			const bool async_enabled = SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT;
+			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC && !async_enabled;
+			options.disableWAL = async_enabled;
 
 			double writeBeginTime = a.getHistograms ? timer_monotonic() : 0;
 			if (rateLimiter) {
@@ -1079,6 +1215,23 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.done.sendError(statusToError(s));
 			} else {
 				a.done.send(Void());
+				if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT) {
+					if (a.version != invalidVersion) {
+						const rocksdb::SequenceNumber seqno = db->GetLatestSequenceNumber();
+						flushEventListener->addVersion(seqno, a.version);
+					} else {
+						// If there is no version or invalidVersion(this commit might be part
+						// of SS recovery/creation) specified, its better to do a hard commit
+						// (clear flushListenerMap and then flush). So, if SS reads persistVersion
+						// Key to recover SS or replay TLog, everything will be in sync.
+						flushEventListener->clear();
+						rocksdb::FlushOptions flushOptions;
+						rocksdb::Status flushStatus = db->Flush(flushOptions, cf);
+						if (!flushStatus.ok()) {
+							logRocksDBError(flushStatus, "RocksDBFlushFailure");
+						}
+					}
+				}
 
 				double compactRangeBeginTime = a.getHistograms ? timer_monotonic() : 0;
 				for (const auto& keyRange : deletes) {
@@ -1111,6 +1264,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CloseAction& a) {
+			if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT) {
+				// Persisting the data before closing the KVstore.
+				flushEventListener->clear();
+				rocksdb::FlushOptions flushOptions;
+				rocksdb::Status flushStatus = db->Flush(flushOptions, cf);
+				if (!flushStatus.ok()) {
+					logRocksDBError(flushStatus, "RocksDBFlushFailure");
+				}
+			}
+
 			readIterPool.reset();
 			if (db == nullptr) {
 				a.done.send(Void());
@@ -1252,7 +1415,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					logRocksDBError(status, "Restore");
 					a.done.sendError(statusToError(status));
 				} else {
-					TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Restore");
+					TraceEvent("RocksDB").detail("Path", a.path).detail("Method", "Restore");
 					a.done.send(Void());
 				}
 			} else {
@@ -1299,6 +1462,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				perfContextMetrics->reset();
 			}
 		}
+
+		~Reader() override { readIterPool.reset(); }
 
 		void init() override {}
 
@@ -1621,6 +1786,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> actorErrorListener;
 	Future<Void> collection;
 	PromiseStream<Future<Void>> addActor;
+	std::shared_ptr<FlushEventListener> flushEventListener;
 
 	struct Counters {
 		CounterCollection cc;
@@ -1635,7 +1801,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id)
 	  : path(path), id(id), perfContextMetrics(new PerfContextMetrics()),
-	    readIterPool(new ReadIteratorPool(db, defaultFdbCF, path)),
+	    readIterPool(new ReadIteratorPool(db, defaultFdbCF, id)),
 	    readSemaphore(SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
@@ -1668,6 +1834,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 		}
 
+		if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT) {
+			flushEventListener = std::make_shared<FlushEventListener>(getPersistPromiseStream(), id);
+		}
 		// the writer uses SERVER_KNOBS->ROCKSDB_READ_PARALLELISM as its threadIndex
 		// threadIndex is used for metricPromiseStreams and perfContextMetrics
 		writeThread->addThread(new Writer(db,
@@ -1678,8 +1847,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                                  SERVER_KNOBS->ROCKSDB_READ_PARALLELISM,
 		                                  SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE > 0
 		                                      ? metricPromiseStreams[SERVER_KNOBS->ROCKSDB_READ_PARALLELISM].get()
-		                                      : nullptr),
+		                                      : nullptr,
+		                                  flushEventListener),
 		                       "fdb-rocksdb-wr");
+
 		TraceEvent("RocksDBReadThreads").detail("KnobRocksDBReadParallelism", SERVER_KNOBS->ROCKSDB_READ_PARALLELISM);
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
 			readThreads->addThread(
@@ -1820,6 +1991,18 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Future<Void> init() override {
 		if (openFuture.isValid()) {
+			if (SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT) {
+				// Init is called as part of SS creation or recovery, its better to do a
+				// hard commit (clear flushListenerMap and then flush). So, if SS reads
+				// persistVersionKey to recover SS or replay TLog, everything will be in sync.
+				flushEventListener->clear();
+				rocksdb::FlushOptions flushOptions;
+				rocksdb::Status flushStatus = db->Flush(flushOptions, defaultFdbCF);
+				if (!flushStatus.ok()) {
+					logRocksDBError(flushStatus, "RocksDBFlushFailure");
+				}
+			}
+
 			return openFuture;
 		}
 		auto a = std::make_unique<Writer::OpenAction>(path, metrics, &readSemaphore, &fetchSemaphore, errorListener);
@@ -1876,6 +2059,20 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		auto a = new Writer::CommitAction();
 		a->batchToCommit = std::move(writeBatch);
 		auto res = a->done.getFuture();
+		writeThread->post(a);
+		return res;
+	}
+
+	Future<Void> commitAsync(Version version, bool sequential) override {
+		ASSERT(SERVER_KNOBS->SS_ENABLE_ASYNC_COMMIT);
+		// If there is nothing to write, don't write.
+		if (writeBatch == nullptr) {
+			return Void();
+		}
+		auto a = new Writer::CommitAction();
+		a->batchToCommit = std::move(writeBatch);
+		auto res = a->done.getFuture();
+		a->version = version;
 		writeThread->post(a);
 		return res;
 	}

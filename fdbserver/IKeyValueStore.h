@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/StorageCheckpoint.h"
+#include "flow/IThreadPool.h"
 
 struct CheckpointRequest {
 	const Version version; // The FDB version at which the checkpoint is created.
@@ -59,12 +60,31 @@ public:
 
 class IKeyValueStore : public IClosable {
 public:
+	// A PersistNotification object is sent from the storage engine to a SS to inform the persistence of mutations up
+	// to 'version'.
+	// A construct is used instead of a version for potential future extension to notifications on other storage events,
+	// e.g., with the following addition, it can represents an event of write without persistence, for more aggressive
+	// pipelining.
+	// enum Type {
+	// 	BufferWrite,
+	// 	Persist,
+	// };
+	struct PersistNotification {
+		PersistNotification(Version version) : version(version) {}
+		Version version;
+	};
+
 	virtual KeyValueStoreType getType() const = 0;
 	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) = 0;
 	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) = 0;
 	virtual Future<Void> canCommit() { return Void(); }
 	virtual Future<Void> commit(
 	    bool sequential = false) = 0; // returns when prior sets and clears are (atomically) durable
+	// After the Future is ready, the commit is readable from the storage engine, but may not be
+	// persistent.
+	virtual Future<Void> commitAsync(Version version, bool sequential = false) {
+		throw internal_error_msg("Not Implemented Yet.");
+	}
 
 	enum class ReadType {
 		EAGER,
@@ -132,8 +152,14 @@ public:
 	// of a rollback.
 	virtual Future<Void> init() { return Void(); }
 
+	virtual ThreadReturnPromiseStream<PersistNotification>* getPersistPromiseStream() { return &persist; }
+	virtual FutureStream<PersistNotification> getPersistFutureStream() { return persist.getFuture(); }
+
 protected:
 	virtual ~IKeyValueStore() {}
+
+private:
+	ThreadReturnPromiseStream<PersistNotification> persist;
 };
 
 extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
