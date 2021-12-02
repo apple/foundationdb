@@ -292,7 +292,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
-			// a.shardMap->clear();
 			a.shardMap->insert(KeyRangeRef("\xff\xff"_sr, "\xff\xff\xff"_sr), db);
 
 			TraceEvent(SevInfo, "RocksDB")
@@ -356,6 +355,44 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					return Future<bool>(true);
 				}).blockUntilReady();
 			}
+			a.done.send(Void());
+		}
+
+		struct AddShardAction : TypedAction<Writer, AddShardAction> {
+			const std::string path;
+			KeyRange range;
+			ThreadReturnPromise<Void> done;
+			KeyRangeMap<DB>* shardMap;
+
+			AddShardAction(std::string path, KeyRange range, KeyRangeMap<DB>* shardMap)
+			  : path(path), range(range), shardMap(shardMap) {}
+
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+		};
+
+		void action(AddShardAction& a) {
+			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
+				"default", getCFOptions() } };
+			std::vector<rocksdb::ColumnFamilyHandle*> handle;
+			auto options = getOptions();
+			DB ndb;
+			rocksdb::Status status = rocksdb::DB::Open(options, a.path, defaultCF, &handle, &ndb);
+			if (!status.ok()) {
+				logRocksDBError(status, "AddShard");
+				a.done.sendError(statusToError(status));
+				return;
+			}
+
+			ASSERT(a.shardMap != nullptr);
+
+			a.shardMap->insert(a.range, ndb);
+
+			TraceEvent(SevInfo, "RocksDB")
+			    .detail("Path", a.path)
+			    .detail("Method", "AddShard")
+			    .detail("Begin", a.range.begin.toString())
+			    .detail("End", a.range.end.toString());
+
 			a.done.send(Void());
 		}
 
@@ -880,6 +917,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
+	Future<Void> addShard(KeyRangeRef range, UID id) {
+		auto a = std::make_unique<Writer::AddShardAction>(dataPath + id.toString(), range, &shardMap);
+		Future<Void> f = a->done.getFuture();
+		writeThread->post(a.release());
+		return f;
+	}
+
+	
+
 	DB db = nullptr;
 	std::string path;
 	const std::string dataPath;
@@ -964,6 +1010,12 @@ TEST_CASE("/rocks/multiRocks") {
 	state RocksDBKeyValueStore* kvStore =
 	    new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	wait(kvStore->init());
+
+	for (auto* rocks : kvStore->getAllInstances()) {
+		std::cout << "Rocks: " << rocks->GetName() << std::endl;
+	}
+
+	wait(kvStore->addShard(KeyRangeRef("a"_sr, "b"_sr), deterministicRandom()->randomUniqueID()));
 
 	for (auto* rocks : kvStore->getAllInstances()) {
 		std::cout << "Rocks: " << rocks->GetName() << std::endl;
