@@ -381,9 +381,9 @@ void LogPushData::addTLogGroups(const std::vector<TLogGroupRef>& groups, Version
 	}
 }
 
-std::map<ptxn::TLogGroupID, ptxn::SerializedTeamData> LogPushData::getGroupMutations(
+std::unordered_map<ptxn::TLogGroupID, ptxn::SerializedTeamData> LogPushData::getGroupMutations(
     const std::set<ptxn::TLogGroupID>& groups) {
-	std::map<ptxn::TLogGroupID, ptxn::SerializedTeamData> results;
+	std::unordered_map<ptxn::TLogGroupID, ptxn::SerializedTeamData> results;
 	for (const auto& [group, serializer] : *pGroupMessageBuilders) {
 		auto teamData = serializer->getAllSerialized();
 		results.emplace(group, teamData);

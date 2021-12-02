@@ -827,7 +827,8 @@ struct LogPushData : NonCopyable {
 	void setMutations(uint32_t totalMutations, VectorRef<StringRef> mutations);
 
 	// Returns messages for specified groups
-	std::map<ptxn::TLogGroupID, ptxn::SerializedTeamData> getGroupMutations(const std::set<ptxn::TLogGroupID>& groups);
+	std::unordered_map<ptxn::TLogGroupID, ptxn::SerializedTeamData> getGroupMutations(
+	    const std::set<ptxn::TLogGroupID>& groups);
 
 	// Sets mutations for internal group writers. "groupMutations" is the output from
 	// getGroupMutations() and is used before writing any other mutations.
