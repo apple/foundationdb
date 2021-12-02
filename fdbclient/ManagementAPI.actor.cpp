@@ -715,7 +715,7 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 
 	result.auto_replication = result.old_replication;
 
-	int storage_replication;
+	[[maybe_unused]] int storage_replication;
 	int log_replication;
 	if (result.old_replication == "single") {
 		result.auto_replication = "double";

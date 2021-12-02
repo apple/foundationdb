@@ -1590,7 +1590,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					for (int j = 0; j < storageServers.size(); j++)
 						storageServerSizes[storageServers[j]] += shardBytes;
 
-				bool hasValidEstimate = estimatedBytes.size() > 0;
+				// FIXME: Where is this intended to be used?
+				[[maybe_unused]] bool hasValidEstimate = estimatedBytes.size() > 0;
 
 				// If the storage servers' sampled estimate of shard size is different from ours
 				if (self->performQuiescentChecks) {
