@@ -188,7 +188,7 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_keyrange_array(FDBFuture
                                                                        FDBKeyRange const** out_ranges,
                                                                        int* out_count);
 
-// FDBResult is a synchronous computation result, as opposed to a future that is asynchronous.
+/* FDBResult is a synchronous computation result, as opposed to a future that is asynchronous. */
 DLLEXPORT void fdb_result_destroy(FDBResult* r);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_result_get_keyvalue_array(FDBResult* r,
@@ -196,7 +196,7 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_result_get_keyvalue_array(FDBResult
                                                                        int* out_count,
                                                                        fdb_bool_t* out_more);
 
-// add other return types as we need them
+/* TODO: add other return types as we need them */
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_create_database(const char* cluster_file_path, FDBDatabase** out_database);
 
