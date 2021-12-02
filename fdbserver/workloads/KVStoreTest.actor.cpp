@@ -20,6 +20,7 @@
 
 #include <ctime>
 #include <cinttypes>
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
@@ -278,7 +279,7 @@ ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest)
 		}
 		double elapsed = timer() - cst;
 		TraceEvent("KVStoreCount").detail("Count", count).detail("Took", elapsed);
-		printf("Counted: %" PRId64 " in %0.1fs\n", count, elapsed);
+		fmt::print("Counted: {0} in {1:01.f}s\n");
 	}
 
 	if (workload->doSetup) {
