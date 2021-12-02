@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "fdbclient/ClientVersion.h"
@@ -240,8 +241,64 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> DLTransaction::getRangeSplitPoints(c
 		int keysArrayLength;
 		FdbCApi::fdb_error_t error = api->futureGetKeyArray(f, &splitKeys, &keysArrayLength);
 		ASSERT(!error);
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
 		return Standalone<VectorRef<KeyRef>>(VectorRef<KeyRef>((KeyRef*)splitKeys, keysArrayLength), Arena());
 	});
+}
+
+ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> DLTransaction::getBlobGranuleRanges(const KeyRangeRef& keyRange) {
+	if (!api->transactionGetBlobGranuleRanges) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->transactionGetBlobGranuleRanges(
+	    tr, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
+	return toThreadFuture<Standalone<VectorRef<KeyRangeRef>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const FdbCApi::FDBKeyRange* keyRanges;
+		int keyRangesLength;
+		FdbCApi::fdb_error_t error = api->futureGetKeyRangeArray(f, &keyRanges, &keyRangesLength);
+		ASSERT(!error);
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
+		return Standalone<VectorRef<KeyRangeRef>>(VectorRef<KeyRangeRef>((KeyRangeRef*)keyRanges, keyRangesLength),
+		                                          Arena());
+	});
+}
+
+ThreadResult<RangeResult> DLTransaction::readBlobGranules(const KeyRangeRef& keyRange,
+                                                          Version beginVersion,
+                                                          Optional<Version> readVersion,
+                                                          ReadBlobGranuleContext granuleContext) {
+	if (!api->transactionReadBlobGranules) {
+		return unsupported_operation();
+	}
+
+	// FIXME: better way to convert here?
+	FdbCApi::FDBReadBlobGranuleContext context;
+	context.userContext = granuleContext.userContext;
+	context.start_load_f = granuleContext.start_load_f;
+	context.get_load_f = granuleContext.get_load_f;
+	context.free_load_f = granuleContext.free_load_f;
+	context.debugNoMaterialize = granuleContext.debugNoMaterialize;
+
+	int64_t rv = readVersion.present() ? readVersion.get() : invalidVersion;
+
+	FdbCApi::FDBResult* r = api->transactionReadBlobGranules(tr,
+	                                                         keyRange.begin.begin(),
+	                                                         keyRange.begin.size(),
+	                                                         keyRange.end.begin(),
+	                                                         keyRange.end.size(),
+	                                                         beginVersion,
+	                                                         rv,
+	                                                         context);
+	const FdbCApi::FDBKeyValue* kvs;
+	int count;
+	FdbCApi::fdb_bool_t more;
+	FdbCApi::fdb_error_t error = api->resultGetKeyValueArray(r, &kvs, &count, &more);
+	ASSERT(!error);
+
+	// The memory for this is stored in the FDBResult and is released when the result gets destroyed
+	return ThreadResult<RangeResult>(
+	    RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena()));
 }
 
 void DLTransaction::addReadConflictRange(const KeyRangeRef& keys) {
@@ -537,6 +594,13 @@ void DLApi::init() {
 	                   "fdb_transaction_get_range_split_points",
 	                   headerVersion >= 700);
 
+	loadClientFunction(&api->transactionGetBlobGranuleRanges,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_get_blob_granule_ranges",
+	                   headerVersion >= 710);
+	loadClientFunction(
+	    &api->transactionReadBlobGranules, lib, fdbCPath, "fdb_transaction_read_blob_granules", headerVersion >= 710);
 	loadClientFunction(&api->futureGetInt64,
 	                   lib,
 	                   fdbCPath,
@@ -547,12 +611,18 @@ void DLApi::init() {
 	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key", headerVersion >= 0);
 	loadClientFunction(&api->futureGetValue, lib, fdbCPath, "fdb_future_get_value", headerVersion >= 0);
 	loadClientFunction(&api->futureGetStringArray, lib, fdbCPath, "fdb_future_get_string_array", headerVersion >= 0);
+	loadClientFunction(
+	    &api->futureGetKeyRangeArray, lib, fdbCPath, "fdb_future_get_keyrange_array", headerVersion >= 710);
 	loadClientFunction(&api->futureGetKeyArray, lib, fdbCPath, "fdb_future_get_key_array", headerVersion >= 700);
 	loadClientFunction(
 	    &api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array", headerVersion >= 0);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel", headerVersion >= 0);
 	loadClientFunction(&api->futureDestroy, lib, fdbCPath, "fdb_future_destroy", headerVersion >= 0);
+
+	loadClientFunction(
+	    &api->resultGetKeyValueArray, lib, fdbCPath, "fdb_result_get_keyvalue_array", headerVersion >= 710);
+	loadClientFunction(&api->resultDestroy, lib, fdbCPath, "fdb_result_destroy", headerVersion >= 710);
 
 	loadClientFunction(&api->futureGetDatabase, lib, fdbCPath, "fdb_future_get_database", headerVersion < 610);
 	loadClientFunction(&api->createCluster, lib, fdbCPath, "fdb_create_cluster", headerVersion < 610);
@@ -835,6 +905,27 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> MultiVersionTransaction::getRangeSpl
 	auto f = tr.transaction ? tr.transaction->getRangeSplitPoints(range, chunkSize)
 	                        : makeTimeout<Standalone<VectorRef<KeyRef>>>();
 	return abortableFuture(f, tr.onChange);
+}
+
+ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> MultiVersionTransaction::getBlobGranuleRanges(
+    const KeyRangeRef& keyRange) {
+	auto tr = getTransaction();
+	auto f = tr.transaction ? tr.transaction->getBlobGranuleRanges(keyRange)
+	                        : makeTimeout<Standalone<VectorRef<KeyRangeRef>>>();
+	return abortableFuture(f, tr.onChange);
+}
+
+ThreadResult<RangeResult> MultiVersionTransaction::readBlobGranules(const KeyRangeRef& keyRange,
+                                                                    Version beginVersion,
+                                                                    Optional<Version> readVersion,
+                                                                    ReadBlobGranuleContext granuleContext) {
+	auto tr = getTransaction();
+	if (tr.transaction) {
+		return tr.transaction->readBlobGranules(keyRange, beginVersion, readVersion, granuleContext);
+	} else {
+		// FIXME: handle abortable future + timeout properly
+		return ThreadResult<RangeResult>(transaction_cancelled());
+	}
 }
 
 void MultiVersionTransaction::atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) {
