@@ -47,8 +47,8 @@ RUN yum install -y \
 WORKDIR /tmp
 
 RUN curl -Ls https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd64 -o tini  && \
-    echo "93dcc18adc78c65a028a84799ecf8ad40c936fdfc5f2a57b1acda5a8117fa82c  tini" > tini-amd64.sha256sum && \
-    sha256sum -c tini-amd64.sha256sum && \
+    echo "93dcc18adc78c65a028a84799ecf8ad40c936fdfc5f2a57b1acda5a8117fa82c  tini" > tini-sha.txt && \
+    sha256sum --quiet -c tini-sha.txt && \
     chmod +x tini && \
     mv tini /usr/bin/ && \
     rm -rf /tmp/*
@@ -73,14 +73,19 @@ RUN mkdir -p /var/fdb/{logs,tmp,lib} && \
     echo ${FDB_VERSION} > /var/fdb/version
 
 # Set up a non-root user
-RUN groupadd --gid 4059 fdb && \
-    useradd --gid 4059 --uid 4059 --no-create-home --shell /bin/bash fdb && \
+RUN groupadd --gid 4059 \
+             fdb && \
+    useradd --gid 4059 \
+            --uid 4059 \
+            --no-create-home \
+            --shell /bin/bash \
+            fdb && \
     chown -R fdb:fdb /var/fdb
 
 COPY website /tmp/website/
 
 # Install FoundationDB Binaries
-RUN curl $FDB_WEBSITE/downloads/$FDB_VERSION/linux/fdb_$FDB_VERSION.tar.gz | tar zxf - --strip-components=1 && \
+RUN curl -Ls $FDB_WEBSITE/downloads/$FDB_VERSION/linux/fdb_$FDB_VERSION.tar.gz | tar zxf - --strip-components=1 && \
     for file in fdbbackup fdbcli fdbdr fdbmonitor fdbrestore fdbserver backup_agent dr_agent fastrestore_tool; do \
         chmod u+x $file; \
         mv $file /usr/bin; \
@@ -88,16 +93,16 @@ RUN curl $FDB_WEBSITE/downloads/$FDB_VERSION/linux/fdb_$FDB_VERSION.tar.gz | tar
 
 # Install additional FoundationDB Client Libraries
 RUN for version in $FDB_LIBRARY_VERSIONS; do \
-    curl $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /usr/lib/fdb/multiversion/libfdb_c_${version%.*}.so; \
+    curl -Ls $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /usr/lib/fdb/multiversion/libfdb_c_${version%.*}.so; \
     done
 
 # Install additional FoundationDB Client Libraries (for sidecar)
 RUN mkdir -p /var/fdb/lib && \
     for version in $FDB_LIBRARY_VERSIONS; do \
-    curl $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /var/fdb/lib/libfdb_c_${version%.*}.so; \
+    curl -Ls $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /var/fdb/lib/libfdb_c_${version%.*}.so; \
     done
 
-RUN curl $FDB_WEBSITE/downloads/$FDB_VERSION/linux/libfdb_c_$FDB_VERSION.so -o /usr/lib/libfdb_c.so
+RUN curl -Ls $FDB_WEBSITE/downloads/$FDB_VERSION/linux/libfdb_c_$FDB_VERSION.so -o /usr/lib/libfdb_c.so
 
 RUN rm -rf /tmp/*
 WORKDIR /
@@ -136,9 +141,9 @@ FROM foundationdb-base as foundationdb
 WORKDIR /tmp
 RUN curl -LsO https://raw.githubusercontent.com/brendangregg/FlameGraph/90533539b75400297092f973163b8a7b067c66d3/stackcollapse-perf.pl && \
     curl -LsO https://raw.githubusercontent.com/brendangregg/FlameGraph/90533539b75400297092f973163b8a7b067c66d3/flamegraph.pl && \
-    echo "a682ac46497d6fdbf9904d1e405d3aea3ad255fcb156f6b2b1a541324628dfc0  flamegraph.pl" > flamegraph.sha256sum && \
-    echo "5bcfb73ff2c2ab7bf2ad2b851125064780b58c51cc602335ec0001bec92679a5  stackcollapse-perf.pl" >> flamegraph.sha256sum && \
-    sha256sum -c flamegraph.sha256sum && \
+    echo "a682ac46497d6fdbf9904d1e405d3aea3ad255fcb156f6b2b1a541324628dfc0  flamegraph.pl" > flamegraph-sha.txt && \
+    echo "5bcfb73ff2c2ab7bf2ad2b851125064780b58c51cc602335ec0001bec92679a5  stackcollapse-perf.pl" >> flamegraph-sha.txt && \
+    sha256sum --quiet -c flamegraph-sha.txt && \
     chmod +x stackcollapse-perf.pl flamegraph.pl && \
     mv stackcollapse-perf.pl flamegraph.pl /usr/bin && \
     rm -rf /tmp/*
@@ -166,12 +171,12 @@ RUN yum -y install \
 WORKDIR /tmp
 RUN curl -Ls https://amazon-eks.s3.amazonaws.com/1.19.6/2021-01-05/bin/linux/amd64/kubectl -o kubectl && \
     echo "08ff68159bbcb844455167abb1d0de75bbfe5ae1b051f81ab060a1988027868a  kubectl" > kubectl.txt && \
-    sha256sum -c kubectl.txt && \
+    sha256sum --quiet -c kubectl.txt && \
     mv kubectl /usr/local/bin/kubectl && \
     chmod 755 /usr/local/bin/kubectl && \
-    curl https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.2.43.zip -o "awscliv2.zip" && \
+    curl -Ls https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.2.43.zip -o "awscliv2.zip" && \
     echo "9a8b3c4e7f72bbcc55e341dce3af42479f2730c225d6d265ee6f9162cfdebdfd  awscliv2.zip" > awscliv2.txt && \
-    sha256sum -c awscliv2.txt && \
+    sha256sum --quiet -c awscliv2.txt && \
     unzip -qq awscliv2.zip && \
     ./aws/install && \
     rm -rf /tmp/*
