@@ -1,5 +1,11 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
+#include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/SystemData.h"
+#include "fdbserver/CoroFlow.h"
+#include "flow/IThreadPool.h"
+#include "flow/ThreadHelper.actor.h"
+#include "flow/flow.h"
 #include <rocksdb/cache.h>
 #include <rocksdb/db.h>
 #include <rocksdb/filter_policy.h>
@@ -7,13 +13,8 @@
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
-#include <rocksdb/version.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
-#include "fdbclient/SystemData.h"
-#include "fdbserver/CoroFlow.h"
-#include "flow/flow.h"
-#include "flow/IThreadPool.h"
-#include "flow/ThreadHelper.actor.h"
+#include <rocksdb/version.h>
 
 #include <memory>
 #include <tuple>
@@ -286,7 +287,18 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
-			TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
+			if (a.shardMap == nullptr) {
+				a.done.send(Void());
+				return;
+			}
+
+			// a.shardMap->clear();
+			a.shardMap->insert(KeyRangeRef("\xff\xff"_sr, "\xff\xff\xff"_sr), db);
+
+			TraceEvent(SevInfo, "RocksDB")
+			    .detail("Path", a.path)
+			    .detail("Method", "Open")
+			    .detail("MetaRocks", uint64_t(db));
 
 			auto readOptions = getReadOptions();
 			std::chrono::seconds deadlineSeconds(30);
@@ -300,23 +312,40 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			cursor->Seek(toSlice(persistShardMappingKeys.begin));
 			while (cursor->Valid() && toStringRef(cursor->key()) < persistShardMappingKeys.end) {
 				KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-				DB cdb;
-				status = rocksdb::DB::Open(options, dataPath + kv.value.toString(), defaultCF, &handle, &cdb);
-				if (!status.ok()) {
-					logRocksDBError(status, "Open");
-					a.done.sendError(statusToError(status));
-					return;
+				DB cdb = nullptr;
+				if (!kv.value.empty()) {
+					status = rocksdb::DB::Open(options, a.dataPath + kv.value.toString(), defaultCF, &handle, &cdb);
+					if (!status.ok()) {
+						logRocksDBError(status, "Open");
+						a.done.sendError(statusToError(status));
+						return;
+					}
 				}
-				shardMap->insert(kv.key, cdb);
+				a.shardMap->rawInsert(kv.key, cdb);
 				cursor->Next();
 			}
-			status = cursor->status();
 
+			status = cursor->status();
 			if (!status.ok()) {
 				logRocksDBError(status, "Open");
 				a.done.sendError(statusToError(status));
 				return;
 			}
+
+			// if (a.shardMap.size() == 0) {
+			// 	DB ndb;
+			// 	UID id = deterministicRandom()->randomUniqueID();
+			// 	status = rocksdb::DB::Open(options, a.dataPath + id.toString(), defaultCF, &handle, &ndb);
+			// 	if (!status.ok()) {
+			// 		logRocksDBError(status, "Open");
+			// 		a.done.sendError(statusToError(status));
+			// 		return;
+			// 	}
+			// 	a.shardMap->insert(allKeys, ndb);
+			// 	rocksdb::WriteOptions writeOptions;
+			// 	writeOptions.sync = true;
+			// 	db->Put(writeOptions, toSlice(persistShardMappingPrefix + allKeys.begin()), toSlice());
+			// }
 
 			// The current thread and main thread are same when the code runs in simulation.
 			// blockUntilReady() is getting the thread into deadlock state, so avoiding the
@@ -633,7 +662,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	    readSemaphore(SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
-	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX) {
+	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
+	    shardMap(nullptr, "\xff\xff\xff"_sr) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage engine
 		// is still multi-threaded as background compaction threads are still present. Reads/writes to disk will also
 		// block the network thread in a way that would be unacceptable in production but is a necessary evil here. When
@@ -838,6 +868,18 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return StorageBytes(free, total, live, free);
 	}
 
+	std::vector<rocksdb::DB*> getAllInstances() const {
+		std::vector<DB> res;
+		for (auto& it : shardMap.ranges()) {
+			std::cout << it.begin().toString() << ", " << it.end().toString() << ": " << uint64_t(it.value())
+			          << std::endl;
+			if (it.value() != nullptr) {
+				res.push_back(it.value());
+			}
+		}
+		return res;
+	}
+
 	DB db = nullptr;
 	std::string path;
 	const std::string dataPath;
@@ -910,6 +952,29 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/Reopen") {
 	wait(closed);
 
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
+	return Void();
+}
+
+TEST_CASE("/rocks/multiRocks") {
+	state std::string cwd = platform::getWorkingDirectory() + "/";
+	std::cout << "Working directory: " << cwd << std::endl;
+	state std::string rocksDBTestDir = "rocksdb-kvstore-reopen-test-db";
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+
+	state RocksDBKeyValueStore* kvStore =
+	    new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	for (auto* rocks : kvStore->getAllInstances()) {
+		std::cout << "Rocks: " << rocks->GetName() << std::endl;
+	}
+
+	// kvStore->set({ LiteralStringRef("foo"), LiteralStringRef("bar") });
+	// wait(kvStore->commit(false));
+
+	// Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
+	// ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+
 	return Void();
 }
 
