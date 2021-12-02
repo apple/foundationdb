@@ -41,12 +41,12 @@ std::vector<VersionSubsequenceMessage> CommitRecord::getMessagesFromStorageTeams
     const std::unordered_set<StorageTeamID>& storageTeamIDs) const {
 
 	std::vector<VersionSubsequenceMessage> vsm;
-	for (const auto& [version, _1] : this->messages) {
-		for (const auto& [storageTeamID, _2] : _1) {
+	for (const auto& [version, storageTeamMessages] : this->messages) {
+		for (const auto& [storageTeamID, subsequencedMessages] : storageTeamMessages) {
 			if (!storageTeamIDs.empty() && storageTeamIDs.find(storageTeamID) == std::end(storageTeamIDs)) {
 				continue;
 			}
-			for (const auto& [subsequence, message] : _2) {
+			for (const auto& [subsequence, message] : subsequencedMessages) {
 				vsm.emplace_back(version, subsequence, message);
 			}
 		}
@@ -119,14 +119,10 @@ void prepareProxySerializedMessages(
 		return;
 	}
 
-	for (const auto& [storageTeamID, _1] : commitRecord.messages.at(commitVersion)) {
-		for (const auto& [subsequence, message] : _1) {
+	for (const auto& [storageTeamID, subsequencedMessages] : commitRecord.messages.at(commitVersion)) {
+		for (const auto& [subsequence, message] : subsequencedMessages) {
 			auto pSerializer = serializerGen(storageTeamID);
-			// setSubsequence requires subsequence increasing, but for the first message, the subsequence is 1 and the
-			// initial subsequence for the serializer is 1 too, this causes an ASSERT failure
-			if (pSerializer->getSubsequence() != subsequence) {
-				pSerializer->setSubsequence(subsequence);
-			}
+			pSerializer->setSubsequence(subsequence);
 			switch (message.getType()) {
 			case Message::Type::MUTATION_REF:
 				pSerializer->write(std::get<MutationRef>(message), storageTeamID);
@@ -147,8 +143,8 @@ void prepareProxySerializedMessages(
 }
 
 bool isAllRecordsValidated(const CommitRecord& commitRecord) {
-	for (const auto& [_1, storageTeamTagMap] : commitRecord.tags) {
-		for (const auto& [_2, commitRecordTag] : storageTeamTagMap) {
+	for (const auto& [version, storageTeamTagMap] : commitRecord.tags) {
+		for (const auto& [storageTeamID, commitRecordTag] : storageTeamTagMap) {
 			if (!commitRecordTag.allValidated()) {
 				return false;
 			}

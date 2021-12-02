@@ -28,6 +28,7 @@
 
 namespace ptxn::test {
 
+// Base class for a configurable delay
 class Delay {
 	bool m_enabled = false;
 
@@ -48,6 +49,7 @@ public:
 	}
 };
 
+// Provides a fixed time delay
 class FixedTimeDelay : public Delay {
 	double m_delayTime;
 
@@ -61,6 +63,7 @@ public:
 	void setDelayTime(const double delayTime) { m_delayTime = delayTime; }
 };
 
+// Provides a delay of random time in a given range
 class RandomDelay : public Delay {
 	double m_delayLower;
 	double m_delayUpper;
@@ -80,6 +83,7 @@ public:
 	void setDelayUpper(const double upper) { m_delayUpper = upper; }
 };
 
+// Provides an exponental backoff delay with possible jitter time
 class ExponentalBackoffDelay : public Delay {
 	double m_initialBackoff;
 	bool m_useJitter = true;
