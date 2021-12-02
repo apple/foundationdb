@@ -251,13 +251,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.toml)
-<<<<<<< HEAD
   add_fdb_test(TEST_FILES slow/BlobGranuleCorrectnessLarge.toml)
   add_fdb_test(TEST_FILES slow/BlobGranuleCorrectnessLargeClean.toml)
-=======
-  add_fdb_test(TEST_FILES slow/BlobGranuleCorrectnessLarge.toml IGNORE)
-  add_fdb_test(TEST_FILES slow/BlobGranuleCorrectnessLargeClean.toml IGNORE)
->>>>>>> master
   add_fdb_test(TEST_FILES slow/ClogWithRollbacks.toml)
   add_fdb_test(TEST_FILES slow/CloggedCycleTest.toml)
   add_fdb_test(TEST_FILES slow/CloggedStorefront.toml)
