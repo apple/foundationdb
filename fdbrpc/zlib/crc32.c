@@ -204,7 +204,8 @@ const z_crc_t FAR* ZEXPORT get_crc_table() {
 	DO1
 
 /* ========================================================================= */
-unsigned long ZEXPORT crc32(crc, buf, len) unsigned long crc;
+unsigned long ZEXPORT crc32(crc, buf, len)
+unsigned long crc;
 const unsigned char FAR* buf;
 uInt len;
 {
@@ -256,7 +257,8 @@ uInt len;
 	DOLIT4
 
 /* ========================================================================= */
-local unsigned long crc32_little(crc, buf, len) unsigned long crc;
+local unsigned long crc32_little(crc, buf, len)
+unsigned long crc;
 const unsigned char FAR* buf;
 unsigned len;
 {
@@ -304,7 +306,8 @@ unsigned len;
 	DOBIG4
 
 /* ========================================================================= */
-local unsigned long crc32_big(crc, buf, len) unsigned long crc;
+local unsigned long crc32_big(crc, buf, len)
+unsigned long crc;
 const unsigned char FAR* buf;
 unsigned len;
 {
@@ -344,7 +347,8 @@ unsigned len;
 #define GF2_DIM 32 /* dimension of GF(2) vectors (length of CRC) */
 
 /* ========================================================================= */
-local unsigned long gf2_matrix_times(mat, vec) unsigned long* mat;
+local unsigned long gf2_matrix_times(mat, vec)
+unsigned long* mat;
 unsigned long vec;
 {
 	unsigned long sum;
@@ -370,7 +374,8 @@ unsigned long* mat;
 }
 
 /* ========================================================================= */
-local uLong crc32_combine_(crc1, crc2, len2) uLong crc1;
+local uLong crc32_combine_(crc1, crc2, len2)
+uLong crc1;
 uLong crc2;
 z_off64_t len2;
 {
@@ -425,12 +430,14 @@ z_off64_t len2;
 }
 
 /* ========================================================================= */
-uLong ZEXPORT crc32_combine(crc1, crc2, len2) uLong crc1;
+uLong ZEXPORT crc32_combine(crc1, crc2, len2)
+uLong crc1;
 uLong crc2;
 z_off_t len2;
 { return crc32_combine_(crc1, crc2, len2); }
 
-uLong ZEXPORT crc32_combine64(crc1, crc2, len2) uLong crc1;
+uLong ZEXPORT crc32_combine64(crc1, crc2, len2)
+uLong crc1;
 uLong crc2;
 z_off64_t len2;
 { return crc32_combine_(crc1, crc2, len2); }

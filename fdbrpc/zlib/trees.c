@@ -368,7 +368,8 @@ void gen_trees_header() {
 /* ===========================================================================
  * Initialize the tree data structures for a new zlib stream.
  */
-void ZLIB_INTERNAL _tr_init(s) deflate_state* s;
+void ZLIB_INTERNAL _tr_init(s)
+deflate_state* s;
 {
 	tr_static_init();
 
@@ -805,7 +806,8 @@ int max_code; /* and its largest code of non zero frequency */
  * Construct the Huffman tree for the bit lengths and return the index in
  * bl_order of the last bit length code to send.
  */
-local int build_bl_tree(s) deflate_state* s;
+local int build_bl_tree(s)
+deflate_state* s;
 {
 	int max_blindex; /* index of last bit length code of non zero freq */
 
@@ -866,7 +868,8 @@ int lcodes, dcodes, blcodes; /* number of codes for each tree */
 /* ===========================================================================
  * Send a stored block
  */
-void ZLIB_INTERNAL _tr_stored_block(s, buf, stored_len, last) deflate_state* s;
+void ZLIB_INTERNAL _tr_stored_block(s, buf, stored_len, last)
+deflate_state* s;
 charf* buf; /* input block */
 ulg stored_len; /* length of input block */
 int last; /* one if this is the last block for a file */
@@ -882,14 +885,16 @@ int last; /* one if this is the last block for a file */
 /* ===========================================================================
  * Flush the bits in the bit buffer to pending output (leaves at most 7 bits)
  */
-void ZLIB_INTERNAL _tr_flush_bits(s) deflate_state* s;
+void ZLIB_INTERNAL _tr_flush_bits(s)
+deflate_state* s;
 { bi_flush(s); }
 
 /* ===========================================================================
  * Send one empty static block to give enough lookahead for inflate.
  * This takes 10 bits, of which 7 may remain in the bit buffer.
  */
-void ZLIB_INTERNAL _tr_align(s) deflate_state* s;
+void ZLIB_INTERNAL _tr_align(s)
+deflate_state* s;
 {
 	send_bits(s, STATIC_TREES << 1, 3);
 	send_code(s, END_BLOCK, static_ltree);
@@ -903,7 +908,8 @@ void ZLIB_INTERNAL _tr_align(s) deflate_state* s;
  * Determine the best encoding for the current block: dynamic trees, static
  * trees or store, and output the encoded block to the zip file.
  */
-void ZLIB_INTERNAL _tr_flush_block(s, buf, stored_len, last) deflate_state* s;
+void ZLIB_INTERNAL _tr_flush_block(s, buf, stored_len, last)
+deflate_state* s;
 charf* buf; /* input block, or NULL if too old */
 ulg stored_len; /* length of input block */
 int last; /* one if this is the last block for a file */
@@ -1005,7 +1011,8 @@ int last; /* one if this is the last block for a file */
  * Save the match info and tally the frequency counts. Return true if
  * the current block must be flushed.
  */
-int ZLIB_INTERNAL _tr_tally(s, dist, lc) deflate_state* s;
+int ZLIB_INTERNAL _tr_tally(s, dist, lc)
+deflate_state* s;
 unsigned dist; /* distance of matched string */
 unsigned lc; /* match length-MIN_MATCH or unmatched char (if dist==0) */
 {
@@ -1116,7 +1123,8 @@ const ct_data* dtree; /* distance tree */
  *   (7 {BEL}, 8 {BS}, 11 {VT}, 12 {FF}, 26 {SUB}, 27 {ESC}).
  * IN assertion: the fields Freq of dyn_ltree are set.
  */
-local int detect_data_type(s) deflate_state* s;
+local int detect_data_type(s)
+deflate_state* s;
 {
 	/* black_mask is the bit mask of black-listed bytes
 	 * set bits 0..6, 14..25, and 28..31
@@ -1148,7 +1156,8 @@ local int detect_data_type(s) deflate_state* s;
  * method would use a table)
  * IN assertion: 1 <= len <= 15
  */
-local unsigned bi_reverse(code, len) unsigned code; /* the value to invert */
+local unsigned bi_reverse(code, len)
+unsigned code; /* the value to invert */
 int len; /* its bit length */
 {
 	register unsigned res = 0;
