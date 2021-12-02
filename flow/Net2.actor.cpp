@@ -1819,33 +1819,33 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 	Promise<std::vector<NetworkAddress>> promise;
 	state Future<std::vector<NetworkAddress>> result = promise.getFuture();
 
-	tcpResolver.async_resolve(
-	    tcp::resolver::query(host, service), [=](const boost::system::error_code& ec, tcp::resolver::iterator iter) {
-		    if (ec) {
-			    promise.sendError(lookup_failed());
-			    return;
-		    }
+	tcpResolver.async_resolve(tcp::resolver::query(host, service),
+	                          [=](const boost::system::error_code& ec, tcp::resolver::iterator iter) {
+		                          if (ec) {
+			                          promise.sendError(lookup_failed());
+			                          return;
+		                          }
 
-		    std::vector<NetworkAddress> addrs;
+		                          std::vector<NetworkAddress> addrs;
 
-		    tcp::resolver::iterator end;
-		    while (iter != end) {
-			    auto endpoint = iter->endpoint();
-			    auto addr = endpoint.address();
-			    if (addr.is_v6()) {
-				    addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
-			    } else {
-				    addrs.emplace_back(IPAddress(addr.to_v4().to_ulong(), endpoint.port()));
-			    }
-			    ++iter;
-		    }
+		                          tcp::resolver::iterator end;
+		                          while (iter != end) {
+			                          auto endpoint = iter->endpoint();
+			                          auto addr = endpoint.address();
+			                          if (addr.is_v6()) {
+				                          addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+			                          } else {
+				                          addrs.emplace_back(IPAddress(addr.to_v4().to_ulong(), endpoint.port()));
+			                          }
+			                          ++iter;
+		                          }
 
-		    if (addrs.empty()) {
-			    promise.sendError(lookup_failed());
-		    } else {
-			    promise.send(addrs);
-		    }
-	    });
+		                          if (addrs.empty()) {
+			                          promise.sendError(lookup_failed());
+		                          } else {
+			                          promise.send(addrs);
+		                          }
+	                          });
 
 	wait(ready(result));
 	tcpResolver.cancel();
