@@ -1014,7 +1014,8 @@ struct InFlightFile {
 static Reference<ChangeFeedData> newChangeFeedData(Version startVersion) {
 	// FIXME: should changeFeedStream guarantee that this is always set to begin-1 instead?
 	Reference<ChangeFeedData> r = makeReference<ChangeFeedData>();
-	r->lastReturnedVersion.set(startVersion);
+	// TODO uncomment?
+	// r->lastReturnedVersion.set(startVersion);
 	return r;
 }
 
@@ -1949,7 +1950,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 
 				// lazily load files for old granule if not present
 				chunkRange = cur->range;
-				if (cur->files.isError() || !cur->files.isValid()) {
+				if (!cur->files.isValid() || cur->files.isError()) {
 					cur->files = loadHistoryFiles(bwData, cur->granuleID);
 				}
 
@@ -2100,6 +2101,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 		req.reply.send(rep);
 		--bwData->stats.activeReadRequests;
 	} catch (Error& e) {
+		printf("Error in BGFRequest %s\n", e.name());
 		if (e.code() == error_code_operation_cancelled) {
 			req.reply.sendError(wrong_shard_server());
 			throw;

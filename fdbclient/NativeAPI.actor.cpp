@@ -6808,7 +6808,8 @@ Reference<ChangeFeedStorageData> DatabaseContext::getStorageData(StorageServerIn
 }
 
 Version ChangeFeedData::getVersion() {
-	if (notAtLatest.get() == 0 && mutations.isEmpty() && storageData.size() > 0) {
+	// TODO uncomment?
+	if (notAtLatest.get() == 0 && mutations.isEmpty() /*& storageData.size() > 0*/) {
 		Version v = storageData[0]->version.get();
 		for (int i = 1; i < storageData.size(); i++) {
 			if (storageData[i]->version.get() < v) {
