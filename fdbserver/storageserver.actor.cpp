@@ -1744,6 +1744,10 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 
 	if (data->version.get() < req.begin) {
 		wait(data->version.whenAtLeast(req.begin));
+		// we must delay here to ensure that any up-to-date change feeds that are waiting on the
+		// mutation trigger run BEFORE any blocked change feeds run, in order to preserve the
+		// correct minStreamVersion ordering
+		wait(delay(0.0));
 	}
 	state uint64_t changeCounter = data->shardChangeCounter;
 	if (!inverted && !data->isReadable(req.range)) {
