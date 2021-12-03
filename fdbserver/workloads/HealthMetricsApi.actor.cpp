@@ -167,10 +167,12 @@ struct HealthMetricsApiWorkload : TestWorkload {
 				self->detailedWorstDiskUsage = std::max(self->detailedWorstDiskUsage, storageStats.diskUsage);
 				traceDiskUsage.detail(format("Storage-%s", ss.first.toString().c_str()), storageStats.diskUsage);
 			}
-			TraceEvent traceTLogQueue("TLogQueue");
+
+			// This trace event can cause TraceEventOverflow. Only enable when debugging an issue
+			//TraceEvent traceTLogQueue("TLogQueue");
 			for (const auto& ss : healthMetrics.tLogQueue) {
 				self->detailedWorstTLogQueue = std::max(self->detailedWorstTLogQueue, ss.second);
-				traceTLogQueue.detail(format("TLog-%s", ss.first.toString().c_str()), ss.second);
+				//traceTLogQueue.detail(format("TLog-%s", ss.first.toString().c_str()), ss.second);
 			}
 		};
 	}
