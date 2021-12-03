@@ -976,7 +976,7 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 
 ACTOR Future<Void> checkBlobWorkerList(BlobManagerData* bmData) {
 	loop {
-		wait(delay(1.0));
+		wait(delay(SERVER_KNOBS->BLOB_WORKERLIST_FETCH_INTERVAL));
 		std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db));
 		for (auto& worker : blobWorkers) {
 			if (!bmData->workerAddresses.count(worker.stableAddress())) {
