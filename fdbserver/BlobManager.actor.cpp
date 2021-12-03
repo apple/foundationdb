@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <sstream>
 #include <queue>
 #include <vector>
 #include <unordered_map>
@@ -1412,30 +1413,49 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(BlobManagerData* bmData, UID granule
  * also removes the history entry for this granule from the system keyspace
  */
 ACTOR Future<Void> fullyDeleteGranule(BlobManagerData* self, UID granuleId, KeyRef historyKey) {
+	if (BM_DEBUG) {
+		printf("Fully deleting granule %s: init\n", granuleId.toString().c_str());
+	}
+
 	state Transaction tr(self->db);
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-	KeyRange filesRange = blobGranuleFileKeyRangeFor(granuleId);
 
 	// get files
 	GranuleFiles files = wait(loadHistoryFiles(&tr, granuleId, BM_DEBUG));
 
 	std::vector<Future<Void>> deletions;
+	std::vector<std::string> filesToDelete; // TODO: remove, just for debugging
 
 	for (auto snapshotFile : files.snapshotFiles) {
 		std::string fname = snapshotFile.filename;
 		deletions.emplace_back(self->bstore->deleteFile(fname));
+		filesToDelete.emplace_back(fname);
 	}
 
 	for (auto deltaFile : files.deltaFiles) {
 		std::string fname = deltaFile.filename;
 		deletions.emplace_back(self->bstore->deleteFile(fname));
+		filesToDelete.emplace_back(fname);
 	}
 
+	if (BM_DEBUG) {
+		printf("Fully deleting granule %s: deleting %d files\n", granuleId.toString().c_str(), deletions.size());
+		for (auto filename : filesToDelete) {
+			printf(" - %s\n", filename.c_str());
+		}
+	}
+
+	// delete the files before the corresponding metadata.
+	// this could lead to dangling pointers in fdb, but this granule should
+	// never be read again anyways, and we can clean up the keys the next time around.
+	// deleting files before corresponding metadata reduces the # of orphaned files.
 	wait(waitForAll(deletions));
 
 	// delete metadata in FDB (history entry and file keys)
+	if (BM_DEBUG) {
+		printf("Fully deleting granule %s: deleting history and file keys\n", granuleId.toString().c_str());
+	}
 	loop {
 		try {
 			KeyRange fileRangeKey = blobGranuleFileKeyRangeFor(granuleId);
@@ -1448,6 +1468,10 @@ ACTOR Future<Void> fullyDeleteGranule(BlobManagerData* self, UID granuleId, KeyR
 		}
 	}
 
+	if (BM_DEBUG) {
+		printf("Fully deleting granule %s: success\n", granuleId.toString().c_str());
+	}
+
 	return Void();
 }
 
@@ -1456,51 +1480,88 @@ ACTOR Future<Void> fullyDeleteGranule(BlobManagerData* self, UID granuleId, KeyR
  * version <= pruneVersion and deletes all files older than it.
  */
 ACTOR Future<Void> partiallyDeleteGranule(BlobManagerData* self, UID granuleId, Version pruneVersion) {
+	if (BM_DEBUG) {
+		printf("Partially deleting granule %s: init\n", granuleId.toString().c_str());
+	}
+
 	state Transaction tr(self->db);
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-	KeyRange filesRange = blobGranuleFileKeyRangeFor(granuleId);
-
+	// get files
 	GranuleFiles files = wait(loadHistoryFiles(&tr, granuleId, BM_DEBUG));
 
-	Version latestSnaphotVersion = invalidVersion;
+	// represents the version of the latest snapshot file in this granule with G.version < pruneVersion
+	Version latestSnapshotVersion = invalidVersion;
 
-	state std::vector<Future<Void>> deletions;
-	state std::vector<KeyRef> deletedFileKeys;
+	state std::vector<Future<Void>> deletions; // deletion work per file
+	state std::vector<Key> deletedFileKeys; // keys for deleted files
+	state std::vector<std::string> filesToDelete; // TODO: remove evenutally, just for debugging
 
 	// TODO: binary search these snapshot files for latestSnapshotVersion
 	for (int idx = files.snapshotFiles.size() - 1; idx >= 0; --idx) {
 		// if we already found the latestSnapshotVersion, this snapshot can be deleted
-		if (latestSnaphotVersion != invalidVersion) {
+		if (latestSnapshotVersion != invalidVersion) {
 			std::string fname = files.snapshotFiles[idx].filename;
 			deletions.emplace_back(self->bstore->deleteFile(fname));
 			deletedFileKeys.emplace_back(blobGranuleFileKeyFor(granuleId, 'S', files.snapshotFiles[idx].version));
+			filesToDelete.emplace_back(fname);
 		} else if (files.snapshotFiles[idx].version <= pruneVersion) {
 			// otherwise if this is the FIRST snapshot file with version < pruneVersion,
 			// then we found our latestSnapshotVersion (FIRST since we are traversing in reverse)
-			latestSnaphotVersion = files.snapshotFiles[idx].version;
+			latestSnapshotVersion = files.snapshotFiles[idx].version;
 		}
 	}
 
-	ASSERT(latestSnaphotVersion != invalidVersion);
+	// we would have only partially deleted the granule if such a snapshot existed
+	ASSERT(latestSnapshotVersion != invalidVersion);
 
 	// delete all delta files older than latestSnapshotVersion
 	for (auto deltaFile : files.deltaFiles) {
-		if (deltaFile.version < latestSnaphotVersion) {
-			std::string fname = deltaFile.filename;
-			deletions.emplace_back(self->bstore->deleteFile(fname));
-			deletedFileKeys.emplace_back(blobGranuleFileKeyFor(granuleId, 'D', deltaFile.version));
+		// traversing in fwd direction, so stop once we find the first delta file past the latestSnapshotVersion
+		if (deltaFile.version > latestSnapshotVersion) {
+			break;
+		}
+
+		// otherwise deltaFile.version <= latestSnapshotVersion so delete it
+		// == should also be deleted because the last delta file before a snapshot would have the same version
+		std::string fname = deltaFile.filename;
+		deletions.emplace_back(self->bstore->deleteFile(fname));
+		deletedFileKeys.emplace_back(blobGranuleFileKeyFor(granuleId, 'D', deltaFile.version));
+		filesToDelete.emplace_back(fname);
+	}
+
+	if (BM_DEBUG) {
+		printf("Partially deleting granule %s: deleting %d files\n", granuleId.toString().c_str(), deletions.size());
+		for (auto filename : filesToDelete) {
+			printf(" - %s\n", filename.c_str());
 		}
 	}
 
-	printf("partial deletion: deleting %d files\n", deletions.size());
+	// TODO: the following comment relies on the assumption that BWs will not get requests to
+	// read data that was already pruned. confirm assumption is fine. otherwise, we'd need
+	// to communicate with BWs here and have them ack the pruneVersion
+
+	// delete the files before the corresponding metadata.
+	// this could lead to dangling pointers in fdb, but we should never read data older than
+	// pruneVersion anyways, and we can clean up the keys the next time around.
+	// deleting files before corresponding metadata reduces the # of orphaned files.
 	wait(waitForAll(deletions));
 
 	// delete metadata in FDB (deleted file keys)
+	// TODO: do we need to also update the start version for the history entry?
+	//       it would be a blind write here so might that cause a problem with history traversal in BW?
+	//       do we gain any benefit from updating it? even if we keep the old start version, the worst is
+	//       someone requests a version in [oldStartVersion, newStartVersion) and we fail to return
+	//       any files for that request.
+
+	if (BM_DEBUG) {
+		printf("Partially deleting granule %s: deleting file keys\n", granuleId.toString().c_str());
+	}
+
 	loop {
 		try {
-			for (auto key : deletedFileKeys) {
+			for (auto& key : deletedFileKeys) {
 				tr.clear(key);
 			}
 			wait(tr.commit());
@@ -1508,6 +1569,10 @@ ACTOR Future<Void> partiallyDeleteGranule(BlobManagerData* self, UID granuleId, 
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
+	}
+
+	if (BM_DEBUG) {
+		printf("Partially deleting granule %s: success\n", granuleId.toString().c_str());
 	}
 	return Void();
 }
@@ -1519,11 +1584,15 @@ ACTOR Future<Void> partiallyDeleteGranule(BlobManagerData* self, UID granuleId, 
  * and nodes that can be partially deleted (i.e. some of their files can be deleted).
  * Once all this is done, we finally clear the pruneIntent key, if possible, to indicate we are done
  * processing this prune intent.
- *
- * TODO: communicate the prune to blob workers so they can clean up local memory
- * maybe BWs can just watch the prune keys as well!
  */
 ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef endKey, Version pruneVersion, bool force) {
+	if (BM_DEBUG) {
+		printf("pruneRange starting for range [%s-%s) @ pruneVersion=%lld, force=%s\n",
+		       startKey.printable().c_str(),
+		       endKey.printable().c_str(),
+		       pruneVersion);
+	}
+
 	// queue of <range, startVersion, endVersion> for BFS traversal of history
 	// TODO: consider using GranuleHistoryEntry, but that also makes it a little messy
 	state std::queue<std::tuple<KeyRange, Version, Version>> historyEntryQueue;
@@ -1546,28 +1615,35 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 
 	state KeyRangeMap<UID>::iterator activeRange;
 	for (activeRange = activeRanges.begin(); activeRange != activeRanges.end(); ++activeRange) {
-		// assumption: prune boundaries must respect granule boundaries
-		printf("looping over active range [%s-%s)=%s\n",
-		       activeRange.begin().printable().c_str(),
-		       activeRange.end().printable().c_str(),
-		       activeRange.value().toString().c_str());
+		if (BM_DEBUG) {
+			printf("Checking if active range [%s-%s), owned by BW %s, should be pruned\n",
+			       activeRange.begin().printable().c_str(),
+			       activeRange.end().printable().c_str(),
+			       activeRange.value().toString().c_str());
+		}
 
-		// ASSERT(activeRange.begin() >= startKey && activeRange.end() < endKey);
+		// assumption: prune boundaries must respect granule boundaries
 		if (activeRange.begin() < startKey || activeRange.end() > endKey) {
 			continue;
 		}
 
+		// TODO: if this is a force prune, then revoke the assignment from the corresponding BW first
+		// so that it doesn't try to interact with the granule (i.e. force it to give up gLock).
+		// we'll need some way to ack that the revoke was successful
+
 		loop {
 			try {
-				printf("fetching latest history for worker assignment [%s-%s)=%s\n",
-				       activeRange.begin().printable().c_str(),
-				       activeRange.end().printable().c_str(),
-				       activeRange.value().toString().c_str());
+				if (BM_DEBUG) {
+					printf("Fetching latest history entry for range [%s-%s)\n",
+					       activeRange.begin().printable().c_str(),
+					       activeRange.end().printable().c_str())
+				}
 				Optional<GranuleHistory> history = wait(getLatestGranuleHistory(&tr, activeRange.range()));
-				// ASSERT(history.present());
 				// TODO: can we tell from the krm that this range is not valid, so that we don't need to do a get
 				if (history.present()) {
-					printf("pushing onto history queue\n");
+					if (BM_DEBUG) {
+						printf("Adding range to history queue\n");
+					}
 					historyEntryQueue.push({ activeRange.range(), history.get().version, MAX_VERSION });
 				}
 				break;
@@ -1577,7 +1653,9 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 		}
 	}
 
-	printf("starting to go through history queue\n");
+	if (BM_DEBUG) {
+		printf("Beginning BFS traversal of history\n");
+	}
 	while (!historyEntryQueue.empty()) {
 		// process the node at the front of the queue and remove it
 		KeyRange currRange;
@@ -1585,6 +1663,14 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 		state Version endVersion;
 		std::tie(currRange, startVersion, endVersion) = historyEntryQueue.front();
 		historyEntryQueue.pop();
+
+		if (BM_DEBUG) {
+			printf("Processing history node [%s-%s) with versions [%lld, %lld)\n",
+			       currRange.begin.printable().c_str(),
+			       currRange.end.printable().c_str(),
+			       startVersion,
+			       endVersion);
+		}
 
 		// get the persisted history entry for this granule
 		state Standalone<BlobGranuleHistoryValue> currHistoryNode;
@@ -1600,8 +1686,16 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 			}
 		}
 
+		if (BM_DEBUG) {
+			printf("Found history entry for this node. It's granuleID is %s\n",
+			       currHistoryNode.granuleID.toString().c_str());
+		}
+
 		// if we already saw this node, skip it; otherwise, mark it as visited
 		if (visited.count(currHistoryNode.granuleID)) {
+			if (BM_DEBUG) {
+				printf("Already processed %s, so skipping it\n", currHistoryNode.granuleID.toString().c_str());
+			}
 			continue;
 		}
 		visited.insert(currHistoryNode.granuleID);
@@ -1609,18 +1703,32 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 		// There are three cases this granule can fall into:
 		// - if the granule's end version is at or before the prune version or this is a force delete,
 		//   this granule should be completely deleted
-		// - else if the startVersion <= pruneVersion, then G.startVersion <= pruneVersion < G.endVersion
+		// - else if the startVersion <= pruneVersion, then G.startVersion < pruneVersion < G.endVersion
 		//   and so this granule should be partially deleted
 		// - otherwise, this granule is active, so don't schedule it for deletion
 		if (force || endVersion <= pruneVersion) {
+			if (BM_DEBUG) {
+				printf("Granule %s will be FULLY deleted\n", currHistoryNode.granuleID.toString().c_str());
+			}
 			toFullyDelete.push_back({ currHistoryNode.granuleID, historyKey });
-		} else if (startVersion <= pruneVersion) {
+		} else if (startVersion < pruneVersion) {
+			if (BM_DEBUG) {
+				printf("Granule %s will be partially deleted\n", currHistoryNode.granuleID.toString().c_str());
+			}
 			toPartiallyDelete.push_back({ currHistoryNode.granuleID });
 		}
 
 		// add all of the node's parents to the queue
 		for (auto& parent : currHistoryNode.parentGranules) {
-			// the parent's end version is this node's startVersion
+			// the parent's end version is this node's startVersion,
+			// since this node must have started where it's parent finished
+			if (BM_DEBUG) {
+				printf("Adding parent [%s-%s) with versions [%lld-%lld) to queue\n",
+				       parent.first.begin.printable().c_str(),
+				       parent.first.end.printable().c_str(),
+				       parent.second,
+				       startVersion);
+			}
 			historyEntryQueue.push({ parent.first, parent.second, startVersion });
 		}
 	}
@@ -1632,23 +1740,34 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 	// any node that must be partially deleted must occur later on in the history. Thus,
 	// we delete the 'toFullyDelete' granules first.
 	//
-	// Unfortunately we can't do multiple deletions in parallel because they might
-	// race and we'll end up with unreachable nodes in the case of a crash
+	// Unfortunately we can't do parallelize _full_ deletions because they might
+	// race and we'll end up with unreachable nodes in the case of a crash.
+	// Since partial deletions only occur for "leafs", they can be done in parallel
 
 	state int i;
-	printf("%d granules to fully delete\n", toFullyDelete.size());
+	if (BM_DEBUG) {
+		printf("%d granules to fully delete\n", toFullyDelete.size());
+	}
 	for (i = toFullyDelete.size() - 1; i >= 0; --i) {
 		UID granuleId;
 		KeyRef historyKey;
 		std::tie(granuleId, historyKey) = toFullyDelete[i];
 		// FIXME: consider batching into a single txn (need to take care of txn size limit)
+		if (BM_DEBUG) {
+			printf("About to fully delete granule %s\n", granuleId.toString().c_str());
+		}
 		wait(fullyDeleteGranule(self, granuleId, historyKey));
 	}
 
+	if (BM_DEBUG) {
+		printf("%d granules to partially delete\n", toPartiallyDelete.size());
+	}
 	std::vector<Future<Void>> partialDeletions;
-	printf("%d granules to partially delete\n", toPartiallyDelete.size());
 	for (i = toPartiallyDelete.size() - 1; i >= 0; --i) {
 		UID granuleId = toPartiallyDelete[i];
+		if (BM_DEBUG) {
+			printf("About to partially delete granule %s\n", granuleId.toString().c_str());
+		}
 		partialDeletions.emplace_back(partiallyDeleteGranule(self, granuleId, pruneVersion));
 	}
 
@@ -1660,6 +1779,9 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 	// If that is the case, we should not clear the key. Otherwise, we can just clear the key.
 
 	tr.reset();
+	if (BM_DEBUG) {
+		printf("About to clear prune intent\n");
+	}
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1679,20 +1801,19 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 			}
 			break;
 		} catch (Error& e) {
-			printf("pruneRange got error %s\n", e.name());
+			printf("Attempt to clear prune intent got error %s\n", e.name());
 			wait(tr.onError(e));
 		}
 	}
 
+	if (BM_DEBUG) {
+		printf("Successfully pruned range [%s-%s) at pruneVersion=%lld\n",
+		       startKey.printable().c_str(),
+		       endKey.printable().c_str(),
+		       pruneVersion);
+	}
 	return Void();
 }
-
-/*
-TODO: We need to revoke range from BW so that it doesn't try to add to a granule that we dropped
-Will SnowTram reuse table IDs; do we unhybridize a range once it's been revoked/dropped?
-
-Or can we possibly make the BW give it up upon seeing a change in the watch?
-*/
 
 /*
  * This monitor watches for changes to a key K that gets updated whenever there is a new prune intent.
@@ -1731,26 +1852,61 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-					Optional<Value> newPruneWatchVal = wait(tr->get(blobGranulePruneChangeKey));
+					state Optional<Value> newPruneWatchVal = wait(tr->get(blobGranulePruneChangeKey));
 
 					// if the value at the change key has changed, that means there is new work to do
 					if (newPruneWatchVal.present() && oldPruneWatchVal != newPruneWatchVal.get()) {
 						oldPruneWatchVal = newPruneWatchVal.get();
-						printf("old and new watch don't match\n");
+						if (BM_DEBUG) {
+							printf("the blobGranulePruneChangeKey changed\n");
+						}
+
+						// TODO: debugging code, remove it
+						if (newPruneWatchVal.get().toString().substr(0, 6) == "random") {
+							state Reference<ReadYourWritesTransaction> dummy =
+							    makeReference<ReadYourWritesTransaction>(self->db);
+							loop {
+								try {
+									dummy->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+									dummy->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+									std::istringstream iss(newPruneWatchVal.get().toString().substr(6));
+									Version version;
+									iss >> version;
+									dummy->set(blobGranulePruneKeys.begin.withSuffix(normalKeys.begin),
+									           blobGranulePruneValueFor(version, false));
+									wait(dummy->commit());
+									break;
+
+								} catch (Error& e) {
+									wait(dummy->onError(e));
+								}
+							}
+						}
 						break;
 					}
 
 					// otherwise, there are no changes and we should wait until the next change (or timeout)
 					state Future<Void> watchPruneIntentsChange = tr->watch(blobGranulePruneChangeKey);
 					wait(tr->commit());
+
+					if (BM_DEBUG) {
+						printf("monitorPruneKeys waiting for change or timeout\n");
+					}
+
 					choose {
-						when(wait(watchPruneIntentsChange)) { tr->reset(); }
+						when(wait(watchPruneIntentsChange)) {
+							if (BM_DEBUG) {
+								printf("monitorPruneKeys saw a change\n");
+							}
+							tr->reset();
+						}
 						when(wait(delay(SERVER_KNOBS->BG_PRUNE_TIMEOUT))) {
-							printf("bg prune timeouts\n");
+							if (BM_DEBUG) {
+								printf("monitorPruneKeys got a timeout\n");
+							}
 							break;
 						}
 					}
-					// wait(timeout(watchPruneIntentsChange, SERVER_KNOBS->BG_PRUNE_TIMEOUT, Void()));
 				} catch (Error& e) {
 					wait(tr->onError(e));
 				}
@@ -1758,22 +1914,9 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 
 			tr->reset();
 
-			loop {
-				try {
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					Version dummyV = wait(tr->getReadVersion());
-					Value dummyValue = blobGranulePruneValueFor(dummyV, false);
-					wait(krmSetRange(tr, blobGranulePruneKeys.begin, normalKeys, dummyValue));
-					wait(tr->commit());
-					break;
-				} catch (Error& e) {
-					printf("dummy txn saw error %s\n", e.name());
-					wait(tr->onError(e));
-				}
+			if (BM_DEBUG) {
+				printf("Looping over prune intents\n");
 			}
-
-			tr->reset();
 
 			// loop through all prune intentions and do prune work accordingly
 			state KeyRef beginKey = normalKeys.begin;
@@ -1802,43 +1945,22 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 						bool force;
 						std::tie(pruneVersion, force) = decodeBlobGranulePruneValue(pruneIntents[rangeIdx].value);
 
-						// TODO: should we add this to an actor collection or a list of futures?
-						// Probably because still need to handle the case of one prune at version V and then timer
-						// expires and we start another prune again at version V. we need to keep track of what's in
-						// progress. That brings another problem though: what happens if something is in progress and
-						// fails... One way to prevent this is to not iterate over the prunes until the last iteration
-						// is done (i.e waitForAll)
-						//
-
-						/*
-						auto currPrunes = self->prunesInProgress.intersectingRanges(range);
-						int count = 0;
-						for (auto currPrune : currPrunes) {
-						    count++;
-						    if (currPrune.value() == pruneVersion) {
-						    }
-						}
-						ASSERT(currPrunes.() <= 1);
-						*/
-
 						printf("about to prune range [%s-%s) @ %d, force=%s\n",
 						       rangeStartKey.printable().c_str(),
 						       rangeEndKey.printable().c_str(),
 						       pruneVersion,
 						       force ? "T" : "F");
 						prunes.emplace_back(pruneRange(self, rangeStartKey, rangeEndKey, pruneVersion, force));
-
-						// TODO: maybe clear the key here if pruneRange succeeded, but then we'd have to wait here
 					}
 
 					// wait for this set of prunes to complete before starting the next ones since if we prune
 					// a range R at version V and while we are doing that, the time expires, we will end up
-					// trying to prune the same range again since the work isn't finished
+					// trying to prune the same range again since the work isn't finished and the prunes will race
 					//
 					// TODO: this isn't that efficient though. Instead we could keep metadata as part of the BM's
-					// memory that tracks which prunes are active. Once done, we can mark that work as done. If the BM
-					// fails then all prunes will fail and so the next BM will have a clear set of metadata (i.e. no
-					// work in progress) so we will end up doing the work in the new BM
+					// memory that tracks which prunes are active. Once done, we can mark that work as done. If the
+					// BM fails then all prunes will fail and so the next BM will have a clear set of metadata (i.e.
+					// no work in progress) so we will end up doing the work in the new BM
 					wait(waitForAll(prunes));
 
 					if (!pruneIntents.more) {
@@ -1851,7 +1973,9 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 					wait(tr->onError(e));
 				}
 			}
-			printf("done pruning all ranges. looping back\n");
+			if (BM_DEBUG) {
+				printf("Done pruning current set of prune intents.\n");
+			}
 		}
 	} catch (Error& e) {
 		if (BM_DEBUG) {

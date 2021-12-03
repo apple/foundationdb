@@ -45,7 +45,7 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 #define BW_DEBUG true
-#define BW_REQUEST_DEBUG false
+#define BW_REQUEST_DEBUG true
 
 // represents a previous version of a granule, and optionally the files that compose it
 struct GranuleHistoryEntry : NonCopyable, ReferenceCounted<GranuleHistoryEntry> {
@@ -250,7 +250,6 @@ ACTOR Future<Void> readAndCheckGranuleLock(Reference<ReadYourWritesTransaction> 
 	return Void();
 }
 
-<<<<<<< HEAD
 // used for "business logic" of both versions of loading granule files
 ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, GranuleFiles* files, UID granuleID) {
 
@@ -475,9 +474,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
 	// TODO some sort of directory structure would be useful?
-	state std::string fname = deterministicRandom()->randomUniqueID().toString() + "_T" +
-	                          std::to_string((uint64_t)(1000.0 * now())) + "_V" + std::to_string(currentDeltaVersion) +
-	                          ".delta";
+	state std::string fname = granuleID.toString() + "_T" + std::to_string((uint64_t)(1000.0 * now())) + "_V" +
+	                          std::to_string(currentDeltaVersion) + ".delta";
 
 	state Value serialized = ObjectWriter::toValue(deltasToWrite, Unversioned());
 
@@ -576,8 +574,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
                                           PromiseStream<RangeResult> rows,
                                           bool createGranuleHistory) {
 	// TODO some sort of directory structure would be useful maybe?
-	state std::string fname = deterministicRandom()->randomUniqueID().toString() + "_T" +
-	                          std::to_string((uint64_t)(1000.0 * now())) + "_V" + std::to_string(version) + ".snapshot";
+	state std::string fname = granuleID.toString() + "_T" + std::to_string((uint64_t)(1000.0 * now())) + "_V" +
+	                          std::to_string(version) + ".snapshot";
 	state Arena arena;
 	state GranuleSnapshot snapshot;
 
@@ -1243,6 +1241,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 		ASSERT(metadata->readable.canBeSet());
 		metadata->readable.send(Void());
+		printf("Got change feed stream\n");
 
 		loop {
 			// check outstanding snapshot/delta files for completion
@@ -1353,6 +1352,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				                                                   MAX_VERSION,
 				                                                   metadata->keyRange);
 			}
+
+			printf("About to process mutations\n");
 
 			// process mutations
 			if (!mutations.empty()) {
@@ -1952,6 +1953,11 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 }
 
 ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, BlobGranuleFileRequest req) {
+	printf("BW %s got blobGranuleFileRequest for range [%s-%s) @ %lld\n",
+	       bwData->id.toString().c_str(),
+	       req.keyRange.begin.printable().c_str(),
+	       req.keyRange.end.printable().c_str(),
+	       req.readVersion);
 	try {
 		// TODO REMOVE in api V2
 		ASSERT(req.beginVersion == 0);
@@ -2011,10 +2017,13 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 				throw wrong_shard_server();
 			}
 
+			printf("is readable\n");
+
 			state KeyRange chunkRange;
 			state GranuleFiles chunkFiles;
 
 			if (metadata->initialSnapshotVersion > req.readVersion) {
+				printf("time travel query\n");
 				// this is a time travel query, find previous granule
 				if (metadata->historyLoaded.canBeSet()) {
 					choose {
@@ -2092,6 +2101,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 				ASSERT(chunkFiles.deltaFiles.back().version > req.readVersion);
 				ASSERT(chunkFiles.snapshotFiles.front().version <= req.readVersion);
 			} else {
+
 				// this is an active granule query
 				loop {
 					if (!metadata->activeCFData.get().isValid()) {
@@ -2739,6 +2749,107 @@ ACTOR Future<Void> monitorRemoval(Reference<BlobWorkerData> bwData) {
 	}
 }
 
+ACTOR Future<Void> monitorPruneKeys(Reference<BlobWorkerData> self) {
+	try {
+		state Value oldPruneWatchVal;
+		loop {
+			state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			// Wait for the watch to change, or some time to expire (whichever comes first)
+			// before checking through the prune intents. We write a UID into the change key value
+			// so that we can still recognize when the watch key has been changed while we weren't
+			// monitoring it
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+					Optional<Value> newPruneWatchVal = wait(tr->get(blobGranulePruneChangeKey));
+
+					// if the value at the change key has changed, that means there is new work to do
+					if (newPruneWatchVal.present() && oldPruneWatchVal != newPruneWatchVal.get()) {
+						oldPruneWatchVal = newPruneWatchVal.get();
+						printf("old and new watch don't match\n");
+						break;
+					}
+
+					// otherwise, there are no changes and we should wait until the next change (or timeout)
+					state Future<Void> watchPruneIntentsChange = tr->watch(blobGranulePruneChangeKey);
+					wait(tr->commit());
+					printf("About to wait for change or timeout\n");
+					choose {
+						when(wait(watchPruneIntentsChange)) { tr->reset(); }
+						when(wait(delay(SERVER_KNOBS->BG_PRUNE_TIMEOUT))) {
+							printf("bg prune timeouts\n");
+							break;
+						}
+					}
+					// wait(timeout(watchPruneIntentsChange, SERVER_KNOBS->BG_PRUNE_TIMEOUT, Void()));
+				} catch (Error& e) {
+					wait(tr->onError(e));
+				}
+			}
+
+			tr->reset();
+
+			// loop through all prune intentions and do prune work accordingly
+			state KeyRef beginKey = normalKeys.begin;
+			loop {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+				state std::vector<Future<Void>> prunes;
+				try {
+					// TODO: replace 10000 with a knob
+					KeyRange nextRange(KeyRangeRef(beginKey, normalKeys.end));
+					state RangeResult pruneIntents = wait(krmGetRanges(
+					    tr, blobGranulePruneKeys.begin, nextRange, 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+
+					// TODO: would we miss a range [pruneIntents[9999], pruneIntents[10000]) because of the `more`?
+					//       Or does `readThrough` take care of this? We also do this in recoverBlobManager
+					printf("pruneIntents.size()==%d\n", pruneIntents.size());
+					for (int rangeIdx = 0; rangeIdx < pruneIntents.size() - 1; ++rangeIdx) {
+						if (pruneIntents[rangeIdx].value.size() == 0) {
+							continue;
+						}
+						KeyRef rangeStartKey = pruneIntents[rangeIdx].key;
+						KeyRef rangeEndKey = pruneIntents[rangeIdx + 1].key;
+						KeyRange range(KeyRangeRef(rangeStartKey, rangeEndKey));
+						Version pruneVersion;
+						bool force;
+						std::tie(pruneVersion, force) = decodeBlobGranulePruneValue(pruneIntents[rangeIdx].value);
+
+						printf("about to prune range [%s-%s) @ %d, force=%s\n",
+						       rangeStartKey.printable().c_str(),
+						       rangeEndKey.printable().c_str(),
+						       pruneVersion,
+						       force ? "T" : "F");
+
+						// TODO: clear associated history
+					}
+
+					if (!pruneIntents.more) {
+						break;
+					}
+
+					beginKey = pruneIntents.readThrough.get();
+				} catch (Error& e) {
+					// TODO: other errors here from pruneRange?
+					wait(tr->onError(e));
+				}
+			}
+			printf("done pruning all ranges. looping back\n");
+		}
+	} catch (Error& e) {
+		if (BW_DEBUG) {
+			printf("monitorPruneKeys got error %s\n", e.name());
+		}
+		throw e;
+	}
+}
+
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
                               ReplyPromise<InitializeBlobWorkerReply> recruitReply,
                               Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
@@ -2784,6 +2895,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	recruitReply.send(rep);
 
 	self->addActor.send(waitFailureServer(bwInterf.waitFailure.getFuture()));
+	self->addActor.send(monitorPruneKeys(self));
 	state Future<Void> selfRemoved = monitorRemoval(self);
 
 	TraceEvent("BlobWorkerInit", self->id);
