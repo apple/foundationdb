@@ -2076,7 +2076,7 @@ void merge(Arena& arena,
 ACTOR Future<Optional<Value>> quickGetValue(StorageServer* data,
                                             StringRef key,
                                             Version version,
-                                            // To provide some contexts.
+                                            // To provide span context, tags, debug ID to underlying lookups.
                                             GetKeyValuesAndFlatMapRequest* pOriginalReq) {
 	if (data->shards[key]->isReadable()) {
 		try {
@@ -2601,7 +2601,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 ACTOR Future<RangeResult> quickGetKeyValues(StorageServer* data,
                                             StringRef prefix,
                                             Version version,
-                                            // To provide some contexts.
+                                            // To provide span context, tags, debug ID to underlying lookups.
                                             GetKeyValuesAndFlatMapRequest* pOriginalReq) {
 	try {
 		// TODO: Use a lower level API may be better? Or tweak priorities?
@@ -2825,7 +2825,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 ACTOR Future<GetKeyValuesAndFlatMapReply> flatMap(StorageServer* data,
                                                   GetKeyValuesReply input,
                                                   StringRef mapper,
-                                                  // To provide some contexts.
+                                                  // To provide span context, tags, debug ID to underlying lookups.
                                                   GetKeyValuesAndFlatMapRequest* pOriginalReq) {
 	state GetKeyValuesAndFlatMapReply result;
 	result.version = input.version;

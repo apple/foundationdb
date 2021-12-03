@@ -951,7 +951,6 @@ TEST_CASE("fdb_transaction_get_range_and_flat_map") {
 		int id = beginId;
 		for (int i = 0; i < result.kvs.size(); i++, id++) {
 			const auto& [key, value] = result.kvs[i];
-			//			std::cout << "result[" << i << "]: key=" << key << ", value=" << value << std::endl;
 			CHECK(recordKey(id).compare(key) == 0);
 			CHECK(recordValue(id).compare(value) == 0);
 		}

@@ -86,8 +86,7 @@ struct GetRangeAndMapWorkload : TestWorkload {
 
 	static void showResult(const RangeResult& result) {
 		std::cout << "result size: " << result.size() << std::endl;
-		const KeyValueRef* it = result.begin();
-		for (; it != result.end(); it++) {
+		for (const KeyValueRef* it = result.begin(); it != result.end(); it++) {
 			std::cout << "key=" << it->key.printable() << ", value=" << it->value.printable() << std::endl;
 		}
 	}
@@ -137,9 +136,8 @@ struct GetRangeAndMapWorkload : TestWorkload {
 			std::cout << "result.size()=" << result.size() << std::endl;
 			std::cout << "result.more=" << result.more << std::endl;
 			ASSERT(result.size() == endId - beginId);
-			const KeyValueRef* it = result.begin();
 			int id = beginId;
-			for (; it != result.end(); it++) {
+			for (const KeyValueRef* it = result.begin(); it != result.end(); it++) {
 				ASSERT(it->key == recordKey(id));
 				ASSERT(it->value == recordValue(id));
 				id++;
