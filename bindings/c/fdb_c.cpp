@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include <cstdint>
 #define FDB_API_VERSION 710
 #define FDB_INCLUDE_LEGACY_TYPES
@@ -34,6 +35,7 @@ int g_api_version = 0;
  *
  * type mapping:
  *   FDBFuture -> ThreadSingleAssignmentVarBase
+ *   FDBResult -> ThreadSingleAssignmentVarBase
  *   FDBDatabase -> IDatabase
  *   FDBTransaction -> ITransaction
  */
@@ -260,10 +262,31 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_string_array(FDBFuture* f, const
 	                 *out_count = na.size(););
 }
 
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_keyrange_array(FDBFuture* f,
+                                                               FDBKeyRange const** out_ranges,
+                                                               int* out_count) {
+	CATCH_AND_RETURN(Standalone<VectorRef<KeyRangeRef>> na = TSAV(Standalone<VectorRef<KeyRangeRef>>, f)->get();
+	                 *out_ranges = (FDBKeyRange*)na.begin();
+	                 *out_count = na.size(););
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_future_get_key_array(FDBFuture* f, FDBKey const** out_key_array, int* out_count) {
 	CATCH_AND_RETURN(Standalone<VectorRef<KeyRef>> na = TSAV(Standalone<VectorRef<KeyRef>>, f)->get();
 	                 *out_key_array = (FDBKey*)na.begin();
 	                 *out_count = na.size(););
+}
+
+extern "C" DLLEXPORT void fdb_result_destroy(FDBResult* r) {
+	CATCH_AND_DIE(TSAVB(r)->cancel(););
+}
+
+fdb_error_t fdb_result_get_keyvalue_array(FDBResult* r,
+                                          FDBKeyValue const** out_kv,
+                                          int* out_count,
+                                          fdb_bool_t* out_more) {
+	CATCH_AND_RETURN(RangeResult rr = TSAV(RangeResult, r)->get(); *out_kv = (FDBKeyValue*)rr.begin();
+	                 *out_count = rr.size();
+	                 *out_more = rr.more;);
 }
 
 FDBFuture* fdb_create_cluster_v609(const char* cluster_file_path) {
@@ -708,6 +731,7 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_estimated_range_size_bytes(F
                                                                                int begin_key_name_length,
                                                                                uint8_t const* end_key_name,
                                                                                int end_key_name_length) {
+	// FIXME: this can throw inverted_range()
 	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
 	return (FDBFuture*)(TXN(tr)->getEstimatedRangeSizeBytes(range).extractPtr());
 }
@@ -718,8 +742,46 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_range_split_points(FDBTransa
                                                                        uint8_t const* end_key_name,
                                                                        int end_key_name_length,
                                                                        int64_t chunk_size) {
+	// FIXME: this can throw inverted_range()
 	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
 	return (FDBFuture*)(TXN(tr)->getRangeSplitPoints(range, chunk_size).extractPtr());
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_blob_granule_ranges(FDBTransaction* tr,
+                                                                        uint8_t const* begin_key_name,
+                                                                        int begin_key_name_length,
+                                                                        uint8_t const* end_key_name,
+                                                                        int end_key_name_length) {
+	// FIXME: this can throw inverted_range()
+	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	return (FDBFuture*)(TXN(tr)->getBlobGranuleRanges(range).extractPtr());
+}
+
+extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules(FDBTransaction* tr,
+                                                                   uint8_t const* begin_key_name,
+                                                                   int begin_key_name_length,
+                                                                   uint8_t const* end_key_name,
+                                                                   int end_key_name_length,
+                                                                   int64_t beginVersion,
+                                                                   int64_t readVersion,
+                                                                   FDBReadBlobGranuleContext granule_context) {
+	// FIXME: this can throw inverted_range()
+	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+
+	// FIXME: better way to convert?
+	ReadBlobGranuleContext context;
+	context.userContext = granule_context.userContext;
+	context.start_load_f = granule_context.start_load_f;
+	context.get_load_f = granule_context.get_load_f;
+	context.free_load_f = granule_context.free_load_f;
+	context.debugNoMaterialize = granule_context.debugNoMaterialize;
+
+	Optional<Version> rv;
+	if (readVersion != invalidVersion) {
+		rv = readVersion;
+	}
+
+	return (FDBResult*)(TXN(tr)->readBlobGranules(range, beginVersion, rv, context).extractPtr());
 }
 
 #include "fdb_c_function_pointers.g.h"

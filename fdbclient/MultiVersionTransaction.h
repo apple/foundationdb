@@ -33,6 +33,7 @@
 // All of the required functions loaded from that external library are stored in function pointers in this struct.
 struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	typedef struct FDB_future FDBFuture;
+	typedef struct FDB_result FDBResult;
 	typedef struct FDB_cluster FDBCluster;
 	typedef struct FDB_database FDBDatabase;
 	typedef struct FDB_transaction FDBTransaction;
@@ -48,10 +49,35 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 		const void* value;
 		int valueLength;
 	} FDBKeyValue;
+	typedef struct keyrange {
+		const void* beginKey;
+		int beginKeyLength;
+		const void* endKey;
+		int endKeyLength;
+	} FDBKeyRange;
 #pragma pack(pop)
 
 	typedef int fdb_error_t;
 	typedef int fdb_bool_t;
+
+	typedef struct readgranulecontext {
+		// User context to pass along to functions
+		void* userContext;
+
+		// Returns a unique id for the load. Asynchronous to support queueing multiple in parallel.
+		int64_t (
+		    *start_load_f)(const char* filename, int filenameLength, int64_t offset, int64_t length, void* context);
+
+		// Returns data for the load. Pass the loadId returned by start_load_f
+		uint8_t* (*get_load_f)(int64_t loadId, void* context);
+
+		// Frees data from load. Pass the loadId returned by start_load_f
+		void (*free_load_f)(int64_t loadId, void* context);
+
+		// set this to true for testing if you don't want to read the granule files, just
+		// do the request to the blob workers
+		fdb_bool_t debugNoMaterialize;
+	} FDBReadBlobGranuleContext;
 
 	typedef void (*FDBCallback)(FDBFuture* future, void* callback_parameter);
 
@@ -168,6 +194,21 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                             int end_key_name_length,
 	                                             int64_t chunkSize);
 
+	FDBFuture* (*transactionGetBlobGranuleRanges)(FDBTransaction* db,
+	                                              uint8_t const* begin_key_name,
+	                                              int begin_key_name_length,
+	                                              uint8_t const* end_key_name,
+	                                              int end_key_name_length);
+
+	FDBResult* (*transactionReadBlobGranules)(FDBTransaction* db,
+	                                          uint8_t const* begin_key_name,
+	                                          int begin_key_name_length,
+	                                          uint8_t const* end_key_name,
+	                                          int end_key_name_length,
+	                                          int64_t beginVersion,
+	                                          int64_t readVersion,
+	                                          FDBReadBlobGranuleContext granule_context);
+
 	FDBFuture* (*transactionCommit)(FDBTransaction* tr);
 	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction* tr, int64_t* outVersion);
 	FDBFuture* (*transactionGetApproximateSize)(FDBTransaction* tr);
@@ -192,11 +233,15 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*futureGetKey)(FDBFuture* f, uint8_t const** outKey, int* outKeyLength);
 	fdb_error_t (*futureGetValue)(FDBFuture* f, fdb_bool_t* outPresent, uint8_t const** outValue, int* outValueLength);
 	fdb_error_t (*futureGetStringArray)(FDBFuture* f, const char*** outStrings, int* outCount);
+	fdb_error_t (*futureGetKeyRangeArray)(FDBFuture* f, const FDBKeyRange** out_keyranges, int* outCount);
 	fdb_error_t (*futureGetKeyArray)(FDBFuture* f, FDBKey const** outKeys, int* outCount);
 	fdb_error_t (*futureGetKeyValueArray)(FDBFuture* f, FDBKeyValue const** outKV, int* outCount, fdb_bool_t* outMore);
 	fdb_error_t (*futureSetCallback)(FDBFuture* f, FDBCallback callback, void* callback_parameter);
 	void (*futureCancel)(FDBFuture* f);
 	void (*futureDestroy)(FDBFuture* f);
+
+	fdb_error_t (*resultGetKeyValueArray)(FDBResult* f, FDBKeyValue const** outKV, int* outCount, fdb_bool_t* outMore);
+	void (*resultDestroy)(FDBResult* f);
 
 	// Legacy Support
 	FDBFuture* (*createCluster)(const char* clusterFilePath);
@@ -247,6 +292,12 @@ public:
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                int64_t chunkSize) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
+
+	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
+	                                           Version beginVersion,
+	                                           Optional<Version> readVersion,
+	                                           ReadBlobGranuleContext granule_context) override;
 
 	void addReadConflictRange(const KeyRangeRef& keys) override;
 
@@ -394,8 +445,15 @@ public:
 
 	void addReadConflictRange(const KeyRangeRef& keys) override;
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
+
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                int64_t chunkSize) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
+
+	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
+	                                           Version beginVersion,
+	                                           Optional<Version> readVersion,
+	                                           ReadBlobGranuleContext granule_context) override;
 
 	void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) override;
 	void set(const KeyRef& key, const ValueRef& value) override;
