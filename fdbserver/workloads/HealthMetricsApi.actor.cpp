@@ -172,7 +172,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 			//TraceEvent traceTLogQueue("TLogQueue");
 			for (const auto& ss : healthMetrics.tLogQueue) {
 				self->detailedWorstTLogQueue = std::max(self->detailedWorstTLogQueue, ss.second);
-				//traceTLogQueue.detail(format("TLog-%s", ss.first.toString().c_str()), ss.second);
+				// traceTLogQueue.detail(format("TLog-%s", ss.first.toString().c_str()), ss.second);
 			}
 		};
 	}
