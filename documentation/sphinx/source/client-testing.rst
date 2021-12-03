@@ -24,23 +24,23 @@ Options to Control Buggify
 There are four network options to control the buggify behavior. By default, buggify is disabled (as it will behave in a way
 that is not desirable in a production environment). The options to control buggify are:
 
-- ``buggify_enable``
+- ``buggify-enable``
   This option takes no argument and will enable buggify.
-- ``buggify_disable``
+- ``buggify-disable``
   This can be used to disable buggify again.
-- ``client_buggify_section_activated_probability`` (default ``25``)
+- ``client-buggify-section-activated-probability`` (default ``25``)
   A number between 0 and 100.
-- ``client_buggify_section_fired_probability`` (default ``25``)
+- ``client-buggify-section-fired-probability`` (default ``25``)
   A number between 0 and 100.
 
 The way buggify works is by enabling sections in the code first that get only executed with a certain probability. Generally
 these code sections will simply introduce a synthetic error.
 
 When a section is passed for the first time, the client library will decide randomly whether that code section will be enabled
-or not. It will be enabled with a probability of ``client_buggify_section_activated_probability``.
+or not. It will be enabled with a probability of ``client-buggify-section-activated-probability``.
 
 Whenever the client executes a buggify-enabled code-block, it will randomly execute it. This is to make sure that a certain
-exception doesn't always fire. The probably for executing such a section is ``client_buggify_section_fired_probability``.
+exception doesn't always fire. The probably for executing such a section is ``client-buggify-section-fired-probability``.
 
 ################################
 Simulation and Cluster Workloads
@@ -341,14 +341,14 @@ example this file would create a server with 8 processes of which 4 would act as
     group = foundationdb
 
     [general]
-    restart_delay = 60
-    cluster_file = /etc/foundationdb/fdb.cluster
+    restart-delay = 60
+    cluster-file = /etc/foundationdb/fdb.cluster
 
     ## Default parameters for individual fdbserver processes
     [fdbserver]
     command = /usr/sbin/fdbserver
-    public_address = auto:$ID
-    listen_address = public
+    public-address = auto:$ID
+    listen-address = public
     datadir = /var/lib/foundationdb/data/$ID
     logdir = /var/log/foundationdb
 

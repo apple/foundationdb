@@ -426,7 +426,7 @@ public:
 
 		char* endptr;
 		const char* rd =
-		    get_value_multi(ini, "restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
+		    get_value_multi(ini, "restart-delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if (!rd) {
 			log_msg(SevError, "Unable to resolve restart delay for %s\n", ssection.c_str());
 			return;
@@ -439,7 +439,7 @@ public:
 		}
 
 		const char* mrd = get_value_multi(
-		    ini, "initial_restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
+		    ini, "initial-restart-delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if (!mrd) {
 			initial_restart_delay = 0;
 		} else {
@@ -453,7 +453,7 @@ public:
 		current_restart_delay = initial_restart_delay;
 
 		const char* rbo = get_value_multi(
-		    ini, "restart_backoff", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
+		    ini, "restart-backoff", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if (!rbo) {
 			restart_backoff = max_restart_delay;
 		} else {
@@ -469,7 +469,7 @@ public:
 		}
 
 		const char* rdri = get_value_multi(
-		    ini, "restart_delay_reset_interval", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
+		    ini, "restart-delay-reset-interval", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if (!rdri) {
 			restart_delay_reset_interval = max_restart_delay;
 		} else {
@@ -481,16 +481,16 @@ public:
 		}
 
 		const char* q =
-		    get_value_multi(ini, "disable_lifecycle_logging", ssection.c_str(), section.c_str(), "general", nullptr);
+		    get_value_multi(ini, "disable-lifecycle-logging", ssection.c_str(), section.c_str(), "general", nullptr);
 		if (q && !strcmp(q, "true"))
 			quiet = true;
 
 		const char* del_env =
-		    get_value_multi(ini, "delete_envvars", ssection.c_str(), section.c_str(), "general", nullptr);
+		    get_value_multi(ini, "delete-envvars", ssection.c_str(), section.c_str(), "general", nullptr);
 		delete_envvars = del_env;
 
 		const char* kocc =
-		    get_value_multi(ini, "kill_on_configuration_change", ssection.c_str(), section.c_str(), "general", nullptr);
+		    get_value_multi(ini, "kill-on-configuration-change", ssection.c_str(), section.c_str(), "general", nullptr);
 		if (kocc && strcmp(kocc, "true")) {
 			kill_on_configuration_change = false;
 		}
@@ -508,10 +508,10 @@ public:
 		const char* id_s = ssection.c_str() + strlen(section.c_str()) + 1;
 
 		for (auto i : keys) {
-			if (!strcmp(i.pItem, "command") || !strcmp(i.pItem, "restart_delay") ||
-			    !strcmp(i.pItem, "initial_restart_delay") || !strcmp(i.pItem, "restart_backoff") ||
-			    !strcmp(i.pItem, "restart_delay_reset_interval") || !strcmp(i.pItem, "disable_lifecycle_logging") ||
-			    !strcmp(i.pItem, "delete_envvars") || !strcmp(i.pItem, "kill_on_configuration_change")) {
+			if (!strcmp(i.pItem, "command") || !strcmp(i.pItem, "restart-delay") ||
+			    !strcmp(i.pItem, "initial-restart-delay") || !strcmp(i.pItem, "restart-backoff") ||
+			    !strcmp(i.pItem, "restart-delay-reset-interval") || !strcmp(i.pItem, "disable-lifecycle-logging") ||
+			    !strcmp(i.pItem, "delete-envvars") || !strcmp(i.pItem, "kill-on-configuration-change")) {
 				continue;
 			}
 

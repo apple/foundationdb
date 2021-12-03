@@ -673,7 +673,7 @@ private:
 		});
 
 		const char* rd =
-		    getValueMulti(ini, "restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
+		    getValueMulti(ini, "restart-delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if (!rd) {
 			LogEvent(EVENTLOG_ERROR_TYPE, format("Unable to resolve restart delay for %s\n", ssection.c_str()));
 			return result;
@@ -687,7 +687,7 @@ private:
 		}
 
 		const char* q =
-		    getValueMulti(ini, "disable_lifecycle_logging", ssection.c_str(), section.c_str(), "general", nullptr);
+		    getValueMulti(ini, "disable-lifecycle-logging", ssection.c_str(), section.c_str(), "general", nullptr);
 		if (q && !strcmp(q, "true"))
 			result.quiet = true;
 
@@ -703,7 +703,7 @@ private:
 
 		for (auto i : keys) {
 			if (!strcmp(i.pItem, "command") || !strcmp(i.pItem, "restart_delay") ||
-			    !strcmp(i.pItem, "disable_lifecycle_logging")) {
+			    !strcmp(i.pItem, "disable-lifecycle-logging")) {
 				continue;
 			}
 
