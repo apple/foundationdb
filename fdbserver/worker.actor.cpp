@@ -1394,6 +1394,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::map<SharedLogsKey, SharedLogsValue> sharedLogs;
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
 	state WorkerCache<InitializeBackupReply> backupWorkerCache;
+	state WorkerCache<InitializeBlobWorkerReply> blobWorkerCache;
 
 	state std::string coordFolder = abspath(_coordFolder);
 
@@ -2036,13 +2037,17 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				}
 			}
 			when(InitializeBlobWorkerRequest req = waitNext(interf.blobWorker.getFuture())) {
-				BlobWorkerInterface recruited(locality, req.interfaceId);
-				recruited.initEndpoints();
-				startRole(Role::BLOB_WORKER, recruited.id(), interf.id());
+				if (!blobWorkerCache.exists(req.reqId)) {
+					BlobWorkerInterface recruited(locality, req.interfaceId);
+					recruited.initEndpoints();
+					startRole(Role::BLOB_WORKER, recruited.id(), interf.id());
 
-				ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady = req.reply;
-				Future<Void> bw = blobWorker(recruited, blobWorkerReady, dbInfo);
-				errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
+					ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady = req.reply;
+					Future<Void> bw = blobWorker(recruited, blobWorkerReady, dbInfo);
+					errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
+				} else {
+					forwardPromise(req.reply, blobWorkerCache.get(req.reqId));
+				}
 			}
 			when(InitializeCommitProxyRequest req = waitNext(interf.commitProxy.getFuture())) {
 				LocalLineage _;
