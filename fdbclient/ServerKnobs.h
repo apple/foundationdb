@@ -742,6 +742,7 @@ public:
 	int BG_DELTA_BYTES_BEFORE_COMPACT;
 
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
+	double BLOB_WORKERLIST_FETCH_INTERVAL;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);
