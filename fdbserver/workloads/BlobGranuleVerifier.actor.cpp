@@ -27,6 +27,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/SystemData.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -59,6 +60,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	int64_t timeTravelTooOld = 0;
 	int64_t rowsRead = 0;
 	int64_t bytesRead = 0;
+	KeyRangeMap<Version> latestPruneVersions;
 	std::vector<Future<Void>> clients;
 
 	DatabaseConfiguration config;
@@ -305,11 +307,53 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		OldRead(KeyRange range, Version v, RangeResult oldResult) : range(range), v(v), oldResult(oldResult) {}
 	};
 
+	ACTOR Future<Void> pruneAtVersion(Database cx, KeyRange range, Version version, bool force) {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				Optional<Value> oldPruneIntent = wait(tr->get(blobGranulePruneKeys.begin.withSuffix(range.begin)));
+
+				if (oldPruneIntent.present()) {
+					Version oldPruneVersion;
+					bool oldForce;
+					std::tie(oldPruneVersion, oldForce) = decodeBlobGranulePruneValue(oldPruneIntent.get());
+					if (oldPruneVersion >= version) {
+						return Void();
+					}
+				}
+
+				Value pruneValue = blobGranulePruneValueFor(version, force);
+				wait(krmSetRange(tr, blobGranulePruneKeys.begin, range, pruneValue));
+				tr->set(blobGranulePruneChangeKey, deterministicRandom()->randomUniqueID().toString());
+				wait(tr->commit());
+				if (BGV_DEBUG) {
+					printf("pruneAtVersion for range [%s-%s) at version %lld succeeded\n",
+					       range.begin.printable().c_str(),
+					       range.end.printable().c_str(),
+					       version);
+				}
+				return Void();
+			} catch (Error& e) {
+				if (BGV_DEBUG) {
+					printf("pruneAtVersion for range [%s-%s) at version %lld encountered error %s\n",
+					       range.begin.printable().c_str(),
+					       range.end.printable().c_str(),
+					       version,
+					       e.name());
+				}
+				wait(tr->onError(e));
+			}
+		}
+	}
+
 	ACTOR Future<Void> verifyGranules(Database cx, BlobGranuleVerifierWorkload* self) {
 		state double last = now();
 		state double endTime = last + self->testDuration;
 		state std::map<double, OldRead> timeTravelChecks;
 		state int64_t timeTravelChecksMemory = 0;
+		state KeyRangeMap<Version> latestPruneVersions;
 
 		TraceEvent("BlobGranuleVerifierStart");
 		if (BGV_DEBUG) {
@@ -334,10 +378,18 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					// advance iterator before doing read, so if it gets error we don't retry it
 
 					try {
+						// before reading, prune at some version [0, readVersion)
+						Version pruneVersion = deterministicRandom()->randomInt(0, oldRead.v);
+						wait(self->pruneAtVersion(cx, oldRead.range, pruneVersion, false));
+						// FIXME: this doesnt actually guarantee that the prune executed. maybe add a delay?
+
 						std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> reReadResult =
 						    wait(self->readFromBlob(cx, self, oldRead.range, oldRead.v));
 						self->compareResult(oldRead.oldResult, reReadResult, oldRead.range, oldRead.v, false);
 						self->timeTravelReads++;
+
+						// TODO: read at some version older than pruneVersion and make sure you get txn_too_old
+						// To achieve this, the BWs are going to have to recognize latest prune versions per granules
 					} catch (Error& e) {
 						if (e.code() == error_code_transaction_too_old) {
 							self->timeTravelTooOld++;
