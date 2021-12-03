@@ -7119,6 +7119,9 @@ ACTOR Future<Void> changeFeedWhenAtLatest(ChangeFeedData* self, Version version)
 			}
 		}
 	}
+	if (self->lastReturnedVersion.get() < version) {
+		self->lastReturnedVersion.set(version);
+	}
 	ASSERT(self->getVersion() >= version);
 	return Void();
 }
