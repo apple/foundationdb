@@ -1636,7 +1636,7 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 				if (BM_DEBUG) {
 					printf("Fetching latest history entry for range [%s-%s)\n",
 					       activeRange.begin().printable().c_str(),
-					       activeRange.end().printable().c_str())
+					       activeRange.end().printable().c_str());
 				}
 				Optional<GranuleHistory> history = wait(getLatestGranuleHistory(&tr, activeRange.range()));
 				// TODO: can we tell from the krm that this range is not valid, so that we don't need to do a get
@@ -1692,6 +1692,8 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 		}
 
 		// if we already saw this node, skip it; otherwise, mark it as visited
+		// TODO: doing the visited check here as opposed to when adding this node as a parent
+		// causes us to do another GET, but the parentGranules field does not contain parent gids
 		if (visited.count(currHistoryNode.granuleID)) {
 			if (BM_DEBUG) {
 				printf("Already processed %s, so skipping it\n", currHistoryNode.granuleID.toString().c_str());
