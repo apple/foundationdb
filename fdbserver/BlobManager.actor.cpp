@@ -215,7 +215,6 @@ struct BlobManagerData {
 	std::unordered_set<UID> deadWorkers;
 	KeyRangeMap<UID> workerAssignments;
 	KeyRangeMap<bool> knownBlobRanges;
-	KeyRangeMap<Version> prunesInProgress;
 
 	AsyncTrigger startRecruiting;
 	Debouncer restartRecruiting;
