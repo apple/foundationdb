@@ -923,8 +923,7 @@ ThreadResult<RangeResult> MultiVersionTransaction::readBlobGranules(const KeyRan
 	if (tr.transaction) {
 		return tr.transaction->readBlobGranules(keyRange, beginVersion, readVersion, granuleContext);
 	} else {
-		// FIXME: handle abortable future + timeout properly
-		return abortableTimeoutResult<RangeResult>(tr.onChange());
+		return abortableTimeoutResult<RangeResult>(tr.onChange);
 	}
 }
 
@@ -1128,7 +1127,7 @@ ThreadResult<T> MultiVersionTransaction::abortableTimeoutResult(ThreadFuture<Voi
 	ThreadFuture<T> timeoutFuture = makeTimeout<T>();
 	ThreadFuture<T> abortable = abortableFuture(timeoutFuture, abortSignal);
 	abortable.blockUntilReadyCheckOnMainThread();
-	return ThreadResult<T>(abortable.extractPtr());
+	return ThreadResult<T>((ThreadSingleAssignmentVar<T>*)abortable.extractPtr());
 }
 
 void MultiVersionTransaction::reset() {
