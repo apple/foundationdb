@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbbackup/BackupTLSConfig.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/Arena.h"
@@ -2309,7 +2310,7 @@ ACTOR Future<Void> runRestore(Database db,
 
 		origDb = Database::createDatabase(originalClusterFile, Database::API_VERSION_LATEST);
 		Version v = wait(timeKeeperVersionFromDatetime(targetTimestamp, origDb.get()));
-		printf("Timestamp '%s' resolves to version %" PRId64 "\n", targetTimestamp.c_str(), v);
+		fmt::print("Timestamp '{0}' resolves to version {1}\n", targetTimestamp, v);
 		targetVersion = v;
 	}
 
@@ -2336,8 +2337,9 @@ ACTOR Future<Void> runRestore(Database db,
 				throw restore_error();
 			}
 
-			if (verbose)
-				printf("Using target restore version %" PRId64 "\n", targetVersion);
+			if (verbose) {
+				fmt::print("Ussing target restore version {}\n", targetVersion);
+			}
 		}
 
 		if (performRestore) {
@@ -2359,19 +2361,19 @@ ACTOR Future<Void> runRestore(Database db,
 
 			if (waitForDone && verbose) {
 				// If restore is now complete then report version restored
-				printf("Restored to version %" PRId64 "\n", restoredVersion);
+				fmt::print("Restored to version {}\n", restoredVersion);
 			}
 		} else {
 			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion, ranges));
 
 			if (!rset.present()) {
-				fprintf(stderr,
-				        "Insufficient data to restore to version %" PRId64 ".  Describe backup for more information.\n",
-				        targetVersion);
+				fmt::print(stderr,
+				           "Insufficient data to restore to version {}.  Describe backup for more information.\n",
+				           targetVersion);
 				throw restore_invalid_version();
 			}
 
-			printf("Backup can be used to restore to version %" PRId64 "\n", targetVersion);
+			fmt::print("Backup can be used to restore to version {}\n", targetVersion);
 		}
 
 	} catch (Error& e) {
@@ -2472,20 +2474,20 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
 
 			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion));
 			if (!rset.present()) {
-				fprintf(stderr, "Insufficient data to restore to version %" PRId64 "\n", restoreVersion);
+				fmt::print(stderr, "Insufficient data to restore to version {}\n", restoreVersion);
 				throw restore_invalid_version();
 			}
 
 			// Display the restore information, if requested
 			if (verbose) {
-				printf("[DRY RUN] Restoring backup to version: %" PRId64 "\n", restoreVersion);
-				printf("%s\n", description.toString().c_str());
+				fmt::print("[DRY RUN] Restoring backup to version: {}\n", restoreVersion);
+				fmt::print("{}\n", description.toString());
 			}
 		}
 
 		if (waitForDone && verbose) {
 			// If restore completed then report version restored
-			printf("Restored to version %" PRId64 "%s\n", restoreVersion, (performRestore) ? "" : " (DRY RUN)");
+			fmt::print("Restored to version {0}{1}\n", restoreVersion, (performRestore) ? "" : " (DRY RUN)");
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -2520,7 +2522,7 @@ ACTOR Future<Void> dumpBackupData(const char* name,
 		}
 	}
 
-	printf("Scanning version range %" PRId64 " to %" PRId64 "\n", beginVersion, endVersion);
+	fmt::print("Scanning version range {0} to {1}\n", beginVersion, endVersion);
 	BackupFileList files = wait(c->dumpFileList(beginVersion, endVersion));
 	files.toStream(stdout);
 
@@ -2579,12 +2581,12 @@ ACTOR Future<Void> expireBackupData(const char* name,
 		printf("\r%s%s\n", p.c_str(), (spaces > 0 ? std::string(spaces, ' ').c_str() : ""));
 
 		if (endVersion < 0)
-			printf("All data before %" PRId64 " versions (%" PRId64
-			       " days) prior to latest backup log has been deleted.\n",
-			       -endVersion,
-			       -endVersion / ((int64_t)24 * 3600 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+			fmt::print("All data before {0} versions ({1}"
+			           " days) prior to latest backup log has been deleted.\n",
+			           -endVersion,
+			           -endVersion / ((int64_t)24 * 3600 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 		else
-			printf("All data before version %" PRId64 " has been deleted.\n", endVersion);
+			fmt::print("All data before version {} has been deleted.\n", endVersion);
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
@@ -2996,15 +2998,15 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 
 static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRef>>& keyRanges) {
 	bool err = false, partial = false;
-	int tokenArray = 0, tokenIndex = 0;
+	int tokenArray = 0;
 
 	auto parsed = parseLine(optionValue, err, partial);
 
 	for (auto tokens : parsed) {
 		tokenArray++;
-		tokenIndex = 0;
 
 		/*
+		int tokenIndex = 0;
 		for (auto token : tokens)
 		{
 		    tokenIndex++;

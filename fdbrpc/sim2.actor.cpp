@@ -21,6 +21,7 @@
 #include <cinttypes>
 #include <memory>
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbrpc/simulator.h"
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
@@ -589,13 +590,13 @@ private:
 		       ((uintptr_t)data % 4096 == 0 && length % 4096 == 0 && offset % 4096 == 0)); // Required by KAIO.
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
-			fprintf(randLog,
-			        "SFR1 %s %s %s %d %" PRId64 "\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str(),
-			        length,
-			        offset);
+			fmt::print(randLog,
+			           "SFR1 {0} {1} {2} {3} {4}\n",
+			           self->dbgId.shortString(),
+			           self->filename,
+			           opId.shortString(),
+			           length,
+			           offset);
 
 		wait(waitUntilDiskReady(self->diskParameters, length));
 
@@ -633,14 +634,14 @@ private:
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog) {
 			uint32_t a = crc32c_append(0, data.begin(), data.size());
-			fprintf(randLog,
-			        "SFW1 %s %s %s %d %d %" PRId64 "\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str(),
-			        a,
-			        data.size(),
-			        offset);
+			fmt::print(randLog,
+			           "SFW1 {0} {1} {2} {3} {4} {5}\n",
+			           self->dbgId.shortString(),
+			           self->filename,
+			           opId.shortString(),
+			           a,
+			           data.size(),
+			           offset);
 		}
 
 		if (self->delayOnWrite)
@@ -681,12 +682,8 @@ private:
 	ACTOR static Future<Void> truncate_impl(SimpleFile* self, int64_t size) {
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
-			fprintf(randLog,
-			        "SFT1 %s %s %s %" PRId64 "\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str(),
-			        size);
+			fmt::print(
+			    randLog, "SFT1 {0} {1} {2} {3}\n", self->dbgId.shortString(), self->filename, opId.shortString(), size);
 
 		// KAIO will return EINVAL, as len==0 is an error.
 		if ((self->flags & IAsyncFile::OPEN_NO_AIO) == 0 && size == 0) {
@@ -782,12 +779,8 @@ private:
 		}
 
 		if (randLog)
-			fprintf(randLog,
-			        "SFS2 %s %s %s %" PRId64 "\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str(),
-			        pos);
+			fmt::print(
+			    randLog, "SFS2 {0} {1} {2} {3}\n", self->dbgId.shortString(), self->filename, opId.shortString(), pos);
 		INJECT_FAULT(io_error, "SimpleFile::size"); // SimpleFile::size inject io_error
 
 		return pos;
@@ -2091,12 +2084,12 @@ public:
 			}
 
 			if (randLog)
-				fprintf(randLog,
-				        "T %f %d %s %" PRId64 "\n",
-				        this->time,
-				        int(deterministicRandom()->peek() % 10000),
-				        t.machine ? t.machine->name : "none",
-				        t.stable);
+				fmt::print(randLog,
+				           "T {0} {1} {2} {3}\n",
+				           this->time,
+				           int(deterministicRandom()->peek() % 10000),
+				           t.machine ? t.machine->name : "none",
+				           t.stable);
 		}
 	}
 

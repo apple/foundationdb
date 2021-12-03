@@ -78,10 +78,27 @@ void Future::cancel() {
 	return fdb_future_get_string_array(future_, out_strings, out_count);
 }
 
+// KeyRangeArrayFuture
+
+[[nodiscard]] fdb_error_t KeyRangeArrayFuture::get(const FDBKeyRange** out_keyranges, int* out_count) {
+	return fdb_future_get_keyrange_array(future_, out_keyranges, out_count);
+}
+
 // KeyValueArrayFuture
 
 [[nodiscard]] fdb_error_t KeyValueArrayFuture::get(const FDBKeyValue** out_kv, int* out_count, fdb_bool_t* out_more) {
 	return fdb_future_get_keyvalue_array(future_, out_kv, out_count, out_more);
+}
+
+// Result
+
+Result::~Result() {
+	fdb_result_destroy(result_);
+}
+
+// KeyValueArrayResult
+[[nodiscard]] fdb_error_t KeyValueArrayResult::get(const FDBKeyValue** out_kv, int* out_count, fdb_bool_t* out_more) {
+	return fdb_result_get_keyvalue_array(result_, out_kv, out_count, out_more);
 }
 
 // Database
@@ -269,6 +286,25 @@ fdb_error_t Transaction::add_conflict_range(std::string_view begin_key,
                                             FDBConflictRangeType type) {
 	return fdb_transaction_add_conflict_range(
 	    tr_, (const uint8_t*)begin_key.data(), begin_key.size(), (const uint8_t*)end_key.data(), end_key.size(), type);
+}
+
+KeyRangeArrayFuture Transaction::get_blob_granule_ranges(std::string_view begin_key, std::string_view end_key) {
+	return KeyRangeArrayFuture(fdb_transaction_get_blob_granule_ranges(
+	    tr_, (const uint8_t*)begin_key.data(), begin_key.size(), (const uint8_t*)end_key.data(), end_key.size()));
+}
+KeyValueArrayResult Transaction::read_blob_granules(std::string_view begin_key,
+                                                    std::string_view end_key,
+                                                    int64_t beginVersion,
+                                                    int64_t readVersion,
+                                                    FDBReadBlobGranuleContext granuleContext) {
+	return KeyValueArrayResult(fdb_transaction_read_blob_granules(tr_,
+	                                                              (const uint8_t*)begin_key.data(),
+	                                                              begin_key.size(),
+	                                                              (const uint8_t*)end_key.data(),
+	                                                              end_key.size(),
+	                                                              beginVersion,
+	                                                              readVersion,
+	                                                              granuleContext));
 }
 
 } // namespace fdb

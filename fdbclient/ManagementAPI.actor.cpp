@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -453,7 +454,7 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 
 	result.auto_replication = result.old_replication;
 
-	int storage_replication;
+	[[maybe_unused]] int storage_replication;
 	int log_replication;
 	if (result.old_replication == "single") {
 		result.auto_replication = "double";
@@ -1677,9 +1678,9 @@ ACTOR Future<Void> printHealthyZone(Database cx) {
 				printf("No ongoing maintenance.\n");
 			} else {
 				auto healthyZone = decodeHealthyZoneValue(val.get());
-				printf("Maintenance for zone %s will continue for %" PRId64 " seconds.\n",
-				       healthyZone.first.toString().c_str(),
-				       (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+				fmt::print("Maintenance for zone {0} will continue for {1} seconds.\n",
+				           healthyZone.first.toString(),
+				           (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 			}
 			return Void();
 		} catch (Error& e) {

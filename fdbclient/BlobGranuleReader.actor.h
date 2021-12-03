@@ -28,8 +28,10 @@
 #elif !defined(BLOB_GRANULE_READER_CLIENT_H)
 #define BLOB_GRANULE_READER_CLIENT_H
 
-#include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/BackupContainerFileSystem.h"
+#include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/BlobGranuleFiles.h"
+#include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/BlobWorkerCommon.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
