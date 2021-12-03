@@ -507,9 +507,9 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 
 		StorageTeamData(StorageTeamData&& r) noexcept
 		  : storageTeamId(r.storageTeamId), tags(r.tags), versionMessages(std::move(r.versionMessages)),
-		    nothingPersistent(r.nothingPersistent), poppedRecently(r.poppedRecently), popped(r.popped),
-		    persistentPopped(r.persistentPopped), versionForPoppedLocation(r.versionForPoppedLocation),
-		    poppedLocation(r.poppedLocation), unpoppedRecovered(r.unpoppedRecovered) {}
+		    popped(r.popped), poppedLocation(r.poppedLocation), persistentPopped(r.persistentPopped),
+		    versionForPoppedLocation(r.versionForPoppedLocation), poppedRecently(r.poppedRecently),
+		    unpoppedRecovered(r.unpoppedRecovered), nothingPersistent(r.nothingPersistent) {}
 		void operator=(StorageTeamData&& r) noexcept {
 			storageTeamId = r.storageTeamId;
 			nothingPersistent = r.nothingPersistent;
@@ -580,6 +580,7 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	std::unordered_map<StorageTeamID, Reference<StorageTeamData>> storageTeamData;
 	std::unordered_map<ptxn::StorageTeamID, std::vector<Tag>> storageTeams;
 
+	Future<Void> terminated;
 	AsyncTrigger stopCommit; // Trigger to stop the commit
 	bool stopped = false; // Whether this generation has been stopped.
 	bool initialized = false; // Whether this generation has been initialized.
@@ -608,8 +609,6 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 
 	Version unrecoveredBefore = 1;
 	Version recoveredAt = 1;
-
-	Future<Void> terminated;
 
 	int8_t locality; // data center id?
 	UID recruitmentID;
@@ -647,9 +646,9 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	                           int8_t locality,
 	                           DBRecoveryCount epoch,
 	                           const std::string& context)
-	  : tlogGroupData(tlogGroupData), storageTeams(storageTeams), cc("TLog", interf.id().toString()),
-	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), logId(interf.id()),
-	    protocolVersion(protocolVersion), terminated(tlogGroupData->terminated.getFuture()),
+	  : tlogGroupData(tlogGroupData), logId(interf.id()), cc("TLog", interf.id().toString()),
+	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), protocolVersion(protocolVersion),
+	    storageTeams(storageTeams), terminated(tlogGroupData->terminated.getFuture()),
 	    logSystem(new AsyncVar<Reference<ILogSystem>>()),
 	    // These are initialized differently on init() or recovery
 	    locality(locality), recruitmentID(recruitmentID), logSpillType(logSpillType) {

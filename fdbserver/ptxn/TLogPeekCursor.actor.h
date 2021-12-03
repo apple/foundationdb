@@ -392,9 +392,9 @@ protected:
 
 } // namespace details
 
-// Base class for peeking data from multiple storage teams, where all storage teams are notified when a commit version is done, i.e., the proxy broadcasts to all teams.
-// In this case, even different teams might have different team versions, they will be informed when the commit version
-// has changed.
+// Base class for peeking data from multiple storage teams, where all storage teams are notified when a commit version
+// is done, i.e., the proxy broadcasts to all teams. In this case, even different teams might have different team
+// versions, they will be informed when the commit version has changed.
 class BroadcastedStorageTeamPeekCursorBase : public ptxn::details::VersionSubsequencePeekCursorBase,
                                              protected details::StorageTeamIDCursorMapper {
 protected:
