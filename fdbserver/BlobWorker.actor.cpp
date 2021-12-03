@@ -250,51 +250,6 @@ ACTOR Future<Void> readAndCheckGranuleLock(Reference<ReadYourWritesTransaction> 
 	return Void();
 }
 
-// used for "business logic" of both versions of loading granule files
-ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, GranuleFiles* files, UID granuleID) {
-
-	loop {
-		int lim = BUGGIFY ? 2 : 1000;
-		RangeResult res = wait(tr->getRange(KeyRangeRef(*startKey, endKey), lim));
-		for (auto& it : res) {
-			UID gid;
-			uint8_t fileType;
-			Version version;
-
-			Standalone<StringRef> filename;
-			int64_t offset;
-			int64_t length;
-
-			std::tie(gid, fileType, version) = decodeBlobGranuleFileKey(it.key);
-			ASSERT(gid == granuleID);
-
-			std::tie(filename, offset, length) = decodeBlobGranuleFileValue(it.value);
-
-			BlobFileIndex idx(version, filename.toString(), offset, length);
-			if (fileType == 'S') {
-				ASSERT(files->snapshotFiles.empty() || files->snapshotFiles.back().version < idx.version);
-				files->snapshotFiles.push_back(idx);
-			} else {
-				ASSERT(fileType == 'D');
-				ASSERT(files->deltaFiles.empty() || files->deltaFiles.back().version < idx.version);
-				files->deltaFiles.push_back(idx);
-			}
-		}
-		if (res.more) {
-			*startKey = keyAfter(res.back().key);
-		} else {
-			break;
-		}
-	}
-	if (BW_DEBUG) {
-		fmt::print("Loaded {0} snapshot and {1} delta files for {2}\n",
-		           files->snapshotFiles.size(),
-		           files->deltaFiles.size(),
-		           granuleID.toString());
-	}
-	return Void();
-}
-
 // Read snapshot and delta files for granule history, for completed granule
 // Retries on error local to this function
 ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobWorkerData> bwData, UID granuleID) {
@@ -304,7 +259,7 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobWorkerData> bwData, UI
 	state GranuleFiles files;
 	loop {
 		try {
-			wait(readGranuleFiles(&tr, &startKey, range.end, &files, granuleID));
+			wait(readGranuleFiles(&tr, &startKey, range.end, &files, granuleID, BW_DEBUG));
 			return files;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -473,7 +428,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
                                            Optional<std::pair<KeyRange, UID>> oldGranuleComplete) {
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
-	// TODO some sort of directory structure would be useful?
+	// TODO: this will induce S3 hotspotting, so we should rethink if we want to prefix the file name
+	// with the granuleID or just add it somewhere in the file name
 	state std::string fname = granuleID.toString() + "_T" + std::to_string((uint64_t)(1000.0 * now())) + "_V" +
 	                          std::to_string(currentDeltaVersion) + ".delta";
 
@@ -573,7 +529,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
                                           Version version,
                                           PromiseStream<RangeResult> rows,
                                           bool createGranuleHistory) {
-	// TODO some sort of directory structure would be useful maybe?
+	// TODO: this will induce S3 hotspotting, so we should rethink if we want to prefix the file name
+	// with the granuleID or just add it somewhere in the file name
 	state std::string fname = granuleID.toString() + "_T" + std::to_string((uint64_t)(1000.0 * now())) + "_V" +
 	                          std::to_string(version) + ".snapshot";
 	state Arena arena;
@@ -1203,7 +1160,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				metadata->durableSnapshotVersion.set(startState.blobFilesToSnapshot.get().snapshotFiles.back().version);
 			} else {
 				ASSERT(startState.previousDurableVersion == invalidVersion);
-				printf("About to dump initial snapshot\n");
 				BlobFileIndex fromFDB = wait(dumpInitialSnapshotFromFDB(bwData, metadata, startState.granuleID));
 				newSnapshotFile = fromFDB;
 				ASSERT(startState.changeFeedStartVersion <= fromFDB.version);
@@ -1241,7 +1197,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 		ASSERT(metadata->readable.canBeSet());
 		metadata->readable.send(Void());
-		printf("Got change feed stream\n");
 
 		loop {
 			// check outstanding snapshot/delta files for completion
@@ -1352,8 +1307,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				                                                   MAX_VERSION,
 				                                                   metadata->keyRange);
 			}
-
-			printf("About to process mutations\n");
 
 			// process mutations
 			if (!mutations.empty()) {
@@ -1953,11 +1906,14 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 }
 
 ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, BlobGranuleFileRequest req) {
-	printf("BW %s got blobGranuleFileRequest for range [%s-%s) @ %lld\n",
-	       bwData->id.toString().c_str(),
-	       req.keyRange.begin.printable().c_str(),
-	       req.keyRange.end.printable().c_str(),
-	       req.readVersion);
+	if (BW_DEBUG) {
+		printf("BW %s processing blobGranuleFileRequest for range [%s-%s) @ %lld\n",
+		       bwData->id.toString().c_str(),
+		       req.keyRange.begin.printable().c_str(),
+		       req.keyRange.end.printable().c_str(),
+		       req.readVersion);
+	}
+
 	try {
 		// TODO REMOVE in api V2
 		ASSERT(req.beginVersion == 0);
@@ -2017,13 +1973,10 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 				throw wrong_shard_server();
 			}
 
-			printf("is readable\n");
-
 			state KeyRange chunkRange;
 			state GranuleFiles chunkFiles;
 
 			if (metadata->initialSnapshotVersion > req.readVersion) {
-				printf("time travel query\n");
 				// this is a time travel query, find previous granule
 				if (metadata->historyLoaded.canBeSet()) {
 					choose {
@@ -2101,7 +2054,6 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 				ASSERT(chunkFiles.deltaFiles.back().version > req.readVersion);
 				ASSERT(chunkFiles.snapshotFiles.front().version <= req.readVersion);
 			} else {
-
 				// this is an active granule query
 				loop {
 					if (!metadata->activeCFData.get().isValid()) {

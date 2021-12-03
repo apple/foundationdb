@@ -24,22 +24,8 @@
 
 #include <sstream>
 
-#include "flow/flow.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
-#include "flow/actorcompiler.h" // has to be last include
-
-// Stores the value representation of a blob granule history entry in FDB
-struct BlobGranuleHistoryValue {
-	constexpr static FileIdentifier file_identifier = 991434;
-	UID granuleID;
-	VectorRef<std::pair<KeyRangeRef, Version>> parentGranules;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, granuleID, parentGranules);
-	}
-};
 
 // file format of actual blob files
 struct GranuleSnapshot : VectorRef<KeyValueRef> {
@@ -102,4 +88,16 @@ struct BlobGranuleChunkRef {
 };
 
 enum BlobGranuleSplitState { Unknown = 0, Initialized = 1, Assigned = 2, Done = 3 };
+
+struct BlobGranuleHistoryValue {
+	constexpr static FileIdentifier file_identifier = 991434;
+	UID granuleID;
+	VectorRef<std::pair<KeyRangeRef, Version>> parentGranules;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, granuleID, parentGranules);
+	}
+};
+
 #endif
