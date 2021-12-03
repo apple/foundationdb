@@ -205,6 +205,7 @@ struct BlobManagerData {
 	std::unordered_map<UID, BlobWorkerInterface> workersById;
 	std::unordered_map<UID, BlobWorkerStats> workerStats; // mapping between workerID -> workerStats
 	std::unordered_set<NetworkAddress> workerAddresses;
+	std::unordered_set<UID> deadWorkers;
 	KeyRangeMap<UID> workerAssignments;
 	KeyRangeMap<bool> knownBlobRanges;
 
@@ -773,7 +774,7 @@ ACTOR Future<Void> deregisterBlobWorker(BlobManagerData* bmData, BlobWorkerInter
 }
 
 ACTOR Future<Void> killBlobWorker(BlobManagerData* bmData, BlobWorkerInterface bwInterf, bool registered) {
-	UID bwId = bwInterf.id();
+	state UID bwId = bwInterf.id();
 
 	// Remove blob worker from stats map so that when we try to find a worker to takeover the range,
 	// the one we just killed isn't considered.
@@ -781,6 +782,7 @@ ACTOR Future<Void> killBlobWorker(BlobManagerData* bmData, BlobWorkerInterface b
 	// when we try to recruit new blob workers.
 
 	if (registered) {
+		bmData->deadWorkers.insert(bwId);
 		bmData->workerStats.erase(bwId);
 		bmData->workersById.erase(bwId);
 		bmData->workerAddresses.erase(bwInterf.stableAddress());
@@ -825,6 +827,11 @@ ACTOR Future<Void> killBlobWorker(BlobManagerData* bmData, BlobWorkerInterface b
 	    brokenPromiseToNever(bwInterf.haltBlobWorker.getReply(HaltBlobWorkerRequest(bmData->epoch, bmData->id))));
 
 	wait(deregister);
+
+	if (registered) {
+		bmData->deadWorkers.erase(bwId);
+	}
+
 	return Void();
 }
 
@@ -974,20 +981,29 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 	return Void();
 }
 
-ACTOR Future<Void> checkBlobWorkerList(BlobManagerData* bmData) {
+ACTOR Future<Void> checkBlobWorkerList(BlobManagerData* bmData, Promise<Void> workerListReady) {
 	loop {
-		wait(delay(SERVER_KNOBS->BLOB_WORKERLIST_FETCH_INTERVAL));
+		// Get list of last known blob workers
+		// note: the list will include every blob worker that the old manager knew about,
+		// but it might also contain blob workers that died while the new manager was being recruited
 		std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db));
+		// add all blob workers to this new blob manager's records and start monitoring it
 		for (auto& worker : blobWorkers) {
-			if (!bmData->workerAddresses.count(worker.stableAddress())) {
-				bmData->workerAddresses.insert(worker.stableAddress());
-				bmData->workersById[worker.id()] = worker;
-				bmData->workerStats[worker.id()] = BlobWorkerStats();
-				bmData->addActor.send(monitorBlobWorker(bmData, worker));
-			} else if (!bmData->workersById.count(worker.id())) {
-				bmData->addActor.send(killBlobWorker(bmData, worker, false));
+			if (!bmData->deadWorkers.count(worker.id())) {
+				if (!bmData->workerAddresses.count(worker.stableAddress())) {
+					bmData->workerAddresses.insert(worker.stableAddress());
+					bmData->workersById[worker.id()] = worker;
+					bmData->workerStats[worker.id()] = BlobWorkerStats();
+					bmData->addActor.send(monitorBlobWorker(bmData, worker));
+				} else if (!bmData->workersById.count(worker.id())) {
+					bmData->addActor.send(killBlobWorker(bmData, worker, false));
+				}
 			}
 		}
+		if (workerListReady.canBeSet()) {
+			workerListReady.send(Void());
+		}
+		wait(delay(SERVER_KNOBS->BLOB_WORKERLIST_FETCH_INTERVAL));
 	}
 }
 
@@ -998,24 +1014,9 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 		return Void();
 	}
 
-	// Get list of last known blob workers
-	// note: the list will include every blob worker that the old manager knew about,
-	// but it might also contain blob workers that died while the new manager was being recruited
-	std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db));
-
-	// add all blob workers to this new blob manager's records and start monitoring it
-	for (auto& worker : blobWorkers) {
-		if (!bmData->workerAddresses.count(worker.stableAddress())) {
-			bmData->workerAddresses.insert(worker.stableAddress());
-			bmData->workersById[worker.id()] = worker;
-			bmData->workerStats[worker.id()] = BlobWorkerStats();
-			bmData->addActor.send(monitorBlobWorker(bmData, worker));
-		} else if (!bmData->workersById.count(worker.id())) {
-			bmData->addActor.send(killBlobWorker(bmData, worker, false));
-		}
-	}
-
-	bmData->addActor.send(checkBlobWorkerList(bmData));
+	state Promise<Void> workerListReady;
+	bmData->addActor.send(checkBlobWorkerList(bmData, workerListReady));
+	wait(workerListReady.getFuture());
 
 	// Once we acknowledge the existing blob workers, we can go ahead and recruit new ones
 	bmData->startRecruiting.trigger();
