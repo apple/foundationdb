@@ -61,7 +61,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	std::vector<Future<Void>> clients;
 
 	Reference<BackupContainerFileSystem> bstore;
-	AsyncVar<std::vector<KeyRange>> granuleRanges;
+	AsyncVar<Standalone<VectorRef<KeyRangeRef>>> granuleRanges;
 
 	BlobGranuleVerifierWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		doSetup = !clientId; // only do this on the "first" client
@@ -142,28 +142,17 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> findGranules(Database cx, BlobGranuleVerifierWorkload* self) {
-		// updates the current set of granules in the database, but on a delay, so there can be some mismatch if ranges
-		// change
 		loop {
-			state std::vector<KeyRange> allGranules;
 			state Transaction tr(cx);
-			state PromiseStream<KeyRange> stream;
-			state Future<Void> reader = cx->getBlobGranuleRangesStream(stream, normalKeys);
 			loop {
 				try {
-					KeyRange r = waitNext(stream.getFuture());
-					allGranules.push_back(r);
+					Standalone<VectorRef<KeyRangeRef>> allGranules = wait(tr.getBlobGranuleRanges(normalKeys));
+					self->granuleRanges.set(allGranules);
+					break;
 				} catch (Error& e) {
-					if (e.code() == error_code_end_of_stream) {
-						break;
-					}
-					throw e;
+					wait(tr.onError(e));
 				}
 			}
-			wait(reader);
-			// printf("BG find granules found %d granules\n", allGranules.size());
-			self->granuleRanges.set(allGranules);
-
 			wait(delay(deterministicRandom()->random01() * 10.0));
 		}
 	}
@@ -193,32 +182,29 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		return std::pair(out, v);
 	}
 
+	// FIXME: typedef this pair type and/or chunk list
 	ACTOR Future<std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>>
 	readFromBlob(Database cx, BlobGranuleVerifierWorkload* self, KeyRange range, Version version) {
 		state RangeResult out;
-		state Standalone<VectorRef<BlobGranuleChunkRef>> replyOut;
-		state PromiseStream<Standalone<BlobGranuleChunkRef>> chunkStream;
-		state Future<Void> requester = cx->readBlobGranulesStream(chunkStream, range, 0, version);
+		state Standalone<VectorRef<BlobGranuleChunkRef>> chunks;
+		state Transaction tr(cx);
+
 		loop {
 			try {
-				Standalone<BlobGranuleChunkRef> nextChunk = waitNext(chunkStream.getFuture());
-				out.arena().dependsOn(
-				    nextChunk.arena()); // FIXME: this wastes extra memory but fixes a segfault because nextChunk gets
-				                        // deallocated as soon as we wait on readBlobGranule.
-				replyOut.arena().dependsOn(nextChunk.arena());
-				replyOut.push_back(replyOut.arena(), nextChunk);
-
-				RangeResult chunkRows = wait(readBlobGranule(nextChunk, range, version, self->bstore));
-				out.arena().dependsOn(chunkRows.arena());
-				out.append(out.arena(), chunkRows.begin(), chunkRows.size());
+				Standalone<VectorRef<BlobGranuleChunkRef>> chunks_ = wait(tr.readBlobGranules(range, 0, version));
+				chunks = chunks_;
+				break;
 			} catch (Error& e) {
-				if (e.code() == error_code_end_of_stream) {
-					break;
-				}
-				throw e;
+				wait(tr.onError(e));
 			}
 		}
-		return std::pair(out, replyOut);
+
+		for (const BlobGranuleChunkRef& chunk : chunks) {
+			RangeResult chunkRows = wait(readBlobGranule(chunk, range, version, self->bstore));
+			out.arena().dependsOn(chunkRows.arena());
+			out.append(out.arena(), chunkRows.begin(), chunkRows.size());
+		}
+		return std::pair(out, chunks);
 	}
 
 	bool compareResult(RangeResult fdb,
@@ -407,12 +393,13 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	ACTOR Future<bool> _check(Database cx, BlobGranuleVerifierWorkload* self) {
 		// check error counts, and do an availability check at the end
 
-		Transaction tr(cx);
+		state Transaction tr(cx);
 		state Version readVersion = wait(tr.getReadVersion());
 		state int checks = 0;
 
+		state KeyRange last;
 		state bool availabilityPassed = true;
-		state std::vector<KeyRange> allRanges = self->granuleRanges.get();
+		state Standalone<VectorRef<KeyRangeRef>> allRanges = self->granuleRanges.get();
 		for (auto& range : allRanges) {
 			state KeyRange r = range;
 			state PromiseStream<Standalone<BlobGranuleChunkRef>> chunkStream;
@@ -422,33 +409,36 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				           r.end.printable(),
 				           readVersion);
 			}
-			state KeyRange last;
-			state Future<Void> requester = cx->readBlobGranulesStream(chunkStream, r, 0, readVersion);
-			loop {
-				try {
-					// just make sure granule returns a non-error response, to ensure the range wasn't lost and the
-					// workers are all caught up. Kind of like a quiet database check, just for the blob workers
-					Standalone<BlobGranuleChunkRef> nextChunk = waitNext(chunkStream.getFuture());
-					last = nextChunk.keyRange;
-					checks++;
-				} catch (Error& e) {
-					if (e.code() == error_code_end_of_stream) {
-						break;
+
+			try {
+				loop {
+					tr.reset();
+					try {
+						Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
+						    wait(tr.readBlobGranules(r, 0, readVersion));
+						ASSERT(chunks.size() > 0);
+						last = chunks.back().keyRange;
+						checks += chunks.size();
+					} catch (Error& e) {
+						wait(tr.onError(e));
 					}
-					if (BGV_DEBUG) {
-						fmt::print(
-						    "BG Verifier failed final availability check for [{0} - {1}) @ {2} with error {3}. Last "
-						    "Success=[{4} - {5})\n",
-						    r.begin.printable(),
-						    r.end.printable(),
-						    readVersion,
-						    e.name(),
-						    last.begin.printable(),
-						    last.end.printable());
-					}
-					availabilityPassed = false;
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_end_of_stream) {
 					break;
 				}
+				if (BGV_DEBUG) {
+					fmt::print("BG Verifier failed final availability check for [{0} - {1}) @ {2} with error {3}. Last "
+					           "Success=[{4} - {5})\n",
+					           r.begin.printable(),
+					           r.end.printable(),
+					           readVersion,
+					           e.name(),
+					           last.begin.printable(),
+					           last.end.printable());
+				}
+				availabilityPassed = false;
+				break;
 			}
 		}
 		fmt::print("Blob Granule Verifier finished with:\n");

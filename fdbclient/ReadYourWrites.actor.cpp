@@ -1672,6 +1672,46 @@ Future<Standalone<VectorRef<KeyRef>>> ReadYourWritesTransaction::getRangeSplitPo
 	return waitOrError(tr.getRangeSplitPoints(range, chunkSize), resetPromise.getFuture());
 }
 
+Future<Standalone<VectorRef<KeyRangeRef>>> ReadYourWritesTransaction::getBlobGranuleRanges(const KeyRange& range) {
+	if (checkUsedDuringCommit()) {
+		return used_during_commit();
+	}
+	if (resetPromise.isSet())
+		return resetPromise.getFuture().getError();
+
+	KeyRef maxKey = getMaxReadKey();
+	if (range.begin > maxKey || range.end > maxKey)
+		return key_outside_legal_range();
+
+	return waitOrError(tr.getBlobGranuleRanges(range), resetPromise.getFuture());
+}
+
+Future<Standalone<VectorRef<BlobGranuleChunkRef>>> ReadYourWritesTransaction::readBlobGranules(
+    const KeyRange& range,
+    Version begin,
+    Optional<Version> readVersion,
+    Version* readVersionOut) {
+	// Remove in V2 of API
+	ASSERT(begin == 0);
+
+	if (!options.readYourWritesDisabled) {
+		return blob_granule_no_ryw();
+	}
+
+	if (checkUsedDuringCommit()) {
+		return used_during_commit();
+	}
+
+	if (resetPromise.isSet())
+		return resetPromise.getFuture().getError();
+
+	KeyRef maxKey = getMaxReadKey();
+	if (range.begin > maxKey || range.end > maxKey)
+		return key_outside_legal_range();
+
+	return waitOrError(tr.readBlobGranules(range, begin, readVersion, readVersionOut), resetPromise.getFuture());
+}
+
 void ReadYourWritesTransaction::addReadConflictRange(KeyRangeRef const& keys) {
 	if (checkUsedDuringCommit()) {
 		throw used_during_commit();

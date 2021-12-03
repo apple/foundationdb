@@ -234,7 +234,7 @@ struct NetworkAddress {
 	IPAddress ip;
 	uint16_t port;
 	uint16_t flags;
-	NetworkAddressFromHostname fromHostname;
+	bool fromHostname;
 
 	enum { FLAG_PRIVATE = 1, FLAG_TLS = 2 };
 
@@ -296,8 +296,7 @@ struct NetworkAddress {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (is_fb_function<Ar>) {
-			bool fromHN = fromHostname == NetworkAddressFromHostname::True;
-			serializer(ar, ip, port, flags, fromHN);
+			serializer(ar, ip, port, flags, fromHostname);
 		} else {
 			if (ar.isDeserializing && !ar.protocolVersion().hasIPv6()) {
 				uint32_t ipV4;
@@ -307,8 +306,7 @@ struct NetworkAddress {
 				serializer(ar, ip, port, flags);
 			}
 			if (ar.protocolVersion().hasNetworkAddressHostnameFlag()) {
-				bool fromHN = fromHostname == NetworkAddressFromHostname::True;
-				serializer(ar, fromHN);
+				serializer(ar, fromHostname);
 			}
 		}
 	}

@@ -185,7 +185,7 @@ Future<Reference<IConnection>> INetworkConnections::connect(const std::string& h
 	Future<NetworkAddress> pickEndpoint =
 	    map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
 		    NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
-		    addr.fromHostname = NetworkAddressFromHostname::True;
+		    addr.fromHostname = true;
 		    if (useTLS) {
 			    addr.flags = NetworkAddress::FLAG_TLS;
 		    }
@@ -214,7 +214,7 @@ TEST_CASE("/flow/network/ipaddress") {
 		auto addrCompressed = "[2001:db8:85a3::8a2e:370:7334]:4800";
 		ASSERT(addrParsed.isV6());
 		ASSERT(!addrParsed.isTLS());
-		ASSERT(addrParsed.fromHostname == NetworkAddressFromHostname::False);
+		ASSERT(addrParsed.fromHostname == false);
 		ASSERT(addrParsed.toString() == addrCompressed);
 		ASSERT(addrParsed.toString() == addrCompressed);
 	}
@@ -225,7 +225,7 @@ TEST_CASE("/flow/network/ipaddress") {
 		auto addrCompressed = "[2001:db8:85a3::8a2e:370:7334]:4800:tls(fromHostname)";
 		ASSERT(addrParsed.isV6());
 		ASSERT(addrParsed.isTLS());
-		ASSERT(addrParsed.fromHostname == NetworkAddressFromHostname::True);
+		ASSERT(addrParsed.fromHostname == true);
 		ASSERT(addrParsed.toString() == addrCompressed);
 	}
 
