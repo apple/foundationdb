@@ -1895,6 +1895,11 @@ public:
 
 	// Returns true if remote DC is healthy and can failover to.
 	bool remoteDCIsHealthy() {
+		// Ignore remote DC health if worker health monitor is disabled.
+		if (!SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
+			return true;
+		}
+
 		// When we just start, we ignore any remote DC health info since the current CC may be elected at wrong DC due
 		// to that all the processes are still starting.
 		if (machineStartTime() == 0) {
