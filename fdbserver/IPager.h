@@ -20,12 +20,15 @@
 
 #ifndef FDBSERVER_IPAGER_H
 #define FDBSERVER_IPAGER_H
+#include "flow/Error.h"
+#include <stdint.h>
 #pragma once
 
 #include "fdbserver/IKeyValueStore.h"
 
 #include "flow/flow.h"
 #include "fdbclient/FDBTypes.h"
+#define XXH_INLINE_ALL
 #include "flow/xxhash.h"
 
 #ifndef VALGRIND
@@ -76,11 +79,37 @@ static const std::vector<std::pair<PagerEvents, PagerEventReasons>> L0PossibleEv
 	{ PagerEvents::PageWrite, PagerEventReasons::MetaData },
 };
 
+enum EncodingType : uint8_t {
+	XXHash64 = 0,
+	// For testing purposes
+	XOREncryption = 1
+};
+
+enum PageType : uint8_t {
+	HeaderPage = 0,
+	BackupHeaderPage = 1,
+	BTreeNode = 2,
+	BTreeSuperNode = 3,
+	QueuePageStandalone = 4,
+	QueuePageInExtent = 5
+};
+
 // Represents a block of memory in a 4096-byte aligned location held by an Arena.
+// Page Format:
+//    VersionHeader
+//    Header based on headerVersion
+//    EncodingType-specific Header
+//    Footer based headerVersion
+//    Payload acording to encoding
+//
+// Pages can only be written using the latest HeaderVersion
+//
+// preWrite() must be called before writing a page to disk, which will do any checksum generation or encryption needed
+// postRead() must be called after loading a page from disk, which will do any verification or decryption needed
 class ArenaPage : public ReferenceCounted<ArenaPage>, public FastAllocated<ArenaPage> {
 public:
-	// The page's logical size includes an opaque checksum, use size() to get usable size
-	ArenaPage(int logicalSize, int bufferSize) : logicalSize(logicalSize), bufferSize(bufferSize), userData(nullptr) {
+	ArenaPage(int logicalSize, int bufferSize)
+	  : logicalSize(logicalSize), bufferSize(bufferSize), pUsable(nullptr), userData(nullptr) {
 		if (bufferSize > 0) {
 			buffer = (uint8_t*)arena.allocate4kAlignedBuffer(bufferSize);
 
@@ -91,27 +120,163 @@ public:
 		}
 	};
 
+	// Convenient constructor that returns a reference
+	static Reference<ArenaPage> create(int logicalSize, int bufferSize) {
+		return Reference<ArenaPage>(new ArenaPage(logicalSize, bufferSize));
+	}
+
 	~ArenaPage() {
 		if (userData != nullptr && userDataDestructor != nullptr) {
 			userDataDestructor(userData);
 		}
 	}
 
-	uint8_t const* begin() const { return (uint8_t*)buffer; }
+	// Before using begin() or size(), either init() or postRead() must be called
+	const uint8_t* data() const { return pUsable; }
+	uint8_t* mutateData() const { return (uint8_t*)pUsable; }
+	int dataSize() const { return usableSize; }
 
-	uint8_t* mutate() { return (uint8_t*)buffer; }
+	const uint8_t* rawData() const { return buffer; }
+	uint8_t* rawData() { return buffer; }
+	int rawSize() const { return bufferSize; }
+	static constexpr uint8_t HEADER_WRITE_VERSION = 1;
 
-	typedef XXH64_hash_t Checksum;
+#pragma pack(push, 1)
 
-	// Usable size, without checksum
-	int size() const { return logicalSize - sizeof(Checksum); }
+	// This can't change
+	struct VersionHeader {
+		uint8_t headerVersion;
+		EncodingType encodingType;
+	};
 
-	Standalone<StringRef> asStringRef() const { return Standalone<StringRef>(StringRef(begin(), size()), arena); }
+	struct Header {
+		// pageType Meaning is based on type.
+		//   For Queue pages, pageSubType is QueueID
+		//   For BTree nodes, pageSubType is Height (also stored in BTreeNode)
+		PageType pageType;
+		uint8_t pageSubType;
+
+		// Physical page ID of first block on disk of the ArenaPage
+		PhysicalPageID firstPhysicalPageID;
+		// The first logical page ID the ArenaPage was referenced by when last written
+		LogicalPageID lastKnownLogicalPageID;
+		// The first logical page ID of the parent of this ArenaPage when last written
+		LogicalPageID lastKnownParentID;
+
+		// Time and write version as of the last update to this page
+		double writeTime;
+		Version writeVersion;
+	};
+
+	struct XXHashEncodingHeader {
+		XXH64_hash_t checksum;
+		void encode(uint8_t* payload, int len, PhysicalPageID seed) {
+			checksum = XXH3_64bits_withSeed(payload, len, seed);
+		}
+		void decode(uint8_t* payload, int len, PhysicalPageID seed) {
+			if (checksum != XXH3_64bits_withSeed(payload, len, seed)) {
+				throw checksum_failed();
+			}
+		}
+	};
+
+	struct XOREncodingHeader {
+		XXH64_hash_t checksum;
+		uint8_t keyID;
+		void encode(uint8_t secret, uint8_t* payload, int len, PhysicalPageID seed) {
+			uint8_t key = secret ^ keyID;
+			for (int i = 0; i < len; ++i) {
+				payload[i] ^= key;
+			}
+			checksum = XXH3_64bits_withSeed(payload, len, seed);
+		}
+		void decode(uint8_t secret, uint8_t* payload, int len, PhysicalPageID seed) {
+			if (checksum != XXH3_64bits_withSeed(payload, len, seed)) {
+				throw checksum_failed();
+			}
+			uint8_t key = secret ^ keyID;
+			for (int i = 0; i < len; ++i) {
+				payload[i] ^= key;
+			}
+		}
+	};
+
+	struct Footer {
+		XXH64_hash_t checksum;
+		void update(uint8_t* payload, int len) { checksum = XXH3_64bits(payload, len); }
+		void verify(uint8_t* payload, int len) {
+			if (checksum != XXH3_64bits(payload, len)) {
+				throw checksum_failed();
+			}
+		}
+	};
+
+#pragma pack(pop)
+
+	// Syntactic sugar for getting a series of types from a byte buffer
+	// The Reader casts to any T * and increments the read pointer by T's size.
+	struct Reader {
+		uint8_t* ptr;
+		template <typename T>
+		operator T*() {
+			T* p = (T*)ptr;
+			ptr += sizeof(T);
+			return p;
+		}
+		template <typename T>
+		void skip() {
+			ptr += sizeof(T);
+		}
+	};
+
+	// Initialize the header for a new page to be populated soon and written to disk
+	void init(EncodingType t, PageType pageType, uint8_t pageSubType) {
+		Reader next{ buffer };
+		VersionHeader* vh = next;
+		// Only the latest header version is written.
+		vh->headerVersion = HEADER_WRITE_VERSION;
+		vh->encodingType = t;
+
+		Header* h = next;
+		h->pageType = pageType;
+		h->pageSubType = pageSubType;
+
+		if (t == EncodingType::XXHash64) {
+			next.skip<XXHashEncodingHeader>();
+		} else if (t == EncodingType::XOREncryption) {
+			next.skip<XOREncodingHeader>();
+		} else {
+			throw unsupported_format_version();
+		}
+
+		next.skip<XXH64_hash_t>();
+
+		pUsable = next;
+		usableSize = logicalSize - (pUsable - buffer);
+	}
+
+	// Get the usable size for a new page of pageSize using HEADER_WRITE_VERSION with encoding type t
+	static int getUsableSize(int pageSize, EncodingType t) {
+		int usable = pageSize - sizeof(VersionHeader) - sizeof(Header) - sizeof(XXH64_hash_t);
+
+		if (t == EncodingType::XXHash64) {
+			usable -= sizeof(XXHashEncodingHeader);
+		} else if (t == EncodingType::XOREncryption) {
+			usable -= sizeof(XOREncodingHeader);
+		} else {
+			throw unsupported_format_version();
+		}
+
+		return usable;
+	}
+
+	Standalone<StringRef> asStringRef() const { return Standalone<StringRef>(StringRef(buffer, logicalSize)); }
 
 	// Get an ArenaPage which is a copy of this page, in its own Arena
 	Reference<ArenaPage> cloneContents() const {
 		ArenaPage* p = new ArenaPage(logicalSize, bufferSize);
 		memcpy(p->buffer, buffer, logicalSize);
+		p->pUsable = p->buffer + (pUsable - buffer);
 		return Reference<ArenaPage>(p);
 	}
 
@@ -123,41 +288,91 @@ public:
 		return Reference<ArenaPage>(p);
 	}
 
-	// Given a vector of pages with the same ->size(), create a new ArenaPage with a ->size() that is
-	// equivalent to all of the input pages and has all of their contents copied into it.
-	static Reference<ArenaPage> concatPages(const std::vector<Reference<const ArenaPage>>& pages) {
-		int usableSize = pages.front()->size();
-		int totalUsableSize = pages.size() * usableSize;
-		int totalBufferSize = pages.front()->bufferSize * pages.size();
-		ArenaPage* superpage = new ArenaPage(totalUsableSize + sizeof(Checksum), totalBufferSize);
+	// Must be called before writing to disk to update headers and encrypt page
+	// Pre:   Encoding secrets and other options must be set
+	// Post:  Encoding options will be stored in page if needed, payload will be encrypted
+	void preWrite(PhysicalPageID pageID) const {
+		Reader next{ buffer };
+		const VersionHeader* vh = next;
+		ASSERT(vh->headerVersion == HEADER_WRITE_VERSION);
 
-		uint8_t* wptr = superpage->mutate();
-		for (auto& p : pages) {
-			ASSERT(p->size() == usableSize);
-			memcpy(wptr, p->begin(), usableSize);
-			wptr += usableSize;
+		Header* h = next;
+		h->firstPhysicalPageID = pageID;
+
+		if (vh->encodingType == EncodingType::XXHash64) {
+			XXHashEncodingHeader* xh = next;
+			xh->encode(pUsable, usableSize, pageID);
+		} else if (vh->encodingType == EncodingType::XOREncryption) {
+			XOREncodingHeader* xorh = next;
+			xorh->keyID = xorKeyID;
+			xorh->encode(xorKeySecret, pUsable, usableSize, pageID);
+		} else {
+			throw unsupported_format_version();
 		}
 
-		return Reference<ArenaPage>(superpage);
+		Footer* f = next;
+		f->update(buffer, (uint8_t*)f - buffer);
 	}
 
-	Checksum& getChecksum() { return *(Checksum*)(buffer + size()); }
+	// Must be called after reading from disk to verify and decrypt page
+	// Pre:   Encoding secrets must be set
+	// Post:  Encoding options that come from page data will be populated, payload will be decrypted
+	void postRead(PhysicalPageID pageID) {
+		Reader next{ buffer };
+		const VersionHeader* vh = next;
 
-	Checksum calculateChecksum(LogicalPageID pageID) { return XXH3_64bits_withSeed(buffer, size(), pageID); }
+		if (vh->headerVersion == 1) {
+			next.skip<Header>();
+			XXHashEncodingHeader* xh = nullptr;
+			XOREncodingHeader* xorh = nullptr;
 
-	void updateChecksum(LogicalPageID pageID) { getChecksum() = calculateChecksum(pageID); }
+			if (vh->encodingType == EncodingType::XXHash64) {
+				xh = next;
+			} else if (vh->encodingType == EncodingType::XOREncryption) {
+				xorh = next;
+			} else {
+				throw unsupported_format_version();
+			}
 
-	bool verifyChecksum(LogicalPageID pageID) { return getChecksum() == calculateChecksum(pageID); }
+			Footer* f = next;
+			f->verify(buffer, (uint8_t*)f - buffer);
+
+			if (xh != nullptr) {
+				xh->decode(pUsable, usableSize, pageID);
+			} else if (xorh != nullptr) {
+				xorh->decode(xorKeySecret, pUsable, usableSize, pageID);
+				xorKeyID = xorh->keyID;
+			}
+		} else {
+			throw unsupported_format_version();
+		}
+	}
 
 	const Arena& getArena() const { return arena; }
 
 private:
 	Arena arena;
+
+	// The logical size of the page, which can be smaller than bufferSize, which is only of
+	// practical purpose in simulation to use arbitrarily small page sizes to test edge cases
+	// with shorter execution time
 	int logicalSize;
+
+	// The physical size of allocated memory for the page which also represents the space
+	// to be written to disk
 	int bufferSize;
 	uint8_t* buffer;
 
+	// Pointer and length of page space available to the user
+	uint8_t* pUsable;
+	int usableSize;
+
+	// Encoding-specific secrets
+	uint8_t xorKeyID;
+	uint8_t xorKeySecret;
+
 public:
+	// A metadata object that can be attached to the page and will be deleted with the page
 	mutable void* userData;
 	mutable void (*userDataDestructor)(void*);
 };
@@ -191,12 +406,11 @@ public:
 class IPager2 : public IClosable {
 public:
 	// Returns an ArenaPage that can be passed to writePage. The data in the returned ArenaPage might not be zeroed.
-	virtual Reference<ArenaPage> newPageBuffer(size_t size = 1) = 0;
+	virtual Reference<ArenaPage> newPageBuffer(size_t blocks = 1) = 0;
 
 	// Returns the usable size of pages returned by the pager (i.e. the size of the page that isn't pager overhead).
 	// For a given pager instance, separate calls to this function must return the same value.
 	// Only valid to call after recovery is complete.
-	virtual int getUsablePageSize() const = 0;
 	virtual int getPhysicalPageSize() const = 0;
 	virtual int getLogicalPageSize() const = 0;
 	virtual int getPagesPerExtent() const = 0;
