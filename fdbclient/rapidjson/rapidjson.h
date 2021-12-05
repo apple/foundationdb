@@ -449,7 +449,7 @@ RAPIDJSON_NAMESPACE_END
  */
 #define RAPIDJSON_STATIC_ASSERT(x)                                                                                     \
 	typedef ::RAPIDJSON_NAMESPACE::StaticAssertTest<sizeof(::RAPIDJSON_NAMESPACE::STATIC_ASSERTION_FAILURE<bool(x)>)>  \
-	    RAPIDJSON_JOIN(StaticAssertTypedef, __LINE__) RAPIDJSON_STATIC_ASSERT_UNUSED_ATTRIBUTE
+	RAPIDJSON_JOIN(StaticAssertTypedef, __LINE__) RAPIDJSON_STATIC_ASSERT_UNUSED_ATTRIBUTE
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////

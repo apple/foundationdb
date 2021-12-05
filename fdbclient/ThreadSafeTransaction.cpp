@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/DatabaseContext.h"
@@ -257,6 +258,23 @@ ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& 
 	});
 }
 
+ThreadFuture<RangeResult> ThreadSafeTransaction::getRangeAndFlatMap(const KeySelectorRef& begin,
+                                                                    const KeySelectorRef& end,
+                                                                    const StringRef& mapper,
+                                                                    GetRangeLimits limits,
+                                                                    bool snapshot,
+                                                                    bool reverse) {
+	KeySelector b = begin;
+	KeySelector e = end;
+	Key h = mapper;
+
+	ISingleThreadTransaction* tr = this->tr;
+	return onMainThread([tr, b, e, h, limits, snapshot, reverse]() -> Future<RangeResult> {
+		tr->checkDeferredError();
+		return tr->getRangeAndFlatMap(b, e, h, limits, Snapshot{ snapshot }, Reverse{ reverse });
+	});
+}
+
 ThreadFuture<Standalone<VectorRef<const char*>>> ThreadSafeTransaction::getAddressesForKey(const KeyRef& key) {
 	Key k = key;
 
@@ -265,6 +283,56 @@ ThreadFuture<Standalone<VectorRef<const char*>>> ThreadSafeTransaction::getAddre
 		tr->checkDeferredError();
 		return tr->getAddressesForKey(k);
 	});
+}
+
+ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeTransaction::getBlobGranuleRanges(
+    const KeyRangeRef& keyRange) {
+	ISingleThreadTransaction* tr = this->tr;
+	KeyRange r = keyRange;
+
+	return onMainThread([tr, r]() -> Future<Standalone<VectorRef<KeyRangeRef>>> {
+		tr->checkDeferredError();
+		return tr->getBlobGranuleRanges(r);
+	});
+}
+
+ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranules(const KeyRangeRef& keyRange,
+                                                                  Version beginVersion,
+                                                                  Optional<Version> readVersion,
+                                                                  ReadBlobGranuleContext granule_context) {
+	// In V1 of api this is required, field is just for forward compatibility
+	ASSERT(beginVersion == 0);
+
+	// FIXME: prevent from calling this from another main thread!
+
+	bool doMaterialize = !granule_context.debugNoMaterialize;
+
+	ISingleThreadTransaction* tr = this->tr;
+	KeyRange r = keyRange;
+
+	int64_t readVersionOut;
+	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> getFilesFuture = onMainThread(
+	    [tr, r, beginVersion, readVersion, &readVersionOut]() -> Future<Standalone<VectorRef<BlobGranuleChunkRef>>> {
+		    tr->checkDeferredError();
+		    return tr->readBlobGranules(r, beginVersion, readVersion, &readVersionOut);
+	    });
+
+	// FIXME: can this safely avoid another main thread jump?
+	getFilesFuture.blockUntilReadyCheckOnMainThread();
+
+	// propagate error to client
+	if (getFilesFuture.isError()) {
+		return ThreadResult<RangeResult>(getFilesFuture.getError());
+	}
+
+	Standalone<VectorRef<BlobGranuleChunkRef>> files = getFilesFuture.get();
+
+	// do this work off of fdb network threads for performance!
+	if (doMaterialize) {
+		return loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersionOut, granule_context);
+	} else {
+		return ThreadResult<RangeResult>(blob_granule_not_materialized());
+	}
 }
 
 void ThreadSafeTransaction::addReadConflictRange(const KeyRangeRef& keys) {
@@ -490,5 +558,3 @@ void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* ho
 	                          // upon return that the hook is set.
 	threadCompletionHooks.emplace_back(hook, hookParameter);
 }
-
-IClientApi* ThreadSafeApi::api = new ThreadSafeApi();

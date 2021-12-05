@@ -49,7 +49,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES BackupContainers.txt IGNORE)
   add_fdb_test(TEST_FILES BandwidthThrottle.txt IGNORE)
   add_fdb_test(TEST_FILES BigInsert.txt IGNORE)
-  add_fdb_test(TEST_FILES BlobGranuleReaderUnit.txt IGNORE)
+  add_fdb_test(TEST_FILES BlobGranuleFileUnit.txt IGNORE)
   add_fdb_test(TEST_FILES BlobManagerUnit.txt IGNORE)
   add_fdb_test(TEST_FILES ConsistencyCheck.txt IGNORE)
   add_fdb_test(TEST_FILES DDMetricsExclude.txt IGNORE)
@@ -127,6 +127,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BackupCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectnessClean.toml)
+  add_fdb_test(TEST_FILES fast/BlobGranuleCorrectness.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/BlobGranuleCorrectnessClean.toml IGNORE)
   add_fdb_test(TEST_FILES fast/CacheTest.toml)
   add_fdb_test(TEST_FILES fast/CloggedSideband.toml)
   add_fdb_test(TEST_FILES fast/ConfigureLocked.toml)
@@ -150,6 +152,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/MemoryLifetime.toml)
   add_fdb_test(TEST_FILES fast/MoveKeysCycle.toml)
   add_fdb_test(TEST_FILES fast/MutationLogReaderCorrectness.toml)
+  add_fdb_test(TEST_FILES fast/GetRangeAndMap.toml)
   add_fdb_test(TEST_FILES fast/ProtocolVersion.toml)
   add_fdb_test(TEST_FILES fast/RandomSelector.toml)
   add_fdb_test(TEST_FILES fast/RandomUnitTests.toml)
@@ -190,6 +193,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/SpecificUnitTests.toml)
   add_fdb_test(TEST_FILES rare/SwizzledLargeApiCorrectness.toml)
   add_fdb_test(TEST_FILES rare/RedwoodCorrectnessBTree.toml)
+  add_fdb_test(TEST_FILES rare/RedwoodDeltaTree.toml)
   add_fdb_test(TEST_FILES rare/Throttling.toml)
   add_fdb_test(TEST_FILES rare/TransactionTagApiCorrectness.toml)
   add_fdb_test(TEST_FILES rare/TransactionTagSwizzledApiCorrectness.toml)
@@ -207,18 +211,6 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_5.0.0_until_6.3.0/StorefrontTestRestart-1.txt
                restarting/from_5.0.0_until_6.3.0/StorefrontTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapTestAttrition-1.txt
-               restarting/from_6.2.33_until_6.3.0/SnapTestAttrition-2.txt IGNORE) # TODO re-enable once snap test failures are fixed!
-  add_fdb_test(
-    TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapTestSimpleRestart-1.txt
-               restarting/from_6.2.33_until_6.3.0/SnapTestSimpleRestart-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapTestRestart-1.txt
-               restarting/from_6.2.33_until_6.3.0/SnapTestRestart-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_6.2.33_until_6.3.0/SnapCycleRestart-1.txt
-               restarting/from_6.2.33_until_6.3.0/SnapCycleRestart-2.txt)
-  add_fdb_test(
     TEST_FILES restarting/from_5.1.7_until_6.3.0/DrUpgradeRestart-1.txt
                restarting/from_5.1.7_until_6.3.0/DrUpgradeRestart-2.txt)
   add_fdb_test(
@@ -234,18 +226,6 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_6.3.13/DrUpgradeRestart-1.txt
                restarting/from_6.3.13/DrUpgradeRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.3.13/SnapCycleRestart-1.txt
-               restarting/from_6.3.13/SnapCycleRestart-2.txt IGNORE) # TODO re-enable once snap test failures are fixed!
-  add_fdb_test( 
-    TEST_FILES restarting/from_6.3.13/SnapTestAttrition-1.txt
-               restarting/from_6.3.13/SnapTestAttrition-2.txt IGNORE) # TODO re-enable once snap test failures are fixed!
-  add_fdb_test(
-    TEST_FILES restarting/from_6.3.13/SnapTestRestart-1.txt
-               restarting/from_6.3.13/SnapTestRestart-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_6.3.13/SnapTestSimpleRestart-1.txt
-               restarting/from_6.3.13/SnapTestSimpleRestart-2.txt)
-  add_fdb_test(
     TEST_FILES restarting/from_6.3.13/StorefrontTestRestart-1.txt
                restarting/from_6.3.13/StorefrontTestRestart-2.txt)
   add_fdb_test(
@@ -254,12 +234,22 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/to_7.0.0/CycleTestRestart-1.txt
                restarting/to_7.0.0/CycleTestRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.0.0/SnapTestAttrition-1.txt
+               restarting/from_7.0.0/SnapTestAttrition-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.0.0/SnapTestSimpleRestart-1.txt
+               restarting/from_7.0.0/SnapTestSimpleRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.0.0/SnapTestRestart-1.txt
+               restarting/from_7.0.0/SnapTestRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.0.0/SnapCycleRestart-1.txt
+               restarting/from_7.0.0/SnapCycleRestart-2.txt)
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.toml)
-  add_fdb_test(TEST_FILES fast/BlobGranuleCorrectness.toml IGNORE)
   add_fdb_test(TEST_FILES slow/BlobGranuleCorrectnessLarge.toml IGNORE)
-  add_fdb_test(TEST_FILES fast/BlobGranuleCorrectnessClean.toml IGNORE)
   add_fdb_test(TEST_FILES slow/BlobGranuleCorrectnessLargeClean.toml IGNORE)
   add_fdb_test(TEST_FILES slow/ClogWithRollbacks.toml)
   add_fdb_test(TEST_FILES slow/CloggedCycleTest.toml)
@@ -271,6 +261,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/DDBalanceAndRemove.toml)
   add_fdb_test(TEST_FILES slow/DDBalanceAndRemoveStatus.toml)
   add_fdb_test(TEST_FILES slow/DifferentClustersSameRV.toml)
+  add_fdb_test(TEST_FILES slow/DiskFailureCycle.toml)
   add_fdb_test(TEST_FILES slow/FastTriggeredWatches.toml)
   add_fdb_test(TEST_FILES slow/LowLatencyWithFailures.toml)
   add_fdb_test(TEST_FILES slow/MoveKeysClean.toml)

@@ -439,7 +439,6 @@ private:
 		try {
 			state int rep = wait(self->onRead(self, data, length, offset));
 			wait(g_simulator.onProcess(currentProcess, currentTaskID));
-
 			return rep;
 		} catch (Error& e) {
 			state Error err = e;

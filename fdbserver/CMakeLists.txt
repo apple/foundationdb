@@ -164,6 +164,7 @@ set(FDBSERVER_SRCS
   workloads/BulkSetup.actor.h
   workloads/Cache.actor.cpp
   workloads/ChangeConfig.actor.cpp
+  workloads/ClearSingleRange.actor.cpp
   workloads/ClientLibManagementWorkload.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
   workloads/TriggerRecovery.actor.cpp
@@ -182,6 +183,7 @@ set(FDBSERVER_SRCS
   workloads/DDMetricsExclude.actor.cpp
   workloads/DiskDurability.actor.cpp
   workloads/DiskDurabilityTest.actor.cpp
+  workloads/DiskFailureInjection.actor.cpp
   workloads/DummyWorkload.actor.cpp
   workloads/ExternalWorkload.actor.cpp
   workloads/FastTriggeredWatches.actor.cpp
@@ -208,6 +210,7 @@ set(FDBSERVER_SRCS
   workloads/MemoryLifetime.actor.cpp
   workloads/MetricLogging.actor.cpp
   workloads/MutationLogReaderCorrectness.actor.cpp
+  workloads/GetRangeAndMap.actor.cpp
   workloads/ParallelRestore.actor.cpp
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp
@@ -267,8 +270,7 @@ set(FDBSERVER_SRCS
   workloads/WriteTagThrottling.actor.cpp
 )
 
-# ugly hack to make Windows work for now
-if(WIN32)
+if(${COROUTINE_IMPL} STREQUAL libcoro)
   list(APPEND FDBSERVER_SRCS CoroFlowCoro.actor.cpp)
 else()
   list(APPEND FDBSERVER_SRCS CoroFlow.actor.cpp)

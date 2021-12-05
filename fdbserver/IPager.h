@@ -391,7 +391,6 @@ public:
 	                                                                int priority,
 	                                                                bool cacheable,
 	                                                                bool nohit) = 0;
-	virtual bool tryEvictPage(LogicalPageID id) = 0;
 	virtual Version getVersion() const = 0;
 
 	virtual Key getMetaKey() const = 0;
@@ -414,6 +413,9 @@ public:
 	virtual int getPhysicalPageSize() const = 0;
 	virtual int getLogicalPageSize() const = 0;
 	virtual int getPagesPerExtent() const = 0;
+
+	// Write detail fields with pager stats to a trace event
+	virtual void toTraceEvent(TraceEvent& e) const = 0;
 
 	// Allocate a new page ID for a subsequent write.  The page will be considered in-use after the next commit
 	// regardless of whether or not it was written to.
@@ -517,6 +519,9 @@ public:
 	// If any snapshots are in use at a version less than v, the pager can either forcefully
 	// invalidate them or keep their versions around until the snapshots are no longer in use.
 	virtual void setOldestReadableVersion(Version v) = 0;
+
+	// Advance the commit version and the oldest readble version and commit until the remap queue is empty.
+	virtual Future<Void> clearRemapQueue() = 0;
 
 protected:
 	~IPager2() {} // Destruction should be done using close()/dispose() from the IClosable interface
