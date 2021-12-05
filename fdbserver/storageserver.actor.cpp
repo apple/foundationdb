@@ -1877,7 +1877,7 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevError, "LocalChangeFeedError", data->thisServerID).detail("CFID", rangeID.printable()).error(e);
+		TraceEvent(SevError, "LocalChangeFeedError", data->thisServerID).error(e).detail("CFID", rangeID.printable());
 		throw;
 	}
 }
