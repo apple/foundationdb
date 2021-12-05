@@ -5284,6 +5284,11 @@ ACTOR Future<Void> startBlobManager(ClusterControllerData* self) {
 			                                                                      id_used);
 
 			int64_t nextEpoch = wait(getNextBMEpoch(self));
+			if (!self->masterProcessId.present() ||
+			    self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
+			    self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+				continue;
+			}
 			InitializeBlobManagerRequest req(deterministicRandom()->randomUniqueID(), nextEpoch);
 			state WorkerDetails worker = bmWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::BlobManager)) {
