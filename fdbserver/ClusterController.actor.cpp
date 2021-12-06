@@ -3805,11 +3805,14 @@ void checkBetterSingletons(ClusterControllerData* self) {
 ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 	try {
 		wait(delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL));
-		while (!self->goodRecruitmentTime.isReady()) {
-			wait(self->goodRecruitmentTime);
-		}
-		while (now() - self->lastRecruitTime < SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY) {
-			wait(delay(SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY + 0.001 - (now() - self->lastRecruitTime)));
+		while (now() - self->lastRecruitTime < SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY ||
+		       !self->goodRecruitmentTime.isReady()) {
+			if (now() - self->lastRecruitTime < SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY) {
+				wait(delay(SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY + 0.001 - (now() - self->lastRecruitTime)));
+			}
+			if (!self->goodRecruitmentTime.isReady()) {
+				wait(self->goodRecruitmentTime);
+			}
 		}
 
 		checkOutstandingRecruitmentRequests(self);
