@@ -3195,6 +3195,7 @@ public:
 	// recruitX is used to signal when role X needs to be (re)recruited.
 	// recruitingXID is used to track the ID of X's interface which is being recruited.
 	// We use AsyncVars to kill (i.e. halt) singletons that have been replaced.
+	double lastRecruitTime = 0;
 	AsyncVar<bool> recruitDistributor;
 	Optional<UID> recruitingDistributorID;
 	AsyncVar<bool> recruitRatekeeper;
@@ -3299,7 +3300,10 @@ struct RatekeeperSingleton : Singleton<RatekeeperInterface> {
 			    brokenPromiseToNever(interface.get().haltRatekeeper.getReply(HaltRatekeeperRequest(cc->id)));
 		}
 	}
-	void recruit(ClusterControllerData* cc) const { cc->recruitRatekeeper.set(true); }
+	void recruit(ClusterControllerData* cc) const {
+		cc->lastRecruitTime = now();
+		cc->recruitRatekeeper.set(true);
+	}
 };
 
 struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
@@ -3320,7 +3324,10 @@ struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
 			    brokenPromiseToNever(interface.get().haltDataDistributor.getReply(HaltDataDistributorRequest(cc->id)));
 		}
 	}
-	void recruit(ClusterControllerData* cc) const { cc->recruitDistributor.set(true); }
+	void recruit(ClusterControllerData* cc) const {
+		cc->lastRecruitTime = now();
+		cc->recruitDistributor.set(true);
+	}
 };
 
 struct BlobManagerSingleton : Singleton<BlobManagerInterface> {
@@ -3341,7 +3348,10 @@ struct BlobManagerSingleton : Singleton<BlobManagerInterface> {
 			    brokenPromiseToNever(interface.get().haltBlobManager.getReply(HaltBlobManagerRequest(cc->id)));
 		}
 	}
-	void recruit(ClusterControllerData* cc) const { cc->recruitBlobManager.set(true); }
+	void recruit(ClusterControllerData* cc) const {
+		cc->lastRecruitTime = now();
+		cc->recruitBlobManager.set(true);
+	}
 };
 
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterControllerData::DBInfo* db) {
@@ -3797,6 +3807,9 @@ ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 		wait(delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL));
 		while (!self->goodRecruitmentTime.isReady()) {
 			wait(self->goodRecruitmentTime);
+		}
+		while (now() - self->lastRecruitTime < SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY) {
+			wait(delay(SERVER_KNOBS->SINGLETON_RECRUIT_BME_DELAY + 0.001 - (now() - self->lastRecruitTime)));
 		}
 
 		checkOutstandingRecruitmentRequests(self);
