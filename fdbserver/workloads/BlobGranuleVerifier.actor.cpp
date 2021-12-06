@@ -129,20 +129,26 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	}
 
 	std::string description() const override { return "BlobGranuleVerifier"; }
-	Future<Void> setup(Database const& cx) override {
-		config = wait(getDatabaseConfiguration(cx));
-		if (!config.blobGranulesEnabled) {
+	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
+
+	ACTOR Future<Void> _setup(Database cx, BlobGranuleVerifierWorkload* self) {
+		if (!self->doSetup) {
+			wait(delay(0));
 			return Void();
 		}
 
-		if (doSetup) {
-			double initialDelay = deterministicRandom()->random01() * (maxDelay - minDelay) + minDelay;
-			if (BGV_DEBUG) {
-				printf("BGW setup initial delay of %.3f\n", initialDelay);
-			}
-			return setUpBlobRange(cx, delay(initialDelay));
+		DatabaseConfiguration _config = wait(getDatabaseConfiguration(cx));
+		self->config = _config;
+		if (!self->config.blobGranulesEnabled) {
+			return Void();
 		}
-		return delay(0);
+
+		double initialDelay = deterministicRandom()->random01() * (self->maxDelay - self->minDelay) + self->minDelay;
+		if (BGV_DEBUG) {
+			printf("BGW setup initial delay of %.3f\n", initialDelay);
+		}
+		wait(self->setUpBlobRange(cx, delay(initialDelay)));
+		return Void();
 	}
 
 	ACTOR Future<Void> findGranules(Database cx, BlobGranuleVerifierWorkload* self) {
