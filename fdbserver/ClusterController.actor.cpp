@@ -872,8 +872,8 @@ public:
 			fitness_workers[std::make_tuple(fitness,
 			                                id_used[worker_process_id],
 			                                worker_details.degraded,
-			                                inCCDC,
-			                                isLongLivedStateless(worker_process_id))]
+			                                isLongLivedStateless(worker_process_id),
+			                                inCCDC)]
 			    .push_back(worker_details);
 		}
 
@@ -1430,8 +1430,8 @@ public:
 				auto sharing = preferredSharing.find(it.first);
 				fitness_workers[std::make_tuple(fitness,
 				                                id_used[it.first],
-				                                sharing != preferredSharing.end() ? sharing->second : 1e6,
-				                                isLongLivedStateless(it.first))]
+				                                isLongLivedStateless(it.first),
+				                                sharing != preferredSharing.end() ? sharing->second : 1e6)]
 				    .push_back(it.second.details);
 			}
 		}
@@ -1478,8 +1478,8 @@ public:
 				auto sharing = preferredSharing.find(it.first);
 				fitness_workers[std::make_tuple(fitness,
 				                                id_used[it.first],
-				                                sharing != preferredSharing.end() ? sharing->second : 1e6,
-				                                isLongLivedStateless(it.first))]
+				                                isLongLivedStateless(it.first),
+				                                sharing != preferredSharing.end() ? sharing->second : 1e6)]
 				    .push_back(it.second.details);
 			}
 		}
