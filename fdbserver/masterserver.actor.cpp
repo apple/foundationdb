@@ -216,6 +216,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    clusterController; // If the cluster controller changes, this master will die, so this is immutable.
 
 	ReusableCoordinatedState cstate;
+	Promise<Void> recoveryReadyForCommits;
 	Promise<Void> cstateUpdated;
 	Reference<AsyncVar<ServerDBInfo>> dbInfo;
 	int64_t registrationCount; // Number of different MasterRegistrationRequests sent to clusterController
@@ -542,7 +543,9 @@ ACTOR Future<Void> updateRegistration(Reference<MasterData> self, Reference<ILog
 		TraceEvent("MasterUpdateRegistration", self->dbgid)
 		    .detail("RecoveryCount", self->cstate.myDBState.recoveryCount)
 		    .detail("OldestBackupEpoch", logSystemConfig.oldestBackupEpoch)
-		    .detail("Logs", describe(logSystemConfig.tLogs));
+		    .detail("Logs", describe(logSystemConfig.tLogs))
+		    .detail("CStateUpdated", self->cstateUpdated.isSet())
+		    .detail("RecoveryState", self->recoveryState);
 
 		if (!self->cstateUpdated.isSet()) {
 			wait(sendMasterRegistration(self.getPtr(),
@@ -551,7 +554,7 @@ ACTOR Future<Void> updateRegistration(Reference<MasterData> self, Reference<ILog
 			                            self->resolvers,
 			                            self->cstate.myDBState.recoveryCount,
 			                            self->cstate.prevDBState.getPriorCommittedLogServers()));
-		} else {
+		} else if (self->recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 			updateLogsKey = updateLogsValue(self, cx);
 			wait(sendMasterRegistration(self.getPtr(),
 			                            logSystemConfig,
@@ -559,6 +562,9 @@ ACTOR Future<Void> updateRegistration(Reference<MasterData> self, Reference<ILog
 			                            self->resolvers,
 			                            self->cstate.myDBState.recoveryCount,
 			                            vector<UID>()));
+		} else {
+			// The master should enter the accepting commits phase soon, and then we will register again
+			TEST(true); // cstate is updated but we aren't accepting commits yet
 		}
 	}
 }
@@ -1356,10 +1362,15 @@ ACTOR Future<Void> trackTlogRecovery(Reference<MasterData> self,
 		    self->configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>());
 		state bool finalUpdate = !newState.oldTLogData.size() && allLogs;
 		wait(self->cstate.write(newState, finalUpdate));
-		wait(minRecoveryDuration);
-		self->logSystem->coreStateWritten(newState);
 		if (self->cstateUpdated.canBeSet()) {
 			self->cstateUpdated.send(Void());
+		}
+
+		wait(minRecoveryDuration);
+		self->logSystem->coreStateWritten(newState);
+
+		if (self->recoveryReadyForCommits.canBeSet()) {
+			self->recoveryReadyForCommits.send(Void());
 		}
 
 		if (finalUpdate) {
@@ -1797,7 +1808,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 
 	self->addActor.send(trackTlogRecovery(self, oldLogSystems, minRecoveryDuration));
 	debug_advanceMaxCommittedVersion(UID(), self->recoveryTransactionVersion);
-	wait(self->cstateUpdated.getFuture());
+	wait(self->recoveryReadyForCommits.getFuture());
 	debug_advanceMinCommittedVersion(UID(), self->recoveryTransactionVersion);
 
 	if (debugResult) {

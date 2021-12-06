@@ -144,14 +144,16 @@ uLong ZEXPORT zlibCompileFlags() {
 #endif
 int ZLIB_INTERNAL z_verbose = verbose;
 
-void ZLIB_INTERNAL z_error(m) char* m;
+void ZLIB_INTERNAL z_error(m)
+char* m;
 { criticalError(FDB_EXIT_ABORT, "zlibError", m); }
 #endif
 
 /* exported to allow conversion of error code to string for compress() and
  * uncompress()
  */
-const char* ZEXPORT zError(err) int err;
+const char* ZEXPORT zError(err)
+int err;
 { return ERR_MSG(err); }
 
 #if defined(_WIN32_WCE)
@@ -164,7 +166,8 @@ int errno = 0;
 
 #ifndef HAVE_MEMCPY
 
-void ZLIB_INTERNAL zmemcpy(dest, source, len) Bytef* dest;
+void ZLIB_INTERNAL zmemcpy(dest, source, len)
+Bytef* dest;
 const Bytef* source;
 uInt len;
 {
@@ -188,7 +191,8 @@ uInt len;
 	return 0;
 }
 
-void ZLIB_INTERNAL zmemzero(dest, len) Bytef* dest;
+void ZLIB_INTERNAL zmemzero(dest, len)
+Bytef* dest;
 uInt len;
 {
 	if (len == 0)
@@ -315,7 +319,8 @@ extern voidp calloc OF((uInt items, uInt size));
 extern void free OF((voidpf ptr));
 #endif
 
-voidpf ZLIB_INTERNAL zcalloc(opaque, items, size) voidpf opaque;
+voidpf ZLIB_INTERNAL zcalloc(opaque, items, size)
+voidpf opaque;
 unsigned items;
 unsigned size;
 {
@@ -324,7 +329,8 @@ unsigned size;
 	return sizeof(uInt) > 2 ? (voidpf)malloc(items * size) : (voidpf)calloc(items, size);
 }
 
-void ZLIB_INTERNAL zcfree(opaque, ptr) voidpf opaque;
+void ZLIB_INTERNAL zcfree(opaque, ptr)
+voidpf opaque;
 voidpf ptr;
 {
 	free(ptr);

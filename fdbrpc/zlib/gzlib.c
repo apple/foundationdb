@@ -30,7 +30,8 @@ local gzFile gz_open OF((const void*, int, const char*));
 
    The gz_strwinerror function does not change the current setting of
    GetLastError. */
-char ZLIB_INTERNAL* gz_strwinerror(error) DWORD error;
+char ZLIB_INTERNAL* gz_strwinerror(error)
+DWORD error;
 {
 	static char buf[1024];
 
@@ -161,7 +162,7 @@ const char* mode;
 				state->direct = 1;
 				break;
 			default: /* could consider as an error, but just ignore */
-			         ;
+			    ;
 			}
 		mode++;
 	}
@@ -267,7 +268,8 @@ const char* mode;
 { return gz_open(path, -1, mode); }
 
 /* -- see zlib.h -- */
-gzFile ZEXPORT gzdopen(fd, mode) int fd;
+gzFile ZEXPORT gzdopen(fd, mode)
+int fd;
 const char* mode;
 {
 	char* path; /* identifier for error messages */
@@ -293,7 +295,8 @@ const char* mode;
 #endif
 
 /* -- see zlib.h -- */
-int ZEXPORT gzbuffer(file, size) gzFile file;
+int ZEXPORT gzbuffer(file, size)
+gzFile file;
 unsigned size;
 {
 	gz_statep state;
@@ -317,7 +320,8 @@ unsigned size;
 }
 
 /* -- see zlib.h -- */
-int ZEXPORT gzrewind(file) gzFile file;
+int ZEXPORT gzrewind(file)
+gzFile file;
 {
 	gz_statep state;
 
@@ -338,7 +342,8 @@ int ZEXPORT gzrewind(file) gzFile file;
 }
 
 /* -- see zlib.h -- */
-z_off64_t ZEXPORT gzseek64(file, offset, whence) gzFile file;
+z_off64_t ZEXPORT gzseek64(file, offset, whence)
+gzFile file;
 z_off64_t offset;
 int whence;
 {
@@ -412,7 +417,8 @@ int whence;
 }
 
 /* -- see zlib.h -- */
-z_off_t ZEXPORT gzseek(file, offset, whence) gzFile file;
+z_off_t ZEXPORT gzseek(file, offset, whence)
+gzFile file;
 z_off_t offset;
 int whence;
 {
@@ -423,7 +429,8 @@ int whence;
 }
 
 /* -- see zlib.h -- */
-z_off64_t ZEXPORT gztell64(file) gzFile file;
+z_off64_t ZEXPORT gztell64(file)
+gzFile file;
 {
 	gz_statep state;
 
@@ -439,7 +446,8 @@ z_off64_t ZEXPORT gztell64(file) gzFile file;
 }
 
 /* -- see zlib.h -- */
-z_off_t ZEXPORT gztell(file) gzFile file;
+z_off_t ZEXPORT gztell(file)
+gzFile file;
 {
 	z_off64_t ret;
 
@@ -448,7 +456,8 @@ z_off_t ZEXPORT gztell(file) gzFile file;
 }
 
 /* -- see zlib.h -- */
-z_off64_t ZEXPORT gzoffset64(file) gzFile file;
+z_off64_t ZEXPORT gzoffset64(file)
+gzFile file;
 {
 	z_off64_t offset;
 	gz_statep state;
@@ -470,7 +479,8 @@ z_off64_t ZEXPORT gzoffset64(file) gzFile file;
 }
 
 /* -- see zlib.h -- */
-z_off_t ZEXPORT gzoffset(file) gzFile file;
+z_off_t ZEXPORT gzoffset(file)
+gzFile file;
 {
 	z_off64_t ret;
 
@@ -479,7 +489,8 @@ z_off_t ZEXPORT gzoffset(file) gzFile file;
 }
 
 /* -- see zlib.h -- */
-int ZEXPORT gzeof(file) gzFile file;
+int ZEXPORT gzeof(file)
+gzFile file;
 {
 	gz_statep state;
 
@@ -495,7 +506,8 @@ int ZEXPORT gzeof(file) gzFile file;
 }
 
 /* -- see zlib.h -- */
-const char* ZEXPORT gzerror(file, errnum) gzFile file;
+const char* ZEXPORT gzerror(file, errnum)
+gzFile file;
 int* errnum;
 {
 	gz_statep state;
@@ -514,7 +526,8 @@ int* errnum;
 }
 
 /* -- see zlib.h -- */
-void ZEXPORT gzclearerr(file) gzFile file;
+void ZEXPORT gzclearerr(file)
+gzFile file;
 {
 	gz_statep state;
 
@@ -539,7 +552,8 @@ void ZEXPORT gzclearerr(file) gzFile file;
    memory).  Simply save the error message as a static string.  If there is an
    allocation failure constructing the error message, then convert the error to
    out of memory. */
-void ZLIB_INTERNAL gz_error(state, err, msg) gz_statep state;
+void ZLIB_INTERNAL gz_error(state, err, msg)
+gz_statep state;
 int err;
 const char* msg;
 {
