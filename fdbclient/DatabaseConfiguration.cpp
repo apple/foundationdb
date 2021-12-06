@@ -50,7 +50,7 @@ void DatabaseConfiguration::resetInternal() {
 	perpetualStorageWiggleSpeed = 0;
 	perpetualStorageWiggleLocality = "0";
 	storageMigrationType = StorageMigrationType::DEFAULT;
-	blobGranulesEnabled = true;
+	blobGranulesEnabled = false;
 }
 
 int toInt(ValueRef const& v) {

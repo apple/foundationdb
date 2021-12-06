@@ -2352,7 +2352,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check BlobManager
-		if (configuration.&& db.blobManager.present() &&
+		if (config.blobGranulesEnabled && db.blobManager.present() &&
 		    (!nonExcludedWorkerProcessMap.count(db.blobManager.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.blobManager.get().address()].processClass.machineClassFitness(
 		         ProcessClass::BlobManager) > fitnessLowerBound)) {
