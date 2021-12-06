@@ -7269,8 +7269,11 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		if (nextStream.next.version != checkVersion) {
 			if (nextOut.size()) {
 				*begin = checkVersion + 1;
+				ASSERT(nextOut.back().version >= results->lastReturnedVersion.get());
 				results->mutations.send(nextOut);
-				results->lastReturnedVersion.set(nextOut.back().version);
+				if (nextOut.back().version > results->lastReturnedVersion.get()) {
+					results->lastReturnedVersion.set(nextOut.back().version);
+				}
 				nextOut = Standalone<VectorRef<MutationsAndVersionRef>>();
 			}
 			checkVersion = nextStream.next.version;
@@ -7295,8 +7298,11 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		}
 	}
 	if (nextOut.size()) {
+		ASSERT(nextOut.back().version >= results->lastReturnedVersion.get());
 		results->mutations.send(nextOut);
-		results->lastReturnedVersion.set(nextOut.back().version);
+		if (nextOut.back().version > results->lastReturnedVersion.get()) {
+			results->lastReturnedVersion.set(nextOut.back().version);
+		}
 	}
 	throw end_of_stream();
 }
@@ -7437,9 +7443,12 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 						when(wait(cx->connectionFileChanged())) { break; }
 						when(ChangeFeedStreamReply rep = waitNext(replyStream.getFuture())) {
 							begin = rep.mutations.back().version + 1;
+							ASSERT(rep.mutations.back().version >= results->lastReturnedVersion.get());
 							results->mutations.send(
 							    Standalone<VectorRef<MutationsAndVersionRef>>(rep.mutations, rep.arena));
-							results->lastReturnedVersion.set(rep.mutations.back().version);
+							if (rep.mutations.back().version > results->lastReturnedVersion.get()) {
+								results->lastReturnedVersion.set(rep.mutations.back().version);
+							}
 							if (!atLatest && rep.atLatestVersion) {
 								atLatest = true;
 								results->notAtLatest.set(0);
