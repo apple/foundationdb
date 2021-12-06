@@ -36,6 +36,7 @@
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
@@ -1746,6 +1747,10 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 	// Unfortunately we can't do parallelize _full_ deletions because they might
 	// race and we'll end up with unreachable nodes in the case of a crash.
 	// Since partial deletions only occur for "leafs", they can be done in parallel
+	//
+	// Note about file deletions: although we might be retrying a deletion of a granule,
+	// we won't run into any issues with trying to "re-delete" a blob file since deleting
+	// a file that doesn't exist is considered successful
 
 	state int i;
 	if (BM_DEBUG) {
@@ -1922,58 +1927,68 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 			}
 
 			// loop through all prune intentions and do prune work accordingly
-			state KeyRef beginKey = normalKeys.begin;
-			loop {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			try {
+				state KeyRef beginKey = normalKeys.begin;
+				loop {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-				state std::vector<Future<Void>> prunes;
-				try {
-					// TODO: replace 10000 with a knob
-					KeyRange nextRange(KeyRangeRef(beginKey, normalKeys.end));
-					RangeResult pruneIntents = wait(krmGetRanges(
-					    tr, blobGranulePruneKeys.begin, nextRange, 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
-					state Key lastEndKey;
+					state std::vector<Future<Void>> prunes;
+					try {
+						// TODO: replace 10000 with a knob
+						KeyRange nextRange(KeyRangeRef(beginKey, normalKeys.end));
+						state RangeResult pruneIntents = wait(krmGetRanges(
+						    tr, blobGranulePruneKeys.begin, nextRange, 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+						state Key lastEndKey;
 
-					for (int rangeIdx = 0; rangeIdx < pruneIntents.size() - 1; ++rangeIdx) {
-						KeyRef rangeStartKey = pruneIntents[rangeIdx].key;
-						KeyRef rangeEndKey = pruneIntents[rangeIdx + 1].key;
-						lastEndKey = rangeEndKey;
-						if (pruneIntents[rangeIdx].value.size() == 0) {
-							continue;
+						for (int rangeIdx = 0; rangeIdx < pruneIntents.size() - 1; ++rangeIdx) {
+							KeyRef rangeStartKey = pruneIntents[rangeIdx].key;
+							KeyRef rangeEndKey = pruneIntents[rangeIdx + 1].key;
+							lastEndKey = rangeEndKey;
+							if (pruneIntents[rangeIdx].value.size() == 0) {
+								continue;
+							}
+							KeyRange range(KeyRangeRef(rangeStartKey, rangeEndKey));
+							Version pruneVersion;
+							bool force;
+							std::tie(pruneVersion, force) = decodeBlobGranulePruneValue(pruneIntents[rangeIdx].value);
+
+							printf("about to prune range [%s-%s) @ %d, force=%s\n",
+							       rangeStartKey.printable().c_str(),
+							       rangeEndKey.printable().c_str(),
+							       pruneVersion,
+							       force ? "T" : "F");
+							prunes.emplace_back(pruneRange(self, rangeStartKey, rangeEndKey, pruneVersion, force));
 						}
-						KeyRange range(KeyRangeRef(rangeStartKey, rangeEndKey));
-						Version pruneVersion;
-						bool force;
-						std::tie(pruneVersion, force) = decodeBlobGranulePruneValue(pruneIntents[rangeIdx].value);
 
-						printf("about to prune range [%s-%s) @ %d, force=%s\n",
-						       rangeStartKey.printable().c_str(),
-						       rangeEndKey.printable().c_str(),
-						       pruneVersion,
-						       force ? "T" : "F");
-						prunes.emplace_back(pruneRange(self, rangeStartKey, rangeEndKey, pruneVersion, force));
+						// wait for this set of prunes to complete before starting the next ones since if we prune
+						// a range R at version V and while we are doing that, the time expires, we will end up
+						// trying to prune the same range again since the work isn't finished and the prunes will race
+						//
+						// TODO: this isn't that efficient though. Instead we could keep metadata as part of the BM's
+						// memory that tracks which prunes are active. Once done, we can mark that work as done. If the
+						// BM fails then all prunes will fail and so the next BM will have a clear set of metadata (i.e.
+						// no work in progress) so we will end up doing the work in the new BM
+						wait(waitForAll(prunes));
+
+						if (!pruneIntents.more) {
+							break;
+						}
+
+						beginKey = lastEndKey;
+					} catch (Error& e) {
+						wait(tr->onError(e));
 					}
-
-					// wait for this set of prunes to complete before starting the next ones since if we prune
-					// a range R at version V and while we are doing that, the time expires, we will end up
-					// trying to prune the same range again since the work isn't finished and the prunes will race
-					//
-					// TODO: this isn't that efficient though. Instead we could keep metadata as part of the BM's
-					// memory that tracks which prunes are active. Once done, we can mark that work as done. If the
-					// BM fails then all prunes will fail and so the next BM will have a clear set of metadata (i.e.
-					// no work in progress) so we will end up doing the work in the new BM
-					wait(waitForAll(prunes));
-
-					if (!pruneIntents.more) {
-						break;
-					}
-
-					beginKey = lastEndKey;
-				} catch (Error& e) {
-					// TODO: other errors here from pruneRange?
-					wait(tr->onError(e));
 				}
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
+				if (BM_DEBUG) {
+					printf("monitorPruneKeys for BM %s saw error %s\n", self->id.toString().c_str(), e.name());
+				}
+				// don't want to kill the blob manager for errors around pruning
+				TraceEvent("MonitorPruneKeysError", self->id).detail("Error", e.name());
 			}
 			if (BM_DEBUG) {
 				printf("Done pruning current set of prune intents.\n");
