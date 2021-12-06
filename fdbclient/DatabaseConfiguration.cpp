@@ -629,21 +629,6 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		storageMigrationType = (StorageMigrationType::MigrationType)type;
 	} else if (ck == LiteralStringRef("proxies")) {
 		overwriteProxiesCount();
-		int proxiesCount;
-		parse(&proxiesCount, value);
-		if (proxiesCount > 1) {
-			int derivedGrvProxyCount =
-			    std::max(1,
-			             std::min(CLIENT_KNOBS->DEFAULT_MAX_GRV_PROXIES,
-			                      proxiesCount / (CLIENT_KNOBS->DEFAULT_COMMIT_GRV_PROXIES_RATIO + 1)));
-			int derivedCommitProxyCount = proxiesCount - derivedGrvProxyCount;
-			if (grvProxyCount == -1) {
-				grvProxyCount = derivedGrvProxyCount;
-			}
-			if (commitProxyCount == -1) {
-				commitProxyCount = derivedCommitProxyCount;
-			}
-		}
 	} else if (ck == LiteralStringRef("blob_granules_enabled")) {
 		parse((&type), value);
 		blobGranulesEnabled = (type != 0);
