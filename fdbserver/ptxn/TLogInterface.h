@@ -253,6 +253,10 @@ struct TLogPopRequest {
 
 	ReplyPromise<Void> reply;
 
+	TLogPopRequest(Version version, Version durableKnownCommittedVersion, Tag tag)
+	  : version(version), durableKnownCommittedVersion(durableKnownCommittedVersion), tag(tag) {}
+	TLogPopRequest() {}
+
 	template <typename Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, arena, version, durableKnownCommittedVersion, tag, storageTeamID, reply);
@@ -536,6 +540,20 @@ struct TLogInterface_PassivelyPull : public TLogInterfaceBase {
 
 	void initEndpoints() override;
 };
+
+namespace details {
+
+class TLogInterfaceSharedPtrWrapper {
+	std::shared_ptr<TLogInterfaceBase> ptr;
+
+public:
+	TLogInterfaceSharedPtrWrapper(std::shared_ptr<TLogInterfaceBase> ptr_ = nullptr) : ptr(ptr_) {}
+
+	operator std::shared_ptr<TLogInterface_PassivelyPull>();
+	operator std::shared_ptr<TLogInterface_ActivelyPush>();
+};
+
+} // namespace details
 
 std::shared_ptr<TLogInterfaceBase> getNewTLogInterface(const MessageTransferModel model,
                                                        UID id_ = deterministicRandom()->randomUniqueID(),

@@ -184,12 +184,24 @@ static const KeyRangeRef persistTxsTagsKeys = KeyRangeRef(LiteralStringRef("TxsT
 static const KeyRange persistTagMessagesKeys = prefixRange(LiteralStringRef("TagMsg/"));
 static const KeyRange persistTagMessageRefsKeys = prefixRange(LiteralStringRef("TagMsgRef/"));
 static const KeyRange persistTagPoppedKeys = prefixRange(LiteralStringRef("TagPop/"));
+static const KeyRange persistStorageTeamPoppedKeys = prefixRange(LiteralStringRef("StorageTeamPop/"));
+static const KeyRange persistStorageTeamMessagesKeys = prefixRange(LiteralStringRef("StorageTeamMsg/"));
+static const KeyRange persistStorageTeamMessageRefsKeys = prefixRange(LiteralStringRef("StorageTeamMsgRef/"));
 
 static Key persistTagMessagesKey(UID id, Tag tag, Version version) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(persistTagMessagesKeys.begin);
 	wr << id;
 	wr << tag;
+	wr << bigEndian64(version);
+	return wr.toValue();
+}
+
+static Key persistStorageTeamMessagesKey(UID id, StorageTeamID storageTeamId, Version version) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(persistStorageTeamMessagesKeys.begin);
+	wr << id;
+	wr << storageTeamId;
 	wr << bigEndian64(version);
 	return wr.toValue();
 }
@@ -203,6 +215,15 @@ static Key persistTagMessageRefsKey(UID id, Tag tag, Version version) {
 	return wr.toValue();
 }
 
+Key persistStorageTeamMessageRefsKey(UID id, StorageTeamID storageTeamId, Version version) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(persistStorageTeamMessageRefsKeys.begin);
+	wr << id;
+	wr << storageTeamId;
+	wr << bigEndian64(version);
+	return wr.toValue();
+}
+
 static Key persistTagPoppedKey(UID id, Tag tag) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(persistTagPoppedKeys.begin);
@@ -210,8 +231,19 @@ static Key persistTagPoppedKey(UID id, Tag tag) {
 	wr << tag;
 	return wr.toValue();
 }
+static Key persistStorageTeamPoppedKey(UID id, StorageTeamID storageTeamId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(persistStorageTeamPoppedKeys.begin);
+	wr << id;
+	wr << storageTeamId;
+	return wr.toValue();
+}
 
 static Value persistTagPoppedValue(Version popped) {
+	return BinaryWriter::toValue(popped, Unversioned());
+}
+
+static Value persistStorageTeamPoppedValue(Version popped) {
 	return BinaryWriter::toValue(popped, Unversioned());
 }
 
@@ -233,6 +265,22 @@ static StringRef stripTagMessagesKey(StringRef key) {
 static Version decodeTagMessagesKey(StringRef key) {
 	return bigEndian64(BinaryReader::fromStringRef<Version>(stripTagMessagesKey(key), Unversioned()));
 }
+
+struct SpilledData {
+	SpilledData() = default;
+	SpilledData(Version version, IDiskQueue::location start, uint32_t length, uint32_t mutationBytes)
+	  : version(version), start(start), length(length), mutationBytes(mutationBytes) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, start, length, mutationBytes);
+	}
+
+	Version version = 0;
+	IDiskQueue::location start = 0;
+	uint32_t length = 0;
+	uint32_t mutationBytes = 0;
+};
 
 // Data for a TLog group across multiple generations
 struct TLogGroupData : NonCopyable, public ReferenceCounted<TLogGroupData> {
@@ -443,20 +491,67 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 		StorageTeamID storageTeamId;
 		std::vector<Tag> tags;
 		std::map<Version, std::pair<StringRef, Arena>> versionMessages;
+		Version popped = 0; // see popped version tracking contract below
+		IDiskQueue::location poppedLocation = 0; // The location of the earliest commit with data for this tag.
+		Version persistentPopped = 0; // The popped version recorded in the btree.
+		Version versionForPoppedLocation = 0; // `poppedLocation` was calculated at this popped version
+		bool poppedRecently = false; // `popped` has changed since last updatePersistentData
+		bool unpoppedRecovered = false;
+		bool nothingPersistent =
+		    false; // true means tag is *known* to have no messages in persistentData.  false means nothing.
 
 		StorageTeamData(StorageTeamID storageTeam, std::vector<Tag> tags) : storageTeamId(storageTeam), tags(tags) {}
 
+		StorageTeamData(StorageTeamID storageTeam, std::vector<Tag> tags, Version popped)
+		  : storageTeamId(storageTeam), tags(tags), popped(popped) {}
+
 		StorageTeamData(StorageTeamData&& r) noexcept
-		  : storageTeamId(r.storageTeamId), tags(r.tags), versionMessages(std::move(r.versionMessages)) {}
+		  : storageTeamId(r.storageTeamId), tags(r.tags), versionMessages(std::move(r.versionMessages)),
+		    popped(r.popped), poppedLocation(r.poppedLocation), persistentPopped(r.persistentPopped),
+		    versionForPoppedLocation(r.versionForPoppedLocation), poppedRecently(r.poppedRecently),
+		    unpoppedRecovered(r.unpoppedRecovered), nothingPersistent(r.nothingPersistent) {}
 		void operator=(StorageTeamData&& r) noexcept {
 			storageTeamId = r.storageTeamId;
-			tags = r.tags;
+			nothingPersistent = r.nothingPersistent;
+			poppedRecently = r.poppedRecently;
+			popped = r.popped;
+			persistentPopped = r.persistentPopped;
+			versionForPoppedLocation = r.versionForPoppedLocation;
+			poppedLocation = r.poppedLocation;
+			unpoppedRecovered = r.unpoppedRecovered;
 			versionMessages = std::move(r.versionMessages);
 		}
 	};
 
 	// For the version of each entry that was push()ed, the [start, end) location of the serialized bytes
 	Map<Version, std::pair<IDiskQueue::location, IDiskQueue::location>> versionLocation;
+
+	/*
+	Popped version tracking contract needed by log system to implement ILogCursor::popped():
+
+	    - Log server tracks for each (possible) tag a popped_version
+	    Impl: TagData::popped (in memory) and persistTagPoppedKeys (in persistentData)
+	    - popped_version(tag) is <= the maximum version for which log server (or a predecessor) is ever asked to pop the
+	tag Impl: Only increased by tLogPop() in response to either a pop request or recovery from a predecessor
+	    - popped_version(tag) is > the maximum version for which log server is unable to peek messages due to previous
+	pops (on this server or a predecessor) Impl: Increased by tLogPop() atomically with erasing messages from memory;
+	persisted by updatePersistentData() atomically with erasing messages from store; messages are not erased from queue
+	where popped_version is not persisted
+	    - LockTLogReply returns all tags which either have messages, or which have nonzero popped_versions
+	    Impl: tag_data is present for all such tags
+	    - peek(tag, v) returns the popped_version for tag if that is greater than v
+	    Impl: Check tag_data->popped (after all waits)
+	*/
+
+	// If persistentDataVersion != persistentDurableDataVersion,
+	// then spilling is happening from persistentDurableDataVersion to persistentDataVersion.
+	// Data less than persistentDataDurableVersion is spilled on disk (or fully popped from the TLog);
+	VersionMetricHandle persistentDataVersion,
+	    persistentDataDurableVersion; // The last version number in the portion of the log (written|durable) to
+	                                  // persistentData
+	Version queuePoppedVersion; // The disk queue has been popped up until the location which represents this version.
+	Version minPoppedTagVersion;
+	Tag minPoppedTag; // The tag that makes tLog hold its data and cause tLog's disk queue increasing.
 
 	// In-memory index: messages data at each version
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
@@ -468,10 +563,24 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	// Tlog group that this LogGeneration belongs to.
 	Reference<TLogGroupData> tlogGroupData;
 
+	// The maximum version that a proxy has told us that is committed (all TLogs have ack'd a commit for this version).
+	Version knownCommittedVersion = 0;
+
+	// Log interface id for this generation.
+	// Different TLogGroups in the same generation in the same tlog server share the same log ID.
+	UID logId;
+
+	CounterCollection cc;
+	Counter bytesInput;
+	Counter bytesDurable;
+
+	ProtocolVersion protocolVersion;
+
 	// Storage teams tracker
 	std::unordered_map<StorageTeamID, Reference<StorageTeamData>> storageTeamData;
 	std::unordered_map<ptxn::StorageTeamID, std::vector<Tag>> storageTeams;
 
+	Future<Void> terminated;
 	AsyncTrigger stopCommit; // Trigger to stop the commit
 	bool stopped = false; // Whether this generation has been stopped.
 	bool initialized = false; // Whether this generation has been initialized.
@@ -485,29 +594,21 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 
 	Version queueCommittingVersion = 0;
 
-	// The maximum version that a proxy has told us that is committed (all TLogs have ack'd a commit for this version).
-	Version knownCommittedVersion = 0;
+	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
 
 	Version durableKnownCommittedVersion = 0;
 	Version minKnownCommittedVersion = 0;
 
-	CounterCollection cc;
-	Counter bytesInput;
-	Counter bytesDurable;
-
-	// Log interface id for this generation.
-	// Different TLogGroups in the same generation in the same tlog server share the same log ID.
-	UID logId;
-	ProtocolVersion protocolVersion;
+	Version newPersistentDataVersion;
 
 	// Whether this tlog interface is removed, this can happen when a new master is elected and tlog interface recruited
 	// by the old master gets removed.
 	Future<Void> removed;
 	PromiseStream<Future<Void>> addActor;
 	Promise<Void> recoveryComplete, committingQueue;
-	Future<Void> terminated;
 
-	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
+	Version unrecoveredBefore = 1;
+	Version recoveredAt = 1;
 
 	int8_t locality; // data center id?
 	UID recruitmentID;
@@ -545,9 +646,9 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	                           int8_t locality,
 	                           DBRecoveryCount epoch,
 	                           const std::string& context)
-	  : tlogGroupData(tlogGroupData), storageTeams(storageTeams), recoveryCount(epoch),
-	    cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc),
-	    logId(interf.id()), protocolVersion(protocolVersion), terminated(tlogGroupData->terminated.getFuture()),
+	  : tlogGroupData(tlogGroupData), logId(interf.id()), cc("TLog", interf.id().toString()),
+	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), protocolVersion(protocolVersion),
+	    storageTeams(storageTeams), terminated(tlogGroupData->terminated.getFuture()),
 	    logSystem(new AsyncVar<Reference<ILogSystem>>()),
 	    // These are initialized differently on init() or recovery
 	    locality(locality), recruitmentID(recruitmentID), logSpillType(logSpillType) {
@@ -1504,6 +1605,8 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializePtxnTLogR
 		newGenerationData->removed = self->removed;
 		activeGeneration->emplace(group.logGroupId, newGenerationData);
 		tlogGroupStarts.push_back(tlogGroupStart(tlogGroupData, newGenerationData));
+		tlogGroupData->spillOrder.push_back(recruited.id());
+		tlogGroupData->popOrder.push_back(recruited.id());
 	}
 
 	wait(waitForAll(tlogGroupStarts));
@@ -1513,6 +1616,394 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializePtxnTLogR
 	TraceEvent("TLogStart", recruited.id());
 	wait(tLogCore(self, activeGeneration, recruited));
 	return Void();
+}
+
+ACTOR Future<Void> tLogPop(Reference<TLogGroupData> self, TLogPopRequest req, Reference<LogGenerationData> logData) {
+	if (self->ignorePopRequest) {
+		TraceEvent(SevDebug, "IgnoringPopRequest").detail("IgnorePopDeadline", self->ignorePopDeadline);
+
+		auto& v = self->toBePopped[req.tag];
+		v = std::max(v, req.version);
+
+		TraceEvent(SevDebug, "IgnoringPopRequest")
+		    .detail("IgnorePopDeadline", self->ignorePopDeadline)
+		    .detail("Tag", req.tag.toString())
+		    .detail("Version", req.version);
+	} else {
+		// TODO: pop from tlog
+		wait(Future<Void>(Void()));
+		// wait(tLogPopCore(self, req.tag, req.version, logData));
+	}
+	req.reply.send(Void());
+	return Void();
+}
+
+void updatePersistentPopped(Reference<TLogGroupData> self,
+                            Reference<LogGenerationData> logData,
+                            Reference<LogGenerationData::StorageTeamData> data) {
+	if (!data->poppedRecently)
+		return;
+	self->persistentData->set(KeyValueRef(persistStorageTeamPoppedKey(logData->logId, data->storageTeamId),
+	                                      persistStorageTeamPoppedValue(data->popped)));
+	data->poppedRecently = false;
+	data->persistentPopped = data->popped;
+
+	if (data->nothingPersistent)
+		return;
+
+	if (logData->shouldSpillByValue(data->storageTeamId)) {
+		self->persistentData->clear(
+		    KeyRangeRef(persistStorageTeamMessagesKey(logData->logId, data->storageTeamId, Version(0)),
+		                persistStorageTeamMessagesKey(logData->logId, data->storageTeamId, data->popped)));
+	} else {
+		self->persistentData->clear(
+		    KeyRangeRef(persistStorageTeamMessageRefsKey(logData->logId, data->storageTeamId, Version(0)),
+		                persistStorageTeamMessageRefsKey(logData->logId, data->storageTeamId, data->popped)));
+	}
+
+	if (data->popped > logData->persistentDataVersion) {
+		data->nothingPersistent = true;
+	}
+}
+
+ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self,
+                                        Reference<LogGenerationData> logData,
+                                        Version newPersistentDataVersion) {
+	state BinaryWriter wr(Unversioned());
+
+	// PERSIST: Changes self->persistentDataVersion and writes and commits the relevant changes
+	ASSERT(newPersistentDataVersion <= logData->version.get());
+	ASSERT(newPersistentDataVersion <= logData->queueCommittedVersion.get());
+	ASSERT(newPersistentDataVersion > logData->persistentDataVersion);
+	ASSERT(logData->persistentDataVersion == logData->persistentDataDurableVersion);
+	logData->newPersistentDataVersion = newPersistentDataVersion;
+
+	//TraceEvent("UpdatePersistentData", self->dbgid).detail("Seq", newPersistentDataSeq);
+
+	state bool anyData = false;
+
+	// For all existing tags
+	state int tagLocality = 0;
+	state std::unordered_map<StorageTeamID, Reference<LogGenerationData::StorageTeamData>>::iterator it;
+	for (it = logData->storageTeamData.begin(); it != logData->storageTeamData.end(); it++) {
+		// iterate through all storage teams and try to update persistent data
+		state Reference<LogGenerationData::StorageTeamData> teamData = it->second;
+		if (teamData) {
+			// TODO: implement eraseMessagesBefore for StorageTeamData
+			// wait(teamData->eraseMessagesBefore(teamData->popped, self, logData, TaskPriority::UpdateStorage));
+			state Version currentVersion = 0;
+			// Clear recently popped versions from persistentData if necessary
+			updatePersistentPopped(self, logData, teamData);
+			state Version lastVersion = std::numeric_limits<Version>::min();
+			state IDiskQueue::location firstLocation = std::numeric_limits<IDiskQueue::location>::max();
+			// Transfer unpopped messages with version numbers less than newPersistentDataVersion to persistentData
+			// TOFIX: versions in logData->versionLocation is erased through persistentQueue->forgetBefore,
+			// however we do not erase it in teamData yet, that alone needs a PR.
+			state std::map<Version, std::pair<StringRef, Arena>>::iterator msg =
+			    teamData->versionMessages.lower_bound(logData->versionLocation.begin()->key);
+			state int refSpilledTagCount = 0;
+			wr = BinaryWriter(AssumeVersion(logData->protocolVersion));
+			// We prefix our spilled locations with a count, so that we can read this back out as a VectorRef.
+			wr << uint32_t(0);
+			while (msg != teamData->versionMessages.end() && msg->first <= newPersistentDataVersion) {
+				currentVersion = msg->first;
+				anyData = true;
+				teamData->nothingPersistent = false;
+
+				if (logData->shouldSpillByValue(teamData->storageTeamId)) {
+					wr = BinaryWriter(Unversioned());
+					// write real data here as the value to be persisted.
+					for (; msg != teamData->versionMessages.end() && msg->first == currentVersion; ++msg) {
+						wr << msg->second.first; // question: do we need arena here?
+					}
+
+					self->persistentData->set(KeyValueRef(
+					    persistStorageTeamMessagesKey(logData->logId, teamData->storageTeamId, currentVersion),
+					    wr.toValue()));
+				} else {
+					// spill everything else by reference
+					const IDiskQueue::location begin = logData->versionLocation[currentVersion].first;
+					const IDiskQueue::location end = logData->versionLocation[currentVersion].second;
+					ASSERT(end > begin && end.lo - begin.lo < std::numeric_limits<uint32_t>::max());
+					uint32_t length = static_cast<uint32_t>(end.lo - begin.lo);
+					refSpilledTagCount++;
+
+					uint32_t size = 0;
+					for (; msg != teamData->versionMessages.end() && msg->first == currentVersion; ++msg) {
+						// Fast forward until we find a new version.
+						// TOFIX: how to calculate the size of stringref?
+						// size += msg->second->first.expectedSize();
+						size += 0;
+					}
+
+					SpilledData spilledData(currentVersion, begin, length, size);
+					wr << spilledData;
+
+					lastVersion = std::max(currentVersion, lastVersion);
+					firstLocation = std::min(begin, firstLocation);
+
+					if ((wr.getLength() + sizeof(SpilledData) >
+					     SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BYTES_PER_BATCH)) {
+						*(uint32_t*)wr.getData() = refSpilledTagCount;
+						self->persistentData->set(KeyValueRef(
+						    persistStorageTeamMessageRefsKey(logData->logId, teamData->storageTeamId, lastVersion),
+						    wr.toValue()));
+						teamData->poppedLocation = std::min(teamData->poppedLocation, firstLocation);
+						refSpilledTagCount = 0;
+						wr = BinaryWriter(AssumeVersion(logData->protocolVersion));
+						wr << uint32_t(0);
+					}
+
+					Future<Void> f = yield(TaskPriority::UpdateStorage);
+					if (!f.isReady()) {
+						wait(f);
+						msg = teamData->versionMessages.upper_bound(currentVersion);
+					}
+				}
+			}
+			if (refSpilledTagCount > 0) {
+				*(uint32_t*)wr.getData() = refSpilledTagCount;
+				self->persistentData->set(
+				    KeyValueRef(persistStorageTeamMessageRefsKey(logData->logId, teamData->storageTeamId, lastVersion),
+				                wr.toValue()));
+				teamData->poppedLocation = std::min(teamData->poppedLocation, firstLocation);
+			}
+
+			wait(yield(TaskPriority::UpdateStorage));
+		}
+	}
+
+	auto locationIter = logData->versionLocation.lower_bound(newPersistentDataVersion);
+	if (locationIter != logData->versionLocation.end()) {
+		self->persistentData->set(
+		    KeyValueRef(persistRecoveryLocationKey, BinaryWriter::toValue(locationIter->value.first, Unversioned())));
+	}
+
+	self->persistentData->set(
+	    KeyValueRef(BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistCurrentVersionKeys.begin),
+	                BinaryWriter::toValue(newPersistentDataVersion, Unversioned())));
+	self->persistentData->set(KeyValueRef(
+	    BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistKnownCommittedVersionKeys.begin),
+	    BinaryWriter::toValue(logData->knownCommittedVersion, Unversioned())));
+	logData->persistentDataVersion = newPersistentDataVersion;
+
+	wait(self->persistentData->commit()); // SOMEDAY: This seems to be running pretty often, should we slow it down???
+	wait(delay(0, TaskPriority::UpdateStorage));
+
+	// Now that the changes we made to persistentData are durable, erase the data we moved from memory and the queue,
+	// increase bytesDurable accordingly, and update persistentDataDurableVersion.
+
+	TEST(anyData); // TLog moved data to persistentData
+	logData->persistentDataDurableVersion = newPersistentDataVersion;
+
+	for (it = logData->storageTeamData.begin(); it != logData->storageTeamData.end(); it++) {
+		if (it->second) {
+			// uncomment this once we have StorageTeamData::eraseMessagesBefore
+			// wait(it->second->eraseMessagesBefore(
+			// 	newPersistentDataVersion + 1, self, logData, TaskPriority::UpdateStorage));
+			wait(yield(TaskPriority::UpdateStorage));
+		}
+	}
+
+	logData->version_sizes.erase(logData->version_sizes.begin(),
+	                             logData->version_sizes.lower_bound(logData->persistentDataDurableVersion));
+
+	wait(yield(TaskPriority::UpdateStorage));
+
+	while (!logData->messageBlocks.empty() && logData->messageBlocks.front().first <= newPersistentDataVersion) {
+		int64_t bytesErased =
+		    int64_t(logData->messageBlocks.front().second.size()) * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
+		logData->bytesDurable += bytesErased;
+		self->bytesDurable += bytesErased;
+		logData->messageBlocks.pop_front();
+		wait(yield(TaskPriority::UpdateStorage));
+	}
+
+	if (logData->bytesDurable.getValue() > logData->bytesInput.getValue() || self->bytesDurable > self->bytesInput) {
+		TraceEvent(SevError, "BytesDurableTooLarge", logData->logId)
+		    .detail("SharedBytesInput", self->bytesInput)
+		    .detail("SharedBytesDurable", self->bytesDurable)
+		    .detail("LocalBytesInput", logData->bytesInput.getValue())
+		    .detail("LocalBytesDurable", logData->bytesDurable.getValue());
+	}
+
+	ASSERT(logData->bytesDurable.getValue() <= logData->bytesInput.getValue());
+	ASSERT(self->bytesDurable <= self->bytesInput);
+
+	if (self->queueCommitEnd.get() > 0) {
+		// FIXME: Maintain a heap of tags ordered by version to make this O(1) instead of O(n).
+		Version minVersion = std::numeric_limits<Version>::max();
+		for (it = logData->storageTeamData.begin(); it != logData->storageTeamData.end(); it++) {
+			if (it->second) {
+				if (logData->shouldSpillByValue(it->second->storageTeamId)) {
+					minVersion = std::min(minVersion, newPersistentDataVersion);
+				} else {
+					minVersion = std::min(minVersion, it->second->popped);
+				}
+			}
+		}
+		if (minVersion != std::numeric_limits<Version>::max()) {
+			self->persistentQueue->forgetBefore(
+			    newPersistentDataVersion,
+			    logData); // SOMEDAY: this can cause a slow task (~0.5ms), presumably from erasing too many versions.
+			              // Should we limit the number of versions cleared at a time?
+		}
+	}
+	logData->newPersistentDataVersion = invalidVersion;
+
+	return Void();
+}
+
+// This function (and updatePersistentData, which is called by this function) run at a low priority and can soak up all
+// CPU resources. For this reason, they employ aggressive use of yields to avoid causing slow tasks that could introduce
+// latencies for more important work (e.g. commits).
+// This actor is just a loop that calls updatePersistentData and popDiskQueue whenever
+// (a) there's data to be spilled or (b) we should update metadata after some commits have been fully popped.
+ACTOR Future<Void> updateStorage(Reference<TLogGroupData> self) {
+	while (self->spillOrder.size() && !self->id_data.count(self->spillOrder.front())) {
+		self->spillOrder.pop_front();
+	}
+
+	if (!self->spillOrder.size()) {
+		wait(delay(BUGGIFY ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL
+		                   : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL,
+		           TaskPriority::UpdateStorage));
+		return Void();
+	}
+
+	state Reference<LogGenerationData> logData = self->id_data[self->spillOrder.front()];
+	state Version nextVersion = 0;
+	state int totalSize = 0;
+
+	state FlowLock::Releaser commitLockReleaser;
+
+	// FIXME: This policy for calculating the cache pop version could end up popping recent data in the remote DC after
+	// two consecutive recoveries.
+	// It also does not protect against spilling the cache tag directly, so it is theoretically possible to spill this
+	// tag; which is not intended to ever happen.
+	Optional<Version> cachePopVersion;
+	for (auto& it : self->id_data) {
+		if (!it.second->stopped) {
+			if (it.second->version.get() - it.second->unrecoveredBefore >
+			    SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT + SERVER_KNOBS->MAX_CACHE_VERSIONS) {
+				cachePopVersion = it.second->version.get() - SERVER_KNOBS->MAX_CACHE_VERSIONS;
+			}
+			break;
+		}
+	}
+
+	if (cachePopVersion.present()) {
+		state std::vector<Future<Void>> cachePopFutures;
+		for (auto& it : self->id_data) {
+			// cacheTag is a special tag, not sure why we use it here in old path
+			cachePopFutures.push_back(tLogPop(self, TLogPopRequest(cachePopVersion.get(), 0, cacheTag), it.second));
+		}
+		wait(waitForAll(cachePopFutures));
+	}
+
+	if (logData->stopped) {
+		if (self->bytesInput - self->bytesDurable >= self->targetVolatileBytes) {
+			while (logData->persistentDataDurableVersion != logData->version.get()) {
+				totalSize = 0;
+				Map<Version, std::pair<int, int>>::iterator sizeItr = logData->version_sizes.begin();
+				nextVersion = logData->version.get();
+				while (totalSize < SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT &&
+				       sizeItr != logData->version_sizes.end()) {
+					totalSize += sizeItr->value.first + sizeItr->value.second;
+					++sizeItr;
+					nextVersion = sizeItr == logData->version_sizes.end() ? logData->version.get() : sizeItr->key;
+				}
+
+				wait(logData->queueCommittedVersion.whenAtLeast(nextVersion));
+				wait(delay(0, TaskPriority::UpdateStorage));
+
+				//TraceEvent("TlogUpdatePersist", self->dbgid).detail("LogId", logData->logId).detail("NextVersion", nextVersion).detail("Version", logData->version.get()).detail("PersistentDataDurableVer", logData->persistentDataDurableVersion).detail("QueueCommitVer", logData->queueCommittedVersion.get()).detail("PersistDataVer", logData->persistentDataVersion);
+				if (nextVersion > logData->persistentDataVersion) {
+					wait(self->persistentDataCommitLock.take());
+					commitLockReleaser = FlowLock::Releaser(self->persistentDataCommitLock);
+					wait(updatePersistentData(self, logData, nextVersion));
+					// Concurrently with this loop, the last stopped TLog could have been removed.
+					if (self->popOrder.size()) {
+						// hfu5 TODO: add popDiskQueue()
+						// wait(popDiskQueue(self, self->id_data[self->popOrder.front()]));
+					}
+					commitLockReleaser.release();
+				} else {
+					wait(delay(BUGGIFY ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL
+					                   : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL,
+					           TaskPriority::UpdateStorage));
+				}
+
+				if (logData->removed.isReady()) {
+					break;
+				}
+			}
+
+			if (logData->persistentDataDurableVersion == logData->version.get()) {
+				self->spillOrder.pop_front();
+			}
+			wait(delay(0.0, TaskPriority::UpdateStorage));
+		} else {
+			wait(delay(BUGGIFY ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL
+			                   : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL,
+			           TaskPriority::UpdateStorage));
+		}
+	} else if (logData->initialized) {
+		ASSERT(self->spillOrder.size() == 1);
+		if (logData->version_sizes.empty()) {
+			nextVersion = logData->version.get();
+		} else {
+			// Double check that a running TLog wasn't wrongly affected by spilling locked SharedTLogs.
+			ASSERT_WE_THINK(self->targetVolatileBytes == SERVER_KNOBS->TLOG_SPILL_THRESHOLD);
+			Map<Version, std::pair<int, int>>::iterator sizeItr = logData->version_sizes.begin();
+			while (totalSize < SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT &&
+			       sizeItr != logData->version_sizes.end() &&
+			       (logData->bytesInput.getValue() - logData->bytesDurable.getValue() - totalSize >=
+			            self->targetVolatileBytes ||
+			        sizeItr->value.first == 0)) {
+				totalSize += sizeItr->value.first + sizeItr->value.second;
+				++sizeItr;
+				nextVersion = sizeItr == logData->version_sizes.end() ? logData->version.get() : sizeItr->key;
+			}
+		}
+
+		//TraceEvent("UpdateStorageVer", logData->logId).detail("NextVersion", nextVersion).detail("PersistentDataVersion", logData->persistentDataVersion).detail("TotalSize", totalSize);
+
+		wait(logData->queueCommittedVersion.whenAtLeast(nextVersion));
+		wait(delay(0, TaskPriority::UpdateStorage));
+
+		if (nextVersion > logData->persistentDataVersion) {
+			wait(self->persistentDataCommitLock.take());
+			commitLockReleaser = FlowLock::Releaser(self->persistentDataCommitLock);
+			wait(updatePersistentData(self, logData, nextVersion));
+			if (self->popOrder.size()) {
+				// hfu5 TODO: add popDiskQueue()
+				// wait(popDiskQueue(self, self->id_data[self->popOrder.front()]));
+			}
+			commitLockReleaser.release();
+		}
+
+		if (totalSize < SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT) {
+			wait(delay(BUGGIFY ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL
+			                   : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL,
+			           TaskPriority::UpdateStorage));
+		} else {
+			// recovery wants to commit to persistant data when updatePersistentData is not active, this delay ensures
+			// that immediately after updatePersist returns another one has not been started yet.
+			wait(delay(0.0, TaskPriority::UpdateStorage));
+		}
+	} else {
+		wait(delay(BUGGIFY ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL
+		                   : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL,
+		           TaskPriority::UpdateStorage));
+	}
+	return Void();
+}
+
+ACTOR Future<Void> updateStorageLoop(Reference<TLogGroupData> self) {
+	wait(delay(0, TaskPriority::UpdateStorage));
+
+	loop { wait(updateStorage(self)); }
 }
 
 ACTOR Future<Void> tLog(
@@ -1576,8 +2067,7 @@ ACTOR Future<Void> tLog(
 
 					for (auto& [_, tlogGroup] : self->tlogGroups) {
 						tlogGroup->sharedActors.send(commitQueue(tlogGroup));
-						// TODO: add updateStorageLoop when implementing pop
-						// tlogGroup->sharedActors.send(updateStorageLoop(tlogGroup));
+						tlogGroup->sharedActors.send(updateStorageLoop(tlogGroup));
 					}
 
 					// start the new generation

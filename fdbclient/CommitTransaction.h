@@ -50,6 +50,7 @@ static const char* typeString[] = { "SetValue",
 	                                "AndV2",
 	                                "CompareAndClear",
 	                                "Reserved_For_SpanContextMessage",
+	                                "Reserved_For_EmptyCommit",
 	                                "MAX_ATOMIC_OP" };
 
 struct MutationRef {
@@ -77,6 +78,7 @@ struct MutationRef {
 		AndV2,
 		CompareAndClear,
 		Reserved_For_SpanContextMessage /* See fdbserver/SpanContextMessage.h */,
+		Reserved_For_EmptyCommit /* See fdbserver/EmptyCommit.h */,
 		MAX_ATOMIC_OP
 	};
 	// This is stored this way for serialization purposes.
@@ -190,19 +192,30 @@ struct CommitTransactionRef {
 	    report_conflicting_keys(from.report_conflicting_keys) {}
 	VectorRef<KeyRangeRef> read_conflict_ranges;
 	VectorRef<KeyRangeRef> write_conflict_ranges;
-	VectorRef<MutationRef> mutations;
+	VectorRef<MutationRef> mutations; // metadata mutations
 	Version read_snapshot;
 	bool report_conflicting_keys;
+	bool lock_aware; // set when metadata mutations are present
+	SpanID spanContext;
 
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
 		if constexpr (is_fb_function<Ar>) {
-			serializer(
-			    ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot, report_conflicting_keys);
+			serializer(ar,
+			           read_conflict_ranges,
+			           write_conflict_ranges,
+			           mutations,
+			           read_snapshot,
+			           report_conflicting_keys,
+			           lock_aware,
+			           spanContext);
 		} else {
 			serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot);
 			if (ar.protocolVersion().hasReportConflictingKeys()) {
 				serializer(ar, report_conflicting_keys);
+			}
+			if (ar.protocolVersion().hasSpanContext()) {
+				serializer(ar, lock_aware, spanContext);
 			}
 		}
 	}

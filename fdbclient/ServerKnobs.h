@@ -339,6 +339,7 @@ public:
 	int TXN_STATE_SEND_AMOUNT;
 	double REPORT_TRANSACTION_COST_ESTIMATION_DELAY;
 	bool PROXY_REJECT_BATCH_QUEUED_TOO_LONG;
+	bool PROXY_USE_RESOLVER_PRIVATE_MUTATIONS;
 
 	int RESET_MASTER_BATCHES;
 	int RESET_RESOLVER_BATCHES;
@@ -578,6 +579,11 @@ public:
 	double MAX_STORAGE_COMMIT_TIME;
 	int64_t RANGESTREAM_LIMIT_BYTES;
 	bool ENABLE_CLEAR_RANGE_EAGER_READS;
+	// When using merge cursor, some of the cursors might not have messages available. This knob determines the number
+	// of times the cursor peeks before claiming failure.
+	int MERGE_CURSOR_RETRY_TIMES;
+	// Time between each retries of peeks when using merge cursor
+	double MERGE_CURSOR_RETRY_DELAY;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;

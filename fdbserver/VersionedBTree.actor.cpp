@@ -4259,7 +4259,6 @@ struct BTreePage {
 				c.moveFirst();
 				ASSERT(c.valid());
 
-				bool anyOutOfRange = false;
 				do {
 					r += "  ";
 					r += c.get().toString(height == 1);
@@ -4267,7 +4266,6 @@ struct BTreePage {
 					bool tooLow = c.get().withoutValue() < lowerBound.withoutValue();
 					bool tooHigh = c.get().withoutValue() >= upperBound.withoutValue();
 					if (tooLow || tooHigh) {
-						anyOutOfRange = true;
 						if (tooLow) {
 							r += " (below decode lower bound)";
 						}

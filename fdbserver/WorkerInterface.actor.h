@@ -701,11 +701,12 @@ struct InitializeResolverRequest {
 	uint64_t recoveryCount;
 	int commitProxyCount;
 	int resolverCount;
+	UID masterId; // master's UID
 	ReplyPromise<ResolverInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, recoveryCount, commitProxyCount, resolverCount, reply);
+		serializer(ar, recoveryCount, commitProxyCount, resolverCount, masterId, reply);
 	}
 };
 
@@ -1105,7 +1106,9 @@ ACTOR Future<Void> tLog(
     std::string folder,
     Reference<AsyncVar<bool>> degraded,
     Reference<AsyncVar<UID>> activeSharedTLog);
-}
+
+Key persistStorageTeamMessageRefsKey(UID id, StorageTeamID storageTeamId, Version version);
+} // namespace ptxn
 
 typedef decltype(&tLog) TLogFn;
 

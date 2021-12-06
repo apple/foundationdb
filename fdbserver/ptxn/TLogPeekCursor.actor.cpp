@@ -20,12 +20,14 @@
 
 #include "fdbserver/ptxn/TLogPeekCursor.actor.h"
 
+#include <algorithm>
 #include <iterator>
 #include <unordered_set>
 #include <vector>
 
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ptxn/TLogInterface.h"
+#include "fdbserver/ptxn/test/Delay.h"
 #include "fdbserver/ptxn/test/Utils.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
@@ -49,6 +51,10 @@ const Standalone<StringRef>& emptyCursorHeader() {
 	return empty;
 };
 
+} // anonymous namespace
+
+namespace details::StorageTeamPeekCursor {
+
 struct PeekRemoteContext {
 	const Optional<UID> debugID;
 	const StorageTeamID storageTeamID;
@@ -60,34 +66,34 @@ struct PeekRemoteContext {
 	const std::vector<TLogInterfaceBase*>& pTLogInterfaces;
 
 	// Deserializer
-	SubsequencedMessageDeserializer* pDeserializer;
+	SubsequencedMessageDeserializer& deserializer;
 
 	// Deserializer iterator
-	SubsequencedMessageDeserializer::iterator* pDeserializerIterator;
+	ptxn::details::ArenaWrapper<SubsequencedMessageDeserializer::iterator>& wrappedDeserializerIter;
+
+	// The pointer to the work arena. The work arena stores the data from TLogPeekReply
+	Arena* pWorkArena;
 
 	// If not null, attach the arena in the reply to this arena, so the mutations will still be
 	// accessible even the deserializer gets destructed.
 	Arena* pAttachArena;
 
-	Arena* pWorkArena;
-
 	PeekRemoteContext(const Optional<UID>& debugID_,
 	                  const StorageTeamID& storageTeamID_,
 	                  Version* pLastVersion_,
 	                  const std::vector<TLogInterfaceBase*>& pInterfaces_,
-	                  SubsequencedMessageDeserializer* pDeserializer_,
-	                  SubsequencedMessageDeserializer::iterator* pDeserializerIterator_,
+	                  SubsequencedMessageDeserializer& deserializer_,
+	                  details::ArenaWrapper<SubsequencedMessageDeserializer::iterator>& wrappedDeserializerIterator_,
 	                  Arena* pWorkArena_,
 	                  Arena* pAttachArena_ = nullptr)
 	  : debugID(debugID_), storageTeamID(storageTeamID_), pLastVersion(pLastVersion_), pTLogInterfaces(pInterfaces_),
-	    pDeserializer(pDeserializer_), pDeserializerIterator(pDeserializerIterator_), pAttachArena(pAttachArena_),
-	    pWorkArena(pWorkArena_) {
+	    deserializer(deserializer_), wrappedDeserializerIter(wrappedDeserializerIterator_), pWorkArena(pWorkArena_),
+	    pAttachArena(pAttachArena_) {
 
 		for (const auto pTLogInterface : pTLogInterfaces) {
 			ASSERT(pTLogInterface != nullptr);
 		}
-
-		ASSERT(pDeserializer != nullptr && pDeserializerIterator != nullptr);
+		ASSERT(pWorkArena_);
 	}
 };
 
@@ -103,32 +109,27 @@ ACTOR Future<bool> peekRemote(PeekRemoteContext peekRemoteContext) {
 	request.endVersion = invalidVersion; // we *ALWAYS* try to extract *ALL* data
 	request.storageTeamID = peekRemoteContext.storageTeamID;
 
-	try {
-		state TLogPeekReply reply = wait(pTLogInterface->peek.getReply(request));
+	state TLogPeekReply reply = wait(pTLogInterface->peek.getReply(request));
 
-		peekRemoteContext.pDeserializer->reset(reply.data);
-		*peekRemoteContext.pLastVersion = peekRemoteContext.pDeserializer->getLastVersion();
-		*peekRemoteContext.pDeserializerIterator = peekRemoteContext.pDeserializer->begin();
+	// In case the remote epoch ended, an end_of_stream exception will be thrown and it is the caller's responsible
+	// to catch.
 
-		if (*peekRemoteContext.pDeserializerIterator == peekRemoteContext.pDeserializer->end()) {
-			// No new mutations incoming, and there is no new mutations responded from TLog in this request
-			return false;
-		}
-
-		if (peekRemoteContext.pAttachArena != nullptr) {
-			peekRemoteContext.pAttachArena->dependsOn(reply.arena);
-		}
-
-		(*peekRemoteContext.pWorkArena) = reply.arena;
-
-		return true;
-	} catch (Error& error) {
-		// FIXME deal with possible errors
+	peekRemoteContext.deserializer.reset(reply.data);
+	peekRemoteContext.wrappedDeserializerIter = peekRemoteContext.deserializer.begin();
+	if (peekRemoteContext.wrappedDeserializerIter.get() == peekRemoteContext.deserializer.end()) {
+		// No new mutations incoming, and there is no new mutations responded from TLog in this request
 		return false;
 	}
+
+	*peekRemoteContext.pLastVersion = reply.endVersion;
+	*peekRemoteContext.pWorkArena = reply.arena;
+
+	return true;
 }
 
-} // anonymous namespace
+} // namespace details::StorageTeamPeekCursor
+
+#pragma region PeekCursorBase
 
 PeekCursorBase::iterator::iterator(PeekCursorBase* pCursor_, bool isEndIterator_)
   : pCursor(pCursor_), isEndIterator(isEndIterator_) {}
@@ -173,19 +174,70 @@ bool PeekCursorBase::hasRemaining() const {
 	return hasRemainingImpl();
 }
 
+#pragma endregion PeekCursorBase
+
+namespace details {
+
+#pragma region VersionSubsequencePeekCursorBase
+
+VersionSubsequencePeekCursorBase::VersionSubsequencePeekCursorBase(const Version version_,
+                                                                   const Subsequence subsequence_)
+  : PeekCursorBase() {}
+
+const Version& VersionSubsequencePeekCursorBase::getVersion() const {
+	return get().version;
+}
+
+const Subsequence& VersionSubsequencePeekCursorBase::getSubsequence() const {
+	return get().subsequence;
+}
+
+int VersionSubsequencePeekCursorBase::operatorSpaceship(const VersionSubsequencePeekCursorBase& other) const {
+	const Version& thisVersion = getVersion();
+	const Version& otherVersion = other.getVersion();
+	if (thisVersion < otherVersion) {
+		return -1;
+	} else if (thisVersion > otherVersion) {
+		return 1;
+	}
+
+	const Subsequence& thisSubsequence = getSubsequence();
+	const Subsequence& otherSubsequence = other.getSubsequence();
+	if (thisSubsequence < otherSubsequence) {
+		return -1;
+	} else if (thisSubsequence > otherSubsequence) {
+		return 1;
+	}
+
+	return 0;
+}
+
+#pragma endregion VersionSubsequencePeekCursorBase
+
+} // namespace details
+
+#pragma region StorageTeamPeekCursor
+
 StorageTeamPeekCursor::StorageTeamPeekCursor(const Version& beginVersion_,
                                              const StorageTeamID& storageTeamID_,
                                              TLogInterfaceBase* pTLogInterface_,
-                                             Arena* pArena_)
-  : StorageTeamPeekCursor(beginVersion_, storageTeamID_, std::vector<TLogInterfaceBase*>{ pTLogInterface_ }, pArena_) {}
+                                             Arena* pArena_,
+                                             const bool reportEmptyVersion_)
+  : StorageTeamPeekCursor(beginVersion_,
+                          storageTeamID_,
+                          std::vector<TLogInterfaceBase*>{ pTLogInterface_ },
+                          pArena_,
+                          reportEmptyVersion_) {}
 
 StorageTeamPeekCursor::StorageTeamPeekCursor(const Version& beginVersion_,
                                              const StorageTeamID& storageTeamID_,
                                              const std::vector<TLogInterfaceBase*>& pTLogInterfaces_,
-                                             Arena* pArena_)
-  : storageTeamID(storageTeamID_), pTLogInterfaces(pTLogInterfaces_), pAttachArena(pArena_),
-    deserializer(emptyCursorHeader()), deserializerIter(deserializer.begin()), beginVersion(beginVersion_),
-    lastVersion(beginVersion_ - 1) {
+                                             Arena* pArena_,
+                                             const bool reportEmptyVersion_)
+  : VersionSubsequencePeekCursorBase(), storageTeamID(storageTeamID_), pTLogInterfaces(pTLogInterfaces_),
+    pAttachArena(pArena_), deserializer(emptyCursorHeader(), /* reportEmptyVersion_ */ true),
+    wrappedDeserializerIter(deserializer.begin(), pArena_), beginVersion(beginVersion_),
+    reportEmptyVersion(reportEmptyVersion_), lastVersion(beginVersion_ - 1) {
 
 	for (const auto pTLogInterface : pTLogInterfaces) {
 		ASSERT(pTLogInterface != nullptr);
@@ -196,38 +248,408 @@ const StorageTeamID& StorageTeamPeekCursor::getStorageTeamID() const {
 	return storageTeamID;
 }
 
-const Version& StorageTeamPeekCursor::getLastVersion() const {
-	return lastVersion;
-}
-
 const Version& StorageTeamPeekCursor::getBeginVersion() const {
 	return beginVersion;
 }
 
 Future<bool> StorageTeamPeekCursor::remoteMoreAvailableImpl() {
 	// FIXME Put debugID if necessary
-	PeekRemoteContext context(Optional<UID>(),
-	                          getStorageTeamID(),
-	                          &lastVersion,
-	                          pTLogInterfaces,
-	                          &deserializer,
-	                          &deserializerIter,
-	                          &workArena,
-	                          pAttachArena);
+	details::StorageTeamPeekCursor::PeekRemoteContext context(Optional<UID>(),
+	                                                          getStorageTeamID(),
+	                                                          &lastVersion,
+	                                                          pTLogInterfaces,
+	                                                          deserializer,
+	                                                          wrappedDeserializerIter,
+	                                                          &workArena,
+	                                                          pAttachArena);
 
-	return peekRemote(context);
+	return details::StorageTeamPeekCursor::peekRemote(context);
 }
 
 void StorageTeamPeekCursor::nextImpl() {
-	++deserializerIter;
+	++(wrappedDeserializerIter.get());
 }
 
 const VersionSubsequenceMessage& StorageTeamPeekCursor::getImpl() const {
-	return *deserializerIter;
+	return *wrappedDeserializerIter.get();
 }
 
 bool StorageTeamPeekCursor::hasRemainingImpl() const {
-	return deserializerIter != deserializer.end();
+	if (!reportEmptyVersion) {
+		while (wrappedDeserializerIter.get() != deserializer.end() &&
+		       wrappedDeserializerIter.get()->message.getType() == Message::Type::EMPTY_VERSION_MESSAGE) {
+			++(wrappedDeserializerIter.get());
+		}
+	}
+	return wrappedDeserializerIter.get() != deserializer.end();
+}
+
+#pragma endregion StorageTeamPeekCursor
+
+namespace merged {
+
+namespace details {
+
+#pragma region OrderedCursorContainer
+
+bool OrderedCursorContainer::heapElementComparator(OrderedCursorContainer::element_t e1,
+                                                   OrderedCursorContainer::element_t e2) {
+	return *e1 > *e2;
+}
+
+OrderedCursorContainer::OrderedCursorContainer() {
+	std::make_heap(std::begin(container), std::end(container), heapElementComparator);
+}
+
+void OrderedCursorContainer::pushImpl(const OrderedCursorContainer::element_t& pCursor) {
+	container.push_back(pCursor);
+	std::push_heap(std::begin(container), std::end(container), heapElementComparator);
+}
+
+void OrderedCursorContainer::popImpl() {
+	std::pop_heap(std::begin(container), std::end(container), heapElementComparator);
+	container.pop_back();
+}
+
+#pragma endregion OrderedCursorContainer
+
+#pragma region UnorderedCursorContainer
+
+void UnorderedCursorContainer::pushImpl(const UnorderedCursorContainer::element_t& pCursor) {
+	container.push_back(pCursor);
+}
+
+void UnorderedCursorContainer::popImpl() {
+	container.pop_front();
+}
+
+#pragma endregion UnorderedCursorContainer
+
+#pragma region StorageTeamIDCursorMapper
+
+void StorageTeamIDCursorMapper::addCursor(std::shared_ptr<StorageTeamPeekCursor>&& cursor) {
+	addCursorImpl(std::move(cursor));
+}
+
+void StorageTeamIDCursorMapper::addCursorImpl(std::shared_ptr<StorageTeamPeekCursor>&& cursor) {
+	const StorageTeamID& storageTeamID = cursor->getStorageTeamID();
+	ASSERT(!isCursorExists(storageTeamID));
+	mapper[storageTeamID] = std::shared_ptr<StorageTeamPeekCursor>(std::move(cursor));
+}
+
+std::shared_ptr<StorageTeamPeekCursor> StorageTeamIDCursorMapper::removeCursor(const StorageTeamID& storageTeamID) {
+
+	ASSERT(isCursorExists(storageTeamID));
+	return removeCursorImpl(storageTeamID);
+}
+
+std::shared_ptr<StorageTeamPeekCursor> StorageTeamIDCursorMapper::removeCursorImpl(const StorageTeamID& storageTeamID) {
+
+	std::shared_ptr<StorageTeamPeekCursor> result = mapper[storageTeamID];
+	mapper.erase(storageTeamID);
+	return result;
+}
+
+bool StorageTeamIDCursorMapper::isCursorExists(const StorageTeamID& storageTeamID) const {
+	return mapper.find(storageTeamID) != mapper.end();
+}
+
+StorageTeamPeekCursor& StorageTeamIDCursorMapper::getCursor(const StorageTeamID& storageTeamID) {
+	ASSERT(isCursorExists(storageTeamID));
+	return *mapper[storageTeamID];
+}
+
+const StorageTeamPeekCursor& StorageTeamIDCursorMapper::getCursor(const StorageTeamID& storageTeamID) const {
+	ASSERT(isCursorExists(storageTeamID));
+	return *mapper.at(storageTeamID);
+}
+
+std::shared_ptr<StorageTeamPeekCursor> StorageTeamIDCursorMapper::getCursorPtr(const StorageTeamID& storageTeamID) {
+
+	ASSERT(isCursorExists(storageTeamID));
+	return mapper.at(storageTeamID);
+}
+
+int StorageTeamIDCursorMapper::getNumCursors() const {
+	return mapper.size();
+}
+
+StorageTeamIDCursorMapper::StorageTeamIDCursorMapper_t::iterator StorageTeamIDCursorMapper::cursorsBegin() {
+	return std::begin(mapper);
+}
+
+StorageTeamIDCursorMapper::StorageTeamIDCursorMapper_t::iterator StorageTeamIDCursorMapper::cursorsEnd() {
+	return std::end(mapper);
+}
+
+#pragma endregion StorageTeamIDCursorMapper
+
+namespace BroadcastedStorageTeamPeekCursor {
+
+struct PeekRemoteContext {
+	using GetCursorPtrFunc_t = std::function<std::shared_ptr<StorageTeamPeekCursor>(const StorageTeamID&)>;
+
+	// Cursors that are empty
+	std::list<StorageTeamID>& emptyCursorStorageTeamIDs;
+
+	// Cursors that meets end-of-stream when querying the TLog server
+	std::list<StorageTeamID>& retiredCursorStorageTeamIDs;
+
+	// Function that called to get the corresponding cursor by storage team id
+	GetCursorPtrFunc_t getCursorPtr;
+
+	PeekRemoteContext(std::list<StorageTeamID>& emptyCursorStorageTeamIDs_,
+	                  std::list<StorageTeamID>& retiredCursorStorageTeamIDs_,
+	                  GetCursorPtrFunc_t getCursorPtr_)
+	  : emptyCursorStorageTeamIDs(emptyCursorStorageTeamIDs_),
+	    retiredCursorStorageTeamIDs(retiredCursorStorageTeamIDs_), getCursorPtr(getCursorPtr_) {}
+};
+
+struct PeekSingleCursorResult {
+	bool retrievedData = false;
+	bool endOfStream = false;
+};
+
+ACTOR Future<PeekSingleCursorResult> peekSingleCursor(std::shared_ptr<StorageTeamPeekCursor> pCursor) {
+	state int i = 0;
+	state ptxn::test::ExponentalBackoffDelay exponentalBackoff(SERVER_KNOBS->MERGE_CURSOR_RETRY_DELAY);
+	exponentalBackoff.enable();
+
+	while (i < SERVER_KNOBS->MERGE_CURSOR_RETRY_TIMES) {
+		try {
+			state bool receivedData = wait(pCursor->remoteMoreAvailable());
+		} catch (Error& error) {
+			if (error.code() == error_code_end_of_stream) {
+				return PeekSingleCursorResult{ false, true };
+			}
+			throw;
+		}
+		if (receivedData) {
+			exponentalBackoff.resetBackoffs();
+			return PeekSingleCursorResult{ true, false };
+		}
+		if (++i == SERVER_KNOBS->MERGE_CURSOR_RETRY_TIMES) {
+			break;
+		}
+		wait(exponentalBackoff());
+	}
+
+	return PeekSingleCursorResult{ false, false };
+}
+
+// Returns the number of cursors reported that has received messages from TLogs
+ACTOR Future<bool> peekRemote(std::shared_ptr<PeekRemoteContext> pPeekRemoteContext) {
+	if (pPeekRemoteContext->emptyCursorStorageTeamIDs.empty()) {
+		throw end_of_stream();
+	}
+
+	std::vector<Future<PeekSingleCursorResult>> cursorFutures;
+	std::transform(
+	    std::begin(pPeekRemoteContext->emptyCursorStorageTeamIDs),
+	    std::end(pPeekRemoteContext->emptyCursorStorageTeamIDs),
+	    std::back_inserter(cursorFutures),
+	    /* NOTE ACTORs are compiled into classes */
+	    [this](const auto& storageTeamID) -> auto {
+		    return peekSingleCursor(pPeekRemoteContext->getCursorPtr(storageTeamID));
+	    });
+	state std::vector<PeekSingleCursorResult> cursorResults = wait(getAll(cursorFutures));
+
+	auto cursorResultsIter = std::begin(cursorResults);
+	auto emptyCursorStorageTeamIDsIter = std::begin(pPeekRemoteContext->emptyCursorStorageTeamIDs);
+	// For any cursors need to be refilled, if the final state is either filled or end_of_stream, the cursors will
+	// be ready; otherwise, not ready.
+	bool cursorsReady = true;
+	while (cursorResultsIter != std::end(cursorResults)) {
+		const auto& peekResult = *cursorResultsIter++;
+		const StorageTeamID& storageTeamID = *emptyCursorStorageTeamIDsIter;
+
+		// Timeout
+		if (!peekResult.endOfStream && !peekResult.retrievedData) {
+			TraceEvent(SevWarn, "CursorTimeOutError").detail("StorageTeamID", storageTeamID);
+			cursorsReady = false;
+			++emptyCursorStorageTeamIDsIter;
+			continue;
+		}
+
+		if (peekResult.endOfStream) {
+			TraceEvent(SevInfo, "CursorEndOfStream").detail("StorageTeamID", storageTeamID);
+			pPeekRemoteContext->retiredCursorStorageTeamIDs.push_back(storageTeamID);
+		}
+
+		pPeekRemoteContext->emptyCursorStorageTeamIDs.erase(emptyCursorStorageTeamIDsIter++);
+	}
+
+	return cursorsReady;
+}
+
+} // namespace BroadcastedStorageTeamPeekCursor
+
+} // namespace details
+
+#pragma region BroadcastedStorageTeamPeekCursorBase
+
+bool BroadcastedStorageTeamPeekCursorBase::tryFillCursorContainer() {
+	ASSERT(getNumCursors() != 0);
+	ASSERT(pCursorContainer && pCursorContainer->empty());
+
+	for (const auto& storageTeamID : retiredCursorStorageTeamIDs) {
+		removeCursor(storageTeamID);
+	}
+
+	if (getNumCursors() == 0) {
+		// We have no active cursors, fail the cursor filling process
+		// In this case, the caller should do the RPC, and peekRemote should throw end_of_stream to indicate the cursor
+		// is expired.
+		return false;
+	}
+
+	// Find the current version all the cursors are sharing
+	currentVersion = invalidVersion;
+	bool isFirstElement = true;
+	for (auto iter = cursorsBegin(); iter != cursorsEnd(); ++iter) {
+		auto pCursor = iter->second;
+		if (!pCursor->hasRemaining()) {
+			emptyCursorStorageTeamIDs.push_back(pCursor->getStorageTeamID());
+			continue;
+		}
+
+		Version cursorVersion = iter->second->getVersion();
+		if (isFirstElement) {
+			currentVersion = cursorVersion;
+			isFirstElement = false;
+		} else {
+			// In the broadcast model, the cursors must be in state of:
+			//   * For cursors that have messages, they share the same version.
+			// . * Otherwise, the cursor must have no remaining data, i.e. needs RPC to get refilled.
+			// The cursors cannot be lagged behind, or the subsequence constraint cannot be fulfilled.
+			UNSTOPPABLE_ASSERT(currentVersion == cursorVersion);
+		}
+	}
+
+	if (!emptyCursorStorageTeamIDs.empty()) {
+		// There are cursors locally consumed. Requires RPC to get a refill.
+		return false;
+	}
+
+	// No cursor should report its version invalidVersion
+	ASSERT(currentVersion != invalidVersion);
+
+	// Now the cursors are all sharing the same version, fill the cursor container for consumption
+	for (auto iter = cursorsBegin(); iter != cursorsEnd(); ++iter) {
+		pCursorContainer->push(
+		    std::dynamic_pointer_cast<ptxn::details::VersionSubsequencePeekCursorBase>(iter->second));
+	}
+
+	return true;
+}
+
+Future<bool> BroadcastedStorageTeamPeekCursorBase::remoteMoreAvailableImpl() {
+	using PeekRemoteContext = details::BroadcastedStorageTeamPeekCursor::PeekRemoteContext;
+	std::shared_ptr<PeekRemoteContext> pContext = std::make_shared<PeekRemoteContext>(
+	    emptyCursorStorageTeamIDs, retiredCursorStorageTeamIDs, [this](const StorageTeamID& storageTeamID) -> auto {
+		    return getCursorPtr(storageTeamID);
+	    });
+	return details::BroadcastedStorageTeamPeekCursor::peekRemote(pContext);
+}
+
+const VersionSubsequenceMessage& BroadcastedStorageTeamPeekCursorBase::getImpl() const {
+	return pCursorContainer->front()->get();
+}
+
+void BroadcastedStorageTeamPeekCursorBase::addCursorImpl(std::shared_ptr<StorageTeamPeekCursor>&& cursor) {
+	ASSERT(!cursor->isEmptyVersionsIgnored());
+	emptyCursorStorageTeamIDs.push_back(cursor->getStorageTeamID());
+	details::StorageTeamIDCursorMapper::addCursorImpl(std::move(cursor));
+}
+
+bool BroadcastedStorageTeamPeekCursorBase::hasRemainingImpl() const {
+	while (true) {
+		// Remove all empty version message
+		while (!pCursorContainer->empty() &&
+		       pCursorContainer->front()->get().message.getType() == Message::Type::EMPTY_VERSION_MESSAGE) {
+			auto& pCursorContainer = const_cast<BroadcastedStorageTeamPeekCursorBase*>(this)->pCursorContainer;
+			auto pConsumedCursor = pCursorContainer->front();
+			pConsumedCursor->next();
+			pCursorContainer->pop();
+		}
+
+		if (!pCursorContainer->empty()) {
+			return true;
+		} else {
+			// FIXME Rethink this... const_cast is bitter yet setting hasRemainingImpl non-const is also painful
+			bool tryFillResult = const_cast<BroadcastedStorageTeamPeekCursorBase*>(this)->tryFillCursorContainer();
+			if (!tryFillResult) {
+				return false;
+			}
+			return true;
+		}
+	}
+}
+
+#pragma endregion BroadcastedStorageTeamPeekCursorBase
+
+void BroadcastedStorageTeamPeekCursor_Ordered::nextImpl() {
+	if (pCursorContainer->empty() && !tryFillCursorContainer()) {
+		// Calling BroadcastedStorageTeamPeekCursor::next while hasRemaining is fals
+		ASSERT(false);
+	}
+
+	details::OrderedCursorContainer::element_t pConsumedCursor = pCursorContainer->front();
+	pCursorContainer->pop();
+	pConsumedCursor->next();
+	if (pConsumedCursor->hasRemaining() && pConsumedCursor->getVersion() == currentVersion) {
+		// The current version is not completely consumed, push it back for consumption
+		pCursorContainer->push(
+		    std::dynamic_pointer_cast<ptxn::details::VersionSubsequencePeekCursorBase>(pConsumedCursor));
+	}
+}
+
+void BroadcastedStorageTeamPeekCursor_Unordered::nextImpl() {
+	if (pCursorContainer->empty() && !tryFillCursorContainer()) {
+		// Calling BroadcastedStorageTeamPeekCursor::next while hasRemaining is fals
+		ASSERT(false);
+	}
+
+	details::OrderedCursorContainer::element_t pConsumedCursor = pCursorContainer->front();
+	pConsumedCursor->next();
+	if (!pConsumedCursor->hasRemaining() || pConsumedCursor->getVersion() != currentVersion) {
+		pCursorContainer->pop();
+	}
+}
+
+} // namespace merged
+
+// Moves the cursor so it locates to the given version/subsequence. If the version/subsequence does not exist, moves the
+// cursor to the closest next mutation. If the version/subsequence is earlier than the current version/subsequence the
+// cursor is located, then the code will do nothing.
+ACTOR Future<Void> advanceTo(PeekCursorBase* cursor, Version version, Subsequence subsequence) {
+	state PeekCursorBase::iterator iter = cursor->begin();
+
+	loop {
+		while (iter != cursor->end()) {
+			// Is iter already past the version?
+			if (iter->version > version) {
+				return Void();
+			}
+			// Is iter current at the given version?
+			if (iter->version == version) {
+				while (iter != cursor->end() && iter->version == version && iter->subsequence < subsequence)
+					++iter;
+				if (iter->version > version || iter->subsequence >= subsequence) {
+					return Void();
+				}
+			}
+			++iter;
+		}
+
+		// Consumed local data, need to check remote TLog
+		bool remoteAvailable = wait(cursor->remoteMoreAvailable());
+		if (!remoteAvailable) {
+			// The version/subsequence should be in the future
+			// Throw error?
+			return Void();
+		}
+	}
 }
 
 //////////////////////////////////////////////////////////////////////////////////

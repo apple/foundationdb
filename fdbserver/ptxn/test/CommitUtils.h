@@ -21,8 +21,9 @@
 #ifndef FDBSERVER_PTXN_TEST_GENERATEDCOMMITS_H
 #define FDBSERVER_PTXN_TEST_GENERATEDCOMMITS_H
 
-#include <functional>
+#include <map>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -39,33 +40,75 @@ struct CommitRecordTag {
 	bool allValidated() const;
 };
 
-// Record generated commits
+// Record generated commits in the current epoch
 struct CommitRecord {
+	// Format:
+	// Commit Version ---+ Storage Team ID -- <Subsequence, Message>
+	//                   | Storage Team ID -- <Subsequence, Message>
+	//                   | Storage Team ID -- <Subsequence, Message>
+	//                     ...
+	// Commit Version ---+ Storage Team ID -- <Subsequence, Message>
+	//                   | Storage Team ID -- <Subsequence, Message>
+	//                     ...
+	using RecordType = std::map<Version, std::unordered_map<StorageTeamID, VectorRef<std::pair<Subsequence, Message>>>>;
+
+	// The arena contains the messages
 	Arena messageArena;
-	std::map<Version, std::unordered_map<StorageTeamID, VectorRef<std::pair<Subsequence, Message>>>> messages;
+
+	RecordType messages;
+
+	// Maps commit version to corresponding storage team version
+	std::map<Version, Version> commitVersionStorageTeamVersionMapper;
+
+	// Maps StorageTeamID to corresponding epoch
+	std::unordered_map<StorageTeamID, std::pair<Version, Version>> storageTeamEpochVersionRange;
+
+	// Add tag for each Commit version -- Storage Team ID pair. The tag is used for verifying the data.
 	std::map<Version, std::unordered_map<StorageTeamID, CommitRecordTag>> tags;
 
+	// Get messages from a given set of storage teams, in format
+	//     CommitVersion -- Subsequence -- Messag
+	// If the set is empty, return *all* messages in CommitRecord
+	std::vector<VersionSubsequenceMessage> getMessagesFromStorageTeams(
+	    const std::unordered_set<StorageTeamID>& storageTeamIDs = std::unordered_set<StorageTeamID>()) const;
 	int getNumTotalMessages() const;
+
+	// The first commit version
+	Version firstVersion = MAX_VERSION;
+
+	// The last commit version
+	Version lastVersion = invalidVersion;
 };
+
+extern const std::pair<int, int> DEFAULT_KEY_LENGTH_RANGE;
+extern const std::pair<int, int> DEFAULT_VALUE_LENGTH_RANGE;
+
+// Generate a random SetValue MutationRef
+MutationRef generateRandomSetValue(Arena& arena,
+                                   const std::pair<int, int>& keyLengthRange = DEFAULT_KEY_LENGTH_RANGE,
+                                   const std::pair<int, int>& valueLengthRange = DEFAULT_VALUE_LENGTH_RANGE);
 
 // Generates a series of random mutations
 void generateMutationRefs(const int numMutations,
                           Arena& arena,
                           VectorRef<MutationRef>& mutationRefs,
-                          const std::pair<int, int>& keyLengthRange = { 10, 15 },
-                          const std::pair<int, int>& valueLengthRange = { 10, 1000 });
+                          const std::pair<int, int>& keyLengthRange = DEFAULT_KEY_LENGTH_RANGE,
+                          const std::pair<int, int>& valueLengthRange = DEFAULT_VALUE_LENGTH_RANGE);
 
-// Distribute MutationRefs to StorageTeamIDs in CommitRecord
+// Distribute MutationRefs to StorageTeamIDs in CommitRecord.
 void distributeMutationRefs(VectorRef<MutationRef>& mutationRefs,
-                            const Version& version,
+                            const Version& commitVersion,
+                            const Version& storageTeamVersion,
                             const std::vector<StorageTeamID>& storageTeamIDs,
                             CommitRecord& commitRecord);
 
 // For a given version, serialize the messages from CommitRecord for Proxy use
+// The function will receive a StorageTeamID, and return the serializer for its corresponding TLogGroupID
+// FIXME: use TestEnvironment for the mapping
 void prepareProxySerializedMessages(
     const CommitRecord& commitRecord,
-    const Version& version,
-    std::function<std::shared_ptr<ProxySubsequencedMessageSerializer>(StorageTeamID)> serializer);
+    const Version& commitVersion,
+    std::function<std::shared_ptr<ProxySubsequencedMessageSerializer>(const StorageTeamID&)> serializerGen);
 
 // Check if all records are validated
 bool isAllRecordsValidated(const CommitRecord& commitRecord);

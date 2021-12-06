@@ -27,6 +27,9 @@
 #include <vector>
 
 #include "fdbclient/FDBTypes.h"
+#include "flow/BooleanParam.h"
+
+FDB_DECLARE_BOOLEAN_PARAM(UpdateAllGroups);
 
 namespace ptxn {
 
@@ -46,7 +49,15 @@ public:
 	void removeGroups(const std::vector<TLogGroupID>& groups);
 
 	// Updates "groups" with new commitVersion. Returns each group's PCV in a map.
-	std::map<TLogGroupID, Version> updateGroups(const std::vector<TLogGroupID>& groups, Version commitVersion);
+	// Whenever shard boundary changes, we need to return all groups in the results,
+	// i.e., the commit proxy needs to broadcast to all TLog groups so that the Resolver
+	// may correctly track commit versions of TLog groups.
+	std::map<TLogGroupID, Version> updateGroups(const std::vector<TLogGroupID>& groups,
+	                                            Version commitVersion,
+	                                            UpdateAllGroups returnAllGroups);
+	std::map<TLogGroupID, Version> updateGroups(const std::set<TLogGroupID>& groups,
+	                                            Version commitVersion,
+	                                            UpdateAllGroups returnAllGroups);
 
 	// Returns the most lagging group and its CV.
 	std::pair<TLogGroupID, Version> mostLaggingGroup() const;

@@ -1,11 +1,10 @@
-#! /bin/bash
+#!/bin/bash
 
-#
-# download_multiversion_libraries.bash
+# entrypoint.bash
 #
 # This source file is part of the FoundationDB open source project
 #
-# Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+# Copyright 2018-2019 Apple Inc. and the FoundationDB project authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,12 +19,13 @@
 # limitations under the License.
 #
 
-mkdir -p /usr/lib/fdb/multiversion
-website=$1
-shift
-for version in $*; do
-	origin=$website/downloads/$version/linux/libfdb_c_$version.so
-	destination=/usr/lib/fdb/multiversion/libfdb_c_$version.so
-	echo "Downloading $origin to $destination"
-	curl $origin -o $destination
-done
+
+if [[ -n "$ADDITIONAL_ENV_FILE" ]]; then
+  source $ADDITIONAL_ENV_FILE
+fi
+
+if [[ -f "/opt/rh/rh-python38/enable" ]]; then
+    source /opt/rh/rh-python38/enable
+fi
+
+exec /sidecar.py $*

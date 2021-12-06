@@ -28,6 +28,8 @@
 
 namespace ptxn {
 
+#pragma region SubsequencedMessageSerializer
+
 SubsequencedMessageSerializer::SubsequencedMessageSerializer(const StorageTeamID& storageTeamID) {
 	header.storageTeamID = storageTeamID;
 	header.lastVersion = invalidVersion;
@@ -82,6 +84,9 @@ void SubsequencedMessageSerializer::write(const Subsequence& subsequence, const 
 		break;
 	case Message::Type::MUTATION_REF:
 		write(subsequence, std::get<MutationRef>(message));
+		break;
+	case Message::Type::EMPTY_VERSION_MESSAGE:
+		// Empty version message is not serializable, only triggers a version change, so it is not written
 		break;
 	default:
 		throw internal_error_msg("message to be serialized is valueless, or having undefined type");
@@ -157,6 +162,10 @@ size_t SubsequencedMessageSerializer::getTotalBytes() const {
 	return serializer.getTotalBytes();
 }
 
+#pragma endregion SubsequencedMessageSerializer
+
+#pragma region TLogSubsequencedMessageSerializer
+
 TLogSubsequencedMessageSerializer::TLogSubsequencedMessageSerializer(const StorageTeamID& storageTeamID_)
   : serializer(storageTeamID_) {}
 
@@ -174,17 +183,30 @@ size_t TLogSubsequencedMessageSerializer::getTotalBytes() const {
 	return serializer.getTotalBytes();
 }
 
-ProxySubsequencedMessageSerializer::ProxySubsequencedMessageSerializer(const Version& version_) : version(version_) {}
+#pragma endregion TLogSubsequencedMessageSerializer
+
+#pragma region ProxySubsequencedMessageSerializer
+
+ProxySubsequencedMessageSerializer::ProxySubsequencedMessageSerializer(const Version& version_)
+  : storageTeamVersion(version_) {}
+
+const Subsequence& ProxySubsequencedMessageSerializer::getSubsequence() const {
+	return subsequence;
+}
 
 const Version& ProxySubsequencedMessageSerializer::getVersion() const {
-	return version;
+	return storageTeamVersion;
+}
+
+void ProxySubsequencedMessageSerializer::setSubsequence(const Subsequence& newSubsequence) {
+	subsequence = newSubsequence;
 }
 
 void ProxySubsequencedMessageSerializer::prepareWriteMessage(const StorageTeamID& storageTeamID) {
 	// If the storage team ID is unseen, create a serializer for it.
 	if (serializers.find(storageTeamID) == serializers.end()) {
 		serializers.emplace(storageTeamID, storageTeamID);
-		serializers.at(storageTeamID).startVersionWriting(version);
+		serializers.at(storageTeamID).startVersionWriting(storageTeamVersion);
 	}
 
 	// If span context message exists, and not being written to the serializer, then serialize it first.
@@ -201,6 +223,18 @@ void ProxySubsequencedMessageSerializer::prepareWriteMessage(const StorageTeamID
 void ProxySubsequencedMessageSerializer::broadcastSpanContext(const SpanContextMessage& spanContext) {
 	spanContextMessage = spanContext;
 	storageTeamInjectedSpanContext.clear();
+
+	// Broadcast the SpanContext to known storage teams
+	for (auto& [storageTeamID, serializer] : serializers) {
+		storageTeamInjectedSpanContext.insert(storageTeamID);
+		serializer.write(SubsequenceSpanContextItem{ subsequence++, spanContext });
+	}
+}
+
+void ProxySubsequencedMessageSerializer::writeTeamSpanContext(const SpanContextMessage& spanContext,
+                                                              const StorageTeamID& team) {
+	prepareWriteMessage(team);
+	serializers.at(team).write(SubsequenceSpanContextItem{ subsequence++, spanContext });
 }
 
 void ProxySubsequencedMessageSerializer::write(const MutationRef& mutation, const StorageTeamID& storageTeamID) {
@@ -231,12 +265,17 @@ std::pair<Arena, std::unordered_map<StorageTeamID, StringRef>> ProxySubsequenced
 	std::unordered_map<StorageTeamID, StringRef> result;
 	Arena sharedArena;
 	for (auto& [storageTeamID, serializer] : serializers) {
+		// FIXME rethink about this memory copy
 		result[storageTeamID] = StringRef(sharedArena, getSerialized(storageTeamID));
 	}
 	return { sharedArena, result };
 }
 
+#pragma endregion ProxySubsequencedMessageSerializer
+
 namespace details {
+
+#pragma region SubsequencedMessageDeserializerBase
 
 void SubsequencedMessageDeserializerBase::resetImpl(const StringRef serialized_) {
 	ASSERT(serialized_.size() > 0);
@@ -261,10 +300,16 @@ const Version& SubsequencedMessageDeserializerBase::getLastVersion() const {
 	return header.lastVersion;
 }
 
+#pragma endregion SubsequencedMessageDeserializerBase
+
 } // namespace details
 
-SubsequencedMessageDeserializer::iterator::iterator(const StringRef serialized_, bool isEndIterator)
-  : deserializer(serialized_), rawSerializedData(serialized_) {
+#pragma region SubsequencedMessageDeserializer
+
+SubsequencedMessageDeserializer::iterator::iterator(const StringRef serialized_,
+                                                    const bool isEndIterator,
+                                                    const bool iterateOverEmptyVersions_)
+  : deserializer(serialized_), rawSerializedData(serialized_), iterateOverEmptyVersions(iterateOverEmptyVersions_) {
 
 	header = deserializer.deserializeAsMainHeader();
 
@@ -306,6 +351,16 @@ SubsequencedMessageDeserializer::iterator& SubsequencedMessageDeserializer::iter
 		while (sectionIndex != header.numItems) {
 			versionHeader = deserializer.deserializeAsSectionHeader();
 			currentItem.version = versionHeader.version;
+
+			if (iterateOverEmptyVersions && versionHeader.numItems == 0) {
+				// The EmpytVersionMessage has no subsequence, MAX_SUBSEQUENCE is used so it is processed after all
+				// other messages in the current version.
+				currentItem.subsequence = MAX_SUBSEQUENCE;
+				currentItem.message = EmptyMessage();
+
+				return *this;
+			}
+
 			if (versionHeader.numItems != 0) {
 				break;
 			}
@@ -353,10 +408,15 @@ Arena& SubsequencedMessageDeserializer::iterator::arena() {
 	return deserializer.arena();
 }
 
-SubsequencedMessageDeserializer::SubsequencedMessageDeserializer(const StringRef serialized_)
-  : endIterator(serialized_, true) {
+SubsequencedMessageDeserializer::SubsequencedMessageDeserializer(const StringRef serialized_,
+                                                                 const bool iterateOverEmptyVersions_)
+  : endIterator(serialized_, true), iterateOverEmptyVersions(iterateOverEmptyVersions_) {
 
 	reset(serialized_);
+}
+
+bool SubsequencedMessageDeserializer::isEmptyVersionsIgnored() const {
+	return !iterateOverEmptyVersions;
 }
 
 void SubsequencedMessageDeserializer::reset(const StringRef serialized_) {
@@ -369,7 +429,7 @@ SubsequencedMessageDeserializer::iterator SubsequencedMessageDeserializer::begin
 	// Since the iterator is setting to a state that it is located at the end of a version section,
 	// doing a prefix ++ will trigger it read a new version section, and place itself to the beginning
 	// of the items in the section.
-	return ++iterator(serialized, false);
+	return ++iterator(serialized, false, iterateOverEmptyVersions);
 }
 
 const SubsequencedMessageDeserializer::iterator& SubsequencedMessageDeserializer::end() const {
@@ -383,5 +443,7 @@ SubsequencedMessageDeserializer::const_iterator SubsequencedMessageDeserializer:
 const SubsequencedMessageDeserializer::const_iterator& SubsequencedMessageDeserializer::cend() const {
 	return end();
 }
+
+#pragma endregion SubsequencedMessageDeserializer
 
 } // namespace ptxn

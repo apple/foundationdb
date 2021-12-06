@@ -22,6 +22,7 @@
 #define FDBSERVER_LOGSYSTEM_H
 
 #include <set>
+#include <stdint.h>
 #include <vector>
 #include <unordered_map>
 
@@ -33,7 +34,6 @@
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/ptxn/MessageSerializer.h"
 #include "fdbserver/SpanContextMessage.h"
-#include "fdbserver/TLogGroup.actor.h"
 #include "fdbserver/TLogGroup.actor.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -753,10 +753,7 @@ struct CompareFirst {
 // uniquely identified by its first byte -- a value from MutationRef::Type.
 //
 struct LogPushData : NonCopyable {
-	// Log subsequences have to start at 1 (the MergedPeekCursor relies on this to make sure we never have !hasMessage()
-	// in the middle of data for a version
-
-	explicit LogPushData(Reference<ILogSystem> logSystem) : logSystem(logSystem), subsequence(1) {
+	explicit LogPushData(Reference<ILogSystem> logSystem) : logSystem(logSystem) {
 		for (auto& log : logSystem->getLogSystemConfig().tLogs) {
 			if (log.isLocal) {
 				for (int i = 0; i < log.tLogs.size(); i++) {
@@ -789,8 +786,14 @@ struct LogPushData : NonCopyable {
 			auto groupID = tLogGroupCollection->assignStorageTeam(team)->id();
 			ASSERT(pGroupMessageBuilders->count(groupID));
 			(*pGroupMessageBuilders)[groupID]->write(m, team);
+			writtenTLogGroups.insert(groupID);
 		}
 	}
+
+	const std::set<ptxn::TLogGroupID>& getWrittenTLogGroups() const { return writtenTLogGroups; }
+
+	void setShardChanged() { shardChanged = true; }
+	bool isShardChanged() const { return shardChanged; }
 
 	void writeMessage(StringRef rawMessageWithoutLength, bool usePreviousLocations);
 
@@ -798,6 +801,9 @@ struct LogPushData : NonCopyable {
 	void writeTypedMessage(T const& item, bool metadataMessage = false, bool allLocations = false);
 
 	Standalone<StringRef> getMessages(int loc) { return messagesWriter[loc].toValue(); }
+
+	// Returns all locations' messages, including empty ones.
+	std::vector<Standalone<StringRef>> getAllMessages();
 
 	// Records if a tlog (specified by "loc") will receive an empty version batch message.
 	// "value" is the message returned by getMessages() call.
@@ -808,7 +814,27 @@ struct LogPushData : NonCopyable {
 	float getEmptyMessageRatio() const;
 
 	std::unordered_map<ptxn::TLogGroupID, std::shared_ptr<ptxn::ProxySubsequencedMessageSerializer>>*
-	    pGroupMessageBuilders;
+	    pGroupMessageBuilders = nullptr;
+
+	// Add TLog groups to initialize "pGroupMessageBuilders".
+	void addTLogGroups(const std::vector<TLogGroupRef>& groups, Version commitVersion);
+
+	// Returns the total number of mutations.
+	uint32_t getMutationCount() const { return subsequence; }
+
+	// Sets mutations for all internal writers. "mutations" is the output from
+	// getAllMessages() and is used before writing any other mutations.
+	void setMutations(uint32_t totalMutations, VectorRef<StringRef> mutations);
+
+	// Returns messages for specified groups
+	std::unordered_map<ptxn::TLogGroupID, ptxn::SerializedTeamData> getGroupMutations(
+	    const std::set<ptxn::TLogGroupID>& groups);
+
+	// Sets mutations for internal group writers. "groupMutations" is the output from
+	// getGroupMutations() and is used before writing any other mutations.
+	void setGroupMutations(
+	    const std::map<ptxn::TLogGroupID, std::unordered_map<ptxn::StorageTeamID, StringRef>>& groupMutations,
+	    Version commitVersion);
 
 private:
 	Reference<ILogSystem> logSystem;
@@ -821,8 +847,13 @@ private:
 	// for the current transaction. Adding transaction info will reset this
 	// field.
 	std::unordered_set<int> writtenLocations;
-	uint32_t subsequence;
+	// Log subsequences have to start at 1 (the MergedPeekCursor relies on this to make sure we never have !hasMessage()
+	// in the middle of data for a version
+	uint32_t subsequence = 1;
 	SpanID spanContext;
+	// Stores TLog groups updated by the transactions.
+	std::set<ptxn::TLogGroupID> writtenTLogGroups;
+	bool shardChanged = false; // if keyServers has any changes, i.e., shard boundary modifications.
 
 	// Writes transaction info to the message stream at the given location if
 	// it has not already been written (for the current transaction). Returns

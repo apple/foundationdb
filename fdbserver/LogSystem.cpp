@@ -19,8 +19,14 @@
  */
 
 #include "fdbserver/LogSystem.h"
+#include "fdbserver/LogProtocolMessage.h"
+#include "fdbserver/SpanContextMessage.h"
+#include "fdbserver/ptxn/MessageSerializer.h"
+#include "fdbserver/ptxn/MessageTypes.h"
 #include "fdbserver/ptxn/test/FakeLogSystem.h"
 #include "fdbserver/TagPartitionedLogSystem.actor.h"
+#include "flow/Error.h"
+#include "flow/serialize.h"
 
 #ifndef __INTEL_COMPILER
 #pragma region LogSet
@@ -321,6 +327,15 @@ void LogPushData::writeMessage(StringRef rawMessageWithoutLength, bool usePrevio
 	}
 }
 
+std::vector<Standalone<StringRef>> LogPushData::getAllMessages() {
+	std::vector<Standalone<StringRef>> results;
+	results.reserve(messagesWriter.size());
+	for (int loc = 0; loc < messagesWriter.size(); loc++) {
+		results.push_back(getMessages(loc));
+	}
+	return results;
+}
+
 void LogPushData::recordEmptyMessage(int loc, const Standalone<StringRef>& value) {
 	if (!isEmptyMessage[loc]) {
 		BinaryWriter w(AssumeVersion(g_network->protocolVersion()));
@@ -357,6 +372,54 @@ bool LogPushData::writeTransactionInfo(int location, uint32_t subseq) {
 	int length = wr.getLength() - offset;
 	*(uint32_t*)((uint8_t*)wr.getData() + offset) = length - sizeof(uint32_t);
 	return true;
+}
+
+void LogPushData::addTLogGroups(const std::vector<TLogGroupRef>& groups, Version commitVersion) {
+	for (const auto& group : groups) {
+		pGroupMessageBuilders->emplace(group->id(),
+		                               std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(commitVersion));
+	}
+}
+
+std::unordered_map<ptxn::TLogGroupID, ptxn::SerializedTeamData> LogPushData::getGroupMutations(
+    const std::set<ptxn::TLogGroupID>& groups) {
+	std::unordered_map<ptxn::TLogGroupID, ptxn::SerializedTeamData> results;
+	for (const auto& [group, serializer] : *pGroupMessageBuilders) {
+		auto teamData = serializer->getAllSerialized();
+		results.emplace(group, teamData);
+	}
+	return results;
+}
+
+// TODO: we deserialize mutations sent from Resolvers and serialized to pGroupMessageBuilders.
+// It would be nice that ProxySubsequencedMessageSerializer can be set with
+// serialized data.
+void LogPushData::setGroupMutations(
+    const std::map<ptxn::TLogGroupID, std::unordered_map<ptxn::StorageTeamID, StringRef>>& groupMutations,
+    Version commitVersion) {
+	for (const auto& [group, teamData] : groupMutations) {
+		auto it = pGroupMessageBuilders->find(group);
+		if (it == pGroupMessageBuilders->end()) {
+			it = pGroupMessageBuilders
+			         ->emplace(group, std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(commitVersion))
+			         .first;
+		}
+		auto& writer = it->second;
+		for (const auto& [team, mutations] : teamData) {
+			ptxn::SubsequencedMessageDeserializer deserializer(mutations);
+			for (const auto& item : deserializer) {
+				if (item.message.getType() == ptxn::Message::Type::SPAN_CONTEXT_MESSAGE) {
+					writer->writeTeamSpanContext(std::get<SpanContextMessage>(item.message), team);
+				} else if (item.message.getType() == ptxn::Message::Type::MUTATION_REF) {
+					writer->write(std::get<MutationRef>(item.message), team);
+				} else if (item.message.getType() == ptxn::Message::Type::LOG_PROTOCOL_MESSAGE) {
+					writer->write(std::get<LogProtocolMessage>(item.message), team);
+				} else {
+					UNREACHABLE();
+				}
+			}
+		}
+	}
 }
 
 #ifndef __INTEL_COMPILER
@@ -430,3 +493,17 @@ Reference<ILogSystem> ILogSystem::fromServerDBInfo(UID const& dbgid,
 #ifndef __INTEL_COMPILER
 #pragma endregion
 #endif
+
+void LogPushData::setMutations(uint32_t totalMutations, VectorRef<StringRef> mutations) {
+	ASSERT_EQ(subsequence, 1);
+	subsequence = totalMutations + 1; // set to next mutation number
+
+	ASSERT_EQ(messagesWriter.size(), mutations.size());
+	BinaryWriter w(AssumeVersion(g_network->protocolVersion()));
+	Standalone<StringRef> v = w.toValue();
+	const int header = v.size();
+	for (int i = 0; i < mutations.size(); i++) {
+		BinaryWriter& wr = messagesWriter[i];
+		wr.serializeBytes(mutations[i].substr(header));
+	}
+}

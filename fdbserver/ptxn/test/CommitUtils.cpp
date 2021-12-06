@@ -37,54 +37,103 @@ int CommitRecord::getNumTotalMessages() const {
 	return sum;
 }
 
+std::vector<VersionSubsequenceMessage> CommitRecord::getMessagesFromStorageTeams(
+    const std::unordered_set<StorageTeamID>& storageTeamIDs) const {
+
+	std::vector<VersionSubsequenceMessage> vsm;
+	for (const auto& [version, storageTeamMessages] : this->messages) {
+		for (const auto& [storageTeamID, subsequencedMessages] : storageTeamMessages) {
+			if (!storageTeamIDs.empty() && storageTeamIDs.find(storageTeamID) == std::end(storageTeamIDs)) {
+				continue;
+			}
+			for (const auto& [subsequence, message] : subsequencedMessages) {
+				vsm.emplace_back(version, subsequence, message);
+			}
+		}
+	}
+	std::sort(std::begin(vsm), std::end(vsm));
+	return vsm;
+}
+
+const std::pair<int, int> DEFAULT_KEY_LENGTH_RANGE = { 10, 20 };
+const std::pair<int, int> DEFAULT_VALUE_LENGTH_RANGE = { 100, 200 };
+
+MutationRef generateRandomSetValue(Arena& arena,
+                                   const std::pair<int, int>& keyLengthRange,
+                                   const std::pair<int, int>& valueLengthRange) {
+	StringRef key = StringRef(arena, getRandomAlnum(keyLengthRange.first, keyLengthRange.second));
+	StringRef value = StringRef(arena, getRandomAlnum(valueLengthRange.first, valueLengthRange.second));
+	return MutationRef(MutationRef::SetValue, key, value);
+}
+
 void generateMutationRefs(const int numMutations,
                           Arena& arena,
                           VectorRef<MutationRef>& mutationRefs,
                           const std::pair<int, int>& keyLengthRange,
                           const std::pair<int, int>& valueLengthRange) {
 	for (int i = 0; i < numMutations; ++i) {
-		StringRef key = StringRef(arena, getRandomAlnum(keyLengthRange.first, keyLengthRange.second));
-		StringRef value = StringRef(arena, getRandomAlnum(valueLengthRange.first, valueLengthRange.second));
-		mutationRefs.emplace_back(arena, MutationRef(MutationRef::SetValue, key, value));
+		mutationRefs.push_back(arena, generateRandomSetValue(arena, keyLengthRange, valueLengthRange));
 	}
 }
 
 void distributeMutationRefs(VectorRef<MutationRef>& mutationRefs,
-                            const Version& version,
-                            const std::vector<StorageTeamID>& storageTeamIDs,
+                            const Version& commitVersion,
+                            const Version& storageTeamVersion,
+                            const std::vector<StorageTeamID>& allStorageTeamIDs,
                             CommitRecord& commitRecord) {
-	auto& storageTeamMessageMap = commitRecord.messages[version];
 
-	// Find the maximum subsequence used in the commitRecord for the given version
-	Subsequence subsequence = invalidSubsequence;
-	for (const auto& [_, messages] : storageTeamMessageMap) {
-		subsequence = std::max(messages.back().first, subsequence);
+	for (auto storageTeamID : allStorageTeamIDs) {
+		if (commitRecord.storageTeamEpochVersionRange.count(storageTeamID) == 0) {
+			commitRecord.storageTeamEpochVersionRange[storageTeamID] = { commitVersion, commitVersion + 1 };
+		} else {
+			commitRecord.storageTeamEpochVersionRange.at(storageTeamID).second = commitVersion + 1;
+		}
 	}
+
+	auto& storageTeamMessageMap = commitRecord.messages[commitVersion];
+	auto storageTeamIDs = randomlyPick<std::vector<StorageTeamID>>(
+	    allStorageTeamIDs, deterministicRandom()->randomInt(1, allStorageTeamIDs.size() + 1));
 
 	// Distribute the mutations
+	Subsequence subsequence = 0;
 	for (const auto& mutationRef : mutationRefs) {
 		const StorageTeamID storageTeamID = randomlyPick(storageTeamIDs);
-		storageTeamMessageMap[storageTeamID].push_back(commitRecord.messageArena, { ++subsequence, mutationRef });
+		storageTeamMessageMap[storageTeamID].push_back(
+		    commitRecord.messageArena, { ++subsequence, MutationRef(commitRecord.messageArena, mutationRef) });
 	}
+
+	// Update commit version range
+	commitRecord.firstVersion = std::min(commitRecord.firstVersion, commitVersion);
+	commitRecord.lastVersion = std::max(commitRecord.lastVersion, commitVersion);
+
+	commitRecord.commitVersionStorageTeamVersionMapper[commitVersion] = storageTeamVersion;
 }
 
 void prepareProxySerializedMessages(
     const CommitRecord& commitRecord,
-    const Version& version,
-    std::function<std::shared_ptr<ProxySubsequencedMessageSerializer>(StorageTeamID)> serializer) {
+    const Version& commitVersion,
+    std::function<std::shared_ptr<ProxySubsequencedMessageSerializer>(const StorageTeamID&)> serializerGen) {
 
-	if (commitRecord.messages.find(version) == commitRecord.messages.end()) {
+	if (commitRecord.messages.find(commitVersion) == commitRecord.messages.end()) {
 		// Version not found, skips the serialization
 		return;
 	}
-	for (const auto& [storageTeamID, messages] : commitRecord.messages.at(version)) {
-		for (const auto& [subsequence, message] : messages) {
+
+	for (const auto& [storageTeamID, subsequencedMessages] : commitRecord.messages.at(commitVersion)) {
+		for (const auto& [subsequence, message] : subsequencedMessages) {
+			auto pSerializer = serializerGen(storageTeamID);
+			pSerializer->setSubsequence(subsequence);
 			switch (message.getType()) {
 			case Message::Type::MUTATION_REF:
-				serializer(storageTeamID)->write(std::get<MutationRef>(message), storageTeamID);
+				pSerializer->write(std::get<MutationRef>(message), storageTeamID);
 				break;
 			case Message::Type::SPAN_CONTEXT_MESSAGE:
-				serializer(storageTeamID)->broadcastSpanContext(std::get<SpanContextMessage>(message));
+				// This might be nasty, as SPAN_CONTEXT_MESSAGE is broadcasted once, and then all new StorageTeamIDs
+				// will have it later. Do not support this at this stage.
+				ASSERT(false);
+				break;
+			case Message::Type::LOG_PROTOCOL_MESSAGE:
+				pSerializer->write(std::get<LogProtocolMessage>(message), storageTeamID);
 				break;
 			default:
 				throw internal_error_msg("Unsupported type");
@@ -93,17 +142,9 @@ void prepareProxySerializedMessages(
 	}
 }
 
-void distributeMutationRefs(VectorRef<MutationRef>& mutationRefs,
-                            const Version& version,
-                            const StorageTeamID& storageTeamID,
-                            CommitRecord& commitRecord) {
-	distributeMutationRefs(mutationRefs, version, std::vector<StorageTeamID>{ storageTeamID }, commitRecord);
-}
-
 bool isAllRecordsValidated(const CommitRecord& commitRecord) {
-	std::cout << " Check validation " << std::endl;
-	for (const auto& [_1, storageTeamTagMap] : commitRecord.tags) {
-		for (const auto& [_2, commitRecordTag] : storageTeamTagMap) {
+	for (const auto& [version, storageTeamTagMap] : commitRecord.tags) {
+		for (const auto& [storageTeamID, commitRecordTag] : storageTeamTagMap) {
 			if (!commitRecordTag.allValidated()) {
 				return false;
 			}

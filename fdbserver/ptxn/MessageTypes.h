@@ -84,17 +84,30 @@ struct SubsequenceSerializedMessageItem {
 	}
 };
 
+// Placeholder message, used to notify an version w/o any messages inside it
+struct EmptyMessage {
+	// All empty messages are the same, the version difference is checked at VersionSubsequenceMessage
+	bool operator==(const EmptyMessage&) const { return true; }
+
+	// All empty messages are the same, the version difference is checked at VersionSubsequenceMessage
+	bool operator!=(const EmptyMessage&) const { return false; }
+
+	std::string toString() const { return std::string("<EmptyMessage>"); }
+};
+
 // Stores one of the following:
 //    * MutationRef
 //    * SpanContextMessage
 //    * LogProtocolMessage
-struct Message : public std::variant<MutationRef, SpanContextMessage, LogProtocolMessage> {
-	using variant_t = std::variant<MutationRef, SpanContextMessage, LogProtocolMessage>;
+// .  * EmptyMessage
+struct Message : public std::variant<MutationRef, SpanContextMessage, LogProtocolMessage, EmptyMessage> {
+	using variant_t = std::variant<MutationRef, SpanContextMessage, LogProtocolMessage, EmptyMessage>;
 
 	enum class Type : std::size_t {
 		MUTATION_REF,
 		SPAN_CONTEXT_MESSAGE,
 		LOG_PROTOCOL_MESSAGE,
+		EMPTY_VERSION_MESSAGE,
 		UNDEFINED = std::variant_npos
 	};
 
@@ -126,8 +139,15 @@ struct VersionSubsequenceMessage {
 
 	std::string toString() const;
 
+	// FIXME use operator spaceship when we use C++20
+	int operatorSpaceship(const VersionSubsequenceMessage& another) const;
+
 	bool operator==(const VersionSubsequenceMessage&) const;
 	bool operator!=(const VersionSubsequenceMessage&) const;
+	bool operator<(const VersionSubsequenceMessage&) const;
+	bool operator<=(const VersionSubsequenceMessage&) const;
+	bool operator>(const VersionSubsequenceMessage&) const;
+	bool operator>=(const VersionSubsequenceMessage&) const;
 };
 
 std::ostream& operator<<(std::ostream&, const VersionSubsequenceMessage&);

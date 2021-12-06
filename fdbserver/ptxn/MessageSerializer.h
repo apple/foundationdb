@@ -18,9 +18,11 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_PTXN_TLOGSTORAGESERVERPEEKMESSAGESERIALIZER_H
-#define FDBSERVER_PTXN_TLOGSTORAGESERVERPEEKMESSAGESERIALIZER_H
+#ifndef FDBSERVER_PTXN_MESSAGESERIALIZER_H
+#define FDBSERVER_PTXN_MESSAGESERIALIZER_H
 
+#include "fdbclient/FDBTypes.h"
+#include "fdbserver/SpanContextMessage.h"
 #pragma once
 
 #include <cstdint>
@@ -34,6 +36,7 @@
 
 namespace ptxn {
 
+using SerializedTeamData = std::pair<Arena, std::unordered_map<StorageTeamID, StringRef>>;
 const SerializationProtocolVersion MessageSerializationProtocolVersion = 1;
 
 namespace details {
@@ -96,7 +99,7 @@ struct SubsequencedItemsHeader : MultipleItemHeaderBase {
 
 } // namespace details
 
-// Encodes the subsequence/mutations pair, grouped by the version. The format of serialized data would look like
+// Encodes the subsequence/mutations pair, grouped by the commit version. The format of serialized data would look like
 //
 //    | Header | V(1)Data | V(2)Data | ...
 //
@@ -109,9 +112,11 @@ struct SubsequencedItemsHeader : MultipleItemHeaderBase {
 //    * MutationRef
 //    * SpanContext
 //    * LogProtocolMessage
+//    * EmptyVersionMessage
 //
 // In the serialized data, the versions are strictly increasing ordered. And the subsequence with for a given version is
 // also strictly increasing ordered.
+// This serializer is used for TLog stream data to storage servers.
 class SubsequencedMessageSerializer {
 private:
 	// The serializer that generates the final output
@@ -214,8 +219,8 @@ public:
 //      tloggroup2 : version, [team 1 header], team 1 mutations, [team 3 header], team 3 mutations
 class ProxySubsequencedMessageSerializer {
 private:
-	// Mapper between StorageTeamID and SubsequencedMessageSerializer
-	std::unordered_map<StorageTeamID, SubsequencedMessageSerializer> serializers;
+	// Stores the storage team version of the commit
+	const Version storageTeamVersion;
 
 	// Subsequence of the mutation
 	// NOTE: The subsequence is designed to start at 1. This allows a cursor,  which initialized at subsequence 0, not
@@ -232,6 +237,10 @@ private:
 	// This is the sequence by using unsigned integer as subsequence in the old code.
 	Subsequence subsequence = 1;
 
+protected:
+	// Mapper between StorageTeamID and SubsequencedMessageSerializer
+	std::unordered_map<StorageTeamID, SubsequencedMessageSerializer> serializers;
+
 	// SpanContextMessage to be broadcasted
 	Optional<SpanContextMessage> spanContextMessage;
 
@@ -241,23 +250,30 @@ private:
 	// Tries to inject the span context to the serializer with given storage team ID
 	void tryInjectSpanContextMessage(const StorageTeamID& storageTeamID);
 
-	// Stores the version of the commit
-	const Version version;
-
 	// Prepares writing a message:
 	//     * Create a new StorageTeam serializer if necessary.
 	//     * Write SpanContextMessage if exists and is not prepended yet.
 	void prepareWriteMessage(const StorageTeamID& storageTeamID);
 
 public:
-	explicit ProxySubsequencedMessageSerializer(const Version&);
+	// version_ is the storage team version
+	explicit ProxySubsequencedMessageSerializer(const Version& version_);
 
 	// Gets the version the serializer is currently using
 	const Version& getVersion() const;
 
+	// Gets the current subsequence
+	const Subsequence& getSubsequence() const;
+
+	// Sets the subsequence. It is the caller's obligation to ensure the subsequence is ordered properly.
+	void setSubsequence(const Subsequence& subsequence);
+
 	// Broadcasts the span context to all storage teams. After this function is called, for any storage team, the first
 	// write will always prepend this SpanContextMessage before the mutation.
 	void broadcastSpanContext(const SpanContextMessage&);
+
+	// Writes a SpanContextMessage for the specified team.
+	void writeTeamSpanContext(const SpanContextMessage&, const StorageTeamID&);
 
 	// Writes a mutation to a given stoarge team.
 	void write(const MutationRef&, const StorageTeamID&);
@@ -281,8 +297,20 @@ public:
 	// Get serialized data for a given storage team ID
 	Standalone<StringRef> getSerialized(const StorageTeamID& storageTeamID);
 
-	// Get all serialized data
-	std::pair<Arena, std::unordered_map<StorageTeamID, StringRef>> getAllSerialized();
+	// Returns all teams' serialized data
+	SerializedTeamData getAllSerialized();
+};
+
+class BroadcastedSubsequencedMessageSerializer : public ProxySubsequencedMessageSerializer {
+public:
+	template <typename Container_t>
+	BroadcastedSubsequencedMessageSerializer(const Version& storageTeamVersion, const Container_t& storageTeamIDs)
+	  : ProxySubsequencedMessageSerializer(storageTeamVersion) {
+
+		for (const auto& storageTeamID : storageTeamIDs) {
+			prepareWriteMessage(storageTeamID);
+		}
+	}
 };
 
 template <typename T>
@@ -347,10 +375,11 @@ public:
 		// Store the deserialized data
 		VersionSubsequenceMessage currentItem;
 
+	protected:
 		// serialized_ refers to the serialized data
 		// If isEndIterator, then the iterator indicates the end of the serialized data. The behavior of dereferencing
 		// the iterator is undefined.
-		iterator(StringRef serialized_, bool isEndIterator = false);
+		iterator(StringRef serialized_, const bool isEndIterator = false, const bool iterateOverEmptyVersions_ = false);
 
 	public:
 		bool operator==(const iterator& another) const;
@@ -371,16 +400,26 @@ public:
 		// invalidated, i.e. the life cycle will be the same to the iterator. To extend the life cycle, this arena
 		// should be dependent on other arenas.
 		Arena& arena();
+
+		// If true, when the iterator meets a section with no messages, it yields an EmptyMessage
+		bool iterateOverEmptyVersions;
 	};
 
 private:
 	iterator endIterator;
 
+	bool iterateOverEmptyVersions;
+
 public:
 	using const_iterator = iterator;
 
 	// serialized_ refers to the serialized data
-	SubsequencedMessageDeserializer(const StringRef serialized_);
+	// If iterateOverEmptyVersions_ is set to true, the iterator will yield a VersionSubsequencedMessage with message
+	// type EmptyMessage when meet a version that has no messages, instead of skipping it.
+	SubsequencedMessageDeserializer(const StringRef serialized_, const bool iterateOverEmptyVersions_ = false);
+
+	// Returns true if a version without messages will be skipped.
+	bool isEmptyVersionsIgnored() const;
 
 	// Resets the deserializer, this will invalidate all iterators
 	void reset(const StringRef serialized_);
@@ -398,4 +437,4 @@ public:
 
 } // namespace ptxn
 
-#endif // FDBSERVER_PTXN_TLOGSTORAGESERVERPEEKMESSAGESERIALIZER_H
+#endif // FDBSERVER_PTXN_MESSAGESERIALIZER_H

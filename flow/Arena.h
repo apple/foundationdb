@@ -101,6 +101,8 @@ public:
 	Arena& operator=(const Arena&);
 	Arena& operator=(Arena&&) noexcept;
 
+	// Adds a reference to memory blocks held by "p" so that they are accessible after "p" is destructed. Note future
+	// blocks allocated by "p" are not referenced.
 	void dependsOn(const Arena& p);
 	void* allocate4kAlignedBuffer(uint32_t size);
 	size_t getSize() const;
