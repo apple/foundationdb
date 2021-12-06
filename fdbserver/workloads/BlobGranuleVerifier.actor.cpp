@@ -24,6 +24,7 @@
 
 #include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/Knobs.h"
@@ -59,6 +60,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	int64_t rowsRead = 0;
 	int64_t bytesRead = 0;
 	std::vector<Future<Void>> clients;
+
+	DatabaseConfiguration config;
 
 	Reference<BackupContainerFileSystem> bstore;
 	AsyncVar<Standalone<VectorRef<KeyRangeRef>>> granuleRanges;
@@ -127,7 +130,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 	std::string description() const override { return "BlobGranuleVerifier"; }
 	Future<Void> setup(Database const& cx) override {
-		if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		config = wait(getDatabaseConfiguration(cx));
+		if (!config.blobGranulesEnabled) {
 			return Void();
 		}
 
@@ -377,7 +381,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		if (!config.blobGranulesEnabled) {
 			return Void();
 		}
 
@@ -457,7 +461,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	}
 
 	Future<bool> check(Database const& cx) override {
-		if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		if (!config.blobGranulesEnabled) {
 			return true;
 		}
 

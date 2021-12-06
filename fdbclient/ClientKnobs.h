@@ -250,9 +250,6 @@ public:
 	int MVC_CLIENTLIB_CHUNK_SIZE;
 	int MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION;
 
-	// blob granules
-	bool ENABLE_BLOB_GRANULES;
-
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
 };

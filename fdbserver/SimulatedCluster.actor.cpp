@@ -2021,7 +2021,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		// TODO: caching disabled for this merge
 		int storageCacheMachines = dc == 0 ? 1 : 0;
 		int blobWorkerMachines = 0;
-		if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		if (simconfig.db.blobGranulesEnabled) {
 			int blobWorkerProcesses = 1 + deterministicRandom()->randomInt(0, NUM_EXTRA_BW_MACHINES + 1);
 			blobWorkerMachines = std::max(1, blobWorkerProcesses / processesPerMachine);
 		}

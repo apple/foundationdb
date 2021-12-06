@@ -3720,7 +3720,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	WorkerDetails newDDWorker = findNewProcessForSingleton(self, ProcessClass::DataDistributor, id_used);
 
 	WorkerDetails newBMWorker;
-	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+	if (self->db.config.blobGranulesEnabled) {
 		newBMWorker = findNewProcessForSingleton(self, ProcessClass::BlobManager, id_used);
 	}
 
@@ -3729,7 +3729,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	auto bestFitnessForDD = findBestFitnessForSingleton(self, newDDWorker, ProcessClass::DataDistributor);
 
 	ProcessClass::Fitness bestFitnessForBM;
-	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+	if (self->db.config.blobGranulesEnabled) {
 		bestFitnessForBM = findBestFitnessForSingleton(self, newBMWorker, ProcessClass::BlobManager);
 	}
 
@@ -3747,7 +3747,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	    self, newDDWorker, ddSingleton, bestFitnessForDD, self->recruitingDistributorID);
 
 	bool bmHealthy = true;
-	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+	if (self->db.config.blobGranulesEnabled) {
 		bmHealthy = isHealthySingleton<BlobManagerInterface>(
 		    self, newBMWorker, bmSingleton, bestFitnessForBM, self->recruitingBlobManagerID);
 	}
@@ -3766,14 +3766,15 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	Optional<Standalone<StringRef>> newDDProcessId = newDDWorker.interf.locality.processId();
 
 	Optional<Standalone<StringRef>> currBMProcessId, newBMProcessId;
-	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+	if (self->db.config.blobGranulesEnabled) {
+
 		currBMProcessId = bmSingleton.interface.get().locality.processId();
 		newBMProcessId = newBMWorker.interf.locality.processId();
 	}
 
 	std::vector<Optional<Standalone<StringRef>>> currPids = { currRKProcessId, currDDProcessId };
 	std::vector<Optional<Standalone<StringRef>>> newPids = { newRKProcessId, newDDProcessId };
-	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+	if (self->db.config.blobGranulesEnabled) {
 		currPids.emplace_back(currBMProcessId);
 		newPids.emplace_back(newBMProcessId);
 	}
@@ -3782,7 +3783,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	auto newColocMap = getColocCounts(newPids);
 
 	// if the knob is disabled, the BM coloc counts should have no affect on the coloc counts check below
-	if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+	if (!self->db.config.blobGranulesEnabled) {
 		ASSERT(currColocMap[currBMProcessId] == 0);
 		ASSERT(newColocMap[newBMProcessId] == 0);
 	}
@@ -3796,7 +3797,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 			rkSingleton.recruit(self);
 		} else if (newColocMap[newDDProcessId] < currColocMap[currDDProcessId]) {
 			ddSingleton.recruit(self);
-		} else if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES && newColocMap[newBMProcessId] < currColocMap[currBMProcessId]) {
+		} else if (self->db.config.blobGranulesEnabled && newColocMap[newBMProcessId] < currColocMap[currBMProcessId]) {
 			bmSingleton.recruit(self);
 		}
 	}
@@ -3818,7 +3819,7 @@ ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 		checkOutstandingRecruitmentRequests(self);
 		checkOutstandingStorageRequests(self);
 
-		if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		if (self->db.config.blobGranulesEnabled) {
 			checkOutstandingBlobWorkerRequests(self);
 		}
 		checkBetterSingletons(self);
@@ -4368,7 +4369,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 		    self, w, currSingleton, registeringSingleton, self->recruitingRatekeeperID);
 	}
 
-	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES && req.blobManagerInterf.present()) {
+	if (self->db.config.blobGranulesEnabled && req.blobManagerInterf.present()) {
 		auto currSingleton = BlobManagerSingleton(self->db.serverInfo->get().blobManager);
 		auto registeringSingleton = BlobManagerSingleton(req.blobManagerInterf);
 		haltRegisteringOrCurrentSingleton<BlobManagerInterface>(
@@ -5517,7 +5518,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(handleForcedRecoveries(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
-	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+	if (self.db.config.blobGranulesEnabled) {
 		self.addActor.send(monitorBlobManager(&self));
 	}
 	// self.addActor.send(monitorTSSMapping(&self));
