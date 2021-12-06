@@ -46,8 +46,8 @@ ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::createFromExistingDatabas
 	});
 }
 
-Reference<ITenant> ThreadSafeDatabase::openTenant(const char* tenantName) {
-	return makeReference<ThreadSafeTenant>(db, tenantName);
+Reference<ITenant> ThreadSafeDatabase::openTenant(StringRef tenantName) {
+	return makeReference<ThreadSafeTenant>(Reference<ThreadSafeDatabase>::addRef(this), tenantName);
 }
 
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
@@ -144,7 +144,8 @@ ThreadSafeDatabase::~ThreadSafeDatabase() {
 }
 
 Reference<ITransaction> ThreadSafeTenant::createTransaction() {
-	return Reference<ITransaction>();
+	auto type = db->isConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
+	return Reference<ITransaction>(new ThreadSafeTransaction(db->db, type));
 }
 
 ThreadSafeTenant::~ThreadSafeTenant() {}

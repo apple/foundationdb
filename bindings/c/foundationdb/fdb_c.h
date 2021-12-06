@@ -209,7 +209,8 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_set_option(FDBDatabase* d,
                                                                  int value_length);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_open_tenant(FDBDatabase* d,
-                                                                  const char* tenant_name,
+                                                                  uint8_t const* tenant_name,
+                                                                  int tenant_name_length,
                                                                   FDBTenant** out_tenant);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_create_transaction(FDBDatabase* d,

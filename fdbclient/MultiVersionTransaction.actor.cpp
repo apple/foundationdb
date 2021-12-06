@@ -409,13 +409,13 @@ ThreadFuture<Void> DLDatabase::onReady() {
 	return ready;
 }
 
-Reference<ITenant> DLDatabase::openTenant(const char* tenantName) {
+Reference<ITenant> DLDatabase::openTenant(StringRef tenantName) {
 	if (!api->databaseOpenTenant) {
 		throw unsupported_operation();
 	}
 
 	FdbCApi::FDBTenant* tenant;
-	throwIfError(api->databaseOpenTenant(db, tenantName, &tenant));
+	throwIfError(api->databaseOpenTenant(db, tenantName.begin(), tenantName.size(), &tenant));
 	return makeReference<DLTenant>(api, tenant);
 }
 
@@ -1202,7 +1202,7 @@ bool MultiVersionTransaction::isValid() {
 }
 
 // MultiVersionTenant
-MultiVersionTenant::MultiVersionTenant(Reference<MultiVersionDatabase> db, const char* tenantName)
+MultiVersionTenant::MultiVersionTenant(Reference<MultiVersionDatabase> db, StringRef tenantName)
   : db(db), tenantName(tenantName) {
 	updateTenant();
 }
@@ -1220,7 +1220,7 @@ void MultiVersionTenant::updateTenant() {
 	Reference<ITenant> tenant;
 	auto currentDb = db->dbState->dbVar->get();
 	if (currentDb.value) {
-		tenant = currentDb.value->openTenant(tenantName.c_str());
+		tenant = currentDb.value->openTenant(tenantName);
 	} else {
 		tenant = Reference<ITenant>(nullptr);
 	}
@@ -1308,7 +1308,7 @@ Reference<IDatabase> MultiVersionDatabase::debugCreateFromExistingDatabase(Refer
 	return Reference<IDatabase>(new MultiVersionDatabase(MultiVersionApi::api, 0, "", db, db, false));
 }
 
-Reference<ITenant> MultiVersionDatabase::openTenant(const char* tenantName) {
+Reference<ITenant> MultiVersionDatabase::openTenant(StringRef tenantName) {
 	return makeReference<MultiVersionTenant>(Reference<MultiVersionDatabase>::addRef(this), tenantName);
 }
 

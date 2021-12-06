@@ -378,9 +378,11 @@ extern "C" DLLEXPORT void fdb_database_destroy(FDBDatabase* d) {
 }
 
 extern "C" DLLEXPORT fdb_error_t fdb_database_open_tenant(FDBDatabase* d,
-                                                          const char* tenant_name,
+                                                          uint8_t const* tenant_name,
+                                                          int tenant_name_length,
                                                           FDBTenant** out_tenant) {
-	CATCH_AND_RETURN(*out_tenant = (FDBTenant*)DB(d)->openTenant(tenant_name).extractPtr(););
+	CATCH_AND_RETURN(*out_tenant =
+	                     (FDBTenant*)DB(d)->openTenant(StringRef(tenant_name, tenant_name_length)).extractPtr(););
 }
 
 extern "C" DLLEXPORT fdb_error_t fdb_database_create_transaction(FDBDatabase* d, FDBTransaction** out_transaction) {

@@ -92,7 +92,10 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*createDatabase)(const char* clusterFilePath, FDBDatabase** db);
 
 	// Database
-	fdb_error_t (*databaseOpenTenant)(FDBDatabase* database, const char* tenantName, FDBTenant** outTenant);
+	fdb_error_t (*databaseOpenTenant)(FDBDatabase* database,
+	                                  uint8_t const* tenantName,
+	                                  int tenantNameLength,
+	                                  FDBTenant** outTenant);
 	fdb_error_t (*databaseCreateTransaction)(FDBDatabase* database, FDBTransaction** tr);
 	fdb_error_t (*databaseSetOption)(FDBDatabase* database,
 	                                 FDBDatabaseOption option,
@@ -367,7 +370,7 @@ public:
 
 	ThreadFuture<Void> onReady();
 
-	Reference<ITenant> openTenant(const char* tenantName) override;
+	Reference<ITenant> openTenant(StringRef tenantName) override;
 	Reference<ITransaction> createTransaction() override;
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	double getMainThreadBusyness() override;
@@ -586,7 +589,7 @@ class MultiVersionApi;
 // it connects with a different version.
 class MultiVersionTenant final : public ITenant, ThreadSafeReferenceCounted<MultiVersionTenant> {
 public:
-	MultiVersionTenant(Reference<MultiVersionDatabase> db, const char* tenantName);
+	MultiVersionTenant(Reference<MultiVersionDatabase> db, StringRef tenantName);
 	~MultiVersionTenant() override;
 
 	Reference<ITransaction> createTransaction() override;
@@ -598,7 +601,7 @@ public:
 
 private:
 	Reference<MultiVersionDatabase> db;
-	const std::string tenantName;
+	const Standalone<StringRef> tenantName;
 
 	Mutex tenantLock;
 	ThreadFuture<Void> tenantUpdater;
@@ -622,7 +625,7 @@ public:
 
 	~MultiVersionDatabase() override;
 
-	Reference<ITenant> openTenant(const char* tenantName) override;
+	Reference<ITenant> openTenant(StringRef tenantName) override;
 	Reference<ITransaction> createTransaction() override;
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	double getMainThreadBusyness() override;
