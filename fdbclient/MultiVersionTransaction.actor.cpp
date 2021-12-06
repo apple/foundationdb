@@ -761,6 +761,7 @@ void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParame
 
 // MultiVersionTransaction
 MultiVersionTransaction::MultiVersionTransaction(Reference<MultiVersionDatabase> db,
+                                                 Optional<Reference<MultiVersionTenant>> tenant,
                                                  UniqueOrderedOptionList<FDBTransactionOptions> defaultOptions)
   : db(db), startTime(timer_monotonic()), timeoutTsav(new ThreadSingleAssignmentVar<Void>()) {
 	setDefaultOptions(defaultOptions);
@@ -773,18 +774,29 @@ void MultiVersionTransaction::setDefaultOptions(UniqueOrderedOptionList<FDBTrans
 }
 
 void MultiVersionTransaction::updateTransaction() {
-	auto currentDb = db->dbState->dbVar->get();
-
 	TransactionInfo newTr;
-	if (currentDb.value) {
-		newTr.transaction = currentDb.value->createTransaction();
+	if (tenant.present()) {
+		ASSERT(tenant.get());
+		auto currentTenant = tenant.get()->tenantVar->get();
+		if (currentTenant.value) {
+			newTr.transaction = currentTenant.value->createTransaction();
+		}
+
+		newTr.onChange = currentTenant.onChange;
+	} else {
+		auto currentDb = db->dbState->dbVar->get();
+		if (currentDb.value) {
+			newTr.transaction = currentDb.value->createTransaction();
+		}
+
+		newTr.onChange = currentDb.onChange;
 	}
 
 	Optional<StringRef> timeout;
 	for (auto option : persistentOptions) {
 		if (option.first == FDBTransactionOptions::TIMEOUT) {
 			timeout = option.second.castTo<StringRef>();
-		} else if (currentDb.value) {
+		} else if (newTr.transaction) {
 			newTr.transaction->setOption(option.first, option.second.castTo<StringRef>());
 		}
 	}
@@ -794,12 +806,10 @@ void MultiVersionTransaction::updateTransaction() {
 	// that might inadvertently fail the transaction.
 	if (timeout.present()) {
 		setTimeout(timeout);
-		if (currentDb.value) {
+		if (newTr.transaction) {
 			newTr.transaction->setOption(FDBTransactionOptions::TIMEOUT, timeout);
 		}
 	}
-
-	newTr.onChange = currentDb.onChange;
 
 	lock.enter();
 	transaction = newTr;
@@ -1191,10 +1201,37 @@ bool MultiVersionTransaction::isValid() {
 	return tr.transaction.isValid();
 }
 
+// MultiVersionTenant
+MultiVersionTenant::MultiVersionTenant(Reference<MultiVersionDatabase> db, const char* tenantName)
+  : db(db), tenantName(tenantName) {
+	updateTenant();
+}
+
 MultiVersionTenant::~MultiVersionTenant() {}
 
 Reference<ITransaction> MultiVersionTenant::createTransaction() {
-	return Reference<ITransaction>();
+	return Reference<ITransaction>(new MultiVersionTransaction(
+	    db, Reference<MultiVersionTenant>::addRef(this), db->dbState->transactionDefaultOptions));
+}
+
+// Creates a new underlying tenant object whenever the database connection changes. This change is signaled
+// to open transactions via an AsyncVar.
+void MultiVersionTenant::updateTenant() {
+	Reference<ITenant> tenant;
+	auto currentDb = db->dbState->dbVar->get();
+	if (currentDb.value) {
+		tenant = currentDb.value->openTenant(tenantName.c_str());
+	} else {
+		tenant = Reference<ITenant>(nullptr);
+	}
+
+	tenantVar->set(tenant);
+
+	MutexHolder holder(tenantLock);
+	tenantUpdater = mapThreadFuture<Void, Void>(currentDb.onChange, [this](ErrorOr<Void> result) {
+		updateTenant();
+		return Void();
+	});
 }
 
 // MultiVersionDatabase
@@ -1272,12 +1309,13 @@ Reference<IDatabase> MultiVersionDatabase::debugCreateFromExistingDatabase(Refer
 }
 
 Reference<ITenant> MultiVersionDatabase::openTenant(const char* tenantName) {
-	return makeReference<MultiVersionTenant>();
+	return makeReference<MultiVersionTenant>(Reference<MultiVersionDatabase>::addRef(this), tenantName);
 }
 
 Reference<ITransaction> MultiVersionDatabase::createTransaction() {
-	return Reference<ITransaction>(
-	    new MultiVersionTransaction(Reference<MultiVersionDatabase>::addRef(this), dbState->transactionDefaultOptions));
+	return Reference<ITransaction>(new MultiVersionTransaction(Reference<MultiVersionDatabase>::addRef(this),
+	                                                           Optional<Reference<MultiVersionTenant>>(),
+	                                                           dbState->transactionDefaultOptions));
 }
 
 void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {

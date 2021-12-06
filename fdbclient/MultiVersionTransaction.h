@@ -425,6 +425,7 @@ private:
 };
 
 class MultiVersionDatabase;
+class MultiVersionTenant;
 
 // An implementation of ITransaction that wraps a transaction created either locally or through a dynamically loaded
 // external client. When needed (e.g on cluster version change), the MultiVersionTransaction can automatically replace
@@ -432,6 +433,7 @@ class MultiVersionDatabase;
 class MultiVersionTransaction : public ITransaction, ThreadSafeReferenceCounted<MultiVersionTransaction> {
 public:
 	MultiVersionTransaction(Reference<MultiVersionDatabase> db,
+	                        Optional<Reference<MultiVersionTenant>> tenant,
 	                        UniqueOrderedOptionList<FDBTransactionOptions> defaultOptions);
 
 	~MultiVersionTransaction() override;
@@ -508,6 +510,7 @@ public:
 
 private:
 	const Reference<MultiVersionDatabase> db;
+	const Optional<Reference<MultiVersionTenant>> tenant;
 	ThreadSpinLock lock;
 
 	struct TransactionInfo {
@@ -578,15 +581,31 @@ struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 
 class MultiVersionApi;
 
+// An implementation of ITenant that wraps a tenant created either locally or through a dynamically loaded
+// external client. The wrapped ITenant is automatically changed when the MultiVersionDatabase used to create
+// it connects with a different version.
 class MultiVersionTenant final : public ITenant, ThreadSafeReferenceCounted<MultiVersionTenant> {
 public:
-	MultiVersionTenant() {}
+	MultiVersionTenant(Reference<MultiVersionDatabase> db, const char* tenantName);
 	~MultiVersionTenant() override;
 
 	Reference<ITransaction> createTransaction() override;
 
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::delref(); }
+
+	Reference<ThreadSafeAsyncVar<Reference<ITenant>>> tenantVar;
+
+private:
+	Reference<MultiVersionDatabase> db;
+	const std::string tenantName;
+
+	Mutex tenantLock;
+	ThreadFuture<Void> tenantUpdater;
+
+	// Creates a new underlying tenant object whenever the database connection changes. This change is signaled
+	// to open transactions via an AsyncVar.
+	void updateTenant();
 };
 
 // An implementation of IDatabase that wraps a database created either locally or through a dynamically loaded
