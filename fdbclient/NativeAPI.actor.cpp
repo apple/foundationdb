@@ -7075,44 +7075,51 @@ Version ChangeFeedData::getVersion() {
 	return lastReturnedVersion.get();
 }
 
+ACTOR Future<Void> changeFeedWaitLatest(ChangeFeedData* self, Version version) {
+	// first, wait on SS to have sent up through version
+	int desired = 0;
+	int waiting = 0;
+	std::vector<Future<Void>> allAtLeast;
+	for (auto& it : self->storageData) {
+		if (it->version.get() < version) {
+			waiting++;
+			if (version > it->desired.get()) {
+				it->desired.set(version);
+				desired++;
+			}
+			allAtLeast.push_back(it->version.whenAtLeast(version));
+		}
+	}
+
+	wait(waitForAll(allAtLeast));
+
+	// then, wait on ss streams to have processed up through version
+	std::vector<Future<Void>> onEmpty;
+	for (auto& it : self->streams) {
+		if (!it.isEmpty()) {
+			onEmpty.push_back(it.onEmpty());
+		}
+	}
+
+	if (onEmpty.size()) {
+		wait(waitForAll(onEmpty));
+		wait(delay(0));
+	}
+
+	// then, wait for client to have consumed up through version
+	if (!self->mutations.isEmpty()) {
+		wait(self->mutations.onEmpty());
+		wait(delay(0));
+	}
+	return Void();
+}
+
 ACTOR Future<Void> changeFeedWhenAtLatest(ChangeFeedData* self, Version version) {
 	state Future<Void> lastReturned = self->lastReturnedVersion.whenAtLeast(version);
 	loop {
 		if (self->notAtLatest.get() == 0) {
-			std::vector<Future<Void>> allAtLeast;
-			for (auto& it : self->storageData) {
-				if (it->version.get() < version) {
-					if (version > it->desired.get()) {
-						it->desired.set(version);
-					}
-					allAtLeast.push_back(it->version.whenAtLeast(version));
-				}
-			}
 			choose {
-				when(wait(lastReturned)) { break; }
-				when(wait(waitForAll(allAtLeast))) {
-					std::vector<Future<Void>> onEmpty;
-					if (!self->mutations.isEmpty()) {
-						onEmpty.push_back(self->mutations.onEmpty());
-					}
-					for (auto& it : self->streams) {
-						if (!it.isEmpty()) {
-							onEmpty.push_back(it.onEmpty());
-						}
-					}
-					if (!onEmpty.size()) {
-						break;
-					}
-					choose {
-						when(wait(waitForAll(onEmpty))) {
-							wait(delay(0));
-							break;
-						}
-						when(wait(lastReturned)) { break; }
-						when(wait(self->refresh.getFuture())) {}
-						when(wait(self->notAtLatest.onChange())) {}
-					}
-				}
+				when(wait(changeFeedWaitLatest(self, version))) { return Void(); }
 				when(wait(self->refresh.getFuture())) {}
 				when(wait(self->notAtLatest.onChange())) {}
 			}
@@ -7124,6 +7131,7 @@ ACTOR Future<Void> changeFeedWhenAtLatest(ChangeFeedData* self, Version version)
 			}
 		}
 	}
+
 	if (self->lastReturnedVersion.get() < version) {
 		self->lastReturnedVersion.set(version);
 	}
@@ -7421,15 +7429,18 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				req.begin = begin;
 				req.end = end;
 				req.range = range;
+
+				results->streams.clear();
+
 				StorageServerInterface interf = locations[0].second->getInterface(chosenLocations[0]);
-				state ReplyPromiseStream<ChangeFeedStreamReply> replyStream =
-				    interf.changeFeedStream.getReplyStream(req);
+
 				for (auto& it : results->storageData) {
 					if (it->debugGetReferenceCount() == 2) {
 						db->changeFeedUpdaters.erase(it->id);
 					}
 				}
-				results->streams.clear();
+				results->streams.push_back(interf.changeFeedStream.getReplyStream(req));
+
 				results->storageData.clear();
 				results->storageData.push_back(db->getStorageData(interf));
 				Promise<Void> refresh = results->refresh;
@@ -7441,8 +7452,20 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 					wait(results->mutations.onEmpty());
 					choose {
 						when(wait(cx->connectionFileChanged())) { break; }
-						when(ChangeFeedStreamReply rep = waitNext(replyStream.getFuture())) {
+						when(ChangeFeedStreamReply rep = waitNext(results->streams[0].getFuture())) {
 							begin = rep.mutations.back().version + 1;
+
+							// TODO REMOVE, for debugging
+							if (rep.mutations.back().version < results->lastReturnedVersion.get()) {
+								printf("out of order mutation for CF %s from (%d) %s! %lld < %lld\n",
+								       rangeID.toString().substr(0, 6).c_str(),
+								       results->storageData.size(),
+								       results->storageData.empty()
+								           ? "????"
+								           : results->storageData[0]->id.toString().substr(0, 4).c_str(),
+								       rep.mutations.back().version,
+								       results->lastReturnedVersion.get());
+							}
 							ASSERT(rep.mutations.back().version >= results->lastReturnedVersion.get());
 							results->mutations.send(
 							    Standalone<VectorRef<MutationsAndVersionRef>>(rep.mutations, rep.arena));
