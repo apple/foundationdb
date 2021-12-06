@@ -164,9 +164,7 @@ public:
 ACTOR Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
 
 // Read storage metadata from database, and do necessary updates
-ACTOR Future<StorageMetadataType> checkStorageMetadata(DDTeamCollection* self,
-                                        Database cx,
-                                        UID interfaceUid);
+ACTOR Future<StorageMetadataType> checkStorageMetadata(DDTeamCollection* self, Database cx, UID interfaceUid);
 
 // TeamCollection's machine team information
 class TCMachineTeamInfo : public ReferenceCounted<TCMachineTeamInfo> {
@@ -660,14 +658,17 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int64_t unhealthyServers;
 	std::map<int,int> priority_teams;
 	std::map<UID, Reference<TCServerInfo>> server_info;
-	std::map<Key, std::vector<Reference<TCServerInfo>>> pid2server_info; // some process may serve as multiple storage servers
-	std::vector<AddressExclusion> wiggle_addresses; // collection of wiggling servers' address
 	std::map<UID, Reference<TCServerInfo>> tss_info_by_pair;
 	std::map<UID, Reference<TCServerInfo>> server_and_tss_info; // TODO could replace this with an efficient way to do a read-only concatenation of 2 data structures? 
 	std::map<Key, int> lagging_zones; // zone to number of storage servers lagging
 	AsyncVar<bool> disableFailingLaggingServers;
+
+	// storage wiggle info
+	Reference<StorageWiggler> storageWiggler;
+	std::map<Key, std::vector<Reference<TCServerInfo>>> pid2server_info; // some process may serve as multiple storage servers
+	std::vector<AddressExclusion> wiggle_addresses; // collection of wiggling servers' address
 	Optional<Key> wigglingPid; // Process id of current wiggling storage server;
-    Reference<AsyncVar<bool>> pauseWiggle;
+	Reference<AsyncVar<bool>> pauseWiggle;
 	Reference<AsyncVar<bool>> processingWiggle; // track whether wiggling relocation is being processed
 
 	// machine_info has all machines info; key must be unique across processes on the same machine
@@ -781,6 +782,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 PromiseStream<Promise<int>> getUnhealthyRelocationCount)
 	  : cx(cx), distributorId(distributorId), configuration(configuration), doBuildTeams(true),
 	    lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output), unhealthyServers(0),
+	    storageWiggler(makeReference<StorageWiggler>(this)),
 	    processingWiggle(processingWiggle), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
 	    initialFailureReactionDelay(
 	        delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
@@ -1255,29 +1257,20 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		self->healthyZone.set(initTeams->initHealthyZoneValue);
 		// SOMEDAY: If some servers have teams and not others (or some servers have more data than others) and there is
 		// an address/locality collision, should we preferentially mark the least used server as undesirable?
-		state std::vector<std::pair<StorageServerInterface, ProcessClass>>::iterator serverIter = initTeams->allServers.begin();
-		for (; serverIter != initTeams->allServers.end(); ++serverIter) {
-			if (self->shouldHandleServer(serverIter->first)) {
-				if (!self->isValidLocality(self->configuration.storagePolicy, serverIter->first.locality)) {
+		for (auto& allServer : initTeams->allServers) {
+			if (self->shouldHandleServer(allServer.first)) {
+				if (!self->isValidLocality(self->configuration.storagePolicy, allServer.first.locality)) {
 					TraceEvent(SevWarnAlways, "MissingLocality")
-					    .detail("Server", serverIter->first.uniqueID)
-					    .detail("Locality", serverIter->first.locality.toString());
-					auto addr = serverIter->first.stableAddress();
+					    .detail("Server", allServer.first.uniqueID)
+					    .detail("Locality", allServer.first.locality.toString());
+					auto addr = allServer.first.stableAddress();
 					self->invalidLocalityAddr.insert(AddressExclusion(addr.ip, addr.port));
 					if (self->checkInvalidLocalities.isReady()) {
 						self->checkInvalidLocalities = checkAndRemoveInvalidLocalityAddr(self);
 						self->addActor.send(self->checkInvalidLocalities);
 					}
 				}
-				if(!serverIter->first.isTss()) {
-					// read or initialize StorageMetadata map
-					StorageMetadataType metadata = wait(checkStorageMetadata(self, self->cx, serverIter->first.id()));
-					self->addServer(serverIter->first,
-					                serverIter->second, self->serverTrackerErrorOut, 0, ddEnabledState, &metadata);
-				} else {
-					self->addServer(
-					    serverIter->first, serverIter->second, self->serverTrackerErrorOut, 0, ddEnabledState);
-				}
+				self->addServer(allServer.first, allServer.second, self->serverTrackerErrorOut, 0, ddEnabledState);
 			}
 		}
 
@@ -2571,8 +2564,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	               ProcessClass processClass,
 	               Promise<Void> errorOut,
 	               Version addedVersion,
-	               const DDEnabledState* ddEnabledState,
-	               const StorageMetadataType* metadata = nullptr) {
+	               const DDEnabledState* ddEnabledState) {
 		if (!shouldHandleServer(newServer)) {
 			return;
 		}
@@ -2611,8 +2603,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			ASSERT(r->lastKnownInterface.locality.processId().present());
 			StringRef pid = r->lastKnownInterface.locality.processId().get();
 			pid2server_info[pid].push_back(r);
-			ASSERT(metadata != nullptr);
-			// TODO: add to createdTime based priority_queue
 		}
 
 		r->tracker =
@@ -2981,6 +2971,25 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			this->restartRecruiting.trigger();
 		}
 	}
+};
+
+struct StorageWiggler : public ReferenceCounted<StorageWiggler> {
+	DDTeamCollection* teamCollection;
+
+	// step statistics
+	uint64_t last_step_start = 0; // wall timer
+	TimerSmoother smoothed_step_duration;
+	int finished_step = 0;
+	int ongoing_step = 0;
+
+	// round statistics
+	uint64_t last_round_start = 0; // wall timer
+	TimerSmoother smoothed_round_duration;
+	int finished_round = 0;
+	int remained_step = 0;
+
+	StorageWiggler(DDTeamCollection* collection)
+	  : teamCollection(collection), smoothed_step_duration(10.0 * 60), smoothed_round_duration(20.0 * 60) {}
 };
 
 TCServerInfo::~TCServerInfo() {
@@ -4454,13 +4463,11 @@ ACTOR Future<Void> waitServerListChange(DDTeamCollection* self,
 								currentInterfaceChanged.send(std::make_pair(ssi, processClass));
 							}
 						} else if (!self->recruitingIds.count(ssi.id())) {
-							// read or initialize StorageMetadata map
-							StorageMetadataType metadata = wait(checkStorageMetadata(self, self->cx, results[i].first.id()));
-							self->addServer(results[i].first,
-							                results[i].second,
+							self->addServer(ssi,
+							                processClass,
 							                self->serverTrackerErrorOut,
 							                tr.getReadVersion().get(),
-							                ddEnabledState, &metadata);
+							                ddEnabledState);
 						}
 					}
 
@@ -5306,26 +5313,21 @@ ACTOR Future<UID> getClusterId(DDTeamCollection* self) {
 	}
 }
 
-// Read storage metadata from database, and do necessary updates
-ACTOR Future<StorageMetadataType> checkStorageMetadata(DDTeamCollection* self,
-                                        Database cx,
-                                        UID interfaceUid) {
+// Read storage metadata from database
+ACTOR Future<StorageMetadataType> checkStorageMetadata(DDTeamCollection* self, Database cx, UID interfaceUid) {
 	state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
 	                                                                                           IncludeVersion());
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 	state StorageMetadataType data;
 	loop {
-		try{
+		try {
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			auto property = metadataMap.getProperty(interfaceUid);
 			Optional<StorageMetadataType> metadata = wait(property.get(tr));
-			if(!metadata.present()) {
-				data.createdTime = timer_int();
-				// write to database
-				metadataMap.set(tr, interfaceUid, data);
-			}
-			else {
+			if (!metadata.present()) {
+				ASSERT(false); // metadata is written when initialize storage
+			} else {
 				data = metadata.get();
 			}
 			wait(tr->commit());
@@ -5338,6 +5340,7 @@ ACTOR Future<StorageMetadataType> checkStorageMetadata(DDTeamCollection* self,
 	}
 	return data;
 }
+
 ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
                                      RecruitStorageReply candidateWorker,
                                      const DDEnabledState* ddEnabledState,
@@ -5416,7 +5419,7 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 		state ErrorOr<InitializeStorageReply> newServer = wait(fRecruit);
 
 		if (doRecruit && newServer.isError()) {
-			TraceEvent(SevWarn, "DDRecruitmentError").error(newServer.getError());
+			TraceEvent(SevWarn, "DDRecruitmentError").error(newServer.getError()).detail("ServerID", interfaceId);
 			if (!newServer.isError(error_code_recruitment_failed) &&
 			    !newServer.isError(error_code_request_maybe_delivered)) {
 				tssState->markComplete();
@@ -5471,16 +5474,14 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 			UID id = newServer.get().interf.id();
 			if (!self->server_and_tss_info.count(id)) {
 				if (!recruitTss) {
-					// read or initialize StorageMetadata map
-					StorageMetadataType metadata = wait(checkStorageMetadata(self, self->cx, newServer.get().interf.id()));
+					// signal the teamBuilder a new SS is recruited
 					self->addServer(newServer.get().interf,
 					                candidateWorker.processClass,
 					                self->serverTrackerErrorOut,
 					                newServer.get().addedVersion,
-					                ddEnabledState, &metadata);
+					                ddEnabledState);
 					self->waitUntilRecruited.set(false);
-				}
-				else if(tssState->tssRecruitSuccess()){
+				} else if (tssState->tssRecruitSuccess()) {
 					// signal all done after adding tss to tracking info
 					self->addServer(newServer.get().interf,
 					                candidateWorker.processClass,

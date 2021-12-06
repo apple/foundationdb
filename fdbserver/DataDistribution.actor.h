@@ -289,6 +289,7 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
 int64_t getMaxShardSize(double dbSizeEstimate);
 
 struct DDTeamCollection;
+struct StorageWiggler;
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
     Transaction* tr);
 

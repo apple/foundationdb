@@ -1163,6 +1163,8 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 
 			tr->set(serverListKeyFor(server.id()), serverListValue(server));
 			wait(tr->commit());
+			TraceEvent("AddStorageServerSystemKey").detail("ServerID", server.id());
+
 			return std::make_pair(tr->getCommittedVersion(), tag);
 		} catch (Error& e) {
 			if (e.code() == error_code_commit_unknown_result)
@@ -1240,6 +1242,7 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 						TEST(true); // Storage server already removed after retrying transaction
 						return Void();
 					}
+					TraceEvent(SevError, "RemoveInvalidServer").detail("ServerID", serverID);
 					ASSERT(false); // Removing an already-removed server?  A never added server?
 				}
 
