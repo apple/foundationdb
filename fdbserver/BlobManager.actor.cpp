@@ -1074,11 +1074,13 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 			KeyRange nextRange(KeyRangeRef(beginKey, normalKeys.end));
 			RangeResult results = wait(
 			    krmGetRanges(tr, blobGranuleMappingKeys.begin, nextRange, 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+			Key lastEndKey;
 
 			// Add the mappings to our in memory key range map
 			for (int rangeIdx = 0; rangeIdx < results.size() - 1; rangeIdx++) {
 				Key granuleStartKey = results[rangeIdx].key;
 				Key granuleEndKey = results[rangeIdx + 1].key;
+				lastEndKey = granuleEndKey;
 				if (results[rangeIdx].value.size()) {
 					// note: if the old owner is dead, we handle this in rangeAssigner
 					UID existingOwner = decodeBlobGranuleMappingValue(results[rangeIdx].value);
@@ -1090,7 +1092,7 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 				break;
 			}
 
-			beginKey = results.readThrough.get();
+			beginKey = lastEndKey;
 		} catch (Error& e) {
 			wait(tr->onError(e));
 		}
@@ -1929,18 +1931,17 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 				try {
 					// TODO: replace 10000 with a knob
 					KeyRange nextRange(KeyRangeRef(beginKey, normalKeys.end));
-					state RangeResult pruneIntents = wait(krmGetRanges(
+					RangeResult pruneIntents = wait(krmGetRanges(
 					    tr, blobGranulePruneKeys.begin, nextRange, 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+					state Key lastEndKey;
 
-					// TODO: would we miss a range [pruneIntents[9999], pruneIntents[10000]) because of the `more`?
-					//       Or does `readThrough` take care of this? We also do this in recoverBlobManager
-					printf("pruneIntents.size()==%d\n", pruneIntents.size());
 					for (int rangeIdx = 0; rangeIdx < pruneIntents.size() - 1; ++rangeIdx) {
+						KeyRef rangeStartKey = pruneIntents[rangeIdx].key;
+						KeyRef rangeEndKey = pruneIntents[rangeIdx + 1].key;
+						lastEndKey = rangeEndKey;
 						if (pruneIntents[rangeIdx].value.size() == 0) {
 							continue;
 						}
-						KeyRef rangeStartKey = pruneIntents[rangeIdx].key;
-						KeyRef rangeEndKey = pruneIntents[rangeIdx + 1].key;
 						KeyRange range(KeyRangeRef(rangeStartKey, rangeEndKey));
 						Version pruneVersion;
 						bool force;
@@ -1968,7 +1969,7 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 						break;
 					}
 
-					beginKey = pruneIntents.readThrough.get();
+					beginKey = lastEndKey;
 				} catch (Error& e) {
 					// TODO: other errors here from pruneRange?
 					wait(tr->onError(e));
