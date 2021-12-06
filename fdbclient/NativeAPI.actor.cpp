@@ -77,6 +77,7 @@
 #include "flow/TLSConfig.actor.h"
 #include "flow/Tracing.h"
 #include "flow/UnitTest.h"
+#include "flow/network.h"
 #include "flow/serialize.h"
 
 #ifdef WIN32
@@ -379,39 +380,41 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 	loop {
 		wait(delay(CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace));
 
-		TraceEvent ev("TransactionMetrics", cx->dbId);
+		if (!g_network->isSimulated()) {
+			TraceEvent ev("TransactionMetrics", cx->dbId);
 
-		ev.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
-		    .detail("Cluster",
-		            cx->getConnectionRecord()
-		                ? cx->getConnectionRecord()->getConnectionString().clusterKeyName().toString()
-		                : "")
-		    .detail("Internal", cx->internal);
+			ev.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
+			    .detail("Cluster",
+			            cx->getConnectionRecord()
+			                ? cx->getConnectionRecord()->getConnectionString().clusterKeyName().toString()
+			                : "")
+			    .detail("Internal", cx->internal);
 
-		cx->cc.logToTraceEvent(ev);
+			cx->cc.logToTraceEvent(ev);
 
-		ev.detail("LocationCacheEntryCount", cx->locationCache.size());
-		ev.detail("MeanLatency", cx->latencies.mean())
-		    .detail("MedianLatency", cx->latencies.median())
-		    .detail("Latency90", cx->latencies.percentile(0.90))
-		    .detail("Latency98", cx->latencies.percentile(0.98))
-		    .detail("MaxLatency", cx->latencies.max())
-		    .detail("MeanRowReadLatency", cx->readLatencies.mean())
-		    .detail("MedianRowReadLatency", cx->readLatencies.median())
-		    .detail("MaxRowReadLatency", cx->readLatencies.max())
-		    .detail("MeanGRVLatency", cx->GRVLatencies.mean())
-		    .detail("MedianGRVLatency", cx->GRVLatencies.median())
-		    .detail("MaxGRVLatency", cx->GRVLatencies.max())
-		    .detail("MeanCommitLatency", cx->commitLatencies.mean())
-		    .detail("MedianCommitLatency", cx->commitLatencies.median())
-		    .detail("MaxCommitLatency", cx->commitLatencies.max())
-		    .detail("MeanMutationsPerCommit", cx->mutationsPerCommit.mean())
-		    .detail("MedianMutationsPerCommit", cx->mutationsPerCommit.median())
-		    .detail("MaxMutationsPerCommit", cx->mutationsPerCommit.max())
-		    .detail("MeanBytesPerCommit", cx->bytesPerCommit.mean())
-		    .detail("MedianBytesPerCommit", cx->bytesPerCommit.median())
-		    .detail("MaxBytesPerCommit", cx->bytesPerCommit.max())
-		    .detail("NumLocalityCacheEntries", cx->locationCache.size());
+			ev.detail("LocationCacheEntryCount", cx->locationCache.size());
+			ev.detail("MeanLatency", cx->latencies.mean())
+			    .detail("MedianLatency", cx->latencies.median())
+			    .detail("Latency90", cx->latencies.percentile(0.90))
+			    .detail("Latency98", cx->latencies.percentile(0.98))
+			    .detail("MaxLatency", cx->latencies.max())
+			    .detail("MeanRowReadLatency", cx->readLatencies.mean())
+			    .detail("MedianRowReadLatency", cx->readLatencies.median())
+			    .detail("MaxRowReadLatency", cx->readLatencies.max())
+			    .detail("MeanGRVLatency", cx->GRVLatencies.mean())
+			    .detail("MedianGRVLatency", cx->GRVLatencies.median())
+			    .detail("MaxGRVLatency", cx->GRVLatencies.max())
+			    .detail("MeanCommitLatency", cx->commitLatencies.mean())
+			    .detail("MedianCommitLatency", cx->commitLatencies.median())
+			    .detail("MaxCommitLatency", cx->commitLatencies.max())
+			    .detail("MeanMutationsPerCommit", cx->mutationsPerCommit.mean())
+			    .detail("MedianMutationsPerCommit", cx->mutationsPerCommit.median())
+			    .detail("MaxMutationsPerCommit", cx->mutationsPerCommit.max())
+			    .detail("MeanBytesPerCommit", cx->bytesPerCommit.mean())
+			    .detail("MedianBytesPerCommit", cx->bytesPerCommit.median())
+			    .detail("MaxBytesPerCommit", cx->bytesPerCommit.max())
+			    .detail("NumLocalityCacheEntries", cx->locationCache.size());
+		}
 
 		cx->latencies.clear();
 		cx->readLatencies.clear();
@@ -437,42 +440,44 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 				traceTSSErrors("TSS_TSSErrors", it.first, it.second->tssErrorsByCode);
 			}
 
-			TraceEvent tssEv("TSSClientMetrics", cx->dbId);
-			tssEv.detail("TSSID", it.first)
-			    .detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
-			    .detail("Internal", cx->internal);
+			if (!g_network->isSimulated()) {
+				TraceEvent tssEv("TSSClientMetrics", cx->dbId);
+				tssEv.detail("TSSID", it.first)
+				    .detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
+				    .detail("Internal", cx->internal);
 
-			it.second->cc.logToTraceEvent(tssEv);
+				it.second->cc.logToTraceEvent(tssEv);
 
-			tssEv.detail("MeanSSGetValueLatency", it.second->SSgetValueLatency.mean())
-			    .detail("MedianSSGetValueLatency", it.second->SSgetValueLatency.median())
-			    .detail("SSGetValueLatency90", it.second->SSgetValueLatency.percentile(0.90))
-			    .detail("SSGetValueLatency99", it.second->SSgetValueLatency.percentile(0.99));
+				tssEv.detail("MeanSSGetValueLatency", it.second->SSgetValueLatency.mean())
+				    .detail("MedianSSGetValueLatency", it.second->SSgetValueLatency.median())
+				    .detail("SSGetValueLatency90", it.second->SSgetValueLatency.percentile(0.90))
+				    .detail("SSGetValueLatency99", it.second->SSgetValueLatency.percentile(0.99));
 
-			tssEv.detail("MeanTSSGetValueLatency", it.second->TSSgetValueLatency.mean())
-			    .detail("MedianTSSGetValueLatency", it.second->TSSgetValueLatency.median())
-			    .detail("TSSGetValueLatency90", it.second->TSSgetValueLatency.percentile(0.90))
-			    .detail("TSSGetValueLatency99", it.second->TSSgetValueLatency.percentile(0.99));
+				tssEv.detail("MeanTSSGetValueLatency", it.second->TSSgetValueLatency.mean())
+				    .detail("MedianTSSGetValueLatency", it.second->TSSgetValueLatency.median())
+				    .detail("TSSGetValueLatency90", it.second->TSSgetValueLatency.percentile(0.90))
+				    .detail("TSSGetValueLatency99", it.second->TSSgetValueLatency.percentile(0.99));
 
-			tssEv.detail("MeanSSGetKeyLatency", it.second->SSgetKeyLatency.mean())
-			    .detail("MedianSSGetKeyLatency", it.second->SSgetKeyLatency.median())
-			    .detail("SSGetKeyLatency90", it.second->SSgetKeyLatency.percentile(0.90))
-			    .detail("SSGetKeyLatency99", it.second->SSgetKeyLatency.percentile(0.99));
+				tssEv.detail("MeanSSGetKeyLatency", it.second->SSgetKeyLatency.mean())
+				    .detail("MedianSSGetKeyLatency", it.second->SSgetKeyLatency.median())
+				    .detail("SSGetKeyLatency90", it.second->SSgetKeyLatency.percentile(0.90))
+				    .detail("SSGetKeyLatency99", it.second->SSgetKeyLatency.percentile(0.99));
 
-			tssEv.detail("MeanTSSGetKeyLatency", it.second->TSSgetKeyLatency.mean())
-			    .detail("MedianTSSGetKeyLatency", it.second->TSSgetKeyLatency.median())
-			    .detail("TSSGetKeyLatency90", it.second->TSSgetKeyLatency.percentile(0.90))
-			    .detail("TSSGetKeyLatency99", it.second->TSSgetKeyLatency.percentile(0.99));
+				tssEv.detail("MeanTSSGetKeyLatency", it.second->TSSgetKeyLatency.mean())
+				    .detail("MedianTSSGetKeyLatency", it.second->TSSgetKeyLatency.median())
+				    .detail("TSSGetKeyLatency90", it.second->TSSgetKeyLatency.percentile(0.90))
+				    .detail("TSSGetKeyLatency99", it.second->TSSgetKeyLatency.percentile(0.99));
 
-			tssEv.detail("MeanSSGetKeyValuesLatency", it.second->SSgetKeyValuesLatency.mean())
-			    .detail("MedianSSGetKeyValuesLatency", it.second->SSgetKeyValuesLatency.median())
-			    .detail("SSGetKeyValuesLatency90", it.second->SSgetKeyValuesLatency.percentile(0.90))
-			    .detail("SSGetKeyValuesLatency99", it.second->SSgetKeyValuesLatency.percentile(0.99));
+				tssEv.detail("MeanSSGetKeyValuesLatency", it.second->SSgetKeyValuesLatency.mean())
+				    .detail("MedianSSGetKeyValuesLatency", it.second->SSgetKeyValuesLatency.median())
+				    .detail("SSGetKeyValuesLatency90", it.second->SSgetKeyValuesLatency.percentile(0.90))
+				    .detail("SSGetKeyValuesLatency99", it.second->SSgetKeyValuesLatency.percentile(0.99));
 
-			tssEv.detail("MeanTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.mean())
-			    .detail("MedianTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.median())
-			    .detail("TSSGetKeyValuesLatency90", it.second->TSSgetKeyValuesLatency.percentile(0.90))
-			    .detail("TSSGetKeyValuesLatency99", it.second->TSSgetKeyValuesLatency.percentile(0.99));
+				tssEv.detail("MeanTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.mean())
+				    .detail("MedianTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.median())
+				    .detail("TSSGetKeyValuesLatency90", it.second->TSSgetKeyValuesLatency.percentile(0.90))
+				    .detail("TSSGetKeyValuesLatency99", it.second->TSSgetKeyValuesLatency.percentile(0.99));
+			}
 
 			it.second->clear();
 		}
@@ -7264,8 +7269,11 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		if (nextStream.next.version != checkVersion) {
 			if (nextOut.size()) {
 				*begin = checkVersion + 1;
+				ASSERT(nextOut.back().version >= results->lastReturnedVersion.get());
 				results->mutations.send(nextOut);
-				results->lastReturnedVersion.set(nextOut.back().version);
+				if (nextOut.back().version > results->lastReturnedVersion.get()) {
+					results->lastReturnedVersion.set(nextOut.back().version);
+				}
 				nextOut = Standalone<VectorRef<MutationsAndVersionRef>>();
 			}
 			checkVersion = nextStream.next.version;
@@ -7290,8 +7298,11 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		}
 	}
 	if (nextOut.size()) {
+		ASSERT(nextOut.back().version >= results->lastReturnedVersion.get());
 		results->mutations.send(nextOut);
-		results->lastReturnedVersion.set(nextOut.back().version);
+		if (nextOut.back().version > results->lastReturnedVersion.get()) {
+			results->lastReturnedVersion.set(nextOut.back().version);
+		}
 	}
 	throw end_of_stream();
 }
@@ -7432,9 +7443,12 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 						when(wait(cx->connectionFileChanged())) { break; }
 						when(ChangeFeedStreamReply rep = waitNext(replyStream.getFuture())) {
 							begin = rep.mutations.back().version + 1;
+							ASSERT(rep.mutations.back().version >= results->lastReturnedVersion.get());
 							results->mutations.send(
 							    Standalone<VectorRef<MutationsAndVersionRef>>(rep.mutations, rep.arena));
-							results->lastReturnedVersion.set(rep.mutations.back().version);
+							if (rep.mutations.back().version > results->lastReturnedVersion.get()) {
+								results->lastReturnedVersion.set(rep.mutations.back().version);
+							}
 							if (!atLatest && rep.atLatestVersion) {
 								atLatest = true;
 								results->notAtLatest.set(0);
