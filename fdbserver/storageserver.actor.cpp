@@ -5232,8 +5232,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			if (cloneCursor2->version().version > ver && cloneCursor2->version().version > data->version.get()) {
 				++data->counters.updateVersions;
 				if (data->currentChangeFeeds.size()) {
-					data->changeFeedVersions.push_back(std::make_pair(
-					    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver));
+					data->changeFeedVersions.emplace_back(
+					    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver);
 					updatedChangeFeeds.insert(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end());
 					data->currentChangeFeeds.clear();
 				}
@@ -5319,8 +5319,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		}
 		data->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeTLogMsgsUpdates);
 		if (data->currentChangeFeeds.size()) {
-			data->changeFeedVersions.push_back(std::make_pair(
-			    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver));
+			data->changeFeedVersions.emplace_back(
+			    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver);
 			updatedChangeFeeds.insert(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end());
 			data->currentChangeFeeds.clear();
 		}
