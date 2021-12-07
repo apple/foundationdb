@@ -60,12 +60,11 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
                                     std::string folder) {
 	state ptxn::test::print::PrintTiming printTiming("startTLogServers");
 	state std::vector<ptxn::InitializePtxnTLogRequest> tLogInitializations;
-	state std::unordered_map<ptxn::TLogGroupID, int> groupToLeaderId;
 	pContext->groupsPerTLog.resize(pContext->numTLogs);
 	for (int i = 0, index = 0; i < pContext->numTLogGroups; ++i) {
 		ptxn::TLogGroup& tLogGroup = pContext->tLogGroups[i];
 		pContext->groupsPerTLog[index].push_back(tLogGroup);
-		groupToLeaderId[tLogGroup.logGroupId] = index;
+		pContext->groupToLeaderId[tLogGroup.logGroupId] = index;
 		++index;
 		index %= pContext->numTLogs;
 	}
@@ -128,7 +127,7 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 	}
 	// Update the TLogGroupID to interface mapping
 	for (auto& [tLogGroupID, tLogGroupLeader] : pContext->tLogGroupLeaders) {
-		tLogGroupLeader = pContext->tLogInterfaces[groupToLeaderId[tLogGroupID]];
+		tLogGroupLeader = pContext->tLogInterfaces[pContext->groupToLeaderId[tLogGroupID]];
 	}
 	return Void();
 }
@@ -717,9 +716,10 @@ ACTOR Future<std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>>
 TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	state ptxn::test::TestDriverOptions options(params);
 	state std::vector<Future<Void>> actors;
-	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
+	wait(delay(30.0));
 	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 0;
 	(const_cast<ServerKnobs*> SERVER_KNOBS)->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL = 0.5;
+	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
 
 	for (const auto& group : pContext->tLogGroups) {
 		ptxn::test::print::print(group);
@@ -842,6 +842,167 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 
 	ASSERT(q->getNextReadLocation() == q->getNextCommitLocation());
 
+	platform::eraseDirectoryRecursive(folder);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ptxn/test/single_tlog_recovery") {
+	state ptxn::test::TestDriverOptions options(params);
+	state std::vector<Future<Void>> actors;
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 0;
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL = 0.5;
+	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
+
+	for (const auto& group : pContext->tLogGroups) {
+		ptxn::test::print::print(group);
+	}
+	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
+	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
+
+	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
+	platform::createDirectory(folder);
+
+	state std::vector<ptxn::InitializePtxnTLogRequest> tLogInitializations;
+	state std::unordered_map<ptxn::TLogGroupID, IDiskQueue*> qs;
+	pContext->groupsPerTLog.resize(pContext->numTLogs);
+	state std::unordered_map<ptxn::TLogGroupID, IKeyValueStore*> ds;
+	for (int i = 0, index = 0; i < pContext->numTLogGroups; ++i) {
+		ptxn::TLogGroup& tLogGroup = pContext->tLogGroups[i];
+		pContext->groupsPerTLog[index].push_back(tLogGroup);
+		pContext->groupToLeaderId[tLogGroup.logGroupId] = index;
+		++index;
+		index %= pContext->numTLogs;
+	}
+
+	state int i = 0;
+	for (; i < pContext->numTLogs; i++) {
+		PromiseStream<ptxn::InitializePtxnTLogRequest> initializeTLog;
+		Promise<Void> recovered;
+		tLogInitializations.emplace_back();
+		tLogInitializations.back().isPrimary = true;
+		tLogInitializations.back().storeType = KeyValueStoreType::MEMORY;
+		tLogInitializations.back().tlogGroups = pContext->groupsPerTLog[i];
+		UID tlogId = ptxn::test::randomUID();
+		UID workerId = ptxn::test::randomUID();
+		state StringRef fileVersionedLogDataPrefix = "log2Version-"_sr;
+		state StringRef fileLogDataPrefix = "logData-"_sr;
+		state std::string diskQueueFilePrefix = "logqueue-";
+		ptxn::InitializePtxnTLogRequest req = tLogInitializations.back();
+		const StringRef prefix = req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
+
+		std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues;
+		for (ptxn::TLogGroup& tlogGroup : pContext->groupsPerTLog[i]) {
+			std::string filename =
+			    filenameFromId(req.storeType, folder, prefix.toString() + "test", tlogGroup.logGroupId);
+			IKeyValueStore* data = openKVStore(req.storeType, filename, tlogGroup.logGroupId, 500e6);
+			IDiskQueue* queue =
+			    openDiskQueue(joinPath(folder, diskQueueFilePrefix + tlogGroup.logGroupId.toString() + "-"),
+			                  "fdq",
+			                  tlogGroup.logGroupId,
+			                  DiskQueueVersion::V1);
+			qs[tlogGroup.logGroupId] = queue;
+			ds[tlogGroup.logGroupId] = data;
+			persistentDataAndQueues[tlogGroup.logGroupId] = std::make_pair(data, queue);
+		}
+
+		actors.push_back(ptxn::tLog(persistentDataAndQueues,
+		                            makeReference<AsyncVar<ServerDBInfo>>(),
+		                            LocalityData(),
+		                            initializeTLog,
+		                            tlogId,
+		                            workerId,
+		                            false,
+		                            Promise<Void>(),
+		                            Promise<Void>(),
+		                            folder,
+		                            makeReference<AsyncVar<bool>>(false),
+		                            makeReference<AsyncVar<UID>>(tlogId)));
+		initializeTLog.send(tLogInitializations.back());
+		std::cout << "Recruit tlog " << i << " : " << tlogId.shortString() << ", workerID: " << workerId.shortString()
+		          << "\n";
+	}
+
+	// replace fake TLogInterface with recruited interface
+	std::vector<Future<ptxn::TLogInterface_PassivelyPull>> interfaceFutures(pContext->numTLogs);
+	for (i = 0; i < pContext->numTLogs; i++) {
+		interfaceFutures[i] = tLogInitializations[i].reply.getFuture();
+	}
+	std::vector<ptxn::TLogInterface_PassivelyPull> interfaces = wait(getAll(interfaceFutures));
+	for (i = 0; i < pContext->numTLogs; i++) {
+		*(pContext->tLogInterfaces[i]) = interfaces[i];
+	}
+
+	for (auto& [tLogGroupID, tLogGroupLeader] : pContext->tLogGroupLeaders) {
+		tLogGroupLeader = pContext->tLogInterfaces[pContext->groupToLeaderId[tLogGroupID]];
+	}
+
+	state IKeyValueStore* d = ds[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
+
+	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>> res =
+	    wait(commitInjectReturnVersions(pContext, storageTeamID, pContext->numCommits));
+	wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
+
+	// wait here so that actors who update persistentData can do their job.
+	wait(delay(1.5));
+
+	// Start to recover, put the same tlog groups in the requests as initial assignment
+	state ptxn::TLogGroupID targetGroup = pContext->storageTeamIDTLogGroupIDMapper[storageTeamID];
+	state std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> dqs;
+	state int writtenTLogID = pContext->groupToLeaderId[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
+	PromiseStream<ptxn::InitializePtxnTLogRequest> initializeTLogRecover;
+
+	state IDiskQueue::location previousNextPushLocation = qs[targetGroup]->getNextPushLocation();
+
+	tLogInitializations.emplace_back();
+	tLogInitializations.back().isPrimary = true;
+	tLogInitializations.back().storeType = KeyValueStoreType::MEMORY;
+	tLogInitializations.back().tlogGroups = pContext->groupsPerTLog[writtenTLogID];
+	// nede to set recruitementId to avoid caching
+	tLogInitializations.back().recruitmentID = ptxn::test::randomUID();
+	ptxn::InitializePtxnTLogRequest req = tLogInitializations.back();
+	const StringRef prefix = req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
+
+	for (ptxn::TLogGroup& tlogGroup : pContext->groupsPerTLog[writtenTLogID]) {
+		std::string filename = filenameFromId(req.storeType, folder, prefix.toString() + "test", tlogGroup.logGroupId);
+		IKeyValueStore* data = openKVStore(req.storeType, filename, tlogGroup.logGroupId, 500e6);
+		IDiskQueue* queue = openDiskQueue(joinPath(folder, diskQueueFilePrefix + tlogGroup.logGroupId.toString() + "-"),
+		                                  "fdq",
+		                                  tlogGroup.logGroupId,
+		                                  DiskQueueVersion::V1);
+		dqs[tlogGroup.logGroupId] = std::make_pair(data, queue);
+	}
+
+	// cancel all actors, but disk files would not be erase so that we can recover from it.
+	for (auto& a : actors) {
+		a.cancel();
+	}
+	actors.clear();
+
+	state std::vector<Future<Void>> actors_recover;
+	UID tlogId = ptxn::test::randomUID();
+	actors_recover.push_back(ptxn::tLog(dqs,
+	                                    makeReference<AsyncVar<ServerDBInfo>>(),
+	                                    LocalityData(),
+	                                    initializeTLogRecover,
+	                                    tlogId,
+	                                    ptxn::test::randomUID(),
+	                                    true,
+	                                    Promise<Void>(),
+	                                    Promise<Void>(),
+	                                    folder,
+	                                    makeReference<AsyncVar<bool>>(false),
+	                                    makeReference<AsyncVar<UID>>(tlogId)));
+	initializeTLogRecover.send(tLogInitializations.back());
+
+	// wait for the recovery of TLog,
+	// cannot read the data and compare bit-by-bit because read operation is only allowed during recovery time.
+	wait(delay(5.0));
+
+	// From results I see the diff of location::low is always 36(size of DiskQueue::PageHeader)
+	// not sure why though, asserting >= would also make sense to me.
+	// it is hard to verify through peeking, because the interface is recruited from inside.
+	ASSERT(dqs[targetGroup].second->getNextReadLocation() >= previousNextPushLocation);
+	ASSERT(dqs[targetGroup].second->getNextReadLocation().lo == previousNextPushLocation.lo + 36);
 	platform::eraseDirectoryRecursive(folder);
 	return Void();
 }
