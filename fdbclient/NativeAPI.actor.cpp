@@ -7103,11 +7103,14 @@ ACTOR Future<Void> changeFeedWaitLatest(ChangeFeedData* self, Version version) {
 
 	if (onEmpty.size()) {
 		wait(waitForAll(onEmpty));
+	}
+
+	if (self->mutations.isEmpty()) {
 		wait(delay(0));
 	}
 
 	// then, wait for client to have consumed up through version
-	if (!self->mutations.isEmpty()) {
+	while (!self->mutations.isEmpty()) {
 		wait(self->mutations.onEmpty());
 		wait(delay(0));
 	}
@@ -7119,7 +7122,7 @@ ACTOR Future<Void> changeFeedWhenAtLatest(ChangeFeedData* self, Version version)
 	loop {
 		if (self->notAtLatest.get() == 0) {
 			choose {
-				when(wait(changeFeedWaitLatest(self, version))) { return Void(); }
+				when(wait(changeFeedWaitLatest(self, version))) { break; }
 				when(wait(self->refresh.getFuture())) {}
 				when(wait(self->notAtLatest.onChange())) {}
 			}
