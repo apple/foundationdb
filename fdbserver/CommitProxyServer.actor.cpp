@@ -1524,7 +1524,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	// client may get a commit version that the master is not aware of, and next GRV request may get a version less than
 	// self->committedVersion.
 	TEST(pProxyCommitData->committedVersion.get() > self->commitVersion); // later version was reported committed first
-	if (self->commitVersion >= pProxyCommitData->committedVersion.get()) {
+	if (self->commitVersion >= pProxyCommitData->committedVersion.get() || SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 		wait(pProxyCommitData->master.reportLiveCommittedVersion.getReply(
 		    ReportRawCommittedVersionRequest(self->commitVersion,
 		                                     self->lockedAfter,
