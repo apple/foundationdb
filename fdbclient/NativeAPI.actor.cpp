@@ -7109,11 +7109,6 @@ ACTOR Future<Void> changeFeedWaitLatest(ChangeFeedData* self, Version version) {
 		wait(delay(0));
 	}
 
-	// then, wait for client to have consumed up through version
-	while (!self->mutations.isEmpty()) {
-		wait(self->mutations.onEmpty());
-		wait(delay(0));
-	}
 	return Void();
 }
 
@@ -7133,6 +7128,12 @@ ACTOR Future<Void> changeFeedWhenAtLatest(ChangeFeedData* self, Version version)
 				when(wait(self->refresh.getFuture())) {}
 			}
 		}
+	}
+
+	// then, wait for client to have consumed up through version
+	while (!self->mutations.isEmpty()) {
+		wait(self->mutations.onEmpty());
+		wait(delay(0));
 	}
 
 	if (self->lastReturnedVersion.get() < version) {
