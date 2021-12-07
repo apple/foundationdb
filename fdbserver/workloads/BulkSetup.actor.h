@@ -170,11 +170,13 @@ Future<Void> bulkSetup(Database cx,
                        Promise<std::vector<std::pair<uint64_t, double>>> ratesAtKeyCounts =
                            Promise<std::vector<std::pair<uint64_t, double>>>(),
                        int keySaveIncrement = 0,
-                       double keyCheckInterval = 0.1) {
+                       double keyCheckInterval = 0.1,
+                       uint64_t startNodeIdx = 0,
+                       uint64_t endNodeIdx = 0) {
 
 	state std::vector<std::pair<uint64_t, uint64_t>> jobs;
-	state uint64_t startNode = (nodeCount * workload->clientId) / workload->clientCount;
-	state uint64_t endNode = (nodeCount * (workload->clientId + 1)) / workload->clientCount;
+	state uint64_t startNode = startNodeIdx ? startNodeIdx : (nodeCount * workload->clientId) / workload->clientCount;
+	state uint64_t endNode = endNodeIdx ? endNodeIdx : (nodeCount * (workload->clientId + 1)) / workload->clientCount;
 
 	state double start = now();
 
