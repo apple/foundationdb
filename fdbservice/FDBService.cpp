@@ -643,7 +643,7 @@ private:
 		return true;
 	}
 
-	const char* getValueMulti(const CSimpleIni& ini, const char* name, ...) {
+	const char* getValueMultiUtil(const CSimpleIni& ini, const char* name, ...) {
 		const char* ret = nullptr;
 		const char* section = nullptr;
 		va_list ap;
@@ -653,6 +653,42 @@ private:
 		}
 		va_end(ap);
 		return ret;
+	}
+
+	const char* getValueMulti(const CSimpleIni& ini, const char* name, ...) {
+		va_list args;
+		va_start(args, name);
+		const char* ret = nullptr;
+		ret = getValueMultiUtil(ini, name, args);
+		if (!ret) {
+			std::string nameCopy(name);
+			for (int i = nameCopy.size() - 1; i >= 0; --i) {
+				if (nameCopy[i] == '-') {
+					nameCopy.at(i) = '_';
+				}
+			}
+			ret = getValueMultiUtil(ini, name, args);
+		}
+		va_end(args, name);
+		return ret;
+	}
+
+	bool isEqualIgnoreHyphenAndUnderscore(const char* str, const char* target) {
+		while (*str && *target) {
+			char curStr = *str, curTarget = *target;
+			if (curStr == '-') {
+				curStr = '_';
+			}
+			if (curTarget == '-') {
+				curTarget = '_';
+			}
+			if (curStr != curTarget) {
+				return false;
+			}
+			str++;
+			target++;
+		}
+		return !(*str || *target);
 	}
 
 	Command makeCommand(const CSimpleIni& ini, std::string section, uint16_t id) {
@@ -702,8 +738,8 @@ private:
 		const char* id_s = ssection.c_str() + strlen(section.c_str()) + 1;
 
 		for (auto i : keys) {
-			if (!strcmp(i.pItem, "command") || !strcmp(i.pItem, "restart_delay") ||
-			    !strcmp(i.pItem, "disable-lifecycle-logging")) {
+			if (!strcmp(i.pItem, "command") || isEqualIgnoreHyphenAndUnderscore(i.pItem, "restart-delay") ||
+			    isEqualIgnoreHyphenAndUnderscore(i.pItem, "disable-lifecycle-logging")) {
 				continue;
 			}
 

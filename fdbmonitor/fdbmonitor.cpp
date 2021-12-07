@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <iostream>
 #include <signal.h>
 #include <stdio.h>
 #ifndef _WIN32
@@ -193,7 +194,7 @@ void log_err(const char* func, int err, const char* format, ...) {
 	va_end(args);
 }
 
-const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
+const char* get_value_multi_util(const CSimpleIni& ini, const char* key, ...) {
 	const char* ret = nullptr;
 	const char* section = nullptr;
 
@@ -206,6 +207,43 @@ const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
 	va_end(ap);
 
 	return ret;
+}
+
+const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
+	va_list args;
+	va_start(args, key);
+
+	const char* ret = get_value_multi_util(ini, key, args);
+	if (!ret) {
+		// convert - to _ for the parameter key
+		std::string keyCopy(key);
+		for (int i = keyCopy.size() - 1; i >= 0; --i) {
+			if (keyCopy[i] == '-') {
+				keyCopy.at(i) = '_';
+			}
+		}
+		ret = get_value_multi_util(ini, keyCopy.c_str(), args);
+	}
+	va_end(args);
+	return ret;
+}
+
+bool isEqualIgnoreHyphenAndUnderscore(const char* str, const char* target) {
+	while (*str && *target) {
+		char curStr = *str, curTarget = *target;
+		if (curStr == '-') {
+			curStr = '_';
+		}
+		if (curTarget == '-') {
+			curTarget = '_';
+		}
+		if (curStr != curTarget) {
+			return false;
+		}
+		str++;
+		target++;
+	}
+	return !(*str || *target);
 }
 
 double timer() {
@@ -508,10 +546,13 @@ public:
 		const char* id_s = ssection.c_str() + strlen(section.c_str()) + 1;
 
 		for (auto i : keys) {
-			if (!strcmp(i.pItem, "command") || !strcmp(i.pItem, "restart-delay") ||
-			    !strcmp(i.pItem, "initial-restart-delay") || !strcmp(i.pItem, "restart-backoff") ||
-			    !strcmp(i.pItem, "restart-delay-reset-interval") || !strcmp(i.pItem, "disable-lifecycle-logging") ||
-			    !strcmp(i.pItem, "delete-envvars") || !strcmp(i.pItem, "kill-on-configuration-change")) {
+			if (!strcmp(i.pItem, "command") || !isEqualIgnoreHyphenAndUnderscore(i.pItem, "restart-delay") ||
+			    !isEqualIgnoreHyphenAndUnderscore(i.pItem, "initial-restart-delay") ||
+			    !isEqualIgnoreHyphenAndUnderscore(i.pItem, "restart-backoff") ||
+			    !isEqualIgnoreHyphenAndUnderscore(i.pItem, "restart-delay-reset-interval") ||
+			    !isEqualIgnoreHyphenAndUnderscore(i.pItem, "disable-lifecycle-logging") ||
+			    !isEqualIgnoreHyphenAndUnderscore(i.pItem, "delete-envvars") ||
+			    !isEqualIgnoreHyphenAndUnderscore(i.pItem, "kill-on-configuration-change")) {
 				continue;
 			}
 
