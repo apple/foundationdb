@@ -484,7 +484,6 @@ Future<Version> TagPartitionedLogSystem::pushTLogGroup(Version prevVersion,
 
 	std::vector<Future<Void>> quorumResults;
 	std::vector<Future<ptxn::TLogCommitReply>> allReplies;
-	int location = 0;
 	Span span("TPLS:push"_loc, spanContext);
 	auto serialized = data.pGroupMessageBuilders->find(tLogGroup)->second->getAllSerialized();
 
@@ -498,26 +497,25 @@ Future<Version> TagPartitionedLogSystem::pushTLogGroup(Version prevVersion,
 			const auto& logServers = it->groupIdToInterfaces[tLogGroup];
 			std::vector<Future<Void>> tLogCommitResults;
 
-			for (int loc = 0; loc < logServers.size(); loc++) {
+			for (auto& logServer : logServers) {
 				// TODO: pass serializer from caller
 				allReplies.push_back(
-				    logServers[loc]->get().interf().commit.getReply(ptxn::TLogCommitRequest(spanContext,
-				                                                                            tLogGroup,
-				                                                                            serialized.first,
-				                                                                            serialized.second,
-				                                                                            prevVersion,
-				                                                                            version,
-				                                                                            knownCommittedVersion,
-				                                                                            minKnownCommittedVersion,
-				                                                                            addedTeams,
-				                                                                            removedTeams,
-				                                                                            teamToTags,
-				                                                                            debugID),
-				                                                    TaskPriority::ProxyTLogCommitReply));
+				    logServer->get().interf().commit.getReply(ptxn::TLogCommitRequest(spanContext,
+				                                                                      tLogGroup,
+				                                                                      serialized.first,
+				                                                                      serialized.second,
+				                                                                      prevVersion,
+				                                                                      version,
+				                                                                      knownCommittedVersion,
+				                                                                      minKnownCommittedVersion,
+				                                                                      addedTeams,
+				                                                                      removedTeams,
+				                                                                      teamToTags,
+				                                                                      debugID),
+				                                              TaskPriority::ProxyTLogCommitReply));
 				Future<Void> commitSuccess = success(allReplies.back());
 				addActor.get().send(commitSuccess);
 				tLogCommitResults.push_back(commitSuccess);
-				location++;
 			}
 			quorumResults.push_back(quorum(tLogCommitResults, tLogCommitResults.size()));
 		}
