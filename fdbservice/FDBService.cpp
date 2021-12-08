@@ -643,7 +643,7 @@ private:
 		return true;
 	}
 
-	const char* getValueMultiUtil(const CSimpleIni& ini, const char* name, ...) {
+	const char* getValueMulti(const CSimpleIni& ini, const char* name, ...) {
 		const char* ret = nullptr;
 		const char* section = nullptr;
 		va_list ap;
@@ -651,29 +651,25 @@ private:
 		while (!ret && (section = va_arg(ap, const char*))) {
 			ret = ini.GetValue(section, name, nullptr);
 		}
+		if (!ret) {
+			std::string keyCopy(key);
+			for (int i = keyCopy.size() - 1; i >= 0; --i) {
+				if (keyCopy[i] == '-') {
+					keyCopy.at(i) = '_';
+				}
+			}
+			while (!ret && (section = va_arg(ap, const char*))) {
+				ret = ini.GetValue(section, keyCopy.c_str(), nullptr);
+			}
+		}
 		va_end(ap);
 		return ret;
 	}
 
-	const char* getValueMulti(const CSimpleIni& ini, const char* name, ...) {
-		va_list args;
-		va_start(args, name);
-		const char* ret = nullptr;
-		ret = getValueMultiUtil(ini, name, args);
-		if (!ret) {
-			std::string nameCopy(name);
-			for (int i = nameCopy.size() - 1; i >= 0; --i) {
-				if (nameCopy[i] == '-') {
-					nameCopy.at(i) = '_';
-				}
-			}
-			ret = getValueMultiUtil(ini, name, args);
+	bool isParameterNameEqual(const char* str, const char* target) {
+		if (!str || !target) {
+			return false;
 		}
-		va_end(args, name);
-		return ret;
-	}
-
-	bool isEqualIgnoreHyphenAndUnderscore(const char* str, const char* target) {
 		while (*str && *target) {
 			char curStr = *str, curTarget = *target;
 			if (curStr == '-') {
@@ -738,8 +734,8 @@ private:
 		const char* id_s = ssection.c_str() + strlen(section.c_str()) + 1;
 
 		for (auto i : keys) {
-			if (!strcmp(i.pItem, "command") || isEqualIgnoreHyphenAndUnderscore(i.pItem, "restart-delay") ||
-			    isEqualIgnoreHyphenAndUnderscore(i.pItem, "disable-lifecycle-logging")) {
+			if (!isParameterNameEqual(i.pItem, "command") || isParameterNameEqual(i.pItem, "restart-delay") ||
+			    isParameterNameEqual(i.pItem, "disable-lifecycle-logging")) {
 				continue;
 			}
 

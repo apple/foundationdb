@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include <iostream>
 #include <signal.h>
 #include <stdio.h>
 #ifndef _WIN32
@@ -194,7 +193,7 @@ void log_err(const char* func, int err, const char* format, ...) {
 	va_end(args);
 }
 
-const char* get_value_multi_util(const CSimpleIni& ini, const char* key, ...) {
+const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
 	const char* ret = nullptr;
 	const char* section = nullptr;
 
@@ -204,31 +203,26 @@ const char* get_value_multi_util(const CSimpleIni& ini, const char* key, ...) {
 	while (!ret && (section = va_arg(ap, const char*)))
 		ret = ini.GetValue(section, key, nullptr);
 
-	va_end(ap);
-
-	return ret;
-}
-
-const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
-	va_list args;
-	va_start(args, key);
-
-	const char* ret = get_value_multi_util(ini, key, args);
 	if (!ret) {
-		// convert - to _ for the parameter key
 		std::string keyCopy(key);
 		for (int i = keyCopy.size() - 1; i >= 0; --i) {
 			if (keyCopy[i] == '-') {
 				keyCopy.at(i) = '_';
 			}
 		}
-		ret = get_value_multi_util(ini, keyCopy.c_str(), args);
+		while (!ret && (section = va_arg(ap, const char*))) {
+			ret = ini.GetValue(section, keyCopy.c_str(), nullptr);
+		}
 	}
-	va_end(args);
+	va_end(ap);
+
 	return ret;
 }
 
-bool isEqualIgnoreHyphenAndUnderscore(const char* str, const char* target) {
+bool isParameterNameEqual(const char* str, const char* target) {
+	if (!str || !target) {
+		return false;
+	}
 	while (*str && *target) {
 		char curStr = *str, curTarget = *target;
 		if (curStr == '-') {
@@ -546,13 +540,13 @@ public:
 		const char* id_s = ssection.c_str() + strlen(section.c_str()) + 1;
 
 		for (auto i : keys) {
-			if (!strcmp(i.pItem, "command") || !isEqualIgnoreHyphenAndUnderscore(i.pItem, "restart-delay") ||
-			    !isEqualIgnoreHyphenAndUnderscore(i.pItem, "initial-restart-delay") ||
-			    !isEqualIgnoreHyphenAndUnderscore(i.pItem, "restart-backoff") ||
-			    !isEqualIgnoreHyphenAndUnderscore(i.pItem, "restart-delay-reset-interval") ||
-			    !isEqualIgnoreHyphenAndUnderscore(i.pItem, "disable-lifecycle-logging") ||
-			    !isEqualIgnoreHyphenAndUnderscore(i.pItem, "delete-envvars") ||
-			    !isEqualIgnoreHyphenAndUnderscore(i.pItem, "kill-on-configuration-change")) {
+			if (!isParameterNameEqual(i.pItem, "command") || !isParameterNameEqual(i.pItem, "restart-delay") ||
+			    !isParameterNameEqual(i.pItem, "initial-restart-delay") ||
+			    !isParameterNameEqual(i.pItem, "restart-backoff") ||
+			    !isParameterNameEqual(i.pItem, "restart-delay-reset-interval") ||
+			    !isParameterNameEqual(i.pItem, "disable-lifecycle-logging") ||
+			    !isParameterNameEqual(i.pItem, "delete-envvars") ||
+			    !isParameterNameEqual(i.pItem, "kill-on-configuration-change")) {
 				continue;
 			}
 
@@ -564,7 +558,7 @@ public:
 				opt.replace(pos, 3, id_s, strlen(id_s));
 
 			const char* flagName = i.pItem + 5;
-			if (strncmp("flag_", i.pItem, 5) == 0 && strlen(flagName) > 0) {
+			if ((strncmp("flag_", i.pItem, 5) == 0 || strncmp("flag-", i.pItem, 5) == 0) && strlen(flagName) > 0) {
 				if (opt == "true")
 					commands.push_back(std::string("--") + flagName);
 				else if (opt != "false") {
