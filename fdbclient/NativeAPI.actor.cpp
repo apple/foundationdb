@@ -7076,6 +7076,14 @@ Version ChangeFeedData::getVersion() {
 	return lastReturnedVersion.get();
 }
 
+// TODO REMOVE when BG is correctness clean
+// To debug a waitLatest at wait_version returning early, set wait_version to the version, and start+end to a version
+// range that surrounds wait_version enough to figure out what's going on
+#define DEBUG_CF_START_VERSION invalidVersion
+#define DEBUG_CF_END_VERSION invalidVersion
+#define DEBUG_CF_WAIT_VERSION invalidVersion
+#define DEBUG_CF_VERSION(v) DEBUG_CF_START_VERSION <= v&& v <= DEBUG_CF_END_VERSION
+
 ACTOR Future<Void> changeFeedWaitLatest(ChangeFeedData* self, Version version) {
 	// first, wait on SS to have sent up through version
 	int desired = 0;
@@ -7092,6 +7100,14 @@ ACTOR Future<Void> changeFeedWaitLatest(ChangeFeedData* self, Version version) {
 		}
 	}
 
+	if (DEBUG_CF_WAIT_VERSION == version) {
+		fmt::print("CFW {0})     WaitLatest: waiting for {1}/{2} ss ({3} < desired)\n",
+		           version,
+		           waiting,
+		           self->storageData.size(),
+		           desired);
+	}
+
 	wait(waitForAll(allAtLeast));
 
 	// then, wait on ss streams to have processed up through version
@@ -7100,6 +7116,10 @@ ACTOR Future<Void> changeFeedWaitLatest(ChangeFeedData* self, Version version) {
 		if (!it.isEmpty()) {
 			onEmpty.push_back(it.onEmpty());
 		}
+	}
+
+	if (DEBUG_CF_WAIT_VERSION == version) {
+		fmt::print("CFW {0})     WaitLatest: waiting for {1} ss onEmpty\n", version, onEmpty.size());
 	}
 
 	if (onEmpty.size()) {
@@ -7112,8 +7132,15 @@ ACTOR Future<Void> changeFeedWaitLatest(ChangeFeedData* self, Version version) {
 
 	// then, wait for client to have consumed up through version
 	while (!self->mutations.isEmpty()) {
+		if (DEBUG_CF_WAIT_VERSION == version) {
+			fmt::print("CFW {0})     WaitLatest: waiting for client onEmpty\n", version);
+		}
 		wait(self->mutations.onEmpty());
 		wait(delay(0));
+	}
+
+	if (DEBUG_CF_WAIT_VERSION == version) {
+		fmt::print("CFW {0})     WaitLatest: done\n", version);
 	}
 
 	return Void();
@@ -7121,7 +7148,13 @@ ACTOR Future<Void> changeFeedWaitLatest(ChangeFeedData* self, Version version) {
 
 ACTOR Future<Void> changeFeedWhenAtLatest(ChangeFeedData* self, Version version) {
 	state Future<Void> lastReturned = self->lastReturnedVersion.whenAtLeast(version);
+	if (DEBUG_CF_WAIT_VERSION == version) {
+		fmt::print("CFW {0}) WhenAtLeast: LR={1}\n", version, self->lastReturnedVersion.get());
+	}
 	loop {
+		if (DEBUG_CF_WAIT_VERSION == version) {
+			fmt::print("CFW {0})   WhenAtLeast: NotAtLatest={1}\n", version, self->notAtLatest.get());
+		}
 		if (self->notAtLatest.get() == 0) {
 			choose {
 				when(wait(changeFeedWaitLatest(self, version))) { break; }
@@ -7135,6 +7168,10 @@ ACTOR Future<Void> changeFeedWhenAtLatest(ChangeFeedData* self, Version version)
 				when(wait(self->refresh.getFuture())) {}
 			}
 		}
+	}
+
+	if (DEBUG_CF_VERSION(version)) {
+		fmt::print("CFLR (WAL): {0}\n", version);
 	}
 
 	if (self->lastReturnedVersion.get() < version) {
@@ -7285,6 +7322,9 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 				ASSERT(nextOut.back().version >= results->lastReturnedVersion.get());
 				results->mutations.send(nextOut);
 				wait(results->mutations.onEmpty());
+				if (DEBUG_CF_VERSION(nextOut.back().version)) {
+					fmt::print("CFLR (merged): {0} (1)\n", nextOut.back().version);
+				}
 				if (nextOut.back().version > results->lastReturnedVersion.get()) {
 					results->lastReturnedVersion.set(nextOut.back().version);
 				}
@@ -7315,6 +7355,9 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		ASSERT(nextOut.back().version >= results->lastReturnedVersion.get());
 		results->mutations.send(nextOut);
 		wait(results->mutations.onEmpty());
+		if (DEBUG_CF_VERSION(nextOut.back().version)) {
+			fmt::print("CFLR (merged): {0} (1)\n", nextOut.back().version);
+		}
 		if (nextOut.back().version > results->lastReturnedVersion.get()) {
 			results->lastReturnedVersion.set(nextOut.back().version);
 		}
@@ -7476,7 +7519,21 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 							ASSERT(feedReply.mutations.back().version >= results->lastReturnedVersion.get());
 							results->mutations.send(
 							    Standalone<VectorRef<MutationsAndVersionRef>>(feedReply.mutations, feedReply.arena));
+
+							// Because onEmpty returns here before the consuming process, we must do a delay(0)
 							wait(results->mutations.onEmpty());
+							wait(delay(0));
+
+							if (DEBUG_CF_VERSION(feedReply.mutations.back().version)) {
+								fmt::print("CFLR (single): {0} ({1}), atLatest={2}, rep.atLatest={3}, notAtLatest={4}, "
+								           "minSV={5}\n",
+								           feedReply.mutations.back().version,
+								           feedReply.mutations.size(),
+								           atLatest ? "T" : "F",
+								           feedReply.atLatestVersion ? "T" : "F",
+								           results->notAtLatest.get(),
+								           feedReply.minStreamVersion);
+							}
 							if (feedReply.mutations.back().version > results->lastReturnedVersion.get()) {
 								results->lastReturnedVersion.set(feedReply.mutations.back().version);
 							}

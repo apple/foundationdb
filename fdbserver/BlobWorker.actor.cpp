@@ -1136,6 +1136,12 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 	return cfRollbackVersion;
 }
 
+// TODO REMOVE once correctness clean
+#define DEBUG_BW_START_VERSION invalidVersion
+#define DEBUG_BW_END_VERSION invalidVersion
+#define DEBUG_BW_WAIT_VERSION invalidVersion
+#define DEBUG_BW_VERSION(v) DEBUG_BW_START_VERSION <= v&& v <= DEBUG_BW_END_VERSION
+
 // updater for a single granule
 // TODO: this is getting kind of large. Should try to split out this actor if it continues to grow?
 // FIXME: handle errors here (forward errors)
@@ -1302,8 +1308,15 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 			state Standalone<VectorRef<MutationsAndVersionRef>> mutations;
 			try {
+				if (DEBUG_BW_VERSION(metadata->bufferedDeltaVersion)) {
+					fmt::print("BW waiting mutations after ({0})\n", metadata->bufferedDeltaVersion);
+				}
 				state Standalone<VectorRef<MutationsAndVersionRef>> _mutations =
 				    waitNext(metadata->activeCFData.get()->mutations.getFuture());
+				if (DEBUG_BW_VERSION(metadata->bufferedDeltaVersion)) {
+					fmt::print(
+					    "BW got mutations after ({0}): ({1})\n", metadata->bufferedDeltaVersion, _mutations.size());
+				}
 				mutations = _mutations;
 				if (readOldChangeFeed) {
 					ASSERT(mutations.back().version < startState.changeFeedStartVersion);
@@ -1441,6 +1454,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							    .detail("Granule", metadata->keyRange)
 							    .detail("ChangeFeedID", readOldChangeFeed ? oldCFKey.get() : cfKey)
 							    .detail("OldChangeFeed", readOldChangeFeed ? "T" : "F");
+						}
+						if (DEBUG_BW_VERSION(deltas.version)) {
+							fmt::print("BW {0}: ({1})\n", deltas.version, deltas.mutations.size());
 						}
 						metadata->currentDeltas.push_back_deep(metadata->deltaArena, deltas);
 					}
@@ -1790,17 +1806,20 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	// if we don't have to wait for change feed version to catch up or wait for any pending file writes to complete,
 	// nothing to do
 
-	/*printf("  [%s - %s) waiting for %lld\n  readable:%s\n  bufferedDelta=%lld\n  pendingDelta=%lld\n  "
-	       "durableDelta=%lld\n  pendingSnapshot=%lld\n  durableSnapshot=%lld\n",
-	       metadata->keyRange.begin.printable().c_str(),
-	       metadata->keyRange.end.printable().c_str(),
-	       v,
-	       metadata->readable.isSet() ? "T" : "F",
-	       metadata->activeCFData.get()->getVersion(),
-	       metadata->pendingDeltaVersion,
-	       metadata->durableDeltaVersion.get(),
-	       metadata->pendingSnapshotVersion,
-	       metadata->durableSnapshotVersion.get());*/
+	if (v == DEBUG_BW_WAIT_VERSION) {
+		fmt::print("{0}) [{1} - {2}) waiting for {3}\n  readable:{4}\n  bufferedDelta={5}\n  pendingDelta={6}\n  "
+		           "durableDelta={7}\n  pendingSnapshot={8}\n  durableSnapshot={9}\n",
+		           v,
+		           metadata->keyRange.begin.printable().c_str(),
+		           metadata->keyRange.end.printable().c_str(),
+		           v,
+		           metadata->readable.isSet() ? "T" : "F",
+		           metadata->activeCFData.get()->getVersion(),
+		           metadata->pendingDeltaVersion,
+		           metadata->durableDeltaVersion.get(),
+		           metadata->pendingSnapshotVersion,
+		           metadata->durableSnapshotVersion.get());
+	}
 
 	ASSERT(metadata->activeCFData.get().isValid());
 
@@ -1809,13 +1828,24 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	     metadata->durableDeltaVersion.get() == metadata->pendingDeltaVersion) &&
 	    (v <= metadata->durableSnapshotVersion.get() ||
 	     metadata->durableSnapshotVersion.get() == metadata->pendingSnapshotVersion)) {
+		if (v == DEBUG_BW_WAIT_VERSION) {
+			fmt::print("{0}) already done\n", v);
+		}
 		return Void();
 	}
 
 	// wait for change feed version to catch up to ensure we have all data
 	if (metadata->activeCFData.get()->getVersion() < v) {
+		if (v == DEBUG_BW_WAIT_VERSION) {
+			fmt::print("{0}) waiting for CF version (currently {1})\n", v, metadata->activeCFData.get()->getVersion());
+		}
+
 		wait(metadata->activeCFData.get()->whenAtLeast(v));
 		ASSERT(metadata->activeCFData.get()->getVersion() >= v);
+
+		if (v == DEBUG_BW_WAIT_VERSION) {
+			fmt::print("{0}) got CF version {1}\n", v, metadata->activeCFData.get()->getVersion());
+		}
 	}
 
 	// wait for any pending delta and snapshot files as of the moment the change feed version caught up.
@@ -1825,15 +1855,32 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	// If there are mutations that are no longer buffered but have not been
 	// persisted to a delta file that are necessary for the query, wait for them
 	if (pendingDeltaV > metadata->durableDeltaVersion.get() && v > metadata->durableDeltaVersion.get()) {
+		if (v == DEBUG_BW_WAIT_VERSION) {
+			fmt::print("{0}) waiting for DDV {1} < {2}\n", v, metadata->durableDeltaVersion.get(), pendingDeltaV);
+		}
+
 		wait(metadata->durableDeltaVersion.whenAtLeast(pendingDeltaV));
 		ASSERT(metadata->durableDeltaVersion.get() >= pendingDeltaV);
+
+		if (v == DEBUG_BW_WAIT_VERSION) {
+			fmt::print("{0}) waiting for DDV {1} >= {2}\n", v, metadata->durableDeltaVersion.get(), pendingDeltaV);
+		}
 	}
 
 	// This isn't strictly needed, but if we're in the process of re-snapshotting, we'd likely rather
 	// return that snapshot file than the previous snapshot file and all its delta files.
 	if (pendingSnapshotV > metadata->durableSnapshotVersion.get() && v > metadata->durableSnapshotVersion.get()) {
+		if (v == DEBUG_BW_WAIT_VERSION) {
+			fmt::print("{0}) waiting for DSV {1} < {2}\n", v, metadata->durableSnapshotVersion.get(), pendingSnapshotV);
+		}
+
 		wait(metadata->durableSnapshotVersion.whenAtLeast(pendingSnapshotV));
 		ASSERT(metadata->durableSnapshotVersion.get() >= pendingSnapshotV);
+
+		if (v == DEBUG_BW_WAIT_VERSION) {
+			fmt::print(
+			    "{0}) waiting for DSV {1} >= {2}\n", v, metadata->durableSnapshotVersion.get(), pendingSnapshotV);
+		}
 	}
 
 	// There is a race here - we wait for pending delta files before this to finish, but while we do, we
@@ -1841,8 +1888,20 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	// file instead of in memory mutations, so we wait for that delta file to complete
 
 	if (metadata->pendingDeltaVersion > v) {
+		if (v == DEBUG_BW_WAIT_VERSION) {
+			fmt::print("{0}) waiting for DDV again {1} < {2}\n", v, metadata->durableDeltaVersion.get(), v);
+		}
+
 		wait(metadata->durableDeltaVersion.whenAtLeast(v));
 		ASSERT(metadata->durableDeltaVersion.get() >= v);
+
+		if (v == DEBUG_BW_WAIT_VERSION) {
+			fmt::print("{0}) waiting for DDV again {1} >= {2}\n", v, metadata->durableDeltaVersion.get(), v);
+		}
+	}
+
+	if (v == DEBUG_BW_WAIT_VERSION) {
+		fmt::print("{0}) done\n", v);
 	}
 
 	return Void();
