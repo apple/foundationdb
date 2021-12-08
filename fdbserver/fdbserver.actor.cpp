@@ -1072,7 +1072,8 @@ private:
 				break;
 			case OPT_KNOB: {
 				std::string syn = args.OptionSyntax();
-				if (!StringRef(syn).startsWith(LiteralStringRef("--knob_"))) {
+				if (!StringRef(syn).startsWith(LiteralStringRef("--knob_")) &&
+				    !StringRef(syn).startsWith(LiteralStringRef("--knob-"))) {
 					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1095,7 +1096,8 @@ private:
 			};
 			case OPT_UNITTESTPARAM: {
 				std::string syn = args.OptionSyntax();
-				if (!StringRef(syn).startsWith(LiteralStringRef("--test_"))) {
+				if (!StringRef(syn).startsWith(LiteralStringRef("--test_")) &&
+				    !StringRef(syn).startsWith(LiteralStringRef("--test-"))) {
 					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1104,7 +1106,8 @@ private:
 			}
 			case OPT_LOCALITY: {
 				std::string syn = args.OptionSyntax();
-				if (!StringRef(syn).startsWith(LiteralStringRef("--locality_"))) {
+				if (!StringRef(syn).startsWith(LiteralStringRef("--locality_")) &&
+				    !StringRef(syn).startsWith(LiteralStringRef("--locality-"))) {
 					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", syn.c_str());
 					flushAndExit(FDB_EXIT_ERROR);
 				}

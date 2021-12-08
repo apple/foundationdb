@@ -1519,7 +1519,8 @@ struct CLIOptions {
 			break;
 		case OPT_KNOB: {
 			std::string syn = args.OptionSyntax();
-			if (!StringRef(syn).startsWith(LiteralStringRef("--knob_"))) {
+			if (!StringRef(syn).startsWith(LiteralStringRef("--knob_")) &&
+			    !!StringRef(syn).startsWith(LiteralStringRef("--knob-"))) {
 				fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
 				return FDB_EXIT_ERROR;
 			}

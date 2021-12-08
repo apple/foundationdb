@@ -199,9 +199,9 @@ const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
 
 	va_list ap;
 	va_start(ap, key);
-
 	while (!ret && (section = va_arg(ap, const char*)))
 		ret = ini.GetValue(section, key, nullptr);
+	va_end(ap);
 
 	if (!ret) {
 		std::string keyCopy(key);
@@ -210,12 +210,13 @@ const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
 				keyCopy.at(i) = '_';
 			}
 		}
-		while (!ret && (section = va_arg(ap, const char*))) {
+		va_list tempArg;
+		va_start(tempArg, key);
+		while (!ret && (section = va_arg(tempArg, const char*))) {
 			ret = ini.GetValue(section, keyCopy.c_str(), nullptr);
 		}
+		va_end(tempArg);
 	}
-	va_end(ap);
-
 	return ret;
 }
 
@@ -540,13 +541,13 @@ public:
 		const char* id_s = ssection.c_str() + strlen(section.c_str()) + 1;
 
 		for (auto i : keys) {
-			if (!isParameterNameEqual(i.pItem, "command") || !isParameterNameEqual(i.pItem, "restart-delay") ||
-			    !isParameterNameEqual(i.pItem, "initial-restart-delay") ||
-			    !isParameterNameEqual(i.pItem, "restart-backoff") ||
-			    !isParameterNameEqual(i.pItem, "restart-delay-reset-interval") ||
-			    !isParameterNameEqual(i.pItem, "disable-lifecycle-logging") ||
-			    !isParameterNameEqual(i.pItem, "delete-envvars") ||
-			    !isParameterNameEqual(i.pItem, "kill-on-configuration-change")) {
+			if (isParameterNameEqual(i.pItem, "command") || isParameterNameEqual(i.pItem, "restart-delay") ||
+			    isParameterNameEqual(i.pItem, "initial-restart-delay") ||
+			    isParameterNameEqual(i.pItem, "restart-backoff") ||
+			    isParameterNameEqual(i.pItem, "restart-delay-reset-interval") ||
+			    isParameterNameEqual(i.pItem, "disable-lifecycle-logging") ||
+			    isParameterNameEqual(i.pItem, "delete-envvars") ||
+			    isParameterNameEqual(i.pItem, "kill-on-configuration-change")) {
 				continue;
 			}
 

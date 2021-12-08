@@ -714,7 +714,7 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "--destination", SO_REQ_SEP },
-	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	{ OPT_VERSION, "--version", SO_NONE },
 	{ OPT_VERSION, "-v", SO_NONE },
 	{ OPT_BUILD_FLAGS, "--build-flags", SO_NONE },
@@ -3463,7 +3463,8 @@ int main(int argc, char* argv[]) {
 				break;
 			case OPT_LOCALITY: {
 				std::string syn = args->OptionSyntax();
-				if (!StringRef(syn).startsWith(LiteralStringRef("--locality_"))) {
+				if (!StringRef(syn).startsWith(LiteralStringRef("--locality_")) &&
+				    !StringRef(syn).startsWith(LiteralStringRef("--locality-"))) {
 					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", syn.c_str());
 					return FDB_EXIT_ERROR;
 				}
@@ -3530,7 +3531,8 @@ int main(int argc, char* argv[]) {
 				break;
 			case OPT_KNOB: {
 				std::string syn = args->OptionSyntax();
-				if (!StringRef(syn).startsWith(LiteralStringRef("--knob_"))) {
+				if (!StringRef(syn).startsWith(LiteralStringRef("--knob_")) &&
+				    !!StringRef(syn).startsWith(LiteralStringRef("--knob-"))) {
 					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
 					return FDB_EXIT_ERROR;
 				}

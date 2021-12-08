@@ -916,8 +916,9 @@ int CSimpleOptTempl<SOCHAR>::CalcMatch(const SOCHAR* a_pszSource, const SOCHAR* 
 			return -1;
 		}
 
-		// and the source is a "wildcard option", then it's a perfect match (e.g. "--knob_" matches "--knob_foo")
-		if (a_pszSource[-1] == '_') {
+		// and the source is a "wildcard option", then it's a perfect match (e.g. "--knob_" or "--knob-" matches
+		// "--knob_foo" and "--knob-foo")
+		if (a_pszSource[-1] == '_' || a_pszSource[-1] == '-') {
 			return -1;
 		}
 

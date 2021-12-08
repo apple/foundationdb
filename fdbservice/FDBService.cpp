@@ -646,23 +646,28 @@ private:
 	const char* getValueMulti(const CSimpleIni& ini, const char* name, ...) {
 		const char* ret = nullptr;
 		const char* section = nullptr;
+
 		va_list ap;
 		va_start(ap, name);
 		while (!ret && (section = va_arg(ap, const char*))) {
 			ret = ini.GetValue(section, name, nullptr);
 		}
+		va_end(ap);
+
 		if (!ret) {
-			std::string keyCopy(key);
-			for (int i = keyCopy.size() - 1; i >= 0; --i) {
-				if (keyCopy[i] == '-') {
-					keyCopy.at(i) = '_';
+			std::string nameCopy(name);
+			for (int i = nameCopy.size() - 1; i >= 0; --i) {
+				if (nameCopy[i] == '-') {
+					nameCopy.at(i) = '_';
 				}
 			}
-			while (!ret && (section = va_arg(ap, const char*))) {
-				ret = ini.GetValue(section, keyCopy.c_str(), nullptr);
+			va_list tempArg;
+			va_start(tempArg, name);
+			while (!ret && (section = va_arg(tempArg, const char*))) {
+				ret = ini.GetValue(section, nameCopy.c_str(), nullptr);
 			}
+			va_end(tempArg);
 		}
-		va_end(ap);
 		return ret;
 	}
 
@@ -734,7 +739,7 @@ private:
 		const char* id_s = ssection.c_str() + strlen(section.c_str()) + 1;
 
 		for (auto i : keys) {
-			if (!isParameterNameEqual(i.pItem, "command") || isParameterNameEqual(i.pItem, "restart-delay") ||
+			if (isParameterNameEqual(i.pItem, "command") || isParameterNameEqual(i.pItem, "restart-delay") ||
 			    isParameterNameEqual(i.pItem, "disable-lifecycle-logging")) {
 				continue;
 			}
