@@ -1163,7 +1163,7 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 
 			tr->set(serverListKeyFor(server.id()), serverListValue(server));
 			wait(tr->commit());
-			TraceEvent("AddStorageServerSystemKey").detail("ServerID", server.id());
+			TraceEvent("AddedStorageServerSystemKey").detail("ServerID", server.id());
 
 			return std::make_pair(tr->getCommittedVersion(), tag);
 		} catch (Error& e) {

@@ -24,7 +24,7 @@
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/SpanContextMessage.h"
-
+#include "fdbclient/SystemData.h"
 #if defined(FDB_CLEAN_BUILD) && MUTATION_TRACKING_ENABLED
 #error "You cannot use mutation tracking in a clean/release build."
 #endif
@@ -33,8 +33,8 @@
 // keys in debugKeys and the ranges in debugRanges.
 // Each entry is a pair of (label, keyOrRange) and the Label will be attached to the
 // MutationTracking TraceEvent for easier searching/recognition.
-std::vector<std::pair<const char*, KeyRef>> debugKeys = { { "SomeKey", "foo"_sr } };
-std::vector<std::pair<const char*, KeyRangeRef>> debugRanges = { { "Everything", { ""_sr, "\xff\xff\xff\xff"_sr } } };
+std::vector<std::pair<const char*, KeyRef>> debugKeys; // = { { "SomeKey", "foo"_sr } };
+std::vector<std::pair<const char*, KeyRangeRef>> debugRanges ; // = { { "ServerList", serverListKeys } };
 
 TraceEvent debugMutationEnabled(const char* context, Version version, MutationRef const& mutation, UID id) {
 	const char* label = nullptr;

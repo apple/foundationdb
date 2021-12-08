@@ -782,8 +782,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 PromiseStream<Promise<int>> getUnhealthyRelocationCount)
 	  : cx(cx), distributorId(distributorId), configuration(configuration), doBuildTeams(true),
 	    lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output), unhealthyServers(0),
-	    storageWiggler(makeReference<StorageWiggler>(this)),
-	    processingWiggle(processingWiggle), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
+	    storageWiggler(makeReference<StorageWiggler>(this)), processingWiggle(processingWiggle),
+	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
 	    initialFailureReactionDelay(
 	        delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
 	    initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)),
@@ -5318,7 +5318,7 @@ ACTOR Future<StorageMetadataType> checkStorageMetadata(DDTeamCollection* self, D
 	state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
 	                                                                                           IncludeVersion());
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-	state StorageMetadataType data;
+	state StorageMetadataType data(timer_int());
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -5326,7 +5326,7 @@ ACTOR Future<StorageMetadataType> checkStorageMetadata(DDTeamCollection* self, D
 			auto property = metadataMap.getProperty(interfaceUid);
 			Optional<StorageMetadataType> metadata = wait(property.get(tr));
 			if (!metadata.present()) {
-				ASSERT(false); // metadata is written when initialize storage
+				metadataMap.set(tr, interfaceUid, data);
 			} else {
 				data = metadata.get();
 			}
