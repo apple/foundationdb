@@ -1428,7 +1428,6 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 				auto& logData = sharedLogs[SharedLogsKey(s.tLogOptions, s.storeType)];
 				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
 				// be sending a fake InitializeTLogRequest rather than calling tLog() ?
-				// here is where recovery happens
 				Future<Void> tl =
 				    tLogFn(persistentDataAndQueues,
 				           dbInfo,

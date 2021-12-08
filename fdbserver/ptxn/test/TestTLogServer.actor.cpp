@@ -716,7 +716,6 @@ ACTOR Future<std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>>
 TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	state ptxn::test::TestDriverOptions options(params);
 	state std::vector<Future<Void>> actors;
-	wait(delay(30.0));
 	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 0;
 	(const_cast<ServerKnobs*> SERVER_KNOBS)->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL = 0.5;
 	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
@@ -972,12 +971,13 @@ TEST_CASE("/fdbserver/ptxn/test/single_tlog_recovery") {
 		dqs[tlogGroup.logGroupId] = std::make_pair(data, queue);
 	}
 
-	// cancel all actors, but disk files would not be erase so that we can recover from it.
+	// cancel all actors to shutdown all tlogs, but disk files would not be erase so that we can recover from it.
 	for (auto& a : actors) {
 		a.cancel();
 	}
 	actors.clear();
 
+	// start recovery
 	state std::vector<Future<Void>> actors_recover;
 	UID tlogId = ptxn::test::randomUID();
 	actors_recover.push_back(ptxn::tLog(dqs,
