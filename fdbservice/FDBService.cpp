@@ -647,27 +647,22 @@ private:
 		const char* ret = nullptr;
 		const char* section = nullptr;
 
+		std::string nameCopy(name);
+		for (int i = nameCopy.size() - 1; i >= 0; --i) {
+			if (nameCopy[i] == '-') {
+				nameCopy.at(i) = '_';
+			}
+		}
+
 		va_list ap;
 		va_start(ap, name);
 		while (!ret && (section = va_arg(ap, const char*))) {
 			ret = ini.GetValue(section, name, nullptr);
-		}
-		va_end(ap);
-
-		if (!ret) {
-			std::string nameCopy(name);
-			for (int i = nameCopy.size() - 1; i >= 0; --i) {
-				if (nameCopy[i] == '-') {
-					nameCopy.at(i) = '_';
-				}
-			}
-			va_list tempArg;
-			va_start(tempArg, name);
-			while (!ret && (section = va_arg(tempArg, const char*))) {
+			if (!ret) {
 				ret = ini.GetValue(section, nameCopy.c_str(), nullptr);
 			}
-			va_end(tempArg);
 		}
+		va_end(ap);
 		return ret;
 	}
 
