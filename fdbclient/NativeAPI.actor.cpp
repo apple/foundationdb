@@ -6532,6 +6532,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Trans
 				                  KeyRangeRef(blobGranuleMapping[i].key, blobGranuleMapping[i + 1].key));
 			}
 		}
+		results.arena().dependsOn(blobGranuleMapping.arena());
 		if (blobGranuleMapping.more) {
 			currentRange = KeyRangeRef(blobGranuleMapping.back().key, currentRange.end);
 		} else {

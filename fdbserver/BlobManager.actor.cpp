@@ -1172,15 +1172,16 @@ ACTOR Future<Void> chaosRangeMover(BlobManagerData* bmData) {
 					// FIXME: with low probability, could immediately revoke it from the new assignment and move
 					// it back right after to test that race
 
+					state KeyRange range = randomRange.range();
 					RangeAssignment revokeOld;
 					revokeOld.isAssign = false;
-					revokeOld.keyRange = randomRange.range();
+					revokeOld.keyRange = range;
 					revokeOld.revoke = RangeRevokeData(false);
 					bmData->rangesToAssign.send(revokeOld);
 
 					RangeAssignment assignNew;
 					assignNew.isAssign = true;
-					assignNew.keyRange = randomRange.range();
+					assignNew.keyRange = range;
 					assignNew.assign = RangeAssignmentData(); // not a continue
 					bmData->rangesToAssign.send(assignNew);
 					break;

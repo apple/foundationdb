@@ -86,6 +86,7 @@ struct GranuleStartState {
 	Optional<GranuleHistory> history;
 };
 
+// TODO add global byte limit for pending and buffered deltas
 struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	KeyRange keyRange;
 
@@ -2064,12 +2065,10 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 				j--;
 			}
 			j++;
-			[[maybe_unused]] Version latestDeltaVersion = invalidVersion;
 			while (j <= i) {
 				BlobFileIndex deltaF = chunkFiles.deltaFiles[j];
 				chunk.deltaFiles.emplace_back_deep(rep.arena, deltaF.filename, deltaF.offset, deltaF.length);
 				bwData->stats.readReqDeltaBytesReturned += deltaF.length;
-				latestDeltaVersion = deltaF.version;
 				j++;
 			}
 
