@@ -1137,8 +1137,8 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 }
 
 // TODO REMOVE once correctness clean
-#define DEBUG_BW_START_VERSION 42629425
-#define DEBUG_BW_END_VERSION 48085149
+#define DEBUG_BW_START_VERSION invalidVersion
+#define DEBUG_BW_END_VERSION invalidVersion
 #define DEBUG_BW_WAIT_VERSION invalidVersion
 #define DEBUG_BW_VERSION(v) DEBUG_BW_START_VERSION <= v&& v <= DEBUG_BW_END_VERSION
 
@@ -1308,20 +1308,20 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 			state Standalone<VectorRef<MutationsAndVersionRef>> mutations;
 			try {
-				if (DEBUG_BW_VERSION(metadata->bufferedDeltaVersion)) {
-					fmt::print("BW waiting mutations after ({0})\n", metadata->bufferedDeltaVersion);
-				}
+				/*if (DEBUG_BW_VERSION(metadata->bufferedDeltaVersion)) {
+				    fmt::print("BW waiting mutations after ({0})\n", metadata->bufferedDeltaVersion);
+				}*/
 				// Even if there are no new mutations, there still might be readers waiting on durableDeltaVersion
 				// to advance. We need to check whether any outstanding files have finished so we don't wait on
 				// mutations forever
 				choose {
 					when(Standalone<VectorRef<MutationsAndVersionRef>> _mutations =
 					         waitNext(metadata->activeCFData.get()->mutations.getFuture())) {
-						if (DEBUG_BW_VERSION(metadata->bufferedDeltaVersion)) {
-							fmt::print("BW got mutations after ({0}): ({1})\n",
-							           metadata->bufferedDeltaVersion,
-							           _mutations.size());
-						}
+						/*if (DEBUG_BW_VERSION(metadata->bufferedDeltaVersion)) {
+						    fmt::print("BW got mutations after ({0}): ({1})\n",
+						               metadata->bufferedDeltaVersion,
+						               _mutations.size());
+						}*/
 						mutations = _mutations;
 						ASSERT(!mutations.empty());
 						if (readOldChangeFeed) {
@@ -1332,10 +1332,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					}
 					when(wait(inFlightFiles.empty() ? Never() : success(inFlightFiles.front().future))) {
 						//  TODO REMOVE
-						if (DEBUG_BW_VERSION(metadata->bufferedDeltaVersion)) {
-							fmt::print("BW got file before waiting for mutations after {0}\n",
-							           metadata->bufferedDeltaVersion);
-						}
+						/*if (DEBUG_BW_VERSION(metadata->bufferedDeltaVersion)) {
+						    fmt::print("BW got file before waiting for mutations after {0}\n",
+						               metadata->bufferedDeltaVersion);
+						}*/
 					}
 				}
 			} catch (Error& e) {
@@ -1483,11 +1483,18 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							metadata->currentDeltas.push_back_deep(metadata->deltaArena, deltas);
 
 							processedAnyMutations = true;
+							ASSERT(deltas.version != invalidVersion);
+							ASSERT(deltas.version > lastDeltaVersion);
 							lastDeltaVersion = deltas.version;
 
 							Version nextKnownNoRollbacksPast = std::min(deltas.version, deltas.knownCommittedVersion);
-							ASSERT(nextKnownNoRollbacksPast >= knownNoRollbacksPast);
-							knownNoRollbacksPast = nextKnownNoRollbacksPast;
+							// FIXME: apparently we can have invalidVersion for knownCommittedVersion
+							ASSERT(nextKnownNoRollbacksPast >= knownNoRollbacksPast ||
+							       nextKnownNoRollbacksPast == invalidVersion);
+
+							if (nextKnownNoRollbacksPast != invalidVersion) {
+								knownNoRollbacksPast = nextKnownNoRollbacksPast;
+							}
 						}
 					}
 					if (justDidRollback) {
@@ -1497,7 +1504,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				if (!justDidRollback && processedAnyMutations) {
 					// update buffered version and committed version
 					ASSERT(lastDeltaVersion != invalidVersion);
-					ASSERT(knownNoRollbacksPast != invalidVersion);
 					ASSERT(lastDeltaVersion > metadata->bufferedDeltaVersion);
 
 					// Update buffered delta version so new waitForVersion checks can bypass waiting entirely
@@ -1505,7 +1511,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 					// This is the only place it is safe to set committedVersion, as it has to come from the
 					// mutation stream, or we could have a situation where the blob worker has consumed an
-					// uncommitted mutation, but not its rollback, from the change feed, and could thus
+					// uncommitted mutation, but not its rollback, fro	m the change feed, and could thus
 					// think the uncommitted mutation is committed because it saw a higher committed version
 					// than the mutation's version.
 					// We also can only set it after consuming all of the mutations from the vector from the promise
