@@ -60,6 +60,7 @@ namespace ptxn {
 struct LogGenerationData;
 struct TLogGroupData;
 struct TLogServerData;
+ACTOR Future<Void> updateStorage(Reference<TLogGroupData> self);
 
 struct TLogQueue final : public IClosable {
 public:
@@ -392,9 +393,16 @@ struct TLogGroupData : NonCopyable, public ReferenceCounted<TLogGroupData> {
 
 struct TLogServerData : NonCopyable, public ReferenceCounted<TLogServerData> {
 	std::unordered_map<TLogGroupID, Reference<TLogGroupData>> tlogGroups;
+
+	// There is one interface for each recruitment, during recovery previous recruitments are fetched and interfaces are
+	// started
 	std::map<UID, ptxn::TLogInterface_PassivelyPull> id_interf;
+
+	// Promise streams to hold the actors of the interfaces
+	std::map<UID, PromiseStream<Future<Void>>> actorsPerRecruitment;
+
+	// Once its value is set, TLogRejoinRequest will be sent to master for each interface of each recruitment.
 	std::map<UID, Promise<Void>> registerWithMasters;
-	std::map<UID, PromiseStream<Future<Void>>> actorsPerEpoch;
 
 	// what's this for?
 	std::unordered_map<UID, std::vector<Reference<struct LogGenerationData>>> logGenerations;
@@ -1396,7 +1404,7 @@ ACTOR Future<Void> tLogCore(
     Reference<TLogServerData> self,
     std::shared_ptr<std::unordered_map<TLogGroupID, Reference<LogGenerationData>>> activeGeneration,
     TLogInterface_PassivelyPull tli,
-    UID epochId) {
+    UID recruitmentId) {
 	if (self->removed.isReady()) {
 		wait(delay(0)); // to avoid iterator invalidation in restorePersistentState when removed is already ready
 		ASSERT(self->removed.isError());
@@ -1412,7 +1420,7 @@ ACTOR Future<Void> tLogCore(
 	}
 
 	TraceEvent("TLogCore", self->dbgid).detail("WorkerID", self->workerID);
-	self->actorsPerEpoch[epochId].send(self->removed);
+	self->actorsPerRecruitment[recruitmentId].send(self->removed);
 
 	// FIXME: update tlogMetrics to include new information, or possibly only have one copy for the shared instance
 	for (auto& logGroup : *activeGeneration) {
@@ -1425,10 +1433,10 @@ ACTOR Future<Void> tLogCore(
 	startRole(Role::TRANSACTION_LOG, tli.id(), self->workerID, { { "SharedTLog", self->dbgid.shortString() } });
 
 	// TODO: remove this so that a log generation is only tracked once
-	self->actorsPerEpoch[epochId].send(traceRole(Role::TRANSACTION_LOG, tli.id()));
-	self->actorsPerEpoch[epochId].send(serveTLogInterface_PassivelyPull(self, tli, activeGeneration));
-	self->actorsPerEpoch[epochId].send(waitFailureServer(tli.waitFailure.getFuture()));
-	state Future<Void> error = actorCollection(self->actorsPerEpoch[epochId].getFuture());
+	self->actorsPerRecruitment[recruitmentId].send(traceRole(Role::TRANSACTION_LOG, tli.id()));
+	self->actorsPerRecruitment[recruitmentId].send(serveTLogInterface_PassivelyPull(self, tli, activeGeneration));
+	self->actorsPerRecruitment[recruitmentId].send(waitFailureServer(tli.waitFailure.getFuture()));
+	state Future<Void> error = actorCollection(self->actorsPerRecruitment[recruitmentId].getFuture());
 
 	try {
 		wait(error);
@@ -1669,6 +1677,9 @@ ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
 		logData->version.set(ver);
 		logData->recoveryCount =
 		    BinaryReader::fromStringRef<DBRecoveryCount>(fRecoverCounts.get()[idx].value, Unversioned());
+
+		// for multiple groups with same recruitment id, here it sends the same request to master multiple times.
+		// it works fine now, will change if necessary.
 		logData->removed = rejoinMasters(
 		    serverData, recruited, logData->recoveryCount, serverData->registerWithMasters[id1].getFuture(), false);
 		removed.push_back(errorOr(logData->removed));
@@ -1768,10 +1779,10 @@ ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
 								    .detail("Version", logData->version.get())
 								    .detail("PVer", logData->persistentDataVersion);
 
-								// choose {
-								// 	when(wait(updateStorage(self))) {}
-								// 	when(wait(allRemoved)) { throw worker_removed(); }
-								// }
+								choose {
+									when(wait(updateStorage(self))) {}
+									when(wait(allRemoved)) { throw worker_removed(); }
+								}
 							}
 						} else {
 							// Updating persistRecoveryLocation and persistCurrentVersion at the same time,
