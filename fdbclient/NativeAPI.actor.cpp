@@ -6537,9 +6537,6 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Trans
 }
 
 Future<Standalone<VectorRef<KeyRangeRef>>> Transaction::getBlobGranuleRanges(const KeyRange& range) {
-	if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
-		throw client_invalid_operation();
-	}
 	return ::getBlobGranuleRangesActor(this, range);
 }
 
@@ -6708,9 +6705,6 @@ Future<Standalone<VectorRef<BlobGranuleChunkRef>>> Transaction::readBlobGranules
                                                                                  Version begin,
                                                                                  Optional<Version> readVersion,
                                                                                  Version* readVersionOut) {
-	if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
-		throw client_invalid_operation();
-	}
 	return readBlobGranulesActor(cx, this, range, begin, readVersion, readVersionOut);
 }
 
