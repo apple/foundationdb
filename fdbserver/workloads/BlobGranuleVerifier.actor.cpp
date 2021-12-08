@@ -402,7 +402,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		state Standalone<VectorRef<KeyRangeRef>> allRanges = self->granuleRanges.get();
 		for (auto& range : allRanges) {
 			state KeyRange r = range;
-			state PromiseStream<Standalone<BlobGranuleChunkRef>> chunkStream;
 			if (BGV_DEBUG) {
 				fmt::print("Final availability check [{0} - {1}) @ {2}\n",
 				           r.begin.printable(),
@@ -419,6 +418,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						ASSERT(chunks.size() > 0);
 						last = chunks.back().keyRange;
 						checks += chunks.size();
+						break;
 					} catch (Error& e) {
 						wait(tr.onError(e));
 					}
