@@ -174,6 +174,16 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			}
 			out[p + key] = format("%d", type);
 		}
+
+		if (key == "blob_granules_enabled") {
+			int enabled = std::stoi(value);
+			if (enabled != 0 && enabled != 1) {
+				printf("Error: Only 0 or 1 are valid values for blob_granules_enabled. "
+				       "1 enables blob granules and 0 disables them.\n");
+				return out;
+			}
+			out[p + key] = value;
+		}
 		return out;
 	}
 

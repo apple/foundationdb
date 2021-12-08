@@ -30,6 +30,7 @@ struct BlobManagerInterface {
 	constexpr static FileIdentifier file_identifier = 369169;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct HaltBlobManagerRequest> haltBlobManager;
+	RequestStream<struct HaltBlobGranulesRequest> haltBlobGranules;
 	struct LocalityData locality;
 	UID myId;
 
@@ -44,7 +45,7 @@ struct BlobManagerInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, haltBlobManager, locality, myId);
+		serializer(ar, waitFailure, haltBlobManager, haltBlobGranules, locality, myId);
 	}
 };
 
@@ -52,9 +53,25 @@ struct HaltBlobManagerRequest {
 	constexpr static FileIdentifier file_identifier = 4149140;
 	UID requesterID;
 	ReplyPromise<Void> reply;
+	bool haltBlobGranules;
 
 	HaltBlobManagerRequest() {}
-	explicit HaltBlobManagerRequest(UID uid) : requesterID(uid) {}
+	explicit HaltBlobManagerRequest(UID uid, bool haltBlobGranules = false)
+	  : requesterID(uid), haltBlobGranules(haltBlobGranules) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, requesterID, reply, haltBlobGranules);
+	}
+};
+
+struct HaltBlobGranulesRequest {
+	constexpr static FileIdentifier file_identifier = 904267;
+	UID requesterID;
+	ReplyPromise<Void> reply;
+
+	HaltBlobGranulesRequest() {}
+	explicit HaltBlobGranulesRequest(UID uid) : requesterID(uid) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

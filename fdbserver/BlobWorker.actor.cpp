@@ -2890,6 +2890,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				self->addActor.send(handleRangeAssign(self, granuleToReassign, true));
 			}
 			when(HaltBlobWorkerRequest req = waitNext(bwInterf.haltBlobWorker.getFuture())) {
+				printf("BW %s got halt request\n", self->id.toString().c_str());
+
 				req.reply.send(Void());
 				if (self->managerEpochOk(req.managerEpoch)) {
 					TraceEvent("BlobWorkerHalted", self->id)
