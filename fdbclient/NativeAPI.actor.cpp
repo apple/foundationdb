@@ -7322,6 +7322,7 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 				ASSERT(nextOut.back().version >= results->lastReturnedVersion.get());
 				results->mutations.send(nextOut);
 				wait(results->mutations.onEmpty());
+				wait(delay(0));
 				if (DEBUG_CF_VERSION(nextOut.back().version)) {
 					fmt::print("CFLR (merged): {0} (1)\n", nextOut.back().version);
 				}
@@ -7355,6 +7356,7 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		ASSERT(nextOut.back().version >= results->lastReturnedVersion.get());
 		results->mutations.send(nextOut);
 		wait(results->mutations.onEmpty());
+		wait(delay(0));
 		if (DEBUG_CF_VERSION(nextOut.back().version)) {
 			fmt::print("CFLR (merged): {0} (1)\n", nextOut.back().version);
 		}
