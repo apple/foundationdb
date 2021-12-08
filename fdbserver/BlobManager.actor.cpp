@@ -1356,7 +1356,6 @@ ACTOR Future<Void> haltBlobGranules(BlobManagerData* bmData) {
 	std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db));
 	std::vector<Future<Void>> deregisterBlobWorkers;
 	for (auto& worker : blobWorkers) {
-		printf("BM: sending halt to BW %s\n", worker.myId.toString().c_str());
 		// TODO: send a special req to blob workers so they clean up granules/CFs
 		bmData->addActor.send(
 		    brokenPromiseToNever(worker.haltBlobWorker.getReply(HaltBlobWorkerRequest(bmData->epoch, bmData->id))));
@@ -1431,7 +1430,6 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 				break;
 			}
 			when(state HaltBlobGranulesRequest req = waitNext(bmInterf.haltBlobGranules.getFuture())) {
-				printf("BM: got haltBlobGranules\n");
 				wait(haltBlobGranules(&self));
 				req.reply.send(Void());
 				TraceEvent("BlobGranulesHalted", bmInterf.id()).detail("ReqID", req.requesterID);

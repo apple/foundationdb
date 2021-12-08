@@ -53,15 +53,13 @@ struct HaltBlobManagerRequest {
 	constexpr static FileIdentifier file_identifier = 4149140;
 	UID requesterID;
 	ReplyPromise<Void> reply;
-	bool haltBlobGranules;
 
 	HaltBlobManagerRequest() {}
-	explicit HaltBlobManagerRequest(UID uid, bool haltBlobGranules = false)
-	  : requesterID(uid), haltBlobGranules(haltBlobGranules) {}
+	explicit HaltBlobManagerRequest(UID uid) : requesterID(uid) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requesterID, reply, haltBlobGranules);
+		serializer(ar, requesterID, reply);
 	}
 };
 

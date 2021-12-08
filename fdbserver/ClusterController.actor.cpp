@@ -3354,7 +3354,6 @@ struct BlobManagerSingleton : Singleton<BlobManagerInterface> {
 		cc->recruitBlobManager.set(true);
 	}
 	void haltBlobGranules(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
-		printf("CC: about to send haltBlobGranules\n");
 		if (interface.present()) {
 			cc->id_worker[pid].haltBlobManager =
 			    brokenPromiseToNever(interface.get().haltBlobGranules.getReply(HaltBlobGranulesRequest(cc->id)));
@@ -5392,6 +5391,7 @@ ACTOR Future<Void> monitorBlobManager(ClusterControllerData* self) {
 				}
 				when(wait(self->recruitBlobManager.onChange())) {}
 				when(wait(watchConfigChange)) {
+					// if there is a blob manager present but blob granules are now disabled, stop the BM
 					if (!self->db.config.blobGranulesEnabled) {
 						const auto& blobManager = self->db.serverInfo->get().blobManager;
 						BlobManagerSingleton(blobManager)
@@ -5401,6 +5401,7 @@ ACTOR Future<Void> monitorBlobManager(ClusterControllerData* self) {
 			}
 		} else {
 			wait(watchConfigChange);
+			// if there is no blob manager present but blob granules are now enabled, recruit a BM
 			if (self->db.config.blobGranulesEnabled) {
 				wait(startBlobManager(self));
 			}
