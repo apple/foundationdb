@@ -5399,12 +5399,12 @@ ACTOR Future<Void> monitorBlobManager(ClusterControllerData* self) {
 					}
 				}
 			}
-		} else {
-			wait(watchConfigChange);
+		} else if (self->db.config.blobGranulesEnabled) {
 			// if there is no blob manager present but blob granules are now enabled, recruit a BM
-			if (self->db.config.blobGranulesEnabled) {
-				wait(startBlobManager(self));
-			}
+			wait(startBlobManager(self));
+		} else {
+			// if there is no blob manager present and blob granules are disabled, wait for a config change
+			wait(watchConfigChange);
 		}
 	}
 }

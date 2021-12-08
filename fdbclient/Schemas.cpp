@@ -771,7 +771,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "aggressive",
              "gradual"
          ]},
-         "blob_granules_enabled":1,
+         "blob_granules_enabled":0
       },
       "data":{
          "least_operating_space_bytes_log_server":0,
