@@ -1137,8 +1137,8 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 }
 
 // TODO REMOVE once correctness clean
-#define DEBUG_BW_START_VERSION invalidVersion
-#define DEBUG_BW_END_VERSION invalidVersion
+#define DEBUG_BW_START_VERSION 42629425
+#define DEBUG_BW_END_VERSION 48085149
 #define DEBUG_BW_WAIT_VERSION invalidVersion
 #define DEBUG_BW_VERSION(v) DEBUG_BW_START_VERSION <= v&& v <= DEBUG_BW_END_VERSION
 
@@ -1475,7 +1475,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 								    .detail("OldChangeFeed", readOldChangeFeed ? "T" : "F");
 							}
 							if (DEBUG_BW_VERSION(deltas.version)) {
-								fmt::print("BW {0}: ({1})\n", deltas.version, deltas.mutations.size());
+								fmt::print("BW {0}: ({1}), KCV={2}\n",
+								           deltas.version,
+								           deltas.mutations.size(),
+								           deltas.knownCommittedVersion);
 							}
 							metadata->currentDeltas.push_back_deep(metadata->deltaArena, deltas);
 
@@ -1496,17 +1499,21 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					ASSERT(lastDeltaVersion != invalidVersion);
 					ASSERT(knownNoRollbacksPast != invalidVersion);
 					ASSERT(lastDeltaVersion > metadata->bufferedDeltaVersion);
-					ASSERT(knownNoRollbacksPast >= committedVersion.get());
 
+					// Update buffered delta version so new waitForVersion checks can bypass waiting entirely
 					metadata->bufferedDeltaVersion = lastDeltaVersion;
+
 					// This is the only place it is safe to set committedVersion, as it has to come from the
 					// mutation stream, or we could have a situation where the blob worker has consumed an
 					// uncommitted mutation, but not its rollback, from the change feed, and could thus
 					// think the uncommitted mutation is committed because it saw a higher committed version
 					// than the mutation's version.
 					// We also can only set it after consuming all of the mutations from the vector from the promise
-					// stream, as yielding when consuming from a change feed can cause bugs
-					committedVersion.set(knownNoRollbacksPast);
+					// stream, as yielding when consuming from a change feed can cause bugs if this wakes up one of the
+					// file writers
+					if (knownNoRollbacksPast > committedVersion.get()) {
+						committedVersion.set(knownNoRollbacksPast);
+					}
 				}
 				justDidRollback = false;
 
