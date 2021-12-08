@@ -1357,6 +1357,21 @@ ACTOR Future<Void> blobWorkerRecruiter(
 	}
 }
 
+ACTOR Future<Void> haltBlobGranules(BlobManagerData* bmData) {
+	std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db));
+	std::vector<Future<Void>> deregisterBlobWorkers;
+	for (auto& worker : blobWorkers) {
+		printf("BM: sending halt to BW %s\n", worker.myId.toString().c_str());
+		// TODO: send a special req to blob workers so they clean up granules/CFs
+		bmData->addActor.send(
+		    brokenPromiseToNever(worker.haltBlobWorker.getReply(HaltBlobWorkerRequest(bmData->epoch, bmData->id))));
+		deregisterBlobWorkers.emplace_back(deregisterBlobWorker(bmData, worker));
+	}
+	waitForAll(deregisterBlobWorkers);
+
+	return Void();
+}
+
 ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
                                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                int64_t epoch) {
@@ -1418,6 +1433,13 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 			when(HaltBlobManagerRequest req = waitNext(bmInterf.haltBlobManager.getFuture())) {
 				req.reply.send(Void());
 				TraceEvent("BlobManagerHalted", bmInterf.id()).detail("ReqID", req.requesterID);
+				break;
+			}
+			when(state HaltBlobGranulesRequest req = waitNext(bmInterf.haltBlobGranules.getFuture())) {
+				printf("BM: got haltBlobGranules\n");
+				wait(haltBlobGranules(&self));
+				req.reply.send(Void());
+				TraceEvent("BlobGranulesHalted", bmInterf.id()).detail("ReqID", req.requesterID);
 				break;
 			}
 			when(wait(collection)) {

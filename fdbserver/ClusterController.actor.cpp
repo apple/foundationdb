@@ -24,6 +24,7 @@
 #include <set>
 #include <vector>
 
+#include "fdbclient/SystemData.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
@@ -3352,6 +3353,13 @@ struct BlobManagerSingleton : Singleton<BlobManagerInterface> {
 		cc->lastRecruitTime = now();
 		cc->recruitBlobManager.set(true);
 	}
+	void haltBlobGranules(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
+		printf("CC: about to send haltBlobGranules\n");
+		if (interface.present()) {
+			cc->id_worker[pid].haltBlobManager =
+			    brokenPromiseToNever(interface.get().haltBlobGranules.getReply(HaltBlobGranulesRequest(cc->id)));
+		}
+	}
 };
 
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterControllerData::DBInfo* db) {
@@ -5349,12 +5357,31 @@ ACTOR Future<Void> startBlobManager(ClusterControllerData* self) {
 	}
 }
 
+ACTOR Future<Void> watchBlobGranulesConfigKey(ClusterControllerData* self) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			Key blobGranuleConfigKey = configKeysPrefix.withSuffix(StringRef("blob_granules_enabled"));
+			state Future<Void> watch = tr->watch(blobGranuleConfigKey);
+			wait(tr->commit());
+			wait(watch);
+			return Void();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> monitorBlobManager(ClusterControllerData* self) {
 	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 		wait(self->db.serverInfo->onChange());
 	}
 
 	loop {
+		state Future<Void> watchConfigChange = watchBlobGranulesConfigKey(self);
 		if (self->db.serverInfo->get().blobManager.present() && !self->recruitBlobManager.get()) {
 			choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().blobManager.get().waitFailure,
@@ -5364,9 +5391,19 @@ ACTOR Future<Void> monitorBlobManager(ClusterControllerData* self) {
 					self->db.clearInterf(ProcessClass::BlobManagerClass);
 				}
 				when(wait(self->recruitBlobManager.onChange())) {}
+				when(wait(watchConfigChange)) {
+					if (!self->db.config.blobGranulesEnabled) {
+						const auto& blobManager = self->db.serverInfo->get().blobManager;
+						BlobManagerSingleton(blobManager)
+						    .haltBlobGranules(self, blobManager.get().locality.processId());
+					}
+				}
 			}
 		} else {
-			wait(startBlobManager(self));
+			wait(watchConfigChange);
+			if (self->db.config.blobGranulesEnabled) {
+				wait(startBlobManager(self));
+			}
 		}
 	}
 }
@@ -5518,9 +5555,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(handleForcedRecoveries(&self, interf));
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
-	if (self.db.config.blobGranulesEnabled) {
-		self.addActor.send(monitorBlobManager(&self));
-	}
+	self.addActor.send(monitorBlobManager(&self));
 	// self.addActor.send(monitorTSSMapping(&self));
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(traceCounters("ClusterControllerMetrics",
