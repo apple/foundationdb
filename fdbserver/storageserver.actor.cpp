@@ -3929,7 +3929,8 @@ ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
 					}
 					remoteLoc++;
 				} else if (remoteResult[remoteLoc].version == localResult.version) {
-					if (remoteResult[remoteLoc].mutations.size()) {
+					if (remoteResult[remoteLoc].mutations.size() &&
+					    remoteResult[remoteLoc].mutations.back().param1 != lastEpochEndPrivateKey) {
 						ASSERT(localResult.mutations.size());
 						remoteResult[remoteLoc].mutations.append(
 						    remoteResult.arena(), localResult.mutations.begin(), localResult.mutations.size());
