@@ -298,48 +298,74 @@ ParsedKnobValue Knobs::parseKnobValue(std::string const& knob, std::string const
 	}
 }
 
+// Convert any underscore in the given parameter into hyphen, if any
+std::string toHyphen(const std::string& knob) {
+	std::string hyphenKnob(knob);
+	for (auto ptr = hyphenKnob.begin(); ptr != hyphenKnob.end(); ++ptr) {
+		if (*ptr == '_') {
+			*ptr = '-';
+		}
+	}
+	return hyphenKnob;
+}
+
 bool Knobs::setKnob(std::string const& knob, int value) {
-	if (!int_knobs.count(knob)) {
+	std::string hyphenKnob = toHyphen(knob);
+	bool isUnderscore;
+	if (!(isUnderscore = int_knobs.count(knob)) && !int_knobs.count(hyphenKnob)) {
 		return false;
 	}
-	*int_knobs[knob].value = value;
-	explicitlySetKnobs.insert(toLower(knob));
+	const auto& knobKey = isUnderscore ? knob : hyphenKnob;
+	*int_knobs[knobKey].value = value;
+	explicitlySetKnobs.insert(toLower(knobKey));
 	return true;
 }
 
 bool Knobs::setKnob(std::string const& knob, int64_t value) {
-	if (!int64_knobs.count(knob)) {
+	std::string hyphenKnob = toHyphen(knob);
+	bool isUnderscore;
+	if (!(isUnderscore = int64_knobs.count(knob)) && int64_knobs.count(hyphenKnob)) {
 		return false;
 	}
-	*int64_knobs[knob].value = value;
-	explicitlySetKnobs.insert(toLower(knob));
+	const auto& knobKey = isUnderscore ? knob : hyphenKnob;
+	*int64_knobs[knobKey].value = value;
+	explicitlySetKnobs.insert(toLower(knobKey));
 	return true;
 }
 
 bool Knobs::setKnob(std::string const& knob, bool value) {
-	if (!bool_knobs.count(knob)) {
+	std::string hyphenKnob = toHyphen(knob);
+	bool isUnderscore;
+	if (!(isUnderscore = bool_knobs.count(hyphenKnob)) && !bool_knobs.count(hyphenKnob)) {
 		return false;
 	}
-	*bool_knobs[knob].value = value;
-	explicitlySetKnobs.insert(toLower(knob));
+	const auto& knobKey = isUnderscore ? knob : hyphenKnob;
+	*bool_knobs[knobKey].value = value;
+	explicitlySetKnobs.insert(toLower(knobKey));
 	return true;
 }
 
 bool Knobs::setKnob(std::string const& knob, double value) {
-	if (!double_knobs.count(knob)) {
+	std::string hyphenKnob = toHyphen(knob);
+	bool isUnderscore;
+	if (!(isUnderscore = double_knobs.count(hyphenKnob)) && !double_knobs.count(hyphenKnob)) {
 		return false;
 	}
-	*double_knobs[knob].value = value;
-	explicitlySetKnobs.insert(toLower(knob));
+	const auto& knobKey = isUnderscore ? knob : hyphenKnob;
+	*double_knobs[knobKey].value = value;
+	explicitlySetKnobs.insert(toLower(knobKey));
 	return true;
 }
 
 bool Knobs::setKnob(std::string const& knob, std::string const& value) {
-	if (!string_knobs.count(knob)) {
+	std::string hyphenKnob = toHyphen(knob);
+	bool isUnderscore;
+	if (!(isUnderscore = string_knobs.count(hyphenKnob)) && !string_knobs.count(hyphenKnob)) {
 		return false;
 	}
-	*string_knobs[knob].value = value;
-	explicitlySetKnobs.insert(toLower(knob));
+	const auto& knobKey = isUnderscore ? knob : hyphenKnob;
+	*string_knobs[knobKey].value = value;
+	explicitlySetKnobs.insert(toLower(knobKey));
 	return true;
 }
 
