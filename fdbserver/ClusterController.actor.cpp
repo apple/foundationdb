@@ -141,6 +141,7 @@ public:
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 		Future<Void> clientCounter;
 		int clientCount;
+		AsyncVar<bool> blobGranulesEnabled;
 
 		DBInfo()
 		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
@@ -151,7 +152,8 @@ public:
 		                               EnableLocalityLoadBalance::True,
 		                               TaskPriority::DefaultEndpoint,
 		                               LockAware::True)), // SOMEDAY: Locality!
-		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false), clientCount(0) {
+		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false), clientCount(0),
+		    blobGranulesEnabled(config.blobGranulesEnabled) {
 			clientCounter = countClients(this);
 		}
 
@@ -3727,7 +3729,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	WorkerDetails newDDWorker = findNewProcessForSingleton(self, ProcessClass::DataDistributor, id_used);
 
 	WorkerDetails newBMWorker;
-	if (self->db.config.blobGranulesEnabled) {
+	if (self->db.blobGranulesEnabled.get()) {
 		newBMWorker = findNewProcessForSingleton(self, ProcessClass::BlobManager, id_used);
 	}
 
@@ -3736,7 +3738,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	auto bestFitnessForDD = findBestFitnessForSingleton(self, newDDWorker, ProcessClass::DataDistributor);
 
 	ProcessClass::Fitness bestFitnessForBM;
-	if (self->db.config.blobGranulesEnabled) {
+	if (self->db.blobGranulesEnabled.get()) {
 		bestFitnessForBM = findBestFitnessForSingleton(self, newBMWorker, ProcessClass::BlobManager);
 	}
 
@@ -3754,7 +3756,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	    self, newDDWorker, ddSingleton, bestFitnessForDD, self->recruitingDistributorID);
 
 	bool bmHealthy = true;
-	if (self->db.config.blobGranulesEnabled) {
+	if (self->db.blobGranulesEnabled.get()) {
 		bmHealthy = isHealthySingleton<BlobManagerInterface>(
 		    self, newBMWorker, bmSingleton, bestFitnessForBM, self->recruitingBlobManagerID);
 	}
@@ -3773,7 +3775,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	Optional<Standalone<StringRef>> newDDProcessId = newDDWorker.interf.locality.processId();
 
 	Optional<Standalone<StringRef>> currBMProcessId, newBMProcessId;
-	if (self->db.config.blobGranulesEnabled) {
+	if (self->db.blobGranulesEnabled.get()) {
 
 		currBMProcessId = bmSingleton.interface.get().locality.processId();
 		newBMProcessId = newBMWorker.interf.locality.processId();
@@ -3781,7 +3783,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 
 	std::vector<Optional<Standalone<StringRef>>> currPids = { currRKProcessId, currDDProcessId };
 	std::vector<Optional<Standalone<StringRef>>> newPids = { newRKProcessId, newDDProcessId };
-	if (self->db.config.blobGranulesEnabled) {
+	if (self->db.blobGranulesEnabled.get()) {
 		currPids.emplace_back(currBMProcessId);
 		newPids.emplace_back(newBMProcessId);
 	}
@@ -3790,7 +3792,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	auto newColocMap = getColocCounts(newPids);
 
 	// if the knob is disabled, the BM coloc counts should have no affect on the coloc counts check below
-	if (!self->db.config.blobGranulesEnabled) {
+	if (!self->db.blobGranulesEnabled.get()) {
 		ASSERT(currColocMap[currBMProcessId] == 0);
 		ASSERT(newColocMap[newBMProcessId] == 0);
 	}
@@ -3804,7 +3806,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 			rkSingleton.recruit(self);
 		} else if (newColocMap[newDDProcessId] < currColocMap[currDDProcessId]) {
 			ddSingleton.recruit(self);
-		} else if (self->db.config.blobGranulesEnabled && newColocMap[newBMProcessId] < currColocMap[currBMProcessId]) {
+		} else if (self->db.blobGranulesEnabled.get() && newColocMap[newBMProcessId] < currColocMap[currBMProcessId]) {
 			bmSingleton.recruit(self);
 		}
 	}
@@ -3826,7 +3828,7 @@ ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 		checkOutstandingRecruitmentRequests(self);
 		checkOutstandingStorageRequests(self);
 
-		if (self->db.config.blobGranulesEnabled) {
+		if (self->db.blobGranulesEnabled.get()) {
 			checkOutstandingBlobWorkerRequests(self);
 		}
 		checkBetterSingletons(self);
@@ -4376,7 +4378,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 		    self, w, currSingleton, registeringSingleton, self->recruitingRatekeeperID);
 	}
 
-	if (self->db.config.blobGranulesEnabled && req.blobManagerInterf.present()) {
+	if (self->db.blobGranulesEnabled.get() && req.blobManagerInterf.present()) {
 		auto currSingleton = BlobManagerSingleton(self->db.serverInfo->get().blobManager);
 		auto registeringSingleton = BlobManagerSingleton(req.blobManagerInterf);
 		haltRegisteringOrCurrentSingleton<BlobManagerInterface>(
@@ -5358,16 +5360,24 @@ ACTOR Future<Void> startBlobManager(ClusterControllerData* self) {
 
 ACTOR Future<Void> watchBlobGranulesConfigKey(ClusterControllerData* self) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	state Key blobGranuleConfigKey = configKeysPrefix.withSuffix(StringRef("blob_granules_enabled"));
 
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Key blobGranuleConfigKey = configKeysPrefix.withSuffix(StringRef("blob_granules_enabled"));
 			state Future<Void> watch = tr->watch(blobGranuleConfigKey);
 			wait(tr->commit());
 			wait(watch);
-			return Void();
+
+			tr->reset();
+
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			Optional<Value> blobConfig = wait(tr->get(blobGranuleConfigKey));
+			if (blobConfig.present()) {
+				self->db.blobGranulesEnabled.set(blobConfig.get() == LiteralStringRef("1"));
+			}
 		} catch (Error& e) {
 			wait(tr->onError(e));
 		}
@@ -5392,19 +5402,19 @@ ACTOR Future<Void> monitorBlobManager(ClusterControllerData* self) {
 				when(wait(self->recruitBlobManager.onChange())) {}
 				when(wait(watchConfigChange)) {
 					// if there is a blob manager present but blob granules are now disabled, stop the BM
-					if (!self->db.config.blobGranulesEnabled) {
+					if (!self->db.blobGranulesEnabled.get()) {
 						const auto& blobManager = self->db.serverInfo->get().blobManager;
 						BlobManagerSingleton(blobManager)
 						    .haltBlobGranules(self, blobManager.get().locality.processId());
 					}
 				}
 			}
-		} else if (self->db.config.blobGranulesEnabled) {
+		} else if (self->db.blobGranulesEnabled.get()) {
 			// if there is no blob manager present but blob granules are now enabled, recruit a BM
 			wait(startBlobManager(self));
 		} else {
 			// if there is no blob manager present and blob granules are disabled, wait for a config change
-			wait(watchConfigChange);
+			wait(self->db.blobGranulesEnabled.onChange());
 		}
 	}
 }
@@ -5557,6 +5567,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
 	self.addActor.send(monitorBlobManager(&self));
+	self.addActor.send(watchBlobGranulesConfigKey(&self));
 	// self.addActor.send(monitorTSSMapping(&self));
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(traceCounters("ClusterControllerMetrics",
