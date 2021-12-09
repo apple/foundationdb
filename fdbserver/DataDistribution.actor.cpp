@@ -164,7 +164,7 @@ public:
 ACTOR Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
 
 // Read storage metadata from database, and do necessary updates
-ACTOR Future<StorageMetadataType> checkStorageMetadata(DDTeamCollection* self, Database cx, UID interfaceUid);
+ACTOR Future<Void> checkStorageMetadata(DDTeamCollection* self, TCServerInfo* server);
 
 // TeamCollection's machine team information
 class TCMachineTeamInfo : public ReferenceCounted<TCMachineTeamInfo> {
@@ -4551,8 +4551,12 @@ ACTOR Future<Void> serverMetricsPolling(TCServerInfo* server) {
 	}
 }
 
-// Set the server's storeType; Error is catched by the caller
-ACTOR Future<Void> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo* server) {
+// // Set the server's storeType; Read storage metadata from database; Error is catched by the caller
+ACTOR Future<Void> checkStorageMetadata(DDTeamCollection* self, TCServerInfo* server) {
+	state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
+	                                                                                           IncludeVersion());
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	state StorageMetadataType data(timer_int());
 	// Update server's storeType, especially when it was created
 	state KeyValueStoreType type =
 	    wait(brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(
@@ -4564,8 +4568,28 @@ ACTOR Future<Void> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo
 			self->wrongStoreTypeRemover = removeWrongStoreType(self);
 			self->addActor.send(self->wrongStoreTypeRemover);
 		}
+	} else {
+		// read storage metadata
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				auto property = metadataMap.getProperty(server->lastKnownInterface.id());
+				Optional<StorageMetadataType> metadata = wait(property.get(tr));
+				if (!metadata.present()) {
+					metadataMap.set(tr, server->lastKnownInterface.id(), data);
+				} else {
+					data = metadata.get();
+				}
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				state Error err = e;
+				wait(tr->onError(e));
+				// TraceEvent("CheckStorageMetadataError").error(err);
+			}
+		}
 	}
-
 	return Never();
 }
 
@@ -4713,13 +4737,12 @@ ACTOR Future<Void> storageServerTracker(
 
 	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
 
-	state Future<Void> storeTypeTracker = (isTss) ? Never() : keyValueStoreTypeTracker(self, server);
 	state bool hasWrongDC = !isCorrectDC(self, server);
 	state bool hasInvalidLocality =
 	    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
 	state int targetTeamNumPerServer =
 	    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
-
+	state Future<Void> storageMetadataTracker = (isTss) ? Never() : checkStorageMetadata(self, server);
 	try {
 		loop {
 			status.isUndesired = !self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get();
@@ -4910,6 +4933,7 @@ ACTOR Future<Void> storageServerTracker(
 					}
 
 					// Remove server from FF/serverList
+					storageMetadataTracker.cancel();
 					wait(removeStorageServer(
 					    cx, server->id, server->lastKnownInterface.tssPairID, self->lock, ddEnabledState));
 
@@ -5051,7 +5075,7 @@ ACTOR Future<Void> storageServerTracker(
 					recordTeamCollectionInfo = true;
 					// Restart the storeTracker for the new interface. This will cancel the previous
 					// keyValueStoreTypeTracker
-					storeTypeTracker = (isTss) ? Never() : keyValueStoreTypeTracker(self, server);
+					storageMetadataTracker = (isTss) ? Never() : checkStorageMetadata(self, server);
 					hasWrongDC = !isCorrectDC(self, server);
 					hasInvalidLocality =
 					    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
@@ -5071,7 +5095,7 @@ ACTOR Future<Void> storageServerTracker(
 					    .detail("WrongStoreTypeRemoved", server->wrongStoreTypeToRemove.get());
 				}
 				when(wait(server->wakeUpTracker.getFuture())) { server->wakeUpTracker = Promise<Void>(); }
-				when(wait(storeTypeTracker)) {}
+				when(wait(storageMetadataTracker)) {}
 				when(wait(server->ssVersionTooFarBehind.onChange())) {}
 				when(wait(self->disableFailingLaggingServers.onChange())) {}
 			}
@@ -5311,34 +5335,6 @@ ACTOR Future<UID> getClusterId(DDTeamCollection* self) {
 			wait(tr.onError(e));
 		}
 	}
-}
-
-// Read storage metadata from database
-ACTOR Future<StorageMetadataType> checkStorageMetadata(DDTeamCollection* self, Database cx, UID interfaceUid) {
-	state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
-	                                                                                           IncludeVersion());
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-	state StorageMetadataType data(timer_int());
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			auto property = metadataMap.getProperty(interfaceUid);
-			Optional<StorageMetadataType> metadata = wait(property.get(tr));
-			if (!metadata.present()) {
-				metadataMap.set(tr, interfaceUid, data);
-			} else {
-				data = metadata.get();
-			}
-			wait(tr->commit());
-			break;
-		} catch (Error& e) {
-			state Error err = e;
-			wait(tr->onError(e));
-			// TraceEvent("CheckStorageMetadataError").error(err);
-		}
-	}
-	return data;
 }
 
 ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
