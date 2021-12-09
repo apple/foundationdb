@@ -137,11 +137,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			return Void();
 		}
 
-		DatabaseConfiguration _config = wait(getDatabaseConfiguration(cx));
-		self->config = _config;
-		if (!self->config.blobGranulesEnabled) {
-			return Void();
-		}
+		wait(success(ManagementAPI::changeConfig(cx.getReference(), "blob_granules_enabled=1", true)));
 
 		double initialDelay = deterministicRandom()->random01() * (self->maxDelay - self->minDelay) + self->minDelay;
 		if (BGV_DEBUG) {
@@ -387,10 +383,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		if (!config.blobGranulesEnabled) {
-			return Void();
-		}
-
 		clients.reserve(threads + 1);
 		clients.push_back(timeout(findGranules(cx, this), testDuration, Void()));
 		for (int i = 0; i < threads; i++) {
@@ -466,13 +458,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		return availabilityPassed && self->mismatches == 0 && checks > 0 && self->timeTravelTooOld == 0;
 	}
 
-	Future<bool> check(Database const& cx) override {
-		if (!config.blobGranulesEnabled) {
-			return true;
-		}
-
-		return _check(cx, this);
-	}
+	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
