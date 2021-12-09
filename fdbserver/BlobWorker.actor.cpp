@@ -121,6 +121,9 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 
 	AssignBlobRangeRequest originalReq;
 
+	// TODO FOR DEBUGGING, REMOVE
+	Version waitForVersionReturned = invalidVersion;
+
 	void resume() {
 		if (resumeSnapshot.canBeSet()) {
 			resumeSnapshot.send(Void());
@@ -1329,6 +1332,18 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						} else {
 							ASSERT(mutations.front().version >= startState.changeFeedStartVersion);
 						}
+
+						// if we just got mutations, we haven't buffered them yet, so waitForVersion can't have returned
+						// this version yet
+						if (mutations.front().version <= metadata->waitForVersionReturned) {
+							fmt::print("ERROR: WaitForVersion returned early for granule [{0} - {1}). "
+							           "waitForVersionReturned={2}, mutationVersion={3} !!!\n",
+							           metadata->keyRange.begin.printable(),
+							           metadata->keyRange.end.printable(),
+							           metadata->waitForVersionReturned,
+							           mutations.front().version);
+						}
+						ASSERT(mutations.front().version > metadata->waitForVersionReturned);
 					}
 					when(wait(inFlightFiles.empty() ? Never() : success(inFlightFiles.front().future))) {
 						//  TODO REMOVE
@@ -1947,6 +1962,11 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 
 	if (v == DEBUG_BW_WAIT_VERSION) {
 		fmt::print("{0}) done\n", v);
+	}
+
+	// TODO REMOVE debugging
+	if (v > metadata->waitForVersionReturned) {
+		metadata->waitForVersionReturned = v;
 	}
 
 	return Void();
