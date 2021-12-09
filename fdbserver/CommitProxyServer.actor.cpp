@@ -865,7 +865,6 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	self->previousCommitVersionByGroup.swap(self->resolution[0].previousCommitVersions);
 	for (auto& it : self->previousCommitVersionByGroup) {
 		if (self->pGroupMessageBuilders.count(it.first) == 0) {
-			// std::cout << "Adding to group: " << it.first.toString() << std::endl;
 			self->pGroupMessageBuilders[it.first] =
 			    std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(self->commitVersion);
 		}
@@ -1389,6 +1388,12 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		std::vector<Future<Version>> pushResults;
 		pushResults.reserve(self->pGroupMessageBuilders.size());
 		for (auto& [groupId, _] : self->pGroupMessageBuilders) {
+			auto pcvIt = self->previousCommitVersionByGroup.find(groupId);
+			if (pcvIt == self->previousCommitVersionByGroup.end()) {
+				ASSERT(!SERVER_KNOBS->BROADCAST_TLOG_GROUPS);
+				continue;
+			}
+
 			std::set<ptxn::StorageTeamID> addedTeams;
 			std::set<ptxn::StorageTeamID> removedTeams;
 
@@ -1399,7 +1404,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 					removedTeams.insert(team);
 			}
 
-			pushResults.push_back(pProxyCommitData->logSystem->push(self->previousCommitVersionByGroup[groupId],
+			pushResults.push_back(pProxyCommitData->logSystem->push(pcvIt->second,
 			                                                        self->commitVersion,
 			                                                        pProxyCommitData->committedVersion.get(),
 			                                                        pProxyCommitData->minKnownCommittedVersion,
