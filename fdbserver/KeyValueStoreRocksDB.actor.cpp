@@ -9,6 +9,7 @@
 #include <rocksdb/table.h>
 #include <rocksdb/version.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
+#include <rocksdb/rate_limiter.h>
 #include "fdbclient/SystemData.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
@@ -100,6 +101,9 @@ rocksdb::Options getOptions() {
 	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
 
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
+	std::shared_ptr<rocksdb::RateLimiter> rateLimiter(rocksdb::NewGenericRateLimiter(
+	    10 * 1000 * 1000, 100 * 1000, 10, rocksdb::RateLimiter::Mode::kWritesOnly, true));
+	options.rate_limiter = rateLimiter;
 	return options;
 }
 
@@ -302,6 +306,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
+
+			getOptions().rate_limiter->Request(a.batchToCommit->GetDataSize() /* bytes */, rocksdb::Env::IO_HIGH);
 			auto s = db->Write(options, a.batchToCommit.get());
 			if (!s.ok()) {
 				logRocksDBError(s, "Commit");
