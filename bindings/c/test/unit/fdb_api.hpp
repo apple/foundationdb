@@ -135,11 +135,44 @@ private:
 	KeyValueArrayFuture(FDBFuture* f) : Future(f) {}
 };
 
+class KeyRangeArrayFuture : public Future {
+public:
+	// Call this function instead of fdb_future_get_keyrange_array when using
+	// the KeyRangeArrayFuture type. It's behavior is identical to
+	// fdb_future_get_keyrange_array.
+	fdb_error_t get(const FDBKeyRange** out_keyranges, int* out_count);
+
+private:
+	friend class Transaction;
+	KeyRangeArrayFuture(FDBFuture* f) : Future(f) {}
+};
+
 class EmptyFuture : public Future {
 private:
 	friend class Transaction;
 	friend class Database;
 	EmptyFuture(FDBFuture* f) : Future(f) {}
+};
+
+class Result {
+public:
+	virtual ~Result() = 0;
+
+protected:
+	Result(FDBResult* r) : result_(r) {}
+	FDBResult* result_;
+};
+
+class KeyValueArrayResult : public Result {
+public:
+	// Call this function instead of fdb_result_get_keyvalue_array when using
+	// the KeyValueArrayREsult type. It's behavior is identical to
+	// fdb_result_get_keyvalue_array.
+	fdb_error_t get(const FDBKeyValue** out_kv, int* out_count, fdb_bool_t* out_more);
+
+private:
+	friend class Transaction;
+	KeyValueArrayResult(FDBResult* r) : Result(r) {}
 };
 
 // Wrapper around FDBDatabase, providing database-level API
@@ -219,6 +252,25 @@ public:
 	                              fdb_bool_t snapshot,
 	                              fdb_bool_t reverse);
 
+	// WARNING: This feature is considered experimental at this time. It is only allowed when using snapshot isolation
+	// AND disabling read-your-writes. Returns a future which will be set to an FDBKeyValue array.
+	KeyValueArrayFuture get_range_and_flat_map(const uint8_t* begin_key_name,
+	                                           int begin_key_name_length,
+	                                           fdb_bool_t begin_or_equal,
+	                                           int begin_offset,
+	                                           const uint8_t* end_key_name,
+	                                           int end_key_name_length,
+	                                           fdb_bool_t end_or_equal,
+	                                           int end_offset,
+	                                           const uint8_t* mapper_name,
+	                                           int mapper_name_length,
+	                                           int limit,
+	                                           int target_bytes,
+	                                           FDBStreamingMode mode,
+	                                           int iteration,
+	                                           fdb_bool_t snapshot,
+	                                           fdb_bool_t reverse);
+
 	// Wrapper around fdb_transaction_watch. Returns a future representing an
 	// empty value.
 	EmptyFuture watch(std::string_view key);
@@ -248,6 +300,13 @@ public:
 
 	// Wrapper around fdb_transaction_add_conflict_range.
 	fdb_error_t add_conflict_range(std::string_view begin_key, std::string_view end_key, FDBConflictRangeType type);
+
+	KeyRangeArrayFuture get_blob_granule_ranges(std::string_view begin_key, std::string_view end_key);
+	KeyValueArrayResult read_blob_granules(std::string_view begin_key,
+	                                       std::string_view end_key,
+	                                       int64_t beginVersion,
+	                                       int64_t endVersion,
+	                                       FDBReadBlobGranuleContext granule_context);
 
 private:
 	FDBTransaction* tr_;

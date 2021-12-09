@@ -49,7 +49,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 			choose {
 				when(IKVSGetValueRequest getReq = waitNext(ikvsInterface.getValue.getFuture())) {
 					// TraceEvent(SevDebug, "RemoteKVStore").detail("Request", "get");
-					forwardPromise(getReq.reply, kvStore->readValue(getReq.key, getReq.debugID));
+					forwardPromise(getReq.reply, kvStore->readValue(getReq.key, getReq.type, getReq.debugID));
 				}
 				when(IKVSSetRequest req = waitNext(ikvsInterface.set.getFuture())) {
 					// TraceEvent(SevDebug, "RemoteKVStore").detail("Request", "set");
@@ -68,13 +68,15 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					// TraceEvent(SevDebug, "RemoteKVStore").detail("Request", "readPrefix");
 					forwardPromise(
 					    readPrefixReq.reply,
-					    kvStore->readValuePrefix(readPrefixReq.key, readPrefixReq.maxLength, readPrefixReq.debugID));
+					    kvStore->readValuePrefix(
+					        readPrefixReq.key, readPrefixReq.maxLength, readPrefixReq.type, readPrefixReq.debugID));
 				}
 				when(IKVSReadRangeRequest readRangeReq = waitNext(ikvsInterface.readRange.getFuture())) {
 					// TraceEvent(SevDebug, "RemoteKVStore").detail("Request", "readRange");
 					forwardPromise(
 					    readRangeReq.reply,
-					    kvStore->readRange(readRangeReq.keys, readRangeReq.rowLimit, readRangeReq.byteLimit));
+					    kvStore->readRange(
+					        readRangeReq.keys, readRangeReq.rowLimit, readRangeReq.byteLimit, readRangeReq.type));
 				}
 				when(IKVSGetStorageByteRequest req = waitNext(ikvsInterface.getStorageBytes.getFuture())) {
 					// TraceEvent(SevDebug, "RemoteKVStore").detail("Request", "getStorageBytes");

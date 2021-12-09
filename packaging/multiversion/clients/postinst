@@ -12,18 +12,15 @@ then
     mkdir ${PKG_CONFIG_DIR}
 fi
 
-getent group foundationdb >/dev/null || addgroup --system foundationdb
-getent passwd foundationdb >/dev/null || adduser --system --disabled-login --ingroup foundationdb --no-create-home --home /var/lib/foundationdb --gecos "FoundationDB" --shell /bin/false foundationdb
-
 mkdir -p /usr/lib/foundationdb/backup_agent
 
-update-alternatives --install /usr/bin/fdbcli fdbclients /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbcli @ALTERNATIVES_PRIORITY@ \
-    --slave /usr/bin/fdbbackup fdbbackup /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbbackup \
-    --slave /usr/bin/fdbrestore fdbrestore /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbbackup \
-    --slave /usr/bin/dr_agent dr_agent /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbbackup \
-    --slave /usr/bin/fdbdr fdbdr /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbbackup \
-    --slave /usr/lib/foundationdb/backup_agent/backup_agent backup_agent /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbbackup \
-    --slave /usr/@LIB_DIR@/libfdb_c.so libfdb_c /usr/lib/foundationdb-@PROJECT_VERSION@/lib/libfdb_c.so \
-    --slave /usr/@LIB_DIR@/pkgconfig/foundationdb-client.pc foundationdb-client.pc /usr/lib/foundationdb-@PROJECT_VERSION@/lib/pkgconfig/foundationdb-client.pc \
-    --slave /usr/@LIB_DIR@/cmake/FoundationDB-Client FoundationDB-ClientConfig /usr/lib/foundationdb-@PROJECT_VERSION@/lib/cmake/FoundationDB-Client \
-    --slave /usr/include/foundationdb fdb-client-headers /usr/lib/foundationdb-@PROJECT_VERSION@/include/foundationdb
+update-alternatives --install /usr/bin/fdbcli fdbclients /usr/lib/foundationdb-@FDB_VERSION@/bin/fdbcli @ALTERNATIVES_PRIORITY@ \
+    --slave /usr/bin/fdbbackup fdbbackup /usr/lib/foundationdb-@FDB_VERSION@/bin/fdbbackup \
+    --slave /usr/bin/fdbrestore fdbrestore /usr/lib/foundationdb-@FDB_VERSION@/bin/fdbbackup \
+    --slave /usr/bin/dr_agent dr_agent /usr/lib/foundationdb-@FDB_VERSION@/bin/fdbbackup \
+    --slave /usr/bin/fdbdr fdbdr /usr/lib/foundationdb-@FDB_VERSION@/bin/fdbbackup \
+    --slave /usr/lib/foundationdb/backup_agent/backup_agent backup_agent /usr/lib/foundationdb-@FDB_VERSION@/bin/fdbbackup \
+    --slave /usr/@LIB_DIR@/libfdb_c.so libfdb_c /usr/lib/foundationdb-@FDB_VERSION@/lib/libfdb_c.so \
+    --slave /usr/@LIB_DIR@/pkgconfig/foundationdb-client.pc foundationdb-client.pc /usr/lib/foundationdb-@FDB_VERSION@/lib/pkgconfig/foundationdb-client.pc \
+    --slave /usr/@LIB_DIR@/cmake/FoundationDB-Client FoundationDB-ClientConfig /usr/lib/foundationdb-@FDB_VERSION@/lib/cmake/FoundationDB-Client \
+    --slave /usr/include/foundationdb fdb-client-headers /usr/lib/foundationdb-@FDB_VERSION@/include/foundationdb

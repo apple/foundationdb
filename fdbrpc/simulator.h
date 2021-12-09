@@ -74,6 +74,7 @@ public:
 		LocalityData locality;
 		ProcessClass startingClass;
 		TDMetricCollection tdmetrics;
+		ChaosMetrics chaosMetrics;
 		HistogramRegistry histograms;
 		std::map<NetworkAddress, Reference<IListener>> listenerMap;
 		std::map<NetworkAddress, Reference<IUDPSocket>> boundUDPSockets;
@@ -155,6 +156,8 @@ public:
 			case ProcessClass::DataDistributorClass:
 				return false;
 			case ProcessClass::RatekeeperClass:
+				return false;
+			case ProcessClass::BlobManagerClass:
 				return false;
 			case ProcessClass::StorageCacheClass:
 				return false;
@@ -275,7 +278,7 @@ public:
 	virtual bool isAvailable() const = 0;
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
-	ProtocolVersion protocolVersion() override = 0;
+	ProtocolVersion protocolVersion() const override = 0;
 	void addRole(NetworkAddress const& address, std::string const& role) {
 		roleAddresses[address][role]++;
 		TraceEvent("RoleAdd")
@@ -438,6 +441,7 @@ public:
 	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;
 	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
 	TSSMode tssMode;
+	std::map<NetworkAddress, bool> corruptWorkerMap;
 	ConfigDBType configDBType;
 
 	// Used by workloads that perform reconfigurations
@@ -471,6 +475,13 @@ public:
 
 	static thread_local ProcessInfo* currentProcess;
 
+	bool checkInjectedCorruption() {
+		auto iter = corruptWorkerMap.find(currentProcess->address);
+		if (iter != corruptWorkerMap.end())
+			return iter->second;
+		return false;
+	}
+
 protected:
 	Mutex mutex;
 
@@ -487,7 +498,7 @@ private:
 extern ISimulator* g_pSimulator;
 #define g_simulator (*g_pSimulator)
 
-void startNewSimulator();
+void startNewSimulator(bool printSimTime);
 
 // Parameters used to simulate disk performance
 struct DiskParameters : ReferenceCounted<DiskParameters> {

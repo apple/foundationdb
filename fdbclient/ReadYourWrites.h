@@ -104,10 +104,22 @@ public:
 		                snapshot,
 		                reverse);
 	}
+	Future<RangeResult> getRangeAndFlatMap(KeySelector begin,
+	                                       KeySelector end,
+	                                       Key mapper,
+	                                       GetRangeLimits limits,
+	                                       Snapshot = Snapshot::False,
+	                                       Reverse = Reverse::False) override;
 
 	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key) override;
 	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range, int64_t chunkSize) override;
 	Future<int64_t> getEstimatedRangeSizeBytes(const KeyRange& keys) override;
+
+	Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRange& range) override;
+	Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranules(const KeyRange& range,
+	                                                                    Version begin,
+	                                                                    Optional<Version> readVersion,
+	                                                                    Version* readVersionOut) override;
 
 	void addReadConflictRange(KeyRangeRef const& keys) override;
 	void makeSelfConflicting() override { tr.makeSelfConflicting(); }

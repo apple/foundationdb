@@ -26,6 +26,8 @@
 #include <toml.hpp>
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/simulator.h"
+#include "fdbclient/ClusterConnectionFile.h"
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -219,7 +221,9 @@ class TestConfig {
 			}
 
 			if (attrib == "configureLocked") {
-				sscanf(value.c_str(), "%d", &configureLocked);
+				int configureLockedInt;
+				sscanf(value.c_str(), "%d", &configureLockedInt);
+				configureLocked = (configureLockedInt != 0);
 			}
 
 			if (attrib == "startIncompatibleProcess") {
@@ -276,7 +280,7 @@ public:
 	//	0 = "ssd"
 	//	1 = "memory"
 	//	2 = "memory-radixtree-beta"
-	//	3 = "ssd-redwood-experimental"
+	//	3 = "ssd-redwood-1-experimental"
 	//	4 = "ssd-rocksdb-experimental"
 	// Requires a comma-separated list of numbers WITHOUT whitespaces
 	std::vector<int> storageEngineExcludeTypes;
@@ -387,7 +391,7 @@ T simulate(const T& in) {
 	return out;
 }
 
-ACTOR Future<Void> runBackup(Reference<ClusterConnectionFile> connFile) {
+ACTOR Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
 	state std::vector<Future<Void>> agentFutures;
 
 	while (g_simulator.backupAgents == ISimulator::BackupAgentType::WaitForType) {
@@ -395,7 +399,7 @@ ACTOR Future<Void> runBackup(Reference<ClusterConnectionFile> connFile) {
 	}
 
 	if (g_simulator.backupAgents == ISimulator::BackupAgentType::BackupToFile) {
-		Database cx = Database::createDatabase(connFile, -1);
+		Database cx = Database::createDatabase(connRecord, -1);
 
 		state FileBackupAgent fileAgent;
 		agentFutures.push_back(fileAgent.run(
@@ -414,7 +418,7 @@ ACTOR Future<Void> runBackup(Reference<ClusterConnectionFile> connFile) {
 	throw internal_error();
 }
 
-ACTOR Future<Void> runDr(Reference<ClusterConnectionFile> connFile) {
+ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 	state std::vector<Future<Void>> agentFutures;
 
 	while (g_simulator.drAgents == ISimulator::BackupAgentType::WaitForType) {
@@ -422,13 +426,13 @@ ACTOR Future<Void> runDr(Reference<ClusterConnectionFile> connFile) {
 	}
 
 	if (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
-		Database cx = Database::createDatabase(connFile, -1);
+		Database cx = Database::createDatabase(connRecord, -1);
 
-		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
+		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
 		state Database extraDB = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("StartingDrAgents")
-		    .detail("ConnFile", connFile->getConnectionString().toString())
+		    .detail("ConnectionString", connRecord->getConnectionString().toString())
 		    .detail("ExtraString", extraFile->getConnectionString().toString());
 
 		state DatabaseBackupAgent dbAgent = DatabaseBackupAgent(cx);
@@ -459,7 +463,7 @@ enum AgentMode { AgentNone = 0, AgentOnly = 1, AgentAddition = 2 };
 // SOMEDAY: when a process can be rebooted in isolation from the other on that machine,
 //  a loop{} will be needed around the waiting on simulatedFDBD(). For now this simply
 //  takes care of house-keeping such as context switching and file closing.
-ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnectionFile> connFile,
+ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionRecord> connRecord,
                                                          IPAddress ip,
                                                          bool sslEnabled,
                                                          uint16_t port,
@@ -525,7 +529,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 			    .detail("Version", FDB_VT_VERSION)
 			    .detail("PackageName", FDB_VT_PACKAGE_NAME)
 			    .detail("DataFolder", *dataFolder)
-			    .detail("ConnectionString", connFile ? connFile->getConnectionString().toString() : "")
+			    .detail("ConnectionString", connRecord ? connRecord->getConnectionString().toString() : "")
 			    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 			    .detail("CommandLine", "fdbserver -r simulation")
 			    .detail("BuggifyEnabled", isBuggifyEnabled(BuggifyType::General))
@@ -546,7 +550,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 					futures.push_back(FlowTransport::transport().bind(n, n));
 				}
 				if (runBackupAgents != AgentOnly) {
-					futures.push_back(fdbd(connFile,
+					futures.push_back(fdbd(connRecord,
 					                       localities,
 					                       processClass,
 					                       *dataFolder,
@@ -561,8 +565,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 					                       configDBType));
 				}
 				if (runBackupAgents != AgentNone) {
-					futures.push_back(runBackup(connFile));
-					futures.push_back(runDr(connFile));
+					futures.push_back(runBackup(connRecord));
+					futures.push_back(runDr(connRecord));
 				}
 
 				futures.push_back(success(onShutdown));
@@ -666,9 +670,9 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 
 			if (!useSeedFile) {
 				writeFile(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
-				connFile = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"));
+				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"));
 			} else {
-				connFile =
+				connRecord =
 				    makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
 			}
 		} else {
@@ -747,9 +751,9 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			state std::vector<Future<ISimulator::KillType>> processes;
 			for (int i = 0; i < ips.size(); i++) {
 				std::string path = joinPath(myFolders[i], "fdb.cluster");
-				Reference<ClusterConnectionFile> clusterFile(useSeedFile
-				                                                 ? new ClusterConnectionFile(path, connStr.toString())
-				                                                 : new ClusterConnectionFile(path));
+				Reference<IClusterConnectionRecord> clusterFile(
+				    useSeedFile ? new ClusterConnectionFile(path, connStr.toString())
+				                : new ClusterConnectionFile(path));
 				const int listenPort = i * listenPerProcess + 1;
 				AgentMode agentMode =
 				    runBackupAgents == AgentOnly ? (i == ips.size() - 1 ? AgentOnly : AgentNone) : runBackupAgents;
@@ -1221,7 +1225,7 @@ void SimulationConfig::set_config(std::string config) {
 		db.set(kv.first, kv.second);
 }
 
-StringRef StringRefOf(const char* s) {
+[[maybe_unused]] StringRef StringRefOf(const char* s) {
 	return StringRef((uint8_t*)s, strlen(s));
 }
 
@@ -1337,7 +1341,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	}
 	case 3: {
 		TEST(true); // Simulated cluster using redwood storage engine
-		set_config("ssd-redwood-experimental");
+		set_config("ssd-redwood-1-experimental");
 		break;
 	}
 	case 4: {
@@ -1784,6 +1788,13 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		if ("tss_storage_engine" == kv.first) {
 			continue;
 		}
+		if ("perpetual_storage_wiggle_locality" == kv.first) {
+			if (deterministicRandom()->random01() < 0.25) {
+				int dcId = deterministicRandom()->randomInt(0, simconfig.datacenters);
+				startingConfigString += " " + kv.first + "=" + "data_hall:" + std::to_string(dcId);
+			}
+			continue;
+		}
 		startingConfigString += " ";
 		if (kv.second.type() == json_spirit::int_type) {
 			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int());
@@ -2134,14 +2145,14 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		systemActors->push_back(
 		    reportErrors(simulatedMachine(conn,
 		                                  ips,
-		                                  sslEnabled && sslOnly,
+		                                  sslEnabled,
 		                                  localities,
 		                                  ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
 		                                  baseFolder,
 		                                  false,
 		                                  i == useSeedForMachine,
 		                                  AgentNone,
-		                                  sslEnabled && sslOnly,
+		                                  sslOnly,
 		                                  whitelistBinPaths,
 		                                  protocolVersion,
 		                                  configDBType),
@@ -2179,7 +2190,7 @@ bool rocksDBEnabled = false;
 #endif
 
 // Populates the TestConfig fields according to what is found in the test file.
-void checkTestConf(const char* testFile, TestConfig* testConfig) {}
+[[maybe_unused]] void checkTestConf(const char* testFile, TestConfig* testConfig) {}
 
 } // namespace
 
@@ -2189,7 +2200,7 @@ ACTOR void setupAndRun(std::string dataFolder,
                        bool restoring,
                        std::string whitelistBinPaths) {
 	state std::vector<Future<Void>> systemActors;
-	state Optional<ClusterConnectionString> connFile;
+	state Optional<ClusterConnectionString> connectionString;
 	state Standalone<StringRef> startingConfiguration;
 	state int testerCount = 1;
 	state TestConfig testConfig;
@@ -2251,7 +2262,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 			wait(timeoutError(restartSimulatedSystem(&systemActors,
 			                                         dataFolder,
 			                                         &testerCount,
-			                                         &connFile,
+			                                         &connectionString,
 			                                         &startingConfiguration,
 			                                         testConfig,
 			                                         whitelistBinPaths,
@@ -2266,7 +2277,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 			setupSimulatedSystem(&systemActors,
 			                     dataFolder,
 			                     &testerCount,
-			                     &connFile,
+			                     &connectionString,
 			                     &startingConfiguration,
 			                     whitelistBinPaths,
 			                     testConfig,
@@ -2275,7 +2286,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 		}
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(clusterFileDir);
-		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connFile.get().toString());
+		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connectionString.get().toString());
 		wait(timeoutError(runTests(makeReference<ClusterConnectionFile>(joinPath(clusterFileDir, "fdb.cluster")),
 		                           TEST_TYPE_FROM_FILE,
 		                           TEST_ON_TESTERS,

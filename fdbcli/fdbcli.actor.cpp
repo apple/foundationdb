@@ -19,6 +19,8 @@
  */
 
 #include "boost/lexical_cast.hpp"
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IClientApi.h"
@@ -35,6 +37,7 @@
 #include "fdbclient/Schemas.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Tuple.h"
 
@@ -90,7 +93,8 @@ enum {
 	OPT_BUILD_FLAGS,
 	OPT_TRACE_FORMAT,
 	OPT_KNOB,
-	OPT_DEBUG_TLS
+	OPT_DEBUG_TLS,
+	OPT_API_VERSION,
 };
 
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -112,6 +116,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
 	                                  { OPT_KNOB, "--knob_", SO_REQ_SEP },
 	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
+	                                  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	                                  TLS_OPTION_FLAGS
@@ -428,6 +433,8 @@ static void printProgramUsage(const char* name) {
 	       "                 and then exits.\n"
 	       "  --no-status    Disables the initial status check done when starting\n"
 	       "                 the CLI.\n"
+	       "  --api-version  APIVERSION\n"
+	       "                 Specifies the version of the API for the CLI to use.\n"
 #ifndef TLS_DISABLED
 	       TLS_HELP
 #endif
@@ -625,9 +632,9 @@ ACTOR Future<Void> commitTransaction(Reference<ITransaction> tr) {
 	wait(makeInterruptable(safeThreadFutureToFuture(tr->commit())));
 	auto ver = tr->getCommittedVersion();
 	if (ver != invalidVersion)
-		printf("Committed (%" PRId64 ")\n", ver);
+		fmt::print("Committed ({})\n", ver);
 	else
-		printf("Nothing to commit\n");
+		fmt::print("Nothing to commit\n");
 	return Void();
 }
 
@@ -1030,8 +1037,8 @@ ACTOR Future<bool> exclude(Database db,
 			    locality.c_str());
 		}
 
+		ClusterConnectionString ccs = wait(ccf->getStoredConnectionString());
 		bool foundCoordinator = false;
-		auto ccs = ClusterConnectionFile(ccf->getFilename()).getConnectionString();
 		for (const auto& c : ccs.coordinators()) {
 			if (std::count(exclusionVector.begin(), exclusionVector.end(), AddressExclusion(c.ip, c.port)) ||
 			    std::count(exclusionVector.begin(), exclusionVector.end(), AddressExclusion(c.ip))) {
@@ -1171,6 +1178,7 @@ void configureGenerator(const char* text, const char* line, std::vector<std::str
 		                   "logs=",
 		                   "resolvers=",
 		                   "perpetual_storage_wiggle=",
+		                   "perpetual_storage_wiggle_locality=",
 		                   "storage_migration_type=",
 		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
@@ -1370,6 +1378,9 @@ struct CLIOptions {
 
 	std::vector<std::pair<std::string, std::string>> knobs;
 
+	// api version, using the latest version by default
+	int api_version = FDB_API_VERSION;
+
 	CLIOptions(int argc, char* argv[]) {
 		program_name = argv[0];
 		for (int a = 0; a < argc; a++) {
@@ -1392,7 +1403,9 @@ struct CLIOptions {
 			exit_code = FDB_EXIT_ERROR;
 			return;
 		}
+	}
 
+	void setupKnobs() {
 		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 		for (const auto& [knobName, knobValueString] : knobs) {
 			try {
@@ -1432,6 +1445,22 @@ struct CLIOptions {
 		case OPT_CONNFILE:
 			clusterFile = args.OptionArg();
 			break;
+		case OPT_API_VERSION: {
+			char* endptr;
+			api_version = strtoul((char*)args.OptionArg(), &endptr, 10);
+			if (*endptr != '\0') {
+				fprintf(stderr, "ERROR: invalid client version %s\n", args.OptionArg());
+				return 1;
+			} else if (api_version < 700 || api_version > FDB_API_VERSION) {
+				// multi-version fdbcli only available after 7.0
+				fprintf(stderr,
+				        "ERROR: api version %s is not supported. (Min: 700, Max: %d)\n",
+				        args.OptionArg(),
+				        FDB_API_VERSION);
+				return 1;
+			}
+			break;
+		}
 		case OPT_TRACE:
 			trace = true;
 			break;
@@ -1531,6 +1560,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state Database localDb;
 	state Reference<IDatabase> db;
 	state Reference<ITransaction> tr;
+	state Transaction trx;
 
 	state bool writeMode = false;
 
@@ -1558,14 +1588,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	TraceEvent::setNetworkThread();
 
 	try {
-		localDb = Database::createDatabase(ccf, -1, IsInternal::False);
+		localDb = Database::createDatabase(ccf, opt.api_version, IsInternal::False);
 		if (!opt.exec.present()) {
-			printf("Using cluster file `%s'.\n", ccf->getFilename().c_str());
+			printf("Using cluster file `%s'.\n", ccf->getLocation().c_str());
 		}
 		db = API->createDatabase(opt.clusterFile.c_str());
 	} catch (Error& e) {
 		fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
-		printf("Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
+		printf("Unable to connect to cluster from `%s'\n", ccf->getLocation().c_str());
 		return 1;
 	}
 
@@ -1576,7 +1606,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 		    .detail("Version", FDB_VT_VERSION)
 		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
 		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
-		    .detail("ClusterFile", ccf->getFilename().c_str())
+		    .detail("ClusterFile", ccf->toString())
 		    .detail("ConnectionString", ccf->getConnectionString().toString())
 		    .setMaxFieldLength(10000)
 		    .detail("CommandLine", opt.commandLine)
@@ -1641,7 +1671,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 			// Don't put dangerous commands in the command history
 			if (line.find("writemode") == std::string::npos && line.find("expensive_data_check") == std::string::npos &&
-			    line.find("unlock") == std::string::npos)
+			    line.find("unlock") == std::string::npos && line.find("blobrange") == std::string::npos)
 				linenoise.historyAdd(line);
 		}
 
@@ -1849,6 +1879,20 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "lock")) {
 					bool _result = wait(makeInterruptable(lockCommandActor(db, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "changefeed")) {
+					bool _result = wait(makeInterruptable(changeFeedCommandActor(localDb, tokens, warn)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "blobrange")) {
+					bool _result = wait(makeInterruptable(blobRangeCommandActor(localDb, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -2391,8 +2435,6 @@ int main(int argc, char** argv) {
 
 	registerCrashHandler();
 
-	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::False, IsSimulated::False);
-
 #ifdef __unixish__
 	struct sigaction act;
 
@@ -2491,9 +2533,12 @@ int main(int argc, char** argv) {
 	}
 
 	try {
-		// Note: refactoring fdbcli, in progress
-		API->selectApiVersion(FDB_API_VERSION);
+		API->selectApiVersion(opt.api_version);
 		API->setupNetwork();
+		opt.setupKnobs();
+		if (opt.exit_code != -1) {
+			return opt.exit_code;
+		}
 		Future<int> cliFuture = runCli(opt);
 		Future<Void> timeoutFuture = opt.exit_timeout ? timeExit(opt.exit_timeout) : Never();
 		auto f = stopNetworkAfter(success(cliFuture) || timeoutFuture);

@@ -64,7 +64,7 @@ The ``commit`` command commits the current transaction. Any sets or clears execu
 configure
 ---------
 
-The ``configure`` command changes the database configuration. Its syntax is ``configure [new|tss] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>] [count=<TSS_COUNT>] [perpetual_storage_wiggle=<WIGGLE_SPEED>] [storage_migration_type={disabled|aggressive|gradual}]``.
+The ``configure`` command changes the database configuration. Its syntax is ``configure [new|tss] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>] [count=<TSS_COUNT>] [perpetual_storage_wiggle=<WIGGLE_SPEED>] [perpetual_storage_wiggle_locality=<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>] [storage_migration_type={disabled|aggressive|gradual}]``.
 
 The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When ``new`` is used, both a redundancy mode and a storage engine must be specified.
 
@@ -112,7 +112,10 @@ For recommendations on appropriate values for process types in large clusters, s
 perpetual storage wiggle
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-Set the value speed (a.k.a., the number of processes that the Data Distributor should wiggle at a time). Currently, only 0 and 1 are supported. The value 0 means to disable the perpetual storage wiggle. For more details, see :ref:`perpetual-storage-wiggle`.
+``perpetual_storage_wiggle`` sets the value speed (a.k.a., the number of processes that the Data Distributor should wiggle at a time). Currently, only 0 and 1 are supported. The value 0 means to disable the perpetual storage wiggle.
+``perpetual_storage_wiggle_locality`` sets the process filter for wiggling. The processes that match the given locality key and locality value are only wiggled. The value 0 will disable the locality filter and matches all the processes for wiggling.
+
+For more details, see :ref:`perpetual-storage-wiggle`.
 
 storage migration type
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -160,6 +163,10 @@ For each IP address or IP:port pair in ``<ADDRESS...>`` or locality (which inclu
 If the ``failed`` keyword is specified, the address is marked as failed and added to the set of failed servers. It will not wait for the database state to move off the specified servers.
 
 For more information on excluding servers, see :ref:`removing-machines-from-a-cluster`.
+
+Warning about potential dataloss ``failed`` option: if a server is the last one in some team(s), excluding it with ``failed`` will lose all data in the team(s), and hence ``failed`` should only be set when the server(s) have permanently failed.
+
+In the case all servers of a team have failed permanently, excluding all the servers will clean up the corresponding keyrange, and fix the invalid metadata. The keyrange will be assigned to a new team as an empty shard.
 
 exit
 ----

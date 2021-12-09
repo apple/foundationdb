@@ -146,12 +146,13 @@ struct OpenKVStoreRequest {
 struct IKVSGetValueRequest {
 	constexpr static FileIdentifier file_identifier = 1029439;
 	KeyRef key;
+	IKeyValueStore::ReadType type;
 	Optional<UID> debugID = Optional<UID>();
 	ReplyPromise<Optional<Value>> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, debugID, reply);
+		serializer(ar, key, type, debugID, reply);
 	}
 };
 
@@ -192,12 +193,13 @@ struct IKVSReadValuePrefixRequest {
 	constexpr static FileIdentifier file_identifier = 1928374;
 	KeyRef key;
 	int maxLength;
+	IKeyValueStore::ReadType type;
 	Optional<UID> debugID = Optional<UID>();
 	ReplyPromise<Optional<Value>> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, maxLength, debugID, reply);
+		serializer(ar, key, maxLength, type, debugID, reply);
 	}
 };
 
@@ -206,11 +208,12 @@ struct IKVSReadRangeRequest {
 	KeyRangeRef keys;
 	int rowLimit;
 	int byteLimit;
+	IKeyValueStore::ReadType type;
 	ReplyPromise<RangeResult> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, rowLimit, byteLimit, reply);
+		serializer(ar, keys, rowLimit, byteLimit, type, reply);
 	}
 };
 
@@ -358,11 +361,11 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 		return initialized;
 	}
 
-	Future<Void> getError() override {
+	Future<Void> getError() const override {
 		// TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote get error");
 		return getErrorImpl(this);
 	}
-	Future<Void> onClosed() override {
+	Future<Void> onClosed() const override {
 		// TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote onclosed");
 		return onCloseImpl(this);
 	}
@@ -397,21 +400,27 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 		return commitAndGetStorageBytes(this, commitReply);
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) override {
+	Future<Optional<Value>> readValue(KeyRef key,
+	                                  ReadType type = ReadType::NORMAL,
+	                                  Optional<UID> debugID = Optional<UID>()) override {
 		// // TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote readValue");
-		return readValueImpl(this, IKVSGetValueRequest{ key, debugID });
+		return readValueImpl(this, IKVSGetValueRequest{ key, type, debugID });
 	}
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
+	                                        ReadType type = ReadType::NORMAL,
 	                                        Optional<UID> debugID = Optional<UID>()) override {
 		// // TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote readValuePrefix");
-		return interf.readValuePrefix.getReply(IKVSReadValuePrefixRequest{ key, maxLength, debugID });
+		return interf.readValuePrefix.getReply(IKVSReadValuePrefixRequest{ key, maxLength, type, debugID });
 	}
 
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) override {
+	Future<RangeResult> readRange(KeyRangeRef keys,
+	                              int rowLimit = 1 << 30,
+	                              int byteLimit = 1 << 30,
+	                              ReadType type = ReadType::NORMAL) override {
 		// // TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "remote read range");
-		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit };
+		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit, type };
 		return interf.readRange.getReply(req);
 	}
 
@@ -434,8 +443,8 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 		return val;
 	}
 
-	ACTOR static Future<Void> getErrorImpl(RemoteIKeyValueStore* self) {
-		wait(self->init());
+	ACTOR static Future<Void> getErrorImpl(const RemoteIKeyValueStore* self) {
+		wait(self->initialized);
 		// // TraceEvent(SevDebug, "RemoteKVStore").detail("Event", "post init, before getError");
 		choose {
 			when(wait(self->interf.getError.getReply(IKVSGetErrorRequest{}))) {
@@ -451,8 +460,8 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 		return Void();
 	}
 
-	ACTOR static Future<Void> onCloseImpl(RemoteIKeyValueStore* self) {
-		wait(self->init());
+	ACTOR static Future<Void> onCloseImpl(const RemoteIKeyValueStore* self) {
+		wait(self->initialized);
 		// // TraceEvent(SevDebug, "RemoteKVStore").detail("Event", "post init, before onClosed");
 		wait(self->interf.onClosed.getReply(IKVSOnClosedRequest{}));
 		return Void();

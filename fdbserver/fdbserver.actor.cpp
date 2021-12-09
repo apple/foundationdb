@@ -41,6 +41,7 @@
 #include <boost/interprocess/managed_shared_memory.hpp>
 
 #include "fdbclient/ActorLineageProfiler.h"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
@@ -106,7 +107,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME, OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -196,6 +197,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_PROFILER,	             "--profiler_",                 SO_REQ_SEP },
 	{ OPT_FLOW_PROCESS_NAME,     "--process_name",              SO_REQ_SEP },
 	{ OPT_FLOW_PROCESS_ENDPOINT, "--process_endpoint",          SO_REQ_SEP },
+	{ OPT_PRINT_SIMTIME,         "--print_sim_time",             SO_NONE },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -538,7 +540,7 @@ static void printOptionUsage(std::string option, std::string description) {
 
 	std::stringstream sstream(description);
 	if (sstream.eof()) {
-		printf(result.c_str());
+		printf("%s", result.c_str());
 		return;
 	}
 
@@ -561,7 +563,7 @@ static void printOptionUsage(std::string option, std::string description) {
 	}
 	result += currLine + '\n';
 
-	printf(result.c_str());
+	printf("%s", result.c_str());
 }
 
 static void printUsage(const char* name, bool devhelp) {
@@ -815,7 +817,7 @@ Optional<bool> checkBuggifyOverride(const char* testFile) {
 // Takes a vector of public and listen address strings given via command line, and returns vector of NetworkAddress
 // objects.
 std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
-    const ClusterConnectionFile& connectionFile,
+    const IClusterConnectionRecord& connectionRecord,
     const std::vector<std::string>& publicAddressStrs,
     std::vector<std::string>& listenAddressStrs) {
 	if (listenAddressStrs.size() > 0 && publicAddressStrs.size() != listenAddressStrs.size()) {
@@ -833,7 +835,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 	NetworkAddressList publicNetworkAddresses;
 	NetworkAddressList listenNetworkAddresses;
 
-	auto& coordinators = connectionFile.getConnectionString().coordinators();
+	auto& coordinators = connectionRecord.getConnectionString().coordinators();
 	ASSERT(coordinators.size() > 0);
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
@@ -843,7 +845,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 		if (autoPublicAddress) {
 			try {
 				const NetworkAddress& parsedAddress = NetworkAddress::parse("0.0.0.0:" + publicAddressStr.substr(5));
-				const IPAddress publicIP = determinePublicIPAutomatically(connectionFile.getConnectionString());
+				const IPAddress publicIP = determinePublicIPAutomatically(connectionRecord.getConnectionString());
 				currentPublicAddress = NetworkAddress(publicIP, parsedAddress.port, true, parsedAddress.isTLS());
 			} catch (Error& e) {
 				fprintf(stderr,
@@ -1012,13 +1014,14 @@ struct CLIOptions {
 	std::string configPath;
 	ConfigDBType configDBType{ ConfigDBType::DISABLED };
 
-	Reference<ClusterConnectionFile> connectionFile;
+	Reference<IClusterConnectionRecord> connectionFile;
 	Standalone<StringRef> machineId;
 	UnitTestParameters testParams;
 
 	std::map<std::string, std::string> profilerConfig;
 	std::string flowProcessName;
 	Endpoint flowProcessEndpoint;
+	bool printSimTime = false;
 
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
@@ -1544,6 +1547,9 @@ private:
 				}
 				break;
 			}
+			case OPT_PRINT_SIMTIME:
+				printSimTime = true;
+				break;
 
 #ifndef TLS_DISABLED
 			case TLSConfig::OPT_TLS_PLUGIN:
@@ -1844,7 +1850,7 @@ int main(int argc, char* argv[]) {
 
 		if (role == ServerRole::Simulation || role == ServerRole::CreateTemplateDatabase) {
 			// startOldSimulator();
-			startNewSimulator();
+			startNewSimulator(opts.printSimTime);
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			openTracer(TracerType(deterministicRandom()->randomInt(static_cast<int>(TracerType::DISABLED),
 			                                                       static_cast<int>(TracerType::SIM_END))));
@@ -1920,7 +1926,7 @@ int main(int argc, char* argv[]) {
 		    .detail("FileSystem", opts.fileSystemPath)
 		    .detail("DataFolder", opts.dataFolder)
 		    .detail("WorkingDirectory", cwd)
-		    .detail("ClusterFile", opts.connectionFile ? opts.connectionFile->getFilename().c_str() : "")
+		    .detail("ClusterFile", opts.connectionFile ? opts.connectionFile->toString() : "")
 		    .detail("ConnectionString",
 		            opts.connectionFile ? opts.connectionFile->getConnectionString().toString() : "")
 		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))

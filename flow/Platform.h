@@ -392,7 +392,13 @@ std::string getDefaultConfigPath();
 // Returns the absolute platform-dependant path for the default fdb.cluster file
 std::string getDefaultClusterFilePath();
 
-void* getImageOffset();
+struct ImageInfo {
+	void* offset = nullptr;
+	std::string fileName = "unknown";
+	std::string symbolFileName = "unknown";
+};
+
+ImageInfo getImageInfo();
 
 // Places the frame pointers in a string formatted as parameters for addr2line.
 size_t raw_backtrace(void** addresses, int maxStackDepth);
@@ -416,17 +422,19 @@ typedef struct {
 dev_t getDeviceId(std::string path);
 #endif
 
-#ifdef __linux__
-#ifndef __aarch64__
-#include <x86intrin.h>
-#else
+#if defined(__aarch64__)
 #include "sse2neon.h"
-#endif
-#include <features.h>
-#include <sys/stat.h>
-#endif
-
-#if defined(__APPLE__)
+// aarch64 does not have rdtsc counter
+// Use cntvct_el0 virtual counter instead
+inline static uint64_t timestampCounter() {
+	uint64_t timer;
+	asm volatile("mrs %0, cntvct_el0" : "=r"(timer));
+	return timer;
+}
+#elif defined(__linux__)
+#include <x86intrin.h>
+#define timestampCounter() __rdtsc()
+#elif defined(__APPLE__) // macOS on Intel
 // Version of CLang bundled with XCode doesn't yet include ia32intrin.h.
 #if !(__has_builtin(__rdtsc))
 inline static uint64_t timestampCounter() {
@@ -437,16 +445,7 @@ inline static uint64_t timestampCounter() {
 #else
 #define timestampCounter() __rdtsc()
 #endif
-#elif defined(__aarch64__)
-// aarch64 does not have rdtsc counter
-// Use cntvct_el0 virtual counter instead
-inline static uint64_t timestampCounter() {
-	uint64_t timer;
-	asm volatile("mrs %0, cntvct_el0" : "=r"(timer));
-	return timer;
-}
 #else
-// all other platforms including Linux x86_64
 #define timestampCounter() __rdtsc()
 #endif
 
@@ -459,6 +458,11 @@ inline static uint64_t __rdtsc() {
 }
 #endif
 #endif
+
+#if defined(__linux__)
+#include <features.h>
+#endif
+#include <sys/stat.h>
 
 #ifdef _WIN32
 #include <intrin.h>
@@ -613,6 +617,7 @@ inline static void flushOutputStreams() {
 #if defined(_MSC_VER)
 #define DLLEXPORT __declspec(dllexport)
 #elif defined(__GNUG__)
+#undef DLLEXPORT
 #define DLLEXPORT __attribute__((visibility("default")))
 #else
 #error Missing symbol export
@@ -680,6 +685,9 @@ void* loadFunction(void* lib, const char* func_name);
 
 std::string exePath();
 
+// get the absolute path
+std::string getExecPath();
+
 #ifdef _WIN32
 inline static int ctzll(uint64_t value) {
 	unsigned long count = 0;
@@ -746,9 +754,6 @@ void platformInit();
 void registerCrashHandler();
 void setupRunLoopProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
-
-// get the absolute path
-std::string getExecPath();
 
 // Use _exit() or criticalError(), not exit()
 #define exit static_assert(false, "Calls to exit() are forbidden by policy");

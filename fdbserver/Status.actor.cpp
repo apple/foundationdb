@@ -19,6 +19,8 @@
  */
 
 #include <cinttypes>
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "fdbclient/BlobWorkerInterface.h"
 #include "fdbserver/Status.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -95,7 +97,6 @@ extern int limitReasonEnd;
 extern const char* limitReasonName[];
 extern const char* limitReasonDesc[];
 
-struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
 typedef std::map<std::string, TraceEventFields> EventMap;
 
 ACTOR static Future<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
@@ -115,7 +116,7 @@ ACTOR static Future<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterf
 	}
 }
 
-ACTOR static Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
+ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
     std::vector<WorkerDetails> workers,
     std::string eventName) {
 	try {
@@ -724,6 +725,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     std::vector<std::pair<TLogInterface, EventMap>> tLogs,
     std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies,
     std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
+    std::vector<BlobWorkerInterface> blobWorkers,
     ServerCoordinators coordinators,
     Database cx,
     Optional<DatabaseConfiguration> configuration,
@@ -795,6 +797,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("ratekeeper", db->get().ratekeeper.get());
 	}
 
+	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES && db->get().blobManager.present()) {
+		roles.addRole("blob_manager", db->get().blobManager.get());
+	}
+
 	for (auto& tLogSet : db->get().logSystemConfig.tLogs) {
 		for (auto& it : tLogSet.logRouters) {
 			if (it.present()) {
@@ -813,7 +819,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		}
 	}
 
-	for (auto& coordinator : coordinators.ccf->getConnectionString().coordinators()) {
+	for (auto& coordinator : coordinators.ccr->getConnectionString().coordinators()) {
 		roles.addCoordinatorRole(coordinator);
 	}
 
@@ -856,6 +862,13 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	for (res = resolvers.begin(); res != resolvers.end(); ++res) {
 		roles.addRole("resolver", *res);
 		wait(yield());
+	}
+
+	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+		for (auto blobWorker : blobWorkers) {
+			roles.addRole("blob_worker", blobWorker);
+			wait(yield());
+		}
 	}
 
 	for (workerItr = workers.begin(); workerItr != workers.end(); ++workerItr) {
@@ -2423,7 +2436,7 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 		workerZones[worker.interf.address()] = worker.interf.locality.zoneId().orDefault(LiteralStringRef(""));
 	}
 	std::map<StringRef, int> coordinatorZoneCounts;
-	for (auto& coordinator : coordinators.ccf->getConnectionString().coordinators()) {
+	for (auto& coordinator : coordinators.ccr->getConnectionString().coordinators()) {
 		auto zone = workerZones[coordinator];
 		coordinatorZoneCounts[zone] += 1;
 	}
@@ -2802,11 +2815,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state std::vector<std::pair<TLogInterface, EventMap>> tLogs;
 		state std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies;
 		state std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
+		state std::vector<BlobWorkerInterface> blobWorkers;
 		state JsonBuilderObject qos;
 		state JsonBuilderObject data_overlay;
 
 		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
-		statusObj["connection_string"] = coordinators.ccf->getConnectionString().toString();
+		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
 		statusObj["bounce_impact"] = getBounceImpactInfo(statusCode);
 
 		state Optional<DatabaseConfiguration> configuration;
@@ -2874,6 +2888,11 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			    errorOr(getCommitProxiesAndMetrics(db, address_workers));
 			state Future<ErrorOr<std::vector<std::pair<GrvProxyInterface, EventMap>>>> grvProxyFuture =
 			    errorOr(getGrvProxiesAndMetrics(db, address_workers));
+			state Future<ErrorOr<std::vector<BlobWorkerInterface>>> blobWorkersFuture;
+
+			if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+				blobWorkersFuture = errorOr(timeoutError(getBlobWorkers(cx, true), 5.0));
+			}
 
 			state int minStorageReplicasRemaining = -1;
 			state int fullyReplicatedRegions = -1;
@@ -2990,6 +3009,18 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				messages.push_back(
 				    JsonBuilder::makeMessage("grv_proxies_error", "Timed out trying to retrieve grv proxies."));
 			}
+
+			// ...also blob workers
+			if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+				ErrorOr<std::vector<BlobWorkerInterface>> _blobWorkers = wait(blobWorkersFuture);
+				if (_blobWorkers.present()) {
+					blobWorkers = _blobWorkers.get();
+				} else {
+					messages.push_back(
+					    JsonBuilder::makeMessage("blob_workers_error", "Timed out trying to retrieve blob workers."));
+				}
+			}
+
 			wait(waitForAll(warningFutures));
 		} else {
 			// Set layers status to { _valid: false, error: "configurationMissing"}
@@ -3013,6 +3044,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		                              tLogs,
 		                              commitProxies,
 		                              grvProxies,
+		                              blobWorkers,
 		                              coordinators,
 		                              cx,
 		                              configuration,
@@ -3276,7 +3308,7 @@ JsonBuilderObject randomDocument(const std::vector<std::string>& strings, int& l
 	return r;
 }
 
-TEST_CASE("/status/json/builderPerf") {
+TEST_CASE("Lstatus/json/builderPerf") {
 	std::vector<std::string> strings;
 	int c = 1000000;
 	printf("Generating random strings\n");
@@ -3330,16 +3362,16 @@ TEST_CASE("/status/json/builderPerf") {
 	}
 
 	double elapsed = generated + serialized;
-	printf("RESULT: %" PRId64
-	       " bytes  %d elements  %d levels  %f seconds (%f gen, %f serialize)  %f MB/s  %f items/s\n",
-	       bytes,
-	       iterations * elements,
-	       level,
-	       elapsed,
-	       generated,
-	       elapsed - generated,
-	       bytes / elapsed / 1e6,
-	       iterations * elements / elapsed);
+	fmt::print("RESULT: {0}"
+	           " bytes  {1} elements  {2} levels  {3} seconds ({4} gen, {5} serialize)  {6} MB/s  {7} items/s\n",
+	           bytes,
+	           iterations * elements,
+	           level,
+	           elapsed,
+	           generated,
+	           elapsed - generated,
+	           bytes / elapsed / 1e6,
+	           iterations * elements / elapsed);
 
 	return Void();
 }

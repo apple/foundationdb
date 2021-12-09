@@ -284,15 +284,49 @@ struct CompoundWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		std::vector<Future<Void>> all;
 		all.reserve(workloads.size());
-		for (int w = 0; w < workloads.size(); w++)
-			all.push_back(workloads[w]->start(cx));
+		auto wCount = std::make_shared<unsigned>(0);
+		for (int i = 0; i < workloads.size(); i++) {
+			std::string workloadName = workloads[i]->description();
+			++(*wCount);
+			TraceEvent("WorkloadRunStatus")
+			    .detail("Name", workloadName)
+			    .detail("Count", *wCount)
+			    .detail("Phase", "Start");
+			all.push_back(fmap(
+			    [workloadName, wCount](Void value) {
+				    --(*wCount);
+				    TraceEvent("WorkloadRunStatus")
+				        .detail("Name", workloadName)
+				        .detail("Remaining", *wCount)
+				        .detail("Phase", "End");
+				    return Void();
+			    },
+			    workloads[i]->start(cx)));
+		}
 		return waitForAll(all);
 	}
 	Future<bool> check(Database const& cx) override {
 		std::vector<Future<bool>> all;
 		all.reserve(workloads.size());
-		for (int w = 0; w < workloads.size(); w++)
-			all.push_back(workloads[w]->check(cx));
+		auto wCount = std::make_shared<unsigned>(0);
+		for (int i = 0; i < workloads.size(); i++) {
+			++(*wCount);
+			std::string workloadName = workloads[i]->description();
+			TraceEvent("WorkloadCheckStatus")
+			    .detail("Name", workloadName)
+			    .detail("Count", *wCount)
+			    .detail("Phase", "Start");
+			all.push_back(fmap(
+			    [workloadName, wCount](bool ret) {
+				    --(*wCount);
+				    TraceEvent("WorkloadCheckStatus")
+				        .detail("Name", workloadName)
+				        .detail("Remaining", *wCount)
+				        .detail("Phase", "End");
+				    return true;
+			    },
+			    workloads[i]->check(cx)));
+		}
 		return allTrue(all);
 	}
 	void getMetrics(std::vector<PerfMetric>& m) override {
@@ -422,7 +456,7 @@ void printSimulatedTopology() {
 			printf("%smachineId: %s\n", indent.c_str(), p->locality.describeMachineId().c_str());
 		}
 		indent += "  ";
-		printf("%sAddress: %s\n", indent.c_str(), p->address.toString().c_str(), p->name);
+		printf("%sAddress: %s\n", indent.c_str(), p->address.toString().c_str());
 		indent += "  ";
 		printf("%sClass: %s\n", indent.c_str(), p->startingClass.toString().c_str());
 		printf("%sName: %s\n", indent.c_str(), p->name);
@@ -599,7 +633,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 }
 
 ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
-                                        Reference<ClusterConnectionFile> ccf,
+                                        Reference<IClusterConnectionRecord> ccr,
                                         Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
                                         LocalityData locality) {
 	state WorkloadInterface workIface;
@@ -614,7 +648,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 		startRole(Role::TESTER, workIface.id(), UID(), details);
 
 		if (work.useDatabase) {
-			cx = Database::createDatabase(ccf, -1, IsInternal::True, locality);
+			cx = Database::createDatabase(ccr, -1, IsInternal::True, locality);
 			wait(delay(1.0));
 		}
 
@@ -658,7 +692,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 }
 
 ACTOR Future<Void> testerServerCore(TesterInterface interf,
-                                    Reference<ClusterConnectionFile> ccf,
+                                    Reference<IClusterConnectionRecord> ccr,
                                     Reference<AsyncVar<struct ServerDBInfo> const> dbInfo,
                                     LocalityData locality) {
 	state PromiseStream<Future<Void>> addWorkload;
@@ -668,7 +702,7 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 	loop choose {
 		when(wait(workerFatalError)) {}
 		when(WorkloadRequest work = waitNext(interf.recruitments.getFuture())) {
-			addWorkload.send(testerServerWorkload(work, ccf, dbInfo, locality));
+			addWorkload.send(testerServerWorkload(work, ccr, dbInfo, locality));
 		}
 	}
 }
@@ -1439,7 +1473,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		cx = openDBOnServer(dbInfo);
 	}
 
-	state Future<Void> disabler = disableConnectionFailuresAfter(450, "Tester");
+	state Future<Void> disabler = disableConnectionFailuresAfter(FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, "Tester");
 
 	// Change the configuration (and/or create the database) if necessary
 	printf("startingConfiguration:%s start\n", startingConfiguration.toString().c_str());
@@ -1583,8 +1617,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
  * functionality. Its main purpose is to generate the test specification from passed arguments and then call into the
  * correct actor which will orchestrate the actual test.
  *
- * \param connFile A cluster connection file. Not all tests require a functional cluster but all tests require
- * a cluster file.
+ * \param connRecord A cluster connection record. Not all tests require a functional cluster but all tests require
+ * a cluster record.
  * \param whatToRun TEST_TYPE_FROM_FILE to read the test description from a passed toml file or
  * TEST_TYPE_CONSISTENCY_CHECK to generate a test spec for consistency checking
  * \param at TEST_HERE: this process will act as a test client and execute the given workload. TEST_ON_SERVERS: Run a
@@ -1600,7 +1634,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
  *
  * \returns A future which will be set after all tests finished.
  */
-ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
+ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
                             test_type_t whatToRun,
                             test_location_t at,
                             int minTestersExpected,
@@ -1612,8 +1646,8 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
 	auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
 	std::vector<Future<Void>> actors;
-	if (connFile) {
-		actors.push_back(reportErrors(monitorLeader(connFile, cc), "MonitorLeader"));
+	if (connRecord) {
+		actors.push_back(reportErrors(monitorLeader(connRecord, cc), "MonitorLeader"));
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
 	}
 
@@ -1688,7 +1722,7 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 		std::vector<TesterInterface> iTesters(1);
 		actors.push_back(
 		    reportErrors(monitorServerDBInfo(cc, LocalityData(), db), "MonitorServerDBInfo")); // FIXME: Locality
-		actors.push_back(reportErrors(testerServerCore(iTesters[0], connFile, db, locality), "TesterServerCore"));
+		actors.push_back(reportErrors(testerServerCore(iTesters[0], connRecord, db, locality), "TesterServerCore"));
 		tests = runTests(cc, ci, iTesters, testSpecs, startingConfiguration, locality);
 	} else {
 		tests = reportErrors(runTests(cc, ci, testSpecs, at, minTestersExpected, startingConfiguration, locality),
@@ -1702,4 +1736,71 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 			throw internal_error();
 		}
 	}
+}
+
+namespace {
+ACTOR Future<Void> testExpectedErrorImpl(Future<Void> test,
+                                         const char* testDescr,
+                                         Optional<Error> expectedError,
+                                         Optional<bool*> successFlag,
+                                         std::map<std::string, std::string> details,
+                                         Optional<Error> throwOnError,
+                                         UID id) {
+	state Error actualError;
+	try {
+		wait(test);
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		actualError = e;
+		// The test failed as expected
+		if (!expectedError.present() || actualError.code() == expectedError.get().code()) {
+			return Void();
+		}
+	}
+
+	// The test has failed
+	if (successFlag.present()) {
+		*(successFlag.get()) = false;
+	}
+	TraceEvent evt(SevError, "TestErrorFailed", id);
+	evt.detail("TestDescription", testDescr);
+	if (expectedError.present()) {
+		evt.detail("ExpectedError", expectedError.get().name());
+		evt.detail("ExpectedErrorCode", expectedError.get().code());
+	}
+	if (actualError.isValid()) {
+		evt.detail("ActualError", actualError.name());
+		evt.detail("ActualErrorCode", actualError.code());
+	} else {
+		evt.detail("Reason", "Unexpected success");
+	}
+
+	// Make sure that no duplicate details were provided
+	ASSERT(details.count("TestDescription") == 0);
+	ASSERT(details.count("ExpectedError") == 0);
+	ASSERT(details.count("ExpectedErrorCode") == 0);
+	ASSERT(details.count("ActualError") == 0);
+	ASSERT(details.count("ActualErrorCode") == 0);
+	ASSERT(details.count("Reason") == 0);
+
+	for (auto& p : details) {
+		evt.detail(p.first.c_str(), p.second);
+	}
+	if (throwOnError.present()) {
+		throw throwOnError.get();
+	}
+	return Void();
+}
+} // namespace
+
+Future<Void> testExpectedError(Future<Void> test,
+                               const char* testDescr,
+                               Optional<Error> expectedError,
+                               Optional<bool*> successFlag,
+                               std::map<std::string, std::string> details,
+                               Optional<Error> throwOnError,
+                               UID id) {
+	return testExpectedErrorImpl(test, testDescr, expectedError, successFlag, details, throwOnError, id);
 }
