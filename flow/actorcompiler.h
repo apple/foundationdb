@@ -73,3 +73,10 @@ T waitNext(const FutureStream<T>&);
 #ifdef _MSC_VER
 #pragma warning(disable : 4355) // 'this' : used in base member initializer list
 #endif
+
+// Currently, #ifdef can't be used inside actors, so define no-op versions of these valgrind
+// functions if valgrind is not defined
+#ifndef VALGRIND
+#define VALGRIND_MAKE_MEM_UNDEFINED(x, y)
+#define VALGRIND_MAKE_MEM_DEFINED(x, y)
+#endif

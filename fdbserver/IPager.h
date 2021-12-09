@@ -31,14 +31,10 @@
 #define XXH_INLINE_ALL
 #include "flow/xxhash.h"
 
-#ifndef VALGRIND
-#define VALGRIND_MAKE_MEM_UNDEFINED(x, y)
-#define VALGRIND_MAKE_MEM_DEFINED(x, y)
-#endif
-
 typedef uint32_t LogicalPageID;
 typedef uint32_t PhysicalPageID;
 #define invalidLogicalPageID std::numeric_limits<LogicalPageID>::max()
+#define invalidPhysicalPageID std::numeric_limits<PhysicalPageID>::max()
 
 typedef uint32_t QueueID;
 #define invalidQueueID std::numeric_limits<QueueID>::max()
@@ -113,8 +109,10 @@ public:
 		if (bufferSize > 0) {
 			buffer = (uint8_t*)arena.allocate4kAlignedBuffer(bufferSize);
 
+#ifdef VALGRIND
 			// Mark any unused page portion defined
 			VALGRIND_MAKE_MEM_DEFINED(buffer + logicalSize, bufferSize - logicalSize);
+#endif
 		} else {
 			buffer = nullptr;
 		}
@@ -231,6 +229,7 @@ public:
 
 	// Initialize the header for a new page to be populated soon and written to disk
 	void init(EncodingType t, PageType pageType, uint8_t pageSubType) {
+		encodingType = t;
 		Reader next{ buffer };
 		VersionHeader* vh = next;
 		// Only the latest header version is written.
@@ -249,7 +248,7 @@ public:
 			throw unsupported_format_version();
 		}
 
-		next.skip<XXH64_hash_t>();
+		next.skip<Footer>();
 
 		pUsable = next;
 		usableSize = logicalSize - (pUsable - buffer);
@@ -257,7 +256,7 @@ public:
 
 	// Get the usable size for a new page of pageSize using HEADER_WRITE_VERSION with encoding type t
 	static int getUsableSize(int pageSize, EncodingType t) {
-		int usable = pageSize - sizeof(VersionHeader) - sizeof(Header) - sizeof(XXH64_hash_t);
+		int usable = pageSize - sizeof(VersionHeader) - sizeof(Header) - sizeof(Footer);
 
 		if (t == EncodingType::XXHash64) {
 			usable -= sizeof(XXHashEncodingHeader);
@@ -277,6 +276,14 @@ public:
 		ArenaPage* p = new ArenaPage(logicalSize, bufferSize);
 		memcpy(p->buffer, buffer, logicalSize);
 		p->pUsable = p->buffer + (pUsable - buffer);
+		p->usableSize = usableSize;
+
+		p->encodingType = encodingType;
+		if (encodingType == EncodingType::XOREncryption) {
+			p->xorKeyID = xorKeyID;
+			p->xorKeySecret = xorKeySecret;
+		}
+
 		return Reference<ArenaPage>(p);
 	}
 
@@ -298,6 +305,12 @@ public:
 
 		Header* h = next;
 		h->firstPhysicalPageID = pageID;
+		h->writeTime = now();
+
+		// TODO:  Update these when possible.
+		h->lastKnownLogicalPageID = invalidLogicalPageID;
+		h->lastKnownParentID = invalidLogicalPageID;
+		h->writeVersion = invalidVersion;
 
 		if (vh->encodingType == EncodingType::XXHash64) {
 			XXHashEncodingHeader* xh = next;
@@ -367,6 +380,7 @@ private:
 	uint8_t* pUsable;
 	int usableSize;
 
+	EncodingType encodingType;
 	// Encoding-specific secrets
 	uint8_t xorKeyID;
 	uint8_t xorKeySecret;
