@@ -7379,10 +7379,15 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 				if (nextOut.back().version < results->lastReturnedVersion.get()) {
 					printf("ERROR: merge cursor pushing next out <= lastReturnedVersion");
 				}
-				ASSERT(nextOut.back().version >= results->lastReturnedVersion.get());
-				results->mutations.send(nextOut);
-				wait(results->mutations.onEmpty());
-				wait(delay(0));
+				// We can get an empty version pushed through the stream if whenAtLeast is called. Ignore
+				// it
+				ASSERT(nextOut.size() == 1);
+				if (!nextOut.back().mutations.empty()) {
+					ASSERT(nextOut.back().version >= results->lastReturnedVersion.get());
+					results->mutations.send(nextOut);
+					wait(results->mutations.onEmpty());
+					wait(delay(0));
+				}
 				if (DEBUG_CF_VERSION(nextOut.back().version)) {
 					fmt::print("CFLR (merged): {0} (1)\n", nextOut.back().version);
 				}
