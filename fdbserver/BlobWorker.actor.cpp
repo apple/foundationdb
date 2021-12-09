@@ -1889,6 +1889,10 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	     metadata->durableDeltaVersion.get() == metadata->pendingDeltaVersion) &&
 	    (v <= metadata->durableSnapshotVersion.get() ||
 	     metadata->durableSnapshotVersion.get() == metadata->pendingSnapshotVersion)) {
+		// TODO REMOVE debugging
+		if (v > metadata->waitForVersionReturned) {
+			metadata->waitForVersionReturned = v;
+		}
 		if (v == DEBUG_BW_WAIT_VERSION) {
 			fmt::print("{0}) already done\n", v);
 		}

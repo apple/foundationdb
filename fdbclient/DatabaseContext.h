@@ -174,6 +174,7 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	std::vector<Reference<ChangeFeedStorageData>> storageData;
 	AsyncVar<int> notAtLatest;
 	Promise<Void> refresh;
+	Version maxSeenVersion;
 
 	ChangeFeedData() : notAtLatest(1) {}
 };

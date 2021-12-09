@@ -7063,16 +7063,17 @@ Reference<ChangeFeedStorageData> DatabaseContext::getStorageData(StorageServerIn
 }
 
 Version ChangeFeedData::getVersion() {
-	// TODO uncomment?
-	if (notAtLatest.get() == 0 && mutations.isEmpty() /*& storageData.size() > 0*/) {
-		Version v = storageData[0]->version.get();
-		for (int i = 1; i < storageData.size(); i++) {
-			if (storageData[i]->version.get() < v) {
-				v = storageData[i]->version.get();
-			}
-		}
-		return std::max(v, lastReturnedVersion.get());
+	// FIXME: add back in smarter version check later
+	/*if (notAtLatest.get() == 0 && mutations.isEmpty()) {
+	    Version v = storageData[0]->version.get();
+	    for (int i = 1; i < storageData.size(); i++) {
+	        if (storageData[i]->version.get() < v) {
+	            v = storageData[i]->version.get();
+	        }
+	    }
+	    return std::max(v, lastReturnedVersion.get());
 	}
+	*/
 	return lastReturnedVersion.get();
 }
 
@@ -7131,16 +7132,31 @@ ACTOR Future<Void> changeFeedWaitLatest(ChangeFeedData* self, Version version) {
 	}
 
 	// then, wait for client to have consumed up through version
-	while (!self->mutations.isEmpty()) {
+	if (self->maxSeenVersion >= version) {
+		// merge cursor has something buffered but has not yet sent it to self->mutations, just wait for
+		// lastReturnedVersion
 		if (DEBUG_CF_WAIT_VERSION == version) {
-			fmt::print("CFW {0})     WaitLatest: waiting for client onEmpty\n", version);
+			fmt::print("CFW {0})     WaitLatest: maxSeenVersion -> waiting lastReturned\n", version);
 		}
-		wait(self->mutations.onEmpty());
-		wait(delay(0));
-	}
 
-	if (DEBUG_CF_WAIT_VERSION == version) {
-		fmt::print("CFW {0})     WaitLatest: done\n", version);
+		wait(self->lastReturnedVersion.whenAtLeast(version));
+
+		if (DEBUG_CF_WAIT_VERSION == version) {
+			fmt::print("CFW {0})     WaitLatest: maxSeenVersion -> got lastReturned\n", version);
+		}
+	} else {
+		// all mutations <= version are in self->mutations, wait for empty
+		while (!self->mutations.isEmpty()) {
+			if (DEBUG_CF_WAIT_VERSION == version) {
+				fmt::print("CFW {0})     WaitLatest: waiting for client onEmpty\n", version);
+			}
+			wait(self->mutations.onEmpty());
+			wait(delay(0));
+		}
+
+		if (DEBUG_CF_WAIT_VERSION == version) {
+			fmt::print("CFW {0})     WaitLatest: done\n", version);
+		}
 	}
 
 	return Void();
@@ -7242,6 +7258,9 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
 						}
 						resultLoc++;
 					}
+					if (rep.mutations.back().version > feedData->maxSeenVersion) {
+						feedData->maxSeenVersion = rep.mutations.back().version;
+					}
 					nextVersion = rep.mutations.back().version + 1;
 
 					if (!atLatestVersion && rep.atLatestVersion) {
@@ -7317,6 +7336,7 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 			db->changeFeedUpdaters.erase(it->id);
 		}
 	}
+	results->maxSeenVersion = invalidVersion;
 	results->storageData.clear();
 	Promise<Void> refresh = results->refresh;
 	results->refresh = Promise<Void>();
@@ -7354,6 +7374,10 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 				*begin = checkVersion + 1;
 				if (DEBUG_CF_VERSION(nextOut.back().version)) {
 					fmt::print("CFNA (merged): {0} (1)\n", nextOut.back().version);
+				}
+
+				if (nextOut.back().version < results->lastReturnedVersion.get()) {
+					printf("ERROR: merge cursor pushing next out <= lastReturnedVersion");
 				}
 				ASSERT(nextOut.back().version >= results->lastReturnedVersion.get());
 				results->mutations.send(nextOut);
@@ -7532,6 +7556,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				}
 				results->streams.push_back(interf.changeFeedStream.getReplyStream(req));
 
+				results->maxSeenVersion = invalidVersion;
 				results->storageData.clear();
 				results->storageData.push_back(db->getStorageData(interf));
 				Promise<Void> refresh = results->refresh;
