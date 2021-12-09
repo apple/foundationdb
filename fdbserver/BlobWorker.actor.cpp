@@ -1909,7 +1909,7 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 		ASSERT(metadata->durableDeltaVersion.get() >= pendingDeltaV);
 
 		if (v == DEBUG_BW_WAIT_VERSION) {
-			fmt::print("{0}) waiting for DDV {1} >= {2}\n", v, metadata->durableDeltaVersion.get(), pendingDeltaV);
+			fmt::print("{0}) got DDV {1} >= {2}\n", v, metadata->durableDeltaVersion.get(), pendingDeltaV);
 		}
 	}
 
@@ -1924,8 +1924,7 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 		ASSERT(metadata->durableSnapshotVersion.get() >= pendingSnapshotV);
 
 		if (v == DEBUG_BW_WAIT_VERSION) {
-			fmt::print(
-			    "{0}) waiting for DSV {1} >= {2}\n", v, metadata->durableSnapshotVersion.get(), pendingSnapshotV);
+			fmt::print("{0}) got DSV {1} >= {2}\n", v, metadata->durableSnapshotVersion.get(), pendingSnapshotV);
 		}
 	}
 
@@ -1933,7 +1932,7 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	// kick off another delta file and roll the mutations. In that case, we must return the new delta
 	// file instead of in memory mutations, so we wait for that delta file to complete
 
-	if (metadata->pendingDeltaVersion > v) {
+	if (metadata->pendingDeltaVersion >= v) {
 		if (v == DEBUG_BW_WAIT_VERSION) {
 			fmt::print("{0}) waiting for DDV again {1} < {2}\n", v, metadata->durableDeltaVersion.get(), v);
 		}
@@ -1942,7 +1941,7 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 		ASSERT(metadata->durableDeltaVersion.get() >= v);
 
 		if (v == DEBUG_BW_WAIT_VERSION) {
-			fmt::print("{0}) waiting for DDV again {1} >= {2}\n", v, metadata->durableDeltaVersion.get(), v);
+			fmt::print("{0}) got DDV again {1} >= {2}\n", v, metadata->durableDeltaVersion.get(), v);
 		}
 	}
 
