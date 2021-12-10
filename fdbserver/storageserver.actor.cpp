@@ -232,6 +232,8 @@ struct StorageServerDisk {
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
 
+	RateCounter* kvThroughput;
+
 private:
 	struct StorageServer* data;
 	IKeyValueStore* storage;
@@ -798,6 +800,7 @@ public:
 
 		// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
 		// and cleared from the memory, we do not subtract it but add it to bytesDurable.
+		// It represents the footprint in RAM, not the logical data size.
 		Counter bytesInput;
 		// Bytes of the mutations that have been removed from memory because they durable. The counting is same as
 		// bytesInput, instead of the actual bytes taken in the storages, so that (bytesInput - bytesDurable) can
@@ -810,9 +813,17 @@ public:
 		// and the lengths of both parameters.
 		Counter mutationBytes;
 
+		// Similar to mutationBytes, it counts the size of the serialized key and value for each mutation.
+		Counter logicalInputBytes;
+
+		// Bytes fetched from TLogs for moving-in shard.
+		Counter logicalMoveOverheadBytes;
+
 		Counter sampledBytesCleared;
 		// The number of key-value pairs fetched by fetchKeys()
 		Counter kvFetched;
+		// The throuput of the storage engine.
+		RateCounter kvThroughput;
 		Counter mutations, setMutations, clearRangeMutations, atomicMutations;
 		Counter updateBatches, updateVersions;
 		Counter loops;
@@ -837,16 +848,18 @@ public:
 		    lowPriorityQueries("LowPriorityQueries", cc), rowsQueried("RowsQueried", cc),
 		    bytesQueried("BytesQueried", cc), watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc),
 		    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), bytesFetched("BytesFetched", cc),
-		    mutationBytes("MutationBytes", cc), sampledBytesCleared("SampledBytesCleared", cc),
-		    kvFetched("KVFetched", cc), mutations("Mutations", cc), setMutations("SetMutations", cc),
-		    clearRangeMutations("ClearRangeMutations", cc), atomicMutations("AtomicMutations", cc),
-		    updateBatches("UpdateBatches", cc), updateVersions("UpdateVersions", cc), loops("Loops", cc),
-		    fetchWaitingMS("FetchWaitingMS", cc), fetchWaitingCount("FetchWaitingCount", cc),
-		    fetchExecutingMS("FetchExecutingMS", cc), fetchExecutingCount("FetchExecutingCount", cc),
-		    readsRejected("ReadsRejected", cc), wrongShardServer("WrongShardServer", cc),
-		    fetchedVersions("FetchedVersions", cc), fetchesFromLogs("FetchesFromLogs", cc),
-		    quickGetValueHit("QuickGetValueHit", cc), quickGetValueMiss("QuickGetValueMiss", cc),
-		    quickGetKeyValuesHit("QuickGetKeyValuesHit", cc), quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc),
+		    mutationBytes("MutationBytes", cc), logicalInputBytes("LogicalInputBytes", cc),
+		    logicalMoveOverheadBytes("LogicalMoveOverheadBytes", cc), sampledBytesCleared("SampledBytesCleared", cc),
+		    kvFetched("KVFetched", cc), kvThroughput("KeyValueStoreThroughput", cc), mutations("Mutations", cc),
+		    setMutations("SetMutations", cc), clearRangeMutations("ClearRangeMutations", cc),
+		    atomicMutations("AtomicMutations", cc), updateBatches("UpdateBatches", cc),
+		    updateVersions("UpdateVersions", cc), loops("Loops", cc), fetchWaitingMS("FetchWaitingMS", cc),
+		    fetchWaitingCount("FetchWaitingCount", cc), fetchExecutingMS("FetchExecutingMS", cc),
+		    fetchExecutingCount("FetchExecutingCount", cc), readsRejected("ReadsRejected", cc),
+		    wrongShardServer("WrongShardServer", cc), fetchedVersions("FetchedVersions", cc),
+		    fetchesFromLogs("FetchesFromLogs", cc), quickGetValueHit("QuickGetValueHit", cc),
+		    quickGetValueMiss("QuickGetValueMiss", cc), quickGetKeyValuesHit("QuickGetKeyValuesHit", cc),
+		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc),
 		    readLatencySample("ReadLatencyMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -928,6 +941,7 @@ public:
 		addShard(ShardInfo::newNotAssigned(allKeys));
 
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
+		this->storage.kvThroughput = &counters.kvThroughput;
 	}
 
 	//~StorageServer() { fclose(log); }
@@ -4415,6 +4429,8 @@ AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys)
 }
 
 void AddingShard::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
+	// Record the traffic of data move updates overhead.
+	server->counters.logicalMoveOverheadBytes += mutation.expectedSize();
 	if (mutation.type == mutation.ClearRange) {
 		ASSERT(keys.begin <= mutation.param1 && mutation.param2 <= keys.end);
 	} else if (isSingleKeyMutation((MutationRef::Type)mutation.type)) {
@@ -5288,6 +5304,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					updater.applyMutation(data, msg, ver, false);
 					mutationBytes += msg.totalSize();
 					data->counters.mutationBytes += msg.totalSize();
+					data->counters.logicalInputBytes += msg.expectedSize();
 					++data->counters.mutations;
 					switch (msg.type) {
 					case MutationRef::SetValue:
@@ -5509,7 +5526,10 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME));
-		data->storageCommitLatencyHistogram->sampleSeconds(now() - beforeStorageCommit);
+		const double commitDuration = now() - beforeStorageCommit;
+		data->counters.kvThroughput.setInterval(commitDuration);
+		data->counters.kvThroughput.resetInterval();
+		data->storageCommitLatencyHistogram->sampleSeconds(commitDuration);
 
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
@@ -5639,14 +5659,17 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 }
 
 void StorageServerDisk::clearRange(KeyRangeRef keys) {
+	kvThroughput->add(keys.expectedSize());
 	storage->clear(keys);
 }
 
 void StorageServerDisk::writeKeyValue(KeyValueRef kv) {
+	kvThroughput->add(kv.expectedSize());
 	storage->set(kv);
 }
 
 void StorageServerDisk::writeMutation(MutationRef mutation) {
+	kvThroughput->add(mutation.expectedSize());
 	if (mutation.type == MutationRef::SetValue) {
 		storage->set(KeyValueRef(mutation.param1, mutation.param2));
 	} else if (mutation.type == MutationRef::ClearRange) {
@@ -5661,8 +5684,10 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
 	for (const auto& m : mutations) {
 		DEBUG_MUTATION(debugContext, debugVersion, m, data->thisServerID);
 		if (m.type == MutationRef::SetValue) {
+			kvThroughput->add(m.expectedSize());
 			storage->set(KeyValueRef(m.param1, m.param2));
 		} else if (m.type == MutationRef::ClearRange) {
+			kvThroughput->add(m.expectedSize());
 			storage->clear(KeyRangeRef(m.param1, m.param2));
 		}
 	}
@@ -5694,7 +5719,9 @@ bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion,
 
 // Update data->storage to persist the changes from (data->storageVersion(),version]
 void StorageServerDisk::makeVersionDurable(Version version) {
-	storage->set(KeyValueRef(persistVersion, BinaryWriter::toValue(version, Unversioned())));
+	KeyValueRef kv(persistVersion, BinaryWriter::toValue(version, Unversioned()));
+	kvThroughput->add(kv.expectedSize());
+	storage->set(kv);
 
 	// TraceEvent("MakeDurable", data->thisServerID)
 	//     .detail("FromVersion", prevStorageVersion)
