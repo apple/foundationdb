@@ -216,8 +216,8 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 		    ClientStatusInfo(req.traceLogGroup, req.supportedVersions, req.issues);
 	}
 
-	while (db->clientInfo->get().read().id == req.knownClientInfoID &&
-	       !db->clientInfo->get().read().forward.present()) {
+	while (!db->clientInfo->get().read().id.isValid() || (db->clientInfo->get().read().id == req.knownClientInfoID &&
+	                                                      !db->clientInfo->get().read().forward.present())) {
 		choose {
 			when(wait(checkStuck)) {
 				replyContents = failed_to_progress();
@@ -228,7 +228,10 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 				if (req.supportedVersions.size() > 0) {
 					db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
 				}
-				replyContents = db->clientInfo->get();
+				if (db->clientInfo->get().read().id.isValid()) {
+					replyContents = db->clientInfo->get();
+				}
+				// Otherwise, we still break out of the loop and return a default_error_or.
 				break;
 			} // The client might be long gone!
 		}
@@ -295,7 +298,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 
 	loop choose {
 		when(OpenDatabaseCoordRequest req = waitNext(interf.openDatabase.getFuture())) {
-			if (clientData.clientInfo->get().read().id != req.knownClientInfoID &&
+			if (clientData.clientInfo->get().read().id.isValid() &&
+			    clientData.clientInfo->get().read().id != req.knownClientInfoID &&
 			    !clientData.clientInfo->get().read().forward.present()) {
 				req.reply.send(clientData.clientInfo->get());
 			} else {
