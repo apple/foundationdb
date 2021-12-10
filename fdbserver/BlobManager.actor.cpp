@@ -1871,26 +1871,28 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 						}
 
 						// TODO: debugging code, remove it
+						/*
 						if (newPruneWatchVal.get().toString().substr(0, 6) == "prune=") {
-							state Reference<ReadYourWritesTransaction> dummy =
-							    makeReference<ReadYourWritesTransaction>(self->db);
-							loop {
-								try {
-									dummy->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-									dummy->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-									std::istringstream iss(newPruneWatchVal.get().toString().substr(6));
-									Version version;
-									iss >> version;
-									dummy->set(blobGranulePruneKeys.begin.withSuffix(normalKeys.begin),
-									           blobGranulePruneValueFor(version, false));
-									wait(dummy->commit());
-									break;
+						    state Reference<ReadYourWritesTransaction> dummy =
+						        makeReference<ReadYourWritesTransaction>(self->db);
+						    loop {
+						        try {
+						            dummy->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						            dummy->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+						            std::istringstream iss(newPruneWatchVal.get().toString().substr(6));
+						            Version version;
+						            iss >> version;
+						            dummy->set(blobGranulePruneKeys.begin.withSuffix(normalKeys.begin),
+						                       blobGranulePruneValueFor(version, false));
+						            wait(dummy->commit());
+						            break;
 
-								} catch (Error& e) {
-									wait(dummy->onError(e));
-								}
-							}
+						        } catch (Error& e) {
+						            wait(dummy->onError(e));
+						        }
+						    }
 						}
+						*/
 						break;
 					}
 
