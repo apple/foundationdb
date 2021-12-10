@@ -1167,7 +1167,9 @@ ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
 	// make sure the change feed has consumed mutations up through grvVersion to ensure none of them are rollbacks
 
 	loop {
-		state Future<Void> atLeast = metadata->activeCFData.get()->whenAtLeast(grvVersion);
+		// if not valid, we're about to be cancelled anyway
+		state Future<Void> atLeast =
+		    metadata->activeCFData.get().isValid() ? metadata->activeCFData.get()->whenAtLeast(grvVersion) : Never();
 		choose {
 			when(wait(atLeast)) { break; }
 			when(wait(metadata->activeCFData.onChange())) {}
@@ -1885,6 +1887,8 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	// if we don't have to wait for change feed version to catch up or wait for any pending file writes to complete,
 	// nothing to do
 
+	ASSERT(metadata->activeCFData.get().isValid());
+
 	if (v == DEBUG_BW_WAIT_VERSION) {
 		fmt::print("{0}) [{1} - {2}) waiting for {3}\n  readable:{4}\n  bufferedDelta={5}\n  pendingDelta={6}\n  "
 		           "durableDelta={7}\n  pendingSnapshot={8}\n  durableSnapshot={9}\n",
@@ -1899,8 +1903,6 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 		           metadata->pendingSnapshotVersion,
 		           metadata->durableSnapshotVersion.get());
 	}
-
-	ASSERT(metadata->activeCFData.get().isValid());
 
 	if (v <= metadata->activeCFData.get()->getVersion() &&
 	    (v <= metadata->durableDeltaVersion.get() ||
