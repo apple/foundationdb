@@ -38,7 +38,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( MAX_COMMIT_BATCH_INTERVAL,                             2.0 ); if( randomize && BUGGIFY ) MAX_COMMIT_BATCH_INTERVAL = 0.5; // Each commit proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
 	MAX_COMMIT_BATCH_INTERVAL = std::min(MAX_COMMIT_BATCH_INTERVAL, MAX_READ_TRANSACTION_LIFE_VERSIONS/double(2*VERSIONS_PER_SECOND)); // Ensure that the proxy commits 2 times every MAX_READ_TRANSACTION_LIFE_VERSIONS, otherwise the master will not give out versions fast enough
 	init( ENABLE_VERSION_VECTOR,                                true );
-	init( ENABLE_VERSION_VECTOR_TLOG_UNICAST,                   true );
+	init( ENABLE_VERSION_VECTOR_TLOG_UNICAST,                  false );
 
 	// TLogs
 	init( TLOG_TIMEOUT,                                          0.4 ); //cannot buggify because of availability
