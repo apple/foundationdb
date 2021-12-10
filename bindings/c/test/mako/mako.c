@@ -70,7 +70,7 @@ FILE* debugme; /* descriptor used for debug messages */
 				/* unretryable error */                                                                                \
 				fprintf(stderr, "ERROR: fdb_transaction_on_error returned %d at %s:%d\n", err2, __FILE__, __LINE__);   \
 				fdb_transaction_reset(_t);                                                                             \
-				/* TODO: if we adda retry limit in the future,                                                         \
+				/* TODO: if we add a retry limit in the future,                                                        \
 				 *       handle the conflict stats properly.                                                           \
 				 */                                                                                                    \
 				return FDB_ERROR_ABORT;                                                                                \
@@ -101,7 +101,7 @@ FILE* debugme; /* descriptor used for debug messages */
 				/* unretryable error */                                                                                \
 				fprintf(stderr, "ERROR: fdb_transaction_on_error returned %d at %s:%d\n", err2, __FILE__, __LINE__);   \
 				fdb_transaction_reset(_t);                                                                             \
-				/* TODO: if we add a retry limit in the future,                                                         \
+				/* TODO: if we add a retry limit in the future,                                                        \
 				 *       handle the conflict stats properly.                                                           \
 				 */                                                                                                    \
 				return FDB_ERROR_ABORT;                                                                                \
