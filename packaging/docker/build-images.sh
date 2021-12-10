@@ -165,6 +165,9 @@ function build_and_push_images(){
     for image in "${image_list[@]}"; do
         logg "BUILDING ${image}"
         image_tag="${tag_base}${image}:${fdb_version}"
+        if [ -n "${tag_postfix+x}" ]; then
+            image_tag="${tag_base}${image}:${fdb_version}-${tag_postfix}"
+        fi
         if [ "${image}" == "foundationdb-kubernetes-sidecar" ]; then
             image_tag="${image_tag}-1"
         fi
@@ -256,6 +259,7 @@ if [ -n "${OKTETO_NAMESPACE+x}" ]; then
     fdb_library_versions=( "${fdb_version}" )
     registry="${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com"
     tag_base="${registry}/foundationdb/"
+    tag_postfix="${OKTETO_NAME:-dev}"
     stripped_binaries_and_from_where="unstripped_local" # MUST BE ONE OF ( "unstripped_artifactory" "stripped_artifactory" "unstripped_local" "stripped_local" )
     dockerfile_name="Dockerfile.eks"
     use_development_java_bindings="true"
