@@ -203,14 +203,20 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 }
 
 void DatabaseContext::updateCachedRV(double t, Version v) {
-	if (t > lastTimedGrv && v >= cachedRv) {
+	if (v >= cachedRv) {
 		TraceEvent("CheckpointCacheUpdate")
 		    .detail("Version", v)
 		    .detail("CurTime", t)
 		    .detail("LastVersion", cachedRv)
 		    .detail("LastTime", lastTimedGrv);
 		cachedRv = v;
-		lastTimedGrv = t;
+		// Since the time is based on the start of the request, it's possible that we
+		// get a newer version with an older time.
+		// (Request started earlier, but was latest to reach the proxy)
+		// Only update time when strictly increasing (?)
+		if (t > lastTimedGrv) {
+			lastTimedGrv = t;
+		}
 	}
 }
 
@@ -5338,15 +5344,18 @@ ACTOR static Future<Void> tryCommit(Database cx,
 			}
 			when(CommitID ci = wait(reply)) {
 				Version v = ci.version;
-				if (cx->rvCacheGeneration != tr->getRvGeneration()) {
-					cx->invalidateRvCache();
-				} else {
-					cx->updateCachedRV(grvTime, v);
-				}
 				if (v != invalidVersion) {
 					if (CLIENT_BUGGIFY) {
 						throw commit_unknown_result();
 					}
+					// TraceEvent("CheckpointSideband1");
+					// if (cx->rvCacheGeneration != tr->getRvGeneration()) {
+					// 	TraceEvent("CheckpointSideband1.1");
+					// 	cx->invalidateRvCache();
+					// } else {
+					TraceEvent("CheckpointSideband1.2");
+					cx->updateCachedRV(grvTime, v);
+					// }
 					if (info.debugID.present())
 						TraceEvent(interval.end()).detail("CommittedVersion", v);
 					*pCommittedVersion = v;
@@ -5411,6 +5420,7 @@ ACTOR static Future<Void> tryCommit(Database cx,
 	} catch (Error& e) {
 		if (e.code() == error_code_request_maybe_delivered || e.code() == error_code_commit_unknown_result) {
 			// We don't know if the commit happened, and it might even still be in flight.
+			TraceEvent("DebugSidebandCommitUnknownResult");
 
 			// Advance the cached RV generation to create a time boundary where a commit (possibly) failed.
 			cx->rvCacheGeneration++;
@@ -6048,14 +6058,15 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		if (!CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && !options.skipGrvCache &&
 		    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE || options.useGrvCache) &&
 		    rkThrottlingCooledDown(getDatabase().getPtr())) {
-			TraceEvent("DebugGrvUseCache")
-			    .detail("LastRV", cx->cachedRv)
-			    .detail("LastTime", format("%.6f", cx->lastTimedGrv));
+			TraceEvent("DebugGrvEnterCachePath");
 			// Upon our first request to use cached RVs, start the background updater
 			if (!cx->grvUpdateHandler.isValid()) {
 				cx->grvUpdateHandler = backgroundGrvUpdater(getDatabase().getPtr());
 			}
-			if (now() - cx->lastTimedGrv <= CLIENT_KNOBS->MAX_VERSION_CACHE_LAG) {
+			if (now() - cx->lastTimedGrv <= CLIENT_KNOBS->MAX_VERSION_CACHE_LAG && cx->cachedRv != Version(0)) {
+				TraceEvent("DebugGrvUseCache")
+				    .detail("LastRV", cx->cachedRv)
+				    .detail("LastTime", format("%.6f", cx->lastTimedGrv));
 				readVersion = cx->cachedRv;
 				return readVersion;
 			} // else go through regular GRV path
@@ -6137,6 +6148,8 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		                                 startTime,
 		                                 metadataVersion,
 		                                 options.tags);
+	} else {
+		TraceEvent("DebugGrvValidRv");
 	}
 	return readVersion;
 }
