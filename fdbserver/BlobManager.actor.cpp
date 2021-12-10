@@ -1694,7 +1694,7 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 			if (BM_DEBUG) {
 				printf("Granule %s will be partially deleted\n", currHistoryNode.granuleID.toString().c_str());
 			}
-			toPartiallyDelete.push_back({ currHistoryNode.granuleID, currHistoryNode.contents().});
+			toPartiallyDelete.push_back({ currHistoryNode.granuleID });
 		}
 
 		// add all of the node's parents to the queue
