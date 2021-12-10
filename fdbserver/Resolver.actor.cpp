@@ -72,7 +72,9 @@ public:
 
 	// Adds state transactions between two versions to the reply message.
 	// Returns if shardChanged has ever happened for these versions.
-	bool addStateTransactions(ResolveTransactionBatchReply* reply, Version firstUnseenVersion, Version commitVersion) {
+	[[nodiscard]] bool applyStateTxnsToBatchReply(ResolveTransactionBatchReply* reply,
+	                                              Version firstUnseenVersion,
+	                                              Version commitVersion) {
 		bool shardChanged = false;
 		auto stateTransactionItr = recentStateTransactions.lower_bound(firstUnseenVersion);
 		auto endItr = recentStateTransactions.lower_bound(commitVersion);
@@ -85,13 +87,17 @@ public:
 	}
 
 	bool empty() const { return recentStateTransactionSizes.empty(); }
+	// Returns the number of versions with non-empty state transactions.
 	uint32_t size() const { return recentStateTransactionSizes.size(); }
 
 	// Returns the first/smallest version of the state transactions.
+	// This can only be called when empty() returns false or size() > 0.
 	Version firstVersion() const { return recentStateTransactionSizes.front().first; }
 
+	// Records non-zero stateBytes for a version.
 	void addVersionBytes(Version commitVersion, int64_t stateBytes) {
-		recentStateTransactionSizes.emplace_back(commitVersion, stateBytes);
+		if (stateBytes > 0)
+			recentStateTransactionSizes.emplace_back(commitVersion, stateBytes);
 	}
 
 	// Returns the reference to the pair of (shardChanged, stateMutations) for the given version
@@ -349,8 +355,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		self->resolvedStateMutations += stateMutations;
 		self->resolvedStateBytes += stateBytes;
 
-		if (stateBytes > 0)
-			self->recentStateTransactionsInfo.addVersionBytes(req.version, stateBytes);
+		self->recentStateTransactionsInfo.addVersionBytes(req.version, stateBytes);
 
 		ASSERT(req.version >= firstUnseenVersion);
 		ASSERT(firstUnseenVersion >= self->debugMinRecentStateVersion);
@@ -358,7 +363,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		TEST(firstUnseenVersion == req.version); // Resolver first unseen version is current version
 
 		bool shardChanged =
-		    self->recentStateTransactionsInfo.addStateTransactions(&reply, firstUnseenVersion, req.version);
+		    self->recentStateTransactionsInfo.applyStateTxnsToBatchReply(&reply, firstUnseenVersion, req.version);
 
 		// Update group versions
 		std::set<ptxn::TLogGroupID> writtenGroups; // TLog groups been written
@@ -366,6 +371,8 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			writtenGroups.insert(req.updatedGroups.begin(), req.updatedGroups.end());
 			auto& more = toCommit.getWrittenTLogGroups();
 			writtenGroups.insert(more.begin(), more.end());
+			// If shardChanged before this commit version, the proxy may have computed
+			// the wrong set of groups, thus switching to broadcast to all groups.
 			stateTransactionsPair.first = toCommit.isShardChanged();
 			shardChanged = shardChanged || toCommit.isShardChanged();
 			reply.previousCommitVersions = self->versionTracker.updateGroups(
