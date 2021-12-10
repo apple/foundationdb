@@ -80,6 +80,8 @@ struct Notified {
 		val = std::move(r.val);
 	}
 
+	int numWaiting() { return waiting.size(); }
+
 private:
 	using Item = std::pair<ValueType, Promise<Void>>;
 	struct ItemCompare {
