@@ -853,6 +853,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			info->collection = nullptr;
 		}
 
+		storageWiggler->teamCollection = nullptr;
 		// TraceEvent("DDTeamCollectionDestructed", distributorId)
 		//    .detail("Primary", primary)
 		//    .detail("ServerTrackerDestroyed", server_info.size());
@@ -2816,6 +2817,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		if (info_vec.size() == 0) {
 			pid2server_info.erase(pid);
 		}
+		storageWiggler->removeServer(removedServer);
 
 		// Step: Remove server team that relate to removedServer
 		// Find all servers with which the removedServer shares teams
@@ -2973,24 +2975,37 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 };
 
-struct StorageWiggler : public ReferenceCounted<StorageWiggler> {
-	DDTeamCollection* teamCollection;
+StorageWiggler::StorageWiggler(DDTeamCollection* collection)
+  : teamCollection(collection), smoothed_step_duration(10.0 * 60), smoothed_round_duration(20.0 * 60) {}
 
-	// step statistics
-	uint64_t last_step_start = 0; // wall timer
-	TimerSmoother smoothed_step_duration;
-	int finished_step = 0;
-	int ongoing_step = 0;
-
-	// round statistics
-	uint64_t last_round_start = 0; // wall timer
-	TimerSmoother smoothed_round_duration;
-	int finished_round = 0;
-	int remained_step = 0;
-
-	StorageWiggler(DDTeamCollection* collection)
-	  : teamCollection(collection), smoothed_step_duration(10.0 * 60), smoothed_round_duration(20.0 * 60) {}
-};
+// add server to wiggling queue
+void StorageWiggler::addServer(const UID& serverId, const StorageMetadataType& metadata) {
+	// std::cout << "size: " << pq_handles.size() << " add " << serverId.toString() << " DC: "<< teamCollection->primary
+	// << std::endl;
+	ASSERT(!pq_handles.count(serverId));
+	pq_handles[serverId] = wiggle_pq.emplace(metadata, serverId);
+}
+void StorageWiggler::removeServer(const UID& serverId) {
+	// std::cout << "size: " << pq_handles.size() << " remove " << serverId.toString() << " DC: "<<
+	// teamCollection->primary <<std::endl;
+	//	for (auto [k, v] : pq_handles) {
+	//		std::cout << k.toString() << " ";
+	//	}
+	if(contains(serverId)) {
+		auto handle = pq_handles.at(serverId);
+		wiggle_pq.erase(handle);
+		pq_handles.erase(serverId);
+	}
+}
+void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataType& metadata) {
+	//	std::cout << "size: " << pq_handles.size() << " update " << serverId.toString()
+	//	          << " DC: " << teamCollection->primary << std::endl;
+	auto handle = pq_handles.at(serverId);
+	if ((*handle).first.expireNow == metadata.expireNow && (*handle).first.createdTime == metadata.createdTime) {
+		return;
+	}
+	wiggle_pq.update(handle, std::make_pair(metadata, serverId));
+}
 
 TCServerInfo::~TCServerInfo() {
 	if (collection && ssVersionTooFarBehind.get() && !lastKnownInterface.isTss()) {
@@ -4384,7 +4399,7 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 		state ReadYourWritesTransaction tr(teamCollection->cx);
 		loop {
 			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				Optional<Standalone<StringRef>> value = wait(tr.get(perpetualStorageWiggleKey));
 
 				if (value.present()) {
@@ -4588,6 +4603,13 @@ ACTOR Future<Void> checkStorageMetadata(DDTeamCollection* self, TCServerInfo* se
 				wait(tr->onError(e));
 				// TraceEvent("CheckStorageMetadataError").error(err);
 			}
+		}
+
+		// add server to wiggler
+		if (self->storageWiggler->contains(server->id)) {
+			self->storageWiggler->updateMetadata(server->id, data);
+		} else {
+			self->storageWiggler->addServer(server->id, data);
 		}
 	}
 	return Never();

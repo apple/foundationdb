@@ -24,6 +24,8 @@
 #elif !defined(FDBSERVER_DATA_DISTRIBUTION_ACTOR_H)
 #define FDBSERVER_DATA_DISTRIBUTION_ACTOR_H
 
+#include <boost/heap/skew_heap.hpp>
+#include <boost/heap/policies.hpp>
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/LogSystem.h"
@@ -289,7 +291,49 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
 int64_t getMaxShardSize(double dbSizeEstimate);
 
 struct DDTeamCollection;
-struct StorageWiggler;
+struct StorageWiggler : ReferenceCounted<StorageWiggler> {
+	DDTeamCollection* teamCollection;
+	// step statistics
+	uint64_t last_step_start = 0; // wall timer
+	TimerSmoother smoothed_step_duration;
+	int finished_step = 0;
+	int ongoing_step = 0;
+
+	// round statistics
+	uint64_t last_round_start = 0; // wall timer
+	TimerSmoother smoothed_round_duration;
+	int finished_round = 0;
+	int remained_step = 0;
+
+	// data structures
+	typedef std::pair<StorageMetadataType, UID> MetadataUIDP;
+	// sorted by (!expireNow, createdTime, UID), the least comes first
+	struct CompPair {
+		bool operator()(MetadataUIDP const& a, MetadataUIDP const& b) const {
+			if (a.first.expireNow == b.first.expireNow) {
+				if (a.first.createdTime == b.first.createdTime) {
+					return a.second > b.second;
+				}
+				// larger createdTime means the age is younger
+				return a.first.createdTime > b.first.createdTime;
+			}
+			// expireNow=true is greater than expireNow=false
+			return a.first.expireNow < b.first.expireNow;
+		}
+	};
+	boost::heap::skew_heap<MetadataUIDP, boost::heap::mutable_<true>, boost::heap::compare<CompPair>> wiggle_pq;
+	std::unordered_map<UID, decltype(wiggle_pq)::handle_type> pq_handles;
+
+	explicit StorageWiggler(DDTeamCollection* collection);
+	// add server to wiggling queue
+	void addServer(const UID& serverId, const StorageMetadataType& metadata);
+	// remove server from wiggling queue
+	void removeServer(const UID& serverId);
+	// update metadata and adjust priority_queue
+	void updateMetadata(const UID& serverId, const StorageMetadataType& metadata);
+	bool contains(const UID& serverId) { return pq_handles.count(serverId) > 0; }
+};
+
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
     Transaction* tr);
 
