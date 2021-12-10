@@ -200,6 +200,9 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 	PromiseStream<AssignBlobRangeRequest> granuleUpdateErrors;
 
+	Promise<Void> doGRVCheck;
+	NotifiedVersion grvVersion;
+
 	BlobWorkerData(UID id, Database db) : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
 
 	bool managerEpochOk(int64_t epoch) {
@@ -497,7 +500,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
                                            GranuleDeltas deltasToWrite,
                                            Version currentDeltaVersion,
                                            Future<BlobFileIndex> previousDeltaFileFuture,
-                                           NotifiedVersion* granuleCommittedVersion,
+                                           Future<Void> waitCommitted,
                                            Optional<std::pair<KeyRange, UID>> oldGranuleComplete) {
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
@@ -522,9 +525,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	state int numIterations = 0;
 	try {
 		// before updating FDB, wait for the delta file version to be committed and previous delta files to finish
-		if (currentDeltaVersion > granuleCommittedVersion->get()) {
-			wait(granuleCommittedVersion->whenAtLeast(currentDeltaVersion));
-		}
+		// TODO fix file leak here on error pre-transaction.
+		wait(waitCommitted);
 		BlobFileIndex prev = wait(previousDeltaFileFuture);
 		wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
 
@@ -1139,6 +1141,50 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 	return cfRollbackVersion;
 }
 
+ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
+                                        Reference<GranuleMetadata> metadata,
+                                        Version version) {
+	// TODO REMOVE debugs
+	if (version > bwData->grvVersion.get()) {
+		/*if (BW_DEBUG) {
+		    fmt::print("waitVersionCommitted waiting {0}\n", version);
+		}*/
+		// this order is important, since we need to register a waiter on the notified version before waking the GRV
+		// actor
+		Future<Void> grvAtLeast = bwData->grvVersion.whenAtLeast(version);
+		if (bwData->doGRVCheck.canBeSet()) {
+			bwData->doGRVCheck.send(Void());
+		}
+		wait(grvAtLeast);
+	}
+	state Version grvVersion = bwData->grvVersion.get();
+	/*if (BW_DEBUG) {
+	    fmt::print("waitVersionCommitted got {0} < {1}, waiting on CF (currently {2})\n",
+	               version,
+	               grvVersion,
+	               metadata->activeCFData.get()->getVersion());
+	}*/
+	// make sure the change feed has consumed mutations up through grvVersion to ensure none of them are rollbacks
+
+	loop {
+		state Future<Void> atLeast = metadata->activeCFData.get()->whenAtLeast(grvVersion);
+		choose {
+			when(wait(atLeast)) { break; }
+			when(wait(metadata->activeCFData.onChange())) {}
+		}
+	}
+	// sanity check to make sure whenAtLeast didn't return early
+	if (grvVersion > metadata->waitForVersionReturned) {
+		metadata->waitForVersionReturned = grvVersion;
+	}
+	/*if (BW_DEBUG) {
+	    fmt::print(
+	        "waitVersionCommitted CF whenAtLeast {0}: {1}\n", grvVersion, metadata->activeCFData.get()->getVersion());
+	}*/
+
+	return Void();
+}
+
 // TODO REMOVE once correctness clean
 #define DEBUG_BW_START_VERSION invalidVersion
 #define DEBUG_BW_END_VERSION invalidVersion
@@ -1159,7 +1205,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 	state Optional<std::pair<KeyRange, UID>> oldChangeFeedDataComplete;
 	state Key cfKey;
 	state Optional<Key> oldCFKey;
-	state NotifiedVersion committedVersion;
 	state int pendingSnapshots = 0;
 
 	state std::deque<std::pair<Version, Version>> rollbacksInProgress;
@@ -1248,7 +1293,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		metadata->durableDeltaVersion.set(startVersion);
 		metadata->pendingDeltaVersion = startVersion;
 		metadata->bufferedDeltaVersion = startVersion;
-		committedVersion.set(startVersion);
 
 		metadata->activeCFData.set(newChangeFeedData(startVersion));
 		if (startState.parentGranule.present() && startVersion < startState.changeFeedStartVersion) {
@@ -1383,7 +1427,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			// process mutations
 			if (!mutations.empty()) {
 				bool processedAnyMutations = false;
-				Version knownNoRollbacksPast = invalidVersion;
 				Version lastDeltaVersion = invalidVersion;
 				for (MutationsAndVersionRef deltas : mutations) {
 
@@ -1404,7 +1447,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							br >> rollbackVersion;
 
 							ASSERT(rollbackVersion >= metadata->durableDeltaVersion.get());
-							ASSERT(rollbackVersion >= committedVersion.get());
 
 							if (!rollbacksInProgress.empty()) {
 								ASSERT(rollbacksInProgress.front().first == rollbackVersion);
@@ -1492,10 +1534,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 								    .detail("OldChangeFeed", readOldChangeFeed ? "T" : "F");
 							}
 							if (DEBUG_BW_VERSION(deltas.version)) {
-								fmt::print("BW {0}: ({1}), KCV={2}\n",
-								           deltas.version,
-								           deltas.mutations.size(),
-								           deltas.knownCommittedVersion);
+								fmt::print("BW {0}: ({1})\n", deltas.version, deltas.mutations.size());
 							}
 							metadata->currentDeltas.push_back_deep(metadata->deltaArena, deltas);
 
@@ -1503,14 +1542,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							ASSERT(deltas.version != invalidVersion);
 							ASSERT(deltas.version > lastDeltaVersion);
 							lastDeltaVersion = deltas.version;
-
-							Version nextKnownNoRollbacksPast = std::min(deltas.version, deltas.knownCommittedVersion);
-							ASSERT(nextKnownNoRollbacksPast >= knownNoRollbacksPast ||
-							       nextKnownNoRollbacksPast == invalidVersion);
-
-							if (nextKnownNoRollbacksPast != invalidVersion) {
-								knownNoRollbacksPast = nextKnownNoRollbacksPast;
-							}
 						}
 					}
 					if (justDidRollback) {
@@ -1518,24 +1549,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					}
 				}
 				if (!justDidRollback && processedAnyMutations) {
-					// update buffered version and committed version
+					// update buffered version
 					ASSERT(lastDeltaVersion != invalidVersion);
 					ASSERT(lastDeltaVersion > metadata->bufferedDeltaVersion);
 
 					// Update buffered delta version so new waitForVersion checks can bypass waiting entirely
 					metadata->bufferedDeltaVersion = lastDeltaVersion;
-
-					// This is the only place it is safe to set committedVersion, as it has to come from the
-					// mutation stream, or we could have a situation where the blob worker has consumed an
-					// uncommitted mutation, but not its rollback, fro	m the change feed, and could thus
-					// think the uncommitted mutation is committed because it saw a higher committed version
-					// than the mutation's version.
-					// We also can only set it after consuming all of the mutations from the vector from the promise
-					// stream, as yielding when consuming from a change feed can cause bugs if this wakes up one of the
-					// file writers
-					if (knownNoRollbacksPast > committedVersion.get()) {
-						committedVersion.set(knownNoRollbacksPast);
-					}
 				}
 				justDidRollback = false;
 
@@ -1564,17 +1583,18 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					} else {
 						previousFuture = Future<BlobFileIndex>(BlobFileIndex());
 					}
-					Future<BlobFileIndex> dfFuture = writeDeltaFile(bwData,
-					                                                metadata->keyRange,
-					                                                startState.granuleID,
-					                                                metadata->originalEpoch,
-					                                                metadata->originalSeqno,
-					                                                metadata->deltaArena,
-					                                                metadata->currentDeltas,
-					                                                lastDeltaVersion,
-					                                                previousFuture,
-					                                                &committedVersion,
-					                                                oldChangeFeedDataComplete);
+					Future<BlobFileIndex> dfFuture =
+					    writeDeltaFile(bwData,
+					                   metadata->keyRange,
+					                   startState.granuleID,
+					                   metadata->originalEpoch,
+					                   metadata->originalSeqno,
+					                   metadata->deltaArena,
+					                   metadata->currentDeltas,
+					                   lastDeltaVersion,
+					                   previousFuture,
+					                   waitVersionCommitted(bwData, metadata, lastDeltaVersion),
+					                   oldChangeFeedDataComplete);
 					inFlightFiles.push_back(
 					    InFlightFile(dfFuture, lastDeltaVersion, metadata->bufferedDeltaBytes, false));
 
@@ -1641,15 +1661,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						state int waitIdx = 0;
 						int idx = 0;
 						for (auto& f : inFlightFiles) {
-							if (f.snapshot && f.version < metadata->pendingSnapshotVersion &&
-							    f.version <= committedVersion.get()) {
+							if (f.snapshot && f.version < metadata->pendingSnapshotVersion) {
 								if (BW_DEBUG) {
-									fmt::print("[{0} - {1}) Waiting on previous snapshot file @ {2} <= known "
-									           "committed {3}\n",
+									fmt::print("[{0} - {1}) Waiting on previous snapshot file @ {2}\n",
 									           metadata->keyRange.begin.printable(),
 									           metadata->keyRange.end.printable(),
-									           f.version,
-									           committedVersion.get());
+									           f.version);
 								}
 								waitIdx = idx + 1;
 							}
@@ -1912,6 +1929,10 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 		if (v == DEBUG_BW_WAIT_VERSION) {
 			fmt::print("{0}) got CF version {1}\n", v, metadata->activeCFData.get()->getVersion());
 		}
+		// TODO REMOVE debugging
+		if (v > metadata->waitForVersionReturned) {
+			metadata->waitForVersionReturned = v;
+		}
 	}
 
 	// wait for any pending delta and snapshot files as of the moment the change feed version caught up.
@@ -1967,11 +1988,6 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 
 	if (v == DEBUG_BW_WAIT_VERSION) {
 		fmt::print("{0}) done\n", v);
-	}
-
-	// TODO REMOVE debugging
-	if (v > metadata->waitForVersionReturned) {
-		metadata->waitForVersionReturned = v;
 	}
 
 	return Void();
@@ -2776,6 +2792,40 @@ ACTOR Future<Void> monitorRemoval(Reference<BlobWorkerData> bwData) {
 	}
 }
 
+// Because change feeds send uncommitted data and explicit rollback messages, we speculatively buffer/write
+// uncommitted data. This means we must ensure the data is actually committed before "committing" those writes in
+// the blob granule. The simplest way to do this is to have the blob worker do a periodic GRV, which is guaranteed
+// to be an earlier committed version. Then, once the change feed has consumed up through the GRV's data, we can
+// guarantee nothing will roll back the in-memory mutations
+ACTOR Future<Void> runGRVChecks(Reference<BlobWorkerData> bwData) {
+	state Transaction tr(bwData->db);
+	loop {
+		// only do grvs to get committed version if we need it to persist delta files
+		while (bwData->grvVersion.numWaiting() == 0) {
+			// printf("GRV checker sleeping\n");
+			wait(bwData->doGRVCheck.getFuture());
+			bwData->doGRVCheck.reset();
+			// printf("GRV checker waking: %d pending\n", bwData->grvVersion.numWaiting());
+		}
+
+		// batch potentially multiple delta files into one GRV, and also rate limit GRVs for this worker
+		wait(delay(0.1)); // TODO KNOB?
+		// printf("GRV checker doing grv @ %.2f\n", now());
+
+		tr.reset();
+		try {
+			Version readVersion = wait(tr.getReadVersion());
+			ASSERT(readVersion >= bwData->grvVersion.get());
+			// printf("GRV checker got GRV %lld\n", readVersion);
+			bwData->grvVersion.set(readVersion);
+
+			++bwData->stats.commitVersionChecks;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
                               ReplyPromise<InitializeBlobWorkerReply> recruitReply,
                               Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
@@ -2828,6 +2878,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	recruitReply.send(rep);
 
 	self->addActor.send(waitFailureServer(bwInterf.waitFailure.getFuture()));
+	self->addActor.send(runGRVChecks(self));
 	state Future<Void> selfRemoved = monitorRemoval(self);
 
 	TraceEvent("BlobWorkerInit", self->id);
