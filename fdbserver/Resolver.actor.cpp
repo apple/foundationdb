@@ -80,6 +80,9 @@ public:
 		bool shardChanged = initialShardChanged;
 		auto stateTransactionItr = recentStateTransactions.lower_bound(firstUnseenVersion);
 		auto endItr = recentStateTransactions.lower_bound(commitVersion);
+		// Resolver only sends back prior state txns back, because the proxy
+		// sends this request has them and will apply them via applyMetadataToCommittedTransactions();
+		// and other proxies will get this version's state txns as a prior version.
 		for (; stateTransactionItr != endItr; ++stateTransactionItr) {
 			shardChanged = shardChanged || stateTransactionItr->value.first;
 			reply->stateMutations.push_back(reply->arena, stateTransactionItr->value.second);
