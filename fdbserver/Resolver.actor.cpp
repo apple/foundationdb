@@ -71,11 +71,13 @@ public:
 	}
 
 	// Adds state transactions between two versions to the reply message.
+	// "initialShardChanged" indicates if commitVersion has shard changes.
 	// Returns if shardChanged has ever happened for these versions.
 	[[nodiscard]] bool applyStateTxnsToBatchReply(ResolveTransactionBatchReply* reply,
 	                                              Version firstUnseenVersion,
-	                                              Version commitVersion) {
-		bool shardChanged = false;
+	                                              Version commitVersion,
+	                                              bool initialShardChanged) {
+		bool shardChanged = initialShardChanged;
 		auto stateTransactionItr = recentStateTransactions.lower_bound(firstUnseenVersion);
 		auto endItr = recentStateTransactions.lower_bound(commitVersion);
 		for (; stateTransactionItr != endItr; ++stateTransactionItr) {
@@ -362,8 +364,11 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 
 		TEST(firstUnseenVersion == req.version); // Resolver first unseen version is current version
 
-		bool shardChanged =
-		    self->recentStateTransactionsInfo.applyStateTxnsToBatchReply(&reply, firstUnseenVersion, req.version);
+		// If shardChanged at or before this commit version, the proxy may have computed
+		// the wrong set of groups. Then we need to broadcast to all groups below.
+		stateTransactionsPair.first = toCommit.isShardChanged();
+		bool shardChanged = self->recentStateTransactionsInfo.applyStateTxnsToBatchReply(
+		    &reply, firstUnseenVersion, req.version, toCommit.isShardChanged());
 
 		// Update group versions
 		std::set<ptxn::TLogGroupID> writtenGroups; // TLog groups been written
@@ -371,10 +376,6 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			writtenGroups.insert(req.updatedGroups.begin(), req.updatedGroups.end());
 			auto& more = toCommit.getWrittenTLogGroups();
 			writtenGroups.insert(more.begin(), more.end());
-			// If shardChanged before this commit version, the proxy may have computed
-			// the wrong set of groups, thus switching to broadcast to all groups.
-			stateTransactionsPair.first = toCommit.isShardChanged();
-			shardChanged = shardChanged || toCommit.isShardChanged();
 			reply.previousCommitVersions = self->versionTracker.updateGroups(
 			    writtenGroups, req.version, shardChanged ? UpdateAllGroups::True : UpdateAllGroups::False);
 		}
