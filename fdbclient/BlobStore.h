@@ -94,10 +94,12 @@ public:
 	                  std::string service,
 	                  std::string const& key,
 	                  std::string const& secret,
+	                  std::string const& securityToken = "",
 	                  BlobKnobs const& knobs = BlobKnobs(),
 	                  HTTP::Headers extraHeaders = HTTP::Headers())
-	  : host(host), service(service), key(key), secret(secret), lookupSecret(secret.empty()), knobs(knobs),
-	    extraHeaders(extraHeaders), requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
+	  : host(host), service(service), key(key), lookupKey(key.empty()), secret(secret), lookupSecret(secret.empty()),
+	    securityToken(securityToken), knobs(knobs), extraHeaders(extraHeaders),
+	    requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
 	    requestRateList(new SpeedLimit(knobs.list_requests_per_second, 1)),
 	    requestRateWrite(new SpeedLimit(knobs.write_requests_per_second, 1)),
 	    requestRateRead(new SpeedLimit(knobs.read_requests_per_second, 1)),
@@ -114,8 +116,9 @@ public:
 		const char* resource = "";
 		if (withResource)
 			resource = "<name>";
-		return format("blobstore://<api_key>:<secret>@<host>[:<port>]/%s[?<param>=<value>[&<param>=<value>]...]",
-		              resource);
+		return format(
+		    "blobstore://<api_key>:<secret>:<security_token>@<host>[:<port>]/%s[?<param>=<value>[&<param>=<value>]...]",
+		    resource);
 	}
 
 	typedef std::map<std::string, std::string> ParametersT;
@@ -143,8 +146,10 @@ public:
 	std::string host;
 	std::string service;
 	std::string key;
+	bool lookupKey;
 	std::string secret;
 	bool lookupSecret;
+	std::string securityToken;
 	BlobKnobs knobs;
 	HTTP::Headers extraHeaders;
 
@@ -167,6 +172,13 @@ public:
 
 	// Sets headers needed for Authorization (including Date which will be overwritten if present)
 	void setAuthHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers);
+
+	// Set headers in the AWS V4 authorization format. $date and $datestamp are used for unit testing
+	void setV4AuthHeaders(const std::string& verb,
+	                      const std::string& resource,
+	                      HTTP::Headers& headers,
+	                      std::string date = "",
+	                      std::string datestamp = "");
 
 	// Prepend the HTTP request header to the given PacketBuffer, returning the new head of the buffer chain
 	static PacketBuffer* writeRequestHeader(std::string const& request,
