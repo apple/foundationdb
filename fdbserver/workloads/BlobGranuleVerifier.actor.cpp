@@ -60,7 +60,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	int64_t timeTravelTooOld = 0;
 	int64_t rowsRead = 0;
 	int64_t bytesRead = 0;
-	KeyRangeMap<Version> latestPruneVersions;
 	std::vector<Future<Void>> clients;
 
 	DatabaseConfiguration config;
@@ -307,6 +306,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		OldRead(KeyRange range, Version v, RangeResult oldResult) : range(range), v(v), oldResult(oldResult) {}
 	};
 
+	// utility to prune <range> at pruneVersion=<version> with the <force> flag
 	ACTOR Future<Void> pruneAtVersion(Database cx, KeyRange range, Version version, bool force) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
@@ -353,7 +353,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		state double endTime = last + self->testDuration;
 		state std::map<double, OldRead> timeTravelChecks;
 		state int64_t timeTravelChecksMemory = 0;
-		state KeyRangeMap<Version> latestPruneVersions;
 
 		TraceEvent("BlobGranuleVerifierStart");
 		if (BGV_DEBUG) {
@@ -378,11 +377,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					// advance iterator before doing read, so if it gets error we don't retry it
 
 					try {
-						// before reading, prune at some version [0, readVersion)
-						Version pruneVersion = deterministicRandom()->randomInt(0, oldRead.v);
-						wait(self->pruneAtVersion(cx, oldRead.range, pruneVersion, false));
-						// FIXME: this doesnt actually guarantee that the prune executed. maybe add a delay?
-
+						// TODO: before reading, prune at some version [0, readVersion)
 						std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> reReadResult =
 						    wait(self->readFromBlob(cx, self, oldRead.range, oldRead.v));
 						self->compareResult(oldRead.oldResult, reReadResult, oldRead.range, oldRead.v, false);
