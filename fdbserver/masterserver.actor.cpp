@@ -455,8 +455,13 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 		isr.storeType = self->configuration.storageServerStoreType;
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
+
 		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-			isr.storageTeamId = seedTeamId;
+			// Each storage server belongs to two teams initially (1) team
+			// containing just itself for private mutations, (2) seed team
+			// containing all SS.
+			isr.storageTeams = Optional<std::vector<ptxn::StorageTeamID>>(
+			    std::vector<ptxn::StorageTeamID>{ isr.interfaceId, seedTeamId });
 		}
 
 		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
@@ -479,6 +484,7 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 			idx++;
 
 			servers->emplace_back(newServer.get().interf, seedTeamId);
+			servers->emplace_back(newServer.get().interf, newServer.get().interf.id());
 			ssInterfaces.push_back(newServer.get().interf);
 		}
 	}
@@ -490,7 +496,8 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 
 	TraceEvent("MasterRecruitedInitialStorageServers", self->dbgid)
 	    .detail("TargetCount", self->configuration.storageTeamSize)
-	    .detail("Servers", describe(ssInterfaces));
+	    .detail("Servers", describe(ssInterfaces))
+		.detail("SeedStorageTeamId", seedTeamId);
 
 	return Void();
 }
@@ -945,7 +952,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 	// Load storage teams from \xff keyspace to tLogGroupCollection.
 	RangeResult ssTeams = wait(self->txnStateStore->readRange(storageTeamIdKeyRange));
 	for (auto& r : ssTeams) {
-		auto teamId = storageTeamIdKeyDecode(r.key);
+		auto teamId = decodeStorageTeamIdKey(r.key);
 		self->tLogGroupCollection->tryAddStorageTeam(teamId, decodeStorageTeams(r.value));
 	}
 
@@ -973,16 +980,27 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(
 	ASSERT(self->recoveryTransactionVersion);
 
 	if (SERVER_KNOBS->TLOG_NEW_INTERFACE && self->lastEpochEnd == 0) {
-		for (const auto& pair : *servers) {
-			std::vector<UID> serverSrcUID(1, pair.first.id());
-			auto teamId = pair.second;
-			TraceEvent("MasterAssignTeam").detail("SS", pair.first.id()).detail("Team", teamId);
-			for (const auto& ss : serverSrcUID) {
-				Key teamIdKey = storageServerToTeamIdKey(ss);
-				Value val = encodeStorageServerToTeamIdValue({ teamId });
-				self->txnStateStore->set(KeyValueRef(teamIdKey, val));
-			}
+		// Copies the seed server mutations from recovery commit to over here.
+		// TODO (Vishesh): Why do have to do this? Why can't we just do it at one place?
+		std::unordered_map<UID, std::set<ptxn::StorageTeamID>> serverToTeams;
+
+		for (const auto& [s, teamId] : *servers) {
+			serverToTeams[s.id()].emplace(teamId);
 		}
+
+		for (auto& [ss, teams] : serverToTeams) {
+			self->txnStateStore->set(
+			    KeyValueRef(storageServerToTeamIdKey(ss), encodeStorageServerToTeamIdValue(teams)));
+		}
+
+		// for (auto& [teamId, servers] : teamToServers) {
+		//	std::sort(servers.begin(), servers.end());
+		//	self->txnStateStore->set(
+		//	    KeyValueRef(storageTeamIdKey(teamId), encodeStorageTeams(servers))); // TeamId -> Vec<StorageServers>
+		//	Key teamListKey = storageServerListToTeamIdKey(servers);
+		//	self->txnStateStore->set(
+		//	    KeyValueRef(teamListKey, BinaryWriter::toValue(teamId, Unversioned()))); // Vec<StorageServer> -> TeamId
+		// }
 	}
 
 	state RangeResult data =

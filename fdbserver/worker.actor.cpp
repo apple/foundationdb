@@ -1882,7 +1882,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					                               storageReady,
 					                               dbInfo,
 					                               folder,
-					                               req.storageTeamId);
+					                               req.storageTeams);
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(&runningStorages,

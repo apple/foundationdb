@@ -31,6 +31,7 @@
 #include "fdbserver/TSSMappingUtil.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/serialize.h"
+#include <algorithm>
 #include <unordered_map>
 #include <vector>
 
@@ -1453,6 +1454,39 @@ void seedShardServers(Arena& arena,
                       CommitTransactionRef& tr,
                       std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>> servers,
                       const std::vector<StringRef>& keySplits) {
+
+	std::unordered_map<ptxn::StorageTeamID, std::vector<UID>> teamToServers;
+	std::unordered_map<UID, std::set<ptxn::StorageTeamID>> serverToTeams;
+	for (const auto& [s, teamId] : servers) {
+		teamToServers[teamId].push_back(s.id());
+		serverToTeams[s.id()].emplace(teamId);
+	}
+
+	// Create seed teams. Initially all storage servers belong to same team.
+	ptxn::StorageTeamID seedServerId;
+	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		bool seedServerSet = false;
+		ASSERT(serverToTeams.size());
+		for (auto& [ss, teams] : serverToTeams) {
+			tr.set(arena, storageServerToTeamIdKey(ss), encodeStorageServerToTeamIdValue(teams));
+		}
+
+		for (auto& [teamId, servers] : teamToServers) {
+			std::sort(servers.begin(), servers.end());
+			tr.set(arena, storageTeamIdKey(teamId), encodeStorageTeams(servers)); // TeamId -> Vec<StorageServers>
+			Key teamListKey = storageServerListToTeamIdKey(servers);
+			tr.set(arena, teamListKey, BinaryWriter::toValue(teamId, Unversioned())); // Vec<StorageServer> -> TeamId
+
+			if (servers.size() > 1) {
+				// Only seed team has more than one member.
+				ASSERT(!seedServerSet);
+				seedServerId = teamId;
+				seedServerSet = true;
+			}
+		}
+		ASSERT(seedServerSet);
+	}
+
 	std::map<Optional<Value>, Tag> dcId_locality;
 	std::map<UID, Tag> server_tag;
 	int8_t nextLocality = 0;
@@ -1475,13 +1509,11 @@ void seedShardServers(Arena& arena,
 	tr.read_snapshot = 0;
 	tr.read_conflict_ranges.push_back_deep(arena, allKeys);
 
-	std::unordered_map<ptxn::StorageTeamID, std::vector<UID>> teamToServers;
-
 	for (const auto& [s, teamId] : servers) {
-		teamToServers[teamId].push_back(s.id());
 		// Assign tags
 		tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(server_tag[s.id()]));
 		tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
+
 		if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
 			// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
 			TraceEvent(SevError, "TSSIdentityMappingEnabled").log();
@@ -1491,24 +1523,13 @@ void seedShardServers(Arena& arena,
 		}
 	}
 
-	// Create seed teams. Initially all storage servers belong to same team.
-	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-		ASSERT(teamToServers.size() == 1);
-		for (auto& [teamId, servers] : teamToServers) {
-			tr.set(arena, storageTeamIdKey(teamId), encodeStorageTeams(servers)); // TeamId -> Vec<StorageServers>
-			Key teamListKey = storageServerListToTeamIdKey(servers);
-			tr.set(arena, teamListKey, BinaryWriter::toValue(teamId, Unversioned())); // Vec<StorageServer> -> TeamId
-		}
-	}
 
 	std::vector<Tag> serverTags;
 	std::vector<UID> serverSrcUID;
-	std::vector<ptxn::StorageTeamID> serverTeamIDs;
 	serverTags.reserve(servers.size());
 	for (const auto& [s, team] : servers) {
 		serverTags.push_back(server_tag[s.id()]);
 		serverSrcUID.push_back(s.id());
-		serverTeamIDs.push_back(team);
 	}
 
 	if (!SERVER_KNOBS->TLOG_NEW_INTERFACE) {
@@ -1527,7 +1548,7 @@ void seedShardServers(Arena& arena,
 	} else {
 		auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS
 		                   ? keyServersValue(serverTags)
-		                   : keyServersValue(RangeResult(), serverSrcUID, serverTeamIDs[0]);
+		                   : keyServersValue(RangeResult(), serverSrcUID, seedServerId);
 		krmSetPreviouslyEmptyRange(
 		    tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, serverKeysFalse);
 
@@ -1537,52 +1558,4 @@ void seedShardServers(Arena& arena,
 		}
 		return;
 	}
-
-	// TODO: Remove key-splits code.
-
-	auto getServersValue = [&](int serverIndex) -> Value {
-		// TODO: encode team into keyServersValue with tags
-		return CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS
-		           ? keyServersValue({ serverTags[serverIndex] })
-		           : keyServersValue(RangeResult(), { serverSrcUID[serverIndex] }, serverTeamIDs[serverIndex]);
-	};
-
-	const int numServers = servers.size();
-	const int numKeyRanges = keySplits.size() + 1;
-
-	ASSERT(numKeyRanges > 1);
-
-	// TODO: allow numKeyRanges != numServers
-	ASSERT(numKeyRanges == numServers);
-
-	int serverIndex = 0;
-	StringRef keyRangeStart = allKeys.begin;
-	for (int index = 0; index < keySplits.size(); ++index) {
-		auto keyRange = KeyRangeRef(keyRangeStart, keySplits[index]);
-		TraceEvent("SeedShard", serverSrcUID[serverIndex]).detail("KeyRange", keyRange.toString());
-		krmSetPreviouslyEmptyRange(
-		    tr, arena, serverKeysPrefixFor(servers[serverIndex].first.id()), keyRange, serverKeysTrue, serverKeysFalse);
-		krmSetPreviouslyEmptyRange(
-		    tr, arena, keyServersPrefix, keyRange, getServersValue(serverIndex), serverKeysFalse);
-		++serverIndex;
-		serverIndex %= numServers;
-		keyRangeStart = keySplits[index];
-	}
-	if (keySplits.size() != 0) {
-		keyRangeStart = keySplits.back();
-	}
-	TraceEvent("SeedShard", serverSrcUID[serverIndex])
-	    .detail("KeyRange", KeyRangeRef(keyRangeStart, allKeys.end).toString());
-	krmSetPreviouslyEmptyRange(tr,
-	                           arena,
-	                           serverKeysPrefixFor(serverSrcUID[serverIndex]),
-	                           KeyRangeRef(keyRangeStart, allKeys.end),
-	                           serverKeysTrue,
-	                           serverKeysFalse);
-	krmSetPreviouslyEmptyRange(tr,
-	                           arena,
-	                           keyServersPrefix,
-	                           KeyRangeRef(keyRangeStart, allKeys.end),
-	                           getServersValue(serverIndex),
-	                           serverKeysFalse);
 }

@@ -3544,6 +3544,10 @@ private:
 			if ((m.type == MutationRef::SetValue && !data->isTss() && !matchesThisServer) ||
 			    (m.type == MutationRef::ClearRange &&
 			     ((!data->isTSSInQuarantine() && matchesThisServer) || (data->isTss() && matchesTssPair)))) {
+				TraceEvent("StorageWorkerRemovedWithTag", data->thisServerID)
+				    .detail("Tag", printable(serverTagKey.toString()))
+				    .detail("MatchThisServer", matchesThisServer)
+				    .detail("MatchesTssPair", matchesTssPair);
 				throw worker_removed();
 			}
 			if (!data->isTss() && m.type == MutationRef::ClearRange && data->ssPairID.present() &&
@@ -5200,12 +5204,12 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
-                                 Optional<ptxn::StorageTeamID> storageTeamID) {
+                                 Optional<std::vector<ptxn::StorageTeamID>> storageTeams) {
 
 	state StorageServer self(persistentData, db, ssi);
 
-	self.storageTeamID = storageTeamID;
-	if (storageTeamID.present()) {
+	self.storageTeamID = storageTeams.present() ? storageTeams.get()[0] : Optional<ptxn::StorageTeamID>();
+	if (storageTeams.present()) {
 		self.logProtocol = ProtocolVersion::withPartitionTransaction();
 	}
 

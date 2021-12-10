@@ -223,7 +223,7 @@ struct ProxyCommitData {
 
 	std::map<Tag, UID> tagToServer;
 	// Each storage server's own team.
-	std::unordered_map<UID, ptxn::StorageTeamID> ssToStorageTeam;
+	std::unordered_map<UID, std::set<ptxn::StorageTeamID>> ssToStorageTeam;
 
 	// List of added/removed storage teams in given TLogGroup.
 	std::unordered_map<UID, std::vector<std::pair<ptxn::StorageTeamID, bool>>> changedTeams;

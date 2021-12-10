@@ -23,6 +23,7 @@
 #include <random>
 #include <vector>
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/IDiskQueue.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/ptxn/TLogInterface.h"
@@ -270,6 +271,7 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 		Promise<Void> recovered;
 		storageInitializations.emplace_back();
 
+		std::vector<ptxn::StorageTeamID> teams = { pContext->storageTeamIDs[0] };
 		actors->push_back(storageServer(openKVStore(KeyValueStoreType::StoreType::SSD_BTREE_V2,
 		                                            joinPath(folder, "storage-" + recruited.id().toString() + ".ssd-2"),
 		                                            recruited.id(),
@@ -280,7 +282,7 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 		                                storageInitializations.back().reply,
 		                                dbInfo,
 		                                folder,
-		                                pContext->storageTeamIDs[0]));
+		                                teams));
 		initializeStorage.send(storageInitializations.back());
 		printTiming << "Recruited storage server " << i
 		            << " : Storage Server Debug ID = " << recruited.id().shortString() << "\n";

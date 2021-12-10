@@ -51,7 +51,7 @@ struct ResolverData {
 	std::map<UID, Reference<StorageInfo>>* storageCache = nullptr;
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 	std::map<Tag, UID> tagToServer;
-	std::unordered_map<UID, ptxn::StorageTeamID>* ssToStorageTeam = nullptr;
+	std::unordered_map<UID, std::set<ptxn::StorageTeamID>>* ssToStorageTeam = nullptr;
 	std::unordered_map<UID, std::vector<std::pair<ptxn::StorageTeamID, bool>>> changedTeams;
 	Reference<TLogGroupCollection> tLogGroupCollection;
 
@@ -61,7 +61,7 @@ struct ResolverData {
 	             KeyRangeMap<ServerCacheInfo>* info,
 	             bool* forceRecovery,
 	             Reference<TLogGroupCollection> collection,
-	             std::unordered_map<UID, ptxn::StorageTeamID>* pSsToStorageTeam)
+	             std::unordered_map<UID, std::set<ptxn::StorageTeamID>>* pSsToStorageTeam)
 	  : dbgid(debugId), txnStateStore(store), keyInfo(info), confChanges(forceRecovery), initialCommit(true),
 	    ssToStorageTeam(pSsToStorageTeam), tLogGroupCollection(collection) {}
 
@@ -77,7 +77,7 @@ struct ResolverData {
 	             std::unordered_map<UID, StorageServerInterface>* tssMapping,
 	             Version commitVersion,
 	             Reference<TLogGroupCollection> collection,
-	             std::unordered_map<UID, ptxn::StorageTeamID>* ssToStorageTeam)
+	             std::unordered_map<UID, std::set<ptxn::StorageTeamID>>* ssToStorageTeam)
 	  : dbgid(debugId), txnStateStore(store), keyInfo(info), confChanges(forceRecovery), logSystem(logSystem),
 	    toCommit(toCommit), popVersion(popVersion), storageCache(storageCache), tssMapping(tssMapping),
 	    ssToStorageTeam(ssToStorageTeam), tLogGroupCollection(collection) {

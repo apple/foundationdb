@@ -2147,9 +2147,10 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 				if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 					// Add storage teams of storage servers
 					ASSERT(pContext->pCommitData->ssToStorageTeam.count(id));
-					if (pContext->pCommitData->ssToStorageTeam[id] == srcDstTeams[0]) {
+					ASSERT(pContext->pCommitData->ssToStorageTeam[id].size());
+					if (pContext->pCommitData->ssToStorageTeam[id].count(srcDstTeams[0])) {
 						info.storageTeams.insert(srcDstTeams[0]);
-					} else if (pContext->pCommitData->ssToStorageTeam[id] == srcDstTeams[1]) {
+					} else if (pContext->pCommitData->ssToStorageTeam[id].count(srcDstTeams[1])) {
 						info.storageTeams.insert(srcDstTeams[1]);
 					} else {
 						ASSERT(false);
@@ -2157,13 +2158,19 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 				}
 			}
 		};
+
 		for (auto& kv : data) {
 			if (kv.key.startsWith(storageServerToTeamIdKeyPrefix)) {
 				UID k = decodeStorageServerToTeamIdKey(kv.key);
 				std::set<ptxn::StorageTeamID> storageTeamIDs = decodeStorageServerToTeamIdValue(kv.value);
-				// For demo purpose, each storage server can only belong to single storage team.
-				// The first team of a storage server is its own team.
-				pContext->pCommitData->ssToStorageTeam.emplace(k, *storageTeamIDs.begin());
+				// Initially, each storage server belongs to two teams (1) Seed
+				// team and (2) its own team for private mutations.
+				pContext->pCommitData->ssToStorageTeam[k].insert(storageTeamIDs.begin(), storageTeamIDs.end());
+			}
+		}
+
+		for (auto& kv : data) {
+			if (kv.key.startsWith(storageServerToTeamIdKeyPrefix)) {
 				continue;
 			} else if (!kv.key.startsWith(keyServersPrefix)) {
 				mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);

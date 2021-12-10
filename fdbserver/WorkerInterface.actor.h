@@ -726,7 +726,7 @@ struct InitializeStorageRequest {
 	Tag seedTag; //< If this server will be passed to seedShardServers, this will be a tag, otherwise it is invalidTag
 	UID reqId;
 	UID interfaceId;
-	Optional<ptxn::StorageTeamID> storageTeamId;
+	Optional<std::vector<ptxn::StorageTeamID>> storageTeams;
 	KeyValueStoreType storeType;
 	Optional<std::pair<UID, Version>>
 	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
@@ -734,7 +734,7 @@ struct InitializeStorageRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, seedTag, reqId, interfaceId, storageTeamId, storeType, reply, tssPairIDAndVersion);
+		serializer(ar, seedTag, reqId, interfaceId, storageTeams, storeType, reply, tssPairIDAndVersion);
 	}
 };
 
@@ -995,15 +995,16 @@ class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
 
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Tag seedTag,
-                                 Version tssSeedVersion,
-                                 ReplyPromise<InitializeStorageReply> recruitReply,
-                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder,
-                                 // Storage team id of a ptxn storage server
-                                 Optional<ptxn::StorageTeamID> storageTeamId = Optional<ptxn::StorageTeamID>());
+ACTOR Future<Void> storageServer(
+    IKeyValueStore* persistentData,
+    StorageServerInterface ssi,
+    Tag seedTag,
+    Version tssSeedVersion,
+    ReplyPromise<InitializeStorageReply> recruitReply,
+    Reference<AsyncVar<ServerDBInfo> const> db,
+    std::string folder,
+    // Storage team id of a ptxn storage server
+    Optional<std::vector<ptxn::StorageTeamID>> storageTeams = Optional<std::vector<ptxn::StorageTeamID>>());
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,

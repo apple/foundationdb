@@ -112,7 +112,7 @@ bool serverHasKey(ValueRef storedValue);
 extern const KeyRef storageTeamIdKeyPrefix;
 extern const KeyRangeRef storageTeamIdKeyRange;
 const Key storageTeamIdKey(ptxn::StorageTeamID teamId);
-ptxn::StorageTeamID storageTeamIdKeyDecode(const KeyRef& key);
+ptxn::StorageTeamID decodeStorageTeamIdKey(const KeyRef& key);
 std::vector<UID> decodeStorageTeams(const ValueRef& value);
 const Value encodeStorageTeams(const std::vector<UID>& value);
 

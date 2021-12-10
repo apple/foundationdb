@@ -2573,10 +2573,11 @@ ACTOR Future<Optional<Value>> getValue(Future<Version> version,
 				g_traceBatch.addEvent("GetValueDebug",
 				                      getValueID.get().first(),
 				                      "NativeAPI.getValue.Error"); //.detail("TaskID", g_network->getCurrentTask());
-				/*TraceEvent("TransactionDebugGetValueDone", getValueID.get())
-				    .detail("Key", key)
-				    .detail("ReqVersion", ver)
-				    .detail("ReplySize", reply.value.present() ? reply.value.get().size() : -1);*/
+				// TraceEvent("TransactionDebugGetValueDone", getValueID.get())
+				//     .detail("Key", key)
+				//     .detail("ReqVersion", ver)
+				//     .detail("ReplySize", reply.value.present() ? reply.value.get().size() : -1)
+				//     .error(e);
 			}
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    (e.code() == error_code_transaction_too_old && ver == latestVersion)) {
@@ -6082,10 +6083,10 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 			// Should we abort and wait the newly splitted shards to be hot again?
 			state int nLocs = locations.size();
 			// if (nLocs > 1) {
-			// 	TraceEvent("RHDDebug")
-			// 	    .detail("NumSSIs", nLocs)
-			// 	    .detail("KeysBegin", keys.begin.printable().c_str())
-			// 	    .detail("KeysEnd", keys.end.printable().c_str());
+			//	TraceEvent("RHDDebug")
+			//	    .detail("NumSSIs", nLocs)
+			//	    .detail("KeysBegin", keys.begin.printable().c_str())
+			//	    .detail("KeysEnd", keys.end.printable().c_str());
 			// }
 			state vector<Future<ReadHotSubRangeReply>> fReplies(nLocs);
 			KeyRef partBegin, partEnd;

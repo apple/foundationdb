@@ -82,7 +82,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 
 	Reference<TLogGroupCollection> tLogGroupCollection = Reference<TLogGroupCollection>(nullptr);
 	// Each storage server's own team.
-	std::unordered_map<UID, ptxn::StorageTeamID> ssToStorageTeam;
+	std::unordered_map<UID, std::set<ptxn::StorageTeamID>> ssToStorageTeam;
 
 	Version debugMinRecentStateVersion = 0;
 
@@ -480,9 +480,10 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 				if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 					// Add storage teams of storage servers
 					ASSERT(pContext->pResolverData->ssToStorageTeam.count(id));
-					if (pContext->pResolverData->ssToStorageTeam[id] == srcDstTeams[0]) {
+					ASSERT(pContext->pResolverData->ssToStorageTeam[id].size());
+					if (pContext->pResolverData->ssToStorageTeam[id].count(srcDstTeams[0])) {
 						info.storageTeams.insert(srcDstTeams[0]);
-					} else if (pContext->pResolverData->ssToStorageTeam[id] == srcDstTeams[1]) {
+					} else if (pContext->pResolverData->ssToStorageTeam[id].count(srcDstTeams[1])) {
 						info.storageTeams.insert(srcDstTeams[1]);
 					} else {
 						ASSERT(false);
@@ -494,10 +495,14 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 			if (kv.key.startsWith(storageServerToTeamIdKeyPrefix)) {
 				UID k = decodeStorageServerToTeamIdKey(kv.key);
 				std::set<ptxn::StorageTeamID> storageTeamIDs = decodeStorageServerToTeamIdValue(kv.value);
-				// For demo purpose, each storage server can only belong to single storage team.
-				ASSERT(storageTeamIDs.size() == 1);
-				// The first team of a storage server is its own team.
-				pContext->pResolverData->ssToStorageTeam.emplace(k, *storageTeamIDs.begin());
+				// Initially, each storage server belongs to two teams (1) Seed
+				// team and (2) its own team for private mutations.
+				pContext->pResolverData->ssToStorageTeam[k].insert(storageTeamIDs.begin(), storageTeamIDs.end());
+			}
+		}
+
+		for (auto& kv : data) {
+			if (kv.key.startsWith(storageServerToTeamIdKeyPrefix)) {
 				continue;
 			} else if (!kv.key.startsWith(keyServersPrefix)) {
 				mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);
@@ -516,10 +521,6 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 			updateTagInfo(src, info, srcDstTeams, info.src_info);
 			updateTagInfo(dest, info, srcDstTeams, info.dest_info);
 			uniquify(info.tags);
-			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-				// A shard can only correspond to single storage team in the primary DC for now
-				ASSERT(info.storageTeams.size() == 1);
-			}
 			keyInfoData.emplace_back(MapPair<Key, ServerCacheInfo>(k, info), 1);
 		}
 
