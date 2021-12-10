@@ -5360,7 +5360,7 @@ ACTOR Future<Void> startBlobManager(ClusterControllerData* self) {
 
 ACTOR Future<Void> watchBlobGranulesConfigKey(ClusterControllerData* self) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-	state Key blobGranuleConfigKey = configKeysPrefix.withSuffix(StringRef("blob_granules_enabled"));
+	state Key blobGranuleConfigKey = configKeysPrefix.withSuffix("blob_granules_enabled"_sr);
 
 	loop {
 		try {
@@ -5392,22 +5392,26 @@ ACTOR Future<Void> monitorBlobManager(ClusterControllerData* self) {
 	}
 
 	loop {
-		state Future<Void> watchConfigChange = watchBlobGranulesConfigKey(self);
 		if (self->db.serverInfo->get().blobManager.present() && !self->recruitBlobManager.get()) {
-			choose {
-				when(wait(waitFailureClient(self->db.serverInfo->get().blobManager.get().waitFailure,
-				                            SERVER_KNOBS->BLOB_MANAGER_FAILURE_TIME))) {
-					TraceEvent("CCBlobManagerDied", self->id)
-					    .detail("BMID", self->db.serverInfo->get().blobManager.get().id());
-					self->db.clearInterf(ProcessClass::BlobManagerClass);
-				}
-				when(wait(self->recruitBlobManager.onChange())) {}
-				when(wait(watchConfigChange)) {
-					// if there is a blob manager present but blob granules are now disabled, stop the BM
-					if (!self->db.blobGranulesEnabled.get()) {
-						const auto& blobManager = self->db.serverInfo->get().blobManager;
-						BlobManagerSingleton(blobManager)
-						    .haltBlobGranules(self, blobManager.get().locality.processId());
+			state Future<Void> wfClient = waitFailureClient(self->db.serverInfo->get().blobManager.get().waitFailure,
+			                                                SERVER_KNOBS->BLOB_MANAGER_FAILURE_TIME);
+			loop {
+				choose {
+					when(wait(wfClient)) {
+						TraceEvent("CCBlobManagerDied", self->id)
+						    .detail("BMID", self->db.serverInfo->get().blobManager.get().id());
+						self->db.clearInterf(ProcessClass::BlobManagerClass);
+						break;
+					}
+					when(wait(self->recruitBlobManager.onChange())) { break; }
+					when(wait(self->db.blobGranulesEnabled.onChange())) {
+						// if there is a blob manager present but blob granules are now disabled, stop the BM
+						if (!self->db.blobGranulesEnabled.get()) {
+							const auto& blobManager = self->db.serverInfo->get().blobManager;
+							BlobManagerSingleton(blobManager)
+							    .haltBlobGranules(self, blobManager.get().locality.processId());
+							break;
+						}
 					}
 				}
 			}
