@@ -223,11 +223,8 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 				replyContents = failed_to_progress();
 				break;
 			}
-			when(wait(yieldedFuture(db->clientInfo->onChange()))) {}
+			when(wait(yieldedFuture(db->clientInfo->onChange()))) { replyContents = db->clientInfo->get(); }
 			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) {
-				if (req.supportedVersions.size() > 0) {
-					db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
-				}
 				if (db->clientInfo->get().read().id.isValid()) {
 					replyContents = db->clientInfo->get();
 				}
@@ -235,6 +232,10 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 				break;
 			} // The client might be long gone!
 		}
+	}
+
+	if (req.supportedVersions.size() > 0) {
+		db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	if (replyContents.present()) {
