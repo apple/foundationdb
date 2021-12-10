@@ -801,23 +801,28 @@ ACTOR Future<Void> killBlobWorker(BlobManagerData* bmData, BlobWorkerInterface b
 	if (BM_DEBUG) {
 		printf("Taking back ranges from BW %s\n", bwId.toString().c_str());
 	}
+	// copy ranges into vector before sending, because send then modifies workerAssignments
+	state std::vector<KeyRange> rangesToMove;
 	for (auto& it : bmData->workerAssignments.ranges()) {
 		if (it.cvalue() == bwId) {
-			// Send revoke request
-			RangeAssignment raRevoke;
-			raRevoke.isAssign = false;
-			raRevoke.keyRange = it.range();
-			raRevoke.revoke = RangeRevokeData(false);
-			bmData->rangesToAssign.send(raRevoke);
-
-			// Add range back into the stream of ranges to be assigned
-			RangeAssignment raAssign;
-			raAssign.isAssign = true;
-			raAssign.worker = Optional<UID>();
-			raAssign.keyRange = it.range();
-			raAssign.assign = RangeAssignmentData(); // not a continue
-			bmData->rangesToAssign.send(raAssign);
+			rangesToMove.push_back(it.range());
 		}
+	}
+	for (auto& it : rangesToMove) {
+		// Send revoke request
+		RangeAssignment raRevoke;
+		raRevoke.isAssign = false;
+		raRevoke.keyRange = it;
+		raRevoke.revoke = RangeRevokeData(false);
+		bmData->rangesToAssign.send(raRevoke);
+
+		// Add range back into the stream of ranges to be assigned
+		RangeAssignment raAssign;
+		raAssign.isAssign = true;
+		raAssign.worker = Optional<UID>();
+		raAssign.keyRange = it;
+		raAssign.assign = RangeAssignmentData(); // not a continue
+		bmData->rangesToAssign.send(raAssign);
 	}
 
 	// Send halt to blob worker, with no expectation of hearing back
@@ -866,15 +871,15 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 						bmData->iAmReplaced.send(Void());
 					}
 				} else if (rep.epoch < bmData->epoch) {
-					// TODO: revoke the range from that worker? and send optimistic halt req to other (zombie) BM? it's
-					// optimistic because such a BM is not necessarily a zombie. it could have gotten killed properly
-					// but the BW that sent this reply was behind (i.e. it started the req when the old BM was in charge
-					// and finished by the time the new BM took over)
+					// TODO: revoke the range from that worker? and send optimistic halt req to other (zombie) BM?
+					// it's optimistic because such a BM is not necessarily a zombie. it could have gotten killed
+					// properly but the BW that sent this reply was behind (i.e. it started the req when the old BM
+					// was in charge and finished by the time the new BM took over)
 					continue;
 				}
 
-				// TODO maybe this won't be true eventually, but right now the only time the blob worker reports back is
-				// to split the range.
+				// TODO maybe this won't be true eventually, but right now the only time the blob worker reports
+				// back is to split the range.
 				ASSERT(rep.doSplit);
 
 				// only evaluate for split if this worker currently owns the granule in this blob manager's mapping
@@ -1029,11 +1034,11 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 	//    For example, suppose a blob manager sends requests to the range assigner stream to move a granule G.
 	//    However, before sending those requests off to the workers, the BM dies. So the persisting mapping
 	//    still has G->oldWorker. The following algorithm will re-assign G to oldWorker (as long as it is also still
-	//    alive). Note that this is fine because it simply means that the range was not moved optimally, but it is still
-	//    owned. In the above case, even if the revoke goes through, since we don't update the mapping during revokes,
-	//    this is the same as the case above. Another case to consider is when a blob worker dies when the BM is
-	//    recovering. Now the mapping at this time looks like G->deadBW. But the rangeAssigner handles this: we'll try
-	//    to assign a range to a dead worker and fail and reassign it to the next best worker.
+	//    alive). Note that this is fine because it simply means that the range was not moved optimally, but it is
+	//    still owned. In the above case, even if the revoke goes through, since we don't update the mapping during
+	//    revokes, this is the same as the case above. Another case to consider is when a blob worker dies when the
+	//    BM is recovering. Now the mapping at this time looks like G->deadBW. But the rangeAssigner handles this:
+	//    we'll try to assign a range to a dead worker and fail and reassign it to the next best worker.
 	//
 	// 2. We get the existing split intentions that were Started but not acknowledged by any blob workers and
 	//    add them to our key range map, bmData->granuleAssignments. Note that we are adding them on top of
