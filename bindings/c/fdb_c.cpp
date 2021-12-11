@@ -578,6 +578,19 @@ FDBFuture* fdb_transaction_get_range_and_flat_map_impl(FDBTransaction* tr,
 	                    .extractPtr());
 }
 
+FDBFuture* fdb_transaction_get_range_with_predicate(FDBTransaction* tr,
+                                                    uint8_t const* begin_key_name,
+                                                    int begin_key_name_length,
+                                                    uint8_t const* end_key_name,
+                                                    int end_key_name_length,
+                                                    uint8_t const* predicate_name,
+                                                    int predicate_name_length,
+                                                    fdb_bool_t snapshot,
+                                                    fdb_bool_t reverse) {
+	// TODO(hackathon)
+	return TSAV_ERROR(Standalone<RangeResultRef>, end_of_stream);
+}
+
 // TODO: Support FDB_API_ADDED in generate_asm.py and then this can be replaced with fdb_api_ptr_unimpl.
 FDBFuture* fdb_transaction_get_range_and_flat_map_v699(FDBTransaction* tr,
                                                        uint8_t const* begin_key_name,

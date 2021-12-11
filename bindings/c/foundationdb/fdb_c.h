@@ -301,6 +301,16 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_and_flat_map(F
                                                                                fdb_bool_t snapshot,
                                                                                fdb_bool_t reverse);
 
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_with_predicate(FDBTransaction* tr,
+                                                                                 uint8_t const* begin_key_name,
+                                                                                 int begin_key_name_length,
+                                                                                 uint8_t const* end_key_name,
+                                                                                 int end_key_name_length,
+                                                                                 uint8_t const* predicate_name,
+                                                                                 int predicate_name_length,
+                                                                                 fdb_bool_t snapshot,
+                                                                                 fdb_bool_t reverse);
+
 DLLEXPORT void fdb_transaction_set(FDBTransaction* tr,
                                    uint8_t const* key_name,
                                    int key_name_length,
