@@ -647,10 +647,10 @@ private:
 		const char* ret = nullptr;
 		const char* section = nullptr;
 
-		std::string nameCopy(name);
-		for (int i = nameCopy.size() - 1; i >= 0; --i) {
-			if (nameCopy[i] == '-') {
-				nameCopy.at(i) = '_';
+		std::string nameWithUnderscores(name);
+		for (int i = nameWithUnderscores.size() - 1; i >= 0; --i) {
+			if (nameWithUnderscores[i] == '-') {
+				nameWithUnderscores.at(i) = '_';
 			}
 		}
 
@@ -659,7 +659,7 @@ private:
 		while (!ret && (section = va_arg(ap, const char*))) {
 			ret = ini.GetValue(section, name, nullptr);
 			if (!ret) {
-				ret = ini.GetValue(section, nameCopy.c_str(), nullptr);
+				ret = ini.GetValue(section, nameWithUnderscores.c_str(), nullptr);
 			}
 		}
 		va_end(ap);

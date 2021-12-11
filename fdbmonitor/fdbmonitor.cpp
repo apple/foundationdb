@@ -197,10 +197,10 @@ const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
 	const char* ret = nullptr;
 	const char* section = nullptr;
 
-	std::string keyCopy(key);
-	for (int i = keyCopy.size() - 1; i >= 0; --i) {
-		if (keyCopy[i] == '-') {
-			keyCopy.at(i) = '_';
+	std::string keyWithUnderscores(key);
+	for (int i = keyWithUnderscores.size() - 1; i >= 0; --i) {
+		if (keyWithUnderscores[i] == '-') {
+			keyWithUnderscores.at(i) = '_';
 		}
 	}
 
@@ -209,7 +209,7 @@ const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
 	while (!ret && (section = va_arg(ap, const char*))) {
 		ret = ini.GetValue(section, key, nullptr);
 		if (!ret) {
-			ret = ini.GetValue(section, keyCopy.c_str(), nullptr);
+			ret = ini.GetValue(section, keyWithUnderscores.c_str(), nullptr);
 		}
 	}
 	va_end(ap);
