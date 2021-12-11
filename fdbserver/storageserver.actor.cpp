@@ -23,6 +23,7 @@
 #include <type_traits>
 #include <unordered_map>
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.h"
 #include "flow/ActorCollection.h"
@@ -445,7 +446,7 @@ public:
 
 	Tag tag;
 	// StorageTeamId for this storage server. Exists iff this is a ptxn storage server
-	Optional<ptxn::StorageTeamID> storageTeamID;
+	Optional<std::set<ptxn::StorageTeamID>> storageTeamIDs;
 	vector<std::pair<Version, Tag>> history;
 	vector<std::pair<Version, Tag>> allHistory;
 	Version poppedAllAfter;
@@ -495,7 +496,7 @@ public:
 
 	void popVersion(Version v, bool popAllTags = false) {
 		// Disable pop if it's ptxn storage server
-		if (storageTeamID.present()) {
+		if (storageTeamIDs.present()) {
 			return;
 		}
 
@@ -1242,6 +1243,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	// Temporarily disabled -- this path is hit a lot
 	// getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
+	std::cout << "GetValueReq: " << req.key.toString() << std::endl;
 	try {
 		++data->counters.getValueQueries;
 		++data->counters.allQueries;
@@ -5077,7 +5079,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 							self->poppedAllAfter = self->db->get().logSystemConfig.recoveredAt.get();
 						}
 						self->logCursor = self->logSystem->peekSingle(
-						    self->thisServerID, self->version.get() + 1, self->tag, self->storageTeamID, self->history);
+						    self->thisServerID, self->version.get() + 1, self->tag, self->thisServerID, self->history);
 						self->popVersion(self->durableVersion.get() + 1, true);
 					}
 					// If update() is waiting for results from the tlog, it might never get them, so needs to be
@@ -5208,7 +5210,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 	state StorageServer self(persistentData, db, ssi);
 
-	self.storageTeamID = storageTeams.present() ? storageTeams.get()[0] : Optional<ptxn::StorageTeamID>();
+	self.storageTeamIDs = storageTeams.present()
+	                          ? std::set<ptxn::StorageTeamID>(storageTeams.get().begin(), storageTeams.get().end())
+	                          : Optional<std::set<ptxn::StorageTeamID>>();
 	if (storageTeams.present()) {
 		self.logProtocol = ProtocolVersion::withPartitionTransaction();
 	}
@@ -5245,6 +5249,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		TraceEvent("StorageServerInit", ssi.id())
 		    .detail("Version", self.version.get())
 		    .detail("SeedTag", seedTag.toString())
+			.detail("StorageTeams", describe(storageTeams.get()))
 		    .detail("TssPair", ssi.isTss() ? ssi.tssPairID.get().toString() : "");
 		InitializeStorageReply rep;
 		rep.interf = ssi;
