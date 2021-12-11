@@ -826,6 +826,56 @@ Java_com_apple_foundationdb_FDBTransaction_Transaction_1getRangeAndFlatMap(JNIEn
 	return (jlong)f;
 }
 
+JNIEXPORT jlong JNICALL
+Java_com_apple_foundationdb_FDBTransaction_Transaction_1getRangeWithPredicate(JNIEnv* jenv,
+                                                                              jobject,
+                                                                              jlong tPtr,
+                                                                              jbyteArray begin,
+                                                                              jbyteArray end,
+                                                                              jbyteArray predicate,
+                                                                              jboolean snapshot,
+                                                                              jboolean reverse) {
+	if (!tPtr || !begin || !end || !predicate) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	uint8_t* pBegin = (uint8_t*)jenv->GetByteArrayElements(begin, JNI_NULL);
+	if (!pBegin) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+	uint8_t* pEnd = (uint8_t*)jenv->GetByteArrayElements(end, JNI_NULL);
+	if (!pEnd) {
+		jenv->ReleaseByteArrayElements(begin, (jbyte*)pBegin, JNI_ABORT);
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+	uint8_t* pPredicate = (uint8_t*)jenv->GetByteArrayElements(predicate, JNI_NULL);
+	if (!pPredicate) {
+		jenv->ReleaseByteArrayElements(begin, (jbyte*)pBegin, JNI_ABORT);
+		jenv->ReleaseByteArrayElements(end, (jbyte*)pEnd, JNI_ABORT);
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+	FDBFuture* f = fdb_transaction_get_range_with_predicate(tr,
+	                                                        pBegin,
+	                                                        jenv->GetArrayLength(begin),
+	                                                        pEnd,
+	                                                        jenv->GetArrayLength(end),
+	                                                        pPredicate,
+	                                                        jenv->GetArrayLength(predicate),
+	                                                        (fdb_bool_t)snapshot,
+	                                                        (fdb_bool_t)reverse);
+	jenv->ReleaseByteArrayElements(begin, (jbyte*)pBegin, JNI_ABORT);
+	jenv->ReleaseByteArrayElements(end, (jbyte*)pEnd, JNI_ABORT);
+	jenv->ReleaseByteArrayElements(predicate, (jbyte*)pPredicate, JNI_ABORT);
+	return (jlong)f;
+}
+
 JNIEXPORT void JNICALL Java_com_apple_foundationdb_FutureResults_FutureResults_1getDirect(JNIEnv* jenv,
                                                                                           jobject,
                                                                                           jlong future,
