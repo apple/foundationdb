@@ -50,14 +50,80 @@ struct ProxyRequestsInfo {
 } // namespace
 
 namespace {
+
+class RecentStateTransactionsInfo {
+public:
+	RecentStateTransactionsInfo() = default;
+
+	// Erases state transactions up to the given version (inclusive) and returns
+	// the number of bytes for the erased mutations.
+	int64_t eraseUpTo(Version oldestVersion) {
+		recentStateTransactions.erase(recentStateTransactions.begin(),
+		                              recentStateTransactions.upper_bound(oldestVersion));
+
+		int64_t stateBytes = 0;
+		while (recentStateTransactionSizes.size() && recentStateTransactionSizes.front().first <= oldestVersion) {
+			stateBytes += recentStateTransactionSizes.front().second;
+			recentStateTransactionSizes.pop_front();
+		}
+		return stateBytes;
+	}
+
+	// Adds state transactions between two versions to the reply message.
+	// "initialShardChanged" indicates if commitVersion has shard changes.
+	// Returns if shardChanged has ever happened for these versions.
+	[[nodiscard]] bool applyStateTxnsToBatchReply(ResolveTransactionBatchReply* reply,
+	                                              Version firstUnseenVersion,
+	                                              Version commitVersion,
+	                                              bool initialShardChanged) {
+		bool shardChanged = initialShardChanged;
+		auto stateTransactionItr = recentStateTransactions.lower_bound(firstUnseenVersion);
+		auto endItr = recentStateTransactions.lower_bound(commitVersion);
+		// Resolver only sends back prior state txns back, because the proxy
+		// sends this request has them and will apply them via applyMetadataToCommittedTransactions();
+		// and other proxies will get this version's state txns as a prior version.
+		for (; stateTransactionItr != endItr; ++stateTransactionItr) {
+			shardChanged = shardChanged || stateTransactionItr->value.first;
+			reply->stateMutations.push_back(reply->arena, stateTransactionItr->value.second);
+			reply->arena.dependsOn(stateTransactionItr->value.second.arena());
+		}
+		return shardChanged;
+	}
+
+	bool empty() const { return recentStateTransactionSizes.empty(); }
+	// Returns the number of versions with non-empty state transactions.
+	uint32_t size() const { return recentStateTransactionSizes.size(); }
+
+	// Returns the first/smallest version of the state transactions.
+	// This can only be called when empty() returns false or size() > 0.
+	Version firstVersion() const { return recentStateTransactionSizes.front().first; }
+
+	// Records non-zero stateBytes for a version.
+	void addVersionBytes(Version commitVersion, int64_t stateBytes) {
+		if (stateBytes > 0)
+			recentStateTransactionSizes.emplace_back(commitVersion, stateBytes);
+	}
+
+	// Returns the reference to the pair of (shardChanged, stateMutations) for the given version
+	std::pair<bool, Standalone<VectorRef<StateTransactionRef>>>& getStateTransactionsRef(Version commitVersion) {
+		return recentStateTransactions[commitVersion];
+	}
+
+private:
+	// Commit version to a pair of (shardChanged, stateMutations).
+	Map<Version, std::pair<bool, Standalone<VectorRef<StateTransactionRef>>>> recentStateTransactions;
+
+	// Only keep versions with non-zero size state transactions.
+	Deque<std::pair<Version, int64_t>> recentStateTransactionSizes;
+};
+
 struct Resolver : ReferenceCounted<Resolver> {
 	const UID dbgid;
 	const int commitProxyCount, resolverCount;
 	NotifiedVersion version;
 	AsyncVar<Version> neededVersion;
 
-	Map<Version, Standalone<VectorRef<StateTransactionRef>>> recentStateTransactions;
-	Deque<std::pair<Version, int64_t>> recentStateTransactionSizes;
+	RecentStateTransactionsInfo recentStateTransactionsInfo;
 	AsyncVar<int64_t> totalStateBytes;
 	AsyncTrigger checkNeededVersion;
 	std::map<NetworkAddress, ProxyRequestsInfo> proxyInfoMap;
@@ -141,18 +207,20 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.Before");
 	}
 
-	/*TraceEvent("ResolveBatchStart", self->dbgid).detail("From", proxyAddress).detail("Version", req.version).detail("PrevVersion", req.prevVersion).detail("StateTransactions", req.txnStateTransactions.size())
-	    .detail("RecentStateTransactions", self->recentStateTransactionSizes.size()).detail("LastVersion",
-	   proxyInfo.lastVersion).detail("FirstVersion", self->recentStateTransactionSizes.empty() ? -1 :
-	   self->recentStateTransactionSizes.front().first) .detail("ResolverVersion", self->version.get());*/
+	/* TraceEvent("ResolveBatchStart", self->dbgid).detail("From", proxyAddress).detail("Version",
+	   req.version).detail("PrevVersion", req.prevVersion).detail("StateTransactions", req.txnStateTransactions.size())
+	    .detail("RecentStateTransactions", self->recentStateTransactionsInfo.size()).detail("LastVersion",
+	   proxyInfo.lastVersion).detail("FirstVersion", self->recentStateTransactionsInfo.empty() ? -1 :
+	   self->recentStateTransactionsInfo.firstVersion()) .detail("ResolverVersion", self->version.get()); */
 
 	while (self->totalStateBytes.get() > SERVER_KNOBS->RESOLVER_STATE_MEMORY_LIMIT &&
-	       self->recentStateTransactionSizes.size() &&
-	       proxyInfo.lastVersion > self->recentStateTransactionSizes.front().first &&
+	       self->recentStateTransactionsInfo.size() &&
+	       proxyInfo.lastVersion > self->recentStateTransactionsInfo.firstVersion() &&
 	       req.version > self->neededVersion.get()) {
-		/*TraceEvent("ResolveBatchDelay").detail("From", proxyAddress).detail("StateBytes", self->totalStateBytes.get()).detail("RecentStateTransactionSize", self->recentStateTransactionSizes.size())
-		    .detail("LastVersion", proxyInfo.lastVersion).detail("RequestVersion", req.version).detail("NeededVersion",
-		   self->neededVersion.get()) .detail("RecentStateVer", self->recentStateTransactions.begin()->key);*/
+		/* TraceEvent("ResolveBatchDelay").detail("From", proxyAddress).detail("StateBytes",
+	 self->totalStateBytes.get()).detail("RecentStateTransactionSize", self->recentStateTransactionsInfo.size())
+	 .detail("LastVersion", proxyInfo.lastVersion).detail("RequestVersion", req.version).detail("NeededVersion",
+		     self->neededVersion.get()) .detail("RecentStateVer", self->recentStateTransactionsInfo.firstVersion());*/
 
 		wait(self->totalStateBytes.onChange() || self->neededVersion.onChange());
 	}
@@ -162,8 +230,8 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 	}
 
 	loop {
-		if (self->recentStateTransactionSizes.size() &&
-		    proxyInfo.lastVersion <= self->recentStateTransactionSizes.front().first) {
+		if (self->recentStateTransactionsInfo.size() &&
+		    proxyInfo.lastVersion <= self->recentStateTransactionsInfo.firstVersion()) {
 			self->neededVersion.set(std::max(self->neededVersion.get(), req.prevVersion));
 		}
 
@@ -241,7 +309,8 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		ASSERT(req.prevVersion >= 0 ||
 		       req.txnStateTransactions.size() == 0); // The master's request should not have any state transactions
 
-		auto& stateTransactions = self->recentStateTransactions[req.version];
+		auto& stateTransactionsPair = self->recentStateTransactionsInfo.getStateTransactionsRef(req.version);
+		auto& stateTransactions = stateTransactionsPair.second;
 		int64_t stateMutations = 0;
 		int64_t stateBytes = 0;
 		LogPushData toCommit(self->logSystem); // For accumulating private mutations
@@ -279,6 +348,23 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			TEST(self->forceRecovery); // Resolver detects forced recovery
 		}
 
+		self->resolvedStateTransactions += req.txnStateTransactions.size();
+		self->resolvedStateMutations += stateMutations;
+		self->resolvedStateBytes += stateBytes;
+
+		self->recentStateTransactionsInfo.addVersionBytes(req.version, stateBytes);
+
+		ASSERT(req.version >= firstUnseenVersion);
+		ASSERT(firstUnseenVersion >= self->debugMinRecentStateVersion);
+
+		TEST(firstUnseenVersion == req.version); // Resolver first unseen version is current version
+
+		// If shardChanged at or before this commit version, the proxy may have computed
+		// the wrong set of groups. Then we need to broadcast to all groups below.
+		stateTransactionsPair.first = toCommit.isShardChanged();
+		bool shardChanged = self->recentStateTransactionsInfo.applyStateTxnsToBatchReply(
+		    &reply, firstUnseenVersion, req.version, toCommit.isShardChanged());
+
 		// Adds private mutation messages to the reply message.
 		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 			auto privateMutations = toCommit.getAllMessages();
@@ -291,26 +377,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			reply.privateMutationCount = toCommit.getMutationCount();
 		}
 
-		self->resolvedStateTransactions += req.txnStateTransactions.size();
-		self->resolvedStateMutations += stateMutations;
-		self->resolvedStateBytes += stateBytes;
-
-		if (stateBytes > 0)
-			self->recentStateTransactionSizes.emplace_back(req.version, stateBytes);
-
-		ASSERT(req.version >= firstUnseenVersion);
-		ASSERT(firstUnseenVersion >= self->debugMinRecentStateVersion);
-
-		TEST(firstUnseenVersion == req.version); // Resolver first unseen version is current version
-
-		auto stateTransactionItr = self->recentStateTransactions.lower_bound(firstUnseenVersion);
-		auto endItr = self->recentStateTransactions.lower_bound(req.version);
-		for (; stateTransactionItr != endItr; ++stateTransactionItr) {
-			reply.stateMutations.push_back(reply.arena, stateTransactionItr->value);
-			reply.arena.dependsOn(stateTransactionItr->value.arena());
-		}
-
-		//TraceEvent("ResolveBatch", self->dbgid).detail("PrevVersion", req.prevVersion).detail("Version", req.version).detail("StateTransactionVersions", self->recentStateTransactionSizes.size()).detail("StateBytes", stateBytes).detail("FirstVersion", self->recentStateTransactionSizes.empty() ? -1 : self->recentStateTransactionSizes.front().first).detail("StateMutationsIn", req.txnStateTransactions.size()).detail("StateMutationsOut", reply.stateMutations.size()).detail("From", proxyAddress);
+		//TraceEvent("ResolveBatch", self->dbgid).detail("PrevVersion", req.prevVersion).detail("Version", req.version).detail("StateTransactionVersions", self->recentStateTransactionsInfo.size()).detail("StateBytes", stateBytes).detail("FirstVersion", self->recentStateTransactionsInfo.empty() ? -1 : self->recentStateTransactionsInfo.firstVersion()).detail("StateMutationsIn", req.txnStateTransactions.size()).detail("StateMutationsOut", reply.stateMutations.size()).detail("From", proxyAddress);
 
 		ASSERT(!proxyInfo.outstandingBatches.empty());
 		ASSERT(self->proxyInfoMap.size() <= self->commitProxyCount + 1);
@@ -335,16 +402,10 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		bool anyPopped = false;
 		if (firstUnseenVersion <= oldestProxyVersion && self->proxyInfoMap.size() == self->commitProxyCount + 1) {
 			TEST(true); // Deleting old state transactions
-			self->recentStateTransactions.erase(self->recentStateTransactions.begin(),
-			                                    self->recentStateTransactions.upper_bound(oldestProxyVersion));
+			int64_t erasedBytes = self->recentStateTransactionsInfo.eraseUpTo(oldestProxyVersion);
 			self->debugMinRecentStateVersion = oldestProxyVersion + 1;
-
-			while (self->recentStateTransactionSizes.size() &&
-			       self->recentStateTransactionSizes.front().first <= oldestProxyVersion) {
-				anyPopped = true;
-				stateBytes -= self->recentStateTransactionSizes.front().second;
-				self->recentStateTransactionSizes.pop_front();
-			}
+			anyPopped = erasedBytes = 0;
+			stateBytes -= erasedBytes;
 		}
 
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
@@ -352,7 +413,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 				reply.tpcvMap.clear();
 			} else {
 				std::set<uint16_t> writtenTLogs;
-				if (reply.privateMutationCount) {
+				if (shardChanged || reply.privateMutationCount) {
 					for (int i = 0; i < self->numLogs; i++) {
 						writtenTLogs.insert(i);
 					}

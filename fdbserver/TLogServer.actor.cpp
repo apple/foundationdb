@@ -2234,6 +2234,13 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		}
 		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 		logData->version.set(req.version);
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			self->unknownCommittedVersions.push_front(std::make_tuple(req.version, req.tLogCount));
+			while (!self->unknownCommittedVersions.empty() &&
+			       std::get<0>(self->unknownCommittedVersions.back()) <= req.knownCommittedVersion) {
+				self->unknownCommittedVersions.pop_back();
+			}
+		}
 
 		if (req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.AfterTLogCommit");
@@ -2255,13 +2262,6 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 
 	if (req.debugID.present())
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.After");
-	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-		self->unknownCommittedVersions.push_front(std::make_tuple(req.version, req.tLogCount));
-		while (!self->unknownCommittedVersions.empty() &&
-		       std::get<0>(self->unknownCommittedVersions.back()) <= req.knownCommittedVersion) {
-			self->unknownCommittedVersions.pop_back();
-		}
-	}
 	req.reply.send(logData->durableKnownCommittedVersion);
 	return Void();
 }

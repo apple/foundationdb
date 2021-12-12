@@ -790,6 +790,9 @@ struct LogPushData : NonCopyable {
 		writtenTLogs.insert(msg_locations.begin(), msg_locations.end());
 	}
 
+	void setShardChanged() { shardChanged = true; }
+	bool isShardChanged() const { return shardChanged; }
+
 	void writeMessage(StringRef rawMessageWithoutLength, bool usePreviousLocations);
 
 	template <class T>
@@ -829,6 +832,7 @@ private:
 	std::unordered_set<int> writtenLocations;
 	uint32_t subsequence;
 	SpanID spanContext;
+	bool shardChanged = false; // if keyServers has any changes, i.e., shard boundary modifications.
 
 	// Writes transaction info to the message stream at the given location if
 	// it has not already been written (for the current transaction). Returns

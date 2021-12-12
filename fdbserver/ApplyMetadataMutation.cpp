@@ -193,6 +193,9 @@ private:
 		}
 		uniquify(info.tags);
 		keyInfo->insert(insertRange, info);
+		if (toCommit && SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			toCommit->setShardChanged();
+		}
 	}
 
 	void checkSetServerKeysPrefix(MutationRef m) {
@@ -607,6 +610,9 @@ private:
 			                clearRange.begin == StringRef()
 			                    ? ServerCacheInfo()
 			                    : keyInfo->rangeContainingKeyBefore(clearRange.begin).value());
+			if (toCommit && SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+				toCommit->setShardChanged();
+			}
 		}
 
 		if (!initialCommit)
