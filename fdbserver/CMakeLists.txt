@@ -209,6 +209,7 @@ set(FDBSERVER_SRCS
   workloads/MemoryKeyValueStore.h
   workloads/MemoryLifetime.actor.cpp
   workloads/MetricLogging.actor.cpp
+  workloads/MiniCycle.actor.cpp
   workloads/MutationLogReaderCorrectness.actor.cpp
   workloads/GetRangeAndMap.actor.cpp
   workloads/ParallelRestore.actor.cpp

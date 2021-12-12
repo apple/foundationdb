@@ -747,7 +747,7 @@ public:
 
 	ThreadResult() : sav(0) {}
 	explicit ThreadResult(ThreadSingleAssignmentVar<T>* sav) : sav(sav) {
-		ASSERT(sav->isReadyUnsafe());
+		ASSERT(sav->isReady());
 		// sav->addref();
 	}
 	ThreadResult(const ThreadResult<T>& rhs) : sav(rhs.sav) {

@@ -4892,14 +4892,14 @@ public:
 				}
 
 				// Start reading the page, without caching
-				entries.push_back(std::make_pair(q.get(),
-				                                 self->readPage(PagerEventReasons::LazyClear,
-				                                                q.get().height,
-				                                                snapshot,
-				                                                q.get().pageID,
-				                                                ioLeafPriority,
-				                                                true,
-				                                                false)));
+				entries.emplace_back(q.get(),
+				                     self->readPage(PagerEventReasons::LazyClear,
+				                                    q.get().height,
+				                                    snapshot,
+				                                    q.get().pageID,
+				                                    ioLeafPriority,
+				                                    true,
+				                                    false));
 				--toPop;
 			}
 
