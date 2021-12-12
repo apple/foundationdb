@@ -2162,6 +2162,8 @@ public:
 		recoverFuture = forwardError(recover(this), errorPromise);
 	}
 
+	std::string getName() const override { return filename; }
+
 	void setPageSize(int size) {
 		g_redwoodMetrics.updateMaxRecordCount(315 * size / 4096);
 
@@ -2284,8 +2286,8 @@ public:
 			self->filePageCountPending = self->filePageCount;
 
 			if (self->logicalPageSize != self->desiredPageSize) {
-				TraceEvent(SevWarn, "RedwoodPageSizeNotDesired")
-				    .detail("Filename", self->filename)
+				TraceEvent(SevWarnAlways, "RedwoodPageSizeMismatch")
+				    .detail("InstanceName", self->getName())
 				    .detail("ExistingPageSize", self->logicalPageSize)
 				    .detail("DesiredPageSize", self->desiredPageSize);
 			}
@@ -5008,6 +5010,14 @@ public:
 			self->m_pHeader->fromKeyRef(meta);
 			self->m_lazyClearQueue.recover(self->m_pager, self->m_pHeader->lazyDeleteQueue, "LazyClearQueueRecovered");
 			debug_printf("BTree recovered.\n");
+			if (self->m_pHeader->encodingType != self->m_encodingType) {
+				TraceEvent(SevWarn, "RedwoodBTreeNodeEncodingMismatch")
+				    .detail("InstanceName", self->m_pager->getName())
+				    .detail("EncodingFound", self->m_pHeader->encodingType)
+				    .detail("EncodingDesired", self->m_encodingType);
+
+				self->m_encodingType = self->m_pHeader->encodingType;
+			}
 		}
 
 		self->m_lazyClearActor = 0;
@@ -9237,6 +9247,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	    params.getDouble("clearSingleKeyProbability").orDefault(deterministicRandom()->random01());
 	state double clearPostSetProbability =
 	    params.getDouble("clearPostSetProbability").orDefault(deterministicRandom()->random01() * .1);
+	state int maxColdStarts = params.getInt("coldStartsAllowed").orDefault(300);
 	state double coldStartProbability =
 	    params.getDouble("coldStartProbability").orDefault(pagerMemoryOnly ? 0 : (deterministicRandom()->random01()));
 	state double advanceOldVersionProbability =
@@ -9289,6 +9300,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;
 	state std::set<Key> keys;
+	state int coldStarts = 0;
 
 	Version lastVer = btree->getLastCommittedVersion();
 	printf("Starting from version: %" PRId64 "\n", lastVer);
@@ -9472,7 +9484,9 @@ TEST_CASE("Lredwood/correctness/btree") {
 			mutationBytesTargetThisCommit = randomSize(maxCommitSize);
 
 			// Recover from disk at random
-			if (!pagerMemoryOnly && deterministicRandom()->random01() < coldStartProbability) {
+			if (!pagerMemoryOnly && coldStarts < maxColdStarts &&
+			    deterministicRandom()->random01() < coldStartProbability) {
+				++coldStarts;
 				printf("Recovering from disk after next commit.\n");
 
 				// Wait for outstanding commit
