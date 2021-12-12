@@ -333,21 +333,25 @@ public:
 	void postRead(PhysicalPageID pageID) {
 		Reader next{ buffer };
 		const VersionHeader* vh = next;
+		encodingType = vh->encodingType;
 
 		if (vh->headerVersion == 1) {
-			next.skip<Header>();
+			Header* h = next;
 			XXHashEncodingHeader* xh = nullptr;
 			XOREncodingHeader* xorh = nullptr;
 
-			if (vh->encodingType == EncodingType::XXHash64) {
+			if (encodingType == EncodingType::XXHash64) {
 				xh = next;
-			} else if (vh->encodingType == EncodingType::XOREncryption) {
+			} else if (encodingType == EncodingType::XOREncryption) {
 				xorh = next;
 			} else {
 				throw unsupported_format_version();
 			}
 
 			Footer* f = next;
+			pUsable = next;
+			usableSize = logicalSize - (pUsable - buffer);
+
 			f->verify(buffer, (uint8_t*)f - buffer);
 
 			if (xh != nullptr) {
@@ -355,6 +359,10 @@ public:
 			} else if (xorh != nullptr) {
 				xorh->decode(xorKeySecret, pUsable, usableSize, pageID);
 				xorKeyID = xorh->keyID;
+			}
+
+			if (h->firstPhysicalPageID != pageID) {
+				throw page_header_wrong_page_id();
 			}
 		} else {
 			throw unsupported_format_version();

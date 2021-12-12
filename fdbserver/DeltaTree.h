@@ -1654,6 +1654,8 @@ public:
 		} else {
 			nodeBytesUsed = 0;
 		}
+
+		ASSERT(size() <= spaceAvailable);
 		nodeBytesFree = spaceAvailable - size();
 #ifdef VALGRIND
 		// Mark unused available space as defined
@@ -1731,8 +1733,15 @@ private:
 		node.setLeftChildOffset(largeNodes, leftChildOffset);
 		node.setRightChildOffset(largeNodes, rightChildOffset);
 
-		deltatree_printf("%p: Serialized %s as %s\n", this, item.toString().c_str(), node.toString(this).c_str());
+		int written = wptr - (uint8_t*)&node;
+		deltatree_printf("Built subtree tree=%p subtreeRoot=%p written=%d end=%p serialized subtreeRoot %s as %s \n",
+		                 this,
+		                 &node,
+		                 written,
+		                 (uint8_t*)&node + written,
+		                 item.toString().c_str(),
+		                 node.toString(this).c_str());
 
-		return wptr - (uint8_t*)&node;
+		return written;
 	}
 };

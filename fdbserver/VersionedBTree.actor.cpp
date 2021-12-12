@@ -50,7 +50,7 @@
 #include <cinttypes>
 #include <boost/intrusive/list.hpp>
 
-#define REDWOOD_DEBUG 1
+#define REDWOOD_DEBUG 0
 
 // Only print redwood debug statements for a certain address. Useful in simulation with many redwood processes to reduce
 // log size.
@@ -2242,6 +2242,7 @@ public:
 				if (e.code() == error_code_actor_cancelled) {
 					throw;
 				}
+				debug_printf("DWALPager(%s) Failed to recover primary header\n", self->filename.c_str());
 				TraceEvent(SevWarn, "RedwoodHeaderError")
 				    .detail("Filename", self->filename)
 				    .detail("PageID", primaryHeaderPageID)
@@ -2257,6 +2258,7 @@ public:
 					wait(store(self->headerPage, self->readHeaderPage(backupHeaderPageID)));
 					recoveredHeader = true;
 				} catch (Error& e) {
+					debug_printf("DWALPager(%s) Failed to recover backup header\n", self->filename.c_str());
 					TraceEvent(SevWarn, "RedwoodRecoveryError")
 					    .detail("Filename", self->filename)
 					    .detail("PageID", backupHeaderPageID)
@@ -2881,24 +2883,30 @@ public:
 
 		state Reference<ArenaPage> page =
 		    header ? ArenaPage::create(smallestPhysicalBlock, smallestPhysicalBlock) : self->newPageBuffer();
-		debug_printf("DWALPager(%s) op=readPhysicalStart %s ptr=%p\n",
+		debug_printf("DWALPager(%s) op=readPhysicalStart %s ptr=%p header=%d\n",
 		             self->filename.c_str(),
 		             toString(pageID).c_str(),
-		             page->data());
+		             page->rawData(),
+		             header);
 
 		int readBytes = wait(readPhysicalBlock(self,
 		                                       page->rawData(),
 		                                       page->rawSize(),
 		                                       (int64_t)pageID * page->rawSize(),
 		                                       std::min(priority, ioMaxPriority)));
-		debug_printf("DWALPager(%s) op=readPhysicalComplete %s ptr=%p bytes=%d\n",
+		debug_printf("DWALPager(%s) op=readPhysicalDiskReadComplete %s ptr=%p bytes=%d\n",
 		             self->filename.c_str(),
 		             toString(pageID).c_str(),
-		             page->data(),
+		             page->rawData(),
 		             readBytes);
 
 		try {
 			page->postRead(pageID);
+			debug_printf("DWALPager(%s) op=readPhysicalVerifyComplete %s ptr=%p bytes=%d\n",
+			             self->filename.c_str(),
+			             toString(pageID).c_str(),
+			             page->rawData(),
+			             readBytes);
 		} catch (Error& e) {
 			Error err = e;
 			if (g_network->isSimulated() && g_simulator.checkInjectedCorruption()) {
@@ -2937,7 +2945,7 @@ public:
 		debug_printf("DWALPager(%s) op=readPhysicalStart %s ptr=%p\n",
 		             self->filename.c_str(),
 		             toString(pageIDs).c_str(),
-		             page->data());
+		             page->rawData());
 
 		// TODO:  Could a dispatched read try to write to page after it has been destroyed if this actor is cancelled?
 		state int blockSize = self->physicalPageSize;
@@ -2952,7 +2960,7 @@ public:
 		debug_printf("DWALPager(%s) op=readPhysicalComplete %s ptr=%p bytes=%d\n",
 		             self->filename.c_str(),
 		             toString(pageIDs).c_str(),
-		             page->data(),
+		             page->rawData(),
 		             pageIDs.size() * blockSize);
 
 		try {
@@ -3203,7 +3211,7 @@ public:
 		debug_printf("DWALPager(%s) op=readPhysicalExtentComplete %s ptr=%p bytes=%d file offset=%d\n",
 		             self->filename.c_str(),
 		             toString(pageID).c_str(),
-		             extent->data(),
+		             extent->rawData(),
 		             readSize,
 		             (pageID * self->physicalPageSize));
 
@@ -5322,9 +5330,13 @@ private:
 	// Describes a range of a vector of records that should be built into a single BTreePage
 	struct PageToBuild {
 		PageToBuild(int index, int blockSize, EncodingType t)
-		  : startIndex(index), count(0), pageSize(blockSize), bytesLeft(ArenaPage::getUsableSize(blockSize, t)),
+		  : startIndex(index), count(0), pageSize(blockSize),
 		    largeDeltaTree(pageSize > BTreePage::BinaryTree::SmallSizeLimit), blockSize(blockSize), blockCount(1),
-		    kvBytes(0) {}
+		    kvBytes(0) {
+
+			// Subtrace Page header overhead, BTreePage overhead, and DeltaTree (BTreePage::BinaryTree) overhead.
+			bytesLeft = ArenaPage::getUsableSize(blockSize, t) - sizeof(BTreePage) - sizeof(BTreePage::BinaryTree);
+		}
 
 		PageToBuild next(EncodingType t) { return PageToBuild(endIndex(), blockSize, t); }
 
@@ -5338,11 +5350,11 @@ private:
 		int blockCount; // The number of blocks in pageSize
 		int kvBytes; // The amount of user key/value bytes added to the page
 
-		// Number of bytes used by the generated/serialized BTreePage
-		int size() const { return pageSize - bytesLeft; }
+		// Number of bytes used by the generated/serialized BTreePage, including all headers
+		int usedBytes() const { return pageSize - bytesLeft; }
 
 		// Used fraction of pageSize bytes
-		double usedFraction() const { return (double)size() / pageSize; }
+		double usedFraction() const { return (double)usedBytes() / pageSize; }
 
 		// Unused fraction of pageSize bytes
 		double slackFraction() const { return (double)bytesLeft / pageSize; }
@@ -5361,7 +5373,7 @@ private:
 			    "{start=%d count=%d used %d/%d bytes (%.2f%% slack) kvBytes=%d blocks=%d blockSize=%d large=%d}",
 			    startIndex,
 			    count,
-			    size(),
+			    usedBytes(),
 			    pageSize,
 			    slackFraction() * 100,
 			    kvBytes,
@@ -5593,13 +5605,13 @@ private:
 			             pageLowerBound.toString(false).c_str(),
 			             pageUpperBound.toString(false).c_str());
 
-			int deltaTreeSpace = p.pageSize - sizeof(BTreePage);
+			int deltaTreeSpace = page->dataSize() - sizeof(BTreePage);
+			debug_printf("Building tree at %p deltaTreeSpace %d p.usedBytes=%d\n",
+			             btPage->tree(),
+			             deltaTreeSpace,
+			             p.usedBytes());
 			state int written = btPage->tree()->build(
 			    deltaTreeSpace, &entries[p.startIndex], &entries[endIndex], &pageLowerBound, &pageUpperBound);
-
-			// Mark the slack in the page as defined
-			VALGRIND_MAKE_MEM_DEFINED((uint8_t*)btPage->tree() + written,
-			                          page->dataSize() - written - ((uint8_t*)btPage->tree() - page->data()));
 
 			if (written > deltaTreeSpace) {
 				debug_printf("ERROR:  Wrote %d bytes to page %s deltaTreeSpace=%d\n",
@@ -9278,7 +9290,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;
 	state std::set<Key> keys;
 
-	state Version lastVer = btree->getLastCommittedVersion();
+	Version lastVer = btree->getLastCommittedVersion();
 	printf("Starting from version: %" PRId64 "\n", lastVer);
 
 	state Version version = lastVer + 1;
