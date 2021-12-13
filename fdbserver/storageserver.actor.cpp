@@ -837,6 +837,8 @@ public:
 		// fallback).
 		Counter quickGetValueHit, quickGetValueMiss, quickGetKeyValuesHit, quickGetKeyValuesMiss;
 
+		RateCounter kvReadThroughput;
+
 		LatencySample readLatencySample;
 		LatencyBands readLatencyBands;
 
@@ -1783,6 +1785,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 
 	if (req.end > feed->second->emptyVersion + 1 && feed->second->durableVersion != invalidVersion &&
 	    req.begin <= feed->second->durableVersion) {
+		state double startTime = now();
 		RangeResult res = wait(data->storage.readRange(
 		    KeyRangeRef(changeFeedDurableKey(req.rangeID, std::max(req.begin, feed->second->emptyVersion)),
 		                changeFeedDurableKey(req.rangeID, req.end)),
@@ -1790,6 +1793,9 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    remainingDurableBytes));
 
 		if (!req.range.empty()) {
+			data->counters.kvReadThroughput += res.expectedSize();
+			data->counters.kvReadThroughput.setInterval(now() - startTime);
+			data->counters.kvReadThroughput.resetInterval();
 			data->checkChangeCounter(changeCounter, req.range);
 		}
 
