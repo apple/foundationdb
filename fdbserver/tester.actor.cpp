@@ -325,19 +325,14 @@ TestWorkload* getWorkloadIface(WorkloadRequest work,
 	TestWorkload* workload = IWorkloadFactory::create(testName.toString(), wcx);
 
 	for (int q = 0; q < options.size(); q++)
-		fprintf(stdout,
-				" '%s' = '%s'\n",
-				options[q].key.toString().c_str(),
-				options[q].value.toString().c_str());
+		fprintf(stdout, " '%s' = '%s'\n", options[q].key.toString().c_str(), options[q].value.toString().c_str());
 	if (workload) {
-		fprintf(stdout,
-				"TestName: %s\n. Workload Options:",
-				printable(testName).c_str());
+		fprintf(stdout, "TestName: %s\n. Workload Options:", printable(testName).c_str());
 		for (int p = 0; p < workload->options.size(); p++)
 			fprintf(stdout,
-					" '%s' = '%s'\n",
-					workload->options[p].key.toString().c_str(),
-					workload->options[p].value.toString().c_str());
+			        " '%s' = '%s'\n",
+			        workload->options[p].key.toString().c_str(),
+			        workload->options[p].value.toString().c_str());
 	}
 	auto unconsumedOptions = checkAllOptionsConsumed(workload ? workload->options : VectorRef<KeyValueRef>());
 	if (!workload || unconsumedOptions.size()) {
@@ -554,14 +549,21 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 					wait(workload->start(cx) || databaseError);
 					startResult = Void();
 				} catch (Error& e) {
-					startResult = operation_failed();
-					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
-						throw;
-					TraceEvent(SevError, "TestFailure", workIface.id())
-					    .error(e, true)
-					    .detail("Reason", "Error starting workload")
-					    .detail("Workload", workload->description());
-					// ok = false;
+					if (e.code() == error_code_actor_cancelled) {
+						TraceEvent(SevWarn, "TestFailure", workIface.id())
+						    .error(e, true)
+						    .detail("Workload", workload->description());
+						startResult = Void();
+					} else {
+						startResult = operation_failed();
+						if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
+							throw;
+						TraceEvent(SevError, "TestFailure", workIface.id())
+						    .error(e, true)
+						    .detail("Reason", "Error starting workload")
+						    .detail("Workload", workload->description());
+						// ok = false
+					}
 				}
 				TraceEvent("TestComplete", workIface.id())
 				    .detail("Workload", workload->description())
@@ -1640,8 +1642,12 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 		Standalone<VectorRef<KeyValueRef>> options;
 		TraceEvent(SevDebug, "TestHarnessConsistencyCheck").detail("File", fileName.c_str());
 		spec.title = LiteralStringRef("ConsistencyCheck");
+
+		// Do these defaults make sense for running consistency checker as a separate role?
+		// shuffleShards?
+		// indefinite?
+		// rateLimitMax?
 		spec.databasePingDelay = 0;
-		//spec.useDB = false;
 		spec.timeout = 0;
 		spec.waitForQuiescenceBegin = false;
 		spec.waitForQuiescenceEnd = false;
@@ -1664,10 +1670,7 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 		}
 		printf("runTests: Options:\n");
 		for (int q = 0; q < options.size(); q++)
-			fprintf(stdout,
-					" '%s' = '%s'\n",
-					options[q].key.toString().c_str(),
-					options[q].value.toString().c_str());
+			fprintf(stdout, " '%s' = '%s'\n", options[q].key.toString().c_str(), options[q].value.toString().c_str());
 		spec.options.push_back_deep(spec.options.arena(), options);
 		testSpecs.push_back(spec);
 	} else if (whatToRun == TEST_TYPE_UNIT_TESTS) {
@@ -1733,5 +1736,4 @@ ACTOR Future<Void> runTests(Reference<ClusterConnectionFile> connFile,
 			throw internal_error();
 		}
 	}
-
 }

@@ -250,7 +250,8 @@ struct DatabaseConfiguration {
 	StorageMigrationType storageMigrationType;
 
 	// Shard Consistency Scan config
-	bool consistencyScanEnabled;
+	int64_t consistencyScanEnabled;
+	int64_t consistencyScanRestart;
 	double consistencyScanMaxRate;
 	double consistencyScanInterval;
 

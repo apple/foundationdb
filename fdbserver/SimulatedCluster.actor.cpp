@@ -1254,6 +1254,15 @@ void SimulationConfig::setRandomConfig() {
 	if (deterministicRandom()->random01() < 0.5) {
 		set_config("backup_worker_enabled:=1");
 	}
+
+	if (deterministicRandom()->random01() < 0.5) {
+		// TraceEvent("SimulatedConfigRandom").detail("CconsistencyScanEnabled", 0);
+		set_config("consistency_scan_enabled=0");
+	} else {
+		TraceEvent("SimulatedConfigRandom").detail("ConsistencyScanEnabled", 1);
+		set_config("consistency_scan_enabled=1 consistency_scan_restart=1 consistency_scan_maxrate=50e6 "
+		           "consistency_scan_interval=30");
+	}
 }
 
 // Overwrite DB with simple options, used when simpleConfig is true in the TestConfig
@@ -1794,7 +1803,14 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			startingConfigString += kv.first + "=" +
 			                        json_spirit::write_string(json_spirit::mValue(kv.second.get_array()),
 			                                                  json_spirit::Output_options::none);
+		} else if ("consistency_scan_interval" == kv.first) {
+			printf("kv-first: %s\n", kv.first.c_str());
+			startingConfigString += format("consistency_scan_interval:=%lf", simconfig.db.consistencyScanInterval);
+		} else if ("consistency_scan_rate" == kv.first) {
+			printf("kv-first: %s\n", kv.first.c_str());
+			startingConfigString += format("consistency_scan_rate:=%lf", simconfig.db.consistencyScanMaxRate);
 		} else {
+			printf("kv-first: %s\n", kv.first.c_str());
 			ASSERT(false);
 		}
 	}

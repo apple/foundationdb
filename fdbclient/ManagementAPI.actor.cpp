@@ -165,16 +165,24 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			out[p + key] = format("%d", type);
 		}
 		if (key == "consistency_scan_enabled" && isInteger(value)) {
-			//int csEnabled = std::stoi(value);
+			// int csEnabled = std::stoi(value);
 			out[p + key] = value;
+			printf("consistency_scan_enabled: %s\n", value.c_str());
 		}
-		if (key == "consistency_scan_rate" && isInteger(value)) {
-			//int csRate = std::stoi(value);
+		// TODO: NEELAM: should we check if consistency_scan_enabled is set first?
+		if (key == "consistency_scan_restart" && isInteger(value)) {
 			out[p + key] = value;
+			printf("consistency_scan_restart: %s\n", value.c_str());
 		}
-		if (key == "consistency_scan_interval" && isInteger(value)) {
-			//int csInterval = std::stoi(value);
+		if (key == "consistency_scan_rate") { //} && isInteger(value)) {
+			// int csRate = std::stoi(value);
 			out[p + key] = value;
+			printf("consistency_scan_rate: %s\n", value.c_str());
+		}
+		if (key == "consistency_scan_interval") { //} && isInteger(value)) {
+			// int csInterval = std::stoi(value);
+			out[p + key] = value;
+			printf("consistency_scan_interval: %s\n", value.c_str());
 		}
 		return out;
 	}

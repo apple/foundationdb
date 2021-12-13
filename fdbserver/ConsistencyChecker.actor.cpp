@@ -39,46 +39,51 @@ struct ConsistencyCheckerData {
 	UID id;
 	Database db;
 	// TODO: NEELAM: we probably dont need to keep the next three fields here
-	//bool state;
-	//double maxRate;
-	//double targetInterval;
+	// bool state;
+	// double maxRate;
+	// double targetInterval;
 
 	DatabaseConfiguration configuration;
 	PromiseStream<Future<Void>> addActor;
 
-	//ConsistencyCheckerData(UID id, Database db, double maxRate, double targetInterval)
-	//  : id(id), db(db), maxRate(maxRate), targetInterval(targetInterval) {}
-	ConsistencyCheckerData(UID id, Database db)
-        : id(id), db(db) {}
+	// ConsistencyCheckerData(UID id, Database db, double maxRate, double targetInterval)
+	//   : id(id), db(db), maxRate(maxRate), targetInterval(targetInterval) {}
+	ConsistencyCheckerData(UID id, Database db) : id(id), db(db) {}
 };
 
-ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-									  double maxRate, double targetInterval,Reference<ClusterConnectionFile> connFile) {
-	state ConsistencyCheckerData self(ckInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
+ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf,
+                                      Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                      int64_t restart,
+                                      double maxRate,
+                                      double targetInterval,
+                                      Reference<ClusterConnectionFile> connFile) {
+	state ConsistencyCheckerData self(ckInterf.id(),
+	                                  openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 	state Promise<Void> err;
 	state Future<Void> collection = actorCollection(self.addActor.getFuture());
 	state UnitTestParameters testParams;
 
 	TraceEvent("ConsistencyCheckerStarting", ckInterf.id()).log();
 	self.addActor.send(waitFailureServer(ckInterf.waitFailure.getFuture()));
-	//self.addActor.send(configurationMonitor(&self)); //TODO: NEELAM: do we need this? maybe not
+	// self.addActor.send(configurationMonitor(&self)); //TODO: NEELAM: do we need this? maybe not
 
 	self.addActor.send(traceRole(Role::CONSISTENCYCHECKER, ckInterf.id()));
 
+	testParams.set("restart", restart);
 	testParams.set("maxRate", maxRate);
 	testParams.set("targetInterval", targetInterval);
 
 	try {
 		loop choose {
 			// Run consistency check workload. Pass in the DBConfig params as testParams
-			when(wait(runTests(connFile, //Reference<ClusterConnectionFile>(new ClusterConnectionFile()),
-							   TEST_TYPE_CONSISTENCY_CHECK,
-							   TEST_HERE,
-							   1,
-							   std::string(),
-							   StringRef(),
-							   ckInterf.locality,
-							   testParams))) {
+			when(wait(runTests(connFile, // Reference<ClusterConnectionFile>(new ClusterConnectionFile()),
+			                   TEST_TYPE_CONSISTENCY_CHECK,
+			                   TEST_HERE,
+			                   1,
+			                   std::string(),
+			                   StringRef(),
+			                   ckInterf.locality,
+			                   testParams))) {
 				return Void();
 			}
 			when(HaltConsistencyCheckerRequest req = waitNext(ckInterf.haltConsistencyChecker.getFuture())) {
@@ -93,6 +98,10 @@ ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf, Refe
 			}
 		}
 	} catch (Error& err) {
+		if (err.code() == error_code_actor_cancelled) {
+			TraceEvent("ConsistencyCheckerActorCanceled", ckInterf.id()).error(err, true);
+			return Void();
+		}
 		TraceEvent("ConsistencyCheckerDied", ckInterf.id()).error(err, true);
 	}
 	return Void();

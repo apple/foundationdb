@@ -82,6 +82,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	// Randomize shard order with each iteration if true
 	bool shuffleShards;
 
+	// Restart from the beginning if true, else try to resume based on the progress key saved during previous run
+	int restart;
 	double maxRate;
 	double targetInterval;
 
@@ -109,6 +111,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		rateLimitMax = getOption(options, LiteralStringRef("rateLimitMax"), 0);
 		shuffleShards = getOption(options, LiteralStringRef("shuffleShards"), false);
 		indefinite = getOption(options, LiteralStringRef("indefinite"), false);
+		restart = getOption(options, LiteralStringRef("restart"), 1);
 		maxRate = getOption(options, LiteralStringRef("maxRate"), 0);
 		targetInterval = getOption(options, LiteralStringRef("targetInterval"), 0);
 		suspendConsistencyCheck.set(true);
@@ -338,7 +341,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			} catch (Error& e) {
 				if (e.code() == error_code_transaction_too_old || e.code() == error_code_future_version ||
 				    e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-				    e.code() == error_code_process_behind)
+				    e.code() == error_code_process_behind || e.code() == error_code_actor_cancelled)
 					TraceEvent("ConsistencyCheck_Retry")
 					    .error(e); // FIXME: consistency check does not retry in this case
 				else
@@ -1130,6 +1133,21 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> setConsistencyCheckProgress(Database cx, Key key) {
+		state ReadYourWritesTransaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.set(consistencyCheckProgressKey, key);
+				wait(tr.commit());
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	// Checks that the data in each shard is the same on each storage server that it resides on.  Also performs some
 	// sanity checks on the sizes of shards and storage servers. Returns false if there is a failure
 	ACTOR Future<bool> checkDataConsistency(Database cx,
@@ -1149,6 +1167,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state int i = self->clientId * (self->shardSampleFactor + 1);
 		state int increment =
 		    (self->distributed && !self->firstClient) ? effectiveClientCount * self->shardSampleFactor : 1;
+		// TODO: NEELAM: take maxRate and interval into account
 		state int rateLimitForThisRound =
 		    self->bytesReadInPreviousRound == 0
 		        ? self->rateLimitMax
@@ -1161,6 +1180,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Reference<IRateControl> rateLimiter = Reference<IRateControl>(new SpeedLimit(rateLimitForThisRound, 1));
 		state double rateLimiterStartTime = now();
 		state int64_t bytesReadInthisRound = 0;
+		state bool resume = !(self->restart);
+		state KeyRef prevReadKey;
 
 		state double dbSize = 100e12;
 		if (g_network->isSimulated()) {
@@ -1169,9 +1190,28 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			dbSize = _dbSize;
 		}
 
+		// TODO: NEELAM: See if we remembered progress from a previous run
+		if (resume) {
+			TraceEvent("ConsistencyCheck_Resuming").log();
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<Value> value = wait(tr.get(consistencyCheckProgressKey));
+			if (value.present()) {
+				prevReadKey = value.get();
+				TraceEvent("ConsistencyCheck_ResumingAt").detail("Key", prevReadKey.toString());
+			}
+		}
+
 		state std::vector<KeyRangeRef> ranges;
 
 		for (int k = 0; k < keyLocations.size() - 1; k++) {
+			// TODO: NEELAM: check is this is sufficient
+			if (resume && keyLocations[k].key < prevReadKey) {
+				TraceEvent("ConsistencyCheck_SkippingRange")
+				    .detail("KeyBegin", keyLocations[k].key.toString())
+				    .detail("KeyEnd", keyLocations[k + 1].key.toString())
+				    .detail("PrevKey", prevReadKey.toString());
+				continue;
+			}
 			KeyRangeRef range(keyLocations[k].key, keyLocations[k + 1].key);
 			ranges.push_back(range);
 		}
@@ -1317,7 +1357,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						// Get the min version of the storage servers
 						Version version = wait(self->getVersion(cx, self));
 
-						state GetKeyValuesRequest req;
+						// state GetKeyValuesRequest req;
+						state GetKeyValuesStreamRequest req;
 						req.begin = begin;
 						req.end = firstGreaterOrEqual(range.end);
 						req.limit = 1e4;
@@ -1326,34 +1367,75 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						req.tags = TagSet();
 
 						// Try getting the entries in the specified range
-						state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
+						state std::vector<FutureStream<GetKeyValuesStreamReply>> keyValueFutures;
 						state int j = 0;
-						for (j = 0; j < storageServerInterfaces.size(); j++) {
-							resetReply(req);
-							keyValueFutures.push_back(
-							    storageServerInterfaces[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
-						}
-
-						wait(waitForAll(keyValueFutures));
+						TraceEvent("ConsistencyCheck_StoringGetFutures")
+						    .detail("SSISize", storageServerInterfaces.size());
 
 						// Read the resulting entries
 						state int firstValidServer = -1;
+						state GetKeyValuesStreamReply reference;
 						totalReadAmount = 0;
-						for (j = 0; j < keyValueFutures.size(); j++) {
-							ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
+						for (j = 0; j < storageServerInterfaces.size(); j++) {
+							state GetKeyValuesStreamReply current;
+							try {
+								TraceEvent("ConsistencyCheck_GetKeyValuesStream").detail("Iter", j);
+								resetReply(req);
+								GetKeyValuesStreamReply _current = waitNext(
+								    storageServerInterfaces[j].getKeyValuesStream.getReplyStream(req).getFuture());
+								TraceEvent("ConsistencyCheck_GetKeyValuesStream")
+								    .detail("DataSize", _current.data.size())
+								    .detail("More", _current.more)
+								    .detail("CurShardBegin", req.begin.getKey())
+								    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString());
+								current = _current;
+							} catch (Error& e) {
+								if (e.code() != error_code_end_of_stream) {
+									// If the data is not available and we aren't relocating this shard
+									if (!isRelocating) {
+										TraceEvent("ConsistencyCheck_StorageServerUnavailable")
+										    .suppressFor(1.0)
+										    .detail("StorageServer", storageServers[j])
+										    .detail("ShardBegin", printable(range.begin))
+										    .detail("ShardEnd", printable(range.end))
+										    .detail("Address", storageServerInterfaces[j].address())
+										    .detail("UID", storageServerInterfaces[j].id())
+										    .detail("GetKeyValuesToken",
+										            storageServerInterfaces[j].getKeyValues.getEndpoint().token)
+										    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False")
+										    .error(e);
+
+										// All shards should be available in quiscence
+										if (self->performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
+											self->testFailure("Storage server unavailable");
+											return false;
+										}
+									} // else continue?
+								} else {
+									current = GetKeyValuesStreamReply();
+									TraceEvent("ConsistencyCheck_EndofStream")
+									    .detail("DataSize", current.data.size())
+									    .detail("More", current.more)
+									    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString());
+								}
+							}
 
 							// Compare the results with other storage servers
-							if (rangeResult.present() && !rangeResult.get().error.present()) {
-								state GetKeyValuesReply current = rangeResult.get();
+							if (current.data.size()) {
 								totalReadAmount += current.data.expectedSize();
+								TraceEvent("ConsistencyCheck_GetKeyValuesStream")
+								    .detail("CurDataSize", current.data.size());
 								// If we haven't encountered a valid storage server yet, then mark this as the baseline
 								// to compare against
-								if (firstValidServer == -1)
+								if (firstValidServer == -1) {
 									firstValidServer = j;
-
-								// Compare this shard against the first
-								else {
-									GetKeyValuesReply reference = keyValueFutures[firstValidServer].get().get();
+									reference = current;
+									TraceEvent("ConsistencyCheck_FirstValidServer")
+									    .detail("Iter", j)
+									    .detail("DataSize", reference.data.size());
+									// Compare this shard against the first
+								} else {
+									// GetKeyValuesReply reference = keyValueFutures[firstValidServer].get().get();
 
 									if (current.data != reference.data || current.more != reference.more) {
 										// Be especially verbose if in simulation
@@ -1485,34 +1567,17 @@ struct ConsistencyCheckWorkload : TestWorkload {
 									}
 								}
 							}
-
-							// If the data is not available and we aren't relocating this shard
-							else if (!isRelocating) {
-								Error e =
-								    rangeResult.isError() ? rangeResult.getError() : rangeResult.get().error.get();
-
-								TraceEvent("ConsistencyCheck_StorageServerUnavailable")
-								    .suppressFor(1.0)
-								    .detail("StorageServer", storageServers[j])
-								    .detail("ShardBegin", printable(range.begin))
-								    .detail("ShardEnd", printable(range.end))
-								    .detail("Address", storageServerInterfaces[j].address())
-								    .detail("UID", storageServerInterfaces[j].id())
-								    .detail("GetKeyValuesToken",
-								            storageServerInterfaces[j].getKeyValues.getEndpoint().token)
-								    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False")
-								    .error(e);
-
-								// All shards should be available in quiscence
-								if (self->performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
-									self->testFailure("Storage server unavailable");
-									return false;
-								}
-							}
 						}
 
 						if (firstValidServer >= 0) {
-							VectorRef<KeyValueRef> data = keyValueFutures[firstValidServer].get().get().data;
+							// Remember the last key of the range we just verified
+							TraceEvent("ConsistencyCheck_StoringProgressKey")
+							    .detail("ProgressKey", reference.data[reference.data.size() - 1].key.toString());
+							state Future<Void> fSetProgress =
+							    setConsistencyCheckProgress(cx, reference.data[reference.data.size() - 1].key);
+							wait(fSetProgress);
+
+							VectorRef<KeyValueRef> data = reference.data;
 							// Calculate the size of the shard, the variance of the shard size estimate, and the correct
 							// shard size estimate
 							for (int k = 0; k < data.size(); k++) {
@@ -1572,8 +1637,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						bytesReadInthisRound += totalReadAmount;
 
 						// Advance to the next set of entries
-						if (firstValidServer >= 0 && keyValueFutures[firstValidServer].get().get().more) {
-							VectorRef<KeyValueRef> result = keyValueFutures[firstValidServer].get().get().data;
+						if (firstValidServer >= 0 && reference.more) {
+							VectorRef<KeyValueRef> result = reference.data;
 							ASSERT(result.size() > 0);
 							begin = firstGreaterThan(result[result.size() - 1].key);
 							ASSERT(begin.getKey() != allKeys.end);
@@ -1581,9 +1646,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						} else
 							break;
 					} catch (Error& e) {
-						state Error err = e;
-						wait(onErrorTr.onError(err));
-						TraceEvent("ConsistencyCheck_RetryDataConsistency").error(err);
+						if (e.code() != error_code_end_of_stream) {
+							state Error err = e;
+							wait(onErrorTr.onError(err));
+							TraceEvent("ConsistencyCheck_RetryDataConsistency").error(err);
+						}
 					}
 				}
 

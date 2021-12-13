@@ -3556,7 +3556,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	bool ckHealthy = true;
 	if (recruitCK) {
 		ckHealthy = isHealthySingleton<ConsistencyCheckerInterface>(
-			self, newCKWorker, ckSingleton, bestFitnessForCK, self->recruitingConsistencyCheckerID);
+		    self, newCKWorker, ckSingleton, bestFitnessForCK, self->recruitingConsistencyCheckerID);
 	}
 
 	// if any of the singletons are unhealthy (rerecruited or not stable), then do not
@@ -3570,13 +3570,13 @@ void checkBetterSingletons(ClusterControllerData* self) {
 
 	Optional<Standalone<StringRef>> currRKProcessId = rkSingleton.interface.get().locality.processId();
 	Optional<Standalone<StringRef>> currDDProcessId = ddSingleton.interface.get().locality.processId();
-	//Optional<Standalone<StringRef>> currCKProcessId = ckSingleton.interface.get().locality.processId();
+	// Optional<Standalone<StringRef>> currCKProcessId = ckSingleton.interface.get().locality.processId();
 	Optional<Standalone<StringRef>> newRKProcessId = newRKWorker.interf.locality.processId();
 	Optional<Standalone<StringRef>> newDDProcessId = newDDWorker.interf.locality.processId();
-	//Optional<Standalone<StringRef>> newCKProcessId = newCKWorker.interf.locality.processId();
+	// Optional<Standalone<StringRef>> newCKProcessId = newCKWorker.interf.locality.processId();
 
-	//auto currColocMap = getColocCounts({ currRKProcessId, currDDProcessId, currCKProcessId });
-	//auto newColocMap = getColocCounts({ newRKProcessId, newDDProcessId, newCKProcessId });
+	// auto currColocMap = getColocCounts({ currRKProcessId, currDDProcessId, currCKProcessId });
+	// auto newColocMap = getColocCounts({ newRKProcessId, newDDProcessId, newCKProcessId });
 
 	Optional<Standalone<StringRef>> currCKProcessId, newCKProcessId;
 
@@ -4980,7 +4980,7 @@ ACTOR Future<Void> startConsistencyChecker(ClusterControllerData* self) {
 			                                                                self->db.config,
 			                                                                id_used);
 			InitializeConsistencyCheckerRequest req(deterministicRandom()->randomUniqueID(),
-			                                        self->db.config.consistencyScanEnabled,
+			                                        self->db.config.consistencyScanRestart,
 			                                        self->db.config.consistencyScanMaxRate,
 			                                        self->db.config.consistencyScanInterval);
 			state WorkerDetails worker = ckWorker.worker;
@@ -5038,11 +5038,13 @@ ACTOR Future<Void> monitorConsistencyChecker(ClusterControllerData* self) {
 		if (self->db.serverInfo->get().consistencyChecker.present() /*&& !self->db.config.consistencyScanEnabled */
 		    && !self->recruitConsistencyChecker.get()) {
 			// TODO: NEELAM: check
-			// if (!self->db.config.consistencyScanEnabled) {
-			//	const auto& consistencyChecker = self->db.serverInfo->get().consistencyChecker;
-			//	ConsistencyCheckerSingleton(consistencyChecker)
-			//	    .halt(self, consistencyChecker.get().locality.processId());
-			//}
+			if (!self->db.config.consistencyScanEnabled) {
+				TraceEvent("CCConsistencyCheckerHalting", self->id)
+				    .detail("CKID", self->db.serverInfo->get().consistencyChecker.get().id());
+				const auto& consistencyChecker = self->db.serverInfo->get().consistencyChecker;
+				ConsistencyCheckerSingleton(consistencyChecker)
+				    .halt(self, consistencyChecker.get().locality.processId());
+			}
 			choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().consistencyChecker.get().waitFailure,
 				                            SERVER_KNOBS->CONSISTENCYCHECKER_FAILURE_TIME))) {
@@ -5052,7 +5054,6 @@ ACTOR Future<Void> monitorConsistencyChecker(ClusterControllerData* self) {
 				}
 				// NEELAM: what's this for?
 				when(wait(self->recruitConsistencyChecker.onChange())) {}
-				// when(wait(self->db.config.consistencyScanEnabled.onChange())) {}
 			}
 		} else if (self->db.config.consistencyScanEnabled) {
 			TraceEvent("CCMonitorConsistencyCheckerStarting", self->id).log();

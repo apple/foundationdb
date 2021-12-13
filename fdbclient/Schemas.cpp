@@ -768,7 +768,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "aggressive",
              "gradual"
          ]},
-         "consistency_scan_enabled":false,
+         "consistency_scan_enabled":0,
+         "consistency_scan_restart":0,
          "consistency_scan_rate":0,
          "consistency_scan_interval":0
       },

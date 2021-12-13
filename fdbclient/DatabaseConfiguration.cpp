@@ -48,6 +48,7 @@ void DatabaseConfiguration::resetInternal() {
 	storageMigrationType = StorageMigrationType::DEFAULT;
 	// TODO: NEELAM: should we have defaults?
 	consistencyScanEnabled = false;
+	consistencyScanRestart = 1;
 	consistencyScanMaxRate = 0;
 	consistencyScanInterval = 0;
 }
@@ -55,6 +56,11 @@ void DatabaseConfiguration::resetInternal() {
 void parse(int* i, ValueRef const& v) {
 	// FIXME: Sanity checking
 	*i = atoi(v.toString().c_str());
+}
+
+void parse(int64_t* i, ValueRef const& v) {
+	// FIXME: Sanity checking
+	*i = atoll(v.toString().c_str());
 }
 
 void parse(double* i, ValueRef const& v) {
@@ -212,8 +218,8 @@ bool DatabaseConfiguration::isValid() const {
 	      storageMigrationType != StorageMigrationType::UNSET)) {
 
 		//} &&
-		  //TODO: NEELAM: check
-	//  (consistencyScanEnabled && consistencyScanMaxRate > 0))) {
+		// TODO: NEELAM: check
+		//  (consistencyScanEnabled && consistencyScanMaxRate > 0))) {
 		return false;
 	}
 	std::set<Key> dcIds;
@@ -406,6 +412,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	result["perpetual_storage_wiggle"] = perpetualStorageWiggleSpeed;
 	result["storage_migration_type"] = storageMigrationType.toString();
 	result["consistency_scan_enabled"] = consistencyScanEnabled;
+	result["consistency_scan_restart"] = consistencyScanRestart;
 	result["consistency_scan_rate"] = consistencyScanMaxRate;
 	result["consistency_scan_interval"] = consistencyScanInterval;
 	return result;
@@ -565,8 +572,11 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		parse((&type), value);
 		storageMigrationType = (StorageMigrationType::MigrationType)type;
 	} else if (ck == LiteralStringRef("consistency_scan_enabled")) {
-		parse((&type), value);
-		consistencyScanEnabled = (type != 0);
+		// parse((&type), value);
+		// consistencyScanEnabled = (type != 0);
+		parse(&consistencyScanEnabled, value);
+	} else if (ck == LiteralStringRef("consistency_scan_restart")) {
+		parse(&consistencyScanRestart, value);
 	} else if (ck == LiteralStringRef("consistency_scan_rate")) {
 		parse(&consistencyScanMaxRate, value);
 	} else if (ck == LiteralStringRef("consistency_scan_interval")) {

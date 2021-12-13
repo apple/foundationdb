@@ -1695,12 +1695,13 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 					DUMPTOKEN(recruited.haltConsistencyChecker);
 
 					Future<Void> consistencyCheckerProcess =
-					    consistencyChecker(recruited, dbInfo, req.maxRate, req.targetInterval, connFile);
-					errorForwarders.add(forwardError(errors, Role::CONSISTENCYCHECKER,
-					                                   recruited.id(),
-					                                   setWhenDoneOrError(consistencyCheckerProcess,
-					                                                      ckInterf,
-					                                                      Optional<ConsistencyCheckerInterface>())));
+					    consistencyChecker(recruited, dbInfo, req.restart, req.maxRate, req.targetInterval, connFile);
+					errorForwarders.add(forwardError(errors,
+					                                 Role::CONSISTENCYCHECKER,
+					                                 recruited.id(),
+					                                 setWhenDoneOrError(consistencyCheckerProcess,
+					                                                    ckInterf,
+					                                                    Optional<ConsistencyCheckerInterface>())));
 					ckInterf->set(Optional<ConsistencyCheckerInterface>(recruited));
 				}
 				TraceEvent("ConsistencyChecker_InitRequest", req.reqId).detail("ConsistencyCheckerId", recruited.id());

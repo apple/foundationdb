@@ -1175,9 +1175,10 @@ void configureGenerator(const char* text, const char* line, std::vector<std::str
 		                   "perpetual_storage_wiggle=",
 		                   "storage_migration_type=",
 		                   "consistency_scan_enabled=",
+		                   "consistency_scan_restart=",
 		                   "consistency_scan_rate=",
 		                   "consistency_scan_interval=",
-						   nullptr };
+		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
 

@@ -623,17 +623,17 @@ struct InitializeRatekeeperRequest {
 struct InitializeConsistencyCheckerRequest {
 	constexpr static FileIdentifier file_identifier = 3104275;
 	UID reqId;
-	bool state;
+	int64_t restart;
 	double maxRate;
 	double targetInterval;
 	ReplyPromise<ConsistencyCheckerInterface> reply;
 
 	InitializeConsistencyCheckerRequest() {}
-	explicit InitializeConsistencyCheckerRequest(UID uid, bool state, double maxRate, double targetInterval)
-	  : reqId(uid), state(state), maxRate(maxRate), targetInterval(targetInterval) {}
+	explicit InitializeConsistencyCheckerRequest(UID uid, int64_t restart, double maxRate, double targetInterval)
+	  : reqId(uid), restart(restart), maxRate(maxRate), targetInterval(targetInterval) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reqId, state, maxRate, targetInterval, reply);
+		serializer(ar, reqId, restart, maxRate, targetInterval, reply);
 	}
 };
 
@@ -985,8 +985,12 @@ ACTOR Future<Void> logRouter(TLogInterface interf,
                              Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
-ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-									  double maxRate, double targetInterval,Reference<ClusterConnectionFile> connFile);
+ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf,
+                                      Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                      int64_t restart,
+                                      double maxRate,
+                                      double targetInterval,
+                                      Reference<ClusterConnectionFile> connFile);
 ACTOR Future<Void> storageCacheServer(StorageServerInterface interf,
                                       uint16_t id,
                                       Reference<AsyncVar<ServerDBInfo> const> db);
