@@ -522,7 +522,7 @@ public:
 	}
 	ssize_t read(int fd, void* buf, size_t nbyte) {
 		ASSERT(fd > 0);
-		auto& f = fds[fd];
+		auto& f = fds.at(fd);
 		if (f.offset >= f.data->size()) return 0;
 		auto res = std::max(nbyte, size_t(f.data->size() - f.offset));
 		memcpy(buf, f.data->data() + f.offset, res);
@@ -531,7 +531,7 @@ public:
 	}
 	ssize_t write(int fd, const void* buf, size_t nbyte) {
 		ASSERT(fd > 0);
-		auto& f = fds[fd];
+		auto& f = fds.at(fd);
 		if (f.flags & O_RDONLY) {
 			lastError = EBADF;
 			return -1;
@@ -543,7 +543,7 @@ public:
 	}
 	int truncate(int fd, off_t length) {
 		ASSERT(fd > 0);
-		auto& f = fds[fd];
+		auto& f = fds.at(fd);
 		if (f.flags & O_RDONLY) {
 			lastError = EBADF;
 			return -1;
@@ -557,7 +557,7 @@ public:
 	}
 	off_t lseek(int fd, off_t offset, int whence) {
 		ASSERT(fd > 0);
-		auto& f = fds[fd];
+		auto& f = fds.at(fd);
 		if (whence == SEEK_SET) {
 			f.offset = offset;
 		} else if (whence == SEEK_END) {
