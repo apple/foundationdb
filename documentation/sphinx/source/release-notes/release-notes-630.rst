@@ -2,6 +2,12 @@
 Release Notes
 #############
 
+6.3.23
+======
+* Fixed a bug that remoteDCIsHealthy logic is not guarded by CC_ENABLE_WORKER_HEALTH_MONITOR, which may prevent HA failback. `(PR #6106) <https://github.com/apple/foundationdb/pull/6106>`_
+* Fixed a race condition with updating the coordinated state and updating the master registration. `(PR #6088) <https://github.com/apple/foundationdb/pull/6088>`_
+* Changed dbinfo broadcast to be explicitly requested by the worker registration message. `(PR #6073) <https://github.com/apple/foundationdb/pull/6073>`_
+
 6.3.22
 ======
 * Added histograms to client GRV batcher. `(PR #5760) <https://github.com/apple/foundationdb/pull/5760>`_
