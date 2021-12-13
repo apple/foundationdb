@@ -793,11 +793,6 @@ void commitMessages(Reference<TLogGroupData> self,
                     StorageTeamID storageTeamId) {
 	// SOMEDAY: This method of copying messages is reasonably memory efficient, but it's still a lot of bytes copied.
 	// Find a way to do the memory allocation right as we receive the messages in the network layer.
-	if (storageTeamId == txsTeam) {
-		// TODO: persist txsStateStore data, but ignore for now since we don't
-		// handle recovery yet.
-		return;
-	}
 
 	// The structure of a message is:
 	//   | Protocol Version | Main Header | Message Header | Message |
