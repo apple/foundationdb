@@ -453,6 +453,9 @@ public:
 		return false;
 	}
 
+	virtual void crashAfter(double t) = 0;
+	virtual void terminateAfter(double t) = 0;
+
 protected:
 	Mutex mutex;
 
