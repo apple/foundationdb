@@ -36,6 +36,11 @@ DeterministicRandom::DeterministicRandom(uint32_t seed, bool useRandLog)
 	UNSTOPPABLE_ASSERT(seed != 0); // docs for mersenne twister say x0>0
 };
 
+void DeterministicRandom::reseed(uint32_t seed) {
+	random = std::mt19937((unsigned long)seed);
+	next = (uint64_t(random()) << 32) ^ random();
+}
+
 double DeterministicRandom::random01() {
 	double d = gen64() / double(uint64_t(-1));
 	if (randLog && useRandLog)
