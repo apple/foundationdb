@@ -1284,6 +1284,13 @@ public:
 
 			self->execTask(t);
 			self->yielded = false;
+			if (self->terminateAt > 0.0 && self->time > self->terminateAt) {
+				if (self->dieWhenTerminate) {
+					crashAndDie();
+				} else {
+					flushAndExit(0);
+				}
+			}
 		}
 		self->currentProcess = callingMachine;
 		self->net2->stop();
@@ -2272,6 +2279,15 @@ public:
 
 	ProtocolVersion protocolVersion() const override { return getCurrentProcess()->protocolVersion; }
 
+	void crashAfter(double t) override {
+		terminateAt = t;
+		dieWhenTerminate = true;
+	}
+	void terminateAfter(double t) override {
+		terminateAt = t;
+		dieWhenTerminate = false;
+	}
+
 	// time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	// time should only be modified from the main thread.
 	double time;
@@ -2300,6 +2316,8 @@ public:
 	bool yielded;
 	int yield_limit; // how many more times yield may return false before next returning true
 	bool printSimTime;
+	double terminateAt = -1.0;
+	bool dieWhenTerminate = false;
 
 private:
 	MockDNS mockDNS;
