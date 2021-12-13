@@ -41,13 +41,10 @@ ACTOR template <size_t Size>
 static Future<Void> benchCallbackActor(benchmark::State* benchState) {
 	state size_t actorCount = benchState->range(0);
 	state uint32_t sum;
-	state Promise<Void> trigger;
-	state std::vector<Future<Void>> futures;
-	wait(delay(0));
 	while (benchState->KeepRunning()) {
 		sum = 0;
-		trigger = Promise<Void>();
-		futures.clear();
+		Promise<Void> trigger;
+		std::vector<Future<Void>> futures;
 		futures.reserve(actorCount);
 		for (int i = 0; i < actorCount; ++i) {
 			futures.push_back(increment<Size>(trigger.getFuture(), &sum));
