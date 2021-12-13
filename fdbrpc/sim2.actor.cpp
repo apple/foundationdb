@@ -23,6 +23,7 @@
 
 #include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbrpc/simulator.h"
+#include "flow/singleton.h"
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
@@ -433,8 +434,6 @@ private:
 #include <fcntl.h>
 #include <sys/stat.h>
 
-int sf_open(const char* filename, int flags, int convFlags, int mode);
-
 #if defined(_WIN32)
 #include <io.h>
 #define O_CLOEXEC 0
@@ -449,13 +448,166 @@ int sf_open(const char* filename, int flags, int convFlags, int mode);
 #define _chsize ::ftruncate
 #define O_BINARY 0
 
-int sf_open(const char* filename, int flags, int convFlags, int mode) {
-	return _open(filename, convFlags, mode);
-}
-
 #else
 #error How do i open a file on a new platform?
 #endif
+
+class ISimpleFile : public ReferenceCounted<ISimpleFile> {
+public:
+	virtual ~ISimpleFile() {}
+	virtual ssize_t read(void* buf, size_t nbyte) = 0;
+	virtual ssize_t write(const void* buf, size_t nbyte) = 0;
+	virtual off_t lseek(off_t offset, int whence) = 0;
+	virtual int truncate(off_t length) = 0;
+	virtual int debugFD() = 0;
+	virtual int fsync() = 0;
+	virtual void close() = 0;
+	virtual int error() = 0;
+};
+
+class BlockingFile : public ISimpleFile {
+	int fd;
+
+public:
+	BlockingFile(int fd) : fd(fd) {}
+	ssize_t read(void* buf, size_t nbyte) override { return _read(fd, buf, nbyte); }
+	ssize_t write(const void* buf, size_t nbyte) override { return _write(fd, buf, nbyte); }
+	int truncate(off_t length) override { return _chsize(fd, length); }
+	int debugFD() override { return fd; }
+	void close() override { _close(fd); }
+	off_t lseek(off_t offset, int whence) override { return _lseeki64(fd, offset, whence); }
+	int fsync() override { return _commit(fd); }
+	int error() override { return errno; }
+};
+
+class SimpleInMemoryFileSystemT {
+	friend struct crossbow::create_static<SimpleInMemoryFileSystemT>;
+	using FileMemory = std::vector<uint8_t>;
+	using FileMemoryPtr = std::shared_ptr<FileMemory>;
+	struct OpenFile {
+		FileMemoryPtr data;
+		int flags;
+		off_t offset = 0;
+		OpenFile(FileMemoryPtr const& data, int flags) : data(data), flags(flags) {}
+	};
+	SimpleInMemoryFileSystemT() {}
+	int nextFD = 1;
+	std::unordered_map<std::string, FileMemoryPtr> files;
+	std::unordered_map<int, OpenFile> fds;
+	int lastError = 0;
+public:
+	int open(std::string path, int flags) {
+		auto file = files.find(path);
+		if (file == files.end()) {
+			if (!(flags & O_CREAT)) {
+				lastError = ENOENT;
+				return -1;
+			}
+			file = files.insert(std::make_pair(path, std::make_shared<FileMemory>())).first;
+		} else {
+			if ((flags & O_CREAT) && (flags & O_EXCL)) {
+				lastError = ENOENT;
+				return -1;
+			}
+		}
+		if (flags & O_TRUNC) {
+			file->second->resize(0);
+		}
+		auto res = nextFD++;
+		fds.insert(std::make_pair(res, OpenFile(file->second, flags)));
+		return res;
+	}
+	void deleteFile(std::string const& path) {
+		files.erase(path);
+	}
+	ssize_t read(int fd, void* buf, size_t nbyte) {
+		ASSERT(fd > 0);
+		auto& f = fds[fd];
+		if (f.offset >= f.data->size()) return 0;
+		auto res = std::max(nbyte, size_t(f.data->size() - f.offset));
+		memcpy(buf, f.data->data() + f.offset, res);
+		f.offset += res;
+		return res;
+	}
+	ssize_t write(int fd, const void* buf, size_t nbyte) {
+		ASSERT(fd > 0);
+		auto& f = fds[fd];
+		if (f.flags & O_RDONLY) {
+			lastError = EBADF;
+			return -1;
+		}
+		f.data->resize(std::max(f.data->size(), size_t(f.offset + nbyte)));
+		memcpy(f.data->data() + f.offset, buf, nbyte);
+		f.offset += nbyte;
+		return nbyte;
+	}
+	int truncate(int fd, off_t length) {
+		ASSERT(fd > 0);
+		auto& f = fds[fd];
+		if (f.flags & O_RDONLY) {
+			lastError = EBADF;
+			return -1;
+		}
+		f.data->resize(length);
+		return 0;
+	}
+	void close(int fd) {
+		ASSERT(fd > 0);
+		fds.erase(fd);
+	}
+	off_t lseek(int fd, off_t offset, int whence) {
+		ASSERT(fd > 0);
+		auto& f = fds[fd];
+		if (whence == SEEK_SET) {
+			f.offset = offset;
+		} else if (whence == SEEK_END) {
+			f.offset = f.data->size() + offset;
+		} else {
+			// other seek methods not implemented
+			UNSTOPPABLE_ASSERT(false);
+		}
+		return f.offset;
+	}
+	int fsync(int fd) { ASSERT(fd > 0); return 0; }
+	int error() { return lastError; }
+};
+
+using SimpleInMemoryFileSystem = crossbow::singleton<SimpleInMemoryFileSystemT>;
+
+class InMemoryFile : public ISimpleFile {
+	int fd;
+	SimpleInMemoryFileSystem fs;
+
+public:
+	InMemoryFile(int fd) : fd(fd) {}
+	ssize_t read(void* buf, size_t nbyte) override { return fs->read(fd, buf, nbyte); }
+	ssize_t write(const void* buf, size_t nbyte) override { return fs->write(fd, buf, nbyte); }
+	int truncate(off_t length) override { return fs->truncate(fd, length); }
+	int debugFD() override { return fd; }
+	void close() override { fs->close(fd); }
+	off_t lseek(off_t offset, int whence) override { return fs->lseek(fd, offset, whence); }
+	int fsync() override { return fs->fsync(fd); }
+	int error() override { return fs->error(); }
+};
+
+Reference<ISimpleFile> sf_open_impl(const char* filename, int flags, int convFlags, int mode);
+#ifdef __unixish__
+Reference<ISimpleFile> sf_open_impl(const char* filename, int flags, int convFlags, int mode) {
+
+	int fd = _open(filename, convFlags, mode);
+	return Reference<ISimpleFile>(new BlockingFile(fd));
+}
+#endif
+
+Reference<ISimpleFile> sf_open(const char* filename, int flags, int convFlags, int mode) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		SimpleInMemoryFileSystem fs;
+		auto fd = fs->open(filename, convFlags);
+		return Reference<ISimpleFile>(new InMemoryFile(fd));
+	} else {
+		return sf_open_impl(filename, flags, convFlags, mode);
+	}
+}
 
 class SimpleFile : public IAsyncFile, public ReferenceCounted<SimpleFile> {
 public:
@@ -498,9 +650,9 @@ public:
 				open_filename = filename + ".part";
 			}
 
-			int h = sf_open(open_filename.c_str(), flags, flagConversion(flags), mode);
-			if (h == -1) {
-				bool notFound = errno == ENOENT;
+			Reference<ISimpleFile> h = sf_open(open_filename.c_str(), flags, flagConversion(flags), mode);
+			if (h->debugFD() == -1) {
+				bool notFound = h->error() == ENOENT;
 				Error e = notFound ? file_not_found() : io_error();
 				TraceEvent(notFound ? SevWarn : SevWarnAlways, "FileOpenError")
 				    .error(e)
@@ -525,7 +677,7 @@ public:
 	void addref() override { ReferenceCounted<SimpleFile>::addref(); }
 	void delref() override { ReferenceCounted<SimpleFile>::delref(); }
 
-	int64_t debugFD() const override { return (int64_t)h; }
+	int64_t debugFD() const override { return (int64_t)file->debugFD(); }
 
 	Future<int> read(void* data, int length, int64_t offset) override { return read_impl(this, data, length, offset); }
 
@@ -542,12 +694,12 @@ public:
 	std::string getFilename() const override { return actualFilename; }
 
 	~SimpleFile() override {
-		_close(h);
+		file->close();
 		--openCount;
 	}
 
 private:
-	int h;
+  Reference<ISimpleFile> file;
 
 	// Performance parameters of simulated disk
 	Reference<DiskParameters> diskParameters;
@@ -560,13 +712,13 @@ private:
 	// This is to support AsyncFileNonDurable, which issues its own delays for writes and truncates
 	bool delayOnWrite;
 
-	SimpleFile(int h,
+	SimpleFile(Reference<ISimpleFile> file,
 	           Reference<DiskParameters> diskParameters,
 	           bool delayOnWrite,
 	           const std::string& filename,
 	           const std::string& actualFilename,
 	           int flags)
-	  : h(h), diskParameters(diskParameters), filename(filename), actualFilename(actualFilename), flags(flags),
+	  : file(file), diskParameters(diskParameters), filename(filename), actualFilename(actualFilename), flags(flags),
 	    dbgId(deterministicRandom()->randomUniqueID()), delayOnWrite(delayOnWrite) {}
 
 	static int flagConversion(int flags) {
@@ -600,13 +752,13 @@ private:
 
 		wait(waitUntilDiskReady(self->diskParameters, length));
 
-		if (_lseeki64(self->h, offset, SEEK_SET) == -1) {
+		if (self->file->lseek(offset, SEEK_SET) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 1);
 			throw io_error();
 		}
 
 		unsigned int read_bytes = 0;
-		if ((read_bytes = _read(self->h, data, (unsigned int)length)) == -1) {
+		if ((read_bytes = self->file->read(data, (unsigned int)length)) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 2);
 			throw io_error();
 		}
@@ -647,13 +799,13 @@ private:
 		if (self->delayOnWrite)
 			wait(waitUntilDiskReady(self->diskParameters, data.size()));
 
-		if (_lseeki64(self->h, offset, SEEK_SET) == -1) {
+		if (self->file->lseek(offset, SEEK_SET) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 3);
 			throw io_error();
 		}
 
 		unsigned int write_bytes = 0;
-		if ((write_bytes = _write(self->h, (void*)data.begin(), data.size())) == -1) {
+		if ((write_bytes = self->file->write((void*)data.begin(), data.size())) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 4);
 			throw io_error();
 		}
@@ -693,12 +845,12 @@ private:
 		if (self->delayOnWrite)
 			wait(waitUntilDiskReady(self->diskParameters, 0));
 
-		if (_chsize(self->h, (long)size) == -1) {
+		if (self->file->truncate((long)size) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError")
 			    .detail("Location", 6)
 			    .detail("Filename", self->filename)
 			    .detail("Size", size)
-			    .detail("Fd", self->h)
+			    .detail("Fd", self->file->debugFD())
 			    .GetLastError();
 			throw io_error();
 		}
@@ -772,7 +924,7 @@ private:
 
 		wait(waitUntilDiskReady(self->diskParameters, 0));
 
-		int64_t pos = _lseeki64(self->h, 0L, SEEK_END);
+		int64_t pos = self->file->lseek(0L, SEEK_END);
 		if (pos == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 8);
 			throw io_error();
@@ -1090,8 +1242,13 @@ public:
 			try {
 				wait(::delay(0.05 * deterministicRandom()->random01()));
 				if (!currentProcess->rebooting) {
-					auto f = IAsyncFileSystem::filesystem(self->net2)->deleteFile(filename, false);
-					ASSERT(f.isReady());
+					if (FLOW_KNOBS->SIM_FUZZER) {
+						SimpleInMemoryFileSystem fs;
+						fs->deleteFile(filename);
+					} else {
+						auto f = IAsyncFileSystem::filesystem(self->net2)->deleteFile(filename, false);
+						ASSERT(f.isReady());
+					}
 					wait(::delay(0.05 * deterministicRandom()->random01()));
 					TEST(true); // Simulated durable delete
 				}
@@ -2436,7 +2593,7 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 
 #include <Windows.h>
 
-int sf_open(const char* filename, int flags, int convFlags, int mode) {
+int sf_open_impl(const char* filename, int flags, int convFlags, int mode) {
 	HANDLE wh = CreateFile(filename,
 	                       GENERIC_READ | ((flags & IAsyncFile::OPEN_READWRITE) ? GENERIC_WRITE : 0),
 	                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -2451,7 +2608,7 @@ int sf_open(const char* filename, int flags, int convFlags, int mode) {
 		h = _open_osfhandle((intptr_t)wh, convFlags);
 	else
 		errno = GetLastError() == ERROR_FILE_NOT_FOUND ? ENOENT : EFAULT;
-	return h;
+	return Reference<ISimpleFile>(new BlockingFile(h));
 }
 
 #endif
