@@ -132,10 +132,11 @@ struct TLogLockResult {
 	constexpr static FileIdentifier file_identifier = 11822027;
 	Version end;
 	Version knownCommittedVersion;
+	std::vector<std::pair<Version, Version>> versionHistory;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, end, knownCommittedVersion);
+		serializer(ar, end, knownCommittedVersion, versionHistory);
 	}
 };
 
@@ -299,7 +300,7 @@ struct TLogCommitRequest {
 	constexpr static FileIdentifier file_identifier = 4022206;
 	SpanID spanContext;
 	Arena arena;
-	Version prevVersion, version, knownCommittedVersion, minKnownCommittedVersion;
+	Version prevVersion, truePrevVersion, version, knownCommittedVersion, minKnownCommittedVersion;
 
 	StringRef messages; // Each message prefixed by a 4-byte length
 
@@ -310,18 +311,20 @@ struct TLogCommitRequest {
 	TLogCommitRequest(const SpanID& context,
 	                  const Arena& a,
 	                  Version prevVersion,
+	                  Version truePrevVersion,
 	                  Version version,
 	                  Version knownCommittedVersion,
 	                  Version minKnownCommittedVersion,
 	                  StringRef messages,
 	                  Optional<UID> debugID)
-	  : spanContext(context), arena(a), prevVersion(prevVersion), version(version),
+	  : spanContext(context), arena(a), prevVersion(prevVersion), truePrevVersion(truePrevVersion), version(version),
 	    knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion),
 	    messages(messages), debugID(debugID) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
 		           prevVersion,
+		           truePrevVersion,
 		           version,
 		           knownCommittedVersion,
 		           minKnownCommittedVersion,

@@ -45,6 +45,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
+#include "flow/IRandom.h"
 #include "flow/Trace.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -178,7 +179,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    recoveryTransactionVersion; // The first version in this epoch
 	double lastCommitTime;
 
-	Version liveCommittedVersion; // The largest live committed version reported by commit proxies.
+	NotifiedVersion liveCommittedVersion; // The largest live committed version reported by commit proxies.
 	bool databaseLocked;
 	Optional<Value> proxyMetadataVersion;
 	Version minKnownCommittedVersion;
@@ -193,6 +194,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	Reference<ILogSystem> logSystem;
 	Version version; // The last version assigned to a proxy by getVersion()
+	int tLogGroups = 0;
+	std::vector<Version> tLogGroupVersions;
 	double lastVersionTime;
 	LogSystemDiskQueueAdapter* txnStateLogAdapter;
 	IKeyValueStore* txnStateStore;
@@ -1176,6 +1179,8 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 	auto itr = proxyItr->second.replies.find(req.requestNum);
 	if (itr != proxyItr->second.replies.end()) {
 		TEST(true); // Duplicate request for sequence
+		wait(self->liveCommittedVersion.whenAtLeast(itr->second.version -
+		                                            SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
 		req.reply.send(itr->second);
 	} else if (req.requestNum <= proxyItr->second.latestRequestNum.get()) {
 		TEST(true); // Old request for previously acknowledged sequence - may be impossible with current FlowTransport
@@ -1183,7 +1188,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		       proxyItr->second.latestRequestNum.get()); // The latest request can never be acknowledged
 		req.reply.send(Never());
 	} else {
-		GetCommitVersionReply rep;
+		state GetCommitVersionReply rep;
 
 		if (self->version == invalidVersion) {
 			self->lastVersionTime = now();
@@ -1195,15 +1200,16 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 				t1 = self->lastVersionTime;
 			}
 			rep.prevVersion = self->version;
-			self->version +=
-			    std::max<Version>(1,
-			                      std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
-			                                        SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
+			// FIXME: do something more efficient, think more carefully about this scenario
+			Version minPrevVer = rep.prevVersion;
+			for (auto& it : self->tLogGroupVersions) {
+				minPrevVer = std::min(minPrevVer, it);
+			}
+			self->version = std::max<Version>(
+			    self->version + 1,
+			    std::min<Version>(minPrevVer + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS - self->tLogGroups,
+			                      self->version + SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
 
-			TEST(self->version - rep.prevVersion == 1); // Minimum possible version gap
-
-			bool maxVersionGap = self->version - rep.prevVersion == SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
-			TEST(maxVersionGap); // Maximum possible version gap
 			self->lastVersionTime = t1;
 
 			if (self->resolverNeedingChanges.count(req.requestingProxy)) {
@@ -1216,6 +1222,19 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 			}
 		}
 
+		if (req.commitBytes == 0) {
+			for (int tlogGroup = 0; tlogGroup < self->tLogGroups; tlogGroup++) {
+				auto& groupVersion = self->tLogGroupVersions[tlogGroup];
+				rep.tlogGroups.push_back(std::make_pair(tlogGroup, groupVersion));
+				groupVersion = self->version;
+			}
+		} else {
+			int tlogGroup = deterministicRandom()->randomInt(0, self->tLogGroups);
+			auto& groupVersion = self->tLogGroupVersions[tlogGroup];
+			rep.tlogGroups.push_back(std::make_pair(tlogGroup, groupVersion));
+			groupVersion = self->version;
+		}
+
 		rep.version = self->version;
 		rep.requestNum = req.requestNum;
 
@@ -1223,6 +1242,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		                               proxyItr->second.replies.upper_bound(req.mostRecentProcessedRequestNum));
 		proxyItr->second.replies[req.requestNum] = rep;
 		ASSERT(rep.prevVersion >= 0);
+		wait(self->liveCommittedVersion.whenAtLeast(rep.version - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
 		req.reply.send(rep);
 
 		ASSERT(proxyItr->second.latestRequestNum.get() == req.requestNum - 1);
@@ -1248,6 +1268,20 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	}
 }
 
+ACTOR Future<Void> handleCommitVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
+	wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion));
+
+	self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
+	if (req.version > self->liveCommittedVersion.get()) {
+		self->liveCommittedVersion.set(req.version);
+		self->databaseLocked = req.locked;
+		self->proxyMetadataVersion = req.metadataVersion;
+	}
+	++self->reportLiveCommittedVersionRequests;
+	req.reply.send(Void());
+	return Void();
+}
+
 ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 	loop {
 		choose {
@@ -1256,13 +1290,9 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 					g_traceBatch.addEvent("TransactionDebug",
 					                      req.debugID.get().first(),
 					                      "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
-
-				if (self->liveCommittedVersion == invalidVersion) {
-					self->liveCommittedVersion = self->recoveryTransactionVersion;
-				}
 				++self->getLiveCommittedVersionRequests;
 				GetRawCommittedVersionReply reply;
-				reply.version = self->liveCommittedVersion;
+				reply.version = self->liveCommittedVersion.get();
 				reply.locked = self->databaseLocked;
 				reply.metadataVersion = self->proxyMetadataVersion;
 				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
@@ -1270,14 +1300,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 			}
 			when(ReportRawCommittedVersionRequest req =
 			         waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
-				self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
-				if (req.version > self->liveCommittedVersion) {
-					self->liveCommittedVersion = req.version;
-					self->databaseLocked = req.locked;
-					self->proxyMetadataVersion = req.metadataVersion;
-				}
-				++self->reportLiveCommittedVersionRequests;
-				req.reply.send(Void());
+				self->addActor.send(handleCommitVersion(self, req));
 			}
 		}
 	}
@@ -1933,6 +1956,9 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	                                                     // window of the resolver(s)
 
 	TraceEvent("MasterRecoveryCommit", self->dbgid).log();
+	self->tLogGroups = self->logSystem->getTLogGroups();
+	self->tLogGroupVersions.resize(self->tLogGroups, self->lastEpochEnd);
+	self->liveCommittedVersion.set(self->lastEpochEnd);
 	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send(self->logSystem->onError());
 	self->addActor.send(waitResolverFailure(self->resolvers));

@@ -51,19 +51,20 @@
 struct TLogQueueEntryRef {
 	UID id;
 	Version version;
+	Version prevVersion; // FIXME: handle upgrades, new tlog type?
 	Version knownCommittedVersion;
 	StringRef messages;
 
-	TLogQueueEntryRef() : version(0), knownCommittedVersion(0) {}
+	TLogQueueEntryRef() : version(0), prevVersion(0), knownCommittedVersion(0) {}
 	TLogQueueEntryRef(Arena& a, TLogQueueEntryRef const& from)
-	  : id(from.id), version(from.version), knownCommittedVersion(from.knownCommittedVersion),
-	    messages(a, from.messages) {}
+	  : id(from.id), version(from.version), prevVersion(from.prevVersion),
+	    knownCommittedVersion(from.knownCommittedVersion), messages(a, from.messages) {}
 
 	// To change this serialization, ProtocolVersion::TLogQueueEntryRef must be updated, and downgrades need to be
 	// considered
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, messages, knownCommittedVersion, id);
+		serializer(ar, version, prevVersion, messages, knownCommittedVersion, id);
 	}
 	size_t expectedSize() const { return messages.expectedSize(); }
 };
@@ -71,16 +72,18 @@ struct TLogQueueEntryRef {
 struct AlternativeTLogQueueEntryRef {
 	UID id;
 	Version version;
+	Version prevVersion;
 	Version knownCommittedVersion;
 	std::vector<TagsAndMessage>* alternativeMessages;
 
-	AlternativeTLogQueueEntryRef() : version(0), knownCommittedVersion(0), alternativeMessages(nullptr) {}
+	AlternativeTLogQueueEntryRef()
+	  : version(0), prevVersion(0), knownCommittedVersion(0), alternativeMessages(nullptr) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		ASSERT(!ar.isDeserializing && alternativeMessages);
 		uint32_t msgSize = expectedSize();
-		serializer(ar, version, msgSize);
+		serializer(ar, version, prevVersion, msgSize);
 		for (auto& msg : *alternativeMessages) {
 			ar.serializeBytes(msg.message);
 		}
@@ -522,6 +525,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	std::vector<std::vector<Reference<TagData>>> tag_data; // tag.locality | tag.id
 	int unpoppedRecoveredTags;
+	Deque<std::pair<Version, Version>> versionHistory;
 
 	Reference<TagData> getTagData(Tag tag) {
 		int idx = tag.toTagDataIndex();
@@ -805,6 +809,9 @@ ACTOR Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, 
 	TLogLockResult result;
 	result.end = stopVersion;
 	result.knownCommittedVersion = logData->knownCommittedVersion;
+	for (int i = 0; i < logData->versionHistory.size(); i++) {
+		result.versionHistory.push_back(logData->versionHistory.at(i));
+	}
 
 	TraceEvent("TLogStop2", self->dbgid)
 	    .detail("LogId", logData->logId)
@@ -2145,6 +2152,10 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		if (req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
 
+		while (!logData->versionHistory.empty() && logData->versionHistory.front().first < req.knownCommittedVersion) {
+			logData->versionHistory.pop_front();
+		}
+		logData->versionHistory.push_back(std::make_pair(req.truePrevVersion, req.version));
 		//TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
 		commitMessages(self, logData, req.version, req.arena, req.messages);
 
@@ -2153,6 +2164,7 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		TLogQueueEntryRef qe;
 		// Log the changes to the persistent queue, to be committed by commitQueue()
 		qe.version = req.version;
+		qe.prevVersion = req.truePrevVersion;
 		qe.knownCommittedVersion = logData->knownCommittedVersion;
 		qe.messages = req.messages;
 		qe.id = logData->logId;
@@ -2687,6 +2699,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 					// Log the changes to the persistent queue, to be committed by commitQueue()
 					AlternativeTLogQueueEntryRef qe;
 					qe.version = ver;
+					qe.prevVersion = invalidVersion; // FIXME: needs to be set properly for usable_regions=2
 					qe.knownCommittedVersion = logData->knownCommittedVersion;
 					qe.alternativeMessages = &messages;
 					qe.id = logData->logId;
@@ -2726,6 +2739,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 						// Log the changes to the persistent queue, to be committed by commitQueue()
 						TLogQueueEntryRef qe;
 						qe.version = ver;
+						qe.prevVersion = invalidVersion; // FIXME: needs to be set properly for usable_regions=2
 						qe.knownCommittedVersion = logData->knownCommittedVersion;
 						qe.messages = StringRef();
 						qe.id = logData->logId;
@@ -3088,6 +3102,11 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 						if (!self->spillOrder.size() || self->spillOrder.back() != qe.id) {
 							self->spillOrder.push_back(qe.id);
 						}
+						while (!logData->versionHistory.empty() &&
+						       logData->versionHistory.front().first < qe.knownCommittedVersion) {
+							logData->versionHistory.pop_front();
+						}
+						logData->versionHistory.push_back(std::make_pair(qe.prevVersion, qe.version));
 						logData->knownCommittedVersion =
 						    std::max(logData->knownCommittedVersion, qe.knownCommittedVersion);
 						if (qe.version > logData->version.get()) {
@@ -3329,6 +3348,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 				// Log the changes to the persistent queue, to be committed by commitQueue()
 				TLogQueueEntryRef qe;
 				qe.version = req.recoverAt;
+				qe.prevVersion = invalidVersion;
 				qe.knownCommittedVersion = logData->knownCommittedVersion;
 				qe.messages = StringRef();
 				qe.id = logData->logId;

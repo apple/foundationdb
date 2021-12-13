@@ -151,14 +151,13 @@ struct GetCommitVersionReply {
 	Version version;
 	Version prevVersion;
 	uint64_t requestNum;
+	std::vector<std::pair<int, Version>> tlogGroups;
 
 	GetCommitVersionReply() : resolverChangesVersion(0), version(0), prevVersion(0), requestNum(0) {}
-	explicit GetCommitVersionReply(Version version, Version prevVersion, uint64_t requestNum)
-	  : resolverChangesVersion(0), version(version), prevVersion(prevVersion), requestNum(requestNum) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, resolverChanges, resolverChangesVersion, version, prevVersion, requestNum);
+		serializer(ar, resolverChanges, resolverChangesVersion, version, prevVersion, requestNum, tlogGroups);
 	}
 };
 
@@ -168,24 +167,27 @@ struct GetCommitVersionRequest {
 	uint64_t requestNum;
 	uint64_t mostRecentProcessedRequestNum;
 	UID requestingProxy;
+	int commitBytes;
 	ReplyPromise<GetCommitVersionReply> reply;
 
 	GetCommitVersionRequest() {}
 	GetCommitVersionRequest(SpanID spanContext,
 	                        uint64_t requestNum,
 	                        uint64_t mostRecentProcessedRequestNum,
-	                        UID requestingProxy)
+	                        UID requestingProxy,
+	                        int commitBytes)
 	  : spanContext(spanContext), requestNum(requestNum), mostRecentProcessedRequestNum(mostRecentProcessedRequestNum),
-	    requestingProxy(requestingProxy) {}
+	    requestingProxy(requestingProxy), commitBytes(commitBytes) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, reply, spanContext);
+		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, commitBytes, reply, spanContext);
 	}
 };
 
 struct ReportRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 1853148;
+	Version prevVersion;
 	Version version;
 	bool locked;
 	Optional<Value> metadataVersion;
@@ -193,17 +195,19 @@ struct ReportRawCommittedVersionRequest {
 
 	ReplyPromise<Void> reply;
 
-	ReportRawCommittedVersionRequest() : version(invalidVersion), locked(false), minKnownCommittedVersion(0) {}
-	ReportRawCommittedVersionRequest(Version version,
+	ReportRawCommittedVersionRequest()
+	  : prevVersion(invalidVersion), version(invalidVersion), locked(false), minKnownCommittedVersion(0) {}
+	ReportRawCommittedVersionRequest(Version prevVersion,
+	                                 Version version,
 	                                 bool locked,
 	                                 Optional<Value> metadataVersion,
 	                                 Version minKnownCommittedVersion)
-	  : version(version), locked(locked), metadataVersion(metadataVersion),
+	  : prevVersion(prevVersion), version(version), locked(locked), metadataVersion(metadataVersion),
 	    minKnownCommittedVersion(minKnownCommittedVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, locked, metadataVersion, minKnownCommittedVersion, reply);
+		serializer(ar, prevVersion, version, locked, metadataVersion, minKnownCommittedVersion, reply);
 	}
 };
 
