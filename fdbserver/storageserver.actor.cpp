@@ -46,6 +46,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TransactionLineage.h"
 #include "fdbclient/VersionedMap.h"
+#include "fdbclient/ReadPredicate.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
@@ -93,6 +94,7 @@ bool canReplyWith(Error e) {
 	case error_code_quick_get_value_miss:
 	case error_code_quick_get_key_values_miss:
 	case error_code_get_key_values_and_map_has_more:
+	case error_code_invalid_predicate:
 		// case error_code_all_alternatives_failed:
 		return true;
 	default:
@@ -2074,6 +2076,71 @@ void merge(Arena& arena,
 	}
 }
 
+void mergeWithPredicate(Arena& arena,
+                        VectorRef<KeyValueRef, VecSerStrategy::String>& output,
+                        VectorRef<KeyValueRef> const& vm_output,
+                        RangeResult const& base,
+                        int& vCount,
+                        int limit,
+                        bool stopAtEndOfBase,
+                        int& pos,
+                        const IReadPredicate& predicate,
+                        int limitBytes = 1 << 30)
+// Combines data from base (at an older version) with sets from newer versions in [start, end) and appends the first (up
+// to) |limit| rows to output If limit<0, base and output are in descending order, and start->key()>end->key(), but
+// start is still inclusive and end is exclusive
+{
+	ASSERT(limit != 0);
+	// Add a dependency of the new arena on the result from the KVS so that we don't have to copy any of the KVS
+	// results.
+	arena.dependsOn(base.arena());
+
+	bool forward = limit > 0;
+	if (!forward)
+		limit = -limit;
+	int adjustedLimit = limit + output.size();
+	int accumulatedBytes = 0;
+	KeyValueRef const* baseStart = base.begin();
+	KeyValueRef const* baseEnd = base.end();
+	while (baseStart != baseEnd && vCount > 0 && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
+		if (forward ? baseStart->key < vm_output[pos].key : baseStart->key > vm_output[pos].key) {
+			Optional<KeyValueRef> val = predicate.apply(arena, *baseStart++, false);
+			if (val.present()) {
+				output.push_back(arena, val.get());
+				accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
+			}
+		} else {
+			Optional<KeyValueRef> val = predicate.apply(arena, vm_output[pos], true);
+			if (val.present()) {
+				output.push_back(arena, val.get());
+				accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
+			}
+			if (baseStart->key == vm_output[pos].key)
+				++baseStart;
+			++pos;
+			vCount--;
+		}
+	}
+	while (baseStart != baseEnd && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
+		Optional<KeyValueRef> val = predicate.apply(arena, *baseStart++, false);
+		if (val.present()) {
+			output.push_back(arena, val.get());
+			accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
+		}
+	}
+	if (!stopAtEndOfBase) {
+		while (vCount > 0 && output.size() < adjustedLimit && accumulatedBytes < limitBytes) {
+			Optional<KeyValueRef> val = predicate.apply(arena, vm_output[pos], true);
+			if (val.present()) {
+				output.push_back(arena, val.get());
+				accumulatedBytes += sizeof(KeyValueRef) + output.end()[-1].expectedSize();
+			}
+			++pos;
+			vCount--;
+		}
+	}
+}
+
 ACTOR Future<Optional<Value>> quickGetValue(StorageServer* data,
                                             StringRef key,
                                             Version version,
@@ -2122,7 +2189,8 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
                                           int limit,
                                           int* pLimitBytes,
                                           SpanID parentSpan,
-                                          IKeyValueStore::ReadType type) {
+                                          IKeyValueStore::ReadType type,
+                                          Reference<IReadPredicate> predicate = Reference<IReadPredicate>()) {
 	state GetKeyValuesReply result;
 	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
 	state StorageServer::VersionedData::iterator vCurrent = view.end();
@@ -2195,15 +2263,28 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			// merge the sets in resultCache with the sets on disk, stopping at the last key from disk if there is
 			// 'more'
 			int prevSize = result.data.size();
-			merge(result.arena,
-			      result.data,
-			      resultCache,
-			      atStorageVersion,
-			      vCount,
-			      limit,
-			      atStorageVersion.more,
-			      pos,
-			      *pLimitBytes);
+			if (predicate.isValid()) {
+				mergeWithPredicate(result.arena,
+				                   result.data,
+				                   resultCache,
+				                   atStorageVersion,
+				                   vCount,
+				                   limit,
+				                   atStorageVersion.more,
+				                   pos,
+				                   *predicate,
+				                   *pLimitBytes);
+			} else {
+				merge(result.arena,
+				      result.data,
+				      resultCache,
+				      atStorageVersion,
+				      vCount,
+				      limit,
+				      atStorageVersion.more,
+				      pos,
+				      *pLimitBytes);
+			}
 			limit -= result.data.size() - prevSize;
 
 			for (auto i = result.data.begin() + prevSize; i != result.data.end(); i++) {
@@ -2274,15 +2355,28 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 				throw transaction_too_old();
 
 			int prevSize = result.data.size();
-			merge(result.arena,
-			      result.data,
-			      resultCache,
-			      atStorageVersion,
-			      vCount,
-			      limit,
-			      atStorageVersion.more,
-			      pos,
-			      *pLimitBytes);
+			if (predicate.isValid()) {
+				mergeWithPredicate(result.arena,
+				                   result.data,
+				                   resultCache,
+				                   atStorageVersion,
+				                   vCount,
+				                   limit,
+				                   atStorageVersion.more,
+				                   pos,
+				                   *predicate,
+				                   *pLimitBytes);
+			} else {
+				merge(result.arena,
+				      result.data,
+				      resultCache,
+				      atStorageVersion,
+				      vCount,
+				      limit,
+				      atStorageVersion.more,
+				      pos,
+				      *pLimitBytes);
+			}
 			limit += result.data.size() - prevSize;
 
 			for (auto i = result.data.begin() + prevSize; i != result.data.end(); i++) {
@@ -2440,6 +2534,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	state int64_t resultSize = 0;
 	state IKeyValueStore::ReadType type =
 	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
+	state Reference<IReadPredicate> predicate;
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
 	++data->counters.getRangeQueries;
@@ -2459,6 +2554,14 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	try {
 		if (req.debugID.present())
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Before");
+
+		if (req.predicateName.present()) {
+			predicate = createReadPredicate(req.predicateName.get(), req.predicateArgs);
+			if (!predicate.isValid()) {
+				throw invalid_predicate();
+			}
+		}
+
 		state Version version = wait(waitForVersion(data, req.version, span.context));
 
 		state uint64_t changeCounter = data->shardChangeCounter;
@@ -2527,8 +2630,14 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
 
-			GetKeyValuesReply _r = wait(
-			    readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span.context, type));
+			GetKeyValuesReply _r = wait(readRange(data,
+			                                      version,
+			                                      KeyRangeRef(begin, end),
+			                                      req.limit,
+			                                      &remainingLimitBytes,
+			                                      span.context,
+			                                      type,
+			                                      predicate));
 			GetKeyValuesReply r = _r;
 
 			if (req.debugID.present())
@@ -3066,6 +3175,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	state int64_t resultSize = 0;
 	state IKeyValueStore::ReadType type =
 	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
+	state Reference<IReadPredicate> predicate;
 
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 	++data->counters.getRangeStreamQueries;

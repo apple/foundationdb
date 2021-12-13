@@ -640,6 +640,13 @@ struct GetRangeLimits {
 	}
 };
 
+struct GetRangePredicate {
+	Standalone<StringRef> predicateName;
+	Standalone<VectorRef<StringRef>> predicateArgs;
+
+	bool present() { return !predicateName.empty(); }
+};
+
 struct RangeResultRef : VectorRef<KeyValueRef> {
 	bool more; // True if (but not necessarily only if) values remain in the *key* range requested (possibly beyond the
 	           // limits requested) False implies that no such values remain

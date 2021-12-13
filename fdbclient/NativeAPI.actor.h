@@ -291,6 +291,13 @@ public:
 		                reverse);
 	}
 
+	[[nodiscard]] Future<RangeResult> getRangeWithPredicate(const KeySelector& begin,
+	                                                        const KeySelector& end,
+	                                                        GetRangeLimits limits,
+	                                                        GetRangePredicate predicate,
+	                                                        Snapshot = Snapshot::False,
+	                                                        Reverse = Reverse::False);
+
 	[[nodiscard]] Future<RangeResult> getRangeAndFlatMap(const KeySelector& begin,
 	                                                     const KeySelector& end,
 	                                                     const Key& mapper,
@@ -304,6 +311,7 @@ private:
 	                                     const KeySelector& end,
 	                                     const Key& mapper,
 	                                     GetRangeLimits limits,
+	                                     GetRangePredicate predicate,
 	                                     Snapshot snapshot,
 	                                     Reverse reverse);
 

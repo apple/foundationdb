@@ -313,12 +313,27 @@ struct GetKeyValuesRequest : TimedRequest {
 	bool isFetchKeys;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
+	Optional<StringRef> predicateName;
+	VectorRef<StringRef> predicateArgs;
 	ReplyPromise<GetKeyValuesReply> reply;
 
 	GetKeyValuesRequest() : isFetchKeys(false) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
+		serializer(ar,
+		           begin,
+		           end,
+		           version,
+		           limit,
+		           limitBytes,
+		           isFetchKeys,
+		           tags,
+		           debugID,
+		           predicateName,
+		           predicateArgs,
+		           reply,
+		           spanContext,
+		           arena);
 	}
 };
 

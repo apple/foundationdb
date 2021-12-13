@@ -1,0 +1,6 @@
+[[test]]
+testTitle = 'GetRangeWithPredicate'
+useDB = true
+
+    [[test.workload]]
+    testName = 'GetRangeWithPredicate'

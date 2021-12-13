@@ -3405,6 +3405,19 @@ void getRangeFinished(Database cx,
 	}
 }
 
+template <class GetKeyValuesFamilyRequest>
+void setPredicateInGetRangeRequest(GetKeyValuesFamilyRequest& req, GetRangePredicate predicate) {}
+
+template <>
+void setPredicateInGetRangeRequest<GetKeyValuesRequest>(GetKeyValuesRequest& req, GetRangePredicate predicate) {
+	if (predicate.present()) {
+		req.predicateName = predicate.predicateName;
+		req.arena.dependsOn(predicate.predicateName.arena());
+		req.predicateArgs = predicate.predicateArgs;
+		req.arena.dependsOn(predicate.predicateArgs.arena());
+	}
+}
+
 // GetKeyValuesFamilyRequest: GetKeyValuesRequest or GetKeyValuesAndFlatMapRequest
 // GetKeyValuesFamilyReply: GetKeyValuesReply or GetKeyValuesAndFlatMapReply
 // Sadly we need GetKeyValuesFamilyReply because cannot do something like: state
@@ -3417,6 +3430,7 @@ Future<RangeResult> getRange(Database cx,
                              KeySelector end,
                              Key mapper,
                              GetRangeLimits limits,
+                             GetRangePredicate predicate,
                              Promise<std::pair<Key, Key>> conflictRange,
                              Snapshot snapshot,
                              Reverse reverse,
@@ -3496,6 +3510,8 @@ Future<RangeResult> getRange(Database cx,
 
 			transformRangeLimits(limits, reverse, req);
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
+
+			setPredicateInGetRangeRequest(req, predicate);
 
 			req.tags = cx->sampleReadTags() ? tags : Optional<TagSet>();
 			req.debugID = info.debugID;
@@ -4243,6 +4259,7 @@ Future<RangeResult> getRange(Database const& cx,
 	                                                        end,
 	                                                        ""_sr,
 	                                                        limits,
+	                                                        GetRangePredicate(),
 	                                                        Promise<std::pair<Key, Key>>(),
 	                                                        Snapshot::True,
 	                                                        reverse,
@@ -4564,6 +4581,7 @@ Future<RangeResult> Transaction::getRangeInternal(const KeySelector& begin,
                                                   const KeySelector& end,
                                                   const Key& mapper,
                                                   GetRangeLimits limits,
+                                                  GetRangePredicate predicate,
                                                   Snapshot snapshot,
                                                   Reverse reverse) {
 	++cx->transactionLogicalReads;
@@ -4606,6 +4624,7 @@ Future<RangeResult> Transaction::getRangeInternal(const KeySelector& begin,
 	                                                                      e,
 	                                                                      mapper,
 	                                                                      limits,
+	                                                                      predicate,
 	                                                                      conflictRange,
 	                                                                      snapshot,
 	                                                                      reverse,
@@ -4618,7 +4637,18 @@ Future<RangeResult> Transaction::getRange(const KeySelector& begin,
                                           GetRangeLimits limits,
                                           Snapshot snapshot,
                                           Reverse reverse) {
-	return getRangeInternal<GetKeyValuesRequest, GetKeyValuesReply>(begin, end, ""_sr, limits, snapshot, reverse);
+	return getRangeInternal<GetKeyValuesRequest, GetKeyValuesReply>(
+	    begin, end, ""_sr, limits, GetRangePredicate(), snapshot, reverse);
+}
+
+[[nodiscard]] Future<RangeResult> Transaction::getRangeWithPredicate(const KeySelector& begin,
+                                                                     const KeySelector& end,
+                                                                     GetRangeLimits limits,
+                                                                     GetRangePredicate predicate,
+                                                                     Snapshot snapshot,
+                                                                     Reverse reverse) {
+	return getRangeInternal<GetKeyValuesRequest, GetKeyValuesReply>(
+	    begin, end, ""_sr, limits, predicate, snapshot, reverse);
 }
 
 Future<RangeResult> Transaction::getRangeAndFlatMap(const KeySelector& begin,
@@ -4628,7 +4658,7 @@ Future<RangeResult> Transaction::getRangeAndFlatMap(const KeySelector& begin,
                                                     Snapshot snapshot,
                                                     Reverse reverse) {
 	return getRangeInternal<GetKeyValuesAndFlatMapRequest, GetKeyValuesAndFlatMapReply>(
-	    begin, end, mapper, limits, snapshot, reverse);
+	    begin, end, mapper, limits, GetRangePredicate(), snapshot, reverse);
 }
 
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,
