@@ -5,6 +5,7 @@ set(FLOWBENCH_SRCS
   BenchIterate.cpp
   BenchMem.cpp
   BenchMetadataCheck.cpp
+  BenchNet2.actor.cpp
   BenchPopulate.cpp
   BenchRandom.cpp
   BenchRef.cpp
