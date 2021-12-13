@@ -250,6 +250,7 @@ public:
 	double MAX_BUGGIFIED_DELAY;
 	int SIM_CONNECT_ERROR_MODE;
 	double SIM_SPEEDUP_AFTER_SECONDS;
+	bool SIM_FUZZER;
 
 	// Tracefiles
 	int ZERO_LENGTH_FILE_PAD;
