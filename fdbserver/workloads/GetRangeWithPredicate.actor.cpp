@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct GetRangeWithPredicateWorkload : TestWorkload {
@@ -32,12 +33,64 @@ struct GetRangeWithPredicateWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (enabled) {
-			// return _start(cx, this);
+			return _start(cx, this);
 		}
 		return Void();
 	}
 
-	// ACTOR Future<Void> _start(Database cx, GetRangeWithPredicateWorkload* self) { return Void(); }
+	ACTOR static Future<Void> _start(Database cx, GetRangeWithPredicateWorkload* self) {
+		wait(populateData(cx, 200));
+		wait(testGetRangeSubstrMatch(cx));
+		return Void();
+	}
+
+	ACTOR static Future<Void> populateData(Database cx, int n) {
+		state std::vector<StringRef> testValues = {
+			"one test value"_sr, "test second value"_sr, "third value"_sr, "something unrelated"_sr, "one more"_sr,
+		};
+
+		loop {
+			state Transaction tr(cx);
+			try {
+				tr.reset();
+				for (int i = 0; i < testValues.size(); i++) {
+					tr.set(format("range%06d", i), testValues[i]);
+				}
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> testGetRangeSubstrMatch(Database cx) {
+		Key rangeBegin = "range"_sr;
+		Key rangeEnd = "rangf"_sr;
+
+		state Transaction tr(cx);
+		try {
+			tr.reset();
+			RangeResult result =
+			    wait(tr.getRangeWithPredicate(KeySelector(firstGreaterOrEqual(rangeBegin)),
+			                                  KeySelector(firstGreaterOrEqual(rangeEnd)),
+			                                  GetRangeLimits(),
+			                                  GetRangePredicate(PRED_FIND_IN_VALUE).addArg("test"_sr)));
+			ASSERT(result.size() == 2);
+			showResult(result);
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+		return Void();
+	}
+
+	static void showResult(const RangeResult& result) {
+		std::cout << "result size: " << result.size() << std::endl;
+		for (const KeyValueRef* it = result.begin(); it != result.end(); it++) {
+			std::cout << "key=" << it->key.printable() << ", value=" << it->value.printable() << std::endl;
+		}
+	}
 
 	Future<bool> check(Database const& cx) override { return true; }
 

@@ -644,8 +644,19 @@ struct GetRangePredicate {
 	Standalone<StringRef> predicateName;
 	Standalone<VectorRef<StringRef>> predicateArgs;
 
+	GetRangePredicate() = default;
+	GetRangePredicate(StringRef name) : predicateName(name) {}
+
+	GetRangePredicate& addArg(StringRef arg) {
+		predicateArgs.push_back_deep(predicateArgs.arena(), arg);
+		return *this;
+	}
+
 	bool present() { return !predicateName.empty(); }
 };
+
+// Built-in predicates
+const KeyRef PRED_FIND_IN_VALUE = "std/findInVal"_sr;
 
 struct RangeResultRef : VectorRef<KeyValueRef> {
 	bool more; // True if (but not necessarily only if) values remain in the *key* range requested (possibly beyond the

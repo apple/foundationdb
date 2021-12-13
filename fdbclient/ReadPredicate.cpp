@@ -21,8 +21,6 @@
 #include "fdbclient/ReadPredicate.h"
 #include <string_view>
 
-const KeyRef PRED_FIND_IN_VALUE = "std/findInVal"_sr;
-
 class FindInValuePredicate : public IReadPredicate {
 public:
 	FindInValuePredicate(StringRef searchStr) : searchStr(searchStr.toStringView()) {}
