@@ -1,5 +1,6 @@
 set(FLOWBENCH_SRCS
   flowbench.actor.cpp
+  BenchCallback.actor.cpp
   BenchHash.cpp
   BenchIterate.cpp
   BenchMem.cpp
