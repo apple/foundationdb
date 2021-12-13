@@ -26,6 +26,23 @@
 
 namespace HTTP {
 
+// AWS V4 headers require this encoding for its signature calculation
+std::string awsV4URIEncode(const std::string& s, bool encodeSlash) {
+	std::string o;
+	o.reserve(s.size() * 3);
+	char buf[4];
+	for (auto c : s)
+		if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+			o.append(&c, 1);
+		else if (c == '/')
+			o.append(encodeSlash ? "%2F" : "/");
+		else {
+			sprintf(buf, "%%%.02X", c);
+			o.append(buf);
+		}
+	return o;
+}
+
 std::string urlEncode(const std::string& s) {
 	std::string o;
 	o.reserve(s.size() * 3);
