@@ -522,7 +522,7 @@ public:
 	}
 	ssize_t read(int fd, void* buf, size_t nbyte) {
 		ASSERT(fd > 0);
-		auto& f = fds[fd];
+		auto& f = fds.at(fd);
 		if (f.offset >= f.data->size()) return 0;
 		auto res = std::max(nbyte, size_t(f.data->size() - f.offset));
 		memcpy(buf, f.data->data() + f.offset, res);
@@ -531,7 +531,7 @@ public:
 	}
 	ssize_t write(int fd, const void* buf, size_t nbyte) {
 		ASSERT(fd > 0);
-		auto& f = fds[fd];
+		auto& f = fds.at(fd);
 		if (f.flags & O_RDONLY) {
 			lastError = EBADF;
 			return -1;
@@ -543,7 +543,7 @@ public:
 	}
 	int truncate(int fd, off_t length) {
 		ASSERT(fd > 0);
-		auto& f = fds[fd];
+		auto& f = fds.at(fd);
 		if (f.flags & O_RDONLY) {
 			lastError = EBADF;
 			return -1;
@@ -557,7 +557,7 @@ public:
 	}
 	off_t lseek(int fd, off_t offset, int whence) {
 		ASSERT(fd > 0);
-		auto& f = fds[fd];
+		auto& f = fds.at(fd);
 		if (whence == SEEK_SET) {
 			f.offset = offset;
 		} else if (whence == SEEK_END) {
@@ -1284,6 +1284,13 @@ public:
 
 			self->execTask(t);
 			self->yielded = false;
+			if (self->terminateAt > 0.0 && self->time > self->terminateAt) {
+				if (self->dieWhenTerminate) {
+					crashAndDie();
+				} else {
+					flushAndExit(0);
+				}
+			}
 		}
 		self->currentProcess = callingMachine;
 		self->net2->stop();
@@ -2272,6 +2279,15 @@ public:
 
 	ProtocolVersion protocolVersion() const override { return getCurrentProcess()->protocolVersion; }
 
+	void crashAfter(double t) override {
+		terminateAt = t;
+		dieWhenTerminate = true;
+	}
+	void terminateAfter(double t) override {
+		terminateAt = t;
+		dieWhenTerminate = false;
+	}
+
 	// time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	// time should only be modified from the main thread.
 	double time;
@@ -2300,6 +2316,8 @@ public:
 	bool yielded;
 	int yield_limit; // how many more times yield may return false before next returning true
 	bool printSimTime;
+	double terminateAt = -1.0;
+	bool dieWhenTerminate = false;
 
 private:
 	MockDNS mockDNS;
