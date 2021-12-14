@@ -53,6 +53,15 @@ public:
 	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& range, int64_t chunkSize) override {
 		throw client_invalid_operation();
 	}
+	Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(KeyRange const& range) override {
+		throw client_invalid_operation();
+	}
+	Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranules(KeyRange const& range,
+	                                                                    Version begin,
+	                                                                    Optional<Version> readVersion,
+	                                                                    Version* readVersionOut) override {
+		throw client_invalid_operation();
+	}
 	Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys) override { throw client_invalid_operation(); }
 	void addReadConflictRange(KeyRangeRef const& keys) override { throw client_invalid_operation(); }
 	void makeSelfConflicting() override { throw client_invalid_operation(); }

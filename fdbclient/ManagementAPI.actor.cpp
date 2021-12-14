@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -184,7 +185,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	} else if (mode == "ssd" || mode == "ssd-2") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_BTREE_V2;
-	} else if (mode == "ssd-redwood-experimental") {
+	} else if (mode == "ssd-redwood-1-experimental") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_REDWOOD_V1;
 	} else if (mode == "ssd-rocksdb-experimental") {
@@ -453,7 +454,7 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 
 	result.auto_replication = result.old_replication;
 
-	int storage_replication;
+	[[maybe_unused]] int storage_replication;
 	int log_replication;
 	if (result.old_replication == "single") {
 		result.auto_replication = "double";
@@ -813,14 +814,24 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	                                   StringRef(newName + ':' + deterministicRandom()->randomAlphaNumeric(32)));
 
 	if (g_network->isSimulated()) {
-		for (int i = 0; i < (desiredCoordinators->size() / 2) + 1; i++) {
-			auto addresses = g_simulator.getProcessByAddress((*desiredCoordinators)[i])->addresses;
+		int i = 0;
+		int protectedCount = 0;
+		while ((protectedCount < ((desiredCoordinators->size() / 2) + 1)) && (i < desiredCoordinators->size())) {
+			auto process = g_simulator.getProcessByAddress((*desiredCoordinators)[i]);
+			auto addresses = process->addresses;
 
-			g_simulator.protectedAddresses.insert(addresses.address);
+			if (!process->isReliable()) {
+				i++;
+				continue;
+			}
+
+			g_simulator.protectedAddresses.insert(process->addresses.address);
 			if (addresses.secondaryAddress.present()) {
-				g_simulator.protectedAddresses.insert(addresses.secondaryAddress.get());
+				g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
 			}
 			TraceEvent("ProtectCoordinator").detail("Address", (*desiredCoordinators)[i]).backtrace();
+			protectedCount++;
+			i++;
 		}
 	}
 
@@ -1677,9 +1688,9 @@ ACTOR Future<Void> printHealthyZone(Database cx) {
 				printf("No ongoing maintenance.\n");
 			} else {
 				auto healthyZone = decodeHealthyZoneValue(val.get());
-				printf("Maintenance for zone %s will continue for %" PRId64 " seconds.\n",
-				       healthyZone.first.toString().c_str(),
-				       (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+				fmt::print("Maintenance for zone {0} will continue for {1} seconds.\n",
+				           healthyZone.first.toString(),
+				           (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 			}
 			return Void();
 		} catch (Error& e) {

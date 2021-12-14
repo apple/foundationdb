@@ -47,7 +47,7 @@
 #include "flow/serialize.h"
 
 class TCTeamInfo;
-struct TCMachineInfo;
+class TCMachineInfo;
 class TCMachineTeamInfo;
 
 namespace {
@@ -2195,7 +2195,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		ASSERT_WE_THINK(machine_info.size() > 0 || server_info.size() == 0);
 		ASSERT_WE_THINK(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER >= 1 && configuration.storageTeamSize >= 1);
 
-		int addedMachineTeams = 0;
 		int addedTeams = 0;
 
 		// Exclude machine teams who have members in the wrong configuration.
@@ -2210,15 +2209,18 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		int machineTeamsToBuild = std::max(
 		    0, std::min(desiredMachineTeams - healthyMachineTeamCount, maxMachineTeams - totalMachineTeamCount));
 
-		TraceEvent("BuildMachineTeams")
-		    .detail("TotalHealthyMachine", totalHealthyMachineCount)
-		    .detail("HealthyMachineTeamCount", healthyMachineTeamCount)
-		    .detail("DesiredMachineTeams", desiredMachineTeams)
-		    .detail("MaxMachineTeams", maxMachineTeams)
-		    .detail("MachineTeamsToBuild", machineTeamsToBuild);
-		// Pre-build all machine teams until we have the desired number of machine teams
-		if (machineTeamsToBuild > 0 || notEnoughMachineTeamsForAMachine()) {
-			addedMachineTeams = addBestMachineTeams(machineTeamsToBuild);
+		{
+			TraceEvent te("BuildMachineTeams");
+			te.detail("TotalHealthyMachine", totalHealthyMachineCount)
+			    .detail("HealthyMachineTeamCount", healthyMachineTeamCount)
+			    .detail("DesiredMachineTeams", desiredMachineTeams)
+			    .detail("MaxMachineTeams", maxMachineTeams)
+			    .detail("MachineTeamsToBuild", machineTeamsToBuild);
+			// Pre-build all machine teams until we have the desired number of machine teams
+			if (machineTeamsToBuild > 0 || notEnoughMachineTeamsForAMachine()) {
+				auto addedMachineTeams = addBestMachineTeams(machineTeamsToBuild);
+				te.detail("MachineTeamsAdded", addedMachineTeams);
+			}
 		}
 
 		while (addedTeams < teamsToBuild || notEnoughTeamsForAServer()) {
@@ -4277,16 +4279,20 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				    .detail("StorageCount", movingCount);
 			} else {
 				TEST(true); // start wiggling
-				wait(waitUntilHealthy(self));
-				auto fv = self->excludeStorageServersForWiggle(pid);
-				movingCount = fv.size();
-				moveFinishFuture = waitForAll(fv);
-				TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
-				    .detail("Primary", self->primary)
-				    .detail("ProcessId", pid)
-				    .detail("ExtraHealthyTeamCount", extraTeamCount)
-				    .detail("HealthyTeamCount", self->healthyTeamCount)
-				    .detail("StorageCount", movingCount);
+				choose {
+					when(wait(waitUntilHealthy(self))) {
+						auto fv = self->excludeStorageServersForWiggle(pid);
+						movingCount = fv.size();
+						moveFinishFuture = waitForAll(fv);
+						TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
+						    .detail("Primary", self->primary)
+						    .detail("ProcessId", pid)
+						    .detail("ExtraHealthyTeamCount", extraTeamCount)
+						    .detail("HealthyTeamCount", self->healthyTeamCount)
+						    .detail("StorageCount", movingCount);
+					}
+					when(wait(self->pauseWiggle->onChange())) { continue; }
+				}
 			}
 		}
 
@@ -4641,12 +4647,18 @@ ACTOR Future<Void> storageServerFailureTracker(DDTeamCollection* self,
 						self->healthyZone.set(Optional<Key>());
 					}
 				}
+				if (!status->isUnhealthy()) {
+					// On server transistion from unhealthy -> healthy, trigger buildTeam check,
+					// handles scenario when team building failed due to insufficient healthy servers.
+					// Operaton cost is minimal if currentTeamCount == desiredTeamCount/maxTeamCount.
+					self->doBuildTeams = true;
+				}
 
-				// TraceEvent("StatusMapChange", self->distributorId)
-				//     .detail("ServerID", interf.id())
-				//     .detail("Status", status->toString())
-				//     .detail("Available",
-				//             IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
+				TraceEvent(SevDebug, "StatusMapChange", self->distributorId)
+				    .detail("ServerID", interf.id())
+				    .detail("Status", status->toString())
+				    .detail("Available",
+				            IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
 			}
 			when(wait(status->isUnhealthy() ? waitForAllDataRemoved(cx, interf.id(), addedVersion, self) : Never())) {
 				break;
@@ -5261,6 +5273,21 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 	Future<Void> waitComplete() { return complete.getFuture(); }
 };
 
+ACTOR Future<UID> getClusterId(DDTeamCollection* self) {
+	state ReadYourWritesTransaction tr(self->cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> clusterId = wait(tr.get(clusterIdKey));
+			ASSERT(clusterId.present());
+			return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
                                      RecruitStorageReply candidateWorker,
                                      const DDEnabledState* ddEnabledState,
@@ -5278,12 +5305,15 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 		// Ask the candidateWorker to initialize a SS only if the worker does not have a pending request
 		state UID interfaceId = deterministicRandom()->randomUniqueID();
 
+		UID clusterId = wait(getClusterId(self));
+
 		state InitializeStorageRequest isr;
 		isr.storeType =
 		    recruitTss ? self->configuration.testingStorageServerStoreType : self->configuration.storageServerStoreType;
 		isr.seedTag = invalidTag;
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = interfaceId;
+		isr.clusterId = clusterId;
 
 		self->recruitingIds.insert(interfaceId);
 		self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
@@ -6374,6 +6404,19 @@ static std::set<int> const& normalDataDistributorErrors() {
 	return s;
 }
 
+ACTOR template <class Req>
+Future<Void> sendSnapReq(RequestStream<Req> stream, Req req, Error e) {
+	ErrorOr<REPLY_TYPE(Req)> reply = wait(stream.tryGetReply(req));
+	if (reply.isError()) {
+		TraceEvent("SnapDataDistributor_ReqError")
+		    .error(reply.getError(), true)
+		    .detail("ConvertedErrorType", e.what())
+		    .detail("Peer", stream.getEndpoint().getPrimaryAddress());
+		throw e;
+	}
+	return Void();
+}
+
 ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<ServerDBInfo> const> db) {
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
 	state ReadYourWritesTransaction tr(cx);
@@ -6401,9 +6444,8 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		std::vector<Future<Void>> disablePops;
 		disablePops.reserve(tlogs.size());
 		for (const auto& tlog : tlogs) {
-			disablePops.push_back(transformErrors(
-			    throwErrorOr(tlog.disablePopRequest.tryGetReply(TLogDisablePopRequest(snapReq.snapUID))),
-			    snap_disable_tlog_pop_failed()));
+			disablePops.push_back(sendSnapReq(
+			    tlog.disablePopRequest, TLogDisablePopRequest{ snapReq.snapUID }, snap_disable_tlog_pop_failed()));
 		}
 		wait(waitForAll(disablePops));
 
@@ -6419,10 +6461,9 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		std::vector<Future<Void>> storageSnapReqs;
 		storageSnapReqs.reserve(storageWorkers.size());
 		for (const auto& worker : storageWorkers) {
-			storageSnapReqs.push_back(
-			    transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(
-			                        snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("storage")))),
-			                    snap_storage_failed()));
+			storageSnapReqs.push_back(sendSnapReq(worker.workerSnapReq,
+			                                      WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "storage"_sr),
+			                                      snap_storage_failed()));
 		}
 		wait(waitForAll(storageSnapReqs));
 
@@ -6433,10 +6474,9 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		std::vector<Future<Void>> tLogSnapReqs;
 		tLogSnapReqs.reserve(tlogs.size());
 		for (const auto& tlog : tlogs) {
-			tLogSnapReqs.push_back(
-			    transformErrors(throwErrorOr(tlog.snapRequest.tryGetReply(
-			                        TLogSnapRequest(snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("tlog")))),
-			                    snap_tlog_failed()));
+			tLogSnapReqs.push_back(sendSnapReq(tlog.snapRequest,
+			                                   TLogSnapRequest{ snapReq.snapPayload, snapReq.snapUID, "tlog"_sr },
+			                                   snap_tlog_failed()));
 		}
 		wait(waitForAll(tLogSnapReqs));
 
@@ -6447,9 +6487,8 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		std::vector<Future<Void>> enablePops;
 		enablePops.reserve(tlogs.size());
 		for (const auto& tlog : tlogs) {
-			enablePops.push_back(
-			    transformErrors(throwErrorOr(tlog.enablePopRequest.tryGetReply(TLogEnablePopRequest(snapReq.snapUID))),
-			                    snap_enable_tlog_pop_failed()));
+			enablePops.push_back(sendSnapReq(
+			    tlog.enablePopRequest, TLogEnablePopRequest{ snapReq.snapUID }, snap_enable_tlog_pop_failed()));
 		}
 		wait(waitForAll(enablePops));
 
@@ -6464,10 +6503,9 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		std::vector<Future<Void>> coordSnapReqs;
 		coordSnapReqs.reserve(coordWorkers.size());
 		for (const auto& worker : coordWorkers) {
-			coordSnapReqs.push_back(
-			    transformErrors(throwErrorOr(worker.workerSnapReq.tryGetReply(WorkerSnapRequest(
-			                        snapReq.snapPayload, snapReq.snapUID, LiteralStringRef("coord")))),
-			                    snap_coord_failed()));
+			coordSnapReqs.push_back(sendSnapReq(worker.workerSnapReq,
+			                                    WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "coord"_sr),
+			                                    snap_coord_failed()));
 		}
 		wait(waitForAll(coordSnapReqs));
 		TraceEvent("SnapDataDistributor_AfterSnapCoords")

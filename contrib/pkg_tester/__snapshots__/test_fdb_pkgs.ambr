@@ -46,6 +46,34 @@
   
   '
 ---
+# name: test_execstack_permissions_libfdb_c[centos-versioned]
+  '
+    GNU_STACK      0x0000000000000000 0x0000000000000000 0x0000000000000000
+                   0x0000000000000000 0x0000000000000000  RW     0x0
+  
+  '
+---
+# name: test_execstack_permissions_libfdb_c[centos]
+  '
+    GNU_STACK      0x0000000000000000 0x0000000000000000 0x0000000000000000
+                   0x0000000000000000 0x0000000000000000  RW     0x0
+  
+  '
+---
+# name: test_execstack_permissions_libfdb_c[ubuntu-versioned]
+  '
+    GNU_STACK      0x0000000000000000 0x0000000000000000 0x0000000000000000
+                   0x0000000000000000 0x0000000000000000  RW     0x0
+  
+  '
+---
+# name: test_execstack_permissions_libfdb_c[ubuntu]
+  '
+    GNU_STACK      0x0000000000000000 0x0000000000000000 0x0000000000000000
+                   0x0000000000000000 0x0000000000000000  RW     0x0
+  
+  '
+---
 # name: test_fdbcli_help_text[centos-versioned]
   '
   FoundationDB CLI 7.1 (v7.1.0)

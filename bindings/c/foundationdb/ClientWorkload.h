@@ -37,6 +37,7 @@
 #endif
 
 typedef struct FDB_future FDBFuture;
+typedef struct FDB_result FDBResult;
 typedef struct FDB_database FDBDatabase;
 typedef struct FDB_transaction FDBTransaction;
 

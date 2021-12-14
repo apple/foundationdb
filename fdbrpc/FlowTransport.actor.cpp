@@ -27,7 +27,6 @@
 #include <memcheck.h>
 #endif
 
-#include "flow/crc32c.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/HealthMonitor.h"
@@ -41,6 +40,8 @@
 #include "flow/ObjectSerializer.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
+#define XXH_INLINE_ALL
+#include "flow/xxhash.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();
@@ -984,21 +985,22 @@ static void scanPackets(TransportData* transport,
 
 	const bool checksumEnabled = !peerAddress.isTLS();
 	loop {
-		uint32_t packetLen, packetChecksum;
+		uint32_t packetLen;
+		XXH64_hash_t packetChecksum;
 
-		// Retrieve packet length and checksum
+		// Read packet length if size is sufficient or stop
+		if (e - p < PACKET_LEN_WIDTH)
+			break;
+		packetLen = *(uint32_t*)p;
+		p += PACKET_LEN_WIDTH;
+
+		// Read checksum if present
 		if (checksumEnabled) {
-			if (e - p < sizeof(uint32_t) * 2)
+			// Read checksum if size is sufficient or stop
+			if (e - p < sizeof(packetChecksum))
 				break;
-			packetLen = *(uint32_t*)p;
-			p += PACKET_LEN_WIDTH;
-			packetChecksum = *(uint32_t*)p;
-			p += sizeof(uint32_t);
-		} else {
-			if (e - p < sizeof(uint32_t))
-				break;
-			packetLen = *(uint32_t*)p;
-			p += PACKET_LEN_WIDTH;
+			packetChecksum = *(XXH64_hash_t*)p;
+			p += sizeof(packetChecksum);
 		}
 
 		if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
@@ -1036,23 +1038,23 @@ static void scanPackets(TransportData* transport,
 				}
 			}
 
-			uint32_t calculatedChecksum = crc32c_append(0, p, packetLen);
+			XXH64_hash_t calculatedChecksum = XXH3_64bits(p, packetLen);
 			if (calculatedChecksum != packetChecksum) {
 				if (isBuggifyEnabled) {
 					TraceEvent(SevInfo, "ChecksumMismatchExp")
-					    .detail("PacketChecksum", (int)packetChecksum)
-					    .detail("CalculatedChecksum", (int)calculatedChecksum);
+					    .detail("PacketChecksum", packetChecksum)
+					    .detail("CalculatedChecksum", calculatedChecksum);
 				} else {
 					TraceEvent(SevWarnAlways, "ChecksumMismatchUnexp")
-					    .detail("PacketChecksum", (int)packetChecksum)
-					    .detail("CalculatedChecksum", (int)calculatedChecksum);
+					    .detail("PacketChecksum", packetChecksum)
+					    .detail("CalculatedChecksum", calculatedChecksum);
 				}
 				throw checksum_failed();
 			} else {
 				if (isBuggifyEnabled) {
 					TraceEvent(SevError, "ChecksumMatchUnexp")
-					    .detail("PacketChecksum", (int)packetChecksum)
-					    .detail("CalculatedChecksum", (int)calculatedChecksum);
+					    .detail("PacketChecksum", packetChecksum)
+					    .detail("CalculatedChecksum", calculatedChecksum);
 				}
 			}
 		}
@@ -1261,8 +1263,11 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 						} else {
 							peerProtocolVersion = protocolVersion;
 							if (pkt.canonicalRemotePort) {
-								peerAddress = NetworkAddress(
-								    pkt.canonicalRemoteIp(), pkt.canonicalRemotePort, true, peerAddress.isTLS());
+								peerAddress = NetworkAddress(pkt.canonicalRemoteIp(),
+								                             pkt.canonicalRemotePort,
+								                             true,
+								                             peerAddress.isTLS(),
+								                             NetworkAddressFromHostname(peerAddress.fromHostname));
 							}
 							peer = transport->getOrOpenPeer(peerAddress, false);
 							peer->compatible = compatible;
@@ -1584,7 +1589,15 @@ static ReliablePacket* sendPacket(TransportData* self,
 
 	// Reserve some space for packet length and checksum, write them after serializing data
 	SplitBuffer packetInfoBuffer;
-	uint32_t len, checksum = 0;
+	uint32_t len;
+
+	// This is technically abstraction breaking but avoids XXH3_createState() and XXH3_freeState() which are just
+	// malloc/free
+	XXH3_state_t checksumState;
+	// Checksum will be calculated with buffer API if contiguous, else using stream API.  Mode is tracked here.
+	bool checksumStream = false;
+	XXH64_hash_t checksum;
+
 	int packetInfoSize = PACKET_LEN_WIDTH;
 	if (checksumEnabled) {
 		packetInfoSize += sizeof(checksum);
@@ -1609,10 +1622,37 @@ static ReliablePacket* sendPacket(TransportData* self,
 		while (checksumUnprocessedLength > 0) {
 			uint32_t processLength =
 			    std::min(checksumUnprocessedLength, (uint32_t)(checksumPb->bytes_written - prevBytesWritten));
-			checksum = crc32c_append(checksum, checksumPb->data() + prevBytesWritten, processLength);
+
+			// If not in checksum stream mode yet
+			if (!checksumStream) {
+				// If there is nothing left to process then calculate checksum directly
+				if (processLength == checksumUnprocessedLength) {
+					checksum = XXH3_64bits(checksumPb->data() + prevBytesWritten, processLength);
+				} else {
+					// Otherwise, initialize checksum state and switch to stream mode
+					if (XXH3_64bits_reset(&checksumState) != XXH_OK) {
+						throw internal_error();
+					}
+					checksumStream = true;
+				}
+			}
+
+			// If in checksum stream mode, update the checksum state
+			if (checksumStream) {
+				if (XXH3_64bits_update(&checksumState, checksumPb->data() + prevBytesWritten, processLength) !=
+				    XXH_OK) {
+					throw internal_error();
+				}
+			}
+
 			checksumUnprocessedLength -= processLength;
 			checksumPb = checksumPb->nextPacketBuffer();
 			prevBytesWritten = 0;
+		}
+
+		// If in checksum stream mode, get the final checksum
+		if (checksumStream) {
+			checksum = XXH3_64bits_digest(&checksumState);
 		}
 	}
 

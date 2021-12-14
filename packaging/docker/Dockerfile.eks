@@ -15,94 +15,143 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+#
 FROM amazonlinux:2.0.20210326.0 as base
 
 RUN yum install -y \
-    binutils \
-    bind-utils \
-    curl \
-    gdb \
-    jq \
-    less \
-    lsof \
-    nc \
-    net-tools \
-    perf \
-    perl \
-    procps \
-    python38 \
-    python3-pip \
-    strace \
-    tar \
-    traceroute \
-    telnet \
-    tcpdump \
-    unzip \
-    vim && \
+    bind-utils-9.11.4-26.P2.amzn2.5.2 \
+    binutils-2.29.1-30.amzn2 \
+    curl-7.76.1-7.amzn2.0.2 \
+    gdb-8.0.1-36.amzn2.0.1 \
+    hostname-3.13-3.amzn2.0.2 \
+    jq-1.5-1.amzn2.0.2 \
+    less-458-9.amzn2.0.2 \
+    libsanitizer-7.3.1-13.amzn2 \
+    lsof-4.87-6.amzn2 \
+    net-tools-2.0-0.22.20131004git.amzn2.0.2  \
+    nmap-ncat-6.40-13.amzn2 \
+    perf-4.14.252-195.483.amzn2 \
+    perl-5.16.3-299.amzn2.0.1 \
+    procps-ng-3.3.10-26.amzn2 \
+    strace-4.26-1.amzn2.0.1 \
+    sysstat-10.1.5-12.amzn2 \
+    tar-1.26-35.amzn2 \
+    tcpdump-4.9.2-4.amzn2.1 \
+    telnet-0.17-65.amzn2 \
+    traceroute-2.0.22-2.amzn2.0.1 \
+    unzip-6.0-43.amzn2 \
+    vim-enhanced-8.1.1602-1.amzn2 && \
     yum clean all && \
     rm -rf /var/cache/yum
 
-# TODO: nload, iperf, numademo
+WORKDIR /tmp
 
-RUN curl https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.2.43.zip -o "awscliv2.zip" && \
-    echo "9a8b3c4e7f72bbcc55e341dce3af42479f2730c225d6d265ee6f9162cfdebdfd  awscliv2.zip" > awscliv2.txt && \
-    sha256sum -c awscliv2.txt && \
-    unzip -qq awscliv2.zip && \
-    ./aws/install && \
-    rm -rf /tmp/*
-
-# Adding tini as PID 1 https://github.com/krallin/tini
 RUN curl -Ls https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd64 -o tini  && \
-    echo "93dcc18adc78c65a028a84799ecf8ad40c936fdfc5f2a57b1acda5a8117fa82c  tini" > tini-amd64.sha256sum && \
-    sha256sum -c tini-amd64.sha256sum && \
+    echo "93dcc18adc78c65a028a84799ecf8ad40c936fdfc5f2a57b1acda5a8117fa82c  tini" > tini-sha.txt && \
+    sha256sum --quiet -c tini-sha.txt && \
     chmod +x tini && \
     mv tini /usr/bin/ && \
     rm -rf /tmp/*
 
-# Install flamegraph
-RUN curl -LsO https://raw.githubusercontent.com/brendangregg/FlameGraph/90533539b75400297092f973163b8a7b067c66d3/stackcollapse-perf.pl && \
-    curl -LsO https://raw.githubusercontent.com/brendangregg/FlameGraph/90533539b75400297092f973163b8a7b067c66d3/flamegraph.pl && \
-    echo "a682ac46497d6fdbf9904d1e405d3aea3ad255fcb156f6b2b1a541324628dfc0  flamegraph.pl" > flamegraph.sha256sum && \
-    echo "5bcfb73ff2c2ab7bf2ad2b851125064780b58c51cc602335ec0001bec92679a5  stackcollapse-perf.pl" >> flamegraph.sha256sum && \
-    sha256sum -c flamegraph.sha256sum && \
-    chmod +x stackcollapse-perf.pl flamegraph.pl && \
-    mv stackcollapse-perf.pl flamegraph.pl /usr/bin
-
-ARG FDB_VERSION
-ARG FDB_ADDITIONAL_VERSIONS="6.3.12 6.2.30 6.1.13 5.1.7"
-ARG FDB_WEBSITE=https://www.foundationdb.org
-
-# Install additional FoundationDB Client Libraries
-RUN mkdir -p /usr/lib/fdb/multiversion && \
-    for version in $FDB_ADDITIONAL_VERSIONS; do \
-        curl $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /usr/lib/fdb/multiversion/libfdb_c_$version.so; \
-    done && \
-    rm -rf /mnt/website
-
-COPY --chown=root bin /usr/bin/
-COPY --chown=root lib/libfdb_c.so /var/fdb/lib/
-RUN mv /var/fdb/lib/libfdb_c.so /var/fdb/lib/libfdb_c_${FDB_VERSION%.*}.so
-RUN ln -s /var/fdb/lib/libfdb_c_${FDB_VERSION%.*}.so /var/fdb/lib/libfdb_c.so
-
-# =========================== END OF LAYER: base ===============================
-
-FROM base as foundationdb
-
-ARG FDB_VERSION
-
 WORKDIR /
 
-# Set Up Runtime Scripts and Directories
-ADD release/fdb.bash /var/fdb/scripts/
-RUN chmod a+x /var/fdb/scripts/fdb.bash
+FROM golang:1.16.7-bullseye AS go-build
 
-RUN mkdir -p /var/fdb/logs
+COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
+WORKDIR /fdbkubernetesmonitor
+RUN go build -o /fdb-kubernetes-monitor *.go
 
-VOLUME /var/fdb/data
+FROM base as foundationdb-base
+
+WORKDIR /tmp
+ARG FDB_VERSION=6.3.22
+ARG FDB_LIBRARY_VERSIONS="${FDB_VERSION}"
+ARG FDB_WEBSITE=https://www.foundationdb.org
+
+RUN mkdir -p /var/fdb/{logs,tmp,lib} && \
+    mkdir -p /usr/lib/fdb/multiversion && \
+    echo ${FDB_VERSION} > /var/fdb/version
+
+# Set up a non-root user
+RUN groupadd --gid 4059 \
+             fdb && \
+    useradd --gid 4059 \
+            --uid 4059 \
+            --no-create-home \
+            --shell /bin/bash \
+            fdb && \
+    chown -R fdb:fdb /var/fdb
+
+COPY website /tmp/website/
+
+# Install FoundationDB Binaries
+RUN curl -Ls $FDB_WEBSITE/downloads/$FDB_VERSION/linux/fdb_$FDB_VERSION.tar.gz | tar zxf - --strip-components=1 && \
+    for file in fdbbackup fdbcli fdbdr fdbmonitor fdbrestore fdbserver backup_agent dr_agent fastrestore_tool; do \
+        chmod u+x $file; \
+        mv $file /usr/bin; \
+    done
+
+# Install additional FoundationDB Client Libraries
+RUN for version in $FDB_LIBRARY_VERSIONS; do \
+    curl -Ls $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /usr/lib/fdb/multiversion/libfdb_c_${version%.*}.so; \
+    done
+
+# Install additional FoundationDB Client Libraries (for sidecar)
+RUN mkdir -p /var/fdb/lib && \
+    for version in $FDB_LIBRARY_VERSIONS; do \
+    curl -Ls $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /var/fdb/lib/libfdb_c_${version%.*}.so; \
+    done
+
+RUN curl -Ls $FDB_WEBSITE/downloads/$FDB_VERSION/linux/libfdb_c_$FDB_VERSION.so -o /usr/lib/libfdb_c.so
+
+RUN rm -rf /tmp/*
+WORKDIR /
+
+FROM foundationdb-base as fdb-kubernetes-monitor
+
+# Install the kubernetes monitor binary
+COPY --from=go-build /fdb-kubernetes-monitor /usr/bin/
 
 # Runtime Configuration Options
+USER fdb
+WORKDIR /var/fdb
+VOLUME /var/fdb/data
+ENTRYPOINT ["/usr/bin/fdb-kubernetes-monitor"]
 
+FROM foundationdb-base as foundationdb-kubernetes-sidecar
+
+RUN yum -y install \
+    python3-3.7.10-1.amzn2.0.1 \
+    python3-pip-20.2.2-1.amzn2.0.3 && \
+    yum clean all && \
+    rm -rf /var/cache/yum && \
+    pip3 install watchdog==0.9.0
+
+WORKDIR /
+ADD entrypoint.bash sidecar.py /
+RUN chmod a+x /entrypoint.bash /sidecar.py
+USER fdb
+VOLUME /var/input-files
+VOLUME /var/output-files
+ENV LISTEN_PORT 8080
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/entrypoint.bash"]
+
+FROM foundationdb-base as foundationdb
+
+WORKDIR /tmp
+RUN curl -LsO https://raw.githubusercontent.com/brendangregg/FlameGraph/90533539b75400297092f973163b8a7b067c66d3/stackcollapse-perf.pl && \
+    curl -LsO https://raw.githubusercontent.com/brendangregg/FlameGraph/90533539b75400297092f973163b8a7b067c66d3/flamegraph.pl && \
+    echo "a682ac46497d6fdbf9904d1e405d3aea3ad255fcb156f6b2b1a541324628dfc0  flamegraph.pl" > flamegraph-sha.txt && \
+    echo "5bcfb73ff2c2ab7bf2ad2b851125064780b58c51cc602335ec0001bec92679a5  stackcollapse-perf.pl" >> flamegraph-sha.txt && \
+    sha256sum --quiet -c flamegraph-sha.txt && \
+    chmod +x stackcollapse-perf.pl flamegraph.pl && \
+    mv stackcollapse-perf.pl flamegraph.pl /usr/bin && \
+    rm -rf /tmp/*
+WORKDIR /
+# Set Up Runtime Scripts and Directories
+ADD fdb.bash /var/fdb/scripts/
+RUN chmod a+x /var/fdb/scripts/fdb.bash
+VOLUME /var/fdb/data
 ENV FDB_PORT 4500
 ENV FDB_CLUSTER_FILE /var/fdb/fdb.cluster
 ENV FDB_NETWORKING_MODE container
@@ -110,35 +159,38 @@ ENV FDB_COORDINATOR ""
 ENV FDB_COORDINATOR_PORT 4500
 ENV FDB_CLUSTER_FILE_CONTENTS ""
 ENV FDB_PROCESS_CLASS unset
-
 ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/var/fdb/scripts/fdb.bash"]
 
-# =========================== END OF LAYER: foundationdb ===============================
+FROM base as ycsb
 
-FROM base AS sidecar
-WORKDIR /
+RUN yum -y install \
+    java-11-amazon-corretto-11.0.13+8-1.amzn2 && \
+    yum clean all && \
+    rm -rf /var/cache/yum
 
-ARG FDB_VERSION
+WORKDIR /tmp
+RUN curl -Ls https://amazon-eks.s3.amazonaws.com/1.19.6/2021-01-05/bin/linux/amd64/kubectl -o kubectl && \
+    echo "08ff68159bbcb844455167abb1d0de75bbfe5ae1b051f81ab060a1988027868a  kubectl" > kubectl.txt && \
+    sha256sum --quiet -c kubectl.txt && \
+    mv kubectl /usr/local/bin/kubectl && \
+    chmod 755 /usr/local/bin/kubectl && \
+    curl -Ls https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.2.43.zip -o "awscliv2.zip" && \
+    echo "9a8b3c4e7f72bbcc55e341dce3af42479f2730c225d6d265ee6f9162cfdebdfd  awscliv2.zip" > awscliv2.txt && \
+    sha256sum --quiet -c awscliv2.txt && \
+    unzip -qq awscliv2.zip && \
+    ./aws/install && \
+    rm -rf /tmp/*
 
-# Set Up Runtime Scripts and Directories
+# TODO: Log4J complains that it's eating the HTracer logs.  Even without it, we get per-operation
+# time series graphs of throughput, median, 90, 99, 99.9 and 99.99 (in usec).
+ADD run_ycsb.sh /usr/local/bin/run_ycsb.sh
+RUN mkdir -p /var/log/fdb-trace-logs && \
+    chmod +x /usr/local/bin/run_ycsb.sh
 
-ADD sidecar/entrypoint.bash sidecar/sidecar.py /
-RUN chmod a+x /entrypoint.bash /sidecar.py
-RUN pip3 install watchdog==0.9.0
-
-RUN echo ${FDB_VERSION} > /var/fdb/version && \
-    mkdir -p /var/fdb/lib && \
-    groupadd --gid 4059 fdb && \
-    useradd --gid 4059 --uid 4059 --no-create-home --shell /bin/bash fdb
-
-VOLUME /var/input-files
-VOLUME /var/output-files
-
-USER fdb
-
-# Runtime Configuration Options
-
-ENV LISTEN_PORT 8080
-
-ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/entrypoint.bash"]
-# =========================== END OF LAYER: sidecar ===============================
+ADD YCSB /YCSB
+WORKDIR /YCSB
+ENV FDB_NETWORK_OPTION_EXTERNAL_CLIENT_DIRECTORY=/var/dynamic-conf/lib/multiversion/
+ENV FDB_NETWORK_OPTION_TRACE_ENABLE=/var/log/fdb-trace-logs
+ENV LD_LIBRARY_PATH=/var/dynamic-conf/lib/
+ENV BUCKET=""
+CMD ["run_ycsb.sh"]

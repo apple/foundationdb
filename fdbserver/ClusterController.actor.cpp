@@ -436,11 +436,11 @@ public:
 
 		// try to avoid fields in the cluster controller datacenter if everything else is equal
 		for (auto& it : field_count) {
-			fieldQueue.push(std::make_tuple(it.second.first, it.second.second, it.first));
+			fieldQueue.emplace(it.second.first, it.second.second, it.first);
 		}
 
 		for (auto& it : zone_count) {
-			field_zoneQueue[it.second.second].push(std::make_pair(it.second.first, it.first));
+			field_zoneQueue[it.second.second].emplace(it.second.first, it.first);
 		}
 
 		// start with the least used field, and try to find a worker with that field
@@ -500,7 +500,7 @@ public:
 		}
 
 		for (auto& it : zone_count) {
-			zoneQueue.push(std::make_pair(it.second, it.first));
+			zoneQueue.emplace(it.second, it.first);
 		}
 
 		while (zoneQueue.size()) {
@@ -1214,40 +1214,44 @@ public:
 					                                         exclusionWorkerIds);
 
 					if (g_network->isSimulated()) {
-						auto testWorkers = getWorkersForTlogsBackup(
-						    conf, required, desired, policy, testUsed, checkStable, dcIds, exclusionWorkerIds);
-						RoleFitness testFitness(testWorkers, ProcessClass::TLog, testUsed);
-						RoleFitness fitness(workers, ProcessClass::TLog, id_used);
+						try {
+							auto testWorkers = getWorkersForTlogsBackup(
+							    conf, required, desired, policy, testUsed, checkStable, dcIds, exclusionWorkerIds);
+							RoleFitness testFitness(testWorkers, ProcessClass::TLog, testUsed);
+							RoleFitness fitness(workers, ProcessClass::TLog, id_used);
 
-						std::map<Optional<Standalone<StringRef>>, int> field_count;
-						std::set<Optional<Standalone<StringRef>>> zones;
-						for (auto& worker : testWorkers) {
-							if (!zones.count(worker.interf.locality.zoneId())) {
-								field_count[worker.interf.locality.get(pa1->attributeKey())]++;
-								zones.insert(worker.interf.locality.zoneId());
+							std::map<Optional<Standalone<StringRef>>, int> field_count;
+							std::set<Optional<Standalone<StringRef>>> zones;
+							for (auto& worker : testWorkers) {
+								if (!zones.count(worker.interf.locality.zoneId())) {
+									field_count[worker.interf.locality.get(pa1->attributeKey())]++;
+									zones.insert(worker.interf.locality.zoneId());
+								}
 							}
-						}
-						// backup recruitment is not required to use degraded processes that have better fitness
-						// so we cannot compare degraded between the two methods
-						testFitness.degraded = fitness.degraded;
+							// backup recruitment is not required to use degraded processes that have better fitness
+							// so we cannot compare degraded between the two methods
+							testFitness.degraded = fitness.degraded;
 
-						int minField = 100;
+							int minField = 100;
 
-						for (auto& f : field_count) {
-							minField = std::min(minField, f.second);
-						}
-
-						if (fitness > testFitness && minField > 1) {
-							for (auto& w : testWorkers) {
-								TraceEvent("TestTLogs").detail("Interf", w.interf.address());
+							for (auto& f : field_count) {
+								minField = std::min(minField, f.second);
 							}
-							for (auto& w : workers) {
-								TraceEvent("RealTLogs").detail("Interf", w.interf.address());
+
+							if (fitness > testFitness && minField > 1) {
+								for (auto& w : testWorkers) {
+									TraceEvent("TestTLogs").detail("Interf", w.interf.address());
+								}
+								for (auto& w : workers) {
+									TraceEvent("RealTLogs").detail("Interf", w.interf.address());
+								}
+								TraceEvent("FitnessCompare")
+								    .detail("TestF", testFitness.toString())
+								    .detail("RealF", fitness.toString());
+								ASSERT(false);
 							}
-							TraceEvent("FitnessCompare")
-							    .detail("TestF", testFitness.toString())
-							    .detail("RealF", fitness.toString());
-							ASSERT(false);
+						} catch (Error& e) {
+							ASSERT(false); // Simulation only validation should not throw errors
 						}
 					}
 
@@ -1267,25 +1271,29 @@ public:
 			    getWorkersForTlogsSimple(conf, required, desired, id_used, checkStable, dcIds, exclusionWorkerIds);
 
 			if (g_network->isSimulated()) {
-				auto testWorkers = getWorkersForTlogsBackup(
-				    conf, required, desired, policy, testUsed, checkStable, dcIds, exclusionWorkerIds);
-				RoleFitness testFitness(testWorkers, ProcessClass::TLog, testUsed);
-				RoleFitness fitness(workers, ProcessClass::TLog, id_used);
-				// backup recruitment is not required to use degraded processes that have better fitness
-				// so we cannot compare degraded between the two methods
-				testFitness.degraded = fitness.degraded;
+				try {
+					auto testWorkers = getWorkersForTlogsBackup(
+					    conf, required, desired, policy, testUsed, checkStable, dcIds, exclusionWorkerIds);
+					RoleFitness testFitness(testWorkers, ProcessClass::TLog, testUsed);
+					RoleFitness fitness(workers, ProcessClass::TLog, id_used);
+					// backup recruitment is not required to use degraded processes that have better fitness
+					// so we cannot compare degraded between the two methods
+					testFitness.degraded = fitness.degraded;
 
-				if (fitness > testFitness) {
-					for (auto& w : testWorkers) {
-						TraceEvent("TestTLogs").detail("Interf", w.interf.address());
+					if (fitness > testFitness) {
+						for (auto& w : testWorkers) {
+							TraceEvent("TestTLogs").detail("Interf", w.interf.address());
+						}
+						for (auto& w : workers) {
+							TraceEvent("RealTLogs").detail("Interf", w.interf.address());
+						}
+						TraceEvent("FitnessCompare")
+						    .detail("TestF", testFitness.toString())
+						    .detail("RealF", fitness.toString());
+						ASSERT(false);
 					}
-					for (auto& w : workers) {
-						TraceEvent("RealTLogs").detail("Interf", w.interf.address());
-					}
-					TraceEvent("FitnessCompare")
-					    .detail("TestF", testFitness.toString())
-					    .detail("RealF", fitness.toString());
-					ASSERT(false);
+				} catch (Error& e) {
+					ASSERT(false); // Simulation only validation should not throw errors
 				}
 			}
 			return workers;
@@ -1663,7 +1671,8 @@ public:
 	}
 
 	ErrorOr<RecruitFromConfigurationReply> findWorkersForConfigurationFromDC(RecruitFromConfigurationRequest const& req,
-	                                                                         Optional<Key> dcId) {
+	                                                                         Optional<Key> dcId,
+	                                                                         bool checkGoodRecruitment) {
 		RecruitFromConfigurationReply result;
 		std::map<Optional<Standalone<StringRef>>, int> id_used;
 		updateKnownIds(&id_used);
@@ -1774,7 +1783,7 @@ public:
 			               [](const WorkerDetails& w) { return w.interf; });
 		}
 
-		if (!goodRecruitmentTime.isReady() &&
+		if (!goodRecruitmentTime.isReady() && checkGoodRecruitment &&
 		    (RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog)
 		         .betterCount(RoleFitness(tlogs, ProcessClass::TLog, id_used)) ||
 		     (region.satelliteTLogReplicationFactor > 0 && req.configuration.usableRegions > 1 &&
@@ -1800,7 +1809,8 @@ public:
 		return result;
 	}
 
-	RecruitFromConfigurationReply findWorkersForConfigurationDispatch(RecruitFromConfigurationRequest const& req) {
+	RecruitFromConfigurationReply findWorkersForConfigurationDispatch(RecruitFromConfigurationRequest const& req,
+	                                                                  bool checkGoodRecruitment) {
 		if (req.configuration.regions.size() > 1) {
 			std::vector<RegionInfo> regions = req.configuration.regions;
 			if (regions[0].priority == regions[1].priority && regions[1].dcId == clusterControllerDcId.get()) {
@@ -1837,7 +1847,7 @@ public:
 
 			bool setPrimaryDesired = false;
 			try {
-				auto reply = findWorkersForConfigurationFromDC(req, regions[0].dcId);
+				auto reply = findWorkersForConfigurationFromDC(req, regions[0].dcId, checkGoodRecruitment);
 				setPrimaryDesired = true;
 				std::vector<Optional<Key>> dcPriority;
 				dcPriority.push_back(regions[0].dcId);
@@ -1854,7 +1864,8 @@ public:
 				    .detail("RecruitedTxnSystemDcId", regions[0].dcId);
 				throw no_more_servers();
 			} catch (Error& e) {
-				if (!goodRemoteRecruitmentTime.isReady() && regions[1].dcId != clusterControllerDcId.get()) {
+				if (!goodRemoteRecruitmentTime.isReady() && regions[1].dcId != clusterControllerDcId.get() &&
+				    checkGoodRecruitment) {
 					throw operation_failed();
 				}
 
@@ -1864,7 +1875,7 @@ public:
 				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDc", id)
 				    .detail("SetPrimaryDesired", setPrimaryDesired)
 				    .error(e);
-				auto reply = findWorkersForConfigurationFromDC(req, regions[1].dcId);
+				auto reply = findWorkersForConfigurationFromDC(req, regions[1].dcId, checkGoodRecruitment);
 				if (!setPrimaryDesired) {
 					std::vector<Optional<Key>> dcPriority;
 					dcPriority.push_back(regions[1].dcId);
@@ -1882,7 +1893,8 @@ public:
 			std::vector<Optional<Key>> dcPriority;
 			dcPriority.push_back(req.configuration.regions[0].dcId);
 			desiredDcIds.set(dcPriority);
-			auto reply = findWorkersForConfigurationFromDC(req, req.configuration.regions[0].dcId);
+			auto reply =
+			    findWorkersForConfigurationFromDC(req, req.configuration.regions[0].dcId, checkGoodRecruitment);
 			if (reply.isError()) {
 				throw reply.getError();
 			} else if (req.configuration.regions[0].dcId == clusterControllerDcId.get()) {
@@ -2051,7 +2063,7 @@ public:
 			    .detail("DesiredResolvers", req.configuration.getDesiredResolvers())
 			    .detail("ActualResolvers", result.resolvers.size());
 
-			if (!goodRecruitmentTime.isReady() &&
+			if (!goodRecruitmentTime.isReady() && checkGoodRecruitment &&
 			    (RoleFitness(
 			         SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog)
 			         .betterCount(RoleFitness(tlogs, ProcessClass::TLog, id_used)) ||
@@ -2117,84 +2129,89 @@ public:
 	}
 
 	RecruitFromConfigurationReply findWorkersForConfiguration(RecruitFromConfigurationRequest const& req) {
-		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req);
+		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req, true);
 		if (g_network->isSimulated()) {
-			// FIXME: The logic to pick a satellite in a remote region is not
-			// deterministic and can therefore break this nondeterminism check.
-			// Since satellites will generally be in the primary region,
-			// disable the determinism check for remote region satellites.
-			bool remoteDCUsedAsSatellite = false;
-			if (req.configuration.regions.size() > 1) {
-				auto [region, remoteRegion] =
-				    getPrimaryAndRemoteRegion(req.configuration.regions, req.configuration.regions[0].dcId);
-				for (const auto& satellite : region.satellites) {
-					if (satellite.dcId == remoteRegion.dcId) {
-						remoteDCUsedAsSatellite = true;
+			try {
+				// FIXME: The logic to pick a satellite in a remote region is not
+				// deterministic and can therefore break this nondeterminism check.
+				// Since satellites will generally be in the primary region,
+				// disable the determinism check for remote region satellites.
+				bool remoteDCUsedAsSatellite = false;
+				if (req.configuration.regions.size() > 1) {
+					auto [region, remoteRegion] =
+					    getPrimaryAndRemoteRegion(req.configuration.regions, req.configuration.regions[0].dcId);
+					for (const auto& satellite : region.satellites) {
+						if (satellite.dcId == remoteRegion.dcId) {
+							remoteDCUsedAsSatellite = true;
+						}
 					}
 				}
-			}
-			if (!remoteDCUsedAsSatellite) {
-				RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req);
+				if (!remoteDCUsedAsSatellite) {
+					RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req, false);
 
-				std::map<Optional<Standalone<StringRef>>, int> firstUsed;
-				std::map<Optional<Standalone<StringRef>>, int> secondUsed;
-				updateKnownIds(&firstUsed);
-				updateKnownIds(&secondUsed);
+					std::map<Optional<Standalone<StringRef>>, int> firstUsed;
+					std::map<Optional<Standalone<StringRef>>, int> secondUsed;
+					updateKnownIds(&firstUsed);
+					updateKnownIds(&secondUsed);
 
-				// auto mworker = id_worker.find(masterProcessId);
-				//TraceEvent("CompareAddressesMaster")
-				//    .detail("Master",
-				//            mworker != id_worker.end() ? mworker->second.details.interf.address() : NetworkAddress());
+					// auto mworker = id_worker.find(masterProcessId);
+					//TraceEvent("CompareAddressesMaster")
+					//    .detail("Master",
+					//            mworker != id_worker.end() ? mworker->second.details.interf.address() :
+					//            NetworkAddress());
 
-				updateIdUsed(rep.tLogs, firstUsed);
-				updateIdUsed(compare.tLogs, secondUsed);
-				compareWorkers(
-				    req.configuration, rep.tLogs, firstUsed, compare.tLogs, secondUsed, ProcessClass::TLog, "TLog");
-				updateIdUsed(rep.satelliteTLogs, firstUsed);
-				updateIdUsed(compare.satelliteTLogs, secondUsed);
-				compareWorkers(req.configuration,
-				               rep.satelliteTLogs,
-				               firstUsed,
-				               compare.satelliteTLogs,
-				               secondUsed,
-				               ProcessClass::TLog,
-				               "Satellite");
-				updateIdUsed(rep.commitProxies, firstUsed);
-				updateIdUsed(compare.commitProxies, secondUsed);
-				updateIdUsed(rep.grvProxies, firstUsed);
-				updateIdUsed(compare.grvProxies, secondUsed);
-				updateIdUsed(rep.resolvers, firstUsed);
-				updateIdUsed(compare.resolvers, secondUsed);
-				compareWorkers(req.configuration,
-				               rep.commitProxies,
-				               firstUsed,
-				               compare.commitProxies,
-				               secondUsed,
-				               ProcessClass::CommitProxy,
-				               "CommitProxy");
-				compareWorkers(req.configuration,
-				               rep.grvProxies,
-				               firstUsed,
-				               compare.grvProxies,
-				               secondUsed,
-				               ProcessClass::GrvProxy,
-				               "GrvProxy");
-				compareWorkers(req.configuration,
-				               rep.resolvers,
-				               firstUsed,
-				               compare.resolvers,
-				               secondUsed,
-				               ProcessClass::Resolver,
-				               "Resolver");
-				updateIdUsed(rep.backupWorkers, firstUsed);
-				updateIdUsed(compare.backupWorkers, secondUsed);
-				compareWorkers(req.configuration,
-				               rep.backupWorkers,
-				               firstUsed,
-				               compare.backupWorkers,
-				               secondUsed,
-				               ProcessClass::Backup,
-				               "Backup");
+					updateIdUsed(rep.tLogs, firstUsed);
+					updateIdUsed(compare.tLogs, secondUsed);
+					compareWorkers(
+					    req.configuration, rep.tLogs, firstUsed, compare.tLogs, secondUsed, ProcessClass::TLog, "TLog");
+					updateIdUsed(rep.satelliteTLogs, firstUsed);
+					updateIdUsed(compare.satelliteTLogs, secondUsed);
+					compareWorkers(req.configuration,
+					               rep.satelliteTLogs,
+					               firstUsed,
+					               compare.satelliteTLogs,
+					               secondUsed,
+					               ProcessClass::TLog,
+					               "Satellite");
+					updateIdUsed(rep.commitProxies, firstUsed);
+					updateIdUsed(compare.commitProxies, secondUsed);
+					updateIdUsed(rep.grvProxies, firstUsed);
+					updateIdUsed(compare.grvProxies, secondUsed);
+					updateIdUsed(rep.resolvers, firstUsed);
+					updateIdUsed(compare.resolvers, secondUsed);
+					compareWorkers(req.configuration,
+					               rep.commitProxies,
+					               firstUsed,
+					               compare.commitProxies,
+					               secondUsed,
+					               ProcessClass::CommitProxy,
+					               "CommitProxy");
+					compareWorkers(req.configuration,
+					               rep.grvProxies,
+					               firstUsed,
+					               compare.grvProxies,
+					               secondUsed,
+					               ProcessClass::GrvProxy,
+					               "GrvProxy");
+					compareWorkers(req.configuration,
+					               rep.resolvers,
+					               firstUsed,
+					               compare.resolvers,
+					               secondUsed,
+					               ProcessClass::Resolver,
+					               "Resolver");
+					updateIdUsed(rep.backupWorkers, firstUsed);
+					updateIdUsed(compare.backupWorkers, secondUsed);
+					compareWorkers(req.configuration,
+					               rep.backupWorkers,
+					               firstUsed,
+					               compare.backupWorkers,
+					               secondUsed,
+					               ProcessClass::Backup,
+					               "Backup");
+				}
+			} catch (Error& e) {
+				ASSERT(false); // Simulation only validation should not throw errors
 			}
 		}
 		return rep;
@@ -3051,6 +3068,11 @@ public:
 
 	// Returns true if remote DC is healthy and can failover to.
 	bool remoteDCIsHealthy() {
+		// Ignore remote DC health if worker health monitor is disabled.
+		if (!SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
+			return true;
+		}
+
 		// When we just start, we ignore any remote DC health info since the current CC may be elected at wrong DC due
 		// to that all the processes are still starting.
 		if (machineStartTime() == 0) {
@@ -3421,7 +3443,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 				TEST(true); // clusterWatchDatabase() master failed
 				TraceEvent(SevWarn, "DetectedFailedMaster", cluster->id).detail("OldMaster", iMaster.id());
 			} else {
-				TEST(true); // clusterWatchDatabas() !newMaster.present()
+				TEST(true); // clusterWatchDatabase() !newMaster.present()
 				wait(delay(SERVER_KNOBS->MASTER_SPIN_DELAY));
 			}
 		} catch (Error& e) {
@@ -3859,8 +3881,6 @@ ACTOR Future<Void> workerAvailabilityWatch(WorkerInterface worker,
 	        : waitFailureClient(worker.waitFailure, SERVER_KNOBS->WORKER_FAILURE_TIME);
 	cluster->updateWorkerList.set(worker.locality.processId(),
 	                              ProcessData(worker.locality, startingClass, worker.stableAddress()));
-	cluster->updateDBInfoEndpoints.insert(worker.updateServerDBInfo.getEndpoint());
-	cluster->updateDBInfo.trigger();
 	// This switching avoids a race where the worker can be added to id_worker map after the workerAvailabilityWatch
 	// fails for the worker.
 	wait(delay(0));
@@ -3939,7 +3959,7 @@ void clusterRecruitStorage(ClusterControllerData* self, RecruitStorageRequest re
 		req.reply.send(rep);
 	} catch (Error& e) {
 		if (e.code() == error_code_no_more_servers) {
-			self->outstandingStorageRequests.push_back(std::make_pair(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT));
+			self->outstandingStorageRequests.emplace_back(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT);
 			TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
 			    .detail("IsCriticalRecruitment", req.criticalRecruitment)
 			    .error(e);
@@ -3963,8 +3983,7 @@ void clusterRecruitBlobWorker(ClusterControllerData* self, RecruitBlobWorkerRequ
 		req.reply.send(rep);
 	} catch (Error& e) {
 		if (e.code() == error_code_no_more_servers) {
-			self->outstandingBlobWorkerRequests.push_back(
-			    std::make_pair(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT));
+			self->outstandingBlobWorkerRequests.emplace_back(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT);
 			TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", self->id).error(e);
 		} else {
 			TraceEvent(SevError, "RecruitBlobWorkerError", self->id).error(e);
@@ -4048,7 +4067,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	    .detail("GrvProxies", req.grvProxies.size())
 	    .detail("RecoveryCount", req.recoveryCount)
 	    .detail("Stalled", req.recoveryStalled)
-	    .detail("OldestBackupEpoch", req.logSystemConfig.oldestBackupEpoch);
+	    .detail("OldestBackupEpoch", req.logSystemConfig.oldestBackupEpoch)
+	    .detail("ClusterId", req.clusterId);
 
 	// make sure the request comes from an active database
 	auto db = &self->db;
@@ -4130,6 +4150,11 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	if (dbInfo.recoveryCount != req.recoveryCount) {
 		isChanged = true;
 		dbInfo.recoveryCount = req.recoveryCount;
+	}
+
+	if (dbInfo.clusterId != req.clusterId) {
+		isChanged = true;
+		dbInfo.clusterId = req.clusterId;
 	}
 
 	if (isChanged) {
@@ -4278,6 +4303,8 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 			    self->id_worker[w.locality.processId()].watcher,
 			    self->id_worker[w.locality.processId()].details.interf.configBroadcastInterface));
 		}
+		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
+		self->updateDBInfo.trigger();
 		checkOutstandingRequests(self);
 	} else if (info->second.details.interf.id() != w.id() || req.generation >= info->second.gen) {
 		if (!info->second.reply.isSet()) {
@@ -4295,6 +4322,10 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 			self->removedDBInfoEndpoints.insert(info->second.details.interf.updateServerDBInfo.getEndpoint());
 			info->second.details.interf = w;
 			info->second.watcher = workerAvailabilityWatch(w, newProcessClass, self);
+		}
+		if (req.requestDbInfo) {
+			self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
+			self->updateDBInfo.trigger();
 		}
 		if (configBroadcaster != nullptr) {
 			self->addActor.send(
@@ -4459,7 +4490,7 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			for (auto& it : self->id_worker) {
 				workers.push_back(it.second.details);
 				if (it.second.issues.size()) {
-					workerIssues.push_back(ProcessIssues(it.second.details.interf.address(), it.second.issues));
+					workerIssues.emplace_back(it.second.details.interf.address(), it.second.issues);
 				}
 			}
 
@@ -4715,6 +4746,48 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 				state Future<Void> globalConfigFuture = tr.watch(globalConfigVersionKey);
 				wait(tr.commit());
 				wait(globalConfigFuture);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+}
+
+ACTOR Future<Void> monitorClientLibChangeCounter(ClusterControllerData::DBInfo* db) {
+	state ClientDBInfo clientInfo;
+	state ReadYourWritesTransaction tr;
+	state Future<Void> clientLibChangeFuture;
+
+	loop {
+		tr = ReadYourWritesTransaction(db->db);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+				Optional<Value> counterVal = wait(tr.get(clientLibChangeCounterKey));
+				if (counterVal.present() && counterVal.get().size() == sizeof(uint64_t)) {
+					uint64_t changeCounter = *reinterpret_cast<const uint64_t*>(counterVal.get().begin());
+
+					clientInfo = db->serverInfo->get().client;
+					if (changeCounter != clientInfo.clientLibChangeCounter) {
+						TraceEvent("ClientLibChangeCounterChanged").detail("Value", changeCounter);
+						clientInfo.id = deterministicRandom()->randomUniqueID();
+						clientInfo.clientLibChangeCounter = changeCounter;
+						db->clientInfo->set(clientInfo);
+
+						ServerDBInfo serverInfo = db->serverInfo->get();
+						serverInfo.id = deterministicRandom()->randomUniqueID();
+						serverInfo.infoGeneration = ++db->dbInfoCount;
+						serverInfo.client = clientInfo;
+						db->serverInfo->set(serverInfo);
+					}
+				}
+
+				clientLibChangeFuture = tr.watch(clientLibChangeCounterKey);
+				wait(tr.commit());
+				wait(clientLibChangeFuture);
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -5420,6 +5493,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorProcessClasses(&self));
 	self.addActor.send(monitorServerInfoConfig(&self.db));
 	self.addActor.send(monitorGlobalConfig(&self.db));
+	self.addActor.send(monitorClientLibChangeCounter(&self.db));
 	self.addActor.send(updatedChangingDatacenters(&self));
 	self.addActor.send(updatedChangedDatacenters(&self));
 	self.addActor.send(updateDatacenterVersionDifference(&self));
