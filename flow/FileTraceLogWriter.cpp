@@ -161,9 +161,19 @@ void FileTraceLogWriter::open() {
 	// log10(index) < 10
 	UNSTOPPABLE_ASSERT(indexWidth < 10);
 
+	int oFlags = TRACEFILE_FLAGS;
+	if (FLOW_KNOBS->SIM_FUZZER) {
+#if defined(__unixish__)
+		oFlags &= ~O_CLOEXEC;
+#elif defined(_WIN32)
+		printf("SIM_FUZZER not supported for windows yet.");
+		throw internal_error();
+#endif
+	}
+
 	finalname =
 	    format("%s.%d.%d.%s%s", basename.c_str(), indexWidth, index, extension.c_str(), tracePartialFileSuffix.c_str());
-	while ((traceFileFD = __open(finalname.c_str(), TRACEFILE_FLAGS, TRACEFILE_MODE)) == -1) {
+	while ((traceFileFD = __open(finalname.c_str(), oFlags, TRACEFILE_MODE)) == -1) {
 		lastError(errno);
 		if (errno == EEXIST) {
 			++index;
