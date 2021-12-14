@@ -2728,3 +2728,60 @@ ActorLineageSet& Sim2FileSystem::getActorLineageSet() {
 void Sim2FileSystem::newFileSystem() {
 	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Sim2FileSystem());
 }
+
+int forkSearchDepth = 0;
+int forkSearchTimes = 4;
+#if defined(_WIN32)
+int forkSearch() {
+	printf("start fork...");
+	return 0;
+}
+#elif defined(__unixish__)
+#include <unistd.h>
+#include <sys/wait.h>
+int forkSearch() {
+	if(forkSearchDepth > 0) { // now only allow 1
+		return 0;
+	}
+	std::string parentGroup; // = getLogGroup();
+	pid_t processId;
+	int status;
+	for(int i = 0; i < forkSearchTimes; ++ i) {
+		if ((processId = fork()) == 0) { // child process
+			forkSearchDepth ++;
+			int pid = getpid();
+			std::string childLogGroup = parentGroup + "/" + std::to_string(pid); // format to still be finalized
+			// startForkProcessLog(childLogGroup);
+			int new_seed = platform::getRandomSeed(); // non-deterministic seed
+			// TODO: do something to record the seed in order to replay
+			deterministicRandom()->reseed(new_seed);
+		} else if (processId < 0) {
+			perror("----- fork error");
+			return EXIT_FAILURE;
+		} else { // parent process
+			if (waitpid(processId, &status, 0) == -1) {
+				perror("----- waitpid error");
+				return EXIT_FAILURE;
+			}
+
+			// report according to exit status
+			if(WIFEXITED(status)) {
+				if(WEXITSTATUS(status) > 0) { // abnormal exit
+
+				}
+			}
+			else if(WIFSIGNALED(status)) { // abnormal exit
+
+			}
+
+		}
+	}
+
+}
+#else
+#error no support now
+#endif
+// no fork but just use the same new seed as forked process
+void reproduceForkSearch(int seed) {
+	deterministicRandom()->reseed(seed);
+}
