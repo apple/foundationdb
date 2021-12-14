@@ -2250,7 +2250,7 @@ void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, s
 	double conflicts_diff = (conflicts - conflicts_prev) * 1000000000.0 / duration_nsec;
 	printf("%" STR(STATS_FIELD_WIDTH) ".2f\n", conflicts_diff);
 	if (fp) {
-		fprintf(fp, "\"conflictsPerSec\": %.2f},", conflicts_diff);
+		fprintf(fp, "\"conflictsPerSec\": %.2f", conflicts_diff);
 	}
 	conflicts_prev = conflicts;
 
@@ -2260,11 +2260,14 @@ void print_stats(mako_args_t* args, mako_stats_t* stats, struct timespec* now, s
 			if (args->txnspec.ops[op][OP_COUNT] > 0) {
 				printf("%" STR(STATS_FIELD_WIDTH) "lu ", errors_diff[op]);
 				if (fp) {
-					fprintf(fp, "\"errors\": %.2f", conflicts_diff);
+					fprintf(fp, ",\"errors\": %.2f", conflicts_diff);
 				}
 			}
 		}
 		printf("\n");
+	}
+	if (fp) {
+		fprintf(fp, "}");
 	}
 
 	return;
@@ -2336,6 +2339,7 @@ void print_report(mako_args_t* args,
                   pid_t* pid_main,
                   FILE* fp) {
 	int i, j, k, op, index;
+	int first_op = 1;
 	uint64_t totalxacts = 0;
 	uint64_t conflicts = 0;
 	uint64_t totalerrors = 0;
@@ -2432,7 +2436,12 @@ void print_report(mako_args_t* args,
 		if ((args->txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) || op == OP_COMMIT) {
 			printf("%" STR(STATS_FIELD_WIDTH) "lu ", ops_total[op]);
 			if (fp) {
-				fprintf(fp, "\"%s\": %lu,", get_ops_name(op), ops_total[op]);
+				if (first_op) {
+					first_op = 0;
+				} else {
+					fprintf(fp, ",");
+				}
+				fprintf(fp, "\"%s\": %lu", get_ops_name(op), ops_total[op]);
 			}
 		}
 	}
@@ -2451,11 +2460,17 @@ void print_report(mako_args_t* args,
 
 	/* Errors */
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Errors");
+	first_op = 1;
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) {
 			printf("%" STR(STATS_FIELD_WIDTH) "lu ", errors_total[op]);
 			if (fp) {
-				fprintf(fp, "\"%s\": %lu,", get_ops_name(op), errors_total[op]);
+				if (first_op) {
+					first_op = 0;
+				} else {
+					fprintf(fp, ",");
+				}
+				fprintf(fp, "\"%s\": %lu", get_ops_name(op), errors_total[op]);
 			}
 		}
 	}
@@ -2469,6 +2484,7 @@ void print_report(mako_args_t* args,
 
 	/* Total Samples */
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Samples");
+	first_op = 1;
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (lat_total[op]) {
@@ -2477,7 +2493,12 @@ void print_report(mako_args_t* args,
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
 			}
 			if (fp) {
-				fprintf(fp, "\"%s\": %lu,", get_ops_name(op), lat_samples[op]);
+				if (first_op) {
+					first_op = 0;
+				} else {
+					fprintf(fp, ",");
+				}
+				fprintf(fp, "\"%s\": %lu", get_ops_name(op), lat_samples[op]);
 			}
 		}
 	}
@@ -2488,6 +2509,7 @@ void print_report(mako_args_t* args,
 		fprintf(fp, "}, \"minLatency\": {");
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Min");
+	first_op = 1;
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (lat_min[op] == -1) {
@@ -2495,7 +2517,12 @@ void print_report(mako_args_t* args,
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "lu ", lat_min[op]);
 				if (fp) {
-					fprintf(fp, "\"%s\": %lu,", get_ops_name(op), lat_min[op]);
+					if (first_op) {
+						first_op = 0;
+					} else {
+						fprintf(fp, ",");
+					}
+					fprintf(fp, "\"%s\": %lu", get_ops_name(op), lat_min[op]);
 				}
 			}
 		}
@@ -2507,12 +2534,18 @@ void print_report(mako_args_t* args,
 		fprintf(fp, "}, \"avgLatency\": {");
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Avg");
+	first_op = 1;
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (lat_total[op]) {
 				printf("%" STR(STATS_FIELD_WIDTH) "lu ", lat_total[op] / lat_samples[op]);
 				if (fp) {
-					fprintf(fp, "\"%s\": %lu,", get_ops_name(op), lat_total[op] / lat_samples[op]);
+					if (first_op) {
+						first_op = 0;
+					} else {
+						fprintf(fp, ",");
+					}
+					fprintf(fp, "\"%s\": %lu", get_ops_name(op), lat_total[op] / lat_samples[op]);
 				}
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
@@ -2526,6 +2559,7 @@ void print_report(mako_args_t* args,
 		fprintf(fp, "}, \"maxLatency\": {");
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Max");
+	first_op = 1;
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (lat_max[op] == 0) {
@@ -2533,7 +2567,12 @@ void print_report(mako_args_t* args,
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "lu ", lat_max[op]);
 				if (fp) {
-					fprintf(fp, "\"%s\": %lu,", get_ops_name(op), lat_max[op]);
+					if (first_op) {
+						first_op = 0;
+					} else {
+						fprintf(fp, ",");
+					}
+					fprintf(fp, "\"%s\": %lu", get_ops_name(op), lat_max[op]);
 				}
 			}
 		}
@@ -2550,6 +2589,7 @@ void print_report(mako_args_t* args,
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "Median");
 	int num_points[MAX_OP] = { 0 };
+	first_op = 1;
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (lat_total[op]) {
@@ -2585,7 +2625,12 @@ void print_report(mako_args_t* args,
 				}
 				printf("%" STR(STATS_FIELD_WIDTH) "lu ", median);
 				if (fp) {
-					fprintf(fp, "\"%s\": %lu,", get_ops_name(op), median);
+					if (first_op) {
+						first_op = 0;
+					} else {
+						fprintf(fp, ",");
+					}
+					fprintf(fp, "\"%s\": %lu", get_ops_name(op), median);
 				}
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
@@ -2599,6 +2644,7 @@ void print_report(mako_args_t* args,
 		fprintf(fp, "}, \"p95Latency\": {");
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "95.0 pctile");
+	first_op = 1;
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (dataPoints[op] == NULL) {
@@ -2609,7 +2655,12 @@ void print_report(mako_args_t* args,
 				point_95pct = ((float)(num_points[op]) * 0.95) - 1;
 				printf("%" STR(STATS_FIELD_WIDTH) "lu ", dataPoints[op][point_95pct]);
 				if (fp) {
-					fprintf(fp, "\"%s\": %lu,", get_ops_name(op), dataPoints[op][point_95pct]);
+					if (first_op) {
+						first_op = 0;
+					} else {
+						fprintf(fp, ",");
+					}
+					fprintf(fp, "\"%s\": %lu", get_ops_name(op), dataPoints[op][point_95pct]);
 				}
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
@@ -2623,6 +2674,7 @@ void print_report(mako_args_t* args,
 		fprintf(fp, "}, \"p99Latency\": {");
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "99.0 pctile");
+	first_op = 1;
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (dataPoints[op] == NULL) {
@@ -2633,7 +2685,12 @@ void print_report(mako_args_t* args,
 				point_99pct = ((float)(num_points[op]) * 0.99) - 1;
 				printf("%" STR(STATS_FIELD_WIDTH) "lu ", dataPoints[op][point_99pct]);
 				if (fp) {
-					fprintf(fp, "\"%s\": %lu,", get_ops_name(op), dataPoints[op][point_99pct]);
+					if (first_op) {
+						first_op = 0;
+					} else {
+						fprintf(fp, ",");
+					}
+					fprintf(fp, "\"%s\": %lu", get_ops_name(op), dataPoints[op][point_99pct]);
 				}
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
@@ -2647,6 +2704,7 @@ void print_report(mako_args_t* args,
 		fprintf(fp, "}, \"p99.9Latency\": {");
 	}
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "99.9 pctile");
+	first_op = 1;
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (dataPoints[op] == NULL) {
@@ -2657,7 +2715,12 @@ void print_report(mako_args_t* args,
 				point_99_9pct = ((float)(num_points[op]) * 0.999) - 1;
 				printf("%" STR(STATS_FIELD_WIDTH) "lu ", dataPoints[op][point_99_9pct]);
 				if (fp) {
-					fprintf(fp, "\"%s\": %lu,", get_ops_name(op), dataPoints[op][point_99_9pct]);
+					if (first_op) {
+						first_op = 0;
+					} else {
+						fprintf(fp, ",");
+					}
+					fprintf(fp, "\"%s\": %lu", get_ops_name(op), dataPoints[op][point_99_9pct]);
 				}
 			} else {
 				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
@@ -2689,6 +2752,7 @@ int stats_process_main(mako_args_t* args,
                        pid_t* pid_main) {
 	struct timespec timer_start, timer_prev, timer_now;
 	double sin_factor;
+	int first_stats = 1;
 
 	/* wait until the signal turn on */
 	while (*signal == SIGNAL_OFF) {
@@ -2732,7 +2796,7 @@ int stats_process_main(mako_args_t* args,
 		fprintf(fp, "\"txntagging_prefix\": \"%s\",", args->txntagging_prefix);
 		fprintf(fp, "\"streaming_mode\": %d,", args->streaming_mode);
 		fprintf(fp, "\"disable_ryw\": %d,", args->disable_ryw);
-		fprintf(fp, "\"json_output_path\": \"%s\",", args->json_output_path);
+		fprintf(fp, "\"json_output_path\": \"%s\"", args->json_output_path);
 		fprintf(fp, "},\"samples\": [");
 	}
 
@@ -2776,8 +2840,15 @@ int stats_process_main(mako_args_t* args,
 				}
 			}
 
-			if (args->verbose >= VERBOSE_DEFAULT)
+			if (args->verbose >= VERBOSE_DEFAULT) {
+				if (first_stats) {
+					first_stats = 0;
+				} else {
+					if (fp)
+						fprintf(fp, ",");
+				}
 				print_stats(args, stats, &timer_now, &timer_prev, fp);
+			}
 			timer_prev.tv_sec = timer_now.tv_sec;
 			timer_prev.tv_nsec = timer_now.tv_nsec;
 		}
