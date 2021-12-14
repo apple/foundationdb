@@ -808,6 +808,10 @@ void removeTraceRole(std::string const& role) {
 	g_traceLog.removeRole(role);
 }
 
+std::string getTraceLogGroup() {
+	return g_traceLog.getLogGroup();
+}
+
 void setTraceLogGroup(const std::string& logGroup) {
 	g_traceLog.setLogGroup(logGroup);
 }
