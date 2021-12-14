@@ -121,6 +121,9 @@ private:
 	uint64_t rollsize;
 	Mutex mutex;
 
+	// every process should NOT close on exec, except the root process
+	bool closeOnExec = true;
+
 	EventMetricHandle<TraceEventNameID> SevErrorNames;
 	EventMetricHandle<TraceEventNameID> SevWarnAlwaysNames;
 	EventMetricHandle<TraceEventNameID> SevWarnNames;
@@ -312,7 +315,8 @@ public:
 		    tracePartialFileSuffix,
 		    maxLogsSize,
 		    [this]() { barriers->triggerAll(); },
-		    issues));
+		    issues,
+		    closeOnExec));
 
 		if (g_network->isSimulated())
 			writer = Reference<IThreadPool>(new DummyThreadPool());
@@ -540,6 +544,11 @@ public:
 		}
 	}
 
+	std::string getLogGroup() {
+		MutexHolder holder(mutex);
+		return this->logGroup;
+	}
+
 	void setLogGroup(const std::string& logGroup) {
 		MutexHolder holder(mutex);
 		this->logGroup = logGroup;
@@ -553,6 +562,15 @@ public:
 	}
 
 	void retrieveTraceLogIssues(std::set<std::string>& out) { return issues->retrieveIssues(out); }
+
+	void startChildProcess(std::string childLogGroup) { logGroup = childLogGroup; }
+
+	void terminateChildProcess() {
+		// TODO: add any necessary teardown */
+	}
+
+	// since FileTraceLogWriter has a reference to this->closeOnExec, this change will get propogated to the writer
+	void setCloseOnExec(bool closeOnExec) { this->closeOnExec = closeOnExec; }
 
 	~TraceLog() {
 		close();
@@ -784,6 +802,18 @@ void removeTraceRole(std::string const& role) {
 
 void setTraceLogGroup(const std::string& logGroup) {
 	g_traceLog.setLogGroup(logGroup);
+}
+
+void startChildTraceLog(const std::string& childLogGroup) {
+	g_traceLog.startChildProcess(childLogGroup);
+}
+
+void terminateChildTraceLog() {
+	g_traceLog.terminateChildProcess();
+}
+
+void setCloseOnExec(bool closeOnExec) {
+	g_traceLog.setCloseOnExec(closeOnExec);
 }
 
 TraceEvent::TraceEvent() : initialized(true), enabled(false), logged(true) {}

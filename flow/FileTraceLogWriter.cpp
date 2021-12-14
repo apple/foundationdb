@@ -91,10 +91,11 @@ FileTraceLogWriter::FileTraceLogWriter(std::string const& directory,
                                        std::string const& tracePartialFileSuffix,
                                        uint64_t maxLogsSize,
                                        std::function<void()> const& onError,
-                                       Reference<ITraceLogIssuesReporter> const& issues)
+                                       Reference<ITraceLogIssuesReporter> const& issues,
+                                       bool& closeOnExec)
   : directory(directory), processName(processName), basename(basename), extension(extension),
     tracePartialFileSuffix(tracePartialFileSuffix), maxLogsSize(maxLogsSize), traceFileFD(-1), index(0), issues(issues),
-    onError(onError) {}
+    onError(onError), closeOnExec(closeOnExec) {}
 
 void FileTraceLogWriter::addref() {
 	ReferenceCounted<FileTraceLogWriter>::addref();
@@ -161,9 +162,19 @@ void FileTraceLogWriter::open() {
 	// log10(index) < 10
 	UNSTOPPABLE_ASSERT(indexWidth < 10);
 
+	// TODO: what happens if a child process creates a trace file? how will the root process close this file
+	// appropriately?
+	int oFlags = TRACEFILE_FLAGS;
+	if (!closeOnExec) {
+#if defined(__unixish__)
+		oFlags &= ~O_CLOEXEC;
+#endif
+	}
+
 	finalname =
 	    format("%s.%d.%d.%s%s", basename.c_str(), indexWidth, index, extension.c_str(), tracePartialFileSuffix.c_str());
-	while ((traceFileFD = __open(finalname.c_str(), TRACEFILE_FLAGS, TRACEFILE_MODE)) == -1) {
+
+	while ((traceFileFD = __open(finalname.c_str(), oFlags, TRACEFILE_MODE)) == -1) {
 		lastError(errno);
 		if (errno == EEXIST) {
 			++index;
