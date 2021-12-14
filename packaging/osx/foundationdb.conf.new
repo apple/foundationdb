@@ -36,7 +36,7 @@ logdir = /usr/local/foundationdb/logs
 [fdbserver.4689]
 
 [backup_agent]
-command = /usr/local/foundationdb/backup-agent/backup-agent
+command = /usr/local/foundationdb/backup_agent/backup_agent
 logdir = /usr/local/foundationdb/logs
 
 [backup_agent.1]
