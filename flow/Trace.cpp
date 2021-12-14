@@ -121,6 +121,8 @@ private:
 	uint64_t rollsize;
 	Mutex mutex;
 
+	int numChildProcesses;
+
 	EventMetricHandle<TraceEventNameID> SevErrorNames;
 	EventMetricHandle<TraceEventNameID> SevWarnAlwaysNames;
 	EventMetricHandle<TraceEventNameID> SevWarnNames;
@@ -279,7 +281,7 @@ public:
 
 	TraceLog()
 	  : formatter(new XmlTraceLogFormatter()), loggedLength(0), bufferLength(0), opened(false), preopenOverflowCount(0),
-	    logTraceEventMetrics(false), issues(new IssuesList), barriers(new BarrierList) {}
+	    numChildProcesses(0), logTraceEventMetrics(false), issues(new IssuesList), barriers(new BarrierList) {}
 
 	bool isOpen() const { return opened; }
 
@@ -455,7 +457,7 @@ public:
 		bufferLength = 0;
 		writer->post(a);
 
-		if (roll) {
+		if (roll && !FLOW_KNOBS->SIM_FUZZER) {
 			auto o = new WriterThread::Roll;
 			double time = 0;
 			writer->post(o);
@@ -540,6 +542,11 @@ public:
 		}
 	}
 
+	std::string getLogGroup() {
+		MutexHolder holder(mutex);
+		return this->logGroup;
+	}
+
 	void setLogGroup(const std::string& logGroup) {
 		MutexHolder holder(mutex);
 		this->logGroup = logGroup;
@@ -553,6 +560,13 @@ public:
 	}
 
 	void retrieveTraceLogIssues(std::set<std::string>& out) { return issues->retrieveIssues(out); }
+
+	void startChildProcess(std::string childLogGroup) {
+		numChildProcesses++;
+		logGroup = childLogGroup; // TODO: use a stack to support depth > 1 eventually
+	}
+
+	void terminateChildProcess() { numChildProcesses--; }
 
 	~TraceLog() {
 		close();
@@ -782,8 +796,20 @@ void removeTraceRole(std::string const& role) {
 	g_traceLog.removeRole(role);
 }
 
+std::string getTraceLogGroup() {
+	return g_traceLog.getLogGroup();
+}
+
 void setTraceLogGroup(const std::string& logGroup) {
 	g_traceLog.setLogGroup(logGroup);
+}
+
+void startChildTraceLog(const std::string& childLogGroup) {
+	g_traceLog.startChildProcess(childLogGroup);
+}
+
+void terminateChildTraceLog() {
+	g_traceLog.terminateChildProcess();
 }
 
 TraceEvent::TraceEvent() : initialized(true), enabled(false), logged(true) {}
