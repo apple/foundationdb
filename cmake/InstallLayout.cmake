@@ -86,6 +86,12 @@ install(DIRECTORY "${script_dir}/clients/usr/lib/cmake"
   COMPONENT clients-versioned)
 
 ################################################################################
+# Move Docker Setup
+################################################################################
+
+file(COPY "${PROJECT_SOURCE_DIR}/packaging/docker" DESTINATION "${PROJECT_BINARY_DIR}/packages/")
+
+################################################################################
 # General CPack configuration
 ################################################################################
 
