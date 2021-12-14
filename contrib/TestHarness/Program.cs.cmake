@@ -440,7 +440,8 @@ namespace SummarizeTest
                     string tlsPluginArg = "";
                     if (tlsPluginFile.Length > 0) {
                         process.StartInfo.EnvironmentVariables["FDB_TLS_PLUGIN"] = tlsPluginFile;
-                        tlsPluginArg = "--tls-plugin=" + tlsPluginFile;
+                        // Use the old-style option with underscores because old binaries do not support hyphens
+                        tlsPluginArg = "--tls_plugin=" + tlsPluginFile;
                     }
                     process.StartInfo.RedirectStandardOutput = true;
                     string role = (noSim) ? "test" : "simulation";
