@@ -514,4 +514,7 @@ public:
 #endif
 };
 
+extern int forkSearchDepth;
+int forkSearch();
+void reproduceForkSearch(int randomSeed);
 #endif
