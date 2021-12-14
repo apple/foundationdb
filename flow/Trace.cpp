@@ -121,9 +121,6 @@ private:
 	uint64_t rollsize;
 	Mutex mutex;
 
-	// every process should NOT close on exec, except the root process
-	bool closeOnExec;
-
 	int numChildProcesses;
 
 	EventMetricHandle<TraceEventNameID> SevErrorNames;
@@ -284,8 +281,7 @@ public:
 
 	TraceLog()
 	  : formatter(new XmlTraceLogFormatter()), loggedLength(0), bufferLength(0), opened(false), preopenOverflowCount(0),
-	    logTraceEventMetrics(false), issues(new IssuesList), closeOnExec(true), numChildProcesses(0),
-	    barriers(new BarrierList) {}
+	    numChildProcesses(0), logTraceEventMetrics(false), issues(new IssuesList), barriers(new BarrierList) {}
 
 	bool isOpen() const { return opened; }
 
@@ -318,8 +314,7 @@ public:
 		    tracePartialFileSuffix,
 		    maxLogsSize,
 		    [this]() { barriers->triggerAll(); },
-		    issues,
-		    closeOnExec));
+		    issues));
 
 		if (g_network->isSimulated())
 			writer = Reference<IThreadPool>(new DummyThreadPool());
@@ -462,7 +457,7 @@ public:
 		bufferLength = 0;
 		writer->post(a);
 
-		if (roll) {
+		if (roll && !FLOW_KNOBS->SIM_FUZZER) {
 			auto o = new WriterThread::Roll;
 			double time = 0;
 			writer->post(o);
@@ -567,18 +562,11 @@ public:
 	void retrieveTraceLogIssues(std::set<std::string>& out) { return issues->retrieveIssues(out); }
 
 	void startChildProcess(std::string childLogGroup) {
-		// since FileTraceLogWriter has a reference to this->closeOnExec, this change will get propogated to the writer
 		numChildProcesses++;
-		closeOnExec = false;
 		logGroup = childLogGroup; // TODO: use a stack to support depth > 1 eventually
 	}
 
-	void terminateChildProcess() {
-		numChildProcesses--;
-		if (numChildProcesses == 0) {
-			closeOnExec = true;
-		}
-	}
+	void terminateChildProcess() { numChildProcesses--; }
 
 	~TraceLog() {
 		close();

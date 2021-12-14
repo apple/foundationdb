@@ -61,9 +61,6 @@ private:
 
 	std::function<void()> onError;
 
-	// needs to be a reference since setter not defined by ITraceLogWriter
-	bool& closeOnExec;
-
 	void write(const char* str, size_t size);
 
 public:
@@ -74,8 +71,7 @@ public:
 	                   std::string const& tracePartialFileSuffix,
 	                   uint64_t maxLogsSize,
 	                   std::function<void()> const& onError,
-	                   Reference<ITraceLogIssuesReporter> const& issues,
-	                   bool& closeOnExec);
+	                   Reference<ITraceLogIssuesReporter> const& issues);
 
 	void addref() override;
 	void delref() override;

@@ -91,11 +91,10 @@ FileTraceLogWriter::FileTraceLogWriter(std::string const& directory,
                                        std::string const& tracePartialFileSuffix,
                                        uint64_t maxLogsSize,
                                        std::function<void()> const& onError,
-                                       Reference<ITraceLogIssuesReporter> const& issues,
-                                       bool& closeOnExec)
+                                       Reference<ITraceLogIssuesReporter> const& issues)
   : directory(directory), processName(processName), basename(basename), extension(extension),
     tracePartialFileSuffix(tracePartialFileSuffix), maxLogsSize(maxLogsSize), traceFileFD(-1), index(0), issues(issues),
-    onError(onError), closeOnExec(closeOnExec) {}
+    onError(onError) {}
 
 void FileTraceLogWriter::addref() {
 	ReferenceCounted<FileTraceLogWriter>::addref();
@@ -162,18 +161,18 @@ void FileTraceLogWriter::open() {
 	// log10(index) < 10
 	UNSTOPPABLE_ASSERT(indexWidth < 10);
 
-	// TODO: what happens if a child process creates a trace file? how will the root process close this file
-	// appropriately?
 	int oFlags = TRACEFILE_FLAGS;
-	if (!closeOnExec) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
 #if defined(__unixish__)
 		oFlags &= ~O_CLOEXEC;
+#elif defined(_WIN32)
+		printf("SIM_FUZZER not supported for windows yet.");
+		throw internal_error();
 #endif
 	}
 
 	finalname =
 	    format("%s.%d.%d.%s%s", basename.c_str(), indexWidth, index, extension.c_str(), tracePartialFileSuffix.c_str());
-
 	while ((traceFileFD = __open(finalname.c_str(), oFlags, TRACEFILE_MODE)) == -1) {
 		lastError(errno);
 		if (errno == EEXIST) {
