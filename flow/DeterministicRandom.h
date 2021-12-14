@@ -40,7 +40,7 @@ private:
 
 public:
 	DeterministicRandom(uint32_t seed, bool useRandLog = false);
-	void reseed(uint32_t seed);
+	void reseed(uint32_t seed) override;
 	double random01() override;
 	int randomInt(int min, int maxPlusOne) override;
 	int64_t randomInt64(int64_t min, int64_t maxPlusOne) override;

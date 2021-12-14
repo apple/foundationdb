@@ -2067,6 +2067,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 					    .detail("MyToken", lifetime.toString())
 					    .detail("CurrentToken", db->get().masterLifetime.toString());
 					TEST(true); // Master replaced, dying
+					FORK_SIMULATION(true, "Master replaced, dying");
 					if (BUGGIFY)
 						wait(delay(5));
 					throw worker_removed();

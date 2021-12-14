@@ -448,6 +448,8 @@ private:
 #define _chsize ::ftruncate
 #define O_BINARY 0
 
+#include <unistd.h>
+#include <sys/wait.h>
 #else
 #error How do i open a file on a new platform?
 #endif
@@ -495,6 +497,7 @@ class SimpleInMemoryFileSystemT {
 	std::unordered_map<std::string, FileMemoryPtr> files;
 	std::unordered_map<int, OpenFile> fds;
 	int lastError = 0;
+
 public:
 	int open(std::string path, int flags) {
 		auto file = files.find(path);
@@ -581,7 +584,10 @@ public:
 		}
 		return f.offset;
 	}
-	int fsync(int fd) { ASSERT(fd > 0); return 0; }
+	int fsync(int fd) {
+		ASSERT(fd > 0);
+		return 0;
+	}
 	int error() { return lastError; }
 };
 
@@ -712,7 +718,7 @@ public:
 	}
 
 private:
-  Reference<ISimpleFile> file;
+	Reference<ISimpleFile> file;
 
 	// Performance parameters of simulated disk
 	Reference<DiskParameters> diskParameters;
@@ -2305,6 +2311,57 @@ public:
 		dieWhenTerminate = false;
 	}
 
+	int forkSearch(const char* context = "") override {
+#if defined(__unixish__)
+		if (forkSearchDepth > 0) { // now only allow 1
+			return 0;
+		}
+		std::string parentGroup = getTraceLogGroup();
+		pid_t processId;
+		int status;
+		for (int i = 0; i < forkSearchFanout; ++i) {
+			if ((processId = fork()) == 0) { // child process
+				++forkSearchDepth;
+				int pid = getpid();
+				int new_seed = platform::getRandomSeed(); // non-deterministic seed
+				// TODO: do something to record the seed in order to replay
+
+				std::string childLogGroup = parentGroup + "/" + std::to_string(pid); // format to still be finalized
+				startChildTraceLog(childLogGroup);
+				deterministicRandom()->reseed(new_seed);
+				TraceEvent("ChildProcessStarted")
+				    .detail("NewSeed", new_seed)
+				    .detail("ProcessId", pid)
+				    .detail("Context", context);
+			} else if (processId < 0) {
+				return EXIT_FAILURE;
+			} else { // parent process
+				if (waitpid(processId, &status, 0) == -1) {
+					terminateChildTraceLog();
+					return EXIT_FAILURE;
+				}
+
+				// report according to exit status
+				if (WIFEXITED(status)) {
+					auto exitCode = WEXITSTATUS(status);
+					TraceEvent(exitCode == 0 ? SevInfo : SevError, "ChildProcessReturned").detail("ExitCode", exitCode).backtrace();
+				} else if (WIFSIGNALED(status)) { // child crash
+					try {
+						TraceEvent(SevError, "ChildProcessCrashed").log();
+						ASSERT(false);
+					} catch (Error&) {}
+				}
+				terminateChildTraceLog();
+			}
+		}
+		return 0;
+#else
+#error no support now
+#endif
+	}
+
+	// no fork but just use the same new seed as forked process
+	void reproduceForkSearch(int seed) override { deterministicRandom()->reseed(seed); }
 	// time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	// time should only be modified from the main thread.
 	double time;
@@ -2335,6 +2392,8 @@ public:
 	bool printSimTime;
 	double terminateAt = -1.0;
 	bool dieWhenTerminate = false;
+	int forkSearchDepth = 0;
+	int forkSearchFanout = 4;
 
 private:
 	MockDNS mockDNS;
