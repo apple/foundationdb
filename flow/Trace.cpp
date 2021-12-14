@@ -448,6 +448,10 @@ public:
 		if (!eventBuffer.size())
 			return Void(); // SOMEDAY: maybe we still roll the tracefile here?
 
+		if (bufferLength + loggedLength > FLOW_KNOBS->SIM_FUZZER_MAX_LOGS_SIZE) {
+			ASSERT(false);
+		}
+
 		if (rollsize && bufferLength + loggedLength > rollsize) // SOMEDAY: more conditions to roll
 			roll = true;
 
