@@ -2312,17 +2312,14 @@ public:
 	}
 
 	int forkSearch(const char* context = "") override {
-#if defined(_WIN32)
-		printf("start fork...");
-		return 0;
-#elif defined(__unixish__)
+#if defined(__unixish__)
 		if (forkSearchDepth > 0) { // now only allow 1
 			return 0;
 		}
 		std::string parentGroup = getTraceLogGroup();
 		pid_t processId;
 		int status;
-		for (int i = 0; i < forkSearchTimes; ++i) {
+		for (int i = 0; i < forkSearchFanout; ++i) {
 			if ((processId = fork()) == 0) { // child process
 				++forkSearchDepth;
 				int pid = getpid();
@@ -2396,7 +2393,7 @@ public:
 	double terminateAt = -1.0;
 	bool dieWhenTerminate = false;
 	int forkSearchDepth = 0;
-	int forkSearchTimes = 4;
+	int forkSearchFanout = 4;
 
 private:
 	MockDNS mockDNS;
