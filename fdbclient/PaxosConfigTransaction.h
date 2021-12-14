@@ -58,6 +58,13 @@ public:
 	                                       Reverse = Reverse::False) override {
 		throw client_invalid_operation();
 	}
+	Future<RangeResult> getRangeWithPredicate(Key begin,
+	                                          Key end,
+	                                          Key predicate_name,
+	                                          Standalone<VectorRef<StringRef>> predicate_args,
+	                                          Snapshot = Snapshot::False) override {
+		throw client_invalid_operation();
+	}
 	void set(KeyRef const& key, ValueRef const& value) override;
 	void clear(KeyRangeRef const&) override { throw client_invalid_operation(); }
 	void clear(KeyRef const&) override;

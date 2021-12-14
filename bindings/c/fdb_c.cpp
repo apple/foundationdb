@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "flow/Arena.h"
 #include <cstdint>
 #include <string_view>
 #define FDB_API_VERSION 710
@@ -590,18 +591,18 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_with_predicate
                                                                                  int* predicate_arg_lengths,
                                                                                  int predicate_arg_count,
                                                                                  fdb_bool_t snapshot) {
-	std::cout << "begin     " << std::string_view{ (const char*)begin_key_name, size_t(begin_key_name_length) }
-	          << std::endl;
-	std::cout << "end       " << std::string_view{ (const char*)end_key_name, size_t(end_key_name_length) }
-	          << std::endl;
-	std::cout << "predicate " << std::string_view{ (const char*)predicate_name, size_t(predicate_name_length) }
-	          << std::endl;
-	std::cout << "predicate arg count " << predicate_arg_count << std::endl;
+	Standalone<VectorRef<StringRef>> args;
+	args.reserve(args.arena(), predicate_arg_count);
 	for (int i = 0; i < predicate_arg_count; ++i) {
-		std::cout << "arg[" << i << "]  "
-		          << std::string_view{ (const char*)predicate_args[i], size_t(predicate_arg_lengths[i]) } << std::endl;
+		args.push_back_deep(args.arena(), StringRef(predicate_args[i], predicate_arg_lengths[i]));
 	}
-	return TSAV_ERROR(Standalone<RangeResultRef>, end_of_stream);
+	return (FDBFuture*)(TXN(tr)
+	                        ->getRangeWithPredicate(Key(KeyRef(begin_key_name, begin_key_name_length)),
+	                                                Key(KeyRef(end_key_name, end_key_name_length)),
+	                                                Key(KeyRef(predicate_name, predicate_name_length)),
+	                                                args,
+	                                                snapshot)
+	                        .extractPtr());
 }
 
 // TODO: Support FDB_API_ADDED in generate_asm.py and then this can be replaced with fdb_api_ptr_unimpl.

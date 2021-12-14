@@ -112,6 +112,11 @@ public:
 	                                             GetRangeLimits limits,
 	                                             bool snapshot,
 	                                             bool reverse) override;
+	ThreadFuture<RangeResult> getRangeWithPredicate(const KeyRef& begin,
+	                                                const KeyRef& end,
+	                                                const StringRef& predicate_name,
+	                                                const VectorRef<StringRef>& predicate_args,
+	                                                bool snapshot) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;

@@ -161,6 +161,17 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                            int iteration,
 	                                            fdb_bool_t snapshot,
 	                                            fdb_bool_t reverse);
+	FDBFuture* (*transactionGetRangeWithPredicate)(FDBTransaction* tr,
+	                                               uint8_t const* begin_key_name,
+	                                               int begin_key_name_length,
+	                                               uint8_t const* end_key_name,
+	                                               int end_key_name_length,
+	                                               uint8_t const* predicate_name,
+	                                               int predicate_name_length,
+	                                               uint8_t const** predicate_args,
+	                                               int* predicate_arg_lengths,
+	                                               int predicate_arg_count,
+	                                               fdb_bool_t snapshot);
 	FDBFuture* (*transactionGetVersionstamp)(FDBTransaction* tr);
 
 	void (*transactionSet)(FDBTransaction* tr,
@@ -287,6 +298,11 @@ public:
 	                                             GetRangeLimits limits,
 	                                             bool snapshot,
 	                                             bool reverse) override;
+	ThreadFuture<RangeResult> getRangeWithPredicate(const KeyRef& begin,
+	                                                const KeyRef& end,
+	                                                const StringRef& predicate_name,
+	                                                const VectorRef<StringRef>& predicate_args,
+	                                                bool snapshot) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
@@ -440,6 +456,11 @@ public:
 	                                             GetRangeLimits limits,
 	                                             bool snapshot,
 	                                             bool reverse) override;
+	ThreadFuture<RangeResult> getRangeWithPredicate(const KeyRef& begin,
+	                                                const KeyRef& end,
+	                                                const StringRef& predicate_name,
+	                                                const VectorRef<StringRef>& predicate_args,
+	                                                bool snapshot) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 

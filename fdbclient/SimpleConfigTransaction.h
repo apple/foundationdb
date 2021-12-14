@@ -67,6 +67,13 @@ public:
 	                                       Reverse = Reverse::False) override {
 		throw client_invalid_operation();
 	}
+	Future<RangeResult> getRangeWithPredicate(Key begin,
+	                                          Key end,
+	                                          Key predicate_name,
+	                                          Standalone<VectorRef<StringRef>> predicate_args,
+	                                          Snapshot = Snapshot::False) override {
+		throw client_invalid_operation();
+	}
 	Future<Void> commit() override;
 	Version getCommittedVersion() const override;
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;

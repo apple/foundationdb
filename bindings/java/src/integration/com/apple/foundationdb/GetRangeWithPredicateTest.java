@@ -19,6 +19,8 @@
  */
 package com.apple.foundationdb;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import java.util.List;
 
 import org.junit.jupiter.api.AfterEach;
@@ -49,14 +51,18 @@ class GetRangeWithPredicateTest {
 	void testSomething() {
 		try (Database db = fdb.open()) {
 			db.run(tr -> {
-				try {
-					List<KeyValue> result =
-					    tr.getRangeWithPredicate("bar".getBytes(), "foo".getBytes(), "predicate".getBytes(),
-					                             new byte[][] { "arg1".getBytes(), "arg2".getBytes() })
-					        .join();
-				} catch (Exception e) {
-					e.printStackTrace();
-				}
+				tr.set("foo00".getBytes(), "baz".getBytes());
+				tr.set("foo01".getBytes(), "bar".getBytes());
+				tr.set("foo02".getBytes(), "baz".getBytes());
+				return null;
+			});
+			db.run(tr -> {
+				tr.options().setReadYourWritesDisable();
+				List<KeyValue> result =
+				    tr.getRangeWithPredicate("foo00".getBytes(), "foo99".getBytes(), "std/findInVal".getBytes(),
+				                             new byte[][] { "bar".getBytes() })
+				        .join();
+				assertEquals(1, result.size());
 				return null;
 			});
 		}

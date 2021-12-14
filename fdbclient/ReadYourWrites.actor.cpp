@@ -21,6 +21,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/MonitorLeader.h"
@@ -357,6 +358,26 @@ public:
 			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
 		}
 	}
+	ACTOR
+	static Future<RangeResult> readWithPredicate(ReadYourWritesTransaction* ryw,
+	                                             Key begin,
+	                                             Key end,
+	                                             Key predicate_name,
+	                                             Standalone<VectorRef<StringRef>> predicate_args,
+	                                             Snapshot snapshot) {
+		GetRangePredicate predicate{ predicate_name };
+		for (const auto& arg : predicate_args) {
+			predicate.addArg(arg);
+		}
+		choose {
+			when(RangeResult result = wait(ryw->tr.getRangeWithPredicate(
+			         firstGreaterOrEqual(begin), firstGreaterOrEqual(end), GetRangeLimits(), predicate, snapshot))) {
+				return result;
+			}
+			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
+		}
+	}
+
 	ACTOR template <class Req>
 	static Future<typename Req::Result> readWithConflictRangeSnapshot(ReadYourWritesTransaction* ryw, Req req) {
 		state SnapshotCache::iterator it(&ryw->cache, &ryw->writes);
@@ -1625,6 +1646,40 @@ Future<RangeResult> ReadYourWritesTransaction::getRangeAndFlatMap(KeySelector be
 	                  this, RYWImpl::GetRangeAndFlatMapReq<true>(begin, end, mapper, limits), snapshot)
 	            : RYWImpl::readWithConflictRangeAndFlatMap(
 	                  this, RYWImpl::GetRangeAndFlatMapReq<false>(begin, end, mapper, limits), snapshot);
+
+	reading.add(success(result));
+	return result;
+}
+
+Future<RangeResult> ReadYourWritesTransaction::getRangeWithPredicate(Key begin,
+                                                                     Key end,
+                                                                     Key predicate_name,
+                                                                     Standalone<VectorRef<StringRef>> predicate_args,
+                                                                     Snapshot snapshot) {
+	if (specialKeys.contains(begin) && specialKeys.begin <= end && end <= specialKeys.end) {
+		throw client_invalid_operation(); // Not support special keys.
+	}
+
+	if (!options.readYourWritesDisabled) {
+		throw client_invalid_operation();
+	}
+
+	if (checkUsedDuringCommit()) {
+		return used_during_commit();
+	}
+
+	if (resetPromise.isSet())
+		return resetPromise.getFuture().getError();
+
+	KeyRef maxKey = getMaxReadKey();
+	if (begin > maxKey || end > maxKey)
+		return key_outside_legal_range();
+
+	if (begin >= end) {
+		return RangeResult();
+	}
+
+	Future<RangeResult> result = RYWImpl::readWithPredicate(this, begin, end, predicate_name, predicate_args, snapshot);
 
 	reading.add(success(result));
 	return result;
