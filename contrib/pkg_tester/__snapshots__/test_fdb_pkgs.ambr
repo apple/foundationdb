@@ -68,7 +68,7 @@
                    the CLI.
     --api-version  APIVERSION
                    Specifies the version of the API for the CLI to use.
-    --tls-certificate_file CERTFILE
+    --tls-certificate-file CERTFILE
                    The path of a file containing the TLS certificate and CA
                    chain.
     --tls-ca-file CERTAUTHFILE
@@ -113,7 +113,7 @@
                    the CLI.
     --api-version  APIVERSION
                    Specifies the version of the API for the CLI to use.
-    --tls-certificate_file CERTFILE
+    --tls-certificate-file CERTFILE
                    The path of a file containing the TLS certificate and CA
                    chain.
     --tls-ca-file CERTAUTHFILE
@@ -203,7 +203,7 @@
                    the CLI.
     --api-version  APIVERSION
                    Specifies the version of the API for the CLI to use.
-    --tls-certificate_file CERTFILE
+    --tls-certificate-file CERTFILE
                    The path of a file containing the TLS certificate and CA
                    chain.
     --tls-ca-file CERTAUTHFILE
