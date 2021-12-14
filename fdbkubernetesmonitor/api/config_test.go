@@ -60,11 +60,11 @@ func TestGeneratingArgumentsForDefaultConfig(t *testing.T) {
 	}
 
 	expectedArguments := []string{
-		"--cluster_file", ".testdata/fdb.cluster",
-		"--public_address", "10.0.0.1:4501", "--listen_address", "192.168.0.1:4501",
+		"--cluster-file", ".testdata/fdb.cluster",
+		"--public-address", "10.0.0.1:4501", "--listen-address", "192.168.0.1:4501",
 		"--datadir", ".testdata/data/1", "--class", "storage",
-		"--locality_zoneid", "zone1", "--locality_instance-id", "storage-1",
-		"--locality_process-id", "storage-1-1",
+		"--locality-zoneid", "zone1", "--locality-instance-id", "storage-1",
+		"--locality-process-id", "storage-1-1",
 	}
 
 	if !reflect.DeepEqual(arguments, expectedArguments) {
@@ -87,11 +87,11 @@ func TestGeneratingArgumentsForDefaultConfig(t *testing.T) {
 
 	expectedArguments = []string{
 		"/usr/bin/fdbserver",
-		"--cluster_file", ".testdata/fdb.cluster",
-		"--public_address", "10.0.0.1:4501", "--listen_address", "192.168.0.1:4501",
+		"--cluster-file", ".testdata/fdb.cluster",
+		"--public-address", "10.0.0.1:4501", "--listen-address", "192.168.0.1:4501",
 		"--datadir", ".testdata/data/1", "--class", "storage",
-		"--locality_zoneid", "zone1", "--locality_instance-id", "storage-1",
-		"--locality_process-id", "storage-1-1",
+		"--locality-zoneid", "zone1", "--locality-instance-id", "storage-1",
+		"--locality-process-id", "storage-1-1",
 	}
 
 	if !reflect.DeepEqual(arguments, expectedArguments) {

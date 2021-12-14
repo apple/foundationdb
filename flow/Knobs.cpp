@@ -298,48 +298,64 @@ ParsedKnobValue Knobs::parseKnobValue(std::string const& knob, std::string const
 	}
 }
 
+// Convert any hyphen in the given parameter into underscore, if any
+std::string toUnderscore(const std::string& knob) {
+	std::string hyphenKnob(knob);
+	for (auto ptr = hyphenKnob.begin(); ptr != hyphenKnob.end(); ++ptr) {
+		if (*ptr == '-') {
+			*ptr = '_';
+		}
+	}
+	return hyphenKnob;
+}
+
 bool Knobs::setKnob(std::string const& knob, int value) {
-	if (!int_knobs.count(knob)) {
+	std::string underscoreKnob = toUnderscore(knob);
+	if (!int_knobs.count(underscoreKnob)) {
 		return false;
 	}
-	*int_knobs[knob].value = value;
-	explicitlySetKnobs.insert(toLower(knob));
+	*int_knobs[underscoreKnob].value = value;
+	explicitlySetKnobs.insert(toLower(underscoreKnob));
 	return true;
 }
 
 bool Knobs::setKnob(std::string const& knob, int64_t value) {
-	if (!int64_knobs.count(knob)) {
+	std::string underscoreKnob = toUnderscore(knob);
+	if (!int64_knobs.count(underscoreKnob)) {
 		return false;
 	}
-	*int64_knobs[knob].value = value;
-	explicitlySetKnobs.insert(toLower(knob));
+	*int64_knobs[underscoreKnob].value = value;
+	explicitlySetKnobs.insert(toLower(underscoreKnob));
 	return true;
 }
 
 bool Knobs::setKnob(std::string const& knob, bool value) {
-	if (!bool_knobs.count(knob)) {
+	std::string underscoreKnob = toUnderscore(knob);
+	if (!bool_knobs.count(underscoreKnob)) {
 		return false;
 	}
-	*bool_knobs[knob].value = value;
-	explicitlySetKnobs.insert(toLower(knob));
+	*bool_knobs[underscoreKnob].value = value;
+	explicitlySetKnobs.insert(toLower(underscoreKnob));
 	return true;
 }
 
 bool Knobs::setKnob(std::string const& knob, double value) {
-	if (!double_knobs.count(knob)) {
+	std::string underscoreKnob = toUnderscore(knob);
+	if (!double_knobs.count(underscoreKnob)) {
 		return false;
 	}
-	*double_knobs[knob].value = value;
-	explicitlySetKnobs.insert(toLower(knob));
+	*double_knobs[underscoreKnob].value = value;
+	explicitlySetKnobs.insert(toLower(underscoreKnob));
 	return true;
 }
 
 bool Knobs::setKnob(std::string const& knob, std::string const& value) {
-	if (!string_knobs.count(knob)) {
+	std::string underscoreKnob = toUnderscore(knob);
+	if (!string_knobs.count(underscoreKnob)) {
 		return false;
 	}
-	*string_knobs[knob].value = value;
-	explicitlySetKnobs.insert(toLower(knob));
+	*string_knobs[underscoreKnob].value = value;
+	explicitlySetKnobs.insert(toLower(underscoreKnob));
 	return true;
 }
 

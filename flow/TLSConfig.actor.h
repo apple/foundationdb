@@ -265,12 +265,12 @@ public:
 	bool is_client;
 };
 
-#define TLS_PLUGIN_FLAG "--tls_plugin"
-#define TLS_CERTIFICATE_FILE_FLAG "--tls_certificate_file"
-#define TLS_KEY_FILE_FLAG "--tls_key_file"
-#define TLS_VERIFY_PEERS_FLAG "--tls_verify_peers"
-#define TLS_CA_FILE_FLAG "--tls_ca_file"
-#define TLS_PASSWORD_FLAG "--tls_password"
+#define TLS_PLUGIN_FLAG "--tls-plugin"
+#define TLS_CERTIFICATE_FILE_FLAG "--tls-certificate-file"
+#define TLS_KEY_FILE_FLAG "--tls-key-file"
+#define TLS_VERIFY_PEERS_FLAG "--tls-verify-peers"
+#define TLS_CA_FILE_FLAG "--tls-ca-file"
+#define TLS_PASSWORD_FLAG "--tls-password"
 
 #define TLS_OPTION_FLAGS                                                                                               \
 	{ TLSConfig::OPT_TLS_PLUGIN, TLS_PLUGIN_FLAG, SO_REQ_SEP },                                                        \

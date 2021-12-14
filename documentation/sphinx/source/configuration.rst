@@ -212,46 +212,46 @@ Contains basic configuration parameters of the ``fdbmonitor`` process. ``user`` 
 .. code-block:: ini
 
     [general]
-    cluster_file = /etc/foundationdb/fdb.cluster
-    restart_delay = 60
-    ## restart_backoff and restart_delay_reset_interval default to the value that is used for restart_delay
-    # initial_restart_delay = 0
-    # restart_backoff = 60.0
-    # restart_delay_reset_interval = 60
-    # delete_envvars =
-    # kill_on_configuration_change = true
-    # disable_lifecycle_logging = false
+    cluster-file = /etc/foundationdb/fdb.cluster
+    restart-delay = 60
+    ## restart-backoff and restart-delay-reset-interval default to the value that is used for restart_delay
+    # initial-restart-delay = 0
+    # restart-backoff = 60.0
+    # restart-delay-reset-interval = 60
+    # delete-envvars =
+    # kill-on-configuration-change = true
+    # disable-lifecycle-logging = false
 
 Contains settings applicable to all processes (e.g. fdbserver, backup_agent).
 
-* ``cluster_file``: Specifies the location of the cluster file. This file and the directory that contains it must be writable by all processes (i.e. by the user or group set in the ``[fdbmonitor]`` section).
-* ``delete_envvars``: A space separated list of environment variables to remove from the environments of child processes. This can be used if the ``fdbmonitor`` process needs to be run with environment variables that are undesired in its children.
-* ``kill_on_configuration_change``: If ``true``, affected processes will be restarted whenever the configuration file changes. Defaults to ``true``.
-* ``disable_lifecycle_logging``: If ``true``, ``fdbmonitor`` will not write log events when processes start or terminate. Defaults to ``false``.
+* ``cluster-file``: Specifies the location of the cluster file. This file and the directory that contains it must be writable by all processes (i.e. by the user or group set in the ``[fdbmonitor]`` section).
+* ``delete-envvars``: A space separated list of environment variables to remove from the environments of child processes. This can be used if the ``fdbmonitor`` process needs to be run with environment variables that are undesired in its children.
+* ``kill-on-configuration_change``: If ``true``, affected processes will be restarted whenever the configuration file changes. Defaults to ``true``.
+* ``disable-lifecycle-logging``: If ``true``, ``fdbmonitor`` will not write log events when processes start or terminate. Defaults to ``false``.
 
 .. _configuration-restarting:
 
 The ``[general]`` section also contains some parameters to control how processes are restarted when they die. ``fdbmonitor`` uses backoff logic to prevent a process that dies repeatedly from cycling too quickly, and it also introduces up to +/-10% random jitter into the delay to avoid multiple processes all restarting simultaneously. ``fdbmonitor`` tracks separate backoff state for each process, so the restarting of one process will have no effect on the backoff behavior of another.
 
-* ``restart_delay``: The maximum number of seconds (subject to jitter) that fdbmonitor will delay before restarting a failed process.
-* ``initial_restart_delay``: The number of seconds ``fdbmonitor`` waits to restart a process the first time it dies. Defaults to 0 (i.e. the process gets restarted immediately). 
-* ``restart_backoff``: Controls how quickly ``fdbmonitor`` backs off when a process dies repeatedly. The previous delay (or 1, if the previous delay is 0) is multiplied by ``restart_backoff`` to get the next delay, maxing out at the value of ``restart_delay``. Defaults to the value of ``restart_delay``, meaning that the second and subsequent failures will all delay ``restart_delay`` between restarts.
-* ``restart_delay_reset_interval``: The number of seconds a process must be running before resetting the backoff back to the value of ``initial_restart_delay``. Defaults to the value of ``restart_delay``.
+* ``restart-delay``: The maximum number of seconds (subject to jitter) that fdbmonitor will delay before restarting a failed process.
+* ``initial-restart-delay``: The number of seconds ``fdbmonitor`` waits to restart a process the first time it dies. Defaults to 0 (i.e. the process gets restarted immediately). 
+* ``restart-backoff``: Controls how quickly ``fdbmonitor`` backs off when a process dies repeatedly. The previous delay (or 1, if the previous delay is 0) is multiplied by ``restart_backoff`` to get the next delay, maxing out at the value of ``restart_delay``. Defaults to the value of ``restart_delay``, meaning that the second and subsequent failures will all delay ``restart_delay`` between restarts.
+* ``restart-delay-reset-interval``: The number of seconds a process must be running before resetting the backoff back to the value of ``initial_restart_delay``. Defaults to the value of ``restart_delay``.
 
- These ``restart_`` parameters are not applicable to the ``fdbmonitor`` process itself. See :ref:`Configuring autorestart of fdbmonitor <configuration-restart-fdbmonitor>` for details.
+ These ``restart-`` parameters are not applicable to the ``fdbmonitor`` process itself. See :ref:`Configuring autorestart of fdbmonitor <configuration-restart-fdbmonitor>` for details.
 
 As an example, let's say the following parameters have been set:
 
 .. code-block:: ini
 
-    restart_delay = 60
-    initial_restart_delay = 0
-    restart_backoff = 2.0
-    restart_delay_reset_interval = 180
+    restart-delay = 60
+    initial-restart_delay = 0
+    restart-backoff = 2.0
+    restart-delay-reset-interval = 180
 
 The progression of delays for a process that fails repeatedly would be ``0, 2, 4, 8, 16, 32, 60, 60, ...``, each subject to a 10% random jitter. After the process stays alive for 180 seconds, the backoff would reset and the next failure would restart the process immediately.
 
-Using the default parameters, a process will restart immediately if it fails and then delay ``restart_delay`` seconds if it fails again within ``restart_delay`` seconds. 
+Using the default parameters, a process will restart immediately if it fails and then delay ``restart-delay`` seconds if it fails again within ``restart-delay`` seconds. 
 
 .. _foundationdb-conf-fdbserver:
 
@@ -263,21 +263,21 @@ Using the default parameters, a process will restart immediately if it fails and
     ## Default parameters for individual fdbserver processes
     [fdbserver]
     command = /usr/sbin/fdbserver
-    public_address = auto:$ID
-    listen_address = public
+    public-address = auto:$ID
+    listen-address = public
     datadir = /var/lib/foundationdb/data/$ID
     logdir = /var/log/foundationdb
     # logsize = 10MiB
     # maxlogssize = 100MiB
     # class = 
     # memory = 8GiB
-    # storage_memory = 1GiB
-    # cache_memory = 2GiB
-    # locality_machineid = 
-    # locality_zoneid = 
-    # locality_data_hall = 
-    # locality_dcid = 
-    # io_trust_seconds = 20
+    # storage-memory = 1GiB
+    # cache-memory = 2GiB
+    # locality-machineid =
+    # locality-zoneid =
+    # locality-data_hall =
+    # locality-dcid =
+    # io-trust-seconds = 20
 
 Contains default parameters for all fdbserver processes on this machine. These same options can be overridden for individual processes in their respective ``[fdbserver.<ID>]`` sections. In this section, the ID of the individual fdbserver can be substituted by using the ``$ID`` variable in the value. For example, ``public_address = auto:$ID`` makes each fdbserver listen on a port equal to its ID.
 
@@ -285,8 +285,8 @@ Contains default parameters for all fdbserver processes on this machine. These s
 .. note:: In general locality id's are used to specify the location of processes which in turn is used to determine fault and replication domains.
 
 * ``command``: The location of the ``fdbserver`` binary.
-* ``public_address``: The publicly visible IP:Port of the process. If ``auto``, the address will be the one used to communicate with the coordination servers.
-* ``listen_address``: The IP:Port that the server socket should bind to. If ``public``, it will be the same as the public_address.
+* ``public-address``: The publicly visible IP:Port of the process. If ``auto``, the address will be the one used to communicate with the coordination servers.
+* ``listen-address``: The IP:Port that the server socket should bind to. If ``public``, it will be the same as the public_address.
 * ``datadir``: A writable directory (by root or by the user set in the [fdbmonitor] section) where persistent data files will be stored.
 * ``logdir``: A writable directory (by root or by the user set in the [fdbmonitor] section) where FoundationDB will store log files.
 * ``logsize``: Roll over to a new log file after the current log file reaches the specified size. The default value is 10MiB.
@@ -294,12 +294,12 @@ Contains default parameters for all fdbserver processes on this machine. These s
 * ``class``: Process class specifying the roles that will be taken in the cluster. Recommended options are ``storage``, ``transaction``, ``stateless``. See :ref:`guidelines-process-class-config` for process class config recommendations.
 * ``memory``: Maximum memory used by the process. The default value is 8GiB. When specified without a unit, MiB is assumed. This parameter does not change the memory allocation of the program. Rather, it sets a hard limit beyond which the process will kill itself and be restarted. The default value of 8GiB is double the intended memory usage in the default configuration (providing an emergency buffer to deal with memory leaks or similar problems). It is *not* recommended to decrease the value of this parameter below its default value. It may be *increased* if you wish to allocate a very large amount of storage engine memory or cache. In particular, when the ``storage_memory``  or ``cache_memory`` parameters are increased, the ``memory`` parameter should be increased by an equal amount.
 * ``storage_memory``: Maximum memory used for data storage. This parameter is used *only* with memory storage engine, not the ssd storage engine. The default value is 1GiB. When specified without a unit, MB is assumed. Clusters will be restricted to using this amount of memory per process for purposes of data storage. Memory overhead associated with storing the data is counted against this total. If you increase the ``storage_memory`` parameter, you should also increase the ``memory`` parameter by the same amount.
-* ``cache_memory``: Maximum memory used for caching pages from disk. The default value is 2GiB. When specified without a unit, MiB is assumed. If you increase the ``cache_memory`` parameter, you should also increase the ``memory`` parameter by the same amount.
-* ``locality_machineid``: Machine identifier key. All processes on a machine should share a unique id. By default, processes on a machine determine a unique id to share. This does not generally need to be set.
-* ``locality_zoneid``: Zone identifier key.  Processes that share a zone id are considered non-unique for the purposes of data replication. If unset, defaults to machine id.
-* ``locality_dcid``: Datacenter identifier key. All processes physically located in a datacenter should share the id. No default value. If you are depending on datacenter based replication this must be set on all processes.
-* ``locality_data_hall``: Data hall identifier key. All processes physically located in a data hall should share the id. No default value. If you are depending on data hall based replication this must be set on all processes.
-* ``io_trust_seconds``: Time in seconds that a read or write operation is allowed to take before timing out with an error. If an operation times out, all future operations on that file will fail with an error as well. Only has an effect when using AsyncFileKAIO in Linux. If unset, defaults to 0 which means timeout is disabled.
+* ``cache-memory``: Maximum memory used for caching pages from disk. The default value is 2GiB. When specified without a unit, MiB is assumed. If you increase the ``cache_memory`` parameter, you should also increase the ``memory`` parameter by the same amount.
+* ``locality-machineid``: Machine identifier key. All processes on a machine should share a unique id. By default, processes on a machine determine a unique id to share. This does not generally need to be set.
+* ``locality-zoneid``: Zone identifier key.  Processes that share a zone id are considered non-unique for the purposes of data replication. If unset, defaults to machine id.
+* ``locality-dcid``: Datacenter identifier key. All processes physically located in a datacenter should share the id. No default value. If you are depending on datacenter based replication this must be set on all processes.
+* ``locality-data-hall``: Data hall identifier key. All processes physically located in a data hall should share the id. No default value. If you are depending on data hall based replication this must be set on all processes.
+* ``io-trust-seconds``: Time in seconds that a read or write operation is allowed to take before timing out with an error. If an operation times out, all future operations on that file will fail with an error as well. Only has an effect when using AsyncFileKAIO in Linux. If unset, defaults to 0 which means timeout is disabled.
 
 .. note:: In addition to the options above, TLS settings as described for the :ref:`TLS plugin <configuring-tls>` can be specified in the [fdbserver] section.
 
