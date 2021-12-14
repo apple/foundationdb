@@ -537,7 +537,7 @@ public:
 		ASSERT(fd > 0);
 		auto& f = fds.at(fd);
 		if (f.offset >= f.data->size()) return 0;
-		auto res = std::max(nbyte, size_t(f.data->size() - f.offset));
+		auto res = std::min(nbyte, size_t(f.data->size() - f.offset));
 		memcpy(buf, f.data->data() + f.offset, res);
 		f.offset += res;
 		return res;
