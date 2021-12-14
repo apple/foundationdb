@@ -234,6 +234,7 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 
 struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
+	Optional<TenantName> tenant;
 	Reference<TransactionLogInfo> trLogInfo;
 	TransactionOptions options;
 
@@ -256,15 +257,19 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	// Only available so that Transaction can have a default constructor, for use in state variables
 	TransactionState(TaskPriority taskID, SpanID spanID) : taskID(taskID), spanID(spanID) {}
 
-	TransactionState(Database cx, TaskPriority taskID, SpanID spanID, Reference<TransactionLogInfo> trLogInfo)
-	  : cx(cx), trLogInfo(trLogInfo), options(cx), taskID(taskID), spanID(spanID) {}
+	TransactionState(Database cx,
+	                 Optional<TenantName> tenant,
+	                 TaskPriority taskID,
+	                 SpanID spanID,
+	                 Reference<TransactionLogInfo> trLogInfo)
+	  : cx(cx), tenant(tenant), trLogInfo(trLogInfo), options(cx), taskID(taskID), spanID(spanID) {}
 
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
 };
 
 class Transaction : NonCopyable {
 public:
-	explicit Transaction(Database const& cx);
+	explicit Transaction(Database const& cx, Optional<TenantName> const& tenant = Optional<TenantName>());
 	~Transaction();
 
 	void setVersion(Version v);

@@ -597,6 +597,13 @@ UID decodeBlobWorkerListKey(KeyRef const& key);
 const Value blobWorkerListValue(BlobWorkerInterface const& interface);
 BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 
+// State for the tenant map
+extern const KeyRangeRef tenantMapKeys;
+extern const KeyRef tenantMapPrefix;
+extern const KeyRef tenantMapPrivatePrefix;
+// This prefix is prepended to the tenant names of locked tenants
+extern const StringRef lockedTenantPrefix;
+
 #pragma clang diagnostic pop
 
 #endif

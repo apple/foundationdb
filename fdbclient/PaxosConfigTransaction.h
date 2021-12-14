@@ -35,7 +35,7 @@ public:
 	PaxosConfigTransaction(std::vector<ConfigTransactionInterface> const&);
 	PaxosConfigTransaction();
 	~PaxosConfigTransaction();
-	void setDatabase(Database const&) override;
+	void construct(Database const&) override;
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override;
 

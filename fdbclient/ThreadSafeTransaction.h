@@ -82,13 +82,16 @@ public:
 
 private:
 	Reference<ThreadSafeDatabase> db;
+	Standalone<StringRef> name;
 };
 
 // An implementation of ITransaction that serializes operations onto the network thread and interacts with the
 // lower-level client APIs exposed by ISingleThreadTransaction
 class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<ThreadSafeTransaction>, NonCopyable {
 public:
-	explicit ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadTransaction::Type type);
+	explicit ThreadSafeTransaction(DatabaseContext* cx,
+	                               ISingleThreadTransaction::Type type,
+	                               Optional<TenantName> tenant);
 	~ThreadSafeTransaction() override;
 
 	// Note: used while refactoring fdbcli, need to be removed later

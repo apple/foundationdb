@@ -52,7 +52,7 @@ Reference<ITenant> ThreadSafeDatabase::openTenant(StringRef tenantName) {
 
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
 	auto type = isConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
-	return Reference<ITransaction>(new ThreadSafeTransaction(db, type));
+	return Reference<ITransaction>(new ThreadSafeTransaction(db, type, Optional<TenantName>()));
 }
 
 void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
@@ -145,12 +145,14 @@ ThreadSafeDatabase::~ThreadSafeDatabase() {
 
 Reference<ITransaction> ThreadSafeTenant::createTransaction() {
 	auto type = db->isConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
-	return Reference<ITransaction>(new ThreadSafeTransaction(db->db, type));
+	return Reference<ITransaction>(new ThreadSafeTransaction(db->db, type, name));
 }
 
 ThreadSafeTenant::~ThreadSafeTenant() {}
 
-ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadTransaction::Type type) {
+ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
+                                             ISingleThreadTransaction::Type type,
+                                             Optional<TenantName> tenant) {
 	// Allocate memory for the transaction from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 
@@ -161,9 +163,13 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadT
 	auto tr = this->tr = ISingleThreadTransaction::allocateOnForeignThread(type);
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
 	onMainThreadVoid(
-	    [tr, cx]() {
+	    [tr, cx, tenant]() {
 		    cx->addref();
-		    tr->setDatabase(Database(cx));
+		    if (tenant.present()) {
+			    tr->construct(Database(cx), tenant.get());
+		    } else {
+			    tr->construct(Database(cx));
+		    }
 	    },
 	    nullptr);
 }

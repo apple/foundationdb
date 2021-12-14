@@ -2721,6 +2721,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					         ssi.second,
 					         &StorageServerInterface::getValue,
 					         GetValueRequest(span.context,
+					                         trState->tenant,
 					                         key,
 					                         ver,
 					                         trState->cx->sampleReadTags() ? trState->options.readTags
@@ -4320,8 +4321,9 @@ void debugAddTags(Reference<TransactionState> trState) {
 Transaction::Transaction()
   : trState(makeReference<TransactionState>(TaskPriority::DefaultEndpoint, generateSpanID(false))) {}
 
-Transaction::Transaction(Database const& cx)
+Transaction::Transaction(Database const& cx, Optional<TenantName> const& tenant)
   : trState(makeReference<TransactionState>(cx,
+                                            tenant,
                                             cx->taskID,
                                             generateSpanID(cx->transactionTracingSample),
                                             createTrLogInfoProbabilistically(cx))),

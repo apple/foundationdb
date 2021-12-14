@@ -43,7 +43,7 @@ public:
 	SimpleConfigTransaction(ConfigTransactionInterface const&);
 	SimpleConfigTransaction(Database const&);
 	SimpleConfigTransaction();
-	void setDatabase(Database const&) override;
+	void construct(Database const&) override;
 	~SimpleConfigTransaction();
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override;

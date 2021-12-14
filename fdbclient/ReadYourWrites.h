@@ -65,10 +65,11 @@ class ReadYourWritesTransaction final : NonCopyable,
                                         public ISingleThreadTransaction,
                                         public FastAllocated<ReadYourWritesTransaction> {
 public:
-	explicit ReadYourWritesTransaction(Database const& cx);
+	explicit ReadYourWritesTransaction(Database const& cx, Optional<TenantName> tenant = Optional<TenantName>());
 	~ReadYourWritesTransaction();
 
-	void setDatabase(Database const&) override;
+	void construct(Database const&) override;
+	void construct(Database const&, TenantName const& tenant) override;
 	void setVersion(Version v) override { tr.setVersion(v); }
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override { return tr.getCachedReadVersion(); }

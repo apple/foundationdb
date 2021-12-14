@@ -85,6 +85,10 @@ bool canReplyWith(Error e) {
 	case error_code_watch_cancelled:
 	case error_code_unknown_change_feed:
 	case error_code_server_overloaded:
+	case error_code_tenant_name_required:
+	case error_code_tenant_not_found:
+	case error_code_key_not_in_tenant:
+	case error_code_key_range_locked:
 	// getRangeAndMap related exceptions that are not retriable:
 	case error_code_mapper_bad_index:
 	case error_code_mapper_no_such_key:
@@ -380,6 +384,8 @@ public:
 
 struct StorageServer {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
+	typedef VersionedMap<Standalone<StringRef>, Key> TenantMap;
+	typedef VersionedMap<KeyRef, StringRef> TenantIndex;
 
 private:
 	// versionedData contains sets and clears.
@@ -414,7 +420,12 @@ private:
 	std::unordered_map<KeyRef, Reference<ServerWatchMetadata>> watchMap; // keep track of server watches
 
 public:
-public:
+	TenantMap tenantMap;
+	TenantIndex lockedTenantsIndex;
+
+	// TODO: make this a variable configured for the cluster
+	bool allowDefaultTenant = true;
+
 	// Histograms
 	struct FetchKeysHistograms {
 		const Reference<Histogram> latency;
@@ -447,6 +458,10 @@ public:
 	KeyRef setWatchMetadata(Reference<ServerWatchMetadata> metadata);
 	void deleteWatchMetadata(KeyRef key);
 	void clearWatchMetadata();
+
+	// tenant map operations
+	void insertTenant(KeyRef key, ValueRef value, Version version);
+	void clearTenants(KeyRef startKey, KeyRef endKey, Version version);
 
 	class CurrentRunningFetchKeys {
 		std::unordered_map<UID, double> startTimeMap;
@@ -1351,9 +1366,47 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	}
 }
 
+std::vector<KeyRef> checkTenant(StorageServer* data,
+                                Version version,
+                                Optional<TenantName> const& tenantName,
+                                KeyRef begin,
+                                Optional<KeyRef> end = Optional<KeyRef>()) {
+	std::vector<KeyRef> lockedPrefixes;
+	if (tenantName.present()) {
+		auto view = data->tenantMap.at(version);
+		auto itr = view.find(tenantName.get());
+		if (itr == view.end()) {
+			throw tenant_not_found();
+		}
+
+		if (!begin.startsWith(*itr) || (end.present() && !end.get().startsWith(*itr))) {
+			throw key_not_in_tenant();
+		}
+	} else {
+		if (!data->allowDefaultTenant) {
+			throw tenant_name_required();
+		}
+
+		auto view = data->lockedTenantsIndex.at(version);
+		auto itr = view.lastLessOrEqual(begin);
+		while (itr != view.end()) {
+			if (begin.substr(0, itr.key().size()) <= itr.key() && itr.key() <= end.orDefault(begin)) {
+				lockedPrefixes.push_back(itr.key());
+			}
+
+			++itr;
+		}
+	}
+
+	return lockedPrefixes;
+}
+
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	state int64_t resultSize = 0;
 	Span span("SS:getValue"_loc, { req.spanContext });
+	if (req.tenant.present()) {
+		span.addTag("tenant"_sr, req.tenant.get());
+	}
 	span.addTag("key"_sr, req.key);
 	// Temporarily disabled -- this path is hit a lot
 	// getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
@@ -1382,6 +1435,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			                      "getValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
 
 		state uint64_t changeCounter = data->shardChangeCounter;
+		std::vector<KeyRef> lockedPrefixes = checkTenant(data, version, req.tenant, req.key);
 
 		if (!data->shards[req.key]->isReadable()) {
 			//TraceEvent("WrongShardServer", data->thisServerID).detail("Key", req.key).detail("Version", version).detail("In", "getValueQ");
@@ -1389,21 +1443,20 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		}
 
 		state int path = 0;
-		auto i = data->data().at(version).lastLessOrEqual(req.key);
-		if (i && i->isValue() && i.key() == req.key) {
-			v = (Value)i->getValue();
-			path = 1;
-		} else if (!i || !i->isClearTo() || i->getEndKey() <= req.key) {
-			path = 2;
-			Optional<Value> vv = wait(data->storage.readValue(req.key, IKeyValueStore::ReadType::NORMAL, req.debugID));
-			data->counters.kvGetBytes += vv.expectedSize();
-			// Validate that while we were reading the data we didn't lose the version or shard
-			if (version < data->storageVersion()) {
-				TEST(true); // transaction_too_old after readValue
-				throw transaction_too_old();
+		if (lockedPrefixes.empty()) {
+			auto i = data->data().at(version).lastLessOrEqual(req.key);
+			if (i && i->isValue() && i.key() == req.key) {
+				v = (Value)i->getValue();
+				path = 1;
+			} else if (!i || !i->isClearTo() || i->getEndKey() <= req.key) {
+				path = 2;
+				Optional<Value> vv = wait(data->storage.readValue(req.key, IKeyValueStore::ReadType::NORMAL, req.debugID));
+				data->counters.kvGetBytes += vv.expectedSize();
+				// Validate that while we were reading the data we didn't lose the version or shard
+				if (version < data->storageVersion()) {
+					TEST(true); // transaction_too_old after readValue
+					throw transaction_too_old();
 			}
-			data->checkChangeCounter(changeCounter, req.key);
-			v = vv;
 		}
 
 		DEBUG_MUTATION("ShardGetValue",
@@ -1506,7 +1559,8 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanID parent
 			state Version latest = data->version.get();
 			TEST(latest >= minVersion &&
 			     latest < data->data().latestVersion); // Starting watch loop with latestVersion > data->version
-			GetValueRequest getReq(span.context, metadata->key, latest, metadata->tags, metadata->debugID);
+			GetValueRequest getReq(
+			    span.context, Optional<TenantName>(), metadata->key, latest, metadata->tags, metadata->debugID);
 			state Future<Void> getValue = getValueQ(
 			    data, getReq); // we are relying on the delay zero at the top of getValueQ, if removed we need one here
 			GetValueReply reply = wait(getReq.reply.getFuture());
@@ -2141,7 +2195,12 @@ ACTOR Future<Optional<Value>> quickGetValue(StorageServer* data,
 	if (data->shards[key]->isReadable()) {
 		try {
 			// TODO: Use a lower level API may be better? Or tweak priorities?
-			GetValueRequest req(pOriginalReq->spanContext, key, version, pOriginalReq->tags, pOriginalReq->debugID);
+			GetValueRequest req(pOriginalReq->spanContext,
+			                    Optional<TenantName>(),
+			                    key,
+			                    version,
+			                    pOriginalReq->tags,
+			                    pOriginalReq->debugID);
 			// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
 			// original request level, rather than individual underlying lookups. The reason is that throttle any
 			// individual underlying lookup will fail the original request, which is not productive.
@@ -3947,6 +4006,8 @@ static const KeyRef persistLogProtocol = LiteralStringRef(PERSIST_PREFIX "LogPro
 static const KeyRef persistPrimaryLocality = LiteralStringRef(PERSIST_PREFIX "PrimaryLocality");
 static const KeyRangeRef persistChangeFeedKeys =
     KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "RF/"), LiteralStringRef(PERSIST_PREFIX "RF0"));
+static const KeyRangeRef persistTenantMapKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "TM/"), LiteralStringRef(PERSIST_PREFIX "TM0"));
 // data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
 
 ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
@@ -5018,6 +5079,13 @@ private:
 					                m.param2));
 				}
 			}
+		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) &&
+		           m.param1.startsWith(tenantMapPrivatePrefix)) {
+			if (m.type == MutationRef::SetValue) {
+				data->insertTenant(m.param1, m.param2, currentVersion);
+			} else if (m.type == MutationRef::ClearRange) {
+				data->clearTenants(m.param1, m.param2, currentVersion);
+			}
 		} else if (m.param1.substr(1).startsWith(tssMappingKeys.begin) &&
 		           (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange)) {
 			if (!data->isTss()) {
@@ -5083,6 +5151,45 @@ private:
 		}
 	}
 };
+
+void StorageServer::insertTenant(KeyRef key, ValueRef value, Version version) {
+	tenantMap.createNewVersion(version);
+	lockedTenantsIndex.createNewVersion(version);
+
+	Standalone<StringRef> tenantName = key.substr(tenantMapPrivatePrefix.size());
+	Key tenantPrefix = value;
+
+	tenantMap.insert(tenantName, tenantPrefix);
+
+	if (tenantName.startsWith(lockedTenantPrefix)) {
+		lockedTenantsIndex.insert(tenantPrefix, tenantName);
+	}
+
+	auto& mLV = addVersionToMutationLog(version);
+	addMutationToMutationLog(
+	    mLV, MutationRef(MutationRef::SetValue, tenantName.withPrefix(persistTenantMapKeys.begin), value));
+}
+
+void StorageServer::clearTenants(KeyRef startKey, KeyRef endKey, Version version) {
+	tenantMap.createNewVersion(version);
+	lockedTenantsIndex.createNewVersion(version);
+
+	StringRef startTenant = startKey.substr(tenantMapPrivatePrefix.size());
+	StringRef endTenant = endKey.substr(tenantMapPrivatePrefix.size());
+
+	// TODO: this only works if version is latest version
+	auto view = tenantMap.at(version);
+	for (auto itr = view.lower_bound(startTenant); itr != view.lower_bound(endTenant); ++itr) {
+		tenantMap.erase(itr);
+		lockedTenantsIndex.erase(*itr);
+	}
+
+	auto& mLV = addVersionToMutationLog(version);
+	addMutationToMutationLog(mLV,
+	                         MutationRef(MutationRef::ClearRange,
+	                                     startTenant.withPrefix(persistTenantMapKeys.begin),
+	                                     endTenant.withPrefix(persistTenantMapKeys.begin)));
+}
 
 ACTOR Future<Void> tssDelayForever() {
 	loop {
@@ -5967,6 +6074,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state Future<RangeResult> fShardAssigned = storage->readRange(persistShardAssignedKeys);
 	state Future<RangeResult> fShardAvailable = storage->readRange(persistShardAvailableKeys);
 	state Future<RangeResult> fChangeFeeds = storage->readRange(persistChangeFeedKeys);
+	state Future<RangeResult> fTenantMap = storage->readRange(persistTenantMapKeys);
 
 	state Promise<Void> byteSampleSampleRecovered;
 	state Promise<Void> startByteSampleRestore;
@@ -5976,7 +6084,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	TraceEvent("ReadingDurableState", data->thisServerID).log();
 	wait(waitForAll(
 	    std::vector{ fFormat, fID, fClusterID, ftssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
-	wait(waitForAll(std::vector{ fShardAssigned, fShardAvailable, fChangeFeeds }));
+	wait(waitForAll(std::vector{ fShardAssigned, fShardAvailable, fChangeFeeds, fTenantMap }));
 	wait(byteSampleSampleRecovered.getFuture());
 	TraceEvent("RestoringDurableState", data->thisServerID).log();
 
@@ -6102,6 +6210,25 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		wait(yield());
 	}
 	data->keyChangeFeed.coalesce(allKeys);
+
+	state RangeResult tenantMap = fTenantMap.get();
+	state int tenantMapLoc;
+	for (tenantMapLoc = 0; tenantMapLoc < tenantMap.size(); tenantMapLoc++) {
+		auto const& result = tenantMap[tenantMapLoc];
+		Standalone<StringRef> tenantName = result.key.substr(tenantMapPrivatePrefix.size());
+		Key tenantPrefix = result.value;
+
+		data->tenantMap.insert(tenantName, tenantPrefix);
+		data->lockedTenantsIndex.insert(tenantPrefix, tenantName);
+
+		TraceEvent("RestoringTenant", data->thisServerID)
+		    .detail("Key", tenantMap[tenantMapLoc].key)
+		    .detail("TenantName", tenantName)
+		    .detail("Prefix", tenantPrefix);
+
+		wait(yield());
+	}
+
 	// TODO: why is this seemingly random delay here?
 	wait(delay(0.0001));
 
@@ -6584,7 +6711,8 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 			loop {
 				try {
 					state Version latest = self->version.get();
-					GetValueRequest getReq(span.context, metadata->key, latest, metadata->tags, metadata->debugID);
+					GetValueRequest getReq(
+					    span.context, Optional<TenantName>(), metadata->key, latest, metadata->tags, metadata->debugID);
 					state Future<Void> getValue = getValueQ(self, getReq);
 					GetValueReply reply = wait(getReq.reply.getFuture());
 					metadata = self->getWatchMetadata(req.key.contents());
@@ -6881,6 +7009,29 @@ ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<IClusterC
 	}
 }
 
+ACTOR Future<Void> initTenantMap(StorageServer* self) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			state Version version = wait(tr->getReadVersion());
+			RangeResult entries = wait(tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY));
+
+			for (auto kv : entries) {
+				// TODO: we need to make sure whatever version we use for reading the tenant map is the minimum we
+				// can use for reads, and that we will get all updates after that point
+				self->insertTenant(kv.key, kv.value, version);
+			}
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+
+	return Void();
+}
+
 // for creating a new storage server
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
@@ -6933,6 +7084,12 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		rep.addedVersion = self.version.get();
 		recruitReply.send(rep);
 		self.byteSampleRecovery = Void();
+
+		if (seedTag == invalidTag) {
+			// TODO: we need to make sure that if we fail before the result here is made durable, then we can
+			// recover and read it again
+			wait(initTenantMap(&self));
+		}
 
 		ssCore = storageServerCore(&self, ssi);
 		wait(ssCore);

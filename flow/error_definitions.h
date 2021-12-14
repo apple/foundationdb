@@ -198,6 +198,11 @@ ERROR( client_lib_not_found, 2120, "Client library for the given identifier not 
 ERROR( client_lib_not_available, 2121, "Client library exists, but is not available for download." )
 ERROR( client_lib_invalid_binary, 2122, "Invalid client library binary." )
 
+ERROR( tenant_name_required, 2130, "Tenant name must be specified to access data in the cluster" )
+ERROR( tenant_not_found, 2131, "Tenant not found on the cluster" )
+ERROR( key_not_in_tenant, 2132, "The specified key is not in the key-range represented by the tenant" )
+ERROR( key_range_locked, 2133, "The key-range is locked" )
+
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
 ERROR( api_version_already_set, 2201, "API version may be set only once" )
