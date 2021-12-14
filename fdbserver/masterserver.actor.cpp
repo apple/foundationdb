@@ -1120,7 +1120,7 @@ ACTOR Future<Void> recoverFrom(Reference<MasterData> self,
 			when(Standalone<CommitTransactionRef> _req = wait(provisional)) {
 				state Standalone<CommitTransactionRef> req = _req; // mutable
 				TEST(true); // Emergency transaction processing during recovery
-				FORK_SIMULATION(true, "Emergency transaction processing during recovery");
+				// FORK_SIMULATION(true, "Emergency transaction processing during recovery");
 				TraceEvent("EmergencyTransaction", self->dbgid).log();
 				for (auto m = req.mutations.begin(); m != req.mutations.end(); ++m)
 					TraceEvent("EmergencyTransactionMutation", self->dbgid)
@@ -2068,7 +2068,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 					    .detail("MyToken", lifetime.toString())
 					    .detail("CurrentToken", db->get().masterLifetime.toString());
 					TEST(true); // Master replaced, dying
-					FORK_SIMULATION(true, "Master replaced, dying");
+					// FORK_SIMULATION(true, "Master replaced, dying");
 					if (BUGGIFY)
 						wait(delay(5));
 					throw worker_removed();
