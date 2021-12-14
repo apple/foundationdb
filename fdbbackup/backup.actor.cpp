@@ -22,6 +22,7 @@
 #include "fdbbackup/BackupTLSConfig.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/Arena.h"
+#include "flow/ArgParseUtil.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
 #define BOOST_DATE_TIME_NO_LIB
@@ -3462,15 +3463,14 @@ int main(int argc, char* argv[]) {
 				traceLogGroup = args->OptionArg();
 				break;
 			case OPT_LOCALITY: {
-				std::string syn = args->OptionSyntax();
-				if (!StringRef(syn).startsWith(LiteralStringRef("--locality_")) &&
-				    !StringRef(syn).startsWith(LiteralStringRef("--locality-"))) {
-					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", syn.c_str());
+				Optional<std::string> localityKey = extractPrefixedArgument("--locality", args->OptionSyntax());
+				if (!localityKey.present()) {
+					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", args->OptionSyntax());
 					return FDB_EXIT_ERROR;
 				}
-				syn = syn.substr(11);
-				std::transform(syn.begin(), syn.end(), syn.begin(), ::tolower);
-				localities.set(Standalone<StringRef>(syn), Standalone<StringRef>(std::string(args->OptionArg())));
+				Standalone<StringRef> key = StringRef(localityKey.get());
+				std::transform(key.begin(), key.end(), mutateString(key), ::tolower);
+				localities.set(key, Standalone<StringRef>(std::string(args->OptionArg())));
 				break;
 			}
 			case OPT_EXPIRE_BEFORE_DATETIME:
@@ -3530,14 +3530,12 @@ int main(int argc, char* argv[]) {
 				dstOnly.set(true);
 				break;
 			case OPT_KNOB: {
-				std::string syn = args->OptionSyntax();
-				if (!StringRef(syn).startsWith(LiteralStringRef("--knob_")) &&
-				    !!StringRef(syn).startsWith(LiteralStringRef("--knob-"))) {
-					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
+				Optional<std::string> knobName = extractPrefixedArgument("--knob", args->OptionSyntax());
+				if (!knobName.present()) {
+					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", args->OptionSyntax());
 					return FDB_EXIT_ERROR;
 				}
-				syn = syn.substr(7);
-				knobs.emplace_back(syn, args->OptionArg());
+				knobs.emplace_back(knobName.get(), args->OptionArg());
 				break;
 			}
 			case OPT_BACKUPKEYS:

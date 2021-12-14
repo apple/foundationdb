@@ -63,6 +63,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/pubsub.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
@@ -1071,48 +1072,42 @@ private:
 				flushAndExit(FDB_EXIT_SUCCESS);
 				break;
 			case OPT_KNOB: {
-				std::string syn = args.OptionSyntax();
-				if (!StringRef(syn).startsWith(LiteralStringRef("--knob_")) &&
-				    !StringRef(syn).startsWith(LiteralStringRef("--knob-"))) {
-					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
+				Optional<std::string> knobName = extractPrefixedArgument("--knob", args.OptionSyntax());
+				if (!knobName.present()) {
+					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", args.OptionSyntax());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
-				syn = syn.substr(7);
-				knobs.emplace_back(syn, args.OptionArg());
-				manualKnobOverrides[syn] = args.OptionArg();
+				knobs.emplace_back(knobName.get(), args.OptionArg());
+				manualKnobOverrides[knobName.get()] = args.OptionArg();
 				break;
 			}
 			case OPT_PROFILER: {
-				std::string syn = args.OptionSyntax();
-				std::string_view key = syn;
-				if (key.find("--profiler_"sv) != 0 && key.find("--profiler-"sv != 0)) {
-					fprintf(stderr, "ERROR: unable to parse profiler option '%s'\n", syn.c_str());
+				Optional<std::string> profilerArg = extractPrefixedArgument("--profiler", args.OptionSyntax());
+				if (!profilerArg.present()) {
+					fprintf(stderr, "ERROR: unable to parse profiler option '%s'\n", args.OptionSyntax());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
-				key.remove_prefix("--profiler-"sv.size());
-				profilerConfig.emplace(key, args.OptionArg());
+				profilerConfig.emplace(profilerArg.get(), args.OptionArg());
 				break;
 			};
 			case OPT_UNITTESTPARAM: {
-				std::string syn = args.OptionSyntax();
-				if (!StringRef(syn).startsWith(LiteralStringRef("--test_")) &&
-				    !StringRef(syn).startsWith(LiteralStringRef("--test-"))) {
-					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
+				Optional<std::string> testArg = extractPrefixedArgument("--test", args.OptionSyntax());
+				if (!testArg.present()) {
+					fprintf(stderr, "ERROR: unable to parse unit test option '%s'\n", args.OptionSyntax());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
-				testParams.set(syn.substr(7), args.OptionArg());
+				testParams.set(testArg.get(), args.OptionArg());
 				break;
 			}
 			case OPT_LOCALITY: {
-				std::string syn = args.OptionSyntax();
-				if (!StringRef(syn).startsWith(LiteralStringRef("--locality_")) &&
-				    !StringRef(syn).startsWith(LiteralStringRef("--locality-"))) {
-					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", syn.c_str());
+				Optional<std::string> localityKey = extractPrefixedArgument("--locality", args.OptionSyntax());
+				if (!localityKey.present()) {
+					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", args.OptionSyntax());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
-				syn = syn.substr(11);
-				std::transform(syn.begin(), syn.end(), syn.begin(), ::tolower);
-				localities.set(Standalone<StringRef>(syn), Standalone<StringRef>(std::string(args.OptionArg())));
+				Standalone<StringRef> key = StringRef(localityKey.get());
+				std::transform(key.begin(), key.end(), mutateString(key), ::tolower);
+				localities.set(key, Standalone<StringRef>(std::string(args.OptionArg())));
 				break;
 			}
 			case OPT_VERSION:

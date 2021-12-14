@@ -42,6 +42,7 @@
 #include "fdbclient/Tuple.h"
 
 #include "fdbclient/ThreadSafeTransaction.h"
+#include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/FastRef.h"
 #include "flow/Platform.h"
@@ -1518,14 +1519,12 @@ struct CLIOptions {
 			traceFormat = args.OptionArg();
 			break;
 		case OPT_KNOB: {
-			std::string syn = args.OptionSyntax();
-			if (!StringRef(syn).startsWith(LiteralStringRef("--knob_")) &&
-			    !!StringRef(syn).startsWith(LiteralStringRef("--knob-"))) {
-				fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
+			Optional<std::string> knobName = extractPrefixedArgument("--knob", args.OptionSyntax());
+			if (!knobName.present()) {
+				fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", args.OptionSyntax());
 				return FDB_EXIT_ERROR;
 			}
-			syn = syn.substr(7);
-			knobs.emplace_back(syn, args.OptionArg());
+			knobs.emplace_back(knobName.get(), args.OptionArg());
 			break;
 		}
 		case OPT_DEBUG_TLS:
