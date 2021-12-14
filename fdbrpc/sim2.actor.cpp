@@ -520,13 +520,27 @@ public:
 		fds.insert(std::make_pair(res, OpenFile(file->second, flags)));
 		return res;
 	}
-	void deleteFile(std::string const& path) { files.erase(path); }
+	void deleteFile(std::string const& path) {
+		files.erase(path);
+	}
+	void renameFile(std::string const& from, std::string const& to) {
+		auto f = files.find(from);
+		if (f == files.end()) {
+			// source doesn't exist
+			throw io_error();
+		}
+		auto p = files.insert(std::make_pair(to, f->second));
+		if (!p.second) {
+			// destination already exists
+			throw io_error();
+		}
+		files.erase(f);
+	}
 	ssize_t read(int fd, void* buf, size_t nbyte) {
 		ASSERT(fd > 0);
 		auto& f = fds.at(fd);
-		if (f.offset >= f.data->size())
-			return 0;
-		auto res = std::max(nbyte, size_t(f.data->size() - f.offset));
+		if (f.offset >= f.data->size()) return 0;
+		auto res = std::min(nbyte, size_t(f.data->size() - f.offset));
 		memcpy(buf, f.data->data() + f.offset, res);
 		f.offset += res;
 		return res;
@@ -897,7 +911,11 @@ private:
 				    .detail("To", self->filename)
 				    .detail("SourceCount", machineCache.count(sourceFilename))
 				    .detail("FileCount", machineCache.count(self->filename));
-				renameFile(sourceFilename.c_str(), self->filename.c_str());
+				if (FLOW_KNOBS->SIM_FUZZER) {
+					SimpleInMemoryFileSystem()->renameFile(sourceFilename, self->filename);
+				} else {
+					renameFile(sourceFilename.c_str(), self->filename.c_str());
+				}
 
 				machineCache[self->filename] = machineCache[sourceFilename];
 				machineCache.erase(sourceFilename);
@@ -2762,7 +2780,11 @@ Future<Void> Sim2FileSystem::deleteFile(const std::string& filename, bool mustBe
 
 ACTOR Future<Void> renameFileImpl(std::string from, std::string to) {
 	wait(delay(0.5 * deterministicRandom()->random01()));
-	::renameFile(from, to);
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		SimpleInMemoryFileSystem()->renameFile(from, to);
+	} else {
+		::renameFile(from, to);
+	}
 	wait(delay(0.5 * deterministicRandom()->random01()));
 	return Void();
 }
