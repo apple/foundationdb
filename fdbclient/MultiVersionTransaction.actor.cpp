@@ -30,7 +30,6 @@
 #include "flow/UnitTest.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include <_types/_uint8_t.h>
 
 #ifdef FDBCLIENT_NATIVEAPI_ACTOR_H
 #error "MVC should not depend on the Native API"
