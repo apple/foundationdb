@@ -2333,6 +2333,7 @@ public:
 				    .detail("NewSeed", new_seed)
 				    .detail("ProcessId", pid)
 				    .detail("Context", context);
+				return 0;
 			} else if (processId < 0) {
 				return EXIT_FAILURE;
 			} else { // parent process
