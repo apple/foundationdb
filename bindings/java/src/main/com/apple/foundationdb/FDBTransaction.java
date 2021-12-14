@@ -102,9 +102,9 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		}
 
 		@Override
-		public CompletableFuture<List<KeyValue>> getRangeWithPredicate(byte[] begin, byte[] end, byte[] predicate,
-		                                                               boolean reverse) {
-			return getRangeWithPredicate_internal(begin, end, predicate, true, reverse);
+		public CompletableFuture<List<KeyValue>> getRangeWithPredicate(byte[] begin, byte[] end, byte[] predicate_name,
+		                                                               byte[][] predicate_args) {
+			return getRangeWithPredicate_internal(begin, end, predicate_name, predicate_args, true);
 		}
 
 		///////////////////
@@ -332,15 +332,17 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		}
 	}
 
-	private CompletableFuture<List<KeyValue>> getRangeWithPredicate_internal(byte[] begin, byte[] end, byte[] predicate,
-	                                                                         boolean isSnapshot, boolean reverse) {
+	private CompletableFuture<List<KeyValue>> getRangeWithPredicate_internal(byte[] begin, byte[] end,
+	                                                                         byte[] predicate_name,
+	                                                                         byte[][] predicate_args,
+	                                                                         boolean isSnapshot) {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
 		}
 		pointerReadLock.lock();
 		try {
 			FutureResults range = new FutureResults(
-			    Transaction_getRangeWithPredicate(getPtr(), begin, end, predicate, isSnapshot, reverse),
+			    Transaction_getRangeWithPredicate(getPtr(), begin, end, predicate_name, predicate_args, isSnapshot),
 			    FDB.instance().isDirectBufferQueriesEnabled(), executor, eventKeeper);
 			return range.thenApply(result -> result.get().values).whenComplete((result, e) -> range.close());
 		} finally {
@@ -388,9 +390,9 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	@Override
-	public CompletableFuture<List<KeyValue>> getRangeWithPredicate(byte[] begin, byte[] end, byte[] predicate,
-	                                                               boolean reverse) {
-		return getRangeWithPredicate_internal(begin, end, predicate, false, reverse);
+	public CompletableFuture<List<KeyValue>> getRangeWithPredicate(byte[] begin, byte[] end, byte[] predicate_name,
+	                                                               byte[][] predicate_args) {
+		return getRangeWithPredicate_internal(begin, end, predicate_name, predicate_args, false);
 	}
 
 	///////////////////
@@ -837,8 +839,8 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	private native long Transaction_getKey(long cPtr, byte[] key, boolean orEqual, int offset, boolean isSnapshot);
 
-	private native long Transaction_getRangeWithPredicate(long cPtr, byte[] begin, byte[] end, byte[] predicate,
-	                                                      boolean snapshot, boolean reverse);
+	private native long Transaction_getRangeWithPredicate(long cPtr, byte[] begin, byte[] end, byte[] predicate_name,
+	                                                      byte[][] predicate_args, boolean snapshot);
 
 	private native long Transaction_getRange(long cPtr,
 			byte[] keyBegin, boolean orEqualBegin, int offsetBegin,

@@ -308,8 +308,10 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_with_predicate
                                                                                  int end_key_name_length,
                                                                                  uint8_t const* predicate_name,
                                                                                  int predicate_name_length,
-                                                                                 fdb_bool_t snapshot,
-                                                                                 fdb_bool_t reverse);
+                                                                                 uint8_t const** predicate_args,
+                                                                                 int* predicate_arg_lengths,
+                                                                                 int predicate_arg_count,
+                                                                                 fdb_bool_t snapshot);
 
 DLLEXPORT void fdb_transaction_set(FDBTransaction* tr,
                                    uint8_t const* key_name,

@@ -81,6 +81,5 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 	private boolean enableDirectBufferQueries = false;
 
 	private native RangeResult FutureResults_get(long cPtr) throws FDBException;
-	private native boolean FutureResults_getDirect(long cPtr, ByteBuffer buffer, int capacity)
-		throws FDBException;
+	private native void FutureResults_getDirect(long cPtr, ByteBuffer buffer, int capacity) throws FDBException;
 }

@@ -19,20 +19,8 @@
  */
 package com.apple.foundationdb;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.atomic.AtomicReference;
 
-import com.apple.foundationdb.async.AsyncIterable;
-import com.apple.foundationdb.async.AsyncUtil;
-import com.apple.foundationdb.tuple.ByteArrayUtil;
-import com.apple.foundationdb.tuple.Tuple;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -62,8 +50,10 @@ class GetRangeWithPredicateTest {
 		try (Database db = fdb.open()) {
 			db.run(tr -> {
 				try {
-					tr.getRangeWithPredicate(new byte[] {}, new byte[] {}, new byte[] {}, false).join();
-					Assertions.assertTrue(false);
+					List<KeyValue> result =
+					    tr.getRangeWithPredicate("bar".getBytes(), "foo".getBytes(), "predicate".getBytes(),
+					                             new byte[][] { "arg1".getBytes(), "arg2".getBytes() })
+					        .join();
 				} catch (Exception e) {
 					e.printStackTrace();
 				}

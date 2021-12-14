@@ -27,6 +27,7 @@
 class IReadPredicate : public ReferenceCounted<IReadPredicate> {
 public:
 	virtual Optional<KeyValueRef> apply(Arena& ar, const KeyValueRef& input, bool mustClone) const = 0;
+	virtual ~IReadPredicate() {}
 };
 
 Reference<IReadPredicate> createReadPredicate(StringRef name, VectorRef<StringRef> predicateArgs);

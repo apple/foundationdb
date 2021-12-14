@@ -245,17 +245,17 @@ public interface ReadTransaction extends ReadTransactionContext {
 	AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end);
 
 	/**
-	 * Applies a predicate to a key range and returns the result.  The begin
-	 *  and end keys are specified by {@code byte[]} arrays, with the begin
-	 *  key inclusive and the end key exclusive.
+	 * Applies a predicate to a key range and returns the result. The begin
+	 * and end keys are specified by {@code byte[]} arrays, with the begin
+	 * key inclusive and the end key exclusive.
 	 *
 	 * @param begin the beginning of the range (inclusive)
-	 * @param end the end of the range (exclusive)
+	 * @param end   the end of the range (exclusive)
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
-	CompletableFuture<List<KeyValue>> getRangeWithPredicate(byte[] begin, byte[] end, byte[] predicate,
-	                                                        boolean reverse);
+	CompletableFuture<List<KeyValue>> getRangeWithPredicate(byte[] begin, byte[] end, byte[] predicate_name,
+	                                                        byte[][] predicate_args);
 
 	/**
 	 * Gets an ordered range of keys and values from the database.  The begin

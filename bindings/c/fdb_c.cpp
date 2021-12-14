@@ -20,6 +20,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include <cstdint>
+#include <string_view>
 #define FDB_API_VERSION 710
 #define FDB_INCLUDE_LEGACY_TYPES
 
@@ -578,16 +579,28 @@ FDBFuture* fdb_transaction_get_range_and_flat_map_impl(FDBTransaction* tr,
 	                    .extractPtr());
 }
 
-FDBFuture* fdb_transaction_get_range_with_predicate(FDBTransaction* tr,
-                                                    uint8_t const* begin_key_name,
-                                                    int begin_key_name_length,
-                                                    uint8_t const* end_key_name,
-                                                    int end_key_name_length,
-                                                    uint8_t const* predicate_name,
-                                                    int predicate_name_length,
-                                                    fdb_bool_t snapshot,
-                                                    fdb_bool_t reverse) {
-	// TODO(hackathon)
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_with_predicate(FDBTransaction* tr,
+                                                                                 uint8_t const* begin_key_name,
+                                                                                 int begin_key_name_length,
+                                                                                 uint8_t const* end_key_name,
+                                                                                 int end_key_name_length,
+                                                                                 uint8_t const* predicate_name,
+                                                                                 int predicate_name_length,
+                                                                                 uint8_t const** predicate_args,
+                                                                                 int* predicate_arg_lengths,
+                                                                                 int predicate_arg_count,
+                                                                                 fdb_bool_t snapshot) {
+	std::cout << "begin     " << std::string_view{ (const char*)begin_key_name, size_t(begin_key_name_length) }
+	          << std::endl;
+	std::cout << "end       " << std::string_view{ (const char*)end_key_name, size_t(end_key_name_length) }
+	          << std::endl;
+	std::cout << "predicate " << std::string_view{ (const char*)predicate_name, size_t(predicate_name_length) }
+	          << std::endl;
+	std::cout << "predicate arg count " << predicate_arg_count << std::endl;
+	for (int i = 0; i < predicate_arg_count; ++i) {
+		std::cout << "arg[" << i << "]  "
+		          << std::string_view{ (const char*)predicate_args[i], size_t(predicate_arg_lengths[i]) } << std::endl;
+	}
 	return TSAV_ERROR(Standalone<RangeResultRef>, end_of_stream);
 }
 
