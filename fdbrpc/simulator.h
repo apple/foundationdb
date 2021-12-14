@@ -455,7 +455,8 @@ public:
 
 	virtual void crashAfter(double t) = 0;
 	virtual void terminateAfter(double t) = 0;
-
+	virtual int forkSearch(const char* context) = 0;
+	virtual void reproduceForkSearch(int randomSeed) = 0;
 protected:
 	Mutex mutex;
 
@@ -514,7 +515,4 @@ public:
 #endif
 };
 
-extern int forkSearchDepth;
-int forkSearch();
-void reproduceForkSearch(int randomSeed);
 #endif

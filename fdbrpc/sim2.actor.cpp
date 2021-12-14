@@ -448,6 +448,8 @@ private:
 #define _chsize ::ftruncate
 #define O_BINARY 0
 
+#include <unistd.h>
+#include <sys/wait.h>
 #else
 #error How do i open a file on a new platform?
 #endif
@@ -495,6 +497,7 @@ class SimpleInMemoryFileSystemT {
 	std::unordered_map<std::string, FileMemoryPtr> files;
 	std::unordered_map<int, OpenFile> fds;
 	int lastError = 0;
+
 public:
 	int open(std::string path, int flags) {
 		auto file = files.find(path);
@@ -517,13 +520,12 @@ public:
 		fds.insert(std::make_pair(res, OpenFile(file->second, flags)));
 		return res;
 	}
-	void deleteFile(std::string const& path) {
-		files.erase(path);
-	}
+	void deleteFile(std::string const& path) { files.erase(path); }
 	ssize_t read(int fd, void* buf, size_t nbyte) {
 		ASSERT(fd > 0);
 		auto& f = fds.at(fd);
-		if (f.offset >= f.data->size()) return 0;
+		if (f.offset >= f.data->size())
+			return 0;
 		auto res = std::max(nbyte, size_t(f.data->size() - f.offset));
 		memcpy(buf, f.data->data() + f.offset, res);
 		f.offset += res;
@@ -568,7 +570,10 @@ public:
 		}
 		return f.offset;
 	}
-	int fsync(int fd) { ASSERT(fd > 0); return 0; }
+	int fsync(int fd) {
+		ASSERT(fd > 0);
+		return 0;
+	}
 	int error() { return lastError; }
 };
 
@@ -699,7 +704,7 @@ public:
 	}
 
 private:
-  Reference<ISimpleFile> file;
+	Reference<ISimpleFile> file;
 
 	// Performance parameters of simulated disk
 	Reference<DiskParameters> diskParameters;
@@ -2288,6 +2293,60 @@ public:
 		dieWhenTerminate = false;
 	}
 
+	int forkSearch(const char* context = "") override {
+#if defined(_WIN32)
+		printf("start fork...");
+		return 0;
+#elif defined(__unixish__)
+		if (forkSearchDepth > 0) { // now only allow 1
+			return 0;
+		}
+		std::string parentGroup = getTraceLogGroup();
+		pid_t processId;
+		int status;
+		for (int i = 0; i < forkSearchTimes; ++i) {
+			if ((processId = fork()) == 0) { // child process
+				++forkSearchDepth;
+				int pid = getpid();
+				int new_seed = platform::getRandomSeed(); // non-deterministic seed
+				// TODO: do something to record the seed in order to replay
+
+				std::string childLogGroup = parentGroup + "/" + std::to_string(pid); // format to still be finalized
+				startChildTraceLog(childLogGroup);
+				deterministicRandom()->reseed(new_seed);
+				TraceEvent("ChildProcessStarted")
+				    .detail("NewSeed", new_seed)
+				    .detail("ProcessId", pid)
+				    .detail("Context", context);
+			} else if (processId < 0) {
+				return EXIT_FAILURE;
+			} else { // parent process
+				if (waitpid(processId, &status, 0) == -1) {
+					terminateChildTraceLog();
+					return EXIT_FAILURE;
+				}
+
+				// report according to exit status
+				if (WIFEXITED(status)) {
+					auto exitCode = WEXITSTATUS(status);
+					TraceEvent(exitCode == 0 ? SevInfo : SevError, "ChildProcessReturned").detail("ExitCode", exitCode).backtrace();
+				} else if (WIFSIGNALED(status)) { // child crash
+					try {
+						TraceEvent(SevError, "ChildProcessCrashed").log();
+						ASSERT(false);
+					} catch (Error&) {}
+				}
+				terminateChildTraceLog();
+			}
+		}
+		return 0;
+#else
+#error no support now
+#endif
+	}
+
+	// no fork but just use the same new seed as forked process
+	void reproduceForkSearch(int seed) override { deterministicRandom()->reseed(seed); }
 	// time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	// time should only be modified from the main thread.
 	double time;
@@ -2318,6 +2377,8 @@ public:
 	bool printSimTime;
 	double terminateAt = -1.0;
 	bool dieWhenTerminate = false;
+	int forkSearchDepth = 0;
+	int forkSearchTimes = 4;
 
 private:
 	MockDNS mockDNS;
@@ -2727,61 +2788,4 @@ ActorLineageSet& Sim2FileSystem::getActorLineageSet() {
 
 void Sim2FileSystem::newFileSystem() {
 	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Sim2FileSystem());
-}
-
-int forkSearchDepth = 0;
-int forkSearchTimes = 4;
-#if defined(_WIN32)
-int forkSearch() {
-	printf("start fork...");
-	return 0;
-}
-#elif defined(__unixish__)
-#include <unistd.h>
-#include <sys/wait.h>
-int forkSearch() {
-	if(forkSearchDepth > 0) { // now only allow 1
-		return 0;
-	}
-	std::string parentGroup; // = getLogGroup();
-	pid_t processId;
-	int status;
-	for(int i = 0; i < forkSearchTimes; ++ i) {
-		if ((processId = fork()) == 0) { // child process
-			forkSearchDepth ++;
-			int pid = getpid();
-			std::string childLogGroup = parentGroup + "/" + std::to_string(pid); // format to still be finalized
-			// startForkProcessLog(childLogGroup);
-			int new_seed = platform::getRandomSeed(); // non-deterministic seed
-			// TODO: do something to record the seed in order to replay
-			deterministicRandom()->reseed(new_seed);
-		} else if (processId < 0) {
-			perror("----- fork error");
-			return EXIT_FAILURE;
-		} else { // parent process
-			if (waitpid(processId, &status, 0) == -1) {
-				perror("----- waitpid error");
-				return EXIT_FAILURE;
-			}
-
-			// report according to exit status
-			if(WIFEXITED(status)) {
-				if(WEXITSTATUS(status) > 0) { // abnormal exit
-
-				}
-			}
-			else if(WIFSIGNALED(status)) { // abnormal exit
-
-			}
-
-		}
-	}
-
-}
-#else
-#error no support now
-#endif
-// no fork but just use the same new seed as forked process
-void reproduceForkSearch(int seed) {
-	deterministicRandom()->reseed(seed);
 }

@@ -68,15 +68,17 @@
 		(void)__test;                                                                                                  \
 	}
 
-#define FORK_SIMULATION(condition)                                                                                     \
+#define FORK_SIMULATION(condition, context)                                                                            \
 	if (!(condition)) {                                                                                                \
-	} else if (FLOW_KNOBS->SIM_FUZZER) {                                                                               \
+	} else if (FLOW_KNOBS->SIM_FUZZER && g_network->isSimulated()) {                                                   \
 		static TraceEvent* __test = &(TraceEvent("ForkSimulation")                                                     \
 		                                  .detail("File", __FILE__)                                                    \
 		                                  .detail("Line", __LINE__)                                                    \
 		                                  .detail("Condition", #condition));                                           \
 		(void)__test;                                                                                                  \
-		forkSearch();                                                                                                  \
+		if (g_simulator.forkSearch(context)) {                                                                        \
+			TraceEvent("ForkSimulationFailed").log();                                                                  \
+		}                                                                                                              \
 	}
 /*
 usage:
