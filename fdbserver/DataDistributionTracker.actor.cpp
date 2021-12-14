@@ -361,7 +361,7 @@ ACTOR Future<Void> readHotDetector(DataDistributionTracker* self) {
 /*
 ACTOR Future<Void> extrapolateShardBytes( Reference<AsyncVar<Optional<int64_t>>> inBytes,
 Reference<AsyncVar<Optional<int64_t>>> outBytes ) { state std::deque< std::pair<double,int64_t> > past; loop { wait(
-inBytes->onChange() ); if( inBytes->get().present() ) { past.push_back( std::make_pair(now(),inBytes->get().get()) ); if
+inBytes->onChange() ); if( inBytes->get().present() ) { past.emplace_back(now(),inBytes->get().get()); if
 (past.size() < 2) outBytes->set( inBytes->get() ); else { while (past.size() > 1 && past.end()[-1].first -
 past.begin()[1].first > 1.0) past.pop_front(); double rate = std::max(0.0,
 double(past.end()[-1].second-past.begin()[0].second)/(past.end()[-1].first - past.begin()[0].first)); outBytes->set(
@@ -434,21 +434,23 @@ ACTOR Future<Void> changeSizes(DataDistributionTracker* self, KeyRange keys, int
 struct HasBeenTrueFor : ReferenceCounted<HasBeenTrueFor> {
 	explicit HasBeenTrueFor(const Optional<ShardMetrics>& value) {
 		if (value.present()) {
-			trigger = delayJittered(std::max(0.0,
-			                                 SERVER_KNOBS->DD_MERGE_COALESCE_DELAY +
-			                                     value.get().lastLowBandwidthStartTime - now()),
-			                        TaskPriority::DataDistributionLow) ||
-			          cleared.getFuture();
+			lowBandwidthStartTime = value.get().lastLowBandwidthStartTime;
+			trigger =
+			    delayJittered(std::max(0.0, SERVER_KNOBS->DD_MERGE_COALESCE_DELAY + lowBandwidthStartTime - now()),
+			                  TaskPriority::DataDistributionLow) ||
+			    cleared.getFuture();
 		}
 	}
 
 	Future<Void> set(double lastLowBandwidthStartTime) {
-		if (!trigger.isValid()) {
+		if (!trigger.isValid() || lowBandwidthStartTime != lastLowBandwidthStartTime) {
 			cleared = Promise<Void>();
 			trigger =
 			    delayJittered(SERVER_KNOBS->DD_MERGE_COALESCE_DELAY + std::max(lastLowBandwidthStartTime - now(), 0.0),
 			                  TaskPriority::DataDistributionLow) ||
 			    cleared.getFuture();
+
+			lowBandwidthStartTime = lastLowBandwidthStartTime;
 		}
 		return trigger;
 	}
@@ -458,12 +460,14 @@ struct HasBeenTrueFor : ReferenceCounted<HasBeenTrueFor> {
 		}
 		trigger = Future<Void>();
 		cleared.send(Void());
+		lowBandwidthStartTime = 0;
 	}
 
 	// True if this->value is true and has been true for this->seconds
 	bool hasBeenTrueForLongEnough() const { return trigger.isValid() && trigger.isReady(); }
 
 private:
+	double lowBandwidthStartTime = 0;
 	Future<Void> trigger;
 	Promise<Void> cleared;
 };

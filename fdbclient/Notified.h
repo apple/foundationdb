@@ -38,7 +38,7 @@ struct Notified {
 		if (val >= limit)
 			return Void();
 		Promise<Void> p;
-		waiting.push(std::make_pair(limit, p));
+		waiting.emplace(limit, p);
 		return p.getFuture();
 	}
 

@@ -895,35 +895,48 @@ static std::string recordValue(const int i) {
 	return Tuple().append(dataOfRecord(i)).pack().toString();
 }
 
-TEST_CASE("fdb_transaction_get_range_and_flat_map") {
+std::map<std::string, std::string> fillInRecords(int n) {
 	// Note: The user requested `prefix` should be added as the first element of the tuple that forms the key, rather
 	// than the prefix of the key. So we don't use key() or create_data() in this test.
 	std::map<std::string, std::string> data;
-	for (int i = 0; i < 3; i++) {
+	for (int i = 0; i < n; i++) {
 		data[indexEntryKey(i)] = EMPTY;
 		data[recordKey(i)] = recordValue(i);
 	}
 	insert_data(db, data);
+	return data;
+}
+
+GetRangeResult getIndexEntriesAndMap(int beginId, int endId, fdb::Transaction& tr) {
+	std::string indexEntryKeyBegin = indexEntryKey(beginId);
+	std::string indexEntryKeyEnd = indexEntryKey(endId);
 
 	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).pack().toString();
+
+	return get_range_and_flat_map(
+	    tr,
+	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKeyBegin.c_str(), indexEntryKeyBegin.size()),
+	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKeyEnd.c_str(), indexEntryKeyEnd.size()),
+	    (const uint8_t*)mapper.c_str(),
+	    mapper.size(),
+	    /* limit */ 0,
+	    /* target_bytes */ 0,
+	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+	    /* iteration */ 0,
+	    /* snapshot */ true,
+	    /* reverse */ 0);
+}
+
+TEST_CASE("fdb_transaction_get_range_and_flat_map") {
+	fillInRecords(20);
 
 	fdb::Transaction tr(db);
 	// get_range_and_flat_map is only support without RYW. This is a must!!!
 	fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
 	while (1) {
-		auto result = get_range_and_flat_map(
-		    tr,
-		    // [0, 1]
-		    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKey(0).c_str(), indexEntryKey(0).size()),
-		    FDB_KEYSEL_FIRST_GREATER_THAN((const uint8_t*)indexEntryKey(1).c_str(), indexEntryKey(1).size()),
-		    (const uint8_t*)mapper.c_str(),
-		    mapper.size(),
-		    /* limit */ 0,
-		    /* target_bytes */ 0,
-		    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
-		    /* iteration */ 0,
-		    /* snapshot */ true,
-		    /* reverse */ 0);
+		int beginId = 1;
+		int endId = 19;
+		auto result = getIndexEntriesAndMap(beginId, endId, tr);
 
 		if (result.err) {
 			fdb::EmptyFuture f1 = tr.on_error(result.err);
@@ -931,26 +944,26 @@ TEST_CASE("fdb_transaction_get_range_and_flat_map") {
 			continue;
 		}
 
-		// Only the first 2 records are supposed to be returned.
-		if (result.kvs.size() < 2) {
-			CHECK(result.more);
-			// Retry.
-			continue;
-		}
-
-		CHECK(result.kvs.size() == 2);
+		int expectSize = endId - beginId;
+		CHECK(result.kvs.size() == expectSize);
 		CHECK(!result.more);
-		for (int i = 0; i < 2; i++) {
+
+		int id = beginId;
+		for (int i = 0; i < result.kvs.size(); i++, id++) {
 			const auto& [key, value] = result.kvs[i];
-			std::cout << "result[" << i << "]: key=" << key << ", value=" << value << std::endl;
-			// OUTPUT:
-			// result[0]: key=fdbRECORDprimary-key-of-record-00000000, value=data-of-record-00000000
-			// result[1]: key=fdbRECORDprimary-key-of-record-00000001, value=data-of-record-00000001
-			CHECK(recordKey(i).compare(key) == 0);
-			CHECK(recordValue(i).compare(value) == 0);
+			CHECK(recordKey(id).compare(key) == 0);
+			CHECK(recordValue(id).compare(value) == 0);
 		}
 		break;
 	}
+}
+
+TEST_CASE("fdb_transaction_get_range_and_flat_map get_key_values_and_map_has_more") {
+	fillInRecords(2000);
+	fdb::Transaction tr(db);
+	fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+	auto result = getIndexEntriesAndMap(100, 1900, tr);
+	CHECK(result.err == error_code_get_key_values_and_map_has_more);
 }
 
 TEST_CASE("fdb_transaction_get_range_and_flat_map_restricted_to_snapshot") {

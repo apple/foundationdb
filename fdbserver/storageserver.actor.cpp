@@ -92,6 +92,7 @@ bool canReplyWith(Error e) {
 	case error_code_quick_get_key_values_has_more:
 	case error_code_quick_get_value_miss:
 	case error_code_quick_get_key_values_miss:
+	case error_code_get_key_values_and_map_has_more:
 		// case error_code_all_alternatives_failed:
 		return true;
 	default:
@@ -1931,6 +1932,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					  // server, also check that the stream is closed
 					when(wait(req.end == std::numeric_limits<Version>::max() ? Future<Void>(Never())
 					                                                         : data->version.whenAtLeast(req.end))) {}
+					when(wait(delay(5.0))) {} // TODO REMOVE this once empty version logic is fully implemented
 				}
 				auto feed = data->uidChangeFeed.find(req.rangeID);
 				if (feed == data->uidChangeFeed.end() || feed->second->removing) {
@@ -2072,21 +2074,30 @@ void merge(Arena& arena,
 	}
 }
 
-ACTOR Future<Optional<Value>> quickGetValue(StorageServer* data, StringRef key, Version version) {
+ACTOR Future<Optional<Value>> quickGetValue(StorageServer* data,
+                                            StringRef key,
+                                            Version version,
+                                            // To provide span context, tags, debug ID to underlying lookups.
+                                            GetKeyValuesAndFlatMapRequest* pOriginalReq) {
 	if (data->shards[key]->isReadable()) {
 		try {
 			// TODO: Use a lower level API may be better? Or tweak priorities?
-			GetValueRequest req(Span().context, key, version, Optional<TagSet>(), Optional<UID>());
-			data->actors.add(data->readGuard(req, getValueQ));
+			GetValueRequest req(pOriginalReq->spanContext, key, version, pOriginalReq->tags, pOriginalReq->debugID);
+			// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
+			// original request level, rather than individual underlying lookups. The reason is that throttle any
+			// individual underlying lookup will fail the original request, which is not productive.
+			data->actors.add(getValueQ(data, req));
 			GetValueReply reply = wait(req.reply.getFuture());
-			++data->counters.quickGetValueHit;
-			return reply.value;
+			if (!reply.error.present()) {
+				++data->counters.quickGetValueHit;
+				return reply.value;
+			}
+			// Otherwise fallback.
 		} catch (Error& e) {
 			// Fallback.
 		}
-	} else {
-		//	Fallback.
 	}
+	// Otherwise fallback.
 
 	++data->counters.quickGetValueMiss;
 	if (SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK) {
@@ -2588,22 +2599,33 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	return Void();
 }
 
-ACTOR Future<RangeResult> quickGetKeyValues(StorageServer* data, StringRef prefix, Version version) {
+ACTOR Future<RangeResult> quickGetKeyValues(StorageServer* data,
+                                            StringRef prefix,
+                                            Version version,
+                                            // To provide span context, tags, debug ID to underlying lookups.
+                                            GetKeyValuesAndFlatMapRequest* pOriginalReq) {
 	try {
 		// TODO: Use a lower level API may be better? Or tweak priorities?
 		GetKeyValuesRequest req;
-		req.spanContext = Span().context;
+		req.spanContext = pOriginalReq->spanContext;
 		req.arena = Arena();
 		req.begin = firstGreaterOrEqual(KeyRef(req.arena, prefix));
 		req.end = firstGreaterOrEqual(strinc(prefix, req.arena));
 		req.version = version;
+		req.tags = pOriginalReq->tags;
+		req.debugID = pOriginalReq->debugID;
 
-		data->actors.add(data->readGuard(req, getKeyValuesQ));
+		// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
+		// original request level, rather than individual underlying lookups. The reason is that throttle any individual
+		// underlying lookup will fail the original request, which is not productive.
+		data->actors.add(getKeyValuesQ(data, req));
 		GetKeyValuesReply reply = wait(req.reply.getFuture());
-		++data->counters.quickGetKeyValuesHit;
-
-		// Convert GetKeyValuesReply to RangeResult.
-		return RangeResult(RangeResultRef(reply.data, reply.more), reply.arena);
+		if (!reply.error.present()) {
+			++data->counters.quickGetKeyValuesHit;
+			// Convert GetKeyValuesReply to RangeResult.
+			return RangeResult(RangeResultRef(reply.data, reply.more), reply.arena);
+		}
+		// Otherwise fallback.
 	} catch (Error& e) {
 		// Fallback.
 	}
@@ -2801,9 +2823,16 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	return Void();
 }
 
-ACTOR Future<GetKeyValuesAndFlatMapReply> flatMap(StorageServer* data, GetKeyValuesReply input, StringRef mapper) {
+ACTOR Future<GetKeyValuesAndFlatMapReply> flatMap(StorageServer* data,
+                                                  GetKeyValuesReply input,
+                                                  StringRef mapper,
+                                                  // To provide span context, tags, debug ID to underlying lookups.
+                                                  GetKeyValuesAndFlatMapRequest* pOriginalReq) {
 	state GetKeyValuesAndFlatMapReply result;
 	result.version = input.version;
+	if (input.more) {
+		throw get_key_values_and_map_has_more();
+	}
 	result.more = input.more;
 	result.cached = input.cached;
 	result.arena.dependsOn(input.arena);
@@ -2821,7 +2850,7 @@ ACTOR Future<GetKeyValuesAndFlatMapReply> flatMap(StorageServer* data, GetKeyVal
 
 		if (isRangeQuery) {
 			// Use the mappedKey as the prefix of the range query.
-			RangeResult rangeResult = wait(quickGetKeyValues(data, mappedKey, input.version));
+			RangeResult rangeResult = wait(quickGetKeyValues(data, mappedKey, input.version, pOriginalReq));
 
 			if (rangeResult.more) {
 				// Probably the fan out is too large. The user should use the old way to query.
@@ -2832,7 +2861,7 @@ ACTOR Future<GetKeyValuesAndFlatMapReply> flatMap(StorageServer* data, GetKeyVal
 				result.data.emplace_back(result.arena, rangeResult[i].key, rangeResult[i].value);
 			}
 		} else {
-			Optional<Value> valueOption = wait(quickGetValue(data, mappedKey, input.version));
+			Optional<Value> valueOption = wait(quickGetValue(data, mappedKey, input.version, pOriginalReq));
 
 			if (valueOption.present()) {
 				Value value = valueOption.get();
@@ -2951,7 +2980,7 @@ ACTOR Future<Void> getKeyValuesAndFlatMapQ(StorageServer* data, GetKeyValuesAndF
 			state GetKeyValuesAndFlatMapReply r;
 			try {
 				// Map the scanned range to another list of keys and look up.
-				GetKeyValuesAndFlatMapReply _r = wait(flatMap(data, getKeyValuesReply, req.mapper));
+				GetKeyValuesAndFlatMapReply _r = wait(flatMap(data, getKeyValuesReply, req.mapper, &req));
 				r = _r;
 			} catch (Error& e) {
 				TraceEvent("FlatMapError").error(e);
@@ -5204,8 +5233,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			if (cloneCursor2->version().version > ver && cloneCursor2->version().version > data->version.get()) {
 				++data->counters.updateVersions;
 				if (data->currentChangeFeeds.size()) {
-					data->changeFeedVersions.push_back(std::make_pair(
-					    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver));
+					data->changeFeedVersions.emplace_back(
+					    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver);
 					updatedChangeFeeds.insert(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end());
 					data->currentChangeFeeds.clear();
 				}
@@ -5291,8 +5320,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		}
 		data->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeTLogMsgsUpdates);
 		if (data->currentChangeFeeds.size()) {
-			data->changeFeedVersions.push_back(std::make_pair(
-			    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver));
+			data->changeFeedVersions.emplace_back(
+			    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver);
 			updatedChangeFeeds.insert(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end());
 			data->currentChangeFeeds.clear();
 		}

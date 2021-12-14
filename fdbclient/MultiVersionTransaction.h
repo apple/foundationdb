@@ -512,6 +512,9 @@ private:
 	template <class T>
 	ThreadFuture<T> makeTimeout();
 
+	template <class T>
+	ThreadResult<T> abortableTimeoutResult(ThreadFuture<Void> abortSignal);
+
 	TransactionInfo transaction;
 
 	TransactionInfo getTransaction();
