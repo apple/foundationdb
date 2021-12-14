@@ -210,6 +210,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( ALLOCATION_TRACING_ENABLED,                         true );
 	init( SIM_SPEEDUP_AFTER_SECONDS,                           450 );
 	init( SIM_FUZZER,                                        true );
+	init( SIM_FUZZER_MAX_LOGS_SIZE,                            1e9 ); // 1GB
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
