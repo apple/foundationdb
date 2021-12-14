@@ -127,17 +127,19 @@ public:
 
 	RateCounter(std::string const& name, CounterCollection& collection);
 
-	void operator+=(Value delta);
-	void operator++() { *this += 1; }
+	// Add value for the current interval.
 	void add(Value delta);
-	void clear();
-	void setInterval(double deltaT);
-	void resetInterval() override;
+
+	// Set the the current duration, and complete the current interval.
+	void finishInterval(double interval);
+
+	void resetInterval() override {}
 
 	std::string const& getName() const override { return name; }
 
 	Value getIntervalDelta() const { return interval_delta; }
-	Value getValue() const override { return interval_start_value; }
+
+	Value getValue() const override { return sum; }
 
 	// Returns the avarage rate, i.e., (accumulated value) / (accumulated interval).
 	double getRate() const override;
@@ -149,8 +151,8 @@ public:
 
 private:
 	std::string name;
-	double interval, duration;
-	Value interval_delta, interval_start_value;
+	double duration;
+	Value interval_delta, sum;
 	Int64MetricHandle metric;
 };
 

@@ -71,7 +71,7 @@ void Counter::resetInterval() {
 	if (last_event == 0) {
 		last_event = interval_start;
 	}
-	 = last_event;
+	roughness_interval_start = last_event;
 }
 
 void Counter::clear() {
@@ -82,14 +82,9 @@ void Counter::clear() {
 }
 
 RateCounter::RateCounter(std::string const& name, CounterCollection& collection)
-  : name(name), interval(0), duration(0), interval_delta(0), interval_start_value(0) {
+  : name(name), duration(0), interval_delta(0), sum(0) {
 	metric.init(collection.name + "." + (char)toupper(name.at(0)) + name.substr(1), collection.id);
 	collection.counters.push_back(this);
-}
-
-void RateCounter::operator+=(Value delta) {
-	interval_delta += delta;
-	metric += delta;
 }
 
 void RateCounter::add(Value delta) {
@@ -97,35 +92,23 @@ void RateCounter::add(Value delta) {
 	metric += delta;
 }
 
+void RateCounter::finishInterval(double interval) {
+	if (interval == 0)
+		return;
+	sum += interval_delta;
+	interval_delta = 0;
+	duration += interval;
+}
+
 double RateCounter::getRate() const {
 	if (duration == 0.0)
 		return 0.0;
-	return interval_start_value / duration;
+	return sum / duration;
 }
 
 double RateCounter::getRoughness() const {
 	// TODO: Return the variance of the rates.
 	return 0;
-}
-
-void RateCounter::setInterval(double deltaT) {
-	interval = deltaT;
-}
-
-void RateCounter::resetInterval() {
-	if (interval == 0) return;
-	interval_start_value += interval_delta;
-	interval_delta = 0;
-	duration += interval;
-	interval = 0;
-}
-
-void RateCounter::clear() {
-	resetInterval();
-	interval_start_value = 0;
-	duration = 0;
-
-	metric = 0;
 }
 
 void CounterCollection::logToTraceEvent(TraceEvent& te) const {

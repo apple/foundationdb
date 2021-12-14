@@ -267,8 +267,10 @@ struct UpdateEagerReadInfo {
 		// SOMEDAY: Theoretically we can avoid a read if there is an earlier overlapping ClearRange
 		if (m.type == MutationRef::ClearRange && !m.param2.startsWith(systemKeys.end) &&
 		    SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS)
+			// If there is a clear range, we read the end key.
 			keyBegin.push_back(m.param2);
 		else if (m.type == MutationRef::CompareAndClear) {
+			// Read the key after clear end, also read the one to be compared.
 			if (SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS)
 				keyBegin.push_back(keyAfter(m.param1, arena));
 			if (keys.size() > 0 && keys.back().first == m.param1) {
@@ -278,8 +280,10 @@ struct UpdateEagerReadInfo {
 			} else {
 				keys.emplace_back(m.param1, m.param2.size() + 1);
 			}
-		} else if ((m.type == MutationRef::AppendIfFits) || (m.type == MutationRef::ByteMin) ||
-		           (m.type == MutationRef::ByteMax))
+		}
+		// Read the involved key for atomic mutations.
+		else if ((m.type == MutationRef::AppendIfFits) || (m.type == MutationRef::ByteMin) ||
+		         (m.type == MutationRef::ByteMax))
 			keys.emplace_back(m.param1, CLIENT_KNOBS->VALUE_SIZE_LIMIT);
 		else if (isAtomicOp((MutationRef::Type)m.type))
 			keys.emplace_back(m.param1, m.param2.size());
@@ -824,6 +828,8 @@ public:
 		Counter kvFetched;
 		// The throuput of the storage engine.
 		RateCounter kvThroughput;
+		RateCounter pTreeUpdateThroughput;
+		RateCounter storageUpdateThroughput;
 		Counter mutations, setMutations, clearRangeMutations, atomicMutations;
 		Counter updateBatches, updateVersions;
 		Counter loops;
@@ -837,6 +843,7 @@ public:
 		// fallback).
 		Counter quickGetValueHit, quickGetValueMiss, quickGetKeyValuesHit, quickGetKeyValuesMiss;
 
+		RateCounter kvReadRangeThroughput;
 		RateCounter kvReadThroughput;
 
 		LatencySample readLatencySample;
@@ -852,16 +859,18 @@ public:
 		    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), bytesFetched("BytesFetched", cc),
 		    mutationBytes("MutationBytes", cc), logicalInputBytes("LogicalInputBytes", cc),
 		    logicalMoveOverheadBytes("LogicalMoveOverheadBytes", cc), sampledBytesCleared("SampledBytesCleared", cc),
-		    kvFetched("KVFetched", cc), kvThroughput("KeyValueStoreThroughput", cc), mutations("Mutations", cc),
-		    setMutations("SetMutations", cc), clearRangeMutations("ClearRangeMutations", cc),
-		    atomicMutations("AtomicMutations", cc), updateBatches("UpdateBatches", cc),
-		    updateVersions("UpdateVersions", cc), loops("Loops", cc), fetchWaitingMS("FetchWaitingMS", cc),
-		    fetchWaitingCount("FetchWaitingCount", cc), fetchExecutingMS("FetchExecutingMS", cc),
-		    fetchExecutingCount("FetchExecutingCount", cc), readsRejected("ReadsRejected", cc),
-		    wrongShardServer("WrongShardServer", cc), fetchedVersions("FetchedVersions", cc),
-		    fetchesFromLogs("FetchesFromLogs", cc), quickGetValueHit("QuickGetValueHit", cc),
-		    quickGetValueMiss("QuickGetValueMiss", cc), quickGetKeyValuesHit("QuickGetKeyValuesHit", cc),
-		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc),
+		    kvFetched("KVFetched", cc), kvThroughput("KeyValueStoreThroughput", cc),
+		    pTreeUpdateThroughput("PTreeUpdateThroughput", cc), storageUpdateThroughput("StorageUpdateThroughput", cc),
+		    mutations("Mutations", cc), setMutations("SetMutations", cc),
+		    clearRangeMutations("ClearRangeMutations", cc), atomicMutations("AtomicMutations", cc),
+		    updateBatches("UpdateBatches", cc), updateVersions("UpdateVersions", cc), loops("Loops", cc),
+		    fetchWaitingMS("FetchWaitingMS", cc), fetchWaitingCount("FetchWaitingCount", cc),
+		    fetchExecutingMS("FetchExecutingMS", cc), fetchExecutingCount("FetchExecutingCount", cc),
+		    readsRejected("ReadsRejected", cc), wrongShardServer("WrongShardServer", cc),
+		    fetchedVersions("FetchedVersions", cc), fetchesFromLogs("FetchesFromLogs", cc),
+		    quickGetValueHit("QuickGetValueHit", cc), quickGetValueMiss("QuickGetValueMiss", cc),
+		    quickGetKeyValuesHit("QuickGetKeyValuesHit", cc), quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc),
+		    kvReadRangeThroughput("KVReadRangeThroughput", cc), kvReadThroughput("KVReadThroughput", cc),
 		    readLatencySample("ReadLatencyMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -1355,7 +1364,10 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			path = 1;
 		} else if (!i || !i->isClearTo() || i->getEndKey() <= req.key) {
 			path = 2;
+			state double startTime = now();
 			Optional<Value> vv = wait(data->storage.readValue(req.key, IKeyValueStore::ReadType::NORMAL, req.debugID));
+			data->counters.kvReadThroughput.add(vv.expectedSize());
+			data->counters.kvReadThroughput.finishInterval(now() - startTime);
 			// Validate that while we were reading the data we didn't lose the version or shard
 			if (version < data->storageVersion()) {
 				TEST(true); // transaction_too_old after readValue
@@ -1793,9 +1805,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    remainingDurableBytes));
 
 		if (!req.range.empty()) {
-			data->counters.kvReadThroughput += res.expectedSize();
-			data->counters.kvReadThroughput.setInterval(now() - startTime);
-			data->counters.kvReadThroughput.resetInterval();
+			data->counters.kvReadRangeThroughput.add(res.logicalSize());
+			data->counters.kvReadRangeThroughput.finishInterval(now() - startTime);
 			data->checkChangeCounter(changeCounter, req.range);
 		}
 
@@ -2204,8 +2215,11 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 
 			// Read the data on disk up to vCurrent (or the end of the range)
 			readEnd = vCurrent ? std::min(vCurrent.key(), range.end) : range.end;
+			state double startTime = now();
 			RangeResult atStorageVersion =
 			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
+			data->counters.kvReadRangeThroughput.add(atStorageVersion.logicalSize());
+			data->counters.kvReadRangeThroughput.finishInterval(now() - startTime);
 
 			ASSERT(atStorageVersion.size() <= limit);
 			if (data->storageVersion() > version)
@@ -2285,8 +2299,11 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 
 			readBegin = vCurrent ? std::max(vCurrent->isClearTo() ? vCurrent->getEndKey() : vCurrent.key(), range.begin)
 			                     : range.begin;
+			startTime = now();
 			RangeResult atStorageVersion =
 			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
+			data->counters.kvReadRangeThroughput.add(atStorageVersion.logicalSize());
+			data->counters.kvReadRangeThroughput.finishInterval(now() - startTime);
 
 			ASSERT(atStorageVersion.size() <= -limit);
 			if (data->storageVersion() > version)
@@ -5036,6 +5053,7 @@ ACTOR Future<Void> tssDelayForever() {
 
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double start;
+	state double updateBegin = 0;
 	try {
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of memory
 		// This is often referred to as the storage server e-brake (emergency brake)
@@ -5106,6 +5124,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			throw worker_removed();
 		}
 
+		updateBegin = now();
 		++data->counters.updateBatches;
 		data->lastTLogVersion = cursor->getMaxKnownVersion();
 		data->knownCommittedVersion = cursor->getMinKnownCommittedVersion();
@@ -5220,6 +5239,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			state int mutationNum = 0;
 			state VerUpdateRef* pUpdate = &fii.changes[changeNum];
 			for (; mutationNum < pUpdate->mutations.size(); mutationNum++) {
+				data->counters.pTreeUpdateThroughput.add(pUpdate->mutations[mutationNum].expectedSize());
 				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version, true);
 				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
 				// data->counters.mutationBytes or data->counters.mutations should not be updated because they should
@@ -5308,6 +5328,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					}
 
 					updater.applyMutation(data, msg, ver, false);
+					data->counters.pTreeUpdateThroughput.add(msg.expectedSize());
 					mutationBytes += msg.totalSize();
 					data->counters.mutationBytes += msg.totalSize();
 					data->counters.logicalInputBytes += msg.expectedSize();
@@ -5432,6 +5453,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 		validate(data);
 
+		data->counters.pTreeUpdateThroughput.finishInterval(now() - updateBegin);
+
 		data->logCursor->advanceTo(cloneCursor2->version());
 		if (cursor->version().version >= data->lastTLogVersion) {
 			if (data->behind) {
@@ -5455,6 +5478,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 }
 
 ACTOR Future<Void> updateStorage(StorageServer* data) {
+	state double updateBegin;
 	loop {
 		ASSERT(data->durableVersion.get() == data->storageVersion());
 		if (g_network->isSimulated()) {
@@ -5467,6 +5491,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		wait(data->desiredOldestVersion.whenAtLeast(data->storageVersion() + 1));
 		wait(delay(0, TaskPriority::UpdateStorage));
 
+		updateBegin = now();
 		state Promise<Void> durableInProgress;
 		data->durableInProgress = durableInProgress.getFuture();
 
@@ -5524,6 +5549,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
 		state double beforeStorageCommit = now();
+		data->counters.storageUpdateThroughput.add(data->counters.kvThroughput.getIntervalDelta());
 		state Future<Void> durable = data->storage.commit();
 		state Future<Void> durableDelay = Void();
 
@@ -5533,8 +5559,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME));
 		const double commitDuration = now() - beforeStorageCommit;
-		data->counters.kvThroughput.setInterval(commitDuration);
-		data->counters.kvThroughput.resetInterval();
+		data->counters.kvThroughput.finishInterval(commitDuration);
 		data->storageCommitLatencyHistogram->sampleSeconds(commitDuration);
 
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
@@ -5594,6 +5619,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		if (!data->fetchKeysBudgetUsed.get()) {
 			wait(durableDelay || data->fetchKeysBudgetUsed.onChange());
 		}
+		data->counters.storageUpdateThroughput.finishInterval(now() - updateBegin);
 	}
 }
 
@@ -5754,8 +5780,11 @@ ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
 	state int totalKeys = 0;
 	state int totalBytes = 0;
 	loop {
+		state double startTime = now();
 		RangeResult bs = wait(storage->readRange(
 		    KeyRangeRef(begin, end), SERVER_KNOBS->STORAGE_LIMIT_BYTES, SERVER_KNOBS->STORAGE_LIMIT_BYTES));
+		data->counters.kvReadRangeThroughput.add(bs.logicalSize());
+		data->counters.kvReadRangeThroughput.finishInterval(now() - startTime);
 		if (results)
 			results->push_back(bs.castTo<VectorRef<KeyValueRef>>());
 		int rangeSize = bs.expectedSize();
