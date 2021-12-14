@@ -570,7 +570,7 @@ public:
 		// since FileTraceLogWriter has a reference to this->closeOnExec, this change will get propogated to the writer
 		numChildProcesses++;
 		closeOnExec = false;
-		logGroup = childLogGroup;
+		logGroup = childLogGroup; // TODO: use a stack to support depth > 1 eventually
 	}
 
 	void terminateChildProcess() {
