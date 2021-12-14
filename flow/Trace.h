@@ -589,7 +589,6 @@ void retrieveTraceLogIssues(std::set<std::string>& out);
 void setTraceLogGroup(const std::string& role);
 void startChildTraceLog(const std::string& childLogGroup);
 void terminateChildTraceLog();
-void setCloseOnExec(bool closeOnExec);
 
 template <class T>
 class Future;

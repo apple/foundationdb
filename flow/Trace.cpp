@@ -122,7 +122,9 @@ private:
 	Mutex mutex;
 
 	// every process should NOT close on exec, except the root process
-	bool closeOnExec = true;
+	bool closeOnExec;
+
+	int numChildProcesses;
 
 	EventMetricHandle<TraceEventNameID> SevErrorNames;
 	EventMetricHandle<TraceEventNameID> SevWarnAlwaysNames;
@@ -282,7 +284,8 @@ public:
 
 	TraceLog()
 	  : formatter(new XmlTraceLogFormatter()), loggedLength(0), bufferLength(0), opened(false), preopenOverflowCount(0),
-	    logTraceEventMetrics(false), issues(new IssuesList), barriers(new BarrierList) {}
+	    logTraceEventMetrics(false), issues(new IssuesList), closeOnExec(true), numChildProcesses(0),
+	    barriers(new BarrierList) {}
 
 	bool isOpen() const { return opened; }
 
@@ -563,14 +566,19 @@ public:
 
 	void retrieveTraceLogIssues(std::set<std::string>& out) { return issues->retrieveIssues(out); }
 
-	void startChildProcess(std::string childLogGroup) { logGroup = childLogGroup; }
-
-	void terminateChildProcess() {
-		// TODO: add any necessary teardown */
+	void startChildProcess(std::string childLogGroup) {
+		// since FileTraceLogWriter has a reference to this->closeOnExec, this change will get propogated to the writer
+		numChildProcesses++;
+		closeOnExec = false;
+		logGroup = childLogGroup;
 	}
 
-	// since FileTraceLogWriter has a reference to this->closeOnExec, this change will get propogated to the writer
-	void setCloseOnExec(bool closeOnExec) { this->closeOnExec = closeOnExec; }
+	void terminateChildProcess() {
+		numChildProcesses--;
+		if (numChildProcesses == 0) {
+			closeOnExec = true;
+		}
+	}
 
 	~TraceLog() {
 		close();
@@ -810,10 +818,6 @@ void startChildTraceLog(const std::string& childLogGroup) {
 
 void terminateChildTraceLog() {
 	g_traceLog.terminateChildProcess();
-}
-
-void setCloseOnExec(bool closeOnExec) {
-	g_traceLog.setCloseOnExec(closeOnExec);
 }
 
 TraceEvent::TraceEvent() : initialized(true), enabled(false), logged(true) {}
