@@ -91,6 +91,7 @@ public class FakeFDBTransaction extends FDBTransaction {
 	protected FutureResults getRange_internal(KeySelector begin, KeySelector end,
 	                                          // TODO: map is not supported in FakeFDBTransaction yet.
 	                                          byte[] mapper, // Nullable
+	                                          RangeReadPredicate predicate, // Nullable
 	                                          int rowLimit, int targetBytes, int streamingMode, int iteration,
 	                                          boolean isSnapshot, boolean reverse) {
 		numRangeCalls++;

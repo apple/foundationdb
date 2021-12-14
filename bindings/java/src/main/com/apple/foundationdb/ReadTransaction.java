@@ -254,8 +254,8 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
-	CompletableFuture<List<KeyValue>> getRangeWithPredicate(byte[] begin, byte[] end, byte[] predicate_name,
-	                                                        byte[][] predicate_args);
+	AsyncIterable<KeyValue> getRangeWithPredicate(byte[] begin, byte[] end, byte[] predicate_name,
+	                                              byte[][] predicate_args);
 
 	/**
 	 * Gets an ordered range of keys and values from the database.  The begin

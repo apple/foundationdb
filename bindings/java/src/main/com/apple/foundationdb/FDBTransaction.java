@@ -102,9 +102,12 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		}
 
 		@Override
-		public CompletableFuture<List<KeyValue>> getRangeWithPredicate(byte[] begin, byte[] end, byte[] predicate_name,
-		                                                               byte[][] predicate_args) {
-			return getRangeWithPredicate_internal(begin, end, predicate_name, predicate_args, true);
+		public AsyncIterable<KeyValue> getRangeWithPredicate(byte[] begin, byte[] end, byte[] predicate_name,
+		                                                     byte[][] predicate_args) {
+			return new RangeQuery(FDBTransaction.this, true, KeySelector.firstGreaterOrEqual(begin),
+			                      KeySelector.firstGreaterOrEqual(end), null, ReadTransaction.ROW_LIMIT_UNLIMITED,
+			                      false, StreamingMode.WANT_ALL, eventKeeper,
+			                      new RangeReadPredicate(predicate_name, predicate_args));
 		}
 
 		///////////////////
@@ -332,24 +335,6 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		}
 	}
 
-	private CompletableFuture<List<KeyValue>> getRangeWithPredicate_internal(byte[] begin, byte[] end,
-	                                                                         byte[] predicate_name,
-	                                                                         byte[][] predicate_args,
-	                                                                         boolean isSnapshot) {
-		if (eventKeeper != null) {
-			eventKeeper.increment(Events.JNI_CALL);
-		}
-		pointerReadLock.lock();
-		try {
-			FutureResults range = new FutureResults(
-			    Transaction_getRangeWithPredicate(getPtr(), begin, end, predicate_name, predicate_args, isSnapshot),
-			    FDB.instance().isDirectBufferQueriesEnabled(), executor, eventKeeper);
-			return range.thenApply(result -> result.get().values).whenComplete((result, e) -> range.close());
-		} finally {
-			pointerReadLock.unlock();
-		}
-	}
-
 	@Override
 	public CompletableFuture<Long> getEstimatedRangeSizeBytes(byte[] begin, byte[] end) {
 		if (eventKeeper != null) {
@@ -390,9 +375,12 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	@Override
-	public CompletableFuture<List<KeyValue>> getRangeWithPredicate(byte[] begin, byte[] end, byte[] predicate_name,
-	                                                               byte[][] predicate_args) {
-		return getRangeWithPredicate_internal(begin, end, predicate_name, predicate_args, false);
+	public AsyncIterable<KeyValue> getRangeWithPredicate(byte[] begin, byte[] end, byte[] predicate_name,
+	                                                     byte[][] predicate_args) {
+		return new RangeQuery(FDBTransaction.this, false, KeySelector.firstGreaterOrEqual(begin),
+		                      KeySelector.firstGreaterOrEqual(end), null, ReadTransaction.ROW_LIMIT_UNLIMITED, false,
+		                      StreamingMode.WANT_ALL, eventKeeper,
+		                      new RangeReadPredicate(predicate_name, predicate_args));
 	}
 
 	///////////////////
@@ -483,6 +471,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	// Users of this function must close the returned FutureResults when finished
 	protected FutureResults getRange_internal(KeySelector begin, KeySelector end,
 	                                          byte[] mapper, // Nullable
+	                                          RangeReadPredicate predicate, // Nullable
 	                                          int rowLimit, int targetBytes, int streamingMode, int iteration,
 	                                          boolean isSnapshot, boolean reverse) {
 		if (eventKeeper != null) {
@@ -498,7 +487,10 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			 * iteration, Boolean.toString(isSnapshot), Boolean.toString(reverse)));
 			 */
 			return new FutureResults(
-			    mapper == null
+			    predicate != null ? Transaction_getRangeWithPredicate(getPtr(), begin.getKey(), end.getKey(),
+			                                                          predicate.getPredicateName(),
+			                                                          predicate.getPredicateArgs(), isSnapshot)
+			    : mapper == null
 			        ? Transaction_getRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(), end.getKey(),
 			                               end.orEqual(), end.getOffset(), rowLimit, targetBytes, streamingMode,
 			                               iteration, isSnapshot, reverse)

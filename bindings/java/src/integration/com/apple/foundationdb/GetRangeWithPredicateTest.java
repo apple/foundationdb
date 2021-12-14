@@ -23,6 +23,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.List;
 
+import com.apple.foundationdb.async.AsyncIterable;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -61,6 +63,7 @@ class GetRangeWithPredicateTest {
 				List<KeyValue> result =
 				    tr.getRangeWithPredicate("foo00".getBytes(), "foo99".getBytes(), "std/findInVal".getBytes(),
 				                             new byte[][] { "bar".getBytes() })
+				        .asList()
 				        .join();
 				assertEquals(1, result.size());
 				return null;
