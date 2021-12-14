@@ -37,6 +37,7 @@
 #include "fdbrpc/AsyncFileKAIO.actor.h"
 #include "flow/AsioReactor.h"
 #include "flow/Platform.h"
+#include "flow/Platform.actor.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
 
 // Opens a file for asynchronous I/O
@@ -146,4 +147,52 @@ Future<Void> Net2FileSystem::renameFile(const std::string& from, const std::stri
 
 void Net2FileSystem::stop() {
 	Net2AsyncFile::stop();
+}
+
+void Net2FileSystem::atomicReplace(std::string const& path, std::string const& content, bool textmode) {
+	::atomicReplace(path, content, textmode);
+}
+
+bool Net2FileSystem::fileExists(std::string const& filename) {
+	return ::fileExists(filename);
+}
+
+bool Net2FileSystem::directoryExists(std::string const& path) {
+	return ::directoryExists(path);
+}
+
+int64_t Net2FileSystem::fileSize(std::string const& filename) {
+	return ::fileSize(filename);
+}
+
+bool Net2FileSystem::createDirectory(std::string const& directory) {
+	return platform::createDirectory(directory);
+}
+
+std::vector<std::string> Net2FileSystem::listFiles(std::string const& directory, std::string const& extension) {
+	return platform::listFiles(directory, extension);
+}
+
+std::vector<std::string> Net2FileSystem::listDirectories(std::string const& directory) {
+	return platform::listDirectories(directory);
+}
+
+void Net2FileSystem::findFilesRecursively(std::string const& path, std::vector<std::string>& out) {
+	return platform::findFilesRecursively(path, out);
+}
+
+Future<std::vector<std::string>> Net2FileSystem::listFilesAsync(std::string const& directory, std::string const& extension) {
+	return platform::listFilesAsync(directory, extension);
+}
+
+Future<std::vector<std::string>> Net2FileSystem::listDirectoriesAsync(std::string const& directory) {
+	return platform::listDirectoriesAsync(directory);
+}
+
+Future<Void> Net2FileSystem::findFilesRecursivelyAsync(std::string const& path, std::vector<std::string>* out) {
+	return platform::findFilesRecursivelyAsync(path, out);
+}
+
+std::string Net2FileSystem::abspath(std::string const& path, bool resolveLinks, bool mustExist) {
+	return ::abspath(path, resolveLinks, mustExist);
 }
