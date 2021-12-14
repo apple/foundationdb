@@ -228,8 +228,9 @@ artifactory_base_url="${ARTIFACTORY_URL:-https://artifactory.foundationdb.org}"
 aws_region="us-west-2"
 aws_account_id=$(aws --output text sts get-caller-identity --query 'Account')
 build_date=$(date +"%Y-%m-%dT%H:%M:%S%z")
-build_output_directory="${script_dir}/../../build_output"
-commit_sha=$(git rev-parse --verify HEAD --short=10)
+build_output_directory="${script_dir}/../../"
+source_code_diretory=$(awk -F= '/foundationdb_SOURCE_DIR:STATIC/{print $2}' "${build_output_directory}/CMakeCache.txt")
+commit_sha=$(cd "${source_code_diretory}" && git rev-parse --verify HEAD --short=10)
 fdb_version=$(cat "${build_output_directory}/version.txt")
 fdb_library_versions=( '5.1.7' '6.1.13' '6.2.30' '6.3.18' "${fdb_version}" )
 fdb_website="https://www.foundationdb.org"
@@ -259,7 +260,11 @@ if [ -n "${OKTETO_NAMESPACE+x}" ]; then
     fdb_library_versions=( "${fdb_version}" )
     registry="${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com"
     tag_base="${registry}/foundationdb/"
-    tag_postfix="${OKTETO_NAME:-dev}"
+    if [ -n "${1+x}" ]; then
+        tag_postfix="${1}"
+    else
+        tag_postfix="${OKTETO_NAME:-dev}"
+    fi
     stripped_binaries_and_from_where="unstripped_local" # MUST BE ONE OF ( "unstripped_artifactory" "stripped_artifactory" "unstripped_local" "stripped_local" )
     dockerfile_name="Dockerfile.eks"
     use_development_java_bindings="true"
