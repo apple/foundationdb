@@ -156,7 +156,7 @@ The TLS certificate will be automatically refreshed on a configurable cadence. T
 * They are valid certificates.
 * The key file matches the certificate file.
 
-The refresh rate is controlled by ``--knob_tls_cert_refresh_delay_seconds``. Setting it to 0 will disable the refresh.
+The refresh rate is controlled by ``--knob-tls-cert-refresh-delay-seconds``. Setting it to 0 will disable the refresh.
 
 The default LibreSSL-based implementation
 =========================================

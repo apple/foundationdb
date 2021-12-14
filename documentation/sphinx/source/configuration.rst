@@ -214,7 +214,7 @@ Contains basic configuration parameters of the ``fdbmonitor`` process. ``user`` 
     [general]
     cluster-file = /etc/foundationdb/fdb.cluster
     restart-delay = 60
-    ## restart-backoff and restart-delay-reset-interval default to the value that is used for restart_delay
+    ## restart-backoff and restart-delay-reset-interval default to the value that is used for restart-delay
     # initial-restart-delay = 0
     # restart-backoff = 60.0
     # restart-delay-reset-interval = 60
@@ -226,7 +226,7 @@ Contains settings applicable to all processes (e.g. fdbserver, backup_agent).
 
 * ``cluster-file``: Specifies the location of the cluster file. This file and the directory that contains it must be writable by all processes (i.e. by the user or group set in the ``[fdbmonitor]`` section).
 * ``delete-envvars``: A space separated list of environment variables to remove from the environments of child processes. This can be used if the ``fdbmonitor`` process needs to be run with environment variables that are undesired in its children.
-* ``kill-on-configuration_change``: If ``true``, affected processes will be restarted whenever the configuration file changes. Defaults to ``true``.
+* ``kill-on-configuration-change``: If ``true``, affected processes will be restarted whenever the configuration file changes. Defaults to ``true``.
 * ``disable-lifecycle-logging``: If ``true``, ``fdbmonitor`` will not write log events when processes start or terminate. Defaults to ``false``.
 
 .. _configuration-restarting:
@@ -235,8 +235,8 @@ The ``[general]`` section also contains some parameters to control how processes
 
 * ``restart-delay``: The maximum number of seconds (subject to jitter) that fdbmonitor will delay before restarting a failed process.
 * ``initial-restart-delay``: The number of seconds ``fdbmonitor`` waits to restart a process the first time it dies. Defaults to 0 (i.e. the process gets restarted immediately). 
-* ``restart-backoff``: Controls how quickly ``fdbmonitor`` backs off when a process dies repeatedly. The previous delay (or 1, if the previous delay is 0) is multiplied by ``restart_backoff`` to get the next delay, maxing out at the value of ``restart_delay``. Defaults to the value of ``restart_delay``, meaning that the second and subsequent failures will all delay ``restart_delay`` between restarts.
-* ``restart-delay-reset-interval``: The number of seconds a process must be running before resetting the backoff back to the value of ``initial_restart_delay``. Defaults to the value of ``restart_delay``.
+* ``restart-backoff``: Controls how quickly ``fdbmonitor`` backs off when a process dies repeatedly. The previous delay (or 1, if the previous delay is 0) is multiplied by ``restart-backoff`` to get the next delay, maxing out at the value of ``restart-delay``. Defaults to the value of ``restart-delay``, meaning that the second and subsequent failures will all delay ``restart-delay`` between restarts.
+* ``restart-delay-reset-interval``: The number of seconds a process must be running before resetting the backoff back to the value of ``initial-restart-delay``. Defaults to the value of ``restart-delay``.
 
  These ``restart-`` parameters are not applicable to the ``fdbmonitor`` process itself. See :ref:`Configuring autorestart of fdbmonitor <configuration-restart-fdbmonitor>` for details.
 
@@ -245,7 +245,7 @@ As an example, let's say the following parameters have been set:
 .. code-block:: ini
 
     restart-delay = 60
-    initial-restart_delay = 0
+    initial-restart-delay = 0
     restart-backoff = 2.0
     restart-delay-reset-interval = 180
 
@@ -275,26 +275,26 @@ Using the default parameters, a process will restart immediately if it fails and
     # cache-memory = 2GiB
     # locality-machineid =
     # locality-zoneid =
-    # locality-data_hall =
+    # locality-data-hall =
     # locality-dcid =
     # io-trust-seconds = 20
 
-Contains default parameters for all fdbserver processes on this machine. These same options can be overridden for individual processes in their respective ``[fdbserver.<ID>]`` sections. In this section, the ID of the individual fdbserver can be substituted by using the ``$ID`` variable in the value. For example, ``public_address = auto:$ID`` makes each fdbserver listen on a port equal to its ID.
+Contains default parameters for all fdbserver processes on this machine. These same options can be overridden for individual processes in their respective ``[fdbserver.<ID>]`` sections. In this section, the ID of the individual fdbserver can be substituted by using the ``$ID`` variable in the value. For example, ``public-address = auto:$ID`` makes each fdbserver listen on a port equal to its ID.
 
 .. note:: |multiplicative-suffixes|
 .. note:: In general locality id's are used to specify the location of processes which in turn is used to determine fault and replication domains.
 
 * ``command``: The location of the ``fdbserver`` binary.
 * ``public-address``: The publicly visible IP:Port of the process. If ``auto``, the address will be the one used to communicate with the coordination servers.
-* ``listen-address``: The IP:Port that the server socket should bind to. If ``public``, it will be the same as the public_address.
+* ``listen-address``: The IP:Port that the server socket should bind to. If ``public``, it will be the same as the public-address.
 * ``datadir``: A writable directory (by root or by the user set in the [fdbmonitor] section) where persistent data files will be stored.
 * ``logdir``: A writable directory (by root or by the user set in the [fdbmonitor] section) where FoundationDB will store log files.
 * ``logsize``: Roll over to a new log file after the current log file reaches the specified size. The default value is 10MiB.
 * ``maxlogssize``: Delete the oldest log file when the total size of all log files exceeds the specified size. If set to 0B, old log files will not be deleted. The default value is 100MiB.
 * ``class``: Process class specifying the roles that will be taken in the cluster. Recommended options are ``storage``, ``transaction``, ``stateless``. See :ref:`guidelines-process-class-config` for process class config recommendations.
-* ``memory``: Maximum memory used by the process. The default value is 8GiB. When specified without a unit, MiB is assumed. This parameter does not change the memory allocation of the program. Rather, it sets a hard limit beyond which the process will kill itself and be restarted. The default value of 8GiB is double the intended memory usage in the default configuration (providing an emergency buffer to deal with memory leaks or similar problems). It is *not* recommended to decrease the value of this parameter below its default value. It may be *increased* if you wish to allocate a very large amount of storage engine memory or cache. In particular, when the ``storage_memory``  or ``cache_memory`` parameters are increased, the ``memory`` parameter should be increased by an equal amount.
-* ``storage_memory``: Maximum memory used for data storage. This parameter is used *only* with memory storage engine, not the ssd storage engine. The default value is 1GiB. When specified without a unit, MB is assumed. Clusters will be restricted to using this amount of memory per process for purposes of data storage. Memory overhead associated with storing the data is counted against this total. If you increase the ``storage_memory`` parameter, you should also increase the ``memory`` parameter by the same amount.
-* ``cache-memory``: Maximum memory used for caching pages from disk. The default value is 2GiB. When specified without a unit, MiB is assumed. If you increase the ``cache_memory`` parameter, you should also increase the ``memory`` parameter by the same amount.
+* ``memory``: Maximum memory used by the process. The default value is 8GiB. When specified without a unit, MiB is assumed. This parameter does not change the memory allocation of the program. Rather, it sets a hard limit beyond which the process will kill itself and be restarted. The default value of 8GiB is double the intended memory usage in the default configuration (providing an emergency buffer to deal with memory leaks or similar problems). It is *not* recommended to decrease the value of this parameter below its default value. It may be *increased* if you wish to allocate a very large amount of storage engine memory or cache. In particular, when the ``storage-memory``  or ``cache-memory`` parameters are increased, the ``memory`` parameter should be increased by an equal amount.
+* ``storage-memory``: Maximum memory used for data storage. This parameter is used *only* with memory storage engine, not the ssd storage engine. The default value is 1GiB. When specified without a unit, MB is assumed. Clusters will be restricted to using this amount of memory per process for purposes of data storage. Memory overhead associated with storing the data is counted against this total. If you increase the ``storage-memory`` parameter, you should also increase the ``memory`` parameter by the same amount.
+* ``cache-memory``: Maximum memory used for caching pages from disk. The default value is 2GiB. When specified without a unit, MiB is assumed. If you increase the ``cache-memory`` parameter, you should also increase the ``memory`` parameter by the same amount.
 * ``locality-machineid``: Machine identifier key. All processes on a machine should share a unique id. By default, processes on a machine determine a unique id to share. This does not generally need to be set.
 * ``locality-zoneid``: Zone identifier key.  Processes that share a zone id are considered non-unique for the purposes of data replication. If unset, defaults to machine id.
 * ``locality-dcid``: Datacenter identifier key. All processes physically located in a datacenter should share the id. No default value. If you are depending on datacenter based replication this must be set on all processes.
@@ -598,9 +598,9 @@ If a region failover occurs, clients will generally only see a latency spike of 
 Specifying datacenters
 ----------------------
 
-To use region configurations all processes in the cluster need to specify in which datacenter they are located. This can be done on the command line with either ``--locality_dcid`` or ``--datacenter_id``. This datacenter identifier is case sensitive.
+To use region configurations all processes in the cluster need to specify in which datacenter they are located. This can be done on the command line with either ``--locality-dcid`` or ``--datacenter-id``. This datacenter identifier is case sensitive.
 
-Clients should also specify their datacenter with the database option ``datacenter_id``. If a client does not specify their datacenter, they will use latency estimates to balance traffic between the two regions. This will result in about 5% of requests being served by the remote regions, so reads will suffer from high tail latencies.
+Clients should also specify their datacenter with the database option ``datacenter-id``. If a client does not specify their datacenter, they will use latency estimates to balance traffic between the two regions. This will result in about 5% of requests being served by the remote regions, so reads will suffer from high tail latencies.
 
 Changing the region configuration
 ---------------------------------

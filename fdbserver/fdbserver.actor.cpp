@@ -649,7 +649,7 @@ static void printUsage(const char* name, bool devhelp) {
 		    " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, unittests). The default is `fdbd'.");
 #ifdef _WIN32
 		printOptionUsage("-n, --newconsole", " Create a new console.");
-		printOptionUsage("-q, --no_dialog", " Disable error dialog on crash.");
+		printOptionUsage("-q, --no-dialog", " Disable error dialog on crash.");
 		printOptionUsage("--parentpid PID", " Specify a process after whose termination to exit.");
 #endif
 		printOptionUsage("-f TESTFILE, --testfile",
@@ -1085,12 +1085,11 @@ private:
 			case OPT_PROFILER: {
 				std::string syn = args.OptionSyntax();
 				std::string_view key = syn;
-				auto prefix = "--profiler_"sv;
-				if (key.find(prefix) != 0) {
+				if (key.find("--profiler_"sv) != 0 && key.find("--profiler-"sv != 0)) {
 					fprintf(stderr, "ERROR: unable to parse profiler option '%s'\n", syn.c_str());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
-				key.remove_prefix(prefix.size());
+				key.remove_prefix("--profiler-"sv.size());
 				profilerConfig.emplace(key, args.OptionArg());
 				break;
 			};
@@ -1525,7 +1524,7 @@ private:
 
 		if (seedConnString.length() && seedConnFile.length()) {
 			fprintf(
-			    stderr, "%s\n", "--seed_cluster_file and --seed_connection_string may not both be specified at once.");
+			    stderr, "%s\n", "--seed-cluster-file and --seed-connection-string may not both be specified at once.");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
@@ -1534,7 +1533,7 @@ private:
 		if (seedSpecified && !connFile.length()) {
 			fprintf(stderr,
 			        "%s\n",
-			        "If -seed_cluster_file or --seed_connection_string is specified, -C must be specified as well.");
+			        "If -seed-cluster-file or --seed-connection-string is specified, -C must be specified as well.");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
@@ -1754,7 +1753,7 @@ int main(int argc, char* argv[]) {
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
 
 		if (opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
-			fprintf(stderr, "ERROR: --memory has to be larger than --cache_memory\n");
+			fprintf(stderr, "ERROR: --memory has to be larger than --cache-memory\n");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
@@ -1796,7 +1795,7 @@ int main(int argc, char* argv[]) {
 			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::Restore);
 			if (opts.publicAddressStrs.empty()) {
 				if (expectsPublicAddress) {
-					fprintf(stderr, "ERROR: The -p or --public_address option is required\n");
+					fprintf(stderr, "ERROR: The -p or --public-address option is required\n");
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}

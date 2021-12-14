@@ -59,24 +59,24 @@ void printDecodeUsage() {
 	             "  --loggroup     LOG_GROUP\n"
 	             "                 Sets the LogGroup field with the specified value for all\n"
 	             "                 events in the trace output (defaults to `default').\n"
-	             "  --trace_format FORMAT\n"
+	             "  --trace-format FORMAT\n"
 	             "                 Select the format of the trace files, xml (the default) or json.\n"
 	             "                 Has no effect unless --log is specified.\n"
 	             "  --crash        Crash on serious error.\n"
-	             "  --blob_credentials FILE\n"
+	             "  --blob-credentials FILE\n"
 	             "                 File containing blob credentials in JSON format.\n"
 	             "                 The same credential format/file fdbbackup uses.\n"
 #ifndef TLS_DISABLED
 	    TLS_HELP
 #endif
-	             "  --build_flags  Print build information and exit.\n"
-	             "  --list_only    Print file list and exit.\n"
+	             "  --build-flags  Print build information and exit.\n"
+	             "  --list-only    Print file list and exit.\n"
 	             "  -k KEY_PREFIX  Use the prefix for filtering mutations\n"
-	             "  --hex_prefix   HEX_PREFIX\n"
+	             "  --hex-prefix   HEX_PREFIX\n"
 	             "                 The prefix specified in HEX format, e.g., \\x05\\x01.\n"
-	             "  --begin_version_filter BEGIN_VERSION\n"
+	             "  --begin-version-filter BEGIN_VERSION\n"
 	             "                 The version range's begin version (inclusive) for filtering.\n"
-	             "  --end_version_filter END_VERSION\n"
+	             "  --end-version-filter END_VERSION\n"
 	             "                 The version range's end version (exclusive) for filtering.\n"
 	             "\n";
 	return;

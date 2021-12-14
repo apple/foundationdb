@@ -428,7 +428,7 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 	{ OPT_NOSTOPWHENDONE, "--no-stop-when-done", SO_NONE },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
@@ -928,7 +928,7 @@ const char* BlobCredentialInfo =
     "  BLOB CREDENTIALS\n"
     "     Blob account secret keys can optionally be omitted from blobstore:// URLs, in which case they will be\n"
     "     loaded, if possible, from 1 or more blob credentials definition files.\n\n"
-    "     These files can be specified with the --blob_credentials argument described above or via the environment "
+    "     These files can be specified with the --blob-credentials argument described above or via the environment "
     "variable\n"
     "     FDB_BLOB_CREDENTIALS, whose value is a colon-separated list of files.  The command line takes priority over\n"
     "     over the environment but all files from both sources are used.\n\n"
@@ -1201,7 +1201,7 @@ static void printRestoreUsage(bool devhelp) {
 static void printFastRestoreUsage(bool devhelp) {
 	printf(" NOTE: Fast restore aims to support the same fdbrestore option list.\n");
 	printf("       But fast restore is still under development. The options may not be fully supported.\n");
-	printf(" Supported options are: --dest_cluster_file, -r, --waitfordone, --logdir\n");
+	printf(" Supported options are: --dest-cluster-file, -r, --waitfordone, --logdir\n");
 	printRestoreUsage(devhelp);
 	return;
 }
@@ -4135,7 +4135,7 @@ int main(int argc, char* argv[]) {
 			}
 			break;
 		case ProgramExe::FASTRESTORE_TOOL:
-			// Support --dest_cluster_file option as fdbrestore does
+			// Support --dest-cluster-file option as fdbrestore does
 			if (dryRun) {
 				if (restoreType != RestoreType::START) {
 					fprintf(stderr, "Restore dry run only works for 'start' command\n");
