@@ -24,23 +24,23 @@ Options to Control Buggify
 There are four network options to control the buggify behavior. By default, buggify is disabled (as it will behave in a way
 that is not desirable in a production environment). The options to control buggify are:
 
-- ``buggify-enable``
+- ``buggify_enable``
   This option takes no argument and will enable buggify.
-- ``buggify-disable``
+- ``buggify_disable``
   This can be used to disable buggify again.
-- ``client-buggify-section-activated-probability`` (default ``25``)
+- ``client_buggify_section_activated_probability`` (default ``25``)
   A number between 0 and 100.
-- ``client-buggify-section-fired-probability`` (default ``25``)
+- ``client_buggify_section_fired_probability`` (default ``25``)
   A number between 0 and 100.
 
 The way buggify works is by enabling sections in the code first that get only executed with a certain probability. Generally
 these code sections will simply introduce a synthetic error.
 
 When a section is passed for the first time, the client library will decide randomly whether that code section will be enabled
-or not. It will be enabled with a probability of ``client-buggify-section-activated-probability``.
+or not. It will be enabled with a probability of ``client_buggify_section_activated_probability``.
 
 Whenever the client executes a buggify-enabled code-block, it will randomly execute it. This is to make sure that a certain
-exception doesn't always fire. The probably for executing such a section is ``client-buggify-section-fired-probability``.
+exception doesn't always fire. The probably for executing such a section is ``client_buggify_section_fired_probability``.
 
 ################################
 Simulation and Cluster Workloads
