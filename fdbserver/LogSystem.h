@@ -21,6 +21,7 @@
 #ifndef FDBSERVER_LOGSYSTEM_H
 #define FDBSERVER_LOGSYSTEM_H
 
+#include <queue>
 #include <set>
 #include <vector>
 
@@ -491,21 +492,71 @@ struct ILogSystem {
 		void delref() override { ReferenceCounted<BufferedCursor>::delref(); }
 	};
 
+	struct GroupPeekCursor final : IPeekCursor, ReferenceCounted<GroupPeekCursor> {
+		std::vector<Reference<IPeekCursor>> serverCursors;
+		int currentCursor;
+		LogMessageVersion end;
+		Future<Void> more;
+
+		GroupPeekCursor(std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
+		                Tag tag,
+		                Version begin,
+		                Version end,
+		                bool returnIfBlocked);
+
+		Reference<IPeekCursor> cloneNoMore() override;
+		void setProtocolVersion(ProtocolVersion version) override;
+		Arena& arena() override;
+		ArenaReader* reader() override;
+		bool hasMessage() const override;
+		void nextMessage() override;
+		StringRef getMessage() override;
+		StringRef getMessageWithTags() override;
+		VectorRef<Tag> getTags() const override;
+		void advanceTo(LogMessageVersion n) override;
+		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
+		Future<Void> onFailed() override;
+		bool isActive() const override;
+		bool isExhausted() const override;
+		const LogMessageVersion& version() const override;
+		Version popped() const override;
+		Version getMinKnownCommittedVersion() const override;
+		Optional<UID> getPrimaryPeekLocation() const override;
+		Optional<UID> getCurrentPeekLocation() const override;
+
+		void addref() override { ReferenceCounted<GroupPeekCursor>::addref(); }
+
+		void delref() override { ReferenceCounted<GroupPeekCursor>::delref(); }
+	};
+
+	struct CursorVersion {
+		Version version;
+		int cursor;
+
+		CursorVersion() : version(invalidVersion), cursor(0) {}
+		CursorVersion(Version version, int cursor) : version(version), cursor(cursor) {}
+
+		bool operator<(CursorVersion const& rhs) const {
+			// Ordering is reversed for priority_queue
+			return version > rhs.version;
+		}
+	};
+
 	struct HeapPeekCursor final : IPeekCursor, ReferenceCounted<HeapPeekCursor> {
 		std::vector<Reference<IPeekCursor>> serverCursors;
-		Tag tag;
-		Optional<LogMessageVersion> nextVersion;
-		LogMessageVersion messageVersion;
-		bool hasNextMessage;
-		UID randomID;
-		int tLogReplicationFactor;
+		std::priority_queue<CursorVersion> minCursor;
+		LogMessageVersion uninitializedVersion;
+		int currentCursor;
 		Future<Void> more;
 
 		HeapPeekCursor(std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
 		               Tag tag,
 		               Version begin,
 		               Version end,
-		               int tLogReplicationFactor);
+		               int tLogReplicationFactor,
+		               bool returnIfBlocked);
+
+		HeapPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors);
 
 		Reference<IPeekCursor> cloneNoMore() override;
 		void setProtocolVersion(ProtocolVersion version) override;
@@ -782,7 +833,7 @@ struct LogPushData : NonCopyable {
 	// in the middle of data for a version
 
 	explicit LogPushData(Reference<ILogSystem> logSystem)
-	  : logSystem(logSystem), subsequence(1), messagesWriter(AssumeVersion(g_network->protocolVersion())) {}
+	  : logSystem(logSystem), messagesWriter(AssumeVersion(g_network->protocolVersion())), subsequence(1) {}
 
 	void addTxsTag();
 

@@ -2017,6 +2017,10 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 
 	ASSERT(ver > logData->queueCommittedVersion.get());
 
+	while (!logData->versionHistory.empty() && logData->versionHistory.front().first < knownCommittedVersion) {
+		logData->versionHistory.pop_front();
+	}
+
 	logData->durableKnownCommittedVersion = knownCommittedVersion;
 	if (logData->unpoppedRecoveredTags == 0 && knownCommittedVersion >= logData->recoveredAt &&
 	    logData->recoveryComplete.canBeSet()) {
@@ -2152,9 +2156,6 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		if (req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
 
-		while (!logData->versionHistory.empty() && logData->versionHistory.front().first < req.knownCommittedVersion) {
-			logData->versionHistory.pop_front();
-		}
 		logData->versionHistory.push_back(std::make_pair(req.truePrevVersion, req.version));
 		//TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
 		commitMessages(self, logData, req.version, req.arena, req.messages);

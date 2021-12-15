@@ -587,8 +587,8 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 		    .detail("Begin", begin)
 		    .detail("End", end)
 		    .detail("BestLogs", localSets[bestSet]->logServerString());
-		return makeReference<ILogSystem::SetPeekCursor>(
-		    localSets, bestSet, localSets[bestSet]->bestLocationFor(tag), tag, begin, end, parallelGetMore);
+		return makeReference<ILogSystem::HeapPeekCursor>(
+		    localSets[0]->logServers, tag, begin, end, localSets[0]->tLogReplicationFactor, true);
 	} else {
 		std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
@@ -599,8 +599,8 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 			    .detail("Begin", begin)
 			    .detail("End", end)
 			    .detail("BestLogs", localSets[bestSet]->logServerString());
-			cursors.push_back(makeReference<ILogSystem::SetPeekCursor>(
-			    localSets, bestSet, localSets[bestSet]->bestLocationFor(tag), tag, lastBegin, end, parallelGetMore));
+			cursors.push_back(makeReference<ILogSystem::HeapPeekCursor>(
+			    localSets[0]->logServers, tag, lastBegin, end, localSets[0]->tLogReplicationFactor, true));
 		}
 		for (int i = 0; begin < lastBegin; i++) {
 			if (i == oldLogData.size()) {
@@ -664,14 +664,12 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekAll(UID dbgid,
 					    .detail("BestLogs", localOldSets[bestOldSet]->logServerString())
 					    .detail("LastBegin", lastBegin)
 					    .detail("ThisBegin", thisBegin);
-					cursors.push_back(
-					    makeReference<ILogSystem::SetPeekCursor>(localOldSets,
-					                                             bestOldSet,
-					                                             localOldSets[bestOldSet]->bestLocationFor(tag),
-					                                             tag,
-					                                             thisBegin,
-					                                             std::min(lastBegin, end),
-					                                             parallelGetMore));
+					cursors.push_back(makeReference<ILogSystem::HeapPeekCursor>(localOldSets[0]->logServers,
+					                                                            tag,
+					                                                            thisBegin,
+					                                                            std::min(lastBegin, end),
+					                                                            localOldSets[0]->tLogReplicationFactor,
+					                                                            true));
 					epochEnds.push_back(LogMessageVersion(std::min(lastBegin, end)));
 				}
 				lastBegin = thisBegin;
@@ -687,6 +685,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekRemote(UID dbgid
                                                                        Optional<Version> end,
                                                                        Tag tag,
                                                                        bool parallelGetMore) {
+	ASSERT(false);
 	int bestSet = -1;
 	Version lastBegin = recoveredAt.present() ? recoveredAt.get() + 1 : 0;
 	for (int t = 0; t < tLogs.size(); t++) {
@@ -893,20 +892,8 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
 		    .detail("BestSetStart", tLogs[bestSet]->startVersion)
 		    .detail("LogId", tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor(tag)]->get().id());
 		if (useMergePeekCursors) {
-			return makeReference<ILogSystem::MergedPeekCursor>(tLogs[bestSet]->logServers,
-			                                                   tLogs[bestSet]->bestLocationFor(tag),
-			                                                   tLogs[bestSet]->logServers.size() + 1 -
-			                                                       tLogs[bestSet]->tLogReplicationFactor,
-			                                                   tag,
-			                                                   begin,
-			                                                   end,
-			                                                   true,
-			                                                   tLogs[bestSet]->tLogLocalities,
-			                                                   tLogs[bestSet]->tLogPolicy,
-			                                                   tLogs[bestSet]->tLogReplicationFactor);
-		} else {
-			return makeReference<ILogSystem::ServerPeekCursor>(
-			    tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor(tag)], tag, begin, end, false, false);
+			return makeReference<ILogSystem::HeapPeekCursor>(
+			    tLogs[0]->logServers, tag, begin, end, tLogs[0]->tLogReplicationFactor, useMergePeekCursors);
 		}
 	} else {
 		std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
@@ -920,27 +907,12 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
 			    .detail("BestSet", bestSet)
 			    .detail("BestSetStart", tLogs[bestSet]->startVersion)
 			    .detail("LogId", tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor(tag)]->get().id());
-			if (useMergePeekCursors) {
-				cursors.push_back(makeReference<ILogSystem::MergedPeekCursor>(tLogs[bestSet]->logServers,
-				                                                              tLogs[bestSet]->bestLocationFor(tag),
-				                                                              tLogs[bestSet]->logServers.size() + 1 -
-				                                                                  tLogs[bestSet]->tLogReplicationFactor,
-				                                                              tag,
-				                                                              tLogs[bestSet]->startVersion,
-				                                                              end,
-				                                                              true,
-				                                                              tLogs[bestSet]->tLogLocalities,
-				                                                              tLogs[bestSet]->tLogPolicy,
-				                                                              tLogs[bestSet]->tLogReplicationFactor));
-			} else {
-				cursors.push_back(makeReference<ILogSystem::ServerPeekCursor>(
-				    tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor(tag)],
-				    tag,
-				    tLogs[bestSet]->startVersion,
-				    end,
-				    false,
-				    false));
-			}
+			cursors.push_back(makeReference<ILogSystem::HeapPeekCursor>(tLogs[0]->logServers,
+			                                                            tag,
+			                                                            tLogs[0]->startVersion,
+			                                                            end,
+			                                                            tLogs[0]->tLogReplicationFactor,
+			                                                            useMergePeekCursors));
 		}
 		Version lastBegin = tLogs[bestSet]->startVersion;
 		for (int i = 0; begin < lastBegin; i++) {
@@ -1022,18 +994,13 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
 					// detail("LogId",
 					// oldLogData[i].tLogs[bestOldSet]->logServers[tLogs[bestOldSet]->bestLocationFor( tag
 					// )]->get().id());
-					cursors.push_back(makeReference<ILogSystem::MergedPeekCursor>(
-					    oldLogData[i].tLogs[bestOldSet]->logServers,
-					    oldLogData[i].tLogs[bestOldSet]->bestLocationFor(tag),
-					    oldLogData[i].tLogs[bestOldSet]->logServers.size() + 1 -
-					        oldLogData[i].tLogs[bestOldSet]->tLogReplicationFactor,
-					    tag,
-					    thisBegin,
-					    std::min(lastBegin, end),
-					    useMergePeekCursors,
-					    oldLogData[i].tLogs[bestOldSet]->tLogLocalities,
-					    oldLogData[i].tLogs[bestOldSet]->tLogPolicy,
-					    oldLogData[i].tLogs[bestOldSet]->tLogReplicationFactor));
+					cursors.push_back(
+					    makeReference<ILogSystem::HeapPeekCursor>(oldLogData[i].tLogs[0]->logServers,
+					                                              tag,
+					                                              thisBegin,
+					                                              std::min(lastBegin, end),
+					                                              oldLogData[i].tLogs[0]->tLogReplicationFactor,
+					                                              true));
 					epochEnds.emplace_back(std::min(lastBegin, end));
 				}
 				lastBegin = thisBegin;
@@ -1176,6 +1143,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekSingle(UID dbgid
 }
 
 Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID dbgid, Version begin, Tag tag) {
+	ASSERT(false);
 	bool found = false;
 	for (const auto& log : tLogs) {
 		found = log->hasLogRouter(dbgid) || log->hasBackupWorker(dbgid);
@@ -1845,32 +1813,32 @@ Optional<std::pair<Version, Version>> TagPartitionedLogSystem::getDurableVersion
     Optional<Version> lastEnd) {
 
 	Reference<LogSet> logSet = lockInfo.logSet;
-	int prevGroup = 0;
 	std::vector<TLogLockResult> current;
 	std::vector<TLogLockResult> minResult;
 	std::vector<TLogLockResult> maxResult;
 	bool bTooManyFailures = false;
 	Version knownCommittedVersion = 0;
 
-	for (int t = 0; t < logSet->logServers.size(); t++) {
-		int tLogGroup = t / logSet->tLogReplicationFactor;
-		if (lockInfo.replies[t].isReady() && !lockInfo.replies[t].isError() && (!failed.size() || !failed[t]->get())) {
-			current.push_back(lockInfo.replies[t].get());
-			knownCommittedVersion = std::max(knownCommittedVersion, lockInfo.replies[t].get().knownCommittedVersion);
-		}
-		if (tLogGroup != prevGroup) {
-			if (current.size() <= logSet->tLogWriteAntiQuorum) {
-				bTooManyFailures = true;
-				break;
+	for (int group = 0; group < logSet->logServers.size() / logSet->tLogReplicationFactor; group++) {
+		for (int t = 0; t < logSet->tLogReplicationFactor; t++) {
+			int idx = group * logSet->tLogReplicationFactor + t;
+			if (lockInfo.replies[idx].isReady() && !lockInfo.replies[idx].isError() &&
+			    (!failed.size() || !failed[idx]->get())) {
+				current.push_back(lockInfo.replies[idx].get());
+				knownCommittedVersion =
+				    std::max(knownCommittedVersion, lockInfo.replies[idx].get().knownCommittedVersion);
 			}
-			std::sort(current.begin(), current.end(), [](const TLogLockResult& a, const TLogLockResult& b) -> bool {
-				return a.end < b.end;
-			});
-			minResult.push_back(current[logSet->tLogWriteAntiQuorum]);
-			maxResult.push_back(current.back());
-			current.clear();
-			prevGroup = tLogGroup;
 		}
+		if (current.size() <= logSet->tLogWriteAntiQuorum) {
+			bTooManyFailures = true;
+			break;
+		}
+		std::sort(current.begin(), current.end(), [](const TLogLockResult& a, const TLogLockResult& b) -> bool {
+			return a.end < b.end;
+		});
+		minResult.push_back(current[logSet->tLogWriteAntiQuorum]);
+		maxResult.push_back(current.back());
+		current.clear();
 	}
 
 	if (bTooManyFailures) {

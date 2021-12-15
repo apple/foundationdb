@@ -1181,7 +1181,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		TEST(true); // Duplicate request for sequence
 		wait(self->liveCommittedVersion.whenAtLeast(itr->second.version -
 		                                            SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
-		req.reply.send(itr->second);
+		req.reply.send(proxyItr->second.replies[req.requestNum]);
 	} else if (req.requestNum <= proxyItr->second.latestRequestNum.get()) {
 		TEST(true); // Old request for previously acknowledged sequence - may be impossible with current FlowTransport
 		ASSERT(req.requestNum <
