@@ -2932,7 +2932,7 @@ void Sim2FileSystem::findFilesRecursively(std::string const& path, std::vector<s
 	}
 }
 
-ACTOR Future<std::vector<std::string>> listAsyncImpl(std::string const& directory, std::string const& extension, bool directoriesOnly) {
+ACTOR Future<std::vector<std::string>> listAsyncImpl(std::string directory, std::string extension, bool directoriesOnly) {
 	wait(delay(0.01));
 	return SimpleInMemoryFileSystem()->findFiles(directory, extension, directoriesOnly);
 }
