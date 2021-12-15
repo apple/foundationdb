@@ -1179,8 +1179,10 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 	auto itr = proxyItr->second.replies.find(req.requestNum);
 	if (itr != proxyItr->second.replies.end()) {
 		TEST(true); // Duplicate request for sequence
-		wait(self->liveCommittedVersion.whenAtLeast(itr->second.version -
-		                                            SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
+		if (itr->second.version != self->recoveryTransactionVersion) {
+			wait(self->liveCommittedVersion.whenAtLeast(itr->second.version -
+			                                            SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
+		}
 		req.reply.send(proxyItr->second.replies[req.requestNum]);
 	} else if (req.requestNum <= proxyItr->second.latestRequestNum.get()) {
 		TEST(true); // Old request for previously acknowledged sequence - may be impossible with current FlowTransport
@@ -1242,7 +1244,10 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		                               proxyItr->second.replies.upper_bound(req.mostRecentProcessedRequestNum));
 		proxyItr->second.replies[req.requestNum] = rep;
 		ASSERT(rep.prevVersion >= 0);
-		wait(self->liveCommittedVersion.whenAtLeast(rep.version - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
+		if (rep.version != self->recoveryTransactionVersion) {
+			wait(
+			    self->liveCommittedVersion.whenAtLeast(rep.version - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
+		}
 		req.reply.send(rep);
 
 		ASSERT(proxyItr->second.latestRequestNum.get() == req.requestNum - 1);
