@@ -57,7 +57,7 @@ function create_fake_website_directory() {
         "stripped_local")
             for file in "${fdb_binaries[@]}"; do
                 logg "COPYING ${file}"
-                cp -pr "${build_output_directory}/packaging/bin/${file}" "${file}"
+                cp -pr "${build_output_directory}/packages/bin/${file}" "${file}"
                 chmod 755 "${file}"
             done
             ;;
@@ -115,7 +115,7 @@ function create_fake_website_directory() {
             ;;
         "stripped_local")
             logg "COPYING STRIPPED CLIENT LIBRARY"
-            cp -pr "${build_output_directory}/packaging/lib/libfdb_c.so" "${website_directory}/downloads/${fdb_version}/linux/libfdb_c_${fdb_version}.so"
+            cp -pr "${build_output_directory}/packages/lib/libfdb_c.so" "${website_directory}/downloads/${fdb_version}/linux/libfdb_c_${fdb_version}.so"
             ;;
     esac
     # override fdb_website variable that is passed to Docker build
@@ -126,7 +126,7 @@ function compile_ycsb() {
     logg "COMPILING YCSB"
     if [ "${use_development_java_bindings}" == "true" ]; then
         logg "INSTALL JAVA BINDINGS"
-        foundationdb_java_version="${fdb_version}-PRERELEASE"
+        foundationdb_java_version="${fdb_version}-SNAPSHOT"
         mvn install:install-file \
         --batch-mode \
         -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn \
@@ -165,6 +165,9 @@ function build_and_push_images(){
     for image in "${image_list[@]}"; do
         logg "BUILDING ${image}"
         image_tag="${tag_base}${image}:${fdb_version}"
+        if [ -n "${tag_postfix+x}" ]; then
+            image_tag="${tag_base}${image}:${fdb_version}-${tag_postfix}"
+        fi
         if [ "${image}" == "foundationdb-kubernetes-sidecar" ]; then
             image_tag="${image_tag}-1"
         fi
@@ -227,8 +230,8 @@ aws_account_id=$(aws --output text sts get-caller-identity --query 'Account')
 build_date=$(date +"%Y-%m-%dT%H:%M:%S%z")
 build_output_directory="${script_dir}/../../build_output"
 commit_sha=$(git rev-parse --verify HEAD --short=10)
-fdb_version=$(awk '/^[[:space:]]+VERSION[[:space:]]+[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+(-rc[[:digit:]])?/{print $2}' "${script_dir}/../../CMakeLists.txt")
-fdb_library_versions=( '5.1.7' '6.1.13' '6.2.30' "${fdb_version}" )
+fdb_version=$(cat "${build_output_directory}/version.txt")
+fdb_library_versions=( '5.1.7' '6.1.13' '6.2.30' '6.3.18' "${fdb_version}" )
 fdb_website="https://www.foundationdb.org"
 image_list=(
     'base'
@@ -256,6 +259,7 @@ if [ -n "${OKTETO_NAMESPACE+x}" ]; then
     fdb_library_versions=( "${fdb_version}" )
     registry="${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com"
     tag_base="${registry}/foundationdb/"
+    tag_postfix="${OKTETO_NAME:-dev}"
     stripped_binaries_and_from_where="unstripped_local" # MUST BE ONE OF ( "unstripped_artifactory" "stripped_artifactory" "unstripped_local" "stripped_local" )
     dockerfile_name="Dockerfile.eks"
     use_development_java_bindings="true"

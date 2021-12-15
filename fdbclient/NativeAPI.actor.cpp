@@ -6537,9 +6537,6 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Trans
 }
 
 Future<Standalone<VectorRef<KeyRangeRef>>> Transaction::getBlobGranuleRanges(const KeyRange& range) {
-	if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
-		throw client_invalid_operation();
-	}
 	return ::getBlobGranuleRangesActor(this, range);
 }
 
@@ -6708,9 +6705,6 @@ Future<Standalone<VectorRef<BlobGranuleChunkRef>>> Transaction::readBlobGranules
                                                                                  Version begin,
                                                                                  Optional<Version> readVersion,
                                                                                  Version* readVersionOut) {
-	if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
-		throw client_invalid_operation();
-	}
 	return readBlobGranulesActor(cx, this, range, begin, readVersion, readVersionOut);
 }
 
@@ -7376,8 +7370,8 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 			if (locations.size() > 1) {
 				std::vector<std::pair<StorageServerInterface, KeyRange>> interfs;
 				for (int i = 0; i < locations.size(); i++) {
-					interfs.push_back(std::make_pair(locations[i].second->getInterface(chosenLocations[i]),
-					                                 locations[i].first & range));
+					interfs.emplace_back(locations[i].second->getInterface(chosenLocations[i]),
+					                     locations[i].first & range);
 				}
 				wait(mergeChangeFeedStream(db, interfs, results, rangeID, &begin, end) || cx->connectionFileChanged());
 			} else {
