@@ -636,6 +636,26 @@ public:
 		return true;
 	}
 
+	void eraseDirectoryRecursive(std::string const& dir) {
+		auto prefix = dir.back() == '/' ? dir : dir + '/';
+		decltype(directories) newDirectories;
+		for (auto const& d : directories) {
+			std::string_view dir = d;
+			if (dir.size() < prefix.size() || dir.substr(0, prefix.size()) != prefix) {
+				newDirectories.emplace(d);
+			}
+		}
+		directories = std::move(newDirectories);
+		decltype(files) newFiles;
+		for (auto const& f : files) {
+			std::string_view file = f.first;
+			if (file.size() < prefix.size() || file.substr(0, prefix.size()) != prefix) {
+				newFiles.insert(f);
+			}
+		}
+		files = std::move(newFiles);
+	}
+
 	std::vector<std::string> findFiles(std::string directory, std::string extension, bool directoryOnly) {
 		std::vector<std::string> res;
 		std::vector<std::string_view> candidates;
@@ -2905,6 +2925,14 @@ bool Sim2FileSystem::createDirectory(std::string const& directory) {
 		return SimpleInMemoryFileSystem()->createDirectory(directory);
 	} else {
 		return platform::createDirectory(directory);
+	}
+}
+
+void Sim2FileSystem::eraseDirectoryRecursive(std::string const& dir) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		SimpleInMemoryFileSystem()->eraseDirectoryRecursive(dir);
+	} else {
+		platform::eraseDirectoryRecursive(dir);
 	}
 }
 

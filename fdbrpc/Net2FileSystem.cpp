@@ -169,6 +169,10 @@ bool Net2FileSystem::createDirectory(std::string const& directory) {
 	return platform::createDirectory(directory);
 }
 
+void Net2FileSystem::eraseDirectoryRecursive(std::string const& dir) {
+	platform::eraseDirectoryRecursive(dir);
+}
+
 std::vector<std::string> Net2FileSystem::listFiles(std::string const& directory, std::string const& extension) {
 	return platform::listFiles(directory, extension);
 }

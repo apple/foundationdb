@@ -135,6 +135,9 @@ public:
 	// Returns true if directory was created, false if it existed, throws platform_error() otherwise
 	virtual bool createDirectory(std::string const& directory) = 0;
 
+	// Avoid in production code: not atomic, not fast, not reliable in all environments
+	virtual void eraseDirectoryRecursive(std::string const& dir) = 0;
+
 	// e.g. extension==".fdb", returns filenames relative to directory
 	virtual std::vector<std::string> listFiles(std::string const& directory, std::string const& extension = "") = 0;
 
