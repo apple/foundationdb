@@ -594,6 +594,58 @@ Future<ConfigurationResult> autoConfig(Reference<DB> db, ConfigureAutoResult con
 	}
 }
 
+ACTOR template <class DB>
+Future<Void> createTenant(Reference<DB> db, TenantName name) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+
+	// TODO: add a real prefix allocator
+	state Standalone<StringRef> prefix(deterministicRandom()->randomUniqueID().toString());
+	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<Value> val = wait(tr->get(tenantMapKey));
+			if (val.present()) {
+				throw tenant_already_exists();
+			}
+
+			tr->set(tenantMapKey, prefix);
+			wait(tr->commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+ACTOR template <class DB>
+Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<Value> val = wait(tr->get(tenantMapKey));
+			if (!val.present()) {
+				throw tenant_not_found();
+			}
+
+			RangeResult contents = wait(tr->getRange(prefixRange(val.get()), 1));
+			if (!contents.empty()) {
+				throw tenant_not_empty();
+			}
+
+			tr->clear(tenantMapKey);
+			wait(tr->commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 // Accepts tokens separated by spaces in a single string
 template <class DB>
 Future<ConfigurationResult> changeConfig(Reference<DB> db, std::string const& modes, bool force) {

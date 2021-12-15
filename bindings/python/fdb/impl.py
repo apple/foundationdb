@@ -1146,6 +1146,7 @@ class _TransactionCreator(_FDBBase):
                 yield None
         return TransactionCreator
 
+
 class Database(_TransactionCreator):
     def __init__(self, dpointer):
         self.dpointer = dpointer
@@ -1167,6 +1168,12 @@ class Database(_TransactionCreator):
         pointer = ctypes.c_void_p()
         self.capi.fdb_database_create_transaction(self.dpointer, ctypes.byref(pointer))
         return Transaction(pointer.value, self)
+
+    def create_tenant(self, name):
+        return FutureVoid(self.capi.fdb_database_allocate_tenant(self.dpointer, name, len(name)))
+
+    def delete_tenant(self, name):
+        return FutureVoid(self.capi.fdb_database_remove_tenant(self.dpointer, name, len(name)))
 
 
 class Tenant(_TransactionCreator):
@@ -1491,6 +1498,12 @@ def init_c_api():
     _capi.fdb_database_set_option.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
     _capi.fdb_database_set_option.restype = ctypes.c_int
     _capi.fdb_database_set_option.errcheck = check_error_code
+
+    _capi.fdb_database_allocate_tenant.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+    _capi.fdb_database_allocate_tenant.restype = ctypes.c_void_p
+
+    _capi.fdb_database_remove_tenant.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+    _capi.fdb_database_remove_tenant.restype = ctypes.c_void_p
 
     _capi.fdb_tenant_destroy.argtypes = [ctypes.c_void_p]
     _capi.fdb_tenant_destroy.restype = None

@@ -115,6 +115,8 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                     int snapshotCommandLength);
 	double (*databaseGetMainThreadBusyness)(FDBDatabase* database);
 	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
+	FDBFuture* (*databaseAllocateTenant)(FDBDatabase* database, uint8_t const* name, int name_length);
+	FDBFuture* (*databaseRemoveTenant)(FDBDatabase* database, uint8_t const* name, int name_length);
 
 	// Tenant
 	fdb_error_t (*tenantCreateTransaction)(FDBTenant* tenant, FDBTransaction** outTransaction);
@@ -381,6 +383,12 @@ public:
 	ThreadFuture<ProtocolVersion> getServerProtocol(
 	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
 
+	// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
+	ThreadFuture<Void> createTenant(StringRef const& tenantName) override;
+
+	// Deletes the tenant with the given name. The tenant must be empty.
+	ThreadFuture<Void> deleteTenant(StringRef const& tenantName) override;
+
 	void addref() override { ThreadSafeReferenceCounted<DLDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLDatabase>::delref(); }
 
@@ -635,6 +643,12 @@ public:
 	// Note: this will never return if the server is running a protocol from FDB 5.0 or older
 	ThreadFuture<ProtocolVersion> getServerProtocol(
 	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
+
+	// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
+	ThreadFuture<Void> createTenant(StringRef const& tenantName) override;
+
+	// Deletes the tenant with the given name. The tenant must be empty.
+	ThreadFuture<Void> deleteTenant(StringRef const& tenantName) override;
 
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionDatabase>::delref(); }

@@ -23,6 +23,7 @@
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't
@@ -113,6 +114,24 @@ ThreadFuture<ProtocolVersion> ThreadSafeDatabase::getServerProtocol(Optional<Pro
 	DatabaseContext* db = this->db;
 	return onMainThread(
 	    [db, expectedVersion]() -> Future<ProtocolVersion> { return db->getClusterProtocol(expectedVersion); });
+}
+
+// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
+ThreadFuture<Void> ThreadSafeDatabase::createTenant(StringRef const& name) {
+	DatabaseContext* db = this->db;
+	TenantName tenantNameCopy = name;
+	return onMainThread([db, tenantNameCopy]() -> Future<Void> {
+		return ManagementAPI::createTenant(Reference<DatabaseContext>::addRef(db), tenantNameCopy);
+	});
+}
+
+// Deletes the tenant with the given name. The tenant must be empty.
+ThreadFuture<Void> ThreadSafeDatabase::deleteTenant(StringRef const& name) {
+	DatabaseContext* db = this->db;
+	TenantName tenantNameCopy = name;
+	return onMainThread([db, tenantNameCopy]() -> Future<Void> {
+		return ManagementAPI::deleteTenant(Reference<DatabaseContext>::addRef(db), tenantNameCopy);
+	});
 }
 
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {

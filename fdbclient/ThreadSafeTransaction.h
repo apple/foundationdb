@@ -47,6 +47,12 @@ public:
 	ThreadFuture<ProtocolVersion> getServerProtocol(
 	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
 
+	// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
+	ThreadFuture<Void> createTenant(StringRef const& name) override;
+
+	// Deletes the tenant with the given name. The tenant must be empty.
+	ThreadFuture<Void> deleteTenant(StringRef const& name) override;
+
 	// Returns after a majority of coordination servers are available and have reported a leader. The
 	// cluster file therefore is valid, but the database might be unavailable.
 	ThreadFuture<Void> onConnected();
@@ -72,7 +78,7 @@ public: // Internal use only
 
 class ThreadSafeTenant : public ITenant, ThreadSafeReferenceCounted<ThreadSafeTenant>, NonCopyable {
 public:
-	ThreadSafeTenant(Reference<ThreadSafeDatabase> db, StringRef name) : db(db) {}
+	ThreadSafeTenant(Reference<ThreadSafeDatabase> db, StringRef name) : db(db), name(name) {}
 	~ThreadSafeTenant() override;
 
 	Reference<ITransaction> createTransaction() override;

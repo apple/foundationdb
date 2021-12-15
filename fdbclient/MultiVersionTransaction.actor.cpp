@@ -491,6 +491,26 @@ ThreadFuture<ProtocolVersion> DLDatabase::getServerProtocol(Optional<ProtocolVer
 	});
 }
 
+// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
+ThreadFuture<Void> DLDatabase::createTenant(StringRef const& tenantName) {
+	if (api->databaseAllocateTenant == nullptr) {
+		throw unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseAllocateTenant(db, tenantName.begin(), tenantName.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+}
+
+// Deletes the tenant with the given name. The tenant must be empty.
+ThreadFuture<Void> DLDatabase::deleteTenant(StringRef const& tenantName) {
+	if (api->databaseRemoveTenant == nullptr) {
+		throw unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseRemoveTenant(db, tenantName.begin(), tenantName.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+}
+
 // DLApi
 
 // Loads the specified function from a dynamic library
@@ -551,6 +571,9 @@ void DLApi::init() {
 	                   headerVersion >= 700);
 	loadClientFunction(
 	    &api->databaseGetServerProtocol, lib, fdbCPath, "fdb_database_get_server_protocol", headerVersion >= 700);
+	loadClientFunction(
+	    &api->databaseAllocateTenant, lib, fdbCPath, "fdb_database_allocate_tenant", headerVersion >= 710);
+	loadClientFunction(&api->databaseRemoveTenant, lib, fdbCPath, "fdb_database_remove_tenant", headerVersion >= 710);
 	loadClientFunction(&api->databaseDestroy, lib, fdbCPath, "fdb_database_destroy", headerVersion >= 0);
 	loadClientFunction(&api->databaseRebootWorker, lib, fdbCPath, "fdb_database_reboot_worker", headerVersion >= 700);
 	loadClientFunction(&api->databaseForceRecoveryWithDataLoss,
@@ -1378,6 +1401,26 @@ double MultiVersionDatabase::getMainThreadBusyness() {
 // Note: this will never return if the server is running a protocol from FDB 5.0 or older
 ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
 	return dbState->versionMonitorDb->getServerProtocol(expectedVersion);
+}
+
+// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
+ThreadFuture<Void> MultiVersionDatabase::createTenant(StringRef const& tenantName) {
+	if (dbState->db) {
+		return dbState->db->createTenant(tenantName);
+	}
+
+	// TODO: handle upgrades and/or timeouts
+	return Never();
+}
+
+// Deletes the tenant with the given name. The tenant must be empty.
+ThreadFuture<Void> MultiVersionDatabase::deleteTenant(StringRef const& tenantName) {
+	if (dbState->db) {
+		return dbState->db->deleteTenant(tenantName);
+	}
+
+	// TODO: handle upgrades and/or timeouts
+	return Never();
 }
 
 MultiVersionDatabase::DatabaseState::DatabaseState(std::string clusterFilePath, Reference<IDatabase> versionMonitorDb)
