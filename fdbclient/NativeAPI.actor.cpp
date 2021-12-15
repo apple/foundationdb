@@ -4363,8 +4363,7 @@ Transaction::Transaction(Database const& cx, Optional<TenantName> const& tenant)
                                             cx->taskID,
                                             generateSpanID(cx->transactionTracingSample),
                                             createTrLogInfoProbabilistically(cx))),
-    span(trState->spanID, "Transaction"_loc), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), tr(trState->spanID) {
-
+    span(trState->spanID, "Transaction"_loc), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), tr(tenant, trState->spanID) {
 	if (DatabaseContext::debugUseTags) {
 		debugAddTags(trState);
 	}
@@ -4991,7 +4990,7 @@ void TransactionOptions::reset(Database const& cx) {
 void Transaction::resetImpl(bool generateNewSpan) {
 	flushTrLogsIfEnabled();
 	trState = trState->cloneAndReset(createTrLogInfoProbabilistically(trState->cx), generateNewSpan);
-	tr = CommitTransactionRequest(trState->spanID);
+	tr = CommitTransactionRequest(trState->tenant, trState->spanID);
 	readVersion = Future<Version>();
 	metadataVersion = Promise<Optional<Key>>();
 	extraConflictRanges.clear();
@@ -5068,7 +5067,6 @@ ACTOR void checkWrites(Reference<TransactionState> trState,
 
 	wait(delay(deterministicRandom()->random01())); // delay between 0 and 1 seconds
 
-	// Future<Optional<Version>> version, Database cx, CommitTransactionRequest req ) {
 	state KeyRangeMap<MutationBlock> expectedValues;
 
 	auto& mutations = req.transaction.mutations;
@@ -5254,7 +5252,54 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Referen
 	return trCommitCosts;
 }
 
+// TODO: I've written it this way so that the application of the prefix is self-contained and can be easily replaced
+//       by another approach. If we choose not to send the request without the prefix applied, then it may be more
+//       efficient for us to apply the prefix for each mutation and conflict range as we go along. The approach below
+//       defeats some of our attempts to store various operations more compactly (e.g. avoiding duplicate data for
+//       single key ranges).
+// TODO: Compact the result to avoid us having to keep the no longer used memory.
+void applyTenantPrefix(CommitTransactionRequest req, Key tenantPrefix) {
+	for (auto& m : req.transaction.mutations) {
+		if (m.type == MutationRef::ClearRange) {
+			if (m.param2.startsWith(m.param1)) {
+				m.param2 = m.param2.withPrefix(tenantPrefix, req.arena);
+				m.param1 = m.param2.substr(0, tenantPrefix.size() + m.param1.size());
+			} else {
+				m.param1 = m.param1.withPrefix(tenantPrefix, req.arena);
+				m.param2 = m.param2.withPrefix(tenantPrefix, req.arena);
+			}
+		} else {
+			m.param1 = m.param1.withPrefix(tenantPrefix, req.arena);
+		}
+
+		if (m.type == MutationRef::SetVersionstampedKey) {
+			uint8_t* key = mutateString(m.param1);
+			int* offset = reinterpret_cast<int*>(&key[m.param1.size() - 4]);
+			*offset += tenantPrefix.size();
+		}
+	}
+
+	for (auto& rc : req.transaction.read_conflict_ranges) {
+		if (rc.end.startsWith(rc.begin)) {
+			KeyRef end = rc.end.withPrefix(tenantPrefix, req.arena);
+			rc = KeyRangeRef(end.substr(0, tenantPrefix.size() + rc.begin.size()), end);
+		} else {
+			rc = rc.withPrefix(tenantPrefix, req.arena);
+		}
+	}
+
+	for (auto& wc : req.transaction.write_conflict_ranges) {
+		if (wc.end.startsWith(wc.begin)) {
+			KeyRef end = wc.end.withPrefix(tenantPrefix, req.arena);
+			wc = KeyRangeRef(end.substr(0, tenantPrefix.size() + wc.begin.size()), end);
+		} else {
+			wc = wc.withPrefix(tenantPrefix, req.arena);
+		}
+	}
+}
+
 ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
+                                    Future<Key> tenantPrefix,
                                     CommitTransactionRequest req,
                                     Future<Version> readVersion) {
 	state TraceInterval interval("TransactionCommit");
@@ -5275,6 +5320,15 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			     store(req.commitCostEstimation, estimateCommitCosts(trState, &req.transaction)));
 		} else {
 			wait(store(req.transaction.read_snapshot, readVersion));
+		}
+
+		Key resolvedTenantPrefix = wait(tenantPrefix);
+		// TODO: Can we optimize this by sending the prefix as part of the request?
+		//       To do this most efficiently, we'd want the ability to pass around StringRef like objects
+		//       that are composed of a prefix that isn't contiguous with the rest of the data, or we'd need
+		//       to change the type used in a potentially large number of places in the transaction subsystem.
+		if (!resolvedTenantPrefix.empty()) {
+			applyTenantPrefix(req, resolvedTenantPrefix);
 		}
 
 		startTime = now();
@@ -5503,7 +5557,7 @@ Future<Void> Transaction::commitMutations() {
 			tr.transaction.report_conflicting_keys = true;
 		}
 
-		Future<Void> commitResult = tryCommit(trState, tr, readVersion);
+		Future<Void> commitResult = tryCommit(trState, getTenantPrefix(), tr, readVersion);
 
 		if (isCheckingWrites) {
 			Promise<Void> committed;
