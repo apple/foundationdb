@@ -2285,7 +2285,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
 		}
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
-		platform::createDirectory(clusterFileDir);
+		IAsyncFileSystem::filesystem()->createDirectory(clusterFileDir);
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connectionString.get().toString());
 		wait(timeoutError(runTests(makeReference<ClusterConnectionFile>(joinPath(clusterFileDir, "fdb.cluster")),
 		                           TEST_TYPE_FROM_FILE,

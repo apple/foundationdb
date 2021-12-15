@@ -274,7 +274,7 @@ Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const st
 		flags |= IAsyncFile::OPEN_ENCRYPTED;
 	}
 	std::string fullPath = joinPath(m_path, path);
-	platform::createDirectory(parentDirectory(fullPath));
+	IAsyncFileSystem::filesystem()->createDirectory(parentDirectory(fullPath));
 	std::string temp = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";
 	Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
 	return map(f, [=](Reference<IAsyncFile> f) { return Reference<IBackupFile>(new BackupFile(path, f, fullPath)); });

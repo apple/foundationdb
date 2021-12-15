@@ -29,7 +29,7 @@ ACTOR static Future<Void> onErr(Future<Future<Void>> e) {
 }
 
 void OnDemandStore::open() {
-	platform::createDirectory(folder); // FIXME: shall we replace here?
+	IAsyncFileSystem::filesystem()->createDirectory(folder);
 	store = keyValueStoreMemory(joinPath(folder, prefix), myID, 500e6);
 	err.send(store->getError());
 }
