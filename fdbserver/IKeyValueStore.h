@@ -86,6 +86,9 @@ public:
 
 	virtual void enableSnapshot() {}
 
+	virtual Future<Void> addShard(KeyRangeRef range, UID uid) {return Future<Void>();}
+
+
 	/*
 	Concurrency contract
 	    Causal consistency:

@@ -48,6 +48,27 @@ StringRef toStringRef(rocksdb::Slice s) {
 	return StringRef(reinterpret_cast<const uint8_t*>(s.data()), s.size());
 }
 
+void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
+	auto level = status.IsTimedOut() ? SevWarn : SevError;
+	TraceEvent e(level, "RocksDBError");
+	e.detail("Error", status.ToString()).detail("Method", method).detail("RocksDBSeverity", status.severity());
+	if (status.IsIOError()) {
+		e.detail("SubCode", status.subcode());
+	}
+}
+
+Error statusToError(const rocksdb::Status& s) {
+	if (s.IsIOError()) {
+		return io_error();
+	} else if (s.IsTimedOut()) {
+		return transaction_too_old();
+	} else {
+		return unknown_error();
+	}
+}
+
+
+
 rocksdb::ColumnFamilyOptions getCFOptions() {
 	rocksdb::ColumnFamilyOptions options;
 	options.level_compaction_dynamic_level_bytes = true;
@@ -115,6 +136,89 @@ rocksdb::ReadOptions getReadOptions() {
 	return options;
 }
 
+int readRangeInDb(rocksdb::DB* db, const KeyRangeRef& range, int rowLimit, int byteLimit, RangeResult* result) {
+			if (rowLimit == 0 || byteLimit == 0) {
+				return 0;
+			}
+
+			int accumulatedRows = 0;
+			int accumulatedBytes = 0;
+			// TODO: Pass read timeout.
+			int readRangeTimeout = SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT;
+			rocksdb::Status s;
+			auto options = getReadOptions();
+			uint64_t deadlineMircos = db->GetEnv()->NowMicros() + readRangeTimeout * 1000000;
+			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
+			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
+
+			// When using a prefix extractor, ensure that keys are returned in order even if they cross
+			// a prefix boundary.
+			options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
+			if (rowLimit >= 0) {
+				auto endSlice = toSlice(range.end);
+				options.iterate_upper_bound = &endSlice;
+				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
+				cursor->Seek(toSlice(range.begin));
+				while (cursor->Valid() && toStringRef(cursor->key()) < range.end) {
+					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
+					++accumulatedRows;
+					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
+					result->push_back_deep(result->arena(), kv);
+					// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
+					if (accumulatedRows >= rowLimit || accumulatedBytes >= byteLimit) {
+						break;
+					}
+
+					/*
+					if (timer_monotonic() - a.startTime > readRangeTimeout) {
+						TraceEvent(SevWarn, "RocksDBError")
+						    .detail("Error", "Read range request timedout")
+						    .detail("Method", "ReadRangeAction")
+						    .detail("Timeout value", readRangeTimeout);
+						a.result.sendError(transaction_too_old());
+						return;
+					}*/
+					cursor->Next();
+				}
+				s = cursor->status();
+			} else {
+				auto beginSlice = toSlice(range.begin);
+				options.iterate_lower_bound = &beginSlice;
+				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
+				cursor->SeekForPrev(toSlice(range.end));
+				if (cursor->Valid() && toStringRef(cursor->key()) == range.end) {
+					cursor->Prev();
+				}
+				while (cursor->Valid() && toStringRef(cursor->key()) >= range.begin) {
+					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
+					++accumulatedRows;
+					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
+					result->push_back_deep(result->arena(), kv);
+					// Calling `cursor->Prev()` is potentially expensive, so short-circut here just in case.
+					if (accumulatedRows >= -rowLimit || accumulatedBytes >= byteLimit) {
+						break;
+					}
+					/*
+					if (timer_monotonic() - a.startTime > readRangeTimeout) {
+						TraceEvent(SevWarn, "RocksDBError")
+						    .detail("Error", "Read range request timedout")
+						    .detail("Method", "ReadRangeAction")
+						    .detail("Timeout value", readRangeTimeout);
+						a.result.sendError(transaction_too_old());
+						return;
+					}*/
+					cursor->Prev();
+				}
+				s = cursor->status();
+			}
+
+			if (!s.ok()) {
+				logRocksDBError(s, "ReadRange");
+				// The data wrriten to the arena is not erased, which will leave RangeResult in a dirty state. The RangeResult should never be returned to user.
+				return -1;
+			}
+			return accumulatedBytes;
+}
 ACTOR Future<Void> flowLockLogger(const FlowLock* readLock, const FlowLock* fetchLock) {
 	loop {
 		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
@@ -210,24 +314,6 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 	}
 }
 
-void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
-	auto level = status.IsTimedOut() ? SevWarn : SevError;
-	TraceEvent e(level, "RocksDBError");
-	e.detail("Error", status.ToString()).detail("Method", method).detail("RocksDBSeverity", status.severity());
-	if (status.IsIOError()) {
-		e.detail("SubCode", status.subcode());
-	}
-}
-
-Error statusToError(const rocksdb::Status& s) {
-	if (s.IsIOError()) {
-		return io_error();
-	} else if (s.IsTimedOut()) {
-		return transaction_too_old();
-	} else {
-		return unknown_error();
-	}
-}
 
 struct RocksDBKeyValueStore : IKeyValueStore {
 	using DB = rocksdb::DB*;
@@ -258,12 +344,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			const FlowLock* fetchLock;
 			KeyRangeMap<DB>* shardMap;
 
-			OpenAction(std::string path,
+			/*OpenAction(std::string path,
 			           Optional<Future<Void>>& metrics,
 			           const FlowLock* readLock,
 			           const FlowLock* fetchLock)
 			  : path(std::move(path)), dataPath(""), metrics(metrics), readLock(readLock), fetchLock(fetchLock),
-			    shardMap(nullptr) {}
+			    shardMap(nullptr) {}*/
 
 			OpenAction(std::string path,
 			           std::string dataPath,
@@ -272,7 +358,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			           const FlowLock* fetchLock,
 			           KeyRangeMap<DB>* shardMap)
 			  : path(std::move(path)), dataPath(std::move(dataPath)), metrics(metrics), readLock(readLock),
-			    fetchLock(fetchLock), shardMap(shardMap) {}
+			    fetchLock(fetchLock), shardMap(shardMap) {
+					ASSERT(shardMap);
+				}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -289,18 +377,19 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
-			if (a.shardMap == nullptr) {
+			if (!SERVER_KNOBS->ROCKSDB_ENABLE_SHARDING) {
+			    a.shardMap->insert(KeyRangeRef("\xff\xff"_sr, "\xff\xff\xff"_sr), db);
+				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open").detail("SingleShard", "True");
 				a.done.send(Void());
 				return;
 			}
-
-			a.shardMap->insert(KeyRangeRef("\xff\xff"_sr, "\xff\xff\xff"_sr), db);
 
 			TraceEvent(SevInfo, "RocksDB")
 			    .detail("Path", a.path)
 			    .detail("Method", "Open")
 			    .detail("MetaRocks", uint64_t(db));
 
+			// Construct shard mapping.
 			auto readOptions = getReadOptions();
 			std::chrono::seconds deadlineSeconds(30);
 			readOptions.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
@@ -361,13 +450,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		struct AddShardAction : TypedAction<Writer, AddShardAction> {
-			const std::string path;
+			const std::string dataPath;
 			KeyRange range;
+			KeyRangeMap<DB> *shardMap;
 			ThreadReturnPromise<Void> done;
-			KeyRangeMap<DB>* shardMap;
 
-			AddShardAction(std::string path, KeyRange range, KeyRangeMap<DB>* shardMap)
-			  : path(path), range(range), shardMap(shardMap) {}
+			AddShardAction(std::string dataPath, KeyRange range, KeyRangeMap<DB>* shardMap)
+			  : dataPath(dataPath), range(range), shardMap(shardMap) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -378,7 +467,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
 			auto options = getOptions();
 			DB ndb;
-			rocksdb::Status status = rocksdb::DB::Open(options, a.path, defaultCF, &handle, &ndb);
+			rocksdb::Status status = rocksdb::DB::Open(options, a.dataPath, defaultCF, &handle, &ndb);
 			if (!status.ok()) {
 				logRocksDBError(status, "AddShard");
 				a.done.sendError(statusToError(status));
@@ -387,10 +476,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			ASSERT(a.shardMap != nullptr);
 
+			// TODO: check key range conflicts before insertion. 
 			a.shardMap->insert(a.range, ndb);
 
 			TraceEvent(SevInfo, "RocksDB")
-			    .detail("Path", a.path)
+			    .detail("Path", a.dataPath)
 			    .detail("Method", "AddShard")
 			    .detail("Begin", a.range.begin.toString())
 			    .detail("End", a.range.end.toString());
@@ -447,6 +537,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::Status s;
 			for (auto& [db, batch] : *(a.shardedBatches)) {
 				s = doCommit(&batch, db);
+				// rollback or retry if commit failed.
 				if (!s.ok()) {
 					a.done.sendError(statusToError(s));
 					return;
@@ -514,12 +605,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		struct ReadValueAction : TypedAction<Reader, ReadValueAction> {
 			Key key;
+			rocksdb::DB* instance;
 			Optional<UID> debugID;
 			double startTime;
 			ThreadReturnPromise<Optional<Value>> result;
 
-			ReadValueAction(KeyRef key, Optional<UID> debugID)
-			  : key(key), debugID(debugID), startTime(timer_monotonic()) {}
+			ReadValueAction(KeyRef key, rocksdb::DB* instance, Optional<UID> debugID)
+			  : key(key), instance(instance), debugID(debugID), startTime(timer_monotonic()) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
@@ -542,24 +634,18 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::PinnableSlice value;
 			auto options = getReadOptions();
 
-			auto it = shardMap->rangeContaining(a.key);
-			if (it->value() == nullptr) {
-				a.result.sendError(internal_error());
-				return;
-			}
-
+			/*
 			TraceEvent("RocksDBGetValue")
 			    .detail("Key", a.key.toString())
 			    .detail("ShardBegin", it->begin().toString())
 			    .detail("ShardEnd", it->end().toString())
 			    .detail("RocksInstance", it->value()->GetName());
+			*/
 
-			DB db = it->value();
-			uint64_t deadlineMircos =
-			    db->GetEnv()->NowMicros() + (readValueTimeout - (timer_monotonic() - a.startTime)) * 1000000;
+			uint64_t deadlineMircos = a.instance->GetEnv()->NowMicros() + (readValueTimeout - (timer_monotonic() - a.startTime)) * 1000000;
 			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
 			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
-			auto s = db->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
+			auto s = a.instance->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.After");
 				traceBatch.get().dump();
@@ -577,11 +663,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		struct ReadValuePrefixAction : TypedAction<Reader, ReadValuePrefixAction> {
 			Key key;
 			int maxLength;
+			rocksdb::DB* instance;
 			Optional<UID> debugID;
 			double startTime;
 			ThreadReturnPromise<Optional<Value>> result;
-			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID)
-			  : key(key), maxLength(maxLength), debugID(debugID), startTime(timer_monotonic()){};
+			ReadValuePrefixAction(Key key, int maxLength, rocksdb::DB* instance, Optional<UID> debugID)
+			  : key(key), maxLength(maxLength), instance(instance), debugID(debugID), startTime(timer_monotonic()){};
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& a) {
@@ -603,10 +690,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::PinnableSlice value;
 			auto options = getReadOptions();
 			uint64_t deadlineMircos =
-			    db->GetEnv()->NowMicros() + (readValuePrefixTimeout - (timer_monotonic() - a.startTime)) * 1000000;
+			    a.instance->GetEnv()->NowMicros() + (readValuePrefixTimeout - (timer_monotonic() - a.startTime)) * 1000000;
 			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
 			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
-			auto s = db->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
+
+			
+			auto s = a.instance->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValuePrefixDebug",
 				                          a.debugID.get().first(),
@@ -626,11 +715,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
 			KeyRange keys;
+			std::vector<rocksdb::DB*> instances;
 			int rowLimit, byteLimit;
 			double startTime;
 			ThreadReturnPromise<RangeResult> result;
-			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit)
-			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()) {}
+			ReadRangeAction(KeyRange keys, std::vector<rocksdb::DB*> instances, int rowLimit, int byteLimit)
+			  : keys(keys), instances(instances),rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
@@ -643,77 +733,38 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
+			int rowLimit = a.rowLimit;
+			int byteLimit = a.byteLimit;
 			RangeResult result;
-			if (a.rowLimit == 0 || a.byteLimit == 0) {
+
+			if (rowLimit == 0 || byteLimit == 0) {
 				a.result.send(result);
 			}
-			int accumulatedBytes = 0;
-			rocksdb::Status s;
-			auto options = getReadOptions();
-			uint64_t deadlineMircos =
-			    db->GetEnv()->NowMicros() + (readRangeTimeout - (timer_monotonic() - a.startTime)) * 1000000;
-			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
-			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
-			// When using a prefix extractor, ensure that keys are returned in order even if they cross
-			// a prefix boundary.
-			options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
-			if (a.rowLimit >= 0) {
-				auto endSlice = toSlice(a.keys.end);
-				options.iterate_upper_bound = &endSlice;
-				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
-				cursor->Seek(toSlice(a.keys.begin));
-				while (cursor->Valid() && toStringRef(cursor->key()) < a.keys.end) {
-					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
-					result.push_back_deep(result.arena(), kv);
-					// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
-					if (result.size() >= a.rowLimit || accumulatedBytes >= a.byteLimit) {
-						break;
-					}
-					if (timer_monotonic() - a.startTime > readRangeTimeout) {
-						TraceEvent(SevWarn, "RocksDBError")
-						    .detail("Error", "Read range request timedout")
-						    .detail("Method", "ReadRangeAction")
-						    .detail("Timeout value", readRangeTimeout);
-						a.result.sendError(transaction_too_old());
-						return;
-					}
-					cursor->Next();
-				}
-				s = cursor->status();
-			} else {
-				auto beginSlice = toSlice(a.keys.begin);
-				options.iterate_lower_bound = &beginSlice;
-				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
-				cursor->SeekForPrev(toSlice(a.keys.end));
-				if (cursor->Valid() && toStringRef(cursor->key()) == a.keys.end) {
-					cursor->Prev();
-				}
-				while (cursor->Valid() && toStringRef(cursor->key()) >= a.keys.begin) {
-					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
-					result.push_back_deep(result.arena(), kv);
-					// Calling `cursor->Prev()` is potentially expensive, so short-circut here just in case.
-					if (result.size() >= -a.rowLimit || accumulatedBytes >= a.byteLimit) {
-						break;
-					}
-					if (timer_monotonic() - a.startTime > readRangeTimeout) {
-						TraceEvent(SevWarn, "RocksDBError")
-						    .detail("Error", "Read range request timedout")
-						    .detail("Method", "ReadRangeAction")
-						    .detail("Timeout value", readRangeTimeout);
-						a.result.sendError(transaction_too_old());
-						return;
-					}
-					cursor->Prev();
-				}
-				s = cursor->status();
+			if (rowLimit < 0) {
+				// Reverses the instances so we could read range in reverse direction.
+				std::reverse(a.instances.begin(), a.instances.end());
 			}
 
-			if (!s.ok()) {
-				logRocksDBError(s, "ReadRange");
-				a.result.sendError(statusToError(s));
-				return;
+            // TODO: Do multi-thread read to improve performance
+			// All the shards should have the same version. Does the version matter?? probably not.
+			// Consider the following case
+			// Shard [a, b) => s1, [b, d) => s2
+			// Enqueue ClearRange(a, c)
+			// Enqueue Read(a, d), one shard could have applied ClearRange, Another may not.
+
+			RangeResult rangeResult;
+			int accumulatedBytes = 0;
+			for (auto* instance: a.instances) {
+				auto bytesRead = readRangeInDb(instance, a.keys, rowLimit, byteLimit, &rangeResult);
+				if (bytesRead < 0) {
+					// Error reading an instance.
+					a.result.sendError(internal_error());
+					return;
+				}
+				if (result.size() >= abs(a.rowLimit) || bytesRead >= byteLimit) {
+					break;
+				}
+				byteLimit -= bytesRead;
 			}
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
@@ -811,12 +862,21 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		std::cout << "Buffered key " << kv.key.toString() << " in db " << it.value()->GetName() << std::endl;
 	}
 
-	void clear(KeyRangeRef keyRange, const Arena*) override {
-		if (writeBatch == nullptr) {
-			writeBatch.reset(new rocksdb::WriteBatch());
+	void clear(KeyRangeRef range, const Arena*) override {
+        if (writeBatches == nullptr) {
+			writeBatches.reset(new std::unordered_map<DB, rocksdb::WriteBatch>());
 		}
-
-		writeBatch->DeleteRange(toSlice(keyRange.begin), toSlice(keyRange.end));
+        auto rangeIterator = shardMap.intersectingRanges(range);
+		// Get DB instances
+		std::vector<rocksdb::DB*> instances;
+		for(auto it = rangeIterator.begin() ;it != rangeIterator.end();++it) {
+			instances.push_back(it.value());
+		}
+		/*
+		for (const auto& range: ranges) {
+			instances.push_back(shardMap[range]);
+			(*writeBatches)[range].DeleteRange(toSlice(keyRange.begin), toSlice(keyRange.end));
+		}*/
 	}
 
 	Future<Void> commit(bool) override {
@@ -863,8 +923,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType type, Optional<UID> debugID) override {
+		auto it = shardMap.rangeContaining(key);
+		if (it.value() == nullptr) {
+			// TODO: Add new error code, e.g., shard not found.
+			// a.result.sendError(internal_error());
+			return internal_error();
+		}
+		
 		if (!shouldThrottle(type, key)) {
-			auto a = new Reader::ReadValueAction(key, debugID);
+			auto a = new Reader::ReadValueAction(key, it.value(), debugID);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
@@ -874,7 +941,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
-		auto a = std::make_unique<Reader::ReadValueAction>(key, debugID);
+		auto a = std::make_unique<Reader::ReadValueAction>(key, it.value(), debugID);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
@@ -882,8 +949,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	                                        int maxLength,
 	                                        IKeyValueStore::ReadType type,
 	                                        Optional<UID> debugID) override {
+		auto it = shardMap.rangeContaining(key);
+		if (it.value() == nullptr) {
+			// TODO: Add new error code, e.g., shard not found.
+			// a.result.sendError(internal_error());
+			return internal_error();
+		}
 		if (!shouldThrottle(type, key)) {
-			auto a = new Reader::ReadValuePrefixAction(key, maxLength, debugID);
+			auto a = new Reader::ReadValuePrefixAction(key, maxLength, it.value(), debugID);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
@@ -893,7 +966,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
-		auto a = std::make_unique<Reader::ReadValuePrefixAction>(key, maxLength, debugID);
+
+
+
+		auto a = std::make_unique<Reader::ReadValuePrefixAction>(key, maxLength, it.value(), debugID);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
@@ -921,8 +997,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	                              int rowLimit,
 	                              int byteLimit,
 	                              IKeyValueStore::ReadType type) override {
+
+		auto rangeIterator = shardMap.intersectingRanges(keys);
+		// Get DB instances
+		std::vector<rocksdb::DB*> instances;
+		for(auto it = rangeIterator.begin() ;it != rangeIterator.end();++it) {
+			instances.push_back(it.value());
+		}
+		
 		if (!shouldThrottle(type, keys.begin)) {
-			auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
+			auto a = new Reader::ReadRangeAction(keys,instances, rowLimit, byteLimit);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
@@ -930,9 +1014,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		auto& semaphore = (type == IKeyValueStore::ReadType::FETCH) ? fetchSemaphore : readSemaphore;
 		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
-
 		checkWaiters(semaphore, maxWaiters);
-		auto a = std::make_unique<Reader::ReadRangeAction>(keys, rowLimit, byteLimit);
+
+		
+		auto a = std::make_unique<Reader::ReadRangeAction>(keys, instances, rowLimit, byteLimit);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
@@ -959,7 +1044,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
-	Future<Void> addShard(KeyRangeRef range, UID id) {
+	Future<Void> addShard(KeyRangeRef range, UID id) override {
 		auto a = std::make_unique<Writer::AddShardAction>(dataPath + id.toString(), range, &shardMap);
 		Future<Void> f = a->done.getFuture();
 		writeThread->post(a.release());
