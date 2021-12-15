@@ -354,6 +354,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_READ_QUEUE_SOFT_MAX,                           500 );
 	init( ROCKSDB_FETCH_QUEUE_HARD_MAX,                          100 );
 	init( ROCKSDB_FETCH_QUEUE_SOFT_MAX,                           50 );
+	init(ROCKSDB_ENABLE_SHARDING,								 true);
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
