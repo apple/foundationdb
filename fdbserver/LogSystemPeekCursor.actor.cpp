@@ -1535,7 +1535,8 @@ ILogSystem::GroupPeekCursor::GroupPeekCursor(
     Version begin,
     Version end,
     bool returnIfBlocked)
-  : end(end), currentCursor(tag.id % logServers.size()) {
+  : currentCursor(tag.id % logServers.size()), end(end) {
+	TraceEvent("GroupPeekCreate").detail("ReturnIfBlocked", returnIfBlocked);
 	for (int i = 0; i < logServers.size(); i++) {
 		auto cursor =
 		    makeReference<ILogSystem::ServerPeekCursor>(logServers[i], tag, begin, end, returnIfBlocked, false);
@@ -1680,7 +1681,7 @@ ILogSystem::HeapPeekCursor::HeapPeekCursor(
     Version end,
     int tLogReplicationFactor,
     bool returnIfBlocked)
-  : currentCursor(-1), uninitializedVersion(begin) {
+  : uninitializedVersion(begin), currentCursor(-1) {
 	for (int group = 0; group < logServers.size() / tLogReplicationFactor; group++) {
 		std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> groupServers;
 		for (int i = 0; i < tLogReplicationFactor; i++) {
