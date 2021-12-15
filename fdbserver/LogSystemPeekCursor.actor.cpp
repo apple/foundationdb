@@ -1535,7 +1535,7 @@ ILogSystem::GroupPeekCursor::GroupPeekCursor(
     Version begin,
     Version end,
     bool returnIfBlocked)
-  : currentCursor(tag.id % logServers.size()), end(end) {
+  : currentCursor(tag.id % logServers.size()), end(end), returnIfBlocked(returnIfBlocked) {
 	TraceEvent("GroupPeekCreate").detail("ReturnIfBlocked", returnIfBlocked);
 	for (int i = 0; i < logServers.size(); i++) {
 		auto cursor =
@@ -1616,6 +1616,10 @@ ACTOR Future<Void> groupPeekGetMore(ILogSystem::GroupPeekCursor* self, TaskPrior
 					}
 				}
 				if (allExhausted) {
+					if (self->returnIfBlocked && self->version() < self->end) {
+						self->advanceTo(self->end);
+						return Void();
+					}
 					return Never();
 				}
 				if (!foundActive) {

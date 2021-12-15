@@ -497,6 +497,7 @@ struct ILogSystem {
 		int currentCursor;
 		LogMessageVersion end;
 		Future<Void> more;
+		bool returnIfBlocked;
 
 		GroupPeekCursor(std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
 		                Tag tag,
