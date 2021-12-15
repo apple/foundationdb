@@ -2253,6 +2253,10 @@ ACTOR void setupAndRun(std::string dataFolder,
 	                           currentProtocolVersion),
 	    TaskPriority::DefaultYield));
 	Sim2FileSystem::newFileSystem();
+	if (!rebooting) {
+		IAsyncFileSystem::filesystem()->eraseDirectoryRecursive(dataFolder);
+		IAsyncFileSystem::filesystem()->createDirectory(dataFolder);
+	}
 	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
 	TEST(true); // Simulation start
 
