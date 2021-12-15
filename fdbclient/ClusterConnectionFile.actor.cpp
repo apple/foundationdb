@@ -30,7 +30,7 @@ ClusterConnectionFile::ClusterConnectionFile(std::string const& filename)
 		throw no_cluster_file_found();
 	}
 
-	cs = ClusterConnectionString(readFileBytes(filename, MAX_CLUSTER_FILE_BYTES));
+	cs = ClusterConnectionString(IAsyncFileSystem::filesystem()->readFileBytes(filename, MAX_CLUSTER_FILE_BYTES));
 	this->filename = filename;
 }
 

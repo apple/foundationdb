@@ -2320,7 +2320,7 @@ ClusterControllerPriorityInfo getCCPriorityInfo(std::string filePath, ProcessCla
 		                                         .machineClassFitness(ProcessClass::ClusterController),
 		                                     false,
 		                                     ClusterControllerPriorityInfo::FitnessUnknown);
-	std::string contents(readFileBytes(filePath, 1000));
+	std::string contents(IAsyncFileSystem::filesystem()->readFileBytes(filePath, 1000));
 	BinaryReader br(StringRef(contents), IncludeVersion());
 	ClusterControllerPriorityInfo priorityInfo(
 	    ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown);

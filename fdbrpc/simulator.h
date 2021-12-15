@@ -534,7 +534,7 @@ public:
 	std::string abspath(std::string const& path, bool resolveLinks, bool mustExist) override;
 
 	void writeFile(std::string const& filename, std::string const& content) override;
-
+	std::string readFileBytes(std::string const& filename, int maxSize) override;
 #ifdef ENABLE_SAMPLING
 	ActorLineageSet& getActorLineageSet() override;
 #endif

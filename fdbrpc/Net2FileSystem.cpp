@@ -204,3 +204,7 @@ std::string Net2FileSystem::abspath(std::string const& path, bool resolveLinks, 
 void Net2FileSystem::writeFile(std::string const& filename, std::string const& content) {
 	return ::writeFile(filename, content);
 }
+
+std::string Net2FileSystem::readFileBytes(std::string const& filename, int maxSize) {
+	return ::readFileBytes(filename, maxSize);
+}

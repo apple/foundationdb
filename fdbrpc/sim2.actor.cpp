@@ -591,6 +591,12 @@ public:
 		}
 		return f.offset;
 	}
+	off_t ltell(int fd) {
+		ASSERT(fd > 0);
+		auto& f = fds.at(fd);
+		return f.offset;
+	}
+
 	int fsync(int fd) {
 		ASSERT(fd > 0);
 		return 0;
@@ -629,6 +635,33 @@ public:
 			throw;
 		}
 		close(f);
+	}
+
+	std::string readFileBytes(std::string const& filename, int maxSize) {
+		std::string s;
+		auto f = open(filename.c_str(),  O_RDONLY | O_BINARY);
+		if (f < 0) {
+			TraceEvent(SevWarn, "FileOpenError")
+			    .detail("Filename", filename)
+			    .detail("Errno", errno)
+			    .detail("ErrorDescription", strerror(errno));
+			throw file_not_readable();
+		}
+		try {
+			lseek(f, 0, SEEK_END);
+			size_t size = ltell(f);
+			if (size > maxSize)
+				throw file_too_large();
+			s.resize(size);
+			lseek(f, 0, SEEK_SET);
+			if (!read(f, &s[0], size))
+				throw file_not_readable();
+		} catch (...) {
+			close(f);
+			throw;
+		}
+		close(f);
+		return s;
 	}
 
 	bool fileExists(std::string const& filename) {
@@ -3036,6 +3069,14 @@ void Sim2FileSystem::writeFile(std::string const& filename, std::string const& c
 		return SimpleInMemoryFileSystem()->writeFileBytes(filename, (const uint8_t*)(content.c_str()), content.size());
 	} else {
 		return ::writeFile(filename, content);
+	}
+}
+
+std::string Sim2FileSystem::readFileBytes(std::string const& filename, int maxSize) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return SimpleInMemoryFileSystem()->readFileBytes(filename, maxSize);
+	} else {
+		return ::readFileBytes(filename, maxSize);
 	}
 }
 

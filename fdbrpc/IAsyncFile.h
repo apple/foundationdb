@@ -157,7 +157,7 @@ public:
 	virtual std::string abspath(std::string const& path, bool resolveLinks = true, bool mustExist = false) = 0;
 
 	virtual void writeFile(std::string const& filename, std::string const& content) = 0;
-
+	virtual std::string readFileBytes(std::string const& filename, int maxSize) = 0;
 #ifdef ENABLE_SAMPLING
 	// Returns the shared memory data structure used to store actor lineages.
 	virtual ActorLineageSet& getActorLineageSet() = 0;
