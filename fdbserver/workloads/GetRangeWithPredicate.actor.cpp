@@ -41,6 +41,7 @@ struct GetRangeWithPredicateWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(Database cx, GetRangeWithPredicateWorkload* self) {
 		wait(populateData(cx, 200));
 		wait(testGetRangeSubstrMatch(cx));
+		wait(testGetRangeWithLimits(cx));
 		return Void();
 	}
 
@@ -53,8 +54,8 @@ struct GetRangeWithPredicateWorkload : TestWorkload {
 			state Transaction tr(cx);
 			try {
 				tr.reset();
-				for (int i = 0; i < testValues.size(); i++) {
-					tr.set(format("range%06d", i), testValues[i]);
+				for (int i = 0; i < 1000; i++) {
+					tr.set(format("rangea%06d", i), testValues[i % testValues.size()]);
 				}
 				wait(tr.commit());
 				break;
@@ -66,8 +67,8 @@ struct GetRangeWithPredicateWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> testGetRangeSubstrMatch(Database cx) {
-		Key rangeBegin = "range"_sr;
-		Key rangeEnd = "rangf"_sr;
+		Key rangeBegin = "rangea"_sr;
+		Key rangeEnd = "rangeb"_sr;
 
 		state Transaction tr(cx);
 		try {
@@ -77,7 +78,27 @@ struct GetRangeWithPredicateWorkload : TestWorkload {
 			                                  KeySelector(firstGreaterOrEqual(rangeEnd)),
 			                                  GetRangeLimits(),
 			                                  GetRangePredicate(PRED_FIND_IN_VALUE).addArg("test"_sr)));
-			ASSERT(result.size() == 2);
+			ASSERT(result.size() == 400);
+			showResult(result);
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> testGetRangeWithLimits(Database cx) {
+		Key rangeBegin = "rangea"_sr;
+		Key rangeEnd = "rangeb"_sr;
+
+		state Transaction tr(cx);
+		try {
+			tr.reset();
+			RangeResult result =
+			    wait(tr.getRangeWithPredicate(KeySelector(firstGreaterOrEqual(rangeBegin)),
+			                                  KeySelector(firstGreaterOrEqual(rangeEnd)),
+			                                  GetRangeLimits(100),
+			                                  GetRangePredicate(PRED_FIND_IN_VALUE).addArg("test"_sr)));
+			ASSERT(result.size() == 100);
 			showResult(result);
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -87,8 +108,12 @@ struct GetRangeWithPredicateWorkload : TestWorkload {
 
 	static void showResult(const RangeResult& result) {
 		std::cout << "result size: " << result.size() << std::endl;
+		int cnt = 0;
 		for (const KeyValueRef* it = result.begin(); it != result.end(); it++) {
 			std::cout << "key=" << it->key.printable() << ", value=" << it->value.printable() << std::endl;
+			if (cnt++ >= 5) {
+				return;
+			}
 		}
 	}
 

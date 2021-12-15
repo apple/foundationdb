@@ -2299,12 +2299,15 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			// If we hit our limits reading from disk but then combining with MVCC gave us back more room
 			if (atStorageVersion
 			        .more) { // if there might be more data, begin reading right after what we already found to find out
-				ASSERT(result.data.end()[-1].key == atStorageVersion.end()[-1].key);
-				readBegin = readBeginTemp = keyAfter(result.data.end()[-1].key);
-			} else if (vCurrent && vCurrent->isClearTo()) { // if vCurrent is a clear, skip it.
-				ASSERT(vCurrent->getEndKey() > readBegin);
-				readBegin = vCurrent->getEndKey(); // next disk read should start at the end of the clear
-				++vCurrent;
+				readBegin = readBeginTemp = keyAfter(atStorageVersion.end()[-1].key);
+			} else if (vCurrent) {
+				if (vCurrent->isClearTo()) { // if vCurrent is a clear, skip it.
+					ASSERT(vCurrent->getEndKey() > readBegin);
+					readBegin = vCurrent->getEndKey(); // next disk read should start at the end of the clear
+					++vCurrent;
+				} else {
+					readBegin = vCurrent.key();
+				}
 			} else {
 				ASSERT(readEnd == range.end);
 				break;
@@ -2388,12 +2391,15 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			}
 
 			if (atStorageVersion.more) {
-				ASSERT(result.data.end()[-1].key == atStorageVersion.end()[-1].key);
-				readEnd = result.data.end()[-1].key;
-			} else if (vCurrent && vCurrent->isClearTo()) {
-				ASSERT(vCurrent.key() < readEnd);
-				readEnd = vCurrent.key();
-				--vCurrent;
+				readEnd = atStorageVersion.end()[-1].key;
+			} else if (vCurrent) {
+				if (vCurrent->isClearTo()) {
+					ASSERT(vCurrent.key() < readEnd);
+					readEnd = vCurrent.key();
+					--vCurrent;
+				} else {
+					readEnd = vCurrent.key();
+				}
 			} else {
 				ASSERT(readBegin == range.begin);
 				break;
