@@ -513,6 +513,8 @@ public:
 	// Returns true if directory was created, false if it existed, throws platform_error() otherwise
 	bool createDirectory(std::string const& directory) override;
 
+	void eraseDirectoryRecursive(std::string const& dir) override;
+
 	// e.g. extension==".fdb", returns filenames relative to directory
 	std::vector<std::string> listFiles(std::string const& directory, std::string const& extension = "") override;
 

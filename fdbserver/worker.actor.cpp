@@ -1395,7 +1395,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
 	state WorkerCache<InitializeBackupReply> backupWorkerCache;
 
-	state std::string coordFolder = abspath(_coordFolder);
+	state std::string coordFolder = IAsyncFileSystem::filesystem()->abspath(_coordFolder);
 
 	state WorkerInterface interf(locality);
 	state std::set<std::pair<UID, KeyValueStoreType>> runningStorages;
@@ -1408,7 +1408,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		chaosMetricsActor = chaosMetricsLogger();
 	}
 
-	folder = abspath(folder);
+	folder = IAsyncFileSystem::filesystem()->abspath(folder);
 
 	if (metricsPrefix.size() > 0) {
 		if (metricsConnFile.size() > 0) {
@@ -1546,7 +1546,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					StringRef optionsString = StringRef(filename).removePrefix(fileVersionedLogDataPrefix).eat("-");
 					logQueueBasename = fileLogQueuePrefix.toString() + optionsString.toString() + "-";
 				}
-				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder);
+				ASSERT_WE_THINK(IAsyncFileSystem::filesystem()->abspath(parentDirectory(s.filename)) == folder);
 				IKeyValueStore* kv = openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles);
 				const DiskQueueVersion dqv =
 				    s.tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
@@ -1748,8 +1748,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				// beneath the working directory, and we remove the ability to do any symlink or ../..
 				// tricks by resolving all paths through `abspath` first.
 				try {
-					std::string realLogDir = abspath(SERVER_KNOBS->LOG_DIRECTORY);
-					std::string realOutPath = abspath(realLogDir + "/" + profilerReq.outputFile.toString());
+					std::string realLogDir = IAsyncFileSystem::filesystem()->abspath(SERVER_KNOBS->LOG_DIRECTORY);
+					std::string realOutPath =
+					    IAsyncFileSystem::filesystem()->abspath(realLogDir + "/" + profilerReq.outputFile.toString());
 					if (realLogDir.size() < realOutPath.size() &&
 					    strncmp(realLogDir.c_str(), realOutPath.c_str(), realLogDir.size()) == 0) {
 						profilerReq.outputFile = realOutPath;
