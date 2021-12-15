@@ -32,6 +32,7 @@
 #include "flow/IRandom.h"
 #include "flow/IThreadPool.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/Platform.actor.h"
 #include "flow/Util.h"
 #include "flow/WriteOnlySet.h"
 #include "fdbrpc/IAsyncFile.h"
@@ -492,11 +493,17 @@ class SimpleInMemoryFileSystemT {
 		off_t offset = 0;
 		OpenFile(FileMemoryPtr const& data, int flags) : data(data), flags(flags) {}
 	};
-	SimpleInMemoryFileSystemT() {}
+
+	std::unordered_set<std::string> directories;
+
 	int nextFD = 1;
 	std::unordered_map<std::string, FileMemoryPtr> files;
 	std::unordered_map<int, OpenFile> fds;
 	int lastError = 0;
+
+	SimpleInMemoryFileSystemT() {
+		directories.insert("/");
+	}
 
 public:
 	int open(std::string path, int flags) {
@@ -589,6 +596,92 @@ public:
 		return 0;
 	}
 	int error() { return lastError; }
+
+	// File system operations
+	void atomicReplace(std::string const& path, std::string const& content) {
+		auto f = files.find(path);
+		if (f == files.end()) {
+			TraceEvent("StatFailed").detail("Path", path);
+			throw io_error();
+		}
+		f->second->resize(content.size());
+		memcpy(f->second->data(), content.data(), content.size());
+	}
+
+	bool fileExists(std::string const& filename) {
+		auto f = files.find(filename);
+		return f != files.end();
+	}
+
+	bool directoryExists(std::string const& path) {
+		return directories.find(path) != directories.end();
+	}
+
+	int64_t fileSize(std::string const& filename) {
+		auto f = files.find(filename);
+		if (f == files.end()) {
+			TraceEvent("StatFailed").detail("Path", filename);
+			throw io_error();
+		}
+		return f->second->size();
+	}
+
+	bool createDirectory(std::string const& directory) {
+		size_t sep = 0;
+		do {
+			sep = directory.find_first_of('/', sep + 1);
+			auto dir = directory.substr(0, sep);
+			directories.insert(dir);
+		} while (sep != std::string::npos && sep != directory.length() - 1);
+		return true;
+	}
+
+	std::vector<std::string> findFiles(std::string directory, std::string extension, bool directoryOnly) {
+		std::vector<std::string> res;
+		std::vector<std::string_view> candidates;
+		if (directoryOnly) {
+			candidates.resize(directories.size());
+			std::copy(directories.begin(), directories.end(), candidates.begin());
+		} else {
+			candidates.reserve(files.size());
+			for (auto const& file : files) {
+				candidates.push_back(file.first);
+			}
+		}
+		for (auto const& c : candidates) {
+			// use string_view for faster substr
+			std::string_view candidate = c;
+			if (candidate.size() > directory.size() && candidate.substr(0, directory.size()) == directory) {
+				candidate.substr(directory.size());
+				if (candidate[0] == '/') {
+					candidate = candidate.substr(1);
+				} else if (directory.back() != '/') {
+					// this directory name is just sharing a prefix
+					continue;
+				}
+				if (candidate.find('/') != std::string_view::npos) {
+					continue;
+				}
+				res.push_back(std::string(candidate));
+			}
+		}
+		std::sort(res.begin(), res.end());
+		return res;
+	}
+
+	void findFilesRecursively(std::string const& path, std::vector<std::string>& out) {
+		// Add files to output, prefixing path
+		std::vector<std::string> files = findFiles(path, "", false);
+		for (auto const& f : files)
+			out.push_back(joinPath(path, f));
+
+		// Recurse for directories
+		std::vector<std::string> directories = findFiles(path, "", true);
+		for (auto const& dir : directories) {
+			if (dir != "." && dir != "..")
+				findFilesRecursively(joinPath(path, dir), out);
+		}
+	}
 };
 
 using SimpleInMemoryFileSystem = crossbow::singleton<SimpleInMemoryFileSystemT>;
@@ -2773,6 +2866,118 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 // failure.
 Future<Void> Sim2FileSystem::deleteFile(const std::string& filename, bool mustBeDurable) {
 	return Sim2::deleteFileImpl(&g_sim2, filename, mustBeDurable);
+}
+
+void Sim2FileSystem::atomicReplace(std::string const& path, std::string const& content, bool textmode) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		SimpleInMemoryFileSystem()->atomicReplace(path, content);
+	} else {
+		::atomicReplace(path, content, textmode);
+	}
+}
+
+bool Sim2FileSystem::fileExists(std::string const& filename) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return SimpleInMemoryFileSystem()->fileExists(filename);
+	} else {
+		return ::fileExists(filename);
+	}
+}
+
+bool Sim2FileSystem::directoryExists(std::string const& path) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return SimpleInMemoryFileSystem()->directoryExists(path);
+	} else {
+		return ::directoryExists(path);
+	}
+}
+
+int64_t Sim2FileSystem::fileSize(std::string const& filename) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return SimpleInMemoryFileSystem()->fileSize(filename);
+	} else {
+		return ::fileSize(filename);
+	}
+}
+
+bool Sim2FileSystem::createDirectory(std::string const& directory) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return SimpleInMemoryFileSystem()->createDirectory(directory);
+	} else {
+		return platform::createDirectory(directory);
+	}
+}
+
+std::vector<std::string> Sim2FileSystem::listFiles(std::string const& directory, std::string const& extension) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return SimpleInMemoryFileSystem()->findFiles(directory, extension, false);
+	} else {
+		return platform::listFiles(directory, extension);
+	}
+}
+
+std::vector<std::string> Sim2FileSystem::listDirectories(std::string const& directory) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return SimpleInMemoryFileSystem()->findFiles(directory, "", true);
+	} else {
+		return platform::listDirectories(directory);
+	}
+}
+
+void Sim2FileSystem::findFilesRecursively(std::string const& path, std::vector<std::string>& out) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		SimpleInMemoryFileSystem()->findFilesRecursively(path, out);
+	} else {
+		platform::findFilesRecursively(path, out);
+	}
+}
+
+ACTOR Future<std::vector<std::string>> listAsyncImpl(std::string const& directory, std::string const& extension, bool directoriesOnly) {
+	wait(delay(0.01));
+	return SimpleInMemoryFileSystem()->findFiles(directory, extension, directoriesOnly);
+}
+
+Future<std::vector<std::string>> Sim2FileSystem::listFilesAsync(std::string const& directory, std::string const& extension) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return listAsyncImpl(directory, extension, false);
+	} else {
+		return platform::listFilesAsync(directory, extension);
+	}
+}
+
+Future<std::vector<std::string>> Sim2FileSystem::listDirectoriesAsync(std::string const& directory) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return listAsyncImpl(directory, "", true);
+	} else {
+		return platform::listDirectoriesAsync(directory);
+	}
+}
+
+ACTOR Future<Void> findFilesRecursivelyAsyncImpl(std::string path, std::vector<std::string> *out) {
+	wait(delay(0.01));
+	SimpleInMemoryFileSystem()->findFilesRecursively(path, *out);
+	return Void();
+}
+
+Future<Void> Sim2FileSystem::findFilesRecursivelyAsync(std::string const& path, std::vector<std::string>* out) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return findFilesRecursivelyAsyncImpl(path, out);
+	} else {
+		return platform::findFilesRecursivelyAsync(path, out);
+	}
+}
+
+std::string Sim2FileSystem::abspath(std::string const& path, bool resolveLinks, bool mustExist) {
+	if (FLOW_KNOBS) {
+		auto res = ::abspath(path, resolveLinks, false);
+		if (mustExist && !SimpleInMemoryFileSystem()->fileExists(res)) {
+			TraceEvent(SevWarnAlways, "AbsolutePathError").detail("Path", path).GetLastError().error(io_error());
+			throw io_error();
+		}
+		return res;
+	} else {
+		return ::abspath(path, resolveLinks, mustExist);
+	}
 }
 
 ACTOR Future<Void> renameFileImpl(std::string from, std::string to) {
