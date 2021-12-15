@@ -2171,19 +2171,19 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					bool included = true;
 					if (!req.includePartialStores) {
 						if (d.storeType == KeyValueStoreType::SSD_BTREE_V1) {
-							included = fileExists(d.filename + ".fdb-wal");
+							included = IAsyncFileSystem::filesystem()->fileExists(d.filename + ".fdb-wal");
 						} else if (d.storeType == KeyValueStoreType::SSD_BTREE_V2) {
-							included = fileExists(d.filename + ".sqlite-wal");
+							included = IAsyncFileSystem::filesystem()->fileExists(d.filename + ".sqlite-wal");
 						} else if (d.storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
-							included = fileExists(d.filename + "0.pagerlog") && fileExists(d.filename + "1.pagerlog");
+							included = IAsyncFileSystem::filesystem()->fileExists(d.filename + "0.pagerlog") && fileExists(d.filename + "1.pagerlog");
 						} else if (d.storeType == KeyValueStoreType::SSD_ROCKSDB_V1) {
-							included = fileExists(joinPath(d.filename, "CURRENT")) &&
-							           fileExists(joinPath(d.filename, "IDENTITY"));
+							included = IAsyncFileSystem::filesystem()->fileExists(joinPath(d.filename, "CURRENT")) &&
+							           IAsyncFileSystem::filesystem()->fileExists(joinPath(d.filename, "IDENTITY"));
 						} else if (d.storeType == KeyValueStoreType::MEMORY) {
-							included = fileExists(d.filename + "1.fdq");
+							included = IAsyncFileSystem::filesystem()->fileExists(d.filename + "1.fdq");
 						} else {
 							ASSERT(d.storeType == KeyValueStoreType::MEMORY_RADIXTREE);
-							included = fileExists(d.filename + "1.fdr");
+							included = IAsyncFileSystem::filesystem()->fileExists(d.filename + "1.fdr");
 						}
 						if (d.storedComponent == DiskStore::COMPONENT::TLogData && included) {
 							included = false;
@@ -2314,7 +2314,7 @@ ACTOR Future<Void> printOnFirstConnected(Reference<AsyncVar<Optional<ClusterInte
 }
 
 ClusterControllerPriorityInfo getCCPriorityInfo(std::string filePath, ProcessClass processClass) {
-	if (!fileExists(filePath))
+	if (!IAsyncFileSystem::filesystem()->fileExists(filePath))
 		return ClusterControllerPriorityInfo(ProcessClass(processClass.classType(), ProcessClass::CommandLineSource)
 		                                         .machineClassFitness(ProcessClass::ClusterController),
 		                                     false,
@@ -2360,7 +2360,7 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 			    lockFilePath, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0600)));
 
 			if (lockFile.isError() && lockFile.getError().code() == error_code_file_not_found &&
-			    !fileExists(lockFilePath)) {
+			    !IAsyncFileSystem::filesystem()->fileExists(lockFilePath)) {
 				Reference<IAsyncFile> _lockFile = wait(IAsyncFileSystem::filesystem()->open(
 				    lockFilePath,
 				    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_LOCK |

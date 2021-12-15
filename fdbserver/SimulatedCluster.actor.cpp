@@ -959,7 +959,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				myFolders = toRebootFrom;
 				if (!useSeedFile) {
 					for (auto f : toRebootFrom) {
-						if (!fileExists(joinPath(f, "fdb.cluster"))) {
+						if (!IAsyncFileSystem::filesystem()->fileExists(joinPath(f, "fdb.cluster"))) {
 							writeFile(joinPath(f, "fdb.cluster"), connStr.toString());
 						}
 					}

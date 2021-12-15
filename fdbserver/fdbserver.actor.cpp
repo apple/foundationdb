@@ -1558,7 +1558,7 @@ private:
 		     role != ServerRole::UnitTests) ||
 		    autoPublicAddress) {
 
-			if (seedSpecified && !fileExists(connFile)) {
+			if (seedSpecified && !IAsyncFileSystem::filesystem()->fileExists(connFile)) {
 				std::string connectionString = seedConnString.length() ? seedConnString : "";
 				ClusterConnectionString ccs;
 				if (seedConnFile.length()) {
