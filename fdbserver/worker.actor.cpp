@@ -445,7 +445,7 @@ std::vector<DiskStore> getDiskStores(std::string folder,
 		files = IAsyncFileSystem::filesystem()->listFiles(folder, suffix);
 	}
 	if (check == FilesystemCheck::DIRECTORIES_ONLY || check == FilesystemCheck::FILES_AND_DIRECTORIES) {
-		for (const auto& directory : platform::listDirectories(folder)) {
+		for (const auto& directory : IAsyncFileSystem::filesystem()->listDirectories(folder)) {
 			if (StringRef(directory).endsWith(suffix)) {
 				files.push_back(directory);
 			}

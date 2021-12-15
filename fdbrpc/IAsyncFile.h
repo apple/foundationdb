@@ -151,7 +151,7 @@ public:
 
 	virtual Future<Void> findFilesRecursivelyAsync(std::string const& path, std::vector<std::string>* out) = 0;
 
-	virtual std::string abspath(std::string const& path, bool resolveLinks, bool mustExist) = 0;
+	virtual std::string abspath(std::string const& path, bool resolveLinks = true, bool mustExist = false) = 0;
 
 #ifdef ENABLE_SAMPLING
 	// Returns the shared memory data structure used to store actor lineages.

@@ -177,14 +177,14 @@ Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(const s
 	// Remove trailing slashes on path
 	path.erase(path.find_last_not_of("\\/") + 1);
 
-	if (!g_network->isSimulated() && path != abspath(path)) {
+	if (!g_network->isSimulated() && path != IAsyncFileSystem::filesystem()->abspath(path)) {
 		TraceEvent(SevWarn, "BackupContainerLocalDirectory")
 		    .detail("Description", "Backup path must be absolute (e.g. file:///some/path)")
 		    .detail("URL", url)
 		    .detail("Path", path);
 		throw io_error();
 	}
-	std::vector<std::string> dirs = platform::listDirectories(path);
+	std::vector<std::string> dirs = IAsyncFileSystem::filesystem()->listDirectories(path);
 	std::vector<std::string> results;
 
 	for (const auto& r : dirs) {

@@ -1889,7 +1889,7 @@ int main(int argc, char* argv[]) {
 			SERVER_KNOBS->trace();
 
 			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
-			std::vector<std::string> directories = platform::listDirectories(dataFolder);
+			std::vector<std::string> directories = IAsyncFileSystem::filesystem()->listDirectories(dataFolder);
 			const std::set<std::string> allowedDirectories = { ".", "..", "backups", "unittests" };
 
 			for (const auto& dir : directories) {
@@ -1942,7 +1942,7 @@ int main(int argc, char* argv[]) {
 				if (isRestoring && !backupFailed) {
 					std::vector<std::string> returnList;
 					std::string ext = "";
-					returnList = platform::listDirectories(absDataFolder);
+					returnList = IAsyncFileSystem::filesystem()->listDirectories(absDataFolder);
 					std::string snapStr = ini.GetValue("RESTORE", "RestoreSnapUID");
 
 					TraceEvent("RestoringDataFolder").detail("DataFolder", absDataFolder);
