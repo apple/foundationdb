@@ -1600,7 +1600,7 @@ ACTOR Future<Void> groupPeekGetMore(ILogSystem::GroupPeekCursor* self, TaskPrior
 				}
 			} else {
 				bool foundActive = false;
-				bool allExhausted = true;
+				bool allExhausted = self->serverCursors[self->currentCursor]->isExhausted();
 				for (int i = 1; i < self->serverCursors.size(); i++) {
 					int nextCursor = (self->currentCursor + i) % self->serverCursors.size();
 					self->serverCursors[nextCursor]->advanceTo(self->serverCursors[self->currentCursor]->version());
