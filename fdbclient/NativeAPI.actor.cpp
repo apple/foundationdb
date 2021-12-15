@@ -2351,6 +2351,7 @@ AddressExclusion AddressExclusion::parse(StringRef const& key) {
 }
 
 Future<Optional<Value>> getValue(Reference<TransactionState> const& trState,
+                                 Future<Key> const& tenantPrefix,
                                  Key const& key,
                                  Future<Version> const& version,
                                  TransactionRecordLogInfo const& recordLogInfo);
@@ -2365,7 +2366,8 @@ Future<RangeResult> getRange(Reference<TransactionState> const& trState,
 ACTOR Future<Optional<StorageServerInterface>> fetchServerInterface(Reference<TransactionState> trState,
                                                                     Future<Version> ver,
                                                                     UID id) {
-	Optional<Value> val = wait(getValue(trState, serverListKeyFor(id), ver, TransactionRecordLogInfo::False));
+	Optional<Value> val = wait(getValue(trState, Key(), serverListKeyFor(id), ver, TransactionRecordLogInfo::False));
+
 	if (!val.present()) {
 		// A storage server has been removed from serverList since we read keyServers
 		return Optional<StorageServerInterface>();
@@ -2675,13 +2677,23 @@ Future<Void> Transaction::warmRange(KeyRange keys) {
 }
 
 ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
+                                       Future<Key> tenantPrefix,
                                        Key key,
                                        Future<Version> version,
                                        TransactionRecordLogInfo recordLogInfo = TransactionRecordLogInfo::True) {
 	state Version ver = wait(version);
 	state Span span("NAPI:getValue"_loc, trState->spanID);
+	if (trState->tenant.present()) {
+		span.addTag("tenant"_sr, trState->tenant.get());
+	}
+
 	span.addTag("key"_sr, key);
 	trState->cx->validateVersion(ver);
+
+	Key resolvedTenantPrefix = wait(tenantPrefix);
+	if (resolvedTenantPrefix.size() > 0) {
+		key = key.withPrefix(resolvedTenantPrefix);
+	}
 
 	loop {
 		state std::pair<KeyRange, Reference<LocationInfo>> ssi =
@@ -4318,6 +4330,30 @@ void debugAddTags(Reference<TransactionState> trState) {
 	}
 }
 
+ACTOR Future<Key> getTenantPrefixImpl(Reference<TransactionState> trState, Future<Version> version) {
+	// TODO: Support local and/or stateless role caching
+	// TODO: This bypasses Transaction::get(), which means we don't set a conflict range or do some metric accounting.
+	//       Should we incorporate that here? If we use the stateless role caching, we could avoid doing an explicit
+	//       read.
+	Optional<Value> val = wait(getValue(trState, Key(), trState->tenant.get().withPrefix(tenantMapPrefix), version));
+
+	if (!val.present()) {
+		throw tenant_not_found();
+	}
+
+	return val.get();
+}
+
+Future<Key> Transaction::getTenantPrefix() {
+	if (!trState->tenant.present()) {
+		return Key();
+	} else if (!trState->tenantPrefix.isValid()) {
+		trState->tenantPrefix = getTenantPrefixImpl(trState, getReadVersion());
+	}
+
+	return trState->tenantPrefix;
+}
+
 Transaction::Transaction()
   : trState(makeReference<TransactionState>(TaskPriority::DefaultEndpoint, generateSpanID(false))) {}
 
@@ -4328,6 +4364,7 @@ Transaction::Transaction(Database const& cx, Optional<TenantName> const& tenant)
                                             generateSpanID(cx->transactionTracingSample),
                                             createTrLogInfoProbabilistically(cx))),
     span(trState->spanID, "Transaction"_loc), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), tr(trState->spanID) {
+
 	if (DatabaseContext::debugUseTags) {
 		debugAddTags(trState);
 	}
@@ -4421,7 +4458,7 @@ Future<Optional<Value>> Transaction::get(const Key& key, Snapshot snapshot) {
 		}
 	}
 
-	return getValue(trState, key, ver);
+	return getValue(trState, getTenantPrefix(), key, ver);
 }
 
 void Watch::setWatch(Future<Void> watchFuture) {

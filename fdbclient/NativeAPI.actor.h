@@ -249,6 +249,8 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	Version committedVersion{ invalidVersion };
 
+	Future<Key> tenantPrefix;
+
 	// Used to save conflicting keys if FDBTransactionOptions::REPORT_CONFLICTING_KEYS is enabled
 	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
@@ -436,6 +438,8 @@ public:
 	Reference<TransactionState> trState;
 	std::vector<Reference<Watch>> watches;
 	Span span;
+
+	Future<Key> getTenantPrefix();
 
 private:
 	Future<Version> getReadVersion(uint32_t flags);
