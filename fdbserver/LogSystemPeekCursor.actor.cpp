@@ -1683,7 +1683,7 @@ ILogSystem::HeapPeekCursor::HeapPeekCursor(
     Version end,
     int tLogReplicationFactor,
     bool returnIfBlocked)
-  : uninitializedVersion(begin), currentCursor(-1) {
+  : messageVersion(begin), currentCursor(-1) {
 	for (int group = 0; group < logServers.size() / tLogReplicationFactor; group++) {
 		std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> groupServers;
 		for (int i = 0; i < tLogReplicationFactor; i++) {
@@ -1694,8 +1694,9 @@ ILogSystem::HeapPeekCursor::HeapPeekCursor(
 	}
 }
 
-ILogSystem::HeapPeekCursor::HeapPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors)
-  : serverCursors(serverCursors) {
+ILogSystem::HeapPeekCursor::HeapPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors,
+                                           LogMessageVersion messageVersion)
+  : serverCursors(serverCursors), messageVersion(messageVersion) {
 	for (int i = 0; i < serverCursors.size(); i++) {
 		minCursor.push(ILogSystem::CursorVersion(serverCursors[i]->version().version, i));
 	}
@@ -1707,7 +1708,7 @@ Reference<ILogSystem::IPeekCursor> ILogSystem::HeapPeekCursor::cloneNoMore() {
 	for (auto it : serverCursors) {
 		cursors.push_back(it->cloneNoMore());
 	}
-	return makeReference<ILogSystem::HeapPeekCursor>(cursors);
+	return makeReference<ILogSystem::HeapPeekCursor>(cursors, messageVersion);
 }
 
 void ILogSystem::HeapPeekCursor::setProtocolVersion(ProtocolVersion version) {
@@ -1742,6 +1743,8 @@ void ILogSystem::HeapPeekCursor::nextMessage() {
 		minCursor.push(CursorVersion(next, currentCursor));
 		currentCursor = minCursor.top().cursor;
 	}
+	messageVersion = hasMessage() ? serverCursors[currentCursor]->version()
+	                              : std::max(LogMessageVersion(prev + 1), serverCursors[currentCursor]->version());
 }
 
 StringRef ILogSystem::HeapPeekCursor::getMessage() {
@@ -1770,7 +1773,7 @@ void ILogSystem::HeapPeekCursor::advanceTo(LogMessageVersion n) {
 		c->advanceTo(n);
 	}
 
-	uninitializedVersion = n;
+	messageVersion = n;
 	currentCursor = -1;
 	while (!minCursor.empty()) {
 		minCursor.pop();
@@ -1791,6 +1794,7 @@ ACTOR Future<Void> heapPeekGetMore(ILogSystem::HeapPeekCursor* self, TaskPriorit
 		}
 
 		self->currentCursor = self->minCursor.top().cursor;
+		self->messageVersion = self->serverCursors[self->currentCursor]->version();
 		return Void();
 	}
 
@@ -1799,6 +1803,7 @@ ACTOR Future<Void> heapPeekGetMore(ILogSystem::HeapPeekCursor* self, TaskPriorit
 	self->minCursor.push(
 	    ILogSystem::CursorVersion(self->serverCursors[self->currentCursor]->version().version, self->currentCursor));
 	self->currentCursor = self->minCursor.top().cursor;
+	self->messageVersion = self->serverCursors[self->currentCursor]->version();
 	return Void();
 }
 
@@ -1829,10 +1834,7 @@ bool ILogSystem::HeapPeekCursor::isExhausted() const {
 }
 
 const LogMessageVersion& ILogSystem::HeapPeekCursor::version() const {
-	if (currentCursor < 0) {
-		return uninitializedVersion;
-	}
-	return serverCursors[currentCursor]->version();
+	return messageVersion;
 }
 
 Version ILogSystem::HeapPeekCursor::getMinKnownCommittedVersion() const {
