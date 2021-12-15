@@ -24,6 +24,8 @@
 #include "fdbclient/ClientVersion.h"
 #include "fdbclient/LocalClientAPI.h"
 
+#include "fdbrpc/IAsyncFile.h"
+
 #include "flow/network.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
@@ -1744,7 +1746,7 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 	threadCount = std::max(threadCount, 1);
 
 	for (auto filename : files) {
-		std::string lib = abspath(joinPath(path, filename));
+		std::string lib = IAsyncFileSystem::filesystem()->abspath(joinPath(path, filename));
 		if (externalClientDescriptions.count(filename) == 0) {
 			TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
 			externalClientDescriptions.emplace(std::make_pair(filename, ClientDesc(lib, true)));
@@ -1886,7 +1888,7 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		setCallbacksOnExternalThreads();
 	} else if (option == FDBNetworkOptions::EXTERNAL_CLIENT_LIBRARY) {
 		validateOption(value, true, false, false);
-		addExternalLibrary(abspath(value.get().toString()));
+		addExternalLibrary(IAsyncFileSystem::filesystem()->abspath(value.get().toString()));
 	} else if (option == FDBNetworkOptions::EXTERNAL_CLIENT_DIRECTORY) {
 		validateOption(value, true, false, false);
 		addExternalLibraryDirectory(value.get().toString());

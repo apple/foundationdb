@@ -116,7 +116,8 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 	static std::string getDefaultLibraryPath() {
 		auto self = exePath();
 		// we try to resolve self/../../share/foundationdb/libame.so
-		return abspath(joinPath(joinPath(popPath(popPath(self)), "share"), "foundationdb"));
+		return IAsyncFileSystem::filesystem()->abspath(
+		    joinPath(joinPath(popPath(popPath(self)), "share"), "foundationdb"));
 	}
 
 	static std::string toLibName(const std::string& name) {

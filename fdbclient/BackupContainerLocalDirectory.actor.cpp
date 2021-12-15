@@ -96,7 +96,7 @@ private:
 
 ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(std::string path, std::string m_path) {
 	state std::vector<std::string> files;
-	wait(platform::findFilesRecursivelyAsync(joinPath(m_path, path), &files));
+	wait(platform::findFilesRecursivelyAsync(joinPath(m_path, path), &files)); // TODO: platform or IAsyncFileSystem?
 
 	BackupContainerFileSystem::FilesAndSizesT results;
 
@@ -147,6 +147,7 @@ BackupContainerLocalDirectory::BackupContainerLocalDirectory(const std::string& 
 	// Remove trailing slashes on path
 	path.erase(path.find_last_not_of("\\/") + 1);
 
+	// TODO: platform or IAsyncFileSystem?
 	std::string absolutePath = abspath(path);
 
 	if (!g_network->isSimulated() && path != absolutePath) {
@@ -177,6 +178,7 @@ Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(const s
 	// Remove trailing slashes on path
 	path.erase(path.find_last_not_of("\\/") + 1);
 
+	// TODO: platform or IAsyncFileSystem?
 	if (!g_network->isSimulated() && path != abspath(path)) {
 		TraceEvent(SevWarn, "BackupContainerLocalDirectory")
 		    .detail("Description", "Backup path must be absolute (e.g. file:///some/path)")
