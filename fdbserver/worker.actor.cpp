@@ -2351,7 +2351,7 @@ ACTOR Future<Void> monitorAndWriteCCPriorityInfo(std::string filePath,
 
 ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 	state UID processIDUid;
-	platform::createDirectory(folder);
+	IAsyncFileSystem::filesystem()->createDirectory(folder);
 
 	loop {
 		try {

@@ -666,7 +666,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 			    .detail("KillType", shutdownResult);
 			*coordFolder = joinPath(baseFolder, deterministicRandom()->randomUniqueID().toString());
 			*dataFolder = joinPath(baseFolder, deterministicRandom()->randomUniqueID().toString());
-			platform::createDirectory(*dataFolder);
+			IAsyncFileSystem::filesystem()->createDirectory(*dataFolder);
 
 			if (!useSeedFile) {
 				writeFile(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
@@ -740,7 +740,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				coordFolders.push_back(joinPath(baseFolder, deterministicRandom()->randomUniqueID().toString()));
 				std::string thisFolder = deterministicRandom()->randomUniqueID().toString();
 				myFolders.push_back(joinPath(baseFolder, thisFolder));
-				platform::createDirectory(myFolders[i]);
+				IAsyncFileSystem::filesystem()->createDirectory(myFolders[i]);
 
 				if (!useSeedFile)
 					writeFile(joinPath(myFolders[i], "fdb.cluster"), connStr.toString());
@@ -968,7 +968,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				for (int i = 0; i < ips.size(); i++) {
 					coordFolders[i] = joinPath(baseFolder, deterministicRandom()->randomUniqueID().toString());
 					myFolders[i] = joinPath(baseFolder, deterministicRandom()->randomUniqueID().toString());
-					platform::createDirectory(myFolders[i]);
+					IAsyncFileSystem::filesystem()->createDirectory(myFolders[i]);
 
 					if (!useSeedFile) {
 						writeFile(joinPath(myFolders[i], "fdb.cluster"), connStr.toString());
