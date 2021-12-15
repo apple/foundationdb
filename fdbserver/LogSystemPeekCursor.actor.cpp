@@ -1581,7 +1581,9 @@ VectorRef<Tag> ILogSystem::GroupPeekCursor::getTags() const {
 }
 
 void ILogSystem::GroupPeekCursor::advanceTo(LogMessageVersion n) {
-	serverCursors[currentCursor]->advanceTo(n);
+	for (auto& it : serverCursors) {
+		it->advanceTo(n);
+	}
 }
 
 ACTOR Future<Void> groupPeekGetMore(ILogSystem::GroupPeekCursor* self, TaskPriority taskID) {
@@ -1734,13 +1736,11 @@ bool ILogSystem::HeapPeekCursor::hasMessage() const {
 void ILogSystem::HeapPeekCursor::nextMessage() {
 	Version prev = serverCursors[currentCursor]->version().version;
 	serverCursors[currentCursor]->nextMessage();
-	if (serverCursors[currentCursor]->hasMessage()) {
-		Version next = serverCursors[currentCursor]->version().version;
-		if (next != prev) {
-			minCursor.pop();
-			minCursor.push(CursorVersion(next, currentCursor));
-			currentCursor = minCursor.top().cursor;
-		}
+	Version next = serverCursors[currentCursor]->version().version;
+	if (next != prev) {
+		minCursor.pop();
+		minCursor.push(CursorVersion(next, currentCursor));
+		currentCursor = minCursor.top().cursor;
 	}
 }
 
