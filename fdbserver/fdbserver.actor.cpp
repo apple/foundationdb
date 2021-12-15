@@ -922,7 +922,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 
 // moves files from 'dirSrc' to 'dirToMove' if their name contains 'role'
 void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::string role) {
-	std::vector<std::string> returnFiles = IAsyncFileSystem::filesystem()->listFiles(dirSrc, "");
+	std::vector<std::string> returnFiles = platform::listFiles(dirSrc, "");
 	for (const auto& fileEntry : returnFiles) {
 		if (fileEntry != "fdb.cluster" && fileEntry.find(role) != std::string::npos) {
 			// rename files
@@ -1558,7 +1558,7 @@ private:
 		     role != ServerRole::UnitTests) ||
 		    autoPublicAddress) {
 
-			if (seedSpecified && !IAsyncFileSystem::filesystem()->fileExists(connFile)) {
+			if (seedSpecified && !fileExists(connFile)) {
 				std::string connectionString = seedConnString.length() ? seedConnString : "";
 				ClusterConnectionString ccs;
 				if (seedConnFile.length()) {
@@ -1889,7 +1889,7 @@ int main(int argc, char* argv[]) {
 			SERVER_KNOBS->trace();
 
 			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
-			std::vector<std::string> directories = IAsyncFileSystem::filesystem()->listDirectories(dataFolder);
+			std::vector<std::string> directories = platform::listDirectories(dataFolder);
 			const std::set<std::string> allowedDirectories = { ".", "..", "backups", "unittests" };
 
 			for (const auto& dir : directories) {
@@ -1907,7 +1907,7 @@ int main(int argc, char* argv[]) {
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 			}
-			std::vector<std::string> files = IAsyncFileSystem::filesystem()->listFiles(dataFolder);
+			std::vector<std::string> files = platform::listFiles(dataFolder);
 			if ((files.size() > 1 || (files.size() == 1 && files[0] != "restartInfo.ini")) && !opts.restarting) {
 				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder);
 				fprintf(stderr,
@@ -1923,12 +1923,12 @@ int main(int argc, char* argv[]) {
 
 			int isRestoring = 0;
 			if (!opts.restarting) {
-				IAsyncFileSystem::filesystem()->eraseDirectoryRecursive(dataFolder);
-				IAsyncFileSystem::filesystem()->createDirectory(dataFolder);
+				platform::eraseDirectoryRecursive(dataFolder);
+				platform::createDirectory(dataFolder);
 			} else {
 				CSimpleIni ini;
 				ini.SetUnicode();
-				std::string absDataFolder = IAsyncFileSystem::filesystem()->abspath(dataFolder);
+				std::string absDataFolder = abspath(dataFolder);
 				ini.LoadFile(joinPath(absDataFolder, "restartInfo.ini").c_str());
 				int backupFailed = true;
 				const char* isRestoringStr = ini.GetValue("RESTORE", "isRestoring", nullptr);
@@ -1942,7 +1942,7 @@ int main(int argc, char* argv[]) {
 				if (isRestoring && !backupFailed) {
 					std::vector<std::string> returnList;
 					std::string ext = "";
-					returnList = IAsyncFileSystem::filesystem()->listDirectories(absDataFolder);
+					returnList = platform::listDirectories(absDataFolder);
 					std::string snapStr = ini.GetValue("RESTORE", "RestoreSnapUID");
 
 					TraceEvent("RestoringDataFolder").detail("DataFolder", absDataFolder);
@@ -1958,7 +1958,7 @@ int main(int argc, char* argv[]) {
 						}
 
 						std::string childf = absDataFolder + "/" + dirEntry;
-						std::vector<std::string> returnFiles = IAsyncFileSystem::filesystem()->listFiles(childf, ext);
+						std::vector<std::string> returnFiles = platform::listFiles(childf, ext);
 						for (const auto& fileEntry : returnFiles) {
 							if (fileEntry != "fdb.cluster" && fileEntry != "fitness") {
 								TraceEvent("DeletingNonSnapfiles").detail("FileBeingDeleted", childf + "/" + fileEntry);
@@ -1980,7 +1980,7 @@ int main(int argc, char* argv[]) {
 							continue;
 						}
 						// remove empty/partial snap directories
-						std::vector<std::string> childrenList = IAsyncFileSystem::filesystem()->listFiles(dirSrc);
+						std::vector<std::string> childrenList = platform::listFiles(dirSrc);
 						if (childrenList.size() == 0) {
 							TraceEvent("RemovingEmptySnapDirectory").detail("DirBeingDeleted", dirSrc);
 							platform::eraseDirectoryRecursive(dirSrc);
