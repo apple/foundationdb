@@ -608,6 +608,29 @@ public:
 		memcpy(f->second->data(), content.data(), content.size());
 	}
 
+	void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count) {
+		auto f = open(filename, O_BINARY | O_WRONLY | O_CREAT | O_TRUNC);
+		if (f < 0) {
+			TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).GetLastError();
+			throw file_not_writable();
+		}
+
+		try {
+			size_t length = write(f, data, sizeof(uint8_t) * count);
+			if (length != count) {
+				TraceEvent(SevError, "WriteFileBytes")
+				    .detail("Filename", filename)
+				    .detail("WrittenLength", length)
+				    .GetLastError();
+				throw file_not_writable();
+			}
+		} catch (...) {
+			close(f);
+			throw;
+		}
+		close(f);
+	}
+
 	bool fileExists(std::string const& filename) {
 		auto f = files.find(filename);
 		return f != files.end();
@@ -3008,31 +3031,9 @@ std::string Sim2FileSystem::abspath(std::string const& path, bool resolveLinks, 
 	}
 }
 
-void Sim2FileSystem::writeFileBytes(std::string const& filename, const uint8_t* data, size_t count) {
-	auto future = open(filename, IAsyncFile::OPEN_READWRITE|IAsyncFile::OPEN_NO_AIO|IAsyncFile::OPEN_CREATE, 0644);
-	if (!future.canGet()) {
-		TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).GetLastError();
-		throw file_not_writable();
-	}
-	auto f = future.get();
-	try {
-		auto writeFut = f->write(data, sizeof(uint8_t) * count, 0);
-		if (!writeFut.canGet()) {
-			TraceEvent(SevError, "WriteFileBytes")
-			    .detail("Filename", filename)
-			    .GetLastError();
-			throw file_not_writable();
-		}
-	} catch (...) {
-		throw;
-	}
-	auto syncFut = f->sync();
-	ASSERT(syncFut.canGet())
-}
-
 void Sim2FileSystem::writeFile(std::string const& filename, std::string const& content) {
-	if (FLOW_KNOBS) {
-		return this->writeFileBytes(filename, (const uint8_t*)(content.c_str()), content.size());
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return SimpleInMemoryFileSystem()->writeFileBytes(filename, (const uint8_t*)(content.c_str()), content.size());
 	} else {
 		return ::writeFile(filename, content);
 	}

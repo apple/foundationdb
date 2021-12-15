@@ -533,8 +533,6 @@ public:
 
 	std::string abspath(std::string const& path, bool resolveLinks, bool mustExist) override;
 
-	void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count);
-
 	void writeFile(std::string const& filename, std::string const& content) override;
 
 #ifdef ENABLE_SAMPLING
