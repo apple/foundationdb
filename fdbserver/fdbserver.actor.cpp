@@ -922,7 +922,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 
 // moves files from 'dirSrc' to 'dirToMove' if their name contains 'role'
 void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::string role) {
-	std::vector<std::string> returnFiles = platform::listFiles(dirSrc, "");
+	std::vector<std::string> returnFiles = IAsyncFileSystem::filesystem()->listFiles(dirSrc, "");
 	for (const auto& fileEntry : returnFiles) {
 		if (fileEntry != "fdb.cluster" && fileEntry.find(role) != std::string::npos) {
 			// rename files
@@ -1958,7 +1958,7 @@ int main(int argc, char* argv[]) {
 						}
 
 						std::string childf = absDataFolder + "/" + dirEntry;
-						std::vector<std::string> returnFiles = platform::listFiles(childf, ext);
+						std::vector<std::string> returnFiles = IAsyncFileSystem::filesystem()->listFiles(childf, ext);
 						for (const auto& fileEntry : returnFiles) {
 							if (fileEntry != "fdb.cluster" && fileEntry != "fitness") {
 								TraceEvent("DeletingNonSnapfiles").detail("FileBeingDeleted", childf + "/" + fileEntry);
@@ -1980,7 +1980,7 @@ int main(int argc, char* argv[]) {
 							continue;
 						}
 						// remove empty/partial snap directories
-						std::vector<std::string> childrenList = platform::listFiles(dirSrc);
+						std::vector<std::string> childrenList = IAsyncFileSystem::filesystem()->listFiles(dirSrc);
 						if (childrenList.size() == 0) {
 							TraceEvent("RemovingEmptySnapDirectory").detail("DirBeingDeleted", dirSrc);
 							platform::eraseDirectoryRecursive(dirSrc);

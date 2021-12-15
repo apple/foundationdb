@@ -1733,7 +1733,7 @@ void MultiVersionApi::addExternalLibrary(std::string path) {
 
 void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 	TraceEvent("AddingExternalClientDirectory").detail("Directory", path);
-	std::vector<std::string> files = platform::listFiles(path, DYNAMIC_LIB_EXT);
+	std::vector<std::string> files = IAsyncFileSystem::filesystem()->listFiles(path, DYNAMIC_LIB_EXT);
 
 	MutexHolder holder(lock);
 	if (networkStartSetup) {
