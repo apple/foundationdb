@@ -113,7 +113,7 @@ ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(st
 		// Hide .part or .temp files.
 		StringRef s(f);
 		if (!s.endsWith(LiteralStringRef(".part")) && !s.endsWith(LiteralStringRef(".temp")))
-			results.push_back({ f.substr(m_path.size() + 1), ::fileSize(f) });
+			results.push_back({ f.substr(m_path.size() + 1), IAsyncFileSystem::filesystem()->fileSize(f) });
 	}
 
 	return results;
@@ -209,7 +209,7 @@ Future<Void> BackupContainerLocalDirectory::create() {
 }
 
 Future<bool> BackupContainerLocalDirectory::exists() {
-	return directoryExists(m_path);
+	return IAsyncFileSystem::filesystem()->directoryExists(m_path);
 }
 
 Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std::string& path) {
