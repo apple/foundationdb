@@ -96,7 +96,7 @@ private:
 
 ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(std::string path, std::string m_path) {
 	state std::vector<std::string> files;
-	wait(platform::findFilesRecursivelyAsync(joinPath(m_path, path), &files));
+	wait(platform::findFilesRecursivelyAsync(joinPath(m_path, path), &files)); // TODO: platform or IAsyncFileSystem?
 
 	BackupContainerFileSystem::FilesAndSizesT results;
 
