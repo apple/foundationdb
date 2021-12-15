@@ -1292,7 +1292,7 @@ int SQLiteDB::checkAllPageChecksums() {
 	double startT = timer();
 
 	// First try to open an existing file
-	std::string apath = abspath(filename);
+	std::string apath = IAsyncFileSystem::filesystem()->abspath(filename);
 	std::string walpath = apath + "-wal";
 
 	/* REMOVE THIS BEFORE CHECKIN */ if (!IAsyncFileSystem::filesystem()->fileExists(apath))
@@ -1390,7 +1390,7 @@ void SQLiteDB::open(bool writable) {
 	//TraceEvent("KVThreadInitStage").detail("Stage",1).detail("Filename", filename).detail("Writable", writable);
 
 	// First try to open an existing file
-	std::string apath = abspath(filename);
+	std::string apath = IAsyncFileSystem::filesystem()->abspath(filename);
 	std::string walpath = apath + "-wal";
 	ErrorOr<Reference<IAsyncFile>> dbFile = waitForAndGet(
 	    errorOr(IAsyncFileSystem::filesystem()->open(apath, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0)));
@@ -1416,7 +1416,9 @@ void SQLiteDB::open(bool writable) {
 
 		if (dbFile.isError() && walFile.isError() && writable &&
 		    dbFile.getError().code() == error_code_file_not_found &&
-		    walFile.getError().code() == error_code_file_not_found && !IAsyncFileSystem::filesystem()->fileExists(apath) && !IAsyncFileSystem::filesystem()->fileExists(walpath)) {
+		    walFile.getError().code() == error_code_file_not_found &&
+		    !IAsyncFileSystem::filesystem()->fileExists(apath) &&
+		    !IAsyncFileSystem::filesystem()->fileExists(walpath)) {
 			// The file doesn't exist, try to create a new one
 			// Creating the WAL before the database ensures we will not try to open a database with no WAL
 			walFile = waitForAndGet(IAsyncFileSystem::filesystem()->open(

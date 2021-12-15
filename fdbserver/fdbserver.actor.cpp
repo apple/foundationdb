@@ -1928,7 +1928,7 @@ int main(int argc, char* argv[]) {
 			} else {
 				CSimpleIni ini;
 				ini.SetUnicode();
-				std::string absDataFolder = abspath(dataFolder);
+				std::string absDataFolder = IAsyncFileSystem::filesystem()->abspath(dataFolder);
 				ini.LoadFile(joinPath(absDataFolder, "restartInfo.ini").c_str());
 				int backupFailed = true;
 				const char* isRestoringStr = ini.GetValue("RESTORE", "isRestoring", nullptr);
