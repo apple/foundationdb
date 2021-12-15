@@ -890,11 +890,10 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLocal(UID dbgid,
 		    .detail("End", end)
 		    .detail("BestSet", bestSet)
 		    .detail("BestSetStart", tLogs[bestSet]->startVersion)
+		    .detail("UseMerge", useMergePeekCursors)
 		    .detail("LogId", tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor(tag)]->get().id());
-		if (useMergePeekCursors) {
-			return makeReference<ILogSystem::HeapPeekCursor>(
-			    tLogs[0]->logServers, tag, begin, end, tLogs[0]->tLogReplicationFactor, useMergePeekCursors);
-		}
+		return makeReference<ILogSystem::HeapPeekCursor>(
+		    tLogs[0]->logServers, tag, begin, end, tLogs[0]->tLogReplicationFactor, useMergePeekCursors);
 	} else {
 		std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
 		std::vector<LogMessageVersion> epochEnds;
