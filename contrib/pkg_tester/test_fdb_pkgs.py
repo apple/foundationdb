@@ -262,7 +262,7 @@ def test_backup_restore(linux_container: Container, snapshot, tmp_path: pathlib.
         [
             "bash",
             "-c",
-            "fdbrestore start -r file://$(echo /tmp/fdb_backup/*) -w --dest_cluster_file /etc/foundationdb/fdb.cluster",
+            "fdbrestore start -r file://$(echo /tmp/fdb_backup/*) -w --dest-cluster-file /etc/foundationdb/fdb.cluster",
         ]
     )
     assert snapshot == linux_container.run(["fdbcli", "--exec", "get x"])

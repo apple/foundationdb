@@ -317,6 +317,13 @@ if(WITH_PYTHON)
     set_tests_properties("threadsafe_threadfuture_to_future/unit_tests" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
   endif()
 
+  if(NOT OPEN_FOR_IDE)
+    add_test(
+      NAME command_line_argument_test
+      COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/argument_parsing/test_argument_parsing.py ${CMAKE_BINARY_DIR}
+    )
+  endif()
+
   verify_testing()
   if (NOT OPEN_FOR_IDE AND NOT WIN32)
     create_correctness_package()

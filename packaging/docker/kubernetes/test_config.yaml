@@ -141,17 +141,17 @@ data:
       "runProcesses": false,
       "version": "6.3.13",
       "arguments": [
-        {"value": "--cluster_file"},
+        {"value": "--cluster-file"},
         {"value": "/var/fdb/data/fdb.cluster"},
-        {"value": "--seed_cluster_file"},
+        {"value": "--seed-cluster-file"},
         {"value": "/var/fdb/dynamic-conf/fdb.cluster"},
-        {"value": "--public_address"},
+        {"value": "--public-address"},
         {"type": "Concatenate", "values": [
           {"type": "Environment", "source": "FDB_PUBLIC_IP"},
           {"value": ":"},
           {"type": "ProcessNumber", "offset": 4499, "multiplier": 2}
         ]},
-        {"value": "--listen_address"},
+        {"value": "--listen-address"},
         {"type": "Concatenate", "values": [
           {"type": "Environment", "source": "FDB_POD_IP"},
           {"value": ":"},
@@ -164,11 +164,11 @@ data:
         ]},
         {"value": "--class"},
         {"value": "storage"},
-        {"value": "--locality_zoneid"},
+        {"value": "--locality-zoneid"},
         {"type": "Environment", "source": "FDB_ZONE_ID"},
-        {"value": "--locality_instance-id"},
+        {"value": "--locality-instance-id"},
         {"type": "Environment", "source": "FDB_INSTANCE_ID"},
-        {"value": "--locality_process-id"},
+        {"value": "--locality-process-id"},
         {"type": "Concatenate", "values": [
           {"type": "Environment", "source": "FDB_INSTANCE_ID"},
           {"value": "-"},
@@ -176,7 +176,7 @@ data:
         ]},
         {"value": "--logdir"},
         {"value": "/var/fdb/logs"},
-        {"value": "--trace_format"},
+        {"value": "--trace-format"},
         {"value": "json"}
       ]
     }
