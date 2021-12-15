@@ -442,7 +442,7 @@ std::vector<DiskStore> getDiskStores(std::string folder,
 	std::vector<std::string> files;
 
 	if (check == FilesystemCheck::FILES_ONLY || check == FilesystemCheck::FILES_AND_DIRECTORIES) {
-		files = platform::listFiles(folder, suffix);
+		files = IAsyncFileSystem::filesystem()->listFiles(folder, suffix);
 	}
 	if (check == FilesystemCheck::DIRECTORIES_ONLY || check == FilesystemCheck::FILES_AND_DIRECTORIES) {
 		for (const auto& directory : platform::listDirectories(folder)) {

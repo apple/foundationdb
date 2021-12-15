@@ -1907,7 +1907,7 @@ int main(int argc, char* argv[]) {
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 			}
-			std::vector<std::string> files = platform::listFiles(dataFolder);
+			std::vector<std::string> files = IAsyncFileSystem::filesystem()->listFiles(dataFolder);
 			if ((files.size() > 1 || (files.size() == 1 && files[0] != "restartInfo.ini")) && !opts.restarting) {
 				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder);
 				fprintf(stderr,
