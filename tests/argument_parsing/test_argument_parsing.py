@@ -73,12 +73,12 @@ def test_fdbcli(build_dir):
     check(not is_unknown_knob(run_command(command, ['--knob_min-trace-severity', '5'])))
 
 def test_fdbbackup(build_dir):
-    command = [args.build_dir + '/bin/fdbbackup', 'status']
+    command = [args.build_dir + '/bin/fdbbackup', 'list']
 
     check(is_unknown_option(run_command(command, ['--unknown-option'])))
 
-    check(not is_unknown_option(run_command(command, ['--cluster-file', 'foo'])))
-    check(not is_unknown_option(run_command(command, ['--cluster_file', 'foo'])))
+    check(not is_unknown_option(run_command(command, ['--trace-format', 'foo'])))
+    check(not is_unknown_option(run_command(command, ['--trace_format', 'foo'])))
 
     check(is_unknown_knob(run_command(command, ['--knob-fake-knob', 'foo'])))
 
