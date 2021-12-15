@@ -1712,7 +1712,7 @@ void MultiVersionApi::setCallbacksOnExternalThreads() {
 void MultiVersionApi::addExternalLibrary(std::string path) {
 	std::string filename = basename(path);
 
-	if (filename.empty() || !fileExists(path)) {
+	if (filename.empty() || !IAsyncFileSystem::filesystem()->fileExists(path)) {
 		TraceEvent("ExternalClientNotFound").detail("LibraryPath", filename);
 		throw file_not_found();
 	}

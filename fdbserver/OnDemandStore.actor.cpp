@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/OnDemandStore.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "flow/actorcompiler.h" // must be last include
 
 ACTOR static Future<Void> onErr(Future<Future<Void>> e) {
@@ -48,8 +49,8 @@ IKeyValueStore* OnDemandStore::get() {
 }
 
 bool OnDemandStore::exists() const {
-	return store || fileExists(joinPath(folder, prefix + "0.fdq")) || fileExists(joinPath(folder, prefix + "1.fdq")) ||
-	       fileExists(joinPath(folder, prefix + ".fdb"));
+	return store || IAsyncFileSystem::filesystem()->fileExists(joinPath(folder, prefix + "0.fdq")) || IAsyncFileSystem::filesystem()->fileExists(joinPath(folder, prefix + "1.fdq")) ||
+	       IAsyncFileSystem::filesystem()->fileExists(joinPath(folder, prefix + ".fdb"));
 }
 
 IKeyValueStore* OnDemandStore::operator->() {

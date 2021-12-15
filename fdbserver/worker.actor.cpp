@@ -2175,7 +2175,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						} else if (d.storeType == KeyValueStoreType::SSD_BTREE_V2) {
 							included = IAsyncFileSystem::filesystem()->fileExists(d.filename + ".sqlite-wal");
 						} else if (d.storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
-							included = IAsyncFileSystem::filesystem()->fileExists(d.filename + "0.pagerlog") && fileExists(d.filename + "1.pagerlog");
+							included = IAsyncFileSystem::filesystem()->fileExists(d.filename + "0.pagerlog") && IAsyncFileSystem::filesystem()->fileExists(d.filename + "1.pagerlog");
 						} else if (d.storeType == KeyValueStoreType::SSD_ROCKSDB_V1) {
 							included = IAsyncFileSystem::filesystem()->fileExists(joinPath(d.filename, "CURRENT")) &&
 							           IAsyncFileSystem::filesystem()->fileExists(joinPath(d.filename, "IDENTITY"));
