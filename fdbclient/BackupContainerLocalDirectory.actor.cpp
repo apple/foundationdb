@@ -184,7 +184,7 @@ Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(const s
 		    .detail("Path", path);
 		throw io_error();
 	}
-	std::vector<std::string> dirs = platform::listDirectories(path);
+	std::vector<std::string> dirs = IAsyncFileSystem::filesystem()->listDirectories(path);
 	std::vector<std::string> results;
 
 	for (const auto& r : dirs) {
