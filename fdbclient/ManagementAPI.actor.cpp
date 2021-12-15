@@ -1236,9 +1236,10 @@ struct AutoQuorumChange : IQuorumChange {
 		self->addDesiredWorkers(chosen, workers, desiredCount, excluded);
 
 		if (chosen.size() < desiredCount) {
-			if (chosen.size() < oldCoordinators.size()) {
+			if (chosen.empty() || chosen.size() < oldCoordinators.size()) {
 				TraceEvent("NotEnoughMachinesForCoordinators")
 				    .detail("EligibleWorkers", workers.size())
+				    .detail("ChosenWorkers", chosen.size())
 				    .detail("DesiredCoordinators", desiredCount)
 				    .detail("CurrentCoordinators", oldCoordinators.size());
 				*err = CoordinatorsResult::NOT_ENOUGH_MACHINES;
