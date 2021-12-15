@@ -669,7 +669,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 			IAsyncFileSystem::filesystem()->createDirectory(*dataFolder);
 
 			if (!useSeedFile) {
-				writeFile(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
+				IAsyncFileSystem::filesystem()->writeFile(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
 				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"));
 			} else {
 				connRecord =
@@ -743,7 +743,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				IAsyncFileSystem::filesystem()->createDirectory(myFolders[i]);
 
 				if (!useSeedFile)
-					writeFile(joinPath(myFolders[i], "fdb.cluster"), connStr.toString());
+					IAsyncFileSystem::filesystem()->writeFile(joinPath(myFolders[i], "fdb.cluster"), connStr.toString());
 			}
 		}
 
@@ -960,7 +960,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				if (!useSeedFile) {
 					for (auto f : toRebootFrom) {
 						if (!IAsyncFileSystem::filesystem()->fileExists(joinPath(f, "fdb.cluster"))) {
-							writeFile(joinPath(f, "fdb.cluster"), connStr.toString());
+							IAsyncFileSystem::filesystem()->writeFile(joinPath(f, "fdb.cluster"), connStr.toString());
 						}
 					}
 				}
@@ -971,7 +971,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					IAsyncFileSystem::filesystem()->createDirectory(myFolders[i]);
 
 					if (!useSeedFile) {
-						writeFile(joinPath(myFolders[i], "fdb.cluster"), connStr.toString());
+						IAsyncFileSystem::filesystem()->writeFile(joinPath(myFolders[i], "fdb.cluster"), connStr.toString());
 					}
 				}
 
@@ -2286,7 +2286,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 		}
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
 		IAsyncFileSystem::filesystem()->createDirectory(clusterFileDir);
-		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connectionString.get().toString());
+		IAsyncFileSystem::filesystem()->writeFile(joinPath(clusterFileDir, "fdb.cluster"), connectionString.get().toString());
 		wait(timeoutError(runTests(makeReference<ClusterConnectionFile>(joinPath(clusterFileDir, "fdb.cluster")),
 		                           TEST_TYPE_FROM_FILE,
 		                           TEST_ON_TESTERS,

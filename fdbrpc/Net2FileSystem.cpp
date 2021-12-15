@@ -200,3 +200,7 @@ Future<Void> Net2FileSystem::findFilesRecursivelyAsync(std::string const& path, 
 std::string Net2FileSystem::abspath(std::string const& path, bool resolveLinks, bool mustExist) {
 	return ::abspath(path, resolveLinks, mustExist);
 }
+
+void Net2FileSystem::writeFile(std::string const& filename, std::string const& content) {
+	return ::writeFile(filename, content);
+}

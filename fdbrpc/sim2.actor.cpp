@@ -3008,6 +3008,36 @@ std::string Sim2FileSystem::abspath(std::string const& path, bool resolveLinks, 
 	}
 }
 
+void Sim2FileSystem::writeFileBytes(std::string const& filename, const uint8_t* data, size_t count) {
+	auto future = open(filename, IAsyncFile::OPEN_READWRITE|IAsyncFile::OPEN_NO_AIO|IAsyncFile::OPEN_CREATE, 0644);
+	if (!future.canGet()) {
+		TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).GetLastError();
+		throw file_not_writable();
+	}
+	auto f = future.get();
+	try {
+		auto writeFut = f->write(data, sizeof(uint8_t) * count, 0);
+		if (!writeFut.canGet()) {
+			TraceEvent(SevError, "WriteFileBytes")
+			    .detail("Filename", filename)
+			    .GetLastError();
+			throw file_not_writable();
+		}
+	} catch (...) {
+		throw;
+	}
+	auto syncFut = f->sync();
+	ASSERT(syncFut.canGet())
+}
+
+void Sim2FileSystem::writeFile(std::string const& filename, std::string const& content) {
+	if (FLOW_KNOBS) {
+		return this->writeFileBytes(filename, (const uint8_t*)(content.c_str()), content.size());
+	} else {
+		return ::writeFile(filename, content);
+	}
+}
+
 ACTOR Future<Void> renameFileImpl(std::string from, std::string to) {
 	wait(delay(0.5 * deterministicRandom()->random01()));
 	if (FLOW_KNOBS->SIM_FUZZER) {
