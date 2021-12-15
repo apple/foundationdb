@@ -6215,7 +6215,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state int tenantMapLoc;
 	for (tenantMapLoc = 0; tenantMapLoc < tenantMap.size(); tenantMapLoc++) {
 		auto const& result = tenantMap[tenantMapLoc];
-		Standalone<StringRef> tenantName = result.key.substr(tenantMapPrivatePrefix.size());
+		Standalone<StringRef> tenantName = result.key.substr(persistTenantMapKeys.begin.size());
 		Key tenantPrefix = result.value;
 
 		data->tenantMap.insert(tenantName, tenantPrefix);

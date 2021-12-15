@@ -1160,6 +1160,8 @@ class Database(_TransactionCreator):
         self.capi.fdb_database_set_option(self.dpointer, option, param, length)
 
     def open_tenant(self, name):
+        if not isinstance(name, bytes):
+            raise TypeError('Tenant name must be of type ' + bytes.__name__)
         pointer = ctypes.c_void_p()
         self.capi.fdb_database_open_tenant(self.dpointer, name, len(name), ctypes.byref(pointer))
         return Tenant(pointer.value)
