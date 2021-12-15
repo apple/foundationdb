@@ -1370,6 +1370,11 @@ ACTOR Future<Void> Net2::logTimeOffset() {
 	}
 }
 
+THREAD_FUNC_RETURN reactorThreadTest(void* reactor) {
+	loop { ((ASIOReactor*)reactor)->react_block(); }
+	THREAD_RETURN;
+}
+
 void Net2::initMetrics() {
 	bytesReceived.init(LiteralStringRef("Net2.BytesReceived"));
 	countWriteProbes.init(LiteralStringRef("Net2.CountWriteProbes"));
@@ -1432,6 +1437,7 @@ void Net2::run() {
 
 	started.store(true);
 	double nnow = timer_monotonic();
+	// startThread(reactorThreadTest, (void*)&reactor, 0, 0);
 
 	while (!stopped) {
 		FDB_TRACE_PROBE(run_loop_begin);
@@ -1479,6 +1485,8 @@ void Net2::run() {
 		tscBegin = timestampCounter();
 		taskBegin = timer_monotonic();
 		trackAtPriority(TaskPriority::ASIOReactor, taskBegin);
+		// Reactor pushes IO Futures as ready and moves associated tasks
+		// into ready queue
 		reactor.react();
 
 		updateNow();
@@ -1499,9 +1507,11 @@ void Net2::run() {
 			ready.push(timers.top());
 			timers.pop();
 		}
+		// is this double counting?
 		countTimers += numTimers;
 		FDB_TRACE_PROBE(run_loop_ready_timers, numTimers);
 
+		// moves items from threadReady queue to ready queue
 		processThreadReady();
 
 		tscBegin = timestampCounter();
@@ -1513,12 +1523,16 @@ void Net2::run() {
 
 		FDB_TRACE_PROBE(run_loop_tasks_start, queueSize);
 		while (!ready.empty()) {
+			// TraceEvent("DebugRunLoopReadyStart")
+			// 	.detail("ReadySize", ready.size());
+			// aiming to empty the ready queue
 			++countTasks;
 			currentTaskID = ready.top().taskID;
 			priorityMetric = static_cast<int64_t>(currentTaskID);
 			Task* task = ready.top().task;
 			ready.pop();
 
+			// perform highest prio task in ready queue
 			try {
 				(*task)();
 			} catch (Error& e) {
@@ -1532,8 +1546,15 @@ void Net2::run() {
 				minTaskID = currentTaskID;
 			}
 
+			// attempt to empty out the IO backlog for every X tasks while in this queue
+			// if (ready.size() % 5 == 0) {
+			// 	reactor.react();
+			// }
+
 			double tscNow = timestampCounter();
 			double newTaskBegin = timer_monotonic();
+			// break from emptying ready queue if tscNow is outside the bounds of [tscBegin, tscEnd]
+			// or if the next item in the prio queue is greater than given prio below
 			if (check_yield(TaskPriority::Max, tscNow)) {
 				checkForSlowTask(tscBegin, tscNow, newTaskBegin - taskBegin, currentTaskID);
 				taskBegin = newTaskBegin;
@@ -1545,6 +1566,7 @@ void Net2::run() {
 			taskBegin = newTaskBegin;
 			tscBegin = tscNow;
 		}
+		// TraceEvent("DebugRunLoopReadyEnd");
 
 		trackAtPriority(TaskPriority::RunLoop, taskBegin);
 
@@ -1601,7 +1623,7 @@ void Net2::run() {
 		    nondeterministicRandom()->random01() < (nnow - now) * FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopBottom")
 			    .detail("Elapsed", nnow - now); // This includes the time spent running tasks
-	}
+	} // while (!stopped)
 
 	for (auto& fn : stopCallbacks) {
 		fn();
@@ -1610,7 +1632,7 @@ void Net2::run() {
 #ifdef WIN32
 	timeEndPeriod(1);
 #endif
-}
+} // Net2::run
 
 // Updates the PriorityStats found in NetworkMetrics
 void Net2::updateStarvationTracker(struct NetworkMetrics::PriorityStats& binStats,
@@ -1988,6 +2010,12 @@ void ASIOReactor::sleep(double sleepTime) {
 void ASIOReactor::react() {
 	while (ios.poll_one())
 		++network->countASIOEvents; // Make this a task?
+}
+
+void ASIOReactor::react_block() {
+	ios.run_one();
+	ios.restart();
+	++network->countASIOEvents;
 }
 
 void ASIOReactor::wake() {
