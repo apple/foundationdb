@@ -113,7 +113,7 @@ ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(st
 		// Hide .part or .temp files.
 		StringRef s(f);
 		if (!s.endsWith(LiteralStringRef(".part")) && !s.endsWith(LiteralStringRef(".temp")))
-			results.push_back({ f.substr(m_path.size() + 1), ::fileSize(f) });
+			results.push_back({ f.substr(m_path.size() + 1), IAsyncFileSystem::filesystem()->fileSize(f) });
 	}
 
 	return results;
@@ -184,7 +184,7 @@ Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(const s
 		    .detail("Path", path);
 		throw io_error();
 	}
-	std::vector<std::string> dirs = platform::listDirectories(path);
+	std::vector<std::string> dirs = IAsyncFileSystem::filesystem()->listDirectories(path);
 	std::vector<std::string> results;
 
 	for (const auto& r : dirs) {
@@ -209,7 +209,7 @@ Future<Void> BackupContainerLocalDirectory::create() {
 }
 
 Future<bool> BackupContainerLocalDirectory::exists() {
-	return directoryExists(m_path);
+	return IAsyncFileSystem::filesystem()->directoryExists(m_path);
 }
 
 Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std::string& path) {
@@ -274,7 +274,7 @@ Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const st
 		flags |= IAsyncFile::OPEN_ENCRYPTED;
 	}
 	std::string fullPath = joinPath(m_path, path);
-	platform::createDirectory(parentDirectory(fullPath));
+	IAsyncFileSystem::filesystem()->createDirectory(parentDirectory(fullPath));
 	std::string temp = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";
 	Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
 	return map(f, [=](Reference<IAsyncFile> f) { return Reference<IBackupFile>(new BackupFile(path, f, fullPath)); });
