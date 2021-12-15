@@ -2345,7 +2345,7 @@ ACTOR Future<Void> monitorAndWriteCCPriorityInfo(std::string filePath,
 		std::string contents(BinaryWriter::toValue(asyncPriorityInfo->get(),
 		                                           IncludeVersion(ProtocolVersion::withClusterControllerPriorityInfo()))
 		                         .toString());
-		atomicReplace(filePath, contents, false);
+		IAsyncFileSystem::filesystem()->atomicReplace(filePath, contents, false);
 	}
 }
 

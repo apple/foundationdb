@@ -140,7 +140,7 @@ Future<bool> ClusterConnectionFile::persist() {
 
 	if (filename.size()) {
 		try {
-			atomicReplace(filename,
+			IAsyncFileSystem::filesystem()->atomicReplace(filename,
 			              "# DO NOT EDIT!\n# This file is auto-generated, it is not to be edited by hand\n" +
 			                  cs.toString().append("\n"));
 
