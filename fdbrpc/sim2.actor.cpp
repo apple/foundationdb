@@ -20,6 +20,8 @@
 
 #include <cinttypes>
 #include <memory>
+#include <sstream>
+#include <vector>
 
 #include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbrpc/simulator.h"
@@ -32,6 +34,7 @@
 #include "flow/IRandom.h"
 #include "flow/IThreadPool.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/Platform.actor.h"
 #include "flow/Util.h"
 #include "flow/WriteOnlySet.h"
 #include "fdbrpc/IAsyncFile.h"
@@ -492,14 +495,21 @@ class SimpleInMemoryFileSystemT {
 		off_t offset = 0;
 		OpenFile(FileMemoryPtr const& data, int flags) : data(data), flags(flags) {}
 	};
-	SimpleInMemoryFileSystemT() {}
+
+	std::unordered_set<std::string> directories;
+
 	int nextFD = 1;
 	std::unordered_map<std::string, FileMemoryPtr> files;
 	std::unordered_map<int, OpenFile> fds;
 	int lastError = 0;
 
+	SimpleInMemoryFileSystemT() {
+		directories.insert("/");
+	}
+
 public:
 	int open(std::string path, int flags) {
+		path = abspath(path);
 		auto file = files.find(path);
 		if (file == files.end()) {
 			if (!(flags & O_CREAT)) {
@@ -518,18 +528,21 @@ public:
 		}
 		auto res = nextFD++;
 		fds.insert(std::make_pair(res, OpenFile(file->second, flags)));
+		// std::cout << "open " << path << std::endl;
 		return res;
 	}
-	void deleteFile(std::string const& path) {
-		files.erase(path);
-	}
+
+	void deleteFile(std::string const& path) { files.erase(path); }
+
 	void renameFile(std::string const& from, std::string const& to) {
-		auto f = files.find(from);
+		auto from1 = abspath(from);
+		auto to1 = abspath(to);
+		auto f = files.find(from1);
 		if (f == files.end()) {
 			// source doesn't exist
 			throw io_error();
 		}
-		auto p = files.insert(std::make_pair(to, f->second));
+		auto p = files.insert(std::make_pair(to1, f->second));
 		if (!p.second) {
 			// destination already exists
 			throw io_error();
@@ -539,7 +552,8 @@ public:
 	ssize_t read(int fd, void* buf, size_t nbyte) {
 		ASSERT(fd > 0);
 		auto& f = fds.at(fd);
-		if (f.offset >= f.data->size()) return 0;
+		if (f.offset >= f.data->size())
+			return 0;
 		auto res = std::min(nbyte, size_t(f.data->size() - f.offset));
 		memcpy(buf, f.data->data() + f.offset, res);
 		f.offset += res;
@@ -584,11 +598,176 @@ public:
 		}
 		return f.offset;
 	}
+	off_t ltell(int fd) {
+		ASSERT(fd > 0);
+		auto& f = fds.at(fd);
+		return f.offset;
+	}
+
 	int fsync(int fd) {
 		ASSERT(fd > 0);
 		return 0;
 	}
 	int error() { return lastError; }
+
+	// File system operations
+	void atomicReplace(std::string const& path, std::string const& content) {
+		auto f = files.find(path);
+		if (f == files.end()) {
+			int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC);
+		}
+		f = files.find(abspath(path));
+		f->second->resize(content.size());
+		memcpy(f->second->data(), content.data(), content.size());
+	}
+
+	void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count) {
+		auto f = open(filename, O_BINARY | O_WRONLY | O_CREAT | O_TRUNC);
+		if (f < 0) {
+			TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).GetLastError();
+			throw file_not_writable();
+		}
+
+		try {
+			size_t length = write(f, data, sizeof(uint8_t) * count);
+			if (length != count) {
+				TraceEvent(SevError, "WriteFileBytes")
+				    .detail("Filename", filename)
+				    .detail("WrittenLength", length)
+				    .GetLastError();
+				throw file_not_writable();
+			}
+		} catch (...) {
+			close(f);
+			throw;
+		}
+		close(f);
+	}
+
+	std::string readFileBytes(std::string const& filename, int maxSize) {
+		std::string s;
+		auto f = open(filename.c_str(),  O_RDONLY | O_BINARY);
+		if (f < 0) {
+			TraceEvent(SevWarn, "FileOpenError")
+			    .detail("Filename", filename)
+			    .detail("Errno", errno)
+			    .detail("ErrorDescription", strerror(errno));
+			throw file_not_readable();
+		}
+		try {
+			lseek(f, 0, SEEK_END);
+			size_t size = ltell(f);
+			if (size > maxSize)
+				throw file_too_large();
+			s.resize(size);
+			lseek(f, 0, SEEK_SET);
+			if (!read(f, &s[0], size))
+				throw file_not_readable();
+		} catch (...) {
+			close(f);
+			throw;
+		}
+		close(f);
+		return s;
+	}
+
+	bool fileExists(std::string const& filename) {
+		auto f = files.find(abspath(filename));
+		return f != files.end();
+	}
+
+	bool directoryExists(std::string const& path) {
+		return directories.find(abspath(path)) != directories.end();
+	}
+
+	int64_t fileSize(std::string const& filename) {
+		auto f = files.find(abspath(filename));
+		if (f == files.end()) {
+			TraceEvent("StatFailed").detail("Path", filename);
+			throw io_error();
+		}
+		return f->second->size();
+	}
+
+	bool createDirectory(std::string const& directory) {
+		auto dir1 = abspath(directory);
+		size_t sep = 0;
+		do {
+			sep = dir1.find_first_of('/', sep + 1);
+			auto dir = dir1.substr(0, sep);
+			directories.insert(dir);
+		} while (sep != std::string::npos && sep != dir1.length() - 1);
+		return true;
+	}
+
+	void eraseDirectoryRecursive(std::string const& dir) {
+		auto dir1 = abspath(dir);
+		auto prefix = dir1.back() == '/' ? dir1 : dir1 + '/';
+		decltype(directories) newDirectories;
+		for (auto const& d : directories) {
+			std::string_view dir = d;
+			if (dir.size() < prefix.size() || dir.substr(0, prefix.size()) != prefix) {
+				newDirectories.emplace(d);
+			}
+		}
+		directories = std::move(newDirectories);
+		decltype(files) newFiles;
+		for (auto const& f : files) {
+			std::string_view file = f.first;
+			if (file.size() < prefix.size() || file.substr(0, prefix.size()) != prefix) {
+				newFiles.insert(f);
+			}
+		}
+		files = std::move(newFiles);
+	}
+
+	std::vector<std::string> findFiles(std::string directory, std::string extension, bool directoryOnly) {
+		directory = abspath(directory);
+		std::vector<std::string> res;
+		std::vector<std::string_view> candidates;
+		if (directoryOnly) {
+			candidates.resize(directories.size());
+			std::copy(directories.begin(), directories.end(), candidates.begin());
+		} else {
+			candidates.reserve(files.size());
+			for (auto const& file : files) {
+				candidates.push_back(file.first);
+			}
+		}
+		for (auto const& c : candidates) {
+			// use string_view for faster substr
+			std::string_view candidate = c;
+			if (candidate.size() > directory.size() && candidate.substr(0, directory.size()) == directory) {
+				candidate.substr(directory.size());
+				if (candidate[0] == '/') {
+					candidate = candidate.substr(1);
+				} else if (directory.back() != '/') {
+					// this directory name is just sharing a prefix
+					continue;
+				}
+				if (candidate.find('/') != std::string_view::npos) {
+					continue;
+				}
+				res.push_back(std::string(candidate));
+			}
+		}
+		std::sort(res.begin(), res.end());
+		return res;
+	}
+
+	void findFilesRecursively(std::string const& path, std::vector<std::string>& out) {
+		// Add files to output, prefixing path
+		std::vector<std::string> files = findFiles(path, "", false);
+		for (auto const& f : files)
+			out.push_back(joinPath(path, f));
+
+		// Recurse for directories
+		std::vector<std::string> directories = findFiles(path, "", true);
+		for (auto const& dir : directories) {
+			if (dir != "." && dir != "..")
+				findFilesRecursively(joinPath(path, dir), out);
+		}
+	}
 };
 
 using SimpleInMemoryFileSystem = crossbow::singleton<SimpleInMemoryFileSystemT>;
@@ -2316,6 +2495,25 @@ public:
 		if (forkSearchDepth > 0) { // now only allow 1
 			return 0;
 		}
+
+		// if we are trying to reproduce a fuzzer run, then don't fork - just reseed (possibly)
+		if (fuzzerReproSequence.present()) {
+			Optional<uint32_t> currMove = fuzzerReproSequence.get().front();
+
+			// if the front of the queue is a seed (i.e. non-empty), then reseed with it
+			if (currMove.present()) {
+				deterministicRandom()->reseed(currMove.get());
+			}
+
+			TraceEvent("FuzzerReproduction")
+			    .detail("NewSeed", currMove.present() ? currMove.get() : 'x')
+			    .detail("Context", context);
+
+			// in either case, we are done with the forkSearch invocation, so pop and return
+			fuzzerReproSequence.get().pop();
+			return 0;
+		}
+
 		std::string parentGroup = getTraceLogGroup();
 		pid_t processId;
 		int status;
@@ -2323,16 +2521,20 @@ public:
 			if ((processId = fork()) == 0) { // child process
 				++forkSearchDepth;
 				int pid = getpid();
-				int new_seed = platform::getRandomSeed(); // non-deterministic seed
-				// TODO: do something to record the seed in order to replay
+				int newSeed = platform::getRandomSeed(); // non-deterministic seed
+				forkSequence += std::to_string(newSeed);
 
 				std::string childLogGroup = parentGroup + "/" + std::to_string(pid); // format to still be finalized
 				startChildTraceLog(childLogGroup);
-				deterministicRandom()->reseed(new_seed);
+				deterministicRandom()->reseed(newSeed);
+
 				TraceEvent("ChildProcessStarted")
-				    .detail("NewSeed", new_seed)
+				    .detail("NewSeed", newSeed)
 				    .detail("ProcessId", pid)
-				    .detail("Context", context);
+				    .detail("Context", context)
+				    .detail("Sequence", forkSequence);
+				forkSequence += ',';
+
 				return 0;
 			} else if (processId < 0) {
 				return EXIT_FAILURE;
@@ -2345,24 +2547,29 @@ public:
 				// report according to exit status
 				if (WIFEXITED(status)) {
 					auto exitCode = WEXITSTATUS(status);
-					TraceEvent(exitCode == 0 ? SevInfo : SevError, "ChildProcessReturned").detail("ExitCode", exitCode).backtrace();
+					TraceEvent(exitCode == 0 ? SevInfo : SevError, "ChildProcessReturned")
+					    .detail("ExitCode", exitCode)
+					    .backtrace();
 				} else if (WIFSIGNALED(status)) { // child crash
 					try {
 						TraceEvent(SevError, "ChildProcessCrashed").log();
 						ASSERT(false);
-					} catch (Error&) {}
+					} catch (Error&) {
+					}
 				}
 				terminateChildTraceLog();
 			}
 		}
+
+		forkSequence += 'x';
+		TraceEvent("ForkSearchComplete").detail("Context", context).detail("Sequence", forkSequence);
+		forkSequence += ',';
 		return 0;
 #else
 #error no support now
 #endif
 	}
 
-	// no fork but just use the same new seed as forked process
-	void reproduceForkSearch(int seed) override { deterministicRandom()->reseed(seed); }
 	// time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	// time should only be modified from the main thread.
 	double time;
@@ -2393,8 +2600,10 @@ public:
 	bool printSimTime;
 	double terminateAt = -1.0;
 	bool dieWhenTerminate = false;
+
 	int forkSearchDepth = 0;
 	int forkSearchFanout = 4;
+	std::string forkSequence = ""; // tracks the sequence of seeds up to this point; already serialized
 
 private:
 	MockDNS mockDNS;
@@ -2774,6 +2983,142 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 // failure.
 Future<Void> Sim2FileSystem::deleteFile(const std::string& filename, bool mustBeDurable) {
 	return Sim2::deleteFileImpl(&g_sim2, filename, mustBeDurable);
+}
+
+void Sim2FileSystem::atomicReplace(std::string const& path, std::string const& content, bool textmode) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		SimpleInMemoryFileSystem()->atomicReplace(path, content);
+	} else {
+		::atomicReplace(path, content, textmode);
+	}
+}
+
+bool Sim2FileSystem::fileExists(std::string const& filename) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return SimpleInMemoryFileSystem()->fileExists(filename);
+	} else {
+		return ::fileExists(filename);
+	}
+}
+
+bool Sim2FileSystem::directoryExists(std::string const& path) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return SimpleInMemoryFileSystem()->directoryExists(path);
+	} else {
+		return ::directoryExists(path);
+	}
+}
+
+int64_t Sim2FileSystem::fileSize(std::string const& filename) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return SimpleInMemoryFileSystem()->fileSize(filename);
+	} else {
+		return ::fileSize(filename);
+	}
+}
+
+bool Sim2FileSystem::createDirectory(std::string const& directory) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return SimpleInMemoryFileSystem()->createDirectory(directory);
+	} else {
+		return platform::createDirectory(directory);
+	}
+}
+
+void Sim2FileSystem::eraseDirectoryRecursive(std::string const& dir) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		SimpleInMemoryFileSystem()->eraseDirectoryRecursive(dir);
+	} else {
+		platform::eraseDirectoryRecursive(dir);
+	}
+}
+
+std::vector<std::string> Sim2FileSystem::listFiles(std::string const& directory, std::string const& extension) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return SimpleInMemoryFileSystem()->findFiles(directory, extension, false);
+	} else {
+		return platform::listFiles(directory, extension);
+	}
+}
+
+std::vector<std::string> Sim2FileSystem::listDirectories(std::string const& directory) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return SimpleInMemoryFileSystem()->findFiles(directory, "", true);
+	} else {
+		return platform::listDirectories(directory);
+	}
+}
+
+void Sim2FileSystem::findFilesRecursively(std::string const& path, std::vector<std::string>& out) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		SimpleInMemoryFileSystem()->findFilesRecursively(path, out);
+	} else {
+		platform::findFilesRecursively(path, out);
+	}
+}
+
+ACTOR Future<std::vector<std::string>> listAsyncImpl(std::string directory, std::string extension, bool directoriesOnly) {
+	wait(delay(0.01));
+	return SimpleInMemoryFileSystem()->findFiles(directory, extension, directoriesOnly);
+}
+
+Future<std::vector<std::string>> Sim2FileSystem::listFilesAsync(std::string const& directory, std::string const& extension) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return listAsyncImpl(directory, extension, false);
+	} else {
+		return platform::listFilesAsync(directory, extension);
+	}
+}
+
+Future<std::vector<std::string>> Sim2FileSystem::listDirectoriesAsync(std::string const& directory) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return listAsyncImpl(directory, "", true);
+	} else {
+		return platform::listDirectoriesAsync(directory);
+	}
+}
+
+ACTOR Future<Void> findFilesRecursivelyAsyncImpl(std::string path, std::vector<std::string> *out) {
+	wait(delay(0.01));
+	SimpleInMemoryFileSystem()->findFilesRecursively(path, *out);
+	return Void();
+}
+
+Future<Void> Sim2FileSystem::findFilesRecursivelyAsync(std::string const& path, std::vector<std::string>* out) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return findFilesRecursivelyAsyncImpl(path, out);
+	} else {
+		return platform::findFilesRecursivelyAsync(path, out);
+	}
+}
+
+std::string Sim2FileSystem::abspath(std::string const& path, bool resolveLinks, bool mustExist) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		auto res = ::abspath(path, resolveLinks, false);
+		if (mustExist && !SimpleInMemoryFileSystem()->fileExists(res)) {
+			TraceEvent(SevWarnAlways, "AbsolutePathError").detail("Path", path).GetLastError().error(io_error());
+			throw io_error();
+		}
+		return res;
+	} else {
+		return ::abspath(path, resolveLinks, mustExist);
+	}
+}
+
+void Sim2FileSystem::writeFile(std::string const& filename, std::string const& content) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return SimpleInMemoryFileSystem()->writeFileBytes(filename, (const uint8_t*)(content.c_str()), content.size());
+	} else {
+		return ::writeFile(filename, content);
+	}
+}
+
+std::string Sim2FileSystem::readFileBytes(std::string const& filename, int maxSize) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
+		return SimpleInMemoryFileSystem()->readFileBytes(filename, maxSize);
+	} else {
+		return ::readFileBytes(filename, maxSize);
+	}
 }
 
 ACTOR Future<Void> renameFileImpl(std::string from, std::string to) {

@@ -662,7 +662,7 @@ static int asyncFullPathname(sqlite3_vfs* pVfs, /* VFS */
                              char* zPathOut /* Pointer to output buffer */
 ) {
 	try {
-		auto s = abspath(zPath);
+		auto s = IAsyncFileSystem::filesystem()->abspath(zPath);
 		if (s.size() >= nPathOut)
 			return SQLITE_IOERR;
 		memcpy(zPathOut, s.c_str(), s.size() + 1);
@@ -684,7 +684,7 @@ static int asyncFullPathname(sqlite3_vfs* pVfs, /* VFS */
 ** and false otherwise.
 */
 bool vfsAsyncIsOpen(std::string filename) {
-	return SharedMemoryInfo::table.count(abspath(filename)) > 0;
+	return SharedMemoryInfo::table.count(IAsyncFileSystem::filesystem()->abspath(filename)) > 0;
 }
 
 /*

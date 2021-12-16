@@ -20,6 +20,7 @@
 
 // There's something in one of the files below that defines a macros
 // a macro that makes boost interprocess break on Windows.
+#include "flow/network.h"
 #define BOOST_DATE_TIME_NO_LIB
 
 #include <algorithm>
@@ -95,7 +96,7 @@ using namespace std::literals;
 // clang-format off
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
-	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
+	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_FUZZER_REPRO, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
@@ -142,6 +143,8 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_RESTARTING,            "--restarting",                SO_NONE },
 	{ OPT_RANDOMSEED,            "-s",                          SO_REQ_SEP },
 	{ OPT_RANDOMSEED,            "--seed",                      SO_REQ_SEP },
+	{ OPT_FUZZER_REPRO,          "-z",                          SO_REQ_SEP },
+	{ OPT_FUZZER_REPRO,          "--fuzzer_repro",              SO_REQ_SEP },
 	{ OPT_KEY,                   "-k",                          SO_REQ_SEP },
 	{ OPT_KEY,                   "--key",                       SO_REQ_SEP },
 	{ OPT_MEMLIMIT,              "-m",                          SO_REQ_SEP },
@@ -934,6 +937,28 @@ void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::stri
 	}
 }
 
+// deserializes a comma-separated string into a forkSequence
+std::queue<Optional<uint32_t>> deserializeForkSequence(std::string sequence) {
+	std::queue<Optional<uint32_t>> res;
+	size_t start = 0, end = 0;
+	loop {
+		end = sequence.find(',', start);
+		std::string entry = sequence.substr(start, end - start);
+
+		if (entry == "x") {
+			res.push(Optional<uint32_t>());
+		} else {
+			res.push(std::stoul(entry));
+		}
+
+		if (end == std::string::npos) {
+			break;
+		}
+		start = end + 1;
+	}
+	return res;
+}
+
 namespace {
 enum class ServerRole {
 	ConsistencyCheck,
@@ -966,6 +991,8 @@ struct CLIOptions {
 
 	ServerRole role = ServerRole::FDBD;
 	uint32_t randomSeed = platform::getRandomSeed();
+
+	Optional<std::string> fuzzerSequence;
 
 	const char* testFile = "tests/default.txt";
 	std::string kvFile;
@@ -1353,6 +1380,10 @@ private:
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
+				break;
+			}
+			case OPT_FUZZER_REPRO: {
+				fuzzerSequence = std::string(args.OptionArg());
 				break;
 			}
 			case OPT_MACHINEID: {
@@ -1790,6 +1821,10 @@ int main(int argc, char* argv[]) {
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			openTracer(TracerType(deterministicRandom()->randomInt(static_cast<int>(TracerType::DISABLED),
 			                                                       static_cast<int>(TracerType::SIM_END))));
+			if (g_network->isSimulated() && opts.fuzzerSequence.present()) {
+				g_pSimulator->fuzzerReproSequence = deserializeForkSequence(opts.fuzzerSequence.get());
+			}
+
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 			g_network->addStopCallback(Net2FileSystem::stop);
@@ -1923,9 +1958,6 @@ int main(int argc, char* argv[]) {
 
 			int isRestoring = 0;
 			if (!opts.restarting) {
-				platform::eraseDirectoryRecursive(dataFolder);
-				platform::createDirectory(dataFolder);
-			} else {
 				CSimpleIni ini;
 				ini.SetUnicode();
 				std::string absDataFolder = abspath(dataFolder);

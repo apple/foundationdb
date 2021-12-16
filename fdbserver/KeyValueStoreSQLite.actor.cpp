@@ -1292,10 +1292,10 @@ int SQLiteDB::checkAllPageChecksums() {
 	double startT = timer();
 
 	// First try to open an existing file
-	std::string apath = abspath(filename);
+	std::string apath = IAsyncFileSystem::filesystem()->abspath(filename);
 	std::string walpath = apath + "-wal";
 
-	/* REMOVE THIS BEFORE CHECKIN */ if (!fileExists(apath))
+	/* REMOVE THIS BEFORE CHECKIN */ if (!IAsyncFileSystem::filesystem()->fileExists(apath))
 		return 0;
 
 	TraceEvent("SQLitePageChecksumScanBegin").detail("File", apath);
@@ -1390,7 +1390,7 @@ void SQLiteDB::open(bool writable) {
 	//TraceEvent("KVThreadInitStage").detail("Stage",1).detail("Filename", filename).detail("Writable", writable);
 
 	// First try to open an existing file
-	std::string apath = abspath(filename);
+	std::string apath = IAsyncFileSystem::filesystem()->abspath(filename);
 	std::string walpath = apath + "-wal";
 	ErrorOr<Reference<IAsyncFile>> dbFile = waitForAndGet(
 	    errorOr(IAsyncFileSystem::filesystem()->open(apath, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0)));
@@ -1401,8 +1401,8 @@ void SQLiteDB::open(bool writable) {
 
 	if (writable) {
 		if (dbFile.isError() && dbFile.getError().code() == error_code_file_not_found &&
-		    !fileExists(apath) && // db file is missing
-		    !walFile.isError() && fileExists(walpath)) // ..but WAL file is present
+		    !IAsyncFileSystem::filesystem()->fileExists(apath) && // db file is missing
+		    !walFile.isError() && IAsyncFileSystem::filesystem()->fileExists(walpath)) // ..but WAL file is present
 		{
 			// Either we died partway through creating this DB, or died partway through deleting it, or someone is
 			// monkeying with our files Create a new blank DB by backing up the WAL file (just in case it is important)
@@ -1416,7 +1416,9 @@ void SQLiteDB::open(bool writable) {
 
 		if (dbFile.isError() && walFile.isError() && writable &&
 		    dbFile.getError().code() == error_code_file_not_found &&
-		    walFile.getError().code() == error_code_file_not_found && !fileExists(apath) && !fileExists(walpath)) {
+		    walFile.getError().code() == error_code_file_not_found &&
+		    !IAsyncFileSystem::filesystem()->fileExists(apath) &&
+		    !IAsyncFileSystem::filesystem()->fileExists(walpath)) {
 			// The file doesn't exist, try to create a new one
 			// Creating the WAL before the database ensures we will not try to open a database with no WAL
 			walFile = waitForAndGet(IAsyncFileSystem::filesystem()->open(
@@ -2239,7 +2241,7 @@ void createTemplateDatabase() {
 }
 
 void GenerateIOLogChecksumFile(std::string filename) {
-	if (!fileExists(filename)) {
+	if (!IAsyncFileSystem::filesystem()->fileExists(filename)) {
 		throw file_not_found();
 	}
 
@@ -2256,7 +2258,7 @@ void GenerateIOLogChecksumFile(std::string filename) {
 // If integrity is true, a full btree integrity check is done.
 // If integrity is false, only a scan of all pages to validate their checksums is done.
 ACTOR Future<Void> KVFileCheck(std::string filename, bool integrity) {
-	if (!fileExists(filename))
+	if (!IAsyncFileSystem::filesystem()->fileExists(filename))
 		throw file_not_found();
 
 	StringRef kvFile(filename);

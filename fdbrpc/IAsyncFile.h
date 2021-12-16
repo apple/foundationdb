@@ -113,6 +113,9 @@ public:
 	// renames the file, doesn't sync the directory
 	virtual Future<Void> renameFile(std::string const& from, std::string const& to) = 0;
 
+	// Atomically replaces the contents of the specified file.
+	virtual void atomicReplace(std::string const& path, std::string const& content, bool textmode = true) = 0;
+
 	// Unlinks a file and then deletes it slowly by truncating the file repeatedly.
 	// If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
 	virtual Future<Void> incrementalDeleteFile(const std::string& filename, bool mustBeDurable);
@@ -120,6 +123,41 @@ public:
 	// Returns the time of the last modification of the file.
 	virtual Future<std::time_t> lastWriteTime(const std::string& filename) = 0;
 
+	// Returns true iff the file exists
+	virtual bool fileExists(std::string const& filename) = 0;
+
+	// Returns true iff the directory exists
+	virtual bool directoryExists(std::string const& path) = 0;
+
+	// Returns size of file in bytes
+	virtual int64_t fileSize(std::string const& filename) = 0;
+
+	// Returns true if directory was created, false if it existed, throws platform_error() otherwise
+	virtual bool createDirectory(std::string const& directory) = 0;
+
+	// Avoid in production code: not atomic, not fast, not reliable in all environments
+	virtual void eraseDirectoryRecursive(std::string const& dir) = 0;
+
+	// e.g. extension==".fdb", returns filenames relative to directory
+	virtual std::vector<std::string> listFiles(std::string const& directory, std::string const& extension = "") = 0;
+
+	// returns directory names relative to directory
+	virtual std::vector<std::string> listDirectories(std::string const& directory) = 0;
+
+	virtual void findFilesRecursively(std::string const& path, std::vector<std::string>& out) = 0;
+
+	// e.g. extension==".fdb", returns filenames relative to directory
+	virtual Future<std::vector<std::string>> listFilesAsync(std::string const& directory, std::string const& extension = "") = 0;
+
+	// returns directory names relative to directory
+	virtual Future<std::vector<std::string>> listDirectoriesAsync(std::string const& directory) = 0;
+
+	virtual Future<Void> findFilesRecursivelyAsync(std::string const& path, std::vector<std::string>* out) = 0;
+
+	virtual std::string abspath(std::string const& path, bool resolveLinks = true, bool mustExist = false) = 0;
+
+	virtual void writeFile(std::string const& filename, std::string const& content) = 0;
+	virtual std::string readFileBytes(std::string const& filename, int maxSize) = 0;
 #ifdef ENABLE_SAMPLING
 	// Returns the shared memory data structure used to store actor lineages.
 	virtual ActorLineageSet& getActorLineageSet() = 0;
