@@ -162,7 +162,7 @@ TEST_CASE("/fileio/rename") {
 	// verify rename happened
 	bool renamedExists = false;
 	auto bName = basename(renamedFile);
-	auto files = platform::listFiles("/tmp/");
+	auto files = IAsyncFileSystem::filesystem()->listFiles("/tmp/");
 	for (const auto& file : files) {
 		if (file == bName) {
 			renamedExists = true;
