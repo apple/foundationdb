@@ -20,6 +20,8 @@
 
 #include <cinttypes>
 #include <memory>
+#include <sstream>
+#include <vector>
 
 #include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbrpc/simulator.h"
@@ -520,9 +522,7 @@ public:
 		fds.insert(std::make_pair(res, OpenFile(file->second, flags)));
 		return res;
 	}
-	void deleteFile(std::string const& path) {
-		files.erase(path);
-	}
+	void deleteFile(std::string const& path) { files.erase(path); }
 	void renameFile(std::string const& from, std::string const& to) {
 		auto f = files.find(from);
 		if (f == files.end()) {
@@ -539,7 +539,8 @@ public:
 	ssize_t read(int fd, void* buf, size_t nbyte) {
 		ASSERT(fd > 0);
 		auto& f = fds.at(fd);
-		if (f.offset >= f.data->size()) return 0;
+		if (f.offset >= f.data->size())
+			return 0;
 		auto res = std::min(nbyte, size_t(f.data->size() - f.offset));
 		memcpy(buf, f.data->data() + f.offset, res);
 		f.offset += res;
@@ -2316,6 +2317,25 @@ public:
 		if (forkSearchDepth > 0) { // now only allow 1
 			return 0;
 		}
+
+		// if we are trying to reproduce a fuzzer run, then don't fork - just reseed (possibly)
+		if (fuzzerReproSequence.present()) {
+			Optional<uint32_t> currMove = fuzzerReproSequence.get().front();
+
+			// if the front of the queue is a seed (i.e. non-empty), then reseed with it
+			if (currMove.present()) {
+				deterministicRandom()->reseed(currMove.get());
+			}
+
+			TraceEvent("FuzzerReproduction")
+			    .detail("NewSeed", currMove.present() ? currMove.get() : 'x')
+			    .detail("Context", context);
+
+			// in either case, we are done with the forkSearch invocation, so pop and return
+			fuzzerReproSequence.get().pop();
+			return 0;
+		}
+
 		std::string parentGroup = getTraceLogGroup();
 		pid_t processId;
 		int status;
@@ -2323,16 +2343,20 @@ public:
 			if ((processId = fork()) == 0) { // child process
 				++forkSearchDepth;
 				int pid = getpid();
-				int new_seed = platform::getRandomSeed(); // non-deterministic seed
-				// TODO: do something to record the seed in order to replay
+				int newSeed = platform::getRandomSeed(); // non-deterministic seed
+				forkSequence += std::to_string(newSeed);
 
 				std::string childLogGroup = parentGroup + "/" + std::to_string(pid); // format to still be finalized
 				startChildTraceLog(childLogGroup);
-				deterministicRandom()->reseed(new_seed);
+				deterministicRandom()->reseed(newSeed);
+
 				TraceEvent("ChildProcessStarted")
-				    .detail("NewSeed", new_seed)
+				    .detail("NewSeed", newSeed)
 				    .detail("ProcessId", pid)
-				    .detail("Context", context);
+				    .detail("Context", context)
+				    .detail("Sequence", forkSequence);
+				forkSequence += ',';
+
 				return 0;
 			} else if (processId < 0) {
 				return EXIT_FAILURE;
@@ -2345,24 +2369,29 @@ public:
 				// report according to exit status
 				if (WIFEXITED(status)) {
 					auto exitCode = WEXITSTATUS(status);
-					TraceEvent(exitCode == 0 ? SevInfo : SevError, "ChildProcessReturned").detail("ExitCode", exitCode).backtrace();
+					TraceEvent(exitCode == 0 ? SevInfo : SevError, "ChildProcessReturned")
+					    .detail("ExitCode", exitCode)
+					    .backtrace();
 				} else if (WIFSIGNALED(status)) { // child crash
 					try {
 						TraceEvent(SevError, "ChildProcessCrashed").log();
 						ASSERT(false);
-					} catch (Error&) {}
+					} catch (Error&) {
+					}
 				}
 				terminateChildTraceLog();
 			}
 		}
+
+		forkSequence += 'x';
+		TraceEvent("ForkSearchComplete").detail("Context", context).detail("Sequence", forkSequence);
+		forkSequence += ',';
 		return 0;
 #else
 #error no support now
 #endif
 	}
 
-	// no fork but just use the same new seed as forked process
-	void reproduceForkSearch(int seed) override { deterministicRandom()->reseed(seed); }
 	// time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	// time should only be modified from the main thread.
 	double time;
@@ -2393,8 +2422,10 @@ public:
 	bool printSimTime;
 	double terminateAt = -1.0;
 	bool dieWhenTerminate = false;
+
 	int forkSearchDepth = 0;
 	int forkSearchFanout = 4;
+	std::string forkSequence = ""; // tracks the sequence of seeds up to this point; already serialized
 
 private:
 	MockDNS mockDNS;
