@@ -507,6 +507,7 @@ class SimpleInMemoryFileSystemT {
 
 public:
 	int open(std::string path, int flags) {
+		path = abspath(path);
 		auto file = files.find(path);
 		if (file == files.end()) {
 			if (!(flags & O_CREAT)) {
@@ -525,18 +526,21 @@ public:
 		}
 		auto res = nextFD++;
 		fds.insert(std::make_pair(res, OpenFile(file->second, flags)));
+		// std::cout << "open " << path << std::endl;
 		return res;
 	}
 	void deleteFile(std::string const& path) {
-		files.erase(path);
+		files.erase(abspath(path));
 	}
 	void renameFile(std::string const& from, std::string const& to) {
-		auto f = files.find(from);
+		auto from1 = abspath(from);
+		auto to1 = abspath(to);
+		auto f = files.find(from1);
 		if (f == files.end()) {
 			// source doesn't exist
 			throw io_error();
 		}
-		auto p = files.insert(std::make_pair(to, f->second));
+		auto p = files.insert(std::make_pair(to1, f->second));
 		if (!p.second) {
 			// destination already exists
 			throw io_error();
@@ -609,7 +613,7 @@ public:
 		if (f == files.end()) {
 			int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC);
 		}
-		f = files.find(path);
+		f = files.find(abspath(path));
 		f->second->resize(content.size());
 		memcpy(f->second->data(), content.data(), content.size());
 	}
@@ -665,16 +669,16 @@ public:
 	}
 
 	bool fileExists(std::string const& filename) {
-		auto f = files.find(filename);
+		auto f = files.find(abspath(filename));
 		return f != files.end();
 	}
 
 	bool directoryExists(std::string const& path) {
-		return directories.find(path) != directories.end();
+		return directories.find(abspath(path)) != directories.end();
 	}
 
 	int64_t fileSize(std::string const& filename) {
-		auto f = files.find(filename);
+		auto f = files.find(abspath(filename));
 		if (f == files.end()) {
 			TraceEvent("StatFailed").detail("Path", filename);
 			throw io_error();
@@ -683,17 +687,19 @@ public:
 	}
 
 	bool createDirectory(std::string const& directory) {
+		auto dir1 = abspath(directory);
 		size_t sep = 0;
 		do {
-			sep = directory.find_first_of('/', sep + 1);
-			auto dir = directory.substr(0, sep);
+			sep = dir1.find_first_of('/', sep + 1);
+			auto dir = dir1.substr(0, sep);
 			directories.insert(dir);
-		} while (sep != std::string::npos && sep != directory.length() - 1);
+		} while (sep != std::string::npos && sep != dir1.length() - 1);
 		return true;
 	}
 
 	void eraseDirectoryRecursive(std::string const& dir) {
-		auto prefix = dir.back() == '/' ? dir : dir + '/';
+		auto dir1 = abspath(dir);
+		auto prefix = dir1.back() == '/' ? dir1 : dir1 + '/';
 		decltype(directories) newDirectories;
 		for (auto const& d : directories) {
 			std::string_view dir = d;
@@ -713,6 +719,7 @@ public:
 	}
 
 	std::vector<std::string> findFiles(std::string directory, std::string extension, bool directoryOnly) {
+		directory = abspath(directory);
 		std::vector<std::string> res;
 		std::vector<std::string_view> candidates;
 		if (directoryOnly) {
@@ -3052,7 +3059,7 @@ Future<Void> Sim2FileSystem::findFilesRecursivelyAsync(std::string const& path, 
 }
 
 std::string Sim2FileSystem::abspath(std::string const& path, bool resolveLinks, bool mustExist) {
-	if (FLOW_KNOBS) {
+	if (FLOW_KNOBS->SIM_FUZZER) {
 		auto res = ::abspath(path, resolveLinks, false);
 		if (mustExist && !SimpleInMemoryFileSystem()->fileExists(res)) {
 			TraceEvent(SevWarnAlways, "AbsolutePathError").detail("Path", path).GetLastError().error(io_error());

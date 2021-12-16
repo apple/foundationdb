@@ -1469,6 +1469,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	try {
 		std::vector<DiskStore> stores = getDiskStores(folder);
 		bool validateDataFiles = deleteFile(joinPath(folder, validationFilename));
+		// std::cout << stores.size() << "-----" << folder << std::endl;
 		for (int f = 0; f < stores.size(); f++) {
 			DiskStore s = stores[f];
 			// FIXME: Error handling
