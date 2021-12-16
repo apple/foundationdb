@@ -39,6 +39,7 @@ public:
 
 	void sleep(double timeout);
 	void react();
+	void react_block();
 
 	void wake();
 

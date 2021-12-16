@@ -3,6 +3,7 @@ set(FLOWBENCH_SRCS
   BenchCallback.actor.cpp
   BenchHash.cpp
   BenchIterate.cpp
+  BenchIONet2.actor.cpp
   BenchMem.cpp
   BenchMetadataCheck.cpp
   BenchNet2.actor.cpp

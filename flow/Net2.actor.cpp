@@ -1370,6 +1370,12 @@ ACTOR Future<Void> Net2::logTimeOffset() {
 	}
 }
 
+// Unused implementation of threaded reactor IO
+THREAD_FUNC_RETURN reactorThreadTest(void* reactor) {
+	loop { ((ASIOReactor*)reactor)->react_block(); }
+	THREAD_RETURN;
+}
+
 void Net2::initMetrics() {
 	bytesReceived.init(LiteralStringRef("Net2.BytesReceived"));
 	countWriteProbes.init(LiteralStringRef("Net2.CountWriteProbes"));
@@ -1432,6 +1438,7 @@ void Net2::run() {
 
 	started.store(true);
 	double nnow = timer_monotonic();
+	// startThread(reactorThreadTest, (void*)&reactor, 0, 0);
 
 	while (!stopped) {
 		FDB_TRACE_PROBE(run_loop_begin);
@@ -1499,6 +1506,7 @@ void Net2::run() {
 			ready.push(timers.top());
 			timers.pop();
 		}
+		// is this double counting?
 		countTimers += numTimers;
 		FDB_TRACE_PROBE(run_loop_ready_timers, numTimers);
 
@@ -1530,6 +1538,14 @@ void Net2::run() {
 			if (currentTaskID < minTaskID) {
 				trackAtPriority(currentTaskID, taskBegin);
 				minTaskID = currentTaskID;
+			}
+
+			// attempt to empty out the IO backlog for every 5 tasks while in this loop
+			if (ready.size() % 5 == 1) {
+				if (runFunc) {
+					runFunc();
+				}
+				reactor.react();
 			}
 
 			double tscNow = timestampCounter();
@@ -1601,7 +1617,7 @@ void Net2::run() {
 		    nondeterministicRandom()->random01() < (nnow - now) * FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopBottom")
 			    .detail("Elapsed", nnow - now); // This includes the time spent running tasks
-	}
+	} // while (!stopped)
 
 	for (auto& fn : stopCallbacks) {
 		fn();
@@ -1610,7 +1626,7 @@ void Net2::run() {
 #ifdef WIN32
 	timeEndPeriod(1);
 #endif
-}
+} // Net2::run
 
 // Updates the PriorityStats found in NetworkMetrics
 void Net2::updateStarvationTracker(struct NetworkMetrics::PriorityStats& binStats,
@@ -1988,6 +2004,12 @@ void ASIOReactor::sleep(double sleepTime) {
 void ASIOReactor::react() {
 	while (ios.poll_one())
 		++network->countASIOEvents; // Make this a task?
+}
+
+void ASIOReactor::react_block() {
+	ios.run_one();
+	ios.restart();
+	++network->countASIOEvents;
 }
 
 void ASIOReactor::wake() {
