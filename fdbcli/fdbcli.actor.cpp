@@ -530,6 +530,19 @@ void initHelp() {
 	helpMap["writemode"] = CommandHelp("writemode <on|off>",
 	                                   "enables or disables sets and clears",
 	                                   "Setting or clearing keys from the CLI is not recommended.");
+	helpMap["usetenant"] =
+	    CommandHelp("usetenant [NAME]",
+	                "prints or configures the tenant used for transactions",
+	                "If no name is given, prints the name of the current active tenant. Otherwise, all commands that "
+	                "are used to read or write keys are done inside the tenant with the specified NAME. By default, "
+	                "no tenant is configured and operations are performed on the raw key-space. The tenant cannot be "
+	                "configured while a transaction started with `begin' is open.");
+	helpMap["defaulttenant"] =
+	    CommandHelp("defaulttenant",
+	                "configures transactions to not use a named tenant",
+	                "All commands that are used to read or write keys will be done without a tenant and will operate "
+	                "on the raw key-space. This is the default behavior. The tenant cannot be configured while a "
+	                "transaction started with `begin' is open.");
 }
 
 void printVersion() {
@@ -1084,15 +1097,35 @@ ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens) {
 	return false;
 }
 
+ACTOR Future<bool> checkTenant(Reference<IDatabase> db, StringRef tenantName) {
+	state Reference<ITransaction> tr = db->createTransaction();
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+			Optional<Value> val = wait(safeThreadFutureToFuture(tr->get(tenantName.withPrefix(tenantMapPrefix))));
+			return val.present();
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
 // TODO: Update the function to get rid of the Database after refactoring
 Reference<ITransaction> getTransaction(Reference<IDatabase> db,
+                                       Reference<ITenant> tenant,
                                        Reference<ITransaction>& tr,
                                        FdbOptions* options,
                                        bool intrans) {
 	// Update "tr" to point to a brand new transaction object when it's not initialized or "intrans" flag is "false",
 	// which indicates we need a new transaction object
 	if (!tr || !intrans) {
-		tr = db->createTransaction();
+		if (tenant) {
+			tr = tenant->createTransaction();
+		} else {
+			tr = db->createTransaction();
+		}
 		options->apply(tr);
 	}
 
@@ -1568,6 +1601,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	state Database localDb;
 	state Reference<IDatabase> db;
+	state Reference<ITenant> tenant;
+	state Optional<Standalone<StringRef>> tenantName;
+
+	// This tenant is kept empty for operations that perform management tasks (e.g. killing a process)
+	state const Reference<ITenant> managementTenant;
+
 	state Reference<ITransaction> tr;
 	state Transaction trx;
 
@@ -1628,7 +1667,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	// The 3.0 timeout is a guard to avoid waiting forever when the cli cannot talk to any coordinators
 	loop {
 		try {
-			getTransaction(db, tr, options, intrans);
+			getTransaction(db, managementTenant, tr, options, intrans);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(delay(3.0) || success(safeThreadFutureToFuture(tr->getReadVersion())));
 			break;
@@ -1789,8 +1828,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "waitopen")) {
-					wait(makeInterruptable(
-					    success(safeThreadFutureToFuture(getTransaction(db, tr, options, intrans)->getReadVersion()))));
+					wait(makeInterruptable(success(safeThreadFutureToFuture(
+					    getTransaction(db, managementTenant, tr, options, intrans)->getReadVersion()))));
 					continue;
 				}
 
@@ -1894,6 +1933,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "changefeed")) {
+					// TODO: tenant interaction
 					bool _result = wait(makeInterruptable(changeFeedCommandActor(localDb, tokens, warn)));
 					if (!_result)
 						is_error = true;
@@ -1901,6 +1941,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "blobrange")) {
+					// TODO: tenant interaction
 					bool _result = wait(makeInterruptable(blobRangeCommandActor(localDb, tokens)));
 					if (!_result)
 						is_error = true;
@@ -1952,7 +1993,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					} else {
 						activeOptions = FdbOptions(globalOptions);
 						options = &activeOptions;
-						getTransaction(db, tr, options, false);
+						getTransaction(db, tenant, tr, options, false);
 						intrans = true;
 						printf("Transaction started\n");
 					}
@@ -2013,7 +2054,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						is_error = true;
 					} else {
 						state ThreadFuture<Optional<Value>> valueF =
-						    getTransaction(db, tr, options, intrans)->get(tokens[1]);
+						    getTransaction(db, tenant, tr, options, intrans)->get(tokens[1]);
 						Optional<Standalone<StringRef>> v = wait(makeInterruptable(safeThreadFutureToFuture(valueF)));
 
 						if (v.present())
@@ -2029,8 +2070,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						Version v = wait(makeInterruptable(
-						    safeThreadFutureToFuture(getTransaction(db, tr, options, intrans)->getReadVersion())));
+						Version v = wait(makeInterruptable(safeThreadFutureToFuture(
+						    getTransaction(db, tenant, tr, options, intrans)->getReadVersion())));
 						printf("%ld\n", v);
 					}
 					continue;
@@ -2044,7 +2085,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "kill")) {
-					getTransaction(db, tr, options, intrans);
+					getTransaction(db, managementTenant, tr, options, intrans);
 					bool _result = wait(makeInterruptable(killCommandActor(db, tr, tokens, &address_interface)));
 					if (!_result)
 						is_error = true;
@@ -2052,7 +2093,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "suspend")) {
-					getTransaction(db, tr, options, intrans);
+					getTransaction(db, managementTenant, tr, options, intrans);
 					bool _result = wait(makeInterruptable(suspendCommandActor(db, tr, tokens, &address_interface)));
 					if (!_result)
 						is_error = true;
@@ -2074,7 +2115,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "consistencycheck")) {
-					getTransaction(db, tr, options, intrans);
+					getTransaction(db, managementTenant, tr, options, intrans);
 					bool _result = wait(makeInterruptable(consistencyCheckCommandActor(tr, tokens, intrans)));
 					if (!_result)
 						is_error = true;
@@ -2082,7 +2123,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "profile")) {
-					getTransaction(db, tr, options, intrans);
+					getTransaction(db, managementTenant, tr, options, intrans);
 					bool _result = wait(makeInterruptable(profileCommandActor(tr, tokens, intrans)));
 					if (!_result)
 						is_error = true;
@@ -2090,7 +2131,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "expensive_data_check")) {
-					getTransaction(db, tr, options, intrans);
+					getTransaction(db, managementTenant, tr, options, intrans);
 					bool _result =
 					    wait(makeInterruptable(expensiveDataCheckCommandActor(db, tr, tokens, &address_interface)));
 					if (!_result)
@@ -2150,8 +2191,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							endKey = strinc(tokens[1]);
 						}
 
-						state ThreadFuture<RangeResult> kvsF =
-						    getTransaction(db, tr, options, intrans)->getRange(KeyRangeRef(tokens[1], endKey), limit);
+						getTransaction(db, tenant, tr, options, intrans);
+						state ThreadFuture<RangeResult> kvsF = tr->getRange(KeyRangeRef(tokens[1], endKey), limit);
 						RangeResult kvs = wait(makeInterruptable(safeThreadFutureToFuture(kvsF)));
 
 						printf("\nRange limited to %d keys\n", limit);
@@ -2195,7 +2236,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						getTransaction(db, tr, options, intrans);
+						getTransaction(db, tenant, tr, options, intrans);
 						tr->set(tokens[1], tokens[2]);
 
 						if (!intrans) {
@@ -2216,7 +2257,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						getTransaction(db, tr, options, intrans);
+						getTransaction(db, tenant, tr, options, intrans);
 						tr->clear(tokens[1]);
 
 						if (!intrans) {
@@ -2237,7 +2278,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						getTransaction(db, tr, options, intrans);
+						getTransaction(db, tenant, tr, options, intrans);
 						tr->clear(KeyRangeRef(tokens[1], tokens[2]));
 
 						if (!intrans) {
@@ -2323,6 +2364,50 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					bool _result = wait(makeInterruptable(cacheRangeCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "usetenant")) {
+					if (tokens.size() > 2) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else if (intrans) {
+						fprintf(stderr, "ERROR: Tenant cannot be changed while a transaction is open\n");
+						is_error = true;
+					} else if (tokens.size() == 1) {
+						if (!tenantName.present()) {
+							printf("Using the default tenant\n");
+						} else {
+							printf("Using tenant `%s'\n", printable(tenantName.get()).c_str());
+						}
+					} else {
+						bool exists = wait(makeInterruptable(checkTenant(db, tokens[1])));
+						if (!exists) {
+							fprintf(stderr, "ERROR: Tenant `%s' does not exist\n", printable(tokens[1]).c_str());
+							is_error = true;
+						} else {
+							tenant = db->openTenant(tokens[1]);
+							tenantName = tokens[1];
+							printf("Using tenant `%s'\n", printable(tokens[1]).c_str());
+						}
+					}
+
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "defaulttenant")) {
+					if (tokens.size() != 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else if (intrans) {
+						fprintf(stderr, "ERROR: Tenant cannot be changed while a transaction is open\n");
+						is_error = true;
+					} else {
+						tenant = Reference<ITenant>();
+						tenantName = Optional<Standalone<StringRef>>();
+						printf("Using the default tenant\n");
+					}
+
 					continue;
 				}
 
