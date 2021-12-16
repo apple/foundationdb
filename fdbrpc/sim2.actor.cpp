@@ -2312,46 +2312,6 @@ public:
 		dieWhenTerminate = false;
 	}
 
-	// returns a comma separated string of the current forkSequence
-	std::string serializeForkSequence() {
-		std::ostringstream oss;
-		for (int i = 0; i < forkSequence.size(); ++i) {
-			Optional<uint32_t> currEntry = forkSequence[i];
-			if (currEntry.present()) {
-				oss << currEntry.get();
-			} else {
-				oss << "x"; // 'x' to denote empty
-			}
-
-			if (i < forkSequence.size() - 1) {
-				oss << ",";
-			}
-		}
-		return oss.str();
-	}
-
-	// deserializes a comma-separated string into a forkSequence
-	std::vector<Optional<uint32_t>> deserializeForkSequence(std::string sequence) {
-		std::vector<Optional<uint32_t>> res;
-		size_t start = 0, end = 0;
-		loop {
-			end = sequence.find(',', start);
-			std::string entry = sequence.substr(start, end - start);
-
-			if (entry == "x") {
-				res.emplace_back(Optional<uint32_t>());
-			} else {
-				res.emplace_back(std::stoul(entry));
-			}
-
-			if (end == std::string::npos) {
-				break;
-			}
-			start = end + 1;
-		}
-		return res;
-	}
-
 	int forkSearch(const char* context = "") override {
 #if defined(__unixish__)
 		if (forkSearchDepth > 0) { // now only allow 1
@@ -2384,16 +2344,19 @@ public:
 				++forkSearchDepth;
 				int pid = getpid();
 				int newSeed = platform::getRandomSeed(); // non-deterministic seed
-				forkSequence.emplace_back(newSeed);
+				forkSequence += std::to_string(newSeed);
 
 				std::string childLogGroup = parentGroup + "/" + std::to_string(pid); // format to still be finalized
 				startChildTraceLog(childLogGroup);
 				deterministicRandom()->reseed(newSeed);
+
 				TraceEvent("ChildProcessStarted")
 				    .detail("NewSeed", newSeed)
 				    .detail("ProcessId", pid)
 				    .detail("Context", context)
-				    .detail("Sequence", serializeForkSequence());
+				    .detail("Sequence", forkSequence);
+				forkSequence += ',';
+
 				return 0;
 			} else if (processId < 0) {
 				return EXIT_FAILURE;
@@ -2419,7 +2382,10 @@ public:
 				terminateChildTraceLog();
 			}
 		}
-		forkSequence.emplace_back(Optional<uint32_t>());
+
+		forkSequence += 'x';
+		TraceEvent("ForkSearchComplete").detail("Context", context).detail("Sequence", forkSequence);
+		forkSequence += ',';
 		return 0;
 #else
 #error no support now
@@ -2461,7 +2427,7 @@ public:
 
 	int forkSearchDepth = 0;
 	int forkSearchFanout = 4;
-	std::vector<Optional<uint32_t>> forkSequence;
+	std::string forkSequence = ""; // tracks the sequence of seeds up to this point
 
 private:
 	MockDNS mockDNS;
