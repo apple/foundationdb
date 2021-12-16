@@ -399,20 +399,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	    FutureStream<struct TLogRejoinRequest> rejoinRequests);
 
 	ACTOR static Future<TLogLockResult> lockTLog(UID myID, Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog);
-
-	template <class T>
-	static std::vector<T> getReadyNonError(std::vector<Future<T>> const& futures);
 };
-
-template <class T>
-std::vector<T> TagPartitionedLogSystem::getReadyNonError(std::vector<Future<T>> const& futures) {
-	// Return the values of those futures which have (non-error) values ready
-	std::vector<T> result;
-	for (auto& f : futures)
-		if (f.isReady() && !f.isError())
-			result.push_back(f.get());
-	return result;
-}
 
 #include "flow/unactorcompiler.h"
 #endif // FDBSERVER_TAGPARTITIONEDLOGSYSTEM_ACTOR_H
