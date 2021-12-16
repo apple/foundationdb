@@ -361,9 +361,9 @@ std::string ptxnStorageServerFixture::StorageServerResources::getFolder() const 
 ptxnStorageServerFixture::StorageServerResources::StorageServerResources(const StorageTeamID& storageTeamID_)
   : storageTeamID(storageTeamID_),
     interface(std::make_shared<::StorageServerInterface>(deterministicRandom()->randomUniqueID())),
-    /* IKeyValueStore has protected destructor and is not intended to be deleted */
-    kvStore(openKVStore(keyValueStoreType, getFolder(), interface->id(), MEMORY_LIMIT),
-            [](IKeyValueStore* _) { ASSERT(false); }),
+    /* IKeyValueStore has protected destructor and is not intended to be deleted, since we are doing test we tolerate
+       this memory leakage */
+    kvStore(openKVStore(keyValueStoreType, getFolder(), interface->id(), MEMORY_LIMIT), [](IKeyValueStore* _) {}),
     seedTag(Tag(tagLocalitySpecial, deterministicRandom()->randomInt(1, 65536))), seedVersion(0) {}
 
 void ptxnStorageServerFixture::setUp(const int numStorageServers) {
