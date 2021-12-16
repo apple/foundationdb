@@ -1741,10 +1741,6 @@ int main(int argc, char* argv[]) {
 
 		setThreadLocalDeterministicRandomSeed(opts.randomSeed);
 
-		if (g_network->isSimulated() && opts.fuzzerSequence.present()) {
-			g_pSimulator->fuzzerReproSequence = deserializeForkSequence(opts.fuzzerSequence.get());
-		}
-
 		enableBuggify(opts.buggifyEnabled, BuggifyType::General);
 		enableFaultInjection(opts.faultInjectionEnabled);
 
@@ -1825,6 +1821,10 @@ int main(int argc, char* argv[]) {
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			openTracer(TracerType(deterministicRandom()->randomInt(static_cast<int>(TracerType::DISABLED),
 			                                                       static_cast<int>(TracerType::SIM_END))));
+			if (g_network->isSimulated() && opts.fuzzerSequence.present()) {
+				g_pSimulator->fuzzerReproSequence = deserializeForkSequence(opts.fuzzerSequence.get());
+			}
+
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 			g_network->addStopCallback(Net2FileSystem::stop);

@@ -2392,8 +2392,6 @@ public:
 #endif
 	}
 
-	// no fork but just use the same new seed as forked process
-	void reproduceForkSearch(int seed) override { deterministicRandom()->reseed(seed); }
 	// time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	// time should only be modified from the main thread.
 	double time;
