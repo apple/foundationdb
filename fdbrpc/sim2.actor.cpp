@@ -503,9 +503,7 @@ class SimpleInMemoryFileSystemT {
 	std::unordered_map<int, OpenFile> fds;
 	int lastError = 0;
 
-	SimpleInMemoryFileSystemT() {
-		directories.insert("/");
-	}
+	SimpleInMemoryFileSystemT() { directories.insert("/"); }
 
 public:
 	int open(std::string path, int flags) {
@@ -646,7 +644,7 @@ public:
 
 	std::string readFileBytes(std::string const& filename, int maxSize) {
 		std::string s;
-		auto f = open(filename.c_str(),  O_RDONLY | O_BINARY);
+		auto f = open(filename.c_str(), O_RDONLY | O_BINARY);
 		if (f < 0) {
 			TraceEvent(SevWarn, "FileOpenError")
 			    .detail("Filename", filename)
@@ -676,9 +674,7 @@ public:
 		return f != files.end();
 	}
 
-	bool directoryExists(std::string const& path) {
-		return directories.find(abspath(path)) != directories.end();
-	}
+	bool directoryExists(std::string const& path) { return directories.find(abspath(path)) != directories.end(); }
 
 	int64_t fileSize(std::string const& filename) {
 		auto f = files.find(abspath(filename));
@@ -738,16 +734,16 @@ public:
 			// use string_view for faster substr
 			std::string_view candidate = c;
 			if (candidate.size() > directory.size() && candidate.substr(0, directory.size()) == directory) {
-				candidate.substr(directory.size());
+				candidate = candidate.substr(directory.size());
+
 				if (candidate[0] == '/') {
 					candidate = candidate.substr(1);
-				} else if (directory.back() != '/') {
+				}
+				if (candidate.find('/') != std::string_view::npos) {
 					// this directory name is just sharing a prefix
 					continue;
 				}
-				if (candidate.find('/') != std::string_view::npos) {
-					continue;
-				}
+
 				res.push_back(std::string(candidate));
 			}
 		}
@@ -3057,12 +3053,15 @@ void Sim2FileSystem::findFilesRecursively(std::string const& path, std::vector<s
 	}
 }
 
-ACTOR Future<std::vector<std::string>> listAsyncImpl(std::string directory, std::string extension, bool directoriesOnly) {
+ACTOR Future<std::vector<std::string>> listAsyncImpl(std::string directory,
+                                                     std::string extension,
+                                                     bool directoriesOnly) {
 	wait(delay(0.01));
 	return SimpleInMemoryFileSystem()->findFiles(directory, extension, directoriesOnly);
 }
 
-Future<std::vector<std::string>> Sim2FileSystem::listFilesAsync(std::string const& directory, std::string const& extension) {
+Future<std::vector<std::string>> Sim2FileSystem::listFilesAsync(std::string const& directory,
+                                                                std::string const& extension) {
 	if (FLOW_KNOBS->SIM_FUZZER) {
 		return listAsyncImpl(directory, extension, false);
 	} else {
@@ -3078,7 +3077,7 @@ Future<std::vector<std::string>> Sim2FileSystem::listDirectoriesAsync(std::strin
 	}
 }
 
-ACTOR Future<Void> findFilesRecursivelyAsyncImpl(std::string path, std::vector<std::string> *out) {
+ACTOR Future<Void> findFilesRecursivelyAsyncImpl(std::string path, std::vector<std::string>* out) {
 	wait(delay(0.01));
 	SimpleInMemoryFileSystem()->findFilesRecursively(path, *out);
 	return Void();
