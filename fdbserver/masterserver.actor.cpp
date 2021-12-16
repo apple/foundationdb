@@ -50,6 +50,8 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+#define HackathaonTrace(...) false && TraceEvent(__VA_ARGS__)
+
 struct CommitProxyVersionReplies {
 	std::map<uint64_t, GetCommitVersionReply> replies;
 	NotifiedVersion latestRequestNum;
@@ -171,6 +173,22 @@ private:
 	}
 };
 
+struct TlogCommitReqInfo {
+	int64_t commitBytes;
+	std::chrono::high_resolution_clock::time_point start;
+
+	explicit TlogCommitReqInfo(int64_t bytes, std::chrono::high_resolution_clock::time_point& now)
+	  : commitBytes(bytes), start(now) {}
+};
+
+struct TlogCommitGroupInfo {
+	int tlogGroupIdx;
+	int commitBytes;
+
+	TlogCommitGroupInfo() : tlogGroupIdx(-1), commitBytes(-1) {}
+	explicit TlogCommitGroupInfo(int gIdx, int bytes) : tlogGroupIdx(gIdx), commitBytes(bytes) {}
+};
+
 struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	UID dbgid;
 
@@ -245,6 +263,15 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	int8_t safeLocality;
 	int8_t primaryLocality;
 
+	// Hackathon-2021
+	// support 'round-robin' mode
+	int prvTLogGroup;
+	// support 'least-loaded' mode
+	std::vector<int> tlogBytesToFlushTracker;
+	std::map<Version, TlogCommitGroupInfo> tlogVersionInfoTracker;
+	// support 'time-decay' mode
+	std::vector<std::list<TlogCommitReqInfo>> tlogCommitReqList;
+
 	std::vector<WorkerInterface> backupWorkers; // Recruited backup workers from cluster controller.
 
 	CounterCollection cc;
@@ -277,8 +304,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    myInterface(myInterface), clusterController(clusterController), cstate(coordinators, addActor, dbgid),
 	    dbInfo(dbInfo), registrationCount(0), addActor(addActor),
 	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery), neverCreated(false),
-	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), cc("Master", dbgid.toString()),
-	    changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
+	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), prvTLogGroup(-1),
+	    cc("Master", dbgid.toString()), changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
@@ -1231,7 +1258,102 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 				groupVersion = self->version;
 			}
 		} else {
-			int tlogGroup = deterministicRandom()->randomInt(0, self->tLogGroups);
+			// Hackathon - 2021
+			// 0 -> Random tlog group selection
+			// 1 -> Round-robin tlog group selection
+			// 2 -> least-loaded tlog group selection
+			HackathaonTrace("GetVersion", self->dbgid).detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY);
+
+			std::string mode = SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY;
+			int tlogGroup = -1;
+			if (mode == "random") {
+				tlogGroup = deterministicRandom()->randomInt(0, self->tLogGroups);
+			} else if (mode == "round-robin") {
+				tlogGroup = self->prvTLogGroup == -1 ? 0 : (self->prvTLogGroup + 1) % self->tLogGroups;
+
+				HackathaonTrace("GetVersion", self->dbgid)
+				    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
+				    .detail("NextGIdx", tlogGroup)
+				    .detail("PrvGIdx", self->prvTLogGroup);
+
+				self->prvTLogGroup = tlogGroup;
+			} else if (mode == "least-loaded") {
+				// determine the least loaded TLog using bytes tracker map
+				tlogGroup = 0;
+				int64_t minTLogBytes = self->tlogBytesToFlushTracker[tlogGroup];
+				for (int i = 1; i < self->tLogGroups; i++) {
+					if (self->tlogBytesToFlushTracker[i] < minTLogBytes) {
+						minTLogBytes = self->tlogBytesToFlushTracker[i];
+						tlogGroup = i;
+					}
+					HackathaonTrace("GetVersion", self->dbgid)
+					    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
+						.detail("GroupIdx", i)
+					    .detail("CurrTLogBytesToFlush", self->tlogBytesToFlushTracker[i])
+						.detail("MinTlogBytesToFlush", minTLogBytes);
+				}
+
+				HackathaonTrace("GetVersion", self->dbgid)
+				    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
+					.detail("CandidateGIdx", tlogGroup)
+				    .detail("CandidateTLogBytesToFlush", self->tlogBytesToFlushTracker[tlogGroup]);
+
+				ASSERT(tlogGroup >= 0 && tlogGroup < self->tLogGroups);
+				// record the version <-> {tlogGroup, bytes} information
+				ASSERT(self->tlogVersionInfoTracker.find(self->version) == self->tlogVersionInfoTracker.end());
+				self->tlogVersionInfoTracker.emplace(self->version, TlogCommitGroupInfo(tlogGroup, req.commitBytes));
+				self->tlogBytesToFlushTracker[tlogGroup] += req.commitBytes;
+
+			} else if (mode == "time-decay") {
+				std::vector<int64_t> tlogEffectiveBytesToFlush;
+				tlogEffectiveBytesToFlush.resize(self->tLogGroups, 0);
+				auto now = std::chrono::high_resolution_clock::now();
+				tlogGroup = -1;
+				int64_t minTLogBytesToFlush = INT_MAX;
+				for (int gIdx = 0; gIdx < self->tLogGroups; gIdx++) {
+					// iterate over all pending flushes and compute the effective 'bytesRemainingToFlush'
+					auto lItr = self->tlogCommitReqList[gIdx].begin();
+					while (lItr != self->tlogCommitReqList[gIdx].end()) {
+						double elapsed_time_ms = std::chrono::duration<double, std::milli>(now - lItr->start).count();
+						int64_t bytesFlushedSoFar = static_cast<int64_t>(
+						    (SERVER_KNOBS->HACKATHON_TLOG_FLUSH_BYTES_PER_SECOND * elapsed_time_ms) / 1000);
+						HackathaonTrace("GetVersionTimeDecay", self->dbgid)
+						    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
+						    .detail("GroupIdx", gIdx)
+							.detail("ElapsedMs", elapsed_time_ms)
+						    .detail("CommitBytes", lItr->commitBytes)
+						    .detail("FlushedBytes", bytesFlushedSoFar);
+						if (bytesFlushedSoFar >= lItr->commitBytes) {
+							lItr = self->tlogCommitReqList[gIdx].erase(lItr);
+						} else {
+							// record the bytes still needs to be flushed
+							tlogEffectiveBytesToFlush[gIdx] += (lItr->commitBytes - bytesFlushedSoFar);
+							lItr++;
+						}
+					}
+					// keep track of the tlogs with mininum bytesToFlush
+					if (minTLogBytesToFlush > tlogEffectiveBytesToFlush[gIdx]) {
+						tlogGroup = gIdx;
+						minTLogBytesToFlush = tlogEffectiveBytesToFlush[gIdx];
+					}
+					HackathaonTrace("GetVersion", self->dbgid)
+					    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
+					    .detail("CandidateIdx", tlogGroup)
+						.detail("EffectiveTLogBytesToFlush", tlogEffectiveBytesToFlush[gIdx])
+					    .detail("MinTLogBytesToFlush", minTLogBytesToFlush);
+				}
+				ASSERT(tlogGroup >= 0 && tlogGroup < self->tLogGroups);
+				// update the candidate tLog bytesToFlush entry
+				self->tlogCommitReqList[tlogGroup].emplace_back(TlogCommitReqInfo(req.commitBytes, now));
+			} else {
+				// TOOD: invalid mode config, may send an error reponse; for now assert.
+				ASSERT(false);
+			}
+			HackathaonTrace("GetVersion", self->dbgid)
+			    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
+			    .detail("GroupIdx", tlogGroup)
+			    .detail("Ver", self->version);
+			ASSERT(tlogGroup >= 0 && tlogGroup < self->tLogGroups);
 			auto& groupVersion = self->tLogGroupVersions[tlogGroup];
 			rep.tlogGroups.push_back(std::make_pair(tlogGroup, groupVersion));
 			groupVersion = self->version;
@@ -1274,6 +1396,25 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 }
 
 ACTOR Future<Void> handleCommitVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
+	// NOTE: update the tlogBytesFlushTracker before wait-on-request ordering is done
+	if (SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY == "least-loaded") {
+		// update tlog byte tracker with completed commit
+		auto itr = self->tlogVersionInfoTracker.find(req.version);
+		if (itr != self->tlogVersionInfoTracker.end()) {
+			int commitBytes = itr->second.commitBytes;
+			int tlogGroup = itr->second.tlogGroupIdx;
+			ASSERT(tlogGroup < self->tLogGroups);
+			ASSERT(self->tlogBytesToFlushTracker[tlogGroup] >= commitBytes);
+			// commit is durable; update tlogGroup bytesToFlush tracker
+			self->tlogBytesToFlushTracker[tlogGroup] -= commitBytes;
+
+			// remove tracking commit version {tlogGroup, bytes} info
+			self->tlogVersionInfoTracker.erase(req.version);
+		} else {
+			// duplicate request processing; do nothing
+		}
+	}
+
 	wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion));
 
 	self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
@@ -1963,6 +2104,8 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	TraceEvent("MasterRecoveryCommit", self->dbgid).log();
 	self->tLogGroups = self->logSystem->getTLogGroups();
 	self->tLogGroupVersions.resize(self->tLogGroups, self->lastEpochEnd);
+	self->tlogBytesToFlushTracker.resize(self->tLogGroups, 0);
+	self->tlogCommitReqList.resize(self->tLogGroups);
 	self->liveCommittedVersion.set(self->lastEpochEnd);
 	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send(self->logSystem->onError());
