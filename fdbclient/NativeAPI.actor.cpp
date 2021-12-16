@@ -4945,7 +4945,7 @@ void TransactionOptions::reset(Database const& cx) {
 }
 
 void Transaction::reset() {
-	tr = CommitTransactionRequest();
+	tr = CommitTransactionRequest(info.spanID);
 	readVersion = Future<Version>();
 	metadataVersion = Promise<Optional<Key>>();
 	extraConflictRanges.clear();
@@ -4964,8 +4964,8 @@ void Transaction::reset() {
 }
 
 void Transaction::fullReset() {
-	reset();
 	info.spanID = generateSpanID(cx->transactionTracingSample);
+	reset();
 	span = Span(info.spanID, "Transaction"_loc);
 	backoff = CLIENT_KNOBS->DEFAULT_BACKOFF;
 }
@@ -5227,7 +5227,6 @@ ACTOR static Future<Void> tryCommit(Database cx,
 	state TraceInterval interval("TransactionCommit");
 	state double startTime = now();
 	state Span span("NAPI:tryCommit"_loc, info.spanID);
-	req.spanContext = span.context;
 	if (info.debugID.present())
 		TraceEvent(interval.begin()).detail("Parent", info.debugID.get());
 	try {
