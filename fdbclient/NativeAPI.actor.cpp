@@ -3405,6 +3405,52 @@ void getRangeFinished(Database cx,
 	}
 }
 
+void getRangeAggregateFinished(Database cx,
+                      Reference<TransactionLogInfo> trLogInfo,
+                      double startTime,
+                      KeySelector begin,
+                      KeySelector end,
+                      Promise<std::pair<Key, Key>> conflictRange,
+                      AggregateResult result) {
+	//int64_t bytes = 0;
+	//for (const KeyValueRef& kv : result) {
+	//	bytes += kv.key.size() + kv.value.size();
+	//}
+
+	// TODO could potentially have this part of reply
+	//cx->transactionBytesRead += bytes;
+	//cx->transactionKeysRead += result.size();
+
+	Key rangeBegin;
+	Key rangeEnd;
+
+	if (result.readToBegin) {
+		rangeBegin = allKeys.begin;
+	} else if (result.isEmpty) {
+		rangeBegin = Key(begin.getKey(), begin.arena());
+	} else {
+		rangeBegin = result.readBegin.get();
+	}
+
+	if (end.offset > begin.offset && end.getKey() < rangeBegin) {
+		rangeBegin = Key(end.getKey(), end.arena());
+	}
+
+	if (result.readThroughEnd) {
+		rangeEnd = allKeys.end;
+	} else if (result.isEmpty) {
+		rangeEnd = Key(end.getKey(), end.arena());
+	} else {
+		rangeEnd = keyAfter(result.readEnd.get());
+	}
+
+	if (begin.offset < end.offset && begin.getKey() > rangeEnd) {
+		rangeEnd = Key(begin.getKey(), begin.arena());
+	}
+
+	conflictRange.send(std::make_pair(rangeBegin, rangeEnd));
+}
+
 template <class GetKeyValuesFamilyRequest>
 void setPredicateInGetRangeRequest(GetKeyValuesFamilyRequest& req, GetRangePredicate predicate) {}
 
@@ -3418,6 +3464,200 @@ void setPredicateInGetRangeRequest<GetKeyValuesRequest>(GetKeyValuesRequest& req
 	}
 }
 
+template <>
+void setPredicateInGetRangeRequest<GetKeyValuesAggregateRequest>(GetKeyValuesAggregateRequest& req, GetRangePredicate predicate) {
+	if (predicate.present()) {
+		req.predicateName = predicate.predicateName;
+		req.arena.dependsOn(predicate.predicateName.arena());
+		req.predicateArgs = predicate.predicateArgs;
+		req.arena.dependsOn(predicate.predicateArgs.arena());
+	}
+}
+
+template <class GetKeyValuesFamilyRequest>
+void setAggregateInGetRangeRequest(GetKeyValuesFamilyRequest& req, GetRangeAggregate aggregate) {}
+
+template <>
+void setAggregateInGetRangeRequest<GetKeyValuesAggregateRequest>(GetKeyValuesAggregateRequest& req, GetRangeAggregate aggregate) {
+	if (aggregate.present()) {
+		req.aggregateName = aggregate.aggregateName;
+		req.arena.dependsOn(aggregate.aggregateName.arena());
+		req.aggregateArgs = aggregate.aggregateArgs;
+		req.arena.dependsOn(aggregate.aggregateArgs.arena());
+	}
+}
+
+// GetKeyValuesFamilyRequest: GetKeyValuesRequest or GetKeyValuesAndFlatMapRequest
+// GetKeyValuesFamilyReply: GetKeyValuesReply or GetKeyValuesAndFlatMapReply
+// Sadly we need GetKeyValuesFamilyReply because cannot do something like: state
+// REPLY_TYPE(GetKeyValuesFamilyRequest) rep;
+//ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
+ACTOR Future<AggregateResult> getRangeAggregate(Database cx,
+                             Reference<TransactionLogInfo> trLogInfo,
+                             Future<Version> fVersion,
+                             KeySelector begin,
+                             KeySelector end,
+                             GetRangePredicate predicate,
+                             GetRangeAggregate aggregate,
+                             Promise<std::pair<Key, Key>> conflictRange,
+                             TransactionInfo info,
+                             TagSet tags) {
+	state KeySelector originalBegin = begin;
+	state KeySelector originalEnd = end;
+	state AggregateResult output;
+	state Span span("NAPI:getRangeAggregate"_loc, info.spanID);
+
+	try {
+		state Version version = wait(fVersion);
+		cx->validateVersion(version);
+
+		state double startTime = now();
+		state Version readVersion = version; // Needed for latestVersion requests; if more, make future requests at the
+		                                     // version that the first one completed
+		                                     // FIXME: Is this really right?  Weaken this and see if there is a problem;
+		                                     // if so maybe there is a much subtler problem even with this.
+
+		if (begin.getKey() == allKeys.begin && begin.offset < 1) {
+			output.readToBegin = true;
+			begin = KeySelector(firstGreaterOrEqual(begin.getKey()), begin.arena());
+		}
+
+		loop {
+			if (end.getKey() == allKeys.begin && (end.offset < 1 || end.isFirstGreaterOrEqual())) {
+				getRangeAggregateFinished(
+				    cx, trLogInfo, startTime, originalBegin, originalEnd, conflictRange, output);
+				return output;
+			}
+
+			Key locationKey = Key(begin.getKey(), begin.arena());
+			Reverse locationBackward{ begin.isBackward() };
+			state std::pair<KeyRange, Reference<LocationInfo>> beginServer = wait(getKeyLocation(
+			    cx, locationKey, &StorageServerInterface::getKeyValuesAggregate, info, locationBackward));
+			state KeyRange shard = beginServer.first;
+			state bool modifiedSelectors = false;
+			state GetKeyValuesAggregateRequest req;
+			req.version = readVersion;
+
+			// In case of async tss comparison, also make req arena depend on begin, end, and/or shard's arena depending
+			// on which  is used
+			bool dependOnShard = false;
+			req.begin = begin;
+			req.arena.dependsOn(begin.arena());
+
+			if (end.isDefinitelyGreater(shard.end)) {
+				req.end = firstGreaterOrEqual(shard.end);
+				modifiedSelectors = true;
+				if (!dependOnShard) {
+					req.arena.dependsOn(shard.arena());
+				}
+			} else {
+				req.end = end;
+				req.arena.dependsOn(end.arena());
+			}
+
+			setPredicateInGetRangeRequest(req, predicate);
+			setAggregateInGetRangeRequest(req, aggregate);
+
+			req.tags = cx->sampleReadTags() ? tags : Optional<TagSet>();
+			req.debugID = info.debugID;
+			req.spanContext = span.context;
+			try {
+				if (info.debugID.present()) {
+					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRangeAggregate.Before");
+					/*TraceEvent("TransactionDebugGetRangeInfo", info.debugID.get())
+					    .detail("ReqBeginKey", req.begin.getKey())
+					    .detail("ReqEndKey", req.end.getKey())
+					    .detail("OriginalBegin", originalBegin.toString())
+					    .detail("OriginalEnd", originalEnd.toString())
+					    .detail("Begin", begin.toString())
+					    .detail("End", end.toString())
+					    .detail("Shard", shard)
+					    .detail("ReqLimit", req.limit)
+					    .detail("ReqLimitBytes", req.limitBytes)
+					    .detail("ReqVersion", req.version)
+					    .detail("Reverse", reverse)
+					    .detail("ModifiedSelectors", modifiedSelectors)
+					    .detail("Servers", beginServer.second->description());*/
+				}
+
+				++cx->transactionPhysicalReads;
+				state GetKeyValuesAggregateReply rep;
+				try {
+					if (CLIENT_BUGGIFY_WITH_PROB(.01)) {
+						throw deterministicRandom()->randomChoice(
+						    std::vector<Error>{ transaction_too_old(), future_version() });
+					}
+					// state AnnotateActor annotation(currentLineage);
+					GetKeyValuesAggregateReply _rep =
+					    wait(loadBalance(cx.getPtr(),
+					                     beginServer.second,
+										 &StorageServerInterface::getKeyValuesAggregate,
+					                     /*getRangeRequestStream<GetKeyValuesAggregateRequest>(),*/
+					                     req,
+					                     TaskPriority::DefaultPromiseEndpoint,
+					                     AtMostOnce::False,
+					                     cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
+					rep = _rep;
+					++cx->transactionPhysicalReadsCompleted;
+				} catch (Error&) {
+					++cx->transactionPhysicalReadsCompleted;
+					throw;
+				}
+
+				if (info.debugID.present()) {
+					g_traceBatch.addEvent("TransactionDebug",
+					                      info.debugID.get().first(),
+					                      "NativeAPI.getRangeAggregate.After"); //.detail("SizeOf", rep.data.size());
+					/*TraceEvent("TransactionDebugGetRangeDone", info.debugID.get())
+					    .detail("ReqBeginKey", req.begin.getKey())
+					    .detail("ReqEndKey", req.end.getKey())
+					    .detail("RepIsMore", rep.more)
+					    .detail("VersionReturned", rep.version)
+					    .detail("RowsReturned", rep.data.size());*/
+				}
+
+
+				bool finished = !modifiedSelectors || rep.resultEmpty;
+				bool readThrough = modifiedSelectors;
+
+				output.isEmpty &= rep.resultEmpty;
+				// TODO: make it more generic.
+				output.result += rep.aggrResult;
+				output.readBegin = rep.readBegin;
+				output.readEnd = rep.readEnd;
+
+				if (finished) {
+					if (readThrough) {
+						output.arena().dependsOn(shard.arena()); // TODO: probably dont need this
+						output.readThrough = shard.end;
+					}
+					output.more = modifiedSelectors;
+
+					getRangeAggregateFinished(
+					    cx, trLogInfo, startTime, originalBegin, originalEnd, conflictRange, output);
+					return output;
+				}
+
+				// If the end is beyond the current shard, continue
+				readVersion = rep.version; // see above comment
+				begin = firstGreaterOrEqual(shard.end);
+			} catch (Error& e) {
+				if (info.debugID.present()) {
+					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRangeAggregate.Error");
+					TraceEvent("TransactionDebugError", info.debugID.get()).error(e);
+				}
+				throw e;
+				//TODO: Handle the wrong shard error
+			}
+		}
+	} catch (Error& e) {
+		if (conflictRange.canBeSet()) {
+			conflictRange.send(std::make_pair(Key(), Key()));
+		}
+
+		throw;
+	}
+}
 // GetKeyValuesFamilyRequest: GetKeyValuesRequest or GetKeyValuesAndFlatMapRequest
 // GetKeyValuesFamilyReply: GetKeyValuesReply or GetKeyValuesAndFlatMapReply
 // Sadly we need GetKeyValuesFamilyReply because cannot do something like: state
@@ -4632,13 +4872,53 @@ Future<RangeResult> Transaction::getRangeInternal(const KeySelector& begin,
 	                                                                      options.readTags);
 }
 
+//template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
+Future<AggregateResult> Transaction::getRangeAggregateInternal(const KeySelector& begin,
+															   const KeySelector& end,
+															   GetRangePredicate predicate,
+															   GetRangeAggregate aggregate) {
+	++cx->transactionLogicalReads;
+	//increaseCounterForRequest<GetKeyValuesFamilyRequest>(cx);
+
+	KeySelector b = begin;
+	if (b.orEqual) {
+		//TEST(true); // Native begin orEqual==true
+		b.removeOrEqual(b.arena());
+	}
+
+	KeySelector e = end;
+	if (e.orEqual) {
+		//TEST(true); // Native end orEqual==true
+		e.removeOrEqual(e.arena());
+	}
+
+	if (b.offset >= e.offset && b.getKey() >= e.getKey()) {
+		//TEST(true); // Native range inverted
+		return AggregateResult();
+	}
+
+	Promise<std::pair<Key, Key>> conflictRange;
+	extraConflictRanges.push_back(conflictRange.getFuture());
+
+	return ::getRangeAggregate(cx,
+																				   trLogInfo,
+																				   getReadVersion(),
+																				   b,
+																				   e,
+																				   predicate,
+																				   aggregate,
+																				   conflictRange,
+																				   info,
+																				   options.readTags);
+}
+
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,
-                                          const KeySelector& end,
-                                          GetRangeLimits limits,
-                                          Snapshot snapshot,
-                                          Reverse reverse) {
+										  const KeySelector& end,
+										  GetRangeLimits limits,
+										  Snapshot snapshot,
+										  Reverse reverse) {
 	return getRangeInternal<GetKeyValuesRequest, GetKeyValuesReply>(
-	    begin, end, ""_sr, limits, GetRangePredicate(), snapshot, reverse);
+		begin, end, ""_sr, limits, GetRangePredicate(), snapshot, reverse);
 }
 
 [[nodiscard]] Future<RangeResult> Transaction::getRangeWithPredicate(const KeySelector& begin,
@@ -4659,6 +4939,14 @@ Future<RangeResult> Transaction::getRangeAndFlatMap(const KeySelector& begin,
                                                     Reverse reverse) {
 	return getRangeInternal<GetKeyValuesAndFlatMapRequest, GetKeyValuesAndFlatMapReply>(
 	    begin, end, mapper, limits, GetRangePredicate(), snapshot, reverse);
+}
+
+[[nodiscard]] Future<AggregateResult> Transaction::getRangeAggregate(const KeySelector& begin,
+                                                                     const KeySelector& end,
+                                                                     GetRangePredicate predicate,
+                                                                     GetRangeAggregate aggregate) {
+	//return getRangeAggregateInternal<GetKeyValuesAggregateRequest, GetKeyValuesAggregateReply>(
+	return getRangeAggregateInternal(begin, end, predicate, aggregate);
 }
 
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,

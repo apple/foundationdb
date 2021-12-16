@@ -41,6 +41,7 @@ struct GetRangeWithPredicateWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(Database cx, GetRangeWithPredicateWorkload* self) {
 		wait(populateData(cx, 200));
 		wait(testGetRangeSubstrMatch(cx));
+		wait(testGetRangeCountSubstrMatch(cx));
 		wait(testGetRangeWithLimits(cx));
 		return Void();
 	}
@@ -100,6 +101,25 @@ struct GetRangeWithPredicateWorkload : TestWorkload {
 			                                  GetRangePredicate(PRED_FIND_IN_VALUE).addArg("test"_sr)));
 			ASSERT(result.size() == 100);
 			showResult(result);
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> testGetRangeCountSubstrMatch(Database cx) {
+		Key rangeBegin = "rangea"_sr;
+		Key rangeEnd = "rangeb"_sr;
+
+		state Transaction tr(cx);
+		try {
+			tr.reset();
+			AggregateResult result =
+				wait(tr.getRangeAggregate(KeySelector(firstGreaterOrEqual(rangeBegin)),
+										  KeySelector(firstGreaterOrEqual(rangeEnd)),
+										  GetRangePredicate(PRED_FIND_IN_VALUE).addArg("test"_sr),
+										  GetRangeAggregate(AGGR_COUNT)));
+			std::cout << "result: " << result.result << std::endl;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}

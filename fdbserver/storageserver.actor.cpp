@@ -47,6 +47,7 @@
 #include "fdbclient/TransactionLineage.h"
 #include "fdbclient/VersionedMap.h"
 #include "fdbclient/ReadPredicate.h"
+#include "fdbclient/ReadAggregate.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
@@ -95,6 +96,7 @@ bool canReplyWith(Error e) {
 	case error_code_quick_get_key_values_miss:
 	case error_code_get_key_values_and_map_has_more:
 	case error_code_invalid_predicate:
+	case error_code_invalid_aggregate:
 		// case error_code_all_alternatives_failed:
 		return true;
 	default:
@@ -2141,6 +2143,110 @@ void mergeWithPredicate(Arena& arena,
 	}
 }
 
+void mergeAndAggregate(Arena& arena,
+					   bool& output_isEmpty,
+					   int& output_aggrResult,
+					   Optional<KeyRef>& output_readBegin,
+					   Optional<KeyRef>& output_readEnd,
+					   VectorRef<KeyValueRef> const& vm_output,
+					   RangeResult const& base,
+					   int& vCount,
+					   bool stopAtEndOfBase,
+					   int& pos,
+					   const IReadAggregate& aggregate,
+                       Reference<IReadPredicate> predicate = Reference<IReadPredicate>())
+// Combines data from base (at an older version) with sets from newer versions in [start, end) and appends the first (up
+// to) |limit| rows to output If limit<0, base and output are in descending order, and start->key()>end->key(), but
+// start is still inclusive and end is exclusive
+{
+	KeyValueRef const* baseStart = base.begin();
+	KeyValueRef const* baseEnd = base.end();
+	while (baseStart != baseEnd && vCount > 0) {
+		if (baseStart->key < vm_output[pos].key) {
+			if (predicate.isValid()) {
+				Optional<KeyValueRef> val = predicate->apply(arena, *baseStart, false);
+				if (val.present()) {
+					output_aggrResult = aggregate.apply(val.get(), output_aggrResult);
+					if (output_isEmpty)
+						output_readBegin = val.get().key; // TODO: check
+					output_isEmpty = false;
+					output_readEnd = val.get().key; // TODO: check
+				}
+			} else {
+				output_aggrResult = aggregate.apply(*baseStart, output_aggrResult);
+				if (output_isEmpty)
+					output_readBegin = (*baseStart).key; // TODO: check
+				output_isEmpty = false;
+				output_readEnd = (*baseStart).key; // TODO: check
+			}
+			++baseStart;
+		} else {
+			if (predicate.isValid()) {
+				Optional<KeyValueRef> val = predicate->apply(arena, vm_output[pos], true);
+				if (val.present()) {
+					output_aggrResult = aggregate.apply(val.get(), output_aggrResult);
+					if (output_isEmpty)
+						output_readBegin = val.get().key; // TODO: check
+					output_isEmpty = false;
+					output_readEnd = val.get().key; // TODO: check
+				}
+			} else {
+				output_aggrResult = aggregate.apply(vm_output[pos], output_aggrResult);
+				if (output_isEmpty)
+					output_readBegin = (vm_output[pos]).key; // TODO: check
+				output_isEmpty = false;
+				output_readEnd = (vm_output[pos]).key; // TODO: check
+			}
+
+			if (baseStart->key == vm_output[pos].key)
+				++baseStart;
+			++pos;
+			vCount--;
+		}
+	}
+	while (baseStart != baseEnd) {
+		if (predicate.isValid()) {
+			Optional<KeyValueRef> val = predicate->apply(arena, *baseStart, false);
+			if (val.present()) {
+				output_aggrResult = aggregate.apply(val.get(), output_aggrResult);
+				if (output_isEmpty)
+					output_readBegin = val.get().key; // TODO: check
+				output_isEmpty = false;
+				output_readEnd = val.get().key; // TODO: check
+			}
+		} else {
+			output_aggrResult = aggregate.apply(*baseStart, output_aggrResult);
+				if (output_isEmpty)
+					output_readBegin = (*baseStart).key; // TODO: check
+				output_isEmpty = false;
+				output_readEnd = (*baseStart).key; // TODO: check
+		}
+		++baseStart;
+	}
+	if (!stopAtEndOfBase) {
+		while (vCount > 0) {
+			if (predicate.isValid()) {
+				Optional<KeyValueRef> val = predicate->apply(arena, vm_output[pos], true);
+				if (val.present()) {
+					output_aggrResult = aggregate.apply(val.get(), output_aggrResult);
+				if (output_isEmpty)
+					output_readBegin = val.get().key; // TODO: check
+				output_isEmpty = false;
+				output_readEnd = val.get().key; // TODO: check
+				}
+			} else {
+				output_aggrResult = aggregate.apply(vm_output[pos], output_aggrResult);
+				if (output_isEmpty)
+					output_readBegin = (vm_output[pos]).key; // TODO: check
+				output_isEmpty = false;
+				output_readEnd = (vm_output[pos]).key; // TODO: check
+			}
+			++pos;
+			vCount--;
+		}
+	}
+}
+
 ACTOR Future<Optional<Value>> quickGetValue(StorageServer* data,
                                             StringRef key,
                                             Version version,
@@ -2265,25 +2371,25 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			int prevSize = result.data.size();
 			if (predicate.isValid()) {
 				mergeWithPredicate(result.arena,
-				                   result.data,
-				                   resultCache,
-				                   atStorageVersion,
-				                   vCount,
-				                   limit,
-				                   atStorageVersion.more,
-				                   pos,
-				                   *predicate,
-				                   *pLimitBytes);
+								   result.data,
+								   resultCache,
+								   atStorageVersion,
+								   vCount,
+								   limit,
+								   atStorageVersion.more,
+								   pos,
+								   *predicate,
+								   *pLimitBytes);
 			} else {
 				merge(result.arena,
-				      result.data,
-				      resultCache,
-				      atStorageVersion,
-				      vCount,
-				      limit,
-				      atStorageVersion.more,
-				      pos,
-				      *pLimitBytes);
+					  result.data,
+					  resultCache,
+					  atStorageVersion,
+					  vCount,
+					  limit,
+					  atStorageVersion.more,
+					  pos,
+					  *pLimitBytes);
 			}
 			limit -= result.data.size() - prevSize;
 
@@ -2410,6 +2516,116 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 	// all but the last item are less than *pLimitBytes
 	ASSERT(result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
 	result.more = limit == 0 || *pLimitBytes <= 0; // FIXME: Does this have to be exact?
+	result.version = version;
+	return result;
+}
+
+ACTOR Future<GetKeyValuesAggregateReply> readRangeAggregate(StorageServer* data,
+															Version version,
+															KeyRange range,
+															SpanID parentSpan,
+															IKeyValueStore::ReadType type,
+															Reference<IReadPredicate> predicate = Reference<IReadPredicate>(),
+															Reference<IReadAggregate> aggregate = Reference<IReadAggregate>()) {
+	state GetKeyValuesAggregateReply result;
+	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
+	state StorageServer::VersionedData::iterator vCurrent = view.end();
+	state KeyRef readBegin;
+	state KeyRef readEnd;
+	state Key readBeginTemp;
+	state int vCount = 0;
+	state Span span("SS:readRange"_loc, parentSpan);
+
+	// for caching the storage queue results during the first PTree traversal
+	state VectorRef<KeyValueRef> resultCache;
+
+	// for remembering the position in the resultCache
+	state int pos = 0;
+
+	// Check if the desired key-range is cached
+	auto containingRange = data->cachedRangeMap.rangeContaining(range.begin);
+	if (containingRange.value() && containingRange->range().end >= range.end) {
+		//TraceEvent(SevDebug, "SSReadRangeCached").detail("Size",data->cachedRangeMap.size()).detail("ContainingRangeBegin",containingRange->range().begin).detail("ContainingRangeEnd",containingRange->range().end).
+		//	detail("Begin", range.begin).detail("End",range.end);
+		result.cached = true;
+	} else
+		result.cached = false;
+
+	// We might care about a clear beginning before start that
+	//  runs into range
+	vCurrent = view.lastLessOrEqual(range.begin);
+	if (vCurrent && vCurrent->isClearTo() && vCurrent->getEndKey() > range.begin)
+		readBegin = vCurrent->getEndKey();
+	else
+		readBegin = range.begin;
+
+	vCurrent = view.lower_bound(readBegin);
+
+	while (readBegin < range.end) {
+		ASSERT(!vCurrent || vCurrent.key() >= readBegin);
+		ASSERT(data->storageVersion() <= version);
+
+		/* Traverse the PTree further, if there are no unconsumed resultCache items */
+		if (pos == resultCache.size()) {
+			if (vCurrent) {
+				auto b = vCurrent;
+				--b;
+				ASSERT(!b || b.key() < readBegin);
+			}
+
+			// Read up to limit items from the view, stopping at the next clear (or the end of the range)
+			int vSize = 0;
+			while (vCurrent && vCurrent.key() < range.end && !vCurrent->isClearTo()) {
+				// Store the versionedData results in resultCache
+				resultCache.emplace_back(result.arena, vCurrent.key(), vCurrent->getValue());
+				vSize += sizeof(KeyValueRef) + resultCache.cback().expectedSize();
+				++vCount;
+				++vCurrent;
+			}
+		}
+
+		// Read the data on disk up to vCurrent (or the end of the range)
+		readEnd = vCurrent ? std::min(vCurrent.key(), range.end) : range.end;
+		RangeResult atStorageVersion =
+			wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd)));
+
+		if (data->storageVersion() > version)
+			throw transaction_too_old();
+
+		// merge the sets in resultCache with the sets on disk, stopping at the last key from disk if there is
+		// 'more'
+		mergeAndAggregate(result.arena,
+						  result.resultEmpty,
+						  result.aggrResult,
+						  result.readBegin,
+						  result.readEnd,
+						  resultCache,
+						  atStorageVersion,
+						  vCount,
+						  atStorageVersion.more,
+						  pos,
+						  *aggregate,
+						  predicate);
+
+		// Setup for the next iteration
+		// If we hit our limits reading from disk but then combining with MVCC gave us back more room
+		if (atStorageVersion.more) { // if there might be more data, begin reading right after what we already found to find out
+			//ASSERT(result.data.end()[-1].key == atStorageVersion.end()[-1].key);
+			readBegin = readBeginTemp = keyAfter(result.readEnd.get());
+		} else if (vCurrent) {
+			if (vCurrent->isClearTo()) { // if vCurrent is a clear, skip it.
+				ASSERT(vCurrent->getEndKey() > readBegin);
+				readBegin = vCurrent->getEndKey(); // next disk read should start at the end of the clear
+				++vCurrent;
+			} else {
+				readBegin = vCurrent.key();
+			}
+		} else {
+			ASSERT(readEnd == range.end);
+			break;
+		}
+	}
+
 	result.version = version;
 	return result;
 }
@@ -2710,6 +2926,185 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		                                                   abs(req.begin.offset) > maxSelectorOffset ||
 		                                                   abs(req.end.offset) > maxSelectorOffset);
 	}
+
+	return Void();
+}
+
+ACTOR Future<Void> getKeyValuesAggregateQ(StorageServer* data, GetKeyValuesAggregateRequest req)
+// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
+// selector offset prevents all data from being read in one range read
+{
+	state Span span("SS:getKeyValuesAggregate"_loc, { req.spanContext });
+	state int64_t resultSize = 0;
+	state IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL;
+	state Reference<IReadPredicate> predicate;
+	state Reference<IReadAggregate> aggregate;
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
+
+	++data->counters.getRangeQueries;
+	++data->counters.allQueries;
+	++data->readQueueSizeMetric;
+	data->maxQueryQueue = std::max<int>(
+	    data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
+
+	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
+	// so we need to downgrade here
+	wait(data->getQueryDelay());
+
+	try {
+		if (req.debugID.present())
+			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesAggregate.Before");
+
+		if (req.predicateName.present()) {
+			predicate = createReadPredicate(req.predicateName.get(), req.predicateArgs);
+			if (!predicate.isValid()) {
+				throw invalid_predicate();
+			}
+		}
+
+		if (req.aggregateName.present()) {
+			aggregate = createReadAggregate(req.aggregateName.get(), req.aggregateArgs);
+			if (!aggregate.isValid()) {
+				throw invalid_aggregate();
+			}
+		}
+
+		state Version version = wait(waitForVersion(data, req.version, span.context));
+
+		state uint64_t changeCounter = data->shardChangeCounter;
+		//		try {
+		state KeyRange shard = getShardKeyRange(data, req.begin);
+
+		if (req.debugID.present())
+			g_traceBatch.addEvent(
+			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesAggregate.AfterVersion");
+		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
+		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
+		// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
+		//"None").detail("In", "getKeyValues>getShardKeyRange"); throw e; }
+
+		if (!selectorInRange(req.end, shard) && !(req.end.isFirstGreaterOrEqual() && req.end.getKey() == shard.end)) {
+			//			TraceEvent("WrongShardServer1", data->thisServerID).detail("Begin",
+			// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin",
+			// shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkShardExtents");
+			throw wrong_shard_server();
+		}
+
+		state int offset1 = 0;
+		state int offset2;
+		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
+		                               ? Future<Key>(req.begin.getKey())
+		                               : findKey(data, req.begin, version, shard, &offset1, span.context, type);
+		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
+		                             ? Future<Key>(req.end.getKey())
+		                             : findKey(data, req.end, version, shard, &offset2, span.context, type);
+		state Key begin = wait(fBegin);
+		state Key end = wait(fEnd);
+
+		if (req.debugID.present())
+			g_traceBatch.addEvent(
+			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesAggregate.AfterKeys");
+		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
+
+		// Offsets of zero indicate begin/end keys in this shard, which obviously means we can answer the query
+		// An end offset of 1 is also OK because the end key is exclusive, so if the first key of the next shard is the
+		// end the last actual key returned must be from this shard. A begin offset of 1 is also OK because then either
+		// begin is past end or equal to end (so the result is definitely empty)
+		if ((offset1 && offset1 != 1) || (offset2 && offset2 != 1)) {
+			//TEST(true); // wrong_shard_server due to offset
+			// We could detect when offset1 takes us off the beginning of the database or offset2 takes us off the end,
+			// and return a clipped range rather than an error (since that is what the NativeAPI.getRange will do anyway
+			// via its "slow path"), but we would have to add some flags to the response to encode whether we went off
+			// the beginning and the end, since it needs that information.
+			//TraceEvent("WrongShardServer2", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end).detail("In", "getKeyValues>checkOffsets").detail("BeginKey", begin).detail("EndKey", end).detail("BeginOffset", offset1).detail("EndOffset", offset2);
+			throw wrong_shard_server();
+		}
+
+		if (begin >= end) {
+			if (req.debugID.present())
+				g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesAggregate.Send");
+			//.detail("Begin",begin).detail("End",end);
+
+			GetKeyValuesAggregateReply none;
+			none.version = version;
+			none.penalty = data->getPenalty();
+
+			data->checkChangeCounter(changeCounter,
+			                         KeyRangeRef(std::min<KeyRef>(req.begin.getKey(), req.end.getKey()),
+			                                     std::max<KeyRef>(req.begin.getKey(), req.end.getKey())));
+			req.reply.send(none);
+		} else {
+			//state int remainingLimitBytes = req.limitBytes;
+
+			GetKeyValuesAggregateReply _r = wait(readRangeAggregate(data,
+																	version,
+																	KeyRangeRef(begin, end),
+																	span.context,
+																	type,
+																	predicate,
+																	aggregate));
+			GetKeyValuesAggregateReply r = _r;
+
+			if (req.debugID.present())
+				g_traceBatch.addEvent(
+				    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesAggregate.AfterReadRange");
+			//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
+			data->checkChangeCounter(
+			    changeCounter,
+			    KeyRangeRef(std::min<KeyRef>(begin, std::min<KeyRef>(req.begin.getKey(), req.end.getKey())),
+			                std::max<KeyRef>(end, std::max<KeyRef>(req.begin.getKey(), req.end.getKey()))));
+
+			/*for( int i = 0; i < r.data.size(); i++ ) {
+			    StorageMetrics m;
+			    m.bytesPerKSecond = r.data[i].expectedSize();
+			    m.iosPerKSecond = 1; //FIXME: this should be 1/r.data.size(), but we cannot do that because it is an int
+			    data->metrics.notify(r.data[i].key, m);
+			}*/
+
+			// For performance concerns, the cost of a range read is billed to the start key and end key of the range.
+			// TODO: not calculating for now
+			//int64_t totalByteSize = 0;
+			//for (int i = 0; i < r.data.size(); i++) {
+			//	totalByteSize += r.data[i].expectedSize();
+			//}
+			//if (totalByteSize > 0 && SERVER_KNOBS->READ_SAMPLING_ENABLED) {
+			//	int64_t bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY) / 2;
+			//	data->metrics.notifyBytesReadPerKSecond(r.data[0].key, bytesReadPerKSecond);
+			//	data->metrics.notifyBytesReadPerKSecond(r.data[r.data.size() - 1].key, bytesReadPerKSecond);
+			//}
+
+			r.penalty = data->getPenalty();
+			req.reply.send(r);
+
+			//resultSize = req.limitBytes - remainingLimitBytes;
+			//data->counters.bytesQueried += resultSize;
+			//data->counters.rowsQueried += r.data.size();
+			//if (r.data.size() == 0) {
+			//	++data->counters.emptyQueries;
+			//}
+		}
+	} catch (Error& e) {
+		if (!canReplyWith(e))
+			throw;
+		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
+	}
+
+	//data->transactionTagCounter.addRequest(req.tags, resultSize);
+	++data->counters.finishedQueries;
+	--data->readQueueSizeMetric;
+
+	double duration = g_network->timer() - req.requestTime();
+	data->counters.readLatencySample.addMeasurement(duration);
+	//if (data->latencyBandConfig.present()) {
+	//	int maxReadBytes =
+	//	    data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
+	//	int maxSelectorOffset =
+	//	    data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
+	//	data->counters.readLatencyBands.addMeasurement(duration,
+	//	                                               resultSize > maxReadBytes ||
+	//	                                                   abs(req.begin.offset) > maxSelectorOffset ||
+	//	                                                   abs(req.end.offset) > maxSelectorOffset);
+	//}
 
 	return Void();
 }
@@ -6496,6 +6891,17 @@ ACTOR Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<G
 	}
 }
 
+ACTOR Future<Void> serveGetKeyValuesAggregateRequests(StorageServer* self, FutureStream<GetKeyValuesAggregateRequest> getKeyValuesAggregate) {
+	//getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyValuesAggregate;
+	loop {
+		GetKeyValuesAggregateRequest req = waitNext(getKeyValuesAggregate);
+
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
+		// before doing real work
+		self->actors.add(self->readGuard(req, getKeyValuesAggregateQ));
+	}
+}
+
 ACTOR Future<Void> serveGetKeyValuesAndFlatMapRequests(
     StorageServer* self,
     FutureStream<GetKeyValuesAndFlatMapRequest> getKeyValuesAndFlatMap) {
@@ -6718,6 +7124,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(checkBehind(self));
 	self->actors.add(serveGetValueRequests(self, ssi.getValue.getFuture()));
 	self->actors.add(serveGetKeyValuesRequests(self, ssi.getKeyValues.getFuture()));
+	self->actors.add(serveGetKeyValuesAggregateRequests(self, ssi.getKeyValuesAggregate.getFuture()));
 	self->actors.add(serveGetKeyValuesAndFlatMapRequests(self, ssi.getKeyValuesAndFlatMap.getFuture()));
 	self->actors.add(serveGetKeyValuesStreamRequests(self, ssi.getKeyValuesStream.getFuture()));
 	self->actors.add(serveGetKeyRequests(self, ssi.getKey.getFuture()));
