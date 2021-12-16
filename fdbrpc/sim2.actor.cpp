@@ -735,12 +735,15 @@ public:
 			std::string_view candidate = c;
 			if (candidate.size() > directory.size() && candidate.substr(0, directory.size()) == directory) {
 				candidate = candidate.substr(directory.size());
+
 				if (candidate[0] == '/') {
 					candidate = candidate.substr(1);
-				} else if (candidate.find('/') != std::string_view::npos) {
+				}
+				if (candidate.find('/') != std::string_view::npos) {
 					// this directory name is just sharing a prefix
 					continue;
 				}
+
 				res.push_back(std::string(candidate));
 			}
 		}
