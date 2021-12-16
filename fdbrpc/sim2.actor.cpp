@@ -3178,4 +3178,33 @@ TEST_CASE("/sim2/inmemoryfs/touch") {
 	return Void();
 }
 
+TEST_CASE("/sim2/inmemoryfs/writeread") {
+	SimpleInMemoryFileSystem fs;
+	std::string s1("1234567"), s2("7654321");
+	fs->writeFileBytes("f1", (uint8_t *)s1.c_str(), s1.size());
+	auto reads = fs->readFileBytes("f1", 100);
+	ASSERT(reads == s1);
+
+	fs->atomicReplace("f1", s2);
+	reads = fs->readFileBytes("f1", 100);
+	ASSERT(reads == s2);
+
+	auto fd = fs->open("f1", O_WRONLY);
+	fs->lseek(fd, 1, SEEK_SET);
+
+	char buffer[25];
+	fs->read(fd, buffer, 3);
+	ASSERT(memcmp(buffer, "654", 3) == 0);
+
+	auto len1 = fs->lseek(fd, 0, SEEK_END);
+	ASSERT(len1 == s2.size());
+	ASSERT(fs->ltell(fd) == s2.size());
+	fs->write(fd, s1.c_str(), s1.size());
+
+	fs->lseek(fd, s2.size(), SEEK_SET);
+	fs->read(fd, buffer, s1.size());
+	ASSERT(memcmp(buffer, s1.c_str(), s1.size()) == 0);
+	return Void();
+}
+
 
