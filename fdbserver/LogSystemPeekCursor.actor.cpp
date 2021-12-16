@@ -1702,7 +1702,8 @@ ILogSystem::HeapPeekCursor::HeapPeekCursor(std::vector<Reference<IPeekCursor>> c
                                            LogMessageVersion messageVersion)
   : serverCursors(serverCursors), messageVersion(messageVersion) {
 	for (int i = 0; i < serverCursors.size(); i++) {
-		minCursor.push(ILogSystem::CursorVersion(serverCursors[i]->version().version, i));
+		minCursor.push(
+		    ILogSystem::CursorVersion(serverCursors[i]->version().version, serverCursors[i]->hasMessage(), i));
 	}
 	currentCursor = minCursor.top().cursor;
 }
@@ -1744,7 +1745,7 @@ void ILogSystem::HeapPeekCursor::nextMessage() {
 	Version next = serverCursors[currentCursor]->version().version;
 	if (next != prev) {
 		minCursor.pop();
-		minCursor.push(CursorVersion(next, currentCursor));
+		minCursor.push(CursorVersion(next, serverCursors[currentCursor]->hasMessage(), currentCursor));
 		currentCursor = minCursor.top().cursor;
 	}
 	messageVersion = hasMessage() ? serverCursors[currentCursor]->version()
@@ -1794,7 +1795,8 @@ ACTOR Future<Void> heapPeekGetMore(ILogSystem::HeapPeekCursor* self, TaskPriorit
 		}
 		wait(waitForAll(q));
 		for (int i = 0; i < self->serverCursors.size(); i++) {
-			self->minCursor.push(ILogSystem::CursorVersion(self->serverCursors[i]->version().version, i));
+			self->minCursor.push(ILogSystem::CursorVersion(
+			    self->serverCursors[i]->version().version, self->serverCursors[i]->hasMessage(), i));
 		}
 
 		self->currentCursor = self->minCursor.top().cursor;
@@ -1802,11 +1804,15 @@ ACTOR Future<Void> heapPeekGetMore(ILogSystem::HeapPeekCursor* self, TaskPriorit
 		return Void();
 	}
 
-	wait(self->serverCursors[self->currentCursor]->getMore());
-	self->minCursor.pop();
-	self->minCursor.push(
-	    ILogSystem::CursorVersion(self->serverCursors[self->currentCursor]->version().version, self->currentCursor));
-	self->currentCursor = self->minCursor.top().cursor;
+	while (!(self->serverCursors[self->currentCursor]->hasMessage() ||
+	         self->serverCursors[self->currentCursor]->version().version > self->messageVersion.version)) {
+		wait(self->serverCursors[self->currentCursor]->getMore(taskID));
+		self->minCursor.pop();
+		self->minCursor.push(ILogSystem::CursorVersion(self->serverCursors[self->currentCursor]->version().version,
+		                                               self->serverCursors[self->currentCursor]->hasMessage(),
+		                                               self->currentCursor));
+		self->currentCursor = self->minCursor.top().cursor;
+	}
 	self->messageVersion = self->serverCursors[self->currentCursor]->version();
 	return Void();
 }

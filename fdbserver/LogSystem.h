@@ -532,14 +532,19 @@ struct ILogSystem {
 
 	struct CursorVersion {
 		Version version;
+		bool hasMessage;
 		int cursor;
 
-		CursorVersion() : version(invalidVersion), cursor(0) {}
-		CursorVersion(Version version, int cursor) : version(version), cursor(cursor) {}
+		CursorVersion() : version(invalidVersion), hasMessage(false), cursor(0) {}
+		CursorVersion(Version version, bool hasMessage, int cursor)
+		  : version(version), hasMessage(hasMessage), cursor(cursor) {}
 
 		bool operator<(CursorVersion const& rhs) const {
 			// Ordering is reversed for priority_queue
-			return version > rhs.version;
+			if (version != rhs.version) {
+				return version > rhs.version;
+			}
+			return !hasMessage;
 		}
 	};
 
