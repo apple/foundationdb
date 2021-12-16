@@ -2752,15 +2752,10 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 	    recr.tLogs.size()); // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
 	logSystem->tLogs[0]->updateLocalitySet(localities);
 
-	int tLogGroups = logSystem->tLogs[0]->logServers.size() / configuration.tLogReplicationFactor;
-	int currentGroup = 0;
 	for (Tag tag : localTags) {
-		for (int loc = currentGroup * configuration.tLogReplicationFactor;
-		     loc < (currentGroup + 1) * configuration.tLogReplicationFactor;
-		     loc++) {
+		for (int loc = 0; loc < configuration.tLogReplicationFactor; loc++) {
 			reqs[loc].recoverTags.push_back(tag);
 		}
-		currentGroup = (currentGroup + 1) % tLogGroups;
 	}
 	for (int i = 0; i < oldLogSystem->logRouterTags; i++) {
 		ASSERT(false);
@@ -2772,9 +2767,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		ASSERT(!nonShardedTxs && !needsOldTxs);
 		for (int i = 0; i < maxTxsTags; i++) {
 			Tag tag = Tag(tagLocalityTxs, i);
-			for (int loc = currentGroup * configuration.tLogReplicationFactor;
-			     loc < (currentGroup + 1) * configuration.tLogReplicationFactor;
-			     loc++) {
+			for (int loc = 0; loc < configuration.tLogReplicationFactor; loc++) {
 				reqs[loc].recoverTags.push_back(tag);
 			}
 		}
