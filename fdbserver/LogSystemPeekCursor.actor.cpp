@@ -1745,6 +1745,7 @@ void ILogSystem::HeapPeekCursor::nextMessage() {
 		minCursor.pop();
 		minCursor.push(CursorVersion(next, serverCursors[currentCursor]->hasMessage(), currentCursor));
 		currentCursor = minCursor.top().cursor;
+	}
 
 	hasData = serverCursors[currentCursor]->hasMessage();
 	messageVersion = hasData ? serverCursors[currentCursor]->version()
