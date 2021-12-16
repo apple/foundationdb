@@ -32,11 +32,12 @@ uint64_t DeterministicRandom::gen64() {
 }
 
 DeterministicRandom::DeterministicRandom(uint32_t seed, bool useRandLog)
-  : random((unsigned long)seed), next((uint64_t(random()) << 32) ^ random()), useRandLog(useRandLog) {
+  : seed(seed), random((unsigned long)seed), next((uint64_t(random()) << 32) ^ random()), useRandLog(useRandLog) {
 	UNSTOPPABLE_ASSERT(seed != 0); // docs for mersenne twister say x0>0
 };
 
 void DeterministicRandom::reseed(uint32_t seed) {
+	this->seed = seed;
 	random = std::mt19937((unsigned long)seed);
 	next = (uint64_t(random()) << 32) ^ random();
 }
@@ -131,6 +132,10 @@ std::string DeterministicRandom::randomAlphaNumeric(int length) {
 
 uint64_t DeterministicRandom::peek() const {
 	return next;
+}
+
+uint32_t DeterministicRandom::getSeed() {
+	return seed;
 }
 
 void DeterministicRandom::addref() {

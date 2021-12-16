@@ -520,9 +520,7 @@ public:
 		fds.insert(std::make_pair(res, OpenFile(file->second, flags)));
 		return res;
 	}
-	void deleteFile(std::string const& path) {
-		files.erase(path);
-	}
+	void deleteFile(std::string const& path) { files.erase(path); }
 	void renameFile(std::string const& from, std::string const& to) {
 		auto f = files.find(from);
 		if (f == files.end()) {
@@ -539,7 +537,8 @@ public:
 	ssize_t read(int fd, void* buf, size_t nbyte) {
 		ASSERT(fd > 0);
 		auto& f = fds.at(fd);
-		if (f.offset >= f.data->size()) return 0;
+		if (f.offset >= f.data->size())
+			return 0;
 		auto res = std::min(nbyte, size_t(f.data->size() - f.offset));
 		memcpy(buf, f.data->data() + f.offset, res);
 		f.offset += res;
@@ -2206,6 +2205,7 @@ public:
 		g_network->addStopCallback(Net2FileSystem::stop);
 		Net2FileSystem::newFileSystem();
 		check_yield(TaskPriority::Zero);
+		forkSequence.emplace_back(deterministicRandom()->getSeed());
 	}
 
 	// Implementation
@@ -2311,6 +2311,24 @@ public:
 		dieWhenTerminate = false;
 	}
 
+	// returns a comma separated string of the current forkSequence
+	std::string serializeForkSequence() {
+		std::ostringstream oss;
+		for (int i = 0; i < forkSequence.size(); ++i) {
+			Optional<uint32_t> currEntry = forkSequence[i];
+			if (currEntry.present()) {
+				oss << currEntry.get();
+			} else {
+				oss << "x"; // 'x' to denote empty
+			}
+
+			if (i < forkSequence.size() - 1) {
+				oss << ",";
+			}
+		}
+		return oss.str();
+	}
+
 	int forkSearch(const char* context = "") override {
 #if defined(__unixish__)
 		if (forkSearchDepth > 0) { // now only allow 1
@@ -2323,16 +2341,17 @@ public:
 			if ((processId = fork()) == 0) { // child process
 				++forkSearchDepth;
 				int pid = getpid();
-				int new_seed = platform::getRandomSeed(); // non-deterministic seed
-				// TODO: do something to record the seed in order to replay
+				int newSeed = platform::getRandomSeed(); // non-deterministic seed
+				forkSequence.emplace_back(newSeed);
 
 				std::string childLogGroup = parentGroup + "/" + std::to_string(pid); // format to still be finalized
 				startChildTraceLog(childLogGroup);
-				deterministicRandom()->reseed(new_seed);
+				deterministicRandom()->reseed(newSeed);
 				TraceEvent("ChildProcessStarted")
-				    .detail("NewSeed", new_seed)
+				    .detail("NewSeed", newSeed)
 				    .detail("ProcessId", pid)
-				    .detail("Context", context);
+				    .detail("Context", context)
+				    .detail("Sequence", serializeForkSequence());
 				return 0;
 			} else if (processId < 0) {
 				return EXIT_FAILURE;
@@ -2345,16 +2364,20 @@ public:
 				// report according to exit status
 				if (WIFEXITED(status)) {
 					auto exitCode = WEXITSTATUS(status);
-					TraceEvent(exitCode == 0 ? SevInfo : SevError, "ChildProcessReturned").detail("ExitCode", exitCode).backtrace();
+					TraceEvent(exitCode == 0 ? SevInfo : SevError, "ChildProcessReturned")
+					    .detail("ExitCode", exitCode)
+					    .backtrace();
 				} else if (WIFSIGNALED(status)) { // child crash
 					try {
 						TraceEvent(SevError, "ChildProcessCrashed").log();
 						ASSERT(false);
-					} catch (Error&) {}
+					} catch (Error&) {
+					}
 				}
 				terminateChildTraceLog();
 			}
 		}
+		forkSequence.emplace_back(Optional<uint32_t>());
 		return 0;
 #else
 #error no support now
@@ -2393,8 +2416,10 @@ public:
 	bool printSimTime;
 	double terminateAt = -1.0;
 	bool dieWhenTerminate = false;
+
 	int forkSearchDepth = 0;
 	int forkSearchFanout = 4;
+	std::vector<Optional<uint32_t>> forkSequence;
 
 private:
 	MockDNS mockDNS;
