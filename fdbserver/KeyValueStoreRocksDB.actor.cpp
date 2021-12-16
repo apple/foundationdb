@@ -343,6 +343,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			const FlowLock* readLock;
 			const FlowLock* fetchLock;
 			KeyRangeMap<DB>* shardMap;
+			KeyRangeMap<std::string>* dbPathMap;
 
 			/*OpenAction(std::string path,
 			           Optional<Future<Void>>& metrics,
@@ -356,11 +357,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			           Optional<Future<Void>>& metrics,
 			           const FlowLock* readLock,
 			           const FlowLock* fetchLock,
-			           KeyRangeMap<DB>* shardMap)
+			           KeyRangeMap<DB>* shardMap,
+			           KeyRangeMap<std::string>* dbPathMap)
 			  : path(std::move(path)), dataPath(std::move(dataPath)), metrics(metrics), readLock(readLock),
-			    fetchLock(fetchLock), shardMap(shardMap) {
-					ASSERT(shardMap);
-				}
+			    fetchLock(fetchLock), shardMap(shardMap), dbPathMap(dbPathMap) {
+				ASSERT(shardMap);
+			}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -412,6 +414,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					}
 				}
 				a.shardMap->rawInsert(kv.key, cdb);
+				a.dbPathMap->rawInsert(kv.key, kv.value.toString());
 				cursor->Next();
 			}
 
@@ -422,20 +425,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
-			// if (a.shardMap.size() == 0) {
-			// 	DB ndb;
-			// 	UID id = deterministicRandom()->randomUniqueID();
-			// 	status = rocksdb::DB::Open(options, a.dataPath + id.toString(), defaultCF, &handle, &ndb);
-			// 	if (!status.ok()) {
-			// 		logRocksDBError(status, "Open");
-			// 		a.done.sendError(statusToError(status));
-			// 		return;
-			// 	}
-			// 	a.shardMap->insert(allKeys, ndb);
-			// 	rocksdb::WriteOptions writeOptions;
-			// 	writeOptions.sync = true;
-			// 	db->Put(writeOptions, toSlice(persistShardMappingPrefix + allKeys.begin()), toSlice());
-			// }
+			TraceEvent(a.shardMap->size() == 0 ? SevWarn : SevInfo, "RocksDB")
+			    .detail("Method", "Open")
+			    .detail("NumShard", a.shardMap->size());
 
 			// The current thread and main thread are same when the code runs in simulation.
 			// blockUntilReady() is getting the thread into deadlock state, so avoiding the
@@ -549,8 +541,17 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		struct CloseAction : TypedAction<Writer, CloseAction> {
 			ThreadReturnPromise<Void> done;
 			std::string path;
+			std::string dataPath;
+			KeyRangeMap<rocksdb::DB*>* shardMap;
+			KeyRangeMap<std::string>* dbPathMap;
 			bool deleteOnClose;
-			CloseAction(std::string path, bool deleteOnClose) : path(path), deleteOnClose(deleteOnClose) {}
+			CloseAction(std::string path,
+			            std::string dataPath,
+			            KeyRangeMap<rocksdb::DB*>* shardMap,
+			            KeyRangeMap<std::string>* dbPathMap,
+			            bool deleteOnClose)
+			  : path(path), dataPath(dataPath), shardMap(shardMap), dbPathMap(dbPathMap), deleteOnClose(deleteOnClose) {
+			}
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 
@@ -559,20 +560,44 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.done.send(Void());
 				return;
 			}
-			auto s = db->Close();
-			if (!s.ok()) {
-				logRocksDBError(s, "Close");
-			}
-			if (a.deleteOnClose) {
-				std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
-					"default", getCFOptions() } };
-				s = rocksdb::DestroyDB(a.path, getOptions(), defaultCF);
+
+			if (SERVER_KNOBS->ROCKSDB_ENABLE_SHARDING) {
+				auto s = db->Close();
 				if (!s.ok()) {
-					logRocksDBError(s, "Destroy");
-				} else {
-					TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Destroy");
+					logRocksDBError(s, "Close");
+				}
+				if (a.deleteOnClose) {
+					std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
+						"default", getCFOptions() } };
+					s = rocksdb::DestroyDB(a.path, getOptions(), defaultCF);
+					if (!s.ok()) {
+						logRocksDBError(s, "Destroy");
+					} else {
+						TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Destroy");
+					}
 				}
 			}
+
+			for (auto it : a.shardMap->ranges()) {
+				ASSERT(it.value());
+				auto s = it.value()->Close();
+				if (!s.ok()) {
+					logRocksDBError(s, "CloseShard");
+				}
+			}
+			if (a.deleteOnClose) {
+				for (auto it : a.dbPathMap->ranges()) {
+					std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
+						"default", getCFOptions() } };
+					auto s = rocksdb::DestroyDB(a.dataPath + it.value(), getOptions(), defaultCF);
+					if (!s.ok()) {
+						logRocksDBError(s, "Destroy");
+					} else {
+						TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Destroy");
+					}
+				}
+			}
+
 			TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Close");
 			a.done.send(Void());
 		}
@@ -821,7 +846,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		self->metrics.reset();
 
 		wait(self->readThreads->stop());
-		auto a = new Writer::CloseAction(self->path, deleteOnClose);
+		auto a = new Writer::CloseAction(self->path, self->dataPath, &self->shardMap, &self->dbPathMap, deleteOnClose);
 		auto f = a->done.getFuture();
 		self->writeThread->post(a);
 		wait(f);
@@ -845,8 +870,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (openFuture.isValid()) {
 			return openFuture;
 		}
-		auto a =
-		    std::make_unique<Writer::OpenAction>(path, dataPath, metrics, &readSemaphore, &fetchSemaphore, &shardMap);
+		auto a = std::make_unique<Writer::OpenAction>(
+		    path, dataPath, metrics, &readSemaphore, &fetchSemaphore, &shardMap, &dbPathMap);
 		openFuture = a->done.getFuture();
 		writeThread->post(a.release());
 		return openFuture;
@@ -1045,6 +1070,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<Void> addShard(KeyRangeRef range, UID id) override {
+		if (!SERVER_KNOBS->ROCKSDB_ENABLE_SHARDING) {
+			// TODO: add a new error code.
+			return internal_error();
+		}
 		auto a = std::make_unique<Writer::AddShardAction>(dataPath + id.toString(), range, &shardMap);
 		Future<Void> f = a->done.getFuture();
 		writeThread->post(a.release());
@@ -1069,6 +1098,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	int numFetchWaiters;
 	Counters counters;
 	KeyRangeMap<DB> shardMap;
+	KeyRangeMap<std::string> dbPathMap;
 };
 
 } // namespace
