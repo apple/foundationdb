@@ -1370,6 +1370,7 @@ ACTOR Future<Void> Net2::logTimeOffset() {
 	}
 }
 
+// Unused implementation of threaded reactor IO
 THREAD_FUNC_RETURN reactorThreadTest(void* reactor) {
 	loop { ((ASIOReactor*)reactor)->react_block(); }
 	THREAD_RETURN;
@@ -1485,8 +1486,6 @@ void Net2::run() {
 		tscBegin = timestampCounter();
 		taskBegin = timer_monotonic();
 		trackAtPriority(TaskPriority::ASIOReactor, taskBegin);
-		// Reactor pushes IO Futures as ready and moves associated tasks
-		// into ready queue
 		reactor.react();
 
 		updateNow();
@@ -1511,7 +1510,6 @@ void Net2::run() {
 		countTimers += numTimers;
 		FDB_TRACE_PROBE(run_loop_ready_timers, numTimers);
 
-		// moves items from threadReady queue to ready queue
 		processThreadReady();
 
 		tscBegin = timestampCounter();
@@ -1523,16 +1521,12 @@ void Net2::run() {
 
 		FDB_TRACE_PROBE(run_loop_tasks_start, queueSize);
 		while (!ready.empty()) {
-			// TraceEvent("DebugRunLoopReadyStart")
-			// 	.detail("ReadySize", ready.size());
-			// aiming to empty the ready queue
 			++countTasks;
 			currentTaskID = ready.top().taskID;
 			priorityMetric = static_cast<int64_t>(currentTaskID);
 			Task* task = ready.top().task;
 			ready.pop();
 
-			// perform highest prio task in ready queue
 			try {
 				(*task)();
 			} catch (Error& e) {
@@ -1546,15 +1540,16 @@ void Net2::run() {
 				minTaskID = currentTaskID;
 			}
 
-			// attempt to empty out the IO backlog for every X tasks while in this queue
-			// if (ready.size() % 5 == 0) {
-			// 	reactor.react();
-			// }
+			// attempt to empty out the IO backlog for every 5 tasks while in this loop
+			if (ready.size() % 5 == 1) {
+				if (runFunc) {
+					runFunc();
+				}
+				reactor.react();
+			}
 
 			double tscNow = timestampCounter();
 			double newTaskBegin = timer_monotonic();
-			// break from emptying ready queue if tscNow is outside the bounds of [tscBegin, tscEnd]
-			// or if the next item in the prio queue is greater than given prio below
 			if (check_yield(TaskPriority::Max, tscNow)) {
 				checkForSlowTask(tscBegin, tscNow, newTaskBegin - taskBegin, currentTaskID);
 				taskBegin = newTaskBegin;
@@ -1566,7 +1561,6 @@ void Net2::run() {
 			taskBegin = newTaskBegin;
 			tscBegin = tscNow;
 		}
-		// TraceEvent("DebugRunLoopReadyEnd");
 
 		trackAtPriority(TaskPriority::RunLoop, taskBegin);
 

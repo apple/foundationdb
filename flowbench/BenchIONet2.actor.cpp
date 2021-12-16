@@ -21,6 +21,7 @@
 #include "benchmark/benchmark.h"
 
 #include "flow/Platform.h"
+#include "flow/TreeBenchmark.h"
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/network.h"
@@ -31,7 +32,12 @@
 
 ACTOR static Future<Void> increment(TaskPriority priority, uint32_t* sum) {
 	wait(delay(0, priority));
-	threadSleep(0.000001);
+	DeterministicRandom rand(1);
+	int randSum = 0;
+	for (int i = 0; i < 1e6; ++i) {
+		randSum += rand.randomInt(0, 3);
+	}
+	benchmark::DoNotOptimize(randSum);
 	++(*sum);
 	return Void();
 }
@@ -51,23 +57,15 @@ ACTOR static Future<Void> benchIONet2Actor(benchmark::State* benchState) {
 		state std::vector<Future<Void>> futures;
 		futures.reserve(actorCount);
 		DeterministicRandom rand(seed);
-		// for (int i = 0; i < 1; ++i) {
-		// 	futures.push_back(increment(getRandomTaskPriority(rand), &sum));
-		// }
-		printf("1\n");
-		state Reference<IAsyncFile> f =
-		    wait(IAsyncFileSystem::filesystem()->open("test-benchmark-file", IAsyncFile::OPEN_READWRITE, 0600));
-
-		printf("2\n");
-
+		for (int i = 0; i < actorCount; ++i) {
+			futures.push_back(increment(getRandomTaskPriority(rand), &sum));
+		}
+		state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
+		    "/tmp/__test-benchmark-file__",
+		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE,
+		    0600));
+		wait(f->write(data.get(), 4096, 0));
 		wait(f->sync());
-
-		printf("3\n");
-		// wait(f->truncate(100e6));
-		// wait(f->write(data.get(), 4096, 0));
-		// wait(f->sync());
-		// f.clear();
-		// wait(waitForAll(futures));
 		benchmark::DoNotOptimize(sum);
 	}
 	benchState->SetItemsProcessed(actorCount * static_cast<long>(benchState->iterations()));
