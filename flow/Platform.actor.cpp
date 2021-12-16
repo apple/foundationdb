@@ -1514,7 +1514,7 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 	returnStats.machineCommittedRAM = memInfo.committed;
 	returnStats.machineAvailableRAM = memInfo.available;
 
-	if (dataFolder != "") {
+	if (dataFolder != "" && g_network && g_network->isSimulated() && !FLOW_KNOBS->SIM_FUZZER) {
 		int64_t diskTotal, diskFree;
 		getDiskBytes(dataFolder, diskFree, diskTotal);
 		returnStats.processDiskTotalBytes = diskTotal;
@@ -1681,7 +1681,7 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 	uint64_t nowWriteSectors = (*statState)->lastWriteSectors;
 	uint64_t nowReadSectors = (*statState)->lastReadSectors;
 
-	if (dataFolder != "") {
+	if (dataFolder != "" && g_network && g_network->isSimulated() && !FLOW_KNOBS->SIM_FUZZER) {
 		getDiskStatistics(dataFolder, currentIOs, nowBusyTicks, nowReads, nowWrites, nowWriteSectors, nowReadSectors);
 		returnStats.processDiskQueueDepth = currentIOs;
 		returnStats.processDiskReadCount = nowReads;
