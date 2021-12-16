@@ -607,9 +607,9 @@ public:
 	void atomicReplace(std::string const& path, std::string const& content) {
 		auto f = files.find(path);
 		if (f == files.end()) {
-			TraceEvent("StatFailed").detail("Path", path);
-			throw io_error();
+			int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC);
 		}
+		f = files.find(path);
 		f->second->resize(content.size());
 		memcpy(f->second->data(), content.data(), content.size());
 	}
