@@ -552,8 +552,10 @@ struct ILogSystem {
 		std::vector<Reference<IPeekCursor>> serverCursors;
 		std::priority_queue<CursorVersion> minCursor;
 		LogMessageVersion messageVersion;
+		bool hasData;
 		int currentCursor;
 		Future<Void> more;
+		Tag tag;
 
 		HeapPeekCursor(std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
 		               Tag tag,
@@ -562,7 +564,9 @@ struct ILogSystem {
 		               int tLogReplicationFactor,
 		               bool returnIfBlocked);
 
-		HeapPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors, LogMessageVersion messageVersion);
+		HeapPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors,
+		               LogMessageVersion messageVersion,
+		               bool hasData);
 
 		Reference<IPeekCursor> cloneNoMore() override;
 		void setProtocolVersion(ProtocolVersion version) override;
