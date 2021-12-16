@@ -121,6 +121,41 @@ private:
 	Int64MetricHandle metric;
 };
 
+struct RateCounter final : ICounter, NonCopyable {
+public:
+	typedef int64_t Value;
+
+	RateCounter(std::string const& name, CounterCollection& collection);
+
+	// Add value for the current interval.
+	void add(Value delta);
+
+	// Set the the current duration, and complete the current interval.
+	void finishInterval(double interval);
+
+	void resetInterval() override {}
+
+	std::string const& getName() const override { return name; }
+
+	Value getIntervalDelta() const { return interval_delta; }
+
+	Value getValue() const override { return sum; }
+
+	// Returns the avarage rate, i.e., (accumulated value) / (accumulated interval).
+	double getRate() const override;
+
+	double getRoughness() const override;
+
+	bool hasRate() const override { return true; }
+	bool hasRoughness() const override { return true; }
+
+private:
+	std::string name;
+	double duration;
+	Value interval_delta, sum;
+	Int64MetricHandle metric;
+};
+
 template <>
 struct Traceable<Counter> : std::true_type {
 	static std::string toString(Counter const& counter) {

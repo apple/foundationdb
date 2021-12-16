@@ -81,6 +81,36 @@ void Counter::clear() {
 	metric = 0;
 }
 
+RateCounter::RateCounter(std::string const& name, CounterCollection& collection)
+  : name(name), duration(0), interval_delta(0), sum(0) {
+	metric.init(collection.name + "." + (char)toupper(name.at(0)) + name.substr(1), collection.id);
+	collection.counters.push_back(this);
+}
+
+void RateCounter::add(Value delta) {
+	interval_delta += delta;
+	metric += delta;
+}
+
+void RateCounter::finishInterval(double interval) {
+	if (interval == 0)
+		return;
+	sum += interval_delta;
+	interval_delta = 0;
+	duration += interval;
+}
+
+double RateCounter::getRate() const {
+	if (duration == 0.0)
+		return 0.0;
+	return sum / duration;
+}
+
+double RateCounter::getRoughness() const {
+	// TODO: Return the variance of the rates.
+	return 0;
+}
+
 void CounterCollection::logToTraceEvent(TraceEvent& te) const {
 	for (ICounter* c : counters) {
 		te.detail(c->getName().c_str(), c);
