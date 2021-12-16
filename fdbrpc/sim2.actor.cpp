@@ -54,6 +54,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
 #include "flow/FaultInjection.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
@@ -532,7 +533,7 @@ public:
 		return res;
 	}
 
-	void deleteFile(std::string const& path) { files.erase(path); }
+	void deleteFile(std::string const& path) { files.erase(abspath(path)); }
 
 	void renameFile(std::string const& from, std::string const& to) {
 		auto from1 = abspath(from);
@@ -610,13 +611,20 @@ public:
 	}
 	int error() { return lastError; }
 
+	// creates file at path if it doesn't already exist
+	void touch(std::string const& path) {
+		auto absolutePath = abspath(path);
+		auto file = files.find(absolutePath);
+		if (file == files.end()) {
+			files.insert(std::make_pair(absolutePath, std::make_shared<FileMemory>()));
+		}
+	}
+
 	// File system operations
 	void atomicReplace(std::string const& path, std::string const& content) {
-		auto f = files.find(path);
-		if (f == files.end()) {
-			int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC);
-		}
-		f = files.find(abspath(path));
+		auto absolutePath = abspath(path);
+		touch(absolutePath);
+		auto f = files.find(absolutePath);
 		f->second->resize(content.size());
 		memcpy(f->second->data(), content.data(), content.size());
 	}
@@ -3154,3 +3162,20 @@ ActorLineageSet& Sim2FileSystem::getActorLineageSet() {
 void Sim2FileSystem::newFileSystem() {
 	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Sim2FileSystem());
 }
+
+TEST_CASE("/sim2/inmemoryfs/touch") {
+	SimpleInMemoryFileSystem fs;
+	fs->touch("f1");
+	fs->touch("f2");
+
+	ASSERT(fs->fileExists("f1"));
+	ASSERT(fs->fileExists("f2"));
+	ASSERT(fs->fileSize("f1") == 0);
+
+	fs->deleteFile("f1");
+	ASSERT(!fs->fileExists("f1"));
+	ASSERT(fs->fileExists("f2"));
+	return Void();
+}
+
+
