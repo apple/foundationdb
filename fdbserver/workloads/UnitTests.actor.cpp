@@ -132,7 +132,7 @@ struct UnitTestWorkload : TestWorkload {
 			state double start_now = now();
 			state double start_timer = timer();
 
-			platform::createDirectory(self->testParams.getDataDir());
+			IAsyncFileSystem::filesystem()->createDirectory(self->testParams.getDataDir());
 			try {
 				wait(test->func(self->testParams));
 			} catch (Error& e) {

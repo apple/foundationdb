@@ -96,7 +96,7 @@ private:
 
 ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(std::string path, std::string m_path) {
 	state std::vector<std::string> files;
-	wait(platform::findFilesRecursivelyAsync(joinPath(m_path, path), &files));
+	wait(IAsyncFileSystem::filesystem()->findFilesRecursivelyAsync(joinPath(m_path, path), &files));
 
 	BackupContainerFileSystem::FilesAndSizesT results;
 
@@ -113,7 +113,7 @@ ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(st
 		// Hide .part or .temp files.
 		StringRef s(f);
 		if (!s.endsWith(LiteralStringRef(".part")) && !s.endsWith(LiteralStringRef(".temp")))
-			results.push_back({ f.substr(m_path.size() + 1), ::fileSize(f) });
+			results.push_back({ f.substr(m_path.size() + 1), IAsyncFileSystem::filesystem()->fileSize(f) });
 	}
 
 	return results;
@@ -147,7 +147,7 @@ BackupContainerLocalDirectory::BackupContainerLocalDirectory(const std::string& 
 	// Remove trailing slashes on path
 	path.erase(path.find_last_not_of("\\/") + 1);
 
-	std::string absolutePath = abspath(path);
+	std::string absolutePath = IAsyncFileSystem::filesystem()->abspath(path);
 
 	if (!g_network->isSimulated() && path != absolutePath) {
 		TraceEvent(SevWarn, "BackupContainerLocalDirectory")
@@ -177,14 +177,14 @@ Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(const s
 	// Remove trailing slashes on path
 	path.erase(path.find_last_not_of("\\/") + 1);
 
-	if (!g_network->isSimulated() && path != abspath(path)) {
+	if (!g_network->isSimulated() && path != IAsyncFileSystem::filesystem()->abspath(path)) {
 		TraceEvent(SevWarn, "BackupContainerLocalDirectory")
 		    .detail("Description", "Backup path must be absolute (e.g. file:///some/path)")
 		    .detail("URL", url)
 		    .detail("Path", path);
 		throw io_error();
 	}
-	std::vector<std::string> dirs = platform::listDirectories(path);
+	std::vector<std::string> dirs = IAsyncFileSystem::filesystem()->listDirectories(path);
 	std::vector<std::string> results;
 
 	for (const auto& r : dirs) {
@@ -209,7 +209,7 @@ Future<Void> BackupContainerLocalDirectory::create() {
 }
 
 Future<bool> BackupContainerLocalDirectory::exists() {
-	return directoryExists(m_path);
+	return IAsyncFileSystem::filesystem()->directoryExists(m_path);
 }
 
 Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std::string& path) {
@@ -223,7 +223,7 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 	std::string fullPath = joinPath(m_path, path);
 #ifndef _WIN32
 	if (g_network->isSimulated()) {
-		if (!fileExists(fullPath)) {
+		if (!IAsyncFileSystem::filesystem()->fileExists(fullPath)) {
 			throw file_not_found();
 		}
 
@@ -274,7 +274,7 @@ Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const st
 		flags |= IAsyncFile::OPEN_ENCRYPTED;
 	}
 	std::string fullPath = joinPath(m_path, path);
-	platform::createDirectory(parentDirectory(fullPath));
+	IAsyncFileSystem::filesystem()->createDirectory(parentDirectory(fullPath));
 	std::string temp = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";
 	Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
 	return map(f, [=](Reference<IAsyncFile> f) { return Reference<IBackupFile>(new BackupFile(path, f, fullPath)); });

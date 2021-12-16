@@ -502,6 +502,43 @@ public:
 
 	Future<std::time_t> lastWriteTime(const std::string& filename) override;
 
+	// Atomically replaces the contents of the specified file.
+	void atomicReplace(std::string const& path, std::string const& content, bool textmode = true) override;
+
+	// Returns true iff the file exists
+	bool fileExists(std::string const& filename) override;
+
+	// Returns true iff the directory exists
+	bool directoryExists(std::string const& path) override;
+
+	// Returns size of file in bytes
+	int64_t fileSize(std::string const& filename) override;
+
+	// Returns true if directory was created, false if it existed, throws platform_error() otherwise
+	bool createDirectory(std::string const& directory) override;
+
+	void eraseDirectoryRecursive(std::string const& dir) override;
+
+	// e.g. extension==".fdb", returns filenames relative to directory
+	std::vector<std::string> listFiles(std::string const& directory, std::string const& extension = "") override;
+
+	// returns directory names relative to directory
+	std::vector<std::string> listDirectories(std::string const& directory) override;
+
+	void findFilesRecursively(std::string const& path, std::vector<std::string>& out) override;
+
+	// e.g. extension==".fdb", returns filenames relative to directory
+	Future<std::vector<std::string>> listFilesAsync(std::string const& directory, std::string const& extension = "") override;
+
+	// returns directory names relative to directory
+	Future<std::vector<std::string>> listDirectoriesAsync(std::string const& directory) override;
+
+	Future<Void> findFilesRecursivelyAsync(std::string const& path, std::vector<std::string>* out) override;
+
+	std::string abspath(std::string const& path, bool resolveLinks, bool mustExist) override;
+
+	void writeFile(std::string const& filename, std::string const& content) override;
+	std::string readFileBytes(std::string const& filename, int maxSize) override;
 #ifdef ENABLE_SAMPLING
 	ActorLineageSet& getActorLineageSet() override;
 #endif

@@ -20,16 +20,17 @@
 
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/MonitorLeader.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // Loads and parses the file at 'filename', throwing errors if the file cannot be read or the format is invalid.
 ClusterConnectionFile::ClusterConnectionFile(std::string const& filename)
   : IClusterConnectionRecord(ConnectionStringNeedsPersisted::False) {
-	if (!fileExists(filename)) {
+	if (!IAsyncFileSystem::filesystem()->fileExists(filename)) {
 		throw no_cluster_file_found();
 	}
 
-	cs = ClusterConnectionString(readFileBytes(filename, MAX_CLUSTER_FILE_BYTES));
+	cs = ClusterConnectionString(IAsyncFileSystem::filesystem()->readFileBytes(filename, MAX_CLUSTER_FILE_BYTES));
 	this->filename = filename;
 }
 
@@ -104,7 +105,7 @@ std::pair<std::string, bool> ClusterConnectionFile::lookupClusterFileName(std::s
 		// If this is set but points to a file that does not
 		// exist, we will not fallback to any other methods
 		isDefaultFile = false;
-	} else if (fileExists("fdb.cluster"))
+	} else if (IAsyncFileSystem::filesystem()->fileExists("fdb.cluster"))
 		f = "fdb.cluster";
 	else
 		f = platform::getDefaultClusterFilePath();
@@ -140,7 +141,7 @@ Future<bool> ClusterConnectionFile::persist() {
 
 	if (filename.size()) {
 		try {
-			atomicReplace(filename,
+			IAsyncFileSystem::filesystem()->atomicReplace(filename,
 			              "# DO NOT EDIT!\n# This file is auto-generated, it is not to be edited by hand\n" +
 			                  cs.toString().append("\n"));
 

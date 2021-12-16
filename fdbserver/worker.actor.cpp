@@ -442,10 +442,10 @@ std::vector<DiskStore> getDiskStores(std::string folder,
 	std::vector<std::string> files;
 
 	if (check == FilesystemCheck::FILES_ONLY || check == FilesystemCheck::FILES_AND_DIRECTORIES) {
-		files = platform::listFiles(folder, suffix);
+		files = IAsyncFileSystem::filesystem()->listFiles(folder, suffix);
 	}
 	if (check == FilesystemCheck::DIRECTORIES_ONLY || check == FilesystemCheck::FILES_AND_DIRECTORIES) {
-		for (const auto& directory : platform::listDirectories(folder)) {
+		for (const auto& directory : IAsyncFileSystem::filesystem()->listDirectories(folder)) {
 			if (StringRef(directory).endsWith(suffix)) {
 				files.push_back(directory);
 			}
@@ -1395,7 +1395,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
 	state WorkerCache<InitializeBackupReply> backupWorkerCache;
 
-	state std::string coordFolder = abspath(_coordFolder);
+	state std::string coordFolder = IAsyncFileSystem::filesystem()->abspath(_coordFolder);
 
 	state WorkerInterface interf(locality);
 	state std::set<std::pair<UID, KeyValueStoreType>> runningStorages;
@@ -1408,7 +1408,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		chaosMetricsActor = chaosMetricsLogger();
 	}
 
-	folder = abspath(folder);
+	folder = IAsyncFileSystem::filesystem()->abspath(folder);
 
 	if (metricsPrefix.size() > 0) {
 		if (metricsConnFile.size() > 0) {
@@ -1469,6 +1469,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	try {
 		std::vector<DiskStore> stores = getDiskStores(folder);
 		bool validateDataFiles = deleteFile(joinPath(folder, validationFilename));
+		// std::cout << stores.size() << "-----" << folder << std::endl;
 		for (int f = 0; f < stores.size(); f++) {
 			DiskStore s = stores[f];
 			// FIXME: Error handling
@@ -1546,7 +1547,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					StringRef optionsString = StringRef(filename).removePrefix(fileVersionedLogDataPrefix).eat("-");
 					logQueueBasename = fileLogQueuePrefix.toString() + optionsString.toString() + "-";
 				}
-				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder);
+				ASSERT_WE_THINK(IAsyncFileSystem::filesystem()->abspath(parentDirectory(s.filename)) == folder);
 				IKeyValueStore* kv = openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles);
 				const DiskQueueVersion dqv =
 				    s.tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
@@ -1748,8 +1749,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				// beneath the working directory, and we remove the ability to do any symlink or ../..
 				// tricks by resolving all paths through `abspath` first.
 				try {
-					std::string realLogDir = abspath(SERVER_KNOBS->LOG_DIRECTORY);
-					std::string realOutPath = abspath(realLogDir + "/" + profilerReq.outputFile.toString());
+					std::string realLogDir = IAsyncFileSystem::filesystem()->abspath(SERVER_KNOBS->LOG_DIRECTORY);
+					std::string realOutPath =
+					    IAsyncFileSystem::filesystem()->abspath(realLogDir + "/" + profilerReq.outputFile.toString());
 					if (realLogDir.size() < realOutPath.size() &&
 					    strncmp(realLogDir.c_str(), realOutPath.c_str(), realLogDir.size()) == 0) {
 						profilerReq.outputFile = realOutPath;
@@ -2171,19 +2173,19 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					bool included = true;
 					if (!req.includePartialStores) {
 						if (d.storeType == KeyValueStoreType::SSD_BTREE_V1) {
-							included = fileExists(d.filename + ".fdb-wal");
+							included = IAsyncFileSystem::filesystem()->fileExists(d.filename + ".fdb-wal");
 						} else if (d.storeType == KeyValueStoreType::SSD_BTREE_V2) {
-							included = fileExists(d.filename + ".sqlite-wal");
+							included = IAsyncFileSystem::filesystem()->fileExists(d.filename + ".sqlite-wal");
 						} else if (d.storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
-							included = fileExists(d.filename + "0.pagerlog") && fileExists(d.filename + "1.pagerlog");
+							included = IAsyncFileSystem::filesystem()->fileExists(d.filename + "0.pagerlog") && IAsyncFileSystem::filesystem()->fileExists(d.filename + "1.pagerlog");
 						} else if (d.storeType == KeyValueStoreType::SSD_ROCKSDB_V1) {
-							included = fileExists(joinPath(d.filename, "CURRENT")) &&
-							           fileExists(joinPath(d.filename, "IDENTITY"));
+							included = IAsyncFileSystem::filesystem()->fileExists(joinPath(d.filename, "CURRENT")) &&
+							           IAsyncFileSystem::filesystem()->fileExists(joinPath(d.filename, "IDENTITY"));
 						} else if (d.storeType == KeyValueStoreType::MEMORY) {
-							included = fileExists(d.filename + "1.fdq");
+							included = IAsyncFileSystem::filesystem()->fileExists(d.filename + "1.fdq");
 						} else {
 							ASSERT(d.storeType == KeyValueStoreType::MEMORY_RADIXTREE);
-							included = fileExists(d.filename + "1.fdr");
+							included = IAsyncFileSystem::filesystem()->fileExists(d.filename + "1.fdr");
 						}
 						if (d.storedComponent == DiskStore::COMPONENT::TLogData && included) {
 							included = false;
@@ -2314,12 +2316,12 @@ ACTOR Future<Void> printOnFirstConnected(Reference<AsyncVar<Optional<ClusterInte
 }
 
 ClusterControllerPriorityInfo getCCPriorityInfo(std::string filePath, ProcessClass processClass) {
-	if (!fileExists(filePath))
+	if (!IAsyncFileSystem::filesystem()->fileExists(filePath))
 		return ClusterControllerPriorityInfo(ProcessClass(processClass.classType(), ProcessClass::CommandLineSource)
 		                                         .machineClassFitness(ProcessClass::ClusterController),
 		                                     false,
 		                                     ClusterControllerPriorityInfo::FitnessUnknown);
-	std::string contents(readFileBytes(filePath, 1000));
+	std::string contents(IAsyncFileSystem::filesystem()->readFileBytes(filePath, 1000));
 	BinaryReader br(StringRef(contents), IncludeVersion());
 	ClusterControllerPriorityInfo priorityInfo(
 	    ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown);
@@ -2345,13 +2347,13 @@ ACTOR Future<Void> monitorAndWriteCCPriorityInfo(std::string filePath,
 		std::string contents(BinaryWriter::toValue(asyncPriorityInfo->get(),
 		                                           IncludeVersion(ProtocolVersion::withClusterControllerPriorityInfo()))
 		                         .toString());
-		atomicReplace(filePath, contents, false);
+		IAsyncFileSystem::filesystem()->atomicReplace(filePath, contents, false);
 	}
 }
 
 ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 	state UID processIDUid;
-	platform::createDirectory(folder);
+	IAsyncFileSystem::filesystem()->createDirectory(folder);
 
 	loop {
 		try {
@@ -2360,7 +2362,7 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 			    lockFilePath, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0600)));
 
 			if (lockFile.isError() && lockFile.getError().code() == error_code_file_not_found &&
-			    !fileExists(lockFilePath)) {
+			    !IAsyncFileSystem::filesystem()->fileExists(lockFilePath)) {
 				Reference<IAsyncFile> _lockFile = wait(IAsyncFileSystem::filesystem()->open(
 				    lockFilePath,
 				    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_LOCK |

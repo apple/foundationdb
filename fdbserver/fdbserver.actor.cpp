@@ -1958,9 +1958,6 @@ int main(int argc, char* argv[]) {
 
 			int isRestoring = 0;
 			if (!opts.restarting) {
-				platform::eraseDirectoryRecursive(dataFolder);
-				platform::createDirectory(dataFolder);
-			} else {
 				CSimpleIni ini;
 				ini.SetUnicode();
 				std::string absDataFolder = abspath(dataFolder);

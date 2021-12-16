@@ -567,8 +567,8 @@ Future<Void> testNewLocalConfigAfterCompaction(UnitTestParameters params) {
 	wait(compact(env));
 	// Erase the data dir to simulate a new worker joining the system after
 	// compaction.
-	platform::eraseDirectoryRecursive(params.getDataDir());
-	platform::createDirectory(params.getDataDir());
+	IAsyncFileSystem::filesystem()->eraseDirectoryRecursive(params.getDataDir());
+	IAsyncFileSystem::filesystem()->createDirectory(params.getDataDir());
 	wait(env.restartLocalConfig("class-A"));
 	// Reregister worker with broadcaster.
 	env.changeBroadcaster();

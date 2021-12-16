@@ -666,10 +666,10 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 			    .detail("KillType", shutdownResult);
 			*coordFolder = joinPath(baseFolder, deterministicRandom()->randomUniqueID().toString());
 			*dataFolder = joinPath(baseFolder, deterministicRandom()->randomUniqueID().toString());
-			platform::createDirectory(*dataFolder);
+			IAsyncFileSystem::filesystem()->createDirectory(*dataFolder);
 
 			if (!useSeedFile) {
-				writeFile(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
+				IAsyncFileSystem::filesystem()->writeFile(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
 				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"));
 			} else {
 				connRecord =
@@ -740,10 +740,10 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				coordFolders.push_back(joinPath(baseFolder, deterministicRandom()->randomUniqueID().toString()));
 				std::string thisFolder = deterministicRandom()->randomUniqueID().toString();
 				myFolders.push_back(joinPath(baseFolder, thisFolder));
-				platform::createDirectory(myFolders[i]);
+				IAsyncFileSystem::filesystem()->createDirectory(myFolders[i]);
 
 				if (!useSeedFile)
-					writeFile(joinPath(myFolders[i], "fdb.cluster"), connStr.toString());
+					IAsyncFileSystem::filesystem()->writeFile(joinPath(myFolders[i], "fdb.cluster"), connStr.toString());
 			}
 		}
 
@@ -959,8 +959,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				myFolders = toRebootFrom;
 				if (!useSeedFile) {
 					for (auto f : toRebootFrom) {
-						if (!fileExists(joinPath(f, "fdb.cluster"))) {
-							writeFile(joinPath(f, "fdb.cluster"), connStr.toString());
+						if (!IAsyncFileSystem::filesystem()->fileExists(joinPath(f, "fdb.cluster"))) {
+							IAsyncFileSystem::filesystem()->writeFile(joinPath(f, "fdb.cluster"), connStr.toString());
 						}
 					}
 				}
@@ -968,10 +968,10 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				for (int i = 0; i < ips.size(); i++) {
 					coordFolders[i] = joinPath(baseFolder, deterministicRandom()->randomUniqueID().toString());
 					myFolders[i] = joinPath(baseFolder, deterministicRandom()->randomUniqueID().toString());
-					platform::createDirectory(myFolders[i]);
+					IAsyncFileSystem::filesystem()->createDirectory(myFolders[i]);
 
 					if (!useSeedFile) {
-						writeFile(joinPath(myFolders[i], "fdb.cluster"), connStr.toString());
+						IAsyncFileSystem::filesystem()->writeFile(joinPath(myFolders[i], "fdb.cluster"), connStr.toString());
 					}
 				}
 
@@ -2253,6 +2253,10 @@ ACTOR void setupAndRun(std::string dataFolder,
 	                           currentProtocolVersion),
 	    TaskPriority::DefaultYield));
 	Sim2FileSystem::newFileSystem();
+	if (!rebooting) {
+		IAsyncFileSystem::filesystem()->eraseDirectoryRecursive(dataFolder);
+		IAsyncFileSystem::filesystem()->createDirectory(dataFolder);
+	}
 	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
 	TEST(true); // Simulation start
 
@@ -2285,8 +2289,8 @@ ACTOR void setupAndRun(std::string dataFolder,
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
 		}
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
-		platform::createDirectory(clusterFileDir);
-		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connectionString.get().toString());
+		IAsyncFileSystem::filesystem()->createDirectory(clusterFileDir);
+		IAsyncFileSystem::filesystem()->writeFile(joinPath(clusterFileDir, "fdb.cluster"), connectionString.get().toString());
 		wait(timeoutError(runTests(makeReference<ClusterConnectionFile>(joinPath(clusterFileDir, "fdb.cluster")),
 		                           TEST_TYPE_FROM_FILE,
 		                           TEST_ON_TESTERS,
