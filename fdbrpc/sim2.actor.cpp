@@ -20,6 +20,8 @@
 
 #include <cinttypes>
 #include <memory>
+#include <sstream>
+#include <vector>
 
 #include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbrpc/simulator.h"
@@ -2205,7 +2207,6 @@ public:
 		g_network->addStopCallback(Net2FileSystem::stop);
 		Net2FileSystem::newFileSystem();
 		check_yield(TaskPriority::Zero);
-		forkSequence.emplace_back(deterministicRandom()->getSeed());
 	}
 
 	// Implementation
@@ -2329,11 +2330,52 @@ public:
 		return oss.str();
 	}
 
+	// deserializes a comma-separated string into a forkSequence
+	std::vector<Optional<uint32_t>> deserializeForkSequence(std::string sequence) {
+		std::vector<Optional<uint32_t>> res;
+		size_t start = 0, end = 0;
+		loop {
+			end = sequence.find(',', start);
+			std::string entry = sequence.substr(start, end - start);
+
+			if (entry == "x") {
+				res.emplace_back(Optional<uint32_t>());
+			} else {
+				res.emplace_back(std::stoul(entry));
+			}
+
+			if (end == std::string::npos) {
+				break;
+			}
+			start = end + 1;
+		}
+		return res;
+	}
+
 	int forkSearch(const char* context = "") override {
 #if defined(__unixish__)
 		if (forkSearchDepth > 0) { // now only allow 1
 			return 0;
 		}
+
+		// if we are trying to reproduce a fuzzer run, then don't fork - just reseed (possibly)
+		if (fuzzerReproSequence.present()) {
+			Optional<uint32_t> currMove = fuzzerReproSequence.get().front();
+
+			// if the front of the queue is a seed (i.e. non-empty), then reseed with it
+			if (currMove.present()) {
+				deterministicRandom()->reseed(currMove.get());
+			}
+
+			TraceEvent("FuzzerReproduction")
+			    .detail("NewSeed", currMove.present() ? currMove.get() : 'x')
+			    .detail("Context", context);
+
+			// in either case, we are done with the forkSearch invocation, so pop and return
+			fuzzerReproSequence.get().pop();
+			return 0;
+		}
+
 		std::string parentGroup = getTraceLogGroup();
 		pid_t processId;
 		int status;

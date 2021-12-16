@@ -456,7 +456,9 @@ public:
 	virtual void crashAfter(double t) = 0;
 	virtual void terminateAfter(double t) = 0;
 	virtual int forkSearch(const char* context) = 0;
-	virtual void reproduceForkSearch(int randomSeed) = 0;
+
+	Optional<std::queue<Optional<uint32_t>>> fuzzerReproSequence;
+
 protected:
 	Mutex mutex;
 
