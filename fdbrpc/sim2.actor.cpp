@@ -2427,7 +2427,7 @@ public:
 
 	int forkSearchDepth = 0;
 	int forkSearchFanout = 4;
-	std::string forkSequence = ""; // tracks the sequence of seeds up to this point
+	std::string forkSequence = ""; // tracks the sequence of seeds up to this point; already serialized
 
 private:
 	MockDNS mockDNS;

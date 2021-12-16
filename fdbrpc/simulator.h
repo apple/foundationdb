@@ -24,6 +24,8 @@
 #include <string>
 #pragma once
 
+#include <queue>
+
 #include "flow/flow.h"
 #include "flow/Histogram.h"
 #include "fdbrpc/FailureMonitor.h"
