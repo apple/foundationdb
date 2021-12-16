@@ -610,17 +610,17 @@ public:
 
 	// creates file at path if it doesn't already exist
 	void touch(std::string const& path) {
-		auto f = files.find(path);
-		if (f == files.end()) {
-			int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC);
-			close(fd);
+		auto file = files.find(path);
+		if (file == files.end()) {
+			files.insert(std::make_pair(path, std::make_shared<FileMemory>()));
 		}
 	}
 
 	// File system operations
 	void atomicReplace(std::string const& path, std::string const& content) {
-		touch(path);
-		auto f = files.find(abspath(path));
+		auto absolutePath = path;
+		touch(absolutePath);
+		auto f = files.find(absolutePath);
 		f->second->resize(content.size());
 		memcpy(f->second->data(), content.data(), content.size());
 	}
