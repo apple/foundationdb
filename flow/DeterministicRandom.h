@@ -32,10 +32,10 @@
 
 class DeterministicRandom : public IRandom, public ReferenceCounted<DeterministicRandom> {
 private:
-	uint32_t seed;
 	std::mt19937 random;
 	uint64_t next;
 	bool useRandLog;
+
 	uint64_t gen64();
 
 public:
@@ -51,7 +51,6 @@ public:
 	char randomAlphaNumeric() override;
 	std::string randomAlphaNumeric(int length) override;
 	uint64_t peek() const override;
-	uint32_t getSeed() const override;
 	void addref() override;
 	void delref() override;
 };
