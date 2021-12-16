@@ -214,6 +214,7 @@ struct StorageServerDisk {
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
+	RateCounter* kvThroughput;
 
 private:
 	struct StorageServer* data;
@@ -750,7 +751,12 @@ public:
 		    emptyQueries;
 		Counter bytesInput, bytesDurable, bytesFetched,
 		    mutationBytes; // Like bytesInput but without MVCC accounting
+		Counter logicalInputBytes;
+		Counter logicalMoveOverheadBytes;
 		Counter sampledBytesCleared;
+		RateCounter kvThroughput;
+		RateCounter pTreeUpdateThroughput;
+		RateCounter storageUpdateThroughput;
 		Counter mutations, setMutations, clearRangeMutations, atomicMutations;
 		Counter updateBatches, updateVersions;
 		Counter loops;
@@ -763,7 +769,8 @@ public:
 		// means fallback if fallback is enabled, otherwise means failure (so that another layer could implement
 		// fallback).
 		Counter quickGetValueHit, quickGetValueMiss, quickGetKeyValuesHit, quickGetKeyValuesMiss;
-
+		RateCounter kvReadRangeThroughput;
+		RateCounter kvReadThroughput;
 		LatencySample readLatencySample;
 		LatencyBands readLatencyBands;
 
@@ -776,7 +783,10 @@ public:
 		    rowsQueried("RowsQueried", cc), bytesQueried("BytesQueried", cc), watchQueries("WatchQueries", cc),
 		    emptyQueries("EmptyQueries", cc), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc),
 		    bytesFetched("BytesFetched", cc), mutationBytes("MutationBytes", cc),
-		    sampledBytesCleared("SampledBytesCleared", cc), mutations("Mutations", cc),
+		    logicalInputBytes("LogicalInputBytes", cc), logicalMoveOverheadBytes("LogicalMoveOverheadBytes", cc),
+		    sampledBytesCleared("SampledBytesCleared", cc), kvFetched("KVFetched", cc),
+		    kvThroughput("KeyValueStoreThroughput", cc), pTreeUpdateThroughput("PTreeUpdateThroughput", cc),
+		    storageUpdateThroughput("StorageUpdateThroughput", cc), mutations("Mutations", cc),
 		    setMutations("SetMutations", cc), clearRangeMutations("ClearRangeMutations", cc),
 		    atomicMutations("AtomicMutations", cc), updateBatches("UpdateBatches", cc),
 		    updateVersions("UpdateVersions", cc), loops("Loops", cc), fetchWaitingMS("FetchWaitingMS", cc),
@@ -785,11 +795,11 @@ public:
 		    wrongShardServer("WrongShardServer", cc), fetchedVersions("FetchedVersions", cc),
 		    fetchesFromLogs("FetchesFromLogs", cc), quickGetValueHit("QuickGetValueHit", cc),
 		    quickGetValueMiss("QuickGetValueMiss", cc), quickGetKeyValuesHit("QuickGetKeyValuesHit", cc),
-		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc),
-		    readLatencySample("ReadLatencyMetrics",
-		                      self->thisServerID,
-		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc), kvReadRangeThroughput("KVReadRangeThroughput", cc),
+		    kvReadThroughput("KVReadThroughput", cc), readLatencySample("ReadLatencyMetrics",
+		                                                                self->thisServerID,
+		                                                                SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                                SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
@@ -866,6 +876,7 @@ public:
 		addShard(ShardInfo::newNotAssigned(allKeys));
 
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
+		this->storage.kvThroughput = &counters.kvThroughput;
 	}
 
 	//~StorageServer() { fclose(log); }
@@ -1274,7 +1285,10 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			path = 1;
 		} else if (!i || !i->isClearTo() || i->getEndKey() <= req.key) {
 			path = 2;
+			state double startTime = now();
 			Optional<Value> vv = wait(data->storage.readValue(req.key, IKeyValueStore::ReadType::NORMAL, req.debugID));
+			data->counters.kvReadThroughput.add(vv.expectedSize());
+			data->counters.kvReadThroughput.finishInterval(now() - startTime);
 			// Validate that while we were reading the data we didn't lose the version or shard
 			if (version < data->storageVersion()) {
 				TEST(true); // transaction_too_old after readValue
@@ -1715,8 +1729,11 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 
 			// Read the data on disk up to vCurrent (or the end of the range)
 			readEnd = vCurrent ? std::min(vCurrent.key(), range.end) : range.end;
+			state double startTime = now();
 			RangeResult atStorageVersion =
 			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
+			data->counters.kvReadRangeThroughput.add(atStorageVersion.logicalSize());
+			data->counters.kvReadRangeThroughput.finishInterval(now() - startTime);
 
 			ASSERT(atStorageVersion.size() <= limit);
 			if (data->storageVersion() > version)
@@ -1796,8 +1813,11 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 
 			readBegin = vCurrent ? std::max(vCurrent->isClearTo() ? vCurrent->getEndKey() : vCurrent.key(), range.begin)
 			                     : range.begin;
+			startTime = now();
 			RangeResult atStorageVersion =
 			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
+			data->counters.kvReadRangeThroughput.add(atStorageVersion.logicalSize());
+			data->counters.kvReadRangeThroughput.finishInterval(now() - startTime);
 
 			ASSERT(atStorageVersion.size() <= -limit);
 			if (data->storageVersion() > version)
@@ -3636,6 +3656,7 @@ AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys)
 }
 
 void AddingShard::addMutation(Version version, MutationRef const& mutation) {
+	server->counters.logicalMoveOverheadBytes += mutation.expectedSize();
 	if (mutation.type == mutation.ClearRange) {
 		ASSERT(keys.begin <= mutation.param1 && mutation.param2 <= keys.end);
 	} else if (isSingleKeyMutation((MutationRef::Type)mutation.type)) {
@@ -4076,6 +4097,7 @@ ACTOR Future<Void> tssDelayForever() {
 
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double start;
+	state double updateBegin = 0;
 	try {
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of memory
 		// This is often referred to as the storage server e-brake (emergency brake)
@@ -4238,6 +4260,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			state int mutationNum = 0;
 			state VerUpdateRef* pUpdate = &fii.changes[changeNum];
 			for (; mutationNum < pUpdate->mutations.size(); mutationNum++) {
+				data->counters.pTreeUpdateThroughput.add(pUpdate->mutations[mutationNum].expectedSize());
 				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version);
 				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
 				injectedChanges = true;
@@ -4315,8 +4338,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					}
 
 					updater.applyMutation(data, msg, ver);
+					data->counters.pTreeUpdateThroughput.add(msg.expectedSize());
 					mutationBytes += msg.totalSize();
 					data->counters.mutationBytes += msg.totalSize();
+					data->counters.logicalInputBytes += msg.expectedSize();
 					++data->counters.mutations;
 					switch (msg.type) {
 					case MutationRef::SetValue:
@@ -4422,6 +4447,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		}
 
 		validate(data);
+		data->counters.pTreeUpdateThroughput.finishInterval(now() - updateBegin);
 
 		data->logCursor->advanceTo(cloneCursor2->version());
 		if (cursor->version().version >= data->lastTLogVersion) {
@@ -4446,6 +4472,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 }
 
 ACTOR Future<Void> updateStorage(StorageServer* data) {
+	state double updateBegin;
 	loop {
 		ASSERT(data->durableVersion.get() == data->storageVersion());
 		if (g_network->isSimulated()) {
@@ -4458,6 +4485,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		wait(data->desiredOldestVersion.whenAtLeast(data->storageVersion() + 1));
 		wait(delay(0, TaskPriority::UpdateStorage));
 
+		updateBegin = now();
 		state Promise<Void> durableInProgress;
 		data->durableInProgress = durableInProgress.getFuture();
 
@@ -4489,6 +4517,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
 		state double beforeStorageCommit = now();
+		data->counters.storageUpdateThroughput.add(data->counters.kvThroughput.getIntervalDelta());
 		state Future<Void> durable = data->storage.commit();
 		state Future<Void> durableDelay = Void();
 
@@ -4497,7 +4526,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME));
-		data->storageCommitLatencyHistogram->sampleSeconds(now() - beforeStorageCommit);
+		const double commitDuration = now() - beforeStorageCommit;
+		data->counters.kvThroughput.finishInterval(commitDuration);
+		data->storageCommitLatencyHistogram->sampleSeconds(commitDuration);
 
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
@@ -4543,6 +4574,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		if (!data->fetchKeysBudgetUsed.get()) {
 			wait(durableDelay || data->fetchKeysBudgetUsed.onChange());
 		}
+		data->counters.storageUpdateThroughput.finishInterval(now() - updateBegin);
 	}
 }
 
@@ -4611,6 +4643,7 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 }
 
 void StorageServerDisk::clearRange(KeyRangeRef keys) {
+	kvThroughput->add(keys.expectedSize());
 	storage->clear(keys);
 }
 
@@ -4619,6 +4652,7 @@ void StorageServerDisk::writeKeyValue(KeyValueRef kv) {
 }
 
 void StorageServerDisk::writeMutation(MutationRef mutation) {
+	kvThroughput->add(mutation.expectedSize());
 	// FIXME: DEBUG_MUTATION(debugContext, debugVersion, *m);
 	if (mutation.type == MutationRef::SetValue) {
 		storage->set(KeyValueRef(mutation.param1, mutation.param2));
@@ -4634,8 +4668,10 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
 	for (const auto& m : mutations) {
 		DEBUG_MUTATION(debugContext, debugVersion, m).detail("UID", data->thisServerID);
 		if (m.type == MutationRef::SetValue) {
+			kvThroughput->add(m.expectedSize());
 			storage->set(KeyValueRef(m.param1, m.param2));
 		} else if (m.type == MutationRef::ClearRange) {
+			kvThroughput->add(m.expectedSize());
 			storage->clear(KeyRangeRef(m.param1, m.param2));
 		}
 	}
@@ -4667,7 +4703,9 @@ bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion,
 
 // Update data->storage to persist the changes from (data->storageVersion(),version]
 void StorageServerDisk::makeVersionDurable(Version version) {
-	storage->set(KeyValueRef(persistVersion, BinaryWriter::toValue(version, Unversioned())));
+	KeyValueRef kv(persistVersion, BinaryWriter::toValue(version, Unversioned()));
+	kvThroughput->add(kv.expectedSize());
+	storage->set(kv);
 
 	// TraceEvent("MakeDurable", data->thisServerID)
 	//     .detail("FromVersion", prevStorageVersion)
@@ -4694,8 +4732,11 @@ ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
 	state int totalKeys = 0;
 	state int totalBytes = 0;
 	loop {
+		state double startTime = now();
 		RangeResult bs = wait(storage->readRange(
 		    KeyRangeRef(begin, end), SERVER_KNOBS->STORAGE_LIMIT_BYTES, SERVER_KNOBS->STORAGE_LIMIT_BYTES));
+		data->counters.kvReadRangeThroughput.add(bs.logicalSize());
+		data->counters.kvReadRangeThroughput.finishInterval(now() - startTime);
 		if (results)
 			results->push_back(bs.castTo<VectorRef<KeyValueRef>>());
 		int rangeSize = bs.expectedSize();
