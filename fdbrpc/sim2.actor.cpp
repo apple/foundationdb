@@ -504,9 +504,7 @@ class SimpleInMemoryFileSystemT {
 	std::unordered_map<int, OpenFile> fds;
 	int lastError = 0;
 
-	SimpleInMemoryFileSystemT() {
-		directories.insert("/");
-	}
+	SimpleInMemoryFileSystemT() { directories.insert("/"); }
 
 public:
 	int open(std::string path, int flags) {
@@ -654,7 +652,7 @@ public:
 
 	std::string readFileBytes(std::string const& filename, int maxSize) {
 		std::string s;
-		auto f = open(filename.c_str(),  O_RDONLY | O_BINARY);
+		auto f = open(filename.c_str(), O_RDONLY | O_BINARY);
 		if (f < 0) {
 			TraceEvent(SevWarn, "FileOpenError")
 			    .detail("Filename", filename)
@@ -684,9 +682,7 @@ public:
 		return f != files.end();
 	}
 
-	bool directoryExists(std::string const& path) {
-		return directories.find(abspath(path)) != directories.end();
-	}
+	bool directoryExists(std::string const& path) { return directories.find(abspath(path)) != directories.end(); }
 
 	int64_t fileSize(std::string const& filename) {
 		auto f = files.find(abspath(filename));
@@ -3065,12 +3061,15 @@ void Sim2FileSystem::findFilesRecursively(std::string const& path, std::vector<s
 	}
 }
 
-ACTOR Future<std::vector<std::string>> listAsyncImpl(std::string directory, std::string extension, bool directoriesOnly) {
+ACTOR Future<std::vector<std::string>> listAsyncImpl(std::string directory,
+                                                     std::string extension,
+                                                     bool directoriesOnly) {
 	wait(delay(0.01));
 	return SimpleInMemoryFileSystem()->findFiles(directory, extension, directoriesOnly);
 }
 
-Future<std::vector<std::string>> Sim2FileSystem::listFilesAsync(std::string const& directory, std::string const& extension) {
+Future<std::vector<std::string>> Sim2FileSystem::listFilesAsync(std::string const& directory,
+                                                                std::string const& extension) {
 	if (FLOW_KNOBS->SIM_FUZZER) {
 		return listAsyncImpl(directory, extension, false);
 	} else {
@@ -3086,7 +3085,7 @@ Future<std::vector<std::string>> Sim2FileSystem::listDirectoriesAsync(std::strin
 	}
 }
 
-ACTOR Future<Void> findFilesRecursivelyAsyncImpl(std::string path, std::vector<std::string> *out) {
+ACTOR Future<Void> findFilesRecursivelyAsyncImpl(std::string path, std::vector<std::string>* out) {
 	wait(delay(0.01));
 	SimpleInMemoryFileSystem()->findFilesRecursively(path, *out);
 	return Void();
@@ -3181,7 +3180,7 @@ TEST_CASE("/sim2/inmemoryfs/touch") {
 TEST_CASE("/sim2/inmemoryfs/writeread") {
 	SimpleInMemoryFileSystem fs;
 	std::string s1("1234567"), s2("7654321");
-	fs->writeFileBytes("f1", (uint8_t *)s1.c_str(), s1.size());
+	fs->writeFileBytes("f1", (uint8_t*)s1.c_str(), s1.size());
 	auto reads = fs->readFileBytes("f1", 100);
 	ASSERT(reads == s1);
 
@@ -3204,7 +3203,31 @@ TEST_CASE("/sim2/inmemoryfs/writeread") {
 	fs->lseek(fd, s2.size(), SEEK_SET);
 	fs->read(fd, buffer, s1.size());
 	ASSERT(memcmp(buffer, s1.c_str(), s1.size()) == 0);
+
+	fs->deleteFile("f1");
 	return Void();
 }
 
+TEST_CASE("/sim2/IAsyncfs/writeread") {
+	if (!FLOW_KNOBS->SIM_FUZZER)
+		return Void();
 
+	state std::string s1("1234567");
+	state std::string fname("data/f1");
+
+	auto* fs = IAsyncFileSystem::filesystem();
+	fs->atomicReplace(fname, s1);
+
+	state ErrorOr<Reference<IAsyncFile>> dbFile = wait(
+	    errorOr(IAsyncFileSystem::filesystem()->open(fname, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0)));
+
+	ASSERT(dbFile.present());
+
+	state char* buffer = new char[25];
+	int len = wait(dbFile.get()->read(buffer, s1.size(), 0));
+	ASSERT(memcmp(buffer, s1.c_str(), s1.size()) == 0);
+
+	delete []buffer;
+
+	return Void();
+}
