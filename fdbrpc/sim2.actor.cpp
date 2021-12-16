@@ -2521,7 +2521,7 @@ public:
 			if ((processId = fork()) == 0) { // child process
 				++forkSearchDepth;
 				int pid = getpid();
-				int newSeed = platform::getRandomSeed(); // non-deterministic seed
+				uint32_t newSeed = platform::getRandomSeed(); // non-deterministic seed
 				forkSequence += std::to_string(newSeed);
 
 				std::string childLogGroup = parentGroup + "/" + std::to_string(pid); // format to still be finalized
@@ -2602,7 +2602,7 @@ public:
 	bool dieWhenTerminate = false;
 
 	int forkSearchDepth = 0;
-	int forkSearchFanout = 4;
+	int forkSearchFanout = 2;
 	std::string forkSequence = ""; // tracks the sequence of seeds up to this point; already serialized
 
 private:
