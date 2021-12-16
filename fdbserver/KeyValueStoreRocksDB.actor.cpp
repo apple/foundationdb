@@ -670,7 +670,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			uint64_t deadlineMircos = a.instance->GetEnv()->NowMicros() + (readValueTimeout - (timer_monotonic() - a.startTime)) * 1000000;
 			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
 			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
-			auto s = a.instance->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
+			auto s = a.instance->Get(options, a.instance->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.After");
 				traceBatch.get().dump();
@@ -1124,7 +1124,7 @@ IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
 
 namespace {
 
-TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/Reopen") {
+TEST_CASE("RocksDBKVS/Reopen") {
 	state const std::string rocksDBTestDir = "rocksdb-kvstore-reopen-test-db";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
@@ -1157,7 +1157,7 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/Reopen") {
 	return Void();
 }
 
-TEST_CASE("/rocks/multiRocks") {
+TEST_CASE("RocksDBKVS/multiRocks") {
 	state std::string cwd = platform::getWorkingDirectory() + "/";
 	std::cout << "Working directory: " << cwd << std::endl;
 	state std::string rocksDBTestDir = "rocksdb-kvstore-reopen-test-db";
