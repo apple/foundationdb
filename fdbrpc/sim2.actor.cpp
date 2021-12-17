@@ -3205,6 +3205,7 @@ TEST_CASE("/sim2/inmemoryfs/writeread") {
 	ASSERT(memcmp(buffer, s1.c_str(), s1.size()) == 0);
 
 	fs->deleteFile("f1");
+	fs->close(fd);
 	return Void();
 }
 
@@ -3228,6 +3229,29 @@ TEST_CASE("/sim2/IAsyncfs/writeread") {
 	ASSERT(memcmp(buffer, s1.c_str(), s1.size()) == 0);
 
 	delete []buffer;
+	wait(IAsyncFileSystem::filesystem()->deleteFile(fname, true));
+	ASSERT(!IAsyncFileSystem::filesystem()->fileExists(fname));
+	return Void();
+}
 
+TEST_CASE("/sim2/IAsyncfs/reference") {
+	if (!FLOW_KNOBS->SIM_FUZZER)
+		return Void();
+
+	state std::string s1("1234567");
+	state std::string fname("data/f1");
+
+	auto* fs = IAsyncFileSystem::filesystem();
+	fs->atomicReplace(fname, s1);
+
+	state ErrorOr<Reference<IAsyncFile>> dbFile = wait(
+	    errorOr(IAsyncFileSystem::filesystem()->open(fname, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0)));
+
+	ASSERT(dbFile.present());
+	Reference<IAsyncFile> file1(dbFile.get());
+	Reference<IAsyncFile> file2(file1);
+	Deque<Reference<IAsyncFile>> dq;
+	dq.push_back(file1);
+	dq.push_back(file2);
 	return Void();
 }
