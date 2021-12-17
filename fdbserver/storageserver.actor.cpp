@@ -755,10 +755,10 @@ public:
 		Counter logicalMoveOverheadBytes;
 		Counter sampledBytesCleared;
 		Counter kvThroughput;
-		Counter kvWriteTime;
+		TimeCounter kvWriteTime;
 		Counter pTreeUpdateThroughput;
-		Counter pTreeUpdateTime;
-		Counter storageUpdateTime;
+		TimeCounter pTreeUpdateTime;
+		TimeCounter storageUpdateTime;
 		Counter mutations, setMutations, clearRangeMutations, atomicMutations;
 		Counter updateBatches, updateVersions;
 		Counter loops;

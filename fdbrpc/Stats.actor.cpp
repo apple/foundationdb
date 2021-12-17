@@ -81,6 +81,66 @@ void Counter::clear() {
 	metric = 0;
 }
 
+TimeCounter::TimeCounter(std::string const& name, CounterCollection& collection)
+  : name(name), interval_start(0), last_event(0), interval_sq_time(0), interval_start_value(0), interval_delta(0),
+    roughness_interval_start(0) {
+	metric.init(collection.name + "." + (char)toupper(name.at(0)) + name.substr(1), collection.id);
+	collection.counters.push_back(this);
+}
+
+void TimeCounter::operator+=(Value delta) {
+	if (!delta)
+		return; //< Otherwise last_event will be reset
+	interval_delta += delta;
+	auto t = now();
+	auto elapsed = t - last_event;
+	interval_sq_time += elapsed * elapsed;
+	last_event = t;
+
+	metric += delta;
+}
+
+double TimeCounter::getRate() const {
+	double elapsed = now() - interval_start;
+	return elapsed > 0 ? interval_delta / elapsed : 0;
+}
+
+double TimeCounter::getRoughness() const {
+	double elapsed = last_event - roughness_interval_start;
+	if (elapsed == 0) {
+		return -1;
+	}
+
+	// If we have time interval samples t in T, and let:
+	// n = size(T) = interval_delta
+	// m = mean(T) = elapsed / interval_delta
+	// v = sum(t^2) for t in T = interval_sq_time
+	//
+	// The formula below is: (v/(m*n)) / m - 1
+	// This is equivalent to (v/n - m^2) / m^2 = Variance(T)/m^2
+	// Variance(T)/m^2 is equal to Variance(t/m) for t in T
+	double delay = interval_sq_time / elapsed;
+	return delay * interval_delta / elapsed - 1;
+}
+
+void TimeCounter::resetInterval() {
+	interval_start_value += interval_delta;
+	interval_delta = 0;
+	interval_sq_time = 0;
+	interval_start = now();
+	if (last_event == 0) {
+		last_event = interval_start;
+	}
+	roughness_interval_start = last_event;
+}
+
+void TimeCounter::clear() {
+	resetInterval();
+	interval_start_value = 0;
+
+	metric = 0;
+}
+
 RateCounter::RateCounter(std::string const& name, CounterCollection& collection)
   : name(name), duration(0), interval_delta(0), sum(0) {
 	metric.init(collection.name + "." + (char)toupper(name.at(0)) + name.substr(1), collection.id);

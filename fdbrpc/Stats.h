@@ -121,6 +121,47 @@ private:
 	Int64MetricHandle metric;
 };
 
+struct TimeCounter : ICounter, NonCopyable {
+public:
+	typedef double Value;
+
+	TimeCounter(std::string const& name, CounterCollection& collection);
+
+	void operator+=(Value delta);
+	void operator++() { *this += 1.0; }
+	void clear();
+	void resetInterval() override;
+
+	std::string const& getName() const override { return name; }
+
+	Value getIntervalDelta() const { return interval_delta; }
+	Value getValue() const override { return interval_start_value + interval_delta; }
+
+	// dValue / dt
+	double getRate() const override;
+
+	// Measures the clumpiness or dispersion of the counter.
+	// Computed as a normalized variance of the time between each incrementation of the value.
+	// A delta of N is treated as N distinct increments, with N-1 increments having time span 0.
+	// Normalization is performed by dividing each time sample by the mean time before taking variance.
+	//
+	// roughness = Variance(t/mean(T)) for time interval samples t in T
+	//
+	// A uniformly periodic counter will have roughness of 0
+	// A uniformly periodic counter that increases in clumps of N will have roughness of N-1
+	// A counter with exponentially distributed incrementations will have roughness of 1
+	double getRoughness() const override;
+
+	bool hasRate() const override { return true; }
+	bool hasRoughness() const override { return true; }
+
+private:
+	std::string name;
+	double interval_start, last_event, interval_sq_time, roughness_interval_start;
+	Value interval_delta, interval_start_value;
+	DoubleMetricHandle metric;
+};
+
 struct RateCounter final : ICounter, NonCopyable {
 public:
 	typedef int64_t Value;
