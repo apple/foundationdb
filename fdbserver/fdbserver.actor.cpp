@@ -933,6 +933,11 @@ void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::stri
 			    .detail("Oldname", dirSrc + "/" + fileEntry)
 			    .detail("Newname", dirToMove + "/" + fileEntry);
 			renameFile(dirSrc + "/" + fileEntry, dirToMove + "/" + fileEntry);
+			if (g_network->isSimulated() && FLOW_KNOBS->SIM_FUZZER) {
+				auto f =
+				    IAsyncFileSystem::filesystem()->renameFile(dirSrc + "/" + fileEntry, dirToMove + "/" + fileEntry);
+				ASSERT(f.canGet());
+			}
 		}
 	}
 }

@@ -54,6 +54,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
 #include "flow/FaultInjection.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
@@ -530,7 +531,7 @@ public:
 		return res;
 	}
 
-	void deleteFile(std::string const& path) { files.erase(path); }
+	void deleteFile(std::string const& path) { files.erase(abspath(path)); }
 
 	void renameFile(std::string const& from, std::string const& to) {
 		auto from1 = abspath(from);
@@ -610,15 +611,16 @@ public:
 
 	// creates file at path if it doesn't already exist
 	void touch(std::string const& path) {
-		auto file = files.find(path);
+		auto absolutePath = abspath(path);
+		auto file = files.find(absolutePath);
 		if (file == files.end()) {
-			files.insert(std::make_pair(path, std::make_shared<FileMemory>()));
+			files.insert(std::make_pair(absolutePath, std::make_shared<FileMemory>()));
 		}
 	}
 
 	// File system operations
 	void atomicReplace(std::string const& path, std::string const& content) {
-		auto absolutePath = path;
+		auto absolutePath = abspath(path);
 		touch(absolutePath);
 		auto f = files.find(absolutePath);
 		f->second->resize(content.size());
@@ -627,7 +629,7 @@ public:
 
 	void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count) {
 		auto f = open(filename, O_BINARY | O_WRONLY | O_CREAT | O_TRUNC);
-		if (f < 0) {
+		if (f <= 0) {
 			TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).GetLastError();
 			throw file_not_writable();
 		}
@@ -651,7 +653,7 @@ public:
 	std::string readFileBytes(std::string const& filename, int maxSize) {
 		std::string s;
 		auto f = open(filename.c_str(), O_RDONLY | O_BINARY);
-		if (f < 0) {
+		if (f <= 0) {
 			TraceEvent(SevWarn, "FileOpenError")
 			    .detail("Filename", filename)
 			    .detail("Errno", errno)
@@ -665,7 +667,7 @@ public:
 				throw file_too_large();
 			s.resize(size);
 			lseek(f, 0, SEEK_SET);
-			if (!read(f, &s[0], size))
+			if (!read(f, s.data(), size))
 				throw file_not_readable();
 		} catch (...) {
 			close(f);
@@ -3158,4 +3160,100 @@ ActorLineageSet& Sim2FileSystem::getActorLineageSet() {
 
 void Sim2FileSystem::newFileSystem() {
 	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Sim2FileSystem());
+}
+
+TEST_CASE("/sim2/inmemoryfs/touch") {
+	SimpleInMemoryFileSystem fs;
+	fs->touch("f1");
+	fs->touch("f2");
+
+	ASSERT(fs->fileExists("f1"));
+	ASSERT(fs->fileExists("f2"));
+	ASSERT(fs->fileSize("f1") == 0);
+
+	fs->deleteFile("f1");
+	ASSERT(!fs->fileExists("f1"));
+	ASSERT(fs->fileExists("f2"));
+	return Void();
+}
+
+TEST_CASE("/sim2/inmemoryfs/writeread") {
+	SimpleInMemoryFileSystem fs;
+	std::string s1("1234567"), s2("7654321");
+	fs->writeFileBytes("f1", (uint8_t*)s1.c_str(), s1.size());
+	auto reads = fs->readFileBytes("f1", 100);
+	ASSERT(reads == s1);
+
+	fs->atomicReplace("f1", s2);
+	reads = fs->readFileBytes("f1", 100);
+	ASSERT(reads == s2);
+
+	auto fd = fs->open("f1", O_WRONLY);
+	fs->lseek(fd, 1, SEEK_SET);
+
+	char buffer[25];
+	fs->read(fd, buffer, 3);
+	ASSERT(memcmp(buffer, "654", 3) == 0);
+
+	auto len1 = fs->lseek(fd, 0, SEEK_END);
+	ASSERT(len1 == s2.size());
+	ASSERT(fs->ltell(fd) == s2.size());
+	fs->write(fd, s1.c_str(), s1.size());
+
+	fs->lseek(fd, s2.size(), SEEK_SET);
+	fs->read(fd, buffer, s1.size());
+	ASSERT(memcmp(buffer, s1.c_str(), s1.size()) == 0);
+
+	fs->deleteFile("f1");
+	fs->close(fd);
+	return Void();
+}
+
+TEST_CASE("/sim2/IAsyncfs/writeread") {
+	if (!FLOW_KNOBS->SIM_FUZZER)
+		return Void();
+
+	state std::string s1("1234567");
+	state std::string fname("data/f1");
+
+	auto* fs = IAsyncFileSystem::filesystem();
+	fs->atomicReplace(fname, s1);
+
+	state ErrorOr<Reference<IAsyncFile>> dbFile = wait(
+	    errorOr(IAsyncFileSystem::filesystem()->open(fname, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0)));
+
+	ASSERT(dbFile.present());
+
+	state char* buffer = new char[25];
+	int len = wait(dbFile.get()->read(buffer, s1.size(), 0));
+	ASSERT(memcmp(buffer, s1.c_str(), s1.size()) == 0);
+
+	delete []buffer;
+	wait(IAsyncFileSystem::filesystem()->deleteFile(fname, true));
+	ASSERT(!IAsyncFileSystem::filesystem()->fileExists(fname));
+	return Void();
+}
+
+TEST_CASE("/sim2/IAsyncfs/reference") {
+	if (!FLOW_KNOBS->SIM_FUZZER) {
+		std::cout << "skip test case /sim2/IAsyncfs/reference\n";
+		return Void();
+	}
+
+	state std::string s1("1234567");
+	state std::string fname("data/f1");
+
+	auto* fs = IAsyncFileSystem::filesystem();
+	fs->atomicReplace(fname, s1);
+
+	state ErrorOr<Reference<IAsyncFile>> dbFile = wait(
+	    errorOr(IAsyncFileSystem::filesystem()->open(fname, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0)));
+
+	ASSERT(dbFile.present());
+	Reference<IAsyncFile> file1(dbFile.get());
+	Reference<IAsyncFile> file2(file1);
+	Deque<Reference<IAsyncFile>> dq;
+	dq.push_back(file1);
+	dq.push_back(file2);
+	return Void();
 }

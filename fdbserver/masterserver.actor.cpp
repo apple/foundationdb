@@ -1120,7 +1120,7 @@ ACTOR Future<Void> recoverFrom(Reference<MasterData> self,
 			when(Standalone<CommitTransactionRef> _req = wait(provisional)) {
 				state Standalone<CommitTransactionRef> req = _req; // mutable
 				TEST(true); // Emergency transaction processing during recovery
-				FORK_SIMULATION(true, "Emergency transaction processing during recovery");
+				// FORK_SIMULATION(true, "Emergency transaction processing during recovery");
 				TraceEvent("EmergencyTransaction", self->dbgid).log();
 				for (auto m = req.mutations.begin(); m != req.mutations.end(); ++m)
 					TraceEvent("EmergencyTransactionMutation", self->dbgid)

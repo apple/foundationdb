@@ -1467,9 +1467,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::vector<Future<Void>> recoveries;
 
 	try {
-		std::vector<DiskStore> stores = getDiskStores(folder);
-		bool validateDataFiles = deleteFile(joinPath(folder, validationFilename));
+		state std::vector<DiskStore> stores = getDiskStores(folder);
+		state bool validateDataFiles = deleteFile(joinPath(folder, validationFilename));
 		// std::cout << stores.size() << "-----" << folder << std::endl;
+		if(g_network->isSimulated() && FLOW_KNOBS->SIM_FUZZER) {
+			wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(folder, validationFilename), true));
+		}
 		for (int f = 0; f < stores.size(); f++) {
 			DiskStore s = stores[f];
 			// FIXME: Error handling

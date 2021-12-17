@@ -1409,6 +1409,11 @@ void SQLiteDB::open(bool writable) {
 			// and then hitting the next case
 			walFile = file_not_found();
 			renameFile(walpath, walpath + "-old-" + deterministicRandom()->randomUniqueID().toString());
+			if (g_network->isSimulated() && FLOW_KNOBS->SIM_FUZZER) {
+				auto f = IAsyncFileSystem::filesystem()->renameFile(
+				    walpath, walpath + "-old-" + deterministicRandom()->randomUniqueID().toString());
+				ASSERT(f.canGet());
+			}
 			ASSERT_WE_THINK(false); //< This code should not be hit in FoundationDB at the moment, because worker looks
 			                        // for databases to open by listing .fdb files, not .fdb-wal files
 			// TEST(true);  // Replace a partially constructed or destructed DB
