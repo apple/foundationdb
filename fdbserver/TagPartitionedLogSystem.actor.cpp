@@ -356,7 +356,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 					changes.push_back(t->onChange());
 				}
 			}
-			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 				for (auto& t : it->logServersPtxn) {
 					if (t->get().present()) {
 						failed.push_back(waitFailureClient(t->get().interf().waitFailure,
@@ -2829,7 +2829,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 	state std::vector<ptxn::InitializePtxnTLogRequest> ptxnReqs(recr.tLogs.size());
 
 	logSystem->tLogs[0]->tLogLocalities.resize(recr.tLogs.size());
-	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 		logSystem->tLogs[0]->logServersPtxn.resize(recr.tLogs.size());
 	} else {
 		// Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
@@ -2878,7 +2878,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		}
 	}
 
-	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 		for (int i = 0; i < recr.tLogs.size(); i++) {
 			ptxn::InitializePtxnTLogRequest& req = ptxnReqs[i];
 			req.recruitmentID = logSystem->recruitmentID;
@@ -3023,13 +3023,13 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 			    master_recovery_failed()));
 	}
 
-	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 		wait(waitForAll(ptxnInitializationReplies) || oldRouterRecruitment);
 	} else {
 		wait(waitForAll(initializationReplies) || oldRouterRecruitment);
 	}
 
-	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 		state std::unordered_map<UID, ptxn::TLogInterface_PassivelyPull> id2Interface;
 		state int i = 0;
 		for (i = 0; i < reqs.size(); i++) {

@@ -236,7 +236,7 @@ private:
 			info.tags.push_back(storageInfo->tag);
 			info.src_info.push_back(storageInfo);
 
-			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 				// Add storage teams of storage servers
 				info.storageTeams.insert(srcDstTeams[0]);
 			}
@@ -248,7 +248,7 @@ private:
 			info.tags.push_back(storageInfo->tag);
 			info.dest_info.push_back(storageInfo);
 
-			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 				// Add storage teams of storage servers
 				info.storageTeams.insert(srcDstTeams[1]);
 			}
@@ -256,7 +256,7 @@ private:
 		uniquify(info.tags);
 		//TraceEvent("ProxyApply", dbgid).detail("Range", insertRange.toString()).detail("CacheInfo", info.toString());
 		keyInfo->insert(insertRange, info);
-		if (toCommit && SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		if (toCommit && SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 			toCommit->setShardChanged();
 		}
 	}
@@ -277,7 +277,7 @@ private:
 			    .detail("TagKey", serverTagKeyFor(serverKeysDecodeServer(m.param1)))
 			    .detail("Tag", tag.toString());
 
-			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 				toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 			} else {
 				toCommit->addTag(tag);
@@ -304,7 +304,7 @@ private:
 	}
 
 	void checkSetStorageTeamIDKeyPrefix(MutationRef m) {
-		if (!m.param1.startsWith(storageTeamIdKeyPrefix) || !SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		if (!m.param1.startsWith(storageTeamIdKeyPrefix) || !SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 			return;
 		}
 		ASSERT_WE_THINK(tLogGroupCollection.isValid());
@@ -340,7 +340,7 @@ private:
 		auto group = BinaryReader::fromStringRef<UID>(m.param2, Unversioned());
 		tLogGroupCollection->assignStorageTeam(teamid, group);
 
-		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 			(*changedTeams)[group].push_back(std::make_pair(teamid, true));
 			// TODO (Vishesh) Check if team already exists. Create entry for deleting it from old group.
 		}
@@ -365,7 +365,7 @@ private:
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			TraceEvent("ServerTag", dbgid).detail("Server", id).detail("Tag", tag.toString());
 
-			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 				auto team = tagToTeam(tag).get();
 				toCommit->writeToStorageTeams(tLogGroupCollection, { team }, LogProtocolMessage());
 				toCommit->writeToStorageTeams(tLogGroupCollection, { team }, privatized);
@@ -438,7 +438,7 @@ private:
 		MutationRef privatized = m;
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 
-		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 			// TODO (Vishesh): Cache tags need team of its own.
 			toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(cacheTag).get() }, privatized);
 		} else {
@@ -547,7 +547,7 @@ private:
 			Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get();
 			if (tagV.present()) {
 				auto tag = decodeServerTagValue(tagV.get());
-				if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+				if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 					toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 				} else {
 					TraceEvent(SevDebug, "SendingPrivatized_TSSID", dbgid).detail("M", privatized);
@@ -581,7 +581,7 @@ private:
 			MutationRef privatized = m;
 			auto tag = decodeServerTagValue(tagV.get());
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 				toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 			} else {
 				TraceEvent(SevDebug, "SendingPrivatized_TSSQuarantine", dbgid).detail("M", privatized);
@@ -710,7 +710,7 @@ private:
 		MutationRef privatized = m;
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 
-		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 			if (m.param1 == lastEpochEndKey) {
 				toCommit->writeToStorageTeams(tLogGroupCollection, allTeams, LogProtocolMessage());
 			}
@@ -769,7 +769,7 @@ private:
 			                clearRange.begin == StringRef()
 			                    ? ServerCacheInfo()
 			                    : keyInfo->rangeContainingKeyBefore(clearRange.begin).value());
-			if (toCommit && SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			if (toCommit && SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 				toCommit->setShardChanged();
 			}
 		}
@@ -844,7 +844,7 @@ private:
 					privatized.param1 = kv.key.withPrefix(systemKeys.begin, arena);
 					privatized.param2 = keyAfter(kv.key, arena).withPrefix(systemKeys.begin, arena);
 
-					if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+					if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 						toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 					} else {
 						TraceEvent(SevDebug, "SendingPrivatized_ClearServerTag", dbgid).detail("M", privatized);
@@ -873,7 +873,7 @@ private:
 								privatized.param2 =
 								    keyAfter(maybeTssRange.begin, arena).withPrefix(systemKeys.begin, arena);
 
-								if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+								if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 									toCommit->writeToStorageTeams(
 									    tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 								} else {
@@ -1066,7 +1066,7 @@ private:
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
 
-			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 				toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 			} else {
 				TraceEvent(SevDebug, "SendingPrivatized_ClearTSSMapping", dbgid).detail("M", privatized);
@@ -1098,7 +1098,7 @@ private:
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
-					if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+					if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 						toCommit->writeToStorageTeams(tLogGroupCollection, { tagToTeam(tag).get() }, privatized);
 					} else {
 						TraceEvent(SevDebug, "SendingPrivatized_ClearTSSQuarantine", dbgid).detail("M", privatized);
@@ -1197,7 +1197,7 @@ private:
 			}
 
 			// Add the tags to both begin and end mutations
-			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 				toCommit->writeToStorageTeams(tLogGroupCollection, teams, mutationBegin);
 				toCommit->writeToStorageTeams(tLogGroupCollection, teams, mutationEnd);
 			} else {

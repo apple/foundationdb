@@ -40,6 +40,9 @@ public:
 	double MAX_COMMIT_BATCH_INTERVAL; // Each commit proxy generates a CommitTransactionBatchRequest at least this
 	                                  // often, so that versions always advance smoothly
 
+
+	bool ENABLE_PARTITIONED_TRANSACTIONS;
+
 	// TLogs
 	bool PEEK_USING_STREAMING;
 	double TLOG_TIMEOUT; // tlog OR commit proxy failure - master's reaction time
@@ -107,7 +110,6 @@ public:
 	double PUSH_STATS_SLOW_RATIO;
 	int TLOG_POP_BATCH_SIZE;
 	bool TLOG_SERVER_TEAM_PARTITIONED;
-	bool TLOG_NEW_INTERFACE;
 	bool BROADCAST_TLOG_GROUPS;
 	bool PTXN_DISABLE_DD; // Temporary disable DD for PTXN project development
 
