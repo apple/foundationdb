@@ -216,6 +216,7 @@ struct StorageServerDisk {
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
 	RateCounter* kvThroughput;
 	Counter* kvCommitBytes;
+	Counter* kvClearRange;
 
 private:
 	struct StorageServer* data;
@@ -757,6 +758,7 @@ public:
 		Counter sampledBytesCleared;
 		RateCounter kvThroughput;
 		Counter kvCommitBytes;
+		Counter kvClearRange;
 		RateCounter pTreeUpdateThroughput;
 		Counter pTreeUpdateBytes;
 		RateCounter storageUpdateThroughput;
@@ -772,8 +774,8 @@ public:
 		// means fallback if fallback is enabled, otherwise means failure (so that another layer could implement
 		// fallback).
 		Counter quickGetValueHit, quickGetValueMiss, quickGetKeyValuesHit, quickGetKeyValuesMiss;
-		Counter kvReadRangeTypes;
-		RateCounter kvSingleReadBytes;
+		Counter kvReadRangeBytes;
+		Counter kvSingleReadBytes;
 		LatencySample readLatencySample;
 		LatencyBands readLatencyBands;
 
@@ -788,18 +790,19 @@ public:
 		    bytesFetched("BytesFetched", cc), mutationBytes("MutationBytes", cc),
 		    logicalInputBytes("LogicalInputBytes", cc), logicalMoveOverheadBytes("LogicalMoveOverheadBytes", cc),
 		    sampledBytesCleared("SampledBytesCleared", cc), kvThroughput("KeyValueStoreThroughput", cc),
-		    kvCommitBytes("KeyValueStoreCommitBytes", cc), pTreeUpdateThroughput("PTreeUpdateThroughput", cc),
-		    pTreeUpdateBytes("PTreeUpdateBytes", cc), storageUpdateThroughput("StorageUpdateThroughput", cc),
-		    mutations("Mutations", cc), setMutations("SetMutations", cc),
-		    clearRangeMutations("ClearRangeMutations", cc), atomicMutations("AtomicMutations", cc),
-		    updateBatches("UpdateBatches", cc), updateVersions("UpdateVersions", cc), loops("Loops", cc),
-		    fetchWaitingMS("FetchWaitingMS", cc), fetchWaitingCount("FetchWaitingCount", cc),
-		    fetchExecutingMS("FetchExecutingMS", cc), fetchExecutingCount("FetchExecutingCount", cc),
-		    readsRejected("ReadsRejected", cc), wrongShardServer("WrongShardServer", cc),
-		    fetchedVersions("FetchedVersions", cc), fetchesFromLogs("FetchesFromLogs", cc),
-		    quickGetValueHit("QuickGetValueHit", cc), quickGetValueMiss("QuickGetValueMiss", cc),
-		    quickGetKeyValuesHit("QuickGetKeyValuesHit", cc), quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc),
-		    kvReadRangeTypes("KVReadRangeBytes", cc), kvSingleReadBytes("KVSingleReadBytes", cc),
+		    kvCommitBytes("KeyValueStoreCommitBytes", cc), kvClearRange("KVClearRange", cc),
+		    pTreeUpdateThroughput("PTreeUpdateThroughput", cc), pTreeUpdateBytes("PTreeUpdateBytes", cc),
+		    storageUpdateThroughput("StorageUpdateThroughput", cc), mutations("Mutations", cc),
+		    setMutations("SetMutations", cc), clearRangeMutations("ClearRangeMutations", cc),
+		    atomicMutations("AtomicMutations", cc), updateBatches("UpdateBatches", cc),
+		    updateVersions("UpdateVersions", cc), loops("Loops", cc), fetchWaitingMS("FetchWaitingMS", cc),
+		    fetchWaitingCount("FetchWaitingCount", cc), fetchExecutingMS("FetchExecutingMS", cc),
+		    fetchExecutingCount("FetchExecutingCount", cc), readsRejected("ReadsRejected", cc),
+		    wrongShardServer("WrongShardServer", cc), fetchedVersions("FetchedVersions", cc),
+		    fetchesFromLogs("FetchesFromLogs", cc), quickGetValueHit("QuickGetValueHit", cc),
+		    quickGetValueMiss("QuickGetValueMiss", cc), quickGetKeyValuesHit("QuickGetKeyValuesHit", cc),
+		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc), kvReadRangeBytes("KVReadRangeBytes", cc),
+		    kvSingleReadBytes("KVSingleReadBytes", cc),
 		    readLatencySample("ReadLatencyMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -882,6 +885,7 @@ public:
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
 		this->storage.kvThroughput = &counters.kvThroughput;
 		this->storage.kvCommitBytes = &counters.kvCommitBytes;
+		this->storage.kvClearRange = &counters.kvClearRange;
 	}
 
 	//~StorageServer() { fclose(log); }
@@ -1362,6 +1366,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	--data->readQueueSizeMetric;
 
 	double duration = g_network->timer() - req.requestTime();
+	// Latency of readValue().
 	data->counters.readLatencySample.addMeasurement(duration);
 	if (data->latencyBandConfig.present()) {
 		int maxReadBytes =
@@ -1737,7 +1742,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			state double startTime = now();
 			RangeResult atStorageVersion =
 			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
-			data->counters.kvReadRangeTypes += (atStorageVersion.logicalSize());
+			data->counters.kvReadRangeBytes += (atStorageVersion.logicalSize());
 			// data->counters.kvReadRangeThroughput.addInterval(now() - startTime);
 
 			ASSERT(atStorageVersion.size() <= limit);
@@ -1821,7 +1826,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			startTime = now();
 			RangeResult atStorageVersion =
 			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
-			data->counters.kvReadRangeTypes += (atStorageVersion.logicalSize());
+			data->counters.kvReadRangeBytes += (atStorageVersion.logicalSize());
 			// data->counters.kvReadRangeThroughput.addInterval(now() - startTime);
 
 			ASSERT(atStorageVersion.size() <= -limit);
@@ -2893,8 +2898,9 @@ ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager)
 	eager->finishKeyBegin();
 
 	std::vector<Future<Key>> keyEnd(eager->keyBegin.size());
-	for (int i = 0; i < keyEnd.size(); i++)
+	for (int i = 0; i < keyEnd.size(); i++) {
 		keyEnd[i] = data->storage.readNextKeyInclusive(eager->keyBegin[i], IKeyValueStore::ReadType::EAGER);
+	}
 
 	state Future<vector<Key>> futureKeyEnds = getAll(keyEnd);
 
@@ -2905,7 +2911,15 @@ ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager)
 
 	state Future<vector<Optional<Value>>> futureValues = getAll(value);
 	state vector<Key> keyEndVal = wait(futureKeyEnds);
+	for (const auto& key : keyEndVal) {
+		data->counters.kvReadRangeBytes += key.expectedSize();
+	}
 	vector<Optional<Value>> optionalValues = wait(futureValues);
+	for (const auto& value : optionalValues) {
+		if (value.present()) {
+			data->counters.kvSingleReadBytes += value.expectedSize();
+		}
+	}
 
 	eager->keyEnd = keyEndVal;
 	eager->value = optionalValues;
@@ -4649,22 +4663,24 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 }
 
 void StorageServerDisk::clearRange(KeyRangeRef keys) {
-	*kvThroughput += keys.expectedSize();
 	storage->clear(keys);
+	*kvClearRange++;
 }
 
 void StorageServerDisk::writeKeyValue(KeyValueRef kv) {
 	storage->set(kv);
+	*kvCommitBytes += kv.expectedSize();
 }
 
 void StorageServerDisk::writeMutation(MutationRef mutation) {
 	*kvThroughput += mutation.expectedSize();
-	*kvCommitBytes += mutation.expectedSize();
 	// FIXME: DEBUG_MUTATION(debugContext, debugVersion, *m);
 	if (mutation.type == MutationRef::SetValue) {
 		storage->set(KeyValueRef(mutation.param1, mutation.param2));
+		*kvCommitBytes += mutation.expectedSize();
 	} else if (mutation.type == MutationRef::ClearRange) {
 		storage->clear(KeyRangeRef(mutation.param1, mutation.param2));
+		*kvClearRange++;
 	} else
 		ASSERT(false);
 }
@@ -4680,7 +4696,7 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
 			storage->set(KeyValueRef(m.param1, m.param2));
 		} else if (m.type == MutationRef::ClearRange) {
 			*kvThroughput += m.expectedSize();
-			*kvCommitBytes += m.expectedSize();
+			*kvClearRange++;
 			storage->clear(KeyRangeRef(m.param1, m.param2));
 		}
 	}
@@ -4714,8 +4730,8 @@ bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion,
 void StorageServerDisk::makeVersionDurable(Version version) {
 	KeyValueRef kv(persistVersion, BinaryWriter::toValue(version, Unversioned()));
 	*kvThroughput += kv.expectedSize();
-	*kvCommitBytes += kv.expectedSize();
 	storage->set(kv);
+	*kvCommitBytes += kv.expectedSize();
 
 	// TraceEvent("MakeDurable", data->thisServerID)
 	//     .detail("FromVersion", prevStorageVersion)
@@ -4745,7 +4761,7 @@ ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
 		state double startTime = now();
 		RangeResult bs = wait(storage->readRange(
 		    KeyRangeRef(begin, end), SERVER_KNOBS->STORAGE_LIMIT_BYTES, SERVER_KNOBS->STORAGE_LIMIT_BYTES));
-		data->counters.kvReadRangeTypes += (bs.logicalSize());
+		data->counters.kvReadRangeBytes += (bs.logicalSize());
 		// data->counters.kvReadRangeThroughput.addInterval(now() - startTime);
 		if (results)
 			results->push_back(bs.castTo<VectorRef<KeyValueRef>>());

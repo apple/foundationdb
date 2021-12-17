@@ -207,7 +207,7 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 		{ "IsWriteStopped", rocksdb::DB::Properties::kIsWriteStopped },
  		{ "BlockCacheUsage", rocksdb::DB::Properties::kBlockCacheUsage },
  		{ "BlockCachePinnedUsage", rocksdb::DB::Properties::kBlockCachePinnedUsage },
- 		{ "CompressionRatioAtLevel1", rocksdb::DB::Properties::kCompressionRatioAtLevelPrefix1 }, // compression ratio = uncompressed data size / compressed file size
+ 		{ "CompressionRatioAtLevel1", rocksdb::DB::Properties::kCompressionRatioAtLevelPrefix }, // compression ratio = uncompressed data size / compressed file size
  		// { "LevelStats", rocksdb::DB::Properties::kLevelStats},
 	};
 	
@@ -274,6 +274,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				"default", getCFOptions() } };
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
 			auto options = getOptions();
+			options.env->SetBackgroundThreads(8, rocksdb::Env::Priority::HIGH);
 			auto status = rocksdb::DB::Open(options, a.path, defaultCF, &handle, &db);
 			if (!status.ok()) {
 				logRocksDBError(status, "Open");
