@@ -742,16 +742,16 @@ public:
 			// use string_view for faster substr
 			std::string_view candidate = c;
 			if (candidate.size() > directory.size() && candidate.substr(0, directory.size()) == directory) {
-				candidate.substr(directory.size());
+				candidate = candidate.substr(directory.size());
+
 				if (candidate[0] == '/') {
 					candidate = candidate.substr(1);
-				} else if (directory.back() != '/') {
+				}
+				if (candidate.find('/') != std::string_view::npos) {
 					// this directory name is just sharing a prefix
 					continue;
 				}
-				if (candidate.find('/') != std::string_view::npos) {
-					continue;
-				}
+
 				res.push_back(std::string(candidate));
 			}
 		}
@@ -2525,7 +2525,7 @@ public:
 			if ((processId = fork()) == 0) { // child process
 				++forkSearchDepth;
 				int pid = getpid();
-				int newSeed = platform::getRandomSeed(); // non-deterministic seed
+				uint32_t newSeed = platform::getRandomSeed(); // non-deterministic seed
 				forkSequence += std::to_string(newSeed);
 
 				std::string childLogGroup = parentGroup + "/" + std::to_string(pid); // format to still be finalized
@@ -2606,7 +2606,7 @@ public:
 	bool dieWhenTerminate = false;
 
 	int forkSearchDepth = 0;
-	int forkSearchFanout = 4;
+	int forkSearchFanout = 2;
 	std::string forkSequence = ""; // tracks the sequence of seeds up to this point; already serialized
 
 private:
