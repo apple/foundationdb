@@ -89,8 +89,6 @@ TimeCounter::TimeCounter(std::string const& name, CounterCollection& collection)
 }
 
 void TimeCounter::operator+=(Value delta) {
-	if (!delta)
-		return; //< Otherwise last_event will be reset
 	interval_delta += delta;
 	auto t = now();
 	auto elapsed = t - last_event;
@@ -103,6 +101,10 @@ void TimeCounter::operator+=(Value delta) {
 double TimeCounter::getRate() const {
 	double elapsed = now() - interval_start;
 	return elapsed > 0 ? interval_delta / elapsed : 0;
+}
+
+int64_t TimeCounter::getValue() const {
+	return int64_t((interval_start + interval_delta) * 100000);
 }
 
 double TimeCounter::getRoughness() const {
@@ -142,7 +144,7 @@ void TimeCounter::clear() {
 }
 
 RateCounter::RateCounter(std::string const& name, CounterCollection& collection)
-  : name(name), duration(0), interval_delta(0), sum(0) {
+  : name(name), interval(0), duration(0), interval_delta(0), sum(0) {
 	metric.init(collection.name + "." + (char)toupper(name.at(0)) + name.substr(1), collection.id);
 	collection.counters.push_back(this);
 }
@@ -152,18 +154,27 @@ void RateCounter::add(Value delta) {
 	metric += delta;
 }
 
-void RateCounter::finishInterval(double interval) {
+void RateCounter::addInterval(double delta) {
+	interval += delta;
+}
+
+void RateCounter::operator+=(Value delta) {
+	add(delta);
+}
+
+void RateCounter::resetInterval() {
 	if (interval == 0)
 		return;
 	sum += interval_delta;
 	interval_delta = 0;
 	duration += interval;
+	interval = 0;
 }
 
 double RateCounter::getRate() const {
-	if (duration == 0.0)
+	if (interval == 0)
 		return 0.0;
-	return sum / duration;
+	return interval_delta / interval;
 }
 
 double RateCounter::getRoughness() const {

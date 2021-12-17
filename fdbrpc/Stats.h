@@ -135,7 +135,7 @@ public:
 	std::string const& getName() const override { return name; }
 
 	Value getIntervalDelta() const { return interval_delta; }
-	Value getValue() const override { return interval_start_value + interval_delta; }
+	int64_t getValue() const override;
 
 	// dValue / dt
 	double getRate() const override;
@@ -168,13 +168,14 @@ public:
 
 	RateCounter(std::string const& name, CounterCollection& collection);
 
+	void operator+=(Value delta);
+
 	// Add value for the current interval.
 	void add(Value delta);
 
-	// Set the the current duration, and complete the current interval.
-	void finishInterval(double interval);
+	void addInterval(double delta);
 
-	void resetInterval() override {}
+	void resetInterval() override;
 
 	std::string const& getName() const override { return name; }
 
@@ -192,7 +193,7 @@ public:
 
 private:
 	std::string name;
-	double duration;
+	double interval, duration;
 	Value interval_delta, sum;
 	Int64MetricHandle metric;
 };
