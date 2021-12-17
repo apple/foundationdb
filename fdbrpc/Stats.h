@@ -181,7 +181,7 @@ public:
 
 	Value getIntervalDelta() const { return interval_delta; }
 
-	Value getValue() const override { return sum; }
+	Value getValue() const override { return sum + interval_delta; }
 
 	// Returns the avarage rate, i.e., (accumulated value) / (accumulated interval).
 	double getRate() const override;
