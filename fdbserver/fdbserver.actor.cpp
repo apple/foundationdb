@@ -945,9 +945,10 @@ std::queue<Optional<uint32_t>> deserializeForkSequence(std::string sequence) {
 		end = sequence.find(',', start);
 		std::string entry = sequence.substr(start, end - start);
 
-		if (entry == "x") {
+		if (entry.length() == 1 && entry[0] == 'x') {
 			res.push(Optional<uint32_t>());
 		} else {
+			// TODO: add error handling here if entry isn't a number
 			res.push(std::stoul(entry));
 		}
 
