@@ -53,7 +53,6 @@ RUN curl -Ls https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd6
     mv tini /usr/bin/ && \
     rm -rf /tmp/*
 
-WORKDIR /tmp
 RUN curl -Ls https://amazon-eks.s3.amazonaws.com/1.19.6/2021-01-05/bin/linux/amd64/kubectl -o kubectl && \
     echo "08ff68159bbcb844455167abb1d0de75bbfe5ae1b051f81ab060a1988027868a  kubectl" > kubectl.txt && \
     sha256sum --quiet -c kubectl.txt && \
