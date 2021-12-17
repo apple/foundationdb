@@ -40,6 +40,8 @@
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbrpc/Smoother.h"
 
+FDB_DECLARE_BOOLEAN_PARAM(UseProvisionalProxies);
+
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
 public:
 	static Reference<StorageServerInfo> getInterface(DatabaseContext* cx,
@@ -132,19 +134,39 @@ public:
 	}
 };
 
+struct WatchParameters : public ReferenceCounted<WatchParameters> {
+	const Key key;
+	const Optional<Value> value;
+
+	const Version version;
+	const TagSet tags;
+	const SpanID spanID;
+	const TaskPriority taskID;
+	const Optional<UID> debugID;
+	const bool useProvisionalProxies;
+
+	WatchParameters(Key key,
+	                Optional<Value> value,
+	                Version version,
+	                TagSet tags,
+	                SpanID spanID,
+	                TaskPriority taskID,
+	                Optional<UID> debugID,
+	                UseProvisionalProxies useProvisionalProxies)
+	  : key(key), value(value), version(version), tags(tags), spanID(spanID), taskID(taskID), debugID(debugID),
+	    useProvisionalProxies(useProvisionalProxies) {}
+};
+
 class WatchMetadata : public ReferenceCounted<WatchMetadata> {
 public:
-	Key key;
-	Optional<Value> value;
-	Version version;
 	Promise<Version> watchPromise;
 	Future<Version> watchFuture;
 	Future<Void> watchFutureSS;
 
-	TransactionInfo info;
-	TagSet tags;
+	Reference<const WatchParameters> parameters;
 
-	WatchMetadata(Key key, Optional<Value> value, Version version, TransactionInfo info, TagSet tags);
+	WatchMetadata(Reference<const WatchParameters> parameters)
+	  : watchFuture(watchPromise.getFuture()), parameters(parameters) {}
 };
 
 struct MutationAndVersionStream {
@@ -231,6 +253,19 @@ public:
 	Future<Void> onProxiesChanged() const;
 	Future<Void> onClientLibStatusChanged() const;
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
+	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
+	Future<StorageMetrics> getStorageMetrics(KeyRange const& keys, int shardLimit);
+	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
+	                                                                    StorageMetrics const& min,
+	                                                                    StorageMetrics const& max,
+	                                                                    StorageMetrics const& permittedError,
+	                                                                    int shardLimit,
+	                                                                    int expectedShardCount);
+	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
+	                                                          StorageMetrics const& limit,
+	                                                          StorageMetrics const& estimated);
+
+	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys);
 
 	// Returns the protocol version reported by the coordinator this client is connected to
 	// If an expected version is given, the future won't return until the protocol version is different than expected

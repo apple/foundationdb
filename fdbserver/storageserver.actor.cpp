@@ -2104,7 +2104,7 @@ ACTOR Future<Optional<Value>> quickGetValue(StorageServer* data,
 		state Transaction tr(data->cx);
 		tr.setVersion(version);
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
-		tr.info.taskID = TaskPriority::DefaultPromiseEndpoint;
+		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
 		Future<Optional<Value>> valueFuture = tr.get(key, Snapshot::True);
 		// TODO: async in case it needs to read from other servers.
 		state Optional<Value> valueOption = wait(valueFuture);
@@ -2635,7 +2635,7 @@ ACTOR Future<RangeResult> quickGetKeyValues(StorageServer* data,
 		state Transaction tr(data->cx);
 		tr.setVersion(version);
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
-		tr.info.taskID = TaskPriority::DefaultPromiseEndpoint;
+		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
 		Future<RangeResult> rangeResultFuture = tr.getRange(prefixRange(prefix), Snapshot::True);
 		// TODO: async in case it needs to read from other servers.
 		RangeResult rangeResult = wait(rangeResultFuture);
@@ -4143,7 +4143,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			while (!shard->updates.empty() && shard->updates[0].version <= fetchVersion)
 				shard->updates.pop_front();
 			tr.setVersion(fetchVersion);
-			tr.info.taskID = TaskPriority::FetchKeys;
+			tr.trState->taskID = TaskPriority::FetchKeys;
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold = SERVER_KNOBS->FETCH_USING_STREAMING
 			                              ? tr.getRangeStream(results, keys, GetRangeLimits(), Snapshot::True)

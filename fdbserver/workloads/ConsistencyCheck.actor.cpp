@@ -1124,7 +1124,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		loop {
 			try {
 				StorageMetrics metrics =
-				    wait(tr.getStorageMetrics(KeyRangeRef(allKeys.begin, keyServersPrefix), 100000));
+				    wait(tr.getDatabase()->getStorageMetrics(KeyRangeRef(allKeys.begin, keyServersPrefix), 100000));
 				return metrics.bytes;
 			} catch (Error& e) {
 				wait(tr.onError(e));

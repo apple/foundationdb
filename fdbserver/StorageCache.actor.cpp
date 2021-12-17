@@ -1189,7 +1189,7 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 
 	ASSERT(!cx->switchable);
 	tr.setVersion(version);
-	tr.info.taskID = TaskPriority::FetchKeys;
+	tr.trState->taskID = TaskPriority::FetchKeys;
 	limits.minRows = 0;
 
 	try {

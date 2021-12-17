@@ -1653,7 +1653,7 @@ Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyR
 	if (resetPromise.isSet())
 		return resetPromise.getFuture().getError();
 
-	return map(waitOrError(tr.getStorageMetrics(keys, -1), resetPromise.getFuture()),
+	return map(waitOrError(tr.getDatabase()->getStorageMetrics(keys, -1), resetPromise.getFuture()),
 	           [](const StorageMetrics& m) { return m.bytes; });
 }
 
@@ -1911,7 +1911,7 @@ void ReadYourWritesTransaction::setToken(uint64_t token) {
 RangeResult ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRangeRef kr) {
 	TEST(true); // Special keys read conflict range
 	ASSERT(readConflictRangeKeysRange.contains(kr));
-	ASSERT(!tr.options.checkWritesEnabled);
+	ASSERT(!tr.trState->options.checkWritesEnabled);
 	RangeResult result;
 	if (!options.readYourWritesDisabled) {
 		kr = kr.removePrefix(readConflictRangeKeysRange.begin);

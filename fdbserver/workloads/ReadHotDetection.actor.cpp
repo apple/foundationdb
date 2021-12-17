@@ -98,11 +98,11 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		loop {
 			state Transaction tr(cx);
 			try {
-				StorageMetrics sm = wait(tr.getStorageMetrics(self->wholeRange, 100));
+				StorageMetrics sm = wait(tr.getDatabase()->getStorageMetrics(self->wholeRange, 100));
 				// TraceEvent("RHDCheckPhaseLog")
 				//     .detail("KeyRangeSize", sm.bytes)
 				//     .detail("KeyRangeReadBandwith", sm.bytesReadPerKSecond);
-				Standalone<VectorRef<ReadHotRangeWithMetrics>> keyRanges = wait(tr.getReadHotRanges(self->wholeRange));
+				Standalone<VectorRef<ReadHotRangeWithMetrics>> keyRanges = wait(cx->getReadHotRanges(self->wholeRange));
 				// TraceEvent("RHDCheckPhaseLog")
 				//     .detail("KeyRangesSize", keyRanges.size())
 				//     .detail("ReadKey", self->readKey.printable().c_str())

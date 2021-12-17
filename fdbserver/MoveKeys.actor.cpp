@@ -400,7 +400,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					// Keep track of shards for all src servers so that we can preserve their values in serverKeys
 					state Map<UID, VectorRef<KeyRangeRef>> shardMap;
 
-					tr->getTransaction().info.taskID = TaskPriority::MoveKeys;
+					tr->getTransaction().trState->taskID = TaskPriority::MoveKeys;
 					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
@@ -603,7 +603,7 @@ ACTOR Future<Void> checkFetchingState(Database cx,
 			if (BUGGIFY)
 				wait(delay(5));
 
-			tr.info.taskID = TaskPriority::MoveKeys;
+			tr.trState->taskID = TaskPriority::MoveKeys;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			std::vector<Future<Optional<Value>>> serverListEntries;
@@ -696,7 +696,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 			loop {
 				try {
 
-					tr.info.taskID = TaskPriority::MoveKeys;
+					tr.trState->taskID = TaskPriority::MoveKeys;
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 					releaser.release();
@@ -1317,7 +1317,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 		state Transaction tr(cx);
 		loop {
 			try {
-				tr.info.taskID = TaskPriority::MoveKeys;
+				tr.trState->taskID = TaskPriority::MoveKeys;
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
 				TraceEvent("RemoveKeysFromFailedServerLocked")

@@ -786,7 +786,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 				loop {
 					try {
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-						tr.options.sizeLimit = 2 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
+						tr.trState->options.sizeLimit = 2 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 						wait(checkDatabaseLock(&tr,
 						                       BinaryReader::fromStringRef<UID>(
 						                           task->params[BackupAgentBase::keyConfigLogUid], Unversioned())));
@@ -1531,7 +1531,7 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 				loop {
 					try {
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-						tr.options.sizeLimit = 2 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
+						tr.trState->options.sizeLimit = 2 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 						wait(checkDatabaseLock(&tr,
 						                       BinaryReader::fromStringRef<UID>(
 						                           task->params[BackupAgentBase::keyConfigLogUid], Unversioned())));
