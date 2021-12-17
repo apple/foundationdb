@@ -789,7 +789,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_WORKER_TIMEOUT,                                  10.0 ); if( randomize && BUGGIFY ) BLOB_WORKER_TIMEOUT = 1.0;
 
 	// Hackathon-2021
-	// supported values {"random" , "round-robin", "least-loaded", "time-decay"}
+	// supported values {"random" , "round-robin", "least-loaded", "time-decay", "shortest-wait"}
 	init( HACKATHON_TLOG_SELECTION_STRATEGY,                "random" );
 	init( HACKATHON_TLOG_FLUSH_BYTES_PER_SECOND,      60.0*1024*1024 );
 
