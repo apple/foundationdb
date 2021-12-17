@@ -1,5 +1,6 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
+#include <rocksdb/c.h>
 #include <rocksdb/cache.h>
 #include <rocksdb/db.h>
 #include <rocksdb/filter_policy.h>
@@ -203,7 +204,14 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 		{ "EstimateLiveDataSize", rocksdb::DB::Properties::kEstimateLiveDataSize },
 		{ "BaseLevel", rocksdb::DB::Properties::kBaseLevel },
 		{ "EstPendCompactBytes", rocksdb::DB::Properties::kEstimatePendingCompactionBytes },
+		{ "IsWriteStopped", rocksdb::DB::Properties::kIsWriteStopped },
+ 		{ "BlockCacheUsage", rocksdb::DB::Properties::kBlockCacheUsage },
+ 		{ "BlockCachePinnedUsage", rocksdb::DB::Properties::kBlockCachePinnedUsage },
+ 		{ "CompressionRatioAtLevel1", rocksdb::DB::Properties::kCompressionRatioAtLevelPrefix1 }, // compression ratio = uncompressed data size / compressed file size
+ 		// { "LevelStats", rocksdb::DB::Properties::kLevelStats},
 	};
+	
+	state rocksdb_perfcontext_t* perf = rocksdb_perfcontext_create();
 	loop {
 		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
 		TraceEvent e("RocksDBMetrics");
@@ -220,6 +228,12 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 			ASSERT(db->GetIntProperty(property, &stat));
 			e.detail(name, stat);
 		}
+
+		rocksdb_perfcontext_reset(perf);
+ 		TraceEvent eperf("RocksDBPerfMetrics");
+ 		const uint64_t val =
+           (uint64_t)rocksdb_perfcontext_metric(perf, rocksdb_block_read_byte);
+ 		eperf.detail("BlockReadBytes", val);
 	}
 }
 
