@@ -93,7 +93,7 @@ const Value keyServersValue(RangeResult result,
                             const std::vector<UID>& dest,
                             const ptxn::StorageTeamID dstTeam) {
 	// Only called for ptxn tlogs
-	ASSERT_WE_THINK(SERVER_KNOBS->TLOG_NEW_INTERFACE);
+	ASSERT_WE_THINK(SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS);
 
 	if (!CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS) {
 		BinaryWriter wr(IncludeVersion(ProtocolVersion::withPartitionTransaction()));
@@ -161,7 +161,7 @@ std::vector<ptxn::StorageTeamID> decodeKeyServersValue(RangeResult result,
 	ptxn::StorageTeamID srcTeam, dstTeam;
 	std::vector<Tag> srcTag, destTag;
 
-	if (rd.protocolVersion().hasPartitionTransaction() && SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+	if (rd.protocolVersion().hasPartitionTransaction() && SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 		rd >> src >> srcTeam >> dest >> dstTeam;
 		srcDstTeams.push_back(srcTeam);
 		srcDstTeams.push_back(dstTeam);
@@ -215,7 +215,7 @@ std::vector<ptxn::StorageTeamID> decodeKeyServersValue(std::map<Tag, UID> const&
 	}
 
 	BinaryReader rd(value, IncludeVersion());
-	if (rd.protocolVersion().hasPartitionTransaction() && SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+	if (rd.protocolVersion().hasPartitionTransaction() && SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 		ptxn::StorageTeamID srcTeam, destTeam;
 		rd >> src >> srcTeam >> dest >> destTeam;
 		srcDstTeams.push_back(srcTeam);

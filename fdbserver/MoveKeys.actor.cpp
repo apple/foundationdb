@@ -1504,7 +1504,7 @@ void seedShardServers(Arena& arena,
 		serverTeamIDs.push_back(team);
 	}
 
-	if (!SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+	if (!SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 		auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS ? keyServersValue(serverTags)
 		                                                    : keyServersValue(RangeResult(), serverSrcUID);
 		// We have to set this range in two blocks, because the master tracking of "keyServersLocations" depends on a

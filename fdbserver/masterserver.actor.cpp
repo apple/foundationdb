@@ -455,7 +455,7 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 		isr.storeType = self->configuration.storageServerStoreType;
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
-		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 			// XXX: each storage server belongs to a unique team
 			isr.storageTeamId = teamId = deterministicRandom()->randomUniqueID();
 		}
@@ -796,7 +796,7 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	wait(newSeedServers(self, recruits, seedServers));
 
 	// Recruit TLog groups
-	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 		// Let the tLogGroupCollection have the tLog objects
 		self->tLogGroupCollection->addWorkers(recruits.tLogs);
 		self->tLogGroupCollection->setPolicy(self->configuration.tLogPolicy,
@@ -973,7 +973,7 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(
 	state Sequence txnSequence = 0;
 	ASSERT(self->recoveryTransactionVersion);
 
-	if (SERVER_KNOBS->TLOG_NEW_INTERFACE && self->lastEpochEnd == 0) {
+	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS && self->lastEpochEnd == 0) {
 		for (const auto& pair : *servers) {
 			std::vector<UID> serverSrcUID(1, pair.first.id());
 			auto teamId = pair.second;

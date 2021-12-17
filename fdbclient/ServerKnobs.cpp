@@ -38,6 +38,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( MAX_COMMIT_BATCH_INTERVAL,                             2.0 ); if( randomize && BUGGIFY ) MAX_COMMIT_BATCH_INTERVAL = 0.5; // Each commit proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
 	MAX_COMMIT_BATCH_INTERVAL = std::min(MAX_COMMIT_BATCH_INTERVAL, MAX_READ_TRANSACTION_LIFE_VERSIONS/double(2*VERSIONS_PER_SECOND)); // Ensure that the proxy commits 2 times every MAX_READ_TRANSACTION_LIFE_VERSIONS, otherwise the master will not give out versions fast enough
 
+	// Partitioned transactions
+	init( ENABLE_PARTITIONED_TRANSACTIONS,                     false );
+
 	// TLogs
 	init( TLOG_TIMEOUT,                                          0.4 ); //cannot buggify because of availability
 	init( TLOG_SLOW_REJOIN_WARN_TIMEOUT_SECS,                     60 ); if( randomize && BUGGIFY ) TLOG_SLOW_REJOIN_WARN_TIMEOUT_SECS = deterministicRandom()->randomInt(5,10);
@@ -104,9 +107,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PUSH_STATS_SLOW_RATIO,                                 0.5 );
 	init( TLOG_POP_BATCH_SIZE,                                  1000 ); if ( randomize && BUGGIFY ) TLOG_POP_BATCH_SIZE = 10;
 	init( TLOG_SERVER_TEAM_PARTITIONED,                        false );
-	init( TLOG_NEW_INTERFACE,                                  false );
 	init( BROADCAST_TLOG_GROUPS,                                true ); //BROADCAST_TLOG_GROUPS = !PROXY_USE_RESOLVER_PRIVATE_MUTATIONS;
-	init( PTXN_DISABLE_DD,                                     false ); if (TLOG_NEW_INTERFACE) PTXN_DISABLE_DD = true;
+	init( PTXN_DISABLE_DD,                                     false ); if (ENABLE_PARTITIONED_TRANSACTIONS) PTXN_DISABLE_DD = true;
 	init( TLOG_POPPED_VER_LAG_THRESHOLD_FOR_TLOGPOP_TRACE,     250e6 );
 	init( ENABLE_DETAILED_TLOG_POP_TRACE,                       true );
 
@@ -414,7 +416,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TXN_STATE_SEND_AMOUNT,                                    4 );
 	init( REPORT_TRANSACTION_COST_ESTIMATION_DELAY,               0.1 );
 	init( PROXY_REJECT_BATCH_QUEUED_TOO_LONG,                    true );
-	init( PROXY_USE_RESOLVER_PRIVATE_MUTATIONS,                 false ); PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = TLOG_NEW_INTERFACE || (randomize && BUGGIFY && deterministicRandom()->coinflip());
+	init( PROXY_USE_RESOLVER_PRIVATE_MUTATIONS,                 false ); PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = ENABLE_PARTITIONED_TRANSACTIONS || (randomize && BUGGIFY && deterministicRandom()->coinflip());
 
 	init( RESET_MASTER_BATCHES,                                   200 );
 	init( RESET_RESOLVER_BATCHES,                                 200 );

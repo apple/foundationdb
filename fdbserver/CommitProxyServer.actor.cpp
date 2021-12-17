@@ -781,7 +781,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	self->commitVersion = versionReply.version;
 	self->prevVersion = versionReply.prevVersion;
 
-	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 		self->findOverlappingTLogGroups();
 	}
 
@@ -1027,7 +1027,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		// Resolver also calculates forceRecovery and only applies metadata mutations
 		// in the same set of transactions as this proxy.
 		ResolveTransactionBatchReply& reply = self->resolution[0];
-		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 			self->toCommit.setGroupMutations(reply.groupPrivateMutations, self->commitVersion);
 		} else {
 			self->toCommit.setMutations(reply.privateMutationCount, reply.privateMutations);
@@ -1134,7 +1134,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTag(cacheTag);
 				}
 				self->toCommit.writeTypedMessage(m);
-				if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+				if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 					self->writeToStorageTeams(pProxyCommitData->keyInfo[m.param1].storageTeams, m);
 				}
 			} else if (m.type == MutationRef::ClearRange) {
@@ -1195,7 +1195,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTag(cacheTag);
 				}
 				self->toCommit.writeTypedMessage(m);
-				if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+				if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 					self->writeToStorageTeams(storageTeams, m);
 				}
 			} else {
@@ -1359,7 +1359,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			self->toCommit.addTxsTag();
 		}
 
-		if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+		if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 			self->writeToStorageTeams(ptxn::txsTeam, StringRef(m.begin(), m.size()));
 		} else {
 			self->toCommit.writeMessage(StringRef(m.begin(), m.size()), !firstMessage);
@@ -1384,7 +1384,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	self->commitStartTime = now();
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
 
-	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 		std::vector<Future<Version>> pushResults;
 		pushResults.reserve(self->pGroupMessageBuilders.size());
 		for (auto& [groupId, _] : self->pGroupMessageBuilders) {
@@ -1529,7 +1529,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	// client may get a commit version that the master is not aware of, and next GRV request may get a version less than
 	// self->committedVersion.
 	TEST(pProxyCommitData->committedVersion.get() > self->commitVersion); // later version was reported committed first
-	if (self->commitVersion >= pProxyCommitData->committedVersion.get() || SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+	if (self->commitVersion >= pProxyCommitData->committedVersion.get() || SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 		wait(pProxyCommitData->master.reportLiveCommittedVersion.getReply(
 		    ReportRawCommittedVersionRequest(self->commitVersion,
 		                                     self->lockedAfter,
@@ -2146,7 +2146,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 				info.tags.push_back(storageInfo->tag);
 				storageInfoItems.push_back(storageInfo);
 
-				if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+				if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 					// Add storage teams of storage servers
 					ASSERT(pContext->pCommitData->ssToStorageTeam.count(id));
 					if (pContext->pCommitData->ssToStorageTeam[id] == srcDstTeams[0]) {
@@ -2184,7 +2184,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 			updateTagInfo(src, info, srcDstTeams, info.src_info);
 			updateTagInfo(dest, info, srcDstTeams, info.dest_info);
 			uniquify(info.tags);
-			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 				// A shard can only correspond to single storage team in the primary DC for now
 				ASSERT(info.storageTeams.size() == 1);
 			}
@@ -2214,7 +2214,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 
 	pContext->pTxnStateStore->enableSnapshot();
 
-	if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 		ASSERT(!pContext->pCommitData->tLogGroupCollection->groups().empty());
 	}
 

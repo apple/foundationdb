@@ -375,7 +375,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 
 		// Update group versions
 		std::set<ptxn::TLogGroupID> writtenGroups; // TLog groups been written
-		if (SERVER_KNOBS->TLOG_NEW_INTERFACE && req.prevVersion >= 0) { // Not first request
+		if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS && req.prevVersion >= 0) { // Not first request
 			writtenGroups.insert(req.updatedGroups.begin(), req.updatedGroups.end());
 			auto& more = toCommit.getWrittenTLogGroups();
 			writtenGroups.insert(more.begin(), more.end());
@@ -385,7 +385,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 
 		// Adds private mutation messages to the reply message.
 		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
-			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 				auto groupPrivateMutations = toCommit.getGroupMutations(writtenGroups);
 				for (const auto& [group, teamData] : groupPrivateMutations) {
 					reply.groupPrivateMutations.emplace(group, teamData.second);
@@ -535,7 +535,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 				info.tags.push_back(storageInfo->tag);
 				storageInfoItems.push_back(storageInfo);
 
-				if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+				if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 					// Add storage teams of storage servers
 					ASSERT(pContext->pResolverData->ssToStorageTeam.count(id));
 					if (pContext->pResolverData->ssToStorageTeam[id] == srcDstTeams[0]) {
@@ -574,7 +574,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 			updateTagInfo(src, info, srcDstTeams, info.src_info);
 			updateTagInfo(dest, info, srcDstTeams, info.dest_info);
 			uniquify(info.tags);
-			if (SERVER_KNOBS->TLOG_NEW_INTERFACE) {
+			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 				// A shard can only correspond to single storage team in the primary DC for now
 				ASSERT(info.storageTeams.size() == 1);
 			}

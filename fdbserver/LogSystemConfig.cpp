@@ -27,7 +27,7 @@ std::string TLogSet::toString() const {
 	    tLogReplicationFactor,
 	    isLocal,
 	    logRouters.size(),
-	    SERVER_KNOBS->TLOG_NEW_INTERFACE ? tLogsPtxn.size() : tLogs.size(),
+	    SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS ? tLogsPtxn.size() : tLogs.size(),
 	    tLogGroupIDs.size(),
 	    describe(backupWorkers).c_str(),
 	    locality);
