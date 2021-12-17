@@ -20,9 +20,9 @@
 
 #include "fdbrpc/TraceFileIO.h"
 
-#if CENABLED(0, NOT_IN_CLEAN)
+// #if CENABLED(1, NOT_IN_CLEAN)
 // TO RUN: Set the name of file you wish to track
-std::string debugFileName = "storage-3807bf710afaa6d39d23db60d6e687c8.fdb-wal";
+std::string debugFileName = "storage-bba8cc5fc4e668623c9174974038944c.sqlite";
 std::map<int64_t, uint8_t*> debugFileData;
 std::map<int64_t, uint8_t*> debugFileMask;
 std::map<int64_t, int64_t> debugFileRegions;
@@ -188,8 +188,8 @@ void debugFileTruncate(std::string context, std::string file, int64_t offset) {
 	}
 }
 
-#else
-void debugFileCheck(std::string context, std::string file, const void* data, int64_t offset, int length) {}
-void debugFileSet(std::string context, std::string file, const void* data, int64_t offset, int length) {}
-void debugFileTruncate(std::string context, std::string file, int64_t offset) {}
-#endif
+//#else
+//void debugFileCheck(std::string context, std::string file, const void* data, int64_t offset, int length) {}
+//void debugFileSet(std::string context, std::string file, const void* data, int64_t offset, int length) {}
+//void debugFileTruncate(std::string context, std::string file, int64_t offset) {}
+//#endif

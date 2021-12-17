@@ -1469,7 +1469,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	try {
 		state std::vector<DiskStore> stores = getDiskStores(folder);
 		state bool validateDataFiles = deleteFile(joinPath(folder, validationFilename));
-		std::cout << stores.size() << "-----" << folder << std::endl;
+		// std::cout << stores.size() << "-----" << folder << std::endl;
 		if(g_network->isSimulated() && FLOW_KNOBS->SIM_FUZZER) {
 			wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(folder, validationFilename), true));
 		}
