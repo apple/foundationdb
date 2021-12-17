@@ -629,7 +629,7 @@ public:
 
 	void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count) {
 		auto f = open(filename, O_BINARY | O_WRONLY | O_CREAT | O_TRUNC);
-		if (f < 0) {
+		if (f <= 0) {
 			TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).GetLastError();
 			throw file_not_writable();
 		}
@@ -653,7 +653,7 @@ public:
 	std::string readFileBytes(std::string const& filename, int maxSize) {
 		std::string s;
 		auto f = open(filename.c_str(), O_RDONLY | O_BINARY);
-		if (f < 0) {
+		if (f <= 0) {
 			TraceEvent(SevWarn, "FileOpenError")
 			    .detail("Filename", filename)
 			    .detail("Errno", errno)
@@ -667,7 +667,7 @@ public:
 				throw file_too_large();
 			s.resize(size);
 			lseek(f, 0, SEEK_SET);
-			if (!read(f, &s[0], size))
+			if (!read(f, s.data(), size))
 				throw file_not_readable();
 		} catch (...) {
 			close(f);
@@ -3235,8 +3235,10 @@ TEST_CASE("/sim2/IAsyncfs/writeread") {
 }
 
 TEST_CASE("/sim2/IAsyncfs/reference") {
-	if (!FLOW_KNOBS->SIM_FUZZER)
+	if (!FLOW_KNOBS->SIM_FUZZER) {
+		std::cout << "skip test case /sim2/IAsyncfs/reference\n";
 		return Void();
+	}
 
 	state std::string s1("1234567");
 	state std::string fname("data/f1");
