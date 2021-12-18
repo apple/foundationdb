@@ -222,9 +222,7 @@ static auto fork_child(const std::string& path, std::vector<char*>& paramList) {
 		dup2(writeFD, 1); // stdout
 		dup2(writeFD, 2); // stderr
 		close(writeFD);
-		int execNo = execv(&path[0], &paramList[0]);
-		std::cout << "execv: " << execNo << std::endl;
-		std::cout << "errno: " << errno << std::endl;
+		execv(&path[0], &paramList[0]);
 		_exit(EXIT_FAILURE);
 	}
 	close(writeFD);
@@ -232,6 +230,7 @@ static auto fork_child(const std::string& path, std::vector<char*>& paramList) {
 }
 
 static void setupTraceWithOutput(TraceEvent& event, size_t bytesRead, char* outputBuffer) {
+	// get some errors printed for spawned process
 	std::cout << "Output bytesRead: " << bytesRead << std::endl;
 	std::cout << "output buffer: " << std::string(outputBuffer) << std::endl;
 	if (bytesRead == 0)

@@ -93,7 +93,6 @@ public:
 		UID uid;
 
 		ProtocolVersion protocolVersion;
-		short lastRandomPort;
 
 		ProcessInfo(const char* name,
 		            LocalityData locality,
@@ -105,7 +104,7 @@ public:
 		  : name(name), coordinationFolder(coordinationFolder), dataFolder(dataFolder), machine(nullptr),
 		    addresses(addresses), address(addresses.address), locality(locality), startingClass(startingClass),
 		    failed(false), excluded(false), cleared(false), rebooting(false), network(net), fault_injection_r(0),
-		    fault_injection_p1(0), fault_injection_p2(0), failedDisk(false), lastRandomPort(1000) {
+		    fault_injection_p1(0), fault_injection_p2(0), failedDisk(false) {
 			uid = deterministicRandom()->randomUniqueID();
 		}
 

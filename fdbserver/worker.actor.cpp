@@ -224,6 +224,8 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 				return e.get();
 		}
 		when(ErrorOr<Void> e = wait(storeError)) {
+			// for remote kv store, worker can terminate without an error, so throws actor_cancelled
+			// (there's probably a better way tho)
 			TraceEvent("WorkerTerminatingByIOError", id).error(e.isError() ? e.getError() : actor_cancelled(), true);
 			actor.cancel();
 			// file_not_found can occur due to attempting to open a partially deleted DiskQueue, which should not be
