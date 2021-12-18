@@ -1352,7 +1352,14 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx)
     specialKeySpaceWriteMap(std::make_pair(false, Optional<Value>()), specialKeys.end), options(tr) {
 	std::copy(
 	    cx.getTransactionDefaults().begin(), cx.getTransactionDefaults().end(), std::back_inserter(persistentOptions));
-	applyPersistentOptions();
+	if (cx->isError()) {
+		try {
+			applyPersistentOptions();
+		} catch (Error& e) {
+			cx->deferredError = e;
+			deferredError = e;
+		}
+	}
 }
 
 void ReadYourWritesTransaction::setDatabase(Database const& cx) {

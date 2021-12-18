@@ -2358,6 +2358,26 @@ TEST_CASE("commit_does_not_reset") {
 	}
 }
 
+TEST_CASE("Set transaction size limit too high") {
+	FDBDatabase* tempDb = fdb_open_database(clusterFilePath.c_str());
+	int64_t value = 1e7 + 1;
+	fdb_check(
+	    fdb_database_set_option(tempDb, FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT, (const uint8_t*)&value, sizeof(value)));
+	fdb::Transaction tr(tempDb);
+	while (1) {
+		tr.clear_range(prefix, strinc_str(prefix));
+		for (const auto& [key, val] : std::map<std::string, std::string>{ { "foo", "bar" } }) {
+			tr.set(key, val);
+		}
+
+		fdb::EmptyFuture f1 = tr.commit();
+		fdb_error_t err = wait_future(f1);
+		CHECK(err == 2006 /* Option set with an invalid value */);
+		break;
+	}
+	fdb_database_destroy(tempDb);
+}
+
 int main(int argc, char** argv) {
 	if (argc < 3) {
 		std::cout << "Unit tests for the FoundationDB C API.\n"
