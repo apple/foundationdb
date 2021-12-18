@@ -2364,17 +2364,9 @@ TEST_CASE("Set transaction size limit too high") {
 	fdb_check(
 	    fdb_database_set_option(tempDb, FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT, (const uint8_t*)&value, sizeof(value)));
 	fdb::Transaction tr(tempDb);
-	while (1) {
-		tr.clear_range(prefix, strinc_str(prefix));
-		for (const auto& [key, val] : std::map<std::string, std::string>{ { "foo", "bar" } }) {
-			tr.set(key, val);
-		}
-
-		fdb::EmptyFuture f1 = tr.commit();
-		fdb_error_t err = wait_future(f1);
-		CHECK(err == 2006 /* Option set with an invalid value */);
-		break;
-	}
+	fdb::EmptyFuture f1 = tr.commit();
+	fdb_error_t err = wait_future(f1);
+	CHECK(err == 2006 /* Option set with an invalid value */);
 	fdb_database_destroy(tempDb);
 }
 
