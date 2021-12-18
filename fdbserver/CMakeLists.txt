@@ -120,7 +120,7 @@ set(FDBSERVER_SRCS
   StorageCache.actor.cpp
   StorageMetrics.actor.h
   StorageMetrics.h
-  storageserver.actor.cpp
+  StorageServer.actor.cpp
   TagPartitionedLogSystem.actor.cpp
   TagPartitionedLogSystem.actor.h
   template_fdb.h
