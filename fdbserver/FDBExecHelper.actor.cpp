@@ -157,6 +157,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 			FlowTransport::createInstance(false, 1, WLTOKEN_IKVS_RESERVED_COUNT);
 			FlowTransport::transport().bind(child->address, child->address);
 			Sim2FileSystem::newFileSystem();
+			ProcessFactory<KeyValueStoreProcess>(flowProcessName.c_str());
 			Future<Void> f = runFlowProcess(flowProcessName, flowProcessEndpoint);
 
 			choose {
@@ -294,7 +295,7 @@ ACTOR Future<int> spawnProcess(std::string path,
 		int flags = fcntl(readFD.get(), F_GETFL, 0);
 		fcntl(readFD.get(), F_SETFL, flags | O_NONBLOCK);
 		while (true) {
-			if (runTime > maxWaitTime) {
+			if (maxWaitTime >= 0 && runTime > maxWaitTime) {
 				// timing out
 
 				TraceEvent(SevWarnAlways, "SpawnProcessFailure")
@@ -315,8 +316,6 @@ ACTOR Future<int> spawnProcess(std::string path,
 					break;
 				bytesRead += bytes;
 			}
-			TraceEvent(SevDebug, "SpawnPID").detail("PID", pid);
-			TraceEvent(SevDebug, "errorPID").detail("errno", err);
 			if (err < 0) {
 				TraceEvent event(SevWarnAlways, "SpawnProcessFailure");
 				setupTraceWithOutput(event, bytesRead, outputBuffer);

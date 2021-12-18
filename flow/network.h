@@ -539,7 +539,6 @@ public:
 		enChaosMetrics = 15,
 		enDiskFailureInjector = 16,
 		enBitFlipper = 17,
-		enIKVSProcess = 15,
 		COUNT // Add new fields before this enumerator
 	};
 

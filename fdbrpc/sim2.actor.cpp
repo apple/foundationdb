@@ -390,6 +390,12 @@ private:
 	}
 
 	void rollRandomClose() {
+		// make sure processes on the same machine doesn't get severed
+		std::string currProcessStr = process->address.ip.toString();
+		std::string peerProcessStr = peerProcess->address.ip.toString();
+		if (currProcessStr == peerProcessStr) {
+			return;
+		}
 		if (now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
 		    deterministicRandom()->random01() < .00001) {
 			g_simulator.lastConnectionFailure = now();

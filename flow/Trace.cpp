@@ -37,7 +37,6 @@
 #include "flow/EventTypes.actor.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/MetricSample.h"
-#include "flow/network.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -1482,7 +1481,7 @@ std::string TraceEventFields::getValue(std::string key) const {
 		if (tryGetValue("Type", value)) {
 			ev.detail("Event", value);
 		}
-		ev.detail("FieldName", key).backtrace();
+		ev.detail("FieldName", key);
 
 		throw attribute_not_found();
 	}

@@ -230,9 +230,6 @@ public:
 			auto pos = std::find(usedRemotePorts.begin(), usedRemotePorts.end(), port);
 			if (pos != usedRemotePorts.end()) {
 				usedRemotePorts.erase(pos);
-				TraceEvent(SevDebug, "RandomPortClosed").detail("PortNum", port);
-			} else {
-				TraceEvent(SevDebug, "RemotePortRemovedFailure").detail("Reason", "port not found");
 			}
 		}
 	};
@@ -285,8 +282,7 @@ public:
 		    .detail("Address", address)
 		    .detail("Role", role)
 		    .detail("NumRoles", roleAddresses[address].size())
-		    .detail("Value", roleAddresses[address][role])
-		    .backtrace();
+		    .detail("Value", roleAddresses[address][role]);
 	}
 
 	void removeRole(NetworkAddress const& address, std::string const& role) {

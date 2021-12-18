@@ -20,11 +20,6 @@
 
 // There's something in one of the files below that defines a macros
 // a macro that makes boost interprocess break on Windows.
-#include "fdbrpc/fdbrpc.h"
-// #include "flow/Error.h"
-#include "flow/flow.h"
-// #include "flow/genericactors.actor.h"
-#include "flow/network.h"
 #define BOOST_DATE_TIME_NO_LIB
 
 #include <algorithm>
@@ -53,6 +48,7 @@
 #include "fdbrpc/FlowProcess.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/PerfMetric.h"
+#include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/CoordinationInterface.h"
@@ -81,6 +77,8 @@
 #include "flow/WriteOnlySet.h"
 #include "flow/UnitTest.h"
 #include "flow/FaultInjection.h"
+#include "flow/flow.h"
+#include "flow/network.h"
 
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
@@ -960,10 +958,7 @@ enum class ServerRole {
 	Test,
 	VersionedMapTest,
 	UnitTests,
-	FlowProcess,
-	RemoteIKVS,
-	RemoteIKVSClient,
-	SpawnRemoteIKVS
+	FlowProcess
 };
 struct CLIOptions {
 	std::string commandLine;
@@ -1180,12 +1175,6 @@ private:
 					role = ServerRole::UnitTests;
 				else if (!strcmp(sRole, "flowprocess"))
 					role = ServerRole::FlowProcess;
-				else if (!strcmp(sRole, "remoteIKVS"))
-					role = ServerRole::RemoteIKVS;
-				else if (!strcmp(sRole, "remoteIKVSClient"))
-					role = ServerRole::RemoteIKVSClient;
-				else if (!strcmp(sRole, "spawnRemoteIKVS"))
-					role = ServerRole::SpawnRemoteIKVS;
 				else {
 					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
 					printHelpTeaser(argv[0]);
@@ -1194,7 +1183,6 @@ private:
 				break;
 			case OPT_PUBLICADDR:
 				argStr = args.OptionArg();
-				std::cout << argStr << "\n";
 				boost::split(tmpStrings, argStr, [](char c) { return c == ','; });
 				publicAddressStrs.insert(publicAddressStrs.end(), tmpStrings.begin(), tmpStrings.end());
 				break;
@@ -1720,15 +1708,6 @@ private:
 };
 } // namespace
 
-ACTOR Future<Void> spawnRemoteIKVSTest() {
-	state IKeyValueStore* store = openKVStore(KeyValueStoreType{}, "", UID(3, 0), 8000, false, false, true);
-	wait(delay(2.0));
-	wait(store->commit());
-
-	std::cout << "reached end" << std::endl;
-	return Void();
-}
-
 int main(int argc, char* argv[]) {
 	// TODO: Remove later, this is just to force the statics to be initialized
 	// otherwise the unit test won't run
@@ -1859,9 +1838,8 @@ int main(int argc, char* argv[]) {
 			g_network->addStopCallback(Net2FileSystem::stop);
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
 
-			const bool expectsPublicAddress =
-			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::Restore ||
-			     role == ServerRole::RemoteIKVS || role == ServerRole::FlowProcess);
+			const bool expectsPublicAddress = (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer ||
+			                                   role == ServerRole::Restore || role == ServerRole::FlowProcess);
 			if (opts.publicAddressStrs.empty()) {
 				if (expectsPublicAddress) {
 					fprintf(stderr, "ERROR: The -p or --public_address option is required\n");
@@ -2198,22 +2176,10 @@ int main(int argc, char* argv[]) {
 			f = result;
 		} else if (role == ServerRole::FlowProcess) {
 			TraceEvent(SevDebug, "StartingFlowProcess").detail("From", "fdbserver");
-			std::cout << opts.flowProcessName << "\n";
-			std::cout << opts.flowProcessEndpoint.getPrimaryAddress().toString() << "\n";
 			if (opts.flowProcessName == "KeyValueStoreProcess") {
-				std::cout << "Factory set\n";
-				ProcessFactory<KeyValueStoreProcess>(opts.flowProcessName.c_str()).create();
+				ProcessFactory<KeyValueStoreProcess>(opts.flowProcessName.c_str());
 			}
-			std::cout << g_network->getLocalAddress().toString() << "\n";
 			f = stopAfter(runFlowProcess(opts.flowProcessName, opts.flowProcessEndpoint));
-			g_network->run();
-		} else if (role == ServerRole::RemoteIKVS) {
-			TraceEvent(SevDebug, "StartingRemoteIKVSServer").detail("From", "fdbserver");
-			std::cout << g_network->getLocalAddress().toString() << "\n";
-			f = stopAfter(runRemoteServer());
-			g_network->run();
-		} else if (role == ServerRole::SpawnRemoteIKVS) {
-			f = stopAfter(spawnRemoteIKVSTest());
 			g_network->run();
 		}
 

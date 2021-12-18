@@ -560,9 +560,7 @@ ACTOR Future<bool> getDataDistributionActive(Database cx, WorkerInterface distri
 		return activeMessage.getValue("State") == "Active";
 	} catch (Error& e) {
 		TraceEvent("QuietDatabaseFailure", distributorWorker.id())
-		    .detail("Reason", "Failed to extract DataDistributionActive")
-		    .detail("Error", e.code())
-		    .backtrace();
+		    .detail("Reason", "Failed to extract DataDistributionActive");
 		throw;
 	}
 }

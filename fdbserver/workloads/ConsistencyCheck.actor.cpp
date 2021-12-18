@@ -22,6 +22,7 @@
 #include "boost/lexical_cast.hpp"
 
 #include "flow/IRandom.h"
+#include "flow/Trace.h"
 #include "flow/Tracing.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -307,9 +308,12 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					if (!usingDesiredClasses)
 						self->testFailure("Cluster has machine(s) not using requested classes");
 
-					bool workerListCorrect = wait(self->checkWorkerList(cx, self));
-					if (!workerListCorrect)
-						self->testFailure("Worker list incorrect");
+					if (g_network->isSimulated()) {
+						bool workerListCorrect = wait(self->checkWorkerList(cx, self));
+						if (!workerListCorrect) {
+							self->testFailure("Worker list incorrect");
+						}
+					}
 
 					bool coordinatorsCorrect = wait(self->checkCoordinators(cx));
 					if (!coordinatorsCorrect)
@@ -763,7 +767,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				try {
 					Version version = wait(self->getVersion(cx, self));
 
-					state GetKeyValuesRequest req;
+					GetKeyValuesRequest req;
 					req.begin = firstGreaterOrEqual(beginKey);
 					req.end = firstGreaterOrEqual(std::min<KeyRef>(shards[i].first.end, endKey));
 					req.limit = SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT;
@@ -812,124 +816,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						           reply.get().more != keyValueFutures[firstValidStorageServer].get().get().more) {
 							TraceEvent("CacheConsistencyCheck_InconsistentKeyServers")
 							    .detail("StorageServer1", shards[i].second[firstValidStorageServer].id())
-							    .detail("StorageServer2", shards[i].second[j].id())
-							    .detail("ReplyDataSize", reply.get().data.size())
-							    .detail("StorageServer1Data",
-							            keyValueFutures[firstValidStorageServer].get().get().data.size());
-
-							std::vector<StorageServerInterface>& storageServerInterfaces = shards[i].second;
-							auto& current = reply.get();
-							auto& reference = keyValueFutures[firstValidStorageServer].get().get();
-							auto firstValidServer = firstValidStorageServer;
-							if (g_network->isSimulated()) {
-								int invalidIndex = -1;
-								printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-								       storageServerInterfaces[j].isTss() ? "TSS " : "",
-								       j,
-								       storageServerInterfaces[j].address().toString().c_str(),
-								       printable(shards[i].first.begin).c_str(),
-								       printable(shards[i].first.end).c_str());
-								for (int k = 0; k < current.data.size(); k++) {
-									printf("%d. %s => %s\n",
-									       k,
-									       printable(current.data[k].key).c_str(),
-									       printable(current.data[k].value).c_str());
-									if (invalidIndex < 0 &&
-									    (k >= reference.data.size() || current.data[k].key != reference.data[k].key ||
-									     current.data[k].value != reference.data[k].value))
-										invalidIndex = k;
-								}
-
-								printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-								       storageServerInterfaces[firstValidServer].isTss() ? "TSS " : "",
-								       firstValidServer,
-								       storageServerInterfaces[firstValidServer].address().toString().c_str(),
-								       printable(shards[i].first.begin).c_str(),
-								       printable(shards[i].first.end).c_str());
-								for (int k = 0; k < reference.data.size(); k++) {
-									printf("%d. %s => %s\n",
-									       k,
-									       printable(reference.data[k].key).c_str(),
-									       printable(reference.data[k].value).c_str());
-									if (invalidIndex < 0 &&
-									    (k >= current.data.size() || reference.data[k].key != current.data[k].key ||
-									     reference.data[k].value != current.data[k].value))
-										invalidIndex = k;
-								}
-
-								printf("\nMISMATCH AT %d\n\n", invalidIndex);
-							}
-
-							// Data for trace event
-							// The number of keys unique to the current shard
-							int currentUniques = 0;
-							// The number of keys unique to the reference shard
-							int referenceUniques = 0;
-							// The number of keys in both shards with conflicting values
-							int valueMismatches = 0;
-							// The number of keys in both shards with matching values
-							int matchingKVPairs = 0;
-							// Last unique key on the current shard
-							KeyRef currentUniqueKey;
-							// Last unique key on the reference shard
-							KeyRef referenceUniqueKey;
-							// Last value mismatch
-							KeyRef valueMismatchKey;
-
-							// Loop indeces
-							int currentI = 0;
-							int referenceI = 0;
-							while (currentI < current.data.size() || referenceI < reference.data.size()) {
-								if (currentI >= current.data.size()) {
-									referenceUniqueKey = reference.data[referenceI].key;
-									referenceUniques++;
-									referenceI++;
-								} else if (referenceI >= reference.data.size()) {
-									currentUniqueKey = current.data[currentI].key;
-									currentUniques++;
-									currentI++;
-								} else {
-									KeyValueRef currentKV = current.data[currentI];
-									KeyValueRef referenceKV = reference.data[referenceI];
-
-									if (currentKV.key == referenceKV.key) {
-										if (currentKV.value == referenceKV.value)
-											matchingKVPairs++;
-										else {
-											valueMismatchKey = currentKV.key;
-											valueMismatches++;
-										}
-
-										currentI++;
-										referenceI++;
-									} else if (currentKV.key < referenceKV.key) {
-										currentUniqueKey = currentKV.key;
-										currentUniques++;
-										currentI++;
-									} else {
-										referenceUniqueKey = referenceKV.key;
-										referenceUniques++;
-										referenceI++;
-									}
-								}
-							}
-
-							TraceEvent("ConsistencyCheck_DataInconsistent")
-							    .detail("ShardBegin", shards[i].first.begin)
-							    .detail("ShardEnd", shards[i].first.end)
-							    .detail("VersionNumber", req.version)
-							    .detail(format("Server%dUniques", j).c_str(), currentUniques)
-							    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
-							    .detail(format("Server%dUniques", firstValidServer).c_str(), referenceUniques)
-							    .detail(format("Server%dUniqueKey", firstValidServer).c_str(), referenceUniqueKey)
-							    .detail("ValueMismatches", valueMismatches)
-							    .detail("ValueMismatchKey", valueMismatchKey)
-							    .detail("MatchingKVPairs", matchingKVPairs)
-							    .detail("IsTSS",
-							            storageServerInterfaces[j].isTss() ||
-							                    storageServerInterfaces[firstValidServer].isTss()
-							                ? "True"
-							                : "False");
+							    .detail("StorageServer2", shards[i].second[j].id());
 							self->testFailure("Key servers inconsistent", true);
 							return false;
 						}
@@ -1064,7 +951,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				try {
 					Version version = wait(self->getVersion(cx, self));
 
-					state GetKeyValuesRequest req;
+					GetKeyValuesRequest req;
 					req.begin = firstGreaterOrEqual(beginKey);
 					req.end = firstGreaterOrEqual(std::min<KeyRef>(shards[i].first.end, endKey));
 					req.limit = SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT;
@@ -1111,124 +998,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						           reply.get().more != keyValueFutures[firstValidStorageServer].get().get().more) {
 							TraceEvent("ConsistencyCheck_InconsistentKeyServers")
 							    .detail("StorageServer1", shards[i].second[firstValidStorageServer].id())
-							    .detail("StorageServer2", shards[i].second[j].id())
-							    .detail("ReplyDataSize", reply.get().data.size())
-							    .detail("StorageServer1Data",
-							            keyValueFutures[firstValidStorageServer].get().get().data.size());
-
-							std::vector<StorageServerInterface>& storageServerInterfaces = shards[i].second;
-							auto& current = reply.get();
-							auto& reference = keyValueFutures[firstValidStorageServer].get().get();
-							auto firstValidServer = firstValidStorageServer;
-							if (g_network->isSimulated()) {
-								int invalidIndex = -1;
-								printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-								       storageServerInterfaces[j].isTss() ? "TSS " : "",
-								       j,
-								       storageServerInterfaces[j].address().toString().c_str(),
-								       printable(shards[i].first.begin).c_str(),
-								       printable(shards[i].first.end).c_str());
-								for (int k = 0; k < current.data.size(); k++) {
-									printf("%d. %s => %s\n",
-									       k,
-									       printable(current.data[k].key).c_str(),
-									       printable(current.data[k].value).c_str());
-									if (invalidIndex < 0 &&
-									    (k >= reference.data.size() || current.data[k].key != reference.data[k].key ||
-									     current.data[k].value != reference.data[k].value))
-										invalidIndex = k;
-								}
-
-								printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-								       storageServerInterfaces[firstValidServer].isTss() ? "TSS " : "",
-								       firstValidServer,
-								       storageServerInterfaces[firstValidServer].address().toString().c_str(),
-								       printable(shards[i].first.begin).c_str(),
-								       printable(shards[i].first.end).c_str());
-								for (int k = 0; k < reference.data.size(); k++) {
-									printf("%d. %s => %s\n",
-									       k,
-									       printable(reference.data[k].key).c_str(),
-									       printable(reference.data[k].value).c_str());
-									if (invalidIndex < 0 &&
-									    (k >= current.data.size() || reference.data[k].key != current.data[k].key ||
-									     reference.data[k].value != current.data[k].value))
-										invalidIndex = k;
-								}
-
-								printf("\nMISMATCH AT %d\n\n", invalidIndex);
-							}
-
-							// Data for trace event
-							// The number of keys unique to the current shard
-							int currentUniques = 0;
-							// The number of keys unique to the reference shard
-							int referenceUniques = 0;
-							// The number of keys in both shards with conflicting values
-							int valueMismatches = 0;
-							// The number of keys in both shards with matching values
-							int matchingKVPairs = 0;
-							// Last unique key on the current shard
-							KeyRef currentUniqueKey;
-							// Last unique key on the reference shard
-							KeyRef referenceUniqueKey;
-							// Last value mismatch
-							KeyRef valueMismatchKey;
-
-							// Loop indeces
-							int currentI = 0;
-							int referenceI = 0;
-							while (currentI < current.data.size() || referenceI < reference.data.size()) {
-								if (currentI >= current.data.size()) {
-									referenceUniqueKey = reference.data[referenceI].key;
-									referenceUniques++;
-									referenceI++;
-								} else if (referenceI >= reference.data.size()) {
-									currentUniqueKey = current.data[currentI].key;
-									currentUniques++;
-									currentI++;
-								} else {
-									KeyValueRef currentKV = current.data[currentI];
-									KeyValueRef referenceKV = reference.data[referenceI];
-
-									if (currentKV.key == referenceKV.key) {
-										if (currentKV.value == referenceKV.value)
-											matchingKVPairs++;
-										else {
-											valueMismatchKey = currentKV.key;
-											valueMismatches++;
-										}
-
-										currentI++;
-										referenceI++;
-									} else if (currentKV.key < referenceKV.key) {
-										currentUniqueKey = currentKV.key;
-										currentUniques++;
-										currentI++;
-									} else {
-										referenceUniqueKey = referenceKV.key;
-										referenceUniques++;
-										referenceI++;
-									}
-								}
-							}
-
-							TraceEvent("ConsistencyCheck_DataInconsistent")
-							    .detail("ShardBegin", shards[i].first.begin)
-							    .detail("ShardEnd", shards[i].first.end)
-							    .detail("VersionNumber", req.version)
-							    .detail(format("Server%dUniques", j).c_str(), currentUniques)
-							    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
-							    .detail(format("Server%dUniques", firstValidServer).c_str(), referenceUniques)
-							    .detail(format("Server%dUniqueKey", firstValidServer).c_str(), referenceUniqueKey)
-							    .detail("ValueMismatches", valueMismatches)
-							    .detail("ValueMismatchKey", valueMismatchKey)
-							    .detail("MatchingKVPairs", matchingKVPairs)
-							    .detail("IsTSS",
-							            storageServerInterfaces[j].isTss() ||
-							                    storageServerInterfaces[firstValidServer].isTss()
-							                ? "True"
-							                : "False");
+							    .detail("StorageServer2", shards[i].second[j].id());
 							self->testFailure("Key servers inconsistent", true);
 							return false;
 						}

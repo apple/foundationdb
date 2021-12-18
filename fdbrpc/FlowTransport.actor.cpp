@@ -157,7 +157,6 @@ NetworkMessageReceiver* EndpointMap::get(Endpoint::Token const& token) {
 		TraceEvent(SevWarnAlways, "WellKnownEndpointNotAdded")
 		    .detail("Token", token)
 		    .detail("Index", index)
-		    .detail("WellKnownEndpointsCount", wellKnownEndpointCount)
 		    .backtrace();
 	}
 	if (index < data.size() && data[index].token().first() == token.first() &&
@@ -1476,7 +1475,6 @@ Future<Void> FlowTransport::bind(NetworkAddress publicAddress, NetworkAddress li
 
 	Future<Void> listenF = listen(self, listenAddress);
 	self->listeners.push_back(listenF);
-	std::cout << "publicAddress: " << publicAddress.toString() << "\n";
 	return listenF;
 }
 

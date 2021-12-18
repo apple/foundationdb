@@ -47,11 +47,9 @@ ACTOR Future<int> flowProcessRunner(FlowProcess* self, Promise<Void> ready) {
 	args.emplace_back("--process_endpoint");
 	args.emplace_back(format("%s,%lu,%lu", address.c_str(), token.first(), token.second()));
 
-	process = spawnProcess(path, args, 5000.0, false, 0.01);
+	process = spawnProcess(path, args, -1.0, false, 0.01);
 	choose {
 		when(FlowProcessRegistrationRequest req = waitNext(processInterface.registerProcess.getFuture())) {
-			std::cout << "Received Interface\n";
-			std::fputs("Received Interface\n", stdout);
 			self->consumeInterface(req.flowProcessInterface);
 			ready.send(Void());
 		}
@@ -73,20 +71,12 @@ void FlowProcess::start() {
 }
 
 Future<Void> runFlowProcess(std::string name, Endpoint endpoint) {
-	std::cout << "In runFlowProcess\n";
-	std::fputs("In runFlowProces\n", stdout);
-	// FlowProcess* self = IProcessFactory::create(name.c_str()); // it->second->create() segfaulting?
-	FlowProcess* self = new KeyValueStoreProcess();
-	std::cout << "Check\n";
-	std::string addrMsg = "endpoint address is: ";
-	addrMsg = addrMsg.append(endpoint.getPrimaryAddress().toString());
-	std::fputs(addrMsg.c_str(), stdout);
-	std::cout << "endpoint address is: " << endpoint.getPrimaryAddress().toString() << std::endl;
+	TraceEvent(SevDebug, "RunFlowProcessStart").log();
+	FlowProcess* self = IProcessFactory::create(name.c_str()); // it->second->create() segfaulting?
 	RequestStream<FlowProcessRegistrationRequest> registerProcess(endpoint);
-	std::cout << "registeredProcess with endpoint: " << endpoint.getPrimaryAddress().toString() << std::endl;
 	FlowProcessRegistrationRequest req;
 	req.flowProcessInterface = self->serializedInterface();
 	registerProcess.send(req);
-	std::cout << "run" << std::endl;
+	TraceEvent(SevDebug, "FlowProcessInitFinished").log();
 	return self->run();
 }

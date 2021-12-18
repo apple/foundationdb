@@ -80,12 +80,18 @@ struct IProcessFactory {
 	}
 
 	virtual FlowProcess* create() = 0;
+
+	virtual const char* getName() = 0;
 };
 
 template <class ProcessType>
 struct ProcessFactory : IProcessFactory {
-	ProcessFactory(const char* name) { factories()[name] = this; }
+	ProcessFactory(const char* name) : name(name) { factories()[name] = this; }
 	FlowProcess* create() override { return new ProcessType(); }
+	const char* getName() override { return this->name; }
+
+private:
+	const char* name;
 };
 
 Future<Void> runFlowProcess(std::string name, Endpoint endpoint);
