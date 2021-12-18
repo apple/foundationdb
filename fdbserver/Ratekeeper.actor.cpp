@@ -29,7 +29,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/RatekeeperInterface.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

@@ -23,7 +23,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/RecoveryState.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h" // This must be the last include.

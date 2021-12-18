@@ -22,7 +22,7 @@
 #include "flow/DeterministicRandom.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/QuietDatabase.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbserver/workloads/workloads.actor.h"

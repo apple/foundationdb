@@ -35,7 +35,7 @@
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/RecoveryState.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/ActorCollection.h"
 

@@ -41,7 +41,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/BlobManagerInterface.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/Status.h"
 #include "fdbserver/LatencyBandConfig.h"
 #include "fdbclient/DatabaseContext.h"

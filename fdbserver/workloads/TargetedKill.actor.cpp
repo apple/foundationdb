@@ -25,7 +25,7 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

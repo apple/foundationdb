@@ -24,7 +24,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Choose a random proxy and a random tLog, represented as unclogTlog.

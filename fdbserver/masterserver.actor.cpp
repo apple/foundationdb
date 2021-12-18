@@ -41,7 +41,7 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/ProxyCommitData.actor.h"
 #include "fdbserver/RecoveryState.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"

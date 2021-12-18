@@ -34,7 +34,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h" // This must be the last #include.

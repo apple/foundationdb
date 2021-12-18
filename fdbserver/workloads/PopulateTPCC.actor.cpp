@@ -22,7 +22,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/workloads/TPCCWorkload.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h" // needs to be last include

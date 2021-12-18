@@ -35,7 +35,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/ActorCollection.h"

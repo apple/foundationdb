@@ -1,7 +1,7 @@
 #include <boost/algorithm/string/predicate.hpp>
 
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/ManagementAPI.actor.h"

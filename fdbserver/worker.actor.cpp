@@ -43,7 +43,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/BlobManagerInterface.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/LocalConfiguration.h"

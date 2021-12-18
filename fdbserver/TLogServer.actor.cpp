@@ -40,7 +40,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/Stats.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/RecoveryState.h"

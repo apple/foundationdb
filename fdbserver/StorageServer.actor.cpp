@@ -57,7 +57,7 @@
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/StorageMetrics.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"

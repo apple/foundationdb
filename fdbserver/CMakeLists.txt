@@ -107,7 +107,6 @@ set(FDBSERVER_SRCS
   RoleLineage.actor.h
   RoleLineage.actor.cpp
   ServerDBInfo.actor.h
-  ServerDBInfo.h
   SigStack.cpp
   SimpleConfigConsumer.actor.cpp
   SimpleConfigConsumer.h

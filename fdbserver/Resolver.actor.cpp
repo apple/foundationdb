@@ -25,7 +25,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/ResolverInterface.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/StorageMetrics.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"

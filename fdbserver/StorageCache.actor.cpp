@@ -23,7 +23,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/VersionedMap.h"
 #include "fdbclient/KeyRangeMap.h"

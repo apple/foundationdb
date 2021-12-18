@@ -24,7 +24,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ApplyMetadataMutation.h"

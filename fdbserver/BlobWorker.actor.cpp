@@ -37,7 +37,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/WaitFailure.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"

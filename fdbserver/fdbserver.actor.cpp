@@ -56,7 +56,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/RestoreWorkerInterface.actor.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/SimulatedCluster.h"
 #include "fdbserver/Status.h"
 #include "fdbserver/TesterInterface.actor.h"

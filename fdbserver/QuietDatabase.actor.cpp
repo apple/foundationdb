@@ -30,7 +30,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/Status.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include <boost/lexical_cast.hpp>

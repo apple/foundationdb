@@ -1163,6 +1163,6 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 	}
 }
 
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "flow/unactorcompiler.h"
 #endif
