@@ -2248,7 +2248,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 						Reference<LogSet> logSet = lockResults[0].logSet;
 						if (versionRepCount[k] >=
 						    std::get<1>(result.unknownCommittedVersions[i]) - logSet->tLogReplicationFactor + 1) {
-							if (k > rvLogs[result.id]) {
+							if (k > rvLogs[result.id] && k > knownCommittedVersion) {
 								rvLogs[result.id] = k;
 							}
 						}
@@ -2260,9 +2260,6 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 						logSystem->maxRv = val;
 						// TraceEvent("RecoveryVersionInfo").detail("MaxRv", logSystem->maxRv);
 					}
-				}
-				for (auto& result : results) {
-					rvLogs[result.id] = logSystem->maxRv;
 				}
 			} else {
 				lastEnd = minEnd;
