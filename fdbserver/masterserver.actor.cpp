@@ -824,6 +824,11 @@ ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId,
 		if (ver == invalidVersion) {
 			ver = oldLogSystem->getKnownCommittedVersion();
 		}
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			// Do not try to split peeks between data centers in peekTxns() to recover mem kvstore.
+			// This recovery optimization won't work in UNICAST mode.
+			loc.first = -1;
+		}
 		locality->set(PeekTxsInfo(loc.first, loc.second, ver));
 		TraceEvent("UpdatedLocalityForDcId")
 		    .detail("DcId", dcId)

@@ -52,7 +52,6 @@ struct TLogQueueEntryRef {
 	Version version;
 	Version knownCommittedVersion;
 	StringRef messages;
-
 	TLogQueueEntryRef() : version(0), knownCommittedVersion(0) {}
 	TLogQueueEntryRef(Arena& a, TLogQueueEntryRef const& from)
 	  : id(from.id), version(from.version), knownCommittedVersion(from.knownCommittedVersion),
@@ -319,6 +318,8 @@ struct TLogData : NonCopyable {
 	IDiskQueue* rawPersistentQueue; // The physical queue the persistentQueue below stores its data. Ideally, log
 	                                // interface should work without directly accessing rawPersistentQueue
 	TLogQueue* persistentQueue; // Logical queue the log operates on and persist its data.
+
+	std::deque<std::tuple<Version, int>> unknownCommittedVersions;
 
 	int64_t diskQueueCommitBytes;
 	AsyncVar<bool>
@@ -816,6 +817,8 @@ ACTOR Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, 
 	TLogLockResult result;
 	result.end = stopVersion;
 	result.knownCommittedVersion = logData->knownCommittedVersion;
+	result.unknownCommittedVersions = self->unknownCommittedVersions;
+	result.id = self->dbgid;
 
 	TraceEvent("TLogStop2", self->dbgid)
 	    .detail("LogId", logData->logId)
@@ -1085,7 +1088,6 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 
 	TEST(anyData); // TLog moved data to persistentData
 	logData->persistentDataDurableVersion = newPersistentDataVersion;
-
 	for (tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
 		for (tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
 			if (logData->tag_data[tagLocality][tagId]) {
@@ -2232,6 +2234,13 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		}
 		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 		logData->version.set(req.version);
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			self->unknownCommittedVersions.push_front(std::make_tuple(req.version, req.tLogCount));
+			while (!self->unknownCommittedVersions.empty() &&
+			       std::get<0>(self->unknownCommittedVersions.back()) <= req.knownCommittedVersion) {
+				self->unknownCommittedVersions.pop_back();
+			}
+		}
 
 		if (req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.AfterTLogCommit");
@@ -2253,7 +2262,6 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 
 	if (req.debugID.present())
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.After");
-
 	req.reply.send(logData->durableKnownCommittedVersion);
 	return Void();
 }
@@ -3302,7 +3310,14 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 
 		if (recovering) {
 			logData->unrecoveredBefore = req.startVersion;
-			logData->recoveredAt = req.recoverAt;
+			state Version recoverAt = req.recoverAt;
+			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+				if (req.rvLogs.find(self->dbgid) != req.rvLogs.end()) {
+					recoverAt = req.rvLogs[self->dbgid];
+					// TraceEvent("TLogUnicastRecovered").detail("U", recoverAt);
+				}
+			}
+			logData->recoveredAt = recoverAt;
 			logData->knownCommittedVersion = req.startVersion - 1;
 			logData->persistentDataVersion = logData->unrecoveredBefore - 1;
 			logData->persistentDataDurableVersion = logData->unrecoveredBefore - 1;
@@ -3314,7 +3329,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 
 			TraceEvent("TLogRecover", self->dbgid)
 			    .detail("LogId", logData->logId)
-			    .detail("At", req.recoverAt)
+			    .detail("At", recoverAt)
 			    .detail("Known", req.knownCommittedVersion)
 			    .detail("Unrecovered", logData->unrecoveredBefore)
 			    .detail("Tags", describe(req.recoverTags))
@@ -3331,28 +3346,32 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			self->newLogData.trigger();
 
 			if ((req.isPrimary || req.recoverFrom.logRouterTags == 0) && !logData->stopped &&
-			    logData->unrecoveredBefore <= req.recoverAt) {
+			    logData->unrecoveredBefore <= recoverAt) {
 				if (req.recoverFrom.logRouterTags > 0 && req.locality != tagLocalitySatellite) {
-					logData->logRouterPopToVersion = req.recoverAt;
+					logData->logRouterPopToVersion = recoverAt;
 					std::vector<Tag> tags;
 					tags.push_back(logData->remoteTag);
-					wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, req.recoverAt, true) ||
+					wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, recoverAt, true) ||
 					     logData->removed || logData->stopCommit.onTrigger());
 				} else if (!req.recoverTags.empty()) {
 					ASSERT(logData->unrecoveredBefore > req.knownCommittedVersion);
 					wait(pullAsyncData(
-					         self, logData, req.recoverTags, req.knownCommittedVersion + 1, req.recoverAt, false) ||
+					         self, logData, req.recoverTags, req.knownCommittedVersion + 1, recoverAt, false) ||
 					     logData->removed || logData->stopCommit.onTrigger());
 				}
 				pulledRecoveryVersions = true;
-				logData->knownCommittedVersion = req.recoverAt;
+				logData->knownCommittedVersion = recoverAt;
 			}
 
-			if ((req.isPrimary || req.recoverFrom.logRouterTags == 0) && logData->version.get() < req.recoverAt &&
-			    !logData->stopped) {
+			state Version lastVersionPrevEpoch = req.recoverAt;
+			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+				lastVersionPrevEpoch = req.maxRv;
+			}
+			if ((req.isPrimary || req.recoverFrom.logRouterTags == 0) &&
+			    logData->version.get() < lastVersionPrevEpoch && !logData->stopped) {
 				// Log the changes to the persistent queue, to be committed by commitQueue()
 				TLogQueueEntryRef qe;
-				qe.version = req.recoverAt;
+				qe.version = lastVersionPrevEpoch;
 				qe.knownCommittedVersion = logData->knownCommittedVersion;
 				qe.messages = StringRef();
 				qe.id = logData->logId;
@@ -3362,8 +3381,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 				if (self->diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES) {
 					self->largeDiskQueueCommitBytes.set(true);
 				}
-
-				logData->version.set(req.recoverAt);
+				logData->version.set(lastVersionPrevEpoch);
 			}
 
 			if (logData->recoveryComplete.isSet()) {

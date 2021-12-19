@@ -486,6 +486,7 @@ struct InitializeTLogRequest {
 	UID recruitmentID;
 	LogSystemConfig recoverFrom;
 	Version recoverAt;
+	Version maxRv;
 	Version knownCommittedVersion;
 	LogEpoch epoch;
 	std::vector<Tag> recoverTags;
@@ -499,6 +500,7 @@ struct InitializeTLogRequest {
 	Version startVersion;
 	int logRouterTags;
 	int txsTags;
+	std::map<UID, Version> rvLogs;
 
 	ReplyPromise<struct TLogInterface> reply;
 
@@ -510,6 +512,7 @@ struct InitializeTLogRequest {
 		           recruitmentID,
 		           recoverFrom,
 		           recoverAt,
+		           maxRv,
 		           knownCommittedVersion,
 		           epoch,
 		           recoverTags,
@@ -523,7 +526,8 @@ struct InitializeTLogRequest {
 		           reply,
 		           logVersion,
 		           spillType,
-		           txsTags);
+		           txsTags,
+		           rvLogs);
 	}
 };
 

@@ -105,6 +105,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	Optional<Version> recoveredAt;
 	Version knownCommittedVersion;
 	Version backupStartVersion = invalidVersion; // max(tLogs[0].startVersion, previous epochEnd).
+	Version maxRv; // (when ENABLE_VERSION_VECTOR_TLOG_UNICAST is on) the maximum DV over all tLogs.
+	std::map<UID, Version> rvLogs; // recovery versions per tlog
 	LocalityData locality;
 	// For each currently running popFromLog actor, outstandingPops is
 	// (logID, tag)->(max popped version, durableKnownCommittedVersion).
@@ -124,7 +126,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                        LogEpoch e,
 	                        Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>())
 	  : dbgid(dbgid), logSystemType(LogSystemType::empty), expectedLogSets(0), logRouterTags(0), txsTags(0),
-	    repopulateRegionAntiQuorum(0), stopped(false), epoch(e), oldestBackupEpoch(0),
+	    repopulateRegionAntiQuorum(0), stopped(false), epoch(e), oldestBackupEpoch(0), maxRv(0),
 	    recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), hasRemoteServers(false),
 	    locality(locality), addActor(addActor), popActors(false) {}
 
@@ -306,11 +308,11 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	LogEpoch getOldestBackupEpoch() const final;
 
 	void setOldestBackupEpoch(LogEpoch epoch) final;
-
 	ACTOR static Future<Void> monitorLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> logServer,
 	                                     Reference<AsyncVar<bool>> failed);
 
-	Optional<std::pair<Version, Version>> static getDurableVersion(
+	// returns the log group's knownComittedVersion, DV, and a vector of TLogLockResults for each tLog in the group.
+	Optional<std::tuple<Version, Version, std::vector<TLogLockResult>>> static getDurableVersion(
 	    UID dbgid,
 	    LogLockInfo lockInfo,
 	    std::vector<Reference<AsyncVar<bool>>> failed = std::vector<Reference<AsyncVar<bool>>>(),

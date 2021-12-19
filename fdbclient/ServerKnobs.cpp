@@ -414,7 +414,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TXN_STATE_SEND_AMOUNT,                                    4 );
 	init( REPORT_TRANSACTION_COST_ESTIMATION_DELAY,               0.1 );
 	init( PROXY_REJECT_BATCH_QUEUED_TOO_LONG,                    true );
-	init( PROXY_USE_RESOLVER_PRIVATE_MUTATIONS,                  true ); if( randomize && BUGGIFY ) PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = deterministicRandom()->coinflip();
+	init( PROXY_USE_RESOLVER_PRIVATE_MUTATIONS,                  true ); if( !ENABLE_VERSION_VECTOR_TLOG_UNICAST && randomize && BUGGIFY ) PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = deterministicRandom()->coinflip();
 
 	init( RESET_MASTER_BATCHES,                                   200 );
 	init( RESET_RESOLVER_BATCHES,                                 200 );
