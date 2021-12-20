@@ -77,6 +77,7 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	NotifiedVersion durableSnapshotVersion; // same as delta vars, except for snapshots
 	Version pendingSnapshotVersion = 0;
 	Version initialSnapshotVersion = invalidVersion;
+	Version knownCommittedVersion;
 
 	int64_t originalEpoch;
 	int64_t originalSeqno;
@@ -953,6 +954,12 @@ static Reference<ChangeFeedData> newChangeFeedData(Version startVersion) {
 	return r;
 }
 
+// TODO REMOVE once correctness clean
+#define DEBUG_BW_START_VERSION invalidVersion
+#define DEBUG_BW_END_VERSION invalidVersion
+#define DEBUG_BW_WAIT_VERSION invalidVersion
+#define DEBUG_BW_VERSION(v) DEBUG_BW_START_VERSION <= v&& v <= DEBUG_BW_END_VERSION
+
 static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
                                  Version mutationVersion,
                                  Version rollbackVersion,
@@ -1086,12 +1093,12 @@ ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
 		wait(grvAtLeast);
 	}
 	state Version grvVersion = bwData->grvVersion.get();
-	/*if (BW_DEBUG) {
-	    fmt::print("waitVersionCommitted got {0} < {1}, waiting on CF (currently {2})\n",
-	               version,
-	               grvVersion,
-	               metadata->activeCFData.get()->getVersion());
-	}*/
+	if ((DEBUG_BW_VERSION(version)) || (DEBUG_BW_VERSION(grvVersion))) {
+		fmt::print("waitVersionCommitted got {0} < {1}, waiting on CF (currently {2})\n",
+		           version,
+		           grvVersion,
+		           metadata->activeCFData.get()->getVersion());
+	}
 	// make sure the change feed has consumed mutations up through grvVersion to ensure none of them are rollbacks
 
 	loop {
@@ -1107,6 +1114,9 @@ ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
 	if (grvVersion > metadata->waitForVersionReturned) {
 		metadata->waitForVersionReturned = grvVersion;
 	}
+	if (version > metadata->knownCommittedVersion) {
+		metadata->knownCommittedVersion = version;
+	}
 	/*if (BW_DEBUG) {
 	    fmt::print(
 	        "waitVersionCommitted CF whenAtLeast {0}: {1}\n", grvVersion, metadata->activeCFData.get()->getVersion());
@@ -1114,12 +1124,6 @@ ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
 
 	return Void();
 }
-
-// TODO REMOVE once correctness clean
-#define DEBUG_BW_START_VERSION invalidVersion
-#define DEBUG_BW_END_VERSION invalidVersion
-#define DEBUG_BW_WAIT_VERSION invalidVersion
-#define DEBUG_BW_VERSION(v) DEBUG_BW_START_VERSION <= v&& v <= DEBUG_BW_END_VERSION
 
 // updater for a single granule
 // TODO: this is getting kind of large. Should try to split out this actor if it continues to grow?
@@ -1591,7 +1595,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						state int waitIdx = 0;
 						int idx = 0;
 						for (auto& f : inFlightFiles) {
-							if (f.snapshot && f.version < metadata->pendingSnapshotVersion) {
+							if (f.snapshot && f.version < metadata->pendingSnapshotVersion &&
+							    f.version <= metadata->knownCommittedVersion) {
 								if (BW_DEBUG) {
 									fmt::print("[{0} - {1}) Waiting on previous snapshot file @ {2}\n",
 									           metadata->keyRange.begin.printable(),
@@ -1634,7 +1639,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					// if we're in the old change feed case and can't snapshot but we have enough data to, don't
 					// queue too many files in parallel, and slow down change feed consuming to let file writing
 					// catch up
-					if (inFlightFiles.size() > 10) {
+
+					if (inFlightFiles.size() > 10 && inFlightFiles.front().version <= metadata->knownCommittedVersion) {
 						if (BW_DEBUG) {
 							printf("[%s - %s) Waiting on delta file b/c old change feed\n",
 							       metadata->keyRange.begin.printable().c_str(),

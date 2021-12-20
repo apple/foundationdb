@@ -1052,6 +1052,11 @@ protected:
 		}
 		auto copy = std::move(queue.front());
 		queue.pop();
+		if (onEmpty.isValid() && queue.empty()) {
+			Promise<Void> hold = onEmpty;
+			onEmpty = Promise<Void>(nullptr);
+			hold.send(Void());
+		}
 		return copy;
 	}
 
