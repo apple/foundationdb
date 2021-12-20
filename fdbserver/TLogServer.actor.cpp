@@ -2154,7 +2154,7 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 
 		while (!logData->versionHistory.empty() &&
 		       logData->versionHistory.front().first <
-		           req.truePrevVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
+		           req.knownCommittedVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 			logData->versionHistory.pop_front();
 		}
 		logData->versionHistory.push_back(std::make_pair(req.truePrevVersion, req.version));
@@ -3106,7 +3106,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 						}
 						while (!logData->versionHistory.empty() &&
 						       logData->versionHistory.front().first <
-						           qe.version - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
+						           qe.knownCommittedVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 							logData->versionHistory.pop_front();
 						}
 						logData->versionHistory.push_back(std::make_pair(qe.prevVersion, qe.version));
