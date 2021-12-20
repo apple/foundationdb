@@ -191,23 +191,27 @@ struct StorageServerDisk {
 
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
 	Future<Key> readNextKeyInclusive(KeyRef key, IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL) {
+		++(*kvScans);
 		return readFirstKey(storage, KeyRangeRef(key, allKeys.end), type);
 	}
 	Future<Optional<Value>> readValue(KeyRef key,
 	                                  IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL,
 	                                  Optional<UID> debugID = Optional<UID>()) {
+		++(*kvGets);
 		return storage->readValue(key, type, debugID);
 	}
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
 	                                        IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL,
 	                                        Optional<UID> debugID = Optional<UID>()) {
+		++(*kvGets);
 		return storage->readValuePrefix(key, maxLength, type, debugID);
 	}
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit = 1 << 30,
 	                              int byteLimit = 1 << 30,
 	                              IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL) {
+		++(*kvScans);
 		return storage->readRange(keys, rowLimit, byteLimit, type);
 	}
 
@@ -217,6 +221,9 @@ struct StorageServerDisk {
 
 	Counter* kvBytesCommit;
 	Counter* kvClearRange;
+	Counter* kvGets;
+	Counter* kvScans;
+	Counter* kvCommit;
 
 private:
 	struct StorageServer* data;
@@ -791,6 +798,10 @@ public:
 
 		Counter kvBytesScan;
 		Counter kvBytesGet;
+		Counter eagerReadsKeys;
+		Counter kvGets;
+		Counter kvScans;
+		Counter kvCommit;
 
 		LatencySample readLatencySample;
 		LatencyBands readLatencyBands;
@@ -816,10 +827,12 @@ public:
 		    fetchesFromLogs("FetchesFromLogs", cc), quickGetValueHit("QuickGetValueHit", cc),
 		    quickGetValueMiss("QuickGetValueMiss", cc), quickGetKeyValuesHit("QuickGetKeyValuesHit", cc),
 		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc), kvBytesScan("KVBytesScan", cc),
-		    kvBytesGet("KVBytesGet", cc), readLatencySample("ReadLatencyMetrics",
-		                                                    self->thisServerID,
-		                                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                                                    SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    eagerReadsKeys("EagerReadsKeys", cc), kvGets("KVGets", cc), kvScans("KVScans", cc),
+		    kvCommit("KVCommit", cc), kvBytesGet("KVBytesGet", cc),
+		    readLatencySample("ReadLatencyMetrics",
+		                      self->thisServerID,
+		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
@@ -842,6 +855,8 @@ public:
 			specialCounter(cc, "KvstoreInlineKey", [self]() { return std::get<2>(self->storage.getSize()); });
 		}
 	} counters;
+
+	int64_t bytesRestored;
 
 	Reference<EventCacheHolder> storageServerSourceTLogIDEventHolder;
 
@@ -899,6 +914,9 @@ public:
 
 		this->storage.kvBytesCommit = &counters.kvBytesCommit;
 		this->storage.kvClearRange = &counters.kvClearRange;
+		this->storage.kvGets = &counters.kvGets;
+		this->storage.kvScans = &counters.kvScans;
+		this->storage.kvCommit = &counters.kvCommit;
 	}
 
 	//~StorageServer() { fclose(log); }
@@ -1309,6 +1327,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			path = 2;
 			Optional<Value> vv = wait(data->storage.readValue(req.key, IKeyValueStore::ReadType::NORMAL, req.debugID));
 			data->counters.kvBytesGet += vv.expectedSize();
+			++data->counters.kvGets;
 			// Validate that while we were reading the data we didn't lose the version or shard
 			if (version < data->storageVersion()) {
 				TEST(true); // transaction_too_old after readValue
@@ -2928,6 +2947,8 @@ ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager)
 	}
 	eager->keyEnd = keyEndVal;
 	eager->value = optionalValues;
+	data->counters.eagerReadsKeys += eager->keys.size();
+	data->counters.eagerReadsKeys += keyEnd.size();
 
 	return Void();
 }
@@ -3174,7 +3195,7 @@ void removeDataRange(StorageServer* ss,
 		MutationRef m(MutationRef::ClearRange, range.end, endClear->getEndKey());
 		m = ss->addMutationToMutationLog(mLV, m);
 		data.insert(m.param1, ValueOrClearToRef::clearTo(m.param2));
-		ss->counters.systemClearRange++;
+		++ss->counters.systemClearRange;
 	}
 
 	auto beginClear = data.atLatest().lastLess(range.begin);
@@ -3650,7 +3671,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		if (e.code() == error_code_actor_cancelled && !data->shuttingDown && shard->phase >= AddingShard::Fetching) {
 			if (shard->phase < AddingShard::Waiting) {
 				data->storage.clearRange(keys);
-				data->counters.systemClearRange++;
+				++data->counters.systemClearRange;
 				data->byteSampleApplyClear(keys, invalidVersion);
 			} else {
 				ASSERT(data->data().getLatestVersion() > data->version.get());
@@ -4538,6 +4559,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
 		state double beforeStorageCommit = now();
 		state Future<Void> durable = data->storage.commit();
+		++data->counters.kvCommit;
 		state Future<Void> durableDelay = Void();
 
 		if (bytesLeft > 0) {
@@ -4625,7 +4647,7 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 	//TraceEvent("SetAvailableStatus", self->thisServerID).detail("Version", mLV.version).detail("RangeBegin", availableKeys.begin).detail("RangeEnd", availableKeys.end);
 
 	self->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, availableKeys.begin, availableKeys.end));
-	self->counters.systemClearRange++;
+	++self->counters.systemClearRange;
 	self->addMutationToMutationLog(mLV,
 	                               MutationRef(MutationRef::SetValue,
 	                                           availableKeys.begin,
@@ -4646,7 +4668,7 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 	                                    persistShardAssignedKeys.begin.toString() + keys.end.toString());
 	//TraceEvent("SetAssignedStatus", self->thisServerID).detail("Version", mLV.version).detail("RangeBegin", assignedKeys.begin).detail("RangeEnd", assignedKeys.end);
 	self->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, assignedKeys.begin, assignedKeys.end));
-	self->counters.systemClearRange++;
+	++self->counters.systemClearRange;
 	self->addMutationToMutationLog(mLV,
 	                               MutationRef(MutationRef::SetValue,
 	                                           assignedKeys.begin,
@@ -4662,7 +4684,7 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 
 void StorageServerDisk::clearRange(KeyRangeRef keys) {
 	storage->clear(keys);
-	*kvClearRange++;
+	++(*kvClearRange);
 }
 
 void StorageServerDisk::writeKeyValue(KeyValueRef kv) {
@@ -4677,7 +4699,7 @@ void StorageServerDisk::writeMutation(MutationRef mutation) {
 		*kvBytesCommit += mutation.expectedSize();
 	} else if (mutation.type == MutationRef::ClearRange) {
 		storage->clear(KeyRangeRef(mutation.param1, mutation.param2));
-		*kvClearRange++;
+		++(*kvClearRange);
 	} else
 		ASSERT(false);
 }
@@ -4692,7 +4714,7 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
 			*kvBytesCommit += m.expectedSize();
 		} else if (m.type == MutationRef::ClearRange) {
 			storage->clear(KeyRangeRef(m.param1, m.param2));
-			*kvClearRange++;
+			++(*kvClearRange);
 		}
 	}
 }
@@ -4756,6 +4778,7 @@ ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
 		    KeyRangeRef(begin, end), SERVER_KNOBS->STORAGE_LIMIT_BYTES, SERVER_KNOBS->STORAGE_LIMIT_BYTES));
 		if (results) {
 			results->push_back(bs.castTo<VectorRef<KeyValueRef>>());
+			data->bytesRestored += bs.logicalSize();
 			data->counters.kvBytesScan += bs.logicalSize();
 		}
 		int rangeSize = bs.expectedSize();
@@ -4881,6 +4904,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		data->sk = Key();
 		return false;
 	}
+	data->bytesRestored += fFormat.get().expectedSize();
 	if (!persistFormatReadableRange.contains(fFormat.get().get())) {
 		TraceEvent(SevError, "UnsupportedDBFormat")
 		    .detail("Format", fFormat.get().get().toString())
@@ -4888,8 +4912,10 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		throw worker_recovery_failed();
 	}
 	data->thisServerID = BinaryReader::fromStringRef<UID>(fID.get().get(), Unversioned());
+	data->bytesRestored += fID.get().expectedSize();
 	if (ftssPairID.get().present()) {
 		data->setTssPair(BinaryReader::fromStringRef<UID>(ftssPairID.get().get(), Unversioned()));
+		data->bytesRestored += ftssPairID.get().expectedSize();
 	}
 
 	// It's a bit sketchy to rely on an untrusted storage engine to persist its quarantine state when the quarantine
@@ -4898,22 +4924,29 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	if (fTssQuarantine.get().present()) {
 		TEST(true); // TSS restarted while quarantined
 		data->tssInQuarantine = true;
+		data->bytesRestored += fTssQuarantine.get().expectedSize();
 	}
 
 	data->sk = serverKeysPrefixFor((data->tssPairID.present()) ? data->tssPairID.get() : data->thisServerID)
 	               .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
 
-	if (fLogProtocol.get().present())
+	if (fLogProtocol.get().present()) {
 		data->logProtocol = BinaryReader::fromStringRef<ProtocolVersion>(fLogProtocol.get().get(), Unversioned());
+		data->bytesRestored += fLogProtocol.get().expectedSize();
+	}
 
-	if (fPrimaryLocality.get().present())
+	if (fPrimaryLocality.get().present()) {
 		data->primaryLocality = BinaryReader::fromStringRef<int8_t>(fPrimaryLocality.get().get(), Unversioned());
+		data->bytesRestored += fPrimaryLocality.get().expectedSize();
+	}
 
 	state Version version = BinaryReader::fromStringRef<Version>(fVersion.get().get(), Unversioned());
 	debug_checkRestoredVersion(data->thisServerID, version, "StorageServer");
 	data->setInitialVersion(version);
+	data->bytesRestored += fVersion.get().expectedSize();
 
 	state RangeResult available = fShardAvailable.get();
+	data->bytesRestored += available.logicalSize();
 	state int availableLoc;
 	for (availableLoc = 0; availableLoc < available.size(); availableLoc++) {
 		KeyRangeRef keys(available[availableLoc].key.removePrefix(persistShardAvailableKeys.begin),
@@ -4930,6 +4963,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	}
 
 	state RangeResult assigned = fShardAssigned.get();
+	data->bytesRestored += assigned.logicalSize();
 	state int assignedLoc;
 	for (assignedLoc = 0; assignedLoc < assigned.size(); assignedLoc++) {
 		KeyRangeRef keys(assigned[assignedLoc].key.removePrefix(persistShardAssignedKeys.begin),
@@ -4957,10 +4991,11 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		     ++it) {
 			if (it->value() == invalidVersion) {
 				KeyRangeRef clearRange(it->begin(), it->end());
-				data->counters.systemClearRange++;
+				++data->counters.systemClearRange;
 				// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
 				// DEBUG_KEY_RANGE("clearInvalidVersion", invalidVersion, clearRange);
 				storage->clear(clearRange);
+				++data->counters.systemClearRange;
 				data->byteSampleApplyClear(clearRange, invalidVersion);
 			}
 		}
@@ -5038,7 +5073,7 @@ void StorageServer::byteSampleApplySet(KeyValueRef kv, Version ver) {
 			auto diskRange = singleKeyRange(key.withPrefix(persistByteSampleKeys.begin));
 			addMutationToMutationLogOrStorage(ver,
 			                                  MutationRef(MutationRef::ClearRange, diskRange.begin, diskRange.end));
-			counters.systemClearRange++;
+			++counters.systemClearRange;
 		}
 	}
 
@@ -5085,7 +5120,7 @@ void StorageServer::byteSampleApplyClear(KeyRangeRef range, Version ver) {
 		byteSample.eraseAsync(range.begin, range.end);
 		auto diskRange = range.withPrefix(persistByteSampleKeys.begin);
 		addMutationToMutationLogOrStorage(ver, MutationRef(MutationRef::ClearRange, diskRange.begin, diskRange.end));
-		counters.systemClearRange++;
+		++counters.systemClearRange;
 	}
 }
 
@@ -5197,6 +5232,7 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 	state Future<Void> doPollMetrics = Void();
 
 	wait(self->byteSampleRecovery);
+	TraceEvent("StorageServerRestoreDurableState", self->thisServerID).detail("RestoredBytes", self->bytesRestored);
 
 	self->actors.add(traceCounters("StorageMetrics",
 	                               self->thisServerID,
@@ -5699,6 +5735,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	try {
 		wait(self.storage.init());
 		wait(self.storage.commit());
+		++self.counters.kvCommit;
 
 		if (seedTag == invalidTag) {
 			std::pair<Version, Tag> verAndTag = wait(addStorageServer(
@@ -5715,6 +5752,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		self.storage.makeNewStorageServerDurable();
 		wait(self.storage.commit());
+		++self.counters.kvCommit;
 
 		TraceEvent("StorageServerInit", ssi.id())
 		    .detail("Version", self.version.get())
@@ -5913,6 +5951,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 				throw worker_removed();
 			}
 		}
+		++self.counters.kvCommit;
 
 		bool ok = wait(self.storage.restoreDurableState());
 		if (!ok) {
