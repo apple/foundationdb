@@ -2175,10 +2175,8 @@ void setupNetwork(uint64_t transportId, UseMetrics useMetrics) {
 		networkOptions.logClientInfo = true;
 
 	setupGlobalKnobs();
-	TLS::DisableOpenSSLAtExitHandler();
 	g_network = newNet2(tlsConfig, false, useMetrics || networkOptions.traceDirectory.present());
 	g_network->addStopCallback(Net2FileSystem::stop);
-	g_network->addStopCallback(TLS::DestroyOpenSSLGlobalState);
 	FlowTransport::createInstance(true, transportId, WLTOKEN_RESERVED_COUNT);
 	Net2FileSystem::newFileSystem();
 
