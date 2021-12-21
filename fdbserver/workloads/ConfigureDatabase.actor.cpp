@@ -214,7 +214,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	double testDuration;
 	int additionalDBs;
 	bool allowDescriptorChange;
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter retries;
 
 	ConfigureDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), retries("Retries") {
@@ -232,7 +232,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override { return _start(this, cx); }
 	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>& m) override { m.push_back(retries.getMetric()); }
+	void getMetrics(std::vector<PerfMetric>& m) override { m.push_back(retries.getMetric()); }
 
 	static inline uint64_t valueToUInt64(const StringRef& v) {
 		long long unsigned int x = 0;

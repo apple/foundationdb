@@ -231,14 +231,14 @@ struct KVStoreTestWorkload : TestWorkload {
 		return Void();
 	}
 	Future<bool> check(Database const& cx) override { return true; }
-	void metricsFromHistogram(vector<PerfMetric>& m, std::string name, TestHistogram<float>& h) const {
+	void metricsFromHistogram(std::vector<PerfMetric>& m, std::string name, TestHistogram<float>& h) const {
 		m.emplace_back("Min " + name, 1000.0 * h.min(), Averaged::True);
 		m.emplace_back("Average " + name, 1000.0 * h.mean(), Averaged::True);
 		m.emplace_back("Median " + name, 1000.0 * h.medianEstimate(), Averaged::True);
 		m.emplace_back("95%% " + name, 1000.0 * h.percentileEstimate(0.95), Averaged::True);
 		m.emplace_back("Max " + name, 1000.0 * h.max(), Averaged::True);
 	}
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		if (setupTook)
 			m.emplace_back("SetupTook", setupTook, Averaged::False);
 
@@ -318,7 +318,7 @@ ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest)
 				wait(testKVCommit(&test, &workload->commitLatency, &workload->commits));
 			}
 		} else {
-			vector<Future<Void>> actors;
+			std::vector<Future<Void>> actors;
 			actors.reserve(100);
 			for (int a = 0; a < 100; a++)
 				actors.push_back(testKVReadSaturation(&test, &workload->readLatency, &workload->reads));

@@ -1342,7 +1342,7 @@ ACTOR Future<RangeResult> getWorkerInterfaces(Reference<ClusterConnectionFile> c
 
 	loop {
 		choose {
-			when(vector<ClientWorkerInterface> workers =
+			when(std::vector<ClientWorkerInterface> workers =
 			         wait(clusterInterface->get().present()
 			                  ? brokenPromiseToNever(
 			                        clusterInterface->get().get().getClientWorkers.getReply(GetClientWorkersRequest()))

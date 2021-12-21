@@ -309,13 +309,13 @@ const Key storageCacheKey(const KeyRef& k) {
 	return k.withPrefix(storageCachePrefix);
 }
 
-const Value storageCacheValue(const vector<uint16_t>& serverIndices) {
+const Value storageCacheValue(const std::vector<uint16_t>& serverIndices) {
 	BinaryWriter wr((IncludeVersion(ProtocolVersion::withStorageCacheValue())));
 	wr << serverIndices;
 	return wr.toValue();
 }
 
-void decodeStorageCacheValue(const ValueRef& value, vector<uint16_t>& serverIndices) {
+void decodeStorageCacheValue(const ValueRef& value, std::vector<uint16_t>& serverIndices) {
 	serverIndices.clear();
 	if (value.size()) {
 		BinaryReader rd(value, IncludeVersion());
@@ -323,17 +323,17 @@ void decodeStorageCacheValue(const ValueRef& value, vector<uint16_t>& serverIndi
 	}
 }
 
-const Value logsValue(const vector<std::pair<UID, NetworkAddress>>& logs,
-                      const vector<std::pair<UID, NetworkAddress>>& oldLogs) {
+const Value logsValue(const std::vector<std::pair<UID, NetworkAddress>>& logs,
+                      const std::vector<std::pair<UID, NetworkAddress>>& oldLogs) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withLogsValue()));
 	wr << logs;
 	wr << oldLogs;
 	return wr.toValue();
 }
-std::pair<vector<std::pair<UID, NetworkAddress>>, vector<std::pair<UID, NetworkAddress>>> decodeLogsValue(
+std::pair<std::vector<std::pair<UID, NetworkAddress>>, std::vector<std::pair<UID, NetworkAddress>>> decodeLogsValue(
     const ValueRef& value) {
-	vector<std::pair<UID, NetworkAddress>> logs;
-	vector<std::pair<UID, NetworkAddress>> oldLogs;
+	std::vector<std::pair<UID, NetworkAddress>> logs;
+	std::vector<std::pair<UID, NetworkAddress>> oldLogs;
 	BinaryReader reader(value, IncludeVersion());
 	reader >> logs;
 	reader >> oldLogs;

@@ -10104,7 +10104,7 @@ TEST_CASE(":/redwood/performance/histogramThroughput") {
 	std::default_random_engine generator;
 	std::uniform_int_distribution<uint32_t> distribution(0, UINT32_MAX);
 	state size_t inputSize = pow(10, 8);
-	state vector<uint32_t> uniform;
+	state std::vector<uint32_t> uniform;
 	for (int i = 0; i < inputSize; i++) {
 		uniform.push_back(distribution(generator));
 	}
@@ -10170,7 +10170,7 @@ TEST_CASE(":/redwood/performance/continuousSmapleThroughput") {
 	std::default_random_engine generator;
 	std::uniform_int_distribution<uint32_t> distribution(0, UINT32_MAX);
 	state size_t inputSize = pow(10, 8);
-	state vector<uint32_t> uniform;
+	state std::vector<uint32_t> uniform;
 	for (int i = 0; i < inputSize; i++) {
 		uniform.push_back(distribution(generator));
 	}

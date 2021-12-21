@@ -358,7 +358,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	                                   bool* forceRecovery);
 
 	ACTOR static Future<Void> recruitOldLogRouters(TagPartitionedLogSystem* self,
-	                                               vector<WorkerInterface> workers,
+	                                               std::vector<WorkerInterface> workers,
 	                                               LogEpoch recoveryCount,
 	                                               int8_t locality,
 	                                               Version startVersion,

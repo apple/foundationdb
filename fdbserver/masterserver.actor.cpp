@@ -53,10 +53,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/serialize.h"
 
-using std::max;
-using std::min;
-using std::vector;
-
 struct CommitProxyVersionReplies {
 	std::map<uint64_t, GetCommitVersionReply> replies;
 	NotifiedVersion latestRequestNum;
@@ -296,7 +292,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 };
 
 ACTOR Future<Void> newCommitProxies(Reference<MasterData> self, RecruitFromConfigurationReply recr) {
-	vector<Future<CommitProxyInterface>> initializationReplies;
+	std::vector<Future<CommitProxyInterface>> initializationReplies;
 	for (int i = 0; i < recr.commitProxies.size(); i++) {
 		InitializeCommitProxyRequest req;
 		req.master = self->myInterface;
@@ -312,7 +308,7 @@ ACTOR Future<Void> newCommitProxies(Reference<MasterData> self, RecruitFromConfi
 		                    master_recovery_failed()));
 	}
 
-	vector<CommitProxyInterface> newRecruits = wait(getAll(initializationReplies));
+	std::vector<CommitProxyInterface> newRecruits = wait(getAll(initializationReplies));
 	// It is required for the correctness of COMMIT_ON_FIRST_PROXY that self->commitProxies[0] is the firstCommitProxy.
 	self->commitProxies = newRecruits;
 
@@ -320,7 +316,7 @@ ACTOR Future<Void> newCommitProxies(Reference<MasterData> self, RecruitFromConfi
 }
 
 ACTOR Future<Void> newGrvProxies(Reference<MasterData> self, RecruitFromConfigurationReply recr) {
-	vector<Future<GrvProxyInterface>> initializationReplies;
+	std::vector<Future<GrvProxyInterface>> initializationReplies;
 	for (int i = 0; i < recr.grvProxies.size(); i++) {
 		InitializeGrvProxyRequest req;
 		req.master = self->myInterface;
@@ -332,13 +328,13 @@ ACTOR Future<Void> newGrvProxies(Reference<MasterData> self, RecruitFromConfigur
 		                    master_recovery_failed()));
 	}
 
-	vector<GrvProxyInterface> newRecruits = wait(getAll(initializationReplies));
+	std::vector<GrvProxyInterface> newRecruits = wait(getAll(initializationReplies));
 	self->grvProxies = newRecruits;
 	return Void();
 }
 
 ACTOR Future<Void> newResolvers(Reference<MasterData> self, RecruitFromConfigurationReply recr) {
-	vector<Future<ResolverInterface>> initializationReplies;
+	std::vector<Future<ResolverInterface>> initializationReplies;
 	for (int i = 0; i < recr.resolvers.size(); i++) {
 		InitializeResolverRequest req;
 		req.masterId = self->dbgid;
@@ -352,7 +348,7 @@ ACTOR Future<Void> newResolvers(Reference<MasterData> self, RecruitFromConfigura
 		                    master_recovery_failed()));
 	}
 
-	vector<ResolverInterface> newRecruits = wait(getAll(initializationReplies));
+	std::vector<ResolverInterface> newRecruits = wait(getAll(initializationReplies));
 	self->resolvers = newRecruits;
 
 	return Void();
@@ -361,7 +357,7 @@ ACTOR Future<Void> newResolvers(Reference<MasterData> self, RecruitFromConfigura
 ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
                                   RecruitFromConfigurationReply recr,
                                   Reference<ILogSystem> oldLogSystem,
-                                  vector<Standalone<CommitTransactionRef>>* initialConfChanges) {
+                                  std::vector<Standalone<CommitTransactionRef>>* initialConfChanges) {
 	if (self->configuration.usableRegions > 1) {
 		state Optional<Key> remoteDcId = self->remoteDcIds.size() ? self->remoteDcIds[0] : Optional<Key>();
 		if (!self->dcId_locality.count(recr.dcId)) {
@@ -496,7 +492,7 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 	return Void();
 }
 
-Future<Void> waitCommitProxyFailure(vector<CommitProxyInterface> const& commitProxies) {
+Future<Void> waitCommitProxyFailure(std::vector<CommitProxyInterface> const& commitProxies) {
 	std::vector<Future<Void>> failed;
 	failed.reserve(commitProxies.size());
 	for (auto commitProxy : commitProxies) {
@@ -509,8 +505,8 @@ Future<Void> waitCommitProxyFailure(vector<CommitProxyInterface> const& commitPr
 	return tagError<Void>(quorum(failed, 1), commit_proxy_failed());
 }
 
-Future<Void> waitGrvProxyFailure(vector<GrvProxyInterface> const& grvProxies) {
-	vector<Future<Void>> failed;
+Future<Void> waitGrvProxyFailure(std::vector<GrvProxyInterface> const& grvProxies) {
+	std::vector<Future<Void>> failed;
 	failed.reserve(grvProxies.size());
 	for (int i = 0; i < grvProxies.size(); i++)
 		failed.push_back(waitFailureClient(grvProxies[i].waitFailure,
@@ -521,7 +517,7 @@ Future<Void> waitGrvProxyFailure(vector<GrvProxyInterface> const& grvProxies) {
 	return tagError<Void>(quorum(failed, 1), grv_proxy_failed());
 }
 
-Future<Void> waitResolverFailure(vector<ResolverInterface> const& resolvers) {
+Future<Void> waitResolverFailure(std::vector<ResolverInterface> const& resolvers) {
 	std::vector<Future<Void>> failed;
 	failed.reserve(resolvers.size());
 	for (auto resolver : resolvers) {
@@ -576,11 +572,11 @@ ACTOR Future<Void> updateLogsValue(Reference<MasterData> self, Database cx) {
 
 Future<Void> sendMasterRegistration(MasterData* self,
                                     LogSystemConfig const& logSystemConfig,
-                                    vector<CommitProxyInterface> commitProxies,
-                                    vector<GrvProxyInterface> grvProxies,
-                                    vector<ResolverInterface> resolvers,
+                                    std::vector<CommitProxyInterface> commitProxies,
+                                    std::vector<GrvProxyInterface> grvProxies,
+                                    std::vector<ResolverInterface> resolvers,
                                     DBRecoveryCount recoveryCount,
-                                    vector<UID> priorCommittedLogServers) {
+                                    std::vector<UID> priorCommittedLogServers) {
 	RegisterMasterRequest masterReq;
 	masterReq.id = self->myInterface.id();
 	masterReq.mi = self->myInterface.locality;
@@ -631,7 +627,7 @@ ACTOR Future<Void> updateRegistration(Reference<MasterData> self, Reference<ILog
 			                            self->grvProxies,
 			                            self->resolvers,
 			                            self->cstate.myDBState.recoveryCount,
-			                            vector<UID>()));
+			                            std::vector<UID>()));
 		}
 	}
 }
@@ -640,10 +636,10 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Maste
 	wait(activate);
 
 	// Register a fake commit proxy (to be provided right here) to make ourselves available to clients
-	parent->provisionalCommitProxies = vector<CommitProxyInterface>(1);
+	parent->provisionalCommitProxies = std::vector<CommitProxyInterface>(1);
 	parent->provisionalCommitProxies[0].provisional = true;
 	parent->provisionalCommitProxies[0].initEndpoints();
-	parent->provisionalGrvProxies = vector<GrvProxyInterface>(1);
+	parent->provisionalGrvProxies = std::vector<GrvProxyInterface>(1);
 	parent->provisionalGrvProxies[0].provisional = true;
 	parent->provisionalGrvProxies[0].initEndpoints();
 	state Future<Void> waitCommitProxyFailure =
@@ -811,7 +807,7 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 		}
 	}
 
-	state vector<Standalone<CommitTransactionRef>> confChanges;
+	state std::vector<Standalone<CommitTransactionRef>> confChanges;
 	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits) &&
 	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
 
@@ -1026,7 +1022,7 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(
 
 		if (dataOutstanding > SERVER_KNOBS->MAX_TXS_SEND_MEMORY) {
 			wait(waitForAll(txnReplies));
-			txnReplies = vector<Future<Void>>();
+			txnReplies = std::vector<Future<Void>>();
 			dataOutstanding = 0;
 		}
 
@@ -1084,7 +1080,7 @@ ACTOR Future<Void> discardCommit(IKeyValueStore* store, LogSystemDiskQueueAdapte
 }
 
 void updateConfigForForcedRecovery(Reference<MasterData> self,
-                                   vector<Standalone<CommitTransactionRef>>* initialConfChanges) {
+                                   std::vector<Standalone<CommitTransactionRef>>* initialConfChanges) {
 	bool regionsChanged = false;
 	for (auto& it : self->configuration.regions) {
 		if (it.dcId == self->myInterface.locality.dcId().get() && it.priority < 0) {
@@ -1849,7 +1845,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	self->recoveryState = RecoveryState::RECRUITING;
 
 	state std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>> seedServers;
-	state vector<Standalone<CommitTransactionRef>> initialConfChanges;
+	state std::vector<Standalone<CommitTransactionRef>> initialConfChanges;
 	state Future<Void> logChanges;
 	state Future<Void> minRecoveryDuration;
 	state Future<Version> poppedTxsVersion;

@@ -53,7 +53,7 @@ struct KillRegionWorkload : TestWorkload {
 		return Void();
 	}
 	Future<bool> check(Database const& cx) override { return true; }
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<Void> _setup(KillRegionWorkload* self, Database cx) {
 		TraceEvent("ForceRecovery_DisablePrimaryBegin").log();

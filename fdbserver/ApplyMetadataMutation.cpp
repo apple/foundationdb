@@ -419,7 +419,7 @@ private:
 			}
 			if (cacheInfo && k != allKeys.end) {
 				KeyRef end = cacheInfo->rangeContaining(k).end();
-				vector<uint16_t> serverIndices;
+				std::vector<uint16_t> serverIndices;
 				decodeStorageCacheValue(m.param2, serverIndices);
 				cacheInfo->insert(KeyRangeRef(k, end), serverIndices.size() > 0);
 			}
@@ -1123,7 +1123,7 @@ private:
 
 		std::map<KeyRef, MutationRef>::iterator itr;
 		KeyRef keyBegin, keyEnd;
-		vector<uint16_t> serverIndices;
+		std::vector<uint16_t> serverIndices;
 		MutationRef mutationBegin, mutationEnd;
 
 		for (itr = cachedRangeInfo.begin(); itr != cachedRangeInfo.end(); ++itr) {

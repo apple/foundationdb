@@ -250,6 +250,9 @@ struct DatabaseConfiguration {
 	// Initial shard split boundaries, like ["a", "b", "c"]
 	std::vector<StringRef> splits;
 
+	// Storage Migration Type
+	StorageMigrationType storageMigrationType;
+
 	// Excluded servers (no state should be here)
 	bool isExcludedServer(NetworkAddressList) const;
 	bool isExcludedLocality(const LocalityData& locality) const;

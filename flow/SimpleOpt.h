@@ -957,19 +957,21 @@ SOCHAR** CSimpleOptTempl<SOCHAR>::MultiArg(int a_nCount) {
 	// our argument array
 	SOCHAR** rgpszArg = &m_argv[m_nNextOption];
 
+#ifdef _WIN32
+	// It is not illegal for a value to start with '/' or '-' on Windows
+	// and this would make it impossible to write "/f /path/to/somewhere"
+#else
 	// Ensure that each of the following don't start with an switch character.
 	// Only make this check if we are returning errors for unknown arguments.
 	if (!HasFlag(SO_O_NOERR)) {
 		for (int n = 0; n < a_nCount; ++n) {
-			SOCHAR ch = PrepareArg(rgpszArg[n]);
 			if (rgpszArg[n][0] == (SOCHAR)'-') {
-				rgpszArg[n][0] = ch;
 				m_nLastError = SO_ARG_INVALID_DATA;
 				return nullptr;
 			}
-			rgpszArg[n][0] = ch;
 		}
 	}
+#endif
 
 	// all good
 	m_nNextOption += a_nCount;

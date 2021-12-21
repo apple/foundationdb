@@ -473,7 +473,8 @@ void initHelp() {
 	    "configure [new|tss]"
 	    "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|"
 	    "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
-	    "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>",
+	    "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|storage_migration_type={disabled|gradual|"
+	    "aggressive}",
 	    "change the database configuration",
 	    "The `new' option, if present, initializes a new database with the given configuration rather than changing "
 	    "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
@@ -509,36 +510,6 @@ void initHelp() {
 	    "the configuration of an existing one. Load a JSON document from the provided file, and change the database "
 	    "configuration to match the contents of the JSON document. The format should be the same as the value of the "
 	    "\"configuration\" entry in status JSON without \"excluded_servers\" or \"coordinators_count\".");
-	helpMap["coordinators"] = CommandHelp(
-	    "coordinators auto|<ADDRESS>+ [description=new_cluster_description]",
-	    "change cluster coordinators or description",
-	    "If 'auto' is specified, coordinator addresses will be choosen automatically to support the configured "
-	    "redundancy level. (If the current set of coordinators are healthy and already support the redundancy level, "
-	    "nothing will be changed.)\n\nOtherwise, sets the coordinators to the list of IP:port pairs specified by "
-	    "<ADDRESS>+. An fdbserver process must be running on each of the specified addresses.\n\ne.g. coordinators "
-	    "10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000\n\nIf 'description=desc' is specified then the description field in "
-	    "the cluster\nfile is changed to desc, which must match [A-Za-z0-9_]+.");
-	helpMap["exclude"] = CommandHelp(
-	    "exclude [FORCE] [failed] [no_wait] [<ADDRESS...>] [locality_dcid:<excludedcid>] "
-	    "[locality_zoneid:<excludezoneid>] [locality_machineid:<excludemachineid>] "
-	    "[locality_processid:<excludeprocessid>] or any locality data",
-	    "exclude servers from the database either with IP address match or locality match",
-	    "If no addresses or locaities are specified, lists the set of excluded addresses and localities."
-	    "\n\nFor each IP address or IP:port pair in <ADDRESS...> or any LocalityData attributes (like dcid, zoneid, "
-	    "machineid, processid), adds the address/locality to the set of excluded servers and localities then waits "
-	    "until all database state has been safely moved away from the specified servers. If 'no_wait' is set, the "
-	    "command returns \nimmediately without checking if the exclusions have completed successfully.\n"
-	    "If 'FORCE' is set, the command does not perform safety checks before excluding.\n"
-	    "If 'failed' is set, the transaction log queue is dropped pre-emptively before waiting\n"
-	    "for data movement to finish and the server cannot be included again.");
-	helpMap["include"] = CommandHelp(
-	    "include all|[<ADDRESS...>] [locality_dcid:<excludedcid>] [locality_zoneid:<excludezoneid>] "
-	    "[locality_machineid:<excludemachineid>] [locality_processid:<excludeprocessid>] or any locality data",
-	    "permit previously-excluded servers and localities to rejoin the database",
-	    "If `all' is specified, the excluded servers and localities list is cleared.\n\nFor each IP address or IP:port "
-	    "pair in <ADDRESS...> or any LocalityData (like dcid, zoneid, machineid, processid), removes any "
-	    "matching exclusions from the excluded servers and localities list. "
-	    "(A specified IP will match all IP:* exclusion entries)");
 	helpMap["exit"] = CommandHelp("exit", "exit the CLI", "");
 	helpMap["quit"] = CommandHelp();
 	helpMap["waitconnected"] = CommandHelp();
@@ -587,15 +558,6 @@ void initHelp() {
 	helpMap["writemode"] = CommandHelp("writemode <on|off>",
 	                                   "enables or disables sets and clears",
 	                                   "Setting or clearing keys from the CLI is not recommended.");
-	helpMap["lock"] = CommandHelp(
-	    "lock",
-	    "lock the database with a randomly generated lockUID",
-	    "Randomly generates a lockUID, prints this lockUID, and then uses the lockUID to lock the database.");
-	helpMap["unlock"] =
-	    CommandHelp("unlock <UID>",
-	                "unlock the database with the provided lockUID",
-	                "Unlocks the database with the provided lockUID. This is a potentially dangerous operation, so the "
-	                "user will be asked to enter a passphrase to confirm their intent.");
 }
 
 void printVersion() {
@@ -891,6 +853,27 @@ ACTOR Future<bool> configure(Database db,
 		break;
 	case ConfigurationResult::LOCKED_NOT_NEW:
 		fprintf(stderr, "ERROR: `only new databases can be configured as locked`\n");
+		ret = false;
+		break;
+	case ConfigurationResult::SUCCESS_WARN_PPW_GRADUAL:
+		printf("Configuration changed, with warnings\n");
+		fprintf(stderr,
+		        "WARN: To make progress toward the desired storage type with storage_migration_type=gradual, the "
+		        "Perpetual Wiggle must be enabled.\n");
+		fprintf(stderr,
+		        "Type `configure perpetual_storage_wiggle=1' to enable the perpetual wiggle, or `configure "
+		        "storage_migration_type=gradual' to set the gradual migration type.\n");
+		ret = true;
+		break;
+	case ConfigurationResult::SUCCESS_WARN_CHANGE_STORAGE_NOMIGRATE:
+		printf("Configuration changed, with warnings\n");
+		fprintf(stderr,
+		        "WARN: Storage engine type changed, but nothing will be migrated because "
+		        "storage_migration_mode=disabled.\n");
+		fprintf(stderr,
+		        "Type `configure perpetual_storage_wiggle=1 storage_migration_type=gradual' to enable gradual "
+		        "migration with the perpetual wiggle, or `configure "
+		        "storage_migration_type=aggressive' for aggressive migration.\n");
 		ret = true;
 		break;
 	default:
@@ -1170,12 +1153,12 @@ ACTOR Future<bool> exclude(Database db,
                            Reference<ClusterConnectionFile> ccf,
                            Future<Void> warn) {
 	if (tokens.size() <= 1) {
-		state Future<vector<AddressExclusion>> fexclAddresses = makeInterruptable(getExcludedServers(db));
-		state Future<vector<std::string>> fexclLocalities = makeInterruptable(getExcludedLocalities(db));
+		state Future<std::vector<AddressExclusion>> fexclAddresses = makeInterruptable(getExcludedServers(db));
+		state Future<std::vector<std::string>> fexclLocalities = makeInterruptable(getExcludedLocalities(db));
 
 		wait(success(fexclAddresses) && success(fexclLocalities));
-		vector<AddressExclusion> exclAddresses = fexclAddresses.get();
-		vector<std::string> exclLocalities = fexclLocalities.get();
+		std::vector<AddressExclusion> exclAddresses = fexclAddresses.get();
+		std::vector<std::string> exclLocalities = fexclLocalities.get();
 
 		if (!exclAddresses.size() && !exclLocalities.size()) {
 			printf("There are currently no servers or localities excluded from the database.\n"
@@ -1575,6 +1558,7 @@ void configureGenerator(const char* text, const char* line, std::vector<std::str
 		                   "logs=",
 		                   "resolvers=",
 		                   "perpetual_storage_wiggle=",
+		                   "storage_migration_type=",
 		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
@@ -2220,37 +2204,23 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "coordinators")) {
-					auto cs = ClusterConnectionFile(localDb->getConnectionFile()->getFilename()).getConnectionString();
-					if (tokens.size() < 2) {
-						printf("Cluster description: %s\n", cs.clusterKeyName().toString().c_str());
-						printf("Cluster coordinators (%zu): %s\n",
-						       cs.coordinators().size(),
-						       describe(cs.coordinators()).c_str());
-						printf("Type `help coordinators' to learn how to change this information.\n");
-					} else {
-						bool err = wait(coordinators(localDb, tokens, cs.coordinators()[0].isTLS()));
-						if (err)
-							is_error = true;
-					}
+					bool _result = wait(makeInterruptable(coordinatorsCommandActor(db, tokens)));
+					if (!_result)
+						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "exclude")) {
-					bool err = wait(exclude(localDb, tokens, localDb->getConnectionFile(), warn));
-					if (err)
+					bool _result = wait(makeInterruptable(excludeCommandActor(db, tokens, warn)));
+					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "include")) {
-					if (tokens.size() < 2) {
-						printUsage(tokens[0]);
+					bool _result = wait(makeInterruptable(includeCommandActor(db, tokens)));
+					if (!_result)
 						is_error = true;
-					} else {
-						bool err = wait(include(localDb, tokens));
-						if (err)
-							is_error = true;
-					}
 					continue;
 				}
 
@@ -2262,15 +2232,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "lock")) {
-					if (tokens.size() != 1) {
-						printUsage(tokens[0]);
+					bool _result = wait(lockCommandActor(db, tokens));
+					if (!_result)
 						is_error = true;
-					} else {
-						state UID lockUID = deterministicRandom()->randomUniqueID();
-						printf("Locking database with lockUID: %s\n", lockUID.toString().c_str());
-						wait(makeInterruptable(lockDatabase(localDb, lockUID)));
-						printf("Database locked.\n");
-					}
 					continue;
 				}
 
@@ -2291,16 +2255,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						    checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
 						if (input.present() && input.get() == passPhrase) {
 							UID unlockUID = UID::fromString(tokens[1].toString());
-							try {
-								wait(makeInterruptable(unlockDatabase(localDb, unlockUID)));
-								printf("Database unlocked.\n");
-							} catch (Error& e) {
-								if (e.code() == error_code_database_locked) {
-									printf(
-									    "Unable to unlock database. Make sure to unlock with the correct lock UID.\n");
-								}
-								throw e;
-							}
+							bool _result = wait(makeInterruptable(unlockDatabaseActor(db, unlockUID)));
+							if (!_result)
+								is_error = true;
 						} else {
 							fprintf(stderr, "ERROR: Incorrect passphrase entered.\n");
 							is_error = true;

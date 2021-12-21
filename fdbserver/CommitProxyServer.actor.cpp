@@ -237,7 +237,7 @@ struct ResolutionRequestBuilder {
 			getOutTransaction(0, trIn.read_snapshot).spanContext = trRequest.spanContext;
 		}
 
-		vector<int> resolversUsed;
+		std::vector<int> resolversUsed;
 		for (int r = 0; r < outTr.size(); r++)
 			if (outTr[r]) {
 				resolversUsed.push_back(r);
@@ -328,7 +328,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 	}
 }
 
-void createWhitelistBinPathVec(const std::string& binPath, vector<Standalone<StringRef>>& binPathVec) {
+void createWhitelistBinPathVec(const std::string& binPath, std::vector<Standalone<StringRef>>& binPathVec) {
 	TraceEvent(SevDebug, "BinPathConverter").detail("Input", binPath);
 	StringRef input(binPath);
 	while (input != StringRef()) {
@@ -348,7 +348,7 @@ void createWhitelistBinPathVec(const std::string& binPath, vector<Standalone<Str
 	return;
 }
 
-bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef binPath) {
+bool isWhitelisted(const std::vector<Standalone<StringRef>>& binPathVec, StringRef binPath) {
 	TraceEvent("BinPath").detail("Value", binPath);
 	for (const auto& item : binPathVec) {
 		TraceEvent("Element").detail("Value", item);
@@ -1657,7 +1657,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 
 // Commit one batch of transactions trs
 ACTOR Future<Void> commitBatch(ProxyCommitData* self,
-                               vector<CommitTransactionRequest>* trs,
+                               std::vector<CommitTransactionRequest>* trs,
                                int currentBatchMemBytesCount) {
 	// WARNING: this code is run at a high priority (until the first delay(0)), so it needs to do as little work as
 	// possible
@@ -1723,7 +1723,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 	if (!req.end.present()) {
 		auto r = req.reverse ? commitData->keyInfo.rangeContainingKeyBefore(req.begin)
 		                     : commitData->keyInfo.rangeContaining(req.begin);
-		vector<StorageServerInterface> ssis;
+		std::vector<StorageServerInterface> ssis;
 		ssis.reserve(r.value().src_info.size());
 		for (auto& it : r.value().src_info) {
 			ssis.push_back(it->interf);
@@ -1735,7 +1735,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 		for (auto r = commitData->keyInfo.rangeContaining(req.begin);
 		     r != commitData->keyInfo.ranges().end() && count < req.limit && r.begin() < req.end.get();
 		     ++r) {
-			vector<StorageServerInterface> ssis;
+			std::vector<StorageServerInterface> ssis;
 			ssis.reserve(r.value().src_info.size());
 			for (auto& it : r.value().src_info) {
 				ssis.push_back(it->interf);
@@ -1748,7 +1748,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 		int count = 0;
 		auto r = commitData->keyInfo.rangeContainingKeyBefore(req.end.get());
 		while (count < req.limit && req.begin < r.end()) {
-			vector<StorageServerInterface> ssis;
+			std::vector<StorageServerInterface> ssis;
 			ssis.reserve(r.value().src_info.size());
 			for (auto& it : r.value().src_info) {
 				ssis.push_back(it->interf);
@@ -2274,7 +2274,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	    proxy.id(), master, proxy.getConsistentReadVersion, recoveryTransactionVersion, proxy.commit, db, firstProxy);
 
 	state Future<Sequence> sequenceFuture = (Sequence)0;
-	state PromiseStream<std::pair<vector<CommitTransactionRequest>, int>> batchedCommits;
+	state PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int>> batchedCommits;
 	state Future<Void> commitBatcherActor;
 	state Future<Void> lastCommitComplete = Void();
 
@@ -2377,9 +2377,10 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 			commitData.updateLatencyBandConfig(commitData.db->get().latencyBandConfig);
 		}
 		when(wait(onError)) {}
-		when(std::pair<vector<CommitTransactionRequest>, int> batchedRequests = waitNext(batchedCommits.getFuture())) {
+		when(std::pair<std::vector<CommitTransactionRequest>, int> batchedRequests =
+		         waitNext(batchedCommits.getFuture())) {
 			// WARNING: this code is run at a high priority, so it needs to do as little work as possible
-			const vector<CommitTransactionRequest>& trs = batchedRequests.first;
+			const std::vector<CommitTransactionRequest>& trs = batchedRequests.first;
 			int batchBytes = batchedRequests.second;
 			//TraceEvent("CommitProxyCTR", proxy.id()).detail("CommitTransactions", trs.size()).detail("TransactionRate", transactionRate).detail("TransactionQueue", transactionQueue.size()).detail("ReleasedTransactionCount", transactionCount);
 			if (trs.size() || (commitData.db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&

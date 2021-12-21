@@ -49,6 +49,8 @@ struct CoreTLogSet;
 struct RecruitFromConfigurationReply;
 struct RecruitRemoteFromConfigurationReply;
 struct InitializeBackupReply;
+struct LogPushData;
+struct LocalityData;
 
 struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
 	double lastReset;
@@ -527,7 +529,7 @@ struct ILogSystem {
 	                             Version version,
 	                             Version knownCommittedVersion,
 	                             Version minKnownCommittedVersion,
-	                             struct LogPushData& data,
+	                             LogPushData& data,
 	                             SpanID const& spanContext,
 	                             Optional<UID> debugID = Optional<UID>(),
 	                             Optional<ptxn::TLogGroupID> tLogGroup = Optional<ptxn::TLogGroupID>(),
@@ -735,11 +737,6 @@ struct LengthPrefixedStringRef {
 	LengthPrefixedStringRef(uint32_t* length) : length(length) {}
 };
 
-template <class T>
-struct CompareFirst {
-	bool operator()(T const& lhs, T const& rhs) const { return lhs.first < rhs.first; }
-};
-
 // Structure to store serialized mutations sent from the proxy to the
 // transaction logs. The serialization repeats with the following format:
 //
@@ -927,5 +924,6 @@ void LogPushData::writeTypedMessage(T const& item, bool metadataMessage, bool al
 	}
 	next_message_tags.clear();
 }
+
 
 #endif // FDBSERVER_LOGSYSTEM_H

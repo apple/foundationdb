@@ -102,7 +102,7 @@ class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDa
 	}
 
 	template <class T>
-	std::vector<T> collect(std::function<vector<T>(IDataDistributionTeam const&)> func) const {
+	std::vector<T> collect(std::function<std::vector<T>(IDataDistributionTeam const&)> func) const {
 		std::vector<T> result;
 
 		for (const auto& team : teams) {
@@ -146,7 +146,7 @@ public:
 	}
 
 	std::vector<UID> const& getServerIDs() const override {
-		static vector<UID> tempServerIDs;
+		static std::vector<UID> tempServerIDs;
 		tempServerIDs.clear();
 		for (const auto& team : teams) {
 			std::vector<UID> const& childIDs = team->getServerIDs();

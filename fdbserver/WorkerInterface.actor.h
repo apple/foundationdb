@@ -503,7 +503,7 @@ struct GetWorkersRequest {
 	enum { TESTER_CLASS_ONLY = 0x1, NON_EXCLUDED_PROCESSES_ONLY = 0x2 };
 
 	int flags;
-	ReplyPromise<vector<WorkerDetails>> reply;
+	ReplyPromise<std::vector<WorkerDetails>> reply;
 
 	GetWorkersRequest() : flags(0) {}
 	explicit GetWorkersRequest(int fl) : flags(fl) {}

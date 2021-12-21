@@ -284,7 +284,7 @@ public:
 	    DatabaseConfiguration const& conf,
 	    Reference<IReplicationPolicy> const& policy,
 	    Optional<Optional<Standalone<StringRef>>> const& dcId = Optional<Optional<Standalone<StringRef>>>()) {
-		std::map<ProcessClass::Fitness, vector<WorkerDetails>> fitness_workers;
+		std::map<ProcessClass::Fitness, std::vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
 		Reference<LocalitySet> logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
 		LocalityMap<WorkerDetails>* logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
@@ -508,7 +508,7 @@ public:
 	                                                     bool checkStable,
 	                                                     const std::set<Optional<Key>>& dcIds,
 	                                                     const std::vector<UID>& exclusionWorkerIds) {
-		std::map<std::tuple<ProcessClass::Fitness, int, bool>, vector<WorkerDetails>> fitness_workers;
+		std::map<std::tuple<ProcessClass::Fitness, int, bool>, std::vector<WorkerDetails>> fitness_workers;
 
 		// Go through all the workers to list all the workers that can be recruited.
 		for (const auto& [worker_process_id, worker_info] : id_worker) {
@@ -753,7 +753,7 @@ public:
 	                                                    bool checkStable,
 	                                                    const std::set<Optional<Key>>& dcIds,
 	                                                    const std::vector<UID>& exclusionWorkerIds) {
-		std::map<std::tuple<ProcessClass::Fitness, int, bool, bool, bool>, vector<WorkerDetails>> fitness_workers;
+		std::map<std::tuple<ProcessClass::Fitness, int, bool, bool, bool>, std::vector<WorkerDetails>> fitness_workers;
 
 		// Go through all the workers to list all the workers that can be recruited.
 		for (const auto& [worker_process_id, worker_info] : id_worker) {
@@ -890,7 +890,7 @@ public:
 	    bool checkStable = false,
 	    const std::set<Optional<Key>>& dcIds = std::set<Optional<Key>>(),
 	    const std::vector<UID>& exclusionWorkerIds = {}) {
-		std::map<std::tuple<ProcessClass::Fitness, int, bool, bool>, vector<WorkerDetails>> fitness_workers;
+		std::map<std::tuple<ProcessClass::Fitness, int, bool, bool>, std::vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
 		Reference<LocalitySet> logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
 		LocalityMap<WorkerDetails>* logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
@@ -1343,7 +1343,7 @@ public:
 	                                               std::map<Optional<Standalone<StringRef>>, int>& id_used,
 	                                               std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
 	                                               bool checkStable = false) {
-		std::map<std::tuple<ProcessClass::Fitness, int, bool, int>, vector<WorkerDetails>> fitness_workers;
+		std::map<std::tuple<ProcessClass::Fitness, int, bool, int>, std::vector<WorkerDetails>> fitness_workers;
 
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(role);
@@ -1373,7 +1373,7 @@ public:
 		throw no_more_servers();
 	}
 
-	vector<WorkerDetails> getWorkersForRoleInDatacenter(
+	std::vector<WorkerDetails> getWorkersForRoleInDatacenter(
 	    Optional<Standalone<StringRef>> const& dcId,
 	    ProcessClass::ClusterRole role,
 	    int amount,
@@ -1382,8 +1382,8 @@ public:
 	    std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
 	    Optional<WorkerFitnessInfo> minWorker = Optional<WorkerFitnessInfo>(),
 	    bool checkStable = false) {
-		std::map<std::tuple<ProcessClass::Fitness, int, bool, int>, vector<WorkerDetails>> fitness_workers;
-		vector<WorkerDetails> results;
+		std::map<std::tuple<ProcessClass::Fitness, int, bool, int>, std::vector<WorkerDetails>> fitness_workers;
+		std::vector<WorkerDetails> results;
 		if (minWorker.present()) {
 			results.push_back(minWorker.get().worker);
 		}
@@ -1446,7 +1446,7 @@ public:
 		  : bestFit(ProcessClass::NeverAssign), worstFit(ProcessClass::NeverAssign), role(ProcessClass::NoRole),
 		    count(0) {}
 
-		RoleFitness(const vector<WorkerDetails>& workers,
+		RoleFitness(const std::vector<WorkerDetails>& workers,
 		            ProcessClass::ClusterRole role,
 		            const std::map<Optional<Standalone<StringRef>>, int>& id_used)
 		  : role(role) {
@@ -1773,7 +1773,7 @@ public:
 			try {
 				auto reply = findWorkersForConfigurationFromDC(req, regions[0].dcId);
 				setPrimaryDesired = true;
-				vector<Optional<Key>> dcPriority;
+				std::vector<Optional<Key>> dcPriority;
 				dcPriority.push_back(regions[0].dcId);
 				dcPriority.push_back(regions[1].dcId);
 				desiredDcIds.set(dcPriority);
@@ -1800,7 +1800,7 @@ public:
 				    .error(e);
 				auto reply = findWorkersForConfigurationFromDC(req, regions[1].dcId);
 				if (!setPrimaryDesired) {
-					vector<Optional<Key>> dcPriority;
+					std::vector<Optional<Key>> dcPriority;
 					dcPriority.push_back(regions[1].dcId);
 					dcPriority.push_back(regions[0].dcId);
 					desiredDcIds.set(dcPriority);
@@ -1813,7 +1813,7 @@ public:
 				throw;
 			}
 		} else if (req.configuration.regions.size() == 1) {
-			vector<Optional<Key>> dcPriority;
+			std::vector<Optional<Key>> dcPriority;
 			dcPriority.push_back(req.configuration.regions[0].dcId);
 			desiredDcIds.set(dcPriority);
 			auto reply = findWorkersForConfigurationFromDC(req, req.configuration.regions[0].dcId);
@@ -1967,13 +1967,13 @@ public:
 
 			if (bestDC != clusterControllerDcId) {
 				TraceEvent("BestDCIsNotClusterDC").log();
-				vector<Optional<Key>> dcPriority;
+				std::vector<Optional<Key>> dcPriority;
 				dcPriority.push_back(bestDC);
 				desiredDcIds.set(dcPriority);
 				throw no_more_servers();
 			}
 			// If this cluster controller dies, do not prioritize recruiting the next one in the same DC
-			desiredDcIds.set(vector<Optional<Key>>());
+			desiredDcIds.set(std::vector<Optional<Key>>());
 			TraceEvent("FindWorkersForConfig")
 			    .detail("Replication", req.configuration.tLogReplicationFactor)
 			    .detail("DesiredLogs", req.configuration.getDesiredLogs())
@@ -2175,7 +2175,7 @@ public:
 			getWorkerForRoleInDatacenter(
 			    regions[0].dcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
 
-			vector<Optional<Key>> dcPriority;
+			std::vector<Optional<Key>> dcPriority;
 			dcPriority.push_back(regions[0].dcId);
 			dcPriority.push_back(regions[1].dcId);
 			desiredDcIds.set(dcPriority);
@@ -2202,7 +2202,8 @@ public:
 		}
 	}
 
-	void updateIdUsed(const vector<WorkerDetails>& workers, std::map<Optional<Standalone<StringRef>>, int>& id_used) {
+	void updateIdUsed(const std::vector<WorkerDetails>& workers,
+	                  std::map<Optional<Standalone<StringRef>>, int>& id_used) {
 		for (auto& it : workers) {
 			id_used[it.interf.locality.processId()]++;
 		}
@@ -2999,10 +3000,10 @@ public:
 	Optional<Standalone<StringRef>> masterProcessId;
 	Optional<Standalone<StringRef>> clusterControllerProcessId;
 	Optional<Standalone<StringRef>> clusterControllerDcId;
-	AsyncVar<Optional<vector<Optional<Key>>>> desiredDcIds; // desired DC priorities
-	AsyncVar<std::pair<bool, Optional<vector<Optional<Key>>>>>
+	AsyncVar<Optional<std::vector<Optional<Key>>>> desiredDcIds; // desired DC priorities
+	AsyncVar<std::pair<bool, Optional<std::vector<Optional<Key>>>>>
 	    changingDcIds; // current DC priorities to change first, and whether that is the cluster controller
-	AsyncVar<std::pair<bool, Optional<vector<Optional<Key>>>>>
+	AsyncVar<std::pair<bool, Optional<std::vector<Optional<Key>>>>>
 	    changedDcIds; // current DC priorities to change second, and whether the cluster controller has been changed
 	UID id;
 	std::vector<RecruitFromConfigurationRequest> outstandingRecruitmentRequests;
@@ -3540,11 +3541,11 @@ struct FailureStatusInfo {
 	}
 };
 
-ACTOR Future<vector<TLogInterface>> requireAll(vector<Future<Optional<vector<TLogInterface>>>> in) {
-	state vector<TLogInterface> out;
+ACTOR Future<std::vector<TLogInterface>> requireAll(std::vector<Future<Optional<std::vector<TLogInterface>>>> in) {
+	state std::vector<TLogInterface> out;
 	state int i;
 	for (i = 0; i < in.size(); i++) {
-		Optional<vector<TLogInterface>> x = wait(in[i]);
+		Optional<std::vector<TLogInterface>> x = wait(in[i]);
 		if (!x.present())
 			throw recruitment_failed();
 		out.insert(out.end(), x.get().begin(), x.get().end());
@@ -4032,7 +4033,7 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			}
 
 			// Get status but trap errors to send back to client.
-			vector<WorkerDetails> workers;
+			std::vector<WorkerDetails> workers;
 			std::vector<ProcessIssues> workerIssues;
 
 			for (auto& it : self->id_worker) {
@@ -4527,7 +4528,7 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 		wait(fCommit || delay(SERVER_KNOBS->FORCE_RECOVERY_CHECK_DELAY));
 		if (!fCommit.isReady() || fCommit.isError()) {
 			if (self->clusterControllerDcId != req.dcId) {
-				vector<Optional<Key>> dcPriority;
+				std::vector<Optional<Key>> dcPriority;
 				dcPriority.push_back(req.dcId);
 				dcPriority.push_back(self->clusterControllerDcId);
 				self->desiredDcIds.set(dcPriority);
@@ -4872,7 +4873,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		}
 		when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
 			++self.getWorkersRequests;
-			vector<WorkerDetails> workers;
+			std::vector<WorkerDetails> workers;
 
 			for (auto const& [id, worker] : self.id_worker) {
 				if ((req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) &&
@@ -4892,7 +4893,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		}
 		when(GetClientWorkersRequest req = waitNext(interf.clientInterface.getClientWorkers.getFuture())) {
 			++self.getClientWorkersRequests;
-			vector<ClientWorkerInterface> workers;
+			std::vector<ClientWorkerInterface> workers;
 			for (auto& it : self.id_worker) {
 				if (it.second.details.processClass.classType() != ProcessClass::TesterClass) {
 					workers.push_back(it.second.details.interf.clientInterface);
