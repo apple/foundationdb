@@ -383,9 +383,9 @@ ClientCoordinators::ClientCoordinators(Key clusterKey, std::vector<NetworkAddres
 }
 
 ClientLeaderRegInterface::ClientLeaderRegInterface(NetworkAddress remote)
-  : getLeader(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_GETLEADER)),
-    openDatabase(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_OPENDATABASE)),
-    checkDescriptorMutable(Endpoint({ remote }, WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE)) {}
+  : getLeader(Endpoint::wellKnown({ remote }, WLTOKEN_CLIENTLEADERREG_GETLEADER)),
+    openDatabase(Endpoint::wellKnown({ remote }, WLTOKEN_CLIENTLEADERREG_OPENDATABASE)),
+    checkDescriptorMutable(Endpoint::wellKnown({ remote }, WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE)) {}
 
 ClientLeaderRegInterface::ClientLeaderRegInterface(INetwork* local) {
 	getLeader.makeWellKnownEndpoint(WLTOKEN_CLIENTLEADERREG_GETLEADER, TaskPriority::Coordination);

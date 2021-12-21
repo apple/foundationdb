@@ -9,7 +9,7 @@ bindings/java/foundationdb-tests*.jar
 bindings/java/fdb-java-*-sources.jar
 packaging/msi/FDBInstaller.msi
 build/
-cmake-build-debug/
+cmake-build-debug*
 cmake-build-release/
 
 # Generated source, build, and packaging files

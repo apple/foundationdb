@@ -73,7 +73,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		state StringRef configStr(format("resolvers=%d", numResolversToSet));
 		loop {
 			Optional<ConfigureAutoResult> conf;
-			ConfigurationResult r = wait(changeConfig(cx, { configStr }, conf, true));
+			ConfigurationResult r = wait(ManagementAPI::changeConfig(cx.getReference(), { configStr }, conf, true));
 			if (r == ConfigurationResult::SUCCESS) {
 				self->currentNumOfResolvers = numResolversToSet;
 				TraceEvent(SevInfo, "TriggerRecoveryLoop_ChangeResolverConfigSuccess")

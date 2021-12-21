@@ -340,8 +340,9 @@ std::pair<std::vector<std::pair<UID, NetworkAddress>>, std::vector<std::pair<UID
 	return std::make_pair(logs, oldLogs);
 }
 
-const KeyRef serverKeysPrefix = LiteralStringRef("\xff/serverKeys/");
-const ValueRef serverKeysTrue = LiteralStringRef("1"), // compatible with what was serverKeysTrue
+const KeyRef serverKeysPrefix = "\xff/serverKeys/"_sr;
+const ValueRef serverKeysTrue = "1"_sr, // compatible with what was serverKeysTrue
+    serverKeysTrueEmptyRange = "3"_sr, // the server treats the range as empty.
     serverKeysFalse;
 
 const Key serverKeysKey(UID serverID, const KeyRef& key) {
@@ -366,7 +367,7 @@ UID serverKeysDecodeServer(const KeyRef& key) {
 	return server_id;
 }
 bool serverHasKey(ValueRef storedValue) {
-	return storedValue == serverKeysTrue;
+	return storedValue == serverKeysTrue || storedValue == serverKeysTrueEmptyRange;
 }
 
 const KeyRef storageTeamIdKeyPrefix = "\xff/storageTeams/"_sr;
