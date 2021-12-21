@@ -5818,7 +5818,7 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo> cons
 ACTOR Future<Void> updateInitialDDTeamMaps(Database cx, Reference<InitialDataDistribution> initData) {
 	// TODO: Can be done concurrently.
 	state std::set<std::vector<UID>> primaryTeams = initData->primaryTeams;
-	state std::set<vector<UID>>::iterator it;
+	state std::set<std::vector<UID>>::iterator it;
 	for (it = primaryTeams.begin(); it != primaryTeams.end(); ++it) {
 		ptxn::StorageTeamID teamId = wait(maybeUpdateTeamMaps(cx, *it));
 	}

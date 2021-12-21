@@ -104,13 +104,13 @@ public:
 	                                               LogEpoch recoveryCount,
 	                                               int8_t primaryLocality,
 	                                               int8_t remoteLocality,
-	                                               const vector<Tag>& allTags,
+	                                               const std::vector<Tag>& allTags,
 	                                               const Reference<AsyncVar<bool>>& recruitmentStalled,
 	                                               TLogGroupCollectionRef tLogGroupCollection) override;
 	virtual LogSystemConfig getLogSystemConfig() const override;
 	virtual Standalone<StringRef> getLogsValue() const override;
 	virtual Future<Void> onLogSystemConfigChange() override;
-	virtual void getPushLocations(VectorRef<Tag> tags, vector<int>& locations, bool allLocations) const override;
+	virtual void getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, bool allLocations) const override;
 	virtual bool hasRemoteLogs() const override;
 	virtual Tag getRandomRouterTag() const override;
 	virtual int getLogRouterTags() const override;

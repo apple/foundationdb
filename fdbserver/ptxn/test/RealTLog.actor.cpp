@@ -214,7 +214,7 @@ ACTOR Future<Void> TLogDriverContext::sendPushMessages_impl(TLogDriverContext* p
 		// for each tag
 		for (uint32_t tagID = 0; tagID < pTLogDriverContext->numTagsPerServer; tagID++) {
 			Tag tag(pTLogDriverContext->tagLocality, tagID);
-			vector<Tag> tags = { tag };
+			std::vector<Tag> tags = { tag };
 			toCommit.addTags(tags);
 			toCommit.writeTypedMessage(m);
 		}

@@ -178,7 +178,7 @@ void TLogGroupCollection::addTLogGroup(UID debugID, TLogGroupRef group) {
 	recruitedGroups.push_back(group);
 }
 
-bool TLogGroupCollection::tryAddStorageTeam(ptxn::StorageTeamID teamId, vector<UID> servers) {
+bool TLogGroupCollection::tryAddStorageTeam(ptxn::StorageTeamID teamId, std::vector<UID> servers) {
 	auto it = storageTeams.find(teamId);
 	if (it != storageTeams.end()) {
 		ASSERT(it->second == servers);
