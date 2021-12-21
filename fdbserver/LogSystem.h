@@ -925,5 +925,4 @@ void LogPushData::writeTypedMessage(T const& item, bool metadataMessage, bool al
 	next_message_tags.clear();
 }
 
-
 #endif // FDBSERVER_LOGSYSTEM_H

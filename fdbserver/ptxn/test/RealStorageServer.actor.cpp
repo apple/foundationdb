@@ -58,7 +58,7 @@ struct ServerTestDriver {
 		        currentProtocolVersion),
 		    TaskPriority::DefaultYield));
 		Sim2FileSystem::newFileSystem();
-		FlowTransport::createInstance(false, 1);
+		FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
 		return Void();
 	}
 

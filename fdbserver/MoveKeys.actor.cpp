@@ -1381,7 +1381,8 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						}
 
 						// Assign the shard to teamForDroppedRange in keyServer space.
-						tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, teamForDroppedRange, {}));
+						tr.set(keyServersKey(it.key),
+						       keyServersValue(UIDtoTagMap, teamForDroppedRange, std::vector<UID>()));
 
 						std::vector<Future<Void>> actors;
 
