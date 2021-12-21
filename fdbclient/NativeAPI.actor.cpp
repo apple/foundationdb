@@ -7024,21 +7024,51 @@ ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, Chan
 	state Promise<Void> destroyed = self->destroyed;
 	loop {
 		if (destroyed.isSet()) {
+			if (self->debug) {
+				fmt::print("CFSD {0}: destroyed\n", self->id.toString().substr(0, 4));
+			}
 			return Void();
 		}
 		if (self->version.get() < self->desired.get()) {
+			if (self->debug) {
+				fmt::print("CFSD {0}: update waiting {1} < {2}\n",
+				           self->id.toString().substr(0, 4),
+				           self->version.get(),
+				           self->desired.get());
+			}
 			wait(delay(CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME) || self->version.whenAtLeast(self->desired.get()));
 			if (destroyed.isSet()) {
+				if (self->debug) {
+					fmt::print("CFSD {0}: destroyed2\n", self->id.toString().substr(0, 4));
+				}
 				return Void();
 			}
+			if (self->debug) {
+				fmt::print("CFSD {0}: updated {1} < {2}\n",
+				           self->id.toString().substr(0, 4),
+				           self->version.get(),
+				           self->desired.get());
+			}
 			if (self->version.get() < self->desired.get()) {
+				if (self->debug) {
+					fmt::print("CFSD {0}: requesting {1}\n", self->id.toString().substr(0, 4), self->desired.get());
+				}
 				ChangeFeedVersionUpdateReply rep = wait(brokenPromiseToNever(
 				    interf.changeFeedVersionUpdate.getReply(ChangeFeedVersionUpdateRequest(self->desired.get()))));
+				if (self->debug) {
+					fmt::print("CFSD {0}: got {1}\n", self->id.toString().substr(0, 4), rep.version);
+				}
 				if (rep.version > self->version.get()) {
+					if (self->debug) {
+						fmt::print("CFSD {0}: V={1} (req)\n", self->id.toString().substr(0, 4), rep.version);
+					}
 					self->version.set(rep.version);
 				}
 			}
 		} else {
+			if (self->debug) {
+				fmt::print("CFSD {0}: desired.WAL({1})\n", self->id.toString().substr(0, 4), self->version.get() + 1);
+			}
 			wait(self->desired.whenAtLeast(self->version.get() + 1));
 		}
 	}
@@ -7088,6 +7118,9 @@ ACTOR Future<Void> changeFeedWaitLatest(Reference<ChangeFeedData> self, Version 
 		if (it->version.get() < version) {
 			waiting++;
 			if (version > it->desired.get()) {
+				if (DEBUG_CF_WAIT_VERSION == version) {
+					it->debug = true;
+				}
 				it->desired.set(version);
 				desired++;
 			}
@@ -7609,6 +7642,11 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 								results->notAtLatest.set(0);
 							}
 							if (feedReply.minStreamVersion > results->storageData[0]->version.get()) {
+								if (results->storageData[0]->debug) {
+									fmt::print("CFSD {0}: V={1} (CFLR)\n",
+									           results->storageData[0]->id.toString().substr(0, 4),
+									           results->storageData[0]->version.get());
+								}
 								results->storageData[0]->version.set(feedReply.minStreamVersion);
 							}
 						}

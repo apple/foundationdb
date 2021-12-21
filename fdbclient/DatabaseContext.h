@@ -160,6 +160,8 @@ struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
 	NotifiedVersion desired;
 	Promise<Void> destroyed;
 
+	bool debug = false; // TODO REMOVE
+
 	~ChangeFeedStorageData() { destroyed.send(Void()); }
 };
 
