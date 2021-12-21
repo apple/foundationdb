@@ -543,7 +543,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		struct CommitAction : TypedAction<Writer, CommitAction> {
-			std::unique_ptr<rocksdb::WriteBatch> batchToCommit;
+			std::unique_ptr<rocksdb::WriteBatch> systemMutationBatch;
 			std::unique_ptr<std::unordered_map<DB, rocksdb::WriteBatch>> shardedBatches;
 			ThreadReturnPromise<Void> done;
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
@@ -581,6 +581,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					a.done.sendError(statusToError(s));
 					return;
 				}
+			}
+			// System mutation needs to be committed after all other mutations.
+			s = doCommit(a.systemMutationBatch.get(), db);
+			if (!s.ok()) {
+				a.done.sendError(statusToError(s));
+				return;
 			}
 			a.done.send(Void());
 		}
@@ -915,11 +921,19 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	void set(KeyValueRef kv, const Arena*) override {
 		if (writeBatches == nullptr) {
 			writeBatches.reset(new std::unordered_map<DB, rocksdb::WriteBatch>());
+			systemMutationBatch.reset(new rocksdb::WriteBatch());
 		}
 		auto it = shardMap.rangeContaining(kv.key);
 		ASSERT(it.value() != nullptr);
-		(*writeBatches)[it.value()].Put(toSlice(kv.key), toSlice(kv.value));
-		std::cout << "Buffered key " << kv.key.toString() << " in db " << it.value()->GetName() << std::endl;
+
+		if (it.range() == defaultShardRange) {
+			std::cout << "Sys data mutation" << kv.key.toString() << " . " << kv.value.toString() << "\n";
+			systemMutationBatch->Put(toSlice(kv.key), toSlice(kv.value));
+		} else {
+
+			(*writeBatches)[it.value()].Put(toSlice(kv.key), toSlice(kv.value));
+			std::cout << "Buffered key " << kv.key.toString() << " in db " << it.value()->GetName() << std::endl;
+		}
 	}
 
 	void clear(KeyRangeRef range, const Arena*) override {
@@ -941,11 +955,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Future<Void> commit(bool) override {
 		// If there is nothing to write, don't write.
-		if (writeBatches == nullptr || writeBatches->empty()) {
+		if ((writeBatches == nullptr || writeBatches->empty()) &&
+		    (systemMutationBatch == nullptr)) {
 			return Void();
 		}
 		auto a = new Writer::CommitAction();
 		a->shardedBatches = std::move(writeBatches);
+		a->systemMutationBatch = std::move(systemMutationBatch);
 		auto res = a->done.getFuture();
 		writeThread->post(a);
 		return res;
@@ -1127,7 +1143,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Promise<Void> errorPromise;
 	Promise<Void> closePromise;
 	Future<Void> openFuture;
-	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
+	std::unique_ptr<rocksdb::WriteBatch> systemMutationBatch;
 	std::unique_ptr<std::unordered_map<DB, rocksdb::WriteBatch>> writeBatches;
 	Optional<Future<Void>> metrics;
 	FlowLock readSemaphore;
