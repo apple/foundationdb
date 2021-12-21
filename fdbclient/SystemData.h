@@ -589,19 +589,20 @@ int64_t decodeBlobManagerEpochValue(ValueRef const& value);
 extern const uint8_t BG_FILE_TYPE_DELTA;
 extern const uint8_t BG_FILE_TYPE_SNAPSHOT;
 
-// \xff\x02/bgf/(granuleID, {snapshot|delta}, version) = [[filename]]
+// FIXME: flip order of {filetype, version}
+// \xff\x02/bgf/(granuleUID, {snapshot|delta}, fileVersion) = [[filename]]
 extern const KeyRangeRef blobGranuleFileKeys;
 
-// \xff\x02/bgm/[[begin]] = [[BlobWorkerUID]]
+// \xff\x02/bgm/[[beginKey]] = [[BlobWorkerUID]]
 extern const KeyRangeRef blobGranuleMappingKeys;
 
-// \xff\x02/bgl/(begin,end) = (epoch, seqno, granuleID)
+// \xff\x02/bgl/(beginKey,endKey) = (epoch, seqno, granuleUID)
 extern const KeyRangeRef blobGranuleLockKeys;
 
-// \xff\x02/bgs/(parentGranuleID, granuleID) = state
+// \xff\x02/bgs/(parentGranuleUID, granuleUID) = [[BlobGranuleSplitState]]
 extern const KeyRangeRef blobGranuleSplitKeys;
 
-// \xff\x02/bgh/(start,end,version) = { granuleID, [parentGranuleHistoryKeys] }
+// \xff\x02/bgh/(beginKey,endKey,startVersion) = { granuleUID, [parentGranuleHistoryKeys] }
 extern const KeyRangeRef blobGranuleHistoryKeys;
 
 const Key blobGranuleFileKeyFor(UID granuleID, uint8_t fileType, Version fileVersion);

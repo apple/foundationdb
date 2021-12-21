@@ -267,10 +267,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.done.sendError(statusToError(status));
 			} else {
 				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
-				// The current thread and main thread are same when the code runs in simulation.
-				// blockUntilReady() is getting the thread into deadlock state, so avoiding the
-				// metric logger in simulation.
-				if (!g_network->isSimulated()) {
+				if (g_network->isSimulated()) {
+					// The current thread and main thread are same when the code runs in simulation.
+					// blockUntilReady() is getting the thread into deadlock state, so directly calling
+					// the metricsLogger.
+					a.metrics = rocksDBMetricLogger(options.statistics, db) && flowLockLogger(a.readLock, a.fetchLock);
+				} else {
 					onMainThread([&] {
 						a.metrics =
 						    rocksDBMetricLogger(options.statistics, db) && flowLockLogger(a.readLock, a.fetchLock);

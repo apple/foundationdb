@@ -5,6 +5,7 @@ set(FLOW_SRCS
   ActorCollection.h
   Arena.cpp
   Arena.h
+  ArgParseUtil.h
   AsioReactor.h
   BooleanParam.h
   CompressedInt.actor.cpp

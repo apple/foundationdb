@@ -825,14 +825,24 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	                                   StringRef(newName + ':' + deterministicRandom()->randomAlphaNumeric(32)));
 
 	if (g_network->isSimulated()) {
-		for (int i = 0; i < (desiredCoordinators->size() / 2) + 1; i++) {
-			auto addresses = g_simulator.getProcessByAddress((*desiredCoordinators)[i])->addresses;
+		int i = 0;
+		int protectedCount = 0;
+		while ((protectedCount < ((desiredCoordinators->size() / 2) + 1)) && (i < desiredCoordinators->size())) {
+			auto process = g_simulator.getProcessByAddress((*desiredCoordinators)[i]);
+			auto addresses = process->addresses;
 
-			g_simulator.protectedAddresses.insert(addresses.address);
+			if (!process->isReliable()) {
+				i++;
+				continue;
+			}
+
+			g_simulator.protectedAddresses.insert(process->addresses.address);
 			if (addresses.secondaryAddress.present()) {
-				g_simulator.protectedAddresses.insert(addresses.secondaryAddress.get());
+				g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
 			}
 			TraceEvent("ProtectCoordinator").detail("Address", (*desiredCoordinators)[i]).backtrace();
+			protectedCount++;
+			i++;
 		}
 	}
 
@@ -1117,9 +1127,10 @@ struct AutoQuorumChange final : IQuorumChange {
 		self->addDesiredWorkers(chosen, workers, desiredCount, excluded);
 
 		if (chosen.size() < desiredCount) {
-			if (chosen.size() < oldCoordinators.size()) {
+			if (chosen.empty() || chosen.size() < oldCoordinators.size()) {
 				TraceEvent("NotEnoughMachinesForCoordinators")
 				    .detail("EligibleWorkers", workers.size())
+				    .detail("ChosenWorkers", chosen.size())
 				    .detail("DesiredCoordinators", desiredCount)
 				    .detail("CurrentCoordinators", oldCoordinators.size());
 				*err = CoordinatorsResult::NOT_ENOUGH_MACHINES;

@@ -1411,7 +1411,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
 
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
-		TraceEvent(SevWarnAlways, "ChaosFeaturesEnabled");
+		TraceEvent(SevInfo, "ChaosFeaturesEnabled");
 		chaosMetricsActor = chaosMetricsLogger();
 	}
 

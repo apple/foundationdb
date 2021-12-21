@@ -1001,20 +1001,20 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 					printf("\nSuccessfully removed the tag that was %.4f hours behind.\n\n",
 					       (readVer - minVersion) / (3600.0 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 				} else if (removingLogUid.present() && minVersionLogUid != removingLogUid.get()) {
-					printf("\nWARNING: The oldest tag was possibly removed, run again without `--delete_data' to "
+					printf("\nWARNING: The oldest tag was possibly removed, run again without `--delete-data' to "
 					       "check.\n\n");
 				} else {
 					printf("\nWARNING: Did not delete data because the tag is not at least %.4f hours behind. Change "
-					       "`--min_cleanup_seconds' to adjust this threshold.\n\n",
+					       "`--min-cleanup-seconds' to adjust this threshold.\n\n",
 					       CLIENT_KNOBS->MIN_CLEANUP_SECONDS / 3600.0);
 				}
 			} else if (readVer - minVersion >
 			           CLIENT_KNOBS->MIN_CLEANUP_SECONDS * CLIENT_KNOBS->CORE_VERSIONSPERSECOND) {
-				printf("\nPassing `--delete_data' would delete the tag that is %.4f hours behind.\n\n",
+				printf("\nPassing `--delete-data' would delete the tag that is %.4f hours behind.\n\n",
 				       (readVer - minVersion) / (3600.0 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 			} else {
-				printf("\nPassing `--delete_data' would not delete the tag that is %.4f hours behind. Change "
-				       "`--min_cleanup_seconds' to adjust the cleanup threshold.\n\n",
+				printf("\nPassing `--delete-data' would not delete the tag that is %.4f hours behind. Change "
+				       "`--min-cleanup-seconds' to adjust the cleanup threshold.\n\n",
 				       (readVer - minVersion) / (3600.0 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 			}
 

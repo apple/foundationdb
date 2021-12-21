@@ -49,7 +49,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES BackupContainers.txt IGNORE)
   add_fdb_test(TEST_FILES BandwidthThrottle.txt IGNORE)
   add_fdb_test(TEST_FILES BigInsert.txt IGNORE)
-  add_fdb_test(TEST_FILES BlobGranuleReaderUnit.txt IGNORE)
+  add_fdb_test(TEST_FILES BlobGranuleFileUnit.txt IGNORE)
   add_fdb_test(TEST_FILES BlobManagerUnit.txt IGNORE)
   add_fdb_test(TEST_FILES ConsistencyCheck.txt IGNORE)
   add_fdb_test(TEST_FILES DDMetricsExclude.txt IGNORE)
@@ -127,6 +127,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BackupCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectnessClean.toml)
+  add_fdb_test(TEST_FILES fast/BlobGranuleCorrectness.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/BlobGranuleCorrectnessClean.toml IGNORE)
   add_fdb_test(TEST_FILES fast/CacheTest.toml)
   add_fdb_test(TEST_FILES fast/CloggedSideband.toml)
   add_fdb_test(TEST_FILES fast/ConfigureLocked.toml)
@@ -150,7 +152,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/MemoryLifetime.toml)
   add_fdb_test(TEST_FILES fast/MoveKeysCycle.toml)
   add_fdb_test(TEST_FILES fast/MutationLogReaderCorrectness.toml)
-  add_fdb_test(TEST_FILES fast/IndexPrefetchDemo.toml)
+  add_fdb_test(TEST_FILES fast/GetRangeAndMap.toml)
   add_fdb_test(TEST_FILES fast/ProtocolVersion.toml)
   add_fdb_test(TEST_FILES fast/RandomSelector.toml)
   add_fdb_test(TEST_FILES fast/RandomUnitTests.toml)
@@ -201,8 +203,8 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.0.0/SnapIncrementalRestore-1.toml
                restarting/from_7.0.0/SnapIncrementalRestore-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/ConfigureTestRestart-1.txt
-               restarting/from_7.0.0/ConfigureTestRestart-2.txt)
+    TEST_FILES restarting/from_7.0.0/ConfigureTestRestart-1.toml
+               restarting/from_7.0.0/ConfigureTestRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_5.0.0_until_6.3.0/CycleTestRestart-1.txt
                restarting/from_5.0.0_until_6.3.0/CycleTestRestart-2.txt)
@@ -231,26 +233,24 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
                restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/to_7.0.0/CycleTestRestart-1.txt
-               restarting/to_7.0.0/CycleTestRestart-2.txt)
+    TEST_FILES restarting/to_7.0.0/CycleTestRestart-1.toml
+               restarting/to_7.0.0/CycleTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/SnapTestAttrition-1.txt
-               restarting/from_7.0.0/SnapTestAttrition-2.txt)
+    TEST_FILES restarting/from_7.0.0/SnapTestAttrition-1.toml
+               restarting/from_7.0.0/SnapTestAttrition-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/SnapTestSimpleRestart-1.txt
-               restarting/from_7.0.0/SnapTestSimpleRestart-2.txt)
+    TEST_FILES restarting/from_7.0.0/SnapTestSimpleRestart-1.toml
+               restarting/from_7.0.0/SnapTestSimpleRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/SnapTestRestart-1.txt
-               restarting/from_7.0.0/SnapTestRestart-2.txt)
+    TEST_FILES restarting/from_7.0.0/SnapTestRestart-1.toml
+               restarting/from_7.0.0/SnapTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/SnapCycleRestart-1.txt
-               restarting/from_7.0.0/SnapCycleRestart-2.txt)
+    TEST_FILES restarting/from_7.0.0/SnapCycleRestart-1.toml
+               restarting/from_7.0.0/SnapCycleRestart-2.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.toml)
-  add_fdb_test(TEST_FILES fast/BlobGranuleCorrectness.toml IGNORE)
   add_fdb_test(TEST_FILES slow/BlobGranuleCorrectnessLarge.toml IGNORE)
-  add_fdb_test(TEST_FILES fast/BlobGranuleCorrectnessClean.toml IGNORE)
   add_fdb_test(TEST_FILES slow/BlobGranuleCorrectnessLargeClean.toml IGNORE)
   add_fdb_test(TEST_FILES slow/ClogWithRollbacks.toml)
   add_fdb_test(TEST_FILES slow/CloggedCycleTest.toml)
@@ -329,6 +329,13 @@ if(WITH_PYTHON)
   add_fdb_Test(TEST_FILES ptxn/TLogPeekCursor.toml)
   add_fdb_test(TEST_FILES ptxn/TeamVersionTracker.toml)
   add_fdb_test(TEST_FILES ptxn/StorageServer.toml)
+
+  if(NOT OPEN_FOR_IDE)
+    add_test(
+      NAME command_line_argument_test
+      COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/argument_parsing/test_argument_parsing.py ${CMAKE_BINARY_DIR}
+    )
+  endif()
 
   verify_testing()
   if (NOT OPEN_FOR_IDE AND NOT WIN32)

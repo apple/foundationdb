@@ -660,8 +660,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENABLE_CLEAR_RANGE_EAGER_READS,                       true );
 	init( MERGE_CURSOR_RETRY_TIMES,                               10 );
 	init( MERGE_CURSOR_RETRY_DELAY,                             1e-2 );
-	init( QUICK_GET_VALUE_FALLBACK,                             true );
-	init( QUICK_GET_KEY_VALUES_FALLBACK,                        true );
+	init( QUICK_GET_VALUE_FALLBACK,                             false );
+	init( QUICK_GET_KEY_VALUES_FALLBACK,                        false );
 
 	//Wait Failure
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;
