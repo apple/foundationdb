@@ -1930,13 +1930,13 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 }
 
 ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, BlobGranuleFileRequest req) {
-	if (BW_DEBUG) {
-		printf("BW %s processing blobGranuleFileRequest for range [%s-%s) @ %lld\n",
-		       bwData->id.toString().c_str(),
-		       req.keyRange.begin.printable().c_str(),
-		       req.keyRange.end.printable().c_str(),
-		       req.readVersion);
-	}
+	/*if (BW_DEBUG) {
+	    printf("BW %s processing blobGranuleFileRequest for range [%s-%s) @ %lld\n",
+	           bwData->id.toString().c_str(),
+	           req.keyRange.begin.printable().c_str(),
+	           req.keyRange.end.printable().c_str(),
+	           req.readVersion);
+	}*/
 
 	try {
 		// TODO REMOVE in api V2
