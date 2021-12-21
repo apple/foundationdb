@@ -1305,6 +1305,10 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 					nextVersion = sizeItr == logData->version_sizes.end() ? logData->version.get() : sizeItr->key;
 				}
 
+				nextVersion =
+				    std::min(nextVersion,
+				             std::max<Version>(
+				                 1, logData->knownCommittedVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
 				wait(logData->queueCommittedVersion.whenAtLeast(nextVersion));
 				if (logData->queueCommittedVersion.get() == std::numeric_limits<Version>::max()) {
 					return Void();
@@ -1361,7 +1365,9 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 		}
 
 		//TraceEvent("UpdateStorageVer", logData->logId).detail("NextVersion", nextVersion).detail("PersistentDataVersion", logData->persistentDataVersion).detail("TotalSize", totalSize);
-
+		nextVersion = std::min(
+		    nextVersion,
+		    std::max<Version>(1, logData->knownCommittedVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
 		wait(logData->queueCommittedVersion.whenAtLeast(nextVersion));
 		if (logData->queueCommittedVersion.get() == std::numeric_limits<Version>::max()) {
 			return Void();
@@ -2152,8 +2158,8 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		if (req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
 
-		while (!logData->versionHistory.empty() &&
-		       logData->versionHistory.front().first <
+		while (logData->versionHistory.size() > 1 &&
+		       logData->versionHistory[1].first <
 		           req.knownCommittedVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 			logData->versionHistory.pop_front();
 		}
@@ -3104,8 +3110,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 						if (!self->spillOrder.size() || self->spillOrder.back() != qe.id) {
 							self->spillOrder.push_back(qe.id);
 						}
-						while (!logData->versionHistory.empty() &&
-						       logData->versionHistory.front().first <
+						while (logData->versionHistory.size() > 1 &&
+						       logData->versionHistory[1].first <
 						           qe.knownCommittedVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 							logData->versionHistory.pop_front();
 						}
