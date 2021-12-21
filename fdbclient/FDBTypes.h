@@ -909,6 +909,14 @@ struct StorageBytes {
 		              used / 1e6,
 		              temp / 1e6);
 	}
+
+	void toTraceEvent(TraceEvent& e) const {
+		e.detail("StorageBytesUsed", used)
+		    .detail("StorageBytesTemp", temp)
+		    .detail("StorageBytesTotal", total)
+		    .detail("StorageBytesFree", free)
+		    .detail("StorageBytesAvailable", available);
+	}
 };
 
 struct LogMessageVersion {
@@ -1208,5 +1216,11 @@ struct StorageMigrationType {
 
 	uint32_t type;
 };
+
+inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
+	int pos = locality.find(':');
+	// locality should be either 0 or in the format '<non_empty_string>:<non_empty_string>'
+	return ((pos > 0 && pos < locality.size() - 1) || locality == "0");
+}
 
 #endif

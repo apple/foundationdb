@@ -26,6 +26,7 @@
 
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/ActorCollection.h"
+#include "flow/SystemMonitor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/CoordinationInterface.h"
@@ -2199,10 +2200,10 @@ public:
 		    db.recoveryStalled) {
 			if (db.config.regions.size() > 1) {
 				auto regions = db.config.regions;
-				if (clusterControllerDcId.get() == regions[0].dcId) {
+				if (clusterControllerDcId.get() == regions[0].dcId && regions[1].priority >= 0) {
 					std::swap(regions[0], regions[1]);
 				}
-				ASSERT(clusterControllerDcId.get() == regions[1].dcId);
+				ASSERT(regions[1].priority < 0 || clusterControllerDcId.get() == regions[1].dcId);
 				checkRegions(regions);
 			}
 		}
@@ -2235,7 +2236,7 @@ public:
 
 		if (db.config.regions.size() > 1 && db.config.regions[0].priority > db.config.regions[1].priority &&
 		    db.config.regions[0].dcId != clusterControllerDcId.get() && versionDifferenceUpdated &&
-		    datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
+		    datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE && remoteDCIsHealthy()) {
 			checkRegions(db.config.regions);
 		}
 
@@ -2797,7 +2798,7 @@ public:
 	void updateWorkerHealth(const UpdateWorkerHealthRequest& req) {
 		std::string degradedPeersString;
 		for (int i = 0; i < req.degradedPeers.size(); ++i) {
-			degradedPeersString += i == 0 ? "" : " " + req.degradedPeers[i].toString();
+			degradedPeersString += (i == 0 ? "" : " ") + req.degradedPeers[i].toString();
 		}
 		TraceEvent("ClusterControllerUpdateWorkerHealth")
 		    .detail("WorkerAddress", req.address)
@@ -2931,24 +2932,9 @@ public:
 		return currentDegradedServersWithinLimit;
 	}
 
-	// Returns true when the cluster controller should trigger a recovery due to degraded servers are used in the
-	// transaction system in the primary data center.
-	bool shouldTriggerRecoveryDueToDegradedServers() {
-		if (degradedServers.size() > SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
-			return false;
-		}
-
+	// Whether the transaction system (in primary DC if in HA setting) contains degraded servers.
+	bool transactionSystemContainsDegradedServers() {
 		const ServerDBInfo dbi = db.serverInfo->get();
-		if (dbi.recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-			return false;
-		}
-
-		// Do not trigger recovery if the cluster controller is excluded, since the master will change
-		// anyways once the cluster controller is moved
-		if (id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
-			return false;
-		}
-
 		for (const auto& excludedServer : degradedServers) {
 			if (dbi.master.addresses().contains(excludedServer)) {
 				return true;
@@ -2985,6 +2971,93 @@ public:
 		}
 
 		return false;
+	}
+
+	// Whether transaction system in the remote DC, e.g. log router and tlogs in the remote DC, contains degraded
+	// servers.
+	bool remoteTransactionSystemContainsDegradedServers() {
+		if (db.config.usableRegions <= 1) {
+			return false;
+		}
+
+		for (const auto& excludedServer : degradedServers) {
+			if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	// Returns true if remote DC is healthy and can failover to.
+	bool remoteDCIsHealthy() {
+		// When we just start, we ignore any remote DC health info since the current CC may be elected at wrong DC due
+		// to that all the processes are still starting.
+		if (machineStartTime() == 0) {
+			return true;
+		}
+
+		if (now() - machineStartTime() < SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY) {
+			return true;
+		}
+
+		// When remote DC health is not monitored, we may not know whether the remote is healthy or not. So return false
+		// here to prevent failover.
+		if (!remoteDCMonitorStarted) {
+			return false;
+		}
+
+		return !remoteTransactionSystemContainsDegradedServers();
+	}
+
+	// Returns true when the cluster controller should trigger a recovery due to degraded servers used in the
+	// transaction system in the primary data center.
+	bool shouldTriggerRecoveryDueToDegradedServers() {
+		if (degradedServers.size() > SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
+			return false;
+		}
+
+		if (db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			return false;
+		}
+
+		// Do not trigger recovery if the cluster controller is excluded, since the master will change
+		// anyways once the cluster controller is moved
+		if (id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
+			return false;
+		}
+
+		return transactionSystemContainsDegradedServers();
+	}
+
+	// Returns true when the cluster controller should trigger a failover due to degraded servers used in the
+	// transaction system in the primary data center, and no degradation in the remote data center.
+	bool shouldTriggerFailoverDueToDegradedServers() {
+		if (db.config.usableRegions <= 1) {
+			return false;
+		}
+
+		if (SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION >
+		    SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION) {
+			TraceEvent(SevWarn, "TriggerFailoverDueToDegradedServersInvalidConfig")
+			    .suppressFor(1.0)
+			    .detail("Min", SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION)
+			    .detail("Max", SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION);
+			return false;
+		}
+
+		if (degradedServers.size() < SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION ||
+		    degradedServers.size() > SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION) {
+			return false;
+		}
+
+		// Do not trigger recovery if the cluster controller is excluded, since the master will change
+		// anyways once the cluster controller is moved
+		if (id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
+			return false;
+		}
+
+		return transactionSystemContainsDegradedServers() && !remoteTransactionSystemContainsDegradedServers();
 	}
 
 	int recentRecoveryCountDueToHealth() {
@@ -3038,11 +3111,15 @@ public:
 	PromiseStream<Future<Void>> addActor;
 	bool versionDifferenceUpdated;
 
+	bool remoteDCMonitorStarted;
+	bool remoteTransactionSystemDegraded;
+
 	// recruitX is used to signal when role X needs to be (re)recruited.
 	// recruitingXID is used to track the ID of X's interface which is being recruited.
 	// We use AsyncVars to kill (i.e. halt) singletons that have been replaced.
 	AsyncVar<bool> recruitDistributor;
 	Optional<UID> recruitingDistributorID;
+
 	AsyncVar<bool> recruitRatekeeper;
 	Optional<UID> recruitingRatekeeperID;
 
@@ -3073,6 +3150,8 @@ public:
 	Counter registerMasterRequests;
 	Counter statusRequests;
 
+	Reference<EventCacheHolder> recruitedMasterWorkerEventHolder;
+
 	ClusterControllerData(ClusterControllerFullInterface const& ccInterface,
 	                      LocalityData const& locality,
 	                      ServerCoordinators const& coordinators)
@@ -3080,14 +3159,15 @@ public:
 	    clusterControllerDcId(locality.dcId()), id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()),
 	    outstandingRemoteRequestChecker(Void()), startTime(now()), goodRecruitmentTime(Never()),
 	    goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0), versionDifferenceUpdated(false),
-	    recruitDistributor(false), recruitRatekeeper(false),
-	    clusterControllerMetrics("ClusterController", id.toString()),
+	    remoteDCMonitorStarted(false), remoteTransactionSystemDegraded(false), recruitDistributor(false),
+	    recruitRatekeeper(false), clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
 	    getWorkersRequests("GetWorkersRequests", clusterControllerMetrics),
 	    getClientWorkersRequests("GetClientWorkersRequests", clusterControllerMetrics),
 	    registerMasterRequests("RegisterMasterRequests", clusterControllerMetrics),
-	    statusRequests("StatusRequests", clusterControllerMetrics) {
+	    statusRequests("StatusRequests", clusterControllerMetrics),
+	    recruitedMasterWorkerEventHolder(makeReference<EventCacheHolder>("RecruitedMasterWorker")) {
 		auto serverInfo = ServerDBInfo();
 		serverInfo.id = deterministicRandom()->randomUniqueID();
 		serverInfo.infoGeneration = ++db.dbInfoCount;
@@ -3203,7 +3283,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster, ClusterC
 				// for status tool
 				TraceEvent("RecruitedMasterWorker", cluster->id)
 				    .detail("Address", fNewMaster.get().get().address())
-				    .trackLatest("RecruitedMasterWorker");
+				    .trackLatest(cluster->recruitedMasterWorkerEventHolder->trackingKey);
 
 				iMaster = fNewMaster.get().get();
 
@@ -4648,6 +4728,31 @@ ACTOR Future<Void> updateDatacenterVersionDifference(ClusterControllerData* self
 	}
 }
 
+// A background actor that periodically checks remote DC health, and `checkOutstandingRequests` if remote DC recovers.
+ACTOR Future<Void> updateRemoteDCHealth(ClusterControllerData* self) {
+	// The purpose of the initial delay is to wait for the cluster to achieve a steady state before checking remote DC
+	// health, since remote DC healthy may trigger a failover, and we don't want that to happen too frequently.
+	wait(delay(SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY));
+
+	self->remoteDCMonitorStarted = true;
+
+	// When the remote DC health just start, we may just recover from a health degradation. Check if we can failback if
+	// we are currently in the remote DC in the database configuration.
+	if (!self->remoteTransactionSystemDegraded) {
+		checkOutstandingRequests(self);
+	}
+
+	loop {
+		bool oldRemoteTransactionSystemDegraded = self->remoteTransactionSystemDegraded;
+		self->remoteTransactionSystemDegraded = self->remoteTransactionSystemContainsDegradedServers();
+
+		if (oldRemoteTransactionSystemDegraded && !self->remoteTransactionSystemDegraded) {
+			checkOutstandingRequests(self);
+		}
+		wait(delay(SERVER_KNOBS->CHECK_REMOTE_HEALTH_INTERVAL));
+	}
+}
+
 ACTOR Future<Void> doEmptyCommit(Database cx) {
 	state Transaction tr(cx);
 	loop {
@@ -4956,6 +5061,24 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 						self->excludedDegradedServers.clear();
 						TraceEvent("DegradedServerDetectedAndSuggestRecovery").log();
 					}
+				} else if (self->shouldTriggerFailoverDueToDegradedServers()) {
+					double ccUpTime = now() - machineStartTime();
+					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER &&
+					    ccUpTime > SERVER_KNOBS->INITIAL_UPDATE_CROSS_DC_INFO_DELAY) {
+						TraceEvent("DegradedServerDetectedAndTriggerFailover").log();
+						std::vector<Optional<Key>> dcPriority;
+						auto remoteDcId = self->db.config.regions[0].dcId == self->clusterControllerDcId.get()
+						                      ? self->db.config.regions[1].dcId
+						                      : self->db.config.regions[0].dcId;
+
+						// Switch the current primary DC and remote DC in desiredDcIds, so that the remote DC becomes
+						// the new primary, and the primary DC becomes the new remote.
+						dcPriority.push_back(remoteDcId);
+						dcPriority.push_back(self->clusterControllerDcId);
+						self->desiredDcIds.set(dcPriority);
+					} else {
+						TraceEvent("DegradedServerDetectedAndSuggestFailover").detail("CCUpTime", ccUpTime);
+					}
 				}
 			}
 
@@ -5008,6 +5131,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 
 	if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
 		self.addActor.send(workerHealthMonitor(&self));
+		self.addActor.send(updateRemoteDCHealth(&self));
 	}
 
 	loop choose {
@@ -5412,18 +5536,19 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	NetworkAddress backup(IPAddress(0x06060606), 1);
 	NetworkAddress proxy(IPAddress(0x07070707), 1);
 	NetworkAddress resolver(IPAddress(0x08080808), 1);
+	UID testUID(1, 2);
 
 	// Create a ServerDBInfo using above addresses.
 	ServerDBInfo testDbInfo;
 	testDbInfo.master.changeCoordinators =
-	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ master }, UID(1, 2)));
+	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ master }, testUID));
 
 	TLogInterface localTLogInterf;
-	localTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ tlog }, UID(1, 2)));
+	localTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ tlog }, testUID));
 	TLogInterface localLogRouterInterf;
-	localLogRouterInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ logRouter }, UID(1, 2)));
+	localLogRouterInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ logRouter }, testUID));
 	BackupInterface backupInterf;
-	backupInterf.waitFailure = RequestStream<ReplyPromise<Void>>(Endpoint({ backup }, UID(1, 2)));
+	backupInterf.waitFailure = RequestStream<ReplyPromise<Void>>(Endpoint({ backup }, testUID));
 	TLogSet localTLogSet;
 	localTLogSet.isLocal = true;
 	localTLogSet.tLogs.push_back(OptionalInterface(localTLogInterf));
@@ -5432,7 +5557,7 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	testDbInfo.logSystemConfig.tLogs.push_back(localTLogSet);
 
 	TLogInterface sateTLogInterf;
-	sateTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ satelliteTlog }, UID(1, 2)));
+	sateTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ satelliteTlog }, testUID));
 	TLogSet sateTLogSet;
 	sateTLogSet.isLocal = true;
 	sateTLogSet.locality = tagLocalitySatellite;
@@ -5440,18 +5565,18 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	testDbInfo.logSystemConfig.tLogs.push_back(sateTLogSet);
 
 	TLogInterface remoteTLogInterf;
-	remoteTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ remoteTlog }, UID(1, 2)));
+	remoteTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ remoteTlog }, testUID));
 	TLogSet remoteTLogSet;
 	remoteTLogSet.isLocal = false;
 	remoteTLogSet.tLogs.push_back(OptionalInterface(remoteTLogInterf));
 	testDbInfo.logSystemConfig.tLogs.push_back(remoteTLogSet);
 
 	GrvProxyInterface proxyInterf;
-	proxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, UID(1, 2)));
+	proxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, testUID));
 	testDbInfo.client.grvProxies.push_back(proxyInterf);
 
 	ResolverInterface resolverInterf;
-	resolverInterf.resolve = RequestStream<struct ResolveTransactionBatchRequest>(Endpoint({ resolver }, UID(1, 2)));
+	resolverInterf.resolve = RequestStream<struct ResolveTransactionBatchRequest>(Endpoint({ resolver }, testUID));
 	testDbInfo.resolvers.push_back(resolverInterf);
 
 	testDbInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
@@ -5498,6 +5623,110 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	// Trigger recovery when resolver is degraded.
 	data.degradedServers.insert(resolver);
 	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServers") {
+	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
+	ClusterControllerData data(ClusterControllerFullInterface(),
+	                           LocalityData(),
+	                           ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile())));
+	NetworkAddress master(IPAddress(0x01010101), 1);
+	NetworkAddress tlog(IPAddress(0x02020202), 1);
+	NetworkAddress satelliteTlog(IPAddress(0x03030303), 1);
+	NetworkAddress remoteTlog(IPAddress(0x04040404), 1);
+	NetworkAddress logRouter(IPAddress(0x05050505), 1);
+	NetworkAddress backup(IPAddress(0x06060606), 1);
+	NetworkAddress proxy(IPAddress(0x07070707), 1);
+	NetworkAddress proxy2(IPAddress(0x08080808), 1);
+	NetworkAddress resolver(IPAddress(0x09090909), 1);
+	UID testUID(1, 2);
+
+	data.db.config.usableRegions = 2;
+
+	// Create a ServerDBInfo using above addresses.
+	ServerDBInfo testDbInfo;
+	testDbInfo.master.changeCoordinators =
+	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ master }, testUID));
+
+	TLogInterface localTLogInterf;
+	localTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ tlog }, testUID));
+	TLogInterface localLogRouterInterf;
+	localLogRouterInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ logRouter }, testUID));
+	BackupInterface backupInterf;
+	backupInterf.waitFailure = RequestStream<ReplyPromise<Void>>(Endpoint({ backup }, testUID));
+	TLogSet localTLogSet;
+	localTLogSet.isLocal = true;
+	localTLogSet.tLogs.push_back(OptionalInterface(localTLogInterf));
+	localTLogSet.logRouters.push_back(OptionalInterface(localLogRouterInterf));
+	localTLogSet.backupWorkers.push_back(OptionalInterface(backupInterf));
+	testDbInfo.logSystemConfig.tLogs.push_back(localTLogSet);
+
+	TLogInterface sateTLogInterf;
+	sateTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ satelliteTlog }, testUID));
+	TLogSet sateTLogSet;
+	sateTLogSet.isLocal = true;
+	sateTLogSet.locality = tagLocalitySatellite;
+	sateTLogSet.tLogs.push_back(OptionalInterface(sateTLogInterf));
+	testDbInfo.logSystemConfig.tLogs.push_back(sateTLogSet);
+
+	TLogInterface remoteTLogInterf;
+	remoteTLogInterf.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ remoteTlog }, testUID));
+	TLogSet remoteTLogSet;
+	remoteTLogSet.isLocal = false;
+	remoteTLogSet.tLogs.push_back(OptionalInterface(remoteTLogInterf));
+	testDbInfo.logSystemConfig.tLogs.push_back(remoteTLogSet);
+
+	GrvProxyInterface grvProxyInterf;
+	grvProxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, testUID));
+	testDbInfo.client.grvProxies.push_back(grvProxyInterf);
+
+	CommitProxyInterface commitProxyInterf;
+	commitProxyInterf.commit = RequestStream<struct CommitTransactionRequest>(Endpoint({ proxy2 }, testUID));
+	testDbInfo.client.commitProxies.push_back(commitProxyInterf);
+
+	ResolverInterface resolverInterf;
+	resolverInterf.resolve = RequestStream<struct ResolveTransactionBatchRequest>(Endpoint({ resolver }, testUID));
+	testDbInfo.resolvers.push_back(resolverInterf);
+
+	testDbInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+
+	// No failover when no degraded servers.
+	data.db.serverInfo->set(testDbInfo);
+	ASSERT(!data.shouldTriggerFailoverDueToDegradedServers());
+
+	// No failover when small number of degraded servers
+	data.degradedServers.insert(master);
+	ASSERT(!data.shouldTriggerFailoverDueToDegradedServers());
+	data.degradedServers.clear();
+
+	// Trigger failover when enough servers in the txn system are degraded.
+	data.degradedServers.insert(master);
+	data.degradedServers.insert(tlog);
+	data.degradedServers.insert(proxy);
+	data.degradedServers.insert(proxy2);
+	data.degradedServers.insert(resolver);
+	ASSERT(data.shouldTriggerFailoverDueToDegradedServers());
+
+	// No failover when usable region is 1.
+	data.db.config.usableRegions = 1;
+	ASSERT(!data.shouldTriggerFailoverDueToDegradedServers());
+	data.db.config.usableRegions = 2;
+
+	// No failover when remote is also degraded.
+	data.degradedServers.insert(remoteTlog);
+	ASSERT(!data.shouldTriggerFailoverDueToDegradedServers());
+	data.degradedServers.clear();
+
+	// No failover when some are not from transaction system
+	data.degradedServers.insert(NetworkAddress(IPAddress(0x13131313), 1));
+	data.degradedServers.insert(NetworkAddress(IPAddress(0x13131313), 2));
+	data.degradedServers.insert(NetworkAddress(IPAddress(0x13131313), 3));
+	data.degradedServers.insert(NetworkAddress(IPAddress(0x13131313), 4));
+	data.degradedServers.insert(NetworkAddress(IPAddress(0x13131313), 5));
+	ASSERT(!data.shouldTriggerFailoverDueToDegradedServers());
+	data.degradedServers.clear();
 
 	return Void();
 }

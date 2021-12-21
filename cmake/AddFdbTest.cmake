@@ -443,6 +443,40 @@ function(add_fdbclient_test)
   set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
 endfunction()
 
+# Creates a cluster file for a nonexistent cluster before running the specified command 
+# (usually a ctest test)
+function(add_unavailable_fdbclient_test)
+  set(options DISABLED ENABLED)
+  set(oneValueArgs NAME TEST_TIMEOUT)
+  set(multiValueArgs COMMAND)
+  cmake_parse_arguments(T "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
+  if(OPEN_FOR_IDE)
+    return()
+  endif()
+  if(NOT T_ENABLED AND T_DISABLED)
+    return()
+  endif()
+  if(NOT T_NAME)
+    message(FATAL_ERROR "NAME is a required argument for add_unavailable_fdbclient_test")
+  endif()
+  if(NOT T_COMMAND)
+    message(FATAL_ERROR "COMMAND is a required argument for add_unavailable_fdbclient_test")
+  endif()
+  message(STATUS "Adding unavailable client test ${T_NAME}")
+  add_test(NAME "${T_NAME}"
+  COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/fake_cluster.py
+          --output-dir ${CMAKE_BINARY_DIR}
+          --
+          ${T_COMMAND})
+  if (T_TEST_TIMEOUT)
+    set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT ${T_TEST_TIMEOUT})
+  else()
+    # default timeout
+    set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 60)
+  endif()
+  set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
+endfunction()
+
 # Creates 3 distinct clusters before running the specified command.
 # This is useful for testing features that require multiple clusters (like the
 # multi-cluster FDB client)
