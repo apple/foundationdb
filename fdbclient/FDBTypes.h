@@ -218,18 +218,14 @@ inline std::string describe(const int item) {
 }
 
 // Allows describeList to work on a vector of std::string
-static std::string describe(const std::string& s) {
-	return s;
-}
+std::string describe(const std::string& s);
 
 template <class T>
 std::string describe(Reference<T> const& item) {
 	return item->toString();
 }
 
-static std::string describe(UID const& item) {
-	return item.shortString();
-}
+std::string describe(UID const& item);
 
 template <class T>
 std::string describe(T const& item) {
@@ -738,7 +734,7 @@ struct KeyValueStoreType {
 		case SSD_BTREE_V2:
 			return "ssd-2";
 		case SSD_REDWOOD_V1:
-			return "ssd-redwood-experimental";
+			return "ssd-redwood-1-experimental";
 		case SSD_ROCKSDB_V1:
 			return "ssd-rocksdb-experimental";
 		case MEMORY:

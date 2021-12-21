@@ -3308,7 +3308,7 @@ JsonBuilderObject randomDocument(const std::vector<std::string>& strings, int& l
 	return r;
 }
 
-TEST_CASE("/status/json/builderPerf") {
+TEST_CASE("Lstatus/json/builderPerf") {
 	std::vector<std::string> strings;
 	int c = 1000000;
 	printf("Generating random strings\n");

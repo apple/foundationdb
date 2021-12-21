@@ -311,7 +311,7 @@ public:
 	//	0 = "ssd"
 	//	1 = "memory"
 	//	2 = "memory-radixtree-beta"
-	//	3 = "ssd-redwood-experimental"
+	//	3 = "ssd-redwood-1-experimental"
 	//	4 = "ssd-rocksdb-experimental"
 	// Requires a comma-separated list of numbers WITHOUT whitespaces
 	std::vector<int> storageEngineExcludeTypes;
@@ -1268,7 +1268,7 @@ void SimulationConfig::setSplits(const TestConfig& testConfig) {
 	}
 }
 
-StringRef StringRefOf(const char* s) {
+[[maybe_unused]] StringRef StringRefOf(const char* s) {
 	return StringRef((uint8_t*)s, strlen(s));
 }
 
@@ -1384,7 +1384,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	}
 	case 3: {
 		TEST(true); // Simulated cluster using redwood storage engine
-		set_config("ssd-redwood-experimental");
+		set_config("ssd-redwood-1-experimental");
 		break;
 	}
 	case 4: {
@@ -2234,7 +2234,7 @@ bool rocksDBEnabled = false;
 #endif
 
 // Populates the TestConfig fields according to what is found in the test file.
-void checkTestConf(const char* testFile, TestConfig* testConfig) {}
+[[maybe_unused]] void checkTestConf(const char* testFile, TestConfig* testConfig) {}
 
 } // namespace
 

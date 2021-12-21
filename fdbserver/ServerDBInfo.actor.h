@@ -64,6 +64,7 @@ struct ServerDBInfo {
 	                                           // which need to stay alive in case this recovery fails
 	Optional<LatencyBandConfig> latencyBandConfig;
 	int64_t infoGeneration;
+	UID clusterId;
 
 	// Flag that checks if in the test environtment.
 	bool isTestEnvironment = false;
@@ -91,7 +92,8 @@ struct ServerDBInfo {
 		           logSystemConfig,
 		           priorCommittedLogServers,
 		           latencyBandConfig,
-		           infoGeneration);
+		           infoGeneration,
+		           clusterId);
 	}
 };
 

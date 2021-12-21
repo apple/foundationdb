@@ -100,6 +100,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( RANGESTREAM_FRAGMENT_SIZE,               1e6 );
 	init( RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT,     20 );
 	init( QUARANTINE_TSS_ON_MISMATCH,             true ); if( randomize && BUGGIFY ) QUARANTINE_TSS_ON_MISMATCH = false; // if true, a tss mismatch will put the offending tss in quarantine. If false, it will just be killed
+	init( CHANGE_FEED_EMPTY_BATCH_TIME,          0.005 );
 
 	//KeyRangeMap
 	init( KRM_GET_RANGE_LIMIT,                     1e5 ); if( randomize && BUGGIFY ) KRM_GET_RANGE_LIMIT = 10;
@@ -231,8 +232,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( CONSISTENCY_CHECK_RATE_LIMIT_MAX,        50e6 ); // Limit in per sec
 	init( CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,	7 * 24 * 60 * 60 ); // 7 days
-	
-	//fdbcli		
+
+	//fdbcli
 	init( CLI_CONNECT_PARALLELISM,                  400 );
 	init( CLI_CONNECT_TIMEOUT,                     10.0 );
 
@@ -254,7 +255,11 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
 	init( BUSYNESS_SPIKE_SATURATED_THRESHOLD,     0.500 );
 
-	// blob granules 
+	// multi-version client control
+	init( MVC_CLIENTLIB_CHUNK_SIZE,              8*1024 );
+	init( MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION,      32 );
+
+	// blob granules
 	init( ENABLE_BLOB_GRANULES,                   false );
 
 	// clang-format on

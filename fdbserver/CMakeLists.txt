@@ -211,6 +211,7 @@ set(FDBSERVER_SRCS
   workloads/BulkSetup.actor.h
   workloads/Cache.actor.cpp
   workloads/ChangeConfig.actor.cpp
+  workloads/ClientLibManagementWorkload.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
   workloads/TriggerRecovery.actor.cpp
   workloads/SuspendProcesses.actor.cpp
@@ -228,7 +229,6 @@ set(FDBSERVER_SRCS
   workloads/DDMetricsExclude.actor.cpp
   workloads/DiskDurability.actor.cpp
   workloads/DiskDurabilityTest.actor.cpp
-  workloads/Downgrade.actor.cpp
   workloads/DummyWorkload.actor.cpp
   workloads/ExternalWorkload.actor.cpp
   workloads/FastTriggeredWatches.actor.cpp
@@ -255,6 +255,7 @@ set(FDBSERVER_SRCS
   workloads/MemoryLifetime.actor.cpp
   workloads/MetricLogging.actor.cpp
   workloads/MutationLogReaderCorrectness.actor.cpp
+  workloads/IndexPrefetchDemo.actor.cpp
   workloads/ParallelRestore.actor.cpp
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp

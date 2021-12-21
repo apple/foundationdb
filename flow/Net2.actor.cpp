@@ -152,6 +152,12 @@ public:
 	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string& host) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6) override;
+	// This method should only be used in simulation.
+	void addMockTCPEndpoint(const std::string& host,
+	                        const std::string& service,
+	                        const std::vector<NetworkAddress>& addresses) override {
+		throw operation_failed();
+	}
 	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                       const std::string& service) override;
 	Reference<IListener> listen(NetworkAddress localAddr) override;

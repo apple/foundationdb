@@ -42,9 +42,9 @@ public:
 	// Endpoint represents a particular service (e.g. a serialized Promise<T> or PromiseStream<T>)
 	// An endpoint is either "local" (used for receiving data) or "remote" (used for sending data)
 	constexpr static FileIdentifier file_identifier = 10618805;
-	typedef UID Token;
+	using Token = UID;
 	NetworkAddressList addresses;
-	Token token;
+	Token token{};
 
 	Endpoint() {}
 	Endpoint(const NetworkAddressList& addresses, Token token) : addresses(addresses), token(token) {
@@ -137,7 +137,7 @@ public:
 	}
 };
 
-struct TransportData;
+class TransportData;
 
 struct Peer : public ReferenceCounted<Peer> {
 	TransportData* transport;

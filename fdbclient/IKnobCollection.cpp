@@ -73,20 +73,25 @@ KnobValue IKnobCollection::parseKnobValue(std::string const& knobName, std::stri
 	UNSTOPPABLE_ASSERT(false);
 }
 
-std::unique_ptr<IKnobCollection> IKnobCollection::globalKnobCollection =
-    IKnobCollection::create(IKnobCollection::Type::CLIENT, Randomize::False, IsSimulated::False);
+std::unique_ptr<IKnobCollection>& IKnobCollection::globalKnobCollection() {
+	static std::unique_ptr<IKnobCollection> res;
+	if (!res) {
+		res = IKnobCollection::create(IKnobCollection::Type::CLIENT, Randomize::False, IsSimulated::False);
+	}
+	return res;
+}
 
 void IKnobCollection::setGlobalKnobCollection(Type type, Randomize randomize, IsSimulated isSimulated) {
-	globalKnobCollection = create(type, randomize, isSimulated);
-	FLOW_KNOBS = &globalKnobCollection->getFlowKnobs();
+	globalKnobCollection() = create(type, randomize, isSimulated);
+	FLOW_KNOBS = &globalKnobCollection()->getFlowKnobs();
 }
 
 IKnobCollection const& IKnobCollection::getGlobalKnobCollection() {
-	return *globalKnobCollection;
+	return *globalKnobCollection();
 }
 
 IKnobCollection& IKnobCollection::getMutableGlobalKnobCollection() {
-	return *globalKnobCollection;
+	return *globalKnobCollection();
 }
 
 ConfigMutationRef IKnobCollection::createSetMutation(Arena arena, KeyRef key, ValueRef value) {
