@@ -1687,7 +1687,7 @@ ILogSystem::HeapPeekCursor::HeapPeekCursor(
     Version end,
     int tLogReplicationFactor,
     bool returnIfBlocked)
-  : messageVersion(begin), hasData(false), currentCursor(-1), tag(tag) {
+  : messageVersion(begin), end(end), hasData(false), currentCursor(-1), tag(tag) {
 	for (int group = 0; group < logServers.size() / tLogReplicationFactor; group++) {
 		std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> groupServers;
 		for (int i = 0; i < tLogReplicationFactor; i++) {
@@ -1791,7 +1791,7 @@ ACTOR Future<Void> heapPeekGetMore(ILogSystem::HeapPeekCursor* self, TaskPriorit
 		if (self->currentCursor < 0) {
 			std::vector<Future<Void>> q;
 			for (auto& c : self->serverCursors) {
-				if (!c->hasMessage()) {
+				if (!c->hasMessage() && c->version() < self->end) {
 					q.push_back(c->getMore(taskID));
 				}
 			}

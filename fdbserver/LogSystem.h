@@ -552,6 +552,7 @@ struct ILogSystem {
 		std::vector<Reference<IPeekCursor>> serverCursors;
 		std::priority_queue<CursorVersion> minCursor;
 		LogMessageVersion messageVersion;
+		LogMessageVersion end;
 		bool hasData;
 		int currentCursor;
 		Future<Void> more;

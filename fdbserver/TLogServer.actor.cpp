@@ -503,7 +503,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	*/
 
 	AsyncTrigger stopCommit;
-	bool stopped, initialized;
+	bool stopped, initialized, active;
 	DBRecoveryCount recoveryCount;
 
 	// If persistentDataVersion != persistentDurableDataVersion,
@@ -636,7 +636,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	                 TLogSpillType logSpillType,
 	                 std::vector<Tag> tags,
 	                 std::string context)
-	  : stopped(false), initialized(false), queueCommittingVersion(0), knownCommittedVersion(0),
+	  : stopped(false), initialized(false), active(true), queueCommittingVersion(0), knownCommittedVersion(0),
 	    durableKnownCommittedVersion(0), minKnownCommittedVersion(0), queuePoppedVersion(0), minPoppedTagVersion(0),
 	    minPoppedTag(invalidTag), unpoppedRecoveredTags(0), cc("TLog", interf.id().toString()),
 	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), logId(interf.id()),
@@ -1305,10 +1305,12 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 					nextVersion = sizeItr == logData->version_sizes.end() ? logData->version.get() : sizeItr->key;
 				}
 
-				nextVersion =
-				    std::min(nextVersion,
-				             std::max<Version>(
-				                 1, logData->knownCommittedVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
+				if (logData->active) {
+					nextVersion = std::min(nextVersion,
+					                       std::max<Version>(1,
+					                                         logData->knownCommittedVersion -
+					                                             SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
+				}
 				wait(logData->queueCommittedVersion.whenAtLeast(nextVersion));
 				if (logData->queueCommittedVersion.get() == std::numeric_limits<Version>::max()) {
 					return Void();
@@ -2274,11 +2276,16 @@ ACTOR Future<UID> getClusterId(TLogData* self) {
 ACTOR Future<Void> rejoinMasters(TLogData* self,
                                  TLogInterface tli,
                                  DBRecoveryCount recoveryCount,
+                                 bool* active,
                                  Future<Void> registerWithMaster,
                                  bool isPrimary) {
 	state UID lastMasterID(0, 0);
 	loop {
 		auto const& inf = self->dbInfo->get();
+		if (inf.recoveryCount > recoveryCount && inf.recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
+			*active = false;
+		}
+
 		bool isDisplaced =
 		    !std::count(inf.priorCommittedLogServers.begin(), inf.priorCommittedLogServers.end(), tli.id());
 		if (isPrimary) {
@@ -3035,8 +3042,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		logData->version.set(ver);
 		logData->recoveryCount =
 		    BinaryReader::fromStringRef<DBRecoveryCount>(fRecoverCounts.get()[idx].value, Unversioned());
-		logData->removed =
-		    rejoinMasters(self, recruited, logData->recoveryCount, registerWithMaster.getFuture(), false);
+		logData->removed = rejoinMasters(
+		    self, recruited, logData->recoveryCount, &logData->active, registerWithMaster.getFuture(), false);
 		removed.push_back(errorOr(logData->removed));
 		logsByVersion.emplace_back(ver, id1);
 
@@ -3291,7 +3298,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	self->id_data[recruited.id()] = logData;
 	logData->locality = req.locality;
 	logData->recoveryCount = req.epoch;
-	logData->removed = rejoinMasters(self, recruited, req.epoch, Future<Void>(Void()), req.isPrimary);
+	logData->removed = rejoinMasters(self, recruited, req.epoch, &logData->active, Future<Void>(Void()), req.isPrimary);
 	self->popOrder.push_back(recruited.id());
 	self->spillOrder.push_back(recruited.id());
 
