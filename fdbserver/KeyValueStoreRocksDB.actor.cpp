@@ -46,40 +46,36 @@ rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
 }
 
-rocksdb::Slice toSlice(KeyRangeRef range) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValue()));
-	wr.serializeBytes(persistShardMappingPrefix);
-	// uint16 beginKeyLength, endKeyLength;
-
-	/*uint16_t beginKeyLength = range.begin().size();
-	uint16_t endKeyLength = range.end().size();
-	wr << beginKeyLength;
-	wr << endKeyLength;
-	wr.serializeBytes(range.begin());
-	wr.serializeBytes(range.end());
-	return toSlice(wr.toValue());*/
-	wr << range;
-	auto value = wr.toValue();
-	std::cout << "Serialized range " << value.toString() << "\n";
-	return toSlice(value);
-}
-
 StringRef toStringRef(rocksdb::Slice s) {
 	return StringRef(reinterpret_cast<const uint8_t*>(s.data()), s.size());
 }
 
-KeyRangeRef toKeyRangeRef(rocksdb::Slice s) {
-	auto data = toStringRef(s).removePrefix(persistShardMappingPrefix);
-	BinaryReader reader(data, Unversioned());
-	/*
-	uint16_t beginKeyLength, endKeyLength;
-	reader >> beginKeyLength;
-	reader >> endKeyLength;
-	return KeyRangeRef(data.substr, endKey);*/
-	KeyRangeRef range;
-	reader >> range;
-	std::cout << "Deserialized range " << range.toString();
-	return range;
+rocksdb::Slice getShardMappingKey(StringRef prefix, KeyRangeRef range) {
+	StringRef key = prefix.toString() + range.begin.toString();
+	return toSlice(key);
+}
+
+rocksdb::Slice getShardMappingValue(UID id, KeyRangeRef range) {
+	// BinaryWriter writer(IncludeVersion(ProtocolVersion::withKeyServerValue()));
+	// writer << id;
+	// writer << range.end;
+	// return toSlice(writer.toValue() );
+	auto slice = rocksdb::Slice(id.toString());
+	std::cout << "Mapping value" << slice.ToString() << "\n";
+	return slice;
+}
+
+KeyRangeRef decodeShardMapping(rocksdb::Slice key, rocksdb::Slice value, StringRef prefix, UID* id) {
+	auto beginKey = toStringRef(key).removePrefix(prefix);
+	// auto data = toStringRef(value);
+	std::cout << "UID value " << value.ToString() << "\n";
+	*id = UID::fromString(value.ToString());
+	// BinaryReader reader(data, Unversioned());
+	// reader >> *id;
+	// KeyRef endKey("zzz");
+	// reader >> endKey;
+	// auto endKey = data.substr(sizeof(UID));
+	return KeyRangeRef(beginKey, LiteralStringRef("zzz"));
 }
 
 void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
@@ -425,21 +421,26 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			uint64_t deadlineMicros = db->GetEnv()->NowMicros() + SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT * 1000000;
 			std::chrono::seconds deadlineSeconds(deadlineMicros / 1000000);
 			// readOptions.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
-			// When using a prefix extractor, ensure that keys are returned in order even if they cross
-			// a prefix boundary.
+
+			auto mappingRange = prefixRange(persistShardMappingPrefix);
 			readOptions.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
-			auto endSlice = toSlice(persistShardMappingKeys.end);
+			auto endSlice = toSlice(mappingRange.end);
 			readOptions.iterate_upper_bound = &endSlice;
 			auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions));
-			cursor->Seek(toSlice(persistShardMappingKeys.begin));
-			while (cursor->Valid() && toStringRef(cursor->key()) < persistShardMappingKeys.end) {
-
-				auto range = toKeyRangeRef(cursor->key());
-				auto directory = toStringRef(cursor->value());
-				std::cout << "Discover shard " << directory.toString();
+			cursor->Seek(toSlice(mappingRange.begin));
+			while (cursor->Valid() && toStringRef(cursor->key()) < mappingRange.end) {
+				UID shardId;
+				auto range = decodeShardMapping(cursor->key(), cursor->value(), persistShardMappingPrefix, &shardId);
+				TraceEvent(SevInfo, "RocksDB")
+				    .detail("Method", "Reopen")
+				    .detail("DataPath", a.dataPath)
+				    .detail("ShardId", shardId.toString())
+				    .detail("Begin", range.begin.toString())
+				    .detail("End", range.end.toString());
+				std::cout << "Discover shard " << shardId.toString();
 				DB cdb = nullptr;
-				if (!directory.empty()) {
-					status = rocksdb::DB::Open(options, a.dataPath + directory.toString(), defaultCF, &handle, &cdb);
+				if (!shardId.toString().empty()) {
+					status = rocksdb::DB::Open(options, a.dataPath + shardId.toString(), defaultCF, &handle, &cdb);
 					if (!status.ok()) {
 						logRocksDBError(status, "OpenShard");
 						a.done.sendError(statusToError(status));
@@ -476,12 +477,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		struct AddShardAction : TypedAction<Writer, AddShardAction> {
 			const std::string dataPath;
+			UID shardId;
 			KeyRange range;
 			KeyRangeMap<DB> *shardMap;
 			ThreadReturnPromise<Void> done;
 
-			AddShardAction(std::string dataPath, KeyRange range, KeyRangeMap<DB>* shardMap)
-			  : dataPath(dataPath), range(range), shardMap(shardMap) {}
+			AddShardAction(std::string dataPath, UID uid, KeyRange range, KeyRangeMap<DB>* shardMap)
+			  : dataPath(dataPath), shardId(uid), range(range), shardMap(shardMap) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -492,7 +494,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
 			auto options = getOptions();
 			DB ndb;
-			rocksdb::Status status = rocksdb::DB::Open(options, a.dataPath, defaultCF, &handle, &ndb);
+			rocksdb::Status status =
+			    rocksdb::DB::Open(options, a.dataPath + a.shardId.toString(), defaultCF, &handle, &ndb);
 			if (!status.ok()) {
 				logRocksDBError(status, "AddShard");
 				a.done.sendError(statusToError(status));
@@ -506,7 +509,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			rocksdb::WriteOptions writeOptions;
 			writeOptions.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
-			auto s = db->Put(writeOptions, toSlice(a.range), a.dataPath);
+			auto s = db->Put(writeOptions,
+			                 getShardMappingKey(persistShardMappingPrefix, a.range),
+			                 getShardMappingValue(a.shardId, a.range));
 			if (!s.ok()) {
 				logRocksDBError(s, "PersistShardInfo");
 				a.done.sendError(statusToError(status));
@@ -515,6 +520,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			TraceEvent(SevInfo, "RocksDB")
 			    .detail("Path", a.dataPath)
+			    .detail("ShardId", a.shardId.toString())
 			    .detail("Method", "AddShard")
 			    .detail("Begin", a.range.begin.toString())
 			    .detail("End", a.range.end.toString());
@@ -1129,7 +1135,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			// TODO: add a new error code.
 			return internal_error();
 		}
-		auto a = std::make_unique<Writer::AddShardAction>(dataPath + id.toString(), range, &shardMap);
+		auto a = std::make_unique<Writer::AddShardAction>(dataPath, id, range, &shardMap);
 		Future<Void> f = a->done.getFuture();
 		writeThread->post(a.release());
 		return f;
