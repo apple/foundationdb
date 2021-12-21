@@ -716,6 +716,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 
 // files might not be the current set of files in metadata, in the case of doing the initial snapshot of a granule that
 // was split.
+// FIXME: only pass metadata->keyRange
 ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
                                             Reference<GranuleMetadata> metadata,
                                             UID granuleID,
@@ -727,8 +728,6 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		       metadata->keyRange.begin.printable().c_str(),
 		       metadata->keyRange.end.printable().c_str());
 	}
-
-	// FIXME: don't use metadata->files
 
 	ASSERT(!files.snapshotFiles.empty());
 	ASSERT(!files.deltaFiles.empty());
