@@ -962,13 +962,16 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	std::queue<T, Deque<T>> queue;
 	Promise<Void> onEmpty;
 	Error error;
+	Promise<Void> onError;
 
-	NotifiedQueue(int futures, int promises) : promises(promises), futures(futures), onEmpty(nullptr) {
+	NotifiedQueue(int futures, int promises)
+	  : promises(promises), futures(futures), onEmpty(nullptr), onError(nullptr) {
 		SingleCallback<T>::next = this;
 	}
 
 	bool isReady() const { return !queue.empty() || error.isValid(); }
 	bool isError() const { return queue.empty() && error.isValid(); } // the *next* thing queued is an error
+	bool hasError() const { return error.isValid(); } // there is an error queued
 	uint32_t size() const { return queue.size(); }
 
 	virtual T pop() {
@@ -1006,6 +1009,11 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		this->error = err;
 		if (shouldFireImmediately()) {
 			SingleCallback<T>::next->error(err);
+		}
+
+		// end_of_stream error is "expected", don't terminate reading stream early for this
+		if (onError.isValid() && err.code() != error_code_end_of_stream) {
+			onError.sendError(err);
 		}
 	}
 
@@ -1059,8 +1067,6 @@ protected:
 		}
 		return copy;
 	}
-
-	bool hasError() { return error.isValid(); }
 
 	bool shouldFireImmediately() { return SingleCallback<T>::next != this; }
 };

@@ -7340,45 +7340,13 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 	}
 }
 
-ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
-                                         std::vector<std::pair<StorageServerInterface, KeyRange>> interfs,
-                                         Reference<ChangeFeedData> results,
-                                         Key rangeID,
-                                         Version* begin,
-                                         Version end) {
+// TODO better name
+ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
+                             std::vector<std::pair<StorageServerInterface, KeyRange>> interfs,
+                             std::vector<MutationAndVersionStream> streams,
+                             Version* begin,
+                             Version end) {
 	state std::priority_queue<MutationAndVersionStream, std::vector<MutationAndVersionStream>> mutations;
-	state std::vector<Future<Void>> fetchers(interfs.size());
-	state std::vector<MutationAndVersionStream> streams(interfs.size());
-
-	results->streams.clear();
-	for (auto& it : interfs) {
-		ChangeFeedStreamRequest req;
-		req.rangeID = rangeID;
-		req.begin = *begin;
-		req.end = end;
-		req.range = it.second;
-		results->streams.push_back(it.first.changeFeedStream.getReplyStream(req));
-	}
-
-	for (auto& it : results->storageData) {
-		if (it->debugGetReferenceCount() == 2) {
-			db->changeFeedUpdaters.erase(it->id);
-		}
-	}
-	results->maxSeenVersion = invalidVersion;
-	results->storageData.clear();
-	Promise<Void> refresh = results->refresh;
-	results->refresh = Promise<Void>();
-	for (int i = 0; i < interfs.size(); i++) {
-		results->storageData.push_back(db->getStorageData(interfs[i].first));
-	}
-	results->notAtLatest.set(interfs.size());
-	refresh.send(Void());
-
-	for (int i = 0; i < interfs.size(); i++) {
-		fetchers[i] = partialChangeFeedStream(
-		    interfs[i].first, streams[i].results, results->streams[i], end, results, results->storageData[i], i);
-	}
 	state int interfNum = 0;
 	while (interfNum < interfs.size()) {
 		try {
@@ -7464,6 +7432,64 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	throw end_of_stream();
 }
 
+ACTOR Future<Void> onCFErrors(std::vector<Future<Void>> onErrors) {
+	wait(waitForAny(onErrors));
+	// propagate error - TODO better way?
+	for (auto& f : onErrors) {
+		if (f.isError()) {
+			throw f.getError();
+		}
+	}
+	ASSERT(false);
+	return Void();
+}
+
+ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
+                                         std::vector<std::pair<StorageServerInterface, KeyRange>> interfs,
+                                         Reference<ChangeFeedData> results,
+                                         Key rangeID,
+                                         Version* begin,
+                                         Version end) {
+	state std::vector<Future<Void>> fetchers(interfs.size());
+	state std::vector<Future<Void>> onErrors(interfs.size());
+	state std::vector<MutationAndVersionStream> streams(interfs.size());
+
+	results->streams.clear();
+	for (auto& it : interfs) {
+		ChangeFeedStreamRequest req;
+		req.rangeID = rangeID;
+		req.begin = *begin;
+		req.end = end;
+		req.range = it.second;
+		results->streams.push_back(it.first.changeFeedStream.getReplyStream(req));
+	}
+
+	for (auto& it : results->storageData) {
+		if (it->debugGetReferenceCount() == 2) {
+			db->changeFeedUpdaters.erase(it->id);
+		}
+	}
+	results->maxSeenVersion = invalidVersion;
+	results->storageData.clear();
+	Promise<Void> refresh = results->refresh;
+	results->refresh = Promise<Void>();
+	for (int i = 0; i < interfs.size(); i++) {
+		results->storageData.push_back(db->getStorageData(interfs[i].first));
+	}
+	results->notAtLatest.set(interfs.size());
+	refresh.send(Void());
+
+	for (int i = 0; i < interfs.size(); i++) {
+		onErrors[i] = results->streams[i].onError();
+		fetchers[i] = partialChangeFeedStream(
+		    interfs[i].first, streams[i].results, results->streams[i], end, results, results->storageData[i], i);
+	}
+
+	wait(onCFErrors(onErrors) || doCFMerge(results, interfs, streams, begin, end));
+
+	return Void();
+}
+
 ACTOR Future<KeyRange> getChangeFeedRange(Reference<DatabaseContext> db, Database cx, Key rangeID, Version begin = 0) {
 	state Transaction tr(cx);
 	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
@@ -7496,37 +7522,13 @@ ACTOR Future<KeyRange> getChangeFeedRange(Reference<DatabaseContext> db, Databas
 		}
 	}
 }
-// TODO better name
-ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
-                                          StorageServerInterface interf,
-                                          KeyRange range,
-                                          Reference<ChangeFeedData> results,
-                                          Key rangeID,
-                                          Version* begin,
-                                          Version end) {
-	state Database cx(db);
-	state ChangeFeedStreamRequest req;
-	req.rangeID = rangeID;
-	req.begin = *begin;
-	req.end = end;
-	req.range = range;
 
-	results->streams.clear();
+ACTOR Future<Void> doSingleCFStream(KeyRange range,
+                                    Reference<ChangeFeedData> results,
+                                    Key rangeID,
+                                    Version* begin,
+                                    Version end) {
 
-	for (auto& it : results->storageData) {
-		if (it->debugGetReferenceCount() == 2) {
-			db->changeFeedUpdaters.erase(it->id);
-		}
-	}
-	results->streams.push_back(interf.changeFeedStream.getReplyStream(req));
-
-	results->maxSeenVersion = invalidVersion;
-	results->storageData.clear();
-	results->storageData.push_back(db->getStorageData(interf));
-	Promise<Void> refresh = results->refresh;
-	results->refresh = Promise<Void>();
-	results->notAtLatest.set(1);
-	refresh.send(Void());
 	state bool atLatest = false;
 	loop {
 		wait(results->mutations.onEmpty());
@@ -7577,14 +7579,39 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	}
 }
 
-ACTOR Future<Void> anyCFDisconnect(std::vector<std::pair<StorageServerInterface, KeyRange>> interfs) {
-	state std::vector<Future<Void>> disconnectFutures;
-	disconnectFutures.reserve(interfs.size());
-	for (auto& it : interfs) {
-		disconnectFutures.push_back(
-		    IFailureMonitor::failureMonitor().onDisconnectOrFailure(it.first.changeFeedStream.getEndpoint()));
+ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
+                                          StorageServerInterface interf,
+                                          KeyRange range,
+                                          Reference<ChangeFeedData> results,
+                                          Key rangeID,
+                                          Version* begin,
+                                          Version end) {
+	state Database cx(db);
+	state ChangeFeedStreamRequest req;
+	req.rangeID = rangeID;
+	req.begin = *begin;
+	req.end = end;
+	req.range = range;
+
+	results->streams.clear();
+
+	for (auto& it : results->storageData) {
+		if (it->debugGetReferenceCount() == 2) {
+			db->changeFeedUpdaters.erase(it->id);
+		}
 	}
-	wait(waitForAny(disconnectFutures));
+	results->streams.push_back(interf.changeFeedStream.getReplyStream(req));
+
+	results->maxSeenVersion = invalidVersion;
+	results->storageData.clear();
+	results->storageData.push_back(db->getStorageData(interf));
+	Promise<Void> refresh = results->refresh;
+	results->refresh = Promise<Void>();
+	results->notAtLatest.set(1);
+	refresh.send(Void());
+
+	wait(results->streams[0].onError() || doSingleCFStream(range, results, rangeID, begin, end));
+
 	return Void();
 }
 
@@ -7662,19 +7689,11 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 					interfs.push_back(std::make_pair(locations[i].second->getInterface(chosenLocations[i]),
 					                                 locations[i].first & range));
 				}
-				choose {
-					when(wait(mergeChangeFeedStream(db, interfs, results, rangeID, &begin, end))) {}
-					when(wait(cx->connectionFileChanged())) {}
-					when(wait(anyCFDisconnect(interfs))) {}
-				}
+				wait(mergeChangeFeedStream(db, interfs, results, rangeID, &begin, end) || cx->connectionFileChanged());
 			} else {
 				StorageServerInterface interf = locations[0].second->getInterface(chosenLocations[0]);
-				choose {
-					when(wait(singleChangeFeedStream(db, interf, range, results, rangeID, &begin, end))) {}
-					when(wait(cx->connectionFileChanged())) {}
-					when(wait(IFailureMonitor::failureMonitor().onDisconnectOrFailure(
-					    interf.changeFeedStream.getEndpoint()))) {}
-				}
+				wait(singleChangeFeedStream(db, interf, range, results, rangeID, &begin, end) ||
+				     cx->connectionFileChanged());
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {

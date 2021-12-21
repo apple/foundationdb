@@ -349,8 +349,17 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	KeyRange range;
 	Key id;
 	AsyncTrigger newMutations;
+	Promise<Void> onMove;
 	bool stopped = false; // A stopped change feed no longer adds new mutations, but is still queriable
 	bool removing = false;
+
+	// TODO: could change this to a promiseStream<KeyRange>, and only cancel stream if the cancelled range overlaps the
+	// request range
+	void moved() {
+		Promise<Void> hold = onMove;
+		onMove = Promise<Void>();
+		hold.send(Void());
+	}
 };
 
 class ServerWatchMetadata : public ReferenceCounted<ServerWatchMetadata> {
@@ -1880,6 +1889,20 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
 		TraceEvent(SevError, "LocalChangeFeedError", data->thisServerID).error(e).detail("CFID", rangeID.printable());
 		throw;
 	}
+}
+
+ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamRequest req) {
+	auto feed = data->uidChangeFeed.find(req.rangeID);
+	if (feed == data->uidChangeFeed.end() || feed->second->removing) {
+		req.reply.sendError(unknown_change_feed());
+		return Void();
+	}
+	state Future<Void> moved = feed->second->onMove.getFuture();
+	wait(moved);
+	// DO NOT call req.reply.onReady before sending - we want to propagate this error through regardless of how far
+	// behind client is
+	req.reply.sendError(wrong_shard_server());
+	return Void();
 }
 
 ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamRequest req) {
@@ -4637,6 +4660,7 @@ void changeServerKeys(StorageServer* data,
 					break;
 				}
 			}
+
 			if (!foundAssigned) {
 				Key beginClearKey = f.first.withPrefix(persistChangeFeedKeys.begin);
 				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
@@ -4658,9 +4682,16 @@ void changeServerKeys(StorageServer* data,
 				data->keyChangeFeed.coalesce(f.second.contents());
 				auto feed = data->uidChangeFeed.find(f.first);
 				if (feed != data->uidChangeFeed.end()) {
+					feed->second->moved();
 					feed->second->removing = true;
 					feed->second->newMutations.trigger();
 					data->uidChangeFeed.erase(feed);
+				}
+			} else {
+				// if just part of feed is moved away,
+				auto feed = data->uidChangeFeed.find(f.first);
+				if (feed != data->uidChangeFeed.end()) {
+					feed->second->moved();
 				}
 			}
 		}
@@ -6547,7 +6578,8 @@ ACTOR Future<Void> serveChangeFeedStreamRequests(StorageServer* self,
                                                  FutureStream<ChangeFeedStreamRequest> changeFeedStream) {
 	loop {
 		ChangeFeedStreamRequest req = waitNext(changeFeedStream);
-		self->actors.add(changeFeedStreamQ(self, req));
+		// must notify change feed that its shard is moved away ASAP
+		self->actors.add(changeFeedStreamQ(self, req) || stopChangeFeedOnMove(self, req));
 	}
 }
 

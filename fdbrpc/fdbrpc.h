@@ -511,6 +511,19 @@ public:
 		return queue->onEmpty.getFuture();
 	}
 
+	bool isError() const { return !queue->isError(); }
+
+	// throws, used to short circuit waiting on the queue if there has been an unexpected error
+	Future<Void> onError() {
+		if (queue->hasError() && queue->error.code() != error_code_end_of_stream) {
+			throw queue->error;
+		}
+		if (!queue->onError.isValid()) {
+			queue->onError = Promise<Void>();
+		}
+		return queue->onError.getFuture();
+	}
+
 	uint32_t size() const { return queue->size(); }
 
 	// Must be called on the server before sending results on the stream to ratelimit the amount of data outstanding to
