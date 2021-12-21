@@ -21,6 +21,17 @@
 #include <jni.h>
 #include <string.h>
 
+#include "com_apple_foundationdb_FDB.h"
+#include "com_apple_foundationdb_FDBDatabase.h"
+#include "com_apple_foundationdb_FDBTransaction.h"
+#include "com_apple_foundationdb_FutureInt64.h"
+#include "com_apple_foundationdb_FutureKey.h"
+#include "com_apple_foundationdb_FutureKeyArray.h"
+#include "com_apple_foundationdb_FutureResult.h"
+#include "com_apple_foundationdb_FutureResults.h"
+#include "com_apple_foundationdb_FutureStrings.h"
+#include "com_apple_foundationdb_NativeFuture.h"
+
 #define FDB_API_VERSION 710
 
 #include <foundationdb/fdb_c.h>
@@ -279,9 +290,9 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureInt64_FutureInt64_1get
 	return (jlong)value;
 }
 
-JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureStrings_FutureStrings_1get(JNIEnv* jenv,
-                                                                                       jobject,
-                                                                                       jlong future) {
+JNIEXPORT jobjectArray JNICALL Java_com_apple_foundationdb_FutureStrings_FutureStrings_1get(JNIEnv* jenv,
+                                                                                            jobject,
+                                                                                            jlong future) {
 	if (!future) {
 		throwParamNotNull(jenv);
 		return JNI_NULL;
@@ -500,7 +511,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureResult_FutureResu
 	return result;
 }
 
-JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1get(JNIEnv* jenv, jclass, jlong future) {
+JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1get(JNIEnv* jenv, jobject, jlong future) {
 	if (!future) {
 		throwParamNotNull(jenv);
 		return JNI_NULL;

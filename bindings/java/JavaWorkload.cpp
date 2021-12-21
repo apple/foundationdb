@@ -22,6 +22,10 @@
 #define FDB_API_VERSION 710
 #include <foundationdb/fdb_c.h>
 
+#include "com_apple_foundationdb_testing_AbstractWorkload.h"
+#include "com_apple_foundationdb_testing_Promise.h"
+#include "com_apple_foundationdb_testing_WorkloadContext.h"
+
 #include <jni.h>
 #include <set>
 #include <iostream>
