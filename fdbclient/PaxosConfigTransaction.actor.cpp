@@ -40,7 +40,9 @@ class CommitQuorum {
 		if (successful >= ctis.size() / 2 + 1 && result.canBeSet()) {
 			result.send(Void());
 		} else if (failed >= ctis.size() / 2 + 1 && result.canBeSet()) {
-			result.sendError(not_committed());
+			// Rollforwards could cause a version that didn't have quorum to
+			// commit, so send commit_unknown_result instead of commit_failed.
+			result.sendError(commit_unknown_result());
 		} else {
 			// Check if it is possible to ever receive quorum agreement
 			auto totalRequestsOutstanding = ctis.size() - (failed + successful + maybeCommitted);
@@ -58,6 +60,11 @@ class CommitQuorum {
 			wait(retryBrokenPromise(cti.commit, self->getCommitRequest(generation)));
 			++self->successful;
 		} catch (Error& e) {
+			// self might be destroyed if this actor is canceled
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+
 			if (e.code() == error_code_not_committed) {
 				++self->failed;
 			} else {
@@ -147,6 +154,9 @@ class GetGenerationQuorum {
 					wait(delayJittered(0.01 * (1 << retries)));
 					++retries;
 					self->actors.clear(false);
+					self->result.reset();
+					self->totalRepliesReceived = 0;
+					self->maxAgreement = 0;
 				} else {
 					throw e;
 				}
@@ -312,7 +322,7 @@ public:
 	Future<Void> commit() { return commit(this); }
 
 	PaxosConfigTransactionImpl(Database const& cx) : cx(cx) {
-		auto coordinators = cx->getConnectionFile()->getConnectionString().coordinators();
+		auto coordinators = cx->getConnectionRecord()->getConnectionString().coordinators();
 		ctis.reserve(coordinators.size());
 		for (const auto& coordinator : coordinators) {
 			ctis.emplace_back(coordinator);

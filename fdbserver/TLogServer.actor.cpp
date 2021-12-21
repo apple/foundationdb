@@ -128,8 +128,8 @@ public:
 	Future<Void> commit() { return queue->commit(); }
 
 	// Implements IClosable
-	Future<Void> getError() override { return queue->getError(); }
-	Future<Void> onClosed() override { return queue->onClosed(); }
+	Future<Void> getError() const override { return queue->getError(); }
+	Future<Void> onClosed() const override { return queue->onClosed(); }
 	void dispose() override {
 		queue->dispose();
 		delete this;
@@ -1870,10 +1870,13 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	reply.end = endVersion;
 	reply.onlySpilled = onlySpilled;
 
-	//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("Tag", reqTag.toString()).
-	//	detail("BeginVer", reqBegin).detail("EndVer", reply.end).
-	//	detail("MsgBytes", reply.messages.expectedSize()).
-	//	detail("ForAddress", replyPromise.getEndpoint().getPrimaryAddress());
+	// TraceEvent("TlogPeek", self->dbgid)
+	//    .detail("LogId", logData->logId)
+	//    .detail("Tag", req.tag.toString())
+	//    .detail("BeginVer", req.begin)
+	//    .detail("EndVer", reply.end)
+	//    .detail("MsgBytes", reply.messages.expectedSize())
+	//    .detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
 
 	if (reqSequence.present()) {
 		auto& trackerData = logData->peekTracker[peekId];
@@ -3248,12 +3251,12 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 					std::vector<Tag> tags;
 					tags.push_back(logData->remoteTag);
 					wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, req.recoverAt, true) ||
-					     logData->removed);
+					     logData->removed || logData->stopCommit.onTrigger());
 				} else if (!req.recoverTags.empty()) {
 					ASSERT(logData->unrecoveredBefore > req.knownCommittedVersion);
 					wait(pullAsyncData(
 					         self, logData, req.recoverTags, req.knownCommittedVersion + 1, req.recoverAt, false) ||
-					     logData->removed);
+					     logData->removed || logData->stopCommit.onTrigger());
 				}
 				pulledRecoveryVersions = true;
 				logData->knownCommittedVersion = req.recoverAt;

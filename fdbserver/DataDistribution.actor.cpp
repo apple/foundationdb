@@ -922,14 +922,19 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		// Prefer a healthy team not containing excludeServer.
 		if (candidates.size() > 0) {
-			return teams[deterministicRandom()->randomInt(0, candidates.size())]->getServerIDs();
-		}
-
-		// The backup choice is a team with at least one server besides excludeServer, in this
-		// case, the team  will be possibily relocated to a healthy destination later by DD.
-		if (backup.size() > 0) {
-			std::vector<UID> res = teams[deterministicRandom()->randomInt(0, backup.size())]->getServerIDs();
-			std::remove(res.begin(), res.end(), excludeServer);
+			return teams[candidates[deterministicRandom()->randomInt(0, candidates.size())]]->getServerIDs();
+		} else if (backup.size() > 0) {
+			// The backup choice is a team with at least one server besides excludeServer, in this
+			// case, the team  will be possibily relocated to a healthy destination later by DD.
+			std::vector<UID> servers =
+			    teams[backup[deterministicRandom()->randomInt(0, backup.size())]]->getServerIDs();
+			std::vector<UID> res;
+			for (const UID& id : servers) {
+				if (id != excludeServer) {
+					res.push_back(id);
+				}
+			}
+			TraceEvent("FoundNonoptimalTeamForDroppedShard", excludeServer).detail("Team", describe(res));
 			return res;
 		}
 
@@ -3098,7 +3103,8 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 
 			auto const& keys = self->server_status.getKeys();
 			for (auto const& key : keys) {
-				server_status.emplace(key, self->server_status.get(key));
+				// Add to or update the local server_status map
+				server_status[key] = self->server_status.get(key);
 			}
 
 			TraceEvent("DDPrintSnapshotTeasmInfo", self->distributorId)
@@ -3133,13 +3139,22 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 			server = server_info.begin();
 			for (i = 0; i < server_info.size(); i++) {
 				const UID& uid = server->first;
-				TraceEvent("ServerStatus", self->distributorId)
-				    .detail("ServerUID", uid)
-				    .detail("Healthy", !get(server_status, uid).isUnhealthy())
+
+				TraceEvent e("ServerStatus", self->distributorId);
+				e.detail("ServerUID", uid)
 				    .detail("MachineIsValid", server_info[uid]->machine.isValid())
 				    .detail("MachineTeamSize",
 				            server_info[uid]->machine.isValid() ? server_info[uid]->machine->machineTeams.size() : -1)
 				    .detail("Primary", self->primary);
+
+				// ServerStatus might not be known if server was very recently added and storageServerFailureTracker()
+				// has not yet updated self->server_status
+				// If the UID is not found, do not assume the server is healthy or unhealthy
+				auto it = server_status.find(uid);
+				if (it != server_status.end()) {
+					e.detail("Healthy", !it->second.isUnhealthy());
+				}
+
 				server++;
 				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 					wait(yield());
@@ -3176,7 +3191,11 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 
 				// Healthy machine has at least one healthy server
 				for (auto& server : _machine->serversOnMachine) {
-					if (!get(server_status, server->id).isUnhealthy()) {
+					// ServerStatus might not be known if server was very recently added and
+					// storageServerFailureTracker() has not yet updated self->server_status If the UID is not found, do
+					// not assume the server is healthy
+					auto it = server_status.find(server->id);
+					if (it != server_status.end() && !it->second.isUnhealthy()) {
 						isMachineHealthy = true;
 					}
 				}
@@ -6297,7 +6316,18 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			self->teamCollection = nullptr;
 			primaryTeamCollection = Reference<DDTeamCollection>();
 			remoteTeamCollection = Reference<DDTeamCollection>();
-			wait(shards.clearAsync());
+			if (err.code() == error_code_actor_cancelled) {
+				// When cancelled, we cannot clear asyncronously because
+				// this will result in invalid memory access. This should only
+				// be an issue in simulation.
+				if (!g_network->isSimulated()) {
+					TraceEvent(SevWarnAlways, "DataDistributorCancelled");
+				}
+				shards.clear();
+				throw e;
+			} else {
+				wait(shards.clearAsync());
+			}
 			TraceEvent("DataDistributorTeamCollectionsDestroyed").error(err);
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				TraceEvent("RemoveFailedServer", removeFailedServer.getFuture().get()).error(err);

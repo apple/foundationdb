@@ -642,6 +642,16 @@ struct hash<StringRef> {
 };
 } // namespace std
 
+namespace std {
+template <>
+struct hash<Standalone<StringRef>> {
+	static constexpr std::hash<std::string_view> hashFunc{};
+	std::size_t operator()(Standalone<StringRef> const& tag) const {
+		return hashFunc(std::string_view((const char*)tag.begin(), tag.size()));
+	}
+};
+} // namespace std
+
 template <>
 struct TraceableString<StringRef> {
 	static const char* begin(StringRef value) { return reinterpret_cast<const char*>(value.begin()); }

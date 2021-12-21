@@ -51,9 +51,7 @@ LineageReference getCurrentLineage() {
 	}
 	return *currentLineage;
 }
-#endif
 
-#ifdef ENABLE_SAMPLING
 void sample(LineageReference* lineagePtr);
 
 void replaceLineage(LineageReference* lineage) {

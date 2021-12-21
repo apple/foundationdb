@@ -18,7 +18,9 @@
  * limitations under the License.
  */
 
+// TODO this should really be renamed "TSSComparison.cpp"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/BlobWorkerInterface.h"
 #include "flow/crc32c.h" // for crc32c_append, to checksum values in tss trace events
 
 // Includes template specializations for all tss operations on storage server types.
@@ -270,6 +272,27 @@ void TSS_traceMismatch(TraceEvent& event,
 	ASSERT(false);
 }
 
+// change feed
+template <>
+bool TSS_doCompare(const OverlappingChangeFeedsReply& src, const OverlappingChangeFeedsReply& tss) {
+	ASSERT(false);
+	return true;
+}
+
+template <>
+const char* TSS_mismatchTraceName(const OverlappingChangeFeedsRequest& req) {
+	ASSERT(false);
+	return "";
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const OverlappingChangeFeedsRequest& req,
+                       const OverlappingChangeFeedsReply& src,
+                       const OverlappingChangeFeedsReply& tss) {
+	ASSERT(false);
+}
+
 // template specializations for metrics replies that should never be called because these requests aren't duplicated
 
 // storage metrics
@@ -290,6 +313,26 @@ void TSS_traceMismatch(TraceEvent& event,
                        const WaitMetricsRequest& req,
                        const StorageMetrics& src,
                        const StorageMetrics& tss) {
+	ASSERT(false);
+}
+
+template <>
+bool TSS_doCompare(const BlobGranuleFileReply& src, const BlobGranuleFileReply& tss) {
+	ASSERT(false);
+	return true;
+}
+
+template <>
+const char* TSS_mismatchTraceName(const BlobGranuleFileRequest& req) {
+	ASSERT(false);
+	return "";
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const BlobGranuleFileRequest& req,
+                       const BlobGranuleFileReply& src,
+                       const BlobGranuleFileReply& tss) {
 	ASSERT(false);
 }
 
@@ -330,6 +373,13 @@ void TSSMetrics::recordLatency(const SplitRangeRequest& req, double ssLatency, d
 
 template <>
 void TSSMetrics::recordLatency(const GetKeyValuesStreamRequest& req, double ssLatency, double tssLatency) {}
+
+template <>
+void TSSMetrics::recordLatency(const OverlappingChangeFeedsRequest& req, double ssLatency, double tssLatency) {}
+
+// this isn't even to storage servers
+template <>
+void TSSMetrics::recordLatency(const BlobGranuleFileRequest& req, double ssLatency, double tssLatency) {}
 
 // -------------------
 

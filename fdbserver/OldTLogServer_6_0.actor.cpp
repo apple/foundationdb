@@ -123,8 +123,8 @@ public:
 	Future<Void> commit() { return queue->commit(); }
 
 	// Implements IClosable
-	Future<Void> getError() override { return queue->getError(); }
-	Future<Void> onClosed() override { return queue->onClosed(); }
+	Future<Void> getError() const override { return queue->getError(); }
+	Future<Void> onClosed() const override { return queue->onClosed(); }
 	void dispose() override {
 		queue->dispose();
 		delete this;

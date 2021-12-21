@@ -27,6 +27,7 @@
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
 #include "flow/Arena.h"
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -789,15 +790,18 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		return CoordinatorsResult::BAD_DATABASE_STATE; // Someone deleted this key entirely?
 
 	state ClusterConnectionString old(currentKey.get().toString());
-	if (tr->getDatabase()->getConnectionFile() &&
+	if (tr->getDatabase()->getConnectionRecord() &&
 	    old.clusterKeyName().toString() !=
-	        tr->getDatabase()->getConnectionFile()->getConnectionString().clusterKeyName())
+	        tr->getDatabase()->getConnectionRecord()->getConnectionString().clusterKeyName())
 		return CoordinatorsResult::BAD_DATABASE_STATE; // Someone changed the "name" of the database??
 
 	state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
 	if (!desiredCoordinators->size()) {
 		std::vector<NetworkAddress> _desiredCoordinators = wait(change->getDesiredCoordinators(
-		    tr, old.coordinators(), Reference<ClusterConnectionFile>(new ClusterConnectionFile(old)), result));
+		    tr,
+		    old.coordinators(),
+		    Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(old)),
+		    result));
 		*desiredCoordinators = _desiredCoordinators;
 	}
 
@@ -832,7 +836,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	}
 
 	std::vector<Future<Optional<LeaderInfo>>> leaderServers;
-	ClientCoordinators coord(Reference<ClusterConnectionFile>(new ClusterConnectionFile(conn)));
+	ClientCoordinators coord(Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(conn)));
 
 	leaderServers.reserve(coord.clientLeaderServers.size());
 	for (int i = 0; i < coord.clientLeaderServers.size(); i++)
@@ -865,14 +869,17 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 				return CoordinatorsResult::BAD_DATABASE_STATE; // Someone deleted this key entirely?
 
 			state ClusterConnectionString old(currentKey.get().toString());
-			if (cx->getConnectionFile() &&
-			    old.clusterKeyName().toString() != cx->getConnectionFile()->getConnectionString().clusterKeyName())
+			if (cx->getConnectionRecord() &&
+			    old.clusterKeyName().toString() != cx->getConnectionRecord()->getConnectionString().clusterKeyName())
 				return CoordinatorsResult::BAD_DATABASE_STATE; // Someone changed the "name" of the database??
 
 			state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
 			if (!desiredCoordinators.size()) {
 				std::vector<NetworkAddress> _desiredCoordinators = wait(change->getDesiredCoordinators(
-				    &tr, old.coordinators(), Reference<ClusterConnectionFile>(new ClusterConnectionFile(old)), result));
+				    &tr,
+				    old.coordinators(),
+				    Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(old)),
+				    result));
 				desiredCoordinators = _desiredCoordinators;
 			}
 
@@ -918,7 +925,8 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 			TEST(old.clusterKeyName() == conn.clusterKeyName()); // Quorum change with unchanged name
 
 			state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
-			state ClientCoordinators coord(Reference<ClusterConnectionFile>(new ClusterConnectionFile(conn)));
+			state ClientCoordinators coord(
+			    Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(conn)));
 			// check if allowed to modify the cluster descriptor
 			if (!change->getDesiredClusterKeyName().empty()) {
 				CheckDescriptorMutableReply mutabilityReply =
@@ -953,7 +961,7 @@ struct SpecifiedQuorumChange final : IQuorumChange {
 	explicit SpecifiedQuorumChange(std::vector<NetworkAddress> const& desired) : desired(desired) {}
 	Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
 	                                                           std::vector<NetworkAddress> oldCoordinators,
-	                                                           Reference<ClusterConnectionFile>,
+	                                                           Reference<IClusterConnectionRecord>,
 	                                                           CoordinatorsResult&) override {
 		return desired;
 	}
@@ -965,7 +973,7 @@ Reference<IQuorumChange> specifiedQuorumChange(std::vector<NetworkAddress> const
 struct NoQuorumChange final : IQuorumChange {
 	Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
 	                                                           std::vector<NetworkAddress> oldCoordinators,
-	                                                           Reference<ClusterConnectionFile>,
+	                                                           Reference<IClusterConnectionRecord>,
 	                                                           CoordinatorsResult&) override {
 		return oldCoordinators;
 	}
@@ -981,9 +989,9 @@ struct NameQuorumChange final : IQuorumChange {
 	  : newName(newName), otherChange(otherChange) {}
 	Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
 	                                                           std::vector<NetworkAddress> oldCoordinators,
-	                                                           Reference<ClusterConnectionFile> cf,
+	                                                           Reference<IClusterConnectionRecord> ccr,
 	                                                           CoordinatorsResult& t) override {
-		return otherChange->getDesiredCoordinators(tr, oldCoordinators, cf, t);
+		return otherChange->getDesiredCoordinators(tr, oldCoordinators, ccr, t);
 	}
 	std::string getDesiredClusterKeyName() const override { return newName; }
 };
@@ -997,9 +1005,9 @@ struct AutoQuorumChange final : IQuorumChange {
 
 	Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
 	                                                           std::vector<NetworkAddress> oldCoordinators,
-	                                                           Reference<ClusterConnectionFile> ccf,
+	                                                           Reference<IClusterConnectionRecord> ccr,
 	                                                           CoordinatorsResult& err) override {
-		return getDesired(Reference<AutoQuorumChange>::addRef(this), tr, oldCoordinators, ccf, &err);
+		return getDesired(Reference<AutoQuorumChange>::addRef(this), tr, oldCoordinators, ccr, &err);
 	}
 
 	ACTOR static Future<int> getRedundancy(AutoQuorumChange* self, Transaction* tr) {
@@ -1017,7 +1025,7 @@ struct AutoQuorumChange final : IQuorumChange {
 	ACTOR static Future<bool> isAcceptable(AutoQuorumChange* self,
 	                                       Transaction* tr,
 	                                       std::vector<NetworkAddress> oldCoordinators,
-	                                       Reference<ClusterConnectionFile> ccf,
+	                                       Reference<IClusterConnectionRecord> ccr,
 	                                       int desiredCount,
 	                                       std::set<AddressExclusion>* excluded) {
 		// Are there enough coordinators for the redundancy level?
@@ -1027,7 +1035,7 @@ struct AutoQuorumChange final : IQuorumChange {
 			return false;
 
 		// Check availability
-		ClientCoordinators coord(ccf);
+		ClientCoordinators coord(ccr);
 		std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 		leaderServers.reserve(coord.clientLeaderServers.size());
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
@@ -1065,7 +1073,7 @@ struct AutoQuorumChange final : IQuorumChange {
 	ACTOR static Future<std::vector<NetworkAddress>> getDesired(Reference<AutoQuorumChange> self,
 	                                                            Transaction* tr,
 	                                                            std::vector<NetworkAddress> oldCoordinators,
-	                                                            Reference<ClusterConnectionFile> ccf,
+	                                                            Reference<IClusterConnectionRecord> ccr,
 	                                                            CoordinatorsResult* err) {
 		state int desiredCount = self->desired;
 
@@ -1099,7 +1107,7 @@ struct AutoQuorumChange final : IQuorumChange {
 		}
 
 		if (checkAcceptable) {
-			bool ok = wait(isAcceptable(self.getPtr(), tr, oldCoordinators, ccf, desiredCount, &excluded));
+			bool ok = wait(isAcceptable(self.getPtr(), tr, oldCoordinators, ccr, desiredCount, &excluded));
 			if (ok)
 				return oldCoordinators;
 		}
@@ -2084,6 +2092,90 @@ ACTOR Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UI
 	return Void();
 }
 
+ACTOR Future<Void> updateChangeFeed(Transaction* tr, Key rangeID, ChangeFeedStatus status, KeyRange range) {
+	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+	Optional<Value> val = wait(tr->get(rangeIDKey));
+	if (status == ChangeFeedStatus::CHANGE_FEED_CREATE) {
+		if (!val.present()) {
+			tr->set(rangeIDKey, changeFeedValue(range, invalidVersion, status));
+		} else if (std::get<0>(decodeChangeFeedValue(val.get())) != range) {
+			throw unsupported_operation();
+		}
+	} else if (status == ChangeFeedStatus::CHANGE_FEED_STOP) {
+		if (val.present()) {
+			tr->set(rangeIDKey,
+			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
+			                        std::get<1>(decodeChangeFeedValue(val.get())),
+			                        status));
+		} else {
+			throw unsupported_operation();
+		}
+	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
+		if (val.present()) {
+			tr->set(rangeIDKey,
+			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
+			                        std::get<1>(decodeChangeFeedValue(val.get())),
+			                        status));
+			tr->clear(rangeIDKey);
+		} else {
+			throw unsupported_operation();
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> updateChangeFeed(Reference<ReadYourWritesTransaction> tr,
+                                    Key rangeID,
+                                    ChangeFeedStatus status,
+                                    KeyRange range) {
+	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+	Optional<Value> val = wait(tr->get(rangeIDKey));
+	if (status == ChangeFeedStatus::CHANGE_FEED_CREATE) {
+		if (!val.present()) {
+			tr->set(rangeIDKey, changeFeedValue(range, invalidVersion, status));
+		} else if (std::get<0>(decodeChangeFeedValue(val.get())) != range) {
+			throw unsupported_operation();
+		}
+	} else if (status == ChangeFeedStatus::CHANGE_FEED_STOP) {
+		if (val.present()) {
+			tr->set(rangeIDKey,
+			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
+			                        std::get<1>(decodeChangeFeedValue(val.get())),
+			                        status));
+		} else {
+			throw unsupported_operation();
+		}
+	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
+		if (val.present()) {
+			tr->set(rangeIDKey,
+			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
+			                        std::get<1>(decodeChangeFeedValue(val.get())),
+			                        status));
+			tr->clear(rangeIDKey);
+		} else {
+			throw unsupported_operation();
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> updateChangeFeed(Database cx, Key rangeID, ChangeFeedStatus status, KeyRange range) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			wait(updateChangeFeed(&tr, rangeID, status, range));
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> advanceVersion(Database cx, Version v) {
 	state Transaction tr(cx);
 	loop {
@@ -2104,7 +2196,7 @@ ACTOR Future<Void> advanceVersion(Database cx, Version v) {
 	}
 }
 
-ACTOR Future<Void> forceRecovery(Reference<ClusterConnectionFile> clusterFile, Key dcId) {
+ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile, Key dcId) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
 
