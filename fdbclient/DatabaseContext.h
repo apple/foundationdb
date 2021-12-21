@@ -147,15 +147,25 @@ public:
 	WatchMetadata(Key key, Optional<Value> value, Version version, TransactionInfo info, TagSet tags);
 };
 
+struct MutationAndVersionStream {
+	Standalone<MutationsAndVersionRef> next;
+	PromiseStream<Standalone<MutationsAndVersionRef>> results;
+	bool operator<(MutationAndVersionStream const& rhs) const { return next.version > rhs.next.version; }
+};
+
 struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
 	UID id;
 	Future<Void> updater;
 	NotifiedVersion version;
 	NotifiedVersion desired;
+	Promise<Void> destroyed;
+
+	~ChangeFeedStorageData() { destroyed.send(Void()); }
 };
 
 struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> mutations;
+	std::vector<ReplyPromiseStream<ChangeFeedStreamReply>> streams;
 
 	Version getVersion();
 	Future<Void> whenAtLeast(Version version);
@@ -164,6 +174,8 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	std::vector<Reference<ChangeFeedStorageData>> storageData;
 	AsyncVar<int> notAtLatest;
 	Promise<Void> refresh;
+
+	ChangeFeedData() : notAtLatest(1) {}
 };
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
@@ -487,6 +499,8 @@ public:
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;
 	Reference<TransactionT> createTransaction();
+
+	EventCacheHolder connectToDatabaseEventCacheHolder;
 
 private:
 	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;

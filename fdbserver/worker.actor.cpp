@@ -526,7 +526,8 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
                                       Reference<AsyncVar<bool> const> degraded,
                                       Reference<IClusterConnectionRecord> connRecord,
                                       Reference<AsyncVar<std::set<std::string>> const> issues,
-                                      Reference<LocalConfiguration> localConfig) {
+                                      Reference<LocalConfiguration> localConfig,
+                                      Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply
 	// (requiring us to re-register) The registration request piggybacks optional distributor interface if it exists.
@@ -537,6 +538,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 	state Future<Void> cacheProcessFuture;
 	state Future<Void> cacheErrorsFuture;
 	state Optional<double> incorrectTime;
+	state bool firstReg = true;
 	loop {
 		state ClusterConnectionString storedConnectionString;
 		state bool upToDate = true;
@@ -589,6 +591,13 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		}
 
 		state bool ccInterfacePresent = ccInterface->get().present();
+		if (ccInterfacePresent) {
+			request.requestDbInfo = (ccInterface->get().get().id() != dbInfo->get().clusterInterface.id());
+			if (firstReg) {
+				request.requestDbInfo = true;
+				firstReg = false;
+			}
+		}
 		state Future<RegisterWorkerReply> registrationReply =
 		    ccInterfacePresent ? brokenPromiseToNever(ccInterface->get().get().registerWorker.getReply(request))
 		                       : Never();
@@ -1332,6 +1341,27 @@ struct SharedLogsValue {
 	  : actor(actor), uid(uid), ptxnRequests(requests) {}
 };
 
+ACTOR Future<Void> chaosMetricsLogger() {
+
+	auto res = g_network->global(INetwork::enChaosMetrics);
+	if (!res)
+		return Void();
+
+	state ChaosMetrics* chaosMetrics = static_cast<ChaosMetrics*>(res);
+	chaosMetrics->clear();
+
+	loop {
+		wait(delay(FLOW_KNOBS->CHAOS_LOGGING_INTERVAL));
+
+		TraceEvent e("ChaosMetrics");
+		double elapsed = now() - chaosMetrics->startTime;
+		e.detail("Elapsed", elapsed);
+		chaosMetrics->getFields(&e);
+		e.trackLatest("ChaosMetrics");
+		chaosMetrics->clear();
+	}
+}
+
 ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 LocalityData locality,
@@ -1361,6 +1391,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state Promise<Void> stopping;
 	state WorkerCache<InitializeStorageReply> storageCache;
 	state Future<Void> metricsLogger;
+	state Future<Void> chaosMetricsActor;
 	state Reference<AsyncVar<bool>> degraded = FlowTransport::transport().getDegraded();
 	// tLogFnForOptions() can return a function that doesn't correspond with the FDB version that the
 	// TLogVersion represents.  This can be done if the newer TLog doesn't support a requested option.
@@ -1378,6 +1409,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	interf.initEndpoints();
 
 	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
+
+	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
+		TraceEvent(SevWarnAlways, "ChaosFeaturesEnabled");
+		chaosMetricsActor = chaosMetricsLogger();
+	}
 
 	folder = abspath(folder);
 
@@ -1621,7 +1657,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       degraded,
 		                                       connRecord,
 		                                       issues,
-		                                       localConfig));
+		                                       localConfig,
+		                                       dbInfo));
 
 		if (configDBType != ConfigDBType::DISABLED) {
 			errorForwarders.add(localConfig->consume(interf.configBroadcastInterface));
@@ -1694,6 +1731,22 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					TraceEvent("ProcessReboot").log();
 					ASSERT(!rebootReq.deleteData);
 					flushAndExit(0);
+				}
+			}
+			when(SetFailureInjection req = waitNext(interf.clientInterface.setFailureInjection.getFuture())) {
+				if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
+					if (req.diskFailure.present()) {
+						auto diskFailureInjector = DiskFailureInjector::injector();
+						diskFailureInjector->setDiskFailure(req.diskFailure.get().stallInterval,
+						                                    req.diskFailure.get().stallPeriod,
+						                                    req.diskFailure.get().throttlePeriod);
+					} else if (req.flipBits.present()) {
+						auto bitFlipper = BitFlipper::flipper();
+						bitFlipper->setBitFlipPercentage(req.flipBits.get().percentBitFlips);
+					}
+					req.reply.send(Void());
+				} else {
+					req.reply.sendError(client_invalid_operation());
 				}
 			}
 			when(ProfilerRequest req = waitNext(interf.clientInterface.profiler.getFuture())) {

@@ -337,6 +337,8 @@ private:
 
 	/// Check if the key is overridden by either mutableConfiguration or rawConfiguration
 	bool isOverridden(std::string key) const;
+	// Overwrite commitProxyCount and/or grvProxyCount if set to -1
+	void overwriteProxiesCount();
 };
 
 #endif

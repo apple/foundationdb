@@ -28,6 +28,8 @@
 #include <utility>
 #include <vector>
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
+
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/MultiInterface.h"
@@ -125,8 +127,8 @@ TLSConfig tlsConfig(TLSEndpointType::CLIENT);
 NetworkOptions::NetworkOptions()
   : traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
     traceFormat("xml"), traceClockSource("now"),
-    supportedVersions(new ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>()), runLoopProfilingEnabled(false) {
-}
+    supportedVersions(new ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>()), runLoopProfilingEnabled(false),
+    primaryClient(true) {}
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
@@ -1227,7 +1229,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion),
     mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
+    specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
+    connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size())
 	                ? Void()
@@ -1479,7 +1482,8 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), transactionTracingSample(false), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT) {}
+    bytesPerCommit(1000), transactionTracingSample(false), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {}
 
 // Static constructor used by server processes to create a DatabaseContext
 // For internal (fdbserver) use only
@@ -1793,6 +1797,8 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	if (!g_network)
 		throw network_not_setup();
 
+	platform::ImageInfo imageInfo = platform::getImageInfo();
+
 	if (connRecord) {
 		if (networkOptions.traceDirectory.present() && !traceFileIsOpen()) {
 			g_network->initMetrics();
@@ -1815,11 +1821,11 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 			    .detail("SourceVersion", getSourceVersion())
 			    .detail("Version", FDB_VT_VERSION)
 			    .detail("PackageName", FDB_VT_PACKAGE_NAME)
-			    .detail("ClusterFile", connRecord->toString())
-			    .detail("ConnectionString", connRecord->getConnectionString().toString())
 			    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 			    .detail("ApiVersion", apiVersion)
-			    .detailf("ImageOffset", "%p", platform::getImageOffset())
+			    .detail("ClientLibrary", imageInfo.fileName)
+			    .detailf("ImageOffset", "%p", imageInfo.offset)
+			    .detail("Primary", networkOptions.primaryClient)
 			    .trackLatest("ClientStart");
 
 			initializeSystemMonitorMachineState(SystemMonitorMachineState(IPAddress(publicIP)));
@@ -1873,6 +1879,16 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	    database, Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
 	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
+
+	TraceEvent("ConnectToDatabase", database->dbId)
+	    .detail("Version", FDB_VT_VERSION)
+	    .detail("ClusterFile", connRecord ? connRecord->toString() : "None")
+	    .detail("ConnectionString", connRecord ? connRecord->getConnectionString().toString() : "None")
+	    .detail("ClientLibrary", imageInfo.fileName)
+	    .detail("Primary", networkOptions.primaryClient)
+	    .detail("Internal", internal)
+	    .trackLatest(database->connectToDatabaseEventCacheHolder.trackingKey);
+
 	return database;
 }
 
@@ -1990,7 +2006,11 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 
 		try {
 			auto knobValue = IKnobCollection::parseKnobValue(knobName, knobValueString, IKnobCollection::Type::CLIENT);
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob(knobName, knobValue);
+			if (g_network) {
+				IKnobCollection::getMutableGlobalKnobCollection().setKnob(knobName, knobValue);
+			} else {
+				networkOptions.knobs[knobName] = knobValue;
+			}
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "UnrecognizedKnob").detail("Knob", knobName.c_str());
 			fprintf(stderr, "FoundationDB client ignoring unrecognized knob option '%s'\n", knobName.c_str());
@@ -2091,6 +2111,9 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		}
 		break;
 	}
+	case FDBNetworkOptions::EXTERNAL_CLIENT:
+		networkOptions.primaryClient = false;
+		break;
 	default:
 		break;
 	}
@@ -2136,6 +2159,13 @@ ACTOR Future<Void> monitorNetworkBusyness() {
 	}
 }
 
+static void setupGlobalKnobs() {
+	IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::CLIENT, Randomize::False, IsSimulated::False);
+	for (const auto& [knobName, knobValue] : networkOptions.knobs) {
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob(knobName, knobValue);
+	}
+}
+
 // Setup g_network and start monitoring for network busyness
 void setupNetwork(uint64_t transportId, UseMetrics useMetrics) {
 	if (g_network)
@@ -2144,6 +2174,7 @@ void setupNetwork(uint64_t transportId, UseMetrics useMetrics) {
 	if (!networkOptions.logClientInfo.present())
 		networkOptions.logClientInfo = true;
 
+	setupGlobalKnobs();
 	TLS::DisableOpenSSLAtExitHandler();
 	g_network = newNet2(tlsConfig, false, useMetrics || networkOptions.traceDirectory.present());
 	g_network->addStopCallback(Net2FileSystem::stop);
@@ -4126,7 +4157,6 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results,
                                   Reverse reverse,
                                   TransactionInfo info,
                                   TagSet tags) {
-
 	state ParallelStream<RangeResult> results(_results, CLIENT_KNOBS->RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT);
 
 	// FIXME: better handling to disable row limits
@@ -4597,7 +4627,6 @@ Future<RangeResult> Transaction::getRangeAndFlatMap(const KeySelector& begin,
                                                     GetRangeLimits limits,
                                                     Snapshot snapshot,
                                                     Reverse reverse) {
-
 	return getRangeInternal<GetKeyValuesAndFlatMapRequest, GetKeyValuesAndFlatMapReply>(
 	    begin, end, mapper, limits, snapshot, reverse);
 }
@@ -6015,7 +6044,6 @@ ACTOR Future<ProtocolVersion> getCoordinatorProtocol(NetworkAddressList coordina
 ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
     NetworkAddress coordinatorAddress,
     Optional<ProtocolVersion> expectedVersion) {
-
 	state Reference<AsyncVar<Optional<ProtocolVersion>> const> protocolVersion =
 	    FlowTransport::transport().getPeerProtocolAsyncVar(coordinatorAddress);
 
@@ -6043,7 +6071,6 @@ ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
 ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
     Optional<ProtocolVersion> expectedVersion) {
-
 	state bool needToConnect = true;
 	state Future<ProtocolVersion> protocolVersion = Never();
 
@@ -6758,9 +6785,16 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 }
 
 ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, ChangeFeedStorageData* self) {
+	state Promise<Void> destroyed = self->destroyed;
 	loop {
+		if (destroyed.isSet()) {
+			return Void();
+		}
 		if (self->version.get() < self->desired.get()) {
 			wait(delay(CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME) || self->version.whenAtLeast(self->desired.get()));
+			if (destroyed.isSet()) {
+				return Void();
+			}
 			if (self->version.get() < self->desired.get()) {
 				ChangeFeedVersionUpdateReply rep = wait(brokenPromiseToNever(
 				    interf.changeFeedVersionUpdate.getReply(ChangeFeedVersionUpdateRequest(self->desired.get()))));
@@ -6815,19 +6849,30 @@ ACTOR Future<Void> changeFeedWhenAtLatest(ChangeFeedData* self, Version version)
 			choose {
 				when(wait(lastReturned)) { return Void(); }
 				when(wait(waitForAll(allAtLeast))) {
-					if (self->mutations.isEmpty()) {
+					std::vector<Future<Void>> onEmpty;
+					if (!self->mutations.isEmpty()) {
+						onEmpty.push_back(self->mutations.onEmpty());
+					}
+					for (auto& it : self->streams) {
+						if (!it.isEmpty()) {
+							onEmpty.push_back(it.onEmpty());
+						}
+					}
+					if (!onEmpty.size()) {
 						return Void();
 					}
 					choose {
-						when(wait(self->mutations.onEmpty())) {
+						when(wait(waitForAll(onEmpty))) {
 							wait(delay(0));
 							return Void();
 						}
 						when(wait(lastReturned)) { return Void(); }
 						when(wait(self->refresh.getFuture())) {}
+						when(wait(self->notAtLatest.onChange())) {}
 					}
 				}
 				when(wait(self->refresh.getFuture())) {}
+				when(wait(self->notAtLatest.onChange())) {}
 			}
 		} else {
 			choose {
@@ -6845,66 +6890,66 @@ Future<Void> ChangeFeedData::whenAtLeast(Version version) {
 
 ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
                                           PromiseStream<Standalone<MutationsAndVersionRef>> results,
-                                          Key rangeID,
-                                          Version begin,
+                                          ReplyPromiseStream<ChangeFeedStreamReply> replyStream,
                                           Version end,
-                                          KeyRange range,
                                           Reference<ChangeFeedData> feedData,
                                           Reference<ChangeFeedStorageData> storageData) {
 	state bool atLatestVersion = false;
-	loop {
-		try {
-			state Version lastEmpty = invalidVersion;
-			state ChangeFeedStreamRequest req;
-			req.rangeID = rangeID;
-			req.begin = begin;
-			req.end = end;
-			req.range = range;
-
-			state ReplyPromiseStream<ChangeFeedStreamReply> replyStream = interf.changeFeedStream.getReplyStream(req);
-
-			loop {
-				state ChangeFeedStreamReply rep = waitNext(replyStream.getFuture());
-				begin = rep.mutations.back().version + 1;
-
-				state int resultLoc = 0;
-				// FIXME: handle empty versions properly
-				while (resultLoc < rep.mutations.size()) {
-					if (rep.mutations[resultLoc].mutations.size() || rep.mutations[resultLoc].version + 1 == end ||
-					    (rep.mutations[resultLoc].mutations.empty() &&
-					     rep.mutations[resultLoc].version >= lastEmpty + 5000000)) {
+	state Version nextVersion = 0;
+	try {
+		loop {
+			if (nextVersion >= end) {
+				results.sendError(end_of_stream());
+				return Void();
+			}
+			choose {
+				when(state ChangeFeedStreamReply rep = waitNext(replyStream.getFuture())) {
+					state int resultLoc = 0;
+					while (resultLoc < rep.mutations.size()) {
 						wait(results.onEmpty());
-						results.send(rep.mutations[resultLoc]);
+						if (rep.mutations[resultLoc].version >= nextVersion) {
+							results.send(rep.mutations[resultLoc]);
+						} else {
+							ASSERT(rep.mutations[resultLoc].mutations.empty());
+						}
+						resultLoc++;
 					}
-					resultLoc++;
+					nextVersion = rep.mutations.back().version + 1;
+
+					if (!atLatestVersion && rep.atLatestVersion) {
+						atLatestVersion = true;
+						feedData->notAtLatest.set(feedData->notAtLatest.get() - 1);
+					}
+					if (rep.minStreamVersion > storageData->version.get()) {
+						storageData->version.set(rep.minStreamVersion);
+					}
+
+					for (auto& it : feedData->storageData) {
+						if (rep.mutations.back().version > it->desired.get()) {
+							it->desired.set(rep.mutations.back().version);
+						}
+					}
 				}
-				if (begin == end) {
-					results.sendError(end_of_stream());
-					return Void();
+				when(wait(atLatestVersion && replyStream.isEmpty() && results.isEmpty()
+				              ? storageData->version.whenAtLeast(nextVersion)
+				              : Future<Void>(Never()))) {
+					MutationsAndVersionRef empty;
+					empty.version = storageData->version.get();
+					results.send(empty);
+					nextVersion = storageData->version.get() + 1;
 				}
-				if (!atLatestVersion && rep.atLatestVersion) {
-					atLatestVersion = true;
-					feedData->notAtLatest.set(feedData->notAtLatest.get() - 1);
-				}
-				if (rep.minStreamVersion > storageData->version.get()) {
-					storageData->version.set(rep.minStreamVersion);
-				}
+				when(wait(atLatestVersion && replyStream.isEmpty() && !results.isEmpty() ? results.onEmpty()
+				                                                                         : Future<Void>(Never()))) {}
 			}
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw;
-			}
-			results.sendError(e);
-			return Void();
 		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		results.sendError(e);
+		return Void();
 	}
 }
-
-struct MutationAndVersionStream {
-	Standalone<MutationsAndVersionRef> next;
-	PromiseStream<Standalone<MutationsAndVersionRef>> results;
-	bool operator<(MutationAndVersionStream const& rhs) const { return next.version > rhs.next.version; }
-};
 
 ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
                                          std::vector<std::pair<StorageServerInterface, KeyRange>> interfs,
@@ -6915,6 +6960,16 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	state std::priority_queue<MutationAndVersionStream, std::vector<MutationAndVersionStream>> mutations;
 	state std::vector<Future<Void>> fetchers(interfs.size());
 	state std::vector<MutationAndVersionStream> streams(interfs.size());
+
+	results->streams.clear();
+	for (auto& it : interfs) {
+		ChangeFeedStreamRequest req;
+		req.rangeID = rangeID;
+		req.begin = *begin;
+		req.end = end;
+		req.range = it.second;
+		results->streams.push_back(it.first.changeFeedStream.getReplyStream(req));
+	}
 
 	for (auto& it : results->storageData) {
 		if (it->debugGetReferenceCount() == 2) {
@@ -6931,14 +6986,8 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	refresh.send(Void());
 
 	for (int i = 0; i < interfs.size(); i++) {
-		fetchers[i] = singleChangeFeedStream(interfs[i].first,
-		                                     streams[i].results,
-		                                     rangeID,
-		                                     *begin,
-		                                     end,
-		                                     interfs[i].second,
-		                                     results,
-		                                     results->storageData[i]);
+		fetchers[i] = singleChangeFeedStream(
+		    interfs[i].first, streams[i].results, results->streams[i], end, results, results->storageData[i]);
 	}
 	state int interfNum = 0;
 	while (interfNum < interfs.size()) {
@@ -7116,6 +7165,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 						db->changeFeedUpdaters.erase(it->id);
 					}
 				}
+				results->streams.clear();
 				results->storageData.clear();
 				results->storageData.push_back(db->getStorageData(interf));
 				Promise<Void> refresh = results->refresh;
@@ -7150,10 +7200,15 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 						db->changeFeedUpdaters.erase(it->id);
 					}
 				}
+				results->streams.clear();
 				results->storageData.clear();
 				results->refresh.sendError(change_feed_cancelled());
 				throw;
 			}
+			if (results->notAtLatest.get() == 0) {
+				results->notAtLatest.set(1);
+			}
+
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_unknown_change_feed ||
 			    e.code() == error_code_broken_promise) {
@@ -7168,6 +7223,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 						db->changeFeedUpdaters.erase(it->id);
 					}
 				}
+				results->streams.clear();
 				results->storageData.clear();
 				return Void();
 			}
@@ -7322,16 +7378,15 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 		return Void();
 	}
 
-	// FIXME: lookup both the src and dest shards as of the pop version to ensure all locations are popped
-	state std::vector<Future<Void>> popRequests;
-	for (int i = 0; i < locations.size(); i++) {
-		for (int j = 0; j < locations[i].second->size(); j++) {
-			popRequests.push_back(locations[i].second->getInterface(j).changeFeedPop.getReply(
-			    ChangeFeedPopRequest(rangeID, version, locations[i].first)));
-		}
-	}
-
 	try {
+		// FIXME: lookup both the src and dest shards as of the pop version to ensure all locations are popped
+		std::vector<Future<Void>> popRequests;
+		for (int i = 0; i < locations.size(); i++) {
+			for (int j = 0; j < locations[i].second->size(); j++) {
+				popRequests.push_back(locations[i].second->getInterface(j).changeFeedPop.getReply(
+				    ChangeFeedPopRequest(rangeID, version, locations[i].first)));
+			}
+		}
 		choose {
 			when(wait(waitForAll(popRequests))) {}
 			when(wait(delay(CLIENT_KNOBS->CHANGE_FEED_POP_TIMEOUT))) {
@@ -7446,7 +7501,7 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 					blobGranuleMapping = _bgMapping;
 					if (blobGranuleMapping.more) {
 						if (BG_REQUEST_DEBUG) {
-							printf("BG Mapping for [%s - %s) too large!\n");
+							// printf("BG Mapping for [%s - %s) too large!\n");
 						}
 						throw unsupported_operation();
 					}
@@ -7460,8 +7515,8 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 					}
 
 					if (BG_REQUEST_DEBUG) {
-						printf("Doing blob granule request @ %lld\n", endVersion);
-						printf("blob worker assignments:\n");
+						fmt::print("Doing blob granule request @ {}\n", endVersion);
+						fmt::print("blob worker assignments:\n");
 					}
 
 					for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
@@ -7535,12 +7590,12 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 				                                            nullptr));
 
 				if (BG_REQUEST_DEBUG) {
-					printf("Blob granule request for [%s - %s) @ %lld - %lld got reply from %s:\n",
-					       granuleStartKey.printable().c_str(),
-					       granuleEndKey.printable().c_str(),
-					       begin,
-					       endVersion,
-					       workerId.toString().c_str());
+					fmt::print("Blob granule request for [{0} - {1}) @ {2} - {3} got reply from {4}:\n",
+					           granuleStartKey.printable(),
+					           granuleEndKey.printable(),
+					           begin,
+					           endVersion,
+					           workerId.toString());
 				}
 				for (auto& chunk : rep.chunks) {
 					if (BG_REQUEST_DEBUG) {
@@ -7556,11 +7611,11 @@ ACTOR Future<Void> readBlobGranulesStreamActor(Reference<DatabaseContext> db,
 						}
 						printf("  Deltas: (%d)", chunk.newDeltas.size());
 						if (chunk.newDeltas.size() > 0) {
-							printf(" with version [%lld - %lld]",
-							       chunk.newDeltas[0].version,
-							       chunk.newDeltas[chunk.newDeltas.size() - 1].version);
+							fmt::print(" with version [{0} - {1}]",
+							           chunk.newDeltas[0].version,
+							           chunk.newDeltas[chunk.newDeltas.size() - 1].version);
 						}
-						printf("  IncludedVersion: %lld\n", chunk.includedVersion);
+						fmt::print("  IncludedVersion: {}\n", chunk.includedVersion);
 						printf("\n\n");
 					}
 					Arena a;

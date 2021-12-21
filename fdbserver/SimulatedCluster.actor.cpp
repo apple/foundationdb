@@ -254,7 +254,9 @@ class TestConfig {
 			}
 
 			if (attrib == "configureLocked") {
-				sscanf(value.c_str(), "%d", &configureLocked);
+				int configureLockedInt;
+				sscanf(value.c_str(), "%d", &configureLockedInt);
+				configureLocked = (configureLockedInt != 0);
 			}
 
 			if (attrib == "startIncompatibleProcess") {
@@ -2189,14 +2191,14 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		systemActors->push_back(
 		    reportErrors(simulatedMachine(conn,
 		                                  ips,
-		                                  sslEnabled && sslOnly,
+		                                  sslEnabled,
 		                                  localities,
 		                                  ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
 		                                  baseFolder,
 		                                  false,
 		                                  i == useSeedForMachine,
 		                                  AgentNone,
-		                                  sslEnabled && sslOnly,
+		                                  sslOnly,
 		                                  whitelistBinPaths,
 		                                  protocolVersion,
 		                                  configDBType),

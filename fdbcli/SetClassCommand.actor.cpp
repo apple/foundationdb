@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
+
 #include "fdbcli/fdbcli.actor.h"
 
 #include "fdbclient/FDBOptions.g.h"
@@ -48,7 +50,7 @@ ACTOR Future<Void> printProcessClass(Reference<IDatabase> db) {
 			ASSERT(processSourceList.size() == processTypeList.size());
 			if (!processTypeList.size())
 				printf("No processes are registered in the database.\n");
-			printf("There are currently %zu processes in the database:\n", processTypeList.size());
+			fmt::print("There are currently {} processes in the database:\n", processTypeList.size());
 			for (int index = 0; index < processTypeList.size(); index++) {
 				std::string address =
 				    processTypeList[index].key.removePrefix(fdb_cli::processClassTypeSpecialKeyRange.begin).toString();

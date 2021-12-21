@@ -953,6 +953,44 @@ TEST_CASE("fdb_transaction_get_range_and_flat_map") {
 	}
 }
 
+TEST_CASE("fdb_transaction_get_range_and_flat_map_restricted_to_snapshot") {
+	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).pack().toString();
+	fdb::Transaction tr(db);
+	fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+	auto result = get_range_and_flat_map(
+	    tr,
+	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKey(0).c_str(), indexEntryKey(0).size()),
+	    FDB_KEYSEL_FIRST_GREATER_THAN((const uint8_t*)indexEntryKey(1).c_str(), indexEntryKey(1).size()),
+	    (const uint8_t*)mapper.c_str(),
+	    mapper.size(),
+	    /* limit */ 0,
+	    /* target_bytes */ 0,
+	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+	    /* iteration */ 0,
+	    /* snapshot */ false, // Set snapshot to false
+	    /* reverse */ 0);
+	ASSERT(result.err == error_code_client_invalid_operation);
+}
+
+TEST_CASE("fdb_transaction_get_range_and_flat_map_restricted_to_ryw_disable") {
+	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).pack().toString();
+	fdb::Transaction tr(db);
+	// Not set FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE.
+	auto result = get_range_and_flat_map(
+	    tr,
+	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKey(0).c_str(), indexEntryKey(0).size()),
+	    FDB_KEYSEL_FIRST_GREATER_THAN((const uint8_t*)indexEntryKey(1).c_str(), indexEntryKey(1).size()),
+	    (const uint8_t*)mapper.c_str(),
+	    mapper.size(),
+	    /* limit */ 0,
+	    /* target_bytes */ 0,
+	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+	    /* iteration */ 0,
+	    /* snapshot */ true,
+	    /* reverse */ 0);
+	ASSERT(result.err == error_code_client_invalid_operation);
+}
+
 TEST_CASE("fdb_transaction_get_range reverse") {
 	std::map<std::string, std::string> data = create_data({ { "a", "1" }, { "b", "2" }, { "c", "3" }, { "d", "4" } });
 	insert_data(db, data);

@@ -21,6 +21,7 @@
 #include <cinttypes>
 #include <memory>
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbrpc/simulator.h"
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
@@ -36,6 +37,7 @@
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
+#include "fdbrpc/AsyncFileChaos.actor.h"
 #include "flow/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
@@ -588,13 +590,13 @@ private:
 		       ((uintptr_t)data % 4096 == 0 && length % 4096 == 0 && offset % 4096 == 0)); // Required by KAIO.
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
-			fprintf(randLog,
-			        "SFR1 %s %s %s %d %" PRId64 "\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str(),
-			        length,
-			        offset);
+			fmt::print(randLog,
+			           "SFR1 {0} {1} {2} {3} {4}\n",
+			           self->dbgId.shortString(),
+			           self->filename,
+			           opId.shortString(),
+			           length,
+			           offset);
 
 		wait(waitUntilDiskReady(self->diskParameters, length));
 
@@ -632,14 +634,14 @@ private:
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog) {
 			uint32_t a = crc32c_append(0, data.begin(), data.size());
-			fprintf(randLog,
-			        "SFW1 %s %s %s %d %d %" PRId64 "\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str(),
-			        a,
-			        data.size(),
-			        offset);
+			fmt::print(randLog,
+			           "SFW1 {0} {1} {2} {3} {4} {5}\n",
+			           self->dbgId.shortString(),
+			           self->filename,
+			           opId.shortString(),
+			           a,
+			           data.size(),
+			           offset);
 		}
 
 		if (self->delayOnWrite)
@@ -680,12 +682,8 @@ private:
 	ACTOR static Future<Void> truncate_impl(SimpleFile* self, int64_t size) {
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
-			fprintf(randLog,
-			        "SFT1 %s %s %s %" PRId64 "\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str(),
-			        size);
+			fmt::print(
+			    randLog, "SFT1 {0} {1} {2} {3}\n", self->dbgId.shortString(), self->filename, opId.shortString(), size);
 
 		// KAIO will return EINVAL, as len==0 is an error.
 		if ((self->flags & IAsyncFile::OPEN_NO_AIO) == 0 && size == 0) {
@@ -781,12 +779,8 @@ private:
 		}
 
 		if (randLog)
-			fprintf(randLog,
-			        "SFS2 %s %s %s %" PRId64 "\n",
-			        self->dbgId.shortString().c_str(),
-			        self->filename.c_str(),
-			        opId.shortString().c_str(),
-			        pos);
+			fmt::print(
+			    randLog, "SFS2 {0} {1} {2} {3}\n", self->dbgId.shortString(), self->filename, opId.shortString(), pos);
 		INJECT_FAULT(io_error, "SimpleFile::size"); // SimpleFile::size inject io_error
 
 		return pos;
@@ -1205,6 +1199,9 @@ public:
 		m->protocolVersion = protocol;
 
 		m->setGlobal(enTDMetrics, (flowGlobalType)&m->tdmetrics);
+		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
+			m->setGlobal(enChaosMetrics, (flowGlobalType)&m->chaosMetrics);
+		}
 		m->setGlobal(enNetworkConnections, (flowGlobalType)m->network);
 		m->setGlobal(enASIOTimedOut, (flowGlobalType) false);
 
@@ -2006,8 +2003,9 @@ public:
 		machines.erase(machineId);
 	}
 
-	Sim2()
-	  : time(0.0), timerTime(0.0), currentTaskID(TaskPriority::Zero), taskCount(0), yielded(false), yield_limit(0) {
+	Sim2(bool printSimTime)
+	  : time(0.0), timerTime(0.0), currentTaskID(TaskPriority::Zero), taskCount(0), yielded(false), yield_limit(0),
+	    printSimTime(printSimTime) {
 		// Not letting currentProcess be nullptr eliminates some annoying special cases
 		currentProcess =
 		    new ProcessInfo("NoMachine",
@@ -2069,6 +2067,9 @@ public:
 			t.action.send(Never());
 		} else {
 			mutex.enter();
+			if (printSimTime && (int)this->time < (int)t.time) {
+				printf("Time: %d\n", (int)t.time);
+			}
 			this->time = t.time;
 			this->timerTime = std::max(this->timerTime, this->time);
 			mutex.leave();
@@ -2083,12 +2084,12 @@ public:
 			}
 
 			if (randLog)
-				fprintf(randLog,
-				        "T %f %d %s %" PRId64 "\n",
-				        this->time,
-				        int(deterministicRandom()->peek() % 10000),
-				        t.machine ? t.machine->name : "none",
-				        t.stable);
+				fmt::print(randLog,
+				           "T {0} {1} {2} {3}\n",
+				           this->time,
+				           int(deterministicRandom()->peek() % 10000),
+				           t.machine ? t.machine->name : "none",
+				           t.stable);
 		}
 	}
 
@@ -2141,6 +2142,7 @@ public:
 	// Whether or not yield has returned true during the current iteration of the run loop
 	bool yielded;
 	int yield_limit; // how many more times yield may return false before next returning true
+	bool printSimTime;
 
 private:
 	MockDNS mockDNS;
@@ -2349,9 +2351,9 @@ Future<Reference<IUDPSocket>> Sim2::createUDPSocket(bool isV6) {
 	return Reference<IUDPSocket>(new UDPSimSocket(localAddress, Optional<NetworkAddress>{}));
 }
 
-void startNewSimulator() {
+void startNewSimulator(bool printSimTime) {
 	ASSERT(!g_network);
-	g_network = g_pSimulator = new Sim2();
+	g_network = g_pSimulator = new Sim2(printSimTime);
 	g_simulator.connectionFailuresDisableDuration = deterministicRandom()->random01() < 0.5 ? 0 : 1e6;
 }
 
@@ -2501,6 +2503,8 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 		f = AsyncFileDetachable::open(f);
 		if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
+		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
+			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileChaos(r)); });
 #if ENCRYPTION_ENABLED
 		if (flags & IAsyncFile::OPEN_ENCRYPTED)
 			f = map(f, [flags](Reference<IAsyncFile> r) {

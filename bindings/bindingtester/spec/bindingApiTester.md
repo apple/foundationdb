@@ -117,8 +117,8 @@ should simulate it using an anonymous transaction. Remember that set and clear
 operations must immediately commit (with appropriate retry behavior!).
 
 Any error that bubbles out of these operations must be caught. In the event of
-an error, you must push the packed tuple of the string `"ERROR"` and the error
-code (as a string, not an integer).
+an error, you must push the packed tuple of the byte string `"ERROR"` and the
+error code (as a byte string, not an integer).
 
 Some operations may allow you to push future values onto the stack. When popping
 objects from the stack, the future MUST BE waited on and errors caught before

@@ -1299,6 +1299,9 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 				}
 
 				wait(logData->queueCommittedVersion.whenAtLeast(nextVersion));
+				if (logData->queueCommittedVersion.get() == std::numeric_limits<Version>::max()) {
+					return Void();
+				}
 				wait(delay(0, TaskPriority::UpdateStorage));
 
 				//TraceEvent("TlogUpdatePersist", self->dbgid).detail("LogId", logData->logId).detail("NextVersion", nextVersion).detail("Version", logData->version.get()).detail("PersistentDataDurableVer", logData->persistentDataDurableVersion).detail("QueueCommitVer", logData->queueCommittedVersion.get()).detail("PersistDataVer", logData->persistentDataVersion);
@@ -1353,6 +1356,9 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 		//TraceEvent("UpdateStorageVer", logData->logId).detail("NextVersion", nextVersion).detail("PersistentDataVersion", logData->persistentDataVersion).detail("TotalSize", totalSize);
 
 		wait(logData->queueCommittedVersion.whenAtLeast(nextVersion));
+		if (logData->queueCommittedVersion.get() == std::numeric_limits<Version>::max()) {
+			return Void();
+		}
 		wait(delay(0, TaskPriority::UpdateStorage));
 
 		// nextVersion is the next to be read by SS, that is still on TLog
@@ -2084,6 +2090,9 @@ ACTOR Future<Void> commitQueue(TLogData* self) {
 						wait(self->queueCommitEnd.whenAtLeast(self->queueCommitBegin) ||
 						     self->largeDiskQueueCommitBytes.onChange());
 					}
+					if (logData->queueCommittedVersion.get() == std::numeric_limits<Version>::max()) {
+						break;
+					}
 					self->sharedActors.send(doQueueCommit(self, logData, missingFinalCommit));
 					missingFinalCommit.clear();
 				}
@@ -2600,6 +2609,11 @@ void removeLog(TLogData* self, Reference<LogData> logData) {
 
 	if (self->id_data.size() == 0) {
 		throw worker_removed();
+	}
+	if (logData->queueCommittingVersion == 0) {
+		// If the removed tlog never attempted a queue commit, the update storage loop could become stuck waiting for
+		// queueCommittedVersion to advance.
+		logData->queueCommittedVersion.set(std::numeric_limits<Version>::max());
 	}
 }
 

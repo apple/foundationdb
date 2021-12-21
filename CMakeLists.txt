@@ -207,7 +207,6 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/BuildFlags.h.in ${CMAKE_CUR
 ################################################################################
 # process compile commands for IDE
 ################################################################################
-
 if (CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
   add_custom_command(
 	  OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json

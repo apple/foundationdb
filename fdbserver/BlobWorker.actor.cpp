@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BackupContainerFileSystem.h"
@@ -193,16 +194,16 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	bool managerEpochOk(int64_t epoch) {
 		if (epoch < currentManagerEpoch) {
 			if (BW_DEBUG) {
-				printf("BW %s got request from old epoch %lld, notifying manager it is out of date\n",
-				       id.toString().c_str(),
-				       epoch);
+				fmt::print("BW {0} got request from old epoch {1}, notifying manager it is out of date\n",
+				           id.toString(),
+				           epoch);
 			}
 			return false;
 		} else {
 			if (epoch > currentManagerEpoch) {
 				currentManagerEpoch = epoch;
 				if (BW_DEBUG) {
-					printf("BW %s found new manager epoch %lld\n", id.toString().c_str(), currentManagerEpoch);
+					fmt::print("BW {0} found new manager epoch {1}\n", id.toString(), currentManagerEpoch);
 				}
 			}
 
@@ -216,11 +217,11 @@ static void acquireGranuleLock(int64_t epoch, int64_t seqno, int64_t prevOwnerEp
 	// returns true if our lock (E, S) >= (Eprev, Sprev)
 	if (epoch < prevOwnerEpoch || (epoch == prevOwnerEpoch && seqno < prevOwnerSeqno)) {
 		if (BW_DEBUG) {
-			printf("Lock acquire check failed. Proposed (%lld, %lld) < previous (%lld, %lld)\n",
-			       epoch,
-			       seqno,
-			       prevOwnerEpoch,
-			       prevOwnerSeqno);
+			fmt::print("Lock acquire check failed. Proposed ({0}, {1}) < previous ({2}, {3})\n",
+			           epoch,
+			           seqno,
+			           prevOwnerEpoch,
+			           prevOwnerSeqno);
 		}
 		throw granule_assignment_conflict();
 	}
@@ -239,11 +240,11 @@ static void checkGranuleLock(int64_t epoch, int64_t seqno, int64_t ownerEpoch, i
 	// returns true if we still own the lock, false if someone else does
 	if (epoch != ownerEpoch || seqno != ownerSeqno) {
 		if (BW_DEBUG) {
-			printf("Lock assignment check failed. Expected (%lld, %lld), got (%lld, %lld)\n",
-			       epoch,
-			       seqno,
-			       ownerEpoch,
-			       ownerSeqno);
+			fmt::print("Lock assignment check failed. Expected ({0}, {1}), got ({2}, {3})\n",
+			           epoch,
+			           seqno,
+			           ownerEpoch,
+			           ownerSeqno);
 		}
 		throw granule_assignment_conflict();
 	}
@@ -303,10 +304,10 @@ ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, 
 		}
 	}
 	if (BW_DEBUG) {
-		printf("Loaded %d snapshot and %d delta files for %s\n",
-		       files->snapshotFiles.size(),
-		       files->deltaFiles.size(),
-		       granuleID.toString().c_str());
+		fmt::print("Loaded {0} snapshot and {1} delta files for {2}\n",
+		           files->snapshotFiles.size(),
+		           files->deltaFiles.size(),
+		           granuleID.toString());
 	}
 	return Void();
 }
@@ -546,14 +547,15 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 
 				wait(tr->commit());
 				if (BW_DEBUG) {
-					printf("Granule %s [%s - %s) updated fdb with delta file %s of size %d at version %lld, cv=%lld\n",
-					       granuleID.toString().c_str(),
-					       keyRange.begin.printable().c_str(),
-					       keyRange.end.printable().c_str(),
-					       fname.c_str(),
-					       serialized.size(),
-					       currentDeltaVersion,
-					       tr->getCommittedVersion());
+					fmt::print(
+					    "Granule {0} [{1} - {2}) updated fdb with delta file {3} of size {4} at version {5}, cv={6}\n",
+					    granuleID.toString(),
+					    keyRange.begin.printable(),
+					    keyRange.end.printable(),
+					    fname,
+					    serialized.size(),
+					    currentDeltaVersion,
+					    tr->getCommittedVersion());
 				}
 
 				if (BUGGIFY_WITH_PROB(0.01)) {
@@ -812,10 +814,10 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 	chunk.includedVersion = version;
 
 	if (BW_DEBUG) {
-		printf("Re-snapshotting [%s - %s) @ %lld from blob\n",
-		       metadata->keyRange.begin.printable().c_str(),
-		       metadata->keyRange.end.printable().c_str(),
-		       version);
+		fmt::print("Re-snapshotting [{0} - {1}) @ {2} from blob\n",
+		           metadata->keyRange.begin.printable(),
+		           metadata->keyRange.end.printable(),
+		           version);
 
 		/*printf("  SnapshotFile:\n    %s\n", chunk.snapshotFile.get().toString().c_str());
 		printf("  DeltaFiles:\n");
@@ -911,7 +913,7 @@ ACTOR Future<Void> handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 
 	if (completedDeltaFile.version > cfStartVersion) {
 		if (BW_DEBUG) {
-			printf("Popping change feed %s at %lld\n", cfKey.printable().c_str(), completedDeltaFile.version);
+			fmt::print("Popping change feed {0} at {1}\n", cfKey.printable(), completedDeltaFile.version);
 		}
 		// FIXME: for a write-hot shard, we could potentially batch these and only pop the largest one after several
 		// have completed
@@ -968,10 +970,10 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 				metadata->bytesInNewDeltaFiles -= df.bytes;
 				toPop++;
 				if (BW_DEBUG) {
-					printf("[%s - %s) rollback cancelling delta file @ %lld\n",
-					       metadata->keyRange.begin.printable().c_str(),
-					       metadata->keyRange.end.printable().c_str(),
-					       df.version);
+					fmt::print("[{0} - {1}) rollback cancelling delta file @ {2}\n",
+					           metadata->keyRange.begin.printable(),
+					           metadata->keyRange.end.printable(),
+					           df.version);
 				}
 			} else {
 				ASSERT(df.version > cfRollbackVersion);
@@ -1013,12 +1015,12 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 		}
 		mIdx++;
 		if (BW_DEBUG) {
-			printf("[%s - %s) rollback discarding %d in-memory mutations, %d mutations and %lld bytes left\n",
-			       metadata->keyRange.begin.printable().c_str(),
-			       metadata->keyRange.end.printable().c_str(),
-			       metadata->currentDeltas.size() - mIdx,
-			       mIdx,
-			       metadata->bufferedDeltaBytes);
+			fmt::print("[{0} - {1}) rollback discarding {2} in-memory mutations, {3} mutations and {4} bytes left\n",
+			           metadata->keyRange.begin.printable(),
+			           metadata->keyRange.end.printable(),
+			           metadata->currentDeltas.size() - mIdx,
+			           mIdx,
+			           metadata->bufferedDeltaBytes);
 		}
 
 		metadata->currentDeltas.resize(metadata->deltaArena, mIdx);
@@ -1030,10 +1032,10 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 	}
 
 	if (BW_DEBUG) {
-		printf("[%s - %s) finishing rollback to %lld\n",
-		       metadata->keyRange.begin.printable().c_str(),
-		       metadata->keyRange.end.printable().c_str(),
-		       cfRollbackVersion);
+		fmt::print("[{0} - {1}) finishing rollback to {2}\n",
+		           metadata->keyRange.begin.printable(),
+		           metadata->keyRange.end.printable(),
+		           cfRollbackVersion);
 	}
 
 	metadata->rollbackCount.set(metadata->rollbackCount.get() + 1);
@@ -1089,16 +1091,17 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		}
 
 		if (BW_DEBUG) {
-			printf("Granule File Updater Starting for [%s - %s):\n",
-			       metadata->keyRange.begin.printable().c_str(),
-			       metadata->keyRange.end.printable().c_str());
-			printf("  CFID: %s\n", startState.granuleID.toString().c_str());
-			printf("  CF Start Version: %lld\n", startState.changeFeedStartVersion);
-			printf("  Previous Durable Version: %lld\n", startState.previousDurableVersion);
-			printf("  doSnapshot=%s\n", startState.doSnapshot ? "T" : "F");
-			printf("  Prev CFID: %s\n",
-			       startState.parentGranule.present() ? startState.parentGranule.get().second.toString().c_str() : "");
-			printf("  blobFilesToSnapshot=%s\n", startState.blobFilesToSnapshot.present() ? "T" : "F");
+			fmt::print("Granule File Updater Starting for [{0} - {1}):\n",
+			           metadata->keyRange.begin.printable(),
+			           metadata->keyRange.end.printable());
+			fmt::print("  CFID: {}\n", startState.granuleID.toString());
+			fmt::print("  CF Start Version: {}\n", startState.changeFeedStartVersion);
+			fmt::print("  Previous Durable Version: {}\n", startState.previousDurableVersion);
+			fmt::print("  doSnapshot={}\n", startState.doSnapshot ? "T" : "F");
+			fmt::print("  Prev CFID: {}\n",
+			           startState.parentGranule.present() ? startState.parentGranule.get().second.toString().c_str()
+			                                              : "");
+			fmt::print("  blobFilesToSnapshot={}\n", startState.blobFilesToSnapshot.present() ? "T" : "F");
 		}
 
 		state Version startVersion;
@@ -1261,13 +1264,13 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				if (metadata->bufferedDeltaBytes >= SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES &&
 				    deltas.version > lastVersion) {
 					if (BW_DEBUG) {
-						printf("Granule [%s - %s) flushing delta file after %d bytes @ %lld %lld%s\n",
-						       metadata->keyRange.begin.printable().c_str(),
-						       metadata->keyRange.end.printable().c_str(),
-						       metadata->bufferedDeltaBytes,
-						       lastVersion,
-						       deltas.version,
-						       oldChangeFeedDataComplete.present() ? ". Finalizing " : "");
+						fmt::print("Granule [{0} - {1}) flushing delta file after {2} bytes @ {3} {4}{5}\n",
+						           metadata->keyRange.begin.printable(),
+						           metadata->keyRange.end.printable(),
+						           metadata->bufferedDeltaBytes,
+						           lastVersion,
+						           deltas.version,
+						           oldChangeFeedDataComplete.present() ? ". Finalizing " : "");
 					}
 					TraceEvent("BlobGranuleDeltaFile", bwData->id)
 					    .detail("Granule", metadata->keyRange)
@@ -1323,13 +1326,14 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				if (snapshotEligible && metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT &&
 				    !readOldChangeFeed) {
 					if (BW_DEBUG && (inFlightBlobSnapshot.isValid() || !inFlightDeltaFiles.empty())) {
-						printf("Granule [%s - %s) ready to re-snapshot, waiting for outstanding %d snapshot and %d "
-						       "deltas to "
-						       "finish\n",
-						       metadata->keyRange.begin.printable().c_str(),
-						       metadata->keyRange.end.printable().c_str(),
-						       inFlightBlobSnapshot.isValid() ? 1 : 0,
-						       inFlightDeltaFiles.size());
+						fmt::print(
+						    "Granule [{0} - {1}) ready to re-snapshot, waiting for outstanding {2} snapshot and {3} "
+						    "deltas to "
+						    "finish\n",
+						    metadata->keyRange.begin.printable(),
+						    metadata->keyRange.end.printable(),
+						    inFlightBlobSnapshot.isValid() ? 1 : 0,
+						    inFlightDeltaFiles.size());
 					}
 					// wait for all in flight snapshot/delta files
 					if (inFlightBlobSnapshot.isValid()) {
@@ -1352,10 +1356,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					inFlightDeltaFiles.clear();
 
 					if (BW_DEBUG) {
-						printf("Granule [%s - %s) checking with BM for re-snapshot after %d bytes\n",
-						       metadata->keyRange.begin.printable().c_str(),
-						       metadata->keyRange.end.printable().c_str(),
-						       metadata->bytesInNewDeltaFiles);
+						fmt::print("Granule [{0} - {1}) checking with BM for re-snapshot after {2} bytes\n",
+						           metadata->keyRange.begin.printable(),
+						           metadata->keyRange.end.printable(),
+						           metadata->bytesInNewDeltaFiles);
 					}
 
 					TraceEvent("BlobGranuleSnapshotCheck", bwData->id)
@@ -1394,18 +1398,19 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						}
 
 						if (BW_DEBUG) {
-							printf("Granule [%s - %s)\n, hasn't heard back from BM in BW %s, re-sending status\n",
-							       metadata->keyRange.begin.printable().c_str(),
-							       metadata->keyRange.end.printable().c_str(),
-							       bwData->id.toString().c_str());
+							fmt::print(
+							    "Granule [{0} - {1})\n, hasn't heard back from BM in BW {2}, re-sending status\n",
+							    metadata->keyRange.begin.printable(),
+							    metadata->keyRange.end.printable(),
+							    bwData->id.toString());
 						}
 					}
 
 					if (BW_DEBUG) {
-						printf("Granule [%s - %s) re-snapshotting after %d bytes\n",
-						       metadata->keyRange.begin.printable().c_str(),
-						       metadata->keyRange.end.printable().c_str(),
-						       metadata->bytesInNewDeltaFiles);
+						fmt::print("Granule [{0} - {1}) re-snapshotting after {2} bytes\n",
+						           metadata->keyRange.begin.printable(),
+						           metadata->keyRange.end.printable(),
+						           metadata->bytesInNewDeltaFiles);
 					}
 					TraceEvent("BlobGranuleSnapshotFile", bwData->id)
 					    .detail("Granule", metadata->keyRange)
@@ -1469,7 +1474,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						if (!rollbacksInProgress.empty()) {
 							ASSERT(rollbacksInProgress.front().first == rollbackVersion);
 							ASSERT(rollbacksInProgress.front().second == deltas.version);
-							printf("Passed rollback %lld -> %lld\n", deltas.version, rollbackVersion);
+							fmt::print("Passed rollback {0} -> {1}\n", deltas.version, rollbackVersion);
 							rollbacksCompleted.push_back(rollbacksInProgress.front());
 							rollbacksInProgress.pop_front();
 						} else {
@@ -1481,17 +1486,17 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							     metadata->currentDeltas.back().version <= rollbackVersion)) {
 
 								if (BW_DEBUG) {
-									printf("BW skipping rollback %lld -> %lld completely\n",
-									       deltas.version,
-									       rollbackVersion);
+									fmt::print("BW skipping rollback {0} -> {1} completely\n",
+									           deltas.version,
+									           rollbackVersion);
 								}
 							} else {
 								if (BW_DEBUG) {
-									printf("BW [%s - %s) ROLLBACK @ %lld -> %lld\n",
-									       metadata->keyRange.begin.printable().c_str(),
-									       metadata->keyRange.end.printable().c_str(),
-									       deltas.version,
-									       rollbackVersion);
+									fmt::print("BW [{0} - {1}) ROLLBACK @ {2} -> {3}\n",
+									           metadata->keyRange.begin.printable(),
+									           metadata->keyRange.end.printable(),
+									           deltas.version,
+									           rollbackVersion);
 									TraceEvent(SevWarn, "GranuleRollback", bwData->id)
 									    .detail("Granule", metadata->keyRange)
 									    .detail("Version", deltas.version)
@@ -1528,7 +1533,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					} else if (!rollbacksInProgress.empty() && rollbacksInProgress.front().first < deltas.version &&
 					           rollbacksInProgress.front().second > deltas.version) {
 						if (BW_DEBUG) {
-							printf("Skipping mutations @ %lld b/c prior rollback\n", deltas.version);
+							fmt::print("Skipping mutations @ {} b/c prior rollback\n", deltas.version);
 						}
 					} else {
 						for (auto& delta : deltas.mutations) {
@@ -1556,11 +1561,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				ASSERT(startState.parentGranule.present());
 				oldChangeFeedDataComplete = startState.parentGranule.get();
 				if (BW_DEBUG) {
-					printf("Granule [%s - %s) switching to new change feed %s @ %lld\n",
-					       metadata->keyRange.begin.printable().c_str(),
-					       metadata->keyRange.end.printable().c_str(),
-					       startState.granuleID.toString().c_str(),
-					       metadata->bufferedDeltaVersion.get());
+					fmt::print("Granule [{0} - {1}) switching to new change feed {2} @ {3}\n",
+					           metadata->keyRange.begin.printable(),
+					           metadata->keyRange.end.printable(),
+					           startState.granuleID.toString(),
+					           metadata->bufferedDeltaVersion.get());
 				}
 			}
 			justDidRollback = false;
@@ -1677,11 +1682,11 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 			}
 
 			if (BW_DEBUG) {
-				printf("Loaded %d history entries for granule [%s - %s) (%d skipped)\n",
-				       historyEntryStack.size(),
-				       metadata->keyRange.begin.printable().c_str(),
-				       metadata->keyRange.end.printable().c_str(),
-				       skipped);
+				fmt::print("Loaded {0} history entries for granule [{1} - {2}) ({3} skipped)\n",
+				           historyEntryStack.size(),
+				           metadata->keyRange.begin.printable(),
+				           metadata->keyRange.end.printable(),
+				           skipped);
 			}
 		}
 
@@ -1856,15 +1861,15 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 				}
 
 				if (BW_REQUEST_DEBUG) {
-					printf("[%s - %s) @ %lld time traveled back to %s [%s - %s) @ [%lld - %lld)\n",
-					       req.keyRange.begin.printable().c_str(),
-					       req.keyRange.end.printable().c_str(),
-					       req.readVersion,
-					       cur->granuleID.toString().c_str(),
-					       cur->range.begin.printable().c_str(),
-					       cur->range.end.printable().c_str(),
-					       cur->startVersion,
-					       cur->endVersion);
+					fmt::print("[{0} - {1}) @ {2} time traveled back to {3} [{4} - {5}) @ [{6} - {7})\n",
+					           req.keyRange.begin.printable(),
+					           req.keyRange.end.printable(),
+					           req.readVersion,
+					           cur->granuleID.toString(),
+					           cur->range.begin.printable(),
+					           cur->range.end.printable(),
+					           cur->startVersion,
+					           cur->endVersion);
 				}
 
 				// lazily load files for old granule if not present
@@ -1895,10 +1900,10 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 					if (rollbackCount == metadata->rollbackCount.get()) {
 						break;
 					} else if (BW_REQUEST_DEBUG) {
-						printf("[%s - %s) @ %lld hit rollback, restarting waitForVersion\n",
-						       req.keyRange.begin.printable().c_str(),
-						       req.keyRange.end.printable().c_str(),
-						       req.readVersion);
+						fmt::print("[{0} - {1}) @ {2} hit rollback, restarting waitForVersion\n",
+						           req.keyRange.begin.printable(),
+						           req.keyRange.end.printable(),
+						           req.readVersion);
 					}
 				}
 				chunkFiles = metadata->files;
@@ -2223,13 +2228,13 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
                                    bool disposeOnCleanup,
                                    bool selfReassign) {
 	if (BW_DEBUG) {
-		printf("%s range for [%s - %s): %s @ (%lld, %lld)\n",
-		       selfReassign ? "Re-assigning" : "Changing",
-		       keyRange.begin.printable().c_str(),
-		       keyRange.end.printable().c_str(),
-		       active ? "T" : "F",
-		       epoch,
-		       seqno);
+		fmt::print("{0} range for [{1} - {2}): {3} @ ({4}, {5})\n",
+		           selfReassign ? "Re-assigning" : "Changing",
+		           keyRange.begin.printable(),
+		           keyRange.end.printable(),
+		           active ? "T" : "F",
+		           epoch,
+		           seqno);
 	}
 
 	// For each range that intersects this update:
@@ -2274,11 +2279,11 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 		if (r.value().activeMetadata.isValid() && thisAssignmentNewer) {
 			// cancel actors for old range and clear reference
 			if (BW_DEBUG) {
-				printf("  [%s - %s): @ (%lld, %lld) (cancelling)\n",
-				       r.begin().printable().c_str(),
-				       r.end().printable().c_str(),
-				       r.value().lastEpoch,
-				       r.value().lastSeqno);
+				fmt::print("  [{0} - {1}): @ ({2}, {3}) (cancelling)\n",
+				           r.begin().printable(),
+				           r.end().printable(),
+				           r.value().lastEpoch,
+				           r.value().lastSeqno);
 			}
 			r.value().activeMetadata.clear();
 		} else if (!thisAssignmentNewer) {
@@ -2299,22 +2304,22 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 
 	bwData->granuleMetadata.insert(keyRange, newMetadata);
 	if (BW_DEBUG) {
-		printf("Inserting new range [%s - %s): %s @ (%lld, %lld)\n",
-		       keyRange.begin.printable().c_str(),
-		       keyRange.end.printable().c_str(),
-		       newMetadata.activeMetadata.isValid() ? "T" : "F",
-		       newMetadata.lastEpoch,
-		       newMetadata.lastSeqno);
+		fmt::print("Inserting new range [{0} - {1}): {2} @ ({3}, {4})\n",
+		           keyRange.begin.printable(),
+		           keyRange.end.printable(),
+		           newMetadata.activeMetadata.isValid() ? "T" : "F",
+		           newMetadata.lastEpoch,
+		           newMetadata.lastSeqno);
 	}
 
 	for (auto& it : newerRanges) {
 		if (BW_DEBUG) {
-			printf("Re-inserting newer range [%s - %s): %s @ (%lld, %lld)\n",
-			       it.first.begin.printable().c_str(),
-			       it.first.end.printable().c_str(),
-			       it.second.activeMetadata.isValid() ? "T" : "F",
-			       it.second.lastEpoch,
-			       it.second.lastSeqno);
+			fmt::print("Re-inserting newer range [{0} - {1}): {2} @ ({3}, {4})\n",
+			           it.first.begin.printable(),
+			           it.first.end.printable(),
+			           it.second.activeMetadata.isValid() ? "T" : "F",
+			           it.second.lastEpoch,
+			           it.second.lastSeqno);
 		}
 		bwData->granuleMetadata.insert(it.first, it.second);
 	}
@@ -2333,18 +2338,19 @@ static bool resumeBlobRange(Reference<BlobWorkerData> bwData, KeyRange keyRange,
 	    !existingRange.value().activeMetadata.isValid()) {
 
 		if (BW_DEBUG) {
-			printf("BW %s got out of date resume range for [%s - %s) @ (%lld, %lld). Currently  [%s - %s) @ (%lld, "
-			       "%lld): %s\n",
-			       bwData->id.toString().c_str(),
-			       existingRange.begin().printable().c_str(),
-			       existingRange.end().printable().c_str(),
-			       existingRange.value().lastEpoch,
-			       existingRange.value().lastSeqno,
-			       keyRange.begin.printable().c_str(),
-			       keyRange.end.printable().c_str(),
-			       epoch,
-			       seqno,
-			       existingRange.value().activeMetadata.isValid() ? "T" : "F");
+			fmt::print(
+			    "BW {0} got out of date resume range for [{1} - {2}) @ ({3}, {4}). Currently  [{5} - {6}) @ ({7}, "
+			    "{8}): {9}\n",
+			    bwData->id.toString(),
+			    existingRange.begin().printable(),
+			    existingRange.end().printable(),
+			    existingRange.value().lastEpoch,
+			    existingRange.value().lastSeqno,
+			    keyRange.begin.printable(),
+			    keyRange.end.printable(),
+			    epoch,
+			    seqno,
+			    existingRange.value().activeMetadata.isValid() ? "T" : "F");
 		}
 
 		return false;
@@ -2556,13 +2562,13 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				--self->stats.numRangesAssigned;
 				state AssignBlobRangeRequest assignReq = _req;
 				if (BW_DEBUG) {
-					printf("Worker %s assigned range [%s - %s) @ (%lld, %lld):\n  continue=%s\n",
-					       self->id.toString().c_str(),
-					       assignReq.keyRange.begin.printable().c_str(),
-					       assignReq.keyRange.end.printable().c_str(),
-					       assignReq.managerEpoch,
-					       assignReq.managerSeqno,
-					       assignReq.continueAssignment ? "T" : "F");
+					fmt::print("Worker {0} assigned range [{1} - {2}) @ ({3}, {4}):\n  continue={5}\n",
+					           self->id.toString(),
+					           assignReq.keyRange.begin.printable(),
+					           assignReq.keyRange.end.printable(),
+					           assignReq.managerEpoch,
+					           assignReq.managerSeqno,
+					           assignReq.continueAssignment ? "T" : "F");
 				}
 
 				if (self->managerEpochOk(assignReq.managerEpoch)) {
@@ -2575,13 +2581,13 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				state RevokeBlobRangeRequest revokeReq = _req;
 				--self->stats.numRangesAssigned;
 				if (BW_DEBUG) {
-					printf("Worker %s revoked range [%s - %s) @ (%lld, %lld):\n  dispose=%s\n",
-					       self->id.toString().c_str(),
-					       revokeReq.keyRange.begin.printable().c_str(),
-					       revokeReq.keyRange.end.printable().c_str(),
-					       revokeReq.managerEpoch,
-					       revokeReq.managerSeqno,
-					       revokeReq.dispose ? "T" : "F");
+					fmt::print("Worker {0} revoked range [{1} - {2}) @ ({3}, {4}):\n  dispose={5}\n",
+					           self->id.toString(),
+					           revokeReq.keyRange.begin.printable(),
+					           revokeReq.keyRange.end.printable(),
+					           revokeReq.managerEpoch,
+					           revokeReq.managerSeqno,
+					           revokeReq.dispose ? "T" : "F");
 				}
 
 				if (self->managerEpochOk(revokeReq.managerEpoch)) {
