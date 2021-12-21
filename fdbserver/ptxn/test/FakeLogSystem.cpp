@@ -191,6 +191,7 @@ std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> FakeLogSystem::getOldEpoch
 Future<Reference<ILogSystem>> FakeLogSystem::newEpoch(
     const RecruitFromConfigurationReply& recr,
     const Future<struct RecruitRemoteFromConfigurationReply>& fRemoteWorkers,
+    UID clusterId,
     const DatabaseConfiguration& config,
     LogEpoch recoveryCount,
     int8_t primaryLocality,

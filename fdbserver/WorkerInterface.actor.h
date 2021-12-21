@@ -116,7 +116,7 @@ struct InitializePtxnTLogRequest {
 };
 
 namespace test {
-struct FakeLogSystem;
+class FakeLogSystem;
 struct FakePeekCursor;
 }; // namespace test
 

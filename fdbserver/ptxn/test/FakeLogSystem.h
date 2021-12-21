@@ -100,6 +100,7 @@ public:
 	virtual std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochTagsVersionsInfo() const override;
 	virtual Future<Reference<ILogSystem>> newEpoch(const RecruitFromConfigurationReply& recr,
 	                                               const Future<::RecruitRemoteFromConfigurationReply>& fRemoteWorkers,
+	                                               UID clusterId,
 	                                               const DatabaseConfiguration& config,
 	                                               LogEpoch recoveryCount,
 	                                               int8_t primaryLocality,

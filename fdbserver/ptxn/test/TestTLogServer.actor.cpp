@@ -33,6 +33,7 @@
 #include "fdbserver/ptxn/test/Utils.h"
 #include "flow/Arena.h"
 
+#include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // has to be the last file included
 
 namespace {
@@ -262,6 +263,7 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 	state Version tssSeedVersion = 0;
 	state int i = 0;
 	printTiming << "Recruiting new storage servers" << std::endl;
+	UID clusterId = deterministicRandom()->randomUniqueID();
 	for (; i < pContext->numStorageServers; i++) {
 		pContext->storageServers.emplace_back();
 		auto& recruited = pContext->storageServers.back();
@@ -275,6 +277,7 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 		                                            0),
 		                                recruited,
 		                                Tag(locality, i),
+		                                clusterId,
 		                                tssSeedVersion,
 		                                storageInitializations.back().reply,
 		                                dbInfo,
