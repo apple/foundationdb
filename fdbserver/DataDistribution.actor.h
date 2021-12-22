@@ -334,7 +334,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	// update metadata and adjust priority_queue
 	void updateMetadata(const UID& serverId, const StorageMetadataType& metadata);
 	bool contains(const UID& serverId) { return pq_handles.count(serverId) > 0; }
-
+	bool empty() {return wiggle_pq.empty();}
 	Optional<UID> getNextServerId();
 };
 
