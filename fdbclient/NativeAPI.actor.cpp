@@ -7361,6 +7361,7 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 		interfNum++;
 	}
 	state int atCheckVersion = 0;
+	state int maxAtCheckVersion = -1;
 	state Version checkVersion = invalidVersion;
 	state Standalone<VectorRef<MutationsAndVersionRef>> nextOut;
 	while (mutations.size()) {
@@ -7368,8 +7369,13 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 		mutations.pop();
 		ASSERT(nextStream.next.version >= checkVersion);
 		if (nextStream.next.version == checkVersion) {
+			// TODO REMOVE
+			if (atCheckVersion == 0) {
+				printf("atCheckVersion == 0 at %lld\n", nextStream.next.version);
+			}
 			ASSERT(atCheckVersion > 0);
 		}
+
 		if (nextStream.next.version != checkVersion) {
 			if (nextOut.size()) {
 				*begin = checkVersion + 1;
@@ -7399,6 +7405,11 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 			}
 			checkVersion = nextStream.next.version;
 			atCheckVersion = 0;
+			// save this at the start of the "round" to check if all streams have a reply at version checkVersion. If
+			// so, we can send it early. But because mutations.size() can change if one of the streams gets
+			// end_of_version on its waitNext, we want that to be reflected in the maxAtCheckVersion for the NEXT
+			// version, not this one.
+			maxAtCheckVersion = mutations.size() + 1;
 		}
 		if (nextOut.size() && nextStream.next.version == nextOut.back().version) {
 			if (nextStream.next.mutations.size() &&
@@ -7413,7 +7424,7 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 
 		// TODO AVOID CODE DUPLICATION
 		// If all streams have returned something at this version, we know it is complete.
-		if (atCheckVersion == mutations.size() + 1) {
+		if (atCheckVersion == maxAtCheckVersion) {
 			ASSERT(nextOut.size() == 1);
 			*begin = checkVersion + 1;
 			if (DEBUG_CF_VERSION(nextOut.back().version)) {
