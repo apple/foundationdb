@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
+import glob
 import os
 import shutil
 import subprocess
 import sys
-import socket
 from local_cluster import LocalCluster
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from random import choice
@@ -109,4 +109,21 @@ if __name__ == "__main__":
         errcode = subprocess.run(
             cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env
         ).returncode
+        sev40s = (
+            subprocess.run(
+                ["grep", 'Severity="40"', os.path.join(cluster.log)],
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+            ).returncode
+            != 0
+        )
+        if sev40s:
+            print(">>>>>>>>>>>>>>>>>>>> Found severity 40 events - the test fails")
+            errcode = 1
+        if errcode:
+            for log_file in glob.glob(os.path.join(cluster.log, "*")):
+                print(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(log_file))
+                with open(log_file, "r") as f:
+                    print(f.read())
+
     sys.exit(errcode)
