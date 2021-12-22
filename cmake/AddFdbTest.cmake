@@ -438,7 +438,7 @@ function(add_fdbclient_test)
     set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT ${T_TEST_TIMEOUT})
   else()
     # default timeout
-    set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 60)
+    set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 300)
   endif()
   set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
 endfunction()
