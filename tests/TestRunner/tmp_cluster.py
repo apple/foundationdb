@@ -109,17 +109,25 @@ if __name__ == "__main__":
         errcode = subprocess.run(
             cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env
         ).returncode
+
         sev40s = (
-            subprocess.run(
-                ["grep", 'Severity="40"', os.path.join(cluster.log)],
-                stdout=sys.stdout,
-                stderr=sys.stderr,
-            ).returncode
-            != 0
+            subprocess.getoutput(
+                "grep -r 'Severity=\"40\"' {}".format(cluster.log.as_posix())
+            )
+            .rstrip()
+            .splitlines()
         )
-        if sev40s:
+
+        for line in sev40s:
+            # When running ASAN we expect to see this message. Boost coroutine should be using the correct asan annotations so that it shouldn't produce any false positives.
+            if line.endswith(
+                "WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!"
+            ):
+                continue
             print(">>>>>>>>>>>>>>>>>>>> Found severity 40 events - the test fails")
             errcode = 1
+            break
+
         if errcode:
             for log_file in glob.glob(os.path.join(cluster.log, "*")):
                 print(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(log_file))
