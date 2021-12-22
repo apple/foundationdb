@@ -207,6 +207,11 @@ struct StorageServerDisk {
 	Future<Void> commit() { return storage->commit(); }
 
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
+	// Read the key that is equal or greater then 'key' from the storage engine.
+	// For example, readNextKeyInclusive("a") should return:
+	//  - "a", if key "a" exist
+	//  - "b", if key "a" doesn't exist, and "b" is the next existing key in total order
+	//  - allKeys.end, if keyrange [a, allKeys.end) is empty
 	Future<Key> readNextKeyInclusive(KeyRef key, IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL) {
 		++(*kvScans);
 		return readFirstKey(storage, KeyRangeRef(key, allKeys.end), type);
@@ -236,11 +241,12 @@ struct StorageServerDisk {
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
 
-	Counter* kvBytesCommit;
-	Counter* kvClearRange;
+	// The following are pointers to the Counters in StorageServer::counters of the same names.
+	Counter* kvCommitLogicalBytes;
+	Counter* kvClearRanges;
 	Counter* kvGets;
 	Counter* kvScans;
-	Counter* kvCommit;
+	Counter* kvCommits;
 
 private:
 	struct StorageServer* data;
@@ -808,16 +814,19 @@ public:
 		// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
 		// and cleared from the memory, we do not subtract it but add it to bytesDurable.
 		Counter bytesInput;
-		// Bytes pulled from TLogs, it counts the size of the key value pairs, without any overhead.
+		// Bytes pulled from TLogs, it counts the size of the key value pairs, e.g., key-value pair ("a", "b") is
+		// counted as 2 Bytes.
 		Counter logicalBytesInput;
-		// Bytes pulled from TLogs for moving-in shards.
+		// Bytes pulled from TLogs for moving-in shards, it counts the mutations sent to the moving-in shard during
+		// Fetching and Waiting phases.
 		Counter logicalBytesMoveInOverhead;
 		// Bytes committed to the underlying storage engine by SS, it counts the size of key value pairs.
-		Counter kvBytesCommit;
-		// Count of clearRange operatons to the storage engine.
-		Counter kvClearRange;
-		// ClearRange operations issued by FDB, e.g., removing a shard.
-		Counter systemClearRange;
+		Counter kvCommitLogicalBytes;
+		// Count of all clearRange operatons to the storage engine.
+		Counter kvClearRanges;
+		// ClearRange operations issued by FDB, instead of from users, e.g., ClearRange operations to remove a shard
+		// from a storage server, as in removeDataRange().
+		Counter kvSystemClearRanges;
 		// Bytes of the mutations that have been removed from memory because they durable. The counting is same as
 		// bytesInput, instead of the actual bytes taken in the storages, so that (bytesInput - bytesDurable) can
 		// reflect the current memory footprint of MVCC.
@@ -845,12 +854,18 @@ public:
 		// fallback).
 		Counter quickGetValueHit, quickGetValueMiss, quickGetKeyValuesHit, quickGetKeyValuesMiss;
 
-		Counter kvBytesScan;
-		Counter kvBytesGet;
+		// The number of logical bytes returned from storage engine, in response to readRange operations.
+		Counter kvScanBytes;
+		// The number of logical bytes returned from storage engine, in response to readValue operations.
+		Counter kvGetBytes;
+		// The number of keys read from storage engine by eagerReads.
 		Counter eagerReadsKeys;
+		// The count of readValue operation to the storage engine.
 		Counter kvGets;
+		// The count of readValue operation to the storage engine.
 		Counter kvScans;
-		Counter kvCommit;
+		// The count of commit operation to the storage engine.
+		Counter kvCommits;
 
 		LatencySample readLatencySample;
 		LatencyBands readLatencyBands;
@@ -863,9 +878,10 @@ public:
 		    lowPriorityQueries("LowPriorityQueries", cc), rowsQueried("RowsQueried", cc),
 		    bytesQueried("BytesQueried", cc), watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc),
 		    bytesInput("BytesInput", cc), logicalBytesInput("LogicalBytesInput", cc),
-		    logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc), kvBytesCommit("KVBytesCommit", cc),
-		    kvClearRange("KVClearRange", cc), systemClearRange("SystemClearRange", cc),
-		    bytesDurable("BytesDurable", cc), bytesFetched("BytesFetched", cc), mutationBytes("MutationBytes", cc),
+		    logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
+		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
+		    kvSystemClearRanges("KVSystemClearRanges", cc), bytesDurable("BytesDurable", cc),
+		    bytesFetched("BytesFetched", cc), mutationBytes("MutationBytes", cc),
 		    sampledBytesCleared("SampledBytesCleared", cc), kvFetched("KVFetched", cc), mutations("Mutations", cc),
 		    setMutations("SetMutations", cc), clearRangeMutations("ClearRangeMutations", cc),
 		    atomicMutations("AtomicMutations", cc), updateBatches("UpdateBatches", cc),
@@ -875,9 +891,9 @@ public:
 		    wrongShardServer("WrongShardServer", cc), fetchedVersions("FetchedVersions", cc),
 		    fetchesFromLogs("FetchesFromLogs", cc), quickGetValueHit("QuickGetValueHit", cc),
 		    quickGetValueMiss("QuickGetValueMiss", cc), quickGetKeyValuesHit("QuickGetKeyValuesHit", cc),
-		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc), kvBytesScan("KVBytesScan", cc),
+		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc), kvScanBytes("KVScanBytes", cc),
 		    eagerReadsKeys("EagerReadsKeys", cc), kvGets("KVGets", cc), kvScans("KVScans", cc),
-		    kvCommit("KVCommit", cc), kvBytesGet("KVBytesGet", cc),
+		    kvCommits("KVCommits", cc), kvGetBytes("KVGetBytes", cc),
 		    readLatencySample("ReadLatencyMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -905,6 +921,7 @@ public:
 		}
 	} counters;
 
+	// Bytes read from storage engine when a storage server starts.
 	int64_t bytesRestored;
 
 	Reference<EventCacheHolder> storageServerSourceTLogIDEventHolder;
@@ -962,11 +979,11 @@ public:
 
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 
-		this->storage.kvBytesCommit = &counters.kvBytesCommit;
-		this->storage.kvClearRange = &counters.kvClearRange;
+		this->storage.kvCommitLogicalBytes = &counters.kvCommitLogicalBytes;
+		this->storage.kvClearRanges = &counters.kvClearRanges;
 		this->storage.kvGets = &counters.kvGets;
 		this->storage.kvScans = &counters.kvScans;
-		this->storage.kvCommit = &counters.kvCommit;
+		this->storage.kvCommits = &counters.kvCommits;
 	}
 
 	//~StorageServer() { fclose(log); }
@@ -1379,7 +1396,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		} else if (!i || !i->isClearTo() || i->getEndKey() <= req.key) {
 			path = 2;
 			Optional<Value> vv = wait(data->storage.readValue(req.key, IKeyValueStore::ReadType::NORMAL, req.debugID));
-			data->counters.kvBytesGet += vv.expectedSize();
+			data->counters.kvGetBytes += vv.expectedSize();
 			++data->counters.kvGets;
 			// Validate that while we were reading the data we didn't lose the version or shard
 			if (version < data->storageVersion()) {
@@ -1647,7 +1664,7 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 		if (feed->second->storageVersion != invalidVersion) {
 			self->storage.clearRange(KeyRangeRef(changeFeedDurableKey(feed->second->id, 0),
 			                                     changeFeedDurableKey(feed->second->id, req.version)));
-			++self->counters.systemClearRange;
+			++self->counters.kvSystemClearRanges;
 			if (req.version > feed->second->storageVersion) {
 				feed->second->storageVersion = invalidVersion;
 				feed->second->durableVersion = invalidVersion;
@@ -1816,7 +1833,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		                changeFeedDurableKey(req.rangeID, req.end)),
 		    1 << 30,
 		    remainingDurableBytes));
-		data->counters.kvBytesScan += res.logicalSize();
+		data->counters.kvScanBytes += res.logicalSize();
 
 		if (!req.range.empty()) {
 			data->checkChangeCounter(changeCounter, req.range);
@@ -2230,7 +2247,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			readEnd = vCurrent ? std::min(vCurrent.key(), range.end) : range.end;
 			RangeResult atStorageVersion =
 			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
-			data->counters.kvBytesScan += atStorageVersion.logicalSize();
+			data->counters.kvScanBytes += atStorageVersion.logicalSize();
 
 			ASSERT(atStorageVersion.size() <= limit);
 			if (data->storageVersion() > version)
@@ -2312,7 +2329,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			                     : range.begin;
 			RangeResult atStorageVersion =
 			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
-			data->counters.kvBytesScan += atStorageVersion.logicalSize();
+			data->counters.kvScanBytes += atStorageVersion.logicalSize();
 
 			ASSERT(atStorageVersion.size() <= -limit);
 			if (data->storageVersion() > version)
@@ -3414,7 +3431,7 @@ ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager)
 		state Future<std::vector<Key>> futureKeyEnds = getAll(keyEnd);
 		state std::vector<Key> keyEndVal = wait(futureKeyEnds);
 		for (const auto& key : keyEndVal) {
-			data->counters.kvBytesScan += key.expectedSize();
+			data->counters.kvScanBytes += key.expectedSize();
 		}
 		eager->keyEnd = keyEndVal;
 	}
@@ -3428,7 +3445,7 @@ ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager)
 	std::vector<Optional<Value>> optionalValues = wait(futureValues);
 	for (const auto& value : optionalValues) {
 		if (value.present()) {
-			data->counters.kvBytesGet += value.expectedSize();
+			data->counters.kvGetBytes += value.expectedSize();
 		}
 	}
 	data->counters.eagerReadsKeys += eager->keys.size();
@@ -3722,7 +3739,7 @@ void removeDataRange(StorageServer* ss,
 		MutationRef m(MutationRef::ClearRange, range.end, endClear->getEndKey());
 		m = ss->addMutationToMutationLog(mLV, m);
 		data.insert(m.param1, ValueOrClearToRef::clearTo(m.param2));
-		++ss->counters.systemClearRange;
+		++ss->counters.kvSystemClearRanges;
 	}
 
 	auto beginClear = data.atLatest().lastLess(range.begin);
@@ -4441,7 +4458,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		if (e.code() == error_code_actor_cancelled && !data->shuttingDown && shard->phase >= AddingShard::Fetching) {
 			if (shard->phase < AddingShard::Waiting) {
 				data->storage.clearRange(keys);
-				++data->counters.systemClearRange;
+				++data->counters.kvSystemClearRanges;
 				data->byteSampleApplyClear(keys, invalidVersion);
 			} else {
 				ASSERT(data->data().getLatestVersion() > data->version.get());
@@ -4681,7 +4698,7 @@ void changeServerKeys(StorageServer* data,
 		data->addMutation(data->data().getLatestVersion(), true, clearRange, range, data->updateEagerReads);
 		data->newestAvailableVersion.insert(range, latestVersion);
 		setAvailableStatus(data, range, true);
-		++data->counters.systemClearRange;
+		++data->counters.kvSystemClearRanges;
 	}
 	validate(data);
 
@@ -4707,12 +4724,12 @@ void changeServerKeys(StorageServer* data,
 				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 				data->addMutationToMutationLog(
 				    mLV, MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
-				++data->counters.systemClearRange;
+				++data->counters.kvSystemClearRanges;
 				data->addMutationToMutationLog(mLV,
 				                               MutationRef(MutationRef::ClearRange,
 				                                           changeFeedDurableKey(f.first, 0),
 				                                           changeFeedDurableKey(f.first, version)));
-				++data->counters.systemClearRange;
+				++data->counters.kvSystemClearRanges;
 				auto rs = data->keyChangeFeed.modify(f.second);
 				for (auto r = rs.begin(); r != rs.end(); ++r) {
 					auto& feedList = r->value();
@@ -4960,12 +4977,12 @@ private:
 					auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 					data->addMutationToMutationLog(
 					    mLV, MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
-					++data->counters.systemClearRange;
+					++data->counters.kvSystemClearRanges;
 					data->addMutationToMutationLog(mLV,
 					                               MutationRef(MutationRef::ClearRange,
 					                                           changeFeedDurableKey(feed->second->id, 0),
 					                                           changeFeedDurableKey(feed->second->id, currentVersion)));
-					++data->counters.systemClearRange;
+					++data->counters.kvSystemClearRanges;
 					auto rs = data->keyChangeFeed.modify(feed->second->range);
 					for (auto r = rs.begin(); r != rs.end(); ++r) {
 						auto& feedList = r->value();
@@ -4986,7 +5003,7 @@ private:
 						if (feed->second->storageVersion != invalidVersion) {
 							data->storage.clearRange(KeyRangeRef(changeFeedDurableKey(feed->second->id, 0),
 							                                     changeFeedDurableKey(feed->second->id, popVersion)));
-							++data->counters.systemClearRange;
+							++data->counters.kvSystemClearRanges;
 							if (popVersion > feed->second->storageVersion) {
 								feed->second->storageVersion = invalidVersion;
 								feed->second->durableVersion = invalidVersion;
@@ -5568,7 +5585,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
 		state double beforeStorageCommit = now();
 		state Future<Void> durable = data->storage.commit();
-		++data->counters.kvCommit;
+		++data->counters.kvCommits;
 		state Future<Void> durableDelay = Void();
 
 		if (bytesLeft > 0) {
@@ -5672,7 +5689,7 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 	//TraceEvent("SetAvailableStatus", self->thisServerID).detail("Version", mLV.version).detail("RangeBegin", availableKeys.begin).detail("RangeEnd", availableKeys.end);
 
 	self->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, availableKeys.begin, availableKeys.end));
-	++self->counters.systemClearRange;
+	++self->counters.kvSystemClearRanges;
 	self->addMutationToMutationLog(mLV,
 	                               MutationRef(MutationRef::SetValue,
 	                                           availableKeys.begin,
@@ -5693,7 +5710,7 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 	                                    persistShardAssignedKeys.begin.toString() + keys.end.toString());
 	//TraceEvent("SetAssignedStatus", self->thisServerID).detail("Version", mLV.version).detail("RangeBegin", assignedKeys.begin).detail("RangeEnd", assignedKeys.end);
 	self->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, assignedKeys.begin, assignedKeys.end));
-	++self->counters.systemClearRange;
+	++self->counters.kvSystemClearRanges;
 	self->addMutationToMutationLog(mLV,
 	                               MutationRef(MutationRef::SetValue,
 	                                           assignedKeys.begin,
@@ -5709,21 +5726,21 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 
 void StorageServerDisk::clearRange(KeyRangeRef keys) {
 	storage->clear(keys);
-	++(*kvClearRange);
+	++(*kvClearRanges);
 }
 
 void StorageServerDisk::writeKeyValue(KeyValueRef kv) {
 	storage->set(kv);
-	*kvBytesCommit += kv.expectedSize();
+	*kvCommitLogicalBytes += kv.expectedSize();
 }
 
 void StorageServerDisk::writeMutation(MutationRef mutation) {
 	if (mutation.type == MutationRef::SetValue) {
 		storage->set(KeyValueRef(mutation.param1, mutation.param2));
-		*kvBytesCommit += mutation.expectedSize();
+		*kvCommitLogicalBytes += mutation.expectedSize();
 	} else if (mutation.type == MutationRef::ClearRange) {
 		storage->clear(KeyRangeRef(mutation.param1, mutation.param2));
-		++(*kvClearRange);
+		++(*kvClearRanges);
 	} else
 		ASSERT(false);
 }
@@ -5735,10 +5752,10 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
 		DEBUG_MUTATION(debugContext, debugVersion, m, data->thisServerID);
 		if (m.type == MutationRef::SetValue) {
 			storage->set(KeyValueRef(m.param1, m.param2));
-			*kvBytesCommit += m.expectedSize();
+			*kvCommitLogicalBytes += m.expectedSize();
 		} else if (m.type == MutationRef::ClearRange) {
 			storage->clear(KeyRangeRef(m.param1, m.param2));
-			++(*kvClearRange);
+			++(*kvClearRanges);
 		}
 	}
 }
@@ -5769,9 +5786,8 @@ bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion,
 
 // Update data->storage to persist the changes from (data->storageVersion(),version]
 void StorageServerDisk::makeVersionDurable(Version version) {
-	KeyValueRef kv(persistVersion, BinaryWriter::toValue(version, Unversioned()));
-	storage->set(kv);
-	*kvBytesCommit += kv.expectedSize();
+	storage->set(KeyValueRef(persistVersion, BinaryWriter::toValue(version, Unversioned())));
+	*kvCommitLogicalBytes += persistVersion.expectedSize() + sizeof(Version);
 
 	// TraceEvent("MakeDurable", data->thisServerID)
 	//     .detail("FromVersion", prevStorageVersion)
@@ -5803,7 +5819,7 @@ ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
 		if (results) {
 			results->push_back(bs.castTo<VectorRef<KeyValueRef>>());
 			data->bytesRestored += bs.logicalSize();
-			data->counters.kvBytesScan += bs.logicalSize();
+			data->counters.kvScanBytes += bs.logicalSize();
 		}
 		int rangeSize = bs.expectedSize();
 		totalFetches++;
@@ -6097,11 +6113,11 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		     ++it) {
 			if (it->value() == invalidVersion) {
 				KeyRangeRef clearRange(it->begin(), it->end());
-				++data->counters.systemClearRange;
+				++data->counters.kvSystemClearRanges;
 				// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
 				// DEBUG_KEY_RANGE("clearInvalidVersion", invalidVersion, clearRange);
 				storage->clear(clearRange);
-				++data->counters.systemClearRange;
+				++data->counters.kvSystemClearRanges;
 				data->byteSampleApplyClear(clearRange, invalidVersion);
 			}
 		}
@@ -6179,7 +6195,7 @@ void StorageServer::byteSampleApplySet(KeyValueRef kv, Version ver) {
 			auto diskRange = singleKeyRange(key.withPrefix(persistByteSampleKeys.begin));
 			addMutationToMutationLogOrStorage(ver,
 			                                  MutationRef(MutationRef::ClearRange, diskRange.begin, diskRange.end));
-			++counters.systemClearRange;
+			++counters.kvSystemClearRanges;
 		}
 	}
 
@@ -6226,7 +6242,7 @@ void StorageServer::byteSampleApplyClear(KeyRangeRef range, Version ver) {
 		byteSample.eraseAsync(range.begin, range.end);
 		auto diskRange = range.withPrefix(persistByteSampleKeys.begin);
 		addMutationToMutationLogOrStorage(ver, MutationRef(MutationRef::ClearRange, diskRange.begin, diskRange.end));
-		++counters.systemClearRange;
+		++counters.kvSystemClearRanges;
 	}
 }
 
@@ -6890,7 +6906,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	try {
 		wait(self.storage.init());
 		wait(self.storage.commit());
-		++self.counters.kvCommit;
+		++self.counters.kvCommits;
 
 		if (seedTag == invalidTag) {
 			std::pair<Version, Tag> verAndTag = wait(addStorageServer(
@@ -6907,7 +6923,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		self.storage.makeNewStorageServerDurable();
 		wait(self.storage.commit());
-		++self.counters.kvCommit;
+		++self.counters.kvCommits;
 
 		TraceEvent("StorageServerInit", ssi.id())
 		    .detail("Version", self.version.get())
@@ -7107,7 +7123,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 				throw worker_removed();
 			}
 		}
-		++self.counters.kvCommit;
+		++self.counters.kvCommits;
 
 		bool ok = wait(self.storage.restoreDurableState());
 		if (!ok) {
