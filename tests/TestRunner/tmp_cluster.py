@@ -10,21 +10,25 @@ from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from random import choice
 from pathlib import Path
 
+
 class TempCluster:
     def __init__(self, build_dir: str, process_number: int = 1, port: str = None):
         self.build_dir = Path(build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
         tmp_dir = self.build_dir.joinpath(
-            'tmp',
-            ''.join(choice(LocalCluster.valid_letters_for_secret) for i in range(16)))
+            "tmp",
+            "".join(choice(LocalCluster.valid_letters_for_secret) for i in range(16)),
+        )
         tmp_dir.mkdir(parents=True)
-        self.cluster = LocalCluster(tmp_dir,
-                                    self.build_dir.joinpath('bin', 'fdbserver'),
-                                    self.build_dir.joinpath('bin', 'fdbmonitor'),
-                                    self.build_dir.joinpath('bin', 'fdbcli'),
-                                    process_number,
-                                    port = port)
+        self.cluster = LocalCluster(
+            tmp_dir,
+            self.build_dir.joinpath("bin", "fdbserver"),
+            self.build_dir.joinpath("bin", "fdbmonitor"),
+            self.build_dir.joinpath("bin", "fdbcli"),
+            process_number,
+            port=port,
+        )
         self.log = self.cluster.log
         self.etc = self.cluster.etc
         self.data = self.cluster.data
@@ -40,13 +44,14 @@ class TempCluster:
         shutil.rmtree(self.tmp_dir)
 
     def close(self):
-        self.cluster.__exit__(None,None,None)
+        self.cluster.__exit__(None, None, None)
         shutil.rmtree(self.tmp_dir)
 
 
-if __name__ == '__main__':
-    parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter,
-                            description="""
+if __name__ == "__main__":
+    parser = ArgumentParser(
+        formatter_class=RawDescriptionHelpFormatter,
+        description="""
     This script automatically configures a temporary local cluster on the machine
     and then calls a command while this cluster is running. As soon as the command
     returns, the configured cluster is killed and all generated data is deleted.
@@ -61,30 +66,47 @@ if __name__ == '__main__':
     - All occurrences of @ETC_DIR@ will be replaced with the path to the configuration directory.
 
     The environment variable FDB_CLUSTER_FILE is set to the generated cluster for the command if it is not set already.
-    """)
-    parser.add_argument('--build-dir', '-b', metavar='BUILD_DIRECTORY', help='FDB build directory', required=True)
-    parser.add_argument('cmd', metavar="COMMAND", nargs="+", help="The command to run")
-    parser.add_argument('--process-number', '-p', help="Number of fdb processes running", type=int, default=1)
+    """,
+    )
+    parser.add_argument(
+        "--build-dir",
+        "-b",
+        metavar="BUILD_DIRECTORY",
+        help="FDB build directory",
+        required=True,
+    )
+    parser.add_argument("cmd", metavar="COMMAND", nargs="+", help="The command to run")
+    parser.add_argument(
+        "--process-number",
+        "-p",
+        help="Number of fdb processes running",
+        type=int,
+        default=1,
+    )
     args = parser.parse_args()
     errcode = 1
     with TempCluster(args.build_dir, args.process_number) as cluster:
         print("log-dir: {}".format(cluster.log))
         print("etc-dir: {}".format(cluster.etc))
         print("data-dir: {}".format(cluster.data))
-        print("cluster-file: {}".format(cluster.etc.joinpath('fdb.cluster')))
+        print("cluster-file: {}".format(cluster.etc.joinpath("fdb.cluster")))
         cmd_args = []
         for cmd in args.cmd:
-            if cmd == '@CLUSTER_FILE@':
-                cmd_args.append(str(cluster.etc.joinpath('fdb.cluster')))
-            elif cmd == '@DATA_DIR@':
+            if cmd == "@CLUSTER_FILE@":
+                cmd_args.append(str(cluster.etc.joinpath("fdb.cluster")))
+            elif cmd == "@DATA_DIR@":
                 cmd_args.append(str(cluster.data))
-            elif cmd == '@LOG_DIR@':
+            elif cmd == "@LOG_DIR@":
                 cmd_args.append(str(cluster.log))
-            elif cmd == '@ETC_DIR@':
+            elif cmd == "@ETC_DIR@":
                 cmd_args.append(str(cluster.etc))
             else:
                 cmd_args.append(cmd)
         env = dict(**os.environ)
-        env['FDB_CLUSTER_FILE'] = env.get('FDB_CLUSTER_FILE', cluster.etc.joinpath('fdb.cluster'))
-        errcode = subprocess.run(cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env).returncode
+        env["FDB_CLUSTER_FILE"] = env.get(
+            "FDB_CLUSTER_FILE", cluster.etc.joinpath("fdb.cluster")
+        )
+        errcode = subprocess.run(
+            cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env
+        ).returncode
     sys.exit(errcode)
