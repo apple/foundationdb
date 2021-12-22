@@ -88,6 +88,7 @@ public:
 
 	virtual Future<Void> addShard(KeyRangeRef range, UID uid) {return Future<Void>();}
 
+	virtual void persistShard(KeyRangeRef range) {}
 
 	/*
 	Concurrency contract

@@ -6,5 +6,5 @@ startDelay = 0
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 1
-    testsMatching = 'RocksDBKVS/Cross'
+    testsMatching = 'RocksDBKVS/Reopen'
 
