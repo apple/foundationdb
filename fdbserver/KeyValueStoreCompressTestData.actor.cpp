@@ -54,7 +54,9 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 		store->set(KeyValueRef(keyValue.key, pack(keyValue.value)), arena);
 	}
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override { store->clear(range, arena); }
-	Future<Void> commit(bool sequential = false) override { return store->commit(sequential); }
+	Future<Void> commit(Version version = invalidVersion, bool sequential = false) override {
+		return store->commit(version, sequential);
+	}
 
 	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) override {
 		return doReadValue(store, key, debugID);

@@ -139,7 +139,7 @@ public:
 		}
 	}
 
-	Future<Void> commit(bool sequential) override {
+	Future<Void> commit(Version version, bool sequential) override {
 		if (getAvailableSize() <= 0) {
 			TraceEvent(SevError, "KeyValueStoreMemory_OutOfSpace", id).log();
 			return Never();
@@ -842,7 +842,7 @@ private:
 	}
 	ACTOR static Future<Void> waitAndCommit(KeyValueStoreMemory* self, bool sequential) {
 		wait(self->recovering);
-		wait(self->commit(sequential));
+		wait(self->commit(0, sequential));
 		return Void();
 	}
 	ACTOR static Future<Void> commitAndUpdateVersions(KeyValueStoreMemory* self,

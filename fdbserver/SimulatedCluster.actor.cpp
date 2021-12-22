@@ -1312,6 +1312,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	// Using [0, 4) to disable the RocksDB storage engine.
 	// TODO: Figure out what is broken with the RocksDB engine in simulation.
 	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
+	storage_engine_type = 4;
 	if (testConfig.storageEngineType.present()) {
 		storage_engine_type = testConfig.storageEngineType.get();
 	} else {
@@ -2218,9 +2219,9 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// TODO: Currently backup and restore related simulation tests are failing when run with rocksDB storage engine
 	// possibly due to running the rocksdb in single thread in simulation.
 	// Re-enable the backup and restore related simulation tests when the tests are passing again.
-	if (std::string_view(testFile).find("Backup") != std::string_view::npos) {
-		testConfig.storageEngineExcludeTypes.push_back(4);
-	}
+	/*if (std::string_view(testFile).find("Backup") != std::string_view::npos) {
+	    testConfig.storageEngineExcludeTypes.push_back(4);
+	}*/
 
 	// The RocksDB engine is not always built with the rest of fdbserver. Don't try to use it if it is not included
 	// in the build.

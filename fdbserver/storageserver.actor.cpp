@@ -204,7 +204,7 @@ struct StorageServerDisk {
 
 	Future<Void> getError() { return storage->getError(); }
 	Future<Void> init() { return storage->init(); }
-	Future<Void> commit() { return storage->commit(); }
+	Future<Void> commit(Version version = invalidVersion) { return storage->commit(version); }
 
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
 	Future<Key> readNextKeyInclusive(KeyRef key, IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL) {
@@ -5502,7 +5502,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
 		state double beforeStorageCommit = now();
-		state Future<Void> durable = data->storage.commit();
+		state Future<Void> durable = data->storage.commit(newOldestVersion);
 		state Future<Void> durableDelay = Void();
 
 		if (bytesLeft > 0) {

@@ -47,6 +47,7 @@ public:
 	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) = 0;
 	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) = 0;
 	virtual Future<Void> commit(
+	    Version version = invalidVersion,
 	    bool sequential = false) = 0; // returns when prior sets and clears are (atomically) durable
 
 	enum class ReadType {

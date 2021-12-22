@@ -1575,7 +1575,7 @@ public:
 
 	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override;
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override;
-	Future<Void> commit(bool sequential = false) override;
+	Future<Void> commit(Version version = invalidVersion, bool sequential = false) override;
 
 	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) override;
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
@@ -2188,7 +2188,7 @@ void KeyValueStoreSQLite::clear(KeyRangeRef range, const Arena* arena) {
 	++writesRequested;
 	writeThread->post(new Writer::ClearAction(range));
 }
-Future<Void> KeyValueStoreSQLite::commit(bool sequential) {
+Future<Void> KeyValueStoreSQLite::commit(Version version, bool sequential) {
 	++writesRequested;
 	auto p = new Writer::CommitAction;
 	auto f = p->result.getFuture();

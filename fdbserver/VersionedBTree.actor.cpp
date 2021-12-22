@@ -7355,7 +7355,7 @@ public:
 
 	Future<Void> onClosed() const override { return m_closed.getFuture(); }
 
-	Future<Void> commit(bool sequential = false) override {
+	Future<Void> commit(Version version = invalidVersion, bool sequential = false) override {
 		Future<Void> c = m_tree->commit(m_nextCommitVersion);
 		// Currently not keeping history
 		m_tree->setOldestReadableVersion(m_nextCommitVersion);
