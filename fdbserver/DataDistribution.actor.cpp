@@ -3006,6 +3006,16 @@ void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataTy
 	}
 	wiggle_pq.update(handle, std::make_pair(metadata, serverId));
 }
+Optional<UID> StorageWiggler::getNextServerId() {
+	while(!wiggle_pq.empty()) {
+		auto [metadata, id] = wiggle_pq.top();
+		wiggle_pq.pop();
+		if(teamCollection->server_info.count(id)){
+			return Optional<UID>(id);
+		}
+	}
+	return Optional<UID>();
+}
 
 TCServerInfo::~TCServerInfo() {
 	if (collection && ssVersionTooFarBehind.get() && !lastKnownInterface.isTss()) {
@@ -4100,21 +4110,33 @@ ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getSe
 	return results;
 }
 
-// Create a transaction reading the value of `wigglingStorageServerKey` and update it to the next Process ID according
-// to a sorted PID set maintained by the data distributor. If now no storage server exists, the new Process ID is 0.
+// Create a transaction reading the value of `wigglingStorageServerKey` and update it to the next serverID according
+// to a sorted wiggle_pq maintained by the wiggler.
 ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection) {
 	state ReadYourWritesTransaction tr(teamCollection->cx);
 	state Value writeValue = ""_sr;
 	state const Key writeKey =
 	    wigglingStorageServerKey.withSuffix(teamCollection->primary ? "/primary"_sr : "/remote"_sr);
+	state UID nextId;
 	loop {
+		// wait until the wiggle queue is not empty
+		loop {
+			if(!teamCollection->storageWiggler->nonEmpty.get()) {
+				wait(teamCollection->storageWiggler->nonEmpty.onChange());
+			}
+			auto id = teamCollection->storageWiggler->getNextServerId();
+			if(id.present()) {
+				nextId = id.get();
+				break;
+			}
+		}
+
+		// write the next server id
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			Optional<Value> locality = wait(tr.get(perpetualStorageWiggleLocalityKey));
 
-			if (teamCollection->pid2server_info.empty()) {
-				writeValue = ""_sr;
-			} else if (locality.present() && locality.get().toString().compare("0")) {
+			if (locality.present() && locality.get().toString().compare("0")) {
 				// if perpetual_storage_wiggle_locality has value and not 0(disabled).
 				state std::string localityKeyValue = locality.get().toString();
 				ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValue));
@@ -4123,61 +4145,28 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 				int split = localityKeyValue.find(':');
 				state std::string localityKey = localityKeyValue.substr(0, split);
 				state std::string localityValue = localityKeyValue.substr(split + 1);
-				state Value prevValue;
-				state int serverInfoSize = teamCollection->pid2server_info.size();
 
-				Optional<Value> value = wait(tr.get(writeKey));
-				if (value.present()) {
-					prevValue = value.get();
-				} else {
-					// if value not present, check for locality match of the first entry in pid2server_info.
-					auto& info_vec = teamCollection->pid2server_info.begin()->second;
-					if (info_vec.size() && info_vec[0]->lastKnownInterface.locality.get(localityKey) == localityValue) {
-						writeValue = teamCollection->pid2server_info.begin()->first; // first entry locality matched.
-					} else {
-						prevValue = teamCollection->pid2server_info.begin()->first;
-						serverInfoSize--;
-					}
+
+				if(!teamCollection->server_info.count(nextId)){
+					TEST(true); // server is removed when update wiggle uid
+					continue;
 				}
 
-				// If first entry of pid2server_info, did not match the locality.
-				if (!(writeValue.compare(LiteralStringRef("")))) {
-					auto nextIt = teamCollection->pid2server_info.upper_bound(prevValue);
-					while (true) {
-						if (nextIt == teamCollection->pid2server_info.end()) {
-							nextIt = teamCollection->pid2server_info.begin();
-						}
-
-						if (nextIt->second.size() &&
-						    nextIt->second[0]->lastKnownInterface.locality.get(localityKey) == localityValue) {
-							writeValue = nextIt->first; // locality matched
-							break;
-						}
-						serverInfoSize--;
-						if (!serverInfoSize) {
-							// None of the entries in pid2server_info matched the given locality.
-							writeValue = LiteralStringRef("");
-							TraceEvent("PerpetualNextWigglingStoragePIDNotFound", teamCollection->distributorId)
-							    .detail("WriteValue", "No process matched the given perpetualStorageWiggleLocality")
-							    .detail("PerpetualStorageWiggleLocality", localityKeyValue);
-							break;
-						}
-						nextIt++;
+				// If the selected server matches the locality
+				auto server = teamCollection->server_info.at(nextId);
+				if(server->lastKnownInterface.locality.get(localityKey) == localityValue) {
+						writeValue = nextId.toString();
+				} else {
+					if(!teamCollection->storageWiggler->nonEmpty.get()) {
+						// None of the entries in wiggle queue matches the given locality.
+						TraceEvent("PerpetualNextWigglingStoragePIDNotFound", teamCollection->distributorId)
+						    .detail("WriteValue", "No process matched the given perpetualStorageWiggleLocality")
+						    .detail("PerpetualStorageWiggleLocality", localityKeyValue);
 					}
+					continue;
 				}
 			} else {
-				Optional<Value> value = wait(tr.get(writeKey));
-				Value pid = teamCollection->pid2server_info.begin()->first;
-				if (value.present()) {
-					auto nextIt = teamCollection->pid2server_info.upper_bound(value.get());
-					if (nextIt == teamCollection->pid2server_info.end()) {
-						writeValue = pid;
-					} else {
-						writeValue = nextIt->first;
-					}
-				} else {
-					writeValue = pid;
-				}
+				writeValue = nextId.toString();
 			}
 
 			tr.set(writeKey, writeValue);
@@ -4187,7 +4176,7 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 			wait(tr.onError(e));
 		}
 	}
-	TraceEvent(SevDebug, "PerpetualNextWigglingStoragePID", teamCollection->distributorId)
+	TraceEvent(SevDebug, "PerpetualNextWigglingStorageID", teamCollection->distributorId)
 	    .detail("Primary", teamCollection->primary)
 	    .detail("WriteValue", writeValue);
 

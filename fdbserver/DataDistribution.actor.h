@@ -324,6 +324,8 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	boost::heap::skew_heap<MetadataUIDP, boost::heap::mutable_<true>, boost::heap::compare<CompPair>> wiggle_pq;
 	std::unordered_map<UID, decltype(wiggle_pq)::handle_type> pq_handles;
 
+	AsyncVar<bool> nonEmpty;
+
 	explicit StorageWiggler(DDTeamCollection* collection);
 	// add server to wiggling queue
 	void addServer(const UID& serverId, const StorageMetadataType& metadata);
@@ -332,6 +334,8 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	// update metadata and adjust priority_queue
 	void updateMetadata(const UID& serverId, const StorageMetadataType& metadata);
 	bool contains(const UID& serverId) { return pq_handles.count(serverId) > 0; }
+
+	Optional<UID> getNextServerId();
 };
 
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
