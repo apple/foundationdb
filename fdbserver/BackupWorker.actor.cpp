@@ -1086,7 +1086,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 				TraceEvent("BackupWorkerDone", self.myId).detail("BackupEpoch", self.backupEpoch);
 				// Notify master so that this worker can be removed from log system, then this
 				// worker (for an old epoch's unfinished work) can safely exit.
-				wait(brokenPromiseToNever(db->get().clusterInterface.notifyBackupWorkerDone.getReply(
+				wait(brokenPromiseToNever(db->get().master.notifyBackupWorkerDone.getReply(
 				    BackupWorkerDoneRequest(self.myId, self.backupEpoch))));
 				break;
 			}
