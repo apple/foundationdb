@@ -461,8 +461,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 		changes.push_back(self->backupWorkerChanged.onTrigger());
 
 		ASSERT(failed.size() >= 1);
-		wait(quorum(changes, 1) || tagError<Void>(quorum(failed, 1), tlog_failed()) ||
-		     tagError<Void>(quorum(backupFailed, 1), backup_worker_failed()));
+		wait(quorum(changes, 1) || tagError<Void>(quorum(failed, 1), master_tlog_failed()) ||
+		     tagError<Void>(quorum(backupFailed, 1), master_backup_worker_failed()));
 	}
 }
 
@@ -2300,7 +2300,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 					auto reply = transformErrors(
 					    throwErrorOr(workers[nextRouter].logRouter.getReplyUnlessFailedFor(
 					        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-					    cluster_recovery_failed());
+					    master_recovery_failed());
 					logRouterInitializationReplies.back().push_back(reply);
 					allReplies.push_back(reply);
 					nextRouter = (nextRouter + 1) % workers.size();
@@ -2349,7 +2349,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 					auto reply = transformErrors(
 					    throwErrorOr(workers[nextRouter].logRouter.getReplyUnlessFailedFor(
 					        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-					    cluster_recovery_failed());
+					    master_recovery_failed());
 					logRouterInitializationReplies.back().push_back(reply);
 					allReplies.push_back(reply);
 					nextRouter = (nextRouter + 1) % workers.size();
@@ -2410,7 +2410,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 
 	if (!forRemote) {
 		self->logSystemConfigChanged.trigger();
-		wait(failed.size() ? tagError<Void>(quorum(failed, 1), tlog_failed()) : Future<Void>(Never()));
+		wait(failed.size() ? tagError<Void>(quorum(failed, 1), master_tlog_failed()) : Future<Void>(Never()));
 		throw internal_error();
 	}
 	return Void();
@@ -2509,7 +2509,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		    throwErrorOr(
 		        remoteWorkers.logRouters[i % remoteWorkers.logRouters.size()].logRouter.getReplyUnlessFailedFor(
 		            req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		    cluster_recovery_failed()));
+		    master_recovery_failed()));
 	}
 
 	std::vector<Tag> localTags = TagPartitionedLogSystem::getLocalTags(remoteLocality, allTags);
@@ -2587,7 +2587,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		remoteTLogInitializationReplies.push_back(transformErrors(
 		    throwErrorOr(remoteWorkers.remoteTLogs[i].tLog.getReplyUnlessFailedFor(
 		        remoteTLogReqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		    cluster_recovery_failed()));
+		    master_recovery_failed()));
 
 	TraceEvent("RemoteLogRecruitment_InitializingRemoteLogs")
 	    .detail("StartVersion", logSet->startVersion)
@@ -2616,7 +2616,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		                        TLogRecoveryFinishedRequest(),
 		                        SERVER_KNOBS->TLOG_TIMEOUT,
 		                        SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		                    cluster_recovery_failed()));
+		                    master_recovery_failed()));
 
 	self->remoteRecoveryComplete = waitForAll(recoveryComplete);
 	self->tLogs.push_back(logSet);
@@ -2857,7 +2857,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		initializationReplies.push_back(transformErrors(
 		    throwErrorOr(recr.tLogs[i].tLog.getReplyUnlessFailedFor(
 		        reqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		    cluster_recovery_failed()));
+		    master_recovery_failed()));
 
 	state std::vector<Future<Void>> recoveryComplete;
 
@@ -2924,7 +2924,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 			satelliteInitializationReplies.push_back(transformErrors(
 			    throwErrorOr(recr.satelliteTLogs[i].tLog.getReplyUnlessFailedFor(
 			        sreqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-			    cluster_recovery_failed()));
+			    master_recovery_failed()));
 
 		wait(waitForAll(satelliteInitializationReplies) || oldRouterRecruitment);
 
@@ -2940,7 +2940,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 			            TLogRecoveryFinishedRequest(),
 			            SERVER_KNOBS->TLOG_TIMEOUT,
 			            SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-			    cluster_recovery_failed()));
+			    master_recovery_failed()));
 	}
 
 	wait(waitForAll(initializationReplies) || oldRouterRecruitment);
@@ -2955,7 +2955,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 	// Don't force failure of recovery if it took us a long time to recover. This avoids multiple long running
 	// recoveries causing tests to timeout
 	if (BUGGIFY && now() - startTime < 300 && g_network->isSimulated() && g_simulator.speedUpSimulation)
-		throw cluster_recovery_failed();
+		throw master_recovery_failed();
 
 	for (int i = 0; i < logSystem->tLogs[0]->logServers.size(); i++)
 		recoveryComplete.push_back(transformErrors(
@@ -2963,7 +2963,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		        TLogRecoveryFinishedRequest(),
 		        SERVER_KNOBS->TLOG_TIMEOUT,
 		        SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		    cluster_recovery_failed()));
+		    master_recovery_failed()));
 	logSystem->recoveryComplete = waitForAll(recoveryComplete);
 
 	if (configuration.usableRegions > 1) {
@@ -3057,7 +3057,7 @@ ACTOR Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(
     UID myID,
     Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog) {
 
-	TraceEvent("TLogLockStarted", myID).detail("TLog", tlog->get().id()).detail("InfPresent", tlog->get().present());
+	TraceEvent("TLogLockStarted", myID).detail("TLog", tlog->get().id());
 	loop {
 		choose {
 			when(TLogLockResult data = wait(

@@ -163,25 +163,17 @@ struct ClusterControllerFullInterface {
 	RequestStream<struct GetServerDBInfoRequest>
 	    getServerDBInfo; // only used by testers; the cluster controller will send the serverDBInfo to workers
 	RequestStream<struct UpdateWorkerHealthRequest> updateWorkerHealth;
-	RequestStream<struct TLogRejoinRequest>
-	    tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new controller
-	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
-	RequestStream<struct ChangeCoordinatorsRequest> changeCoordinators;
 
 	UID id() const { return clientInterface.id(); }
 	bool operator==(ClusterControllerFullInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ClusterControllerFullInterface const& r) const { return id() != r.id(); }
-
-	NetworkAddress address() const { return clientInterface.address(); }
 
 	bool hasMessage() const {
 		return clientInterface.hasMessage() || recruitFromConfiguration.getFuture().isReady() ||
 		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||
 		       recruitBlobWorker.getFuture().isReady() || registerWorker.getFuture().isReady() ||
 		       getWorkers.getFuture().isReady() || registerMaster.getFuture().isReady() ||
-		       getServerDBInfo.getFuture().isReady() || updateWorkerHealth.getFuture().isReady() ||
-		       tlogRejoin.getFuture().isReady() || notifyBackupWorkerDone.getFuture().isReady() ||
-		       changeCoordinators.getFuture().isReady();
+		       getServerDBInfo.getFuture().isReady() || updateWorkerHealth.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -195,9 +187,6 @@ struct ClusterControllerFullInterface {
 		registerMaster.getEndpoint(TaskPriority::ClusterControllerRegister);
 		getServerDBInfo.getEndpoint(TaskPriority::ClusterController);
 		updateWorkerHealth.getEndpoint(TaskPriority::ClusterController);
-		tlogRejoin.getEndpoint(TaskPriority::MasterTLogRejoin);
-		notifyBackupWorkerDone.getEndpoint(TaskPriority::ClusterController);
-		changeCoordinators.getEndpoint(TaskPriority::DefaultEndpoint);
 	}
 
 	template <class Ar>
@@ -215,10 +204,7 @@ struct ClusterControllerFullInterface {
 		           getWorkers,
 		           registerMaster,
 		           getServerDBInfo,
-		           updateWorkerHealth,
-		           tlogRejoin,
-		           notifyBackupWorkerDone,
-		           changeCoordinators);
+		           updateWorkerHealth);
 	}
 };
 
@@ -337,11 +323,10 @@ struct RecruitRemoteFromConfigurationReply {
 	constexpr static FileIdentifier file_identifier = 9091392;
 	std::vector<WorkerInterface> remoteTLogs;
 	std::vector<WorkerInterface> logRouters;
-	Optional<UID> dbgId;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, remoteTLogs, logRouters, dbgId);
+		serializer(ar, remoteTLogs, logRouters);
 	}
 };
 
@@ -351,7 +336,6 @@ struct RecruitRemoteFromConfigurationRequest {
 	Optional<Key> dcId;
 	int logRouterCount;
 	std::vector<UID> exclusionWorkerIds;
-	Optional<UID> dbgId;
 	ReplyPromise<RecruitRemoteFromConfigurationReply> reply;
 
 	RecruitRemoteFromConfigurationRequest() {}
@@ -364,7 +348,7 @@ struct RecruitRemoteFromConfigurationRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, configuration, dcId, logRouterCount, exclusionWorkerIds, dbgId, reply);
+		serializer(ar, configuration, dcId, logRouterCount, exclusionWorkerIds, reply);
 	}
 };
 
@@ -502,49 +486,6 @@ struct UpdateWorkerHealthRequest {
 	}
 };
 
-struct TLogRejoinReply {
-	constexpr static FileIdentifier file_identifier = 11;
-
-	// false means someone else registered, so we should re-register.  true means this master is recovered, so don't
-	// send again to the same master.
-	bool masterIsRecovered;
-	TLogRejoinReply() = default;
-	explicit TLogRejoinReply(bool masterIsRecovered) : masterIsRecovered(masterIsRecovered) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, masterIsRecovered);
-	}
-};
-
-struct TLogRejoinRequest {
-	constexpr static FileIdentifier file_identifier = 15692200;
-	TLogInterface myInterface;
-	ReplyPromise<TLogRejoinReply> reply;
-
-	TLogRejoinRequest() {}
-	explicit TLogRejoinRequest(const TLogInterface& interf) : myInterface(interf) {}
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, myInterface, reply);
-	}
-};
-
-struct BackupWorkerDoneRequest {
-	constexpr static FileIdentifier file_identifier = 8736351;
-	UID workerUID;
-	LogEpoch backupEpoch;
-	ReplyPromise<Void> reply;
-
-	BackupWorkerDoneRequest() : workerUID(), backupEpoch(-1) {}
-	BackupWorkerDoneRequest(UID id, LogEpoch epoch) : workerUID(id), backupEpoch(epoch) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, workerUID, backupEpoch, reply);
-	}
-};
-
 struct InitializeTLogRequest {
 	constexpr static FileIdentifier file_identifier = 15604392;
 	UID recruitmentID;
@@ -664,7 +605,6 @@ struct RecruitMasterRequest {
 struct InitializeCommitProxyRequest {
 	constexpr static FileIdentifier file_identifier = 10344153;
 	MasterInterface master;
-	LifetimeToken masterLifetime;
 	uint64_t recoveryCount;
 	Version recoveryTransactionVersion;
 	bool firstProxy;
@@ -672,20 +612,19 @@ struct InitializeCommitProxyRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, master, masterLifetime, recoveryCount, recoveryTransactionVersion, firstProxy, reply);
+		serializer(ar, master, recoveryCount, recoveryTransactionVersion, firstProxy, reply);
 	}
 };
 
 struct InitializeGrvProxyRequest {
 	constexpr static FileIdentifier file_identifier = 8265613;
 	MasterInterface master;
-	LifetimeToken masterLifetime;
 	uint64_t recoveryCount;
 	ReplyPromise<GrvProxyInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, master, masterLifetime, recoveryCount, reply);
+		serializer(ar, master, recoveryCount, reply);
 	}
 };
 

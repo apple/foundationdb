@@ -700,8 +700,8 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 
 	// Manually set up a master address.
 	NetworkAddress testAddress(IPAddress(0x13131313), 1);
-	testDbInfo.master.getCommitVersion =
-	    RequestStream<struct GetCommitVersionRequest>(Endpoint({ testAddress }, UID(1, 2)));
+	testDbInfo.master.changeCoordinators =
+	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ testAddress }, UID(1, 2)));
 
 	// First, create an empty TLogInterface, and check that it shouldn't be considered as in primary DC.
 	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
@@ -1772,10 +1772,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				startRole(Role::MASTER, recruited.id(), interf.id());
 
 				DUMPTOKEN(recruited.waitFailure);
+				DUMPTOKEN(recruited.tlogRejoin);
+				DUMPTOKEN(recruited.changeCoordinators);
 				DUMPTOKEN(recruited.getCommitVersion);
 				DUMPTOKEN(recruited.getLiveCommittedVersion);
 				DUMPTOKEN(recruited.reportLiveCommittedVersion);
-				DUMPTOKEN(recruited.updateRecoveryData);
+				DUMPTOKEN(recruited.notifyBackupWorkerDone);
 
 				// printf("Recruited as masterServer\n");
 				Future<Void> masterProcess = masterServer(

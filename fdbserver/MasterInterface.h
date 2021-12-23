@@ -22,13 +22,11 @@
 #define FDBSERVER_MASTERINTERFACE_H
 #pragma once
 
-#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbserver/TLogInterface.h"
-#include "fdbclient/Notified.h"
 
 typedef uint64_t DBRecoveryCount;
 
@@ -36,17 +34,20 @@ struct MasterInterface {
 	constexpr static FileIdentifier file_identifier = 5979145;
 	LocalityData locality;
 	RequestStream<ReplyPromise<Void>> waitFailure;
+	RequestStream<struct TLogRejoinRequest>
+	    tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
+	RequestStream<struct ChangeCoordinatorsRequest> changeCoordinators;
 	RequestStream<struct GetCommitVersionRequest> getCommitVersion;
+	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
 	// Get the centralized live committed version reported by commit proxies.
 	RequestStream<struct GetRawCommittedVersionRequest> getLiveCommittedVersion;
 	// Report a proxy's committed version.
 	RequestStream<struct ReportRawCommittedVersionRequest> reportLiveCommittedVersion;
-	RequestStream<struct UpdateRecoveryDataRequest> updateRecoveryData;
 
-	NetworkAddress address() const { return getCommitVersion.getEndpoint().getPrimaryAddress(); }
-	NetworkAddressList addresses() const { return getCommitVersion.getEndpoint().addresses; }
+	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
+	NetworkAddressList addresses() const { return changeCoordinators.getEndpoint().addresses; }
 
-	UID id() const { return getCommitVersion.getEndpoint().token; }
+	UID id() const { return changeCoordinators.getEndpoint().token; }
 	template <class Archive>
 	void serialize(Archive& ar) {
 		if constexpr (!is_fb_function<Archive>) {
@@ -54,25 +55,58 @@ struct MasterInterface {
 		}
 		serializer(ar, locality, waitFailure);
 		if (Archive::isDeserializing) {
+			tlogRejoin = RequestStream<struct TLogRejoinRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(1));
+			changeCoordinators =
+			    RequestStream<struct ChangeCoordinatorsRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(2));
 			getCommitVersion =
-			    RequestStream<struct GetCommitVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(1));
+			    RequestStream<struct GetCommitVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(3));
+			notifyBackupWorkerDone =
+			    RequestStream<struct BackupWorkerDoneRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(4));
 			getLiveCommittedVersion =
-			    RequestStream<struct GetRawCommittedVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(2));
+			    RequestStream<struct GetRawCommittedVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(5));
 			reportLiveCommittedVersion = RequestStream<struct ReportRawCommittedVersionRequest>(
-			    waitFailure.getEndpoint().getAdjustedEndpoint(3));
-			updateRecoveryData =
-			    RequestStream<struct UpdateRecoveryDataRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(4));
+			    waitFailure.getEndpoint().getAdjustedEndpoint(6));
 		}
 	}
 
 	void initEndpoints() {
 		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
 		streams.push_back(waitFailure.getReceiver());
+		streams.push_back(tlogRejoin.getReceiver(TaskPriority::MasterTLogRejoin));
+		streams.push_back(changeCoordinators.getReceiver());
 		streams.push_back(getCommitVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
+		streams.push_back(notifyBackupWorkerDone.getReceiver());
 		streams.push_back(getLiveCommittedVersion.getReceiver(TaskPriority::GetLiveCommittedVersion));
 		streams.push_back(reportLiveCommittedVersion.getReceiver(TaskPriority::ReportLiveCommittedVersion));
-		streams.push_back(updateRecoveryData.getReceiver(TaskPriority::UpdateRecoveryTransactionVersion));
 		FlowTransport::transport().addEndpoints(streams);
+	}
+};
+
+struct TLogRejoinReply {
+	constexpr static FileIdentifier file_identifier = 11;
+
+	// false means someone else registered, so we should re-register.  true means this master is recovered, so don't
+	// send again to the same master.
+	bool masterIsRecovered;
+	TLogRejoinReply() = default;
+	explicit TLogRejoinReply(bool masterIsRecovered) : masterIsRecovered(masterIsRecovered) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, masterIsRecovered);
+	}
+};
+
+struct TLogRejoinRequest {
+	constexpr static FileIdentifier file_identifier = 15692200;
+	TLogInterface myInterface;
+	ReplyPromise<TLogRejoinReply> reply;
+
+	TLogRejoinRequest() {}
+	explicit TLogRejoinRequest(const TLogInterface& interf) : myInterface(interf) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, myInterface, reply);
 	}
 };
 
@@ -150,26 +184,6 @@ struct GetCommitVersionRequest {
 	}
 };
 
-struct UpdateRecoveryDataRequest {
-	constexpr static FileIdentifier file_identifier = 13605417;
-	Version recoveryTransactionVersion;
-	Version lastEpochEnd;
-	std::vector<CommitProxyInterface> commitProxies;
-	ReplyPromise<Void> reply;
-
-	UpdateRecoveryDataRequest() {}
-	UpdateRecoveryDataRequest(Version recoveryTransactionVersion,
-	                          Version lastEpochEnd,
-	                          std::vector<CommitProxyInterface> commitProxies)
-	  : recoveryTransactionVersion(recoveryTransactionVersion), lastEpochEnd(lastEpochEnd),
-	    commitProxies(commitProxies) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, recoveryTransactionVersion, lastEpochEnd, commitProxies, reply);
-	}
-};
-
 struct ReportRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 1853148;
 	Version version;
@@ -193,6 +207,21 @@ struct ReportRawCommittedVersionRequest {
 	}
 };
 
+struct BackupWorkerDoneRequest {
+	constexpr static FileIdentifier file_identifier = 8736351;
+	UID workerUID;
+	LogEpoch backupEpoch;
+	ReplyPromise<Void> reply;
+
+	BackupWorkerDoneRequest() : workerUID(), backupEpoch(-1) {}
+	BackupWorkerDoneRequest(UID id, LogEpoch epoch) : workerUID(id), backupEpoch(epoch) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, workerUID, backupEpoch, reply);
+	}
+};
+
 struct LifetimeToken {
 	UID ccID;
 	int64_t count;
@@ -202,9 +231,6 @@ struct LifetimeToken {
 	bool isStillValid(LifetimeToken const& latestToken, bool isLatestID) const {
 		return ccID == latestToken.ccID && (count >= latestToken.count || isLatestID);
 	}
-	bool isEqual(LifetimeToken const& toCompare) {
-		return ccID.compare(toCompare.ccID) == 0 && count == toCompare.count;
-	}
 	std::string toString() const { return ccID.shortString() + format("#%lld", count); }
 	void operator++() { ++count; }
 
@@ -212,20 +238,6 @@ struct LifetimeToken {
 	void serialize(Ar& ar) {
 		serializer(ar, ccID, count);
 	}
-};
-
-struct CommitProxyVersionReplies {
-	std::map<uint64_t, GetCommitVersionReply> replies;
-	NotifiedVersion latestRequestNum;
-
-	CommitProxyVersionReplies(CommitProxyVersionReplies&& r) noexcept
-	  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}
-	void operator=(CommitProxyVersionReplies&& r) noexcept {
-		replies = std::move(r.replies);
-		latestRequestNum = std::move(r.latestRequestNum);
-	}
-
-	CommitProxyVersionReplies() : latestRequestNum(0) {}
 };
 
 #endif
