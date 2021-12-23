@@ -868,6 +868,8 @@ public:
 		Counter kvCommits;
 
 		LatencySample readLatencySample;
+		LatencySample scanLatencySample;
+		LatencySample readRangeLatencySample;
 		LatencyBands readLatencyBands;
 
 		Counters(StorageServer* self)
@@ -898,6 +900,14 @@ public:
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    scanLatencySample("ScanLatencyMetrics",
+		                      self->thisServerID,
+		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    readRangeLatencySample("ReadRangeLatencyMetrics",
+		                           self->thisServerID,
+		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
@@ -2589,9 +2599,12 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
 
+			state double readRangeBegin = g_network->timer();
 			GetKeyValuesReply _r = wait(
 			    readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span.context, type));
 			GetKeyValuesReply r = _r;
+			double duration = g_network->timer() - readRangeBegin;
+			data->counters.readRangeLatencySample.addMeasurement(duration);
 
 			if (req.debugID.present())
 				g_traceBatch.addEvent(
@@ -2647,6 +2660,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
+	data->counters.scanLatencySample.addMeasurement(duration);
 	if (data->latencyBandConfig.present()) {
 		int maxReadBytes =
 		    data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
