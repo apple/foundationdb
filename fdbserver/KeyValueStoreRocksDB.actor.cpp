@@ -15,6 +15,7 @@
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Histogram.h"
+#include "fdbrpc/Stats.h"
 
 #include <memory>
 #include <tuple>
@@ -429,6 +430,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	struct Reader : IThreadPoolReceiver {
 		DB& db;
+		UID id;
 		double readValueTimeout;
 		double readValuePrefixTimeout;
 		double readRangeTimeout;
@@ -445,10 +447,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		Reference<Histogram> readValueGetHistogram;
 		Reference<Histogram> readPrefixGetHistogram;
 
-		explicit Reader(DB& db)
-		  : db(db), readRangeLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                              ROCKSDB_READRANGE_LATENCY_HISTOGRAM,
-		                                                              Histogram::Unit::microseconds)),
+		LatencySample readRangeRequestLatencySample;
+		LatencySample readRangeActionLatencySample;
+		LatencySample readRangeWaitQueueLatencySample;
+		LatencySample readRangeIteratorLatencySample;
+
+		explicit Reader(DB& db, UID id)
+		  : db(db), id(id), readRangeLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                                      ROCKSDB_READRANGE_LATENCY_HISTOGRAM,
+		                                                                      Histogram::Unit::microseconds)),
 		    readValueLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
 		                                                      ROCKSDB_READVALUE_LATENCY_HISTOGRAM,
 		                                                      Histogram::Unit::microseconds)),
@@ -481,7 +488,23 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                                                  Histogram::Unit::microseconds)),
 		    readPrefixGetHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
 		                                                   ROCKSDB_READPREFIX_GET_HISTOGRAM,
-		                                                   Histogram::Unit::microseconds)) {
+		                                                   Histogram::Unit::microseconds)),
+		    readRangeRequestLatencySample("ReadRangeRequestLatency",
+		                                  id,
+		                                  SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                  SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    readRangeActionLatencySample("ReadRangeActionLatency",
+		                                 id,
+		                                 SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                 SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    readRangeWaitQueueLatencySample("ReadRangeWaitQueueLatency",
+		                                    id,
+		                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                    SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    readRangeIteratorLatencySample("ReadRangeIteratorLatency",
+		                                   id,
+		                                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                   SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {
 			if (g_network->isSimulated()) {
 				// In simulation, increasing the read operation timeouts to 5 minutes, as some of the tests have
 				// very high load and single read thread cannot process all the load within the timeouts.
@@ -505,9 +528,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ThreadReturnPromise<Optional<Value>> result;
 			ReadValueAction(KeyRef key, Optional<UID> debugID)
 			  : key(key), debugID(debugID), startTime(timer_monotonic()),
-			    getHistograms(
-			        (deterministicRandom()->random01() < 0.001) ? true : false) {
-			}
+			    getHistograms((deterministicRandom()->random01() < 0.001) ? true : false) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& a) {
@@ -571,9 +592,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ThreadReturnPromise<Optional<Value>> result;
 			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID)
 			  : key(key), maxLength(maxLength), debugID(debugID), startTime(timer_monotonic()),
-			    getHistograms(
-			        (deterministicRandom()->random01() < 0.001) ? true : false) {
-			}
+			    getHistograms((deterministicRandom()->random01() < 0.001) ? true : false) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& a) {
@@ -640,15 +659,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ThreadReturnPromise<RangeResult> result;
 			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit)
 			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()),
-			    getHistograms(
-			        (deterministicRandom()->random01() < 0.001) ? true : false) {
-			}
+			    getHistograms((deterministicRandom()->random01() < 0.001) ? true : false) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
 			double readBeginTime = timer_monotonic();
+
+			double duration = readBeginTime - a.startTime;
+			readRangeWaitQueueLatencySample.addMeasurement(duration);
 			if (a.getHistograms) {
-				readRangeQueueWaitHistogram->sampleSeconds(readBeginTime - a.startTime);
+				readRangeQueueWaitHistogram->sampleSeconds(duration);
 			}
 			if (readBeginTime - a.startTime > readRangeTimeout) {
 				TraceEvent(SevWarn, "RocksDBError")
@@ -677,10 +697,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				auto endSlice = toSlice(a.keys.end);
 				options.iterate_upper_bound = &endSlice;
 
-				double iterCreationBeginTime = a.getHistograms ? timer_monotonic() : 0;
+				double iterCreationBeginTime = timer_monotonic();
+				double currTime = timer_monotonic();
 				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
+				readRangeIteratorLatencySample.addMeasurement(currTime - readBeginTime);
 				if (a.getHistograms) {
-					readRangeNewIteratorHistogram->sampleSeconds(timer_monotonic() - iterCreationBeginTime);
+					readRangeNewIteratorHistogram->sampleSeconds(currTime - iterCreationBeginTime);
 				}
 
 				cursor->Seek(toSlice(a.keys.begin));
@@ -707,10 +729,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				auto beginSlice = toSlice(a.keys.begin);
 				options.iterate_lower_bound = &beginSlice;
 
-				double iterCreationBeginTime = a.getHistograms ? timer_monotonic() : 0;
+				double iterCreationBeginTime = timer_monotonic();
+				double currTime = timer_monotonic();
+				readRangeIteratorLatencySample.addMeasurement(currTime - readBeginTime);
 				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
 				if (a.getHistograms) {
-					readRangeNewIteratorHistogram->sampleSeconds(timer_monotonic() - iterCreationBeginTime);
+					readRangeNewIteratorHistogram->sampleSeconds(currTime - iterCreationBeginTime);
 				}
 
 				cursor->SeekForPrev(toSlice(a.keys.end));
@@ -749,8 +773,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				result.readThrough = result[result.size() - 1].key;
 			}
 			a.result.send(result);
+			double currTime = timer_monotonic();
+			readRangeRequestLatencySample.addMeasurement(currTime - a.startTime);
+			readRangeActionLatencySample.addMeasurement(currTime - readBeginTime);
 			if (a.getHistograms) {
-				double currTime = timer_monotonic();
 				readRangeActionHistogram->sampleSeconds(currTime - readBeginTime);
 				readRangeLatencyHistogram->sampleSeconds(currTime - a.startTime);
 			}
@@ -802,12 +828,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			writeThread = CoroThreadPool::createThreadPool();
 			readThreads = CoroThreadPool::createThreadPool();
 		} else {
+			// writeThread = CoroThreadPool::createThreadPool();
+			// readThreads = CoroThreadPool::createThreadPool();
 			writeThread = createGenericThreadPool();
 			readThreads = createGenericThreadPool();
 		}
 		writeThread->addThread(new Writer(db, id), "fdb-rocksdb-wr");
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
-			readThreads->addThread(new Reader(db), "fdb-rocksdb-re");
+			readThreads->addThread(new Reader(db, deterministicRandom()->randomUniqueID()), "fdb-rocksdb-re");
 		}
 	}
 
