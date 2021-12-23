@@ -934,7 +934,7 @@ ACTOR Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 	addActor.send(traceRole(Role::GRV_PROXY, proxy.id()));
 
 	TraceEvent("GrvProxyServerCore", proxy.id())
-	    .detail("MasterId", master.id())
+	    .detail("MasterId", master.id().toString())
 	    .detail("MasterLifetime", masterLifetime.toString())
 	    .detail("RecoveryCount", db->get().recoveryCount);
 
