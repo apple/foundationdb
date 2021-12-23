@@ -2020,7 +2020,7 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 		logData->recoveryComplete.send(Void());
 	}
 
-	//TraceEvent("TLogCommitDurable", self->dbgid).detail("Version", ver);
+	TraceEvent("TLogCommitDurable", self->dbgid).detail("Version", ver);
 	if (logData->logSystem->get() &&
 	    (!logData->isPrimary || logData->logRouterPoppedVersion < logData->logRouterPopToVersion)) {
 		logData->logRouterPoppedVersion = ver;
