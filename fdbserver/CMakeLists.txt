@@ -8,10 +8,7 @@ set(FDBSERVER_SRCS
   BlobManager.actor.cpp
   BlobManagerInterface.h
   BlobWorker.actor.cpp
-  ClusterController.actor.h
   ClusterController.actor.cpp
-  ClusterRecovery.actor.h
-  ClusterRecovery.actor.cpp
   ConfigBroadcaster.actor.cpp
   ConfigBroadcaster.h
   ConfigDatabaseUnitTests.actor.cpp
