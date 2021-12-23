@@ -282,7 +282,7 @@ namespace details {
 class CursorContainerBase {
 public:
 	// Type of the cursor
-	using element_t = std::shared_ptr<ptxn::details::VersionSubsequencePeekCursorBase>;
+	using element_t = ptxn::details::VersionSubsequencePeekCursorBase*;
 
 	// Type of the container
 	using container_t = std::deque<element_t>;
@@ -359,7 +359,7 @@ private:
 
 public:
 	// Moves a cursor to the mapping system, the original cursor is invalidated
-	void addCursor(std::shared_ptr<StorageTeamPeekCursor>&& cursor);
+	void addCursor(const std::shared_ptr<StorageTeamPeekCursor>& cursor);
 
 	// Removes a cursor from the mapping system
 	std::shared_ptr<StorageTeamPeekCursor> removeCursor(const StorageTeamID& storageTeamID);
@@ -383,7 +383,7 @@ public:
 	StorageTeamIDCursorMapper_t::iterator cursorsEnd();
 
 protected:
-	virtual void addCursorImpl(std::shared_ptr<StorageTeamPeekCursor>&& cursor);
+	virtual void addCursorImpl(const std::shared_ptr<StorageTeamPeekCursor>& cursor);
 	virtual std::shared_ptr<StorageTeamPeekCursor> removeCursorImpl(const StorageTeamID& cursor);
 
 	// Gets the shared_ptr for the given storage team ID
@@ -421,7 +421,7 @@ protected:
 	virtual const VersionSubsequenceMessage& getImpl() const override;
 	virtual bool hasRemainingImpl() const override;
 
-	virtual void addCursorImpl(std::shared_ptr<StorageTeamPeekCursor>&& cursor) override;
+	virtual void addCursorImpl(const std::shared_ptr<StorageTeamPeekCursor>& cursor) override;
 
 public:
 	using details::StorageTeamIDCursorMapper::addCursor;

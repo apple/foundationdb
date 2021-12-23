@@ -327,14 +327,14 @@ void UnorderedCursorContainer::popImpl() {
 
 #pragma region StorageTeamIDCursorMapper
 
-void StorageTeamIDCursorMapper::addCursor(std::shared_ptr<StorageTeamPeekCursor>&& cursor) {
-	addCursorImpl(std::move(cursor));
+void StorageTeamIDCursorMapper::addCursor(const std::shared_ptr<StorageTeamPeekCursor>& cursor) {
+	addCursorImpl(cursor);
 }
 
-void StorageTeamIDCursorMapper::addCursorImpl(std::shared_ptr<StorageTeamPeekCursor>&& cursor) {
+void StorageTeamIDCursorMapper::addCursorImpl(const std::shared_ptr<StorageTeamPeekCursor>& cursor) {
 	const StorageTeamID& storageTeamID = cursor->getStorageTeamID();
 	ASSERT(!isCursorExists(storageTeamID));
-	mapper[storageTeamID] = std::shared_ptr<StorageTeamPeekCursor>(std::move(cursor));
+	mapper[storageTeamID] = std::shared_ptr<StorageTeamPeekCursor>(cursor);
 }
 
 std::shared_ptr<StorageTeamPeekCursor> StorageTeamIDCursorMapper::removeCursor(const StorageTeamID& storageTeamID) {
@@ -536,8 +536,7 @@ bool BroadcastedStorageTeamPeekCursorBase::tryFillCursorContainer() {
 
 	// Now the cursors are all sharing the same version, fill the cursor container for consumption
 	for (auto iter = cursorsBegin(); iter != cursorsEnd(); ++iter) {
-		pCursorContainer->push(
-		    std::dynamic_pointer_cast<ptxn::details::VersionSubsequencePeekCursorBase>(iter->second));
+		pCursorContainer->push(iter->second.get());
 	}
 
 	return true;
@@ -556,10 +555,10 @@ const VersionSubsequenceMessage& BroadcastedStorageTeamPeekCursorBase::getImpl()
 	return pCursorContainer->front()->get();
 }
 
-void BroadcastedStorageTeamPeekCursorBase::addCursorImpl(std::shared_ptr<StorageTeamPeekCursor>&& cursor) {
+void BroadcastedStorageTeamPeekCursorBase::addCursorImpl(const std::shared_ptr<StorageTeamPeekCursor>& cursor) {
 	ASSERT(!cursor->isEmptyVersionsIgnored());
 	emptyCursorStorageTeamIDs.push_back(cursor->getStorageTeamID());
-	details::StorageTeamIDCursorMapper::addCursorImpl(std::move(cursor));
+	details::StorageTeamIDCursorMapper::addCursorImpl(cursor);
 }
 
 bool BroadcastedStorageTeamPeekCursorBase::hasRemainingImpl() const {
@@ -599,8 +598,7 @@ void BroadcastedStorageTeamPeekCursor_Ordered::nextImpl() {
 	pConsumedCursor->next();
 	if (pConsumedCursor->hasRemaining() && pConsumedCursor->getVersion() == currentVersion) {
 		// The current version is not completely consumed, push it back for consumption
-		pCursorContainer->push(
-		    std::dynamic_pointer_cast<ptxn::details::VersionSubsequencePeekCursorBase>(pConsumedCursor));
+		pCursorContainer->push(pConsumedCursor);
 	}
 }
 
