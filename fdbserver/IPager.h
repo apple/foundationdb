@@ -284,6 +284,8 @@ public:
 	Reference<ArenaPage> clone() const {
 		ArenaPage* p = new ArenaPage(logicalSize, bufferSize);
 		memcpy(p->buffer, buffer, logicalSize);
+
+		// Non-verifying header parse just to initialize component pointers
 		p->postRead1(invalidPhysicalPageID, false);
 		p->secret = secret;
 
@@ -296,6 +298,11 @@ public:
 		ArenaPage* p = new ArenaPage(len, 0);
 		p->buffer = buffer + offset;
 		p->arena.dependsOn(arena);
+
+		// Non-verifying header parse just to initialize component pointers
+		p->postRead1(invalidPhysicalPageID, false);
+		p->secret = secret;
+
 		return Reference<ArenaPage>(p);
 	}
 

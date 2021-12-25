@@ -647,7 +647,7 @@ public:
 				              this,
 				              ::toString(pageID).c_str(),
 				              offset,
-				              page ? header()->endOffset : -1,
+				              (page && header()) ? header()->endOffset : -1,
 				              ::toString(endPageID).c_str(),
 				              ::toString(nextPageID).c_str());
 			}
