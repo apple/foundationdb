@@ -2653,6 +2653,7 @@ public:
 		return Void();
 	}
 
+	// The caller must keep page in scope until future is ready
 	Future<Void> writePhysicalPage(PagerEventReasons reason,
 	                               unsigned int level,
 	                               Standalone<VectorRef<PhysicalPageID>> pageIDs,
@@ -2727,19 +2728,18 @@ public:
 		if (!cacheEntry.initialized()) {
 			cacheEntry.writeFuture = writePhysicalPage(reason, level, pageIDs, data);
 		} else if (cacheEntry.reading()) {
-			// Wait for the read to finish, then start the write.
-			cacheEntry.writeFuture = map(success(cacheEntry.readFuture), [=](Void) {
-				writePhysicalPage(reason, level, pageIDs, data);
-				return Void();
-			});
+			// This is very unlikely, maybe impossible in the current pager use cases
+			// Wait for the outstanding read to finish, then start the write
+			cacheEntry.writeFuture = mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
+			    success(cacheEntry.readFuture), [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
 		}
 		// If the page is being written, wait for this write before issuing the new write to ensure the
 		// writes happen in the correct order
 		else if (cacheEntry.writing()) {
-			cacheEntry.writeFuture = map(cacheEntry.writeFuture, [=](Void) {
-				writePhysicalPage(reason, level, pageIDs, data);
-				return Void();
-			});
+			// This is very unlikely, maybe impossible in the current pager use cases
+			// Wait for the previous write to finish, then start new write
+			cacheEntry.writeFuture = mapAsync<Void, std::function<Future<Void>(Void)>, Void>(
+			    cacheEntry.writeFuture, [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
 		} else {
 			cacheEntry.writeFuture = writePhysicalPage(reason, level, pageIDs, data);
 		}
