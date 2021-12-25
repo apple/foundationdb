@@ -697,7 +697,7 @@ public:
 			debug_printf("FIFOQueue::Cursor(%s) loadExtent\n", toString().c_str());
 			return map(queue->pager->readExtent(pageID), [=](Reference<ArenaPage> p) {
 				page = p;
-				debug_printf("FIFOQueue::Cursor(%s) loadExtent done. Page: %p\n", toString().c_str(), page->data());
+				debug_printf("FIFOQueue::Cursor(%s) loadExtent done. Page: %p\n", toString().c_str(), page->rawData());
 				return Void();
 			});
 		}
@@ -780,7 +780,7 @@ public:
 
 				// For extent based queue, update the index of current page within the extent
 				if (queue->usesExtents) {
-					debug_printf("FIFOQueue::Cursor(%s) Adding page %s init=%d pageCount %d\n",
+					debug_printf("FIFOQueue::Cursor(%s) Adding page %s init=%d pageCount % " PRId64 "\n",
 					             toString().c_str(),
 					             ::toString(newPageID).c_str(),
 					             initializeNewPage,
@@ -1177,8 +1177,9 @@ public:
 				             c.pageID * self->pager->getPhysicalPageSize());
 
 				try {
-					page->postRead(c.pageID);
-
+					page->postRead1(c.pageID);
+					// These pages are not encrypted
+					page->postRead2(c.pageID);
 				} catch (Error& e) {
 					TraceEvent(SevError, "RedwoodChecksumFailed")
 					    .detail("PageID", c.pageID)
@@ -1959,7 +1960,8 @@ public:
 					break;
 				}
 
-				debug_printf("currentSize is %u and input size is %u. Trying to evict %s to make room for %s\n",
+				debug_printf("currentSize is %" PRId64
+				             " and input size is %u. Trying to evict %s to make room for %s\n",
 				             currentSize,
 				             size,
 				             toString(toEvict.index).c_str(),
@@ -2197,7 +2199,7 @@ public:
 	}
 
 	void updateCommittedHeader() {
-		lastCommittedHeaderPage = headerPage->cloneContents();
+		lastCommittedHeaderPage = headerPage->clone();
 		pLastCommittedHeader = (Header*)lastCommittedHeaderPage->mutateData();
 	}
 
@@ -2326,7 +2328,7 @@ public:
 			try {
 				loop choose {
 					when(Standalone<VectorRef<RemappedPage>> remaps = waitNext(remapStream.getFuture())) {
-						debug_printf("DWALPager(%s) recovery. remaps size: %d, queueEntries: %d\n",
+						debug_printf("DWALPager(%s) recovery. remaps size: %d, queueEntries: %" PRId64 "\n",
 						             self->filename.c_str(),
 						             remaps.size(),
 						             self->remapQueue.numEntries);
@@ -2448,7 +2450,7 @@ public:
 
 		self->recoveryVersion = self->pHeader->committedVersion;
 		debug_printf("DWALPager(%s) recovered.  recoveryVersion=%" PRId64 " oldestVersion=%" PRId64
-		             " logicalPageSize=%d physicalPageSize=%d\n",
+		             " logicalPageSize=%d physicalPageSize=%d headerPageCount=%" PRId64 " filePageCount=%" PRId64 "\n",
 		             self->filename.c_str(),
 		             self->recoveryVersion,
 		             self->pHeader->oldestVersion,
@@ -2663,21 +2665,33 @@ public:
 		             page->data());
 
 		debug_printf("DWALPager(%s) writePhysicalPage %s\n", filename.c_str(), toString(pageIDs).c_str());
+
+		// Copy the page if preWrite will encrypt/modify the payload
+		bool copy = page->getEncodingType() == EncodingType::XOREncryption;
+		if (copy) {
+			page = page->clone();
+		}
 		page->preWrite(pageIDs.front());
+
 		int blockSize = header ? smallestPhysicalBlock : physicalPageSize;
 		Future<Void> f;
 		if (pageIDs.size() == 1) {
 			f = writePhysicalBlock(this, page->rawData(), reason, level, pageIDs.front(), blockSize, header);
-			operations.add(f);
-			return f;
+		} else {
+			std::vector<Future<Void>> writers;
+			for (int i = 0; i < pageIDs.size(); ++i) {
+				Future<Void> p = writePhysicalBlock(
+				    this, page->rawData() + (i * blockSize), reason, level, pageIDs[i], blockSize, header);
+				writers.push_back(p);
+			}
+			f = waitForAll(writers);
 		}
-		std::vector<Future<Void>> writers;
-		for (int i = 0; i < pageIDs.size(); ++i) {
-			Future<Void> p = writePhysicalBlock(
-			    this, page->rawData() + (i * blockSize), reason, level, pageIDs[i], blockSize, header);
-			writers.push_back(p);
+
+		// If the page was copied, hold the copy alive until f is ready
+		if (copy) {
+			f = holdWhile(page, f);
 		}
-		f = waitForAll(writers);
+
 		operations.add(f);
 		return f;
 	}
@@ -2903,7 +2917,12 @@ public:
 		             readBytes);
 
 		try {
-			page->postRead(pageID);
+			page->postRead1(pageID);
+			if (page->getEncodingType() == EncodingType::XOREncryption) {
+				uint8_t secret = ~page->xorKeyID();
+				page->setSecret(StringRef(&secret, 1));
+			}
+			page->postRead2(pageID);
 			debug_printf("DWALPager(%s) op=readPhysicalVerifyComplete %s ptr=%p bytes=%d\n",
 			             self->filename.c_str(),
 			             toString(pageID).c_str(),
@@ -2966,7 +2985,12 @@ public:
 		             pageIDs.size() * blockSize);
 
 		try {
-			page->postRead(pageIDs.front());
+			page->postRead1(pageIDs.front());
+			if (page->getEncodingType() == EncodingType::XOREncryption) {
+				uint8_t secret = ~page->xorKeyID();
+				page->setSecret(StringRef(&secret, 1));
+			}
+			page->postRead2(pageIDs.front());
 		} catch (Error& e) {
 			// For header pages, error is a warning because recovery may still be possible
 			TraceEvent(SevError, "RedwoodPageError")
@@ -3160,24 +3184,26 @@ public:
 		}
 
 		// readSize may not be equal to the physical extent size (for the first and last extents)
-		if (!readSize)
+		// but otherwise use the full physical extent size
+		if (readSize == 0) {
 			readSize = self->physicalExtentSize;
+		}
 
-		state Reference<ArenaPage> extent = ArenaPage::create(self->logicalPageSize, readSize);
+		state Reference<ArenaPage> extent = ArenaPage::create(readSize, readSize);
 
 		// physicalReadSize is the size of disk read we intend to issue
 		auto physicalReadSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_READ_SIZE;
 		auto parallelReads = readSize / physicalReadSize;
 		auto lastReadSize = readSize % physicalReadSize;
 
-		debug_printf(
-		    "DWALPager(%s) op=readPhysicalExtentStart %s readSize %d offset %d physicalReadSize %d parallelReads %d\n",
-		    self->filename.c_str(),
-		    toString(pageID).c_str(),
-		    readSize,
-		    (int64_t)pageID * (self->physicalPageSize),
-		    physicalReadSize,
-		    parallelReads);
+		debug_printf("DWALPager(%s) op=readPhysicalExtentStart %s readSize %d offset %" PRId64
+		             " physicalReadSize %d parallelReads %d\n",
+		             self->filename.c_str(),
+		             toString(pageID).c_str(),
+		             readSize,
+		             (int64_t)pageID * (self->physicalPageSize),
+		             physicalReadSize,
+		             parallelReads);
 
 		// we split the extent read into a number of parallel disk reads based on the determined physical
 		// disk read size. All those reads are issued in parallel and their futures are stored into the following
@@ -3188,7 +3214,7 @@ public:
 		int64_t currentOffset;
 		for (i = 0; i < parallelReads; i++) {
 			currentOffset = i * physicalReadSize;
-			debug_printf("DWALPager(%s) current offset %d\n", self->filename.c_str(), currentOffset);
+			debug_printf("DWALPager(%s) current offset %" PRId64 "\n", self->filename.c_str(), currentOffset);
 			++g_redwoodMetrics.metric.pagerDiskRead;
 			reads.push_back(
 			    self->pageFile->read(extent->rawData() + currentOffset, physicalReadSize, startOffset + currentOffset));
@@ -3197,7 +3223,7 @@ public:
 		// Handle the last read separately as it may be smaller than physicalReadSize
 		if (lastReadSize) {
 			currentOffset = i * physicalReadSize;
-			debug_printf("DWALPager(%s) iter %d current offset %d lastReadSize %d\n",
+			debug_printf("DWALPager(%s) iter %d current offset %" PRId64 " lastReadSize %d\n",
 			             self->filename.c_str(),
 			             i,
 			             currentOffset,
@@ -4859,6 +4885,10 @@ public:
 	Reference<ArenaPage> makeEmptyRoot() {
 		Reference<ArenaPage> page = m_pager->newPageBuffer();
 		page->init(m_encodingType, PageType::BTreeNode, 1);
+		if (m_encodingType == EncodingType::XOREncryption) {
+			page->xorKeyID() = ~dbEnd.key[0];
+			page->setSecret(dbEnd.key.substr(0, 1));
+		}
 		BTreePage* btpage = (BTreePage*)page->mutateData();
 		btpage->height = 1;
 		btpage->kvBytes = 0;
@@ -4984,7 +5014,8 @@ public:
 		self->m_pHeader = (MetaKey*)new uint8_t[self->m_headerSpace];
 
 		debug_printf("Recovered pager to version %" PRId64 ", oldest version is %" PRId64 "\n",
-		             self->m_newOldestVersion);
+		             self->getLastCommittedVersion(),
+		             self->m_pager->getOldestReadableVersion());
 
 		state Key meta = self->m_pager->getMetaKey();
 		if (meta.size() == 0) {
@@ -5090,7 +5121,7 @@ public:
 		// From the pager's perspective the only pages that should be in use are the btree root and
 		// the previously mentioned lazy delete queue page.
 		int64_t userPageCount = wait(self->m_pager->getUserPageCount());
-		debug_printf("clearAllAndCheckSanity: userPageCount: %d\n", userPageCount);
+		debug_printf("clearAllAndCheckSanity: userPageCount: %" PRId64 "\n", userPageCount);
 		ASSERT(userPageCount == 2);
 
 		return Void();
@@ -5560,7 +5591,7 @@ private:
 
 		for (pageIndex = 0; pageIndex < pagesToBuild.size(); ++pageIndex) {
 			auto& p = pagesToBuild[pageIndex];
-			debug_printf("building page %d of %d %s\n", pageIndex + 1, pagesToBuild.size(), p.toString().c_str());
+			debug_printf("building page %d of %zu %s\n", pageIndex + 1, pagesToBuild.size(), p.toString().c_str());
 			ASSERT(p.count != 0);
 
 			// For internal pages, skip first entry if child link is null.  Such links only exist
@@ -5603,6 +5634,10 @@ private:
 			state Reference<ArenaPage> page = self->m_pager->newPageBuffer(p.blockCount);
 			page->init(
 			    self->m_encodingType, (p.blockCount == 1) ? PageType::BTreeNode : PageType::BTreeSuperNode, height);
+			if (self->m_encodingType == EncodingType::XOREncryption) {
+				page->xorKeyID() = ~pageUpperBound.key[0];
+				page->setSecret(pageUpperBound.key.substr(0, 1));
+			}
 
 			BTreePage* btPage = (BTreePage*)page->mutateData();
 
@@ -5715,7 +5750,7 @@ private:
 	    Version version,
 	    Standalone<VectorRef<RedwoodRecordRef>> records,
 	    unsigned int height) {
-		debug_printf("buildNewRoot start version %" PRId64 ", %lu records\n", version, records.size());
+		debug_printf("buildNewRoot start version %" PRId64 ", %d records\n", version, records.size());
 
 		// While there are multiple child pages for this version we must write new tree levels.
 		while (records.size() > 1) {
@@ -5723,7 +5758,7 @@ private:
 			ASSERT(height < std::numeric_limits<int8_t>::max());
 			Standalone<VectorRef<RedwoodRecordRef>> newRecords =
 			    wait(writePages(self, &dbBegin, &dbEnd, records, height, version, BTreePageIDRef()));
-			debug_printf("Wrote a new root level at version %" PRId64 " height %d size %lu pages\n",
+			debug_printf("Wrote a new root level at version %" PRId64 " height %d size %d pages\n",
 			             version,
 			             height,
 			             newRecords.size());
@@ -5865,7 +5900,7 @@ private:
 
 	// Copy page to a new page which shares the same DecodeCache with the old page
 	static Reference<ArenaPage> clonePageForUpdate(Reference<const ArenaPage> page) {
-		Reference<ArenaPage> newPage = page->cloneContents();
+		Reference<ArenaPage> newPage = page->clone();
 
 		if (newPage->userData != nullptr) {
 			BTreePage::BinaryTree::DecodeCache* cache = (BTreePage::BinaryTree::DecodeCache*)page->userData;
@@ -6715,14 +6750,14 @@ private:
 				recursions.push_back(self->commitSubtree(self, batch, pageID, height - 1, mBegin, mEnd, &u));
 			}
 
-			debug_printf(
-			    "%s Recursions from internal page started. pageSize=%d level=%d children=%d slices=%d recursions=%d\n",
-			    context.c_str(),
-			    btPage->size(),
-			    btPage->height,
-			    btPage->tree()->numItems,
-			    slices.size(),
-			    recursions.size());
+			debug_printf("%s Recursions from internal page started. pageSize=%d level=%d children=%d slices=%zu "
+			             "recursions=%zu\n",
+			             context.c_str(),
+			             btPage->size(),
+			             btPage->height,
+			             btPage->tree()->numItems,
+			             slices.size(),
+			             recursions.size());
 
 			wait(waitForAll(recursions));
 			debug_printf("%s Recursions done, processing slice updates.\n", context.c_str());
@@ -7356,7 +7391,7 @@ public:
 		                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
 		                               false,
 		                               m_error);
-		m_tree = new VersionedBTree(pager, filePrefix);
+		m_tree = new VersionedBTree(pager, filePrefix, BUGGIFY ? EncodingType::XOREncryption : EncodingType::XXHash64);
 		m_init = catchError(init_impl(this));
 	}
 
@@ -8662,7 +8697,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 
 	auto printItems = [&] {
 		for (int k = 0; k < items.size(); ++k) {
-			debug_printf("%d/%d %s\n", k + 1, items.size(), items[k].toString().c_str());
+			debug_printf("%d/%zu %s\n", k + 1, items.size(), items[k].toString().c_str());
 		}
 	};
 
@@ -9264,9 +9299,12 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state int maxVerificationMapEntries = params.getInt("maxVerificationMapEntries").orDefault(300e3);
 	state int concurrentExtentReads =
 	    params.getInt("concurrentExtentReads").orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
+	state EncodingType encodingType =
+	    deterministicRandom()->coinflip() ? EncodingType::XXHash64 : EncodingType::XOREncryption;
 
 	printf("\n");
 	printf("file: %s\n", file.c_str());
+	printf("encodingType: %d\n", encodingType);
 	printf("targetPageOps: %" PRId64 "\n", targetPageOps);
 	printf("pagerMemoryOnly: %d\n", pagerMemoryOnly);
 	printf("serialTest: %d\n", serialTest);
@@ -9295,7 +9333,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	printf("Initializing...\n");
 	pager = new DWALPager(
 	    pageSize, extentSize, file, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads, pagerMemoryOnly);
-	state VersionedBTree* btree = new VersionedBTree(pager, file);
+	state VersionedBTree* btree = new VersionedBTree(pager, file, encodingType);
 	wait(btree->init());
 
 	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;

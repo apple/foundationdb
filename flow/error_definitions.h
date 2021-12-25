@@ -85,6 +85,10 @@ ERROR( granule_assignment_conflict, 1061, "Conflicting attempts to assign blob g
 ERROR( change_feed_cancelled, 1062, "Change feed was cancelled" )
 ERROR( blob_granule_file_load_error, 1063, "Error loading a blob file during granule materialization" )
 ERROR( page_header_wrong_page_id, 1064, "Page header does not match location on disk" )
+ERROR( page_header_checksum_failed, 1065, "Page header checksum failed" )
+ERROR( page_header_version_not_supported, 1066, "Page header checksum failed" )
+ERROR( page_encoding_not_supported, 1067, "Page encoding type is not supported or not valid" )
+ERROR( page_decoding_failed, 1068, "Page content decoding failed" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )

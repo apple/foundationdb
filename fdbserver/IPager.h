@@ -21,6 +21,7 @@
 #ifndef FDBSERVER_IPAGER_H
 #define FDBSERVER_IPAGER_H
 #include "flow/Error.h"
+#include "flow/ProtocolVersion.h"
 #include <stdint.h>
 #pragma once
 
@@ -101,11 +102,12 @@ enum PageType : uint8_t {
 // Pages can only be written using the latest HeaderVersion
 //
 // preWrite() must be called before writing a page to disk, which will do any checksum generation or encryption needed
-// postRead() must be called after loading a page from disk, which will do any verification or decryption needed
+// postRead1() must be called after loading a page from disk to header verification
+// postRead2() must be called after postRead1 to handle page contents verification and possible decryption
 class ArenaPage : public ReferenceCounted<ArenaPage>, public FastAllocated<ArenaPage> {
 public:
 	ArenaPage(int logicalSize, int bufferSize)
-	  : logicalSize(logicalSize), bufferSize(bufferSize), pUsable(nullptr), userData(nullptr) {
+	  : logicalSize(logicalSize), bufferSize(bufferSize), pPayload(nullptr), userData(nullptr) {
 		if (bufferSize > 0) {
 			buffer = (uint8_t*)arena.allocate4kAlignedBuffer(bufferSize);
 
@@ -130,9 +132,9 @@ public:
 	}
 
 	// Before using begin() or size(), either init() or postRead() must be called
-	const uint8_t* data() const { return pUsable; }
-	uint8_t* mutateData() const { return (uint8_t*)pUsable; }
-	int dataSize() const { return usableSize; }
+	const uint8_t* data() const { return pPayload; }
+	uint8_t* mutateData() const { return (uint8_t*)pPayload; }
+	int dataSize() const { return payloadSize; }
 
 	const uint8_t* rawData() const { return buffer; }
 	uint8_t* rawData() { return buffer; }
@@ -166,6 +168,7 @@ public:
 		Version writeVersion;
 	};
 
+	// An encoding that validates the payload with an XXHash checksum
 	struct XXHashEncodingHeader {
 		XXH64_hash_t checksum;
 		void encode(uint8_t* payload, int len, PhysicalPageID seed) {
@@ -173,38 +176,40 @@ public:
 		}
 		void decode(uint8_t* payload, int len, PhysicalPageID seed) {
 			if (checksum != XXH3_64bits_withSeed(payload, len, seed)) {
-				throw checksum_failed();
+				throw page_decoding_failed();
 			}
 		}
 	};
 
+	// An encoding that encrypts the payload with a 1 byte XOR key
+	// and uses an XXHash checksum on the unencrypted payload.
 	struct XOREncodingHeader {
+		// Checksum on decrypted payload
 		XXH64_hash_t checksum;
 		uint8_t keyID;
+
 		void encode(uint8_t secret, uint8_t* payload, int len, PhysicalPageID seed) {
-			uint8_t key = secret ^ keyID;
-			for (int i = 0; i < len; ++i) {
-				payload[i] ^= key;
-			}
 			checksum = XXH3_64bits_withSeed(payload, len, seed);
+			for (int i = 0; i < len; ++i) {
+				payload[i] ^= secret;
+			}
 		}
 		void decode(uint8_t secret, uint8_t* payload, int len, PhysicalPageID seed) {
-			if (checksum != XXH3_64bits_withSeed(payload, len, seed)) {
-				throw checksum_failed();
-			}
-			uint8_t key = secret ^ keyID;
 			for (int i = 0; i < len; ++i) {
-				payload[i] ^= key;
+				payload[i] ^= secret;
+			}
+			if (checksum != XXH3_64bits_withSeed(payload, len, seed)) {
+				throw page_decoding_failed();
 			}
 		}
 	};
 
 	struct Footer {
 		XXH64_hash_t checksum;
-		void update(uint8_t* payload, int len) { checksum = XXH3_64bits(payload, len); }
-		void verify(uint8_t* payload, int len) {
-			if (checksum != XXH3_64bits(payload, len)) {
-				throw checksum_failed();
+		void update(uint8_t* headerBytes, int len) { checksum = XXH3_64bits(headerBytes, len); }
+		void verify(uint8_t* headerBytes, int len) {
+			if (checksum != XXH3_64bits(headerBytes, len)) {
+				throw page_header_checksum_failed();
 			}
 		}
 	};
@@ -214,6 +219,7 @@ public:
 	// Syntactic sugar for getting a series of types from a byte buffer
 	// The Reader casts to any T * and increments the read pointer by T's size.
 	struct Reader {
+		Reader(void* p) : ptr((uint8_t*)p) {}
 		uint8_t* ptr;
 		template <typename T>
 		operator T*() {
@@ -228,30 +234,33 @@ public:
 	};
 
 	// Initialize the header for a new page to be populated soon and written to disk
+	// Pre:  Buffer is allocated and logical size is set
+	// Post: Header is initialized using HEADER_WRITE_VERSION format
+	//       Encoding-specific header pointers are initialized
+	//       Payload can be written to with mutateData() and dataSize()
 	void init(EncodingType t, PageType pageType, uint8_t pageSubType) {
-		encodingType = t;
-		Reader next{ buffer };
-		VersionHeader* vh = next;
-		// Only the latest header version is written.
-		vh->headerVersion = HEADER_WRITE_VERSION;
-		vh->encodingType = t;
+		// Only HEADER_WRITE_VERSION is supported for writing, though
+		// newer or older versions may be supported for reading
+		pVersionHeader->headerVersion = HEADER_WRITE_VERSION;
+		pVersionHeader->encodingType = t;
 
+		Reader next(pVersionHeader + 1);
 		Header* h = next;
 		h->pageType = pageType;
 		h->pageSubType = pageSubType;
 
 		if (t == EncodingType::XXHash64) {
-			next.skip<XXHashEncodingHeader>();
+			pXXHashHeader = next;
 		} else if (t == EncodingType::XOREncryption) {
-			next.skip<XOREncodingHeader>();
+			pXORHeader = next;
 		} else {
-			throw unsupported_format_version();
+			throw page_encoding_not_supported();
 		}
 
 		next.skip<Footer>();
 
-		pUsable = next;
-		usableSize = logicalSize - (pUsable - buffer);
+		pPayload = next;
+		payloadSize = logicalSize - (pPayload - buffer);
 	}
 
 	// Get the usable size for a new page of pageSize using HEADER_WRITE_VERSION with encoding type t
@@ -263,7 +272,7 @@ public:
 		} else if (t == EncodingType::XOREncryption) {
 			usable -= sizeof(XOREncodingHeader);
 		} else {
-			throw unsupported_format_version();
+			throw page_encoding_not_supported();
 		}
 
 		return usable;
@@ -272,23 +281,18 @@ public:
 	Standalone<StringRef> asStringRef() const { return Standalone<StringRef>(StringRef(buffer, logicalSize)); }
 
 	// Get an ArenaPage which is a copy of this page, in its own Arena
-	Reference<ArenaPage> cloneContents() const {
+	Reference<ArenaPage> clone() const {
 		ArenaPage* p = new ArenaPage(logicalSize, bufferSize);
 		memcpy(p->buffer, buffer, logicalSize);
-		p->pUsable = p->buffer + (pUsable - buffer);
-		p->usableSize = usableSize;
-
-		p->encodingType = encodingType;
-		if (encodingType == EncodingType::XOREncryption) {
-			p->xorKeyID = xorKeyID;
-			p->xorKeySecret = xorKeySecret;
-		}
+		p->postRead1(invalidPhysicalPageID, false);
+		p->secret = secret;
 
 		return Reference<ArenaPage>(p);
 	}
 
 	// Get an ArenaPage which depends on this page's Arena and references some of its memory
 	Reference<ArenaPage> subPage(int offset, int len) const {
+		ASSERT(offset + len <= logicalSize);
 		ArenaPage* p = new ArenaPage(len, 0);
 		p->buffer = buffer + offset;
 		p->arena.dependsOn(arena);
@@ -296,12 +300,14 @@ public:
 	}
 
 	// Must be called before writing to disk to update headers and encrypt page
-	// Pre:   Encoding secrets and other options must be set
-	// Post:  Encoding options will be stored in page if needed, payload will be encrypted
+	// Pre:   Encoding-specific header fields are set if needed
+	//        Secret is set if needed
+	// Post:  Main header checksum is updated, encoding-specific header is updated and
+	//        payload encrypted if needed
 	void preWrite(PhysicalPageID pageID) const {
-		Reader next{ buffer };
-		const VersionHeader* vh = next;
-		ASSERT(vh->headerVersion == HEADER_WRITE_VERSION);
+		// Only HEADER_WRITE_VERSION is supported
+		ASSERT(pVersionHeader->headerVersion == HEADER_WRITE_VERSION);
+		Reader next(pVersionHeader + 1);
 
 		Header* h = next;
 		h->firstPhysicalPageID = pageID;
@@ -312,60 +318,61 @@ public:
 		h->lastKnownParentID = invalidLogicalPageID;
 		h->writeVersion = invalidVersion;
 
-		if (vh->encodingType == EncodingType::XXHash64) {
-			XXHashEncodingHeader* xh = next;
-			xh->encode(pUsable, usableSize, pageID);
-		} else if (vh->encodingType == EncodingType::XOREncryption) {
-			XOREncodingHeader* xorh = next;
-			xorh->keyID = xorKeyID;
-			xorh->encode(xorKeySecret, pUsable, usableSize, pageID);
+		if (pVersionHeader->encodingType == EncodingType::XXHash64) {
+			next.skip<XXHashEncodingHeader>();
+			pXXHashHeader->encode(pPayload, payloadSize, pageID);
+		} else if (pVersionHeader->encodingType == EncodingType::XOREncryption) {
+			next.skip<XOREncodingHeader>();
+			pXORHeader->encode(secret[0], pPayload, payloadSize, pageID);
 		} else {
-			throw unsupported_format_version();
+			throw page_encoding_not_supported();
 		}
 
 		Footer* f = next;
 		f->update(buffer, (uint8_t*)f - buffer);
 	}
 
-	// Must be called after reading from disk to verify and decrypt page
-	// Pre:   Encoding secrets must be set
-	// Post:  Encoding options that come from page data will be populated, payload will be decrypted
-	void postRead(PhysicalPageID pageID) {
-		Reader next{ buffer };
-		const VersionHeader* vh = next;
-		encodingType = vh->encodingType;
-
-		if (vh->headerVersion == 1) {
+	// Must be called after reading from disk to verify header and get encoding type
+	// Pre:   Bytes from storage medium copied into raw space
+	// Post:  Encoding-specific header pointer is initialized
+	//        Page header integrity is verified unless verify is false
+	void postRead1(PhysicalPageID pageID, bool verify = true) {
+		Reader next(pVersionHeader + 1);
+		if (pVersionHeader->headerVersion == 1) {
 			Header* h = next;
-			XXHashEncodingHeader* xh = nullptr;
-			XOREncodingHeader* xorh = nullptr;
 
-			if (encodingType == EncodingType::XXHash64) {
-				xh = next;
-			} else if (encodingType == EncodingType::XOREncryption) {
-				xorh = next;
+			if (pVersionHeader->encodingType == EncodingType::XXHash64) {
+				pXXHashHeader = next;
+			} else if (pVersionHeader->encodingType == EncodingType::XOREncryption) {
+				pXORHeader = next;
 			} else {
-				throw unsupported_format_version();
+				throw page_encoding_not_supported();
 			}
 
 			Footer* f = next;
-			pUsable = next;
-			usableSize = logicalSize - (pUsable - buffer);
+			pPayload = next;
+			payloadSize = logicalSize - (pPayload - buffer);
 
-			f->verify(buffer, (uint8_t*)f - buffer);
-
-			if (xh != nullptr) {
-				xh->decode(pUsable, usableSize, pageID);
-			} else if (xorh != nullptr) {
-				xorh->decode(xorKeySecret, pUsable, usableSize, pageID);
-				xorKeyID = xorh->keyID;
-			}
-
-			if (h->firstPhysicalPageID != pageID) {
-				throw page_header_wrong_page_id();
+			if (verify) {
+				f->verify(buffer, (uint8_t*)f - buffer);
+				if (pageID != h->firstPhysicalPageID) {
+					throw page_header_wrong_page_id();
+				}
 			}
 		} else {
-			throw unsupported_format_version();
+			throw page_header_version_not_supported();
+		}
+	}
+
+	// Pre:   postRead1 has been called, encoding-specific parameters have been set
+	// Post:  Payload has been verified and decrypted if necessary
+	void postRead2(PhysicalPageID pageID) {
+		if (pVersionHeader->encodingType == EncodingType::XXHash64) {
+			pXXHashHeader->decode(pPayload, payloadSize, pageID);
+		} else if (pVersionHeader->encodingType == EncodingType::XOREncryption) {
+			pXORHeader->decode(secret[0], pPayload, payloadSize, pageID);
+		} else {
+			throw page_encoding_not_supported();
 		}
 	}
 
@@ -382,18 +389,33 @@ private:
 	// The physical size of allocated memory for the page which also represents the space
 	// to be written to disk
 	int bufferSize;
-	uint8_t* buffer;
+	union {
+		uint8_t* buffer;
+		VersionHeader* pVersionHeader;
+	};
 
 	// Pointer and length of page space available to the user
-	uint8_t* pUsable;
-	int usableSize;
+	uint8_t* pPayload;
+	int payloadSize;
+	union {
+		XXHashEncodingHeader* pXXHashHeader;
+		XOREncodingHeader* pXORHeader;
+	};
 
-	EncodingType encodingType;
-	// Encoding-specific secrets
-	uint8_t xorKeyID;
-	uint8_t xorKeySecret;
+	// Secret string available for use by encodings
+	Key secret;
 
 public:
+	EncodingType getEncodingType() const { return pVersionHeader->encodingType; }
+
+	void setSecret(Key k) { secret = k; }
+
+	// Read/write access to the XOR key ID
+	uint8_t& xorKeyID() {
+		ASSERT(pVersionHeader->encodingType == EncodingType::XOREncryption);
+		return pXORHeader->keyID;
+	}
+
 	// A metadata object that can be attached to the page and will be deleted with the page
 	mutable void* userData;
 	mutable void (*userDataDestructor)(void*);
@@ -426,6 +448,8 @@ public:
 // This API is probably too customized to the behavior of DWALPager and probably needs some changes to be more generic.
 class IPager2 : public IClosable {
 public:
+	virtual std::string getName() const = 0;
+
 	// Returns an ArenaPage that can be passed to writePage. The data in the returned ArenaPage might not be zeroed.
 	virtual Reference<ArenaPage> newPageBuffer(size_t blocks = 1) = 0;
 
