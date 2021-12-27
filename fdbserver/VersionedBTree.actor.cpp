@@ -2175,8 +2175,8 @@ public:
 	          int64_t pageCacheSizeBytes,
 	          Version remapCleanupWindow,
 	          int concurrentExtentReads,
-	          bool memoryOnly = false,
-	          IEncryptionKeyProvider* keyProvider = nullptr,
+	          bool memoryOnly,
+	          IEncryptionKeyProvider* keyProvider,
 	          Promise<Void> errorPromise = {})
 	  : pEncryptionKeyProvider(keyProvider),
 	    ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2),
@@ -4751,11 +4751,11 @@ public:
 		// Remove any leading directory names
 		size_t lastSlash = filename.find_last_of("\\/");
 		if (lastSlash != filename.npos) {
-			filename.erase();
+			filename.erase(0, lastSlash);
 		}
 		xorWith = filename.empty() ? 0x5e
 		                           : (uint8_t)filename[XXH3_64bits(filename.data(), filename.size()) % filename.size()];
-		debug_printf_always("FILENAME %s\n", filename.c_str());
+		debug_printf("XOREncryptionKeyProvider %p reduced filename %s\n", this, filename.c_str());
 	}
 
 	virtual ~XOREncryptionKeyProvider() {}
@@ -4940,8 +4940,8 @@ public:
 	// VersionedBTree takes ownership of pager
 	VersionedBTree(IPager2* pager,
 	               std::string name,
-	               EncodingType t = EncodingType::XXHash64,
-	               IEncryptionKeyProvider* keyProvider = nullptr)
+	               IEncryptionKeyProvider* keyProvider,
+	               EncodingType t = EncodingType::XXHash64)
 	  : m_pager(pager), m_encryptionKeyProvider(keyProvider), m_pBuffer(nullptr), m_mutationCount(0), m_encodingType(t),
 	    m_name(name), m_pHeader(nullptr), m_headerSpace(0) {
 
@@ -7460,7 +7460,9 @@ public:
 		    (BUGGIFY ? deterministicRandom()->randomInt64(0, 100) : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW);
 
 		EncodingType encodingType = EncodingType::XXHash64;
-		if (BUGGIFY) {
+
+		// Deterministically enable encryption based on uid
+		if (g_network->isSimulated() && logID.hash() % 2 == 0) {
 			encodingType = EncodingType::XOREncryption;
 			m_pKeyProvider.reset(new XOREncryptionKeyProvider(filename));
 		}
@@ -7474,7 +7476,7 @@ public:
 		                               false,
 		                               m_pKeyProvider.get(),
 		                               m_error);
-		m_tree = new VersionedBTree(pager, filename, encodingType, m_pKeyProvider.get());
+		m_tree = new VersionedBTree(pager, filename, m_pKeyProvider.get(), encodingType);
 		m_init = catchError(init_impl(this));
 	}
 
@@ -9429,7 +9431,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	                      concurrentExtentReads,
 	                      pagerMemoryOnly,
 	                      pKeyProvider.get());
-	state VersionedBTree* btree = new VersionedBTree(pager, file, encodingType, pKeyProvider.get());
+	state VersionedBTree* btree = new VersionedBTree(pager, file, pKeyProvider.get(), encodingType);
 	wait(btree->init());
 
 	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;
@@ -9646,7 +9648,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 				                               concurrentExtentReads,
 				                               false,
 				                               pKeyProvider.get());
-				btree = new VersionedBTree(pager, file, encodingType, pKeyProvider.get());
+				btree = new VersionedBTree(pager, file, pKeyProvider.get(), encodingType);
 				wait(btree->init());
 
 				Version v = btree->getLastCommittedVersion();
@@ -9685,8 +9687,11 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state Future<Void> closedFuture = btree->onClosed();
 	btree->close();
 	wait(closedFuture);
-	btree =
-	    new VersionedBTree(new DWALPager(pageSize, extentSize, file, cacheSizeBytes, 0, concurrentExtentReads), file);
+	btree = new VersionedBTree(
+	    new DWALPager(
+	        pageSize, extentSize, file, cacheSizeBytes, 0, concurrentExtentReads, pagerMemoryOnly, pKeyProvider.get()),
+	    file,
+	    pKeyProvider.get());
 	wait(btree->init());
 
 	wait(btree->clearAllAndCheckSanity());
@@ -9766,8 +9771,8 @@ TEST_CASE(":/redwood/correctness/pager/cow") {
 
 	int pageSize = 4096;
 	int extentSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE;
-	state IPager2* pager =
-	    new DWALPager(pageSize, extentSize, pagerFile, 0, 0, SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
+	state IPager2* pager = new DWALPager(
+	    pageSize, extentSize, pagerFile, 0, 0, SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS, false, nullptr);
 
 	wait(success(pager->init()));
 	state LogicalPageID id = wait(pager->newPageID());
@@ -9837,8 +9842,8 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 
 	// Do random pushes into the queue and commit periodically
 	if (reload) {
-		pager =
-		    new DWALPager(pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads);
+		pager = new DWALPager(
+		    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads, false, nullptr);
 
 		wait(success(pager->init()));
 
@@ -9889,7 +9894,8 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	}
 
 	printf("Reopening pager file from disk.\n");
-	pager = new DWALPager(pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads);
+	pager = new DWALPager(
+	    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads, false, nullptr);
 	wait(success(pager->init()));
 
 	printf("Starting ExtentQueue FastPath Recovery from Disk.\n");
@@ -10029,9 +10035,15 @@ TEST_CASE(":/redwood/performance/set") {
 		deleteFile(file);
 	}
 
-	DWALPager* pager = new DWALPager(
-	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindow, concurrentExtentReads, pagerMemoryOnly);
-	state VersionedBTree* btree = new VersionedBTree(pager, file);
+	DWALPager* pager = new DWALPager(pageSize,
+	                                 extentSize,
+	                                 file,
+	                                 pageCacheBytes,
+	                                 remapCleanupWindow,
+	                                 concurrentExtentReads,
+	                                 pagerMemoryOnly,
+	                                 nullptr);
+	state VersionedBTree* btree = new VersionedBTree(pager, file, nullptr);
 	wait(btree->init());
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 

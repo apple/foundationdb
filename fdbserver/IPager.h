@@ -405,6 +405,7 @@ public:
 		if (pFormatHeader->encodingType == EncodingType::XXHash64) {
 			pXXHashHeader->decode(pPayload, payloadSize, pageID);
 		} else if (pFormatHeader->encodingType == EncodingType::XOREncryption) {
+			ASSERT(secret.size() == 1);
 			pXORHeader->decode(secret[0], pPayload, payloadSize, pageID);
 		} else {
 			throw page_encoding_not_supported();
