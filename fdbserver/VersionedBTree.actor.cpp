@@ -444,6 +444,17 @@ static constexpr int ioMaxPriority = 3;
 // the previous tail page to update its next link, which risks corrupting it and losing
 // data that was not yet popped if that write is never fsync'd.
 //
+// While FIFOQueue stores data inside a pager, it also is used _by_ the pager to hold internal metadata
+// such as free lists and logical page remapping activity.
+// Therefore, FIFOQueue
+//   - does not use versioned page reads
+//   - does not use versioned page updates via atomicUpdatePage()
+//   - does not update pages in-place
+//   - writes to a Page ID only once before freeing it
+//
+// For clarity, FIFOQueue Page IDs are always typed as PhysicalPageID, as they are always
+// physical page IDs since atomic page updates are not used.
+//
 // Requirements on T
 //   - must be trivially copyable
 //     OR have a specialization for FIFOQueueCodec<T>
@@ -487,15 +498,22 @@ public:
 	struct QueueState {
 		bool operator==(const QueueState& rhs) const { return memcmp(this, &rhs, sizeof(QueueState)) == 0; }
 		QueueID queueID;
-		LogicalPageID headPageID;
-		LogicalPageID tailPageID;
+
+		// First page in the linked-list queue structure
+		PhysicalPageID headPageID;
+		// Item offset representing the next item in the queue in the first page
 		uint16_t headOffset;
-		// Note that there is no tail index because the tail page is always never-before-written and its index will
-		// start at 0
-		int64_t numPages;
-		int64_t numEntries;
-		bool usesExtents; // Is this an extent based queue?
-		LogicalPageID prevExtentEndPageID;
+		// Last page in the linked-list queue structure, where new entries will be written
+		// Note there is no tailPageOffset, it is always 0 because the tail page has never been written
+		PhysicalPageID tailPageID;
+
+		uint32_t numPages;
+		// numEntries could technically exceed the max page ID so it is 64 bits
+		uint64_t numEntries;
+
+		// State for queues that use pages in contiguous blocks of disk space called extents
+		bool usesExtents;
+		PhysicalPageID prevExtentEndPageID;
 		bool tailPageNewExtent; // Tail page points to the start of a new extent
 
 		KeyRef asKeyRef() const { return KeyRef((uint8_t*)this, sizeof(QueueState)); }
@@ -542,22 +560,22 @@ public:
 		FIFOQueue* queue;
 
 		// The current page and pageID being read or written to
-		LogicalPageID pageID;
+		PhysicalPageID pageID;
 		Reference<ArenaPage> page;
 
 		// The first page ID to be written to the pager, if this cursor has written anything
-		LogicalPageID firstPageIDWritten;
+		PhysicalPageID firstPageIDWritten;
 
 		// Offset after QueuePage::begin() to next read from or write to
 		int offset;
 
 		// A read cursor will not read this page (or beyond)
-		LogicalPageID endPageID;
+		PhysicalPageID endPageID;
 
 		// Page future and corresponding page ID for the expected next page to be used.  It may not
 		// match the current page's next page link because queues can prepended with new front pages.
 		Future<Reference<ArenaPage>> nextPageReader;
-		LogicalPageID nextPageID;
+		PhysicalPageID nextPageID;
 
 		// Future that represents all outstanding write operations previously issued
 		// This exists because writing the queue returns void, not a future
@@ -570,15 +588,15 @@ public:
 		// Initialize a cursor.
 		void init(FIFOQueue* q = nullptr,
 		          Mode m = NONE,
-		          LogicalPageID initialPageID = invalidLogicalPageID,
+		          PhysicalPageID initialPageID = invalidPhysicalPageID,
 		          bool initExtentInfo = true,
 		          bool tailPageNewExtent = false,
-		          LogicalPageID endPage = invalidLogicalPageID,
+		          PhysicalPageID endPage = invalidPhysicalPageID,
 		          int readOffset = 0,
-		          LogicalPageID prevExtentEndPageID = invalidLogicalPageID) {
+		          PhysicalPageID prevExtentEndPageID = invalidPhysicalPageID) {
 			queue = q;
 			mode = m;
-			firstPageIDWritten = invalidLogicalPageID;
+			firstPageIDWritten = invalidPhysicalPageID;
 			offset = readOffset;
 			endPageID = endPage;
 			page.clear();
@@ -595,17 +613,17 @@ public:
 					else
 						startNextPageLoad(pageID);
 				} else {
-					nextPageID = invalidLogicalPageID;
+					nextPageID = invalidPhysicalPageID;
 				}
 			} else {
-				pageID = invalidLogicalPageID;
+				pageID = invalidPhysicalPageID;
 				ASSERT(mode == WRITE ||
-				       (initialPageID == invalidLogicalPageID && readOffset == 0 && endPage == invalidLogicalPageID));
+				       (initialPageID == invalidPhysicalPageID && readOffset == 0 && endPage == invalidPhysicalPageID));
 			}
 
 			debug_printf("FIFOQueue::Cursor(%s) initialized\n", toString().c_str());
 
-			if (mode == WRITE && initialPageID != invalidLogicalPageID) {
+			if (mode == WRITE && initialPageID != invalidPhysicalPageID) {
 				debug_printf("FIFOQueue::Cursor(%s) init. Adding new page %u\n", toString().c_str(), initialPageID);
 				addNewPage(initialPageID, 0, true, initExtentInfo, tailPageNewExtent, prevExtentEndPageID);
 			}
@@ -674,14 +692,14 @@ public:
 
 		QueuePage* header() const { return ((QueuePage*)(page->mutateData())); }
 
-		void setNext(LogicalPageID pageID, int offset) {
+		void setNext(PhysicalPageID pageID, int offset) {
 			ASSERT(mode == WRITE);
 			QueuePage* p = header();
 			p->nextPageID = pageID;
 			p->nextOffset = offset;
 		}
 
-		void startNextPageLoad(LogicalPageID id) {
+		void startNextPageLoad(PhysicalPageID id) {
 			nextPageID = id;
 			debug_printf(
 			    "FIFOQueue::Cursor(%s) loadPage start id=%s\n", toString().c_str(), ::toString(nextPageID).c_str());
@@ -710,8 +728,8 @@ public:
 			VALGRIND_MAKE_MEM_DEFINED(header()->begin() + offset, header()->itemSpace - header()->endOffset);
 
 			queue->pager->updatePage(
-			    PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<LogicalPageID>(&pageID, 1), page);
-			if (firstPageIDWritten == invalidLogicalPageID) {
+			    PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<PhysicalPageID>(&pageID, 1), page);
+			if (firstPageIDWritten == invalidPhysicalPageID) {
 				firstPageIDWritten = pageID;
 			}
 		}
@@ -723,14 +741,14 @@ public:
 		// as a new tail page.
 		// if initializeExtentInfo is true in addition to initializeNewPage, update the extentEndPageID info
 		// in the mew page being added using newExtentPage and prevExtentEndPageID parameters
-		void addNewPage(LogicalPageID newPageID,
+		void addNewPage(PhysicalPageID newPageID,
 		                int newOffset,
 		                bool initializeNewPage,
 		                bool initializeExtentInfo = false,
 		                bool newExtentPage = false,
-		                LogicalPageID prevExtentEndPageID = invalidLogicalPageID) {
+		                PhysicalPageID prevExtentEndPageID = invalidPhysicalPageID) {
 			ASSERT(mode == WRITE);
-			ASSERT(newPageID != invalidLogicalPageID);
+			ASSERT(newPageID != invalidPhysicalPageID);
 			debug_printf("FIFOQueue::Cursor(%s) Adding page %s initPage=%d initExtentInfo=%d newExtentPage=%d\n",
 			             toString().c_str(),
 			             ::toString(newPageID).c_str(),
@@ -827,7 +845,7 @@ public:
 			state bool mustWait = self->isBusy();
 			state int bytesNeeded = Codec::bytesNeeded(item);
 			state bool needNewPage =
-			    self->pageID == invalidLogicalPageID || self->offset + bytesNeeded > self->header()->itemSpace;
+			    self->pageID == invalidPhysicalPageID || self->offset + bytesNeeded > self->header()->itemSpace;
 
 			if (BUGGIFY) {
 				// Sometimes (1% probability) decide a new page is needed as long as at least 1 item has been
@@ -853,7 +871,7 @@ public:
 				// Otherwise, taking the mutex would be immediate so no other writer could have run
 				if (mustWait) {
 					needNewPage =
-					    self->pageID == invalidLogicalPageID || self->offset + bytesNeeded > self->header()->itemSpace;
+					    self->pageID == invalidPhysicalPageID || self->offset + bytesNeeded > self->header()->itemSpace;
 					if (BUGGIFY) {
 						// Sometimes (1% probability) decide a new page is needed as long as at least 1 item has been
 						// written (indicated by non-zero offset) to the current page.
@@ -869,11 +887,11 @@ public:
 				debug_printf("FIFOQueue::Cursor(%s) write(%s) page is full, adding new page\n",
 				             self->toString().c_str(),
 				             ::toString(item).c_str());
-				state LogicalPageID newPageID;
+				state PhysicalPageID newPageID;
 				// If this is an extent based queue, check if there is an available page in current extent
 				if (self->queue->usesExtents) {
 					bool allocateNewExtent = false;
-					if (self->pageID != invalidLogicalPageID) {
+					if (self->pageID != invalidPhysicalPageID) {
 						auto praw = self->header();
 						if (praw->extentCurPageID < praw->extentEndPageID) {
 							newPageID = praw->extentCurPageID + 1;
@@ -883,11 +901,11 @@ public:
 					} else
 						allocateNewExtent = true;
 					if (allocateNewExtent) {
-						LogicalPageID newPID = wait(self->queue->pager->newExtentPageID(self->queue->queueID));
+						PhysicalPageID newPID = wait(self->queue->pager->newExtentPageID(self->queue->queueID));
 						newPageID = newPID;
 					}
 				} else {
-					LogicalPageID newPID = wait(self->queue->pager->newPageID());
+					PhysicalPageID newPID = wait(self->queue->pager->newPageID());
 					newPageID = newPID;
 				}
 				self->addNewPage(newPageID, 0, true, true);
@@ -973,7 +991,7 @@ public:
 		// exhausted If locked is true, this call owns the mutex, which would have been locked by readNext() before a
 		// recursive call
 		Future<Optional<T>> readNext(const Optional<T>& upperBound = {}, FlowMutex::Lock* lock = nullptr) {
-			if ((mode != POP && mode != READONLY) || pageID == invalidLogicalPageID || pageID == endPageID) {
+			if ((mode != POP && mode != READONLY) || pageID == invalidPhysicalPageID || pageID == endPageID) {
 				debug_printf("FIFOQueue::Cursor(%s) readNext returning nothing\n", toString().c_str());
 				return Optional<T>();
 			}
@@ -1008,7 +1026,7 @@ public:
 				} else {
 					// Prevent a future next page read from reusing the same result as page would have to be updated
 					// before the queue would read it again
-					nextPageID = invalidLogicalPageID;
+					nextPageID = invalidPhysicalPageID;
 				}
 			}
 			auto p = header();
@@ -1037,9 +1055,9 @@ public:
 			// tail page
 			if (offset == p->endOffset) {
 				debug_printf("FIFOQueue::Cursor(%s) Page exhausted\n", toString().c_str());
-				LogicalPageID oldPageID = pageID;
-				LogicalPageID extentCurPageID = p->extentCurPageID;
-				LogicalPageID extentEndPageID = p->extentEndPageID;
+				PhysicalPageID oldPageID = pageID;
+				PhysicalPageID extentCurPageID = p->extentCurPageID;
+				PhysicalPageID extentEndPageID = p->extentEndPageID;
 				pageID = p->nextPageID;
 				offset = p->nextOffset;
 
@@ -1087,7 +1105,7 @@ public:
 	void operator=(const FIFOQueue& rhs) = delete;
 
 	// Create a new queue at newPageID
-	void create(IPager2* p, LogicalPageID newPageID, std::string queueName, QueueID id, bool extent) {
+	void create(IPager2* p, PhysicalPageID newPageID, std::string queueName, QueueID id, bool extent) {
 		debug_printf("FIFOQueue(%s) create from page %s. usesExtents %d\n",
 		             queueName.c_str(),
 		             toString(newPageID).c_str(),
@@ -1100,12 +1118,12 @@ public:
 		numEntries = 0;
 		usesExtents = extent;
 		tailPageNewExtent = false;
-		prevExtentEndPageID = invalidLogicalPageID;
+		prevExtentEndPageID = invalidPhysicalPageID;
 		pagesPerExtent = pager->getPagesPerExtent();
 		headReader.init(this, Cursor::POP, newPageID, false, false, newPageID, 0);
 		tailWriter.init(this, Cursor::WRITE, newPageID, true, true);
 		headWriter.init(this, Cursor::WRITE);
-		newTailPage = invalidLogicalPageID;
+		newTailPage = invalidPhysicalPageID;
 		debug_printf("FIFOQueue(%s) created\n", queueName.c_str());
 	}
 
@@ -1128,11 +1146,11 @@ public:
 		                qs.tailPageID,
 		                true,
 		                qs.tailPageNewExtent,
-		                invalidLogicalPageID,
+		                invalidPhysicalPageID,
 		                0,
 		                qs.prevExtentEndPageID);
 		headWriter.init(this, Cursor::WRITE);
-		newTailPage = invalidLogicalPageID;
+		newTailPage = invalidPhysicalPageID;
 		debug_printf("FIFOQueue(%s) recovered\n", queueName.c_str());
 	}
 
@@ -1151,7 +1169,7 @@ public:
 		c.initReadOnly(self->headReader, true);
 
 		debug_printf("FIFOQueue::Cursor(%s) peekAllExt begin\n", c.toString().c_str());
-		if (c.pageID == invalidLogicalPageID || c.pageID == c.endPageID) {
+		if (c.pageID == invalidPhysicalPageID || c.pageID == c.endPageID) {
 			debug_printf("FIFOQueue::Cursor(%s) peekAllExt returning nothing\n", c.toString().c_str());
 			res.sendError(end_of_stream());
 			return Void();
@@ -1231,7 +1249,7 @@ public:
 				} // End of Page
 
 				// Check if we have reached the end of the queue
-				if (c.pageID == invalidLogicalPageID || c.pageID == c.endPageID) {
+				if (c.pageID == invalidPhysicalPageID || c.pageID == c.endPageID) {
 					debug_printf("FIFOQueue::Cursor(%s) peekAllExt Queue exhausted\n", c.toString().c_str());
 					res.send(results);
 
@@ -1372,14 +1390,14 @@ public:
 			//
 			// If the newTailPage future is ready but it's an invalid page and the tail page we are currently pointed to
 			// has had items added to it, then get a new tail page ID.
-			if (self->newTailPage.isReady() && self->newTailPage.get() == invalidLogicalPageID) {
+			if (self->newTailPage.isReady() && self->newTailPage.get() == invalidPhysicalPageID) {
 				if (self->tailWriter.pendingTailWrites()) {
 					debug_printf("FIFOQueue(%s) preFlush starting to get new page ID\n", self->name.c_str());
 					if (self->usesExtents) {
-						if (self->tailWriter.pageID == invalidLogicalPageID) {
+						if (self->tailWriter.pageID == invalidPhysicalPageID) {
 							self->newTailPage = self->pager->newExtentPageID(self->queueID);
 							self->tailPageNewExtent = true;
-							self->prevExtentEndPageID = invalidLogicalPageID;
+							self->prevExtentEndPageID = invalidPhysicalPageID;
 						} else {
 							auto p = self->tailWriter.header();
 							debug_printf(
@@ -1395,7 +1413,7 @@ public:
 							} else {
 								self->newTailPage = self->pager->newExtentPageID(self->queueID);
 								self->tailPageNewExtent = true;
-								self->prevExtentEndPageID = invalidLogicalPageID;
+								self->prevExtentEndPageID = invalidPhysicalPageID;
 							}
 						}
 						debug_printf("FIFOQueue(%s) newTailPage tailPageNewExtent:%d prevExtentEndPageID: %u "
@@ -1435,7 +1453,7 @@ public:
 		bool initTailWriter = true;
 
 		// If a new tail page was allocated, link the last page of the tail writer to it.
-		if (newTailPage.get() != invalidLogicalPageID) {
+		if (newTailPage.get() != invalidPhysicalPageID) {
 			tailWriter.addNewPage(newTailPage.get(), 0, false, false);
 			// The flush sequence allocated a page and added it to the queue so increment numPages
 			++numPages;
@@ -1443,7 +1461,7 @@ public:
 			// newPage() should be ready immediately since a pageID is being explicitly passed.
 			ASSERT(!tailWriter.isBusy());
 
-			newTailPage = invalidLogicalPageID;
+			newTailPage = invalidPhysicalPageID;
 			initTailWriter = true;
 		}
 
@@ -1466,7 +1484,7 @@ public:
 		                tailWriter.pageID,
 		                initTailWriter /*false*/,
 		                tailPageNewExtent,
-		                invalidLogicalPageID,
+		                invalidPhysicalPageID,
 		                0,
 		                prevExtentEndPageID);
 		headWriter.init(this, Cursor::WRITE);
@@ -3796,7 +3814,7 @@ private:
 #pragma pack(push, 1)
 	// Header is the format of page 0 of the database
 	struct Header {
-		static constexpr int FORMAT_VERSION = 9;
+		static constexpr int FORMAT_VERSION = 10;
 
 		// Total space that Header can take up including members and variable sized metakey
 		uint16_t headerSpace;
@@ -4791,7 +4809,7 @@ public:
 
 #pragma pack(push, 1)
 	struct MetaKey {
-		static constexpr int FORMAT_VERSION = 16;
+		static constexpr int FORMAT_VERSION = 17;
 		// This serves as the format version for the entire tree, individual pages will not be versioned
 		uint16_t formatVersion;
 		EncodingType encodingType;
