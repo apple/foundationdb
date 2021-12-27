@@ -706,7 +706,7 @@ public:
 			ASSERT(mode == WRITE);
 			debug_printf("FIFOQueue::Cursor(%s) writePage\n", toString().c_str());
 
-			// Mark the unused part of the page as defined
+			// Mark the unused part of the item space as defined
 			VALGRIND_MAKE_MEM_DEFINED(header()->begin() + offset, header()->itemSpace - header()->endOffset);
 
 			queue->pager->updatePage(
@@ -775,7 +775,13 @@ public:
 				p->endOffset = 0;
 				p->itemSpace = page->dataSize() - sizeof(QueuePage);
 				if (BUGGIFY) {
-					p->itemSpace = deterministicRandom()->randomInt(50, p->itemSpace);
+					// Randomly reduce available item space to cause more queue pages to be needed
+					int reducedSpace = deterministicRandom()->randomInt(50, p->itemSpace);
+
+					// Mark the eliminated item space as initialized
+					VALGRIND_MAKE_MEM_DEFINED(header()->begin() + reducedSpace, p->itemSpace - reducedSpace);
+
+					p->itemSpace = reducedSpace;
 				}
 
 				// For extent based queue, update the index of current page within the extent
@@ -1114,6 +1120,7 @@ public:
 		numEntries = qs.numEntries;
 		usesExtents = qs.usesExtents;
 		tailPageNewExtent = qs.tailPageNewExtent;
+		prevExtentEndPageID = qs.prevExtentEndPageID;
 		pagesPerExtent = pager->getPagesPerExtent();
 		headReader.init(this, Cursor::POP, qs.headPageID, loadExtents, false, qs.tailPageID, qs.headOffset);
 		tailWriter.init(this,

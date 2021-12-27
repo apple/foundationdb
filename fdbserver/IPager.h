@@ -131,7 +131,7 @@ public:
 		}
 	}
 
-	// Before using begin() or size(), either init() or postRead() must be called
+	// Before using these, either init() or postRead1 and postRead2() must be called
 	const uint8_t* data() const { return pPayload; }
 	uint8_t* mutateData() const { return (uint8_t*)pPayload; }
 	int dataSize() const { return payloadSize; }
@@ -325,6 +325,12 @@ public:
 		h->lastKnownParentID = invalidLogicalPageID;
 		h->writeVersion = invalidVersion;
 
+#if VALGRIND
+		// Explicitly check payload definedness to make the source of valgrind errors more clear.
+		// Without this check, calculating a checksum on a payload with undefined bytes does not
+		// cause a valgrind error but the resulting checksum is undefined which causes errors later.
+		ASSERT(VALGRIND_CHECK_MEM_IS_DEFINED(pPayload, payloadSize) == 0);
+#endif
 		if (pVersionHeader->encodingType == EncodingType::XXHash64) {
 			next.skip<XXHashEncodingHeader>();
 			pXXHashHeader->encode(pPayload, payloadSize, pageID);
