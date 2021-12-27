@@ -91,6 +91,23 @@ enum PageType : uint8_t {
 	QueuePageInExtent = 5
 };
 
+// Encryption key ID
+typedef uint64_t KeyID;
+
+// Encryption key and secret string
+struct KeyIDWithSecret {
+	KeyID id;
+	Key secret;
+};
+
+// Interface used by pager to get encryption keys by ID when reading pages from disk
+// and by the BTree to get encryption keys to use for new pages
+class IEncryptionKeyProvider {
+public:
+	virtual Future<Key> getSecretByKeyID(KeyID keyID) = 0;
+	virtual Future<KeyIDWithSecret> selectKey(const KeyRef begin, const KeyRef end) = 0;
+};
+
 // Represents a block of memory in a 4096-byte aligned location held by an Arena.
 // Page Format:
 //    VersionHeader
@@ -144,16 +161,19 @@ public:
 #pragma pack(push, 1)
 
 	// This can't change
-	struct VersionHeader {
+	struct FormatHeader {
 		uint8_t headerVersion;
 		EncodingType encodingType;
 	};
 
-	struct Header {
-		// pageType Meaning is based on type.
+	// This header is mainly to facilitate forensic investigation of data on disk.
+	// These fields are not required for correct behavior, and although some of them
+	// could be validated at read time currently none of them are.
+	struct HeaderV1 {
+		PageType pageType;
+		// The meaning of pageSubType is based on pageType
 		//   For Queue pages, pageSubType is QueueID
 		//   For BTree nodes, pageSubType is Height (also stored in BTreeNode)
-		PageType pageType;
 		uint8_t pageSubType;
 
 		// Physical page ID of first block on disk of the ArenaPage
@@ -241,13 +261,19 @@ public:
 	void init(EncodingType t, PageType pageType, uint8_t pageSubType) {
 		// Only HEADER_WRITE_VERSION is supported for writing, though
 		// newer or older versions may be supported for reading
-		pVersionHeader->headerVersion = HEADER_WRITE_VERSION;
-		pVersionHeader->encodingType = t;
+		pFormatHeader->headerVersion = HEADER_WRITE_VERSION;
+		pFormatHeader->encodingType = t;
 
-		Reader next(pVersionHeader + 1);
-		Header* h = next;
+		Reader next(pFormatHeader + 1);
+		HeaderV1* h = next;
 		h->pageType = pageType;
 		h->pageSubType = pageSubType;
+
+		// Write dummy values for these in new pages. They should be updated when possible before calling preWrite()
+		// when modifying existing pages
+		h->lastKnownLogicalPageID = invalidLogicalPageID;
+		h->lastKnownParentID = invalidLogicalPageID;
+		h->writeVersion = invalidVersion;
 
 		if (t == EncodingType::XXHash64) {
 			pXXHashHeader = next;
@@ -265,7 +291,7 @@ public:
 
 	// Get the usable size for a new page of pageSize using HEADER_WRITE_VERSION with encoding type t
 	static int getUsableSize(int pageSize, EncodingType t) {
-		int usable = pageSize - sizeof(VersionHeader) - sizeof(Header) - sizeof(Footer);
+		int usable = pageSize - sizeof(FormatHeader) - sizeof(HeaderV1) - sizeof(Footer);
 
 		if (t == EncodingType::XXHash64) {
 			usable -= sizeof(XXHashEncodingHeader);
@@ -313,17 +339,12 @@ public:
 	//        payload encrypted if needed
 	void preWrite(PhysicalPageID pageID) const {
 		// Only HEADER_WRITE_VERSION is supported
-		ASSERT(pVersionHeader->headerVersion == HEADER_WRITE_VERSION);
-		Reader next(pVersionHeader + 1);
+		ASSERT(pFormatHeader->headerVersion == HEADER_WRITE_VERSION);
+		Reader next(pFormatHeader + 1);
 
-		Header* h = next;
+		HeaderV1* h = next;
 		h->firstPhysicalPageID = pageID;
 		h->writeTime = now();
-
-		// TODO:  Update these when possible.
-		h->lastKnownLogicalPageID = invalidLogicalPageID;
-		h->lastKnownParentID = invalidLogicalPageID;
-		h->writeVersion = invalidVersion;
 
 #if VALGRIND
 		// Explicitly check payload definedness to make the source of valgrind errors more clear.
@@ -331,11 +352,12 @@ public:
 		// cause a valgrind error but the resulting checksum is undefined which causes errors later.
 		ASSERT(VALGRIND_CHECK_MEM_IS_DEFINED(pPayload, payloadSize) == 0);
 #endif
-		if (pVersionHeader->encodingType == EncodingType::XXHash64) {
+		if (pFormatHeader->encodingType == EncodingType::XXHash64) {
 			next.skip<XXHashEncodingHeader>();
 			pXXHashHeader->encode(pPayload, payloadSize, pageID);
-		} else if (pVersionHeader->encodingType == EncodingType::XOREncryption) {
+		} else if (pFormatHeader->encodingType == EncodingType::XOREncryption) {
 			next.skip<XOREncodingHeader>();
+			ASSERT(secret.size() == 1);
 			pXORHeader->encode(secret[0], pPayload, payloadSize, pageID);
 		} else {
 			throw page_encoding_not_supported();
@@ -350,13 +372,13 @@ public:
 	// Post:  Encoding-specific header pointer is initialized
 	//        Page header integrity is verified unless verify is false
 	void postRead1(PhysicalPageID pageID, bool verify = true) {
-		Reader next(pVersionHeader + 1);
-		if (pVersionHeader->headerVersion == 1) {
-			Header* h = next;
+		Reader next(pFormatHeader + 1);
+		if (pFormatHeader->headerVersion == 1) {
+			HeaderV1* h = next;
 
-			if (pVersionHeader->encodingType == EncodingType::XXHash64) {
+			if (pFormatHeader->encodingType == EncodingType::XXHash64) {
 				pXXHashHeader = next;
-			} else if (pVersionHeader->encodingType == EncodingType::XOREncryption) {
+			} else if (pFormatHeader->encodingType == EncodingType::XOREncryption) {
 				pXORHeader = next;
 			} else {
 				throw page_encoding_not_supported();
@@ -380,9 +402,9 @@ public:
 	// Pre:   postRead1 has been called, encoding-specific parameters have been set
 	// Post:  Payload has been verified and decrypted if necessary
 	void postRead2(PhysicalPageID pageID) {
-		if (pVersionHeader->encodingType == EncodingType::XXHash64) {
+		if (pFormatHeader->encodingType == EncodingType::XXHash64) {
 			pXXHashHeader->decode(pPayload, payloadSize, pageID);
-		} else if (pVersionHeader->encodingType == EncodingType::XOREncryption) {
+		} else if (pFormatHeader->encodingType == EncodingType::XOREncryption) {
 			pXORHeader->decode(secret[0], pPayload, payloadSize, pageID);
 		} else {
 			throw page_encoding_not_supported();
@@ -390,6 +412,9 @@ public:
 	}
 
 	const Arena& getArena() const { return arena; }
+
+	// Returns true if the page's encoding type employs encryption
+	bool isEncrypted() const { return getEncodingType() != EncodingType::XXHash64; }
 
 private:
 	Arena arena;
@@ -404,7 +429,7 @@ private:
 	int bufferSize;
 	union {
 		uint8_t* buffer;
-		VersionHeader* pVersionHeader;
+		FormatHeader* pFormatHeader;
 	};
 
 	// Pointer and length of page space available to the user
@@ -419,14 +444,24 @@ private:
 	Key secret;
 
 public:
-	EncodingType getEncodingType() const { return pVersionHeader->encodingType; }
+	EncodingType getEncodingType() const { return pFormatHeader->encodingType; }
 
 	void setSecret(Key k) { secret = k; }
 
-	// Read/write access to the XOR key ID
-	uint8_t& xorKeyID() {
-		ASSERT(pVersionHeader->encodingType == EncodingType::XOREncryption);
-		return pXORHeader->keyID;
+	KeyID getKeyID() const {
+		if (pFormatHeader->encodingType == EncodingType::XOREncryption) {
+			return pXORHeader->keyID;
+		} else {
+			throw page_encoding_not_supported();
+		}
+	}
+
+	void setKeyID(KeyID id) {
+		if (pFormatHeader->encodingType == EncodingType::XOREncryption) {
+			pXORHeader->keyID = (uint8_t)id;
+		} else {
+			throw page_encoding_not_supported();
+		}
 	}
 
 	// A metadata object that can be attached to the page and will be deleted with the page
