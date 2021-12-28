@@ -1207,10 +1207,10 @@ public:
 					page->postRead2(c.pageID);
 				} catch (Error& e) {
 					TraceEvent(SevError, "RedwoodChecksumFailed")
+					    .error(e)
 					    .detail("PageID", c.pageID)
 					    .detail("PageSize", self->pager->getPhysicalPageSize())
-					    .detail("Offset", c.pageID * self->pager->getPhysicalPageSize())
-					    .error(e);
+					    .detail("Offset", c.pageID * self->pager->getPhysicalPageSize());
 
 					debug_printf("FIFOQueue::Cursor(%s) peekALLExt subPage error=%s for %s. Offset %d ",
 					             c.toString().c_str(),
@@ -1258,9 +1258,9 @@ public:
 					if (entriesRead != self->numEntries) {
 						Error e = internal_error(); // TODO:  Something better?
 						TraceEvent(SevError, "RedwoodQueueNumEntriesMisMatch")
+						    .error(e)
 						    .detail("EntriesRead", entriesRead)
-						    .detail("ExpectedEntries", self->numEntries)
-						    .error(e);
+						    .detail("ExpectedEntries", self->numEntries);
 						throw e;
 					}
 					res.sendError(end_of_stream());
@@ -2315,10 +2315,10 @@ public:
 			if (self->pHeader->formatVersion != Header::FORMAT_VERSION) {
 				Error e = unsupported_format_version();
 				TraceEvent(SevWarn, "RedwoodRecoveryError")
+				    .error(e)
 				    .detail("Filename", self->filename)
 				    .detail("Version", self->pHeader->formatVersion)
-				    .detail("ExpectedVersion", Header::FORMAT_VERSION)
-				    .error(e);
+				    .detail("ExpectedVersion", Header::FORMAT_VERSION);
 				throw e;
 			}
 
@@ -2973,13 +2973,14 @@ public:
 				err = err.asInjectedFault();
 			}
 
-			// For header pages, error is a warning because recovery may still be possible
+			// For header pages, event is a warning because the primary header could be read after an unsync'd write,
+			// but no other page can.
 			TraceEvent(header ? SevWarnAlways : SevError, "RedwoodPageError")
 			    .detail("Filename", self->filename.c_str())
+			    .error(err)
 			    .detail("PageID", pageID)
 			    .detail("PageSize", self->physicalPageSize)
-			    .detail("Offset", pageID * self->physicalPageSize)
-			    .error(err);
+			    .detail("Offset", pageID * self->physicalPageSize);
 
 			debug_printf("DWALPager(%s) checksum failed for %s with %s\n",
 			             self->filename.c_str(),
@@ -3033,11 +3034,11 @@ public:
 		} catch (Error& e) {
 			// For header pages, error is a warning because recovery may still be possible
 			TraceEvent(SevError, "RedwoodPageError")
+			    .error(e)
 			    .detail("Filename", self->filename.c_str())
 			    .detail("PageIDs", pageIDs)
 			    .detail("PageSize", self->physicalPageSize)
-			    .detail("Offset", pageIDs.front() * self->physicalPageSize)
-			    .error(e);
+			    .detail("Offset", pageIDs.front() * self->physicalPageSize);
 
 			debug_printf("DWALPager(%s) checksum failed for %s with %s\n",
 			             self->filename.c_str(),
@@ -4874,9 +4875,9 @@ public:
 			if (formatVersion != FORMAT_VERSION) {
 				Error e = unsupported_format_version();
 				TraceEvent(SevWarn, "RedwoodMetaKeyError")
+				    .error(e)
 				    .detail("Version", formatVersion)
-				    .detail("ExpectedVersion", FORMAT_VERSION)
-				    .error(e);
+				    .detail("ExpectedVersion", FORMAT_VERSION);
 				throw e;
 			}
 		}
