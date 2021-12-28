@@ -2265,22 +2265,33 @@ public:
 		if (exists && fileSize >= (self->smallestPhysicalBlock * 2)) {
 			debug_printf("DWALPager(%s) recovering using existing file\n", self->filename.c_str());
 
-			state bool recoveredHeader = false;
+			state bool recoveredBackupHeader = false;
 
 			// Try to read primary header
 			try {
 				wait(store(self->headerPage, self->readHeaderPage(primaryHeaderPageID)));
 			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) {
-					throw;
-				}
-				debug_printf("DWALPager(%s) Failed to recover primary header\n", self->filename.c_str());
-				TraceEvent(SevWarn, "RedwoodHeaderError")
+				debug_printf("DWALPager(%s) Primary header read failed with %s\n", self->filename.c_str(), e.what());
+
+				// Errors that can be caused by a corrupted and unsync'd write to the header page can be ignored and the
+				// committed, sync'd backup header will be tried. Notably, page_header_wrong_page_id is not included in
+				// this list because it means the header checksum passed but this page data is not meant to be at this
+				// location, which is a very serious error so recovery should not continue.
+				bool tryBackupHeader =
+				    (e.code() == error_code_page_header_version_not_supported ||
+				     e.code() == error_code_page_encoding_not_supported ||
+				     e.code() == error_code_page_decoding_failed || e.code() == error_code_page_header_checksum_failed);
+
+				TraceEvent(SevWarn, "RedwoodRecoveryErrorPrimaryHeaderFailed")
+				    .error(e, true)
 				    .detail("Filename", self->filename)
 				    .detail("PageID", primaryHeaderPageID)
-				    .error(e);
+				    .detail("TryingBackupHeader", tryBackupHeader);
 
-				// Don't throw because recovery to last durable commit is sitll possible from backup header
+				// Don't throw if trying backup header below
+				if (!tryBackupHeader) {
+					throw;
+				}
 			}
 
 			// If primary header wasn't valid, try backup header
@@ -2288,13 +2299,13 @@ public:
 				// Try to read backup header
 				try {
 					wait(store(self->headerPage, self->readHeaderPage(backupHeaderPageID)));
-					recoveredHeader = true;
+					recoveredBackupHeader = true;
 				} catch (Error& e) {
-					debug_printf("DWALPager(%s) Failed to recover backup header\n", self->filename.c_str());
-					TraceEvent(SevWarn, "RedwoodRecoveryError")
+					debug_printf("DWALPager(%s) Backup header read failed with %s\n", self->filename.c_str(), e.what());
+					TraceEvent(SevWarn, "RedwoodRecoveryErrorBackupHeaderFailed")
+					    .error(e)
 					    .detail("Filename", self->filename)
-					    .detail("PageID", backupHeaderPageID)
-					    .error(e);
+					    .detail("PageID", backupHeaderPageID);
 					throw;
 				}
 			}
@@ -2381,7 +2392,7 @@ public:
 
 			// If the header was recovered from the backup at Page 1 then write and sync it to Page 0 before continuing.
 			// If this fails, the backup header is still in tact for the next recovery attempt.
-			if (recoveredHeader) {
+			if (recoveredBackupHeader) {
 				// Write the header to page 0
 				wait(self->writeHeaderPage(primaryHeaderPageID, self->headerPage));
 
