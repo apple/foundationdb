@@ -822,10 +822,14 @@ enum class VecSerStrategy { FlatBuffers, String };
 template <class T, VecSerStrategy>
 struct VectorRefPreserializer {
 	VectorRefPreserializer() {}
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) { return *this; }
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>&) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>&) { return *this; }
+	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {}
+	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {
+		return *this;
+	}
+	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>&) noexcept {}
+	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>&) noexcept {
+		return *this;
+	}
 
 	void invalidate() {}
 	void add(const T& item) {}
@@ -839,14 +843,14 @@ struct VectorRefPreserializer<T, VecSerStrategy::String> {
 	string_serialized_traits<T> _string_traits;
 
 	VectorRefPreserializer() : _cached_size(0) {}
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>& other)
+	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>& other) noexcept
 	  : _cached_size(other._cached_size) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>& other) {
+	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>& other) noexcept {
 		_cached_size = other._cached_size;
 		return *this;
 	}
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) : _cached_size(-1) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) {
+	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept : _cached_size(-1) {}
+	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {
 		_cached_size = -1;
 		return *this;
 	}
