@@ -20,6 +20,7 @@
 
 #include "fdbserver/TagPartitionedLogSystem.actor.h"
 
+#include "flow/FastRef.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include <limits>
 
@@ -1858,13 +1859,31 @@ Optional<std::pair<Version, Version>> TagPartitionedLogSystem::getDurableVersion
 
 	Version minRecoveryVersion = calculateRecoveryVersion(minResult);
 
+	Version groupCommittedVersion = knownCommittedVersion;
+	for (int group = 0; group < logSet->logServers.size() / logSet->tLogReplicationFactor; group++) {
+		for (int t = 0; t < logSet->tLogReplicationFactor; t++) {
+			int idx = group * logSet->tLogReplicationFactor + t;
+			if (lockInfo.replies[idx].isReady() && !lockInfo.replies[idx].isError()) {
+				auto& versionHistory = lockInfo.replies[idx].get().versionHistory;
+				auto it = std::upper_bound(versionHistory.begin(),
+				                           versionHistory.end(),
+				                           std::make_pair(0, knownCommittedVersion),
+				                           [](const auto& l, const auto& r) -> bool { return l.second < r.second; });
+				--it;
+				groupCommittedVersion = std::min(groupCommittedVersion, it->second);
+				break;
+			}
+		}
+	}
+
 	TraceEvent("GetDurableResult", dbgid)
 	    .detail("KnownCommittedVersion", knownCommittedVersion)
+	    .detail("GroupCommittedVersion", groupCommittedVersion)
 	    .detail("MinRecoveryVersion", minRecoveryVersion)
 	    .detail("MaxRecoveryVersion", maxRecoveryVersion)
 	    .detail("EpochEnd", lockInfo.epochEnd);
 
-	return std::make_pair(knownCommittedVersion, minRecoveryVersion);
+	return std::make_pair(groupCommittedVersion, minRecoveryVersion);
 }
 
 ACTOR Future<Void> TagPartitionedLogSystem::getDurableVersionChanged(LogLockInfo lockInfo,
@@ -1884,6 +1903,40 @@ ACTOR Future<Void> TagPartitionedLogSystem::getDurableVersionChanged(LogLockInfo
 	ASSERT(changes.size());
 	wait(waitForAny(changes));
 	return Void();
+}
+
+struct GroupEndVersion {
+	Version epochEnd;
+	Version groupEnd;
+	std::vector<std::pair<Version, Version>> versionHistory;
+};
+
+ACTOR Future<Void> updateTLogVersion(Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog,
+                                     Future<TLogLockResult> fLockResult,
+                                     Future<GroupEndVersion> fEndVersion) {
+	state TLogLockResult lockResult = wait(fLockResult);
+	state GroupEndVersion endVersion = wait(fEndVersion);
+	state Version logEndVersion = 0;
+	if (lockResult.end == endVersion.groupEnd) {
+		logEndVersion = endVersion.epochEnd;
+	} else {
+		auto it = std::upper_bound(endVersion.versionHistory.begin(),
+		                           endVersion.versionHistory.end(),
+		                           std::make_pair(0, lockResult.end),
+		                           [](const auto& l, const auto& r) -> bool { return l.second < r.second; });
+		logEndVersion = it->second - 1;
+	}
+
+	loop {
+		if (tlog->get().present()) {
+			choose {
+				when(wait(brokenPromiseToNever(
+				    tlog->get().interf().updateVersionRequest.getReply(UpdateVersionRequest(logEndVersion))))) {}
+				when(wait(tlog->onChange())) {}
+			}
+		}
+		wait(tlog->onChange());
+	}
 }
 
 ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Reference<ILogSystem>>> outLogSystem,
@@ -2027,6 +2080,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 	state std::vector<OldLogData> oldLogData;
 	state std::vector<std::vector<Reference<AsyncVar<bool>>>> logFailed;
 	state std::vector<Future<Void>> failureTrackers;
+	state std::vector<std::vector<Promise<GroupEndVersion>>> endVersions;
+	endVersions.resize(prevState.tLogs.size());
 
 	for (const CoreTLogSet& coreSet : prevState.tLogs) {
 		logServers.push_back(makeReference<LogSet>(coreSet));
@@ -2063,6 +2118,10 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 		lockResults[i].logSet = logServers[i];
 		for (int t = 0; t < logServers[i]->logServers.size(); t++) {
 			lockResults[i].replies.push_back(TagPartitionedLogSystem::lockTLog(dbgid, logServers[i]->logServers[t]));
+			Promise<GroupEndVersion> endVer;
+			endVersions[i].push_back(endVer);
+			failureTrackers.push_back(
+			    updateTLogVersion(logServers[i]->logServers[t], lockResults[i].replies.back(), endVer.getFuture()));
 		}
 	}
 
@@ -2156,6 +2215,32 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 				knownCommittedVersion = std::max(knownCommittedVersion, versions.get().first);
 				maxEnd = std::max(maxEnd, versions.get().second);
 				minEnd = std::min(minEnd, versions.get().second);
+
+				// notify tlogs about empty versions
+				for (int group = 0; group < logServers[log]->logServers.size() / logServers[log]->tLogReplicationFactor;
+				     group++) {
+					Version maxGroupVersion = 0;
+					std::vector<std::pair<Version, Version>> maxVersionHistory;
+					for (int t = 0; t < logServers[log]->tLogReplicationFactor; t++) {
+						int idx = group * logServers[log]->tLogReplicationFactor + t;
+						if (lockResults[log].replies[idx].isReady() && !lockResults[log].replies[idx].isError() &&
+						    lockResults[log].replies[idx].get().end > maxGroupVersion) {
+							maxGroupVersion = lockResults[log].replies[idx].get().end;
+							maxVersionHistory = lockResults[log].replies[idx].get().versionHistory;
+						}
+					}
+
+					for (int t = 0; t < logServers[log]->tLogReplicationFactor; t++) {
+						int idx = group * logServers[log]->tLogReplicationFactor + t;
+						if (endVersions[log][idx].canBeSet()) {
+							GroupEndVersion groupEnd;
+							groupEnd.epochEnd = versions.get().second;
+							groupEnd.groupEnd = maxGroupVersion;
+							groupEnd.versionHistory = maxVersionHistory;
+							endVersions[log][idx].send(groupEnd);
+						}
+					}
+				}
 			}
 			changes.push_back(TagPartitionedLogSystem::getDurableVersionChanged(lockResults[log], logFailed[log]));
 		}

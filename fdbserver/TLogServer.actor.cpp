@@ -526,6 +526,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	std::vector<std::vector<Reference<TagData>>> tag_data; // tag.locality | tag.id
 	int unpoppedRecoveredTags;
 	Deque<std::pair<Version, Version>> versionHistory;
+	Promise<Version> stopVersionUpdated;
 
 	Reference<TagData> getTagData(Tag tag) {
 		int idx = tag.toTagDataIndex();
@@ -1682,8 +1683,17 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	}
 
 	state double blockStart = now();
+	state Version endVersion = logData->version.get();
+	if (logData->stopVersionUpdated.isSet()) {
+		endVersion = std::max(endVersion, logData->stopVersionUpdated.getFuture().get());
+	}
 
-	if (reqReturnIfBlocked && logData->version.get() < reqBegin) {
+	if (reqReturnIfBlocked && endVersion < reqBegin && !logData->stopVersionUpdated.isSet()) {
+		Version _endVersion = wait(logData->stopVersionUpdated.getFuture());
+		endVersion = _endVersion;
+	}
+
+	if (reqReturnIfBlocked && endVersion < reqBegin) {
 		replyPromise.sendError(end_of_stream());
 		if (reqSequence.present()) {
 			auto& trackerData = logData->peekTracker[peekId];
@@ -1698,7 +1708,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 	//TraceEvent("TLogPeekMessages0", self->dbgid).detail("ReqBeginEpoch", reqBegin.epoch).detail("ReqBeginSeq", reqBegin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", reqTag1).detail("Tag2", reqTag2);
 	// Wait until we have something to return that the caller doesn't already have
-	if (logData->version.get() < reqBegin) {
+	if (endVersion < reqBegin) {
 		wait(logData->version.whenAtLeast(reqBegin));
 		wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
 	}
@@ -1755,7 +1765,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		return Void();
 	}
 
-	state Version endVersion = logData->version.get() + 1;
+	endVersion = std::max(endVersion + 1, logData->version.get() + 1);
 	state bool onlySpilled = false;
 
 	// grab messages from disk
@@ -2609,6 +2619,13 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			TEST(true); // Hit ignorePopDeadline
 			TraceEvent("EnableTLogPlayAllIgnoredPops").detail("IgnoredPopDeadline", self->ignorePopDeadline);
 			logData->addActor.send(processPopRequests(self, logData));
+		}
+		when(UpdateVersionRequest req = waitNext(tli.updateVersionRequest.getFuture())) {
+			ASSERT(logData->stopped);
+			if (logData->stopVersionUpdated.canBeSet()) {
+				logData->stopVersionUpdated.send(req.version);
+			}
+			req.reply.send(Void());
 		}
 	}
 }

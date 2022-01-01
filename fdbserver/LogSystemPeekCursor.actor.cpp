@@ -1535,8 +1535,7 @@ ILogSystem::GroupPeekCursor::GroupPeekCursor(
     Version begin,
     Version end,
     bool returnIfBlocked)
-  : currentCursor(tag.id % logServers.size()), end(end), returnIfBlocked(returnIfBlocked) {
-	TraceEvent("GroupPeekCreate").detail("ReturnIfBlocked", returnIfBlocked);
+  : currentCursor(tag.id % logServers.size()), end(end) {
 	for (int i = 0; i < logServers.size(); i++) {
 		auto cursor =
 		    makeReference<ILogSystem::ServerPeekCursor>(logServers[i], tag, begin, end, returnIfBlocked, false);
@@ -1602,25 +1601,14 @@ ACTOR Future<Void> groupPeekGetMore(ILogSystem::GroupPeekCursor* self, TaskPrior
 				}
 			} else {
 				bool foundActive = false;
-				bool allExhausted = self->serverCursors[self->currentCursor]->isExhausted();
 				for (int i = 1; i < self->serverCursors.size(); i++) {
 					int nextCursor = (self->currentCursor + i) % self->serverCursors.size();
 					self->serverCursors[nextCursor]->advanceTo(self->serverCursors[self->currentCursor]->version());
-					if (!self->serverCursors[nextCursor]->isExhausted()) {
-						allExhausted = false;
-					}
 					if (self->serverCursors[nextCursor]->isActive()) {
 						self->currentCursor = nextCursor;
 						foundActive = true;
 						break;
 					}
-				}
-				if (allExhausted) {
-					if (self->returnIfBlocked && self->version() < self->end) {
-						self->advanceTo(self->end);
-						return Void();
-					}
-					return Never();
 				}
 				if (!foundActive) {
 					wait(delay(0.1)); // FIXME: knob
