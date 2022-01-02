@@ -1533,8 +1533,8 @@ void Net2::run() {
 				minTaskID = currentTaskID;
 			}
 
-			// attempt to empty out the IO backlog for every 5 tasks while in this loop
-			if (ready.size() % 5 == 1) {
+			// attempt to empty out the IO backlog
+			if (ready.size() % FLOW_KNOBS->ITERATIONS_PER_REACTOR_CHECK == 1) {
 				if (runFunc) {
 					runFunc();
 				}

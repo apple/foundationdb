@@ -171,6 +171,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MIN_LOGGED_PRIORITY_BUSY_FRACTION,                  0.05 );
 	init( CERT_FILE_MAX_SIZE,                      5 * 1024 * 1024 );
 	init( READY_QUEUE_RESERVED_SIZE,                          8192 );
+	init( ITERATIONS_PER_REACTOR_CHECK,                          5 );
 
 	//Network
 	init( PACKET_LIMIT,                                  100LL<<20 );
