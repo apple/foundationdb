@@ -1936,8 +1936,9 @@ ACTOR Future<Void> updateTLogVersion(Reference<AsyncVar<OptionalInterface<TLogIn
 				    tlog->get().interf().updateVersionRequest.getReply(UpdateVersionRequest(logEndVersion))))) {}
 				when(wait(tlog->onChange())) {}
 			}
+		} else {
+			wait(tlog->onChange());
 		}
-		wait(tlog->onChange());
 	}
 }
 
