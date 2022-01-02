@@ -123,6 +123,10 @@ public:
 // postRead2() must be called after postRead1 to handle page contents verification and possible decryption
 class ArenaPage : public ReferenceCounted<ArenaPage>, public FastAllocated<ArenaPage> {
 public:
+	// This is the header version that newpage init() calls will use.
+	// It is not necessarily the latest header version.
+	static constexpr uint8_t HEADER_WRITE_VERSION = 1;
+
 	ArenaPage(int logicalSize, int bufferSize)
 	  : logicalSize(logicalSize), bufferSize(bufferSize), pPayload(nullptr), userData(nullptr) {
 		if (bufferSize > 0) {
@@ -156,7 +160,6 @@ public:
 	const uint8_t* rawData() const { return buffer; }
 	uint8_t* rawData() { return buffer; }
 	int rawSize() const { return bufferSize; }
-	static constexpr uint8_t HEADER_WRITE_VERSION = 1;
 
 #pragma pack(push, 1)
 
@@ -166,26 +169,38 @@ public:
 		EncodingType encodingType;
 	};
 
-	// This header is mainly to facilitate forensic investigation of data on disk.
-	// These fields are not required for correct behavior, and although some of them
-	// could be validated at read time currently none of them are.
-	struct HeaderV1 {
-		PageType pageType;
-		// The meaning of pageSubType is based on pageType
-		//   For Queue pages, pageSubType is QueueID
-		//   For BTree nodes, pageSubType is Height (also stored in BTreeNode)
-		uint8_t pageSubType;
+	struct FormatV1 {
+		// This header is mainly to facilitate forensic investigation of data on disk.
+		// These fields are not required for correct behavior, and although some of them
+		// could be validated at read time currently none of them are.
+		struct Header {
+			PageType pageType;
+			// The meaning of pageSubType is based on pageType
+			//   For Queue pages, pageSubType is QueueID
+			//   For BTree nodes, pageSubType is Height (also stored in BTreeNode)
+			uint8_t pageSubType;
 
-		// Physical page ID of first block on disk of the ArenaPage
-		PhysicalPageID firstPhysicalPageID;
-		// The first logical page ID the ArenaPage was referenced by when last written
-		LogicalPageID lastKnownLogicalPageID;
-		// The first logical page ID of the parent of this ArenaPage when last written
-		LogicalPageID lastKnownParentID;
+			// Physical page ID of first block on disk of the ArenaPage
+			PhysicalPageID firstPhysicalPageID;
+			// The first logical page ID the ArenaPage was referenced by when last written
+			LogicalPageID lastKnownLogicalPageID;
+			// The first logical page ID of the parent of this ArenaPage when last written
+			LogicalPageID lastKnownParentID;
 
-		// Time and write version as of the last update to this page
-		double writeTime;
-		Version writeVersion;
+			// Time and write version as of the last update to this page
+			double writeTime;
+			Version writeVersion;
+		};
+
+		struct Footer {
+			XXH64_hash_t checksum;
+			void update(uint8_t* headerBytes, int len) { checksum = XXH3_64bits(headerBytes, len); }
+			void verify(uint8_t* headerBytes, int len) {
+				if (checksum != XXH3_64bits(headerBytes, len)) {
+					throw page_header_checksum_failed();
+				}
+			}
+		};
 	};
 
 	// An encoding that validates the payload with an XXHash checksum
@@ -224,20 +239,11 @@ public:
 		}
 	};
 
-	struct Footer {
-		XXH64_hash_t checksum;
-		void update(uint8_t* headerBytes, int len) { checksum = XXH3_64bits(headerBytes, len); }
-		void verify(uint8_t* headerBytes, int len) {
-			if (checksum != XXH3_64bits(headerBytes, len)) {
-				throw page_header_checksum_failed();
-			}
-		}
-	};
-
 #pragma pack(pop)
 
-	// Syntactic sugar for getting a series of types from a byte buffer
-	// The Reader casts to any T * and increments the read pointer by T's size.
+	// Syntactic sugar for getting a series of pointers to arbitrary types from
+	// a byte buffer.
+	// The Reader automatically casts to any T * and increments the read pointer by T's size.
 	struct Reader {
 		Reader(void* p) : ptr((uint8_t*)p) {}
 		uint8_t* ptr;
@@ -259,13 +265,11 @@ public:
 	//       Encoding-specific header pointers are initialized
 	//       Payload can be written to with mutateData() and dataSize()
 	void init(EncodingType t, PageType pageType, uint8_t pageSubType) {
-		// Only HEADER_WRITE_VERSION is supported for writing, though
-		// newer or older versions may be supported for reading
 		pFormatHeader->headerVersion = HEADER_WRITE_VERSION;
 		pFormatHeader->encodingType = t;
 
 		Reader next(pFormatHeader + 1);
-		HeaderV1* h = next;
+		FormatV1::Header* h = next;
 		h->pageType = pageType;
 		h->pageSubType = pageSubType;
 
@@ -283,7 +287,7 @@ public:
 			throw page_encoding_not_supported();
 		}
 
-		next.skip<Footer>();
+		next.skip<FormatV1::Footer>();
 
 		pPayload = next;
 		payloadSize = logicalSize - (pPayload - buffer);
@@ -291,7 +295,7 @@ public:
 
 	// Get the usable size for a new page of pageSize using HEADER_WRITE_VERSION with encoding type t
 	static int getUsableSize(int pageSize, EncodingType t) {
-		int usable = pageSize - sizeof(FormatHeader) - sizeof(HeaderV1) - sizeof(Footer);
+		int usable = pageSize - sizeof(FormatHeader) - sizeof(FormatV1::Header) - sizeof(FormatV1::Footer);
 
 		if (t == EncodingType::XXHash64) {
 			usable -= sizeof(XXHashEncodingHeader);
@@ -338,13 +342,15 @@ public:
 	// Post:  Main header checksum is updated, encoding-specific header is updated and
 	//        payload encrypted if needed
 	void preWrite(PhysicalPageID pageID) const {
-		// Only HEADER_WRITE_VERSION is supported
-		ASSERT(pFormatHeader->headerVersion == HEADER_WRITE_VERSION);
 		Reader next(pFormatHeader + 1);
 
-		HeaderV1* h = next;
-		h->firstPhysicalPageID = pageID;
-		h->writeTime = now();
+		if (pFormatHeader->headerVersion == 1) {
+			FormatV1::Header* h = next;
+			h->firstPhysicalPageID = pageID;
+			h->writeTime = now();
+		} else {
+			throw page_header_version_not_supported();
+		}
 
 #if VALGRIND
 		// Explicitly check payload definedness to make the source of valgrind errors more clear.
@@ -353,18 +359,22 @@ public:
 		ASSERT(VALGRIND_CHECK_MEM_IS_DEFINED(pPayload, payloadSize) == 0);
 #endif
 		if (pFormatHeader->encodingType == EncodingType::XXHash64) {
-			next.skip<XXHashEncodingHeader>();
+			ASSERT(pXXHashHeader == next);
 			pXXHashHeader->encode(pPayload, payloadSize, pageID);
 		} else if (pFormatHeader->encodingType == EncodingType::XOREncryption) {
-			next.skip<XOREncodingHeader>();
+			ASSERT(pXORHeader == next);
 			ASSERT(secret.size() == 1);
 			pXORHeader->encode(secret[0], pPayload, payloadSize, pageID);
 		} else {
 			throw page_encoding_not_supported();
 		}
 
-		Footer* f = next;
-		f->update(buffer, (uint8_t*)f - buffer);
+		if (pFormatHeader->headerVersion == 1) {
+			FormatV1::Footer* f = next;
+			f->update(buffer, (uint8_t*)f - buffer);
+		} else {
+			throw page_header_version_not_supported();
+		}
 	}
 
 	// Must be called after reading from disk to verify header and get encoding type
@@ -374,7 +384,7 @@ public:
 	void postRead1(PhysicalPageID pageID, bool verify = true) {
 		Reader next(pFormatHeader + 1);
 		if (pFormatHeader->headerVersion == 1) {
-			HeaderV1* h = next;
+			FormatV1::Header* h = next;
 
 			if (pFormatHeader->encodingType == EncodingType::XXHash64) {
 				pXXHashHeader = next;
@@ -384,7 +394,7 @@ public:
 				throw page_encoding_not_supported();
 			}
 
-			Footer* f = next;
+			FormatV1::Footer* f = next;
 			pPayload = next;
 			payloadSize = logicalSize - (pPayload - buffer);
 
@@ -433,13 +443,14 @@ private:
 		FormatHeader* pFormatHeader;
 	};
 
-	// Pointer and length of page space available to the user
-	uint8_t* pPayload;
-	int payloadSize;
 	union {
 		XXHashEncodingHeader* pXXHashHeader;
 		XOREncodingHeader* pXORHeader;
 	};
+
+	// Pointer and length of page space available to the user
+	uint8_t* pPayload;
+	int payloadSize;
 
 	// Secret string available for use by encodings
 	Key secret;
