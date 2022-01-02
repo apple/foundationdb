@@ -1858,8 +1858,5 @@ Optional<UID> ILogSystem::HeapPeekCursor::getCurrentPeekLocation() const {
 }
 
 Version ILogSystem::HeapPeekCursor::popped() const {
-	Version poppedVersion = 0;
-	for (auto& c : serverCursors)
-		poppedVersion = std::max(poppedVersion, c->popped());
-	return poppedVersion;
+	return serverCursors[0]->popped();
 }
