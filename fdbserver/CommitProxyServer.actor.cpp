@@ -2048,6 +2048,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 
 	// This has to be declared after the commitData.txnStateStore get initialized
 	state TransactionStateResolveContext transactionStateResolveContext(&commitData, &addActor);
+	state bool firstCommit = firstProxy;
 
 	loop choose {
 		when(wait(dbInfoChange)) {
@@ -2071,6 +2072,10 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 			int batchBytes = batchedRequests.second;
 			//TraceEvent("CommitProxyCTR", proxy.id()).detail("CommitTransactions", trs.size()).detail("TransactionRate", transactionRate).detail("TransactionQueue", transactionQueue.size()).detail("ReleasedTransactionCount", transactionCount);
 			if (trs.size() || commitData.db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
+				if (firstCommit) {
+					firstCommit = false;
+					batchBytes = 0;
+				}
 				addActor.send(transformError(
 				    timeoutError(commitBatch(&commitData,
 				                             const_cast<std::vector<CommitTransactionRequest>*>(&batchedRequests.first),

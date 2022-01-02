@@ -515,6 +515,8 @@ Future<Version> TagPartitionedLogSystem::push(std::vector<std::pair<int, Version
 	std::vector<Future<TLogCommitReply>> allReplies;
 	Span span("TPLS:push"_loc, spanContext);
 	ASSERT(tLogs.size() == 1);
+	Standalone<StringRef> msg = data.getMessages();
+	bool recoveryCommit = tLogGroups.size() > 1 && msg.size() > 0;
 	for (auto& it : tLogs) {
 		if (it->isLocal && it->logServers.size()) {
 			if (it->connectionResetTrackers.size() == 0) {
@@ -526,20 +528,20 @@ Future<Version> TagPartitionedLogSystem::push(std::vector<std::pair<int, Version
 			for (auto& grp : tLogGroups) {
 				for (int loc = grp.first * it->tLogReplicationFactor; loc < (grp.first + 1) * it->tLogReplicationFactor;
 				     loc++) {
-					Standalone<StringRef> msg = data.getMessages();
-					allReplies.push_back(recordPushMetrics(
-					    it->connectionResetTrackers[loc],
-					    it->logServers[loc]->get().interf().address(),
-					    it->logServers[loc]->get().interf().commit.getReply(TLogCommitRequest(spanContext,
-					                                                                          msg.arena(),
-					                                                                          grp.second,
-					                                                                          truePrevVersion,
-					                                                                          version,
-					                                                                          knownCommittedVersion,
-					                                                                          minKnownCommittedVersion,
-					                                                                          msg,
-					                                                                          debugID),
-					                                                        TaskPriority::ProxyTLogCommitReply)));
+					allReplies.push_back(
+					    recordPushMetrics(it->connectionResetTrackers[loc],
+					                      it->logServers[loc]->get().interf().address(),
+					                      it->logServers[loc]->get().interf().commit.getReply(
+					                          TLogCommitRequest(spanContext,
+					                                            msg.arena(),
+					                                            grp.second,
+					                                            truePrevVersion,
+					                                            version,
+					                                            knownCommittedVersion,
+					                                            minKnownCommittedVersion,
+					                                            recoveryCommit && grp.first != 0 ? Value() : msg,
+					                                            debugID),
+					                          TaskPriority::ProxyTLogCommitReply)));
 					Future<Void> commitSuccess = success(allReplies.back());
 					addActor.get().send(commitSuccess);
 					tLogCommitResults.push_back(commitSuccess);
