@@ -1419,9 +1419,9 @@ ACTOR Future<Void> handleCommitVersion(Reference<MasterData> self, ReportRawComm
 
 	self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
 	if (req.version > self->liveCommittedVersion.get()) {
-		self->liveCommittedVersion.set(req.version);
 		self->databaseLocked = req.locked;
 		self->proxyMetadataVersion = req.metadataVersion;
+		self->liveCommittedVersion.set(req.version);
 	}
 	++self->reportLiveCommittedVersionRequests;
 	req.reply.send(Void());
