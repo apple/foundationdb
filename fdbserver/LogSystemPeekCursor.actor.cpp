@@ -1846,6 +1846,9 @@ const LogMessageVersion& ILogSystem::HeapPeekCursor::version() const {
 }
 
 Version ILogSystem::HeapPeekCursor::getMinKnownCommittedVersion() const {
+	if (currentCursor < 0) {
+		return 0;
+	}
 	return serverCursors[currentCursor]->getMinKnownCommittedVersion();
 }
 
