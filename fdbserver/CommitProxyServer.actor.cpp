@@ -199,7 +199,8 @@ struct ResolutionRequestBuilder {
 ACTOR Future<Void> emptyCommitBatcher(ProxyCommitData* commitData,
                                       PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int>> out) {
 	loop {
-		wait(delay(SERVER_KNOBS->MAX_COMMIT_BATCH_INTERVAL, TaskPriority::ProxyCommitBatcher));
+		wait(delay(0.05, TaskPriority::ProxyCommitBatcher)); // FIXME: revert once integrated with version indexers
+		// wait(delay(SERVER_KNOBS->MAX_COMMIT_BATCH_INTERVAL, TaskPriority::ProxyCommitBatcher));
 		out.send({ std::vector<CommitTransactionRequest>(), 0 });
 	}
 }
