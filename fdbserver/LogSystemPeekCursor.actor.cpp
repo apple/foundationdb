@@ -1535,7 +1535,7 @@ ILogSystem::GroupPeekCursor::GroupPeekCursor(
     Version begin,
     Version end,
     bool returnIfBlocked)
-  : currentCursor(tag.id % logServers.size()), end(end) {
+  : currentCursor(tag.id % logServers.size()), messageVersion(begin), end(end) {
 	for (int i = 0; i < logServers.size(); i++) {
 		auto cursor =
 		    makeReference<ILogSystem::ServerPeekCursor>(logServers[i], tag, begin, end, returnIfBlocked, false);
@@ -1565,6 +1565,7 @@ bool ILogSystem::GroupPeekCursor::hasMessage() const {
 
 void ILogSystem::GroupPeekCursor::nextMessage() {
 	serverCursors[currentCursor]->nextMessage();
+	messageVersion = serverCursors[currentCursor]->version();
 }
 
 StringRef ILogSystem::GroupPeekCursor::getMessage() {
@@ -1583,36 +1584,43 @@ void ILogSystem::GroupPeekCursor::advanceTo(LogMessageVersion n) {
 	for (auto& it : serverCursors) {
 		it->advanceTo(n);
 	}
+	messageVersion = serverCursors[currentCursor]->version();
 }
 
 ACTOR Future<Void> groupPeekGetMore(ILogSystem::GroupPeekCursor* self, TaskPriority taskID) {
-	loop {
-		if (self->serverCursors[self->currentCursor]->version() >= self->end) {
-			if (self->serverCursors[self->currentCursor]->hasMessage()) {
-				return Void();
-			}
-			return Never();
+	if (self->messageVersion >= self->end) {
+		if (self->serverCursors[self->currentCursor]->hasMessage()) {
+			return Void();
 		}
-		loop {
-			if (self->serverCursors[self->currentCursor]->isActive()) {
-				choose {
-					when(wait(self->serverCursors[self->currentCursor]->getMore())) { return Void(); }
-					when(wait(self->serverCursors[self->currentCursor]->onFailed())) {}
+		return Never();
+	}
+	loop {
+		if (self->messageVersion < self->serverCursors[self->currentCursor]->version()) {
+			self->messageVersion = self->serverCursors[self->currentCursor]->version();
+			return Void();
+		}
+		if (self->serverCursors[self->currentCursor]->isActive()) {
+			choose {
+				when(wait(self->serverCursors[self->currentCursor]->getMore())) {
+					self->messageVersion = self->serverCursors[self->currentCursor]->version();
+					return Void();
 				}
-			} else {
-				bool foundActive = false;
-				for (int i = 1; i < self->serverCursors.size(); i++) {
-					int nextCursor = (self->currentCursor + i) % self->serverCursors.size();
-					self->serverCursors[nextCursor]->advanceTo(self->serverCursors[self->currentCursor]->version());
-					if (self->serverCursors[nextCursor]->isActive()) {
-						self->currentCursor = nextCursor;
-						foundActive = true;
-						break;
-					}
+				when(wait(self->serverCursors[self->currentCursor]->onFailed())) {
 				}
-				if (!foundActive) {
-					wait(delay(0.1)); // FIXME: knob
+			}
+		} else {
+			bool foundActive = false;
+			for (int i = 1; i < self->serverCursors.size(); i++) {
+				int nextCursor = (self->currentCursor + i) % self->serverCursors.size();
+				self->serverCursors[nextCursor]->advanceTo(self->serverCursors[self->currentCursor]->version());
+				if (self->serverCursors[nextCursor]->isActive()) {
+					self->currentCursor = nextCursor;
+					foundActive = true;
+					break;
 				}
+			}
+			if (!foundActive) {
+				wait(delay(0.1)); // FIXME: knob
 			}
 		}
 	}
@@ -1628,6 +1636,11 @@ Future<Void> ILogSystem::GroupPeekCursor::getMore(TaskPriority taskID) {
 
 	if (hasMessage())
 		return Void();
+
+	if (messageVersion < serverCursors[currentCursor]->version()) {
+		messageVersion = serverCursors[currentCursor]->version();
+		return Void();
+	}
 
 	more = groupPeekGetMore(this, taskID);
 	return more;
@@ -1648,7 +1661,7 @@ bool ILogSystem::GroupPeekCursor::isExhausted() const {
 }
 
 const LogMessageVersion& ILogSystem::GroupPeekCursor::version() const {
-	return serverCursors[currentCursor]->version();
+	return messageVersion;
 }
 
 Version ILogSystem::GroupPeekCursor::getMinKnownCommittedVersion() const {
@@ -1779,7 +1792,7 @@ ACTOR Future<Void> heapPeekGetMore(ILogSystem::HeapPeekCursor* self, TaskPriorit
 		if (self->currentCursor < 0) {
 			std::vector<Future<Void>> q;
 			for (auto& c : self->serverCursors) {
-				if (!c->hasMessage() && c->version() < self->end) {
+				if (!c->hasMessage() && c->version().version <= self->messageVersion.version) {
 					q.push_back(c->getMore(taskID));
 				}
 			}
@@ -1819,6 +1832,9 @@ Future<Void> ILogSystem::HeapPeekCursor::getMore(TaskPriority taskID) {
 	if (more.isValid() && !more.isReady()) {
 		return more;
 	}
+
+	if (hasMessage())
+		return Void();
 
 	if (!serverCursors.size())
 		return Never();

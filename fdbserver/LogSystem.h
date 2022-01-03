@@ -495,6 +495,7 @@ struct ILogSystem {
 	struct GroupPeekCursor final : IPeekCursor, ReferenceCounted<GroupPeekCursor> {
 		std::vector<Reference<IPeekCursor>> serverCursors;
 		int currentCursor;
+		LogMessageVersion messageVersion;
 		LogMessageVersion end;
 		Future<Void> more;
 
