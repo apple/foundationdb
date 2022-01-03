@@ -2621,7 +2621,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			logData->addActor.send(processPopRequests(self, logData));
 		}
 		when(UpdateVersionRequest req = waitNext(tli.updateVersionRequest.getFuture())) {
-			ASSERT(logData->stopped);
+			logData->stopped = true;
 			if (logData->stopVersionUpdated.canBeSet()) {
 				logData->stopVersionUpdated.send(req.version);
 			}

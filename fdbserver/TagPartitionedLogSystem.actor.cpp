@@ -1934,11 +1934,10 @@ ACTOR Future<Void> updateTLogVersion(Reference<AsyncVar<OptionalInterface<TLogIn
 			choose {
 				when(wait(brokenPromiseToNever(
 				    tlog->get().interf().updateVersionRequest.getReply(UpdateVersionRequest(logEndVersion))))) {}
-				when(wait(tlog->onChange())) {}
+				when(wait(tlog->onChange())) { continue; }
 			}
-		} else {
-			wait(tlog->onChange());
 		}
+		wait(tlog->onChange());
 	}
 }
 
