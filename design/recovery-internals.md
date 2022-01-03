@@ -55,7 +55,7 @@ Recovery has 9 phases, which are defined as the 9 states in the source code: REA
 The recovery process is like a state machine, changing from one state to the next state. 
 We will describe in the rest of this document what each phase does to drive the recovery to the next state.
 
-Recovery tracks the information of each recovery phase in `MasterRecoveryState` trace event. By checking the message, we can find which phase the recovery is stuck at. The status used in the `MasterRecoveryState` trace event is defined as `RecoveryStatus` structure in `RecoveryState.h`. The status, instead of the name of the 9 phases, is typically used in diagnosing production issues.
+Recovery tracks the information of each recovery phase in `ClusterRecoveryState` trace event. By checking the message, we can find which phase the recovery is stuck at. The status used in the `ClusterRecoveryState` trace event is defined as `RecoveryStatus` structure in `RecoveryState.h`. The status, instead of the name of the 9 phases, is typically used in diagnosing production issues.
 
 
 ## Phase 1: READING_CSTATE
@@ -140,7 +140,7 @@ However, reading the txnStateStore can be slow because it needs to read from dis
 There are cases where the recovery can get stuck at recruiting enough roles for the txn system configuration. For example, if a cluster with replica factor equal to three has only three tLogs and one of them dies during the recovery, the cluster will not succeed in recruiting 3 tLogs and the recovery will get stuck. Another example is when a new database is created and the cluster does not have a valid txnStateStore. To get out of this situation, the master will use an emergency transaction to forcibly change the configuration such that the recruitment can succeed. This configuration change may temporarily violate the contract of the desired configuration, but it is only temporary.
 
 
-We can use the trace event `MasterRecoveredConfig`, which dumps the information of the new transaction system’s configuration, to diagnose why the recovery is blocked in this phase.
+We can use the trace event `ClusterRecoveredConfig`, which dumps the information of the new transaction system’s configuration, to diagnose why the recovery is blocked in this phase.
 
 
 ## Phase 4: RECOVERY_TRANSACTION
