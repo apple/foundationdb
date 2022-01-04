@@ -19,7 +19,9 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "flow/Arena.h"
 #include <cstdint>
+#include <string_view>
 #define FDB_API_VERSION 710
 #define FDB_INCLUDE_LEGACY_TYPES
 
@@ -600,6 +602,31 @@ FDBFuture* fdb_transaction_get_range_and_flat_map_impl(FDBTransaction* tr,
 	                        snapshot,
 	                        reverse)
 	                    .extractPtr());
+}
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_with_predicate(FDBTransaction* tr,
+                                                                                 uint8_t const* begin_key_name,
+                                                                                 int begin_key_name_length,
+                                                                                 uint8_t const* end_key_name,
+                                                                                 int end_key_name_length,
+                                                                                 uint8_t const* predicate_name,
+                                                                                 int predicate_name_length,
+                                                                                 uint8_t const** predicate_args,
+                                                                                 int* predicate_arg_lengths,
+                                                                                 int predicate_arg_count,
+                                                                                 fdb_bool_t snapshot) {
+	Standalone<VectorRef<StringRef>> args;
+	args.reserve(args.arena(), predicate_arg_count);
+	for (int i = 0; i < predicate_arg_count; ++i) {
+		args.push_back_deep(args.arena(), StringRef(predicate_args[i], predicate_arg_lengths[i]));
+	}
+	return (FDBFuture*)(TXN(tr)
+	                        ->getRangeWithPredicate(Key(KeyRef(begin_key_name, begin_key_name_length)),
+	                                                Key(KeyRef(end_key_name, end_key_name_length)),
+	                                                Key(KeyRef(predicate_name, predicate_name_length)),
+	                                                args,
+	                                                snapshot)
+	                        .extractPtr());
 }
 
 // TODO: Support FDB_API_ADDED in generate_asm.py and then this can be replaced with fdb_api_ptr_unimpl.

@@ -181,6 +181,44 @@ ThreadFuture<RangeResult> DLTransaction::getRangeAndFlatMap(const KeySelectorRef
 	});
 }
 
+ThreadFuture<RangeResult> DLTransaction::getRangeWithPredicate(const KeyRef& begin,
+                                                               const KeyRef& end,
+                                                               const StringRef& predicate_name,
+                                                               const VectorRef<StringRef>& predicate_args,
+                                                               bool snapshot) {
+	static thread_local std::vector<const uint8_t*> args;
+	args.reserve(predicate_args.size());
+	args.clear();
+	static thread_local std::vector<int> arg_lengths;
+	arg_lengths.reserve(predicate_args.size());
+	arg_lengths.clear();
+	for (const auto& arg : predicate_args) {
+		args.push_back(arg.begin());
+		arg_lengths.push_back(arg.size());
+	}
+	FdbCApi::FDBFuture* f = api->transactionGetRangeWithPredicate(tr,
+	                                                              begin.begin(),
+	                                                              begin.size(),
+	                                                              end.begin(),
+	                                                              end.size(),
+	                                                              predicate_name.begin(),
+	                                                              predicate_name.size(),
+	                                                              &args[0],
+	                                                              &arg_lengths[0],
+	                                                              predicate_args.size(),
+	                                                              snapshot);
+	return toThreadFuture<RangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const FdbCApi::FDBKeyValue* kvs;
+		int count;
+		FdbCApi::fdb_bool_t more;
+		FdbCApi::fdb_error_t error = api->futureGetKeyValueArray(f, &kvs, &count, &more);
+		ASSERT(!error);
+
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
+		return RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena());
+	});
+}
+
 ThreadFuture<Standalone<VectorRef<const char*>>> DLTransaction::getAddressesForKey(const KeyRef& key) {
 	FdbCApi::FDBFuture* f = api->transactionGetAddressesForKey(tr, key.begin(), key.size());
 
@@ -870,6 +908,18 @@ ThreadFuture<RangeResult> MultiVersionTransaction::getRangeAndFlatMap(const KeyS
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRangeAndFlatMap(begin, end, mapper, limits, snapshot, reverse)
 	                        : makeTimeout<RangeResult>();
+	return abortableFuture(f, tr.onChange);
+}
+
+ThreadFuture<RangeResult> MultiVersionTransaction::getRangeWithPredicate(const KeyRef& begin,
+                                                                         const KeyRef& end,
+                                                                         const StringRef& predicate_name,
+                                                                         const VectorRef<StringRef>& predicate_args,
+                                                                         bool snapshot) {
+	auto tr = getTransaction();
+	auto f = tr.transaction
+	             ? tr.transaction->getRangeWithPredicate(begin, end, predicate_name, predicate_args, snapshot)
+	             : makeTimeout<RangeResult>();
 	return abortableFuture(f, tr.onChange);
 }
 

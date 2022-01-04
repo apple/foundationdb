@@ -20,6 +20,7 @@
 
 package com.apple.foundationdb;
 
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
@@ -100,31 +101,43 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			return new RangeQuery(FDBTransaction.this, true, begin, end, mapper, limit, reverse, mode, eventKeeper);
 		}
 
+		@Override
+		public AsyncIterable<KeyValue> getRangeWithPredicate(byte[] begin, byte[] end, byte[] predicate_name,
+		                                                     byte[][] predicate_args) {
+			return new RangeQuery(FDBTransaction.this, true, KeySelector.firstGreaterOrEqual(begin),
+			                      KeySelector.firstGreaterOrEqual(end), null, ReadTransaction.ROW_LIMIT_UNLIMITED,
+			                      false, StreamingMode.WANT_ALL, eventKeeper,
+			                      new RangeReadPredicate(predicate_name, predicate_args));
+		}
+
 		///////////////////
-		//  getRange -> KeySelectors
+		// getRange -> KeySelectors
 		///////////////////
 		@Override
 		public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end, int limit, boolean reverse,
 		                                        StreamingMode mode) {
 			return new RangeQuery(FDBTransaction.this, true, begin, end, limit, reverse, mode, eventKeeper);
 		}
+
 		@Override
 		public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
 				int limit, boolean reverse) {
 			return getRange(begin, end, limit, reverse, StreamingMode.ITERATOR);
 		}
+
 		@Override
 		public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
 				int limit) {
 			return getRange(begin, end, limit, false);
 		}
+
 		@Override
 		public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end) {
 			return getRange(begin, end, ReadTransaction.ROW_LIMIT_UNLIMITED);
 		}
 
 		///////////////////
-		//  getRange -> byte[]s
+		// getRange -> byte[]s
 		///////////////////
 		@Override
 		public AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end,
@@ -133,39 +146,45 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 					KeySelector.firstGreaterOrEqual(end),
 					limit, reverse, mode);
 		}
+
 		@Override
 		public AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end,
 				int limit, boolean reverse) {
 			return getRange(begin, end, limit, reverse, StreamingMode.ITERATOR);
 		}
+
 		@Override
 		public AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end,
 				int limit) {
 			return getRange(begin, end, limit, false);
 		}
+
 		@Override
 		public AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end) {
 			return getRange(begin, end, ReadTransaction.ROW_LIMIT_UNLIMITED);
 		}
 
 		///////////////////
-		//  getRange (Range)
+		// getRange (Range)
 		///////////////////
 		@Override
 		public AsyncIterable<KeyValue> getRange(Range range,
 				int limit, boolean reverse, StreamingMode mode) {
 			return getRange(range.begin, range.end, limit, reverse, mode);
 		}
+
 		@Override
 		public AsyncIterable<KeyValue> getRange(Range range,
 				int limit, boolean reverse) {
 			return getRange(range, limit, reverse, StreamingMode.ITERATOR);
 		}
+
 		@Override
 		public AsyncIterable<KeyValue> getRange(Range range,
 				int limit) {
 			return getRange(range, limit, false);
 		}
+
 		@Override
 		public AsyncIterable<KeyValue> getRange(Range range) {
 			return getRange(range, ReadTransaction.ROW_LIMIT_UNLIMITED);
@@ -206,8 +225,9 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	protected FDBTransaction(long cPtr, Database database, Executor executor) {
-		//added for backwards compatibility with subclasses contained in different projects
-		this(cPtr,database,executor,null);
+		// added for backwards compatibility with subclasses contained in different
+		// projects
+		this(cPtr, database, executor, null);
 	}
 
 	protected FDBTransaction(long cPtr, Database database, Executor executor, EventKeeper eventKeeper) {
@@ -240,7 +260,8 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		/*
 		 * Note that this is done outside of the lock, because we don't want to rely on
 		 * the caller code being particularly efficient, and if we get a bad
-		 * implementation of a eventKeeper, we could end up holding the pointerReadLock for an
+		 * implementation of a eventKeeper, we could end up holding the pointerReadLock
+		 * for an
 		 * arbitrary amount of time; this would be Bad(TM), so we execute this outside
 		 * the lock, so that in the worst case only the caller thread itself can be hurt
 		 * by bad callbacks.
@@ -286,7 +307,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		}
 		pointerReadLock.lock();
 		try {
-			return new FutureResult(Transaction_get(getPtr(), key, isSnapshot), executor,eventKeeper);
+			return new FutureResult(Transaction_get(getPtr(), key, isSnapshot), executor, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -353,31 +374,43 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		throw new UnsupportedOperationException("getRangeAndFlatMap is only supported in snapshot");
 	}
 
+	@Override
+	public AsyncIterable<KeyValue> getRangeWithPredicate(byte[] begin, byte[] end, byte[] predicate_name,
+	                                                     byte[][] predicate_args) {
+		return new RangeQuery(FDBTransaction.this, false, KeySelector.firstGreaterOrEqual(begin),
+		                      KeySelector.firstGreaterOrEqual(end), null, ReadTransaction.ROW_LIMIT_UNLIMITED, false,
+		                      StreamingMode.WANT_ALL, eventKeeper,
+		                      new RangeReadPredicate(predicate_name, predicate_args));
+	}
+
 	///////////////////
-	//  getRange -> KeySelectors
+	// getRange -> KeySelectors
 	///////////////////
 	@Override
 	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
 			int limit, boolean reverse, StreamingMode mode) {
 		return new RangeQuery(this, false, begin, end, limit, reverse, mode, eventKeeper);
 	}
+
 	@Override
 	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
 			int limit, boolean reverse) {
 		return getRange(begin, end, limit, reverse, StreamingMode.ITERATOR);
 	}
+
 	@Override
 	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
 			int limit) {
 		return getRange(begin, end, limit, false);
 	}
+
 	@Override
 	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end) {
 		return getRange(begin, end, ReadTransaction.ROW_LIMIT_UNLIMITED);
 	}
 
 	///////////////////
-	//  getRange -> byte[]s
+	// getRange -> byte[]s
 	///////////////////
 	@Override
 	public AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end,
@@ -386,39 +419,45 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 				KeySelector.firstGreaterOrEqual(end),
 				limit, reverse, mode);
 	}
+
 	@Override
 	public AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end,
 			int limit, boolean reverse) {
 		return getRange(begin, end, limit, reverse, StreamingMode.ITERATOR);
 	}
+
 	@Override
 	public AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end,
 			int limit) {
 		return getRange(begin, end, limit, false);
 	}
+
 	@Override
 	public AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end) {
 		return getRange(begin, end, ReadTransaction.ROW_LIMIT_UNLIMITED);
 	}
 
 	///////////////////
-	//  getRange (Range)
+	// getRange (Range)
 	///////////////////
 	@Override
 	public AsyncIterable<KeyValue> getRange(Range range,
 			int limit, boolean reverse, StreamingMode mode) {
 		return getRange(range.begin, range.end, limit, reverse, mode);
 	}
+
 	@Override
 	public AsyncIterable<KeyValue> getRange(Range range,
 			int limit, boolean reverse) {
 		return getRange(range, limit, reverse, StreamingMode.ITERATOR);
 	}
+
 	@Override
 	public AsyncIterable<KeyValue> getRange(Range range,
 			int limit) {
 		return getRange(range, limit, false);
 	}
+
 	@Override
 	public AsyncIterable<KeyValue> getRange(Range range) {
 		return getRange(range, ReadTransaction.ROW_LIMIT_UNLIMITED);
@@ -432,6 +471,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	// Users of this function must close the returned FutureResults when finished
 	protected FutureResults getRange_internal(KeySelector begin, KeySelector end,
 	                                          byte[] mapper, // Nullable
+	                                          RangeReadPredicate predicate, // Nullable
 	                                          int rowLimit, int targetBytes, int streamingMode, int iteration,
 	                                          boolean isSnapshot, boolean reverse) {
 		if (eventKeeper != null) {
@@ -439,12 +479,18 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		}
 		pointerReadLock.lock();
 		try {
-			/*System.out.println(String.format(
-					" -- range get: (%s, %s) limit: %d, bytes: %d, mode: %d, iteration: %d, snap: %s, reverse %s",
-				begin.toString(), end.toString(), rowLimit, targetBytes, streamingMode,
-				iteration, Boolean.toString(isSnapshot), Boolean.toString(reverse)));*/
+			/*
+			 * System.out.println(String.format(
+			 * " -- range get: (%s, %s) limit: %d, bytes: %d, mode: %d, iteration: %d, snap: %s, reverse %s"
+			 * ,
+			 * begin.toString(), end.toString(), rowLimit, targetBytes, streamingMode,
+			 * iteration, Boolean.toString(isSnapshot), Boolean.toString(reverse)));
+			 */
 			return new FutureResults(
-			    mapper == null
+			    predicate != null ? Transaction_getRangeWithPredicate(getPtr(), begin.getKey(), end.getKey(),
+			                                                          predicate.getPredicateName(),
+			                                                          predicate.getPredicateArgs(), isSnapshot)
+			    : mapper == null
 			        ? Transaction_getRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(), end.getKey(),
 			                               end.orEqual(), end.getOffset(), rowLimit, targetBytes, streamingMode,
 			                               iteration, isSnapshot, reverse)
@@ -476,7 +522,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	@Override
 	public void addReadConflictKey(byte[] key) {
-		addConflictRange(key, ByteArrayUtil.join(key, new byte[]{(byte) 0}), ConflictRangeType.READ);
+		addConflictRange(key, ByteArrayUtil.join(key, new byte[] { (byte)0 }), ConflictRangeType.READ);
 	}
 
 	@Override
@@ -685,8 +731,8 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		}
 		pointerReadLock.lock();
 		try {
-			CompletableFuture<Void> f = new FutureVoid(Transaction_onError(getPtr(), ((FDBException) e).getCode()),
-					executor);
+			CompletableFuture<Void> f =
+			    new FutureVoid(Transaction_onError(getPtr(), ((FDBException)e).getCode()), executor);
 			final Transaction tr = transfer();
 			return f.thenApply(v -> tr).whenComplete((v, t) -> {
 				if (t != null) {
@@ -695,7 +741,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			});
 		} finally {
 			pointerReadLock.unlock();
-			if(!transactionOwner) {
+			if (!transactionOwner) {
 				close();
 			}
 		}
@@ -703,7 +749,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	@Override
 	public void cancel() {
-		if(eventKeeper!=null){
+		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
 		}
 		pointerReadLock.lock();
@@ -715,7 +761,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	public CompletableFuture<String[]> getAddressesForKey(byte[] key) {
-		if(eventKeeper!=null){
+		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
 		}
 		pointerReadLock.lock();
@@ -734,9 +780,8 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			tr.options().setUsedDuringCommitProtectionDisable();
 			transactionOwner = false;
 			return tr;
-		}
-		catch(RuntimeException err) {
-			if(tr != null) {
+		} catch (RuntimeException err) {
+			if (tr != null) {
 				tr.close();
 			}
 
@@ -746,10 +791,9 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	@Override
 	protected long getPtr() {
-		if(!transactionOwner) {
+		if (!transactionOwner) {
 			throw new IllegalStateException("Transaction has been invalidated by reset");
-		}
-		else {
+		} else {
 			return super.getPtr();
 		}
 	}
@@ -759,18 +803,17 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		try {
 			checkUnclosed("Transaction");
 			close();
-		}
-		finally {
+		} finally {
 			super.finalize();
 		}
 	}
 
 	@Override
 	protected void closeInternal(long cPtr) {
-		if(eventKeeper!=null){
+		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
 		}
-		if(transactionOwner) {
+		if (transactionOwner) {
 			Transaction_dispose(cPtr);
 		}
 	}
@@ -781,38 +824,63 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	private native long Transaction_getReadVersion(long cPtr);
-	private native  void Transaction_setVersion(long cPtr, long version);
+
+	private native void Transaction_setVersion(long cPtr, long version);
+
 	private native long Transaction_get(long cPtr, byte[] key, boolean isSnapshot);
-	private native  long Transaction_getKey(long cPtr, byte[] key, boolean orEqual,
-			int offset, boolean isSnapshot);
+
+	private native long Transaction_getKey(long cPtr, byte[] key, boolean orEqual, int offset, boolean isSnapshot);
+
+	private native long Transaction_getRangeWithPredicate(long cPtr, byte[] begin, byte[] end, byte[] predicate_name,
+	                                                      byte[][] predicate_args, boolean snapshot);
+
 	private native long Transaction_getRange(long cPtr,
 			byte[] keyBegin, boolean orEqualBegin, int offsetBegin,
 			byte[] keyEnd, boolean orEqualEnd, int offsetEnd,
 			int rowLimit, int targetBytes, int streamingMode, int iteration,
 			boolean isSnapshot, boolean reverse);
+
 	private native long Transaction_getRangeAndFlatMap(long cPtr, byte[] keyBegin, boolean orEqualBegin,
 	                                                   int offsetBegin, byte[] keyEnd, boolean orEqualEnd,
 	                                                   int offsetEnd,
 	                                                   byte[] mapper, // Nonnull
 	                                                   int rowLimit, int targetBytes, int streamingMode, int iteration,
 	                                                   boolean isSnapshot, boolean reverse);
+
 	private native void Transaction_addConflictRange(long cPtr,
 			byte[] keyBegin, byte[] keyEnd, int conflictRangeType);
+
 	private native void Transaction_set(long cPtr, byte[] key, byte[] value);
+
 	private native void Transaction_clear(long cPtr, byte[] key);
+
 	private native void Transaction_clear(long cPtr, byte[] beginKey, byte[] endKey);
+
 	private native void Transaction_mutate(long ptr, int code, byte[] key, byte[] value);
+
 	private native void Transaction_setOption(long cPtr, int code, byte[] value) throws FDBException;
+
 	private native long Transaction_commit(long cPtr);
+
 	private native long Transaction_getCommittedVersion(long cPtr);
+
 	private native long Transaction_getVersionstamp(long cPtr);
+
 	private native long Transaction_getApproximateSize(long cPtr);
+
 	private native long Transaction_onError(long cPtr, int errorCode);
+
 	private native void Transaction_dispose(long cPtr);
+
 	private native void Transaction_reset(long cPtr);
+
 	private native long Transaction_watch(long ptr, byte[] key) throws FDBException;
+
 	private native void Transaction_cancel(long cPtr);
+
 	private native long Transaction_getKeyLocations(long cPtr, byte[] key);
+
 	private native long Transaction_getEstimatedRangeSizeBytes(long cPtr, byte[] keyBegin, byte[] keyEnd);
+
 	private native long Transaction_getRangeSplitPoints(long cPtr, byte[] keyBegin, byte[] keyEnd, long chunkSize);
 }

@@ -50,6 +50,7 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/Range.java
   src/main/com/apple/foundationdb/RangeQuery.java
   src/main/com/apple/foundationdb/KeyArrayResult.java
+  src/main/com/apple/foundationdb/RangeReadPredicate.java
   src/main/com/apple/foundationdb/RangeResult.java
   src/main/com/apple/foundationdb/RangeResultInfo.java
   src/main/com/apple/foundationdb/RangeResultSummary.java
@@ -146,6 +147,7 @@ endif()
 target_include_directories(fdb_java PRIVATE ${JNI_INCLUDE_DIRS})
 # libfdb_java.so is loaded by fdb-java.jar and doesn't need to depened on jvm shared libraries.
 target_link_libraries(fdb_java PRIVATE fdb_c)
+target_link_libraries(fdb_java PRIVATE fdb_java_native)
 if(APPLE)
   set_target_properties(fdb_java PROPERTIES SUFFIX ".jnilib")
 endif()
@@ -182,8 +184,8 @@ set(MANIFEST_FILE ${CMAKE_CURRENT_BINARY_DIR}/resources/META-INF/MANIFEST.MF)
 file(WRITE ${MANIFEST_FILE} ${MANIFEST_TEXT})
 
 add_jar(fdb-java ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES} ${CMAKE_SOURCE_DIR}/LICENSE
-  OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib VERSION ${FDB_VERSION} MANIFEST ${MANIFEST_FILE})
-add_dependencies(fdb-java fdb_java_options fdb_java)
+  OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib VERSION ${FDB_VERSION} MANIFEST ${MANIFEST_FILE} GENERATE_NATIVE_HEADERS fdb_java_native)
+add_dependencies(fdb-java fdb_java_options)
 
 if(NOT OPEN_FOR_IDE)
   set(FAT_JAR_BINARIES "NOTFOUND" CACHE STRING
@@ -264,6 +266,7 @@ if(NOT OPEN_FOR_IDE)
   add_dependencies(fdb-java-tests foundationdb-tests)
   add_custom_target(fat-jar ALL DEPENDS ${target_jar})
   add_dependencies(fat-jar fdb-java)
+  add_dependencies(fat-jar fdb_java)
   add_dependencies(fat-jar copy_lib)
   add_dependencies(packages fat-jar)
 

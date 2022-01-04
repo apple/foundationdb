@@ -103,6 +103,10 @@ set(FDBCLIENT_SRCS
   SimpleConfigTransaction.actor.cpp
   SpecialKeySpace.actor.cpp
   SpecialKeySpace.actor.h
+  ReadAggregate.cpp
+  ReadAggregate.h
+  ReadPredicate.cpp
+  ReadPredicate.h
   ReadYourWrites.actor.cpp
   ReadYourWrites.h
   RestoreInterface.cpp

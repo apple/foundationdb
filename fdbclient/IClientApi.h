@@ -65,6 +65,11 @@ public:
 	                                                     GetRangeLimits limits,
 	                                                     bool snapshot = false,
 	                                                     bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRangeWithPredicate(const KeyRef& begin,
+	                                                        const KeyRef& end,
+	                                                        const StringRef& predicate_name,
+	                                                        const VectorRef<StringRef>& predicate_args,
+	                                                        bool snapshot = false) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) = 0;
 	virtual ThreadFuture<Standalone<StringRef>> getVersionstamp() = 0;
 

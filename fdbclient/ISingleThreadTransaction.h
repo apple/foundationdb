@@ -24,6 +24,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 
@@ -69,6 +70,11 @@ public:
 	                                               GetRangeLimits limits,
 	                                               Snapshot = Snapshot::False,
 	                                               Reverse = Reverse::False) = 0;
+	virtual Future<RangeResult> getRangeWithPredicate(Key begin,
+	                                                  Key end,
+	                                                  Key predicate_name,
+	                                                  Standalone<VectorRef<StringRef>> predicate_args,
+	                                                  Snapshot = Snapshot::False) = 0;
 	virtual Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) = 0;
 	virtual Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& range, int64_t chunkSize) = 0;
 	virtual Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys) = 0;

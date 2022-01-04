@@ -475,6 +475,7 @@ using KeyRange = Standalone<KeyRangeRef>;
 using KeyValue = Standalone<KeyValueRef>;
 using KeySelector = Standalone<struct KeySelectorRef>;
 using RangeResult = Standalone<struct RangeResultRef>;
+using AggregateResult = Standalone<struct AggregateResultRef>;
 
 enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
@@ -637,6 +638,84 @@ struct GetRangeLimits {
 	bool isValid() const {
 		return (rows >= 0 || rows == ROW_LIMIT_UNLIMITED) && (bytes >= 0 || bytes == BYTE_LIMIT_UNLIMITED) &&
 		       minRows >= 0 && (minRows <= rows || rows == ROW_LIMIT_UNLIMITED);
+	}
+};
+
+struct GetRangePredicate {
+	Standalone<StringRef> predicateName;
+	Standalone<VectorRef<StringRef>> predicateArgs;
+
+	GetRangePredicate() = default;
+	GetRangePredicate(StringRef name) : predicateName(name) {}
+
+	GetRangePredicate& addArg(StringRef arg) {
+		predicateArgs.push_back_deep(predicateArgs.arena(), arg);
+		return *this;
+	}
+
+	bool present() { return !predicateName.empty(); }
+};
+
+// Built-in predicates
+const KeyRef PRED_FIND_IN_VALUE = "std/findInVal"_sr;
+
+struct GetRangeAggregate {
+	Standalone<StringRef> aggregateName;
+	Standalone<VectorRef<StringRef>> aggregateArgs;
+
+	GetRangeAggregate() = default;
+	GetRangeAggregate(StringRef name) : aggregateName(name) {}
+
+	GetRangeAggregate& addArg(StringRef arg) {
+		aggregateArgs.push_back_deep(aggregateArgs.arena(), arg);
+		return *this;
+	}
+
+	bool present() { return !aggregateName.empty(); }
+};
+
+// Built-in aggregates
+const KeyRef AGGR_COUNT = "std/count"_sr;
+
+struct AggregateResultRef {
+	int result; // TODO: what should be the type? Currently assuming only Count as the supported aggregate
+	bool isEmpty;
+	bool more; // True if (but not necessarily only if) values remain in the *key* range requested (possibly beyond the
+	           // limits requested) False implies that no such values remain
+	Optional<KeyRef> readBegin; // First Key read
+	Optional<KeyRef> readEnd; // Last key read
+	Optional<KeyRef> readThrough; // Only present when 'more' is true. When present, this value represent the end (or
+	                              // beginning if reverse) of the range which was read to produce these results. This is
+	                              // guarenteed to be less than the requested range.
+	bool readToBegin;
+	bool readThroughEnd;
+
+	AggregateResultRef() : result(0), isEmpty(true), more(false), readToBegin(false), readThroughEnd(false) {}
+	AggregateResultRef(Arena& p, const AggregateResultRef& toCopy)
+		: result(toCopy.result), isEmpty(toCopy.isEmpty), more(toCopy.more),
+	    readBegin(toCopy.readBegin.present() ? KeyRef(p, toCopy.readBegin.get()) : Optional<KeyRef>()),
+	    readEnd(toCopy.readEnd.present() ? KeyRef(p, toCopy.readEnd.get()) : Optional<KeyRef>()),
+	    readThrough(toCopy.readThrough.present() ? KeyRef(p, toCopy.readThrough.get()) : Optional<KeyRef>()),
+	    readToBegin(toCopy.readToBegin), readThroughEnd(toCopy.readThroughEnd) {}
+	AggregateResultRef(const int result, bool isEmpty, bool more, Optional<KeyRef> readBegin = Optional<KeyRef>(),
+					   Optional<KeyRef> readEnd = Optional<KeyRef>(),
+					   Optional<KeyRef> readThrough = Optional<KeyRef>())
+		: result(result), isEmpty(isEmpty), more(more), readThrough(readThrough), readToBegin(false), readThroughEnd(false) {
+	}
+	AggregateResultRef(bool readToBegin, bool readThroughEnd)
+	  : more(false), readToBegin(readToBegin), readThroughEnd(readThroughEnd) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, result, isEmpty, more, readBegin, readEnd, readThrough, readToBegin, readThroughEnd);
+	}
+
+	std::string toString() const {
+		return "result:" + std::to_string(result) + "isEmpty:" + std::to_string(isEmpty) + "more:" + std::to_string(more) +
+		       " readThrough:" + (readBegin.present() ? readBegin.get().toString() : "[unset]") +
+		       " readThrough:" + (readEnd.present() ? readEnd.get().toString() : "[unset]") +
+		       " readThrough:" + (readThrough.present() ? readThrough.get().toString() : "[unset]") +
+		       " readToBegin:" + std::to_string(readToBegin) + " readThroughEnd:" + std::to_string(readThroughEnd);
 	}
 };
 

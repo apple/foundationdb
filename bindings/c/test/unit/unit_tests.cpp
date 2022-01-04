@@ -2358,6 +2358,16 @@ TEST_CASE("commit_does_not_reset") {
 	}
 }
 
+TEST_CASE("get_range_with_predicate stub") {
+	FDBTransaction* tr;
+	fdb_check(fdb_database_create_transaction(db, &tr));
+	FDBFuture* f = fdb_transaction_get_range_with_predicate(
+	    tr, (const uint8_t*)"hello", 5, (const uint8_t*)"world", 5, (const uint8_t*)"predicate", 9, {}, {}, 0, true);
+	CHECK(fdb_future_get_error(f) == 1);
+	fdb_future_destroy(f);
+	fdb_transaction_destroy(tr);
+}
+
 int main(int argc, char** argv) {
 	if (argc < 3) {
 		std::cout << "Unit tests for the FoundationDB C API.\n"

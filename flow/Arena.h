@@ -34,6 +34,7 @@
 #include <stdint.h>
 #include <string>
 #include <cstring>
+#include <string_view>
 #include <limits>
 #include <optional>
 #include <set>
@@ -515,6 +516,8 @@ public:
 	}
 
 	std::string toString() const { return std::string((const char*)data, length); }
+
+	std::string_view toStringView() const { return std::string_view((const char*)data, length); }
 
 	static bool isPrintable(char c) { return c > 32 && c < 127; }
 	inline std::string printable() const;

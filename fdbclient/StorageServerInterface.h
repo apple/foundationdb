@@ -66,6 +66,7 @@ struct StorageServerInterface {
 	// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 	// selector offset prevents all data from being read in one range read
 	RequestStream<struct GetKeyValuesRequest> getKeyValues;
+	RequestStream<struct GetKeyValuesAggregateRequest> getKeyValuesAggregate;
 	RequestStream<struct GetKeyValuesAndFlatMapRequest> getKeyValuesAndFlatMap;
 
 	RequestStream<struct GetShardStateRequest> getShardState;
@@ -108,6 +109,7 @@ struct StorageServerInterface {
 			if (Ar::isDeserializing) {
 				getKey = RequestStream<struct GetKeyRequest>(getValue.getEndpoint().getAdjustedEndpoint(1));
 				getKeyValues = RequestStream<struct GetKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(2));
+				getKeyValuesAggregate = RequestStream<struct GetKeyValuesAggregateRequest>(getValue.getEndpoint().getAdjustedEndpoint(2));
 				getShardState =
 				    RequestStream<struct GetShardStateRequest>(getValue.getEndpoint().getAdjustedEndpoint(3));
 				waitMetrics = RequestStream<struct WaitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(4));
@@ -167,6 +169,7 @@ struct StorageServerInterface {
 		streams.push_back(getValue.getReceiver(TaskPriority::LoadBalancedEndpoint));
 		streams.push_back(getKey.getReceiver(TaskPriority::LoadBalancedEndpoint));
 		streams.push_back(getKeyValues.getReceiver(TaskPriority::LoadBalancedEndpoint));
+		streams.push_back(getKeyValuesAggregate.getReceiver(TaskPriority::LoadBalancedEndpoint));
 		streams.push_back(getShardState.getReceiver());
 		streams.push_back(waitMetrics.getReceiver());
 		streams.push_back(splitMetrics.getReceiver());
@@ -313,12 +316,80 @@ struct GetKeyValuesRequest : TimedRequest {
 	bool isFetchKeys;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
+	Optional<StringRef> predicateName;
+	VectorRef<StringRef> predicateArgs;
 	ReplyPromise<GetKeyValuesReply> reply;
 
 	GetKeyValuesRequest() : isFetchKeys(false) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
+		serializer(ar,
+		           begin,
+		           end,
+		           version,
+		           limit,
+		           limitBytes,
+		           isFetchKeys,
+		           tags,
+		           debugID,
+		           predicateName,
+		           predicateArgs,
+		           reply,
+		           spanContext,
+		           arena);
+	}
+};
+
+struct GetKeyValuesAggregateReply : public LoadBalancedReply {
+	constexpr static FileIdentifier file_identifier = 1783057;
+	Arena arena;
+	int aggrResult; // TODO: NEELAM: result of the aggregate over a range - what should be the data type?
+	Optional<KeyRef> readBegin; // First Key read
+	Optional<KeyRef> readEnd; // Last key read
+	Version version; // useful when latestVersion was requested
+	bool resultEmpty = true;
+	bool cached = false;
+
+	GetKeyValuesAggregateReply() : aggrResult(0), version(invalidVersion), resultEmpty(true), cached(false) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, aggrResult, readBegin, readEnd, version, resultEmpty, cached, arena);
+	}
+};
+
+struct GetKeyValuesAggregateRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 6795757;
+	SpanID spanContext;
+	Arena arena;
+	KeySelectorRef begin, end;
+	Version version; // or latestVersion
+	bool isFetchKeys;
+	Optional<TagSet> tags;
+	Optional<UID> debugID;
+	Optional<StringRef> predicateName;
+	VectorRef<StringRef> predicateArgs;
+	Optional<StringRef> aggregateName;
+	VectorRef<StringRef> aggregateArgs;
+	ReplyPromise<GetKeyValuesAggregateReply> reply;
+
+	GetKeyValuesAggregateRequest() : isFetchKeys(false) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar,
+		           begin,
+		           end,
+		           version,
+				   isFetchKeys,
+		           tags,
+		           debugID,
+		           predicateName,
+		           predicateArgs,
+		           aggregateName,
+		           aggregateArgs,
+		           reply,
+		           spanContext,
+		           arena);
 	}
 };
 

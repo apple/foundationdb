@@ -110,6 +110,11 @@ public:
 	                                       GetRangeLimits limits,
 	                                       Snapshot = Snapshot::False,
 	                                       Reverse = Reverse::False) override;
+	Future<RangeResult> getRangeWithPredicate(Key begin,
+	                                          Key end,
+	                                          Key predicate_name,
+	                                          Standalone<VectorRef<StringRef>> predicate_args,
+	                                          Snapshot = Snapshot::False) override;
 
 	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key) override;
 	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range, int64_t chunkSize) override;

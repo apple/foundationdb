@@ -291,6 +291,18 @@ public:
 		                reverse);
 	}
 
+	[[nodiscard]] Future<RangeResult> getRangeWithPredicate(const KeySelector& begin,
+	                                                        const KeySelector& end,
+	                                                        GetRangeLimits limits,
+	                                                        GetRangePredicate predicate,
+	                                                        Snapshot = Snapshot::False,
+	                                                        Reverse = Reverse::False);
+
+	[[nodiscard]] Future<AggregateResult> getRangeAggregate(const KeySelector& begin,
+															const KeySelector& end,
+															GetRangePredicate predicate,
+															GetRangeAggregate aggregate);
+
 	[[nodiscard]] Future<RangeResult> getRangeAndFlatMap(const KeySelector& begin,
 	                                                     const KeySelector& end,
 	                                                     const Key& mapper,
@@ -304,8 +316,15 @@ private:
 	                                     const KeySelector& end,
 	                                     const Key& mapper,
 	                                     GetRangeLimits limits,
+	                                     GetRangePredicate predicate,
 	                                     Snapshot snapshot,
 	                                     Reverse reverse);
+
+	//template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
+	Future<AggregateResult> getRangeAggregateInternal(const KeySelector& begin,
+	                                     const KeySelector& end,
+	                                     GetRangePredicate predicate,
+	                                     GetRangeAggregate aggregate);
 
 public:
 	// A method for streaming data from the storage server that is more efficient than getRange when reading large

@@ -232,6 +232,25 @@ void TSS_traceMismatch(TraceEvent& event,
 }
 
 template <>
+bool TSS_doCompare(const GetKeyValuesAggregateReply& src, const GetKeyValuesAggregateReply& tss) {
+	return true;
+}
+
+template <>
+const char* TSS_mismatchTraceName(const GetKeyValuesAggregateRequest& req) {
+	ASSERT(false);
+	return "";
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const GetKeyValuesAggregateRequest& req,
+                       const GetKeyValuesAggregateReply& src,
+                       const GetKeyValuesAggregateReply& tss) {
+	ASSERT(false);
+}
+
+template <>
 bool TSS_doCompare(const WatchValueReply& src, const WatchValueReply& tss) {
 	// We duplicate watches just for load, no need to validate replies.
 	return true;
@@ -394,6 +413,9 @@ void TSSMetrics::recordLatency(const GetKeyValuesRequest& req, double ssLatency,
 	SSgetKeyValuesLatency.addSample(ssLatency);
 	TSSgetKeyValuesLatency.addSample(tssLatency);
 }
+
+template <>
+void TSSMetrics::recordLatency(const GetKeyValuesAggregateRequest& req, double ssLatency, double tssLatency) {}
 
 template <>
 void TSSMetrics::recordLatency(const GetKeyValuesAndFlatMapRequest& req, double ssLatency, double tssLatency) {

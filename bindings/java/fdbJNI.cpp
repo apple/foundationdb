@@ -20,6 +20,20 @@
 
 #include <jni.h>
 #include <string.h>
+#include <vector>
+#include "com_apple_foundationdb_FDB.h"
+#include "com_apple_foundationdb_FDBDatabase.h"
+#include "com_apple_foundationdb_FDBTransaction.h"
+#include "com_apple_foundationdb_FutureInt64.h"
+#include "com_apple_foundationdb_FutureKey.h"
+#include "com_apple_foundationdb_FutureKeyArray.h"
+#include "com_apple_foundationdb_FutureResult.h"
+#include "com_apple_foundationdb_FutureResults.h"
+#include "com_apple_foundationdb_FutureStrings.h"
+#include "com_apple_foundationdb_NativeFuture.h"
+#include "com_apple_foundationdb_testing_AbstractWorkload.h"
+#include "com_apple_foundationdb_testing_Promise.h"
+#include "com_apple_foundationdb_testing_WorkloadContext.h"
 
 #define FDB_API_VERSION 710
 
@@ -279,9 +293,9 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureInt64_FutureInt64_1get
 	return (jlong)value;
 }
 
-JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureStrings_FutureStrings_1get(JNIEnv* jenv,
-                                                                                       jobject,
-                                                                                       jlong future) {
+JNIEXPORT jobjectArray JNICALL Java_com_apple_foundationdb_FutureStrings_FutureStrings_1get(JNIEnv* jenv,
+                                                                                            jobject,
+                                                                                            jlong future) {
 	if (!future) {
 		throwParamNotNull(jenv);
 		return JNI_NULL;
@@ -500,7 +514,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureResult_FutureResu
 	return result;
 }
 
-JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1get(JNIEnv* jenv, jclass, jlong future) {
+JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1get(JNIEnv* jenv, jobject, jlong future) {
 	if (!future) {
 		throwParamNotNull(jenv);
 		return JNI_NULL;
@@ -823,6 +837,87 @@ Java_com_apple_foundationdb_FDBTransaction_Transaction_1getRangeAndFlatMap(JNIEn
 	jenv->ReleaseByteArrayElements(keyBeginBytes, (jbyte*)barrBegin, JNI_ABORT);
 	jenv->ReleaseByteArrayElements(keyEndBytes, (jbyte*)barrEnd, JNI_ABORT);
 	jenv->ReleaseByteArrayElements(mapperBytes, (jbyte*)barrMapper, JNI_ABORT);
+	return (jlong)f;
+}
+
+namespace {
+// RAII helper for jni arrays
+struct ByteArray {
+	JNIEnv* jenv;
+	jbyteArray java_array;
+	uint8_t* pointer;
+	operator bool() { return pointer; }
+	explicit ByteArray(JNIEnv* jenv, jbyteArray arr) : jenv(jenv), java_array(arr) {
+		pointer = (uint8_t*)jenv->GetByteArrayElements(arr, JNI_NULL);
+	}
+	~ByteArray() {
+		if (pointer) {
+			jenv->ReleaseByteArrayElements(java_array, (jbyte*)pointer, JNI_ABORT);
+		}
+	}
+};
+} // namespace
+
+JNIEXPORT jlong JNICALL
+Java_com_apple_foundationdb_FDBTransaction_Transaction_1getRangeWithPredicate(JNIEnv* jenv,
+                                                                              jobject,
+                                                                              jlong tPtr,
+                                                                              jbyteArray begin,
+                                                                              jbyteArray end,
+                                                                              jbyteArray predicate_name,
+                                                                              jobjectArray predicate_args,
+                                                                              jboolean snapshot) {
+	if (!tPtr || !begin || !end || !predicate_name || !predicate_args) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBTransaction* tr = (FDBTransaction*)tPtr;
+	ByteArray begin_arr{ jenv, begin };
+	if (!begin_arr) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+	ByteArray end_arr{ jenv, end };
+	if (!end_arr) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+	ByteArray predicate_name_arr{ jenv, predicate_name };
+	if (!predicate_name_arr) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+	std::vector<ByteArray> args; // Just for ownership
+	std::vector<const uint8_t*> arg_pointers; // Massage into c api acceptable format
+	std::vector<int> arg_lengths; // Massage into c api acceptable format
+	int arg_count = jenv->GetArrayLength(predicate_args);
+	args.reserve(arg_count);
+	arg_pointers.reserve(arg_count);
+	arg_lengths.reserve(arg_count);
+	for (int i = 0; i < arg_count; ++i) {
+		args.emplace_back(jenv, (jbyteArray)jenv->GetObjectArrayElement(predicate_args, i));
+		if (!args.back()) {
+			if (!jenv->ExceptionOccurred())
+				throwRuntimeEx(jenv, "Error getting handle to native resources");
+			return 0;
+		}
+		arg_pointers.push_back(args.back().pointer);
+		arg_lengths.push_back(jenv->GetArrayLength(args.back().java_array));
+	}
+	FDBFuture* f = fdb_transaction_get_range_with_predicate(tr,
+	                                                        begin_arr.pointer,
+	                                                        jenv->GetArrayLength(begin),
+	                                                        end_arr.pointer,
+	                                                        jenv->GetArrayLength(end),
+	                                                        predicate_name_arr.pointer,
+	                                                        jenv->GetArrayLength(predicate_name),
+	                                                        &arg_pointers[0],
+	                                                        &arg_lengths[0],
+	                                                        arg_count,
+	                                                        (fdb_bool_t)snapshot);
 	return (jlong)f;
 }
 

@@ -24,6 +24,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "flow/Arena.h"
 
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't
 // call addRef (e.g. C API follows this). Therefore, it is unsafe to call (explicitly or implicitly) this->addRef in any
@@ -272,6 +273,22 @@ ThreadFuture<RangeResult> ThreadSafeTransaction::getRangeAndFlatMap(const KeySel
 	return onMainThread([tr, b, e, h, limits, snapshot, reverse]() -> Future<RangeResult> {
 		tr->checkDeferredError();
 		return tr->getRangeAndFlatMap(b, e, h, limits, Snapshot{ snapshot }, Reverse{ reverse });
+	});
+}
+
+ThreadFuture<RangeResult> ThreadSafeTransaction::getRangeWithPredicate(const KeyRef& begin,
+                                                                       const KeyRef& end,
+                                                                       const StringRef& predicate_name,
+                                                                       const VectorRef<StringRef>& predicate_args,
+                                                                       bool snapshot) {
+	Key b = begin;
+	Key e = end;
+	Standalone<StringRef> p = predicate_name;
+	Standalone<VectorRef<StringRef>> as = predicate_args;
+	ISingleThreadTransaction* tr = this->tr;
+	return onMainThread([tr, b, e, p, as, snapshot]() -> Future<RangeResult> {
+		tr->checkDeferredError();
+		return tr->getRangeWithPredicate(b, e, p, as, Snapshot{ snapshot });
 	});
 }
 
