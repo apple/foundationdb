@@ -46,11 +46,10 @@ void DatabaseConfiguration::resetInternal() {
 	backupWorkerEnabled = false;
 	perpetualStorageWiggleSpeed = 0;
 	storageMigrationType = StorageMigrationType::DEFAULT;
-	// TODO: NEELAM: should we have defaults?
 	consistencyScanEnabled = false;
 	consistencyScanRestart = 1;
-	consistencyScanMaxRate = 0;
-	consistencyScanInterval = 0;
+	consistencyScanMaxRate = CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX;
+	consistencyScanInterval = CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME;
 }
 
 void parse(int* i, ValueRef const& v) {

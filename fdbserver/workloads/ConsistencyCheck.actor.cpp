@@ -1167,7 +1167,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state int i = self->clientId * (self->shardSampleFactor + 1);
 		state int increment =
 		    (self->distributed && !self->firstClient) ? effectiveClientCount * self->shardSampleFactor : 1;
-		// TODO: NEELAM: take maxRate and interval into account
+		// TODO: NEELAM: take maxRate and targetInterval into account
 		state int rateLimitForThisRound =
 		    self->bytesReadInPreviousRound == 0
 		        ? self->rateLimitMax
@@ -1180,7 +1180,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Reference<IRateControl> rateLimiter = Reference<IRateControl>(new SpeedLimit(rateLimitForThisRound, 1));
 		state double rateLimiterStartTime = now();
 		state int64_t bytesReadInthisRound = 0;
-		state bool resume = !(self->restart);
+		state bool resume = !(self->restart || self->shuffleShards);
 		state KeyRef prevReadKey;
 
 		state double dbSize = 100e12;
@@ -1204,7 +1204,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state std::vector<KeyRangeRef> ranges;
 
 		for (int k = 0; k < keyLocations.size() - 1; k++) {
-			// TODO: NEELAM: check is this is sufficient
+			// TODO: NEELAM: check if this is sufficient
 			if (resume && keyLocations[k].key < prevReadKey) {
 				TraceEvent("ConsistencyCheck_SkippingRange")
 				    .detail("KeyBegin", keyLocations[k].key.toString())
@@ -1390,11 +1390,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString());
 								current = _current;
 							} catch (Error& e) {
-								if (e.code() != error_code_end_of_stream) {
+								if (e.code() != error_code_end_of_stream || e.code() == error_code_operation_cancelled) {
 									// If the data is not available and we aren't relocating this shard
 									if (!isRelocating) {
+										printf("Error %d - %s\n", e.code(), e.name());
 										TraceEvent("ConsistencyCheck_StorageServerUnavailable")
 										    .suppressFor(1.0)
+											.detail("ErrorName",e.name())
 										    .detail("StorageServer", storageServers[j])
 										    .detail("ShardBegin", printable(range.begin))
 										    .detail("ShardEnd", printable(range.end))

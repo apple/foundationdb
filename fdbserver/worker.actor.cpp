@@ -1688,7 +1688,7 @@ ACTOR Future<Void> workerServer(Reference<ClusterConnectionFile> connFile,
 
 				if (ckInterf->get().present()) {
 					recruited = ckInterf->get().get();
-					TEST(true); // Recruited while already a consistencychecker. // TODO: NEELAM: what does that mean?
+					TEST(true); // Recruited while already a consistencychecker.
 				} else {
 					startRole(Role::CONSISTENCYCHECKER, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);

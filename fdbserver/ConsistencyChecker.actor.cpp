@@ -38,16 +38,10 @@
 struct ConsistencyCheckerData {
 	UID id;
 	Database db;
-	// TODO: NEELAM: we probably dont need to keep the next three fields here
-	// bool state;
-	// double maxRate;
-	// double targetInterval;
 
 	DatabaseConfiguration configuration;
 	PromiseStream<Future<Void>> addActor;
 
-	// ConsistencyCheckerData(UID id, Database db, double maxRate, double targetInterval)
-	//   : id(id), db(db), maxRate(maxRate), targetInterval(targetInterval) {}
 	ConsistencyCheckerData(UID id, Database db) : id(id), db(db) {}
 };
 
@@ -65,7 +59,6 @@ ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf,
 
 	TraceEvent("ConsistencyCheckerStarting", ckInterf.id()).log();
 	self.addActor.send(waitFailureServer(ckInterf.waitFailure.getFuture()));
-	// self.addActor.send(configurationMonitor(&self)); //TODO: NEELAM: do we need this? maybe not
 
 	self.addActor.send(traceRole(Role::CONSISTENCYCHECKER, ckInterf.id()));
 
