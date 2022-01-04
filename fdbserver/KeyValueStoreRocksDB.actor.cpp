@@ -860,7 +860,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			writeBatch.reset(new rocksdb::WriteBatch());
 		}
 
-		writeBatch->DeleteRange(toSlice(keyRange.begin), toSlice(keyRange.end));
+		if (keyRange.singleKeyRange()) {
+			writeBatch->Delete(toSlice(keyRange.begin));
+		} else {
+			writeBatch->DeleteRange(toSlice(keyRange.begin), toSlice(keyRange.end));
+		}
 	}
 
 	Future<Void> commit(bool) override {
@@ -1015,7 +1019,63 @@ IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
 
 namespace {
 
-TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/Reopen") {
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/RocksDBBasic") {
+	state const std::string rocksDBTestDir = "rocksdb-kvstore-basic-test-db";
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+
+	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	state StringRef foo = "foo"_sr;
+	state StringRef bar = "ibar"_sr;
+	kvStore->set({ foo, foo });
+	kvStore->set({ keyAfter(foo), keyAfter(foo) });
+	kvStore->set({ bar, bar });
+	kvStore->set({ keyAfter(bar), keyAfter(bar) });
+	wait(kvStore->commit(false));
+
+	{
+		Optional<Value> val = wait(kvStore->readValue(foo));
+		ASSERT(foo == val.get());
+	}
+
+	// Test single key deletion.
+	kvStore->clear(singleKeyRange(foo));
+	wait(kvStore->commit(false));
+
+	{
+		Optional<Value> val = wait(kvStore->readValue(foo));
+		ASSERT(!val.present());
+	}
+
+	{
+		Optional<Value> val = wait(kvStore->readValue(keyAfter(foo)));
+		ASSERT(keyAfter(foo) == val.get());
+	}
+
+	// Test range deletion.
+	kvStore->clear(KeyRangeRef(keyAfter(foo), keyAfter(bar)));
+	wait(kvStore->commit(false));
+
+	{
+		Optional<Value> val = wait(kvStore->readValue(bar));
+		ASSERT(!val.present());
+	}
+
+	{
+		Optional<Value> val = wait(kvStore->readValue(keyAfter(bar)));
+		ASSERT(keyAfter(bar) == val.get());
+	}
+
+	Future<Void> closed = kvStore->onClosed();
+	kvStore->close();
+	wait(closed);
+
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+	return Void();
+}
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/RocksDBReopen") {
 	state const std::string rocksDBTestDir = "rocksdb-kvstore-reopen-test-db";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
