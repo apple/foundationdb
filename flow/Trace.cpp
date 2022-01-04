@@ -367,7 +367,7 @@ public:
 			fields.addField("Roles", r.rolesString);
 		}
 
-		for (auto field : universalFields) {
+		for (auto const& field : universalFields) {
 			fields.addField(field.first, field.second);
 		}
 
