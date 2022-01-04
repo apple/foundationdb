@@ -124,6 +124,8 @@ public:
 		sav->sendError(exc);
 	}
 
+	void send(Never) { sendError(never_reply()); }
+
 	Future<T> getFuture() const {
 		sav->addFutureRef();
 		return Future<T>(sav);
