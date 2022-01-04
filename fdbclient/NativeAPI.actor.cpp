@@ -4308,6 +4308,7 @@ Transaction::~Transaction() {
 void Transaction::operator=(Transaction&& r) noexcept {
 	flushTrLogsIfEnabled();
 	tr = std::move(r.tr);
+	readVersion = std::move(r.readVersion);
 	trState = std::move(r.trState);
 	metadataVersion = std::move(r.metadataVersion);
 	extraConflictRanges = std::move(r.extraConflictRanges);
@@ -4318,7 +4319,7 @@ void Transaction::operator=(Transaction&& r) noexcept {
 }
 
 void Transaction::flushTrLogsIfEnabled() {
-	if (trState->trLogInfo && trState->trLogInfo->logsAdded && trState->trLogInfo->trLogWriter.getData()) {
+	if (trState && trState->trLogInfo && trState->trLogInfo->logsAdded && trState->trLogInfo->trLogWriter.getData()) {
 		ASSERT(trState->trLogInfo->flushed == false);
 		trState->cx->clientStatusUpdater.inStatusQ.push_back(
 		    { trState->trLogInfo->identifier, std::move(trState->trLogInfo->trLogWriter) });
@@ -6372,17 +6373,28 @@ Future<std::pair<Optional<StorageMetrics>, int>> DatabaseContext::waitStorageMet
     StorageMetrics const& permittedError,
     int shardLimit,
     int expectedShardCount) {
-	return ::waitStorageMetrics(Database(this), keys, min, max, permittedError, shardLimit, expectedShardCount);
+	return ::waitStorageMetrics(Database(Reference<DatabaseContext>::addRef(this)),
+	                            keys,
+	                            min,
+	                            max,
+	                            permittedError,
+	                            shardLimit,
+	                            expectedShardCount);
 }
 
 Future<StorageMetrics> DatabaseContext::getStorageMetrics(KeyRange const& keys, int shardLimit) {
 	if (shardLimit > 0) {
 		StorageMetrics m;
 		m.bytes = -1;
-		return extractMetrics(
-		    ::waitStorageMetrics(Database(this), keys, StorageMetrics(), m, StorageMetrics(), shardLimit, -1));
+		return extractMetrics(::waitStorageMetrics(Database(Reference<DatabaseContext>::addRef(this)),
+		                                           keys,
+		                                           StorageMetrics(),
+		                                           m,
+		                                           StorageMetrics(),
+		                                           shardLimit,
+		                                           -1));
 	} else {
-		return ::getStorageMetricsLargeKeyRange(Database(this), keys);
+		return ::getStorageMetricsLargeKeyRange(Database(Reference<DatabaseContext>::addRef(this)), keys);
 	}
 }
 
@@ -6406,7 +6418,7 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 }
 
 Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> DatabaseContext::getReadHotRanges(KeyRange const& keys) {
-	return ::getReadHotRanges(Database(this), keys);
+	return ::getReadHotRanges(Database(Reference<DatabaseContext>::addRef(this)), keys);
 }
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<TransactionState> trState,
@@ -6759,7 +6771,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 Future<Standalone<VectorRef<KeyRef>>> DatabaseContext::splitStorageMetrics(KeyRange const& keys,
                                                                            StorageMetrics const& limit,
                                                                            StorageMetrics const& estimated) {
-	return ::splitStorageMetrics(Database(this), keys, limit, estimated);
+	return ::splitStorageMetrics(Database(Reference<DatabaseContext>::addRef(this)), keys, limit, estimated);
 }
 
 void Transaction::checkDeferredError() const {

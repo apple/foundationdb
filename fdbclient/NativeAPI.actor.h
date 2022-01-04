@@ -238,7 +238,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	Optional<UID> debugID;
 	TaskPriority taskID;
 	SpanID spanID;
-	bool useProvisionalProxies;
+	bool useProvisionalProxies = false;
 
 	int numErrors = 0;
 	double startTime = 0;
