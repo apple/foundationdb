@@ -41,7 +41,7 @@ struct PeekTxsInfo {
 	    knownCommittedVersion(knownCommittedVersion) {}
 };
 
-class LogSystemDiskQueueAdapter : public IDiskQueue {
+class LogSystemDiskQueueAdapter final : public IDiskQueue {
 public:
 	// This adapter is designed to let KeyValueStoreMemory use ILogSystem
 	// as a backing store, so that the transaction subsystem can in

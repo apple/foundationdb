@@ -869,7 +869,7 @@ public:
 	}
 };
 
-class DiskQueue : public IDiskQueue, public Tracked<DiskQueue> {
+class DiskQueue final : public IDiskQueue, public Tracked<DiskQueue> {
 public:
 	// FIXME: Is setting lastCommittedSeq to -1 instead of 0 necessary?
 	DiskQueue(std::string basename,
@@ -1539,7 +1539,7 @@ private:
 // This works by performing two commits when uncommitted data is popped:
 //	Commit 1 - pop only previously committed data and push new data (i.e., commit uncommitted data)
 //  Commit 2 - finish pop into uncommitted data
-class DiskQueue_PopUncommitted : public IDiskQueue {
+class DiskQueue_PopUncommitted final : public IDiskQueue {
 
 public:
 	DiskQueue_PopUncommitted(std::string basename,

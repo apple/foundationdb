@@ -283,7 +283,6 @@ else()
       -Woverloaded-virtual
       -Wshift-sign-overflow
       # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 11
-      -Wno-delete-non-virtual-dtor
       -Wno-sign-compare
       -Wno-undefined-var-template
       -Wno-unknown-warning-option
