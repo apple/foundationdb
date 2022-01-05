@@ -5368,18 +5368,18 @@ ACTOR Future<Void> watchBlobGranulesConfigKey(ClusterControllerData* self) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			state Future<Void> watch = tr->watch(blobGranuleConfigKey);
-			wait(tr->commit());
-			wait(watch);
+			Optional<Value> blobConfig = wait(tr->get(blobGranuleConfigKey));
+			if (blobConfig.present()) {
+				self->db.blobGranulesEnabled.set(blobConfig.get() == LiteralStringRef("1"));
+			}
 
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			Optional<Value> blobConfig = wait(tr->get(blobGranuleConfigKey));
-			if (blobConfig.present()) {
-				self->db.blobGranulesEnabled.set(blobConfig.get() == LiteralStringRef("1"));
-			}
+			state Future<Void> watch = tr->watch(blobGranuleConfigKey);
+			wait(tr->commit());
+			wait(watch);
 		} catch (Error& e) {
 			wait(tr->onError(e));
 		}

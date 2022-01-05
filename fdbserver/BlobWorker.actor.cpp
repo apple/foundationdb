@@ -1162,9 +1162,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		}
 
 		if (BW_DEBUG) {
-			fmt::print("Granule File Updater Starting for [{0} - {1}):\n",
+			fmt::print("Granule File Updater Starting for [{0} - {1}) @ ({2}, {3}):\n",
 			           metadata->keyRange.begin.printable(),
-			           metadata->keyRange.end.printable());
+			           metadata->keyRange.end.printable(),
+			           metadata->originalEpoch,
+			           metadata->originalSeqno);
 			fmt::print("  CFID: {}\n", startState.granuleID.toString());
 			fmt::print("  CF Start Version: {}\n", startState.changeFeedStartVersion);
 			fmt::print("  Previous Durable Version: {}\n", startState.previousDurableVersion);
@@ -2654,11 +2656,13 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 		return Void();
 	} catch (Error& e) {
 		if (BW_DEBUG) {
-			printf("AssignRange [%s - %s) in BW %s got error %s\n",
-			       req.keyRange.begin.printable().c_str(),
-			       req.keyRange.end.printable().c_str(),
-			       bwData->id.toString().c_str(),
-			       e.name());
+			fmt::print("AssignRange [{0} - {1}) ({2}, {3}) in BW {4} got error {5}\n",
+			           req.keyRange.begin.printable().c_str(),
+			           req.keyRange.end.printable().c_str(),
+			           req.managerEpoch,
+			           req.managerSeqno,
+			           bwData->id.toString().c_str(),
+			           e.name());
 		}
 
 		if (!isSelfReassign) {
@@ -2687,10 +2691,12 @@ ACTOR Future<Void> handleRangeRevoke(Reference<BlobWorkerData> bwData, RevokeBlo
 	} catch (Error& e) {
 		// FIXME: retry on error if dispose fails?
 		if (BW_DEBUG) {
-			printf("RevokeRange [%s - %s) got error %s\n",
-			       req.keyRange.begin.printable().c_str(),
-			       req.keyRange.end.printable().c_str(),
-			       e.name());
+			fmt::print("RevokeRange [{0} - {1}) ({2}, {3}) got error {4}\n",
+			           req.keyRange.begin.printable(),
+			           req.keyRange.end.printable(),
+			           req.managerEpoch,
+			           req.managerSeqno,
+			           e.name());
 		}
 		if (canReplyWith(e)) {
 			req.reply.sendError(e);

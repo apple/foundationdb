@@ -448,7 +448,25 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 		state KeyRange last;
 		state bool availabilityPassed = true;
-		state Standalone<VectorRef<KeyRangeRef>> allRanges = self->granuleRanges.get();
+
+		state Standalone<VectorRef<KeyRangeRef>> allRanges;
+		if (self->granuleRanges.get().empty()) {
+			if (BGV_DEBUG) {
+				fmt::print("Waiting to get granule ranges for check\n");
+			}
+			state Future<Void> rangeFetcher = self->findGranules(cx, self);
+			loop {
+				wait(self->granuleRanges.onChange());
+				if (!self->granuleRanges.get().empty()) {
+					break;
+				}
+			}
+			rangeFetcher.cancel();
+			if (BGV_DEBUG) {
+				fmt::print("Got granule ranges for check\n");
+			}
+		}
+		allRanges = self->granuleRanges.get();
 		for (auto& range : allRanges) {
 			state KeyRange r = range;
 			if (BGV_DEBUG) {
@@ -502,7 +520,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		fmt::print("  {} bytes\n", self->bytesRead);
 		// FIXME: add above as details
 		TraceEvent("BlobGranuleVerifierChecked");
-		return availabilityPassed && self->mismatches == 0 && checks > 0 && self->timeTravelTooOld == 0;
+		return availabilityPassed && self->mismatches == 0 && (checks > 0) && (self->timeTravelTooOld == 0);
 	}
 
 	Future<bool> check(Database const& cx) override { return _check(cx, this); }

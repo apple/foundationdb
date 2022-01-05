@@ -286,6 +286,10 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 ACTOR Future<UID> pickWorkerForAssign(BlobManagerData* bmData) {
 	// wait until there are BWs to pick from
 	while (bmData->workerStats.size() == 0) {
+		// TODO REMOVE
+		if (BM_DEBUG) {
+			printf("BM waiting for blob workers before assigning granules\n");
+		}
 		bmData->restartRecruiting.trigger();
 		wait(bmData->recruitingStream.onChange());
 	}
@@ -523,6 +527,37 @@ ACTOR Future<Void> checkManagerLock(Reference<ReadYourWritesTransaction> tr, Blo
 	return Void();
 }
 
+ACTOR Future<Void> writeInitialGranuleMapping(BlobManagerData* bmData, Standalone<VectorRef<KeyRef>> boundaries) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
+	// don't do too many in one transaction
+	state int i = 0;
+	state int transactionChunkSize = BUGGIFY ? deterministicRandom()->randomInt(2, 5) : 1000;
+	while (i < boundaries.size() - 1) {
+		TEST(i > 0); // multiple transactions for large granule split
+		tr->reset();
+		tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
+		tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
+		state int j = 0;
+		while (i + j < boundaries.size() - 1 && j < transactionChunkSize) {
+			// TODO REMOVE
+			if (BM_DEBUG) {
+				printf("Persisting initial mapping for [%s - %s)\n",
+				       boundaries[i + j].printable().c_str(),
+				       boundaries[i + j + 1].printable().c_str());
+			}
+			// set to empty UID - no worker assigned yet
+			wait(krmSetRange(tr,
+			                 blobGranuleMappingKeys.begin,
+			                 KeyRangeRef(boundaries[i + j], boundaries[i + j + 1]),
+			                 blobGranuleMappingValueFor(UID())));
+			j++;
+		}
+		wait(tr->commit());
+		i += j;
+	}
+	return Void();
+}
+
 // FIXME: this does all logic in one transaction. Adding a giant range to an existing database to blobify would
 // require doing a ton of storage metrics calls, which we should split up across multiple transactions likely.
 ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
@@ -569,7 +604,7 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 				}
 
 				for (auto f : splitFutures) {
-					Standalone<VectorRef<KeyRef>> splits = wait(f);
+					state Standalone<VectorRef<KeyRef>> splits = wait(f);
 					if (BM_DEBUG) {
 						printf("Split client range [%s - %s) into %d ranges:\n",
 						       splits[0].printable().c_str(),
@@ -577,21 +612,22 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 						       splits.size() - 1);
 					}
 
+					// Write to DB BEFORE sending assign requests, so that if manager dies before/during, new manager
+					// picks up the same ranges
+					wait(writeInitialGranuleMapping(bmData, splits));
+
 					for (int i = 0; i < splits.size() - 1; i++) {
 						KeyRange range = KeyRange(KeyRangeRef(splits[i], splits[i + 1]));
 						// only add the client range if this is the first BM or it's not already assigned
-						if (bmData->epoch == 1 || bmData->workerAssignments.intersectingRanges(range).empty()) {
-							if (BM_DEBUG) {
-								printf(
-								    "    [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
-							}
-
-							RangeAssignment ra;
-							ra.isAssign = true;
-							ra.keyRange = range;
-							ra.assign = RangeAssignmentData(); // type=normal
-							bmData->rangesToAssign.send(ra);
+						if (BM_DEBUG) {
+							printf("    [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
 						}
+
+						RangeAssignment ra;
+						ra.isAssign = true;
+						ra.keyRange = range;
+						ra.assign = RangeAssignmentData(); // type=normal
+						bmData->rangesToAssign.send(ra);
 					}
 				}
 
@@ -1086,6 +1122,7 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 					// note: if the old owner is dead, we handle this in rangeAssigner
 					UID existingOwner = decodeBlobGranuleMappingValue(results[rangeIdx].value);
 					workerAssignments.insert(KeyRangeRef(granuleStartKey, granuleEndKey), existingOwner);
+					bmData->knownBlobRanges.insert(KeyRangeRef(granuleStartKey, granuleEndKey), true);
 				}
 			}
 
@@ -1137,6 +1174,8 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 			wait(tr->onError(e));
 		}
 	}
+
+	bmData->knownBlobRanges.coalesce(normalKeys);
 
 	// Step 3. Send assign requests for all the granules and transfer assignments
 	// from local workerAssignments to bmData

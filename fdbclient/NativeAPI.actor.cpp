@@ -6508,7 +6508,7 @@ Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange 
 	return ::getRangeSplitPoints(cx, keys, chunkSize);
 }
 
-#define BG_REQUEST_DEBUG false
+#define BG_REQUEST_DEBUG true
 
 // the blob granule requests are a bit funky because they piggyback off the existing transaction to read from the system
 // keyspace
@@ -6619,6 +6619,14 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		}
 
 		workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
+		if (workerId == UID()) {
+			if (BG_REQUEST_DEBUG) {
+				printf("Key range [%s - %s) has no assigned worker yet!\n",
+				       granuleStartKey.printable().c_str(),
+				       granuleEndKey.printable().c_str());
+			}
+			throw transaction_too_old();
+		}
 		if (BG_REQUEST_DEBUG) {
 			printf("  [%s - %s): %s\n",
 			       granuleStartKey.printable().c_str(),
