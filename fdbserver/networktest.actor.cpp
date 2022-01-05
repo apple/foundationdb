@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbserver/NetworkTest.h"
 #include "flow/Knobs.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -25,7 +26,7 @@
 #include "flow/UnitTest.h"
 #include <inttypes.h>
 
-UID WLTOKEN_NETWORKTEST(-1, 2);
+constexpr int WLTOKEN_NETWORKTEST = WLTOKEN_FIRST_AVAILABLE;
 
 struct LatencyStats {
 	using sample = double;
@@ -55,7 +56,8 @@ struct LatencyStats {
 	double stddev() { return sqrt(x2 / n - (x / n) * (x / n)); }
 };
 
-NetworkTestInterface::NetworkTestInterface(NetworkAddress remote) : test(Endpoint({ remote }, WLTOKEN_NETWORKTEST)) {}
+NetworkTestInterface::NetworkTestInterface(NetworkAddress remote)
+  : test(Endpoint::wellKnown({ remote }, WLTOKEN_NETWORKTEST)) {}
 
 NetworkTestInterface::NetworkTestInterface(INetwork* local) {
 	test.makeWellKnownEndpoint(WLTOKEN_NETWORKTEST, TaskPriority::DefaultEndpoint);
@@ -583,10 +585,10 @@ struct P2PNetworkTest {
 
 		self->startTime = now();
 
-		printf("%d listeners, %d remotes, %d outgoing connections\n",
-		       self->listeners.size(),
-		       self->remotes.size(),
-		       self->connectionsOut);
+		fmt::print("{0} listeners, {1} remotes, {2} outgoing connections\n",
+		           self->listeners.size(),
+		           self->remotes.size(),
+		           self->connectionsOut);
 
 		for (auto n : self->remotes) {
 			printf("Remote: %s\n", n.toString().c_str());

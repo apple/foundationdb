@@ -38,10 +38,8 @@
 #include "fdbserver/WaitFailure.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-using std::make_pair;
 using std::max;
 using std::min;
-using std::pair;
 
 namespace oldTLog_4_6 {
 
@@ -159,8 +157,8 @@ public:
 	Future<Void> commit() { return queue->commit(); }
 
 	// Implements IClosable
-	Future<Void> getError() override { return queue->getError(); }
-	Future<Void> onClosed() override { return queue->onClosed(); }
+	Future<Void> getError() const override { return queue->getError(); }
+	Future<Void> onClosed() const override { return queue->onClosed(); }
 	void dispose() override {
 		queue->dispose();
 		delete this;
@@ -595,7 +593,7 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 				msg = std::upper_bound(tag->value.version_messages.begin(),
 				                       tag->value.version_messages.end(),
 				                       std::make_pair(currentVersion, LengthPrefixedStringRef()),
-				                       CompareFirst<std::pair<Version, LengthPrefixedStringRef>>());
+				                       [](const auto& l, const auto& r) { return l.first < r.first; });
 			}
 		}
 
@@ -748,7 +746,7 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 				auto it = std::lower_bound(tag->value.version_messages.begin(),
 				                           tag->value.version_messages.end(),
 				                           std::make_pair(prevVersion, LengthPrefixedStringRef()),
-				                           CompareFirst<std::pair<Version, LengthPrefixedStringRef>>());
+				                           [](const auto& l, const auto& r) { return l.first < r.first; });
 				for (; it != tag->value.version_messages.end() && it->first < nextVersion; ++it) {
 					totalSize += it->second.expectedSize();
 				}
@@ -892,7 +890,7 @@ void commitMessages(Reference<LogData> self,
 		              10;
 	}
 
-	self->version_sizes[version] = make_pair(expectedBytes, expectedBytes);
+	self->version_sizes[version] = std::make_pair(expectedBytes, expectedBytes);
 	self->bytesInput += addedBytes;
 	bytesInput += addedBytes;
 
@@ -945,7 +943,7 @@ void peekMessagesFromMemory(Reference<LogData> self,
 	auto it = std::lower_bound(deque.begin(),
 	                           deque.end(),
 	                           std::make_pair(begin, LengthPrefixedStringRef()),
-	                           CompareFirst<std::pair<Version, LengthPrefixedStringRef>>());
+	                           [](const auto& l, const auto& r) { return l.first < r.first; });
 
 	Version currentVersion = -1;
 	for (; it != deque.end(); ++it) {

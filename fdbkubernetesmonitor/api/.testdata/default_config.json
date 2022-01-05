@@ -1,0 +1,36 @@
+{
+	"version": "6.3.15",
+	"arguments": [
+		{"value": "--cluster-file"},
+		{"value": ".testdata/fdb.cluster"},
+		{"value": "--public-address"},
+		{"type": "Concatenate", "values": [
+			{"type": "Environment", "source": "FDB_PUBLIC_IP"},
+			{"value": ":"},
+			{"type": "ProcessNumber", "offset": 4499, "multiplier": 2}
+		]},
+		{"value": "--listen-address"},
+		{"type": "Concatenate", "values": [
+			{"type": "Environment", "source": "FDB_POD_IP"},
+			{"value": ":"},
+			{"type": "ProcessNumber", "offset": 4499, "multiplier": 2}
+		]},
+		{"value": "--datadir"},
+		{"type": "Concatenate", "values": [
+			{"value": ".testdata/data/"},
+			{"type": "ProcessNumber"}
+		]},
+		{"value": "--class"},
+		{"value": "storage"},
+		{"value": "--locality-zoneid"},
+		{"type": "Environment", "source": "FDB_ZONE_ID"},
+		{"value": "--locality-instance-id"},
+		{"type": "Environment", "source": "FDB_INSTANCE_ID"},
+		{"value": "--locality-process-id"},
+		{"type": "Concatenate", "values": [
+			{"type": "Environment", "source": "FDB_INSTANCE_ID"},
+			{"value": "-"},
+			{"type": "ProcessNumber"}
+		]}
+	]
+}

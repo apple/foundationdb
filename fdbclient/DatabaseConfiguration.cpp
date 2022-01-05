@@ -20,8 +20,10 @@
 
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/SystemData.h"
+#include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
+#include "flow/genericactors.actor.h"
 
 DatabaseConfiguration::DatabaseConfiguration() {
 	resetInternal();
@@ -47,6 +49,12 @@ void DatabaseConfiguration::resetInternal() {
 	remoteTLogReplicationFactor = repopulateRegionAntiQuorum = 0;
 	backupWorkerEnabled = false;
 	perpetualStorageWiggleSpeed = 0;
+	perpetualStorageWiggleLocality = "0";
+	storageMigrationType = StorageMigrationType::DEFAULT;
+}
+
+int toInt(ValueRef const& v) {
+	return atoi(v.toString().c_str());
 }
 
 void parse(int* i, ValueRef const& v) {
@@ -214,7 +222,9 @@ bool DatabaseConfiguration::isValid() const {
 	      (usableRegions == 1 || regions.size() == 2) && (regions.size() == 0 || regions[0].priority >= 0) &&
 	      (regions.size() == 0 || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1") &&
 	      // We cannot specify regions with three_datacenter replication
-	      (perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1))) {
+	      (perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1) &&
+	      isValidPerpetualStorageWiggleLocality(perpetualStorageWiggleLocality) &&
+	      storageMigrationType != StorageMigrationType::UNSET)) {
 		return false;
 	}
 	std::set<Key> dcIds;
@@ -300,7 +310,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		result["storage_engine"] = "ssd-2";
 	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
 	           storageServerStoreType == KeyValueStoreType::SSD_REDWOOD_V1) {
-		result["storage_engine"] = "ssd-redwood-experimental";
+		result["storage_engine"] = "ssd-redwood-1-experimental";
 	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
 	           storageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
 		result["storage_engine"] = "ssd-rocksdb-experimental";
@@ -323,7 +333,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		} else if (testingStorageServerStoreType == KeyValueStoreType::SSD_BTREE_V2) {
 			result["tss_storage_engine"] = "ssd-2";
 		} else if (testingStorageServerStoreType == KeyValueStoreType::SSD_REDWOOD_V1) {
-			result["tss_storage_engine"] = "ssd-redwood-experimental";
+			result["tss_storage_engine"] = "ssd-redwood-1-experimental";
 		} else if (testingStorageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
 			result["tss_storage_engine"] = "ssd-rocksdb-experimental";
 		} else if (testingStorageServerStoreType == KeyValueStoreType::MEMORY_RADIXTREE) {
@@ -408,6 +418,8 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	if (!splits.empty()) {
 		result["splits"] = getSplitJSON();
 	}
+	result["perpetual_storage_wiggle_locality"] = perpetualStorageWiggleLocality;
+	result["storage_migration_type"] = storageMigrationType.toString();
 	return result;
 }
 
@@ -487,6 +499,64 @@ std::string DatabaseConfiguration::toString() const {
 	return json_spirit::write_string(json_spirit::mValue(toJSON()), json_spirit::Output_options::none);
 }
 
+Key getKeyWithPrefix(std::string const& k) {
+	return StringRef(k).withPrefix(configKeysPrefix);
+}
+
+void DatabaseConfiguration::overwriteProxiesCount() {
+	Key commitProxiesKey = getKeyWithPrefix("commit_proxies");
+	Key grvProxiesKey = getKeyWithPrefix("grv_proxies");
+	Key proxiesKey = getKeyWithPrefix("proxies");
+	Optional<ValueRef> optCommitProxies = DatabaseConfiguration::get(commitProxiesKey);
+	Optional<ValueRef> optGrvProxies = DatabaseConfiguration::get(grvProxiesKey);
+	Optional<ValueRef> optProxies = DatabaseConfiguration::get(proxiesKey);
+
+	const int mutableGrvProxyCount = optGrvProxies.present() ? toInt(optGrvProxies.get()) : 0;
+	const int mutableCommitProxyCount = optCommitProxies.present() ? toInt(optCommitProxies.get()) : 0;
+	const int mutableProxiesCount = optProxies.present() ? toInt(optProxies.get()) : 0;
+
+	if (mutableProxiesCount > 1) {
+		TraceEvent(SevDebug, "OverwriteProxiesCount")
+		    .detail("CPCount", commitProxyCount)
+		    .detail("MutableCPCount", mutableCommitProxyCount)
+		    .detail("GrvCount", grvProxyCount)
+		    .detail("MutableGrvCPCount", mutableGrvProxyCount)
+		    .detail("MutableProxiesCount", mutableProxiesCount);
+
+		if (grvProxyCount == -1 && commitProxyCount > 0) {
+			if (mutableProxiesCount > commitProxyCount) {
+				grvProxyCount = mutableProxiesCount - commitProxyCount;
+			} else {
+				// invalid configuration; provision min GrvProxies
+				grvProxyCount = 1;
+				commitProxyCount = mutableProxiesCount - 1;
+			}
+		} else if (grvProxyCount > 0 && commitProxyCount == -1) {
+			if (mutableProxiesCount > grvProxyCount) {
+				commitProxyCount = mutableProxiesCount - grvProxyCount;
+			} else {
+				// invalid configuration; provision min CommitProxies
+				commitProxyCount = 1;
+				grvProxyCount = mutableProxiesCount - 1;
+			}
+		} else if (grvProxyCount == -1 && commitProxyCount == -1) {
+			// Use DEFAULT_COMMIT_GRV_PROXIES_RATIO to split proxies between Grv & Commit proxies
+			const int derivedGrvProxyCount =
+			    std::max(1,
+			             std::min(CLIENT_KNOBS->DEFAULT_MAX_GRV_PROXIES,
+			                      mutableProxiesCount / (CLIENT_KNOBS->DEFAULT_COMMIT_GRV_PROXIES_RATIO + 1)));
+
+			grvProxyCount = derivedGrvProxyCount;
+			commitProxyCount = mutableProxiesCount - grvProxyCount;
+		}
+
+		TraceEvent(SevDebug, "OverwriteProxiesCountResult")
+		    .detail("CommitProxyCount", commitProxyCount)
+		    .detail("GrvProxyCount", grvProxyCount)
+		    .detail("ProxyCount", mutableProxiesCount);
+	}
+}
+
 bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	KeyRef ck = key.removePrefix(configKeysPrefix);
 	int type;
@@ -494,9 +564,13 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	if (ck == LiteralStringRef("initialized")) {
 		initialized = true;
 	} else if (ck == LiteralStringRef("commit_proxies")) {
-		parse(&commitProxyCount, value);
+		commitProxyCount = toInt(value);
+		if (commitProxyCount == -1)
+			overwriteProxiesCount();
 	} else if (ck == LiteralStringRef("grv_proxies")) {
-		parse(&grvProxyCount, value);
+		grvProxyCount = toInt(value);
+		if (grvProxyCount == -1)
+			overwriteProxiesCount();
 	} else if (ck == LiteralStringRef("resolvers")) {
 		parse(&resolverCount, value);
 	} else if (ck == LiteralStringRef("logs")) {
@@ -571,15 +645,22 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		parse(&perpetualStorageWiggleSpeed, value);
 	} else if (ck == "splits"_sr) {
 		parse(&splits, value);
+	} else if (ck == LiteralStringRef("perpetual_storage_wiggle_locality")) {
+		if (!isValidPerpetualStorageWiggleLocality(value.toString())) {
+			return false;
+		}
+		perpetualStorageWiggleLocality = value.toString();
+	} else if (ck == LiteralStringRef("storage_migration_type")) {
+		parse((&type), value);
+		storageMigrationType = (StorageMigrationType::MigrationType)type;
+	} else if (ck == LiteralStringRef("proxies")) {
+		overwriteProxiesCount();
 	} else {
 		return false;
 	}
 	return true; // All of the above options currently require recovery to take effect
 }
 
-static KeyValueRef* lower_bound(VectorRef<KeyValueRef>& config, KeyRef const& key) {
-	return std::lower_bound(config.begin(), config.end(), KeyValueRef(key, ValueRef()), KeyValueRef::OrderByKey());
-}
 static KeyValueRef const* lower_bound(VectorRef<KeyValueRef> const& config, KeyRef const& key) {
 	return std::lower_bound(config.begin(), config.end(), KeyValueRef(key, ValueRef()), KeyValueRef::OrderByKey());
 }

@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbserver/CoordinatedState.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/Knobs.h"
@@ -147,8 +148,8 @@ struct CoordinatedStateImpl {
 	ACTOR static Future<GenerationRegReadReply> replicatedRead(CoordinatedStateImpl* self,
 	                                                           GenerationRegReadRequest req) {
 		state std::vector<GenerationRegInterface>& replicas = self->coordinators.stateServers;
-		state vector<Future<GenerationRegReadReply>> rep_empty_reply;
-		state vector<Future<GenerationRegReadReply>> rep_reply;
+		state std::vector<Future<GenerationRegReadReply>> rep_empty_reply;
+		state std::vector<Future<GenerationRegReadReply>> rep_reply;
 		for (int i = 0; i < replicas.size(); i++) {
 			Future<GenerationRegReadReply> reply =
 			    waitAndSendRead(replicas[i].read, GenerationRegReadRequest(req.key, req.gen));
@@ -189,7 +190,7 @@ struct CoordinatedStateImpl {
 
 	ACTOR static Future<UniqueGeneration> replicatedWrite(CoordinatedStateImpl* self, GenerationRegWriteRequest req) {
 		state std::vector<GenerationRegInterface>& replicas = self->coordinators.stateServers;
-		state vector<Future<UniqueGeneration>> wrep_reply;
+		state std::vector<Future<UniqueGeneration>> wrep_reply;
 		for (int i = 0; i < replicas.size(); i++) {
 			Future<UniqueGeneration> reply =
 			    waitAndSendWrite(replicas[i].write, GenerationRegWriteRequest(req.kv, req.gen));
@@ -288,8 +289,7 @@ struct MovableCoordinatedStateImpl {
 		// reached the point where a leader elected by the new coordinators should be doing the rest of the work
 		// (and therefore the caller should die).
 		state CoordinatedState cs(self->coordinators);
-		state CoordinatedState nccs(
-		    ServerCoordinators(Reference<ClusterConnectionFile>(new ClusterConnectionFile(nc))));
+		state CoordinatedState nccs(ServerCoordinators(makeReference<ClusterConnectionMemoryRecord>(nc)));
 		state Future<Void> creationTimeout = delay(30);
 		ASSERT(self->lastValue.present() && self->lastCSValue.present());
 		TraceEvent("StartMove").detail("ConnectionString", nc.toString());
@@ -306,7 +306,7 @@ struct MovableCoordinatedStateImpl {
 			when(wait(nccs.setExclusive(
 			    BinaryWriter::toValue(MovableValue(self->lastValue.get(),
 			                                       MovableValue::MovingFrom,
-			                                       self->coordinators.ccf->getConnectionString().toString()),
+			                                       self->coordinators.ccr->getConnectionString().toString()),
 			                          IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()))))) {}
 		}
 

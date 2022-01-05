@@ -280,7 +280,11 @@ enum _ESOFlags {
 	SO_O_ICASE_WORD = 0x0400,
 
 	/*! Case-insensitive comparisons for all arg types */
-	SO_O_ICASE = 0x0700
+	SO_O_ICASE = 0x0700,
+
+	/*! Treat all hyphens from flag names as underscores except leading hyphens
+	    For example: --cluster-file ==> --cluster_file while comparing. */
+	SO_O_HYPHEN_TO_UNDERSCORE = 0x1000
 };
 
 /*! Types of arguments that options may have. Note that some of the _ESOFlags
@@ -912,8 +916,9 @@ int CSimpleOptTempl<SOCHAR>::CalcMatch(const SOCHAR* a_pszSource, const SOCHAR* 
 			return -1;
 		}
 
-		// and the source is a "wildcard option", then it's a perfect match (e.g. "--knob_" matches "--knob_foo")
-		if (a_pszSource[-1] == '_') {
+		// and the source is a "wildcard option", then it's a perfect match (e.g. "--knob_" or "--knob-" matches
+		// "--knob_foo" and "--knob-foo")
+		if (a_pszSource[-1] == '_' || a_pszSource[-1] == '-') {
 			return -1;
 		}
 
@@ -941,6 +946,14 @@ bool CSimpleOptTempl<SOCHAR>::IsEqual(SOCHAR a_cLeft, SOCHAR a_cRight, int a_nAr
 		if (a_cRight >= 'A' && a_cRight <= 'Z')
 			a_cRight += 'a' - 'A';
 	}
+	if (m_nFlags & SO_O_HYPHEN_TO_UNDERSCORE) {
+		if (a_cLeft == (SOCHAR)'-') {
+			a_cLeft = (SOCHAR)'_';
+		}
+		if (a_cRight == (SOCHAR)'-') {
+			a_cRight = (SOCHAR)'_';
+		}
+	}
 	return a_cLeft == a_cRight;
 }
 
@@ -957,19 +970,21 @@ SOCHAR** CSimpleOptTempl<SOCHAR>::MultiArg(int a_nCount) {
 	// our argument array
 	SOCHAR** rgpszArg = &m_argv[m_nNextOption];
 
+#ifdef _WIN32
+	// It is not illegal for a value to start with '/' or '-' on Windows
+	// and this would make it impossible to write "/f /path/to/somewhere"
+#else
 	// Ensure that each of the following don't start with an switch character.
 	// Only make this check if we are returning errors for unknown arguments.
 	if (!HasFlag(SO_O_NOERR)) {
 		for (int n = 0; n < a_nCount; ++n) {
-			SOCHAR ch = PrepareArg(rgpszArg[n]);
 			if (rgpszArg[n][0] == (SOCHAR)'-') {
-				rgpszArg[n][0] = ch;
 				m_nLastError = SO_ARG_INVALID_DATA;
 				return nullptr;
 			}
-			rgpszArg[n][0] = ch;
 		}
 	}
+#endif
 
 	// all good
 	m_nNextOption += a_nCount;

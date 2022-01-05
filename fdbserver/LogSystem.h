@@ -49,6 +49,8 @@ struct CoreTLogSet;
 struct RecruitFromConfigurationReply;
 struct RecruitRemoteFromConfigurationReply;
 struct InitializeBackupReply;
+struct LogPushData;
+struct LocalityData;
 
 struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
 	double lastReset;
@@ -527,7 +529,7 @@ struct ILogSystem {
 	                             Version version,
 	                             Version knownCommittedVersion,
 	                             Version minKnownCommittedVersion,
-	                             struct LogPushData& data,
+	                             LogPushData& data,
 	                             SpanID const& spanContext,
 	                             Optional<UID> debugID = Optional<UID>(),
 	                             Optional<ptxn::TLogGroupID> tLogGroup = Optional<ptxn::TLogGroupID>(),
@@ -651,6 +653,7 @@ struct ILogSystem {
 
 	virtual Future<Reference<ILogSystem>> newEpoch(RecruitFromConfigurationReply const& recr,
 	                                               Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
+	                                               UID clusterId,
 	                                               DatabaseConfiguration const& config,
 	                                               LogEpoch recoveryCount,
 	                                               int8_t primaryLocality,
@@ -733,11 +736,6 @@ struct LengthPrefixedStringRef {
 
 	LengthPrefixedStringRef() : length(nullptr) {}
 	LengthPrefixedStringRef(uint32_t* length) : length(length) {}
-};
-
-template <class T>
-struct CompareFirst {
-	bool operator()(T const& lhs, T const& rhs) const { return lhs.first < rhs.first; }
 };
 
 // Structure to store serialized mutations sent from the proxy to the

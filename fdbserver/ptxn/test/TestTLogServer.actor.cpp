@@ -33,6 +33,7 @@
 #include "fdbserver/ptxn/test/Utils.h"
 #include "flow/Arena.h"
 
+#include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // has to be the last file included
 
 namespace {
@@ -192,7 +193,7 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 	                                      0,
 	                                      {},
 	                                      {},
-	                                      std::map<ptxn::StorageTeamID, vector<Tag>>(),
+	                                      std::map<ptxn::StorageTeamID, std::vector<Tag>>(),
 	                                      debugID);
 	ptxn::test::print::print(commitRequest);
 
@@ -262,6 +263,7 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 	state Version tssSeedVersion = 0;
 	state int i = 0;
 	printTiming << "Recruiting new storage servers" << std::endl;
+	UID clusterId = deterministicRandom()->randomUniqueID();
 	for (; i < pContext->numStorageServers; i++) {
 		pContext->storageServers.emplace_back();
 		auto& recruited = pContext->storageServers.back();
@@ -275,6 +277,7 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 		                                            0),
 		                                recruited,
 		                                Tag(locality, i),
+		                                clusterId,
 		                                tssSeedVersion,
 		                                storageInitializations.back().reply,
 		                                dbInfo,
@@ -396,7 +399,7 @@ ACTOR Future<std::vector<Standalone<StringRef>>> commitInject(std::shared_ptr<pt
 		                      0,
 		                      std::set<ptxn::StorageTeamID>{},
 		                      std::set<ptxn::StorageTeamID>{},
-		                      std::map<ptxn::StorageTeamID, vector<Tag>>(),
+		                      std::map<ptxn::StorageTeamID, std::vector<Tag>>(),
 		                      Optional<UID>());
 		writtenMessages.emplace_back(getLogEntryContent(requests.back(), pInterface->id()));
 		prevVersion = currVersion;
@@ -687,7 +690,7 @@ ACTOR Future<std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>>
 		                      0,
 		                      std::set<ptxn::StorageTeamID>{},
 		                      std::set<ptxn::StorageTeamID>{},
-		                      std::map<ptxn::StorageTeamID, vector<Tag>>(),
+		                      std::map<ptxn::StorageTeamID, std::vector<Tag>>(),
 		                      Optional<UID>());
 		writtenMessages.emplace_back(getLogEntryContent(requests.back(), pInterface->id()));
 		versions.push_back(currVersion);

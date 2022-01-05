@@ -27,7 +27,6 @@
 #include <memcheck.h>
 #endif
 
-#include "flow/crc32c.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/HealthMonitor.h"
@@ -41,16 +40,14 @@
 #include "flow/ObjectSerializer.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
+#define XXH_INLINE_ALL
+#include "flow/xxhash.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();
 
-constexpr UID WLTOKEN_ENDPOINT_NOT_FOUND(-1, 0);
-constexpr UID WLTOKEN_PING_PACKET(-1, 1);
 constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
 const uint64_t TOKEN_STREAM_FLAG = 1;
-
-static constexpr int WLTOKEN_COUNTS = 22; // number of wellKnownEndpoints
 
 class EndpointMap : NonCopyable {
 public:
@@ -96,7 +93,7 @@ void EndpointMap::realloc() {
 
 void EndpointMap::insertWellKnown(NetworkMessageReceiver* r, const Endpoint::Token& token, TaskPriority priority) {
 	int index = token.second();
-	ASSERT(index <= WLTOKEN_COUNTS);
+	ASSERT(index <= wellKnownEndpointCount);
 	ASSERT(data[index].receiver == nullptr);
 	data[index].receiver = r;
 	data[index].token() =
@@ -195,7 +192,8 @@ void EndpointMap::remove(Endpoint::Token const& token, NetworkMessageReceiver* r
 
 struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
 	EndpointNotFoundReceiver(EndpointMap& endpoints) {
-		endpoints.insertWellKnown(this, WLTOKEN_ENDPOINT_NOT_FOUND, TaskPriority::DefaultEndpoint);
+		endpoints.insertWellKnown(
+		    this, Endpoint::wellKnownToken(WLTOKEN_ENDPOINT_NOT_FOUND), TaskPriority::DefaultEndpoint);
 	}
 
 	void receive(ArenaObjectReader& reader) override {
@@ -219,7 +217,7 @@ struct PingRequest {
 
 struct PingReceiver final : NetworkMessageReceiver {
 	PingReceiver(EndpointMap& endpoints) {
-		endpoints.insertWellKnown(this, WLTOKEN_PING_PACKET, TaskPriority::ReadSocket);
+		endpoints.insertWellKnown(this, Endpoint::wellKnownToken(WLTOKEN_PING_PACKET), TaskPriority::ReadSocket);
 	}
 	void receive(ArenaObjectReader& reader) override {
 		PingRequest req;
@@ -233,7 +231,7 @@ struct PingReceiver final : NetworkMessageReceiver {
 
 class TransportData {
 public:
-	TransportData(uint64_t transportId);
+	TransportData(uint64_t transportId, int maxWellKnownEndpoints);
 
 	~TransportData();
 
@@ -340,8 +338,8 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 	}
 }
 
-TransportData::TransportData(uint64_t transportId)
-  : warnAlwaysForLargePacket(true), endpoints(WLTOKEN_COUNTS), endpointNotFoundReceiver(endpoints),
+TransportData::TransportData(uint64_t transportId, int maxWellKnownEndpoints)
+  : warnAlwaysForLargePacket(true), endpoints(maxWellKnownEndpoints), endpointNotFoundReceiver(endpoints),
     pingReceiver(endpoints), numIncompatibleConnections(0), lastIncompatibleMessage(0), transportId(transportId) {
 	degraded = makeReference<AsyncVar<bool>>(false);
 	pingLogger = pingLatencyLogger(this);
@@ -429,7 +427,7 @@ static ReliablePacket* sendPacket(TransportData* self,
                                   bool reliable);
 
 ACTOR Future<Void> connectionMonitor(Reference<Peer> peer) {
-	state Endpoint remotePingEndpoint({ peer->destination }, WLTOKEN_PING_PACKET);
+	state Endpoint remotePingEndpoint({ peer->destination }, Endpoint::wellKnownToken(WLTOKEN_PING_PACKET));
 	loop {
 		if (!FlowTransport::isClient() && !peer->destination.isPublic() && peer->compatible) {
 			// Don't send ping messages to clients unless necessary. Instead monitor incoming client pings.
@@ -960,13 +958,13 @@ ACTOR static void deliver(TransportData* self,
 			if (self->isLocalAddress(destination.getPrimaryAddress())) {
 				sendLocal(self,
 				          SerializeSource<UID>(destination.token),
-				          Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND));
+				          Endpoint::wellKnown(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND));
 			} else {
 				Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
 				sendPacket(self,
 				           peer,
 				           SerializeSource<UID>(destination.token),
-				           Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND),
+				           Endpoint::wellKnown(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND),
 				           false);
 			}
 		}
@@ -986,21 +984,22 @@ static void scanPackets(TransportData* transport,
 
 	const bool checksumEnabled = !peerAddress.isTLS();
 	loop {
-		uint32_t packetLen, packetChecksum;
+		uint32_t packetLen;
+		XXH64_hash_t packetChecksum;
 
-		// Retrieve packet length and checksum
+		// Read packet length if size is sufficient or stop
+		if (e - p < PACKET_LEN_WIDTH)
+			break;
+		packetLen = *(uint32_t*)p;
+		p += PACKET_LEN_WIDTH;
+
+		// Read checksum if present
 		if (checksumEnabled) {
-			if (e - p < sizeof(uint32_t) * 2)
+			// Read checksum if size is sufficient or stop
+			if (e - p < sizeof(packetChecksum))
 				break;
-			packetLen = *(uint32_t*)p;
-			p += PACKET_LEN_WIDTH;
-			packetChecksum = *(uint32_t*)p;
-			p += sizeof(uint32_t);
-		} else {
-			if (e - p < sizeof(uint32_t))
-				break;
-			packetLen = *(uint32_t*)p;
-			p += PACKET_LEN_WIDTH;
+			packetChecksum = *(XXH64_hash_t*)p;
+			p += sizeof(packetChecksum);
 		}
 
 		if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
@@ -1038,23 +1037,23 @@ static void scanPackets(TransportData* transport,
 				}
 			}
 
-			uint32_t calculatedChecksum = crc32c_append(0, p, packetLen);
+			XXH64_hash_t calculatedChecksum = XXH3_64bits(p, packetLen);
 			if (calculatedChecksum != packetChecksum) {
 				if (isBuggifyEnabled) {
 					TraceEvent(SevInfo, "ChecksumMismatchExp")
-					    .detail("PacketChecksum", (int)packetChecksum)
-					    .detail("CalculatedChecksum", (int)calculatedChecksum);
+					    .detail("PacketChecksum", packetChecksum)
+					    .detail("CalculatedChecksum", calculatedChecksum);
 				} else {
 					TraceEvent(SevWarnAlways, "ChecksumMismatchUnexp")
-					    .detail("PacketChecksum", (int)packetChecksum)
-					    .detail("CalculatedChecksum", (int)calculatedChecksum);
+					    .detail("PacketChecksum", packetChecksum)
+					    .detail("CalculatedChecksum", calculatedChecksum);
 				}
 				throw checksum_failed();
 			} else {
 				if (isBuggifyEnabled) {
 					TraceEvent(SevError, "ChecksumMatchUnexp")
-					    .detail("PacketChecksum", (int)packetChecksum)
-					    .detail("CalculatedChecksum", (int)calculatedChecksum);
+					    .detail("PacketChecksum", packetChecksum)
+					    .detail("CalculatedChecksum", calculatedChecksum);
 				}
 			}
 		}
@@ -1263,8 +1262,11 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 						} else {
 							peerProtocolVersion = protocolVersion;
 							if (pkt.canonicalRemotePort) {
-								peerAddress = NetworkAddress(
-								    pkt.canonicalRemoteIp(), pkt.canonicalRemotePort, true, peerAddress.isTLS());
+								peerAddress = NetworkAddress(pkt.canonicalRemoteIp(),
+								                             pkt.canonicalRemotePort,
+								                             true,
+								                             peerAddress.isTLS(),
+								                             NetworkAddressFromHostname(peerAddress.fromHostname));
 							}
 							peer = transport->getOrOpenPeer(peerAddress, false);
 							peer->compatible = compatible;
@@ -1420,7 +1422,8 @@ ACTOR static Future<Void> multiVersionCleanupWorker(TransportData* self) {
 	}
 }
 
-FlowTransport::FlowTransport(uint64_t transportId) : self(new TransportData(transportId)) {
+FlowTransport::FlowTransport(uint64_t transportId, int maxWellKnownEndpoints)
+  : self(new TransportData(transportId, maxWellKnownEndpoints)) {
 	self->multiVersionCleanup = multiVersionCleanupWorker(self);
 }
 
@@ -1565,7 +1568,8 @@ static ReliablePacket* sendPacket(TransportData* self,
 
 	// If there isn't an open connection, a public address, or the peer isn't compatible, we can't send
 	if (!peer || (peer->outgoingConnectionIdle && !destination.getPrimaryAddress().isPublic()) ||
-	    (peer->incompatibleProtocolVersionNewer && destination.token != WLTOKEN_PING_PACKET)) {
+	    (peer->incompatibleProtocolVersionNewer &&
+	     destination.token != Endpoint::wellKnownToken(WLTOKEN_PING_PACKET))) {
 		TEST(true); // Can't send to private address without a compatible open connection
 		return nullptr;
 	}
@@ -1584,7 +1588,15 @@ static ReliablePacket* sendPacket(TransportData* self,
 
 	// Reserve some space for packet length and checksum, write them after serializing data
 	SplitBuffer packetInfoBuffer;
-	uint32_t len, checksum = 0;
+	uint32_t len;
+
+	// This is technically abstraction breaking but avoids XXH3_createState() and XXH3_freeState() which are just
+	// malloc/free
+	XXH3_state_t checksumState;
+	// Checksum will be calculated with buffer API if contiguous, else using stream API.  Mode is tracked here.
+	bool checksumStream = false;
+	XXH64_hash_t checksum;
+
 	int packetInfoSize = PACKET_LEN_WIDTH;
 	if (checksumEnabled) {
 		packetInfoSize += sizeof(checksum);
@@ -1609,10 +1621,37 @@ static ReliablePacket* sendPacket(TransportData* self,
 		while (checksumUnprocessedLength > 0) {
 			uint32_t processLength =
 			    std::min(checksumUnprocessedLength, (uint32_t)(checksumPb->bytes_written - prevBytesWritten));
-			checksum = crc32c_append(checksum, checksumPb->data() + prevBytesWritten, processLength);
+
+			// If not in checksum stream mode yet
+			if (!checksumStream) {
+				// If there is nothing left to process then calculate checksum directly
+				if (processLength == checksumUnprocessedLength) {
+					checksum = XXH3_64bits(checksumPb->data() + prevBytesWritten, processLength);
+				} else {
+					// Otherwise, initialize checksum state and switch to stream mode
+					if (XXH3_64bits_reset(&checksumState) != XXH_OK) {
+						throw internal_error();
+					}
+					checksumStream = true;
+				}
+			}
+
+			// If in checksum stream mode, update the checksum state
+			if (checksumStream) {
+				if (XXH3_64bits_update(&checksumState, checksumPb->data() + prevBytesWritten, processLength) !=
+				    XXH_OK) {
+					throw internal_error();
+				}
+			}
+
 			checksumUnprocessedLength -= processLength;
 			checksumPb = checksumPb->nextPacketBuffer();
 			prevBytesWritten = 0;
+		}
+
+		// If in checksum stream mode, get the final checksum
+		if (checksumStream) {
+			checksum = XXH3_64bits_digest(&checksumState);
 		}
 	}
 
@@ -1650,7 +1689,7 @@ static ReliablePacket* sendPacket(TransportData* self,
 #endif
 
 	peer->send(pb, rp, firstUnsent);
-	if (destination.token != WLTOKEN_PING_PACKET) {
+	if (destination.token != Endpoint::wellKnownToken(WLTOKEN_PING_PACKET)) {
 		peer->lastDataPacketSentTime = now();
 	}
 	return rp;
@@ -1715,8 +1754,9 @@ bool FlowTransport::incompatibleOutgoingConnectionsPresent() {
 	return self->numIncompatibleConnections > 0;
 }
 
-void FlowTransport::createInstance(bool isClient, uint64_t transportId) {
-	g_network->setGlobal(INetwork::enFlowTransport, (flowGlobalType) new FlowTransport(transportId));
+void FlowTransport::createInstance(bool isClient, uint64_t transportId, int maxWellKnownEndpoints) {
+	g_network->setGlobal(INetwork::enFlowTransport,
+	                     (flowGlobalType) new FlowTransport(transportId, maxWellKnownEndpoints));
 	g_network->setGlobal(INetwork::enNetworkAddressFunc, (flowGlobalType)&FlowTransport::getGlobalLocalAddress);
 	g_network->setGlobal(INetwork::enNetworkAddressesFunc, (flowGlobalType)&FlowTransport::getGlobalLocalAddresses);
 	g_network->setGlobal(INetwork::enFailureMonitor, (flowGlobalType) new SimpleFailureMonitor());

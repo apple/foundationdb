@@ -72,6 +72,8 @@ struct NetworkOptions {
 	Optional<bool> logClientInfo;
 	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
 	bool runLoopProfilingEnabled;
+	bool primaryClient;
+	std::map<std::string, KnobValue> knobs;
 
 	NetworkOptions();
 };
@@ -83,7 +85,7 @@ public:
 	// Creates a database object that represents a connection to a cluster
 	// This constructor uses a preallocated DatabaseContext that may have been created
 	// on another thread
-	static Database createDatabase(Reference<ClusterConnectionFile> connFile,
+	static Database createDatabase(Reference<IClusterConnectionRecord> connRecord,
 	                               int apiVersion,
 	                               IsInternal internal = IsInternal::True,
 	                               LocalityData const& clientLocality = LocalityData(),
@@ -289,6 +291,23 @@ public:
 		                reverse);
 	}
 
+	[[nodiscard]] Future<RangeResult> getRangeAndFlatMap(const KeySelector& begin,
+	                                                     const KeySelector& end,
+	                                                     const Key& mapper,
+	                                                     GetRangeLimits limits,
+	                                                     Snapshot = Snapshot::False,
+	                                                     Reverse = Reverse::False);
+
+private:
+	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
+	Future<RangeResult> getRangeInternal(const KeySelector& begin,
+	                                     const KeySelector& end,
+	                                     const Key& mapper,
+	                                     GetRangeLimits limits,
+	                                     Snapshot snapshot,
+	                                     Reverse reverse);
+
+public:
 	// A method for streaming data from the storage server that is more efficient than getRange when reading large
 	// amounts of data
 	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
@@ -353,6 +372,13 @@ public:
 	// Try to split the given range into equally sized chunks based on estimated size.
 	// The returned list would still be in form of [keys.begin, splitPoint1, splitPoint2, ... , keys.end]
 	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize);
+
+	Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRange& range);
+	Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranules(const KeyRange& range,
+	                                                                    Version begin,
+	                                                                    Optional<Version> readVersion,
+	                                                                    Version* readVersionOut = nullptr);
+
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set(const KeyRef& key, const ValueRef& value, AddConflictRange = AddConflictRange::True);
 	void atomicOp(const KeyRef& key,
@@ -411,7 +437,7 @@ public:
 	void setTransactionID(uint64_t id);
 	void setToken(uint64_t token);
 
-	const vector<Future<std::pair<Key, Key>>>& getExtraReadConflictRanges() const { return extraConflictRanges; }
+	const std::vector<Future<std::pair<Key, Key>>>& getExtraReadConflictRanges() const { return extraConflictRanges; }
 	Standalone<VectorRef<KeyRangeRef>> readConflictRanges() const {
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.read_conflict_ranges, tr.arena);
 	}
@@ -428,7 +454,7 @@ private:
 	CommitTransactionRequest tr;
 	Future<Version> readVersion;
 	Promise<Optional<Value>> metadataVersion;
-	vector<Future<std::pair<Key, Key>>> extraConflictRanges;
+	std::vector<Future<std::pair<Key, Key>>> extraConflictRanges;
 	Promise<Void> commitResult;
 	Future<Void> committing;
 };
@@ -449,7 +475,7 @@ int64_t extractIntOption(Optional<StringRef> value,
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
-ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions);
+ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);
 
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
 	return bytes / std::max(1, CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR) + 1;

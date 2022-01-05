@@ -66,7 +66,7 @@ void OptionalInterface<Interface>::serialize(Ar& ar) {
 		ident = iface.get().id();
 }
 
-struct LogSet;
+class LogSet;
 struct OldLogData;
 
 template <class Interface>

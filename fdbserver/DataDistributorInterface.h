@@ -21,24 +21,27 @@
 #ifndef FDBSERVER_DATADISTRIBUTORINTERFACE_H
 #define FDBSERVER_DATADISTRIBUTORINTERFACE_H
 
-#include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/Locality.h"
+#include "fdbclient/ClusterInterface.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbrpc/Locality.h"
+#include "fdbrpc/fdbrpc.h"
 
 struct DataDistributorInterface {
 	constexpr static FileIdentifier file_identifier = 12383874;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct HaltDataDistributorRequest> haltDataDistributor;
 	struct LocalityData locality;
+	UID myId;
 	RequestStream<struct DistributorSnapRequest> distributorSnapReq;
 	RequestStream<struct DistributorExclusionSafetyCheckRequest> distributorExclCheckReq;
 	RequestStream<struct GetDataDistributorMetricsRequest> dataDistributorMetrics;
+	RequestStream<struct DistributorSplitRangeRequest> distributorSplitRange;
 
 	DataDistributorInterface() {}
-	explicit DataDistributorInterface(const struct LocalityData& l) : locality(l) {}
+	explicit DataDistributorInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
 
 	void initEndpoints() {}
-	UID id() const { return waitFailure.getEndpoint().token; }
+	UID id() const { return myId; }
 	NetworkAddress address() const { return waitFailure.getEndpoint().getPrimaryAddress(); }
 	bool operator==(const DataDistributorInterface& r) const { return id() == r.id(); }
 	bool operator!=(const DataDistributorInterface& r) const { return !(*this == r); }
@@ -49,9 +52,11 @@ struct DataDistributorInterface {
 		           waitFailure,
 		           haltDataDistributor,
 		           locality,
+		           myId,
 		           distributorSnapReq,
 		           distributorExclCheckReq,
-		           dataDistributorMetrics);
+		           dataDistributorMetrics,
+		           distributorSplitRange);
 	}
 };
 
@@ -132,15 +137,31 @@ struct DistributorExclusionSafetyCheckReply {
 
 struct DistributorExclusionSafetyCheckRequest {
 	constexpr static FileIdentifier file_identifier = 5830931;
-	vector<AddressExclusion> exclusions;
+	std::vector<AddressExclusion> exclusions;
 	ReplyPromise<DistributorExclusionSafetyCheckReply> reply;
 
 	DistributorExclusionSafetyCheckRequest() {}
-	explicit DistributorExclusionSafetyCheckRequest(vector<AddressExclusion> exclusions) : exclusions(exclusions) {}
+	explicit DistributorExclusionSafetyCheckRequest(std::vector<AddressExclusion> exclusions)
+	  : exclusions(exclusions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, exclusions, reply);
+	}
+};
+
+// Insert split points, and distribute the resulted shards to different teams.
+struct DistributorSplitRangeRequest {
+	constexpr static FileIdentifier file_identifier = 1384441;
+	std::vector<Key> splitPoints;
+	ReplyPromise<SplitShardReply> reply;
+
+	DistributorSplitRangeRequest() {}
+	explicit DistributorSplitRangeRequest(std::vector<Key> splitPoints) : splitPoints{ std::move(splitPoints) } {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, splitPoints, reply);
 	}
 };
 

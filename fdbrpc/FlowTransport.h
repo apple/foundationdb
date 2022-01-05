@@ -34,6 +34,7 @@
 struct FlowReceiver;
 
 using ReceiverPriorityPair = std::pair<FlowReceiver*, TaskPriority>;
+enum { WLTOKEN_ENDPOINT_NOT_FOUND = 0, WLTOKEN_PING_PACKET, WLTOKEN_FIRST_AVAILABLE };
 
 #pragma pack(push, 4)
 class Endpoint {
@@ -41,13 +42,19 @@ public:
 	// Endpoint represents a particular service (e.g. a serialized Promise<T> or PromiseStream<T>)
 	// An endpoint is either "local" (used for receiving data) or "remote" (used for sending data)
 	constexpr static FileIdentifier file_identifier = 10618805;
-	typedef UID Token;
+	using Token = UID;
 	NetworkAddressList addresses;
-	Token token;
+	Token token{};
 
 	Endpoint() {}
 	Endpoint(const NetworkAddressList& addresses, Token token) : addresses(addresses), token(token) {
 		choosePrimaryAddress();
+	}
+
+	static Token wellKnownToken(int wlTokenID) { return UID(-1, wlTokenID); }
+
+	static Endpoint wellKnown(const NetworkAddressList& addresses, int wlTokenID) {
+		return Endpoint(addresses, wellKnownToken(wlTokenID));
 	}
 
 	void choosePrimaryAddress() {
@@ -130,7 +137,7 @@ public:
 	}
 };
 
-struct TransportData;
+class TransportData;
 
 struct Peer : public ReferenceCounted<Peer> {
 	TransportData* transport;
@@ -179,12 +186,12 @@ struct Peer : public ReferenceCounted<Peer> {
 
 class FlowTransport {
 public:
-	FlowTransport(uint64_t transportId);
+	FlowTransport(uint64_t transportId, int maxWellKnownEndpoints);
 	~FlowTransport();
 
 	// Creates a new FlowTransport and makes FlowTransport::transport() return it.  This uses g_network->global()
 	// variables, so it will be private to a simulation.
-	static void createInstance(bool isClient, uint64_t transportId);
+	static void createInstance(bool isClient, uint64_t transportId, int maxWellKnownEndpoints);
 
 	static bool isClient() { return g_network->global(INetwork::enClientFailureMonitor) != nullptr; }
 

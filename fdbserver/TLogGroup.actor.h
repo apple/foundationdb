@@ -104,11 +104,11 @@ public:
 	void addTLogGroup(UID debugID, TLogGroupRef group);
 
 	// Return storage team to list of storage server map.
-	const std::map<ptxn::StorageTeamID, vector<UID>>& getStorageTeams() const { return storageTeams; }
+	const std::map<ptxn::StorageTeamID, std::vector<UID>>& getStorageTeams() const { return storageTeams; }
 
 	// Add storage team ID to lists of storage servers in that team. Returns `false` if the team
 	// already exists, else return `true`.
-	bool tryAddStorageTeam(ptxn::StorageTeamID teamId, vector<UID> servers);
+	bool tryAddStorageTeam(ptxn::StorageTeamID teamId, std::vector<UID> servers);
 
 	// Assigns a storage team to given group. This is only called when we know
 	// the group for the team, i.e., in applyMetadataMutations().
@@ -128,7 +128,7 @@ public:
 	// TODO: Get notifications from DD.
 	Future<Void> recoverStorageTeamAssignments(Arena& arena,
 	                                           CommitTransactionRef& tr,
-	                                           vector<StorageServerInterface> servers);
+	                                           std::vector<StorageServerInterface> servers);
 
 	// Called by the master server to write the very first transaction to the database establishing
 	// the first storage team to tLogGroup mapping. TLogGroups should be created by the time this is

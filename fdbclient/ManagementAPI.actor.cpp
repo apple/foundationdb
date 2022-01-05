@@ -22,11 +22,13 @@
 #include <string>
 #include <vector>
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
 #include "flow/Arena.h"
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -161,6 +163,28 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			}
 			out[p + key] = value;
 		}
+		if (key == "perpetual_storage_wiggle_locality") {
+			if (!isValidPerpetualStorageWiggleLocality(value)) {
+				printf("Error: perpetual_storage_wiggle_locality should be in <locality_key>:<locality_value> "
+				       "format or enter 0 to disable the locality match for wiggling.\n");
+				return out;
+			}
+			out[p + key] = value;
+		}
+		if (key == "storage_migration_type") {
+			StorageMigrationType type;
+			if (value == "disabled") {
+				type = StorageMigrationType::DISABLED;
+			} else if (value == "aggressive") {
+				type = StorageMigrationType::AGGRESSIVE;
+			} else if (value == "gradual") {
+				type = StorageMigrationType::GRADUAL;
+			} else {
+				printf("Error: Only disabled|aggressive|gradual are valid for storage_migration_mode.\n");
+				return out;
+			}
+			out[p + key] = format("%d", type);
+		}
 		return out;
 	}
 
@@ -172,7 +196,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	} else if (mode == "ssd" || mode == "ssd-2") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_BTREE_V2;
-	} else if (mode == "ssd-redwood-experimental") {
+	} else if (mode == "ssd-redwood-1-experimental") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_REDWOOD_V1;
 	} else if (mode == "ssd-rocksdb-experimental") {
@@ -422,280 +446,6 @@ ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx) {
 			wait(tr.onError(e));
 		}
 	}
-}
-
-ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string, std::string> m, bool force) {
-	state StringRef initIdKey = LiteralStringRef("\xff/init_id");
-	state Transaction tr(cx);
-
-	if (!m.size()) {
-		return ConfigurationResult::NO_OPTIONS_PROVIDED;
-	}
-
-	// make sure we have essential configuration options
-	std::string initKey = configKeysPrefix.toString() + "initialized";
-	state bool creating = m.count(initKey) != 0;
-	state Optional<UID> locked;
-	{
-		auto iter = m.find(databaseLockedKey.toString());
-		if (iter != m.end()) {
-			if (!creating) {
-				return ConfigurationResult::LOCKED_NOT_NEW;
-			}
-			locked = UID::fromString(iter->second);
-			m.erase(iter);
-		}
-	}
-	if (creating) {
-		m[initIdKey.toString()] = deterministicRandom()->randomUniqueID().toString();
-		if (!isCompleteConfiguration(m)) {
-			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
-		}
-	}
-
-	state Future<Void> tooLong = delay(60);
-	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
-	state bool oldReplicationUsesDcId = false;
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
-
-			if (g_network->isSimulated()) {
-				UID debugID = deterministicRandom()->randomUniqueID();
-				TraceEvent(SevDebug, "ChangeConfigRandom", debugID);
-				tr.debugTransaction(debugID);
-			}
-			if (!creating && !force) {
-				state Future<RangeResult> fConfig = tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<vector<ProcessData>> fWorkers = getWorkers(&tr);
-				wait(success(fConfig) || tooLong);
-
-				if (!fConfig.isReady()) {
-					return ConfigurationResult::DATABASE_UNAVAILABLE;
-				}
-
-				if (fConfig.isReady()) {
-					ASSERT(fConfig.get().size() < CLIENT_KNOBS->TOO_MANY);
-					state DatabaseConfiguration oldConfig;
-					oldConfig.fromKeyValues((VectorRef<KeyValueRef>)fConfig.get());
-					state DatabaseConfiguration newConfig = oldConfig;
-					for (auto kv : m) {
-						newConfig.set(kv.first, kv.second);
-					}
-					if (!newConfig.isValid()) {
-						return ConfigurationResult::INVALID_CONFIGURATION;
-					}
-
-					if (newConfig.tLogPolicy->attributeKeys().count("dcid") && newConfig.regions.size() > 0) {
-						return ConfigurationResult::REGION_REPLICATION_MISMATCH;
-					}
-
-					oldReplicationUsesDcId =
-					    oldReplicationUsesDcId || oldConfig.tLogPolicy->attributeKeys().count("dcid");
-
-					if (oldConfig.usableRegions != newConfig.usableRegions) {
-						// cannot change region configuration
-						std::map<Key, int32_t> dcId_priority;
-						for (auto& it : newConfig.regions) {
-							dcId_priority[it.dcId] = it.priority;
-						}
-						for (auto& it : oldConfig.regions) {
-							if (!dcId_priority.count(it.dcId) || dcId_priority[it.dcId] != it.priority) {
-								return ConfigurationResult::REGIONS_CHANGED;
-							}
-						}
-
-						// must only have one region with priority >= 0
-						int activeRegionCount = 0;
-						for (auto& it : newConfig.regions) {
-							if (it.priority >= 0) {
-								activeRegionCount++;
-							}
-						}
-						if (activeRegionCount > 1) {
-							return ConfigurationResult::MULTIPLE_ACTIVE_REGIONS;
-						}
-					}
-
-					state Future<RangeResult> fServerList = (newConfig.regions.size())
-					                                            ? tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY)
-					                                            : Future<RangeResult>();
-
-					if (newConfig.usableRegions == 2) {
-						if (oldReplicationUsesDcId) {
-							state Future<RangeResult> fLocalityList =
-							    tr.getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
-							wait(success(fLocalityList) || tooLong);
-							if (!fLocalityList.isReady()) {
-								return ConfigurationResult::DATABASE_UNAVAILABLE;
-							}
-							RangeResult localityList = fLocalityList.get();
-							ASSERT(!localityList.more && localityList.size() < CLIENT_KNOBS->TOO_MANY);
-
-							std::set<Key> localityDcIds;
-							for (auto& s : localityList) {
-								auto dc = decodeTagLocalityListKey(s.key);
-								if (dc.present()) {
-									localityDcIds.insert(dc.get());
-								}
-							}
-
-							for (auto& it : newConfig.regions) {
-								if (localityDcIds.count(it.dcId) == 0) {
-									return ConfigurationResult::DCID_MISSING;
-								}
-							}
-						} else {
-							// all regions with priority >= 0 must be fully replicated
-							state std::vector<Future<Optional<Value>>> replicasFutures;
-							for (auto& it : newConfig.regions) {
-								if (it.priority >= 0) {
-									replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(it.dcId)));
-								}
-							}
-							wait(waitForAll(replicasFutures) || tooLong);
-
-							for (auto& it : replicasFutures) {
-								if (!it.isReady()) {
-									return ConfigurationResult::DATABASE_UNAVAILABLE;
-								}
-								if (!it.get().present()) {
-									return ConfigurationResult::REGION_NOT_FULLY_REPLICATED;
-								}
-							}
-						}
-					}
-
-					if (newConfig.regions.size()) {
-						// all storage servers must be in one of the regions
-						wait(success(fServerList) || tooLong);
-						if (!fServerList.isReady()) {
-							return ConfigurationResult::DATABASE_UNAVAILABLE;
-						}
-						RangeResult serverList = fServerList.get();
-						ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
-
-						std::set<Key> newDcIds;
-						for (auto& it : newConfig.regions) {
-							newDcIds.insert(it.dcId);
-						}
-						std::set<Optional<Key>> missingDcIds;
-						for (auto& s : serverList) {
-							auto ssi = decodeServerListValue(s.value);
-							if (!ssi.locality.dcId().present() || !newDcIds.count(ssi.locality.dcId().get())) {
-								missingDcIds.insert(ssi.locality.dcId());
-							}
-						}
-						if (missingDcIds.size() > (oldReplicationUsesDcId ? 1 : 0)) {
-							return ConfigurationResult::STORAGE_IN_UNKNOWN_DCID;
-						}
-					}
-
-					wait(success(fWorkers) || tooLong);
-					if (!fWorkers.isReady()) {
-						return ConfigurationResult::DATABASE_UNAVAILABLE;
-					}
-
-					if (newConfig.regions.size()) {
-						std::map<Optional<Key>, std::set<Optional<Key>>> dcId_zoneIds;
-						for (auto& it : fWorkers.get()) {
-							if (it.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::WorstFit) {
-								dcId_zoneIds[it.locality.dcId()].insert(it.locality.zoneId());
-							}
-						}
-						for (auto& region : newConfig.regions) {
-							if (dcId_zoneIds[region.dcId].size() <
-							    std::max(newConfig.storageTeamSize, newConfig.tLogReplicationFactor)) {
-								return ConfigurationResult::NOT_ENOUGH_WORKERS;
-							}
-							if (region.satelliteTLogReplicationFactor > 0 && region.priority >= 0) {
-								int totalSatelliteProcesses = 0;
-								for (auto& sat : region.satellites) {
-									totalSatelliteProcesses += dcId_zoneIds[sat.dcId].size();
-								}
-								if (totalSatelliteProcesses < region.satelliteTLogReplicationFactor) {
-									return ConfigurationResult::NOT_ENOUGH_WORKERS;
-								}
-							}
-						}
-					} else {
-						std::set<Optional<Key>> zoneIds;
-						for (auto& it : fWorkers.get()) {
-							if (it.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::WorstFit) {
-								zoneIds.insert(it.locality.zoneId());
-							}
-						}
-						if (zoneIds.size() < std::max(newConfig.storageTeamSize, newConfig.tLogReplicationFactor)) {
-							return ConfigurationResult::NOT_ENOUGH_WORKERS;
-						}
-					}
-				}
-			}
-			if (creating) {
-				tr.setOption(FDBTransactionOptions::INITIALIZE_NEW_DATABASE);
-				tr.addReadConflictRange(singleKeyRange(initIdKey));
-			} else if (m.size()) {
-				// might be used in an emergency transaction, so make sure it is retry-self-conflicting and
-				// CAUSAL_WRITE_RISKY
-				tr.setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
-				tr.addReadConflictRange(singleKeyRange(m.begin()->first));
-			}
-
-			if (locked.present()) {
-				ASSERT(creating);
-				tr.atomicOp(databaseLockedKey,
-				            BinaryWriter::toValue(locked.get(), Unversioned())
-				                .withPrefix(LiteralStringRef("0123456789"))
-				                .withSuffix(LiteralStringRef("\x00\x00\x00\x00")),
-				            MutationRef::SetVersionstampedValue);
-			}
-
-			for (auto i = m.begin(); i != m.end(); ++i) {
-				tr.set(StringRef(i->first), StringRef(i->second));
-			}
-
-			tr.addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
-			tr.set(moveKeysLockOwnerKey, versionKey);
-
-			wait(tr.commit());
-			TraceEvent(SevDebug, "ChangeConfigSuccess");
-			break;
-		} catch (Error& e) {
-			state Error e1(e);
-			if ((e.code() == error_code_not_committed || e.code() == error_code_transaction_too_old) && creating) {
-				// The database now exists.  Determine whether we created it or it was already existing/created by
-				// someone else.  The latter is an error.
-				tr.reset();
-				loop {
-					try {
-						if (g_network->isSimulated()) {
-							UID debugID = deterministicRandom()->randomUniqueID();
-							TraceEvent(SevDebug, "ChangeConfigRandom2", debugID);
-							tr.debugTransaction(debugID);
-						}
-
-						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-						tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
-
-						Optional<Value> v = wait(tr.get(initIdKey));
-						if (v != m[initIdKey.toString()])
-							return ConfigurationResult::DATABASE_ALREADY_CREATED;
-						else
-							return ConfigurationResult::DATABASE_CREATED;
-					} catch (Error& e2) {
-						TraceEvent(SevDebug, "ChangeConfigError2").error(e2);
-						wait(tr.onError(e2));
-					}
-				}
-			}
-			TraceEvent(SevDebug, "ChangeConfigError").error(e1);
-			wait(tr.onError(e1));
-		}
-	}
-	return ConfigurationResult::SUCCESS;
 }
 
 ConfigureAutoResult parseConfig(StatusObject const& status) {
@@ -967,97 +717,7 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 	return result;
 }
 
-ACTOR Future<ConfigurationResult> autoConfig(Database cx, ConfigureAutoResult conf) {
-	state Transaction tr(cx);
-	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
-
-	if (!conf.address_class.size())
-		return ConfigurationResult::INCOMPLETE_CONFIGURATION; // FIXME: correct return type
-
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
-
-			vector<ProcessData> workers = wait(getWorkers(&tr));
-			std::map<NetworkAddress, Optional<Standalone<StringRef>>> address_processId;
-			for (auto& w : workers) {
-				address_processId[w.address] = w.locality.processId();
-			}
-
-			for (auto& it : conf.address_class) {
-				if (it.second.classSource() == ProcessClass::CommandLineSource) {
-					tr.clear(processClassKeyFor(address_processId[it.first].get()));
-				} else {
-					tr.set(processClassKeyFor(address_processId[it.first].get()), processClassValue(it.second));
-				}
-			}
-
-			if (conf.address_class.size())
-				tr.set(processClassChangeKey, deterministicRandom()->randomUniqueID().toString());
-
-			if (conf.auto_logs != conf.old_logs)
-				tr.set(configKeysPrefix.toString() + "auto_logs", format("%d", conf.auto_logs));
-
-			if (conf.auto_commit_proxies != conf.old_commit_proxies)
-				tr.set(configKeysPrefix.toString() + "auto_commit_proxies", format("%d", conf.auto_commit_proxies));
-
-			if (conf.auto_grv_proxies != conf.old_grv_proxies)
-				tr.set(configKeysPrefix.toString() + "auto_grv_proxies", format("%d", conf.auto_grv_proxies));
-
-			if (conf.auto_resolvers != conf.old_resolvers)
-				tr.set(configKeysPrefix.toString() + "auto_resolvers", format("%d", conf.auto_resolvers));
-
-			if (conf.auto_replication != conf.old_replication) {
-				std::vector<StringRef> modes;
-				modes.push_back(conf.auto_replication);
-				std::map<std::string, std::string> m;
-				auto r = buildConfiguration(modes, m);
-				if (r != ConfigurationResult::SUCCESS)
-					return r;
-
-				for (auto& kv : m)
-					tr.set(kv.first, kv.second);
-			}
-
-			tr.addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
-			tr.set(moveKeysLockOwnerKey, versionKey);
-
-			wait(tr.commit());
-			return ConfigurationResult::SUCCESS;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
-Future<ConfigurationResult> changeConfig(Database const& cx,
-                                         std::vector<StringRef> const& modes,
-                                         Optional<ConfigureAutoResult> const& conf,
-                                         bool force) {
-	if (modes.size() && modes[0] == LiteralStringRef("auto") && conf.present()) {
-		return autoConfig(cx, conf.get());
-	}
-
-	std::map<std::string, std::string> m;
-	auto r = buildConfiguration(modes, m);
-	if (r != ConfigurationResult::SUCCESS)
-		return r;
-	return changeConfig(cx, m, force);
-}
-
-Future<ConfigurationResult> changeConfig(Database const& cx, std::string const& modes, bool force) {
-	TraceEvent("ChangeConfig").detail("Mode", modes);
-	std::map<std::string, std::string> m;
-	auto r = buildConfiguration(modes, m);
-	if (r != ConfigurationResult::SUCCESS)
-		return r;
-	return changeConfig(cx, m, force);
-}
-
-ACTOR Future<vector<ProcessData>> getWorkers(Transaction* tr) {
+ACTOR Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
 	state Future<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
 	state Future<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
 
@@ -1088,14 +748,14 @@ ACTOR Future<vector<ProcessData>> getWorkers(Transaction* tr) {
 	return results;
 }
 
-ACTOR Future<vector<ProcessData>> getWorkers(Database cx) {
+ACTOR Future<std::vector<ProcessData>> getWorkers(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE); // necessary?
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			vector<ProcessData> workers = wait(getWorkers(&tr));
+			std::vector<ProcessData> workers = wait(getWorkers(&tr));
 			return workers;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -1131,15 +791,18 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		return CoordinatorsResult::BAD_DATABASE_STATE; // Someone deleted this key entirely?
 
 	state ClusterConnectionString old(currentKey.get().toString());
-	if (tr->getDatabase()->getConnectionFile() &&
+	if (tr->getDatabase()->getConnectionRecord() &&
 	    old.clusterKeyName().toString() !=
-	        tr->getDatabase()->getConnectionFile()->getConnectionString().clusterKeyName())
+	        tr->getDatabase()->getConnectionRecord()->getConnectionString().clusterKeyName())
 		return CoordinatorsResult::BAD_DATABASE_STATE; // Someone changed the "name" of the database??
 
 	state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
 	if (!desiredCoordinators->size()) {
 		std::vector<NetworkAddress> _desiredCoordinators = wait(change->getDesiredCoordinators(
-		    tr, old.coordinators(), Reference<ClusterConnectionFile>(new ClusterConnectionFile(old)), result));
+		    tr,
+		    old.coordinators(),
+		    Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(old)),
+		    result));
 		*desiredCoordinators = _desiredCoordinators;
 	}
 
@@ -1162,19 +825,29 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	                                   StringRef(newName + ':' + deterministicRandom()->randomAlphaNumeric(32)));
 
 	if (g_network->isSimulated()) {
-		for (int i = 0; i < (desiredCoordinators->size() / 2) + 1; i++) {
-			auto addresses = g_simulator.getProcessByAddress((*desiredCoordinators)[i])->addresses;
+		int i = 0;
+		int protectedCount = 0;
+		while ((protectedCount < ((desiredCoordinators->size() / 2) + 1)) && (i < desiredCoordinators->size())) {
+			auto process = g_simulator.getProcessByAddress((*desiredCoordinators)[i]);
+			auto addresses = process->addresses;
 
-			g_simulator.protectedAddresses.insert(addresses.address);
+			if (!process->isReliable()) {
+				i++;
+				continue;
+			}
+
+			g_simulator.protectedAddresses.insert(process->addresses.address);
 			if (addresses.secondaryAddress.present()) {
-				g_simulator.protectedAddresses.insert(addresses.secondaryAddress.get());
+				g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
 			}
 			TraceEvent("ProtectCoordinator").detail("Address", (*desiredCoordinators)[i]).backtrace();
+			protectedCount++;
+			i++;
 		}
 	}
 
-	vector<Future<Optional<LeaderInfo>>> leaderServers;
-	ClientCoordinators coord(Reference<ClusterConnectionFile>(new ClusterConnectionFile(conn)));
+	std::vector<Future<Optional<LeaderInfo>>> leaderServers;
+	ClientCoordinators coord(Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(conn)));
 
 	leaderServers.reserve(coord.clientLeaderServers.size());
 	for (int i = 0; i < coord.clientLeaderServers.size(); i++)
@@ -1207,14 +880,17 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 				return CoordinatorsResult::BAD_DATABASE_STATE; // Someone deleted this key entirely?
 
 			state ClusterConnectionString old(currentKey.get().toString());
-			if (cx->getConnectionFile() &&
-			    old.clusterKeyName().toString() != cx->getConnectionFile()->getConnectionString().clusterKeyName())
+			if (cx->getConnectionRecord() &&
+			    old.clusterKeyName().toString() != cx->getConnectionRecord()->getConnectionString().clusterKeyName())
 				return CoordinatorsResult::BAD_DATABASE_STATE; // Someone changed the "name" of the database??
 
 			state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
 			if (!desiredCoordinators.size()) {
 				std::vector<NetworkAddress> _desiredCoordinators = wait(change->getDesiredCoordinators(
-				    &tr, old.coordinators(), Reference<ClusterConnectionFile>(new ClusterConnectionFile(old)), result));
+				    &tr,
+				    old.coordinators(),
+				    Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(old)),
+				    result));
 				desiredCoordinators = _desiredCoordinators;
 			}
 
@@ -1259,8 +935,9 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 			TEST(old.clusterKeyName() != conn.clusterKeyName()); // Quorum change with new name
 			TEST(old.clusterKeyName() == conn.clusterKeyName()); // Quorum change with unchanged name
 
-			state vector<Future<Optional<LeaderInfo>>> leaderServers;
-			state ClientCoordinators coord(Reference<ClusterConnectionFile>(new ClusterConnectionFile(conn)));
+			state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
+			state ClientCoordinators coord(
+			    Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(conn)));
 			// check if allowed to modify the cluster descriptor
 			if (!change->getDesiredClusterKeyName().empty()) {
 				CheckDescriptorMutableReply mutabilityReply =
@@ -1291,24 +968,24 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 }
 
 struct SpecifiedQuorumChange final : IQuorumChange {
-	vector<NetworkAddress> desired;
-	explicit SpecifiedQuorumChange(vector<NetworkAddress> const& desired) : desired(desired) {}
-	Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
-	                                                      vector<NetworkAddress> oldCoordinators,
-	                                                      Reference<ClusterConnectionFile>,
-	                                                      CoordinatorsResult&) override {
+	std::vector<NetworkAddress> desired;
+	explicit SpecifiedQuorumChange(std::vector<NetworkAddress> const& desired) : desired(desired) {}
+	Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
+	                                                           std::vector<NetworkAddress> oldCoordinators,
+	                                                           Reference<IClusterConnectionRecord>,
+	                                                           CoordinatorsResult&) override {
 		return desired;
 	}
 };
-Reference<IQuorumChange> specifiedQuorumChange(vector<NetworkAddress> const& addresses) {
+Reference<IQuorumChange> specifiedQuorumChange(std::vector<NetworkAddress> const& addresses) {
 	return Reference<IQuorumChange>(new SpecifiedQuorumChange(addresses));
 }
 
 struct NoQuorumChange final : IQuorumChange {
-	Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
-	                                                      vector<NetworkAddress> oldCoordinators,
-	                                                      Reference<ClusterConnectionFile>,
-	                                                      CoordinatorsResult&) override {
+	Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
+	                                                           std::vector<NetworkAddress> oldCoordinators,
+	                                                           Reference<IClusterConnectionRecord>,
+	                                                           CoordinatorsResult&) override {
 		return oldCoordinators;
 	}
 };
@@ -1321,11 +998,11 @@ struct NameQuorumChange final : IQuorumChange {
 	Reference<IQuorumChange> otherChange;
 	explicit NameQuorumChange(std::string const& newName, Reference<IQuorumChange> const& otherChange)
 	  : newName(newName), otherChange(otherChange) {}
-	Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
-	                                                      vector<NetworkAddress> oldCoordinators,
-	                                                      Reference<ClusterConnectionFile> cf,
-	                                                      CoordinatorsResult& t) override {
-		return otherChange->getDesiredCoordinators(tr, oldCoordinators, cf, t);
+	Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
+	                                                           std::vector<NetworkAddress> oldCoordinators,
+	                                                           Reference<IClusterConnectionRecord> ccr,
+	                                                           CoordinatorsResult& t) override {
+		return otherChange->getDesiredCoordinators(tr, oldCoordinators, ccr, t);
 	}
 	std::string getDesiredClusterKeyName() const override { return newName; }
 };
@@ -1337,11 +1014,11 @@ struct AutoQuorumChange final : IQuorumChange {
 	int desired;
 	explicit AutoQuorumChange(int desired) : desired(desired) {}
 
-	Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
-	                                                      vector<NetworkAddress> oldCoordinators,
-	                                                      Reference<ClusterConnectionFile> ccf,
-	                                                      CoordinatorsResult& err) override {
-		return getDesired(Reference<AutoQuorumChange>::addRef(this), tr, oldCoordinators, ccf, &err);
+	Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
+	                                                           std::vector<NetworkAddress> oldCoordinators,
+	                                                           Reference<IClusterConnectionRecord> ccr,
+	                                                           CoordinatorsResult& err) override {
+		return getDesired(Reference<AutoQuorumChange>::addRef(this), tr, oldCoordinators, ccr, &err);
 	}
 
 	ACTOR static Future<int> getRedundancy(AutoQuorumChange* self, Transaction* tr) {
@@ -1358,8 +1035,8 @@ struct AutoQuorumChange final : IQuorumChange {
 
 	ACTOR static Future<bool> isAcceptable(AutoQuorumChange* self,
 	                                       Transaction* tr,
-	                                       vector<NetworkAddress> oldCoordinators,
-	                                       Reference<ClusterConnectionFile> ccf,
+	                                       std::vector<NetworkAddress> oldCoordinators,
+	                                       Reference<IClusterConnectionRecord> ccr,
 	                                       int desiredCount,
 	                                       std::set<AddressExclusion>* excluded) {
 		// Are there enough coordinators for the redundancy level?
@@ -1369,15 +1046,15 @@ struct AutoQuorumChange final : IQuorumChange {
 			return false;
 
 		// Check availability
-		ClientCoordinators coord(ccf);
-		vector<Future<Optional<LeaderInfo>>> leaderServers;
+		ClientCoordinators coord(ccr);
+		std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 		leaderServers.reserve(coord.clientLeaderServers.size());
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
 			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
 			                                           GetLeaderRequest(coord.clusterKey, UID()),
 			                                           TaskPriority::CoordinationReply));
 		}
-		Optional<vector<Optional<LeaderInfo>>> results =
+		Optional<std::vector<Optional<LeaderInfo>>> results =
 		    wait(timeout(getAll(leaderServers), CLIENT_KNOBS->IS_ACCEPTABLE_DELAY));
 		if (!results.present()) {
 			return false;
@@ -1404,11 +1081,11 @@ struct AutoQuorumChange final : IQuorumChange {
 		return true; // The status quo seems fine
 	}
 
-	ACTOR static Future<vector<NetworkAddress>> getDesired(Reference<AutoQuorumChange> self,
-	                                                       Transaction* tr,
-	                                                       vector<NetworkAddress> oldCoordinators,
-	                                                       Reference<ClusterConnectionFile> ccf,
-	                                                       CoordinatorsResult* err) {
+	ACTOR static Future<std::vector<NetworkAddress>> getDesired(Reference<AutoQuorumChange> self,
+	                                                            Transaction* tr,
+	                                                            std::vector<NetworkAddress> oldCoordinators,
+	                                                            Reference<IClusterConnectionRecord> ccr,
+	                                                            CoordinatorsResult* err) {
 		state int desiredCount = self->desired;
 
 		if (desiredCount == -1) {
@@ -1419,8 +1096,8 @@ struct AutoQuorumChange final : IQuorumChange {
 		std::vector<AddressExclusion> excl = wait(getExcludedServers(tr));
 		state std::set<AddressExclusion> excluded(excl.begin(), excl.end());
 
-		vector<ProcessData> _workers = wait(getWorkers(tr));
-		state vector<ProcessData> workers = _workers;
+		std::vector<ProcessData> _workers = wait(getWorkers(tr));
+		state std::vector<ProcessData> workers = _workers;
 
 		std::map<NetworkAddress, LocalityData> addr_locality;
 		for (auto w : workers)
@@ -1441,7 +1118,7 @@ struct AutoQuorumChange final : IQuorumChange {
 		}
 
 		if (checkAcceptable) {
-			bool ok = wait(isAcceptable(self.getPtr(), tr, oldCoordinators, ccf, desiredCount, &excluded));
+			bool ok = wait(isAcceptable(self.getPtr(), tr, oldCoordinators, ccr, desiredCount, &excluded));
 			if (ok)
 				return oldCoordinators;
 		}
@@ -1450,13 +1127,14 @@ struct AutoQuorumChange final : IQuorumChange {
 		self->addDesiredWorkers(chosen, workers, desiredCount, excluded);
 
 		if (chosen.size() < desiredCount) {
-			if (chosen.size() < oldCoordinators.size()) {
+			if (chosen.empty() || chosen.size() < oldCoordinators.size()) {
 				TraceEvent("NotEnoughMachinesForCoordinators")
 				    .detail("EligibleWorkers", workers.size())
+				    .detail("ChosenWorkers", chosen.size())
 				    .detail("DesiredCoordinators", desiredCount)
 				    .detail("CurrentCoordinators", oldCoordinators.size());
 				*err = CoordinatorsResult::NOT_ENOUGH_MACHINES;
-				return vector<NetworkAddress>();
+				return std::vector<NetworkAddress>();
 			}
 			chosen.resize((chosen.size() - 1) | 1);
 		}
@@ -1468,11 +1146,11 @@ struct AutoQuorumChange final : IQuorumChange {
 	// (1) the number of workers at each locality type (e.g., dcid) <= desiredCount; and
 	// (2) prefer workers at a locality where less workers has been chosen than other localities: evenly distribute
 	// workers.
-	void addDesiredWorkers(vector<NetworkAddress>& chosen,
-	                       const vector<ProcessData>& workers,
+	void addDesiredWorkers(std::vector<NetworkAddress>& chosen,
+	                       const std::vector<ProcessData>& workers,
 	                       int desiredCount,
 	                       const std::set<AddressExclusion>& excluded) {
-		vector<ProcessData> remainingWorkers(workers);
+		std::vector<ProcessData> remainingWorkers(workers);
 		deterministicRandom()->randomShuffle(remainingWorkers);
 
 		std::partition(remainingWorkers.begin(), remainingWorkers.end(), [](const ProcessData& data) {
@@ -1495,10 +1173,10 @@ struct AutoQuorumChange final : IQuorumChange {
 		std::map<StringRef, std::map<StringRef, int>> currentCounts;
 		std::map<StringRef, int> hardLimits;
 
-		vector<StringRef> fields({ LiteralStringRef("dcid"),
-		                           LiteralStringRef("data_hall"),
-		                           LiteralStringRef("zoneid"),
-		                           LiteralStringRef("machineid") });
+		std::vector<StringRef> fields({ LiteralStringRef("dcid"),
+		                                LiteralStringRef("data_hall"),
+		                                LiteralStringRef("zoneid"),
+		                                LiteralStringRef("machineid") });
 
 		for (auto field = fields.begin(); field != fields.end(); field++) {
 			if (field->toString() == "zoneid") {
@@ -1562,7 +1240,7 @@ Reference<IQuorumChange> autoQuorumChange(int desired) {
 	return Reference<IQuorumChange>(new AutoQuorumChange(desired));
 }
 
-void excludeServers(Transaction& tr, vector<AddressExclusion>& servers, bool failed) {
+void excludeServers(Transaction& tr, std::vector<AddressExclusion>& servers, bool failed) {
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1581,7 +1259,7 @@ void excludeServers(Transaction& tr, vector<AddressExclusion>& servers, bool fai
 	TraceEvent("ExcludeServersCommit").detail("Servers", describe(servers)).detail("ExcludeFailed", failed);
 }
 
-ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers, bool failed) {
+ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> servers, bool failed) {
 	if (cx->apiVersionAtLeast(700)) {
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
@@ -1684,7 +1362,7 @@ ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string
 	}
 }
 
-ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers, bool failed) {
+ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> servers, bool failed) {
 	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	if (cx->apiVersionAtLeast(700)) {
 		state ReadYourWritesTransaction ryw(cx);
@@ -1787,7 +1465,7 @@ ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers,
 
 // Remove the given localities from the exclusion list.
 // include localities by clearing the keys.
-ACTOR Future<Void> includeLocalities(Database cx, vector<std::string> localities, bool failed, bool includeAll) {
+ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> localities, bool failed, bool includeAll) {
 	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	if (cx->apiVersionAtLeast(700)) {
 		state ReadYourWritesTransaction ryw(cx);
@@ -1881,7 +1559,7 @@ ACTOR Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass p
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 
-			vector<ProcessData> workers = wait(getWorkers(&tr));
+			std::vector<ProcessData> workers = wait(getWorkers(&tr));
 
 			bool foundChange = false;
 			for (int i = 0; i < workers.size(); i++) {
@@ -1906,13 +1584,13 @@ ACTOR Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass p
 	}
 }
 
-ACTOR Future<vector<AddressExclusion>> getExcludedServers(Transaction* tr) {
+ACTOR Future<std::vector<AddressExclusion>> getExcludedServers(Transaction* tr) {
 	state RangeResult r = wait(tr->getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 	state RangeResult r2 = wait(tr->getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!r2.more && r2.size() < CLIENT_KNOBS->TOO_MANY);
 
-	vector<AddressExclusion> exclusions;
+	std::vector<AddressExclusion> exclusions;
 	for (auto i = r.begin(); i != r.end(); ++i) {
 		auto a = decodeExcludedServersKey(i->key);
 		if (a.isValid())
@@ -1927,14 +1605,14 @@ ACTOR Future<vector<AddressExclusion>> getExcludedServers(Transaction* tr) {
 	return exclusions;
 }
 
-ACTOR Future<vector<AddressExclusion>> getExcludedServers(Database cx) {
+ACTOR Future<std::vector<AddressExclusion>> getExcludedServers(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE); // necessary?
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			vector<AddressExclusion> exclusions = wait(getExcludedServers(&tr));
+			std::vector<AddressExclusion> exclusions = wait(getExcludedServers(&tr));
 			return exclusions;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -1943,13 +1621,13 @@ ACTOR Future<vector<AddressExclusion>> getExcludedServers(Database cx) {
 }
 
 // Get the current list of excluded localities by reading the keys.
-ACTOR Future<vector<std::string>> getExcludedLocalities(Transaction* tr) {
+ACTOR Future<std::vector<std::string>> getExcludedLocalities(Transaction* tr) {
 	state RangeResult r = wait(tr->getRange(excludedLocalityKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 	state RangeResult r2 = wait(tr->getRange(failedLocalityKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!r2.more && r2.size() < CLIENT_KNOBS->TOO_MANY);
 
-	vector<std::string> excludedLocalities;
+	std::vector<std::string> excludedLocalities;
 	for (const auto& i : r) {
 		auto a = decodeExcludedLocalityKey(i.key);
 		excludedLocalities.push_back(a);
@@ -1963,14 +1641,14 @@ ACTOR Future<vector<std::string>> getExcludedLocalities(Transaction* tr) {
 }
 
 // Get the list of excluded localities by reading the keys.
-ACTOR Future<vector<std::string>> getExcludedLocalities(Database cx) {
+ACTOR Future<std::vector<std::string>> getExcludedLocalities(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			vector<std::string> exclusions = wait(getExcludedLocalities(&tr));
+			std::vector<std::string> exclusions = wait(getExcludedLocalities(&tr));
 			return exclusions;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -2022,9 +1700,9 @@ ACTOR Future<Void> printHealthyZone(Database cx) {
 				printf("No ongoing maintenance.\n");
 			} else {
 				auto healthyZone = decodeHealthyZoneValue(val.get());
-				printf("Maintenance for zone %s will continue for %" PRId64 " seconds.\n",
-				       healthyZone.first.toString().c_str(),
-				       (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+				fmt::print("Maintenance for zone {0} will continue for {1} seconds.\n",
+				           healthyZone.first.toString(),
+				           (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 			}
 			return Void();
 		} catch (Error& e) {
@@ -2200,7 +1878,7 @@ ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr
 }
 
 ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx,
-                                                                vector<AddressExclusion> excl,
+                                                                std::vector<AddressExclusion> excl,
                                                                 bool waitForAllExcluded) {
 	state std::set<AddressExclusion> exclusions(excl.begin(), excl.end());
 	state std::set<NetworkAddress> inProgressExclusion;
@@ -2426,6 +2104,90 @@ ACTOR Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UI
 	return Void();
 }
 
+ACTOR Future<Void> updateChangeFeed(Transaction* tr, Key rangeID, ChangeFeedStatus status, KeyRange range) {
+	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+	Optional<Value> val = wait(tr->get(rangeIDKey));
+	if (status == ChangeFeedStatus::CHANGE_FEED_CREATE) {
+		if (!val.present()) {
+			tr->set(rangeIDKey, changeFeedValue(range, invalidVersion, status));
+		} else if (std::get<0>(decodeChangeFeedValue(val.get())) != range) {
+			throw unsupported_operation();
+		}
+	} else if (status == ChangeFeedStatus::CHANGE_FEED_STOP) {
+		if (val.present()) {
+			tr->set(rangeIDKey,
+			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
+			                        std::get<1>(decodeChangeFeedValue(val.get())),
+			                        status));
+		} else {
+			throw unsupported_operation();
+		}
+	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
+		if (val.present()) {
+			tr->set(rangeIDKey,
+			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
+			                        std::get<1>(decodeChangeFeedValue(val.get())),
+			                        status));
+			tr->clear(rangeIDKey);
+		} else {
+			throw unsupported_operation();
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> updateChangeFeed(Reference<ReadYourWritesTransaction> tr,
+                                    Key rangeID,
+                                    ChangeFeedStatus status,
+                                    KeyRange range) {
+	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+	Optional<Value> val = wait(tr->get(rangeIDKey));
+	if (status == ChangeFeedStatus::CHANGE_FEED_CREATE) {
+		if (!val.present()) {
+			tr->set(rangeIDKey, changeFeedValue(range, invalidVersion, status));
+		} else if (std::get<0>(decodeChangeFeedValue(val.get())) != range) {
+			throw unsupported_operation();
+		}
+	} else if (status == ChangeFeedStatus::CHANGE_FEED_STOP) {
+		if (val.present()) {
+			tr->set(rangeIDKey,
+			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
+			                        std::get<1>(decodeChangeFeedValue(val.get())),
+			                        status));
+		} else {
+			throw unsupported_operation();
+		}
+	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
+		if (val.present()) {
+			tr->set(rangeIDKey,
+			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
+			                        std::get<1>(decodeChangeFeedValue(val.get())),
+			                        status));
+			tr->clear(rangeIDKey);
+		} else {
+			throw unsupported_operation();
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> updateChangeFeed(Database cx, Key rangeID, ChangeFeedStatus status, KeyRange range) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			wait(updateChangeFeed(&tr, rangeID, status, range));
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> advanceVersion(Database cx, Version v) {
 	state Transaction tr(cx);
 	loop {
@@ -2446,7 +2208,7 @@ ACTOR Future<Void> advanceVersion(Database cx, Version v) {
 	}
 }
 
-ACTOR Future<Void> forceRecovery(Reference<ClusterConnectionFile> clusterFile, Key dcId) {
+ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile, Key dcId) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
 
@@ -2649,6 +2411,40 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 		    .detail("SchemaPath", schemaPath);
 		throw unknown_error();
 	}
+}
+
+std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {
+	// Note: the error message here should not be changed if possible
+	// If you do change the message here,
+	// please update the corresponding fdbcli code to support both the old and the new message
+
+	std::string msg;
+	switch (res) {
+	case CoordinatorsResult::INVALID_NETWORK_ADDRESSES:
+		msg = "The specified network addresses are invalid";
+		break;
+	case CoordinatorsResult::SAME_NETWORK_ADDRESSES:
+		msg = "No change (existing configuration satisfies request)";
+		break;
+	case CoordinatorsResult::NOT_COORDINATORS:
+		msg = "Coordination servers are not running on the specified network addresses";
+		break;
+	case CoordinatorsResult::DATABASE_UNREACHABLE:
+		msg = "Database unreachable";
+		break;
+	case CoordinatorsResult::BAD_DATABASE_STATE:
+		msg = "The database is in an unexpected state from which changing coordinators might be unsafe";
+		break;
+	case CoordinatorsResult::COORDINATOR_UNREACHABLE:
+		msg = "One of the specified coordinators is unreachable";
+		break;
+	case CoordinatorsResult::NOT_ENOUGH_MACHINES:
+		msg = "Too few fdbserver machines to provide coordination at the current redundancy level";
+		break;
+	default:
+		break;
+	}
+	return msg;
 }
 
 TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {

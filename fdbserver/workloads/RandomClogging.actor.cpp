@@ -55,7 +55,7 @@ struct RandomCloggingWorkload : TestWorkload {
 			return Void();
 	}
 	Future<bool> check(Database const& cx) override { return true; }
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR void doClog(ISimulator::ProcessInfo* machine, double t, double delay = 0.0) {
 		wait(::delay(delay));
@@ -95,8 +95,8 @@ struct RandomCloggingWorkload : TestWorkload {
 
 			// randomly choose half of the machines in the cluster to all clog up,
 			//  then unclog in a different order over the course of t seconds
-			vector<ISimulator::ProcessInfo*> swizzled;
-			vector<double> starts, ends;
+			std::vector<ISimulator::ProcessInfo*> swizzled;
+			std::vector<double> starts, ends;
 			for (int m = 0; m < g_simulator.getAllProcesses().size(); m++)
 				if (deterministicRandom()->random01() < 0.5) {
 					swizzled.push_back(g_simulator.getAllProcesses()[m]);
@@ -106,7 +106,7 @@ struct RandomCloggingWorkload : TestWorkload {
 			for (int i = 0; i < 10; i++)
 				self->clogRandomPair(t);
 
-			vector<Future<Void>> cloggers;
+			std::vector<Future<Void>> cloggers;
 			for (int i = 0; i < swizzled.size(); i++)
 				self->doClog(swizzled[i], ends[i] - starts[i], starts[i]);
 		}

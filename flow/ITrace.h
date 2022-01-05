@@ -40,10 +40,10 @@ struct ITraceLogWriter {
 class TraceEventFields;
 
 struct ITraceLogFormatter {
-	virtual const char* getExtension() = 0;
-	virtual const char* getHeader() = 0; // Called when starting a new file
-	virtual const char* getFooter() = 0; // Called when ending a file
-	virtual std::string formatEvent(const TraceEventFields&) = 0; // Called for each event
+	virtual const char* getExtension() const = 0;
+	virtual const char* getHeader() const = 0; // Called when starting a new file
+	virtual const char* getFooter() const = 0; // Called when ending a file
+	virtual std::string formatEvent(const TraceEventFields&) const = 0; // Called for each event
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;

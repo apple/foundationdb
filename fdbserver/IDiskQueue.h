@@ -144,8 +144,8 @@ public:
 		return location(cursorWrite, cursorWrite + 1);
 	}
 
-	Future<Void> getError() override { return Future<Void>(); }
-	Future<Void> onClosed() override { return Future<Void>(); }
+	Future<Void> getError() const override { return Future<Void>(); }
+	Future<Void> onClosed() const override { return Future<Void>(); }
 
 	void dispose() override {}
 

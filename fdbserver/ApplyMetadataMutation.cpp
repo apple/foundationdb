@@ -419,7 +419,7 @@ private:
 			}
 			if (cacheInfo && k != allKeys.end) {
 				KeyRef end = cacheInfo->rangeContaining(k).end();
-				vector<uint16_t> serverIndices;
+				std::vector<uint16_t> serverIndices;
 				decodeStorageCacheValue(m.param2, serverIndices);
 				cacheInfo->insert(KeyRangeRef(k, end), serverIndices.size() > 0);
 			}
@@ -471,6 +471,32 @@ private:
 		}
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
+	}
+
+	void checkSetChangeFeedPrefix(MutationRef m) {
+		if (!m.param1.startsWith(changeFeedPrefix)) {
+			return;
+		}
+		if (toCommit && keyInfo) {
+			KeyRange r = std::get<0>(decodeChangeFeedValue(m.param2));
+			MutationRef privatized = m;
+			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+			auto ranges = keyInfo->intersectingRanges(r);
+			auto firstRange = ranges.begin();
+			++firstRange;
+			if (firstRange == ranges.end()) {
+				ranges.begin().value().populateTags();
+				toCommit->addTags(ranges.begin().value().tags);
+			} else {
+				std::set<Tag> allSources;
+				for (auto r : ranges) {
+					r.value().populateTags();
+					allSources.insert(r.value().tags.begin(), r.value().tags.end());
+				}
+				toCommit->addTags(allSources);
+			}
+			toCommit->writeTypedMessage(privatized);
+		}
 	}
 
 	void checkSetServerListPrefix(MutationRef m) {
@@ -704,7 +730,7 @@ private:
 		    m.param1.startsWith(applyMutationsAddPrefixRange.begin) ||
 		    m.param1.startsWith(applyMutationsRemovePrefixRange.begin) || m.param1.startsWith(tagLocalityListPrefix) ||
 		    m.param1.startsWith(serverTagHistoryPrefix) ||
-		    m.param1.startsWith(testOnlyTxnStateStorePrefixRange.begin)) {
+		    m.param1.startsWith(testOnlyTxnStateStorePrefixRange.begin) || m.param1 == clusterIdKey) {
 
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		}
@@ -1123,7 +1149,7 @@ private:
 
 		std::map<KeyRef, MutationRef>::iterator itr;
 		KeyRef keyBegin, keyEnd;
-		vector<uint16_t> serverIndices;
+		std::vector<uint16_t> serverIndices;
 		MutationRef mutationBegin, mutationEnd;
 
 		for (itr = cachedRangeInfo.begin(); itr != cachedRangeInfo.end(); ++itr) {
@@ -1202,6 +1228,7 @@ public:
 				checkSetCacheKeysPrefix(m);
 				checkSetConfigKeys(m);
 				checkSetServerListPrefix(m);
+				checkSetChangeFeedPrefix(m);
 				checkSetTSSMappingKeys(m);
 				checkSetTSSQuarantineKeys(m);
 				checkSetApplyMutationsEndRange(m);

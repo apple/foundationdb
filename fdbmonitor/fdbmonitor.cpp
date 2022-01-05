@@ -197,15 +197,44 @@ const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
 	const char* ret = nullptr;
 	const char* section = nullptr;
 
+	std::string keyWithUnderscores(key);
+	for (int i = keyWithUnderscores.size() - 1; i >= 0; --i) {
+		if (keyWithUnderscores[i] == '-') {
+			keyWithUnderscores.at(i) = '_';
+		}
+	}
+
 	va_list ap;
 	va_start(ap, key);
-
-	while (!ret && (section = va_arg(ap, const char*)))
+	while (!ret && (section = va_arg(ap, const char*))) {
 		ret = ini.GetValue(section, key, nullptr);
-
+		if (!ret) {
+			ret = ini.GetValue(section, keyWithUnderscores.c_str(), nullptr);
+		}
+	}
 	va_end(ap);
-
 	return ret;
+}
+
+bool isParameterNameEqual(const char* str, const char* target) {
+	if (!str || !target) {
+		return false;
+	}
+	while (*str && *target) {
+		char curStr = *str, curTarget = *target;
+		if (curStr == '-') {
+			curStr = '_';
+		}
+		if (curTarget == '-') {
+			curTarget = '_';
+		}
+		if (curStr != curTarget) {
+			return false;
+		}
+		str++;
+		target++;
+	}
+	return !(*str || *target);
 }
 
 double timer() {
@@ -426,7 +455,7 @@ public:
 
 		char* endptr;
 		const char* rd =
-		    get_value_multi(ini, "restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
+		    get_value_multi(ini, "restart-delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if (!rd) {
 			log_msg(SevError, "Unable to resolve restart delay for %s\n", ssection.c_str());
 			return;
@@ -439,7 +468,7 @@ public:
 		}
 
 		const char* mrd = get_value_multi(
-		    ini, "initial_restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
+		    ini, "initial-restart-delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if (!mrd) {
 			initial_restart_delay = 0;
 		} else {
@@ -453,7 +482,7 @@ public:
 		current_restart_delay = initial_restart_delay;
 
 		const char* rbo = get_value_multi(
-		    ini, "restart_backoff", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
+		    ini, "restart-backoff", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if (!rbo) {
 			restart_backoff = max_restart_delay;
 		} else {
@@ -469,7 +498,7 @@ public:
 		}
 
 		const char* rdri = get_value_multi(
-		    ini, "restart_delay_reset_interval", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
+		    ini, "restart-delay-reset-interval", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if (!rdri) {
 			restart_delay_reset_interval = max_restart_delay;
 		} else {
@@ -481,16 +510,16 @@ public:
 		}
 
 		const char* q =
-		    get_value_multi(ini, "disable_lifecycle_logging", ssection.c_str(), section.c_str(), "general", nullptr);
+		    get_value_multi(ini, "disable-lifecycle-logging", ssection.c_str(), section.c_str(), "general", nullptr);
 		if (q && !strcmp(q, "true"))
 			quiet = true;
 
 		const char* del_env =
-		    get_value_multi(ini, "delete_envvars", ssection.c_str(), section.c_str(), "general", nullptr);
+		    get_value_multi(ini, "delete-envvars", ssection.c_str(), section.c_str(), "general", nullptr);
 		delete_envvars = del_env;
 
 		const char* kocc =
-		    get_value_multi(ini, "kill_on_configuration_change", ssection.c_str(), section.c_str(), "general", nullptr);
+		    get_value_multi(ini, "kill-on-configuration-change", ssection.c_str(), section.c_str(), "general", nullptr);
 		if (kocc && strcmp(kocc, "true")) {
 			kill_on_configuration_change = false;
 		}
@@ -508,10 +537,13 @@ public:
 		const char* id_s = ssection.c_str() + strlen(section.c_str()) + 1;
 
 		for (auto i : keys) {
-			if (!strcmp(i.pItem, "command") || !strcmp(i.pItem, "restart_delay") ||
-			    !strcmp(i.pItem, "initial_restart_delay") || !strcmp(i.pItem, "restart_backoff") ||
-			    !strcmp(i.pItem, "restart_delay_reset_interval") || !strcmp(i.pItem, "disable_lifecycle_logging") ||
-			    !strcmp(i.pItem, "delete_envvars") || !strcmp(i.pItem, "kill_on_configuration_change")) {
+			if (isParameterNameEqual(i.pItem, "command") || isParameterNameEqual(i.pItem, "restart-delay") ||
+			    isParameterNameEqual(i.pItem, "initial-restart-delay") ||
+			    isParameterNameEqual(i.pItem, "restart-backoff") ||
+			    isParameterNameEqual(i.pItem, "restart-delay-reset-interval") ||
+			    isParameterNameEqual(i.pItem, "disable-lifecycle-logging") ||
+			    isParameterNameEqual(i.pItem, "delete-envvars") ||
+			    isParameterNameEqual(i.pItem, "kill-on-configuration-change")) {
 				continue;
 			}
 
@@ -523,7 +555,7 @@ public:
 				opt.replace(pos, 3, id_s, strlen(id_s));
 
 			const char* flagName = i.pItem + 5;
-			if (strncmp("flag_", i.pItem, 5) == 0 && strlen(flagName) > 0) {
+			if ((strncmp("flag_", i.pItem, 5) == 0 || strncmp("flag-", i.pItem, 5) == 0) && strlen(flagName) > 0) {
 				if (opt == "true")
 					commands.push_back(std::string("--") + flagName);
 				else if (opt != "false") {
@@ -700,7 +732,12 @@ void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, 
 			fflush(stdout);
 		}
 		execv(cmd->argv[0], (char* const*)cmd->argv);
-		fprintf(stderr, "Unable to launch %s for %s\n", cmd->argv[0], cmd->ssection.c_str());
+		fprintf(stderr,
+		        "Unable to launch %s for %s (execv error %d: %s)\n",
+		        cmd->argv[0],
+		        cmd->ssection.c_str(),
+		        errno,
+		        strerror(errno));
 		_exit(0);
 	}
 
@@ -1222,7 +1259,7 @@ int main(int argc, char** argv) {
 
 	std::vector<const char*> additional_watch_paths;
 
-	CSimpleOpt args(argc, argv, g_rgOptions, SO_O_NOERR);
+	CSimpleOpt args(argc, argv, g_rgOptions, SO_O_NOERR | SO_O_HYPHEN_TO_UNDERSCORE);
 
 	while (args.Next()) {
 		if (args.LastError() == SO_SUCCESS) {

@@ -38,9 +38,9 @@ struct RelocateShard {
 };
 
 struct IDataDistributionTeam {
-	virtual vector<StorageServerInterface> getLastKnownServerInterfaces() const = 0;
+	virtual std::vector<StorageServerInterface> getLastKnownServerInterfaces() const = 0;
 	virtual int size() const = 0;
-	virtual vector<UID> const& getServerIDs() const = 0;
+	virtual std::vector<UID> const& getServerIDs() const = 0;
 	virtual void addDataInFlightToTeam(int64_t delta) = 0;
 	virtual int64_t getDataInFlightToTeam() const = 0;
 	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
@@ -57,7 +57,7 @@ struct IDataDistributionTeam {
 	virtual bool isOptimal() const = 0;
 	virtual bool isWrongConfiguration() const = 0;
 	virtual void setWrongConfiguration(bool) = 0;
-	virtual void addServers(const vector<UID>& servers) = 0;
+	virtual void addServers(const std::vector<UID>& servers) = 0;
 	virtual std::string getTeamID() const = 0;
 
 	std::string getDesc() const {
@@ -133,11 +133,11 @@ public:
 	ShardsAffectedByTeamFailure() {}
 
 	struct Team {
-		vector<UID> servers; // sorted
+		std::vector<UID> servers; // sorted
 		bool primary;
 
 		Team() : primary(true) {}
-		Team(vector<UID> const& servers, bool primary) : servers(servers), primary(primary) {}
+		Team(std::vector<UID> const& servers, bool primary) : servers(servers), primary(primary) {}
 
 		bool operator<(const Team& r) const {
 			if (servers == r.servers)
@@ -167,12 +167,12 @@ public:
 	//       intersecting shards.
 
 	int getNumberOfShards(UID ssID) const;
-	vector<KeyRange> getShardsFor(Team team);
+	std::vector<KeyRange> getShardsFor(Team team);
 	bool hasShards(Team team) const;
 
 	// The first element of the pair is either the source for non-moving shards or the destination team for in-flight
 	// shards The second element of the pair is all previous sources for in-flight shards
-	std::pair<vector<Team>, vector<Team>> getTeamsFor(KeyRangeRef keys);
+	std::pair<std::vector<Team>, std::vector<Team>> getTeamsFor(KeyRangeRef keys);
 
 	void defineShard(KeyRangeRef keys);
 	void moveShard(KeyRangeRef keys, std::vector<Team> destinationTeam);
@@ -190,7 +190,7 @@ private:
 		}
 	};
 
-	KeyRangeMap<std::pair<vector<Team>, vector<Team>>>
+	KeyRangeMap<std::pair<std::vector<Team>, std::vector<Team>>>
 	    shard_teams; // A shard can be affected by the failure of multiple teams if it is a queued merge, or when
 	                 // usable_regions > 1
 	std::set<std::pair<Team, KeyRange>, OrderByTeamKey> team_shards;
@@ -203,10 +203,10 @@ private:
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer
 struct DDShardInfo {
 	Key key;
-	vector<UID> primarySrc;
-	vector<UID> remoteSrc;
-	vector<UID> primaryDest;
-	vector<UID> remoteDest;
+	std::vector<UID> primarySrc;
+	std::vector<UID> remoteSrc;
+	std::vector<UID> primaryDest;
+	std::vector<UID> remoteDest;
 	bool hasDest;
 
 	explicit DDShardInfo(Key key) : key(key), hasDest(false) {}
@@ -214,10 +214,10 @@ struct DDShardInfo {
 
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	int mode;
-	vector<std::pair<StorageServerInterface, ProcessClass>> allServers;
-	std::set<vector<UID>> primaryTeams;
-	std::set<vector<UID>> remoteTeams;
-	vector<DDShardInfo> shards;
+	std::vector<std::pair<StorageServerInterface, ProcessClass>> allServers;
+	std::set<std::vector<UID>> primaryTeams;
+	std::set<std::vector<UID>> remoteTeams;
+	std::vector<DDShardInfo> shards;
 	Optional<Key> initHealthyZoneValue;
 };
 
@@ -259,7 +259,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,
                                          Reference<AsyncVar<bool>> processingUnhealthy,
-                                         vector<TeamCollectionInterface> teamCollection,
+                                         Reference<AsyncVar<bool>> processingWiggle,
+                                         std::vector<TeamCollectionInterface> teamCollection,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                          MoveKeysLock lock,
                                          PromiseStream<Promise<int64_t>> getAverageShardBytes,
@@ -288,7 +289,8 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
 int64_t getMaxShardSize(double dbSizeEstimate);
 
 struct DDTeamCollection;
-ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(Transaction* tr);
+ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
+    Transaction* tr);
 
 #include "flow/unactorcompiler.h"
 #endif

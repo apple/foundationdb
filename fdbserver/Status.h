@@ -38,7 +38,7 @@ struct ProcessIssues {
 Future<StatusReply> clusterGetStatus(
     Reference<AsyncVar<struct ServerDBInfo>> const& db,
     Database const& cx,
-    vector<WorkerDetails> const& workers,
+    std::vector<WorkerDetails> const& workers,
     std::vector<ProcessIssues> const& workerIssues,
     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* const& clientStatus,
     ServerCoordinators const& coordinators,
@@ -46,4 +46,8 @@ Future<StatusReply> clusterGetStatus(
     Version const& datacenterVersionDifference,
     ConfigBroadcaster const* const& conifgBroadcaster);
 
+struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
+Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
+    std::vector<WorkerDetails> const& workers,
+    std::string const& eventName);
 #endif
