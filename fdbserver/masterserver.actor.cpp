@@ -18,7 +18,10 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+#include <chrono>
 #include <iterator>
+#include <ratio>
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
@@ -271,6 +274,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	std::map<Version, TlogCommitGroupInfo> tlogVersionInfoTracker;
 	// support 'time-decay' mode
 	std::vector<std::list<TlogCommitReqInfo>> tlogCommitReqList;
+	// support 'shortest-wait' mode
+	std::vector<std::chrono::high_resolution_clock::time_point> tlogCommitFlushWait;
 
 	std::vector<WorkerInterface> backupWorkers; // Recruited backup workers from cluster controller.
 
@@ -1288,14 +1293,14 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 					}
 					HackathaonTrace("GetVersion", self->dbgid)
 					    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
-						.detail("GroupIdx", i)
+					    .detail("GroupIdx", i)
 					    .detail("CurrTLogBytesToFlush", self->tlogBytesToFlushTracker[i])
-						.detail("MinTlogBytesToFlush", minTLogBytes);
+					    .detail("MinTlogBytesToFlush", minTLogBytes);
 				}
 
 				HackathaonTrace("GetVersion", self->dbgid)
 				    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
-					.detail("CandidateGIdx", tlogGroup)
+				    .detail("CandidateGIdx", tlogGroup)
 				    .detail("CandidateTLogBytesToFlush", self->tlogBytesToFlushTracker[tlogGroup]);
 
 				ASSERT(tlogGroup >= 0 && tlogGroup < self->tLogGroups);
@@ -1320,7 +1325,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 						HackathaonTrace("GetVersionTimeDecay", self->dbgid)
 						    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
 						    .detail("GroupIdx", gIdx)
-							.detail("ElapsedMs", elapsed_time_ms)
+						    .detail("ElapsedMs", elapsed_time_ms)
 						    .detail("CommitBytes", lItr->commitBytes)
 						    .detail("FlushedBytes", bytesFlushedSoFar);
 						if (bytesFlushedSoFar >= lItr->commitBytes) {
@@ -1339,12 +1344,36 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 					HackathaonTrace("GetVersion", self->dbgid)
 					    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
 					    .detail("CandidateIdx", tlogGroup)
-						.detail("EffectiveTLogBytesToFlush", tlogEffectiveBytesToFlush[gIdx])
+					    .detail("EffectiveTLogBytesToFlush", tlogEffectiveBytesToFlush[gIdx])
 					    .detail("MinTLogBytesToFlush", minTLogBytesToFlush);
 				}
 				ASSERT(tlogGroup >= 0 && tlogGroup < self->tLogGroups);
 				// update the candidate tLog bytesToFlush entry
 				self->tlogCommitReqList[tlogGroup].emplace_back(TlogCommitReqInfo(req.commitBytes, now));
+			} else if (mode == "shortest-wait") {
+				tlogGroup = 0;
+				auto now = std::chrono::high_resolution_clock::now();
+				std::chrono::high_resolution_clock::time_point minFlushWaitTime = self->tlogCommitFlushWait[0];
+				for (int gIdx = 1; gIdx < self->tLogGroups; gIdx++) {
+					if (minFlushWaitTime > self->tlogCommitFlushWait[gIdx]) {
+						tlogGroup = gIdx;
+						minFlushWaitTime = self->tlogCommitFlushWait[gIdx];
+					}
+				}
+				ASSERT(tlogGroup >= 0 && tlogGroup < self->tLogGroups);
+				int64_t estimateFlushTimeUS = ((int64_t)req.commitBytes * 1000 * 1000) /
+				                              SERVER_KNOBS->HACKATHON_TLOG_FLUSH_BYTES_PER_SECOND;
+				if (self->tlogCommitFlushWait[tlogGroup] < now) {
+					self->tlogCommitFlushWait[tlogGroup] = now + std::chrono::microseconds(estimateFlushTimeUS);
+				} else {
+					self->tlogCommitFlushWait[tlogGroup] += std::chrono::microseconds(estimateFlushTimeUS);
+				}
+				HackathaonTrace("GetVersion", self->dbgid)
+				    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
+				    .detail("CandidateIdx", tlogGroup)
+				    .detail("Now", now.time_since_epoch().count())
+				    .detail("GroupFlushWaitTime", self->tlogCommitFlushWait[tlogGroup].time_since_epoch().count())
+				    .detail("CommitFlushTimeUS", estimateFlushTimeUS);
 			} else {
 				// TOOD: invalid mode config, may send an error reponse; for now assert.
 				ASSERT(false);
@@ -2106,6 +2135,8 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	self->tLogGroupVersions.resize(self->tLogGroups, self->lastEpochEnd);
 	self->tlogBytesToFlushTracker.resize(self->tLogGroups, 0);
 	self->tlogCommitReqList.resize(self->tLogGroups);
+	auto now = std::chrono::high_resolution_clock::now();
+	self->tlogCommitFlushWait.resize(self->tLogGroups, now);
 	self->liveCommittedVersion.set(self->lastEpochEnd);
 	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send(self->logSystem->onError());
