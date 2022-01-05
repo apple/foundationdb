@@ -466,6 +466,14 @@ public:
 		return k.expectedSize() + v.expectedSize();
 	}
 
+	Key serializeKey(KeyType const& key) {
+		return space.pack(Codec<KeyType>::pack(key));
+	}
+
+	Value serializeValue(ValueType const& val) {
+		return ObjectWriter::toValue(val, versionOptions);
+	}
+
 	void erase(Reference<ReadYourWritesTransaction> tr, KeyType const& key) {
 		return tr->clear(space.pack(Codec<KeyType>::pack(key)));
 	}

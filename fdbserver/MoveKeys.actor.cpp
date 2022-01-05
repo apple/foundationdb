@@ -1519,10 +1519,15 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 	// This isn't strictly necessary, but make sure this is the first transaction
 	tr.read_snapshot = 0;
 	tr.read_conflict_ranges.push_back_deep(arena, allKeys);
+	KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
+	                                                                                     IncludeVersion());
+	StorageMetadataType metadata(timer_int());
 
 	for (auto& s : servers) {
 		tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(server_tag[s.id()]));
 		tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
+		tr.set(arena, metadataMap.serializeKey(s.id()), metadataMap.serializeValue(metadata));
+
 		if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
 			// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
 			TraceEvent(SevError, "TSSIdentityMappingEnabled").log();
