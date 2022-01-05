@@ -189,29 +189,11 @@ static const KeyRange persistStorageTeamPoppedKeys = prefixRange(LiteralStringRe
 static const KeyRange persistStorageTeamMessagesKeys = prefixRange(LiteralStringRef("StorageTeamMsg/"));
 static const KeyRange persistStorageTeamMessageRefsKeys = prefixRange(LiteralStringRef("StorageTeamMsgRef/"));
 
-static Key persistTagMessagesKey(UID id, Tag tag, Version version) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(persistTagMessagesKeys.begin);
-	wr << id;
-	wr << tag;
-	wr << bigEndian64(version);
-	return wr.toValue();
-}
-
 static Key persistStorageTeamMessagesKey(UID id, StorageTeamID storageTeamId, Version version) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(persistStorageTeamMessagesKeys.begin);
 	wr << id;
 	wr << storageTeamId;
-	wr << bigEndian64(version);
-	return wr.toValue();
-}
-
-static Key persistTagMessageRefsKey(UID id, Tag tag, Version version) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(persistTagMessageRefsKeys.begin);
-	wr << id;
-	wr << tag;
 	wr << bigEndian64(version);
 	return wr.toValue();
 }
@@ -225,13 +207,6 @@ Key persistStorageTeamMessageRefsKey(UID id, StorageTeamID storageTeamId, Versio
 	return wr.toValue();
 }
 
-static Key persistTagPoppedKey(UID id, Tag tag) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(persistTagPoppedKeys.begin);
-	wr << id;
-	wr << tag;
-	return wr.toValue();
-}
 static Key persistStorageTeamPoppedKey(UID id, StorageTeamID storageTeamId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(persistStorageTeamPoppedKeys.begin);
@@ -240,39 +215,16 @@ static Key persistStorageTeamPoppedKey(UID id, StorageTeamID storageTeamId) {
 	return wr.toValue();
 }
 
-static Value persistTagPoppedValue(Version popped) {
-	return BinaryWriter::toValue(popped, Unversioned());
-}
-
 static Value persistStorageTeamPoppedValue(Version popped) {
 	return BinaryWriter::toValue(popped, Unversioned());
-}
-
-static Tag decodeTagPoppedKey(KeyRef id, KeyRef key) {
-	Tag s;
-	BinaryReader rd(key.removePrefix(persistTagPoppedKeys.begin).removePrefix(id), Unversioned());
-	rd >> s;
-	return s;
 }
 
 static StorageTeamID decodeStorageTeamIDPoppedKey(KeyRef key) {
 	return BinaryReader::fromStringRef<StorageTeamID>(key, Unversioned());
 }
 
-static Version decodeTagPoppedValue(ValueRef value) {
-	return BinaryReader::fromStringRef<Version>(value, Unversioned());
-}
-
 static std::pair<std::vector<Tag>, Version> decodePairValue(ValueRef value) {
 	return BinaryReader::fromStringRef<std::pair<std::vector<Tag>, Version>>(value, Unversioned());
-}
-
-static StringRef stripTagMessagesKey(StringRef key) {
-	return key.substr(sizeof(UID) + sizeof(Tag) + persistTagMessagesKeys.begin.size());
-}
-
-static Version decodeTagMessagesKey(StringRef key) {
-	return bigEndian64(BinaryReader::fromStringRef<Version>(stripTagMessagesKey(key), Unversioned()));
 }
 
 struct SpilledData {
