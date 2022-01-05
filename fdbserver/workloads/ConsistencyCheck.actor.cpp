@@ -1174,7 +1174,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state int i = self->clientId * (self->shardSampleFactor + 1);
 		state int increment =
 		    (self->distributed && !self->firstClient) ? effectiveClientCount * self->shardSampleFactor : 1;
-		// TODO: NEELAM: take maxRate and targetInterval into account
+		// TODO: NEELAM: take self->maxRate and self->targetInterval into account if specified
 		state int rateLimitForThisRound =
 		    self->bytesReadInPreviousRound == 0
 		        ? self->rateLimitMax
@@ -1284,7 +1284,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			state std::vector<UID> storageServers = (isRelocating) ? destStorageServers : sourceStorageServers;
 			state std::vector<StorageServerInterface> storageServerInterfaces;
 
-			//TraceEvent("ConsistencyCheck_GetStorageInfo").detail("StorageServers", storageServers.size());
 			loop {
 				try {
 					std::vector<Future<Optional<Value>>> serverListEntries;
@@ -1364,7 +1363,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						// Get the min version of the storage servers
 						Version version = wait(self->getVersion(cx, self));
 
-						// state GetKeyValuesRequest req;
 						state GetKeyValuesStreamRequest req;
 						req.begin = begin;
 						req.end = firstGreaterOrEqual(range.end);
@@ -1376,8 +1374,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						// Try getting the entries in the specified range
 						state std::vector<FutureStream<GetKeyValuesStreamReply>> keyValueFutures;
 						state int j = 0;
-						TraceEvent("ConsistencyCheck_StoringGetFutures")
-						    .detail("SSISize", storageServerInterfaces.size());
+						//TraceEvent("ConsistencyCheck_StoringGetFutures")
+						//  .detail("SSISize", storageServerInterfaces.size());
 
 						// Read the resulting entries
 						state int firstValidServer = -1;
@@ -1386,7 +1384,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						for (j = 0; j < storageServerInterfaces.size(); j++) {
 							state GetKeyValuesStreamReply current;
 							try {
-								TraceEvent("ConsistencyCheck_GetKeyValuesStream").detail("Iter", j);
+								//TraceEvent("ConsistencyCheck_GetKeyValuesStream").detail("Iter", j);
 								resetReply(req);
 								GetKeyValuesStreamReply _current = waitNext(
 								    storageServerInterfaces[j].getKeyValuesStream.getReplyStream(req).getFuture());
@@ -1419,7 +1417,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 											self->testFailure("Storage server unavailable");
 											return false;
 										}
-									} // else continue?
+									} // TODO: else continue?
 								} else {
 									current = GetKeyValuesStreamReply();
 									TraceEvent("ConsistencyCheck_EndofStream")
@@ -1444,8 +1442,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 									    .detail("DataSize", reference.data.size());
 									// Compare this shard against the first
 								} else {
-									// GetKeyValuesReply reference = keyValueFutures[firstValidServer].get().get();
-
 									if (current.data != reference.data || current.more != reference.more) {
 										// Be especially verbose if in simulation
 										if (g_network->isSimulated()) {
