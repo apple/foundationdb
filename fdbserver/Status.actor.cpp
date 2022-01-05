@@ -22,12 +22,14 @@
 #include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbserver/Status.h"
+#include "flow/ITrace.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include <time.h>
+#include "fdbserver/ClusterRecovery.actor.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "flow/UnitTest.h"
@@ -1157,14 +1159,18 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
 	state JsonBuilderObject message;
 	state Transaction tr(cx);
 	try {
-		state Future<TraceEventFields> mdActiveGensF = timeoutError(
-		    ccWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("ClusterRecoveryGenerations"))),
-		    1.0);
-		state Future<TraceEventFields> mdF = timeoutError(
-		    ccWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("ClusterRecoveryState"))), 1.0);
-		state Future<TraceEventFields> mDBAvailableF = timeoutError(
-		    ccWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("ClusterRecoveryAvailable"))),
-		    1.0);
+		state Future<TraceEventFields> mdActiveGensF =
+		    timeoutError(ccWorker.interf.eventLogRequest.getReply(EventLogRequest(StringRef(
+		                     getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_GENERATION_EVENT_NAME)))),
+		                 1.0);
+		state Future<TraceEventFields> mdF =
+		    timeoutError(ccWorker.interf.eventLogRequest.getReply(EventLogRequest(StringRef(
+		                     getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME)))),
+		                 1.0);
+		state Future<TraceEventFields> mDBAvailableF =
+		    timeoutError(ccWorker.interf.eventLogRequest.getReply(EventLogRequest(StringRef(
+		                     getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_AVAILABLE_EVENT_NAME)))),
+		                 1.0);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		state Future<ErrorOr<Version>> rvF = errorOr(timeoutError(tr.getReadVersion(), 1.0));
 

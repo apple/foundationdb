@@ -48,10 +48,28 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+typedef enum {
+	CLUSTER_RECOVERY_STATE_EVENT_NAME,
+	CLUSTER_RECOVERY_COMMIT_TLOG_EVENT_NAME,
+	CLUSTER_RECOVERY_DURATION_EVENT_NAME,
+	CLUSTER_RECOVERY_GENERATION_EVENT_NAME,
+	CLUSTER_RECOVERY_SS_RECRUITMENT_EVENT_NAME,
+	CLUSTER_RECOVERY_INVALID_CONFIG_EVENT_NAME,
+	CLUSTER_RECOVERY_RECOVERING_EVENT_NAME,
+	CLUSTER_RECOVERY_RECOVERED_EVENT_NAME,
+	CLUSTER_RECOVERY_SNAPSHOT_CHECK_EVENT_NAME,
+	CLUSTER_RECOVERY_PAUSE_AGENT_BACKUP_EVENT_NAME,
+	CLUSTER_RECOVERY_COMMIT_EVENT_NAME,
+	CLUSTER_RECOVERY_AVAILABLE_EVENT_NAME,
+	CLUSTER_RECOVERY_METRICS_EVENT_NAME,
+	CLUSTER_RECOVERY_LAST // Always the last entry
+} ClusterRecoveryEventType;
+
 ACTOR Future<Void> recoveryTerminateOnConflict(UID dbgid,
                                                Promise<Void> fullyRecovered,
                                                Future<Void> onConflict,
                                                Future<Void> switchedState);
+std::string& getRecoveryEventName(ClusterRecoveryEventType type);
 
 class ReusableCoordinatedState : NonCopyable {
 public:
@@ -229,11 +247,11 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 
 	Future<Void> logger;
 
+	Reference<EventCacheHolder> recoveredConfigEventHolder;
 	Reference<EventCacheHolder> clusterRecoveryStateEventHolder;
 	Reference<EventCacheHolder> clusterRecoveryGenerationsEventHolder;
 	Reference<EventCacheHolder> clusterRecoveryDurationEventHolder;
 	Reference<EventCacheHolder> clusterRecoveryAvailableEventHolder;
-	Reference<EventCacheHolder> recoveredConfigEventHolder;
 
 	ClusterRecoveryData(ClusterControllerData* controllerData,
 	                    Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
@@ -259,13 +277,20 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
-	    clusterRecoveryStateEventHolder(makeReference<EventCacheHolder>("ClusterRecoveryState")),
-	    clusterRecoveryGenerationsEventHolder(makeReference<EventCacheHolder>("ClusterRecoveryGenerations")),
-	    clusterRecoveryDurationEventHolder(makeReference<EventCacheHolder>("ClusterRecoveryDuration")),
-	    clusterRecoveryAvailableEventHolder(makeReference<EventCacheHolder>("ClusterRecoveryAvailable")),
 	    recoveredConfigEventHolder(makeReference<EventCacheHolder>("RecoveredConfig")) {
-		logger = traceCounters(
-		    "ClusterRecoveryMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ClusterRecoveryMetrics");
+		clusterRecoveryStateEventHolder = makeReference<EventCacheHolder>(
+		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME));
+		clusterRecoveryGenerationsEventHolder = makeReference<EventCacheHolder>(
+		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_GENERATION_EVENT_NAME));
+		clusterRecoveryDurationEventHolder = makeReference<EventCacheHolder>(
+		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_DURATION_EVENT_NAME));
+		clusterRecoveryAvailableEventHolder = makeReference<EventCacheHolder>(
+		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_AVAILABLE_EVENT_NAME));
+		logger = traceCounters(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME),
+		                       dbgid,
+		                       SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
+		                       &cc,
+		                       getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME));
 		if (forceRecovery && !controllerData->clusterControllerDcId.present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
 			forceRecovery = false;

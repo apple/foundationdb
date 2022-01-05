@@ -27,6 +27,16 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// Cluster recovery state machine used to be driven from master/sequencer process, recovery state
+// tracking is used by test environment and tooling scripts. To ease the process of migration, prefix
+// is controlled by a ServerKnob for now.
+//
+// TODO: ServerKnob should be removed ones all tooling scripts and usage is identified and updated accordingly
+
+namespace {
+std::map<ClusterRecoveryEventType, std::string> recoveryEventNameMap;
+} // anonymous namespace
+
 static std::set<int> const& normalClusterRecoveryErrors() {
 	static std::set<int> s;
 	if (s.empty()) {
@@ -330,7 +340,8 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 	state std::map<Optional<Value>, Tag> dcId_tags;
 	state int8_t nextLocality = 0;
 	while (idx < recruits.storageServers.size()) {
-		TraceEvent("ClusterRecoveryRecruitingInitialStorageServer", self->dbgid)
+		TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_SS_RECRUITMENT_EVENT_NAME).c_str(),
+		           self->dbgid)
 		    .detail("CandidateWorker", recruits.storageServers[idx].locality.toString());
 
 		InitializeStorageRequest isr;
@@ -465,25 +476,29 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 
 		if (finalUpdate) {
 			self->recoveryState = RecoveryState::FULLY_RECOVERED;
-			TraceEvent("ClusterRecoveryState", self->dbgid)
+			TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
+			           self->dbgid)
 			    .detail("StatusCode", RecoveryStatus::fully_recovered)
 			    .detail("Status", RecoveryStatus::names[RecoveryStatus::fully_recovered])
 			    .detail("FullyRecoveredAtVersion", self->version)
 			    .detail("ClusterId", self->clusterId)
 			    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 
-			TraceEvent("ClusterRecoveryGenerations", self->dbgid)
+			TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_GENERATION_EVENT_NAME).c_str(),
+			           self->dbgid)
 			    .detail("ActiveGenerations", 1)
 			    .trackLatest(self->clusterRecoveryGenerationsEventHolder->trackingKey);
 		} else if (!newState.oldTLogData.size() && self->recoveryState < RecoveryState::STORAGE_RECOVERED) {
 			self->recoveryState = RecoveryState::STORAGE_RECOVERED;
-			TraceEvent("ClusterRecoveryState", self->dbgid)
+			TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
+			           self->dbgid)
 			    .detail("StatusCode", RecoveryStatus::storage_recovered)
 			    .detail("Status", RecoveryStatus::names[RecoveryStatus::storage_recovered])
 			    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 		} else if (allLogs && self->recoveryState < RecoveryState::ALL_LOGS_RECRUITED) {
 			self->recoveryState = RecoveryState::ALL_LOGS_RECRUITED;
-			TraceEvent("ClusterRecoveryState", self->dbgid)
+			TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
+			           self->dbgid)
 			    .detail("StatusCode", RecoveryStatus::all_logs_recruited)
 			    .detail("Status", RecoveryStatus::names[RecoveryStatus::all_logs_recruited])
 			    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
@@ -692,7 +707,9 @@ ACTOR Future<Void> configurationMonitor(Reference<ClusterRecoveryData> self, Dat
 
 				DatabaseConfiguration conf;
 				conf.fromKeyValues((VectorRef<KeyValueRef>)results);
-				TraceEvent("ConfigurationMonitor", self->dbgid).detail("ClusterRecoveryState", self->recoveryState);
+				TraceEvent("ConfigurationMonitor", self->dbgid)
+				    .detail(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
+				            self->recoveryState);
 				if (conf != self->configuration) {
 					if (self->recoveryState != RecoveryState::ALL_LOGS_RECRUITED &&
 					    self->recoveryState != RecoveryState::FULLY_RECOVERED) {
@@ -1028,7 +1045,10 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	if (!self->configuration.isValid()) {
 		RecoveryStatus::RecoveryStatus status;
 		if (self->configuration.initialized) {
-			TraceEvent(SevWarn, "ClusterRecoveryInvalidConfiguration", self->dbgid)
+			TraceEvent(
+			    SevWarn,
+			    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_INVALID_CONFIG_EVENT_NAME).c_str(),
+			    self->dbgid)
 			    .setMaxEventLength(11000)
 			    .setMaxFieldLength(10000)
 			    .detail("Conf", self->configuration.toString());
@@ -1039,13 +1059,15 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 		} else {
 			status = RecoveryStatus::configuration_missing;
 		}
-		TraceEvent("ClusterRecoveryState", self->dbgid)
+		TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
+		           self->dbgid)
 		    .detail("StatusCode", status)
 		    .detail("Status", RecoveryStatus::names[status])
 		    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 		return Never();
 	} else
-		TraceEvent("ClusterRecoveryState", self->dbgid)
+		TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
+		           self->dbgid)
 		    .detail("StatusCode", RecoveryStatus::recruiting_transaction_servers)
 		    .detail("Status", RecoveryStatus::names[RecoveryStatus::recruiting_transaction_servers])
 		    .detail("Conf", self->configuration.toString())
@@ -1089,7 +1111,7 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	}
 	self->backupWorkers.swap(recruits.backupWorkers);
 
-	TraceEvent("ClusterRecoveryState", self->dbgid)
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
 	    .detail("StatusCode", RecoveryStatus::initializing_transaction_servers)
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::initializing_transaction_servers])
 	    .detail("CommitProxies", recruits.commitProxies.size())
@@ -1190,7 +1212,8 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 			self->recoveryTransactionVersion = minRequiredCommitVersion;
 	}
 
-	TraceEvent("ClusterRecovering", self->dbgid)
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_RECOVERED_EVENT_NAME).c_str(),
+	           self->dbgid)
 	    .detail("LastEpochEnd", self->lastEpochEnd)
 	    .detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
 
@@ -1199,7 +1222,8 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	self->originalConfiguration = self->configuration;
 	self->hasConfiguration = true;
 
-	TraceEvent("ClusterRecoveredConfig", self->dbgid)
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_RECOVERED_EVENT_NAME).c_str(),
+	           self->dbgid)
 	    .setMaxEventLength(11000)
 	    .setMaxFieldLength(10000)
 	    .detail("Conf", self->configuration.toString())
@@ -1391,7 +1415,7 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
                                std::vector<Standalone<CommitTransactionRef>>* initialConfChanges,
                                Future<Version> poppedTxsVersion,
                                bool* clusterIdExists) {
-	TraceEvent("ClusterRecoveryState", self->dbgid)
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
 	    .detail("StatusCode", RecoveryStatus::reading_transaction_system_state)
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::reading_transaction_system_state])
 	    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
@@ -1491,7 +1515,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	TraceEvent(recoveryInterval.begin(), self->dbgid).log();
 
 	self->recoveryState = RecoveryState::READING_CSTATE;
-	TraceEvent("ClusterRecoveryState", self->dbgid)
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
 	    .detail("StatusCode", RecoveryStatus::reading_coordinated_state)
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::reading_coordinated_state])
 	    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
@@ -1499,7 +1523,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	wait(self->cstate.read());
 
 	self->recoveryState = RecoveryState::LOCKING_CSTATE;
-	TraceEvent("ClusterRecoveryState", self->dbgid)
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
 	    .detail("StatusCode", RecoveryStatus::locking_coordinated_state)
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::locking_coordinated_state])
 	    .detail("TLogs", self->cstate.prevDBState.tLogs.size())
@@ -1511,7 +1535,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	//	TraceEvent("BWReadCoreState", self->dbgid).detail("Epoch", old.epoch).detail("Version", old.epochEnd);
 	//}
 
-	TraceEvent("ClusterRecoveryGenerations", self->dbgid)
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_GENERATION_EVENT_NAME).c_str(),
+	           self->dbgid)
 	    .detail("ActiveGenerations", self->cstate.myDBState.oldTLogData.size() + 1)
 	    .trackLatest(self->clusterRecoveryGenerationsEventHolder->trackingKey);
 
@@ -1607,7 +1632,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	ASSERT(self->resolvers.size() >= 1);
 
 	self->recoveryState = RecoveryState::RECOVERY_TRANSACTION;
-	TraceEvent("ClusterRecoveryState", self->dbgid)
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
 	    .detail("StatusCode", RecoveryStatus::recovery_transaction)
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
 	    .detail("PrimaryLocality", self->primaryLocality)
@@ -1624,7 +1649,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	int mmApplied = 0; // The number of mutations in tr.mutations that have been applied to the txnStateStore so far
 	if (self->lastEpochEnd != 0) {
 		Optional<Value> snapRecoveryFlag = self->txnStateStore->readValue(writeRecoveryKey).get();
-		TraceEvent("ClusterRecoverySnapshotCheck")
+		TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_SNAPSHOT_CHECK_EVENT_NAME).c_str())
 		    .detail("SnapRecoveryFlag", snapRecoveryFlag.present() ? snapRecoveryFlag.get().toString() : "N/A")
 		    .detail("LastEpochEnd", self->lastEpochEnd);
 		if (snapRecoveryFlag.present()) {
@@ -1633,7 +1658,9 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 			tr.set(recoveryCommitRequest.arena, snapshotEndVersionKey, (bw << self->lastEpochEnd).toValue());
 			// Pause the backups that got restored in this snapshot to avoid data corruption
 			// Requires further operational work to abort the backup
-			TraceEvent("ClusterRecoveryPauseBackupAgents").log();
+			TraceEvent(
+			    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_PAUSE_AGENT_BACKUP_EVENT_NAME).c_str())
+			    .log();
 			Key backupPauseKey = FileBackupAgent::getPauseKey();
 			tr.set(recoveryCommitRequest.arena, backupPauseKey, StringRef());
 			// Clear the key so multiple recoveries will not overwrite the first version recorded
@@ -1709,7 +1736,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial
 	                                                     // window of the resolver(s)
 
-	TraceEvent("ClusterRecoveryCommit", self->dbgid).log();
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_COMMIT_EVENT_NAME).c_str(), self->dbgid)
+	    .log();
 	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send(self->logSystem->onError());
 	self->addActor.send(waitResolverFailure(self->resolvers));
@@ -1732,7 +1760,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	ASSERT(self->recoveryTransactionVersion != 0);
 
 	self->recoveryState = RecoveryState::WRITING_CSTATE;
-	TraceEvent("ClusterRecoveryState", self->dbgid)
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
 	    .detail("StatusCode", RecoveryStatus::writing_coordinated_state)
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::writing_coordinated_state])
 	    .detail("TLogList", self->logSystem->describe())
@@ -1758,7 +1786,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 		TraceEvent(self->forceRecovery ? SevWarn : SevError, "DBRecoveryDurabilityError").log();
 	}
 
-	TraceEvent("ClusterRecoveryCommittedTLogs", self->dbgid)
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_COMMIT_EVENT_NAME).c_str(), self->dbgid)
 	    .detail("TLogs", self->logSystem->describe())
 	    .detail("RecoveryCount", self->cstate.myDBState.recoveryCount)
 	    .detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
@@ -1770,19 +1798,20 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	double recoveryDuration = now() - recoverStartTime;
 
 	TraceEvent((recoveryDuration > 4 && !g_network->isSimulated()) ? SevWarnAlways : SevInfo,
-	           "ClusterRecoveryDuration",
+	           getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_DURATION_EVENT_NAME).c_str(),
 	           self->dbgid)
 	    .detail("RecoveryDuration", recoveryDuration)
 	    .trackLatest(self->clusterRecoveryDurationEventHolder->trackingKey);
 
-	TraceEvent("ClusterRecoveryState", self->dbgid)
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
 	    .detail("StatusCode", RecoveryStatus::accepting_commits)
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::accepting_commits])
 	    .detail("StoreType", self->configuration.storageServerStoreType)
 	    .detail("RecoveryDuration", recoveryDuration)
 	    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 
-	TraceEvent("ClusterRecoveryAvailable", self->dbgid)
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_AVAILABLE_EVENT_NAME).c_str(),
+	           self->dbgid)
 	    .detail("AvailableAtVersion", self->version)
 	    .trackLatest(self->clusterRecoveryAvailableEventHolder->trackingKey);
 
@@ -1816,4 +1845,47 @@ ACTOR Future<Void> cleanupRecoveryActorCollection(Reference<ClusterRecoveryData>
 
 bool isNormalClusterRecoveryError(const Error& error) {
 	return normalClusterRecoveryErrors().count(error.code());
+}
+
+std::string& getRecoveryEventName(ClusterRecoveryEventType type) {
+	ASSERT(type >= ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME &&
+	       type < ClusterRecoveryEventType::CLUSTER_RECOVERY_LAST);
+
+	if (recoveryEventNameMap.empty()) {
+		// initialize the map
+		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME,
+		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryState" });
+		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_COMMIT_TLOG_EVENT_NAME,
+		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryCommittedTLogs" });
+		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_DURATION_EVENT_NAME,
+		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryDuration" });
+		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_GENERATION_EVENT_NAME,
+		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryGenerations" });
+		recoveryEventNameMap.insert(
+		    { ClusterRecoveryEventType::CLUSTER_RECOVERY_SS_RECRUITMENT_EVENT_NAME,
+		      SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryRecruitingInitialStorageServer" });
+		recoveryEventNameMap.insert(
+		    { ClusterRecoveryEventType::CLUSTER_RECOVERY_INVALID_CONFIG_EVENT_NAME,
+		      SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryInvalidConfiguration" });
+		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_RECOVERING_EVENT_NAME,
+		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "Recovering" });
+		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_RECOVERED_EVENT_NAME,
+		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveredConfig" });
+		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_SNAPSHOT_CHECK_EVENT_NAME,
+		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoverySnapshotCheck" });
+		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_SS_RECRUITMENT_EVENT_NAME,
+		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoverySnapshotCheck" });
+		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_PAUSE_AGENT_BACKUP_EVENT_NAME,
+		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryPauseBackupAgents" });
+		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_COMMIT_EVENT_NAME,
+		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryCommit" });
+		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_AVAILABLE_EVENT_NAME,
+		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryAvailable" });
+		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME,
+		                              SERVER_KNOBS->CLUSTER_RECOVERY_EVENT_NAME_PREFIX + "RecoveryMetrics" });
+	}
+
+	auto iter = recoveryEventNameMap.find(type);
+	ASSERT(iter != recoveryEventNameMap.end());
+	return iter->second;
 }
