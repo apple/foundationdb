@@ -1006,13 +1006,17 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		if (error.isValid())
 			return;
 
+		ASSERT(this->error.code() != error_code_success);
 		this->error = err;
 		if (shouldFireImmediately()) {
 			SingleCallback<T>::next->error(err);
 		}
 
 		// end_of_stream error is "expected", don't terminate reading stream early for this
-		if (onError.isValid() && err.code() != error_code_end_of_stream) {
+		// weird destruction issue with sending broken_promise, so just ignore it. Stream is dead anyway. TODO better
+		// fix?
+		if (err.code() != error_code_end_of_stream && err.code() != error_code_broken_promise && onError.isValid()) {
+			ASSERT(onError.canBeSet());
 			onError.sendError(err);
 		}
 	}

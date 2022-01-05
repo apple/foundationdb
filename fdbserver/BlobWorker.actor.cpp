@@ -1086,8 +1086,9 @@ ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
 		// this order is important, since we need to register a waiter on the notified version before waking the GRV
 		// actor
 		Future<Void> grvAtLeast = bwData->grvVersion.whenAtLeast(version);
-		if (bwData->doGRVCheck.canBeSet()) {
-			bwData->doGRVCheck.send(Void());
+		Promise<Void> doGrvCheck = bwData->doGRVCheck;
+		if (doGrvCheck.canBeSet()) {
+			doGrvCheck.send(Void());
 		}
 		wait(grvAtLeast);
 	}
@@ -2742,7 +2743,7 @@ ACTOR Future<Void> runGRVChecks(Reference<BlobWorkerData> bwData) {
 		while (bwData->grvVersion.numWaiting() == 0) {
 			// printf("GRV checker sleeping\n");
 			wait(bwData->doGRVCheck.getFuture());
-			bwData->doGRVCheck.reset();
+			bwData->doGRVCheck = Promise<Void>();
 			// printf("GRV checker waking: %d pending\n", bwData->grvVersion.numWaiting());
 		}
 
