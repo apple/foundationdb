@@ -1313,6 +1313,16 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							ASSERT(mutations.front().version >= startState.changeFeedStartVersion);
 						}
 
+						if (mutations.front().version <= metadata->bufferedDeltaVersion) {
+							fmt::print("ERROR: Mutations went backwards for granule [{0} - {1}). "
+							           "bufferedDeltaVersion={2}, mutationVersion={3} !!!\n",
+							           metadata->keyRange.begin.printable(),
+							           metadata->keyRange.end.printable(),
+							           metadata->bufferedDeltaVersion,
+							           mutations.front().version);
+						}
+						ASSERT(mutations.front().version > metadata->bufferedDeltaVersion);
+
 						// if we just got mutations, we haven't buffered them yet, so waitForVersion can't have returned
 						// this version yet
 						if (mutations.front().version <= metadata->waitForVersionReturned) {

@@ -6508,7 +6508,7 @@ Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange 
 	return ::getRangeSplitPoints(cx, keys, chunkSize);
 }
 
-#define BG_REQUEST_DEBUG true
+#define BG_REQUEST_DEBUG false
 
 // the blob granule requests are a bit funky because they piggyback off the existing transaction to read from the system
 // keyspace
@@ -7356,6 +7356,11 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
                              Version end) {
 	state std::priority_queue<MutationAndVersionStream, std::vector<MutationAndVersionStream>> mutations;
 	state int interfNum = 0;
+
+	// previous version of change feed may have put a mutation in the promise stream and then immediately died. Wait for
+	// that mutation first, so the promise stream always starts empty
+	wait(results->mutations.onEmpty());
+
 	while (interfNum < interfs.size()) {
 		try {
 			Standalone<MutationsAndVersionRef> res = waitNext(streams[interfNum].results.getFuture());
@@ -7388,7 +7393,7 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 			if (nextOut.size()) {
 				*begin = checkVersion + 1;
 				if (DEBUG_CF_VERSION(nextOut.back().version)) {
-					fmt::print("CFNA (merged): {0} (1)\n", nextOut.back().version);
+					fmt::print("CFNA (merged): {0} ({1})\n", nextOut.back().version, nextOut.back().mutations.size());
 				}
 
 				if (nextOut.back().version < results->lastReturnedVersion.get()) {
@@ -7402,9 +7407,11 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 					results->mutations.send(nextOut);
 					wait(results->mutations.onEmpty());
 					wait(delay(0));
+				} else {
+					ASSERT(results->mutations.isEmpty());
 				}
 				if (DEBUG_CF_VERSION(nextOut.back().version)) {
-					fmt::print("CFLR (merged): {0} (1)\n", nextOut.back().version);
+					fmt::print("CFLR (merged): {0} (1)\n", nextOut.back().version, nextOut.back().mutations.size());
 				}
 				if (nextOut.back().version > results->lastReturnedVersion.get()) {
 					results->lastReturnedVersion.set(nextOut.back().version);
@@ -7436,7 +7443,7 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 			ASSERT(nextOut.size() == 1);
 			*begin = checkVersion + 1;
 			if (DEBUG_CF_VERSION(nextOut.back().version)) {
-				fmt::print("CFNA (merged@all): {0} (1)\n", nextOut.back().version);
+				fmt::print("CFNA (merged@all): {0} ({1})\n", nextOut.back().version, nextOut.back().mutations.size());
 			}
 
 			if (nextOut.back().version < results->lastReturnedVersion.get()) {
@@ -7449,10 +7456,13 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 				ASSERT(nextOut.back().version >= results->lastReturnedVersion.get());
 				results->mutations.send(nextOut);
 				wait(results->mutations.onEmpty());
+				ASSERT(results->mutations.isEmpty());
 				wait(delay(0));
+			} else {
+				ASSERT(results->mutations.isEmpty());
 			}
 			if (DEBUG_CF_VERSION(nextOut.back().version)) {
-				fmt::print("CFLR (merged@all): {0} (1)\n", nextOut.back().version);
+				fmt::print("CFLR (merged@all): {0} ({1})\n", nextOut.back().version, nextOut.back().mutations.size());
 			}
 			if (nextOut.back().version > results->lastReturnedVersion.get()) {
 				results->lastReturnedVersion.set(nextOut.back().version);
@@ -7463,7 +7473,7 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 		try {
 			Standalone<MutationsAndVersionRef> res = waitNext(nextStream.results.getFuture());
 			if (DEBUG_CF_VERSION(res.version)) {
-				fmt::print("  CFNA (merge1): {0} (1)\n", res.version, res.mutations.size());
+				fmt::print("  CFNA (merge1): {0} ({1})\n", res.version, res.mutations.size());
 			}
 			nextStream.next = res;
 			mutations.push(nextStream);
@@ -7475,9 +7485,12 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 	}
 	if (nextOut.size()) {
 		ASSERT(nextOut.back().version >= results->lastReturnedVersion.get());
-		results->mutations.send(nextOut);
-		wait(results->mutations.onEmpty());
-		wait(delay(0));
+		if (!nextOut.back().mutations.empty()) {
+			results->mutations.send(nextOut);
+			wait(results->mutations.onEmpty());
+			ASSERT(results->mutations.isEmpty());
+			wait(delay(0));
+		}
 		if (DEBUG_CF_VERSION(nextOut.back().version)) {
 			fmt::print("CFLR (merged): {0} (1)\n", nextOut.back().version);
 		}
@@ -7601,11 +7614,23 @@ ACTOR Future<Void> doSingleCFStream(KeyRange range,
 			       results->lastReturnedVersion.get());
 		}
 		ASSERT(feedReply.mutations.back().version >= results->lastReturnedVersion.get());
-		results->mutations.send(Standalone<VectorRef<MutationsAndVersionRef>>(feedReply.mutations, feedReply.arena));
 
-		// Because onEmpty returns here before the consuming process, we must do a delay(0)
-		wait(results->mutations.onEmpty());
-		wait(delay(0));
+		// don't send completely empty set of mutations to promise stream
+		bool anyMutations = false;
+		for (auto& it : feedReply.mutations) {
+			if (!it.mutations.empty()) {
+				anyMutations = true;
+				break;
+			}
+		}
+		if (anyMutations) {
+			results->mutations.send(
+			    Standalone<VectorRef<MutationsAndVersionRef>>(feedReply.mutations, feedReply.arena));
+
+			// Because onEmpty returns here before the consuming process, we must do a delay(0)
+			wait(results->mutations.onEmpty());
+			wait(delay(0));
+		}
 
 		if (DEBUG_CF_VERSION(feedReply.mutations.back().version)) {
 			fmt::print("CFLR (single): {0} ({1}), atLatest={2}, rep.atLatest={3}, notAtLatest={4}, "
@@ -7679,6 +7704,13 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
                                             KeyRange range) {
 	state Database cx(db);
 	state Span span("NAPI:GetChangeFeedStream"_loc);
+
+	/*printf("CFStream %s [%s - %s): [%lld - %lld]\n",
+	       rangeID.printable().substr(0, 6).c_str(),
+	       range.begin.printable().c_str(),
+	       range.end.printable().c_str(),
+	       begin,
+	       end);*/
 
 	loop {
 		state KeyRange keys;
