@@ -1,3 +1,6 @@
+[configuration]
+storageEngineType = 4
+
 [[test]]
 testTitle = 'Clogged'
 

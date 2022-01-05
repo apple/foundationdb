@@ -2780,6 +2780,14 @@ void deprioritizeThread() {
 #endif
 }
 
+void setThreadPriority(int pri) {
+#ifdef __linux__
+	int tid = syscall(SYS_gettid);
+	setpriority(PRIO_PROCESS, tid, pri);
+#elif defined(_WIN32)
+#endif
+}
+
 bool fileExists(std::string const& filename) {
 	FILE* f = fopen(filename.c_str(), "rb" FOPEN_CLOEXEC_MODE);
 	if (!f)

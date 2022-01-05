@@ -105,6 +105,20 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
 
+	// options.compression = rocksdb::kLZ4Compression;
+
+	if (SERVER_KNOBS->ROCKSDB_COMPRESSION_TYPE >= 0) {
+		options.compression = static_cast<rocksdb::CompressionType>(SERVER_KNOBS->ROCKSDB_COMPRESSION_TYPE);
+	}
+	if (SERVER_KNOBS->ROCKSDB_BOTTOM_LAYER_COMPRESSION_TYPE >= 0) {
+		options.bottommost_compression =
+		    static_cast<rocksdb::CompressionType>(SERVER_KNOBS->ROCKSDB_BOTTOM_LAYER_COMPRESSION_TYPE);
+	}
+	// options.compression_per_level = { rocksdb::kNoCompression,  rocksdb::kNoCompression,  rocksdb::kLZ4Compression,
+	// 	                              rocksdb::kLZ4Compression, rocksdb::kLZ4Compression, rocksdb::kLZ4Compression,
+	// 	                              rocksdb::kLZ4Compression };
+	// options.bottommost_compression = kZSTD;
+
 	return options;
 }
 
@@ -222,6 +236,15 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 			ASSERT(db->GetIntProperty(property, &stat));
 			e.detail(name, stat);
 		}
+
+		// const std::string& compressionRationAt = rocksdb::DB::Properties::kCompressionRatioAtLevelPrefix;
+		for (int i = 0; i < 7; ++i) {
+			std::string ratio;
+			const std::string cral = rocksdb::DB::Properties::kCompressionRatioAtLevelPrefix + std::to_string(i);
+			const std::string name = "CompressionRatioAtLevel" + std::to_string(i);
+			ASSERT(db->GetProperty(cral, &ratio));
+			e.detail(name.c_str(), ratio);
+		}
 	}
 }
 
@@ -301,6 +324,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				"default", getCFOptions() } };
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
 			auto options = getOptions();
+
+			TraceEvent("RocksDBInitialization", id).detail("CompressionType", SERVER_KNOBS->ROCKSDB_COMPRESSION_TYPE);
 			auto status = rocksdb::DB::Open(options, a.path, defaultCF, &handle, &db);
 			if (!status.ok()) {
 				logRocksDBError(status, "Open");
@@ -803,7 +828,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			readThreads = CoroThreadPool::createThreadPool();
 		} else {
 			writeThread = createGenericThreadPool();
-			readThreads = createGenericThreadPool();
+			readThreads = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_READ_THREAD_PRIORITY);
+			TraceEvent("RocksDBInitialization", id)
+			    .detail("ReadThreadsPriority", SERVER_KNOBS->ROCKSDB_READ_THREAD_PRIORITY);
 		}
 		writeThread->addThread(new Writer(db, id), "fdb-rocksdb-wr");
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {

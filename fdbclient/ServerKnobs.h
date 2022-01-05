@@ -272,6 +272,7 @@ public:
 	// KeyValueStoreRocksDB
 	int ROCKSDB_BACKGROUND_PARALLELISM;
 	int ROCKSDB_READ_PARALLELISM;
+	int ROCKSDB_READ_THREAD_PRIORITY;
 	int64_t ROCKSDB_MEMTABLE_BYTES;
 	bool ROCKSDB_UNSAFE_AUTO_FSYNC;
 	int64_t ROCKSDB_PERIODIC_COMPACTION_SECONDS;
@@ -289,6 +290,8 @@ public:
 	// These histograms are in read and write path which can cause performance overhead.
 	// Set to 0 to disable histograms.
 	double ROCKSDB_HISTOGRAMS_SAMPLE_RATE;
+	int ROCKSDB_COMPRESSION_TYPE;
+	int ROCKSDB_BOTTOM_LAYER_COMPRESSION_TYPE;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
