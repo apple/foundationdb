@@ -533,7 +533,7 @@ public:
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
 private:
-	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
+	std::unordered_map<Key, Reference<WatchMetadata>> watchMap;
 };
 
 #endif

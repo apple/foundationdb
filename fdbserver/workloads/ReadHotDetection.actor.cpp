@@ -98,7 +98,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		loop {
 			state Transaction tr(cx);
 			try {
-				StorageMetrics sm = wait(tr.getDatabase()->getStorageMetrics(self->wholeRange, 100));
+				StorageMetrics sm = wait(cx->getStorageMetrics(self->wholeRange, 100));
 				// TraceEvent("RHDCheckPhaseLog")
 				//     .detail("KeyRangeSize", sm.bytes)
 				//     .detail("KeyRangeReadBandwith", sm.bytesReadPerKSecond);

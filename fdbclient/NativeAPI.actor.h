@@ -252,8 +252,6 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
 	// Only available so that Transaction can have a default constructor, for use in state variables
-	TransactionState() {}
-
 	TransactionState(TaskPriority taskID, SpanID spanID) : taskID(taskID), spanID(spanID) {}
 
 	TransactionState(Database cx, TaskPriority taskID, SpanID spanID, Reference<TransactionLogInfo> trLogInfo)

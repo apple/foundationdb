@@ -1912,9 +1912,8 @@ Reference<WatchMetadata> DatabaseContext::getWatchMetadata(KeyRef key) const {
 }
 
 KeyRef DatabaseContext::setWatchMetadata(Reference<WatchMetadata> metadata) {
-	KeyRef keyRef = metadata->parameters->key;
-	watchMap[keyRef] = metadata;
-	return keyRef;
+	watchMap[metadata->parameters->key] = metadata;
+	return metadata->parameters->key;
 }
 
 void DatabaseContext::deleteWatchMetadata(KeyRef key) {
@@ -2974,14 +2973,18 @@ ACTOR Future<Void> watchStorageServerResp(KeyRef key, Database cx) {
 			if (!metadata.isValid())
 				return Void();
 
-			if (watchVersion >= metadata->parameters->version) { // case 1: version_1 (SS) >= version_2 (map)
+			// case 1: version_1 (SS) >= version_2 (map)
+			if (watchVersion >= metadata->parameters->version) {
 				cx->deleteWatchMetadata(key);
 				if (metadata->watchPromise.canBeSet())
 					metadata->watchPromise.send(watchVersion);
-			} else { // ABA happens
+			}
+			// ABA happens
+			else {
 				TEST(true); // ABA issue where the version returned from the server is less than the version in the map
-				if (metadata->watchPromise.getFutureReferenceCount() ==
-				    1) { // case 2: version_1 < version_2 and future_count == 1
+
+				// case 2: version_1 < version_2 and future_count == 1
+				if (metadata->watchPromise.getFutureReferenceCount() == 1) {
 					cx->deleteWatchMetadata(key);
 				}
 			}
@@ -3067,7 +3070,7 @@ Future<Void> getWatchFuture(Database cx, Reference<WatchParameters> parameters) 
 	// recreate in SS)
 	else if (parameters->version > metadata->parameters->version) {
 		TEST(true); // Setting a watch that has a different value than the one in the map but a higher version (newer)
-		cx->deleteWatchMetadata(parameters->key.contents());
+		cx->deleteWatchMetadata(parameters->key);
 
 		metadata->watchPromise.send(parameters->version);
 		metadata->watchFutureSS.cancel();
