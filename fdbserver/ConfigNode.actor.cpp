@@ -64,6 +64,21 @@ Version getVersionFromVersionedMutationKey(KeyRef versionedMutationKey) {
 	return fromBigEndian64(bigEndianResult);
 }
 
+template <typename T>
+void assertCommitted(RangeResult const& range, VectorRef<T> versionedConfigs, std::function<Version(KeyRef)> fn) {
+	if (range.size() == 0) {
+		return;
+	}
+	// Verify every versioned value read from disk (minus the last one which
+	// may not be committed on a quorum) exists in the rollforward changes.
+	for (auto it = range.begin(); it != std::prev(range.end()); ++it) {
+		Version version = fn(it->key);
+		auto resultIt = std::find_if(
+		    versionedConfigs.begin(), versionedConfigs.end(), [version](T const& o) { return o.version == version; });
+		ASSERT(resultIt != versionedConfigs.end());
+	}
+}
+
 } // namespace
 
 TEST_CASE("/fdbserver/ConfigDB/ConfigNode/Internal/versionedMutationKeys") {
@@ -100,6 +115,8 @@ class ConfigNodeImpl {
 
 	// Follower counters
 	Counter compactRequests;
+	Counter rollbackRequests;
+	Counter rollforwardRequests;
 	Counter successfulChangeRequests;
 	Counter failedChangeRequests;
 	Counter snapshotRequests;
@@ -184,6 +201,15 @@ class ConfigNodeImpl {
 		}
 		state Version committedVersion =
 		    wait(map(getGeneration(self), [](auto const& gen) { return gen.committedVersion; }));
+		// TODO: Reenable this when running the ConfigIncrement workload with reboot=false
+		// if (committedVersion < req.mostRecentVersion) {
+		// 	// Handle a very rare case where a ConfigNode loses data between
+		// 	// responding with a committed version and responding to the
+		// 	// subsequent get changes request.
+		// 	TEST(true); // ConfigNode data loss occurred on a minority of coordinators
+		// 	req.reply.sendError(process_behind()); // Reuse the process_behind error
+		// 	return Void();
+		// }
 		state Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
 		    wait(getMutations(self, req.lastSeenVersion + 1, committedVersion));
 		state Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> versionedAnnotations =
@@ -314,6 +340,47 @@ class ConfigNodeImpl {
 		return Void();
 	}
 
+	ACTOR static Future<Void> commitMutations(ConfigNodeImpl* self,
+	                                          Standalone<VectorRef<VersionedConfigMutationRef>> mutations,
+	                                          Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations,
+	                                          Version commitVersion) {
+		Version latestVersion = 0;
+		int index = 0;
+		for (const auto& mutation : mutations) {
+			if (mutation.version > commitVersion) {
+				continue;
+			}
+			// Mutations should be in ascending version order.
+			ASSERT_GE(mutation.version, latestVersion);
+			if (mutation.version > latestVersion) {
+				latestVersion = mutation.version;
+				index = 0;
+			}
+			Key key = versionedMutationKey(mutation.version, index++);
+			Value value = ObjectWriter::toValue(mutation.mutation, IncludeVersion());
+			if (mutation.mutation.isSet()) {
+				TraceEvent("ConfigNodeSetting")
+				    .detail("ConfigClass", mutation.mutation.getConfigClass())
+				    .detail("KnobName", mutation.mutation.getKnobName())
+				    .detail("Value", mutation.mutation.getValue().toString())
+				    .detail("Version", mutation.version);
+				++self->setMutations;
+			} else {
+				++self->clearMutations;
+			}
+			self->kvStore->set(KeyValueRef(key, value));
+		}
+		for (const auto& annotation : annotations) {
+			self->kvStore->set(KeyValueRef(versionedAnnotationKey(annotation.version),
+			                               BinaryWriter::toValue(annotation.annotation, IncludeVersion())));
+		}
+		ConfigGeneration newGeneration = { commitVersion, commitVersion };
+		self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(newGeneration, IncludeVersion())));
+		wait(self->kvStore->commit());
+		++self->successfulCommits;
+		return Void();
+	}
+
 	ACTOR static Future<Void> commit(ConfigNodeImpl* self, ConfigTransactionCommitRequest req) {
 		ConfigGeneration currentGeneration = wait(getGeneration(self));
 		if (req.generation.committedVersion != currentGeneration.committedVersion) {
@@ -325,28 +392,13 @@ class ConfigNodeImpl {
 			req.reply.sendError(not_committed());
 			return Void();
 		}
-		int index = 0;
+		Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
 		for (const auto& mutation : req.mutations) {
-			Key key = versionedMutationKey(req.generation.liveVersion, index++);
-			Value value = ObjectWriter::toValue(mutation, IncludeVersion());
-			if (mutation.isSet()) {
-				TraceEvent("ConfigNodeSetting")
-				    .detail("ConfigClass", mutation.getConfigClass())
-				    .detail("KnobName", mutation.getKnobName())
-				    .detail("Value", mutation.getValue().toString())
-				    .detail("Version", req.generation.liveVersion);
-				++self->setMutations;
-			} else {
-				++self->clearMutations;
-			}
-			self->kvStore->set(KeyValueRef(key, value));
+			mutations.emplace_back_deep(mutations.arena(), req.generation.liveVersion, mutation);
 		}
-		self->kvStore->set(KeyValueRef(versionedAnnotationKey(req.generation.liveVersion),
-		                               BinaryWriter::toValue(req.annotation, IncludeVersion())));
-		ConfigGeneration newGeneration = { req.generation.liveVersion, req.generation.liveVersion };
-		self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(newGeneration, IncludeVersion())));
-		wait(self->kvStore->commit());
-		++self->successfulCommits;
+		Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
+		annotations.emplace_back_deep(annotations.arena(), req.generation.liveVersion, req.annotation);
+		wait(commitMutations(self, mutations, annotations, req.generation.liveVersion));
 		req.reply.send(Void());
 		return Void();
 	}
@@ -443,6 +495,47 @@ class ConfigNodeImpl {
 		return Void();
 	}
 
+	ACTOR static Future<Void> rollforward(ConfigNodeImpl* self, ConfigFollowerRollforwardRequest req) {
+		Version lastCompactedVersion = wait(getLastCompactedVersion(self));
+		if (req.lastKnownCommitted < lastCompactedVersion) {
+			req.reply.sendError(version_already_compacted());
+			return Void();
+		}
+		state ConfigGeneration currentGeneration = wait(getGeneration(self));
+		if (req.lastKnownCommitted != currentGeneration.committedVersion) {
+			req.reply.sendError(transaction_too_old());
+			return Void();
+		}
+		// Rollback to prior known committed version to erase any commits not
+		// made on a quorum.
+		if (req.rollback.present() && req.rollback.get() < currentGeneration.committedVersion) {
+			if (g_network->isSimulated()) {
+				RangeResult mutationRange = wait(self->kvStore->readRange(
+				    KeyRangeRef(versionedMutationKey(req.rollback.get() + 1, 0),
+				                versionedMutationKey(currentGeneration.committedVersion + 1, 0))));
+				// assertCommitted(mutationRange, req.mutations, getVersionFromVersionedMutationKey);
+				RangeResult annotationRange = wait(self->kvStore->readRange(
+				    KeyRangeRef(versionedAnnotationKey(req.rollback.get() + 1),
+				                versionedAnnotationKey(currentGeneration.committedVersion + 1))));
+				// assertCommitted(annotationRange, req.annotations, getVersionFromVersionedAnnotationKey);
+			}
+			self->kvStore->clear(KeyRangeRef(versionedMutationKey(req.rollback.get() + 1, 0),
+			                                 versionedMutationKey(currentGeneration.committedVersion + 1, 0)));
+			self->kvStore->clear(KeyRangeRef(versionedAnnotationKey(req.rollback.get() + 1),
+			                                 versionedAnnotationKey(currentGeneration.committedVersion + 1)));
+
+			currentGeneration.committedVersion = req.rollback.get();
+			// The mutation commit loop below should persist the new generation
+			// to disk, so we don't need to do it here.
+		}
+		// Now rollforward by applying all mutations between last known
+		// committed version and rollforward version.
+		ASSERT_GT(req.mutations[0].version, currentGeneration.committedVersion);
+		wait(commitMutations(self, req.mutations, req.annotations, req.target));
+		req.reply.send(Void());
+		return Void();
+	}
+
 	ACTOR static Future<Void> getCommittedVersion(ConfigNodeImpl* self, ConfigFollowerGetCommittedVersionRequest req) {
 		ConfigGeneration generation = wait(getGeneration(self));
 		req.reply.send(ConfigFollowerGetCommittedVersionReply{ generation.committedVersion });
@@ -464,6 +557,10 @@ class ConfigNodeImpl {
 					++self->compactRequests;
 					wait(compact(self, req));
 				}
+				when(ConfigFollowerRollforwardRequest req = waitNext(cfi->rollforward.getFuture())) {
+					++self->rollforwardRequests;
+					wait(rollforward(self, req));
+				}
 				when(ConfigFollowerGetCommittedVersionRequest req = waitNext(cfi->getCommittedVersion.getFuture())) {
 					++self->getCommittedVersionRequests;
 					wait(getCommittedVersion(self, req));
@@ -476,7 +573,8 @@ class ConfigNodeImpl {
 public:
 	ConfigNodeImpl(std::string const& folder)
 	  : id(deterministicRandom()->randomUniqueID()), kvStore(folder, id, "globalconf-"), cc("ConfigNode"),
-	    compactRequests("CompactRequests", cc), successfulChangeRequests("SuccessfulChangeRequests", cc),
+	    compactRequests("CompactRequests", cc), rollbackRequests("RollbackRequests", cc),
+	    rollforwardRequests("RollforwardRequests", cc), successfulChangeRequests("SuccessfulChangeRequests", cc),
 	    failedChangeRequests("FailedChangeRequests", cc), snapshotRequests("SnapshotRequests", cc),
 	    getCommittedVersionRequests("GetCommittedVersionRequests", cc), successfulCommits("SuccessfulCommits", cc),
 	    failedCommits("FailedCommits", cc), setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),

@@ -50,7 +50,7 @@ struct TransientMetricSample : MetricSample<T> {
 	int64_t addAndExpire(const T& key, int64_t metric, double expiration) {
 		int64_t x = add(key, metric);
 		if (x)
-			queue.push_back(std::make_tuple(expiration, *this->sample.find(key), -x));
+			queue.emplace_back(expiration, *this->sample.find(key), -x);
 		return x;
 	}
 
@@ -116,7 +116,7 @@ struct TransientThresholdMetricSample : MetricSample<T> {
 	int64_t addAndExpire(T_&& key, int64_t metric, double expiration) {
 		int64_t x = add(std::forward<T_>(key), metric);
 		if (x)
-			queue.push_back(std::make_tuple(expiration, *this->sample.find(key), -x));
+			queue.emplace_back(expiration, *this->sample.find(key), -x);
 		return x;
 	}
 

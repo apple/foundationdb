@@ -3175,16 +3175,9 @@ extern "C" void flushAndExit(int exitCode) {
 #include <link.h>
 #endif
 
-struct ImageInfo {
-	void* offset;
-	std::string symbolFileName;
-
-	ImageInfo() : offset(nullptr), symbolFileName("") {}
-};
-
-ImageInfo getImageInfo(const void* symbol) {
+platform::ImageInfo getImageInfo(const void* symbol) {
 	Dl_info info;
-	ImageInfo imageInfo;
+	platform::ImageInfo imageInfo;
 
 #ifdef __linux__
 	link_map* linkMap = nullptr;
@@ -3194,6 +3187,7 @@ ImageInfo getImageInfo(const void* symbol) {
 #endif
 
 	if (res != 0) {
+		imageInfo.fileName = info.dli_fname;
 		std::string imageFile = basename(info.dli_fname);
 		// If we have a client library that doesn't end in the appropriate extension, we will get the wrong debug
 		// suffix. This should only be a cosmetic problem, though.
@@ -3211,25 +3205,23 @@ ImageInfo getImageInfo(const void* symbol) {
 		else {
 			imageInfo.symbolFileName = imageFile + ".debug";
 		}
-	} else {
-		imageInfo.symbolFileName = "unknown";
 	}
 
 	return imageInfo;
 }
 
-ImageInfo getCachedImageInfo() {
+platform::ImageInfo getCachedImageInfo() {
 	// The use of "getCachedImageInfo" is arbitrary and was a best guess at a good way to get the image of the
 	//  most likely candidate for the "real" flow library or binary
-	static ImageInfo info = getImageInfo((const void*)&getCachedImageInfo);
+	static platform::ImageInfo info = getImageInfo((const void*)&getCachedImageInfo);
 	return info;
 }
 
 #include <execinfo.h>
 
 namespace platform {
-void* getImageOffset() {
-	return getCachedImageInfo().offset;
+ImageInfo getImageInfo() {
+	return getCachedImageInfo();
 }
 
 size_t raw_backtrace(void** addresses, int maxStackDepth) {
@@ -3272,8 +3264,8 @@ std::string get_backtrace() {
 std::string format_backtrace(void** addresses, int numAddresses) {
 	return std::string();
 }
-void* getImageOffset() {
-	return nullptr;
+ImageInfo getImageInfo() {
+	return ImageInfo();
 }
 } // namespace platform
 #endif
@@ -3581,8 +3573,10 @@ void* checkThread(void* arg) {
 	int64_t lastRunLoopIterations = net2RunLoopIterations.load();
 	int64_t lastRunLoopSleeps = net2RunLoopSleeps.load();
 
+	double slowTaskStart = 0;
 	double lastSlowTaskSignal = 0;
 	double lastSaturatedSignal = 0;
+	double lastSlowTaskBlockedLog = 0;
 
 	const double minSlowTaskLogInterval =
 	    std::max(FLOW_KNOBS->SLOWTASK_PROFILING_LOG_INTERVAL, FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
@@ -3603,7 +3597,19 @@ void* checkThread(void* arg) {
 
 		if (slowTask) {
 			double t = timer();
-			if (lastSlowTaskSignal == 0 || t - lastSlowTaskSignal >= slowTaskLogInterval) {
+			bool newSlowTask = lastSlowTaskSignal == 0;
+
+			if (newSlowTask) {
+				slowTaskStart = t;
+			} else if (t - std::max(slowTaskStart, lastSlowTaskBlockedLog) > FLOW_KNOBS->SLOWTASK_BLOCKED_INTERVAL) {
+				lastSlowTaskBlockedLog = t;
+				// When this gets logged, it will be with a current timestamp (using timer()). If the network thread
+				// unblocks, it will log any slow task related events at an earlier timestamp. That means the order of
+				// events during this sequence will not match their timestamp order.
+				TraceEvent(SevWarnAlways, "RunLoopBlocked").detail("Duration", t - slowTaskStart);
+			}
+
+			if (newSlowTask || t - lastSlowTaskSignal >= slowTaskLogInterval) {
 				if (lastSlowTaskSignal > 0) {
 					slowTaskLogInterval = std::min(FLOW_KNOBS->SLOWTASK_PROFILING_MAX_LOG_INTERVAL,
 					                               FLOW_KNOBS->SLOWTASK_PROFILING_LOG_BACKOFF * slowTaskLogInterval);
@@ -3614,6 +3620,7 @@ void* checkThread(void* arg) {
 				pthread_kill(mainThread, SIGPROF);
 			}
 		} else {
+			slowTaskStart = 0;
 			lastSlowTaskSignal = 0;
 			lastRunLoopIterations = currentRunLoopIterations;
 			slowTaskLogInterval = minSlowTaskLogInterval;

@@ -19,6 +19,7 @@
  */
 
 #include <cinttypes>
+#include "fdbclient/SystemData.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Trace.h"
@@ -222,6 +223,30 @@ ACTOR Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
 	}
 
 	return std::make_pair(maxQueueSize, maxPoppedVersionLag);
+}
+
+// Returns a vector of blob worker interfaces which have been persisted under the system key space
+ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx, bool use_system_priority = false) {
+	state Transaction tr(cx);
+	loop {
+		if (use_system_priority) {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		}
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			RangeResult blobWorkersList = wait(tr.getRange(blobWorkerListKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!blobWorkersList.more && blobWorkersList.size() < CLIENT_KNOBS->TOO_MANY);
+
+			std::vector<BlobWorkerInterface> blobWorkers;
+			blobWorkers.reserve(blobWorkersList.size());
+			for (int i = 0; i < blobWorkersList.size(); i++) {
+				blobWorkers.push_back(decodeBlobWorkerListValue(blobWorkersList[i].value));
+			}
+			return blobWorkers;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 }
 
 ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx, bool use_system_priority = false) {
@@ -631,22 +656,27 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	state Future<int64_t> storageQueueSize;
 	state Future<bool> dataDistributionActive;
 	state Future<bool> storageServersRecruiting;
-
 	auto traceMessage = "QuietDatabase" + phase + "Begin";
-	TraceEvent(traceMessage.c_str());
+	TraceEvent(traceMessage.c_str()).log();
 
 	// In a simulated environment, wait 5 seconds so that workers can move to their optimal locations
 	if (g_network->isSimulated())
 		wait(delay(5.0));
+
+	TraceEvent("QuietDatabaseWaitingOnFullRecovery").log();
+	while (dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
+		wait(dbInfo->onChange());
+	}
+
 	// The quiet database check (which runs at the end of every test) will always time out due to active data movement.
 	// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.
+
 	printf("Set perpetual_storage_wiggle=0 ...\n");
 	wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
 	printf("Set perpetual_storage_wiggle=0 Done.\n");
 
 	// Require 3 consecutive successful quiet database checks spaced 2 second apart
 	state int numSuccesses = 0;
-
 	loop {
 		try {
 			TraceEvent("QuietDatabaseWaitingOnDataDistributor").log();
@@ -686,15 +716,15 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 			if (dataInFlight.get() > dataInFlightGate || tLogQueueInfo.get().first > maxTLogQueueGate ||
 			    tLogQueueInfo.get().second > maxPoppedVersionLag ||
 			    dataDistributionQueueSize.get() > maxDataDistributionQueueSize ||
-			    storageQueueSize.get() > maxStorageServerQueueGate || dataDistributionActive.get() == false ||
-			    storageServersRecruiting.get() == true || teamCollectionValid.get() == false) {
+			    storageQueueSize.get() > maxStorageServerQueueGate || !dataDistributionActive.get() ||
+			    storageServersRecruiting.get() || !teamCollectionValid.get()) {
 
 				wait(delay(1.0));
 				numSuccesses = 0;
 			} else {
 				if (++numSuccesses == 3) {
 					auto msg = "QuietDatabase" + phase + "Done";
-					TraceEvent(msg.c_str());
+					TraceEvent(msg.c_str()).log();
 					break;
 				} else {
 					wait(delay(g_network->isSimulated() ? 2.0 : 30.0));

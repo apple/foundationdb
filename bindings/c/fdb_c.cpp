@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include <cstdint>
 #define FDB_API_VERSION 710
 #define FDB_INCLUDE_LEGACY_TYPES
@@ -34,6 +35,7 @@ int g_api_version = 0;
  *
  * type mapping:
  *   FDBFuture -> ThreadSingleAssignmentVarBase
+ *   FDBResult -> ThreadSingleAssignmentVarBase
  *   FDBDatabase -> IDatabase
  *   FDBTransaction -> ITransaction
  */
@@ -78,6 +80,30 @@ extern "C" DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_erro
 	}
 	return false;
 }
+
+#define RETURN_FUTURE_ON_ERROR(return_type, code_to_run)                                                               \
+	try {                                                                                                              \
+		code_to_run                                                                                                    \
+	} catch (Error & e) {                                                                                              \
+		if (e.code() <= 0)                                                                                             \
+			return ((FDBFuture*)(ThreadFuture<return_type>(internal_error())).extractPtr());                           \
+		else                                                                                                           \
+			return ((FDBFuture*)(ThreadFuture<return_type>(e)).extractPtr());                                          \
+	} catch (...) {                                                                                                    \
+		return ((FDBFuture*)(ThreadFuture<return_type>(unknown_error())).extractPtr());                                \
+	}
+
+#define RETURN_RESULT_ON_ERROR(return_type, code_to_run)                                                               \
+	try {                                                                                                              \
+		code_to_run                                                                                                    \
+	} catch (Error & e) {                                                                                              \
+		if (e.code() <= 0)                                                                                             \
+			return ((FDBResult*)(ThreadResult<return_type>(internal_error())).extractPtr());                           \
+		else                                                                                                           \
+			return ((FDBResult*)(ThreadResult<return_type>(e)).extractPtr());                                          \
+	} catch (...) {                                                                                                    \
+		return ((FDBResult*)(ThreadResult<return_type>(unknown_error())).extractPtr());                                \
+	}
 
 #define RETURN_ON_ERROR(code_to_run)                                                                                   \
 	try {                                                                                                              \
@@ -260,10 +286,31 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_string_array(FDBFuture* f, const
 	                 *out_count = na.size(););
 }
 
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_keyrange_array(FDBFuture* f,
+                                                               FDBKeyRange const** out_ranges,
+                                                               int* out_count) {
+	CATCH_AND_RETURN(Standalone<VectorRef<KeyRangeRef>> na = TSAV(Standalone<VectorRef<KeyRangeRef>>, f)->get();
+	                 *out_ranges = (FDBKeyRange*)na.begin();
+	                 *out_count = na.size(););
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_future_get_key_array(FDBFuture* f, FDBKey const** out_key_array, int* out_count) {
 	CATCH_AND_RETURN(Standalone<VectorRef<KeyRef>> na = TSAV(Standalone<VectorRef<KeyRef>>, f)->get();
 	                 *out_key_array = (FDBKey*)na.begin();
 	                 *out_count = na.size(););
+}
+
+extern "C" DLLEXPORT void fdb_result_destroy(FDBResult* r) {
+	CATCH_AND_DIE(TSAVB(r)->cancel(););
+}
+
+fdb_error_t fdb_result_get_keyvalue_array(FDBResult* r,
+                                          FDBKeyValue const** out_kv,
+                                          int* out_count,
+                                          fdb_bool_t* out_more) {
+	CATCH_AND_RETURN(RangeResult rr = TSAV(RangeResult, r)->get(); *out_kv = (FDBKeyValue*)rr.begin();
+	                 *out_count = rr.size();
+	                 *out_more = rr.more;);
 }
 
 FDBFuture* fdb_create_cluster_v609(const char* cluster_file_path) {
@@ -436,21 +483,12 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_addresses_for_key(FDBTransac
 	return (FDBFuture*)(TXN(tr)->getAddressesForKey(KeyRef(key_name, key_name_length)).extractPtr());
 }
 
-FDBFuture* fdb_transaction_get_range_impl(FDBTransaction* tr,
-                                          uint8_t const* begin_key_name,
-                                          int begin_key_name_length,
-                                          fdb_bool_t begin_or_equal,
-                                          int begin_offset,
-                                          uint8_t const* end_key_name,
-                                          int end_key_name_length,
-                                          fdb_bool_t end_or_equal,
-                                          int end_offset,
-                                          int limit,
-                                          int target_bytes,
+// Set to the actual limit, target_bytes, and reverse.
+FDBFuture* validate_and_update_parameters(int& limit,
+                                          int& target_bytes,
                                           FDBStreamingMode mode,
                                           int iteration,
-                                          fdb_bool_t snapshot,
-                                          fdb_bool_t reverse) {
+                                          fdb_bool_t& reverse) {
 	/* This method may be called with a runtime API version of 13, in
 	   which negative row limits are a reverse range read */
 	if (g_api_version <= 13 && limit < 0) {
@@ -500,6 +538,27 @@ FDBFuture* fdb_transaction_get_range_impl(FDBTransaction* tr,
 	else if (mode_bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED)
 		target_bytes = std::min(target_bytes, mode_bytes);
 
+	return nullptr;
+}
+
+FDBFuture* fdb_transaction_get_range_impl(FDBTransaction* tr,
+                                          uint8_t const* begin_key_name,
+                                          int begin_key_name_length,
+                                          fdb_bool_t begin_or_equal,
+                                          int begin_offset,
+                                          uint8_t const* end_key_name,
+                                          int end_key_name_length,
+                                          fdb_bool_t end_or_equal,
+                                          int end_offset,
+                                          int limit,
+                                          int target_bytes,
+                                          FDBStreamingMode mode,
+                                          int iteration,
+                                          fdb_bool_t snapshot,
+                                          fdb_bool_t reverse) {
+	FDBFuture* r = validate_and_update_parameters(limit, target_bytes, mode, iteration, reverse);
+	if (r != nullptr)
+		return r;
 	return (
 	    FDBFuture*)(TXN(tr)
 	                    ->getRange(
@@ -509,6 +568,60 @@ FDBFuture* fdb_transaction_get_range_impl(FDBTransaction* tr,
 	                        snapshot,
 	                        reverse)
 	                    .extractPtr());
+}
+
+FDBFuture* fdb_transaction_get_range_and_flat_map_impl(FDBTransaction* tr,
+                                                       uint8_t const* begin_key_name,
+                                                       int begin_key_name_length,
+                                                       fdb_bool_t begin_or_equal,
+                                                       int begin_offset,
+                                                       uint8_t const* end_key_name,
+                                                       int end_key_name_length,
+                                                       fdb_bool_t end_or_equal,
+                                                       int end_offset,
+                                                       uint8_t const* mapper_name,
+                                                       int mapper_name_length,
+                                                       int limit,
+                                                       int target_bytes,
+                                                       FDBStreamingMode mode,
+                                                       int iteration,
+                                                       fdb_bool_t snapshot,
+                                                       fdb_bool_t reverse) {
+	FDBFuture* r = validate_and_update_parameters(limit, target_bytes, mode, iteration, reverse);
+	if (r != nullptr)
+		return r;
+	return (
+	    FDBFuture*)(TXN(tr)
+	                    ->getRangeAndFlatMap(
+	                        KeySelectorRef(KeyRef(begin_key_name, begin_key_name_length), begin_or_equal, begin_offset),
+	                        KeySelectorRef(KeyRef(end_key_name, end_key_name_length), end_or_equal, end_offset),
+	                        StringRef(mapper_name, mapper_name_length),
+	                        GetRangeLimits(limit, target_bytes),
+	                        snapshot,
+	                        reverse)
+	                    .extractPtr());
+}
+
+// TODO: Support FDB_API_ADDED in generate_asm.py and then this can be replaced with fdb_api_ptr_unimpl.
+FDBFuture* fdb_transaction_get_range_and_flat_map_v699(FDBTransaction* tr,
+                                                       uint8_t const* begin_key_name,
+                                                       int begin_key_name_length,
+                                                       fdb_bool_t begin_or_equal,
+                                                       int begin_offset,
+                                                       uint8_t const* end_key_name,
+                                                       int end_key_name_length,
+                                                       fdb_bool_t end_or_equal,
+                                                       int end_offset,
+                                                       uint8_t const* mapper_name,
+                                                       int mapper_name_length,
+                                                       int limit,
+                                                       int target_bytes,
+                                                       FDBStreamingMode mode,
+                                                       int iteration,
+                                                       fdb_bool_t snapshot,
+                                                       fdb_bool_t reverse) {
+	fprintf(stderr, "UNIMPLEMENTED FDB API FUNCTION\n");
+	abort();
 }
 
 FDBFuture* fdb_transaction_get_range_selector_v13(FDBTransaction* tr,
@@ -642,8 +755,10 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_estimated_range_size_bytes(F
                                                                                int begin_key_name_length,
                                                                                uint8_t const* end_key_name,
                                                                                int end_key_name_length) {
-	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
-	return (FDBFuture*)(TXN(tr)->getEstimatedRangeSizeBytes(range).extractPtr());
+	RETURN_FUTURE_ON_ERROR(
+	    int64_t,
+	    KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	    return (FDBFuture*)(TXN(tr)->getEstimatedRangeSizeBytes(range).extractPtr()););
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_range_split_points(FDBTransaction* tr,
@@ -652,8 +767,47 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_range_split_points(FDBTransa
                                                                        uint8_t const* end_key_name,
                                                                        int end_key_name_length,
                                                                        int64_t chunk_size) {
-	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
-	return (FDBFuture*)(TXN(tr)->getRangeSplitPoints(range, chunk_size).extractPtr());
+	RETURN_FUTURE_ON_ERROR(
+	    Standalone<VectorRef<KeyRef>>,
+	    KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	    return (FDBFuture*)(TXN(tr)->getRangeSplitPoints(range, chunk_size).extractPtr()););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_blob_granule_ranges(FDBTransaction* tr,
+                                                                        uint8_t const* begin_key_name,
+                                                                        int begin_key_name_length,
+                                                                        uint8_t const* end_key_name,
+                                                                        int end_key_name_length) {
+	RETURN_FUTURE_ON_ERROR(
+	    Standalone<VectorRef<KeyRangeRef>>,
+	    KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	    return (FDBFuture*)(TXN(tr)->getBlobGranuleRanges(range).extractPtr()););
+}
+
+extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules(FDBTransaction* tr,
+                                                                   uint8_t const* begin_key_name,
+                                                                   int begin_key_name_length,
+                                                                   uint8_t const* end_key_name,
+                                                                   int end_key_name_length,
+                                                                   int64_t beginVersion,
+                                                                   int64_t readVersion,
+                                                                   FDBReadBlobGranuleContext granule_context) {
+	RETURN_RESULT_ON_ERROR(
+	    RangeResult,
+	    KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+
+	    // FIXME: better way to convert?
+	    ReadBlobGranuleContext context;
+	    context.userContext = granule_context.userContext;
+	    context.start_load_f = granule_context.start_load_f;
+	    context.get_load_f = granule_context.get_load_f;
+	    context.free_load_f = granule_context.free_load_f;
+	    context.debugNoMaterialize = granule_context.debugNoMaterialize;
+
+	    Optional<Version> rv;
+	    if (readVersion != invalidVersion) { rv = readVersion; }
+
+	    return (FDBResult*)(TXN(tr)->readBlobGranules(range, beginVersion, rv, context).extractPtr()););
 }
 
 #include "fdb_c_function_pointers.g.h"
@@ -702,6 +856,7 @@ extern "C" DLLEXPORT fdb_error_t fdb_select_api_version_impl(int runtime_version
 	// WARNING: use caution when implementing removed functions by calling public API functions. This can lead to
 	// undesired behavior when using the multi-version API. Instead, it is better to have both the removed and public
 	// functions call an internal implementation function. See fdb_create_database_impl for an example.
+	FDB_API_CHANGED(fdb_transaction_get_range_and_flat_map, 700);
 	FDB_API_REMOVED(fdb_future_get_version, 620);
 	FDB_API_REMOVED(fdb_create_cluster, 610);
 	FDB_API_REMOVED(fdb_cluster_create_database, 610);

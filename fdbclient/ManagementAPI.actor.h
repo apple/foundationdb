@@ -49,6 +49,7 @@ enum class ConfigurationResult {
 	UNKNOWN_OPTION,
 	INCOMPLETE_CONFIGURATION,
 	INVALID_CONFIGURATION,
+	STORAGE_MIGRATION_DISABLED,
 	DATABASE_ALREADY_CREATED,
 	DATABASE_CREATED,
 	DATABASE_UNAVAILABLE,
@@ -61,7 +62,6 @@ enum class ConfigurationResult {
 	DCID_MISSING,
 	LOCKED_NOT_NEW,
 	SUCCESS_WARN_PPW_GRADUAL,
-	SUCCESS_WARN_CHANGE_STORAGE_NOMIGRATE,
 	SUCCESS,
 };
 
@@ -130,7 +130,7 @@ struct IQuorumChange : ReferenceCounted<IQuorumChange> {
 	virtual ~IQuorumChange() {}
 	virtual Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
 	                                                                   std::vector<NetworkAddress> oldCoordinators,
-	                                                                   Reference<ClusterConnectionFile>,
+	                                                                   Reference<IClusterConnectionRecord>,
 	                                                                   CoordinatorsResult&) = 0;
 	virtual std::string getDesiredClusterKeyName() const { return std::string(); }
 };
@@ -207,11 +207,18 @@ ACTOR Future<Void> unlockDatabase(Database cx, UID id);
 ACTOR Future<Void> checkDatabaseLock(Transaction* tr, UID id);
 ACTOR Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id);
 
+ACTOR Future<Void> updateChangeFeed(Transaction* tr, Key rangeID, ChangeFeedStatus status, KeyRange range = KeyRange());
+ACTOR Future<Void> updateChangeFeed(Reference<ReadYourWritesTransaction> tr,
+                                    Key rangeID,
+                                    ChangeFeedStatus status,
+                                    KeyRange range = KeyRange());
+ACTOR Future<Void> updateChangeFeed(Database cx, Key rangeID, ChangeFeedStatus status, KeyRange range = KeyRange());
+
 ACTOR Future<Void> advanceVersion(Database cx, Version v);
 
 ACTOR Future<int> setDDMode(Database cx, int mode);
 
-ACTOR Future<Void> forceRecovery(Reference<ClusterConnectionFile> clusterFile, Standalone<StringRef> dcId);
+ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile, Standalone<StringRef> dcId);
 
 ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Database cx, bool ignoreRebalance);
@@ -569,11 +576,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 
 					if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
 					    newConfig.storageMigrationType == StorageMigrationType::DISABLED) {
-						warnChangeStorageNoMigrate = true;
-					} else if ((newConfig.storageMigrationType == StorageMigrationType::GRADUAL &&
-					            newConfig.perpetualStorageWiggleSpeed == 0) ||
-					           (newConfig.perpetualStorageWiggleSpeed > 0 &&
-					            newConfig.storageMigrationType == StorageMigrationType::DISABLED)) {
+						return ConfigurationResult::STORAGE_MIGRATION_DISABLED;
+					} else if (newConfig.storageMigrationType == StorageMigrationType::GRADUAL &&
+					           newConfig.perpetualStorageWiggleSpeed == 0) {
 						warnPPWGradual = true;
 					}
 				}
@@ -636,8 +641,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 
 	if (warnPPWGradual) {
 		return ConfigurationResult::SUCCESS_WARN_PPW_GRADUAL;
-	} else if (warnChangeStorageNoMigrate) {
-		return ConfigurationResult::SUCCESS_WARN_CHANGE_STORAGE_NOMIGRATE;
 	} else {
 		return ConfigurationResult::SUCCESS;
 	}

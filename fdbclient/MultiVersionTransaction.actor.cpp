@@ -18,10 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
-#include "fdbclient/ThreadSafeTransaction.h"
+#include "fdbclient/ClientVersion.h"
+#include "fdbclient/LocalClientAPI.h"
 
 #include "flow/network.h"
 #include "flow/Platform.h"
@@ -29,6 +30,10 @@
 #include "flow/UnitTest.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+#ifdef FDBCLIENT_NATIVEAPI_ACTOR_H
+#error "MVC should not depend on the Native API"
+#endif
 
 void throwIfError(FdbCApi::fdb_error_t e) {
 	if (e) {
@@ -141,6 +146,41 @@ ThreadFuture<RangeResult> DLTransaction::getRange(const KeyRangeRef& keys,
 	return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 }
 
+ThreadFuture<RangeResult> DLTransaction::getRangeAndFlatMap(const KeySelectorRef& begin,
+                                                            const KeySelectorRef& end,
+                                                            const StringRef& mapper,
+                                                            GetRangeLimits limits,
+                                                            bool snapshot,
+                                                            bool reverse) {
+	FdbCApi::FDBFuture* f = api->transactionGetRangeAndFlatMap(tr,
+	                                                           begin.getKey().begin(),
+	                                                           begin.getKey().size(),
+	                                                           begin.orEqual,
+	                                                           begin.offset,
+	                                                           end.getKey().begin(),
+	                                                           end.getKey().size(),
+	                                                           end.orEqual,
+	                                                           end.offset,
+	                                                           mapper.begin(),
+	                                                           mapper.size(),
+	                                                           limits.rows,
+	                                                           limits.bytes,
+	                                                           FDB_STREAMING_MODE_EXACT,
+	                                                           0,
+	                                                           snapshot,
+	                                                           reverse);
+	return toThreadFuture<RangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const FdbCApi::FDBKeyValue* kvs;
+		int count;
+		FdbCApi::fdb_bool_t more;
+		FdbCApi::fdb_error_t error = api->futureGetKeyValueArray(f, &kvs, &count, &more);
+		ASSERT(!error);
+
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
+		return RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena());
+	});
+}
+
 ThreadFuture<Standalone<VectorRef<const char*>>> DLTransaction::getAddressesForKey(const KeyRef& key) {
 	FdbCApi::FDBFuture* f = api->transactionGetAddressesForKey(tr, key.begin(), key.size());
 
@@ -201,8 +241,64 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> DLTransaction::getRangeSplitPoints(c
 		int keysArrayLength;
 		FdbCApi::fdb_error_t error = api->futureGetKeyArray(f, &splitKeys, &keysArrayLength);
 		ASSERT(!error);
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
 		return Standalone<VectorRef<KeyRef>>(VectorRef<KeyRef>((KeyRef*)splitKeys, keysArrayLength), Arena());
 	});
+}
+
+ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> DLTransaction::getBlobGranuleRanges(const KeyRangeRef& keyRange) {
+	if (!api->transactionGetBlobGranuleRanges) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->transactionGetBlobGranuleRanges(
+	    tr, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
+	return toThreadFuture<Standalone<VectorRef<KeyRangeRef>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const FdbCApi::FDBKeyRange* keyRanges;
+		int keyRangesLength;
+		FdbCApi::fdb_error_t error = api->futureGetKeyRangeArray(f, &keyRanges, &keyRangesLength);
+		ASSERT(!error);
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
+		return Standalone<VectorRef<KeyRangeRef>>(VectorRef<KeyRangeRef>((KeyRangeRef*)keyRanges, keyRangesLength),
+		                                          Arena());
+	});
+}
+
+ThreadResult<RangeResult> DLTransaction::readBlobGranules(const KeyRangeRef& keyRange,
+                                                          Version beginVersion,
+                                                          Optional<Version> readVersion,
+                                                          ReadBlobGranuleContext granuleContext) {
+	if (!api->transactionReadBlobGranules) {
+		return unsupported_operation();
+	}
+
+	// FIXME: better way to convert here?
+	FdbCApi::FDBReadBlobGranuleContext context;
+	context.userContext = granuleContext.userContext;
+	context.start_load_f = granuleContext.start_load_f;
+	context.get_load_f = granuleContext.get_load_f;
+	context.free_load_f = granuleContext.free_load_f;
+	context.debugNoMaterialize = granuleContext.debugNoMaterialize;
+
+	int64_t rv = readVersion.present() ? readVersion.get() : invalidVersion;
+
+	FdbCApi::FDBResult* r = api->transactionReadBlobGranules(tr,
+	                                                         keyRange.begin.begin(),
+	                                                         keyRange.begin.size(),
+	                                                         keyRange.end.begin(),
+	                                                         keyRange.end.size(),
+	                                                         beginVersion,
+	                                                         rv,
+	                                                         context);
+	const FdbCApi::FDBKeyValue* kvs;
+	int count;
+	FdbCApi::fdb_bool_t more;
+	FdbCApi::fdb_error_t error = api->resultGetKeyValueArray(r, &kvs, &count, &more);
+	ASSERT(!error);
+
+	// The memory for this is stored in the FDBResult and is released when the result gets destroyed
+	return ThreadResult<RangeResult>(
+	    RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena()));
 }
 
 void DLTransaction::addReadConflictRange(const KeyRangeRef& keys) {
@@ -387,7 +483,7 @@ ThreadFuture<ProtocolVersion> DLDatabase::getServerProtocol(Optional<ProtocolVer
 // requireFunction - Determines the behavior if the function is not present. If true, an error is thrown. If false,
 //                   the function pointer will be set to nullptr.
 template <class T>
-void loadClientFunction(T* fp, void* lib, std::string libPath, const char* functionName, bool requireFunction = true) {
+void loadClientFunction(T* fp, void* lib, std::string libPath, const char* functionName, bool requireFunction) {
 	*(void**)(fp) = loadFunction(lib, functionName);
 	if (*fp == nullptr && requireFunction) {
 		TraceEvent(SevError, "ErrorLoadingFunction").detail("LibraryPath", libPath).detail("Function", functionName);
@@ -417,16 +513,17 @@ void DLApi::init() {
 		}
 	}
 
-	loadClientFunction(&api->selectApiVersion, lib, fdbCPath, "fdb_select_api_version_impl");
+	loadClientFunction(&api->selectApiVersion, lib, fdbCPath, "fdb_select_api_version_impl", headerVersion >= 0);
 	loadClientFunction(&api->getClientVersion, lib, fdbCPath, "fdb_get_client_version", headerVersion >= 410);
-	loadClientFunction(&api->setNetworkOption, lib, fdbCPath, "fdb_network_set_option");
-	loadClientFunction(&api->setupNetwork, lib, fdbCPath, "fdb_setup_network");
-	loadClientFunction(&api->runNetwork, lib, fdbCPath, "fdb_run_network");
-	loadClientFunction(&api->stopNetwork, lib, fdbCPath, "fdb_stop_network");
+	loadClientFunction(&api->setNetworkOption, lib, fdbCPath, "fdb_network_set_option", headerVersion >= 0);
+	loadClientFunction(&api->setupNetwork, lib, fdbCPath, "fdb_setup_network", headerVersion >= 0);
+	loadClientFunction(&api->runNetwork, lib, fdbCPath, "fdb_run_network", headerVersion >= 0);
+	loadClientFunction(&api->stopNetwork, lib, fdbCPath, "fdb_stop_network", headerVersion >= 0);
 	loadClientFunction(&api->createDatabase, lib, fdbCPath, "fdb_create_database", headerVersion >= 610);
 
-	loadClientFunction(&api->databaseCreateTransaction, lib, fdbCPath, "fdb_database_create_transaction");
-	loadClientFunction(&api->databaseSetOption, lib, fdbCPath, "fdb_database_set_option");
+	loadClientFunction(
+	    &api->databaseCreateTransaction, lib, fdbCPath, "fdb_database_create_transaction", headerVersion >= 0);
+	loadClientFunction(&api->databaseSetOption, lib, fdbCPath, "fdb_database_set_option", headerVersion >= 0);
 	loadClientFunction(&api->databaseGetMainThreadBusyness,
 	                   lib,
 	                   fdbCPath,
@@ -434,7 +531,7 @@ void DLApi::init() {
 	                   headerVersion >= 700);
 	loadClientFunction(
 	    &api->databaseGetServerProtocol, lib, fdbCPath, "fdb_database_get_server_protocol", headerVersion >= 700);
-	loadClientFunction(&api->databaseDestroy, lib, fdbCPath, "fdb_database_destroy");
+	loadClientFunction(&api->databaseDestroy, lib, fdbCPath, "fdb_database_destroy", headerVersion >= 0);
 	loadClientFunction(&api->databaseRebootWorker, lib, fdbCPath, "fdb_database_reboot_worker", headerVersion >= 700);
 	loadClientFunction(&api->databaseForceRecoveryWithDataLoss,
 	                   lib,
@@ -444,32 +541,48 @@ void DLApi::init() {
 	loadClientFunction(
 	    &api->databaseCreateSnapshot, lib, fdbCPath, "fdb_database_create_snapshot", headerVersion >= 700);
 
-	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option");
-	loadClientFunction(&api->transactionDestroy, lib, fdbCPath, "fdb_transaction_destroy");
-	loadClientFunction(&api->transactionSetReadVersion, lib, fdbCPath, "fdb_transaction_set_read_version");
-	loadClientFunction(&api->transactionGetReadVersion, lib, fdbCPath, "fdb_transaction_get_read_version");
-	loadClientFunction(&api->transactionGet, lib, fdbCPath, "fdb_transaction_get");
-	loadClientFunction(&api->transactionGetKey, lib, fdbCPath, "fdb_transaction_get_key");
-	loadClientFunction(&api->transactionGetAddressesForKey, lib, fdbCPath, "fdb_transaction_get_addresses_for_key");
-	loadClientFunction(&api->transactionGetRange, lib, fdbCPath, "fdb_transaction_get_range");
+	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option", headerVersion >= 0);
+	loadClientFunction(&api->transactionDestroy, lib, fdbCPath, "fdb_transaction_destroy", headerVersion >= 0);
+	loadClientFunction(
+	    &api->transactionSetReadVersion, lib, fdbCPath, "fdb_transaction_set_read_version", headerVersion >= 0);
+	loadClientFunction(
+	    &api->transactionGetReadVersion, lib, fdbCPath, "fdb_transaction_get_read_version", headerVersion >= 0);
+	loadClientFunction(&api->transactionGet, lib, fdbCPath, "fdb_transaction_get", headerVersion >= 0);
+	loadClientFunction(&api->transactionGetKey, lib, fdbCPath, "fdb_transaction_get_key", headerVersion >= 0);
+	loadClientFunction(&api->transactionGetAddressesForKey,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_get_addresses_for_key",
+	                   headerVersion >= 0);
+	loadClientFunction(&api->transactionGetRange, lib, fdbCPath, "fdb_transaction_get_range", headerVersion >= 0);
+	loadClientFunction(&api->transactionGetRangeAndFlatMap,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_get_range_and_flat_map",
+	                   headerVersion >= 700);
 	loadClientFunction(
 	    &api->transactionGetVersionstamp, lib, fdbCPath, "fdb_transaction_get_versionstamp", headerVersion >= 410);
-	loadClientFunction(&api->transactionSet, lib, fdbCPath, "fdb_transaction_set");
-	loadClientFunction(&api->transactionClear, lib, fdbCPath, "fdb_transaction_clear");
-	loadClientFunction(&api->transactionClearRange, lib, fdbCPath, "fdb_transaction_clear_range");
-	loadClientFunction(&api->transactionAtomicOp, lib, fdbCPath, "fdb_transaction_atomic_op");
-	loadClientFunction(&api->transactionCommit, lib, fdbCPath, "fdb_transaction_commit");
-	loadClientFunction(&api->transactionGetCommittedVersion, lib, fdbCPath, "fdb_transaction_get_committed_version");
+	loadClientFunction(&api->transactionSet, lib, fdbCPath, "fdb_transaction_set", headerVersion >= 0);
+	loadClientFunction(&api->transactionClear, lib, fdbCPath, "fdb_transaction_clear", headerVersion >= 0);
+	loadClientFunction(&api->transactionClearRange, lib, fdbCPath, "fdb_transaction_clear_range", headerVersion >= 0);
+	loadClientFunction(&api->transactionAtomicOp, lib, fdbCPath, "fdb_transaction_atomic_op", headerVersion >= 0);
+	loadClientFunction(&api->transactionCommit, lib, fdbCPath, "fdb_transaction_commit", headerVersion >= 0);
+	loadClientFunction(&api->transactionGetCommittedVersion,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_get_committed_version",
+	                   headerVersion >= 0);
 	loadClientFunction(&api->transactionGetApproximateSize,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_transaction_get_approximate_size",
 	                   headerVersion >= 620);
-	loadClientFunction(&api->transactionWatch, lib, fdbCPath, "fdb_transaction_watch");
-	loadClientFunction(&api->transactionOnError, lib, fdbCPath, "fdb_transaction_on_error");
-	loadClientFunction(&api->transactionReset, lib, fdbCPath, "fdb_transaction_reset");
-	loadClientFunction(&api->transactionCancel, lib, fdbCPath, "fdb_transaction_cancel");
-	loadClientFunction(&api->transactionAddConflictRange, lib, fdbCPath, "fdb_transaction_add_conflict_range");
+	loadClientFunction(&api->transactionWatch, lib, fdbCPath, "fdb_transaction_watch", headerVersion >= 0);
+	loadClientFunction(&api->transactionOnError, lib, fdbCPath, "fdb_transaction_on_error", headerVersion >= 0);
+	loadClientFunction(&api->transactionReset, lib, fdbCPath, "fdb_transaction_reset", headerVersion >= 0);
+	loadClientFunction(&api->transactionCancel, lib, fdbCPath, "fdb_transaction_cancel", headerVersion >= 0);
+	loadClientFunction(
+	    &api->transactionAddConflictRange, lib, fdbCPath, "fdb_transaction_add_conflict_range", headerVersion >= 0);
 	loadClientFunction(&api->transactionGetEstimatedRangeSizeBytes,
 	                   lib,
 	                   fdbCPath,
@@ -481,18 +594,35 @@ void DLApi::init() {
 	                   "fdb_transaction_get_range_split_points",
 	                   headerVersion >= 700);
 
+	loadClientFunction(&api->transactionGetBlobGranuleRanges,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_get_blob_granule_ranges",
+	                   headerVersion >= 710);
 	loadClientFunction(
-	    &api->futureGetInt64, lib, fdbCPath, headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version");
+	    &api->transactionReadBlobGranules, lib, fdbCPath, "fdb_transaction_read_blob_granules", headerVersion >= 710);
+	loadClientFunction(&api->futureGetInt64,
+	                   lib,
+	                   fdbCPath,
+	                   headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version",
+	                   headerVersion >= 0);
 	loadClientFunction(&api->futureGetUInt64, lib, fdbCPath, "fdb_future_get_uint64", headerVersion >= 700);
-	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
-	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key");
-	loadClientFunction(&api->futureGetValue, lib, fdbCPath, "fdb_future_get_value");
-	loadClientFunction(&api->futureGetStringArray, lib, fdbCPath, "fdb_future_get_string_array");
+	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error", headerVersion >= 0);
+	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key", headerVersion >= 0);
+	loadClientFunction(&api->futureGetValue, lib, fdbCPath, "fdb_future_get_value", headerVersion >= 0);
+	loadClientFunction(&api->futureGetStringArray, lib, fdbCPath, "fdb_future_get_string_array", headerVersion >= 0);
+	loadClientFunction(
+	    &api->futureGetKeyRangeArray, lib, fdbCPath, "fdb_future_get_keyrange_array", headerVersion >= 710);
 	loadClientFunction(&api->futureGetKeyArray, lib, fdbCPath, "fdb_future_get_key_array", headerVersion >= 700);
-	loadClientFunction(&api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array");
-	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback");
-	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel");
-	loadClientFunction(&api->futureDestroy, lib, fdbCPath, "fdb_future_destroy");
+	loadClientFunction(
+	    &api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array", headerVersion >= 0);
+	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
+	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel", headerVersion >= 0);
+	loadClientFunction(&api->futureDestroy, lib, fdbCPath, "fdb_future_destroy", headerVersion >= 0);
+
+	loadClientFunction(
+	    &api->resultGetKeyValueArray, lib, fdbCPath, "fdb_result_get_keyvalue_array", headerVersion >= 710);
+	loadClientFunction(&api->resultDestroy, lib, fdbCPath, "fdb_result_destroy", headerVersion >= 710);
 
 	loadClientFunction(&api->futureGetDatabase, lib, fdbCPath, "fdb_future_get_database", headerVersion < 610);
 	loadClientFunction(&api->createCluster, lib, fdbCPath, "fdb_create_cluster", headerVersion < 610);
@@ -538,6 +668,8 @@ void DLApi::runNetwork() {
 			hook.first(hook.second);
 		} catch (Error& e) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
+		} catch (std::exception& e) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error()).detail("RootException", e.what());
 		} catch (...) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
 		}
@@ -729,6 +861,18 @@ ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& k
 	return abortableFuture(f, tr.onChange);
 }
 
+ThreadFuture<RangeResult> MultiVersionTransaction::getRangeAndFlatMap(const KeySelectorRef& begin,
+                                                                      const KeySelectorRef& end,
+                                                                      const StringRef& mapper,
+                                                                      GetRangeLimits limits,
+                                                                      bool snapshot,
+                                                                      bool reverse) {
+	auto tr = getTransaction();
+	auto f = tr.transaction ? tr.transaction->getRangeAndFlatMap(begin, end, mapper, limits, snapshot, reverse)
+	                        : makeTimeout<RangeResult>();
+	return abortableFuture(f, tr.onChange);
+}
+
 ThreadFuture<Standalone<StringRef>> MultiVersionTransaction::getVersionstamp() {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getVersionstamp() : makeTimeout<Standalone<StringRef>>();
@@ -761,6 +905,26 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> MultiVersionTransaction::getRangeSpl
 	auto f = tr.transaction ? tr.transaction->getRangeSplitPoints(range, chunkSize)
 	                        : makeTimeout<Standalone<VectorRef<KeyRef>>>();
 	return abortableFuture(f, tr.onChange);
+}
+
+ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> MultiVersionTransaction::getBlobGranuleRanges(
+    const KeyRangeRef& keyRange) {
+	auto tr = getTransaction();
+	auto f = tr.transaction ? tr.transaction->getBlobGranuleRanges(keyRange)
+	                        : makeTimeout<Standalone<VectorRef<KeyRangeRef>>>();
+	return abortableFuture(f, tr.onChange);
+}
+
+ThreadResult<RangeResult> MultiVersionTransaction::readBlobGranules(const KeyRangeRef& keyRange,
+                                                                    Version beginVersion,
+                                                                    Optional<Version> readVersion,
+                                                                    ReadBlobGranuleContext granuleContext) {
+	auto tr = getTransaction();
+	if (tr.transaction) {
+		return tr.transaction->readBlobGranules(keyRange, beginVersion, readVersion, granuleContext);
+	} else {
+		return abortableTimeoutResult<RangeResult>(tr.onChange);
+	}
 }
 
 void MultiVersionTransaction::atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) {
@@ -886,18 +1050,45 @@ ACTOR Future<Void> timeoutImpl(Reference<ThreadSingleAssignmentVar<Void>> tsav, 
 	return Void();
 }
 
+namespace {
+
+void validateOptionValuePresent(Optional<StringRef> value) {
+	if (!value.present()) {
+		throw invalid_option_value();
+	}
+}
+
+int64_t extractIntOption(Optional<StringRef> value, int64_t minValue, int64_t maxValue) {
+	validateOptionValuePresent(value);
+	if (value.get().size() != 8) {
+		throw invalid_option_value();
+	}
+
+	int64_t passed = *((int64_t*)(value.get().begin()));
+	if (passed > maxValue || passed < minValue) {
+		throw invalid_option_value();
+	}
+
+	return passed;
+}
+
+} // namespace
+
 // Configure a timeout based on the options set for this transaction. This timeout only applies
 // if we don't have an underlying database object to connect with.
 void MultiVersionTransaction::setTimeout(Optional<StringRef> value) {
 	double timeoutDuration = extractIntOption(value, 0, std::numeric_limits<int>::max()) / 1000.0;
 
 	ThreadFuture<Void> prevTimeout;
-	ThreadFuture<Void> newTimeout = onMainThread([this, timeoutDuration]() {
-		return timeoutImpl(timeoutTsav, timeoutDuration - std::max(0.0, now() - startTime));
-	});
+	double transactionStartTime = startTime;
 
 	{ // lock scope
 		ThreadSpinLockHolder holder(timeoutLock);
+
+		Reference<ThreadSingleAssignmentVar<Void>> tsav = timeoutTsav;
+		ThreadFuture<Void> newTimeout = onMainThread([transactionStartTime, tsav, timeoutDuration]() {
+			return timeoutImpl(tsav, timeoutDuration - std::max(0.0, now() - transactionStartTime));
+		});
 
 		prevTimeout = currentTimeout;
 		currentTimeout = newTimeout;
@@ -915,12 +1106,12 @@ template <class T>
 ThreadFuture<T> MultiVersionTransaction::makeTimeout() {
 	ThreadFuture<Void> f;
 
-	// We create a ThreadFuture that holds a reference to this below,
-	// but the ThreadFuture does not increment the ref count
-	timeoutTsav->addref();
-
 	{ // lock scope
 		ThreadSpinLockHolder holder(timeoutLock);
+
+		// Our ThreadFuture holds a reference to this TSAV,
+		// but the ThreadFuture does not increment the ref count
+		timeoutTsav->addref();
 		f = ThreadFuture<Void>(timeoutTsav.getPtr());
 	}
 
@@ -929,6 +1120,14 @@ ThreadFuture<T> MultiVersionTransaction::makeTimeout() {
 		ASSERT(v.isError());
 		return ErrorOr<T>(v.getError());
 	});
+}
+
+template <class T>
+ThreadResult<T> MultiVersionTransaction::abortableTimeoutResult(ThreadFuture<Void> abortSignal) {
+	ThreadFuture<T> timeoutFuture = makeTimeout<T>();
+	ThreadFuture<T> abortable = abortableFuture(timeoutFuture, abortSignal);
+	abortable.blockUntilReadyCheckOnMainThread();
+	return ThreadResult<T>((ThreadSingleAssignmentVar<T>*)abortable.extractPtr());
 }
 
 void MultiVersionTransaction::reset() {
@@ -1462,7 +1661,8 @@ Reference<ClientInfo> MultiVersionApi::getLocalClient() {
 
 void MultiVersionApi::selectApiVersion(int apiVersion) {
 	if (!localClient) {
-		localClient = makeReference<ClientInfo>(ThreadSafeApi::api);
+		localClient = makeReference<ClientInfo>(getLocalClientAPI());
+		ASSERT(localClient);
 	}
 
 	if (this->apiVersion != 0 && this->apiVersion != apiVersion) {
@@ -1477,6 +1677,8 @@ const char* MultiVersionApi::getClientVersion() {
 	return localClient->api->getClientVersion();
 }
 
+namespace {
+
 void validateOption(Optional<StringRef> value, bool canBePresent, bool canBeAbsent, bool canBeEmpty = true) {
 	ASSERT(canBePresent || canBeAbsent);
 
@@ -1487,6 +1689,8 @@ void validateOption(Optional<StringRef> value, bool canBePresent, bool canBeAbse
 		throw invalid_option_value();
 	}
 }
+
+} // namespace
 
 void MultiVersionApi::disableMultiVersionClientApi() {
 	MutexHolder holder(lock);
@@ -1664,6 +1868,8 @@ void MultiVersionApi::setNetworkOption(FDBNetworkOptions::Option option, Optiona
 }
 
 void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option, Optional<StringRef> value) {
+	bool forwardOption = false;
+
 	auto itr = FDBNetworkOptions::optionInfo.find(option);
 	if (itr != FDBNetworkOptions::optionInfo.end()) {
 		TraceEvent("SetNetworkOption").detail("Option", itr->second.name);
@@ -1695,20 +1901,24 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		ASSERT(!value.present() && !networkStartSetup);
 		externalClient = true;
 		bypassMultiClientApi = true;
+		forwardOption = true;
 	} else if (option == FDBNetworkOptions::CLIENT_THREADS_PER_VERSION) {
 		MutexHolder holder(lock);
 		validateOption(value, true, false, false);
-		ASSERT(!networkStartSetup);
+		if (networkStartSetup) {
+			throw invalid_option();
+		}
 #if defined(__unixish__)
 		threadCount = extractIntOption(value, 1, 1024);
 #else
 		// multiple client threads are not supported on windows.
 		threadCount = extractIntOption(value, 1, 1);
 #endif
-		if (threadCount > 1) {
-			disableLocalClient();
-		}
 	} else {
+		forwardOption = true;
+	}
+
+	if (forwardOption) {
 		MutexHolder holder(lock);
 		localClient->api->setNetworkOption(option, value);
 
@@ -1733,6 +1943,10 @@ void MultiVersionApi::setupNetwork() {
 		MutexHolder holder(lock);
 		if (networkStartSetup) {
 			throw network_already_setup();
+		}
+
+		if (threadCount > 1) {
+			disableLocalClient();
 		}
 
 		for (auto i : externalClientDescriptions) {
@@ -1778,13 +1992,13 @@ void MultiVersionApi::setupNetwork() {
 		localClient->api->setupNetwork();
 	}
 
-	localClient->loadProtocolVersion();
+	localClient->loadVersion();
 
 	if (!bypassMultiClientApi) {
 		runOnExternalClientsAllThreads([this](Reference<ClientInfo> client) {
 			TraceEvent("InitializingExternalClient").detail("LibraryPath", client->libPath);
 			client->api->selectApiVersion(apiVersion);
-			client->loadProtocolVersion();
+			client->loadVersion();
 		});
 
 		MutexHolder holder(lock);
@@ -1810,9 +2024,14 @@ THREAD_FUNC_RETURN runNetworkThread(void* param) {
 	try {
 		((ClientInfo*)param)->api->runNetwork();
 	} catch (Error& e) {
-		TraceEvent(SevError, "RunNetworkError").error(e);
+		TraceEvent(SevError, "ExternalRunNetworkError").error(e);
+	} catch (std::exception& e) {
+		TraceEvent(SevError, "ExternalRunNetworkError").error(unknown_error()).detail("RootException", e.what());
+	} catch (...) {
+		TraceEvent(SevError, "ExternalRunNetworkError").error(unknown_error());
 	}
 
+	TraceEvent("ExternalNetworkThreadTerminating");
 	THREAD_RETURN;
 }
 
@@ -1827,11 +2046,21 @@ void MultiVersionApi::runNetwork() {
 
 	std::vector<THREAD_HANDLE> handles;
 	if (!bypassMultiClientApi) {
-		runOnExternalClientsAllThreads([&handles](Reference<ClientInfo> client) {
-			if (client->external) {
-				handles.push_back(g_network->startThread(&runNetworkThread, client.getPtr()));
-			}
-		});
+		for (int threadNum = 0; threadNum < threadCount; threadNum++) {
+			runOnExternalClients(threadNum, [&handles, threadNum](Reference<ClientInfo> client) {
+				if (client->external) {
+					std::string threadName = format("fdb-%s-%d", client->releaseVersion.c_str(), threadNum);
+					if (threadName.size() > 15) {
+						threadName = format("fdb-%s", client->releaseVersion.c_str());
+						if (threadName.size() > 15) {
+							threadName = "fdb-external";
+						}
+					}
+					handles.push_back(
+					    g_network->startThread(&runNetworkThread, client.getPtr(), 0, threadName.c_str()));
+				}
+			});
+		}
 	}
 
 	localClient->api->runNetwork();
@@ -1849,6 +2078,7 @@ void MultiVersionApi::stopNetwork() {
 	}
 	lock.leave();
 
+	TraceEvent("MultiVersionStopNetwork");
 	localClient->api->stopNetwork();
 
 	if (!bypassMultiClientApi) {
@@ -2034,19 +2264,24 @@ MultiVersionApi::MultiVersionApi()
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 
 // ClientInfo
-void ClientInfo::loadProtocolVersion() {
+void ClientInfo::loadVersion() {
 	std::string version = api->getClientVersion();
 	if (version == "unknown") {
 		protocolVersion = ProtocolVersion(0);
+		releaseVersion = "unknown";
 		return;
 	}
 
+	Standalone<ClientVersionRef> clientVersion = ClientVersionRef(StringRef(version));
+
 	char* next;
-	std::string protocolVersionStr = ClientVersionRef(StringRef(version)).protocolVersion.toString();
+	std::string protocolVersionStr = clientVersion.protocolVersion.toString();
 	protocolVersion = ProtocolVersion(strtoull(protocolVersionStr.c_str(), &next, 16));
 
 	ASSERT(protocolVersion.version() != 0 && protocolVersion.version() != ULLONG_MAX);
 	ASSERT_EQ(next, &protocolVersionStr[protocolVersionStr.length()]);
+
+	releaseVersion = clientVersion.clientVersion.toString();
 }
 
 bool ClientInfo::canReplace(Reference<ClientInfo> other) const {

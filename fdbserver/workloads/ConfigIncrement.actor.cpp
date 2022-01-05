@@ -106,14 +106,12 @@ class ConfigIncrementWorkload : public TestWorkload {
 		state Reference<ISingleThreadTransaction> tr = self->getTransaction(cx);
 		loop {
 			try {
-				// TODO: Reenable once rollforward and rollback are supported
-				// state int currentValue = wait(get(tr));
-				// auto expectedValue = self->incrementActors * self->incrementsPerActor;
-				// TraceEvent("ConfigIncrementCheck")
-				//    .detail("CurrentValue", currentValue)
-				//    .detail("ExpectedValue", expectedValue);
-				// return currentValue >= expectedValue; // >= because we may have maybe_committed errors
-				return true;
+				state int currentValue = wait(get(tr));
+				auto expectedValue = self->incrementActors * self->incrementsPerActor;
+				TraceEvent("ConfigIncrementCheck")
+				    .detail("CurrentValue", currentValue)
+				    .detail("ExpectedValue", expectedValue);
+				return currentValue >= expectedValue; // >= because we may have maybe_committed errors
 			} catch (Error& e) {
 				wait(tr->onError(e));
 			}

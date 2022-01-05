@@ -53,7 +53,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "grv_proxy",
                   "master",
                   "test",
-                  "storage_cache"
+                  "storage_cache",
+                  "blob_worker"
                ]
             },
             "degraded":true,
@@ -95,6 +96,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "data_distributor",
                         "ratekeeper",
                         "consistency_checker",
+                        "blob_manager",
+                        "blob_worker",
                         "storage_cache",
                         "router",
                         "coordinator"
@@ -494,6 +497,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "unreachable_dataDistributor_worker",
                   "unreachable_ratekeeper_worker",
                   "unreachable_consistencyChecker_worker",
+                  "unreachable_blobManager_worker",
                   "unreadable_configuration",
                   "full_replication_timeout",
                   "client_issues",
@@ -726,7 +730,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-experimental",
+             "ssd-redwood-1-experimental",
              "ssd-rocksdb-experimental",
              "memory",
              "memory-1",
@@ -739,7 +743,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-experimental",
+             "ssd-redwood-1-experimental",
              "ssd-rocksdb-experimental",
              "memory",
              "memory-1",
@@ -762,6 +766,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "proxies":6,
          "backup_worker_enabled":1,
          "perpetual_storage_wiggle":0,
+         "perpetual_storage_wiggle_locality":"0",
          "storage_migration_type": {
              "$enum":[
              "disabled",
@@ -1041,3 +1046,19 @@ const KeyRef JSONSchemas::managementApiErrorSchema = LiteralStringRef(R"""(
    "message": "The reason of the error"
 }
 )""");
+
+const KeyRef JSONSchemas::clientLibMetadataSchema = LiteralStringRef(R"""(
+{
+    "platform": "x86_64-linux",
+    "version": "7.1.0",
+    "githash": "e28fef6264d05ab0c9488238022d1ee885a30bea",
+    "type": "debug",
+    "checksum": "fcef53fb4ae86d2c4fff4dc17c7e5d08",
+    "checksumalg": "md5",
+    "apiversion": 710,
+    "protocol": "fdb00b07001001",
+    "filename": "libfdb_c.7.1.0.so",
+    "size" : 19467552,
+    "chunkcount" : 2377,
+    "status": "available"
+})""");

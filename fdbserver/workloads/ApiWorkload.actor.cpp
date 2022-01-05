@@ -19,6 +19,7 @@
  */
 
 #include <cinttypes>
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbserver/workloads/ApiWorkload.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -123,7 +124,7 @@ bool ApiWorkload::compareResults(VectorRef<KeyValueRef> dbResults,
 		for (int j = 0; j < storeResults.size(); j++)
 			printf("%d: %s %d\n", j, storeResults[j].key.toString().c_str(), storeResults[j].value.size());
 
-		printf("Read Version: %" PRId64 "\n", readVersion);
+		fmt::print("Read Version: {}\n", readVersion);
 
 		TraceEvent(SevError, format("%s_CompareSizeMismatch", description().c_str()).c_str())
 		    .detail("ReadVer", readVersion)
@@ -144,7 +145,7 @@ bool ApiWorkload::compareResults(VectorRef<KeyValueRef> dbResults,
 			for (int j = 0; j < storeResults.size(); j++)
 				printf("%d: %s %d\n", j, storeResults[j].key.toString().c_str(), storeResults[j].value.size());
 
-			printf("Read Version: %" PRId64 "\n", readVersion);
+			fmt::print("Read Version: {}\n", readVersion);
 
 			TraceEvent(SevError, format("%s_CompareValueMismatch", description().c_str()).c_str())
 			    .detail("ReadVer", readVersion)

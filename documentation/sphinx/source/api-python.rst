@@ -125,6 +125,10 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
 
     .. note:: |network-options-warning|
 
+    .. method :: fdb.options.set_knob(knob)
+       
+        |option-knob|
+
     .. method :: fdb.options.set_trace_enable( output_directory=None )
 
         |option-trace-enable-blurb|
@@ -188,6 +192,48 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
     .. method :: fdb.options.set_tls_key_bytes(bytes)
 
        |option-tls-key-bytes|
+    
+    .. method :: fdb.options.set_tls_verify_peers(verification_pattern)
+
+       |option-tls-verify-peers|
+    
+    .. method :: fdb.options.set_tls_ca_bytes(ca_bundle)
+
+       |option-tls-ca-bytes|
+
+    .. method :: fdb.options.set_tls_ca_path(path)
+
+       |option-tls-ca-path|
+
+    .. method :: fdb.options.set_tls_password(password)
+
+       |option-tls-password|
+
+    .. method :: fdb.options.set_disable_multi_version_client_api()
+
+       |option-disable-multi-version-client-api|
+
+    .. method :: fdb.options.set_disable_local_client()
+
+      |option-set-disable-local-client|
+
+    .. method :: fdb.options.set_client_threads_per_version(number)
+
+       |option-set-client-threads-per-version|
+
+    .. method :: fdb.options.set_disable_client_statistics_logging()
+
+       |option-disable-client-statistics-logging|
+
+    .. method :: fdb.options.set_enable_run_loop_profiling()
+       
+       |option-enable-run-loop-profiling|
+
+    .. method :: fdb.options.set_distributed_client_tracer(tracer_type)
+       
+       |option-set-distributed-client-tracer|
+    
+    Please refer to fdboptions.py (generated) for a comprehensive list of options.
 
 .. _api-python-keys:
 
