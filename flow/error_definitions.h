@@ -84,6 +84,7 @@ ERROR( change_feed_not_registered, 1060, "Change feed not registered" )
 ERROR( granule_assignment_conflict, 1061, "Conflicting attempts to assign blob granules" )
 ERROR( change_feed_cancelled, 1062, "Change feed was cancelled" )
 ERROR( blob_granule_file_load_error, 1063, "Error loading a blob file during granule materialization" )
+ERROR( blob_granule_transaction_too_old, 1064, "Read version is older than blob granule history supports" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )

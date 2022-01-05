@@ -508,7 +508,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				break;
 			}
 		}
-		fmt::print("Blob Granule Verifier finished with:\n");
+		bool result = availabilityPassed && self->mismatches == 0 && (checks > 0) && (self->timeTravelTooOld == 0);
+		fmt::print("Blob Granule Verifier {0} {1}:\n", self->clientId, result ? "passed" : "failed");
 		fmt::print("  {} successful final granule checks\n", checks);
 		fmt::print("  {} failed final granule checks\n", availabilityPassed ? 0 : 1);
 		fmt::print("  {} mismatches\n", self->mismatches);
@@ -518,9 +519,14 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		fmt::print("  {} time travel reads\n", self->timeTravelReads);
 		fmt::print("  {} rows\n", self->rowsRead);
 		fmt::print("  {} bytes\n", self->bytesRead);
-		// FIXME: add above as details
-		TraceEvent("BlobGranuleVerifierChecked");
-		return availabilityPassed && self->mismatches == 0 && (checks > 0) && (self->timeTravelTooOld == 0);
+		// FIXME: add above as details to trace event
+
+		TraceEvent("BlobGranuleVerifierChecked").detail("Result", result);
+
+		// For some reason simulation is still passing when this fails?.. so assert for now
+		ASSERT(result);
+
+		return result;
 	}
 
 	Future<bool> check(Database const& cx) override { return _check(cx, this); }

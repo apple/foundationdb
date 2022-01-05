@@ -6576,7 +6576,6 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		rv = _end;
 	}
 	self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
 	// Right now just read whole blob range assignments from DB
 	// FIXME: eventually we probably want to cache this and invalidate similarly to storage servers.
 	// Cache misses could still read from the DB, or we could add it to the Transaction State Store and
@@ -6597,7 +6596,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		if (BG_REQUEST_DEBUG) {
 			printf("no blob worker assignments yet\n");
 		}
-		throw transaction_too_old();
+		throw blob_granule_transaction_too_old();
 	}
 
 	if (BG_REQUEST_DEBUG) {
@@ -6615,7 +6614,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				       granuleEndKey.printable().c_str());
 				// TODO probably new exception type instead
 			}
-			throw transaction_too_old();
+			throw blob_granule_transaction_too_old();
 		}
 
 		workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
@@ -6625,7 +6624,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				       granuleStartKey.printable().c_str(),
 				       granuleEndKey.printable().c_str());
 			}
-			throw transaction_too_old();
+			throw blob_granule_transaction_too_old();
 		}
 		if (BG_REQUEST_DEBUG) {
 			printf("  [%s - %s): %s\n",
@@ -6640,9 +6639,12 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			// could have died and so its interface wouldn't be present as part of the blobWorkerList
 			// we persist in the db. So throw wrong_shard_server to get the new mapping
 			if (!workerInterface.present()) {
-				throw wrong_shard_server();
+				// need to re-read mapping, throw transaction_too_old so client retries. TODO better error?
+				// throw wrong_shard_server();
+				throw transaction_too_old();
 			}
-			// FIXME: maybe just want to insert here if there are racing queries for the same worker or something?
+			// FIXME: maybe just want to insert here if there are racing queries for the same worker or
+			// something?
 			cx->blobWorker_interf[workerId] = decodeBlobWorkerListValue(workerInterface.get());
 			if (BG_REQUEST_DEBUG) {
 				printf("    decoded worker interface for %s\n", workerId.toString().c_str());
@@ -6677,42 +6679,64 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		state Reference<MultiInterface<ReferencedInterface<BlobWorkerInterface>>> location =
 		    makeReference<BWLocationInfo>(v);
 		// use load balance with one option for now for retry and error handling
-		BlobGranuleFileReply rep = wait(loadBalance(location,
-		                                            &BlobWorkerInterface::blobGranuleFileRequest,
-		                                            req,
-		                                            TaskPriority::DefaultPromiseEndpoint,
-		                                            AtMostOnce::False,
-		                                            nullptr));
+		try {
+			choose {
+				when(BlobGranuleFileReply rep = wait(loadBalance(location,
+				                                                 &BlobWorkerInterface::blobGranuleFileRequest,
+				                                                 req,
+				                                                 TaskPriority::DefaultPromiseEndpoint,
+				                                                 AtMostOnce::False,
+				                                                 nullptr))) {
+					if (BG_REQUEST_DEBUG) {
+						fmt::print("Blob granule request for [{0} - {1}) @ {2} - {3} got reply from {4}:\n",
+						           granuleStartKey.printable(),
+						           granuleEndKey.printable(),
+						           begin,
+						           rv,
+						           workerId.toString());
+					}
+					results.arena().dependsOn(rep.arena);
+					for (auto& chunk : rep.chunks) {
+						if (BG_REQUEST_DEBUG) {
+							fmt::print(
+							    "[{0} - {1})\n", chunk.keyRange.begin.printable(), chunk.keyRange.end.printable());
 
-		if (BG_REQUEST_DEBUG) {
-			fmt::print("Blob granule request for [{0} - {1}) @ {2} - {3} got reply from {4}:\n",
-			           granuleStartKey.printable(),
-			           granuleEndKey.printable(),
-			           begin,
-			           rv,
-			           workerId.toString());
-		}
-		results.arena().dependsOn(rep.arena);
-		for (auto& chunk : rep.chunks) {
-			if (BG_REQUEST_DEBUG) {
-				fmt::print("[{0} - {1})\n", chunk.keyRange.begin.printable(), chunk.keyRange.end.printable());
+							fmt::print("  SnapshotFile: {0}\n    \n  DeltaFiles:\n",
+							           chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str()
+							                                        : "<none>");
+							for (auto& df : chunk.deltaFiles) {
+								fmt::print("    {0}\n", df.toString());
+							}
+							fmt::print("  Deltas: ({0})", chunk.newDeltas.size());
+							if (chunk.newDeltas.size() > 0) {
+								fmt::print(" with version [{0} - {1}]",
+								           chunk.newDeltas[0].version,
+								           chunk.newDeltas[chunk.newDeltas.size() - 1].version);
+							}
+							fmt::print("  IncludedVersion: {0}\n\n\n", chunk.includedVersion);
+						}
 
-				fmt::print("  SnapshotFile: {0}\n    \n  DeltaFiles:\n",
-				           chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
-				for (auto& df : chunk.deltaFiles) {
-					fmt::print("    {0}\n", df.toString());
+						results.push_back(results.arena(), chunk);
+						keyRange = KeyRangeRef(std::min(chunk.keyRange.end, keyRange.end), keyRange.end);
+					}
 				}
-				fmt::print("  Deltas: ({0})", chunk.newDeltas.size());
-				if (chunk.newDeltas.size() > 0) {
-					fmt::print(" with version [{0} - {1}]",
-					           chunk.newDeltas[0].version,
-					           chunk.newDeltas[chunk.newDeltas.size() - 1].version);
+				// if we detect that this blob worker fails, cancel the request, as otherwise load balance will
+				// retry indefinitely with one option
+				when(wait(IFailureMonitor::failureMonitor().onStateEqual(
+				    location->get(i, &BlobWorkerInterface::blobGranuleFileRequest).getEndpoint(),
+				    FailureStatus(true)))) {
+					printf("readBlobGranules got BW %s failed\n", workerId.toString().c_str());
+
+					throw connection_failed();
 				}
-				fmt::print("  IncludedVersion: {0}\n\n\n", chunk.includedVersion);
 			}
-
-			results.push_back(results.arena(), chunk);
-			keyRange = KeyRangeRef(std::min(chunk.keyRange.end, keyRange.end), keyRange.end);
+		} catch (Error& e) {
+			// worker is up but didn't actually have granule, or connection failed
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed) {
+				// need to re-read mapping, throw transaction_too_old so client retries. TODO better error?
+				throw transaction_too_old();
+			}
+			throw e;
 		}
 	}
 	if (readVersionOut != nullptr) {
@@ -7420,8 +7444,8 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 			}
 			checkVersion = nextStream.next.version;
 			atCheckVersion = 0;
-			// save this at the start of the "round" to check if all streams have a reply at version checkVersion. If
-			// so, we can send it early. But because mutations.size() can change if one of the streams gets
+			// save this at the start of the "round" to check if all streams have a reply at version checkVersion.
+			// If so, we can send it early. But because mutations.size() can change if one of the streams gets
 			// end_of_version on its waitNext, we want that to be reflected in the maxAtCheckVersion for the NEXT
 			// version, not this one.
 			maxAtCheckVersion = mutations.size() + 1;
