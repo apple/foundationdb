@@ -57,14 +57,14 @@ struct FakeTLogContext {
 	int maxVersionsPerPeek = std::numeric_limits<int>::max();
 
 	// Team IDs
-	std::vector<StorageTeamID> storageTeamIDs;
+	std::vector<StorageTeamID> storageTeamIDs{};
 
 	// Stores the unique versions the mutations have been used, in ascending order
-	std::vector<Version> versions;
+	std::vector<Version> versions{};
 
 	// Arena used for storing messages. NOTE The arena in the TestDriverContext is not used, as FakeTLogContext would
 	// keep its own version of data, to simulate the "persistence" behavior.
-	Arena persistenceArena;
+	Arena persistenceArena{};
 
 	using StorageTeamMessages = std::unordered_map<StorageTeamID, VectorRef<VersionSubsequenceMessage>>;
 	// Stores the messages per commit version, in format
@@ -73,10 +73,10 @@ struct FakeTLogContext {
 	//                   ...
 	// Commit version -- ( Storage Team ID -- (Storage Team Version, Subsequence, Message) )
 	//                   ...
-	std::map<Version, StorageTeamMessages> epochVersionMessages;
+	std::map<Version, StorageTeamMessages> epochVersionMessages{};
 
 	// Stores the version range per epoch
-	std::vector<std::pair<Version, Version>> epochVersionRange;
+	std::vector<std::pair<Version, Version>> epochVersionRange{};
 
 	// Delay to simulate network latency
 	RandomDelay latency = RandomDelay(0.01, 0.02);
