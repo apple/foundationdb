@@ -20,6 +20,7 @@
 
 #include <cinttypes>
 #include "fdbclient/BlobWorkerInterface.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/Status.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -583,6 +584,13 @@ struct RolesInfo {
 					obj["busiest_write_tag"] = busiestWriteTagObj;
 				}
 			}
+
+			TraceEventFields const& metadata = metrics.at("Metadata");
+			JsonBuilderObject metadataObj;
+			metadataObj["created_time"] = metadata.getValue("CreatedTime");
+			metadataObj["expire_now"] = metadata.getValue("ExpireNow");
+			obj["storage_metadata"] = metadataObj;
+
 		} catch (Error& e) {
 			if (e.code() != error_code_attribute_not_found)
 				throw e;
@@ -1860,6 +1868,30 @@ static Future<std::vector<TraceEventFields>> getServerBusiestWriteTags(
 	return result;
 }
 
+ACTOR
+static Future<std::vector<StorageMetadataType>> getServerMetadata(std::vector<StorageServerInterface> servers, Database cx) {
+	state KeyBackedObjectMap<UID, StorageMetadataType,decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin, IncludeVersion());
+	state std::vector<StorageMetadataType> res;
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			state int i = 0;
+			for(i = 0; i < servers.size(); ++ i) {
+				Optional<StorageMetadataType> metadata = wait(metadataMap.get(tr, servers[i].id(), Snapshot::True));
+				ASSERT(metadata.present());
+				res.push_back(metadata.get());
+			}
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+	return res;
+}
+
 ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> getStorageServersAndMetrics(
     Database cx,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
@@ -1867,16 +1899,22 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 	state std::vector<StorageServerInterface> servers = wait(timeoutError(getStorageServers(cx, true), 5.0));
 	state std::vector<std::pair<StorageServerInterface, EventMap>> results;
 	state std::vector<TraceEventFields> busiestWriteTags;
+	state std::vector<StorageMetadataType> metadata;
 	wait(store(results,
 	           getServerMetrics(servers,
 	                            address_workers,
 	                            std::vector<std::string>{
 	                                "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag" })) &&
-	     store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)));
+	     store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)) &&
+	     store(metadata, getServerMetadata(servers, cx)));
 
-	ASSERT(busiestWriteTags.size() == results.size());
+	ASSERT(busiestWriteTags.size() == results.size() && metadata.size() == results.size());
 	for (int i = 0; i < busiestWriteTags.size(); ++i) {
 		results[i].second.emplace("BusiestWriteTag", busiestWriteTags[i]);
+		TraceEventFields metadataField;
+		metadataField.addField("CreatedTime", metadata[i].getCreatedTimeStr());
+		metadataField.addField("ExpireNow", metadata[i].expireNow ? "1":"0");
+		results[i].second.emplace("Metadata", metadataField);
 	}
 
 	return results;

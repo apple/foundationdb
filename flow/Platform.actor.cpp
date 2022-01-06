@@ -1870,6 +1870,11 @@ void getLocalTime(const time_t* timep, struct tm* result) {
 #error Port me!
 #endif
 }
+std::string getLocalTimeStr(const time_t* time) {
+	char buff[50];
+	auto size = strftime(buff, 50, "%Y-%m-%d %H:%M:%S", localtime(time));
+	return std::string(buff, size);
+}
 
 void setMemoryQuota(size_t limit) {
 #if defined(USE_SANITIZER)

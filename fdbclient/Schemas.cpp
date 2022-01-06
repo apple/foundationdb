@@ -102,6 +102,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "coordinator"
                      ]
                   },
+				  "storage_metadata":{
+					"created_time":"%Y-%m-%d %H:%M:%S",
+					"expire_now": "0"
+				  }
                   "data_version":12341234,
                   "durable_version":12341234,
                   "data_lag": {
