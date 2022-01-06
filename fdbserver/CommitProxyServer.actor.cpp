@@ -1214,17 +1214,6 @@ ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
 
 	wait(yield(TaskPriority::ProxyCommitYield2));
 
-	if (pProxyCommitData->popRemoteTxs &&
-	    self->msg.popTo > (pProxyCommitData->txsPopVersions.size() ? pProxyCommitData->txsPopVersions.back().second
-	                                                               : pProxyCommitData->lastTxsPop)) {
-		if (pProxyCommitData->txsPopVersions.size() >= SERVER_KNOBS->MAX_TXS_POP_VERSION_HISTORY) {
-			TraceEvent(SevWarnAlways, "DiscardingTxsPopHistory").suppressFor(1.0);
-			pProxyCommitData->txsPopVersions.pop_front();
-		}
-
-		pProxyCommitData->txsPopVersions.emplace_back(self->commitVersion, self->msg.popTo);
-	}
-	pProxyCommitData->logSystem->popTxs(self->msg.popTo);
 	pProxyCommitData->stats.tlogLoggingDist->sampleSeconds(now() - tLoggingStart);
 	return Void();
 }
@@ -1260,6 +1249,18 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	                                     self->localMinKnownCommittedVersion,
 	                                     self->tLogGroups),
 	    TaskPriority::ProxyMasterVersionReply));
+
+	if (pProxyCommitData->popRemoteTxs &&
+	    self->msg.popTo > (pProxyCommitData->txsPopVersions.size() ? pProxyCommitData->txsPopVersions.back().second
+	                                                               : pProxyCommitData->lastTxsPop)) {
+		if (pProxyCommitData->txsPopVersions.size() >= SERVER_KNOBS->MAX_TXS_POP_VERSION_HISTORY) {
+			TraceEvent(SevWarnAlways, "DiscardingTxsPopHistory").suppressFor(1.0);
+			pProxyCommitData->txsPopVersions.pop_front();
+		}
+
+		pProxyCommitData->txsPopVersions.emplace_back(self->commitVersion, self->msg.popTo);
+	}
+	pProxyCommitData->logSystem->popTxs(self->msg.popTo);
 
 	pProxyCommitData->knownCommittedVersion =
 	    std::max(pProxyCommitData->knownCommittedVersion, rep.knownCommittedVersion);
