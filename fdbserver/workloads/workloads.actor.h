@@ -57,7 +57,7 @@ struct WorkloadContext {
 	WorkloadContext& operator=(const WorkloadContext&) = delete;
 };
 
-struct TestWorkload : NonCopyable, WorkloadContext {
+struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkload> {
 	int phases;
 
 	// Subclasses are expected to also have a constructor with this signature (to work with WorkloadFactory<>):
@@ -103,25 +103,25 @@ struct KVWorkload : TestWorkload {
 	Key keyForIndex(uint64_t index, bool absent) const;
 };
 
-struct IWorkloadFactory {
-	static TestWorkload* create(std::string const& name, WorkloadContext const& wcx) {
+struct IWorkloadFactory : ReferenceCounted<IWorkloadFactory> {
+	static Reference<TestWorkload> create(std::string const& name, WorkloadContext const& wcx) {
 		auto it = factories().find(name);
 		if (it == factories().end())
-			return nullptr; // or throw?
+			return {}; // or throw?
 		return it->second->create(wcx);
 	}
-	static std::map<std::string, IWorkloadFactory*>& factories() {
-		static std::map<std::string, IWorkloadFactory*> theFactories;
+	static std::map<std::string, Reference<IWorkloadFactory>>& factories() {
+		static std::map<std::string, Reference<IWorkloadFactory>> theFactories;
 		return theFactories;
 	}
 
-	virtual TestWorkload* create(WorkloadContext const& wcx) = 0;
+	virtual Reference<TestWorkload> create(WorkloadContext const& wcx) = 0;
 };
 
 template <class WorkloadType>
 struct WorkloadFactory : IWorkloadFactory {
-	WorkloadFactory(const char* name) { factories()[name] = this; }
-	TestWorkload* create(WorkloadContext const& wcx) override { return new WorkloadType(wcx); }
+	WorkloadFactory(const char* name) { factories()[name] = Reference<IWorkloadFactory>::addRef(this); }
+	Reference<TestWorkload> create(WorkloadContext const& wcx) override { return makeReference<WorkloadType>(wcx); }
 };
 
 #define REGISTER_WORKLOAD(classname) WorkloadFactory<classname> classname##WorkloadFactory(#classname)
