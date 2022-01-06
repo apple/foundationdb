@@ -90,6 +90,8 @@ public:
 
 	virtual void persistShard(KeyRangeRef range) {}
 
+	virtual void disposeShard(KeyRangeRef range) {}
+
 	/*
 	Concurrency contract
 	    Causal consistency:
