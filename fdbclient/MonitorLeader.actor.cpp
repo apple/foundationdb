@@ -48,14 +48,6 @@ std::string trim(std::string const& connectionString) {
 	return trimmed;
 }
 
-std::string trimFromHostname(std::string const& networkAddress) {
-	const auto& pos = networkAddress.find("(fromHostname)");
-	if (pos != std::string::npos) {
-		return networkAddress.substr(0, pos);
-	}
-	return networkAddress;
-}
-
 } // namespace
 
 FDB_DEFINE_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
@@ -280,7 +272,7 @@ std::string ClusterConnectionString::toString() const {
 		if (i) {
 			s += ',';
 		}
-		s += trimFromHostname(coord[i].toString());
+		s += coord[i].toString();
 	}
 	return s;
 }

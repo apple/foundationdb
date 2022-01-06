@@ -1932,6 +1932,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					  // server, also check that the stream is closed
 					when(wait(req.end == std::numeric_limits<Version>::max() ? Future<Void>(Never())
 					                                                         : data->version.whenAtLeast(req.end))) {}
+					when(wait(delay(5.0))) {} // TODO REMOVE this once empty version logic is fully implemented
 				}
 				auto feed = data->uidChangeFeed.find(req.rangeID);
 				if (feed == data->uidChangeFeed.end() || feed->second->removing) {

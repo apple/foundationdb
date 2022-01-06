@@ -70,7 +70,38 @@ FILE* debugme; /* descriptor used for debug messages */
 				/* unretryable error */                                                                                \
 				fprintf(stderr, "ERROR: fdb_transaction_on_error returned %d at %s:%d\n", err2, __FILE__, __LINE__);   \
 				fdb_transaction_reset(_t);                                                                             \
-				/* TODO: if we adda retry limit in the future,                                                         \
+				/* TODO: if we add a retry limit in the future,                                                        \
+				 *       handle the conflict stats properly.                                                           \
+				 */                                                                                                    \
+				return FDB_ERROR_ABORT;                                                                                \
+			}                                                                                                          \
+			if (err == 1020 /* not_committed */) {                                                                     \
+				return FDB_ERROR_CONFLICT;                                                                             \
+			}                                                                                                          \
+			return FDB_ERROR_RETRY;                                                                                    \
+		}                                                                                                              \
+	} while (0)
+
+#define fdb_handle_result_error(_func, err, _t)                                                                        \
+	do {                                                                                                               \
+		if (err) {                                                                                                     \
+			int err2;                                                                                                  \
+			FDBFuture* fErr;                                                                                           \
+			if ((err != 1020 /* not_committed */) && (err != 1021 /* commit_unknown_result */) &&                      \
+			    (err != 1213 /* tag_throttled */)) {                                                                   \
+				fprintf(stderr, "ERROR: Error %s (%d) occured at %s\n", #_func, err, fdb_get_error(err));              \
+			} else {                                                                                                   \
+				fprintf(annoyme, "ERROR: Error %s (%d) occured at %s\n", #_func, err, fdb_get_error(err));             \
+			}                                                                                                          \
+			fErr = fdb_transaction_on_error(_t, err);                                                                  \
+			/* this will return the original error for non-retryable errors */                                         \
+			err2 = wait_future(fErr);                                                                                  \
+			fdb_future_destroy(fErr);                                                                                  \
+			if (err2) {                                                                                                \
+				/* unretryable error */                                                                                \
+				fprintf(stderr, "ERROR: fdb_transaction_on_error returned %d at %s:%d\n", err2, __FILE__, __LINE__);   \
+				fdb_transaction_reset(_t);                                                                             \
+				/* TODO: if we add a retry limit in the future,                                                        \
 				 *       handle the conflict stats properly.                                                           \
 				 */                                                                                                    \
 				return FDB_ERROR_ABORT;                                                                                \
@@ -666,10 +697,9 @@ int run_op_read_blob_granules(FDBTransaction* transaction,
 
 	if (err) {
 		if (err != 2037 /* blob_granule_not_materialized */) {
-			fprintf(stderr, "ERROR: fdb_result_get_keyvalue_array: %s\n", fdb_get_error(err));
-			fdb_result_destroy(r);
-			return FDB_ERROR_RETRY;
+			fdb_handle_result_error(fdb_transaction_read_blob_granules, err, transaction);
 		} else {
+			fdb_result_destroy(r);
 			return FDB_SUCCESS;
 		}
 	}
