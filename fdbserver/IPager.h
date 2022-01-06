@@ -145,11 +145,6 @@ public:
 		}
 	};
 
-	// Convenient constructor that returns a reference
-	static Reference<ArenaPage> create(int logicalSize, int bufferSize) {
-		return Reference<ArenaPage>(new ArenaPage(logicalSize, bufferSize));
-	}
-
 	~ArenaPage() {
 		if (userData != nullptr && userDataDestructor != nullptr) {
 			userDataDestructor(userData);

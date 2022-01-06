@@ -2557,7 +2557,7 @@ public:
 	}
 
 	Reference<ArenaPage> newPageBuffer(size_t blocks = 1) override {
-		return ArenaPage::create(logicalPageSize * blocks, physicalPageSize * blocks);
+		return ArenaPage::construct(logicalPageSize * blocks, physicalPageSize * blocks);
 	}
 
 	int getPhysicalPageSize() const override { return physicalPageSize; }
@@ -2943,7 +2943,7 @@ public:
 		ASSERT(!self->memoryOnly);
 
 		state Reference<ArenaPage> page =
-		    header ? ArenaPage::create(smallestPhysicalBlock, smallestPhysicalBlock) : self->newPageBuffer();
+		    header ? ArenaPage::construct(smallestPhysicalBlock, smallestPhysicalBlock) : self->newPageBuffer();
 		debug_printf("DWALPager(%s) op=readPhysicalStart %s ptr=%p header=%d\n",
 		             self->filename.c_str(),
 		             toString(pageID).c_str(),
@@ -3235,7 +3235,7 @@ public:
 			readSize = self->physicalExtentSize;
 		}
 
-		state Reference<ArenaPage> extent = ArenaPage::create(readSize, readSize);
+		state Reference<ArenaPage> extent = ArenaPage::construct(readSize, readSize);
 
 		// physicalReadSize is the size of disk read we intend to issue
 		auto physicalReadSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_READ_SIZE;
@@ -9334,12 +9334,12 @@ TEST_CASE(":/redwood/performance/mutationBuffer") {
 TEST_CASE(":/redwood/pager/ArenaPage") {
 	Arena x;
 	printf("Making p\n");
-	Reference<ArenaPage> p = ArenaPage::create(4096, 4096);
+	Reference<ArenaPage> p = ArenaPage::construct(4096, 4096);
 	printf("Made p=%p\n", p->data());
 	printf("Clearing p\n");
 	p.clear();
 	printf("Making p\n");
-	p = ArenaPage::create(4096, 4096);
+	p = ArenaPage::construct(4096, 4096);
 	printf("Made p=%p\n", p->data());
 	printf("Making x depend on p\n");
 	x.dependsOn(p->getArena());

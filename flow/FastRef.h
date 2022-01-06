@@ -25,6 +25,9 @@
 #include <atomic>
 #include <cstdint>
 
+template <class P>
+class Reference;
+
 // The thread safety this class provides is that it's safe to call addref and
 // delref on the same object concurrently in different threads. Subclass does
 // not get deleted until after all calls to delref complete.
@@ -52,6 +55,11 @@ public:
 	void setrefCountUnsafe(int32_t count) const { referenceCount.store(count); }
 	int32_t debugGetReferenceCount() const { return referenceCount.load(); }
 
+	template <class... Us>
+	static Reference<Subclass> construct(Us&&... args) {
+		return Reference<Subclass>(new Subclass(std::forward<Us>(args)...));
+	}
+
 private:
 	ThreadSafeReferenceCounted(const ThreadSafeReferenceCounted&) /* = delete*/;
 	void operator=(const ThreadSafeReferenceCounted&) /* = delete*/;
@@ -71,6 +79,11 @@ public:
 	bool delref_no_destroy() const { return !--referenceCount; }
 	int32_t debugGetReferenceCount() const { return referenceCount; } // Never use in production code, only for tracing
 	bool isSoleOwner() const { return referenceCount == 1; }
+
+	template <class... Us>
+	static Reference<Subclass> construct(Us&&... args) {
+		return Reference<Subclass>(new Subclass(std::forward<Us>(args)...));
+	}
 
 private:
 	ThreadUnsafeReferenceCounted(const ThreadUnsafeReferenceCounted&) /* = delete*/;
