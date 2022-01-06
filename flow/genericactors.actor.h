@@ -870,7 +870,7 @@ template <class T>
 class QuorumCallback;
 
 template <class T>
-struct Quorum : SAV<Void> {
+struct Quorum final : SAV<Void> {
 	int antiQuorum;
 	int count;
 
@@ -1558,7 +1558,9 @@ Future<Void> yieldPromiseStream(FutureStream<T> input,
 	}
 }
 
-struct YieldedFutureActor : SAV<Void>, ActorCallback<YieldedFutureActor, 1, Void>, FastAllocated<YieldedFutureActor> {
+struct YieldedFutureActor final : SAV<Void>,
+                                  ActorCallback<YieldedFutureActor, 1, Void>,
+                                  FastAllocated<YieldedFutureActor> {
 	Error in_error_state;
 
 	typedef ActorCallback<YieldedFutureActor, 1, Void> CB1;

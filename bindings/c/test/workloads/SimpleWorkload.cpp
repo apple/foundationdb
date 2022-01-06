@@ -30,7 +30,7 @@
 
 namespace {
 
-struct SimpleWorkload : FDBWorkload {
+struct SimpleWorkload final : FDBWorkload {
 	static const std::string name;
 	static const std::string KEY_PREFIX;
 	std::mt19937 random;
