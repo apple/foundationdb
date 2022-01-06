@@ -665,7 +665,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	// storage wiggle info
 	Reference<StorageWiggler> storageWiggler;
-	std::map<Key, std::vector<Reference<TCServerInfo>>> pid2server_info; // some process may serve as multiple storage servers
 	std::vector<AddressExclusion> wiggle_addresses; // collection of wiggling servers' address
 	Optional<UID> wigglingPid; // Process id of current wiggling storage server;
 	Reference<AsyncVar<bool>> pauseWiggle;
@@ -1258,20 +1257,20 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		self->healthyZone.set(initTeams->initHealthyZoneValue);
 		// SOMEDAY: If some servers have teams and not others (or some servers have more data than others) and there is
 		// an address/locality collision, should we preferentially mark the least used server as undesirable?
-		for (auto& allServer : initTeams->allServers) {
-			if (self->shouldHandleServer(allServer.first)) {
-				if (!self->isValidLocality(self->configuration.storagePolicy, allServer.first.locality)) {
+		for (auto& server : initTeams->allServers) {
+			if (self->shouldHandleServer(server.first)) {
+				if (!self->isValidLocality(self->configuration.storagePolicy, server.first.locality)) {
 					TraceEvent(SevWarnAlways, "MissingLocality")
-					    .detail("Server", allServer.first.uniqueID)
-					    .detail("Locality", allServer.first.locality.toString());
-					auto addr = allServer.first.stableAddress();
+					    .detail("Server", server.first.uniqueID)
+					    .detail("Locality", server.first.locality.toString());
+					auto addr = server.first.stableAddress();
 					self->invalidLocalityAddr.insert(AddressExclusion(addr.ip, addr.port));
 					if (self->checkInvalidLocalities.isReady()) {
 						self->checkInvalidLocalities = checkAndRemoveInvalidLocalityAddr(self);
 						self->addActor.send(self->checkInvalidLocalities);
 					}
 				}
-				self->addServer(allServer.first, allServer.second, self->serverTrackerErrorOut, 0, ddEnabledState);
+				self->addServer(server.first, server.second, self->serverTrackerErrorOut, 0, ddEnabledState);
 			}
 		}
 
@@ -2600,10 +2599,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			server_info[newServer.id()] = r;
 			// Establish the relation between server and machine
 			checkAndCreateMachine(r);
-			// Add storage server to pid map
-			ASSERT(r->lastKnownInterface.locality.processId().present());
-			StringRef pid = r->lastKnownInterface.locality.processId().get();
-			pid2server_info[pid].push_back(r);
 		}
 
 		r->tracker =
@@ -2805,18 +2800,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// ASSERT( !shardsAffectedByTeamFailure->getServersForTeam( t ) for all t in teams that contain removedServer )
 		Reference<TCServerInfo> removedServerInfo = server_info[removedServer];
 		// Step: Remove TCServerInfo from pid2server_info
-		ASSERT(removedServerInfo->lastKnownInterface.locality.processId().present());
-		StringRef pid = removedServerInfo->lastKnownInterface.locality.processId().get();
-		auto& info_vec = pid2server_info[pid];
-		for (size_t i = 0; i < info_vec.size(); ++i) {
-			if (info_vec[i] == removedServerInfo) {
-				info_vec[i--] = info_vec.back();
-				info_vec.pop_back();
-			}
-		}
-		if (info_vec.size() == 0) {
-			pid2server_info.erase(pid);
-		}
 		storageWiggler->removeServer(removedServer);
 
 		// Step: Remove server team that relate to removedServer
@@ -2936,8 +2919,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	// Adds storage servers held on process of which the Process Id is “id” into excludeServers which prevent
 	// recruiting the wiggling storage servers and let teamTracker start to move data off the affected teams;
 	// Return a vector of futures wait for all data is moved to other teams.
-	std::vector<Future<Void>> excludeStorageServersForWiggle(const UID& id) {
-		std::vector<Future<Void>> moveFutures;
+	Future<Void> excludeStorageServersForWiggle(const UID& id) {
+		Future<Void> moveFuture = Void();
 		if (this->server_info.count(id) != 0) {
 			auto& info = server_info.at(id);
 			AddressExclusion addr(info->lastKnownInterface.address().ip, info->lastKnownInterface.address().port);
@@ -2956,11 +2939,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			if (!abnormal) {
 				this->wiggle_addresses.push_back(addr);
 				this->excludedServers.set(addr, DDTeamCollection::Status::WIGGLING);
-				moveFutures.push_back(info->onRemoved);
+				moveFuture = info->onRemoved;
 				this->restartRecruiting.trigger();
 			}
 		}
-		return moveFutures;
+		return moveFuture;
 	}
 
 	// Include wiggled storage servers by setting their status from `WIGGLING`
@@ -2983,7 +2966,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 };
 
 StorageWiggler::StorageWiggler(DDTeamCollection* collection)
-  : teamCollection(collection), smoothed_step_duration(10.0 * 60), smoothed_round_duration(20.0 * 60) {}
+  : teamCollection(collection), smoothed_step_duration(10.0 * 60), smoothed_round_duration(20.0 * 60), nonEmpty(false) {
+}
 
 // add server to wiggling queue
 void StorageWiggler::addServer(const UID& serverId, const StorageMetadataType& metadata) {
@@ -2991,18 +2975,17 @@ void StorageWiggler::addServer(const UID& serverId, const StorageMetadataType& m
 	// << std::endl;
 	ASSERT(!pq_handles.count(serverId));
 	pq_handles[serverId] = wiggle_pq.emplace(metadata, serverId);
+	nonEmpty.set(true);
 }
 void StorageWiggler::removeServer(const UID& serverId) {
 	// std::cout << "size: " << pq_handles.size() << " remove " << serverId.toString() << " DC: "<<
 	// teamCollection->primary <<std::endl;
-	//	for (auto [k, v] : pq_handles) {
-	//		std::cout << k.toString() << " ";
-	//	}
-	if (contains(serverId)) {
+	if (contains(serverId)) { // server haven't been popped
 		auto handle = pq_handles.at(serverId);
-		wiggle_pq.erase(handle);
 		pq_handles.erase(serverId);
+		wiggle_pq.erase(handle);
 	}
+	nonEmpty.set(!wiggle_pq.empty());
 }
 void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataType& metadata) {
 	//	std::cout << "size: " << pq_handles.size() << " update " << serverId.toString()
@@ -3017,6 +3000,7 @@ Optional<UID> StorageWiggler::getNextServerId() {
 	while (!wiggle_pq.empty()) {
 		auto [metadata, id] = wiggle_pq.top();
 		wiggle_pq.pop();
+		pq_handles.erase(id);
 		if (teamCollection->server_info.count(id)) {
 			TEST(true); // server is removed when update wiggle uid
 			return Optional<UID>(id);
@@ -4122,7 +4106,6 @@ ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getSe
 // to a sorted wiggle_pq maintained by the wiggler.
 ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection) {
 	state ReadYourWritesTransaction tr(teamCollection->cx);
-	state Value writeValue = ""_sr;
 	state const Key writeKey =
 	    wigglingStorageServerKey.withSuffix(teamCollection->primary ? "/primary"_sr : "/remote"_sr);
 	state UID nextId;
@@ -4145,7 +4128,8 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 				                        localityKeyValue.size() - split - 1);
 
 				// Whether the selected server matches the locality
-				auto server = teamCollection->server_info.at(nextId);
+				auto server = teamCollection->server_info.at(id.get());
+				// TraceEvent("PerpetualLocality").detail("Server", server->lastKnownInterface.locality.get(localityKey)).detail("Desire", localityValue);
 				if (server->lastKnownInterface.locality.get(localityKey) == localityValue) {
 					nextId = id.get();
 				} else {
@@ -4177,7 +4161,7 @@ ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection
 	}
 	TraceEvent(SevDebug, "PerpetualNextWigglingStorageID", teamCollection->distributorId)
 	    .detail("Primary", teamCollection->primary)
-	    .detail("WriteValue", writeValue);
+	    .detail("WriteID", nextId);
 
 	return Void();
 }
@@ -4282,7 +4266,6 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 	state Future<Void> moveFinishFuture = Never();
 	state int extraTeamCount = 0;
 	state Future<Void> ddQueueCheck = clusterHealthCheckForPerpetualWiggle(self, &extraTeamCount);
-	state int movingCount = 0;
 	state std::pair<Future<Void>, Value> res = wait(watchPerpetualStoragePIDChange(self));
 	ASSERT(!self->wigglingPid.present()); // only single process wiggle is allowed
 
@@ -4305,21 +4288,18 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				    .detail("ProcessId", id)
 				    .detail("BestTeamKeepStuckCount", self->bestTeamKeepStuckCount)
 				    .detail("ExtraHealthyTeamCount", extraTeamCount)
-				    .detail("HealthyTeamCount", self->healthyTeamCount)
-				    .detail("StorageCount", movingCount);
+				    .detail("HealthyTeamCount", self->healthyTeamCount);
 			} else {
-				TEST(true); // start wiggling
 				choose {
 					when(wait(waitUntilHealthy(self))) {
+						TEST(true); // start wiggling
 						auto fv = self->excludeStorageServersForWiggle(id);
-						movingCount = fv.size();
-						moveFinishFuture = waitForAll(fv);
+						moveFinishFuture = fv;
 						TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
 						    .detail("Primary", self->primary)
 						    .detail("ProcessId", id)
 						    .detail("ExtraHealthyTeamCount", extraTeamCount)
-						    .detail("HealthyTeamCount", self->healthyTeamCount)
-						    .detail("StorageCount", movingCount);
+						    .detail("HealthyTeamCount", self->healthyTeamCount);
 					}
 					when(wait(self->pauseWiggle->onChange())) { continue; }
 				}
@@ -4349,8 +4329,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				self->includeStorageServersForWiggle();
 				TraceEvent("PerpetualStorageWiggleFinish", self->distributorId)
 				    .detail("Primary", self->primary)
-				    .detail("ProcessId", self->wigglingPid.get())
-				    .detail("StorageCount", movingCount);
+				    .detail("ProcessId", self->wigglingPid.get());
 
 				self->wigglingPid.reset();
 				watchFuture = res.first;
@@ -4578,19 +4557,14 @@ ACTOR Future<Void> checkStorageMetadata(DDTeamCollection* self, TCServerInfo* se
 		// read storage metadata
 		loop {
 			try {
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				auto property = metadataMap.getProperty(server->lastKnownInterface.id());
-				Optional<StorageMetadataType> metadata = wait(property.get(tr));
-				if (!metadata.present()) {
-					metadataMap.set(tr, server->lastKnownInterface.id(), data);
-				} else {
-					data = metadata.get();
-				}
+				Optional<StorageMetadataType> metadata = wait(property.get(tr, Snapshot::True));
+				ASSERT(metadata.present());
+				data = metadata.get();
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
-				state Error err = e;
 				wait(tr->onError(e));
 				// TraceEvent("CheckStorageMetadataError").error(err);
 			}
@@ -4969,14 +4943,11 @@ ACTOR Future<Void> storageServerTracker(
 					bool localityChanged = server->lastKnownInterface.locality != newInterface.first.locality;
 					bool machineLocalityChanged = server->lastKnownInterface.locality.zoneId().get() !=
 					                              newInterface.first.locality.zoneId().get();
-					bool processIdChanged = server->lastKnownInterface.locality.processId().get() !=
-					                        newInterface.first.locality.processId().get();
 					TraceEvent("StorageServerInterfaceChanged", self->distributorId)
 					    .detail("ServerID", server->id)
 					    .detail("NewWaitFailureToken", newInterface.first.waitFailure.getEndpoint().token)
 					    .detail("OldWaitFailureToken", server->lastKnownInterface.waitFailure.getEndpoint().token)
 					    .detail("LocalityChanged", localityChanged)
-					    .detail("ProcessIdChanged", processIdChanged)
 					    .detail("MachineLocalityChanged", machineLocalityChanged);
 
 					server->lastKnownInterface = newInterface.first;
@@ -5021,20 +4992,6 @@ ACTOR Future<Void> storageServerTracker(
 							ASSERT(destMachine.isValid());
 						}
 
-						// update pid2server_info if the process id has changed
-						if (processIdChanged) {
-							self->pid2server_info[newInterface.first.locality.processId().get()].push_back(
-							    self->server_info[server->id]);
-							// delete the old one
-							auto& old_infos =
-							    self->pid2server_info[server->lastKnownInterface.locality.processId().get()];
-							for (int i = 0; i < old_infos.size(); ++i) {
-								if (old_infos[i].getPtr() == server) {
-									std::swap(old_infos[i--], old_infos.back());
-									old_infos.pop_back();
-								}
-							}
-						}
 						// Ensure the server's server team belong to a machine team, and
 						// Get the newBadTeams due to the locality change
 						std::vector<Reference<TCTeamInfo>> newBadTeams;
@@ -5428,7 +5385,7 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 		state ErrorOr<InitializeStorageReply> newServer = wait(fRecruit);
 
 		if (doRecruit && newServer.isError()) {
-			TraceEvent(SevWarn, "DDRecruitmentError").error(newServer.getError()).detail("ServerID", interfaceId);
+			TraceEvent(SevWarn, "DDRecruitmentError").error(newServer.getError());
 			if (!newServer.isError(error_code_recruitment_failed) &&
 			    !newServer.isError(error_code_request_maybe_delivered)) {
 				tssState->markComplete();
@@ -5482,15 +5439,7 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 		if (newServer.present()) {
 			UID id = newServer.get().interf.id();
 			if (!self->server_and_tss_info.count(id)) {
-				if (!recruitTss) {
-					// signal the teamBuilder a new SS is recruited
-					self->addServer(newServer.get().interf,
-					                candidateWorker.processClass,
-					                self->serverTrackerErrorOut,
-					                newServer.get().addedVersion,
-					                ddEnabledState);
-					self->waitUntilRecruited.set(false);
-				} else if (tssState->tssRecruitSuccess()) {
+				if (!recruitTss || tssState->tssRecruitSuccess()) {
 					// signal all done after adding tss to tracking info
 					self->addServer(newServer.get().interf,
 					                candidateWorker.processClass,
@@ -5498,6 +5447,9 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 					                newServer.get().addedVersion,
 					                ddEnabledState);
 					tssState->markComplete();
+					// signal the teamBuilder a new SS is recruited
+					if (!recruitTss)
+						self->waitUntilRecruited.set(false);
 				}
 			} else {
 				TraceEvent(SevWarn, "DDRecruitmentError")
