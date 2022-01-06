@@ -27,16 +27,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// Cluster recovery state machine used to be driven from master/sequencer process, recovery state
-// tracking is used by test environment and tooling scripts. To ease the process of migration, prefix
-// is controlled by a ServerKnob for now.
-//
-// TODO: ServerKnob should be removed ones all tooling scripts and usage is identified and updated accordingly
-
-namespace {
-std::map<ClusterRecoveryEventType, std::string> recoveryEventNameMap;
-} // anonymous namespace
-
 static std::set<int> const& normalClusterRecoveryErrors() {
 	static std::set<int> s;
 	if (s.empty()) {
@@ -1851,6 +1841,13 @@ std::string& getRecoveryEventName(ClusterRecoveryEventType type) {
 	ASSERT(type >= ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME &&
 	       type < ClusterRecoveryEventType::CLUSTER_RECOVERY_LAST);
 
+	// Cluster recovery state machine used to be driven from master/sequencer process, recovery state
+	// tracking is used by test environment and tooling scripts. To ease the process of migration, prefix
+	// is controlled by a ServerKnob for now.
+	//
+	// TODO: ServerKnob should be removed ones all tooling scripts and usage is identified and updated accordingly
+
+	static std::map<ClusterRecoveryEventType, std::string> recoveryEventNameMap;
 	if (recoveryEventNameMap.empty()) {
 		// initialize the map
 		recoveryEventNameMap.insert({ ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME,
