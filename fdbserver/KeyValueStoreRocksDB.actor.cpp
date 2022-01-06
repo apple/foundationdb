@@ -110,6 +110,10 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	if (SERVER_KNOBS->ROCKSDB_COMPRESSION_TYPE >= 0) {
 		options.compression = static_cast<rocksdb::CompressionType>(SERVER_KNOBS->ROCKSDB_COMPRESSION_TYPE);
 	}
+	options.compression_opts.enabled = true;
+	options.compression_opts.window_bits=SERVER_KNOBS->ROCKSDB_COMPRESSION_OPTS_WINDOW_BIT;
+	options.compression_opts.level=SERVER_KNOBS->ROCKSDB_COMPRESSION_OPTS_LEVEL;
+	options.compression_opts.strategy=SERVER_KNOBS->ROCKSDB_COMPRESSION_OPTS_STRATEGY;
 	if (SERVER_KNOBS->ROCKSDB_BOTTOM_LAYER_COMPRESSION_TYPE >= 0) {
 		options.bottommost_compression =
 		    static_cast<rocksdb::CompressionType>(SERVER_KNOBS->ROCKSDB_BOTTOM_LAYER_COMPRESSION_TYPE);
@@ -827,7 +831,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			writeThread = CoroThreadPool::createThreadPool();
 			readThreads = CoroThreadPool::createThreadPool();
 		} else {
-			writeThread = createGenericThreadPool();
+			writeThread = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_WRITE_THREAD_PRIORITY);
 			readThreads = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_READ_THREAD_PRIORITY);
 			TraceEvent("RocksDBInitialization", id)
 			    .detail("ReadThreadsPriority", SERVER_KNOBS->ROCKSDB_READ_THREAD_PRIORITY);
