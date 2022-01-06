@@ -438,8 +438,9 @@ struct CommitBatchContext {
 
 	int latencyBucket = 0;
 
-	Version commitVersion;
-	Version prevVersion;
+	Version commitVersion = 0;
+	Version prevVersion = 0;
+	Version localMinKnownCommittedVersion = 0;
 
 	std::vector<std::pair<int, Version>> tLogGroups;
 
@@ -1156,7 +1157,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	self->loggingComplete = pProxyCommitData->logSystem->push(self->tLogGroups,
 	                                                          self->commitVersion,
 	                                                          self->prevVersion,
-	                                                          pProxyCommitData->committedVersion.get(),
+	                                                          pProxyCommitData->knownCommittedVersion,
 	                                                          pProxyCommitData->minKnownCommittedVersion,
 	                                                          self->toCommit,
 	                                                          span.context,
@@ -1198,9 +1199,7 @@ ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
 
 	try {
 		choose {
-			when(Version ver = wait(self->loggingComplete)) {
-				pProxyCommitData->minKnownCommittedVersion = std::max(pProxyCommitData->minKnownCommittedVersion, ver);
-			}
+			when(Version ver = wait(self->loggingComplete)) { self->localMinKnownCommittedVersion = ver; }
 			when(wait(pProxyCommitData->committedVersion.whenAtLeast(self->commitVersion + 1))) {}
 		}
 	} catch (Error& e) {
@@ -1253,13 +1252,19 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	// client may get a commit version that the master is not aware of, and next GRV request may get a version less than
 	// self->committedVersion.
 
-	wait(pProxyCommitData->master.reportLiveCommittedVersion.getReply(
+	ReportRawCommittedVersionReply rep = wait(pProxyCommitData->master.reportLiveCommittedVersion.getReply(
 	    ReportRawCommittedVersionRequest(self->prevVersion,
 	                                     self->commitVersion,
 	                                     self->lockedAfter,
 	                                     self->metadataVersionAfter,
-	                                     pProxyCommitData->minKnownCommittedVersion),
+	                                     self->localMinKnownCommittedVersion,
+	                                     self->tLogGroups),
 	    TaskPriority::ProxyMasterVersionReply));
+
+	pProxyCommitData->knownCommittedVersion =
+	    std::max(pProxyCommitData->knownCommittedVersion, rep.knownCommittedVersion);
+	pProxyCommitData->minKnownCommittedVersion =
+	    std::max(pProxyCommitData->minKnownCommittedVersion, rep.minKnownCommittedVersion);
 
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2) {
 		debug_advanceMinCommittedVersion(UID(), self->commitVersion);

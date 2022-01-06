@@ -203,7 +203,10 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	NotifiedVersion liveCommittedVersion; // The largest live committed version reported by commit proxies.
 	bool databaseLocked;
 	Optional<Value> proxyMetadataVersion;
-	Version minKnownCommittedVersion;
+	std::vector<Version> groupKnownCommittedVersions;
+	std::vector<Version> groupMinKnownCommittedVersions;
+	Version knownCommittedVersion = 0;
+	Version minKnownCommittedVersion = 0;
 
 	DatabaseConfiguration originalConfiguration;
 	DatabaseConfiguration configuration;
@@ -1361,8 +1364,8 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 					}
 				}
 				ASSERT(tlogGroup >= 0 && tlogGroup < self->tLogGroups);
-				int64_t estimateFlushTimeUS = ((int64_t)req.commitBytes * 1000 * 1000) /
-				                              SERVER_KNOBS->HACKATHON_TLOG_FLUSH_BYTES_PER_SECOND;
+				int64_t estimateFlushTimeUS =
+				    ((int64_t)req.commitBytes * 1000 * 1000) / SERVER_KNOBS->HACKATHON_TLOG_FLUSH_BYTES_PER_SECOND;
 				if (self->tlogCommitFlushWait[tlogGroup] < now) {
 					self->tlogCommitFlushWait[tlogGroup] = now + std::chrono::microseconds(estimateFlushTimeUS);
 				} else {
@@ -1446,14 +1449,30 @@ ACTOR Future<Void> handleCommitVersion(Reference<MasterData> self, ReportRawComm
 
 	wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion));
 
-	self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
+	for (auto& it : req.tlogGroups) {
+		self->groupKnownCommittedVersions[it.first] =
+		    std::max(self->groupKnownCommittedVersions[it.first], req.version);
+		self->groupMinKnownCommittedVersions[it.first] =
+		    std::max(self->groupMinKnownCommittedVersions[it.first], req.minKnownCommittedVersion);
+	}
+
+	self->knownCommittedVersion = std::numeric_limits<Version>::max();
+	for (auto& it : self->groupKnownCommittedVersions) {
+		self->knownCommittedVersion = std::min(self->knownCommittedVersion, it);
+	}
+
+	self->minKnownCommittedVersion = std::numeric_limits<Version>::max();
+	for (auto& it : self->groupMinKnownCommittedVersions) {
+		self->minKnownCommittedVersion = std::min(self->minKnownCommittedVersion, it);
+	}
+
 	if (req.version > self->liveCommittedVersion.get()) {
 		self->databaseLocked = req.locked;
 		self->proxyMetadataVersion = req.metadataVersion;
 		self->liveCommittedVersion.set(req.version);
 	}
 	++self->reportLiveCommittedVersionRequests;
-	req.reply.send(Void());
+	req.reply.send(ReportRawCommittedVersionReply(self->knownCommittedVersion, self->minKnownCommittedVersion));
 	return Void();
 }
 
@@ -2133,6 +2152,8 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	TraceEvent("MasterRecoveryCommit", self->dbgid).log();
 	self->tLogGroups = self->logSystem->getTLogGroups();
 	self->tLogGroupVersions.resize(self->tLogGroups, self->lastEpochEnd);
+	self->groupKnownCommittedVersions.resize(self->tLogGroups);
+	self->groupMinKnownCommittedVersions.resize(self->tLogGroups);
 	self->tlogBytesToFlushTracker.resize(self->tLogGroups, 0);
 	self->tlogCommitReqList.resize(self->tLogGroups);
 	auto now = std::chrono::high_resolution_clock::now();

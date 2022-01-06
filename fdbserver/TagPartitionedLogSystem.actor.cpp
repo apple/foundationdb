@@ -1861,31 +1861,14 @@ Optional<std::pair<Version, Version>> TagPartitionedLogSystem::getDurableVersion
 
 	Version minRecoveryVersion = calculateRecoveryVersion(minResult);
 
-	Version groupCommittedVersion = knownCommittedVersion;
-	for (int group = 0; group < logSet->logServers.size() / logSet->tLogReplicationFactor; group++) {
-		for (int t = 0; t < logSet->tLogReplicationFactor; t++) {
-			int idx = group * logSet->tLogReplicationFactor + t;
-			if (lockInfo.replies[idx].isReady() && !lockInfo.replies[idx].isError()) {
-				auto& versionHistory = lockInfo.replies[idx].get().versionHistory;
-				auto it = std::upper_bound(versionHistory.begin(),
-				                           versionHistory.end(),
-				                           std::make_pair(0, knownCommittedVersion),
-				                           [](const auto& l, const auto& r) -> bool { return l.second < r.second; });
-				--it;
-				groupCommittedVersion = std::min(groupCommittedVersion, it->second);
-				break;
-			}
-		}
-	}
 
 	TraceEvent("GetDurableResult", dbgid)
 	    .detail("KnownCommittedVersion", knownCommittedVersion)
-	    .detail("GroupCommittedVersion", groupCommittedVersion)
 	    .detail("MinRecoveryVersion", minRecoveryVersion)
 	    .detail("MaxRecoveryVersion", maxRecoveryVersion)
 	    .detail("EpochEnd", lockInfo.epochEnd);
 
-	return std::make_pair(groupCommittedVersion, minRecoveryVersion);
+	return std::make_pair(knownCommittedVersion, minRecoveryVersion);
 }
 
 ACTOR Future<Void> TagPartitionedLogSystem::getDurableVersionChanged(LogLockInfo lockInfo,

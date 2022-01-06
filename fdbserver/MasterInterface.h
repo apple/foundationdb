@@ -185,6 +185,21 @@ struct GetCommitVersionRequest {
 	}
 };
 
+struct ReportRawCommittedVersionReply {
+	constexpr static FileIdentifier file_identifier = 3568992;
+	Version knownCommittedVersion = 0;
+	Version minKnownCommittedVersion = 0;
+
+	ReportRawCommittedVersionReply() {}
+	ReportRawCommittedVersionReply(Version knownCommittedVersion, Version minKnownCommittedVersion)
+	  : knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, knownCommittedVersion, minKnownCommittedVersion);
+	}
+};
+
 struct ReportRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 1853148;
 	Version prevVersion;
@@ -192,8 +207,9 @@ struct ReportRawCommittedVersionRequest {
 	bool locked;
 	Optional<Value> metadataVersion;
 	Version minKnownCommittedVersion;
+	std::vector<std::pair<int, Version>> tlogGroups;
 
-	ReplyPromise<Void> reply;
+	ReplyPromise<ReportRawCommittedVersionReply> reply;
 
 	ReportRawCommittedVersionRequest()
 	  : prevVersion(invalidVersion), version(invalidVersion), locked(false), minKnownCommittedVersion(0) {}
@@ -201,13 +217,14 @@ struct ReportRawCommittedVersionRequest {
 	                                 Version version,
 	                                 bool locked,
 	                                 Optional<Value> metadataVersion,
-	                                 Version minKnownCommittedVersion)
+	                                 Version minKnownCommittedVersion,
+	                                 std::vector<std::pair<int, Version>> tlogGroups)
 	  : prevVersion(prevVersion), version(version), locked(locked), metadataVersion(metadataVersion),
-	    minKnownCommittedVersion(minKnownCommittedVersion) {}
+	    minKnownCommittedVersion(minKnownCommittedVersion), tlogGroups(tlogGroups) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, prevVersion, version, locked, metadataVersion, minKnownCommittedVersion, reply);
+		serializer(ar, prevVersion, version, locked, metadataVersion, minKnownCommittedVersion, tlogGroups, reply);
 	}
 };
 
