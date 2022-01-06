@@ -1659,26 +1659,26 @@ struct RedwoodMetrics {
 		for (RedwoodMetrics::Level& level : levels) {
 			if (levelCounter > 0) {
 				std::string levelString = "L" + std::to_string(levelCounter);
-				level.buildFillPctSketch = Reference<Histogram>(new Histogram(
-				    Reference<HistogramRegistry>(), "buildFillPct", levelString, Histogram::Unit::percentageLinear));
-				level.modifyFillPctSketch = Reference<Histogram>(new Histogram(
-				    Reference<HistogramRegistry>(), "modifyFillPct", levelString, Histogram::Unit::percentageLinear));
-				level.buildStoredPctSketch = Reference<Histogram>(new Histogram(
-				    Reference<HistogramRegistry>(), "buildStoredPct", levelString, Histogram::Unit::percentageLinear));
-				level.modifyStoredPctSketch = Reference<Histogram>(new Histogram(
-				    Reference<HistogramRegistry>(), "modifyStoredPct", levelString, Histogram::Unit::percentageLinear));
-				level.buildItemCountSketch = Reference<Histogram>(new Histogram(Reference<HistogramRegistry>(),
-				                                                                "buildItemCount",
-				                                                                levelString,
-				                                                                Histogram::Unit::countLinear,
-				                                                                0,
-				                                                                maxRecordCount));
-				level.modifyItemCountSketch = Reference<Histogram>(new Histogram(Reference<HistogramRegistry>(),
-				                                                                 "modifyItemCount",
-				                                                                 levelString,
-				                                                                 Histogram::Unit::countLinear,
-				                                                                 0,
-				                                                                 maxRecordCount));
+				level.buildFillPctSketch = Histogram::construct(
+				    Reference<HistogramRegistry>(), "buildFillPct", levelString, Histogram::Unit::percentageLinear);
+				level.modifyFillPctSketch = Histogram::construct(
+				    Reference<HistogramRegistry>(), "modifyFillPct", levelString, Histogram::Unit::percentageLinear);
+				level.buildStoredPctSketch = Histogram::construct(
+				    Reference<HistogramRegistry>(), "buildStoredPct", levelString, Histogram::Unit::percentageLinear);
+				level.modifyStoredPctSketch = Histogram::construct(
+				    Reference<HistogramRegistry>(), "modifyStoredPct", levelString, Histogram::Unit::percentageLinear);
+				level.buildItemCountSketch = Histogram::construct(Reference<HistogramRegistry>(),
+				                                                  "buildItemCount",
+				                                                  levelString,
+				                                                  Histogram::Unit::countLinear,
+				                                                  0,
+				                                                  maxRecordCount);
+				level.modifyItemCountSketch = Histogram::construct(Reference<HistogramRegistry>(),
+				                                                   "modifyItemCount",
+				                                                   levelString,
+				                                                   Histogram::Unit::countLinear,
+				                                                   0,
+				                                                   maxRecordCount);
 			}
 			++levelCounter;
 		}
