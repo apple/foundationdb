@@ -2706,11 +2706,17 @@ public:
 
 		debug_printf("DWALPager(%s) writePhysicalPage %s\n", filename.c_str(), toString(pageIDs).c_str());
 
+		// Set metadata before prewrite so it's in the pre-encrypted page in cache if the page is encrypted
+		// The actual next commit version is unknown, so the write version of a page is always the
+		// last committed version + 1
+		page->setWriteInfo(pageIDs.front(), this->getLastCommittedVersion() + 1);
+
 		// Copy the page if preWrite will encrypt/modify the payload
 		bool copy = page->isEncrypted();
 		if (copy) {
 			page = page->clone();
 		}
+
 		page->preWrite(pageIDs.front());
 
 		int blockSize = header ? smallestPhysicalBlock : physicalPageSize;
@@ -5566,7 +5572,6 @@ private:
 	};
 
 #warning update forensic fields
-#warning update forensic fields on second write
 
 	// Scans a vector of records and decides on page split points, returning a vector of 1+ pages to build
 	std::vector<PageToBuild> splitPages(const RedwoodRecordRef* lowerBound,
