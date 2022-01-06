@@ -319,9 +319,9 @@ struct TLogData : NonCopyable {
 	// data is written from. This value is restored from disk when the tlog
 	// restarts.
 	UID durableClusterId;
-	// The master cluster ID stores the cluster ID read from the txnStateStore.
+	// The cluster-controller cluster ID stores the cluster ID read from the txnStateStore.
 	// It is cached in this variable.
-	UID masterClusterId;
+	UID ccClusterId;
 	UID dbgid;
 	UID workerID;
 
@@ -783,7 +783,7 @@ void TLogQueue::updateVersionSizes(const TLogQueueEntry& result,
 ACTOR Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, Reference<LogData> logData) {
 	state Version stopVersion = logData->version.get();
 
-	TEST(true); // TLog stopped by recovering master
+	TEST(true); // TLog stopped by recovering cluster-controller
 	TEST(logData->stopped); // logData already stopped
 	TEST(!logData->stopped); // logData not yet stopped
 
@@ -2251,12 +2251,12 @@ ACTOR Future<UID> getClusterId(TLogData* self) {
 	}
 }
 
-ACTOR Future<Void> rejoinMasters(TLogData* self,
-                                 TLogInterface tli,
-                                 DBRecoveryCount recoveryCount,
-                                 Future<Void> registerWithMaster,
-                                 bool isPrimary) {
-	state UID lastMasterID(0, 0);
+ACTOR Future<Void> rejoinClusterController(TLogData* self,
+                                           TLogInterface tli,
+                                           DBRecoveryCount recoveryCount,
+                                           Future<Void> registerWithCC,
+                                           bool isPrimary) {
+	state LifetimeToken lastMasterLifetime;
 	loop {
 		auto const& inf = self->dbInfo->get();
 		bool isDisplaced =
@@ -2284,24 +2284,27 @@ ACTOR Future<Void> rejoinMasters(TLogData* self,
 			// with a different cluster ID.
 			state UID clusterId = wait(getClusterId(self));
 			ASSERT(clusterId.isValid());
-			self->masterClusterId = clusterId;
+			self->ccClusterId = clusterId;
 			ev.detail("ClusterId", clusterId).detail("SelfClusterId", self->durableClusterId);
 			if (BUGGIFY)
 				wait(delay(SERVER_KNOBS->BUGGIFY_WORKER_REMOVED_MAX_LAG * deterministicRandom()->random01()));
 			throw worker_removed();
 		}
 
-		if (registerWithMaster.isReady()) {
-			if (self->dbInfo->get().master.id() != lastMasterID) {
+		if (registerWithCC.isReady()) {
+			if (!lastMasterLifetime.isEqual(self->dbInfo->get().masterLifetime)) {
 				// The TLogRejoinRequest is needed to establish communications with a new master, which doesn't have our
 				// TLogInterface
 				TLogRejoinRequest req(tli);
-				TraceEvent("TLogRejoining", tli.id()).detail("Master", self->dbInfo->get().master.id());
+				TraceEvent("TLogRejoining", tli.id())
+				    .detail("ClusterController", self->dbInfo->get().clusterInterface.id())
+				    .detail("DbInfoMasterLifeTime", self->dbInfo->get().masterLifetime.toString())
+				    .detail("LastMasterLifeTime", lastMasterLifetime.toString());
 				choose {
-					when(TLogRejoinReply rep =
-					         wait(brokenPromiseToNever(self->dbInfo->get().master.tlogRejoin.getReply(req)))) {
+					when(TLogRejoinReply rep = wait(
+					         brokenPromiseToNever(self->dbInfo->get().clusterInterface.tlogRejoin.getReply(req)))) {
 						if (rep.masterIsRecovered)
-							lastMasterID = self->dbInfo->get().master.id();
+							lastMasterLifetime = self->dbInfo->get().masterLifetime;
 					}
 					when(wait(self->dbInfo->onChange())) {}
 				}
@@ -2309,7 +2312,7 @@ ACTOR Future<Void> rejoinMasters(TLogData* self,
 				wait(self->dbInfo->onChange());
 			}
 		} else {
-			wait(registerWithMaster || self->dbInfo->onChange());
+			wait(registerWithCC || self->dbInfo->onChange());
 		}
 	}
 }
@@ -2506,13 +2509,13 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			}
 
 			// Persist cluster ID once cluster has recovered.
-			auto masterClusterId = self->dbInfo->get().clusterId;
+			auto ccClusterId = self->dbInfo->get().clusterId;
 			if (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
 			    !self->durableClusterId.isValid()) {
-				ASSERT(masterClusterId.isValid());
-				self->durableClusterId = masterClusterId;
+				ASSERT(ccClusterId.isValid());
+				self->durableClusterId = ccClusterId;
 				self->persistentData->set(
-				    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(masterClusterId, Unversioned())));
+				    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(ccClusterId, Unversioned())));
 				wait(self->persistentData->commit());
 			}
 		}
@@ -2958,7 +2961,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	}
 
 	state int idx = 0;
-	state Promise<Void> registerWithMaster;
+	state Promise<Void> registerWithCC;
 	state std::map<UID, TLogInterface> id_interf;
 	state std::vector<std::pair<Version, UID>> logsByVersion;
 	for (idx = 0; idx < fVers.get().size(); idx++) {
@@ -3014,7 +3017,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		logData->recoveryCount =
 		    BinaryReader::fromStringRef<DBRecoveryCount>(fRecoverCounts.get()[idx].value, Unversioned());
 		logData->removed =
-		    rejoinMasters(self, recruited, logData->recoveryCount, registerWithMaster.getFuture(), false);
+		    rejoinClusterController(self, recruited, logData->recoveryCount, registerWithCC.getFuture(), false);
 		removed.push_back(errorOr(logData->removed));
 		logsByVersion.emplace_back(ver, id1);
 
@@ -3137,8 +3140,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		self->sharedActors.send(tLogCore(self, it.second, id_interf[it.first], false));
 	}
 
-	if (registerWithMaster.canBeSet())
-		registerWithMaster.send(Void());
+	if (registerWithCC.canBeSet())
+		registerWithCC.send(Void());
 	return Void();
 }
 
@@ -3263,7 +3266,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	self->id_data[recruited.id()] = logData;
 	logData->locality = req.locality;
 	logData->recoveryCount = req.epoch;
-	logData->removed = rejoinMasters(self, recruited, req.epoch, Future<Void>(Void()), req.isPrimary);
+	logData->removed = rejoinClusterController(self, recruited, req.epoch, Future<Void>(Void()), req.isPrimary);
 	self->popOrder.push_back(recruited.id());
 	self->spillOrder.push_back(recruited.id());
 
@@ -3491,13 +3494,13 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 			// it should automatically exclude itself to avoid being used in
 			// the new cluster.
 			auto recoveryState = self.dbInfo->get().recoveryState;
-			if (recoveryState == RecoveryState::FULLY_RECOVERED && self.masterClusterId.isValid() &&
-			    self.durableClusterId.isValid() && self.masterClusterId != self.durableClusterId) {
+			if (recoveryState == RecoveryState::FULLY_RECOVERED && self.ccClusterId.isValid() &&
+			    self.durableClusterId.isValid() && self.ccClusterId != self.durableClusterId) {
 				state NetworkAddress address = g_network->getLocalAddress();
 				wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
 				TraceEvent(SevWarnAlways, "TLogBelongsToExistingCluster")
 				    .detail("ClusterId", self.durableClusterId)
-				    .detail("NewClusterId", self.masterClusterId);
+				    .detail("NewClusterId", self.ccClusterId);
 			}
 			// If the tlog has a valid durable cluster ID, we don't want it to
 			// wipe its data! Throw this error to signal to `tlogTerminated` to
