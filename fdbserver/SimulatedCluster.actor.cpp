@@ -288,7 +288,7 @@ public:
 	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
 	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
 	// Set true to simplify simulation configs for easier debugging
-	bool simpleConfig = false;
+	bool simpleConfig = true;
 	int extraMachineCountDC = 0;
 	Optional<bool> generateFearless, buggify;
 	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
@@ -1257,9 +1257,9 @@ void SimulationConfig::setRandomConfig() {
 		set_config("perpetual_storage_wiggle=1");
 	}
 
-	if (deterministicRandom()->random01() < 0.5) {
-		set_config("backup_worker_enabled:=1");
-	}
+	// if (deterministicRandom()->random01() < 0.5) {
+	//	set_config("backup_worker_enabled:=1");
+	//}
 }
 
 // Overwrite DB with simple options, used when simpleConfig is true in the TestConfig

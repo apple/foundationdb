@@ -746,6 +746,10 @@ public:
 
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
 
+	// Hackathon-2021
+	std::string HACKATHON_TLOG_SELECTION_STRATEGY;
+	int64_t HACKATHON_TLOG_FLUSH_BYTES_PER_SECOND;
+
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);
 };

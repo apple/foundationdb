@@ -38,10 +38,7 @@ struct TLogInterface {
 	UID sharedTLogID;
 
 	RequestStream<struct TLogPeekRequest> peekMessages;
-	RequestStream<struct TLogPeekStreamRequest>
-	    peekStreamMessages; // request establish a peek stream with the TLog server
 	RequestStream<struct TLogPopRequest> popMessages;
-
 	RequestStream<struct TLogCommitRequest> commit;
 	RequestStream<ReplyPromise<struct TLogLockResult>> lock; // first stage of database recovery
 	RequestStream<struct TLogQueuingMetricsRequest> getQueuingMetrics;
@@ -51,6 +48,9 @@ struct TLogInterface {
 	RequestStream<struct TLogDisablePopRequest> disablePopRequest;
 	RequestStream<struct TLogEnablePopRequest> enablePopRequest;
 	RequestStream<struct TLogSnapRequest> snapRequest;
+	RequestStream<struct TLogPeekStreamRequest>
+	    peekStreamMessages; // request establish a peek stream with the TLog server
+	RequestStream<struct UpdateVersionRequest> updateVersionRequest;
 
 	TLogInterface() {}
 	explicit TLogInterface(const LocalityData& locality)
@@ -84,6 +84,7 @@ struct TLogInterface {
 		streams.push_back(enablePopRequest.getReceiver());
 		streams.push_back(snapRequest.getReceiver());
 		streams.push_back(peekStreamMessages.getReceiver(TaskPriority::TLogPeek));
+		streams.push_back(updateVersionRequest.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 
@@ -112,6 +113,8 @@ struct TLogInterface {
 			snapRequest = RequestStream<struct TLogSnapRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(10));
 			peekStreamMessages =
 			    RequestStream<struct TLogPeekStreamRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(11));
+			updateVersionRequest =
+			    RequestStream<struct UpdateVersionRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(12));
 		}
 	}
 };
@@ -132,10 +135,12 @@ struct TLogLockResult {
 	constexpr static FileIdentifier file_identifier = 11822027;
 	Version end;
 	Version knownCommittedVersion;
+	Version maxRecoveryVersion;
+	std::vector<std::pair<Version, Version>> versionHistory;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, end, knownCommittedVersion);
+		serializer(ar, end, knownCommittedVersion, maxRecoveryVersion, versionHistory);
 	}
 };
 
@@ -299,7 +304,7 @@ struct TLogCommitRequest {
 	constexpr static FileIdentifier file_identifier = 4022206;
 	SpanID spanContext;
 	Arena arena;
-	Version prevVersion, version, knownCommittedVersion, minKnownCommittedVersion;
+	Version prevVersion, truePrevVersion, version, knownCommittedVersion, minKnownCommittedVersion;
 
 	StringRef messages; // Each message prefixed by a 4-byte length
 
@@ -310,18 +315,20 @@ struct TLogCommitRequest {
 	TLogCommitRequest(const SpanID& context,
 	                  const Arena& a,
 	                  Version prevVersion,
+	                  Version truePrevVersion,
 	                  Version version,
 	                  Version knownCommittedVersion,
 	                  Version minKnownCommittedVersion,
 	                  StringRef messages,
 	                  Optional<UID> debugID)
-	  : spanContext(context), arena(a), prevVersion(prevVersion), version(version),
+	  : spanContext(context), arena(a), prevVersion(prevVersion), truePrevVersion(truePrevVersion), version(version),
 	    knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion),
 	    messages(messages), debugID(debugID) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
 		           prevVersion,
+		           truePrevVersion,
 		           version,
 		           knownCommittedVersion,
 		           minKnownCommittedVersion,
@@ -404,6 +411,20 @@ struct TLogSnapRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply, snapPayload, snapUID, role, arena);
+	}
+};
+
+struct UpdateVersionRequest {
+	constexpr static FileIdentifier file_identifier = 8134528;
+	Version version = 0;
+	ReplyPromise<Void> reply;
+
+	explicit UpdateVersionRequest(Version version) : version(version) {}
+	UpdateVersionRequest() = default;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, reply);
 	}
 };
 

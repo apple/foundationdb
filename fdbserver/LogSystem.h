@@ -21,6 +21,7 @@
 #ifndef FDBSERVER_LOGSYSTEM_H
 #define FDBSERVER_LOGSYSTEM_H
 
+#include <queue>
 #include <set>
 #include <vector>
 
@@ -60,7 +61,6 @@ public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
 	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
 	std::vector<Reference<ConnectionResetInfo>> connectionResetTrackers;
-	std::vector<Reference<Histogram>> tlogPushDistTrackers;
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
 	std::vector<LocalityData> tLogLocalities; // Stores the localities of the log servers
@@ -492,6 +492,110 @@ struct ILogSystem {
 		void delref() override { ReferenceCounted<BufferedCursor>::delref(); }
 	};
 
+	struct GroupPeekCursor final : IPeekCursor, ReferenceCounted<GroupPeekCursor> {
+		std::vector<Reference<IPeekCursor>> serverCursors;
+		int currentCursor;
+		LogMessageVersion messageVersion;
+		LogMessageVersion end;
+		Future<Void> more;
+
+		GroupPeekCursor(std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
+		                Tag tag,
+		                Version begin,
+		                Version end,
+		                bool returnIfBlocked);
+
+		Reference<IPeekCursor> cloneNoMore() override;
+		void setProtocolVersion(ProtocolVersion version) override;
+		Arena& arena() override;
+		ArenaReader* reader() override;
+		bool hasMessage() const override;
+		void nextMessage() override;
+		StringRef getMessage() override;
+		StringRef getMessageWithTags() override;
+		VectorRef<Tag> getTags() const override;
+		void advanceTo(LogMessageVersion n) override;
+		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
+		Future<Void> onFailed() override;
+		bool isActive() const override;
+		bool isExhausted() const override;
+		const LogMessageVersion& version() const override;
+		Version popped() const override;
+		Version getMinKnownCommittedVersion() const override;
+		Optional<UID> getPrimaryPeekLocation() const override;
+		Optional<UID> getCurrentPeekLocation() const override;
+
+		void addref() override { ReferenceCounted<GroupPeekCursor>::addref(); }
+
+		void delref() override { ReferenceCounted<GroupPeekCursor>::delref(); }
+	};
+
+	struct CursorVersion {
+		Version version;
+		bool hasMessage;
+		int cursor;
+
+		CursorVersion() : version(invalidVersion), hasMessage(false), cursor(0) {}
+		CursorVersion(Version version, bool hasMessage, int cursor)
+		  : version(version), hasMessage(hasMessage), cursor(cursor) {}
+
+		bool operator<(CursorVersion const& rhs) const {
+			// Ordering is reversed for priority_queue
+			if (version != rhs.version) {
+				return version > rhs.version;
+			}
+			return !hasMessage;
+		}
+	};
+
+	struct HeapPeekCursor final : IPeekCursor, ReferenceCounted<HeapPeekCursor> {
+		std::vector<Reference<IPeekCursor>> serverCursors;
+		std::priority_queue<CursorVersion> minCursor;
+		LogMessageVersion messageVersion;
+		LogMessageVersion end;
+		bool hasData;
+		int currentCursor;
+		Future<Void> more;
+		Tag tag;
+
+		HeapPeekCursor(std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
+		               Tag tag,
+		               Version begin,
+		               Version end,
+		               int tLogReplicationFactor,
+		               bool returnIfBlocked);
+
+		HeapPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors,
+		               LogMessageVersion messageVersion,
+		               bool hasData);
+
+		Reference<IPeekCursor> cloneNoMore() override;
+		void setProtocolVersion(ProtocolVersion version) override;
+		Arena& arena() override;
+		ArenaReader* reader() override;
+		void calcHasMessage();
+		void updateMessage(bool usePolicy);
+		bool hasMessage() const override;
+		void nextMessage() override;
+		StringRef getMessage() override;
+		StringRef getMessageWithTags() override;
+		VectorRef<Tag> getTags() const override;
+		void advanceTo(LogMessageVersion n) override;
+		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
+		Future<Void> onFailed() override;
+		bool isActive() const override;
+		bool isExhausted() const override;
+		const LogMessageVersion& version() const override;
+		Version popped() const override;
+		Version getMinKnownCommittedVersion() const override;
+		Optional<UID> getPrimaryPeekLocation() const override;
+		Optional<UID> getCurrentPeekLocation() const override;
+
+		void addref() override { ReferenceCounted<HeapPeekCursor>::addref(); }
+
+		void delref() override { ReferenceCounted<HeapPeekCursor>::delref(); }
+	};
+
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
@@ -513,8 +617,9 @@ struct ILogSystem {
 	// Never returns normally, but throws an error if the subsystem stops working
 
 	// Future<Void> push( UID bundle, int64_t seq, VectorRef<TaggedMessageRef> messages );
-	virtual Future<Version> push(Version prevVersion,
+	virtual Future<Version> push(std::vector<std::pair<int, Version>> tLogGroups,
 	                             Version version,
+	                             Version truePrevVersion,
 	                             Version knownCommittedVersion,
 	                             Version minKnownCommittedVersion,
 	                             LogPushData& data,
@@ -669,6 +774,7 @@ struct ILogSystem {
 
 	virtual Tag getRandomRouterTag() const = 0;
 	virtual int getLogRouterTags() const = 0; // Returns the number of router tags.
+	virtual int getTLogGroups() const = 0;
 
 	virtual Tag getRandomTxsTag() const = 0;
 
@@ -737,16 +843,8 @@ struct LogPushData : NonCopyable {
 	// Log subsequences have to start at 1 (the MergedPeekCursor relies on this to make sure we never have !hasMessage()
 	// in the middle of data for a version
 
-	explicit LogPushData(Reference<ILogSystem> logSystem) : logSystem(logSystem), subsequence(1) {
-		for (auto& log : logSystem->getLogSystemConfig().tLogs) {
-			if (log.isLocal) {
-				for (int i = 0; i < log.tLogs.size(); i++) {
-					messagesWriter.push_back(BinaryWriter(AssumeVersion(g_network->protocolVersion())));
-				}
-			}
-		}
-		isEmptyMessage = std::vector<bool>(messagesWriter.size(), false);
-	}
+	explicit LogPushData(Reference<ILogSystem> logSystem)
+	  : logSystem(logSystem), messagesWriter(AssumeVersion(g_network->protocolVersion())), subsequence(1) {}
 
 	void addTxsTag();
 
@@ -766,27 +864,14 @@ struct LogPushData : NonCopyable {
 	template <class T>
 	void writeTypedMessage(T const& item, bool metadataMessage = false, bool allLocations = false);
 
-	Standalone<StringRef> getMessages(int loc) { return messagesWriter[loc].toValue(); }
-
-	// Records if a tlog (specified by "loc") will receive an empty version batch message.
-	// "value" is the message returned by getMessages() call.
-	void recordEmptyMessage(int loc, const Standalone<StringRef>& value);
-
-	// Returns the ratio of empty messages in this version batch.
-	// MUST be called after getMessages() and recordEmptyMessage().
-	float getEmptyMessageRatio() const;
+	Standalone<StringRef> getMessages() { return messagesWriter.toValue(); }
 
 private:
 	Reference<ILogSystem> logSystem;
 	std::vector<Tag> next_message_tags;
 	std::vector<Tag> prev_tags;
-	std::vector<BinaryWriter> messagesWriter;
-	std::vector<bool> isEmptyMessage; // if messagesWriter has written anything
-	std::vector<int> msg_locations;
-	// Stores message locations that have had span information written to them
-	// for the current transaction. Adding transaction info will reset this
-	// field.
-	std::unordered_set<int> writtenLocations;
+	BinaryWriter messagesWriter;
+	bool writtenTransactionInfo;
 	uint32_t subsequence;
 	SpanID spanContext;
 
@@ -794,7 +879,7 @@ private:
 	// it has not already been written (for the current transaction). Returns
 	// true on a successful write, and false if the location has already been
 	// written.
-	bool writeTransactionInfo(int location, uint32_t subseq);
+	bool writeTransactionInfo(uint32_t subseq);
 };
 
 template <class T>
@@ -806,10 +891,6 @@ void LogPushData::writeTypedMessage(T const& item, bool metadataMessage, bool al
 	for (auto& tag : next_message_tags) {
 		prev_tags.push_back(tag);
 	}
-	msg_locations.clear();
-	logSystem->getPushLocations(prev_tags, msg_locations, allLocations);
-
-	BinaryWriter bw(AssumeVersion(g_network->protocolVersion()));
 
 	// Metadata messages (currently LogProtocolMessage is the only metadata
 	// message) should be written before span information. If this isn't a
@@ -819,10 +900,7 @@ void LogPushData::writeTypedMessage(T const& item, bool metadataMessage, bool al
 	// written.
 	if (!metadataMessage) {
 		uint32_t subseq = this->subsequence++;
-		bool updatedLocation = false;
-		for (int loc : msg_locations) {
-			updatedLocation = writeTransactionInfo(loc, subseq) || updatedLocation;
-		}
+		bool updatedLocation = writeTransactionInfo(subseq);
 		// If this message doesn't write to any new locations, the
 		// subsequence wasn't actually used and can be decremented.
 		if (!updatedLocation) {
@@ -834,32 +912,21 @@ void LogPushData::writeTypedMessage(T const& item, bool metadataMessage, bool al
 		// When writing a metadata message, make sure transaction state has
 		// been reset. If you are running into this assertion, make sure
 		// you are calling addTransactionInfo before each transaction.
-		ASSERT(writtenLocations.size() == 0);
+		writtenTransactionInfo = false;
 	}
 
 	uint32_t subseq = this->subsequence++;
-	bool first = true;
 	int firstOffset = -1, firstLength = -1;
-	for (int loc : msg_locations) {
-		BinaryWriter& wr = messagesWriter[loc];
-
-		if (first) {
-			firstOffset = wr.getLength();
-			wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
-			for (auto& tag : prev_tags)
-				wr << tag;
-			wr << item;
-			firstLength = wr.getLength() - firstOffset;
-			*(uint32_t*)((uint8_t*)wr.getData() + firstOffset) = firstLength - sizeof(uint32_t);
-			DEBUG_TAGS_AND_MESSAGE(
-			    "ProxyPushLocations", invalidVersion, StringRef(((uint8_t*)wr.getData() + firstOffset), firstLength))
-			    .detail("PushLocations", msg_locations);
-			first = false;
-		} else {
-			BinaryWriter& from = messagesWriter[msg_locations[0]];
-			wr.serializeBytes((uint8_t*)from.getData() + firstOffset, firstLength);
-		}
-	}
+	firstOffset = messagesWriter.getLength();
+	messagesWriter << uint32_t(0) << subseq << uint16_t(prev_tags.size());
+	for (auto& tag : prev_tags)
+		messagesWriter << tag;
+	messagesWriter << item;
+	firstLength = messagesWriter.getLength() - firstOffset;
+	*(uint32_t*)((uint8_t*)messagesWriter.getData() + firstOffset) = firstLength - sizeof(uint32_t);
+	DEBUG_TAGS_AND_MESSAGE("ProxyPushLocations",
+	                       invalidVersion,
+	                       StringRef(((uint8_t*)messagesWriter.getData() + firstOffset), firstLength));
 	next_message_tags.clear();
 }
 

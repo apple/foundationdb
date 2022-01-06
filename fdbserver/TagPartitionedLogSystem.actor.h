@@ -181,12 +181,12 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	ACTOR static Future<Void> pushResetChecker(Reference<ConnectionResetInfo> self, NetworkAddress addr);
 
 	ACTOR static Future<TLogCommitReply> recordPushMetrics(Reference<ConnectionResetInfo> self,
-	                                                       Reference<Histogram> dist,
 	                                                       NetworkAddress addr,
 	                                                       Future<TLogCommitReply> in);
 
-	Future<Version> push(Version prevVersion,
+	Future<Version> push(std::vector<std::pair<int, Version>> tLogGroups,
 	                     Version version,
+	                     Version truePrevVersion,
 	                     Version knownCommittedVersion,
 	                     Version minKnownCommittedVersion,
 	                     LogPushData& data,
@@ -292,6 +292,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	TLogVersion getTLogVersion() const final;
 
 	int getLogRouterTags() const final;
+
+	int getTLogGroups() const final;
 
 	Version getBackupStartVersion() const final;
 

@@ -1528,3 +1528,354 @@ Version ILogSystem::BufferedCursor::popped() const {
 	}
 	return poppedVersion;
 }
+
+ILogSystem::GroupPeekCursor::GroupPeekCursor(
+    std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
+    Tag tag,
+    Version begin,
+    Version end,
+    bool returnIfBlocked)
+  : currentCursor(tag.id % logServers.size()), messageVersion(begin), end(end) {
+	for (int i = 0; i < logServers.size(); i++) {
+		auto cursor =
+		    makeReference<ILogSystem::ServerPeekCursor>(logServers[i], tag, begin, end, returnIfBlocked, false);
+		serverCursors.push_back(cursor);
+	}
+}
+
+Reference<ILogSystem::IPeekCursor> ILogSystem::GroupPeekCursor::cloneNoMore() {
+	return serverCursors[currentCursor]->cloneNoMore();
+}
+
+void ILogSystem::GroupPeekCursor::setProtocolVersion(ProtocolVersion version) {
+	serverCursors[currentCursor]->setProtocolVersion(version);
+}
+
+Arena& ILogSystem::GroupPeekCursor::arena() {
+	return serverCursors[currentCursor]->arena();
+}
+
+ArenaReader* ILogSystem::GroupPeekCursor::reader() {
+	return serverCursors[currentCursor]->reader();
+}
+
+bool ILogSystem::GroupPeekCursor::hasMessage() const {
+	return serverCursors[currentCursor]->hasMessage();
+}
+
+void ILogSystem::GroupPeekCursor::nextMessage() {
+	serverCursors[currentCursor]->nextMessage();
+	messageVersion = serverCursors[currentCursor]->version();
+}
+
+StringRef ILogSystem::GroupPeekCursor::getMessage() {
+	return serverCursors[currentCursor]->getMessage();
+}
+
+StringRef ILogSystem::GroupPeekCursor::getMessageWithTags() {
+	return serverCursors[currentCursor]->getMessageWithTags();
+}
+
+VectorRef<Tag> ILogSystem::GroupPeekCursor::getTags() const {
+	return serverCursors[currentCursor]->getTags();
+}
+
+void ILogSystem::GroupPeekCursor::advanceTo(LogMessageVersion n) {
+	for (auto& it : serverCursors) {
+		it->advanceTo(n);
+	}
+	messageVersion = serverCursors[currentCursor]->version();
+}
+
+ACTOR Future<Void> groupPeekGetMore(ILogSystem::GroupPeekCursor* self, TaskPriority taskID) {
+	if (self->messageVersion >= self->end) {
+		if (self->serverCursors[self->currentCursor]->hasMessage()) {
+			return Void();
+		}
+		return Never();
+	}
+	loop {
+		if (self->messageVersion < self->serverCursors[self->currentCursor]->version()) {
+			self->messageVersion = self->serverCursors[self->currentCursor]->version();
+			return Void();
+		}
+		if (self->serverCursors[self->currentCursor]->isActive()) {
+			choose {
+				when(wait(self->serverCursors[self->currentCursor]->getMore())) {
+					self->messageVersion = self->serverCursors[self->currentCursor]->version();
+					return Void();
+				}
+				when(wait(self->serverCursors[self->currentCursor]->onFailed())) {
+				}
+			}
+		} else {
+			bool foundActive = false;
+			for (int i = 1; i < self->serverCursors.size(); i++) {
+				int nextCursor = (self->currentCursor + i) % self->serverCursors.size();
+				self->serverCursors[nextCursor]->advanceTo(self->serverCursors[self->currentCursor]->version());
+				if (self->serverCursors[nextCursor]->isActive()) {
+					self->currentCursor = nextCursor;
+					foundActive = true;
+					break;
+				}
+			}
+			if (!foundActive) {
+				wait(delay(0.1)); // FIXME: knob
+			}
+		}
+	}
+}
+
+Future<Void> ILogSystem::GroupPeekCursor::getMore(TaskPriority taskID) {
+	if (more.isValid() && !more.isReady()) {
+		return more;
+	}
+
+	if (!serverCursors.size())
+		return Never();
+
+	if (hasMessage())
+		return Void();
+
+	if (messageVersion < serverCursors[currentCursor]->version()) {
+		messageVersion = serverCursors[currentCursor]->version();
+		return Void();
+	}
+
+	more = groupPeekGetMore(this, taskID);
+	return more;
+}
+
+Future<Void> ILogSystem::GroupPeekCursor::onFailed() {
+	ASSERT(false);
+	return Never();
+}
+
+bool ILogSystem::GroupPeekCursor::isActive() const {
+	ASSERT(false);
+	return false;
+}
+
+bool ILogSystem::GroupPeekCursor::isExhausted() const {
+	return serverCursors[currentCursor]->isExhausted();
+}
+
+const LogMessageVersion& ILogSystem::GroupPeekCursor::version() const {
+	return messageVersion;
+}
+
+Version ILogSystem::GroupPeekCursor::getMinKnownCommittedVersion() const {
+	return serverCursors[currentCursor]->getMinKnownCommittedVersion();
+}
+
+Optional<UID> ILogSystem::GroupPeekCursor::getPrimaryPeekLocation() const {
+	ASSERT(false);
+	return Optional<UID>();
+}
+
+Optional<UID> ILogSystem::GroupPeekCursor::getCurrentPeekLocation() const {
+	return serverCursors[currentCursor]->getPrimaryPeekLocation();
+}
+
+Version ILogSystem::GroupPeekCursor::popped() const {
+	return serverCursors[currentCursor]->popped();
+}
+
+ILogSystem::HeapPeekCursor::HeapPeekCursor(
+    std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers,
+    Tag tag,
+    Version begin,
+    Version end,
+    int tLogReplicationFactor,
+    bool returnIfBlocked)
+  : messageVersion(begin), end(end), hasData(false), currentCursor(-1), tag(tag) {
+	for (int group = 0; group < logServers.size() / tLogReplicationFactor; group++) {
+		std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> groupServers;
+		for (int i = 0; i < tLogReplicationFactor; i++) {
+			groupServers.push_back(logServers[group * tLogReplicationFactor + i]);
+		}
+		auto cursor = makeReference<ILogSystem::GroupPeekCursor>(groupServers, tag, begin, end, returnIfBlocked);
+		serverCursors.push_back(cursor);
+	}
+}
+
+ILogSystem::HeapPeekCursor::HeapPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors,
+                                           LogMessageVersion messageVersion,
+                                           bool hasData)
+  : serverCursors(serverCursors), messageVersion(messageVersion), hasData(hasData) {
+	for (int i = 0; i < serverCursors.size(); i++) {
+		minCursor.push(
+		    ILogSystem::CursorVersion(serverCursors[i]->version().version, serverCursors[i]->hasMessage(), i));
+	}
+	currentCursor = minCursor.top().cursor;
+}
+
+Reference<ILogSystem::IPeekCursor> ILogSystem::HeapPeekCursor::cloneNoMore() {
+	std::vector<Reference<ILogSystem::IPeekCursor>> cursors;
+	for (auto it : serverCursors) {
+		cursors.push_back(it->cloneNoMore());
+	}
+	return makeReference<ILogSystem::HeapPeekCursor>(cursors, messageVersion, hasData);
+}
+
+void ILogSystem::HeapPeekCursor::setProtocolVersion(ProtocolVersion version) {
+	for (auto it : serverCursors) {
+		if (it->hasMessage()) {
+			it->setProtocolVersion(version);
+		}
+	}
+}
+
+Arena& ILogSystem::HeapPeekCursor::arena() {
+	return serverCursors[currentCursor]->arena();
+}
+
+ArenaReader* ILogSystem::HeapPeekCursor::reader() {
+	return serverCursors[currentCursor]->reader();
+}
+
+bool ILogSystem::HeapPeekCursor::hasMessage() const {
+	return hasData;
+}
+
+void ILogSystem::HeapPeekCursor::nextMessage() {
+	Version prev = serverCursors[currentCursor]->version().version;
+	serverCursors[currentCursor]->nextMessage();
+	Version next = serverCursors[currentCursor]->version().version;
+	if (next != prev) {
+		minCursor.pop();
+		minCursor.push(CursorVersion(next, serverCursors[currentCursor]->hasMessage(), currentCursor));
+		currentCursor = minCursor.top().cursor;
+	}
+
+	hasData = serverCursors[currentCursor]->hasMessage();
+	messageVersion = hasData ? serverCursors[currentCursor]->version()
+	                         : std::max(LogMessageVersion(prev + 1), serverCursors[currentCursor]->version());
+}
+
+StringRef ILogSystem::HeapPeekCursor::getMessage() {
+	return serverCursors[currentCursor]->getMessage();
+}
+
+StringRef ILogSystem::HeapPeekCursor::getMessageWithTags() {
+	return serverCursors[currentCursor]->getMessageWithTags();
+}
+
+VectorRef<Tag> ILogSystem::HeapPeekCursor::getTags() const {
+	return serverCursors[currentCursor]->getTags();
+}
+
+void ILogSystem::HeapPeekCursor::advanceTo(LogMessageVersion n) {
+	while (version() < n && hasMessage()) {
+		getMessage();
+		nextMessage();
+	}
+
+	if (version() == n) {
+		return;
+	}
+
+	for (auto& c : serverCursors) {
+		c->advanceTo(n);
+	}
+
+	messageVersion = n;
+	currentCursor = -1;
+	hasData = false;
+	while (!minCursor.empty()) {
+		minCursor.pop();
+	}
+}
+
+ACTOR Future<Void> heapPeekGetMore(ILogSystem::HeapPeekCursor* self, TaskPriority taskID) {
+	loop {
+		if (self->currentCursor < 0) {
+			std::vector<Future<Void>> q;
+			for (auto& c : self->serverCursors) {
+				if (!c->hasMessage() && c->version().version <= self->messageVersion.version) {
+					q.push_back(c->getMore(taskID));
+				}
+			}
+			wait(waitForAll(q));
+			for (int i = 0; i < self->serverCursors.size(); i++) {
+
+
+				self->minCursor.push(ILogSystem::CursorVersion(
+				    self->serverCursors[i]->version().version, self->serverCursors[i]->hasMessage(), i));
+			}
+
+			self->currentCursor = self->minCursor.top().cursor;
+			self->hasData = self->serverCursors[self->currentCursor]->hasMessage();
+		} else {
+			if (self->hasData ||
+			    self->serverCursors[self->currentCursor]->version().version > self->messageVersion.version) {
+				break;
+			}
+
+			wait(self->serverCursors[self->currentCursor]->getMore(taskID));
+			if (self->currentCursor >= 0) {
+				self->minCursor.pop();
+				self->minCursor.push(
+				    ILogSystem::CursorVersion(self->serverCursors[self->currentCursor]->version().version,
+				                              self->serverCursors[self->currentCursor]->hasMessage(),
+				                              self->currentCursor));
+				self->currentCursor = self->minCursor.top().cursor;
+				self->hasData = self->serverCursors[self->currentCursor]->hasMessage();
+			}
+		}
+	}
+	self->messageVersion = self->serverCursors[self->currentCursor]->version();
+	return Void();
+}
+
+Future<Void> ILogSystem::HeapPeekCursor::getMore(TaskPriority taskID) {
+	if (more.isValid() && !more.isReady()) {
+		return more;
+	}
+
+	if (hasMessage())
+		return Void();
+
+	if (!serverCursors.size())
+		return Never();
+
+	more = heapPeekGetMore(this, taskID);
+	return more;
+}
+
+Future<Void> ILogSystem::HeapPeekCursor::onFailed() {
+	ASSERT(false);
+	return Never();
+}
+
+bool ILogSystem::HeapPeekCursor::isActive() const {
+	ASSERT(false);
+	return false;
+}
+
+bool ILogSystem::HeapPeekCursor::isExhausted() const {
+	return serverCursors[currentCursor]->isExhausted();
+}
+
+const LogMessageVersion& ILogSystem::HeapPeekCursor::version() const {
+	return messageVersion;
+}
+
+Version ILogSystem::HeapPeekCursor::getMinKnownCommittedVersion() const {
+	if (currentCursor < 0) {
+		return 0;
+	}
+	return serverCursors[currentCursor]->getMinKnownCommittedVersion();
+}
+
+Optional<UID> ILogSystem::HeapPeekCursor::getPrimaryPeekLocation() const {
+	return serverCursors[currentCursor]->getPrimaryPeekLocation();
+}
+
+Optional<UID> ILogSystem::HeapPeekCursor::getCurrentPeekLocation() const {
+	return serverCursors[currentCursor]->getCurrentPeekLocation();
+}
+
+Version ILogSystem::HeapPeekCursor::popped() const {
+	return serverCursors[0]->popped();
+}

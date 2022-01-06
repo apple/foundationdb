@@ -279,7 +279,7 @@ void LogPushData::addTxsTag() {
 void LogPushData::addTransactionInfo(SpanID const& context) {
 	TEST(!spanContext.isValid()); // addTransactionInfo with invalid SpanID
 	spanContext = context;
-	writtenLocations.clear();
+	writtenTransactionInfo = false;
 }
 
 void LogPushData::writeMessage(StringRef rawMessageWithoutLength, bool usePreviousLocations) {
@@ -291,56 +291,33 @@ void LogPushData::writeMessage(StringRef rawMessageWithoutLength, bool usePrevio
 		for (auto& tag : next_message_tags) {
 			prev_tags.push_back(tag);
 		}
-		msg_locations.clear();
-		logSystem->getPushLocations(prev_tags, msg_locations);
 		next_message_tags.clear();
 	}
 	uint32_t subseq = this->subsequence++;
 	uint32_t msgsize =
 	    rawMessageWithoutLength.size() + sizeof(subseq) + sizeof(uint16_t) + sizeof(Tag) * prev_tags.size();
-	for (int loc : msg_locations) {
-		BinaryWriter& wr = messagesWriter[loc];
-		wr << msgsize << subseq << uint16_t(prev_tags.size());
-		for (auto& tag : prev_tags)
-			wr << tag;
-		wr.serializeBytes(rawMessageWithoutLength);
-	}
+	messagesWriter << msgsize << subseq << uint16_t(prev_tags.size());
+	for (auto& tag : prev_tags)
+		messagesWriter << tag;
+	messagesWriter.serializeBytes(rawMessageWithoutLength);
 }
 
-void LogPushData::recordEmptyMessage(int loc, const Standalone<StringRef>& value) {
-	if (!isEmptyMessage[loc]) {
-		BinaryWriter w(AssumeVersion(g_network->protocolVersion()));
-		Standalone<StringRef> v = w.toValue();
-		if (value.size() > v.size()) {
-			isEmptyMessage[loc] = true;
-		}
-	}
-}
-
-float LogPushData::getEmptyMessageRatio() const {
-	auto count = std::count(isEmptyMessage.begin(), isEmptyMessage.end(), false);
-	ASSERT_WE_THINK(isEmptyMessage.size() > 0);
-	return 1.0 * count / isEmptyMessage.size();
-}
-
-bool LogPushData::writeTransactionInfo(int location, uint32_t subseq) {
-	if (!FLOW_KNOBS->WRITE_TRACING_ENABLED || logSystem->getTLogVersion() < TLogVersion::V6 ||
-	    writtenLocations.count(location) != 0) {
+bool LogPushData::writeTransactionInfo(uint32_t subseq) {
+	if (!FLOW_KNOBS->WRITE_TRACING_ENABLED || logSystem->getTLogVersion() < TLogVersion::V6 || writtenTransactionInfo) {
 		return false;
 	}
 
 	TEST(true); // Wrote SpanContextMessage to a transaction log
-	writtenLocations.insert(location);
+	writtenTransactionInfo = true;
 
-	BinaryWriter& wr = messagesWriter[location];
 	SpanContextMessage contextMessage(spanContext);
 
-	int offset = wr.getLength();
-	wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
+	int offset = messagesWriter.getLength();
+	messagesWriter << uint32_t(0) << subseq << uint16_t(prev_tags.size());
 	for (auto& tag : prev_tags)
-		wr << tag;
-	wr << contextMessage;
-	int length = wr.getLength() - offset;
-	*(uint32_t*)((uint8_t*)wr.getData() + offset) = length - sizeof(uint32_t);
+		messagesWriter << tag;
+	messagesWriter << contextMessage;
+	int length = messagesWriter.getLength() - offset;
+	*(uint32_t*)((uint8_t*)messagesWriter.getData() + offset) = length - sizeof(uint32_t);
 	return true;
 }

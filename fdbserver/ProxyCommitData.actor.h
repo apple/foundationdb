@@ -64,9 +64,6 @@ struct ProxyStats {
 	LatencySample commitLatencySample;
 	LatencyBands commitLatencyBands;
 
-	// Ratio of tlogs receiving empty commit messages.
-	LatencySample commitBatchingEmptyMessageRatio;
-
 	LatencySample commitBatchingWindowSize;
 
 	Future<Void> logger;
@@ -114,10 +111,6 @@ struct ProxyStats {
 	                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    commitLatencyBands("CommitLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
-	    commitBatchingEmptyMessageRatio("CommitBatchingEmptyMessageRatio",
-	                                    id,
-	                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                                    SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    commitBatchingWindowSize("CommitBatchingWindowSize",
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -167,6 +160,7 @@ struct ProxyCommitData {
 	IKeyValueStore* txnStateStore;
 	NotifiedVersion committedVersion; // Provided that this recovery has succeeded or will succeed, this version is
 	                                  // fully committed (durable)
+	Version knownCommittedVersion; // A version all tlog groups have durable
 	Version minKnownCommittedVersion; // No version smaller than this one will be used as the known committed version
 	                                  // during recovery
 	Version version; // The version at which txnStateStore is up to date
@@ -274,10 +268,11 @@ struct ProxyCommitData {
 	                bool firstProxy)
 	  : dbgid(dbgid), commitBatchesMemBytesCount(0),
 	    stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master), logAdapter(nullptr),
-	    txnStateStore(nullptr), committedVersion(recoveryTransactionVersion), minKnownCommittedVersion(0), version(0),
-	    lastVersionTime(0), commitVersionRequestNumber(1), mostRecentProcessedRequestNumber(0), firstProxy(firstProxy),
-	    lastCoalesceTime(0), locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN),
-	    localCommitBatchesStarted(0), getConsistentReadVersion(getConsistentReadVersion), commit(commit),
+	    txnStateStore(nullptr), committedVersion(recoveryTransactionVersion), knownCommittedVersion(0),
+	    minKnownCommittedVersion(0), version(0), lastVersionTime(0), commitVersionRequestNumber(1),
+	    mostRecentProcessedRequestNumber(0), firstProxy(firstProxy), lastCoalesceTime(0), locked(false),
+	    commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), localCommitBatchesStarted(0),
+	    getConsistentReadVersion(getConsistentReadVersion), commit(commit),
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
 	    singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), lastTxsPop(0), popRemoteTxs(false),
 	    lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0),
