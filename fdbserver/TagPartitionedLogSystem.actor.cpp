@@ -1820,6 +1820,7 @@ Optional<std::pair<Version, Version>> TagPartitionedLogSystem::getDurableVersion
 	std::vector<TLogLockResult> maxResult;
 	bool bTooManyFailures = false;
 	Version knownCommittedVersion = 0;
+	Version maxRecovery = std::numeric_limits<Version>::max();
 
 	for (int group = 0; group < logSet->logServers.size() / logSet->tLogReplicationFactor; group++) {
 		for (int t = 0; t < logSet->tLogReplicationFactor; t++) {
@@ -1829,6 +1830,7 @@ Optional<std::pair<Version, Version>> TagPartitionedLogSystem::getDurableVersion
 				current.push_back(lockInfo.replies[idx].get());
 				knownCommittedVersion =
 				    std::max(knownCommittedVersion, lockInfo.replies[idx].get().knownCommittedVersion);
+				maxRecovery = std::min(maxRecovery, lockInfo.replies[idx].get().maxRecoveryVersion);
 			}
 		}
 		if (current.size() <= logSet->tLogWriteAntiQuorum) {
@@ -1850,7 +1852,7 @@ Optional<std::pair<Version, Version>> TagPartitionedLogSystem::getDurableVersion
 
 	Version maxRecoveryVersion = invalidVersion;
 	if (lastEnd.present()) {
-		maxRecoveryVersion = calculateRecoveryVersion(maxResult);
+		maxRecoveryVersion = std::min(maxRecovery, calculateRecoveryVersion(maxResult));
 		if (maxRecoveryVersion >= lastEnd.get()) {
 			TraceEvent("GetDurableResultWaiting", dbgid)
 			    .detail("MaximumRecoveryVersion", maxRecoveryVersion)
@@ -1859,7 +1861,7 @@ Optional<std::pair<Version, Version>> TagPartitionedLogSystem::getDurableVersion
 		}
 	}
 
-	Version minRecoveryVersion = calculateRecoveryVersion(minResult);
+	Version minRecoveryVersion = std::min(maxRecovery, calculateRecoveryVersion(minResult));
 
 
 	TraceEvent("GetDurableResult", dbgid)

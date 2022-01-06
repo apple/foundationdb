@@ -810,6 +810,8 @@ ACTOR Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, 
 	TLogLockResult result;
 	result.end = stopVersion;
 	result.knownCommittedVersion = logData->knownCommittedVersion;
+	result.maxRecoveryVersion = logData->stopVersionUpdated.isSet() ? logData->stopVersionUpdated.getFuture().get()
+	                                                                : std::numeric_limits<Version>::max();
 	for (int i = 0; i < logData->versionHistory.size(); i++) {
 		result.versionHistory.push_back(logData->versionHistory.at(i));
 	}
@@ -2622,6 +2624,10 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		}
 		when(UpdateVersionRequest req = waitNext(tli.updateVersionRequest.getFuture())) {
 			logData->stopped = true;
+			if (logData->stopVersionUpdated.isSet() && logData->stopVersionUpdated.getFuture().get() < req.version) {
+				// FIXME: force a master recovery
+				ASSERT(false);
+			}
 			if (logData->stopVersionUpdated.canBeSet()) {
 				logData->stopVersionUpdated.send(req.version);
 			}

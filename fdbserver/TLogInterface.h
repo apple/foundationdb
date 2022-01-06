@@ -135,11 +135,12 @@ struct TLogLockResult {
 	constexpr static FileIdentifier file_identifier = 11822027;
 	Version end;
 	Version knownCommittedVersion;
+	Version maxRecoveryVersion;
 	std::vector<std::pair<Version, Version>> versionHistory;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, end, knownCommittedVersion, versionHistory);
+		serializer(ar, end, knownCommittedVersion, maxRecoveryVersion, versionHistory);
 	}
 };
 
