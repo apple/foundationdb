@@ -98,6 +98,7 @@ list(GET FDB_VERSION_LIST 1 FDB_MINOR)
 list(GET FDB_VERSION_LIST 2 FDB_PATCH)
 set(FDB_PACKAGE_NAME "${FDB_MAJOR}.${FDB_MINOR}")
 configure_file(${CMAKE_SOURCE_DIR}/versions.target.cmake ${CMAKE_CURRENT_BINARY_DIR}/versions.target)
+file(WRITE ${CMAKE_BINARY_DIR}/version.txt ${FDB_VERSION})
 
 message(STATUS "FDB version is ${FDB_VERSION}")
 message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
