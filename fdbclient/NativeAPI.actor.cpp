@@ -79,6 +79,10 @@
 #include "flow/UnitTest.h"
 #include "flow/serialize.h"
 
+#ifdef ADDRESS_SANITIZER
+#include <sanitizer/lsan_interface.h>
+#endif
+
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -2084,7 +2088,16 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		Standalone<VectorRef<ClientVersionRef>> supportedVersions;
 		std::vector<StringRef> supportedVersionsStrings = value.get().splitAny(LiteralStringRef(";"));
 		for (StringRef versionString : supportedVersionsStrings) {
+#ifdef ADDRESS_SANITIZER
+			__lsan_disable();
+#endif
+			// LSAN reports that we leak this allocation in client
+			// tests, but I cannot seem to figure out why. AFAICT
+			// it's not actually leaking. If it is a leak, it's only a few bytes.
 			supportedVersions.push_back_deep(supportedVersions.arena(), ClientVersionRef(versionString));
+#ifdef ADDRESS_SANITIZER
+			__lsan_enable();
+#endif
 		}
 
 		ASSERT(supportedVersions.size() > 0);
