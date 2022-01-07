@@ -6723,7 +6723,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				// if we detect that this blob worker fails, cancel the request, as otherwise load balance will
 				// retry indefinitely with one option
 				when(wait(IFailureMonitor::failureMonitor().onStateEqual(
-				    location->get(i, &BlobWorkerInterface::blobGranuleFileRequest).getEndpoint(),
+				    location->get(0, &BlobWorkerInterface::blobGranuleFileRequest).getEndpoint(),
 				    FailureStatus(true)))) {
 					printf("readBlobGranules got BW %s failed\n", workerId.toString().c_str());
 
@@ -7141,8 +7141,11 @@ Version ChangeFeedData::getVersion() {
 #define DEBUG_CF_WAIT_VERSION invalidVersion
 #define DEBUG_CF_VERSION(v) DEBUG_CF_START_VERSION <= v&& v <= DEBUG_CF_END_VERSION
 
+// This function is essentially bubbling the information about what has been processed from the server through the
+// change feed client. First it makes sure the server has returned all mutations up through the target version, the
+// native api has consumed and processed, them, and then the fdb client has consumed all of the mutations.
 ACTOR Future<Void> changeFeedWaitLatest(Reference<ChangeFeedData> self, Version version) {
-	// first, wait on SS to have sent up through version
+	// wait on SS to have sent up through version
 	int desired = 0;
 	int waiting = 0;
 	std::vector<Future<Void>> allAtLeast;
@@ -7190,9 +7193,23 @@ ACTOR Future<Void> changeFeedWaitLatest(Reference<ChangeFeedData> self, Version 
 		wait(delay(0));
 	}
 
+	// wait for merge cursor to fully process everything it read from its individual promise streams, either until it is
+	// done processing or we have up through the desired version
+	while (self->lastReturnedVersion.get() < self->maxSeenVersion && self->lastReturnedVersion.get() < version) {
+		Version target = std::min(self->maxSeenVersion, version);
+		if (DEBUG_CF_WAIT_VERSION == version) {
+			fmt::print("CFW {0})     WaitLatest: waiting merge lastReturned >= {1}\n", version, target);
+		}
+		wait(self->lastReturnedVersion.whenAtLeast(target));
+		if (DEBUG_CF_WAIT_VERSION == version) {
+			fmt::print(
+			    "CFW {0})     WaitLatest: got merge lastReturned {1}\n", version, self->lastReturnedVersion.get());
+		}
+	}
+
 	// then, wait for client to have consumed up through version
 	if (self->maxSeenVersion >= version) {
-		// merge cursor has something buffered but has not yet sent it to self->mutations, just wait for
+		// merge cursor may have something buffered but has not yet sent it to self->mutations, just wait for
 		// lastReturnedVersion
 		if (DEBUG_CF_WAIT_VERSION == version) {
 			fmt::print("CFW {0})     WaitLatest: maxSeenVersion -> waiting lastReturned\n", version);
@@ -7293,13 +7310,20 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 						           feedData->notAtLatest.get(),
 						           rep.minStreamVersion);
 					}
+
+					if (rep.mutations.back().version > feedData->maxSeenVersion) {
+						feedData->maxSeenVersion = rep.mutations.back().version;
+					}
+
 					state int resultLoc = 0;
 					while (resultLoc < rep.mutations.size()) {
 						wait(results.onEmpty());
 						if (DEBUG_CF_VERSION(rep.mutations[resultLoc].version)) {
-							fmt::print("  single {0} {1}:   onEmpty, sending {2} ({3})\n",
+							fmt::print("  single {0} {1}:   sending {2}/{3} {4} ({5})\n",
 							           idx,
 							           interf.id().toString().substr(0, 4),
+							           resultLoc,
+							           rep.mutations.size(),
 							           rep.mutations[resultLoc].version,
 							           rep.mutations[resultLoc].mutations.size());
 						}
@@ -7318,9 +7342,6 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 							ASSERT(rep.mutations[resultLoc].mutations.empty());
 						}
 						resultLoc++;
-					}
-					if (rep.mutations.back().version > feedData->maxSeenVersion) {
-						feedData->maxSeenVersion = rep.mutations.back().version;
 					}
 					nextVersion = rep.mutations.back().version + 1;
 
@@ -7421,7 +7442,9 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 				}
 
 				if (nextOut.back().version < results->lastReturnedVersion.get()) {
-					printf("ERROR: merge cursor pushing next out <= lastReturnedVersion");
+					fmt::print("ERROR: merge cursor pushing next out {} <= lastReturnedVersion {}\n",
+					           nextOut.back().version,
+					           results->lastReturnedVersion.get());
 				}
 				// We can get an empty version pushed through the stream if whenAtLeast is called. Ignore
 				// it
@@ -7477,6 +7500,11 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 			// it
 
 			if (!nextOut.back().mutations.empty()) {
+				if (nextOut.back().version < results->lastReturnedVersion.get()) {
+					fmt::print("Merged all version went backwards!! mutation version {} < lastReturnedVersion {}\n",
+					           nextOut.back().version,
+					           results->lastReturnedVersion.get());
+				}
 				ASSERT(nextOut.back().version >= results->lastReturnedVersion.get());
 				results->mutations.send(nextOut);
 				wait(results->mutations.onEmpty());

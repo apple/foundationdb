@@ -45,7 +45,7 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 #define BW_DEBUG true
-#define BW_REQUEST_DEBUG true
+#define BW_REQUEST_DEBUG false
 
 struct GranuleStartState {
 	UID granuleID;
