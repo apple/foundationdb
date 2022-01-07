@@ -797,10 +797,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		Reference<Histogram> readPrefixGetHistogram;
 
 		explicit Reader(DB& db)
-		  : db(db),
-		    readRangeLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                      ROCKSDB_READRANGE_LATENCY_HISTOGRAM,
-		                                                      Histogram::Unit::microseconds)),
+		  : db(db), readRangeLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                              ROCKSDB_READRANGE_LATENCY_HISTOGRAM,
+		                                                              Histogram::Unit::microseconds)),
 		    readValueLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
 		                                                      ROCKSDB_READVALUE_LATENCY_HISTOGRAM,
 		                                                      Histogram::Unit::microseconds)),
@@ -1417,9 +1416,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-	void disposeShard(KeyRangeRef range) override {
+	Future<Void> disposeShard(KeyRangeRef range) override {
 		if (!SERVER_KNOBS->ROCKSDB_ENABLE_SHARDING) {
-			return;
+			return Void();
 		}
 
 		if (writeBatches == nullptr) {
@@ -1434,12 +1433,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    .detail("Error", "ShardMismatch")
 			    .detail("Range", range.begin.toString() + " : " + range.end.toString())
 			    .detail("ExistingRange", shard.range().begin.toString() + " : " + shard.range().end.toString());
-			return;
+			return Void();
 		}
 
 		if (!shard.value()) {
 			TraceEvent(SevError, "RocksDB").detail("Method", "DisposeShard").detail("Error", "Shard not exist.");
-			return;
+			return Void();
 		}
 
 		// This may cause multiple fragments in metadata, but will not affect correctness.
@@ -1456,6 +1455,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		deletePendingShards->push_back(shard.value());
 		// Should remove exactly one shard.
 		shardMap.rawErase(range);
+
+		return Void();
 	}
 
 	DB db = nullptr;
