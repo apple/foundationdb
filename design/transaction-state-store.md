@@ -22,9 +22,9 @@ inconsistently in the code base as "metadata mutations" in commit proxies and
 
 ## Why do we need transaction state store?
 
-When bootstraping an FDB cluster, the new master (i.e., the sequencer) role recruits a
+When bootstraping an FDB cluster, the cluster controller (CC) role recruits a
 new transaction system and initializes them. In particular, the transaction state store
-is first read by the master from previous generation's log system, and then broadcast to
+is first read by the CC from previous generation's log system, and then broadcast to
 all commit proxies of the new transaction system. After initializing `txnStateStore`, these
 commit proxies know how to assign mutations with storage server tags: `txnStateStore`
 contains the shard map from key range to storage servers; commit proxies use the shard
@@ -38,7 +38,7 @@ proxy could result in a situation where different proxies think they should send
 mutation to different storage servers, thus causing data corruptions.
 
 FDB solves this problem by state machine replication: all commit proxies start with the
-same `txnStateStore` data (from master broadcast), and apply the same sequence of mutations.
+same `txnStateStore` data (from CC broadcast), and apply the same sequence of mutations.
 Because commits happen at all proxies, it is difficult to maintain the same order as well
 as minimize the communication among them. Fortunately, every transaction has to send a
 conflict resolution request to all Resolvers and they process transactions in strict order
@@ -73,7 +73,7 @@ tag `txsTag{ tagLocalitySpecial, 1 }` for `TLogVersion::V3` (FDB 6.1) or a rando
 `txnStateStore`.
 
 At TLogs, all mutation data are indexed by tags. "txs" tag data is special, since it is
-only peeked by the master during the transaction system recovery.
+only peeked by the cluster controller (CC) during the transaction system recovery.
 See [TLog Spilling doc](tlog-spilling.md.html) for more detailed discussion on the
 topic of spilling "txs" data. In short, `txsTag` is spilled by value.
 "txs" tag data is indexed and stored in both primary TLogs and satellite TLogs.
@@ -88,9 +88,15 @@ always be ready. Writes to `txnStateStore` are first buffered by the `LogSystemD
 in memory. After a commit proxy pushes transaction data to the log system and the data
 becomes durable, the proxy clears the buffered data in `LogSystemDiskQueueAdapter`.
 
-* Master reads `txnStateStore` from old log system: https://github.com/apple/foundationdb/blob/6281e647784e74dccb3a6cb88efb9d8b9cccd376/fdbserver/masterserver.actor.cpp#L928-L931
+Note `KeyValueStoreMemory` periodically checkpoints its data to disks to speed up its
+recovery. For `txnStateStore`, this checkpoint allows versions before it to be popped,
+i.e., "txs" tag data on the log system can be reclaimed so that log queue does not grow
+unbounded. Thus, the `txsPoppedVersion` is the version right before a checkpoint, and
+during recovery, `txnStateStore` is recovered by reading all data from this version.
 
-* Master broadcasts `txnStateStore` to commit proxies: https://github.com/apple/foundationdb/blob/6281e647784e74dccb3a6cb88efb9d8b9cccd376/fdbserver/masterserver.actor.cpp#L940-L968
+* CC reads `txnStateStore` from old log system starting at `txsPoppedVersion`: https://github.com/apple/foundationdb/blob/6e31821bf578073409087779c567e26de317acd5/fdbserver/ClusterRecovery.actor.cpp#L1418
+
+* CC broadcasts `txnStateStore` to commit proxies: https://github.com/apple/foundationdb/blob/6e31821bf578073409087779c567e26de317acd5/fdbserver/ClusterRecovery.actor.cpp#L1286-L1313
 
 * Commit proxies receive txnStateStore broadcast and builds the `keyInfo` map: https://github.com/apple/foundationdb/blob/6281e647784e74dccb3a6cb88efb9d8b9cccd376/fdbserver/CommitProxyServer.actor.cpp#L1886-L1927
   * Look up `keyInfo` map for `GetKeyServerLocationsRequest`: https://github.com/apple/foundationdb/blob/6281e647784e74dccb3a6cb88efb9d8b9cccd376/fdbserver/CommitProxyServer.actor.cpp#L1464
