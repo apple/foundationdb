@@ -22,6 +22,7 @@
 #define FDBSERVER_IKEYVALUESTORE_H
 #pragma once
 
+#include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
 
@@ -86,11 +87,15 @@ public:
 
 	virtual void enableSnapshot() {}
 
-	virtual Future<Void> addShard(KeyRangeRef range, UID uid) {return Future<Void>();}
+	virtual Future<Void> addShard(KeyRangeRef range, UID uid) { return Future<Void>(); }
 
-	virtual void persistShard(KeyRangeRef range) {}
+	virtual void persistShard(KeyRangeRef range) {} // To be removed.
 
-	virtual void disposeShard(KeyRangeRef range) {}
+	virtual std::vector<MutationRef> getPersistShardMutation(KeyRangeRef range) { return std::vector<MutationRef>(); }
+
+	virtual Future<Void> disposeShard(KeyRangeRef range) { return Future<Void>(); }
+
+	virtual std::vector<MutationRef> getDisposeShardMutation(KeyRangeRef range) { return std::vector<MutationRef>(); };
 
 	/*
 	Concurrency contract
