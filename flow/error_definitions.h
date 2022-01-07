@@ -204,6 +204,7 @@ ERROR( key_not_in_tenant, 2132, "The specified key is not in the key-range repre
 ERROR( key_range_locked, 2133, "The key-range is locked" )
 ERROR( tenant_already_exists, 2134, "A tenant with the given name already exists" )
 ERROR( tenant_not_empty, 2135, "Cannot delete a non-empty tenant" )
+ERROR( invalid_tenant_name, 2136, "Tenant name cannot begin with \\xff");
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
