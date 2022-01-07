@@ -647,7 +647,6 @@ struct InitializeBackupRequest {
 // FIXME: Rename to InitializeMasterRequest, etc
 struct RecruitMasterRequest {
 	constexpr static FileIdentifier file_identifier = 12684574;
-	Arena arena;
 	LifetimeToken lifetime;
 	bool forceRecovery;
 	ReplyPromise<struct MasterInterface> reply;
@@ -657,7 +656,7 @@ struct RecruitMasterRequest {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, lifetime, forceRecovery, reply, arena);
+		serializer(ar, lifetime, forceRecovery, reply);
 	}
 };
 
