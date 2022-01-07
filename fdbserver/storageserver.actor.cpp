@@ -4358,6 +4358,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		setAvailableStatus(data,
 		                   keys,
 		                   true); // keys will be available when getLatestVersion()==transferredVersion is durable
+		// Persist shard here.
 
 		// Note that since it receives a pointer to FetchInjectionInfo, the thread does not leave this actor until this
 		// point.
@@ -4384,13 +4385,15 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		if (e.code() == error_code_actor_cancelled && !data->shuttingDown && shard->phase >= AddingShard::Fetching) {
 			if (shard->phase < AddingShard::Waiting) {
-				data->storage.clearRange(keys);
+				data->storage.clearRange(keys); // Should be replaced by drop shard.
 				data->byteSampleApplyClear(keys, invalidVersion);
 			} else {
 				ASSERT(data->data().getLatestVersion() > data->version.get());
 				removeDataRange(
 				    data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->shards, keys);
 				setAvailableStatus(data, keys, false);
+				// Drop shard metadata here.
+
 				// Prevent another, overlapping fetchKeys from entering the Fetching phase until
 				// data->data().getLatestVersion() is durable
 				data->newestDirtyVersion.insert(keys, data->data().getLatestVersion());
@@ -4588,6 +4591,7 @@ void changeServerKeys(StorageServer* data,
 				changeNewestAvailable.emplace_back(range, latestVersion);
 				data->addShard(ShardInfo::newReadWrite(range, data));
 				setAvailableStatus(data, range, true);
+				// Create and persist a new shard??? May already exist???
 			} else {
 				auto& shard = data->shards[range.begin];
 				if (!shard->assigned() || shard->keys != range)
@@ -4615,6 +4619,7 @@ void changeServerKeys(StorageServer* data,
 	for (auto r = removeRanges.begin(); r != removeRanges.end(); ++r) {
 		removeDataRange(data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->shards, *r);
 		setAvailableStatus(data, *r, false);
+		// drop and delete shard metadata
 	}
 
 	// Clear the moving-in empty range, and set it available at the latestVersion.
@@ -4623,6 +4628,7 @@ void changeServerKeys(StorageServer* data,
 		data->addMutation(data->data().getLatestVersion(), true, clearRange, range, data->updateEagerReads);
 		data->newestAvailableVersion.insert(range, latestVersion);
 		setAvailableStatus(data, range, true);
+		// create and persist empty shard.
 	}
 	validate(data);
 
