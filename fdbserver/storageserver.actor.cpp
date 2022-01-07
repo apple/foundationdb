@@ -4244,6 +4244,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// fetchKeys.
 					shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, nfk), shard));
 					shard->server->addShard(ShardInfo::newAdding(data, KeyRangeRef(nfk, keys.end)));
+					shard->server->storage.addShard(KeyRangeRef(nfk, keys.end),
+					                                deterministicRandom()->randomUniqueID());
 					shard = data->shards.rangeContaining(keys.begin).value()->adding.get();
 					warningLogger = logFetchKeysWarning(shard);
 					AddingShard* otherShard = data->shards.rangeContaining(nfk).value()->adding.get();
@@ -4382,6 +4384,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		TraceEvent(SevDebug, interval.end(), data->thisServerID);
 	} catch (Error& e) {
 		TraceEvent(SevDebug, interval.end(), data->thisServerID).error(e, true).detail("Version", data->version.get());
+
+		// Note at this moment, the pyhsical shard meta data is not persisted, however, the physical shard could
+		// have been created.
+		data->storage.disposeShard(keys);
 
 		if (e.code() == error_code_actor_cancelled && !data->shuttingDown && shard->phase >= AddingShard::Fetching) {
 			if (shard->phase < AddingShard::Waiting) {
@@ -4543,6 +4549,8 @@ void changeServerKeys(StorageServer* data,
 		else {
 			ASSERT(ranges[i].value->adding);
 			data->addShard(ShardInfo::newAdding(data, ranges[i]));
+
+			data->storage.addShard(ranges[i], deterministicRandom()->randomUniqueID());
 			TEST(true); // ChangeServerKeys reFetchKeys
 		}
 	}
@@ -4583,6 +4591,7 @@ void changeServerKeys(StorageServer* data,
 			data->addShard(ShardInfo::newNotAssigned(range));
 			data->watches.triggerRange(range.begin, range.end);
 		} else if (!dataAvailable) {
+			data->storage.addShard(ranges, deterministicRandom()->randomUniqueID());
 			// SOMEDAY: Avoid restarting adding/transferred shards
 			if (version == 0) { // bypass fetchkeys; shard is known empty at version 0
 				TraceEvent("ChangeServerKeysInitialRange", data->thisServerID)
@@ -4618,6 +4627,7 @@ void changeServerKeys(StorageServer* data,
 	ranges.clear();
 	for (auto r = removeRanges.begin(); r != removeRanges.end(); ++r) {
 		removeDataRange(data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->shards, *r);
+		data->storage.disposeShard(*r);
 		setAvailableStatus(data, *r, false);
 		// drop and delete shard metadata
 	}
@@ -4627,6 +4637,9 @@ void changeServerKeys(StorageServer* data,
 		MutationRef clearRange(MutationRef::ClearRange, range.begin, range.end);
 		data->addMutation(data->data().getLatestVersion(), true, clearRange, range, data->updateEagerReads);
 		data->newestAvailableVersion.insert(range, latestVersion);
+		data->storage.disposeShard(*r);
+		data->storage.addShard(range, deterministicRandom()->randomUniqueID());
+		// We don't need to call setAvailableStatus for the potentially existing shard?
 		setAvailableStatus(data, range, true);
 		// create and persist empty shard.
 	}

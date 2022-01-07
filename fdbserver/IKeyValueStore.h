@@ -87,13 +87,15 @@ public:
 
 	virtual void enableSnapshot() {}
 
-	virtual Future<Void> addShard(KeyRangeRef range, UID uid) { return Future<Void>(); }
+	// The new shard should not overlap with any existing shard, unless both are move-in shard, e.g., when reFetch happens.
+	virtual void addShard(KeyRangeRef range, UID uid) {}
 
 	virtual void persistShard(KeyRangeRef range) {} // To be removed.
 
+	// TODO: This can be removed once KV shard map is merged with SS's shard map.
 	virtual std::vector<MutationRef> getPersistShardMutation(KeyRangeRef range) { return std::vector<MutationRef>(); }
 
-	virtual Future<Void> disposeShard(KeyRangeRef range) { return Future<Void>(); }
+	virtual void disposeShard(KeyRangeRef range) {}
 
 	virtual std::vector<MutationRef> getDisposeShardMutation(KeyRangeRef range) { return std::vector<MutationRef>(); };
 
