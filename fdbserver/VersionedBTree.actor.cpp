@@ -1194,17 +1194,17 @@ public:
 			state int pageIdx = 0;
 			loop {
 				// Position the page pointer to current page in the extent
-				state Reference<ArenaPage> page =
-				    c.page->subPage(pageIdx++ * self->pager->getPhysicalPageSize(), self->pager->getLogicalPageSize());
+				state Reference<ArenaPage> page = c.page->getSubPage(pageIdx++ * self->pager->getPhysicalPageSize(),
+				                                                     self->pager->getLogicalPageSize());
 				debug_printf("FIFOQueue::Cursor(%s) peekALLExt %s. Offset %d\n",
 				             c.toString().c_str(),
 				             toString(c.pageID).c_str(),
 				             c.pageID * self->pager->getPhysicalPageSize());
 
 				try {
-					page->postRead1(c.pageID);
+					page->postReadHeader(c.pageID);
 					// These pages are not encrypted
-					page->postRead2(c.pageID);
+					page->postReadPayload(c.pageID);
 				} catch (Error& e) {
 					TraceEvent(SevError, "RedwoodChecksumFailed")
 					    .error(e)
@@ -1212,7 +1212,7 @@ public:
 					    .detail("PageSize", self->pager->getPhysicalPageSize())
 					    .detail("Offset", c.pageID * self->pager->getPhysicalPageSize());
 
-					debug_printf("FIFOQueue::Cursor(%s) peekALLExt subPage error=%s for %s. Offset %d ",
+					debug_printf("FIFOQueue::Cursor(%s) peekALLExt getSubPage error=%s for %s. Offset %d ",
 					             c.toString().c_str(),
 					             e.what(),
 					             toString(c.pageID).c_str(),
@@ -2962,12 +2962,12 @@ public:
 		             readBytes);
 
 		try {
-			page->postRead1(pageID);
+			page->postReadHeader(pageID);
 			if (self->pEncryptionKeyProvider != nullptr && page->isEncrypted()) {
-				Key secret = wait(self->pEncryptionKeyProvider->getSecretByKeyID(page->getKeyID()));
-				page->setSecret(secret);
+				EncryptionKey k = wait(self->pEncryptionKeyProvider->getByID(page->encryptionKey.id.orDefault(0)));
+				page->encryptionKey = k;
 			}
-			page->postRead2(pageID);
+			page->postReadPayload(pageID);
 			debug_printf("DWALPager(%s) op=readPhysicalVerifyComplete %s ptr=%p bytes=%d\n",
 			             self->filename.c_str(),
 			             toString(pageID).c_str(),
@@ -3031,12 +3031,12 @@ public:
 		             pageIDs.size() * blockSize);
 
 		try {
-			page->postRead1(pageIDs.front());
+			page->postReadHeader(pageIDs.front());
 			if (self->pEncryptionKeyProvider != nullptr && page->isEncrypted()) {
-				Key secret = wait(self->pEncryptionKeyProvider->getSecretByKeyID(page->getKeyID()));
-				page->setSecret(secret);
+				EncryptionKey k = wait(self->pEncryptionKeyProvider->getByID(page->encryptionKey.id.orDefault(0)));
+				page->encryptionKey = k;
 			}
-			page->postRead2(pageIDs.front());
+			page->postReadPayload(pageIDs.front());
 		} catch (Error& e) {
 			// For header pages, error is a warning because recovery may still be possible
 			TraceEvent(SevError, "RedwoodPageError")
@@ -4644,23 +4644,28 @@ struct BTreePage {
 
 #pragma pack(push, 1)
 	struct {
+		// treeOffset allows for newer versions to have additional fields but older code to read them
+		uint8_t treeOffset;
 		uint8_t height;
 		uint32_t kvBytes;
 	};
+
 #pragma pack(pop)
 
-	int size() const {
-		const BinaryTree* t = tree();
-		return (uint8_t*)t - (uint8_t*)this + t->size();
+	void init(unsigned int height, unsigned int kvBytes) {
+		treeOffset = sizeof(BTreePage);
+		this->height = height;
+		this->kvBytes = kvBytes;
 	}
 
+	int size() const { return treeOffset + tree()->size(); }
+
+	uint8_t* treeBuffer() const { return (uint8_t*)this + treeOffset; }
+	BinaryTree* tree() { return (BinaryTree*)treeBuffer(); }
+	BinaryTree* tree() const { return (BinaryTree*)treeBuffer(); }
+	ValueTree* valueTree() const { return (ValueTree*)treeBuffer(); }
+
 	bool isLeaf() const { return height == 1; }
-
-	BinaryTree* tree() { return (BinaryTree*)(this + 1); }
-
-	BinaryTree* tree() const { return (BinaryTree*)(this + 1); }
-
-	ValueTree* valueTree() const { return (ValueTree*)(this + 1); }
 
 	std::string toString(bool write,
 	                     BTreePageIDRef id,
@@ -4778,16 +4783,13 @@ public:
 
 	virtual ~XOREncryptionKeyProvider() {}
 
-	Future<Key> getSecretByKeyID(uint64_t keyID) override {
+	virtual Future<EncryptionKey> getByID(KeyID keyID) override {
 		uint8_t secret = ~(uint8_t)keyID ^ xorWith;
-		return Key(KeyRef(&secret, 1));
+		return EncryptionKey(EncryptionKeyRef(KeyRef(&secret, 1), keyID));
 	}
 
-	virtual Future<KeyIDWithSecret> selectKey(const KeyRef begin, const KeyRef end) override {
-		KeyIDWithSecret ks;
-		ks.id = end.empty() ? 0 : *(end.end() - 1);
-		ks.secret = getSecretByKeyID(ks.id).get();
-		return ks;
+	virtual Future<EncryptionKey> getByRange(const KeyRef begin, const KeyRef end) override {
+		return getByID(end.empty() ? 0 : *(end.end() - 1));
 	}
 
 	uint8_t xorWith;
@@ -4972,14 +4974,12 @@ public:
 		state Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 		page->init(self->m_encodingType, PageType::BTreeNode, 1);
 		if (self->m_encryptionKeyProvider != nullptr && page->isEncrypted()) {
-			KeyIDWithSecret ks = wait(self->m_encryptionKeyProvider->selectKey(dbBegin.key, dbEnd.key));
-			page->setKeyID(ks.id);
-			page->setSecret(ks.secret);
+			EncryptionKey k = wait(self->m_encryptionKeyProvider->getByRange(dbBegin.key, dbEnd.key));
+			page->encryptionKey = k;
 		}
 
 		BTreePage* btpage = (BTreePage*)page->mutateData();
-		btpage->height = 1;
-		btpage->kvBytes = 0;
+		btpage->init(1, 0);
 		btpage->tree()->build(page->dataSize(), nullptr, nullptr, nullptr, nullptr);
 		return page;
 	}
@@ -5013,7 +5013,8 @@ public:
 
 				// Start reading the page, without caching
 				entries.emplace_back(q.get(),
-				                     self->readPage(PagerEventReasons::LazyClear,
+				                     self->readPage(self,
+				                                    PagerEventReasons::LazyClear,
 				                                    q.get().height,
 				                                    snapshot,
 				                                    q.get().pageID,
@@ -5726,16 +5727,14 @@ private:
 			           (pagesToBuild[pageIndex].blockCount == 1) ? PageType::BTreeNode : PageType::BTreeSuperNode,
 			           height);
 			if (self->m_encryptionKeyProvider != nullptr && page->isEncrypted()) {
-				KeyIDWithSecret ks =
-				    wait(self->m_encryptionKeyProvider->selectKey(pageLowerBound.key, pageUpperBound.key));
-				page->setKeyID(ks.id);
-				page->setSecret(ks.secret);
+				EncryptionKey k =
+				    wait(self->m_encryptionKeyProvider->getByRange(pageLowerBound.key, pageUpperBound.key));
+				page->encryptionKey = k;
 			}
 
 			auto& p = pagesToBuild[pageIndex];
 			BTreePage* btPage = (BTreePage*)page->mutateData();
-			btPage->height = height;
-			btPage->kvBytes = p.kvBytes;
+			btPage->init(height, p.kvBytes);
 			g_redwoodMetrics.kvSizeWritten->sample(p.kvBytes);
 
 			debug_printf("Building tree for %s\nlower: %s\nupper: %s\n",
@@ -5861,7 +5860,8 @@ private:
 		return records;
 	}
 
-	ACTOR static Future<Reference<const ArenaPage>> readPage(PagerEventReasons reason,
+	ACTOR static Future<Reference<const ArenaPage>> readPage(VersionedBTree* self,
+	                                                         PagerEventReasons reason,
 	                                                         unsigned int level,
 	                                                         Reference<IPagerSnapshot> snapshot,
 	                                                         BTreePageIDRef id,
@@ -5890,6 +5890,16 @@ private:
 		auto& metrics = g_redwoodMetrics.level(btPage->height).metrics;
 		metrics.pageRead += 1;
 		metrics.pageReadExt += (id.size() - 1);
+
+		// If BTree encryption is enabled, pages read must be encrypted.  This prevents an attack where an
+		// unencrypted page is written in place of an encrypted page.
+		if (page->isEncrypted() != (self->m_encryptionKeyProvider != nullptr)) {
+			Error e = page_unexpected_encryption_mode();
+			TraceEvent(SevError, "RedwoodBTreeEncryptionMismatch")
+			    .error(e)
+			    .detail("PhysicalPageID", page->getPhysicalPageID());
+			throw e;
+		}
 
 		return std::move(page);
 	}
@@ -6338,7 +6348,7 @@ private:
 		}
 
 		state Reference<const ArenaPage> page =
-		    wait(readPage(PagerEventReasons::Commit, height, batch->snapshot, rootID, height, false, true));
+		    wait(readPage(self, PagerEventReasons::Commit, height, batch->snapshot, rootID, height, false, true));
 
 		// If the page exists in the cache, it must be copied before modification.
 		// That copy will be referenced by pageCopy, as page must stay in scope in case anything references its
@@ -7212,7 +7222,8 @@ public:
 
 		Future<Void> pushPage(const BTreePage::BinaryTree::Cursor& link) {
 			debug_printf("pushPage(link=%s)\n", link.get().toString(false).c_str());
-			return map(readPage(reason,
+			return map(readPage(btree,
+			                    reason,
 			                    path.back().btPage()->height - 1,
 			                    pager,
 			                    link.get().getChildPage(),
@@ -7231,7 +7242,7 @@ public:
 
 		Future<Void> pushPage(BTreePageIDRef id) {
 			debug_printf("pushPage(root=%s)\n", ::toString(id).c_str());
-			return map(readPage(reason, btree->m_pHeader->height, pager, id, ioMaxPriority, false, true),
+			return map(readPage(btree, reason, btree->m_pHeader->height, pager, id, ioMaxPriority, false, true),
 			           [=](Reference<const ArenaPage> p) {
 #if REDWOOD_DEBUG
 				           path.push_back({ p, getCursor(p, dbBegin, dbEnd), id });

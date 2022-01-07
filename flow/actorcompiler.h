@@ -79,4 +79,5 @@ T waitNext(const FutureStream<T>&);
 #ifndef VALGRIND
 #define VALGRIND_MAKE_MEM_UNDEFINED(x, y)
 #define VALGRIND_MAKE_MEM_DEFINED(x, y)
+#define VALGRIND_CHECK_MEM_IS_DEFINED(x, y) 0
 #endif

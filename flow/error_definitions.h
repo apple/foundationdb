@@ -89,6 +89,7 @@ ERROR( page_header_checksum_failed, 1065, "Page header checksum failed" )
 ERROR( page_header_version_not_supported, 1066, "Page header checksum failed" )
 ERROR( page_encoding_not_supported, 1067, "Page encoding type is not supported or not valid" )
 ERROR( page_decoding_failed, 1068, "Page content decoding failed" )
+ERROR( page_unexpected_encryption_mode, 1069, "Page content decoding failed" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )

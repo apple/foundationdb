@@ -96,17 +96,28 @@ enum PageType : uint8_t {
 typedef uint64_t KeyID;
 
 // Encryption key and secret string
-struct KeyIDWithSecret {
-	KeyID id;
-	Key secret;
+struct EncryptionKeyRef {
+	EncryptionKeyRef(){};
+	EncryptionKeyRef(StringRef secret, Optional<KeyID> keyID = {}) : secret(secret), id(keyID) {}
+	EncryptionKeyRef(Arena& arena, const EncryptionKeyRef& toCopy) : secret(arena, toCopy.secret), id(toCopy.id) {}
+	int expectedSize() const { return secret.size(); }
+
+	StringRef secret;
+	Optional<KeyID> id;
 };
+typedef Standalone<EncryptionKeyRef> EncryptionKey;
 
 // Interface used by pager to get encryption keys by ID when reading pages from disk
 // and by the BTree to get encryption keys to use for new pages
 class IEncryptionKeyProvider {
 public:
-	virtual Future<Key> getSecretByKeyID(KeyID keyID) = 0;
-	virtual Future<KeyIDWithSecret> selectKey(const KeyRef begin, const KeyRef end) = 0;
+	virtual ~IEncryptionKeyProvider() {}
+
+	// Get encryption key based on key ID for reading.  Returned key ID must match input.
+	virtual Future<EncryptionKey> getByID(KeyID keyID) = 0;
+
+	// Get encryption key that should be used for a given data range.
+	virtual Future<EncryptionKey> getByRange(const KeyRef begin, const KeyRef end) = 0;
 };
 
 // ArenaPage represents a data page meant to be stored on disk, located in a block of
@@ -114,15 +125,17 @@ public:
 //
 // Page Format:
 //    VersionHeader - describes main header version, encoding type, and offsets of subheaders and payload.
-//    MainHeader - structure based on header version
-//    EncodingHeader - structure based on encoding type
+//    MainHeader - structure based on header version.  It is responsible for protecting all bytes
+//                 of VersionHeader, MainHeader, and EncodingHeader with some sort of checksum.
+//    EncodingHeader - structure based on encoding type.  It is responsible for protecting and
+//                     possibly encrypting all payload bytes.
 //    Payload - User accessible bytes, protected and possibly encrypted based on the encoding
 //
 // preWrite() must be called before writing a page to disk to update checksums and encrypt as needed
 // After reading a page from disk,
-//   postRead1() must be called to verify the verison, main, and encoding headers
-//   postRead2() must be called, after potentially setting encryption secret, to verify and possibly
-//               descrypt the payload
+//   postReadHeader() must be called to verify the verison, main, and encoding headers
+//   postReadPayload() must be called, after potentially setting encryption secret, to verify and possibly
+//                     decrypt the payload
 class ArenaPage : public ReferenceCounted<ArenaPage>, public FastAllocated<ArenaPage> {
 public:
 	// This is the header version that new page init() calls will use.
@@ -136,10 +149,8 @@ public:
 		if (bufferSize > 0) {
 			buffer = (uint8_t*)arena.allocate4kAlignedBuffer(bufferSize);
 
-#ifdef VALGRIND
 			// Mark any unused page portion defined
 			VALGRIND_MAKE_MEM_DEFINED(buffer + logicalSize, bufferSize - logicalSize);
-#endif
 		} else {
 			buffer = nullptr;
 		}
@@ -151,7 +162,7 @@ public:
 		}
 	}
 
-	// Before using these, either init() or postRead1 and postRead2() must be called
+	// Before using these, either init() or postReadHeader and postReadPayload() must be called
 	const uint8_t* data() const { return pPayload; }
 	uint8_t* mutateData() const { return (uint8_t*)pPayload; }
 	int dataSize() const { return payloadSize; }
@@ -166,6 +177,7 @@ public:
 	// cannot change, but new header versions and encoding types can be added and existing
 	// header versions and encoding type headers could change size as offset information
 	// is stored to enable efficient jumping to the encoding header or payload.
+	// Page members are only initialized in init()
 	struct Page {
 		uint8_t headerVersion;
 		EncodingType encodingType;
@@ -192,14 +204,12 @@ public:
 		uint8_t* getPayload() const { return (uint8_t*)this + payloadOffset; }
 	};
 
-	// Header version 1
-	// The header is responsible for protecting all Page bytes outside of the payload.
-	// HeaderV1 does so with a 64-bit XXHash checksum
-	//
+	// Redwood header version 1
+	// Protects all headers with a 64-bit XXHash checksum
 	// Most other fields are forensic in nature and are not required to be set for correct
 	// behavior but they can faciliate forensic investigation of data on disk.  Some of them
 	// could be used for sanity checks at runtime.
-	struct HeaderV1 {
+	struct RedwoodHeaderV1 {
 		PageType pageType;
 		// The meaning of pageSubType is based on pageType
 		//   For Queue pages, pageSubType is QueueID
@@ -220,14 +230,14 @@ public:
 		Version writeVersion;
 
 		// Update checksum
-		void update(uint8_t* headerBytes, int len) {
+		void updateChecksum(uint8_t* headerBytes, int len) {
 			// Checksum is within the checksum input so clear it first
 			checksum = 0;
 			checksum = XXH3_64bits(headerBytes, len);
 		}
 
 		// Verify checksum
-		void verify(uint8_t* headerBytes, int len) {
+		void verifyChecksum(uint8_t* headerBytes, int len) {
 			// Checksum is within the checksum input so save it and restore it afterwards
 			XXH64_hash_t saved = checksum;
 			checksum = 0;
@@ -292,7 +302,7 @@ public:
 
 	// Get the usable size for a new page of pageSize using HEADER_WRITE_VERSION with encoding type t
 	static int getUsableSize(int pageSize, EncodingType t) {
-		return pageSize - sizeof(Page) - sizeof(HeaderV1) - encodingHeaderSize(t);
+		return pageSize - sizeof(Page) - sizeof(RedwoodHeaderV1) - encodingHeaderSize(t);
 	}
 
 	// Initialize the header for a new page so that the payload can be written to
@@ -301,15 +311,17 @@ public:
 	//       HEADER_WRITE_VERSION main header and the given encoding type.
 	//       Payload can be written to with mutateData() and dataSize()
 	void init(EncodingType t, PageType pageType, uint8_t pageSubType) {
-		page->headerVersion = HEADER_WRITE_VERSION;
-		page->encodingHeaderOffset = sizeof(Page) + sizeof(HeaderV1);
-		page->encodingType = t;
-		page->payloadOffset = page->encodingHeaderOffset + encodingHeaderSize(t);
+		// Carefully cast away constness to modify page header
+		Page* p = const_cast<Page*>(page);
+		p->headerVersion = HEADER_WRITE_VERSION;
+		p->encodingHeaderOffset = sizeof(Page) + sizeof(RedwoodHeaderV1);
+		p->encodingType = t;
+		p->payloadOffset = page->encodingHeaderOffset + encodingHeaderSize(t);
 
 		pPayload = page->getPayload();
 		payloadSize = logicalSize - (pPayload - buffer);
 
-		HeaderV1* h = page->getMainHeader<HeaderV1>();
+		RedwoodHeaderV1* h = page->getMainHeader<RedwoodHeaderV1>();
 		h->pageType = pageType;
 		h->pageSubType = pageSubType;
 
@@ -328,23 +340,23 @@ public:
 		ArenaPage* p = new ArenaPage(logicalSize, bufferSize);
 		memcpy(p->buffer, buffer, logicalSize);
 
-		// Non-verifying header parse just to initialize component pointers
-		p->postRead1(invalidPhysicalPageID, false);
-		p->secret = secret;
+		// Non-verifying header parse just to initialize members
+		p->postReadHeader(invalidPhysicalPageID, false);
+		p->encryptionKey = encryptionKey;
 
 		return Reference<ArenaPage>(p);
 	}
 
 	// Get an ArenaPage which depends on this page's Arena and references some of its memory
-	Reference<ArenaPage> subPage(int offset, int len) const {
+	Reference<ArenaPage> getSubPage(int offset, int len) const {
 		ASSERT(offset + len <= logicalSize);
 		ArenaPage* p = new ArenaPage(len, 0);
 		p->buffer = buffer + offset;
 		p->arena.dependsOn(arena);
 
 		// Non-verifying header parse just to initialize component pointers
-		p->postRead1(invalidPhysicalPageID, false);
-		p->secret = secret;
+		p->postReadHeader(invalidPhysicalPageID, false);
+		p->encryptionKey = encryptionKey;
 
 		return Reference<ArenaPage>(p);
 	}
@@ -354,7 +366,7 @@ public:
 	// verification will fail.
 	void setWriteInfo(PhysicalPageID pageID, Version writeVersion) {
 		if (page->headerVersion == 1) {
-			HeaderV1* h = page->getMainHeader<HeaderV1>();
+			RedwoodHeaderV1* h = page->getMainHeader<RedwoodHeaderV1>();
 			h->firstPhysicalPageID = pageID;
 			h->writeVersion = writeVersion;
 			h->writeTime = now();
@@ -362,7 +374,7 @@ public:
 	}
 	void setLogicalPageInfo(LogicalPageID lastKnownLogicalPageID, LogicalPageID lastKnownParentLogicalPageID) {
 		if (page->headerVersion == 1) {
-			HeaderV1* h = page->getMainHeader<HeaderV1>();
+			RedwoodHeaderV1* h = page->getMainHeader<RedwoodHeaderV1>();
 			h->lastKnownLogicalPageID = lastKnownLogicalPageID;
 			h->lastKnownParentLogicalPageID = lastKnownParentLogicalPageID;
 		}
@@ -374,23 +386,24 @@ public:
 	// Post:  Main and Encoding subheaders are updated
 	//        Payload is possibly encrypted
 	void preWrite(PhysicalPageID pageID) const {
-#if VALGRIND
 		// Explicitly check payload definedness to make the source of valgrind errors more clear.
 		// Without this check, calculating a checksum on a payload with undefined bytes does not
 		// cause a valgrind error but the resulting checksum is undefined which causes errors later.
 		ASSERT(VALGRIND_CHECK_MEM_IS_DEFINED(pPayload, payloadSize) == 0);
-#endif
+
 		if (page->encodingType == EncodingType::XXHash64) {
 			page->getEncodingHeader<XXHashEncodingHeader>()->encode(pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::XOREncryption) {
-			ASSERT(secret.size() == 1);
-			page->getEncodingHeader<XOREncryptionEncodingHeader>()->encode(secret[0], pPayload, payloadSize, pageID);
+			ASSERT(encryptionKey.secret.size() == 1);
+			XOREncryptionEncodingHeader* xh = page->getEncodingHeader<XOREncryptionEncodingHeader>();
+			xh->keyID = encryptionKey.id.orDefault(0);
+			xh->encode(encryptionKey.secret[0], pPayload, payloadSize, pageID);
 		} else {
 			throw page_encoding_not_supported();
 		}
 
 		if (page->headerVersion == 1) {
-			page->getMainHeader<HeaderV1>()->update(buffer, pPayload - buffer);
+			page->getMainHeader<RedwoodHeaderV1>()->updateChecksum(buffer, pPayload - buffer);
 		} else {
 			throw page_header_version_not_supported();
 		}
@@ -399,17 +412,23 @@ public:
 	// Must be called after reading from disk to verify all non-payload bytes
 	// Pre:   Bytes from storage medium copied into raw buffer space
 	// Post:  Page headers outside of payload are verified (unless verify is false)
+	//        encryptionKey is updated with information from encoding header if needed
 	//        Payload is accessible via data(), dataSize(), etc.
 	//
 	// Exceptions are thrown for unknown header types or pages which fail verification
-	void postRead1(PhysicalPageID pageID, bool verify = true) {
+	void postReadHeader(PhysicalPageID pageID, bool verify = true) {
 		pPayload = page->getPayload();
 		payloadSize = logicalSize - (pPayload - buffer);
 
+		// Populate encryption key with relevant fields from page
+		if (page->encodingType == EncodingType::XOREncryption) {
+			encryptionKey.id = page->getEncodingHeader<XOREncryptionEncodingHeader>()->keyID;
+		}
+
 		if (page->headerVersion == 1) {
 			if (verify) {
-				HeaderV1* h = page->getMainHeader<HeaderV1>();
-				h->verify(buffer, pPayload - buffer);
+				RedwoodHeaderV1* h = page->getMainHeader<RedwoodHeaderV1>();
+				h->verifyChecksum(buffer, pPayload - buffer);
 				if (pageID != h->firstPhysicalPageID) {
 					throw page_header_wrong_page_id();
 				}
@@ -419,14 +438,15 @@ public:
 		}
 	}
 
-	// Pre:   postRead1 has been called, encoding-specific parameters (such as the encryption secret) have been set
+	// Pre:   postReadHeader has been called, encoding-specific parameters (such as the encryption secret) have been set
 	// Post:  Payload has been verified and decrypted if necessary
-	void postRead2(PhysicalPageID pageID) {
+	void postReadPayload(PhysicalPageID pageID) {
 		if (page->encodingType == EncodingType::XXHash64) {
 			page->getEncodingHeader<XXHashEncodingHeader>()->decode(pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::XOREncryption) {
-			ASSERT(secret.size() == 1);
-			page->getEncodingHeader<XOREncryptionEncodingHeader>()->decode(secret[0], pPayload, payloadSize, pageID);
+			ASSERT(encryptionKey.secret.size() == 1);
+			page->getEncodingHeader<XOREncryptionEncodingHeader>()->decode(
+			    encryptionKey.secret[0], pPayload, payloadSize, pageID);
 		} else {
 			throw page_encoding_not_supported();
 		}
@@ -453,7 +473,7 @@ private:
 	// For convenience, it is unioned with a Page pointer which defines the page structure
 	union {
 		uint8_t* buffer;
-		Page* page;
+		const Page* page;
 	};
 
 	// Pointer and length of page space available to the user
@@ -461,29 +481,19 @@ private:
 	uint8_t* pPayload;
 	int payloadSize;
 
-	// Secret string available for use by encodings
-	Key secret;
-
 public:
 	EncodingType getEncodingType() const { return page->encodingType; }
 
-	void setSecret(Key k) { secret = k; }
-
-	KeyID getKeyID() const {
-		if (page->encodingType == EncodingType::XOREncryption) {
-			return page->getEncodingHeader<XOREncryptionEncodingHeader>()->keyID;
+	PhysicalPageID getPhysicalPageID() const {
+		if (page->headerVersion == 1) {
+			return page->getMainHeader<RedwoodHeaderV1>()->firstPhysicalPageID;
 		} else {
-			throw page_encoding_not_supported();
+			throw page_header_version_not_supported();
 		}
 	}
 
-	void setKeyID(KeyID id) {
-		if (page->encodingType == EncodingType::XOREncryption) {
-			page->getEncodingHeader<XOREncryptionEncodingHeader>()->keyID = (uint8_t)id;
-		} else {
-			throw page_encoding_not_supported();
-		}
-	}
+	// Used by encodings that do encryption
+	EncryptionKey encryptionKey;
 
 	// A metadata object that can be attached to the page and will be deleted with the page
 	mutable void* userData;
