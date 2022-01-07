@@ -5181,7 +5181,9 @@ void StorageServer::clearTenants(KeyRef startKey, KeyRef endKey, Version version
 	auto view = tenantMap.at(version);
 	for (auto itr = view.lower_bound(startTenant); itr != view.lower_bound(endTenant); ++itr) {
 		tenantMap.erase(itr);
-		lockedTenantsIndex.erase(*itr);
+		if (itr->startsWith(lockedTenantPrefix)) {
+			lockedTenantsIndex.erase(*itr);
+		}
 	}
 
 	auto& mLV = addVersionToMutationLog(version);
@@ -6219,7 +6221,9 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		Key tenantPrefix = result.value;
 
 		data->tenantMap.insert(tenantName, tenantPrefix);
-		data->lockedTenantsIndex.insert(tenantPrefix, tenantName);
+		if (tenantName.startsWith(lockedTenantPrefix)) {
+			data->lockedTenantsIndex.insert(tenantPrefix, tenantName);
+		}
 
 		TraceEvent("RestoringTenant", data->thisServerID)
 		    .detail("Key", tenantMap[tenantMapLoc].key)
