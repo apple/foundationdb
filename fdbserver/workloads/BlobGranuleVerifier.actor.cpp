@@ -386,7 +386,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						// TODO: read at some version older than pruneVersion and make sure you get txn_too_old
 						// To achieve this, the BWs are going to have to recognize latest prune versions per granules
 					} catch (Error& e) {
-						if (e.code() == error_code_transaction_too_old) {
+						if (e.code() == error_code_blob_granule_transaction_too_old) {
 							self->timeTravelTooOld++;
 							// TODO: add debugging info for when this is a failure
 						}
@@ -418,8 +418,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				if (e.code() == error_code_operation_cancelled) {
 					throw;
 				}
-				if (e.code() != error_code_transaction_too_old && e.code() != error_code_wrong_shard_server &&
-				    BGV_DEBUG) {
+				if (e.code() != error_code_blob_granule_transaction_too_old && BGV_DEBUG) {
 					printf("BGVerifier got unexpected error %s\n", e.name());
 				}
 				self->errors++;
@@ -444,6 +443,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 		state Transaction tr(cx);
 		state Version readVersion = wait(tr.getReadVersion());
+		state Version startReadVersion = readVersion;
 		state int checks = 0;
 
 		state KeyRange last;
@@ -478,16 +478,26 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 			try {
 				loop {
-					tr.reset();
 					try {
 						Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
 						    wait(tr.readBlobGranules(r, 0, readVersion));
 						ASSERT(chunks.size() > 0);
 						last = chunks.back().keyRange;
 						checks += chunks.size();
+
 						break;
 					} catch (Error& e) {
-						wait(tr.onError(e));
+						// it's possible for blob granules to never get opened for the entire test due to fault
+						// injection. If we get blob_granule_transaction_too_old, for the latest read version, the
+						// granule still needs to open. Wait for that to happen at a higher read version.
+						if (e.code() == error_code_blob_granule_transaction_too_old) {
+							wait(delay(1.0));
+							tr.reset();
+							Version rv = wait(tr.getReadVersion());
+							readVersion = rv;
+						} else {
+							wait(tr.onError(e));
+						}
 					}
 				}
 			} catch (Error& e) {
@@ -507,6 +517,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				availabilityPassed = false;
 				break;
 			}
+		}
+		if (BGV_DEBUG && startReadVersion != readVersion) {
+			fmt::print("Availability check updated read version from {0} to {1}\n", startReadVersion, readVersion);
 		}
 		bool result = availabilityPassed && self->mismatches == 0 && (checks > 0) && (self->timeTravelTooOld == 0);
 		fmt::print("Blob Granule Verifier {0} {1}:\n", self->clientId, result ? "passed" : "failed");

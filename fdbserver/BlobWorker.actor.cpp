@@ -2369,7 +2369,6 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 					                                  : info.blobFilesToSnapshot.get().deltaFiles.back().version;
 				}
 			}
-
 			wait(tr.commit());
 
 			if (info.changeFeedStartVersion == invalidVersion) {
@@ -2513,7 +2512,9 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 			if (selfReassign) {
 				thisAssignmentNewer = true;
 			} else {
-				printf("same assignment\n");
+				if (BW_DEBUG) {
+					printf("same assignment\n");
+				}
 				// applied the same assignment twice, make idempotent
 				if (r.value().activeMetadata.isValid()) {
 					futures.push_back(success(r.value().assignFuture));

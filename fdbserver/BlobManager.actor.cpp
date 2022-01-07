@@ -990,14 +990,17 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 				throw e;
 			}
 
-			// TODO: figure out why waitFailure in monitorBlobWorker doesn't pick up the connection failure first
-			if (e.code() == error_code_connection_failed || e.code() == error_code_broken_promise) {
+			// on known network errors or stream close errors, throw
+			if (e.code() == error_code_broken_promise) {
 				throw e;
 			}
 
 			// if we got an error constructing or reading from stream that is retryable, wait and retry.
+			// Sometimes we get connection_failed without the failure monitor tripping. One example is simulation's
+			// rollRandomClose. In this case, just reconstruct the stream. If it was a transient failure, it works, and
+			// if it is permanent, the failure monitor will eventually trip.
 			ASSERT(e.code() != error_code_end_of_stream);
-			if (e.code() == error_code_request_maybe_delivered) {
+			if (e.code() == error_code_request_maybe_delivered || e.code() == error_code_connection_failed) {
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				continue;
 			} else {
@@ -1039,9 +1042,14 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 			throw e;
 		}
 
+		if (BM_DEBUG) {
+			fmt::print(
+			    "BM {0} got monitoring error {1} from BW {2}\n", bmData->epoch, e.name(), bwInterf.id().toString());
+		}
+
 		// TODO: re-evaluate the expected errors here once wait failure issue is resolved
-		// Expected errors here are: [connection_failed, broken_promise]
-		if (e.code() != error_code_connection_failed && e.code() != error_code_broken_promise) {
+		// Expected errors here are: [broken_promise]
+		if (e.code() != error_code_broken_promise) {
 			if (BM_DEBUG) {
 				printf("BM got unexpected error %s monitoring BW %s\n", e.name(), bwInterf.id().toString().c_str());
 			}
