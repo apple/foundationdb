@@ -1388,6 +1388,32 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return f;
 	}
 
+	std::vector<MutationRef> getPersistShardMutation(KeyRangeRef range) override {
+		std::vector<MutationRef> refs;
+
+		auto shard = shardMap.rangeContaining(range.begin);
+		ASSERT(shard.range() == range);
+
+		// Ref:
+		// https://github.com/apple/foundationdb/blob/6613ec282da87fd17ffdb9538f6da2fe42d2fa4f/fdbserver/storageserver.actor.cpp#L5608
+
+		refs.push_back(MutationRef(MutationRef::ClearRange,
+		                           persistShardMappingPrefix.toString() + range.begin.toString(),
+		                           persistShardMappingPrefix.toString() + range.end.toString()));
+		refs.push_back(MutationRef(MutationRef::SetValue,
+		                           persistShardMappingPrefix.toString() + range.begin.toString(),
+		                           shard.value()->GetName()));
+
+		// TODO: should we include sys key range here?
+		if (range.end < defaultShardRange.begin) {
+			auto it = shardMap.rangeContaining(range.end);
+			refs.push_back(MutationRef(MutationRef::SetValue,
+			                           persistShardMappingPrefix.toString() + range.end.toString(),
+			                           it.value() == nullptr ? "" : it.value()->GetName()));
+		}
+		return std::move(refs);
+	}
+
 	void persistShard(KeyRangeRef range) override {
 		if (!SERVER_KNOBS->ROCKSDB_ENABLE_SHARDING) {
 			return;
@@ -1416,14 +1442,47 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
+	std::vector<MutationRef> getDisposeShardMutation(KeyRangeRef range) override {
+		std::vector<MutationRef> refs;
+		auto shard = shardMap.rangeContaining(range.begin);
+		if (shard.range() != range) {
+			TraceEvent(SevError, "RocksDB")
+			    .detail("Method", "DisposeShard")
+			    .detail("Error", "ShardMismatch")
+			    .detail("Range", range.begin.toString() + " : " + range.end.toString())
+			    .detail("ExistingRange", shard.range().begin.toString() + " : " + shard.range().end.toString());
+			return refs;
+		}
+
+		if (!shard.value()) {
+			TraceEvent(SevError, "RocksDB").detail("Method", "DisposeShard").detail("Error", "Shard not exist.");
+			return refs;
+		}
+
+		// This may cause multiple fragments in metadata, but will not affect correctness.
+		refs.push_back(MutationRef(MutationRef::ClearRange,
+		                           persistShardMappingPrefix.toString() + range.begin.toString(),
+		                           persistShardMappingPrefix.toString() + range.end.toString()));
+		refs.push_back(MutationRef(MutationRef::SetValue,
+		                           persistShardMappingPrefix.toString() + range.begin.toString(),
+		                           LiteralStringRef("")));
+
+		// TODO: should we include sys key range here?
+		if (range.end < defaultShardRange.begin) {
+			auto it = shardMap.rangeContaining(range.end);
+			refs.push_back(MutationRef(MutationRef::SetValue,
+			                           persistShardMappingPrefix.toString() + range.end.toString(),
+			                           it.value() == nullptr ? "" : it.value()->GetName()));
+		}
+		deletePendingShards->push_back(shard.value());
+
+		// The shard will stay in shardMap.
+		return std::move(refs);
+	}
+
 	Future<Void> disposeShard(KeyRangeRef range) override {
 		if (!SERVER_KNOBS->ROCKSDB_ENABLE_SHARDING) {
 			return Void();
-		}
-
-		if (writeBatches == nullptr) {
-			writeBatches.reset(new std::unordered_map<DB, rocksdb::WriteBatch>());
-			systemMutationBatch.reset(new rocksdb::WriteBatch());
 		}
 
 		auto shard = shardMap.rangeContaining(range.begin);
@@ -1441,21 +1500,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			return Void();
 		}
 
-		// This may cause multiple fragments in metadata, but will not affect correctness.
-		systemMutationBatch->DeleteRange(persistShardMappingPrefix.toString() + range.begin.toString(),
-		                                 persistShardMappingPrefix.toString() + range.end.toString());
-		systemMutationBatch->Put(persistShardMappingPrefix.toString() + range.begin.toString(), "");
-
-		// TODO: should we include sys key range here?
-		if (range.end < defaultShardRange.begin) {
-			auto it = shardMap.rangeContaining(range.end);
-			systemMutationBatch->Put(persistShardMappingPrefix.toString() + range.end.toString(),
-			                         it.value() == nullptr ? "" : it.value()->GetName());
-		}
 		deletePendingShards->push_back(shard.value());
 		// Should remove exactly one shard.
 		shardMap.rawErase(range);
-
 		return Void();
 	}
 
