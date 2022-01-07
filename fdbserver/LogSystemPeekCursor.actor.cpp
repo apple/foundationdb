@@ -1854,6 +1854,9 @@ bool ILogSystem::HeapPeekCursor::isActive() const {
 }
 
 bool ILogSystem::HeapPeekCursor::isExhausted() const {
+	if (currentCursor < 0) {
+		return false;
+	}
 	return serverCursors[currentCursor]->isExhausted();
 }
 
@@ -1869,10 +1872,16 @@ Version ILogSystem::HeapPeekCursor::getMinKnownCommittedVersion() const {
 }
 
 Optional<UID> ILogSystem::HeapPeekCursor::getPrimaryPeekLocation() const {
+	if (currentCursor < 0) {
+		return Optional<UID>();
+	}
 	return serverCursors[currentCursor]->getPrimaryPeekLocation();
 }
 
 Optional<UID> ILogSystem::HeapPeekCursor::getCurrentPeekLocation() const {
+	if (currentCursor < 0) {
+		return Optional<UID>();
+	}
 	return serverCursors[currentCursor]->getCurrentPeekLocation();
 }
 
