@@ -814,8 +814,8 @@ ACTOR Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, 
 	result.knownCommittedVersion = logData->knownCommittedVersion;
 	result.maxRecoveryVersion = logData->stopVersionUpdated.isSet() ? logData->stopVersionUpdated.getFuture().get()
 	                                                                : std::numeric_limits<Version>::max();
-	for (int i = 0; i < logData->versionHistory.size(); i++) {
-		result.versionHistory.push_back(logData->versionHistory.at(i));
+	for (int i = 0; i < logData->versionHistory.size() && logData->versionHistory[i].second <= stopVersion; i++) {
+		result.versionHistory.push_back(logData->versionHistory[i]);
 	}
 
 	TraceEvent("TLogStop2", self->dbgid)
@@ -2933,6 +2933,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	wait(waitForAll(std::vector{ fFormat, fRecoveryLocation, fClusterId }));
 	wait(waitForAll(std::vector{ fVers,
 	                             fKnownCommitted,
+	                             fVersionHistory,
 	                             fLocality,
 	                             fLogRouterTags,
 	                             fTxsTags,
