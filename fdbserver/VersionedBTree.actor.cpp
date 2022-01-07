@@ -5897,7 +5897,8 @@ private:
 			Error e = page_unexpected_encryption_mode();
 			TraceEvent(SevError, "RedwoodBTreeEncryptionMismatch")
 			    .error(e)
-			    .detail("PhysicalPageID", page->getPhysicalPageID());
+			    .detail("PhysicalPageID", page->getPhysicalPageID())
+			    .detail("IsEncrypted", page->isEncrypted());
 			throw e;
 		}
 
@@ -9719,7 +9720,8 @@ TEST_CASE("Lredwood/correctness/btree") {
 	    new DWALPager(
 	        pageSize, extentSize, file, cacheSizeBytes, 0, concurrentExtentReads, pagerMemoryOnly, pKeyProvider.get()),
 	    file,
-	    pKeyProvider.get());
+	    pKeyProvider.get(),
+	    encodingType);
 	wait(btree->init());
 
 	wait(btree->clearAllAndCheckSanity());
