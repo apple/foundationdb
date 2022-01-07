@@ -1659,26 +1659,26 @@ struct RedwoodMetrics {
 		for (RedwoodMetrics::Level& level : levels) {
 			if (levelCounter > 0) {
 				std::string levelString = "L" + std::to_string(levelCounter);
-				level.buildFillPctSketch = Histogram::construct(
-				    Reference<HistogramRegistry>(), "buildFillPct", levelString, Histogram::Unit::percentageLinear);
-				level.modifyFillPctSketch = Histogram::construct(
-				    Reference<HistogramRegistry>(), "modifyFillPct", levelString, Histogram::Unit::percentageLinear);
-				level.buildStoredPctSketch = Histogram::construct(
-				    Reference<HistogramRegistry>(), "buildStoredPct", levelString, Histogram::Unit::percentageLinear);
-				level.modifyStoredPctSketch = Histogram::construct(
-				    Reference<HistogramRegistry>(), "modifyStoredPct", levelString, Histogram::Unit::percentageLinear);
-				level.buildItemCountSketch = Histogram::construct(Reference<HistogramRegistry>(),
-				                                                  "buildItemCount",
-				                                                  levelString,
-				                                                  Histogram::Unit::countLinear,
-				                                                  0,
-				                                                  maxRecordCount);
-				level.modifyItemCountSketch = Histogram::construct(Reference<HistogramRegistry>(),
-				                                                   "modifyItemCount",
-				                                                   levelString,
-				                                                   Histogram::Unit::countLinear,
-				                                                   0,
-				                                                   maxRecordCount);
+				level.buildFillPctSketch = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "buildFillPct", levelString, Histogram::Unit::percentageLinear));
+				level.modifyFillPctSketch = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "modifyFillPct", levelString, Histogram::Unit::percentageLinear));
+				level.buildStoredPctSketch = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "buildStoredPct", levelString, Histogram::Unit::percentageLinear));
+				level.modifyStoredPctSketch = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "modifyStoredPct", levelString, Histogram::Unit::percentageLinear));
+				level.buildItemCountSketch = Reference<Histogram>(new Histogram(Reference<HistogramRegistry>(),
+				                                                                "buildItemCount",
+				                                                                levelString,
+				                                                                Histogram::Unit::countLinear,
+				                                                                0,
+				                                                                maxRecordCount));
+				level.modifyItemCountSketch = Reference<Histogram>(new Histogram(Reference<HistogramRegistry>(),
+				                                                                 "modifyItemCount",
+				                                                                 levelString,
+				                                                                 Histogram::Unit::countLinear,
+				                                                                 0,
+				                                                                 maxRecordCount));
 			}
 			++levelCounter;
 		}
@@ -2557,7 +2557,7 @@ public:
 	}
 
 	Reference<ArenaPage> newPageBuffer(size_t blocks = 1) override {
-		return ArenaPage::construct(logicalPageSize * blocks, physicalPageSize * blocks);
+		return makeReference<ArenaPage>(logicalPageSize * blocks, physicalPageSize * blocks);
 	}
 
 	int getPhysicalPageSize() const override { return physicalPageSize; }
@@ -2943,7 +2943,7 @@ public:
 		ASSERT(!self->memoryOnly);
 
 		state Reference<ArenaPage> page =
-		    header ? ArenaPage::construct(smallestPhysicalBlock, smallestPhysicalBlock) : self->newPageBuffer();
+		    header ? makeReference<ArenaPage>(smallestPhysicalBlock, smallestPhysicalBlock) : self->newPageBuffer();
 		debug_printf("DWALPager(%s) op=readPhysicalStart %s ptr=%p header=%d\n",
 		             self->filename.c_str(),
 		             toString(pageID).c_str(),
@@ -3235,7 +3235,7 @@ public:
 			readSize = self->physicalExtentSize;
 		}
 
-		state Reference<ArenaPage> extent = ArenaPage::construct(readSize, readSize);
+		state Reference<ArenaPage> extent = makeReference<ArenaPage>(readSize, readSize);
 
 		// physicalReadSize is the size of disk read we intend to issue
 		auto physicalReadSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_READ_SIZE;
@@ -9345,12 +9345,12 @@ TEST_CASE(":/redwood/performance/mutationBuffer") {
 TEST_CASE(":/redwood/pager/ArenaPage") {
 	Arena x;
 	printf("Making p\n");
-	Reference<ArenaPage> p = ArenaPage::construct(4096, 4096);
+	Reference<ArenaPage> p = makeReference<ArenaPage>(4096, 4096);
 	printf("Made p=%p\n", p->data());
 	printf("Clearing p\n");
 	p.clear();
 	printf("Making p\n");
-	p = ArenaPage::construct(4096, 4096);
+	p = makeReference<ArenaPage>(4096, 4096);
 	printf("Made p=%p\n", p->data());
 	printf("Making x depend on p\n");
 	x.dependsOn(p->getArena());
