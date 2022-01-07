@@ -1817,6 +1817,7 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 namespace {
 bool canReplyWith(Error e) {
 	switch (e.code()) {
+	case error_code_blob_granule_transaction_too_old:
 	case error_code_transaction_too_old:
 	case error_code_future_version: // not thrown yet
 	case error_code_wrong_shard_server:
@@ -2001,12 +2002,9 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 			}
 			state Reference<GranuleMetadata> metadata = m;
 
-			// don't do 'if (canBeSet)'
-			if (metadata->readable.canBeSet()) {
-				wait(metadata->readable.getFuture());
-			}
-			if (metadata->cancelled.isSet()) {
-				throw wrong_shard_server();
+			choose {
+				when(wait(metadata->readable.getFuture())) {}
+				when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
 			}
 
 			state KeyRange chunkRange;
@@ -2035,9 +2033,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 
 				if (!cur.isValid()) {
 					// this request predates blob data
-					// FIXME: probably want a dedicated exception like blob_range_too_old or something
-					// instead
-					throw transaction_too_old();
+					throw blob_granule_transaction_too_old();
 				}
 
 				ASSERT(cur->endVersion > req.readVersion);
@@ -2134,7 +2130,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 				i--;
 			}
 			// because of granule history, we should always be able to find the desired snapshot
-			// version, and have thrown transaction_too_old earlier if not possible.
+			// version, and have thrown blob_granule_transaction_too_old earlier if not possible.
 			if (i < 0) {
 				fmt::print("req @ {0} >= initial snapshot {1} but can't find snapshot in ({2}) files:\n",
 				           req.readVersion,
