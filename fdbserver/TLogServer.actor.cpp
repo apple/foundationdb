@@ -2625,8 +2625,8 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		when(UpdateVersionRequest req = waitNext(tli.updateVersionRequest.getFuture())) {
 			logData->stopped = true;
 			if (logData->stopVersionUpdated.isSet() && logData->stopVersionUpdated.getFuture().get() < req.version) {
-				// FIXME: force a master recovery
-				ASSERT(false);
+				TEST(true); // TLog updated to a larger recovery version
+				req.reply.sendError(master_recovery_failed());
 			}
 			if (logData->stopVersionUpdated.canBeSet()) {
 				logData->stopVersionUpdated.send(req.version);

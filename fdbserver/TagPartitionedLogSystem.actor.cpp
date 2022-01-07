@@ -1906,12 +1906,14 @@ ACTOR Future<Void> updateTLogVersion(Reference<AsyncVar<OptionalInterface<TLogIn
 	state Version logEndVersion = 0;
 	if (lockResult.end == endVersion.groupEnd) {
 		logEndVersion = endVersion.epochEnd;
-	} else {
+	} else if (lockResult.end < endVersion.groupEnd) {
 		auto it = std::upper_bound(endVersion.versionHistory.begin(),
 		                           endVersion.versionHistory.end(),
 		                           std::make_pair(0, lockResult.end),
 		                           [](const auto& l, const auto& r) -> bool { return l.second < r.second; });
 		logEndVersion = it->second - 1;
+	} else {
+		logEndVersion = lockResult.end;
 	}
 
 	loop {
@@ -2186,6 +2188,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 		}
 	}
 
+	state Future<Void> failures = waitForAll(failureTrackers);
+
 	state Optional<Version> lastEnd;
 	state Version knownCommittedVersion = 0;
 	loop {
@@ -2222,7 +2226,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 						if (endVersions[log][idx].canBeSet()) {
 							GroupEndVersion groupEnd;
 							groupEnd.epochEnd = versions.get().second;
-							groupEnd.groupEnd = maxGroupVersion;
+							groupEnd.groupEnd = std::min(versions.get().second, maxGroupVersion);
 							groupEnd.versionHistory = maxVersionHistory;
 							endVersions[log][idx].send(groupEnd);
 						}
@@ -2260,7 +2264,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			outLogSystem->set(logSystem);
 		}
 
-		wait(waitForAny(changes));
+		wait(waitForAny(changes) || failures);
 	}
 }
 
