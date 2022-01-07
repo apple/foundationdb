@@ -274,7 +274,7 @@ uint64_t timer_int(); // Return timer as uint64_t
 
 void getLocalTime(const time_t* timep, struct tm* result);
 
-std::string getLocalTimeStr(const time_t* timep);
+std::string getGMTimeStr(const time_t* timep);
 
 void setMemoryQuota(size_t limit);
 

@@ -1189,8 +1189,8 @@ struct StorageMetadataType {
 	}
 
 	std::string getCreatedTimeStr() const {
-		auto time = (time_t)createdTime;
-		return getLocalTimeStr(&time);
+		auto time = (time_t)(createdTime / 1e9); // convert to second, see timer_int() implementation
+		return getGMTimeStr(&time);
 	}
 };
 

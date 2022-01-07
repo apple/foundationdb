@@ -4557,11 +4557,14 @@ ACTOR Future<Void> checkStorageMetadata(DDTeamCollection* self, TCServerInfo* se
 		// read storage metadata
 		loop {
 			try {
-				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				auto property = metadataMap.getProperty(server->lastKnownInterface.id());
-				Optional<StorageMetadataType> metadata = wait(property.get(tr, Snapshot::True));
-				ASSERT(metadata.present());
-				data = metadata.get();
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				auto property = metadataMap.getProperty(server->id);
+				Optional<StorageMetadataType> metadata = wait(property.get(tr));
+				if (metadata.present()) {
+					data = metadata.get();
+				} else {
+					metadataMap.set(tr, server->id, data);
+				}
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
