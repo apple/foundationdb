@@ -357,11 +357,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_FETCH_QUEUE_HARD_MAX,                          100 );
 	init( ROCKSDB_FETCH_QUEUE_SOFT_MAX,                           50 );
 	init( ROCKSDB_HISTOGRAMS_SAMPLE_RATE,                      0.001 ); if( randomize && BUGGIFY ) ROCKSDB_HISTOGRAMS_SAMPLE_RATE = 0;
-	init( ROCKSDB_COMPRESSION_TYPE,									0);
-	init( ROCKSDB_COMPRESSION_OPTS_WINDOW_BIT,					  -14);
-	init( ROCKSDB_COMPRESSION_OPTS_LEVEL,						    6);
-	init( ROCKSDB_COMPRESSION_OPTS_STRATEGY,						0);
-	init( ROCKSDB_BOTTOM_LAYER_COMPRESSION_TYPE,            	   -1);
+	init( ROCKSDB_COMPRESSION_TYPE,								   0 );
+	init( ROCKSDB_COMPRESSION_OPTS_WINDOW_BIT, 	        	      -14 );
+	init( ROCKSDB_COMPRESSION_OPTS_LEVEL,						    6 );
+	init( ROCKSDB_COMPRESSION_OPTS_STRATEGY,						0 );
+	init( ROCKSDB_BOTTOM_LAYER_COMPRESSION_TYPE,            	   -1 );
+	init( ROCKSDB_THROTTLE_READS,                               true );
 
 
 	// Leader election
