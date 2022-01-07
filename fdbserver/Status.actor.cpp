@@ -585,11 +585,13 @@ struct RolesInfo {
 				}
 			}
 
-			TraceEventFields const& metadata = metrics.at("Metadata");
-			JsonBuilderObject metadataObj;
-			metadataObj["created_time"] = metadata.getValue("CreatedTime");
-			metadataObj["expire_now"] = metadata.getValue("ExpireNow");
-			obj["storage_metadata"] = metadataObj;
+			if(!iface.isTss()) { // only storage server has Metadata field
+				TraceEventFields const& metadata = metrics.at("Metadata");
+				JsonBuilderObject metadataObj;
+				metadataObj["created_time"] = metadata.getValue("CreatedTime");
+				metadataObj["expire_now"] = metadata.getValue("ExpireNow");
+				obj["storage_metadata"] = metadataObj;
+			}
 
 		} catch (Error& e) {
 			if (e.code() != error_code_attribute_not_found)
@@ -1869,9 +1871,9 @@ static Future<std::vector<TraceEventFields>> getServerBusiestWriteTags(
 }
 
 ACTOR
-static Future<std::vector<StorageMetadataType>> getServerMetadata(std::vector<StorageServerInterface> servers, Database cx) {
+static Future<std::vector<Optional<StorageMetadataType>>> getServerMetadata(std::vector<StorageServerInterface> servers, Database cx) {
 	state KeyBackedObjectMap<UID, StorageMetadataType,decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin, IncludeVersion());
-	state std::vector<StorageMetadataType> res;
+	state std::vector<Optional<StorageMetadataType>> res(servers.size());
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
 	loop {
@@ -1879,9 +1881,11 @@ static Future<std::vector<StorageMetadataType>> getServerMetadata(std::vector<St
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state int i = 0;
 			for(i = 0; i < servers.size(); ++ i) {
-				Optional<StorageMetadataType> metadata = wait(metadataMap.get(tr, servers[i].id(), Snapshot::True));
-				ASSERT(metadata.present());
-				res.push_back(metadata.get());
+				if(!servers[i].isTss()) {
+					Optional<StorageMetadataType> metadata = wait(metadataMap.get(tr, servers[i].id(), Snapshot::True));
+					// TraceEvent("MetadataAppear", servers[i].id()).detail("Present", metadata.present());
+					res[i] = metadata;
+				}
 			}
 			wait(tr->commit());
 			break;
@@ -1899,7 +1903,7 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 	state std::vector<StorageServerInterface> servers = wait(timeoutError(getStorageServers(cx, true), 5.0));
 	state std::vector<std::pair<StorageServerInterface, EventMap>> results;
 	state std::vector<TraceEventFields> busiestWriteTags;
-	state std::vector<StorageMetadataType> metadata;
+	state std::vector<Optional<StorageMetadataType>> metadata;
 	wait(store(results,
 	           getServerMetrics(servers,
 	                            address_workers,
@@ -1911,10 +1915,12 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 	ASSERT(busiestWriteTags.size() == results.size() && metadata.size() == results.size());
 	for (int i = 0; i < busiestWriteTags.size(); ++i) {
 		results[i].second.emplace("BusiestWriteTag", busiestWriteTags[i]);
-		TraceEventFields metadataField;
-		metadataField.addField("CreatedTime", metadata[i].getCreatedTimeStr());
-		metadataField.addField("ExpireNow", metadata[i].expireNow ? "1":"0");
-		results[i].second.emplace("Metadata", metadataField);
+		if(!servers[i].isTss()) {
+			TraceEventFields metadataField;
+			metadataField.addField("CreatedTime", metadata[i].get().getCreatedTimeStr());
+			metadataField.addField("ExpireNow", metadata[i].get().expireNow ? "1" : "0");
+			results[i].second.emplace("Metadata", metadataField);
+		}
 	}
 
 	return results;

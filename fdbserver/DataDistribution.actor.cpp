@@ -4560,6 +4560,7 @@ ACTOR Future<Void> checkStorageMetadata(DDTeamCollection* self, TCServerInfo* se
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				auto property = metadataMap.getProperty(server->id);
 				Optional<StorageMetadataType> metadata = wait(property.get(tr));
+				// NOTE: in upgrade testing, there may not be any metadata
 				if (metadata.present()) {
 					data = metadata.get();
 				} else {
@@ -4569,7 +4570,6 @@ ACTOR Future<Void> checkStorageMetadata(DDTeamCollection* self, TCServerInfo* se
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));
-				// TraceEvent("CheckStorageMetadataError").error(err);
 			}
 		}
 
