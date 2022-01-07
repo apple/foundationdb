@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.22',
+        VERSION:     '6.3.23',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -401,29 +401,29 @@ Coordinators changed
 </div>
 <div class="section" id="fdbmonitor-section">
 <h3><code class="docutils literal"><span class="pre">[fdbmonitor]</span></code> section</h3>
-<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="c1">## foundationdb.conf</span>
-<span class="c1">##</span>
-<span class="c1">## Configuration file for FoundationDB server processes</span>
+<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="c1">## foundationdb.conf</span><span class="w"></span>
+<span class="c1">##</span><span class="w"></span>
+<span class="c1">## Configuration file for FoundationDB server processes</span><span class="w"></span>
 
-<span class="k">[fdbmonitor]</span>
-<span class="na">user</span> <span class="o">=</span> <span class="s">foundationdb</span>
-<span class="na">group</span> <span class="o">=</span> <span class="s">foundationdb</span>
+<span class="k">[fdbmonitor]</span><span class="w"></span>
+<span class="na">user</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">foundationdb</span><span class="w"></span>
+<span class="na">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">foundationdb</span><span class="w"></span>
 </pre></div>
 </div>
 <p>Contains basic configuration parameters of the <code class="docutils literal"><span class="pre">fdbmonitor</span></code> process. <code class="docutils literal"><span class="pre">user</span></code> and <code class="docutils literal"><span class="pre">group</span></code> are used on Linux systems to control the privilege level of child processes.</p>
 </div>
 <div class="section" id="general-section">
 <h3><code class="docutils literal"><span class="pre">[general]</span></code> section</h3>
-<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="k">[general]</span>
-<span class="na">cluster_file</span> <span class="o">=</span> <span class="s">/etc/foundationdb/fdb.cluster</span>
-<span class="na">restart_delay</span> <span class="o">=</span> <span class="s">60</span>
-<span class="c1">## restart_backoff and restart_delay_reset_interval default to the value that is used for restart_delay</span>
-<span class="c1"># initial_restart_delay = 0</span>
-<span class="c1"># restart_backoff = 60.0</span>
-<span class="c1"># restart_delay_reset_interval = 60</span>
-<span class="c1"># delete_envvars =</span>
-<span class="c1"># kill_on_configuration_change = true</span>
-<span class="c1"># disable_lifecycle_logging = false</span>
+<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="k">[general]</span><span class="w"></span>
+<span class="na">cluster_file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/etc/foundationdb/fdb.cluster</span><span class="w"></span>
+<span class="na">restart_delay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">60</span><span class="w"></span>
+<span class="c1">## restart_backoff and restart_delay_reset_interval default to the value that is used for restart_delay</span><span class="w"></span>
+<span class="c1"># initial_restart_delay = 0</span><span class="w"></span>
+<span class="c1"># restart_backoff = 60.0</span><span class="w"></span>
+<span class="c1"># restart_delay_reset_interval = 60</span><span class="w"></span>
+<span class="c1"># delete_envvars =</span><span class="w"></span>
+<span class="c1"># kill_on_configuration_change = true</span><span class="w"></span>
+<span class="c1"># disable_lifecycle_logging = false</span><span class="w"></span>
 </pre></div>
 </div>
 <p>Contains settings applicable to all processes (e.g. fdbserver, backup_agent).</p>
@@ -441,10 +441,10 @@ Coordinators changed
 <li><code class="docutils literal"><span class="pre">restart_delay_reset_interval</span></code>: The number of seconds a process must be running before resetting the backoff back to the value of <code class="docutils literal"><span class="pre">initial_restart_delay</span></code>. Defaults to the value of <code class="docutils literal"><span class="pre">restart_delay</span></code>.</li>
 </ul>
 <p>As an example, let&#8217;s say the following parameters have been set:</p>
-<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="na">restart_delay</span> <span class="o">=</span> <span class="s">60</span>
-<span class="na">initial_restart_delay</span> <span class="o">=</span> <span class="s">0</span>
-<span class="na">restart_backoff</span> <span class="o">=</span> <span class="s">2.0</span>
-<span class="na">restart_delay_reset_interval</span> <span class="o">=</span> <span class="s">180</span>
+<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="na">restart_delay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">60</span><span class="w"></span>
+<span class="na">initial_restart_delay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">0</span><span class="w"></span>
+<span class="na">restart_backoff</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">2.0</span><span class="w"></span>
+<span class="na">restart_delay_reset_interval</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">180</span><span class="w"></span>
 </pre></div>
 </div>
 <p>The progression of delays for a process that fails repeatedly would be <code class="docutils literal"><span class="pre">0,</span> <span class="pre">2,</span> <span class="pre">4,</span> <span class="pre">8,</span> <span class="pre">16,</span> <span class="pre">32,</span> <span class="pre">60,</span> <span class="pre">60,</span> <span class="pre">...</span></code>, each subject to a 10% random jitter. After the process stays alive for 180 seconds, the backoff would reset and the next failure would restart the process immediately.</p>
@@ -452,24 +452,24 @@ Coordinators changed
 </div>
 <div class="section" id="fdbserver-section">
 <span id="foundationdb-conf-fdbserver"></span><h3><code class="docutils literal"><span class="pre">[fdbserver]</span></code> section</h3>
-<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="c1">## Default parameters for individual fdbserver processes</span>
-<span class="k">[fdbserver]</span>
-<span class="na">command</span> <span class="o">=</span> <span class="s">/usr/sbin/fdbserver</span>
-<span class="na">public_address</span> <span class="o">=</span> <span class="s">auto:$ID</span>
-<span class="na">listen_address</span> <span class="o">=</span> <span class="s">public</span>
-<span class="na">datadir</span> <span class="o">=</span> <span class="s">/var/lib/foundationdb/data/$ID</span>
-<span class="na">logdir</span> <span class="o">=</span> <span class="s">/var/log/foundationdb</span>
-<span class="c1"># logsize = 10MiB</span>
-<span class="c1"># maxlogssize = 100MiB</span>
-<span class="c1"># class =</span>
-<span class="c1"># memory = 8GiB</span>
-<span class="c1"># storage_memory = 1GiB</span>
-<span class="c1"># cache_memory = 2GiB</span>
-<span class="c1"># locality_machineid =</span>
-<span class="c1"># locality_zoneid =</span>
-<span class="c1"># locality_data_hall =</span>
-<span class="c1"># locality_dcid =</span>
-<span class="c1"># io_trust_seconds = 20</span>
+<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="c1">## Default parameters for individual fdbserver processes</span><span class="w"></span>
+<span class="k">[fdbserver]</span><span class="w"></span>
+<span class="na">command</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/usr/sbin/fdbserver</span><span class="w"></span>
+<span class="na">public_address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">auto:$ID</span><span class="w"></span>
+<span class="na">listen_address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">public</span><span class="w"></span>
+<span class="na">datadir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/var/lib/foundationdb/data/$ID</span><span class="w"></span>
+<span class="na">logdir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/var/log/foundationdb</span><span class="w"></span>
+<span class="c1"># logsize = 10MiB</span><span class="w"></span>
+<span class="c1"># maxlogssize = 100MiB</span><span class="w"></span>
+<span class="c1"># class =</span><span class="w"></span>
+<span class="c1"># memory = 8GiB</span><span class="w"></span>
+<span class="c1"># storage_memory = 1GiB</span><span class="w"></span>
+<span class="c1"># cache_memory = 2GiB</span><span class="w"></span>
+<span class="c1"># locality_machineid =</span><span class="w"></span>
+<span class="c1"># locality_zoneid =</span><span class="w"></span>
+<span class="c1"># locality_data_hall =</span><span class="w"></span>
+<span class="c1"># locality_dcid =</span><span class="w"></span>
+<span class="c1"># io_trust_seconds = 20</span><span class="w"></span>
 </pre></div>
 </div>
 <p>Contains default parameters for all fdbserver processes on this machine. These same options can be overridden for individual processes in their respective <code class="docutils literal"><span class="pre">[fdbserver.&lt;ID&gt;]</span></code> sections. In this section, the ID of the individual fdbserver can be substituted by using the <code class="docutils literal"><span class="pre">$ID</span></code> variable in the value. For example, <code class="docutils literal"><span class="pre">public_address</span> <span class="pre">=</span> <span class="pre">auto:$ID</span></code> makes each fdbserver listen on a port equal to its ID.</p>
@@ -506,19 +506,19 @@ Coordinators changed
 </div>
 <div class="section" id="fdbserver-id-section-s">
 <h3><code class="docutils literal"><span class="pre">[fdbserver.&lt;ID&gt;]</span></code> section(s)</h3>
-<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="c1">## An individual fdbserver process with id 4500</span>
-<span class="c1">## Parameters set here override defaults from the [fdbserver] section</span>
-<span class="k">[fdbserver.4500]</span>
+<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="c1">## An individual fdbserver process with id 4500</span><span class="w"></span>
+<span class="c1">## Parameters set here override defaults from the [fdbserver] section</span><span class="w"></span>
+<span class="k">[fdbserver.4500]</span><span class="w"></span>
 </pre></div>
 </div>
 <p>Each section of this type represents an <code class="docutils literal"><span class="pre">fdbserver</span></code> process that will be run. IDs cannot be repeated. Frequently, an administrator will choose to run one <code class="docutils literal"><span class="pre">fdbserver</span></code> per CPU core. Parameters set in this section apply to only a single fdbserver process, and overwrite the defaults set in the <code class="docutils literal"><span class="pre">[fdbserver]</span></code> section. Note that by default, the ID specified in this section is also used as the network port and the data directory.</p>
 </div>
 <div class="section" id="backup-agent-sections">
 <h3>Backup agent sections</h3>
-<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="k">[backup_agent]</span>
-<span class="na">command</span> <span class="o">=</span> <span class="s">/usr/lib/foundationdb/backup_agent/backup_agent</span>
+<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="k">[backup_agent]</span><span class="w"></span>
+<span class="na">command</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/usr/lib/foundationdb/backup_agent/backup_agent</span><span class="w"></span>
 
-<span class="k">[backup_agent.1]</span>
+<span class="k">[backup_agent.1]</span><span class="w"></span>
 </pre></div>
 </div>
 <p>These sections run and configure the backup agent process used for <a class="reference internal" href="backups.html"><span class="doc">point-in-time backups</span></a> of FoundationDB. These don&#8217;t usually need to be modified. The structure and functionality is similar to the <code class="docutils literal"><span class="pre">[fdbserver]</span></code> and <code class="docutils literal"><span class="pre">[fdbserver.&lt;ID&gt;]</span></code> sections.</p>
@@ -998,8 +998,8 @@ Configuration changed.
       
     </p>
     <p>
-        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 02, 2021.<br/>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Jan 07, 2022.<br/>
     </p>
   </div>
 </footer>

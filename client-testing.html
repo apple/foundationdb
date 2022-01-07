@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.22',
+        VERSION:     '6.3.23',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -237,7 +237,7 @@ might be hard to reproduce.</p>
 <p>To start a new thread, one has to &#8220;bind&#8221; operating system threads to their simulated processes. This can be done by setting the
 <code class="docutils literal"><span class="pre">ProcessId</span></code> in the child threads when they get created. In Java this is done by only starting new threads through the provided
 <code class="docutils literal"><span class="pre">Executor</span></code>. In the C++ API one can use the <code class="docutils literal"><span class="pre">FDBWorkloadContext</span></code> to do that. For example:</p>
-<div class="highlight-C++"><div class="highlight"><pre><span></span><span class="k">template</span><span class="o">&lt;</span><span class="k">class</span> <span class="nc">Fun</span><span class="o">&gt;</span><span class="w"></span>
+<div class="highlight-C++"><div class="highlight"><pre><span></span><span class="k">template</span><span class="o">&lt;</span><span class="k">class</span><span class="w"> </span><span class="nc">Fun</span><span class="o">&gt;</span><span class="w"></span>
 <span class="n">std</span><span class="o">::</span><span class="kr">thread</span><span class="w"> </span><span class="n">startThread</span><span class="p">(</span><span class="n">FDBWorkloadContext</span><span class="o">*</span><span class="w"> </span><span class="n">context</span><span class="p">,</span><span class="w"> </span><span class="n">Fun</span><span class="w"> </span><span class="n">fun</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">processId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">context</span><span class="o">-&gt;</span><span class="n">getProcessID</span><span class="p">();</span><span class="w"></span>
 <span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kr">thread</span><span class="p">([</span><span class="n">context</span><span class="p">,</span><span class="w"> </span><span class="n">processID</span><span class="p">,</span><span class="w"> </span><span class="n">fun</span><span class="p">](</span><span class="w"></span>
@@ -485,34 +485,34 @@ processes with the class test. So above 2-step process becomes a bit more comple
 configuration. The main difference to a normal FoundationDB cluster is that some processes
 must have a test class assigned to them. This can be done in the <code class="docutils literal"><span class="pre">foundationdb.conf</span></code>. For
 example this file would create a server with 8 processes of which 4 would act as test clients.</p>
-<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="k">[fdbmonitor]</span>
-<span class="na">user</span> <span class="o">=</span> <span class="s">foundationdb</span>
-<span class="na">group</span> <span class="o">=</span> <span class="s">foundationdb</span>
+<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="k">[fdbmonitor]</span><span class="w"></span>
+<span class="na">user</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">foundationdb</span><span class="w"></span>
+<span class="na">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">foundationdb</span><span class="w"></span>
 
-<span class="k">[general]</span>
-<span class="na">restart_delay</span> <span class="o">=</span> <span class="s">60</span>
-<span class="na">cluster_file</span> <span class="o">=</span> <span class="s">/etc/foundationdb/fdb.cluster</span>
+<span class="k">[general]</span><span class="w"></span>
+<span class="na">restart_delay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">60</span><span class="w"></span>
+<span class="na">cluster_file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/etc/foundationdb/fdb.cluster</span><span class="w"></span>
 
-<span class="c1">## Default parameters for individual fdbserver processes</span>
-<span class="k">[fdbserver]</span>
-<span class="na">command</span> <span class="o">=</span> <span class="s">/usr/sbin/fdbserver</span>
-<span class="na">public_address</span> <span class="o">=</span> <span class="s">auto:$ID</span>
-<span class="na">listen_address</span> <span class="o">=</span> <span class="s">public</span>
-<span class="na">datadir</span> <span class="o">=</span> <span class="s">/var/lib/foundationdb/data/$ID</span>
-<span class="na">logdir</span> <span class="o">=</span> <span class="s">/var/log/foundationdb</span>
+<span class="c1">## Default parameters for individual fdbserver processes</span><span class="w"></span>
+<span class="k">[fdbserver]</span><span class="w"></span>
+<span class="na">command</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/usr/sbin/fdbserver</span><span class="w"></span>
+<span class="na">public_address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">auto:$ID</span><span class="w"></span>
+<span class="na">listen_address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">public</span><span class="w"></span>
+<span class="na">datadir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/var/lib/foundationdb/data/$ID</span><span class="w"></span>
+<span class="na">logdir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/var/log/foundationdb</span><span class="w"></span>
 
-<span class="k">[fdbserver.4500]</span>
-<span class="k">[fdbserver.4501]</span>
-<span class="k">[fdbserver.4502]</span>
-<span class="k">[fdbserver.4503]</span>
-<span class="k">[fdbserver.4510]</span>
-<span class="na">class</span> <span class="o">=</span> <span class="s">test</span>
-<span class="k">[fdbserver.4511]</span>
-<span class="na">class</span> <span class="o">=</span> <span class="s">test</span>
-<span class="k">[fdbserver.4512]</span>
-<span class="na">class</span> <span class="o">=</span> <span class="s">test</span>
-<span class="k">[fdbserver.4513]</span>
-<span class="na">class</span> <span class="o">=</span> <span class="s">test</span>
+<span class="k">[fdbserver.4500]</span><span class="w"></span>
+<span class="k">[fdbserver.4501]</span><span class="w"></span>
+<span class="k">[fdbserver.4502]</span><span class="w"></span>
+<span class="k">[fdbserver.4503]</span><span class="w"></span>
+<span class="k">[fdbserver.4510]</span><span class="w"></span>
+<span class="na">class</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">test</span><span class="w"></span>
+<span class="k">[fdbserver.4511]</span><span class="w"></span>
+<span class="na">class</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">test</span><span class="w"></span>
+<span class="k">[fdbserver.4512]</span><span class="w"></span>
+<span class="na">class</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">test</span><span class="w"></span>
+<span class="k">[fdbserver.4513]</span><span class="w"></span>
+<span class="na">class</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">test</span><span class="w"></span>
 </pre></div>
 </div>
 <p>Running the actual test can be done with <code class="docutils literal"><span class="pre">fdbserver</span></code> as well. For this you can call the process
@@ -543,8 +543,8 @@ with the <code class="docutils literal"><span class="pre">multitest</span></code
       
     </p>
     <p>
-        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 02, 2021.<br/>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Jan 07, 2022.<br/>
     </p>
   </div>
 </footer>

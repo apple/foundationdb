@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    '../',
-        VERSION:     '6.3.22',
+        VERSION:     '6.3.23',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -81,21 +81,23 @@
       role="menu"
       aria-labelledby="dLabelLocalToc"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id2">6.3.22</a></li>
-<li><a class="reference internal" href="#id3">6.3.20</a></li>
-<li><a class="reference internal" href="#id4">6.3.19</a></li>
-<li><a class="reference internal" href="#id5">6.3.18</a></li>
-<li><a class="reference internal" href="#id7">6.3.17</a></li>
-<li><a class="reference internal" href="#id8">6.3.15</a></li>
-<li><a class="reference internal" href="#id10">6.3.14</a></li>
-<li><a class="reference internal" href="#id13">6.3.13</a></li>
-<li><a class="reference internal" href="#id14">6.3.12</a></li>
-<li><a class="reference internal" href="#id15">6.3.11</a></li>
-<li><a class="reference internal" href="#id16">6.3.10</a><ul>
+<li><a class="reference internal" href="#id2">6.3.23</a></li>
+<li><a class="reference internal" href="#id3">6.3.22</a></li>
+<li><a class="reference internal" href="#id4">6.3.21</a></li>
+<li><a class="reference internal" href="#id5">6.3.20</a></li>
+<li><a class="reference internal" href="#id6">6.3.19</a></li>
+<li><a class="reference internal" href="#id8">6.3.18</a></li>
+<li><a class="reference internal" href="#id10">6.3.17</a></li>
+<li><a class="reference internal" href="#id11">6.3.15</a></li>
+<li><a class="reference internal" href="#id13">6.3.14</a></li>
+<li><a class="reference internal" href="#id16">6.3.13</a></li>
+<li><a class="reference internal" href="#id17">6.3.12</a></li>
+<li><a class="reference internal" href="#id18">6.3.11</a></li>
+<li><a class="reference internal" href="#id19">6.3.10</a><ul>
 <li><a class="reference internal" href="#packaging">Packaging</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#id18">6.3.9</a><ul>
+<li><a class="reference internal" href="#id21">6.3.9</a><ul>
 <li><a class="reference internal" href="#features">Features</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
 <li><a class="reference internal" href="#reliability">Reliability</a></li>
@@ -148,21 +150,23 @@
       <div class="col-md-3">
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id2">6.3.22</a></li>
-<li><a class="reference internal" href="#id3">6.3.20</a></li>
-<li><a class="reference internal" href="#id4">6.3.19</a></li>
-<li><a class="reference internal" href="#id5">6.3.18</a></li>
-<li><a class="reference internal" href="#id7">6.3.17</a></li>
-<li><a class="reference internal" href="#id8">6.3.15</a></li>
-<li><a class="reference internal" href="#id10">6.3.14</a></li>
-<li><a class="reference internal" href="#id13">6.3.13</a></li>
-<li><a class="reference internal" href="#id14">6.3.12</a></li>
-<li><a class="reference internal" href="#id15">6.3.11</a></li>
-<li><a class="reference internal" href="#id16">6.3.10</a><ul>
+<li><a class="reference internal" href="#id2">6.3.23</a></li>
+<li><a class="reference internal" href="#id3">6.3.22</a></li>
+<li><a class="reference internal" href="#id4">6.3.21</a></li>
+<li><a class="reference internal" href="#id5">6.3.20</a></li>
+<li><a class="reference internal" href="#id6">6.3.19</a></li>
+<li><a class="reference internal" href="#id8">6.3.18</a></li>
+<li><a class="reference internal" href="#id10">6.3.17</a></li>
+<li><a class="reference internal" href="#id11">6.3.15</a></li>
+<li><a class="reference internal" href="#id13">6.3.14</a></li>
+<li><a class="reference internal" href="#id16">6.3.13</a></li>
+<li><a class="reference internal" href="#id17">6.3.12</a></li>
+<li><a class="reference internal" href="#id18">6.3.11</a></li>
+<li><a class="reference internal" href="#id19">6.3.10</a><ul>
 <li><a class="reference internal" href="#packaging">Packaging</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#id18">6.3.9</a><ul>
+<li><a class="reference internal" href="#id21">6.3.9</a><ul>
 <li><a class="reference internal" href="#features">Features</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
 <li><a class="reference internal" href="#reliability">Reliability</a></li>
@@ -186,6 +190,12 @@
   <div class="section" id="release-notes">
 <span id="id1"></span><h1>Release Notes</h1>
 <div class="section" id="id2">
+<h2>6.3.23</h2>
+<ul class="simple">
+<li>Add AWS v4 header support for backup. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6025">(PR #6025)</a></li>
+</ul>
+</div>
+<div class="section" id="id3">
 <h2>6.3.22</h2>
 <ul class="simple">
 <li>Added histograms to client GRV batcher. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5760">(PR #5760)</a></li>
@@ -194,21 +204,39 @@
 <li>Added a new feature that allows FDB to failover to remote DC when the primary is experiencing massive grey failure. This feature is turned off by default. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5774">(PR #5774)</a></li>
 </ul>
 </div>
-<div class="section" id="id3">
+<div class="section" id="id4">
+<h2>6.3.21</h2>
+<ul class="simple">
+<li>Added a ThreadID field to all trace events for the purpose of multi-threaded client debugging. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5665">(PR #5665)</a></li>
+<li>Fixed some histograms&#8217; group name in the master proxy. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5674">(PR #5674)</a></li>
+<li>Added histograms for GRV path components in the proxy. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5689">(PR #5689)</a></li>
+<li>Fixed race condition introduced in 6.3.20 between setting timeouts and resetting or destroying transactions. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5695">(PR #5695)</a></li>
+<li>Disable detailed transaction log pop tracing by default. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5696">(PR #5696)</a></li>
+</ul>
+</div>
+<div class="section" id="id5">
 <h2>6.3.20</h2>
 <ul class="simple">
 <li>Several minor problems with the versioned packages have been fixed. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5607">(PR 5607)</a></li>
 <li>A client might not honor transaction timeouts when using the multi-version client if it cannot connect to the cluster. <a class="reference external" href="https://github.com/apple/foundationdb/issues/5595">(Issue #5595)</a></li>
 <li>Fixed a very rare bug where recovery could potentially roll back a committed transaction <a class="reference external" href="https://github.com/apple/foundationdb/pull/5461">(PR 5461)</a></li>
+<li>Added histograms for commit path components in the proxy. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5367">(PR #5367)</a></li>
+<li>Fixed a false checkRegions call that could cause unwanted primary DC failover. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5330">(PR #5330)</a></li>
 </ul>
 </div>
-<div class="section" id="id4">
+<div class="section" id="id6">
 <h2>6.3.19</h2>
 <ul class="simple">
-<li>Add the <code class="docutils literal"><span class="pre">trace_partial_file_suffix</span></code> network option. This option will give unfinished trace files a special suffix to indicate they&#8217;re not complete yet. When the trace file is complete, it is renamed to remove the suffix. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5330">(PR #5330)</a></li>
+<li>Added the <code class="docutils literal"><span class="pre">trace_partial_file_suffix</span></code> network option. This option will give unfinished trace files a special suffix to indicate they&#8217;re not complete yet. When the trace file is complete, it is renamed to remove the suffix. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5330">(PR #5330)</a></li>
+<li>Added error details in <code class="docutils literal"><span class="pre">RemovedDeadBackupLayerStatus</span></code> trace event. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5356">(PR #5356)</a></li>
+<li>Added RepeatableReadMultiThreadClientTest. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5212">(PR #5212)</a></li>
+<li>Added a new feature that allows FDB to detect grey failures and automatically recover from them. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5249">(PR #5249)</a></li>
+<li>Added version and timestamp to <code class="docutils literal"><span class="pre">TimeKeeperCommit</span></code> trace event. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5415">(PR #5415)</a></li>
+<li>Added <code class="docutils literal"><span class="pre">RecruitFromConfigurationRetry</span></code> trace event to improve recruitment observability. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5455">(PR #5455)</a></li>
+<li>Several fixes to pkg_tester and packaging. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5460">(PR #5460)</a></li>
 </ul>
 </div>
-<div class="section" id="id5">
+<div class="section" id="id8">
 <h2>6.3.18</h2>
 <ul class="simple">
 <li>The multi-version client API would not propagate errors that occurred when creating databases on external clients. This could result in a invalid memory accesses. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5221">(PR #5221)</a></li>
@@ -218,7 +246,7 @@
 <li>Added SidebandMultiThreadClientTest, which validates causal consistency for multi-threaded client. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5173">(PR #5173)</a></li>
 </ul>
 </div>
-<div class="section" id="id7">
+<div class="section" id="id10">
 <h2>6.3.17</h2>
 <ul class="simple">
 <li>Made readValuePrefix consistent regarding error messages. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5160">(PR #5160)</a></li>
@@ -231,7 +259,7 @@
 <li>Added histograms for storage server write path components. <a class="reference external" href="https://github.com/apple/foundationdb/pull/5019">(PR #5019)</a></li>
 </ul>
 </div>
-<div class="section" id="id8">
+<div class="section" id="id11">
 <h2>6.3.15</h2>
 <ul class="simple">
 <li>Added several counters to the <code class="docutils literal"><span class="pre">MasterMetrics</span></code> trace event to count the number of requests of each type received. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4829">(PR #4829)</a></li>
@@ -241,7 +269,7 @@
 <li>Fix accounting issue that could cause higher priority GRV requests to be rejected after many batch priority requests have been rejected on a proxy. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4932">(PR #4932)</a></li>
 </ul>
 </div>
-<div class="section" id="id10">
+<div class="section" id="id13">
 <h2>6.3.14</h2>
 <ul class="simple">
 <li>Fixed fdbbackup start command that automatically configures database with backup workers to only do so when using partitioned logs. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4863">(PR #4863)</a></li>
@@ -253,14 +281,14 @@
 <li>Fix an accounting error that could potentially result in inaccuracies in priority busyness metrics. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4824">(PR #4824)</a></li>
 </ul>
 </div>
-<div class="section" id="id13">
+<div class="section" id="id16">
 <h2>6.3.13</h2>
 <ul class="simple">
 <li>Added <code class="docutils literal"><span class="pre">commit_batching_window_size</span></code> to the proxy roles section of status to record statistics about commit batching window size on each proxy. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4736">(PR #4736)</a></li>
 <li>The multi-version client now requires at most two client connections with version 6.2 or larger, regardless of how many external clients are configured. Clients older than 6.2 will continue to create an additional connection each. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4667">(PR #4667)</a></li>
 </ul>
 </div>
-<div class="section" id="id14">
+<div class="section" id="id17">
 <h2>6.3.12</h2>
 <ul class="simple">
 <li>Change the default for &#8211;knob_tls_server_handshake_threads to 64. The previous was 1000. This avoids starting 1000 threads by default, but may adversely affect recovery time for large clusters using tls. Users with large tls clusters should consider explicitly setting this knob in their foundationdb.conf file. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4421">(PR #4421)</a></li>
@@ -271,7 +299,7 @@
 <li>Add the ability to instrument java driver actions, such as <code class="docutils literal"><span class="pre">FDBTransaction</span></code> and <code class="docutils literal"><span class="pre">RangeQuery</span></code>. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4385">(PR #4385)</a></li>
 </ul>
 </div>
-<div class="section" id="id15">
+<div class="section" id="id18">
 <h2>6.3.11</h2>
 <ul class="simple">
 <li>Support multiple worker threads for each client version that is loaded. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4269">(PR #4269)</a></li>
@@ -283,7 +311,7 @@
 <li>Build on Windows using VS 2019 + LLVM/Clang. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4258">(PR #4258)</a></li>
 </ul>
 </div>
-<div class="section" id="id16">
+<div class="section" id="id19">
 <h2>6.3.10</h2>
 <ul class="simple">
 <li>Make fault tolerance metric calculation in HA clusters consistent with 6.2 branch. <a class="reference external" href="https://github.com/apple/foundationdb/pull/4175">(PR #4175)</a></li>
@@ -301,7 +329,7 @@
 </ul>
 </div>
 </div>
-<div class="section" id="id18">
+<div class="section" id="id21">
 <h2>6.3.9</h2>
 <div class="section" id="features">
 <h3>Features</h3>
@@ -494,8 +522,8 @@
       
     </p>
     <p>
-        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 02, 2021.<br/>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Jan 07, 2022.<br/>
     </p>
   </div>
 </footer>
