@@ -507,6 +507,7 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 			}
 
 			Tag& tag = dcId_tags[recruits.storageServers[idx].locality.dcId()];
+			self->allTags.push_back(tag);
 			tag.id++;
 			idx++;
 
