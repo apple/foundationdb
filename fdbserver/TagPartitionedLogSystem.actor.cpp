@@ -1679,9 +1679,6 @@ Future<Void> TagPartitionedLogSystem::onLogSystemConfigChange() {
 
 Version TagPartitionedLogSystem::getEnd() const {
 	ASSERT(recoverAt.present());
-	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-		return maxRv + 1;
-	}
 	return recoverAt.get() + 1;
 }
 
@@ -2230,7 +2227,6 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			// If UNICAST is set, keep refreshing list TLog's recovery versions as maxEnd may change as new tLogs are
 			// locked.
 			logSystem->recoverAt = minEnd;
-			logSystem->maxRv = minEnd;
 
 			std::map<UID, Version> rvLogs;
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
@@ -2248,7 +2244,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 						Reference<LogSet> logSet = lockResults[0].logSet;
 						if (versionRepCount[k] >=
 						    std::get<1>(result.unknownCommittedVersions[i]) - logSet->tLogReplicationFactor + 1) {
-							if (k > rvLogs[result.id] && k > knownCommittedVersion) {
+							Version rv = rvLogs.find(result.id) != rvLogs.end() ? rvLogs[result.id] : 0;
+							if (k > rv && k > knownCommittedVersion) {
 								rvLogs[result.id] = k;
 							}
 						}
@@ -2256,11 +2253,9 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 				}
 
 				for (auto const& [key, val] : rvLogs) {
-					if (val > logSystem->maxRv) {
-						logSystem->maxRv = val;
-						// TraceEvent("RecoveryVersionInfo").detail("MaxRv", logSystem->maxRv);
-					}
+					logSystem->recoverAt = std::max(val, logSystem->recoverAt.get());
 				}
+				// TraceEvent("RecoveryVersionInfo").detail("RecoverAt", logSystem->recoverAt);
 			} else {
 				lastEnd = minEnd;
 			}
@@ -2888,7 +2883,6 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		req.recoverFrom = oldLogSystemConfig;
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 			req.rvLogs = oldLogSystem->rvLogs;
-			req.maxRv = oldLogSystem->maxRv;
 		}
 		req.recoverAt = oldLogSystem->recoverAt.get();
 		req.knownCommittedVersion = oldLogSystem->knownCommittedVersion;
@@ -2958,7 +2952,6 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 			req.recoverFrom = oldLogSystemConfig;
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 				req.rvLogs = oldLogSystem->rvLogs;
-				req.maxRv = oldLogSystem->maxRv;
 			}
 			req.recoverAt = oldLogSystem->recoverAt.get();
 			req.knownCommittedVersion = oldLogSystem->knownCommittedVersion;

@@ -3364,9 +3364,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			}
 
 			state Version lastVersionPrevEpoch = req.recoverAt;
-			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				lastVersionPrevEpoch = req.maxRv;
-			}
+
 			if ((req.isPrimary || req.recoverFrom.logRouterTags == 0) &&
 			    logData->version.get() < lastVersionPrevEpoch && !logData->stopped) {
 				// Log the changes to the persistent queue, to be committed by commitQueue()
