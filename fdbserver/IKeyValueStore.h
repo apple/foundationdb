@@ -102,15 +102,15 @@ public:
 		step 3 - commit(): persists and metadata to exclude the shard, closes and destroys (may not be synchronous) the physical instance.
 	*/
 
-	virtual Future<Void> addShard(KeyRangeRef range, UID uid) { return Future<Void>(); }
+	virtual void addShard(KeyRangeRef range, UID uid) {}
 
 	virtual void persistShard(KeyRangeRef range) {} // To be removed.
 
-	virtual std::vector<MutationRef> getPersistShardMutation(KeyRangeRef range) { return std::vector<MutationRef>(); }
+	virtual std::vector<MutationRef> getPersistShardMutations(KeyRangeRef range) { return std::vector<MutationRef>(); }
 
-	virtual Future<Void> disposeShard(KeyRangeRef range) { return Future<Void>(); }
+	virtual void disposeRange(KeyRangeRef range) {}
 
-	virtual std::vector<MutationRef> getDisposeShardMutation(KeyRangeRef range) { return std::vector<MutationRef>(); };
+	virtual std::vector<MutationRef> getDisposeRangeMutations(KeyRangeRef range) { return std::vector<MutationRef>(); };
 
 	/*
 	Concurrency contract
