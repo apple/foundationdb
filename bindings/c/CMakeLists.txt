@@ -157,6 +157,9 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
     set(FDB_C_TARGET $<TARGET_FILE:fdb_c>)
   endif()
   add_custom_command(
+    TARGET fdb_c POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy ${FDB_C_TARGET} ${CMAKE_BINARY_DIR}/lib/libfdb_c_external.so)
+  add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
     COMMAND ${CMAKE_COMMAND} -E copy ${FDB_C_TARGET} ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
     DEPENDS fdb_c
