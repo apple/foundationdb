@@ -2625,11 +2625,12 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			if (logData->stopVersionUpdated.isSet() && logData->stopVersionUpdated.getFuture().get() < req.version) {
 				TEST(true); // TLog updated to a larger recovery version
 				req.reply.sendError(master_recovery_failed());
+			} else {
+				if (logData->stopVersionUpdated.canBeSet()) {
+					logData->stopVersionUpdated.send(req.version);
+				}
+				req.reply.send(Void());
 			}
-			if (logData->stopVersionUpdated.canBeSet()) {
-				logData->stopVersionUpdated.send(req.version);
-			}
-			req.reply.send(Void());
 		}
 	}
 }
