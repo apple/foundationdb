@@ -841,13 +841,18 @@ public:
 		for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
 			auto fitness = std::get<0>(workerIter->first);
 			auto used = std::get<1>(workerIter->first);
+
+			if (zone_count.size() >= required &&
+			    (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed))) {
+				break;
+			}
+
 			for (int i = 0; i < workerIter->second.size(); i++) {
 				zone_count[workerIter->second[i].interf.locality.zoneId()]++;
 			}
 			if (zone_count.size() >= required) {
 				requiredFitness = fitness;
 				requiredUsed = used;
-				break;
 			}
 		}
 
