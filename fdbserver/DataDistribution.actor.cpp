@@ -2997,14 +2997,11 @@ void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataTy
 	wiggle_pq.update(handle, std::make_pair(metadata, serverId));
 }
 Optional<UID> StorageWiggler::getNextServerId() {
-	while (!wiggle_pq.empty()) {
+	if (!wiggle_pq.empty()) {
 		auto [metadata, id] = wiggle_pq.top();
 		wiggle_pq.pop();
 		pq_handles.erase(id);
-		if (teamCollection->server_info.count(id)) {
-			TEST(true); // server is removed when update wiggle uid
-			return Optional<UID>(id);
-		}
+		return Optional<UID>(id);
 	}
 	return Optional<UID>();
 }
@@ -4271,6 +4268,10 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 
 	if (res.second.size() == scalar_traits<UID>::size) {
 		self->wigglingPid = Optional<UID>(BinaryReader::fromStringRef<UID>(res.second, Unversioned()));
+	} else {
+		// skip to the next valid ID
+		watchFuture = res.first;
+		finishStorageWiggleSignal.send(Void());
 	}
 
 	loop {
@@ -4315,6 +4316,10 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 
 				if (res.second.size() == scalar_traits<UID>::size) {
 					self->wigglingPid = Optional<UID>(BinaryReader::fromStringRef<UID>(res.second, Unversioned()));
+				} else {
+					// skip to the next valid ID
+					watchFuture = res.first;
+					finishStorageWiggleSignal.send(Void());
 				}
 
 				// random delay
@@ -4542,6 +4547,33 @@ ACTOR Future<Void> checkStorageMetadata(DDTeamCollection* self, TCServerInfo* se
 	                                                                                           IncludeVersion());
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	state StorageMetadataType data(timer_int());
+	// printf("------ read metadata %s\n", server->id.toString().c_str());
+	// read storage metadata
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			auto property = metadataMap.getProperty(server->id);
+			Optional<StorageMetadataType> metadata = wait(property.get(tr));
+			// NOTE: in upgrade testing, there may not be any metadata
+			if (metadata.present()) {
+				data = metadata.get();
+			} else {
+				metadataMap.set(tr, server->id, data);
+			}
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+
+	// add server to wiggler
+	if (self->storageWiggler->contains(server->id)) {
+		self->storageWiggler->updateMetadata(server->id, data);
+	} else {
+		self->storageWiggler->addServer(server->id, data);
+	}
+
 	// Update server's storeType, especially when it was created
 	state KeyValueStoreType type =
 	    wait(brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(
@@ -4553,33 +4585,8 @@ ACTOR Future<Void> checkStorageMetadata(DDTeamCollection* self, TCServerInfo* se
 			self->wrongStoreTypeRemover = removeWrongStoreType(self);
 			self->addActor.send(self->wrongStoreTypeRemover);
 		}
-	} else {
-		// read storage metadata
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				auto property = metadataMap.getProperty(server->id);
-				Optional<StorageMetadataType> metadata = wait(property.get(tr));
-				// NOTE: in upgrade testing, there may not be any metadata
-				if (metadata.present()) {
-					data = metadata.get();
-				} else {
-					metadataMap.set(tr, server->id, data);
-				}
-				wait(tr->commit());
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
-
-		// add server to wiggler
-		if (self->storageWiggler->contains(server->id)) {
-			self->storageWiggler->updateMetadata(server->id, data);
-		} else {
-			self->storageWiggler->addServer(server->id, data);
-		}
 	}
+
 	return Never();
 }
 
