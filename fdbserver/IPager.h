@@ -95,10 +95,15 @@ enum PageType : uint8_t {
 // Encryption key ID
 typedef uint64_t KeyID;
 
-// Encryption key and secret string
+// EncryptionKeyRef is somewhat multi-variant, it will contain members representing the union
+// of all fields relevant to any implemented encryption scheme.  They are generally of
+// the form
+//   Page Fields - fields which come from or are stored in the Page
+//   Secret Fields - fields which are only known by the Key Provider
+// but it is up to each encoding and provider which fields are which and which ones are used
 struct EncryptionKeyRef {
+
 	EncryptionKeyRef(){};
-	EncryptionKeyRef(StringRef secret, Optional<KeyID> keyID = {}) : secret(secret), id(keyID) {}
 	EncryptionKeyRef(Arena& arena, const EncryptionKeyRef& toCopy) : secret(arena, toCopy.secret), id(toCopy.id) {}
 	int expectedSize() const { return secret.size(); }
 
@@ -113,11 +118,13 @@ class IEncryptionKeyProvider {
 public:
 	virtual ~IEncryptionKeyProvider() {}
 
-	// Get encryption key based on key ID for reading.  Returned key ID must match input.
-	virtual Future<EncryptionKey> getByID(KeyID keyID) = 0;
+	// Get an EncryptionKey with Secret Fields populated based on the given Page Fields.
+	// It is up to the implementation which fields those are.
+	// The output Page Fields must match the input Page Fields.
+	virtual Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) = 0;
 
-	// Get encryption key that should be used for a given data range.
-	virtual Future<EncryptionKey> getByRange(const KeyRef begin, const KeyRef end) = 0;
+	// Get encryption key that should be used for a given user Key-Value range
+	virtual Future<EncryptionKey> getByRange(const KeyRef& begin, const KeyRef& end) = 0;
 };
 
 // ArenaPage represents a data page meant to be stored on disk, located in a block of
@@ -454,8 +461,10 @@ public:
 
 	const Arena& getArena() const { return arena; }
 
+	static bool isEncodingTypeEncrypted(EncodingType t) { return t != EncodingType::XXHash64; }
+
 	// Returns true if the page's encoding type employs encryption
-	bool isEncrypted() const { return getEncodingType() != EncodingType::XXHash64; }
+	bool isEncrypted() const { return isEncodingTypeEncrypted(getEncodingType()); }
 
 private:
 	Arena arena;
@@ -650,6 +659,54 @@ public:
 
 protected:
 	~IPager2() {} // Destruction should be done using close()/dispose() from the IClosable interface
+};
+
+// The null key provider is useful to simplify page decoding.
+// It throws an error for any key info requested.
+class NullKeyProvider : public IEncryptionKeyProvider {
+public:
+	virtual ~NullKeyProvider() {}
+	Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) override { throw encryption_key_not_found(); }
+	Future<EncryptionKey> getByRange(const KeyRef& begin, const KeyRef& end) override {
+		throw encryption_key_not_found();
+	}
+};
+
+// Key provider for dummy XOR encryption scheme
+class XOREncryptionKeyProvider : public IEncryptionKeyProvider {
+public:
+	XOREncryptionKeyProvider(std::string filename) {
+		ASSERT(g_network->isSimulated());
+
+		// Choose a deterministic random filename (without path) byte for secret generation
+		// Remove any leading directory names
+		size_t lastSlash = filename.find_last_of("\\/");
+		if (lastSlash != filename.npos) {
+			filename.erase(0, lastSlash);
+		}
+		xorWith = filename.empty() ? 0x5e
+		                           : (uint8_t)filename[XXH3_64bits(filename.data(), filename.size()) % filename.size()];
+	}
+
+	virtual ~XOREncryptionKeyProvider() {}
+
+	virtual Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) override {
+		if (!key.id.present()) {
+			throw encryption_key_not_found();
+		}
+		EncryptionKey s = key;
+		uint8_t secret = ~(uint8_t)key.id.get() ^ xorWith;
+		s.secret = StringRef(s.arena(), &secret, 1);
+		return s;
+	}
+
+	virtual Future<EncryptionKey> getByRange(const KeyRef& begin, const KeyRef& end) override {
+		EncryptionKeyRef k;
+		k.id = end.empty() ? 0 : *(end.end() - 1);
+		return getSecrets(k);
+	}
+
+	uint8_t xorWith;
 };
 
 #endif

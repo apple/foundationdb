@@ -2176,13 +2176,16 @@ public:
 	          Version remapCleanupWindow,
 	          int concurrentExtentReads,
 	          bool memoryOnly,
-	          IEncryptionKeyProvider* keyProvider,
+	          std::shared_ptr<IEncryptionKeyProvider> keyProvider,
 	          Promise<Void> errorPromise = {})
-	  : pEncryptionKeyProvider(keyProvider),
-	    ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2),
+	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2),
 	    pageCacheBytes(pageCacheSizeBytes), pHeader(nullptr), desiredPageSize(desiredPageSize),
 	    desiredExtentSize(desiredExtentSize), filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
 	    remapCleanupWindow(remapCleanupWindow), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
+
+		if (keyProvider == nullptr) {
+			keyProvider = std::make_shared<NullKeyProvider>();
+		}
 
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
@@ -2963,8 +2966,8 @@ public:
 
 		try {
 			page->postReadHeader(pageID);
-			if (self->pEncryptionKeyProvider != nullptr && page->isEncrypted()) {
-				EncryptionKey k = wait(self->pEncryptionKeyProvider->getByID(page->encryptionKey.id.orDefault(0)));
+			if (page->isEncrypted()) {
+				EncryptionKey k = wait(self->keyProvider->getSecrets(page->encryptionKey));
 				page->encryptionKey = k;
 			}
 			page->postReadPayload(pageID);
@@ -2982,8 +2985,8 @@ public:
 			// For header pages, event is a warning because the primary header could be read after an unsync'd write,
 			// but no other page can.
 			TraceEvent(header ? SevWarnAlways : SevError, "RedwoodPageError")
-			    .detail("Filename", self->filename.c_str())
 			    .error(err)
+			    .detail("Filename", self->filename.c_str())
 			    .detail("PageID", pageID)
 			    .detail("PageSize", self->physicalPageSize)
 			    .detail("Offset", pageID * self->physicalPageSize);
@@ -3032,8 +3035,8 @@ public:
 
 		try {
 			page->postReadHeader(pageIDs.front());
-			if (self->pEncryptionKeyProvider != nullptr && page->isEncrypted()) {
-				EncryptionKey k = wait(self->pEncryptionKeyProvider->getByID(page->encryptionKey.id.orDefault(0)));
+			if (page->isEncrypted()) {
+				EncryptionKey k = wait(self->keyProvider->getSecrets(page->encryptionKey));
 				page->encryptionKey = k;
 			}
 			page->postReadPayload(pageIDs.front());
@@ -3926,7 +3929,7 @@ private:
 	int pagesPerExtent;
 
 private:
-	IEncryptionKeyProvider* pEncryptionKeyProvider;
+	std::shared_ptr<IEncryptionKeyProvider> keyProvider;
 
 	PriorityMultiLock ioLock;
 
@@ -4764,37 +4767,6 @@ struct InPlaceArray {
 };
 #pragma pack(pop)
 
-// Key provider for dummy XOR encryption scheme
-class XOREncryptionKeyProvider : public IEncryptionKeyProvider {
-public:
-	XOREncryptionKeyProvider(std::string filename) {
-		ASSERT(g_network->isSimulated());
-
-		// Choose a deterministic random filename (without path) byte for secret generation
-		// Remove any leading directory names
-		size_t lastSlash = filename.find_last_of("\\/");
-		if (lastSlash != filename.npos) {
-			filename.erase(0, lastSlash);
-		}
-		xorWith = filename.empty() ? 0x5e
-		                           : (uint8_t)filename[XXH3_64bits(filename.data(), filename.size()) % filename.size()];
-		debug_printf("XOREncryptionKeyProvider %p reduced filename %s\n", this, filename.c_str());
-	}
-
-	virtual ~XOREncryptionKeyProvider() {}
-
-	virtual Future<EncryptionKey> getByID(KeyID keyID) override {
-		uint8_t secret = ~(uint8_t)keyID ^ xorWith;
-		return EncryptionKey(EncryptionKeyRef(KeyRef(&secret, 1), keyID));
-	}
-
-	virtual Future<EncryptionKey> getByRange(const KeyRef begin, const KeyRef end) override {
-		return getByID(end.empty() ? 0 : *(end.end() - 1));
-	}
-
-	uint8_t xorWith;
-};
-
 class VersionedBTree {
 public:
 	// The first possible internal record possible in the tree
@@ -4960,10 +4932,23 @@ public:
 	// VersionedBTree takes ownership of pager
 	VersionedBTree(IPager2* pager,
 	               std::string name,
-	               IEncryptionKeyProvider* keyProvider,
-	               EncodingType t = EncodingType::XXHash64)
-	  : m_pager(pager), m_encryptionKeyProvider(keyProvider), m_pBuffer(nullptr), m_mutationCount(0), m_encodingType(t),
-	    m_name(name), m_pHeader(nullptr), m_headerSpace(0) {
+	               EncodingType defaultEncodingType,
+	               std::shared_ptr<IEncryptionKeyProvider> keyProvider)
+	  : m_pager(pager), m_encodingType(defaultEncodingType), m_enforceEncodingType(false), m_keyProvider(keyProvider),
+	    m_pBuffer(nullptr), m_mutationCount(0), m_name(name), m_pHeader(nullptr), m_headerSpace(0) {
+
+		// For encrypted encoding types, enforce that BTree nodes read from disk use the default encoding type
+		// This prevents an attack where an encrypted page is replaced by an attacker with an unencrypted page
+		// or an encrypted page fabricated using a compromised scheme.
+		if (ArenaPage::isEncodingTypeEncrypted(m_encodingType)) {
+			ASSERT(keyProvider != nullptr);
+			m_enforceEncodingType = true;
+		}
+
+		// If key provider isn't given, instantiate the null provider
+		if (m_keyProvider == nullptr) {
+			m_keyProvider = std::make_shared<NullKeyProvider>();
+		}
 
 		m_lazyClearActor = 0;
 		m_init = init_impl(this);
@@ -4973,8 +4958,8 @@ public:
 	ACTOR static Future<Reference<ArenaPage>> makeEmptyRoot(VersionedBTree* self) {
 		state Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 		page->init(self->m_encodingType, PageType::BTreeNode, 1);
-		if (self->m_encryptionKeyProvider != nullptr && page->isEncrypted()) {
-			EncryptionKey k = wait(self->m_encryptionKeyProvider->getByRange(dbBegin.key, dbEnd.key));
+		if (page->isEncrypted()) {
+			EncryptionKey k = wait(self->m_keyProvider->getByRange(dbBegin.key, dbEnd.key));
 			page->encryptionKey = k;
 		}
 
@@ -5130,13 +5115,12 @@ public:
 			self->m_pHeader->fromKeyRef(meta);
 			self->m_lazyClearQueue.recover(self->m_pager, self->m_pHeader->lazyDeleteQueue, "LazyClearQueueRecovered");
 			debug_printf("BTree recovered.\n");
+
 			if (self->m_pHeader->encodingType != self->m_encodingType) {
 				TraceEvent(SevWarn, "RedwoodBTreeNodeEncodingMismatch")
 				    .detail("InstanceName", self->m_pager->getName())
 				    .detail("EncodingFound", self->m_pHeader->encodingType)
 				    .detail("EncodingDesired", self->m_encodingType);
-
-				self->m_encodingType = self->m_pHeader->encodingType;
 			}
 		}
 
@@ -5426,7 +5410,9 @@ private:
 	 */
 
 	IPager2* m_pager;
-	IEncryptionKeyProvider* m_encryptionKeyProvider;
+	EncodingType m_encodingType;
+	bool m_enforceEncodingType;
+	std::shared_ptr<IEncryptionKeyProvider> m_keyProvider;
 
 	// The mutation buffer currently being written to
 	std::unique_ptr<MutationBuffer> m_pBuffer;
@@ -5440,7 +5426,6 @@ private:
 		Reference<IPagerSnapshot> snapshot;
 	};
 
-	EncodingType m_encodingType;
 	Version m_newOldestVersion;
 	Future<Void> m_latestCommit;
 	Future<Void> m_init;
@@ -5726,9 +5711,8 @@ private:
 			page->init(self->m_encodingType,
 			           (pagesToBuild[pageIndex].blockCount == 1) ? PageType::BTreeNode : PageType::BTreeSuperNode,
 			           height);
-			if (self->m_encryptionKeyProvider != nullptr && page->isEncrypted()) {
-				EncryptionKey k =
-				    wait(self->m_encryptionKeyProvider->getByRange(pageLowerBound.key, pageUpperBound.key));
+			if (page->isEncrypted()) {
+				EncryptionKey k = wait(self->m_keyProvider->getByRange(pageLowerBound.key, pageUpperBound.key));
 				page->encryptionKey = k;
 			}
 
@@ -5778,12 +5762,28 @@ private:
 				    self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, height, previousID.front(), page, v));
 				childPageID.push_back(records.arena(), id);
 			} else {
-				// Either the original node is being split, or it's not but it has changed BTreePageID size or
-				// it is now a multi-page node (and maybe was before as well)
-				// Either way, there is no point in reusing any of the original page IDs because either
-				// the parent must be rewritten anyway to account for the change in child link count or size,
-				// or the parent would be rewritten because it the same cost or cheaper than incurring the second
-				// write of 2 or more pages of a multi-page node.
+				// Either the original node is being split, or only a single node was produced but
+				// its size is > 1 block.
+				//
+				// If the node was split, then the parent must be updated anyways to add
+				// any new children so there is no reason to do an atomic update on this node to
+				// preserve any page IDs.
+				//
+				// If the node was not split, then there is still good reason to update the parent
+				// node to point to new page IDs rather than use atomic update on this multi block
+				// node to preserve its page IDs.  The parent node is almost certainly 1 block, so
+				// updating it will be 1 or 2 writes depending on whether or not its second write
+				// can be avoided.  Updating this N>=2 block node atomically, however, will be N
+				// writes plus possibly another N writes if the second writes cannot be avoided.
+				//
+				// Therefore, assuming the parent is 1 block which is almost certain, the worst
+				// case number of writes for updating the parent is equal to the best case number
+				// of writes for doing an atomic update of this multi-block node.
+				//
+				// Additionally, if we did choose to atomically update this mult-block node here
+				// then the "multiple sibling updates -> single parent update" conversion optimization
+				// would likely convert the changes to a parent update anyways, skipping the second writes
+				// on this multi-block node.  It is more efficient to just take this path directly.
 
 				// Free the old IDs, but only once (before the first output record is added).
 				if (records.empty()) {
@@ -5891,11 +5891,10 @@ private:
 		metrics.pageRead += 1;
 		metrics.pageReadExt += (id.size() - 1);
 
-		// If BTree encryption is enabled, pages read must be encrypted.  This prevents an attack where an
-		// unencrypted page is written in place of an encrypted page.
-		if (page->isEncrypted() != (self->m_encryptionKeyProvider != nullptr)) {
-			Error e = page_unexpected_encryption_mode();
-			TraceEvent(SevError, "RedwoodBTreeEncryptionMismatch")
+		// If BTree encryption is enabled, pages read must be encrypted using the desired encryption type
+		if (self->m_enforceEncodingType && (page->getEncodingType() != self->m_encodingType)) {
+			Error e = unexpected_encoding_type();
+			TraceEvent(SevError, "RedwoodBTreeUnexpectedNodeEncoding")
 			    .error(e)
 			    .detail("PhysicalPageID", page->getPhysicalPageID())
 			    .detail("IsEncrypted", page->isEncrypted());
@@ -7493,7 +7492,7 @@ public:
 		// Deterministically enable encryption based on uid
 		if (g_network->isSimulated() && logID.hash() % 2 == 0) {
 			encodingType = EncodingType::XOREncryption;
-			m_pKeyProvider.reset(new XOREncryptionKeyProvider(filename));
+			m_keyProvider = std::make_shared<XOREncryptionKeyProvider>(filename);
 		}
 
 		IPager2* pager = new DWALPager(pageSize,
@@ -7503,9 +7502,9 @@ public:
 		                               remapCleanupWindow,
 		                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
 		                               false,
-		                               m_pKeyProvider.get(),
+		                               m_keyProvider,
 		                               m_error);
-		m_tree = new VersionedBTree(pager, filename, m_pKeyProvider.get(), encodingType);
+		m_tree = new VersionedBTree(pager, filename, encodingType, m_keyProvider);
 		m_init = catchError(init_impl(this));
 	}
 
@@ -7762,7 +7761,7 @@ private:
 	PriorityMultiLock m_concurrentReads;
 	bool prefetch;
 	Version m_nextCommitVersion;
-	std::unique_ptr<IEncryptionKeyProvider> m_pKeyProvider;
+	std::shared_ptr<IEncryptionKeyProvider> m_keyProvider;
 
 	template <typename T>
 	inline Future<T> catchError(Future<T> f) {
@@ -9416,11 +9415,11 @@ TEST_CASE("Lredwood/correctness/btree") {
 	    params.getInt("concurrentExtentReads").orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
 
 	state EncodingType encodingType = EncodingType::XXHash64;
-	state std::unique_ptr<IEncryptionKeyProvider> pKeyProvider = nullptr;
+	state std::shared_ptr<IEncryptionKeyProvider> keyProvider;
 
 	if (deterministicRandom()->coinflip()) {
 		encodingType = EncodingType::XOREncryption;
-		pKeyProvider.reset(new XOREncryptionKeyProvider(file));
+		keyProvider = std::make_shared<XOREncryptionKeyProvider>(file);
 	}
 
 	printf("\n");
@@ -9459,8 +9458,8 @@ TEST_CASE("Lredwood/correctness/btree") {
 	                      remapCleanupWindow,
 	                      concurrentExtentReads,
 	                      pagerMemoryOnly,
-	                      pKeyProvider.get());
-	state VersionedBTree* btree = new VersionedBTree(pager, file, pKeyProvider.get(), encodingType);
+	                      keyProvider);
+	state VersionedBTree* btree = new VersionedBTree(pager, file, encodingType, keyProvider);
 	wait(btree->init());
 
 	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;
@@ -9676,8 +9675,8 @@ TEST_CASE("Lredwood/correctness/btree") {
 				                               remapCleanupWindow,
 				                               concurrentExtentReads,
 				                               false,
-				                               pKeyProvider.get());
-				btree = new VersionedBTree(pager, file, pKeyProvider.get(), encodingType);
+				                               keyProvider);
+				btree = new VersionedBTree(pager, file, encodingType, keyProvider);
 				wait(btree->init());
 
 				Version v = btree->getLastCommittedVersion();
@@ -9718,10 +9717,10 @@ TEST_CASE("Lredwood/correctness/btree") {
 	wait(closedFuture);
 	btree = new VersionedBTree(
 	    new DWALPager(
-	        pageSize, extentSize, file, cacheSizeBytes, 0, concurrentExtentReads, pagerMemoryOnly, pKeyProvider.get()),
+	        pageSize, extentSize, file, cacheSizeBytes, 0, concurrentExtentReads, pagerMemoryOnly, keyProvider),
 	    file,
-	    pKeyProvider.get(),
-	    encodingType);
+	    encodingType,
+	    keyProvider);
 	wait(btree->init());
 
 	wait(btree->clearAllAndCheckSanity());
@@ -10073,7 +10072,7 @@ TEST_CASE(":/redwood/performance/set") {
 	                                 concurrentExtentReads,
 	                                 pagerMemoryOnly,
 	                                 nullptr);
-	state VersionedBTree* btree = new VersionedBTree(pager, file, nullptr);
+	state VersionedBTree* btree = new VersionedBTree(pager, file, EncodingType::XXHash64, nullptr);
 	wait(btree->init());
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 
