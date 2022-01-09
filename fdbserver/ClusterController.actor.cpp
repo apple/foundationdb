@@ -834,79 +834,90 @@ public:
 		auto requiredFitness = ProcessClass::BestFit;
 		int requiredUsed = 0;
 
-		std::set<Optional<Standalone<StringRef>>> zones;
-		std::vector<WorkerDetails> results;
+		typedef Optional<Standalone<StringRef>> Zone;
+		std::map<Zone, int> zone_count;
 
 		// Determine the best required workers by finding the workers with enough unique zoneIds
 		for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
 			auto fitness = std::get<0>(workerIter->first);
 			auto used = std::get<1>(workerIter->first);
-			deterministicRandom()->randomShuffle(workerIter->second);
 			for (int i = 0; i < workerIter->second.size(); i++) {
-				if (!zones.count(workerIter->second[i].interf.locality.zoneId())) {
-					zones.insert(workerIter->second[i].interf.locality.zoneId());
-					results.push_back(workerIter->second[i]);
-					swapAndPop(&workerIter->second, i--);
-					if (results.size() == required) {
-						break;
-					}
-				}
+				zone_count[workerIter->second[i].interf.locality.zoneId()]++;
 			}
-			if (results.size() == required) {
+			if (zone_count.size() >= required) {
 				requiredFitness = fitness;
 				requiredUsed = used;
 				break;
 			}
 		}
 
-		if (results.size() < required) {
+		if (zone_count.size() < required) {
 			throw no_more_servers();
 		}
 
-		int desiredGroups = desired / required;
-		int currentGroups = 1;
-		std::vector<WorkerDetails> current;
-		zones.clear();
-		bool findMoreGroups = true;
 
-		// Continue adding workers to the result set until we reach the desired number of workers
-		while (currentGroups < desiredGroups && findMoreGroups) {
-			for (auto workerIter = fitness_workers.begin();
-			     workerIter != fitness_workers.end() && currentGroups < desiredGroups;
-			     ++workerIter) {
-				auto fitness = std::get<0>(workerIter->first);
-				auto used = std::get<1>(workerIter->first);
-				if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
-					findMoreGroups = false;
-					break;
-				}
-				for (int i = 0; i < workerIter->second.size(); i++) {
-					if (!zones.count(workerIter->second[i].interf.locality.zoneId())) {
-						zones.insert(workerIter->second[i].interf.locality.zoneId());
-						current.push_back(workerIter->second[i]);
-						swapAndPop(&workerIter->second, i--);
-						if (current.size() == required) {
-							break;
-						}
+		std::vector<std::vector<WorkerDetails>> results;
+		results.resize(desired / required);
+		std::map<Zone, int> zone_group;
+
+		for (auto workerIter = fitness_workers.begin();
+		     workerIter != fitness_workers.end() && results.back().size() < required;
+		     ++workerIter) {
+			auto fitness = std::get<0>(workerIter->first);
+			auto used = std::get<1>(workerIter->first);
+			if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
+				break;
+			}
+			std::map<Zone, std::vector<WorkerDetails>> zone_workers;
+			for (int i = 0; i < workerIter->second.size(); i++) {
+				zone_workers[workerIter->second[i].interf.locality.zoneId()].push_back(workerIter->second[i]);
+			}
+			// Continue adding workers to the result set until we reach the desired number of workers
+			while (zone_workers.size()) {
+				Zone maxZone;
+				int maxZoneAmount = 0;
+				int maxCount = 0;
+				for (auto& it : zone_workers) {
+					int& amount = zone_count[it.first];
+					if (amount > maxZoneAmount) {
+						maxZone = it.first;
+						maxZoneAmount = amount;
+						maxCount = 1;
+					} else if (amount == maxZoneAmount && deterministicRandom()->random01() < 1.0 / ++maxCount) {
+						maxZone = it.first;
 					}
 				}
-				if (current.size() == required) {
-					results.insert(results.end(), current.begin(), current.end());
-					current.clear();
-					zones.clear();
-					currentGroups++;
+				auto& w = zone_workers[maxZone];
+				deterministicRandom()->randomShuffle(w);
+				int& c = zone_group[maxZone];
+				int idx = 0;
+				while (idx < w.size() && c < results.size()) {
+					if (results[c].size() < required) {
+						results[c].push_back(w[idx]);
+						idx++;
+					}
+					c++;
+				}
+				if (results.back().size() == required) {
 					break;
 				}
+				zone_workers.erase(maxZone);
+			}
+		}
+		std::vector<WorkerDetails> res;
+		for (auto& it : results) {
+			if (it.size() == required) {
+				res.insert(res.end(), it.begin(), it.end());
 			}
 		}
 
 		ASSERT(results.size() >= required && results.size() <= desired);
 
-		for (auto& result : results) {
+		for (auto& result : res) {
 			id_used[result.interf.locality.processId()]++;
 		}
 
-		return results;
+		return res;
 	}
 
 	// Selects the best method for TLog recruitment based on the specified policy
