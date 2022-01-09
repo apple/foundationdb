@@ -9793,38 +9793,6 @@ ACTOR Future<Void> randomScans(VersionedBTree* btree,
 	return Void();
 }
 
-TEST_CASE(":/redwood/correctness/pager/cow") {
-	state std::string pagerFile = "unittest_pageFile.redwood-v1";
-	printf("Deleting old test data\n");
-	deleteFile(pagerFile);
-
-	int pageSize = 4096;
-	int extentSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE;
-	state IPager2* pager = new DWALPager(
-	    pageSize, extentSize, pagerFile, 0, 0, SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS, false, nullptr);
-
-	wait(success(pager->init()));
-	state LogicalPageID id = wait(pager->newPageID());
-	state VectorRef<LogicalPageID> pageID(&id, 1);
-	Reference<ArenaPage> p = pager->newPageBuffer();
-	p->init(EncodingType::XXHash64, PageType::QueuePageStandalone, 0);
-	memset(p->mutateData(), (char)id, p->dataSize());
-	pager->updatePage(PagerEventReasons::MetaData, nonBtreeLevel, pageID, p);
-	pager->setMetaKey(LiteralStringRef("asdfasdf"));
-	wait(pager->commit(pager->getLastCommittedVersion() + 1));
-	Reference<ArenaPage> p2 =
-	    wait(pager->readPage(PagerEventReasons::PointRead, nonBtreeLevel, id, ioMinPriority, true, false));
-	printf("%s\n", StringRef(p2->data(), p2->dataSize()).toHexString().c_str());
-
-	// TODO: Verify reads, do more writes and reads to make this a real pager validator
-
-	Future<Void> onClosed = pager->onClosed();
-	pager->close();
-	wait(onClosed);
-
-	return Void();
-}
-
 template <int size>
 struct ExtentQueueEntry {
 	uint8_t entry[size];
