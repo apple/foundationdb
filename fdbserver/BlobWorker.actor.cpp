@@ -1461,10 +1461,20 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										metadata->waitForVersionReturned = cfRollbackVersion;
 									}
 									metadata->activeCFData.set(newChangeFeedData(cfRollbackVersion));
+
+									if (!readOldChangeFeed && cfRollbackVersion < startState.changeFeedStartVersion) {
+										// It isn't possible to roll back across the parent/child feed boundary, but as
+										// part of rolling back we may need to cancel in-flight delta files, and those
+										// delta files may include stuff from before the parent/child boundary. So we
+										// have to go back to reading the old change feed
+										ASSERT(cfRollbackVersion >= startState.previousDurableVersion);
+										ASSERT(cfRollbackVersion >= metadata->durableDeltaVersion.get());
+										TEST(true); // rollback crossed change feed boundaries
+										readOldChangeFeed = true;
+										oldChangeFeedDataComplete.reset();
+									}
+
 									if (readOldChangeFeed) {
-										// It shouldn't be possible to roll back across the parent/child feed boundary,
-										// because the transaction creating the child change feed had to commit before
-										// we got here.
 										ASSERT(cfRollbackVersion < startState.changeFeedStartVersion);
 										oldChangeFeedFuture =
 										    bwData->db->getChangeFeedStream(metadata->activeCFData.get(),
@@ -1474,6 +1484,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										                                    metadata->keyRange);
 
 									} else {
+										if (cfRollbackVersion <= startState.changeFeedStartVersion) {
+											fmt::print("Rollback past CF start??. rollback={0}, start={1}\n",
+											           cfRollbackVersion,
+											           startState.changeFeedStartVersion);
+										}
 										ASSERT(cfRollbackVersion > startState.changeFeedStartVersion);
 
 										changeFeedFuture = bwData->db->getChangeFeedStream(metadata->activeCFData.get(),
@@ -1757,10 +1772,10 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 
 			state std::vector<Reference<GranuleHistoryEntry>> historyEntryStack;
 
-			// while the start version of the current granule's parent is larger than the last known start version,
+			// while the start version of the current granule's parent not past the last known start version,
 			// walk backwards
 			while (curHistory.value.parentGranules.size() > 0 &&
-			       curHistory.value.parentGranules[0].second > stopVersion) {
+			       curHistory.value.parentGranules[0].second >= stopVersion) {
 				state GranuleHistory next;
 				loop {
 					try {
@@ -1781,6 +1796,17 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 				historyEntryStack.push_back(makeReference<GranuleHistoryEntry>(
 				    next.range, next.value.granuleID, next.version, curHistory.version));
 				curHistory = next;
+			}
+
+			if (!historyEntryStack.empty()) {
+				Version oldestStartVersion = historyEntryStack.back()->startVersion;
+				// TODO REMOVE eventually, for debugging
+				if (stopVersion != oldestStartVersion && stopVersion != invalidVersion) {
+					fmt::print("Finished, stopVersion={0}, curHistory.version={1}\n", stopVersion, oldestStartVersion);
+				}
+				ASSERT(stopVersion == oldestStartVersion || stopVersion == invalidVersion);
+			} else {
+				ASSERT(stopVersion == invalidVersion);
 			}
 
 			// go back up stack and apply history entries from oldest to newest, skipping ranges that were already
@@ -1989,7 +2015,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 		for (auto& r : checkRanges) {
 			bool isValid = r.value().activeMetadata.isValid();
 			if (lastRangeEnd < r.begin() || !isValid) {
-				if (BW_REQUEST_DEBUG) {
+				if (BW_REQUEST_DEBUG || DEBUG_BW_WAIT_VERSION == req.readVersion) {
 					printf("No %s blob data for [%s - %s) in request range [%s - %s), skipping request\n",
 					       isValid ? "" : "valid",
 					       lastRangeEnd.printable().c_str(),
@@ -2004,7 +2030,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 			lastRangeEnd = r.end();
 		}
 		if (lastRangeEnd < req.keyRange.end) {
-			if (BW_REQUEST_DEBUG) {
+			if (BW_REQUEST_DEBUG || DEBUG_BW_WAIT_VERSION == req.readVersion) {
 				printf("No blob data for [%s - %s) in request range [%s - %s), skipping request\n",
 				       lastRangeEnd.printable().c_str(),
 				       req.keyRange.end.printable().c_str(),
@@ -2050,9 +2076,28 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 
 				// FIXME: doesn't work once we add granule merging, could be multiple ranges and/or
 				// multiple parents
-				Reference<GranuleHistoryEntry> cur = bwData->granuleHistory.rangeContaining(req.keyRange.begin).value();
+				Key historySearchKey = std::max(req.keyRange.begin, metadata->keyRange.begin);
+				Reference<GranuleHistoryEntry> cur = bwData->granuleHistory.rangeContaining(historySearchKey).value();
+
 				// FIXME: use skip pointers here
 				Version expectedEndVersion = metadata->initialSnapshotVersion;
+				if (cur.isValid()) {
+					// TODO REMOVE, useful for debugging for now
+					if (cur->endVersion != expectedEndVersion) {
+						fmt::print("Active granule [{0} - {1}) does not have history ancestor!!. Start is {2}, "
+						           "ancestor is [{3} - {4}) ({5}) V[{6} - {7}). SearchKey={8}\n",
+						           metadata->keyRange.begin.printable(),
+						           metadata->keyRange.end.printable(),
+						           expectedEndVersion,
+						           cur->range.begin.printable(),
+						           cur->range.end.printable(),
+						           cur->granuleID.toString(),
+						           cur->startVersion,
+						           cur->endVersion,
+						           historySearchKey.printable());
+					}
+					ASSERT(cur->endVersion == expectedEndVersion);
+				}
 				while (cur.isValid() && req.readVersion < cur->startVersion) {
 					// assert version of history is contiguous
 					ASSERT(cur->endVersion == expectedEndVersion);
@@ -2065,10 +2110,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 					throw blob_granule_transaction_too_old();
 				}
 
-				ASSERT(cur->endVersion > req.readVersion);
-				ASSERT(cur->startVersion <= req.readVersion);
-
-				if (BW_REQUEST_DEBUG) {
+				if (BW_REQUEST_DEBUG || DEBUG_BW_WAIT_VERSION == req.readVersion) {
 					fmt::print("[{0} - {1}) @ {2} time traveled back to {3} [{4} - {5}) @ [{6} - {7})\n",
 					           req.keyRange.begin.printable(),
 					           req.keyRange.end.printable(),
@@ -2079,6 +2121,9 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 					           cur->startVersion,
 					           cur->endVersion);
 				}
+
+				ASSERT(cur->endVersion > req.readVersion);
+				ASSERT(cur->startVersion <= req.readVersion);
 
 				// lazily load files for old granule if not present
 				chunkRange = cur->range;
@@ -2130,7 +2175,8 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 						when(wait(metadata->activeCFData.onChange())) {}
 						when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
 					}
-					if (BW_REQUEST_DEBUG && metadata->activeCFData.get().isValid()) {
+					if ((BW_REQUEST_DEBUG || DEBUG_BW_WAIT_VERSION == req.readVersion) &&
+					    metadata->activeCFData.get().isValid()) {
 						fmt::print("{0} - {1}) @ {2} hit CF change, restarting waitForVersion\n",
 						           req.keyRange.begin.printable().c_str(),
 						           req.keyRange.end.printable().c_str(),

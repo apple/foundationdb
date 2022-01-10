@@ -710,12 +710,13 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
 	}
 
 	if (BM_DEBUG) {
-		printf("Splitting range [%s - %s) into (%d):\n",
-		       granuleRange.begin.printable().c_str(),
-		       granuleRange.end.printable().c_str(),
-		       newRanges.size() - 1);
+		fmt::print("Splitting range [{0} - {1}) into {2} granules @ {3}:\n",
+		           granuleRange.begin.printable(),
+		           granuleRange.end.printable(),
+		           newRanges.size() - 1,
+		           latestVersion);
 		for (int i = 0; i < newRanges.size(); i++) {
-			printf("    %s\n", newRanges[i].printable().c_str());
+			fmt::print("    {}\n", newRanges[i].printable());
 		}
 	}
 
