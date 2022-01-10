@@ -1112,6 +1112,9 @@ ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
 				when(wait(metadata->activeCFData.onChange())) {}
 			}
 		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) {
+				throw e;
+			}
 
 			// if waiting on a parent granule change feed and we change to the child, the parent will get end_of_stream,
 			// which could cause this waiting whenAtLeast to get change_feed_cancelled. We should simply retry and wait
