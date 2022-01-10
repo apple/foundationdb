@@ -939,6 +939,8 @@ TEST_CASE("/fdbserver/ptxn/test/read_tlog_spilled") {
 	}
 
 	// we can only assert v is present, because its value is encoded by TLog and it is hard to decode it
+	// TODO: assert the value of the spilled data,
+	// there are many factors that can change the encoding of the value, such whether it is spilled by value of ref.
 	ASSERT(exist);
 	platform::eraseDirectoryRecursive(folder);
 	return Void();
