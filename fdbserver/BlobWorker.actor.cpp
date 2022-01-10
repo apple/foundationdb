@@ -1454,6 +1454,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									                                              rollbacksCompleted);
 
 									// Reset change feeds to cfRollbackVersion
+									if (cfRollbackVersion < metadata->waitForVersionReturned) {
+										fmt::print("Rollback resetting waitForVersionReturned {0} -> {1}\n",
+										           metadata->waitForVersionReturned,
+										           cfRollbackVersion);
+										metadata->waitForVersionReturned = cfRollbackVersion;
+									}
 									metadata->activeCFData.set(newChangeFeedData(cfRollbackVersion));
 									if (readOldChangeFeed) {
 										// It shouldn't be possible to roll back across the parent/child feed boundary,
