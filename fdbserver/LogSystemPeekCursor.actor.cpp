@@ -180,7 +180,7 @@ void ILogSystem::ServerPeekCursor::advanceTo(LogMessageVersion n) {
 void updateCursorWithReply(ILogSystem::ServerPeekCursor* self, const TLogPeekReply& res) {
 	self->results = res;
 	self->onlySpilled = res.onlySpilled;
-	if (res.popped.present())
+	if (res.popped.present() && res.popped.get() > self->messageVersion.version)
 		self->poppedVersion = std::min(std::max(self->poppedVersion, res.popped.get()), self->end.version);
 	self->rd = ArenaReader(self->results.arena, self->results.messages, Unversioned());
 	LogMessageVersion skipSeq = self->messageVersion;
@@ -1640,6 +1640,9 @@ Future<Void> ILogSystem::GroupPeekCursor::getMore(TaskPriority taskID) {
 	if (messageVersion < serverCursors[currentCursor]->version()) {
 		messageVersion = serverCursors[currentCursor]->version();
 		return Void();
+	}
+	for (auto& it : serverCursors) {
+		it->advanceTo(messageVersion);
 	}
 
 	more = groupPeekGetMore(this, taskID);

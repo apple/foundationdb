@@ -5081,7 +5081,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		}
 		data->tlogCursorReadsLatencyHistogram->sampleSeconds(now() - beforeTLogCursorReads);
 			TraceEvent("StorageServerWorkerRemoved", data->thisServerID).detail("Reason", "PeekPoppedTLogData");
-		if (cursor->popped() > cursor->version().version) {
+		if (cursor->popped() > 0) {
 			throw worker_removed();
 		}
 
