@@ -828,6 +828,7 @@ public:
 
 		LatencySample readLatencySample;
 		LatencyBands readLatencyBands;
+		LatencySample readRangeLatencySample;
 
 		Counters(StorageServer* self)
 		  : cc("StorageServer", self->thisServerID.toString()), allQueries("QueryQueue", cc),
@@ -851,6 +852,10 @@ public:
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    readRangeLatencySample("ReadRangeLatencyMetrics",
+		                           self->thisServerID,
+		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
@@ -2436,6 +2441,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 // selector offset prevents all data from being read in one range read
 {
+	state double readRangeDuration = 0;
 	state Span span("SS:getKeyValues"_loc, { req.spanContext });
 	state int64_t resultSize = 0;
 	state IKeyValueStore::ReadType type =
@@ -2526,10 +2532,12 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			req.reply.send(none);
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
+			state double readRangeBegin = g_network->timer();
 
 			GetKeyValuesReply _r = wait(
 			    readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span.context, type));
 			GetKeyValuesReply r = _r;
+			readRangeDuration = g_network->timer() - readRangeBegin;
 
 			if (req.debugID.present())
 				g_traceBatch.addEvent(
@@ -2564,6 +2572,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			}
 
 			r.penalty = data->getPenalty();
+			state int numberOfKeys = r.data.size();
 			req.reply.send(r);
 
 			resultSize = req.limitBytes - remainingLimitBytes;
@@ -2585,6 +2594,16 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
+	if (SERVER_KNOBS->ENABLE_SLOW_RANGE_READ_TRACE) {
+		data->counters.readRangeLatencySample.addMeasurement(duration);
+		if (duration > SERVER_KNOBS->SLOW_RANGE_READ_THRESHOLD) {
+			TraceEvent("SlowSSRangeRead", data->thisServerID)
+			    .detail("ReadRangeDuration", readRangeDuration)
+			    .detail("Duration", duration)
+			    .detail("NumberOfKeys", numberOfKeys)
+			    .detail("Size", resultSize);
+		}
+	}
 	if (data->latencyBandConfig.present()) {
 		int maxReadBytes =
 		    data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());

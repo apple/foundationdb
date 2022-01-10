@@ -652,6 +652,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENABLE_CLEAR_RANGE_EAGER_READS,                       true );
 	init( QUICK_GET_VALUE_FALLBACK,                             false );
 	init( QUICK_GET_KEY_VALUES_FALLBACK,                        false );
+	init( ENABLE_SLOW_RANGE_READ_TRACE,                         false );
+	init( SLOW_RANGE_READ_THRESHOLD,                             0.04 );
 
 	//Wait Failure
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;
