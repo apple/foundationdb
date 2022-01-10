@@ -1880,8 +1880,10 @@ static Future<std::vector<TraceEventFields>> getServerBusiestWriteTags(
 }
 
 ACTOR
-static Future<std::vector<Optional<StorageMetadataType>>> getServerMetadata(std::vector<StorageServerInterface> servers, Database cx) {
-	state KeyBackedObjectMap<UID, StorageMetadataType,decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin, IncludeVersion());
+static Future<std::vector<Optional<StorageMetadataType>>> getServerMetadata(std::vector<StorageServerInterface> servers,
+                                                                            Database cx) {
+	state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
+	                                                                                           IncludeVersion());
 	state std::vector<Optional<StorageMetadataType>> res(servers.size());
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
@@ -1889,12 +1891,10 @@ static Future<std::vector<Optional<StorageMetadataType>>> getServerMetadata(std:
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state int i = 0;
-			for(i = 0; i < servers.size(); ++ i) {
-				if(!servers[i].isTss()) {
-					Optional<StorageMetadataType> metadata = wait(metadataMap.get(tr, servers[i].id(), Snapshot::True));
-					// TraceEvent("MetadataAppear", servers[i].id()).detail("Present", metadata.present());
-					res[i] = metadata;
-				}
+			for (i = 0; i < servers.size(); ++i) {
+				Optional<StorageMetadataType> metadata = wait(metadataMap.get(tr, servers[i].id(), Snapshot::True));
+				// TraceEvent(SevDebug, "MetadataAppear", servers[i].id()).detail("Present", metadata.present());
+				res[i] = metadata;
 			}
 			wait(tr->commit());
 			break;
@@ -1922,12 +1922,20 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 	     store(metadata, getServerMetadata(servers, cx)));
 
 	ASSERT(busiestWriteTags.size() == results.size() && metadata.size() == results.size());
-	for (int i = 0; i < busiestWriteTags.size(); ++i) {
+	for (int i = 0; i < results.size(); ++i) {
 		results[i].second.emplace("BusiestWriteTag", busiestWriteTags[i]);
-		if(!servers[i].isTss()) {
+
+		// FIXME: it's possible that a SS is removed between `getStorageServers` and `getServerMetadata`. Maybe we can
+		// read StorageServer and Metadata in an atomic transaction?
+		if (metadata[i].present()) {
 			TraceEventFields metadataField;
 			metadataField.addField("CreatedTime", metadata[i].get().getCreatedTimeStr());
 			metadataField.addField("ExpireNow", metadata[i].get().expireNow ? "1" : "0");
+			results[i].second.emplace("Metadata", metadataField);
+		} else if (!servers[i].isTss()) {
+			TraceEventFields metadataField;
+			metadataField.addField("CreatedTime", "[removed]");
+			metadataField.addField("ExpireNow", "[removed]");
 			results[i].second.emplace("Metadata", metadataField);
 		}
 	}
