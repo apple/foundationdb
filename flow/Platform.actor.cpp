@@ -1874,7 +1874,7 @@ std::string getGMTimeStr(const time_t* time) {
 	char buff[50];
 	auto size = strftime(buff, 50, "%c %z", gmtime(time));
 	// printf(buff);
-	return std::string(std::begin(buff), std::begin(buff)+ size);
+	return std::string(std::begin(buff), std::begin(buff) + size);
 }
 
 void setMemoryQuota(size_t limit) {

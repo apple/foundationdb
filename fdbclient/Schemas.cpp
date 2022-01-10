@@ -103,7 +103,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      ]
                   },
                   "storage_metadata":{
-                     "created_time":"%Y-%m-%d %H:%M:%S",
+                     "created_time":"%c %z",
                      "expire_now": "0"
                   },
                   "data_version":12341234,

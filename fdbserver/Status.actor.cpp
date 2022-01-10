@@ -588,7 +588,7 @@ struct RolesInfo {
 				}
 			}
 
-			if(!iface.isTss()) { // only storage server has Metadata field
+			if (!iface.isTss()) { // only storage server has Metadata field
 				TraceEventFields const& metadata = metrics.at("Metadata");
 				JsonBuilderObject metadataObj;
 				metadataObj["created_time"] = metadata.getValue("CreatedTime");
