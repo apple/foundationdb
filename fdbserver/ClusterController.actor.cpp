@@ -766,10 +766,11 @@ public:
 	                                                    int32_t required,
 	                                                    int32_t desired,
 	                                                    std::map<Optional<Standalone<StringRef>>, int>& id_used,
+	                                                    bool allowDegraded,
 	                                                    bool checkStable,
 	                                                    const std::set<Optional<Key>>& dcIds,
 	                                                    const std::vector<UID>& exclusionWorkerIds) {
-		std::map<std::tuple<ProcessClass::Fitness, int, bool, bool, bool>, std::vector<WorkerDetails>> fitness_workers;
+		std::map<std::tuple<ProcessClass::Fitness, int, bool, bool>, std::vector<WorkerDetails>> fitness_workers;
 
 		// Go through all the workers to list all the workers that can be recruited.
 		for (const auto& [worker_process_id, worker_info] : id_worker) {
@@ -815,6 +816,11 @@ public:
 				    SevDebug, id, "simple", "Worker is not in the target DC", worker_details, fitness, dcIds);
 				continue;
 			}
+			if (!allowDegraded && worker_details.degraded) {
+				logWorkerUnavailable(
+				    SevInfo, id, "simple", "Worker is degraded and not allowed", worker_details, fitness, dcIds);
+				continue;
+			}
 
 			// This worker is a candidate for TLog recruitment.
 			bool inCCDC = worker_details.interf.locality.dcId() == clusterControllerDcId;
@@ -823,11 +829,8 @@ public:
 				fitness = std::max(fitness, ProcessClass::GoodFit);
 			}
 
-			fitness_workers[std::make_tuple(fitness,
-			                                id_used[worker_process_id],
-			                                worker_details.degraded,
-			                                isLongLivedStateless(worker_process_id),
-			                                inCCDC)]
+			fitness_workers[std::make_tuple(
+			                    fitness, id_used[worker_process_id], isLongLivedStateless(worker_process_id), inCCDC)]
 			    .push_back(worker_details);
 		}
 
@@ -942,6 +945,56 @@ public:
 
 				return bestResult;
 			}
+		}
+	}
+
+	// Attempt to recruit TLogs without degraded processes and see if it improves the configuration
+	std::vector<WorkerDetails> getWorkersForTlogsSimple(DatabaseConfiguration const& conf,
+	                                                    int32_t required,
+	                                                    int32_t desired,
+	                                                    std::map<Optional<Standalone<StringRef>>, int>& id_used,
+	                                                    bool checkStable,
+	                                                    const std::set<Optional<Key>>& dcIds,
+	                                                    const std::vector<UID>& exclusionWorkerIds) {
+		desired = conf.tLogReplicationFactor * (desired / conf.tLogReplicationFactor);
+		std::map<Optional<Standalone<StringRef>>, int> withDegradedUsed = id_used;
+		auto withDegraded = getWorkersForTlogsSimple(
+		    conf, required, desired, withDegradedUsed, true, checkStable, dcIds, exclusionWorkerIds);
+		RoleFitness withDegradedFitness(withDegraded, ProcessClass::TLog, withDegradedUsed);
+		ASSERT(withDegraded.size() <= desired);
+
+		bool usedDegraded = false;
+		for (auto& it : withDegraded) {
+			if (it.degraded) {
+				usedDegraded = true;
+				break;
+			}
+		}
+
+		if (!usedDegraded) {
+			id_used = withDegradedUsed;
+			return withDegraded;
+		}
+
+		try {
+			std::map<Optional<Standalone<StringRef>>, int> withoutDegradedUsed = id_used;
+			auto withoutDegraded = getWorkersForTlogsSimple(
+			    conf, required, desired, withoutDegradedUsed, false, checkStable, dcIds, exclusionWorkerIds);
+			RoleFitness withoutDegradedFitness(withoutDegraded, ProcessClass::TLog, withoutDegradedUsed);
+			ASSERT(withoutDegraded.size() <= desired);
+
+			if (withDegradedFitness < withoutDegradedFitness) {
+				id_used = withDegradedUsed;
+				return withDegraded;
+			}
+			id_used = withoutDegradedUsed;
+			return withoutDegraded;
+		} catch (Error& e) {
+			if (e.code() != error_code_no_more_servers) {
+				throw;
+			}
+			id_used = withDegradedUsed;
+			return withDegraded;
 		}
 	}
 
