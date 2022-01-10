@@ -1481,12 +1481,8 @@ ACTOR Future<Void> fullyDeleteGranule(BlobManagerData* self, UID granuleId, KeyR
 		printf("Fully deleting granule %s: init\n", granuleId.toString().c_str());
 	}
 
-	state Transaction tr(self->db);
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
 	// get files
-	GranuleFiles files = wait(loadHistoryFiles(&tr, granuleId, BM_DEBUG));
+	GranuleFiles files = wait(loadHistoryFiles(self->db, granuleId, BM_DEBUG));
 
 	std::vector<Future<Void>> deletions;
 	std::vector<std::string> filesToDelete; // TODO: remove, just for debugging
@@ -1520,6 +1516,11 @@ ACTOR Future<Void> fullyDeleteGranule(BlobManagerData* self, UID granuleId, KeyR
 	if (BM_DEBUG) {
 		printf("Fully deleting granule %s: deleting history and file keys\n", granuleId.toString().c_str());
 	}
+
+	state Transaction tr(self->db);
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
 	loop {
 		try {
 			KeyRange fileRangeKey = blobGranuleFileKeyRangeFor(granuleId);
@@ -1552,12 +1553,8 @@ ACTOR Future<Void> partiallyDeleteGranule(BlobManagerData* self, UID granuleId, 
 		printf("Partially deleting granule %s: init\n", granuleId.toString().c_str());
 	}
 
-	state Transaction tr(self->db);
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
 	// get files
-	GranuleFiles files = wait(loadHistoryFiles(&tr, granuleId, BM_DEBUG));
+	GranuleFiles files = wait(loadHistoryFiles(self->db, granuleId, BM_DEBUG));
 
 	// represents the version of the latest snapshot file in this granule with G.version < pruneVersion
 	Version latestSnapshotVersion = invalidVersion;
@@ -1620,6 +1617,10 @@ ACTOR Future<Void> partiallyDeleteGranule(BlobManagerData* self, UID granuleId, 
 	if (BM_DEBUG) {
 		printf("Partially deleting granule %s: deleting file keys\n", granuleId.toString().c_str());
 	}
+
+	state Transaction tr(self->db);
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 	loop {
 		try {
