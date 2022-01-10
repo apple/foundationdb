@@ -1226,7 +1226,11 @@ public:
 			return item.get();
 		}
 
-		void switchTree(DeltaTree2* newTree) { tree = newTree; }
+		void switchTree(DeltaTree2* newTree) {
+			tree = newTree;
+			// Reset item because it may point into tree memory
+			item.reset();
+		}
 
 		// If the cursor is valid, return a reference to the cursor's internal T.
 		// Otherwise, returns a reference to the cache's upper boundary.

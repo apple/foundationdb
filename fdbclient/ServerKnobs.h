@@ -282,6 +282,11 @@ public:
 	double ROCKSDB_READ_VALUE_TIMEOUT;
 	double ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
 	double ROCKSDB_READ_RANGE_TIMEOUT;
+	double ROCKSDB_READ_QUEUE_WAIT;
+	int ROCKSDB_READ_QUEUE_SOFT_MAX;
+	int ROCKSDB_READ_QUEUE_HARD_MAX;
+	int ROCKSDB_FETCH_QUEUE_SOFT_MAX;
+	int ROCKSDB_FETCH_QUEUE_HARD_MAX;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -587,6 +592,8 @@ public:
 	double MAX_STORAGE_COMMIT_TIME;
 	int64_t RANGESTREAM_LIMIT_BYTES;
 	bool ENABLE_CLEAR_RANGE_EAGER_READS;
+	bool QUICK_GET_VALUE_FALLBACK;
+	bool QUICK_GET_KEY_VALUES_FALLBACK;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -719,8 +726,10 @@ public:
 	int64_t REDWOOD_REMAP_CLEANUP_WINDOW; // Remap remover lag interval in which to coalesce page writes
 	double REDWOOD_REMAP_CLEANUP_LAG; // Maximum allowed remap remover lag behind the cleanup window as a multiple of
 	                                  // the window size
+	int REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES; // Number of pages to grow page file by
 	double REDWOOD_METRICS_INTERVAL;
 	double REDWOOD_HISTOGRAM_INTERVAL;
+	bool REDWOOD_EVICT_UPDATED_PAGES; // Whether to prioritize eviction of updated pages from cache.
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
@@ -735,6 +744,10 @@ public:
 	int BG_DELTA_BYTES_BEFORE_COMPACT;
 
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
+
+	// Hackathon-2021
+	std::string HACKATHON_TLOG_SELECTION_STRATEGY;
+	int64_t HACKATHON_TLOG_FLUSH_BYTES_PER_SECOND;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

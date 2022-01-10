@@ -35,8 +35,9 @@ namespace ClientLibManagement {
 
 enum class ClientLibStatus {
 	DISABLED = 0,
-	AVAILABLE, // 1
-	UPLOADING, // 2
+	UPLOADING, // 1
+	DOWNLOAD, // 2
+	ACTIVE, // 3
 	COUNT // must be the last one
 };
 
@@ -132,6 +133,12 @@ ACTOR Future<Void> deleteClientLibrary(Database db, Standalone<StringRef> client
 // List client libraries available on the cluster, with the specified filter
 // Returns metadata JSON of each library
 ACTOR Future<Standalone<VectorRef<StringRef>>> listClientLibraries(Database db, ClientLibFilter filter);
+
+// Get the current status of an uploaded client library
+ACTOR Future<ClientLibStatus> getClientLibraryStatus(Database db, Standalone<StringRef> clientLibId);
+
+// Change client library metadata status
+ACTOR Future<Void> changeClientLibraryStatus(Database db, Standalone<StringRef> clientLibId, ClientLibStatus newStatus);
 
 } // namespace ClientLibManagement
 

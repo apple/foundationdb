@@ -500,6 +500,17 @@ public:
 	bool operator!=(const ReplyPromiseStream<T>& rhs) const { return !(*this == rhs); }
 
 	bool isEmpty() const { return !queue->isReady(); }
+
+	Future<Void> onEmpty() {
+		if (isEmpty()) {
+			return Void();
+		}
+		if (!queue->onEmpty.isValid()) {
+			queue->onEmpty = Promise<Void>();
+		}
+		return queue->onEmpty.getFuture();
+	}
+
 	uint32_t size() const { return queue->size(); }
 
 	// Must be called on the server before sending results on the stream to ratelimit the amount of data outstanding to
@@ -662,8 +673,8 @@ public:
 	}
 
 	// stream.tryGetReply( request )
-	//   Unreliable at most once delivery: Either delivers request and returns a reply, or returns failure
-	//   (Optional<T>()) eventually. If a reply is returned, request was delivered exactly once. If cancelled or returns
+	//   Unreliable at most once delivery: Either delivers request and returns a reply, or returns an error eventually.
+	//   If a reply is returned, request was delivered exactly once. If cancelled or returns
 	//   failure, request was or will be delivered zero or one times. The caller must be capable of retrying if this
 	//   request returns failure
 	template <class X>

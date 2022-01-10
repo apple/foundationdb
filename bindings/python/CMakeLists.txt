@@ -60,12 +60,12 @@ else()
   add_custom_target(fdb_python_check COMMAND ${CMAKE_COMMAND} -E echo "Skipped Python style check! Missing: pycodestyle")
 endif()
 if(NOT FDB_RELEASE)
-  set(prerelease_string "a1")
+  set(not_fdb_release_string "a1")
 else()
-  set(prerelease_string "")
+  set(not_fdb_release_string "")
 endif()
 set(setup_file_name foundationdb-${FDB_VERSION}.tar.gz)
-set(package_file ${CMAKE_BINARY_DIR}/packages/foundationdb-${FDB_VERSION}${prerelease_string}.tar.gz)
+set(package_file ${CMAKE_BINARY_DIR}/packages/foundationdb-${FDB_VERSION}${not_fdb_release_string}.tar.gz)
 add_custom_command(OUTPUT ${package_file}
   COMMAND $<TARGET_FILE:Python::Interpreter> setup.py sdist --formats=gztar &&
           ${CMAKE_COMMAND} -E copy dist/${setup_file_name} ${package_file}

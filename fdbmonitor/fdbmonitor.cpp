@@ -1151,7 +1151,7 @@ void testPathOps() {
 	std::string cwd = abspath(".", true);
 
 	// Create some symlinks and test resolution (or non-resolution) of them
-	int rc;
+	[[maybe_unused]] int rc;
 	// Ignoring return codes, if symlinks fail tests below will fail
 	rc = unlink("simfdb/backups/four");
 	rc = unlink("simfdb/backups/five");

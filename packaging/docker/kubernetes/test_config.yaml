@@ -138,7 +138,7 @@ data:
   fdb.cluster: ""
   config.json: |
     {
-      "serverCount": 0,
+      "runProcesses": false,
       "version": "6.3.13",
       "arguments": [
         {"value": "--cluster_file"},
@@ -239,7 +239,7 @@ spec:
           emptyDir: {}
       initContainers:
         - name: foundationdb-kubernetes-init
-          image: foundationdb/foundationdb-kubernetes:latest
+          image: foundationdb/foundationdb-kubernetes:6.3.13-local
           imagePullPolicy: IfNotPresent
           args:
             - "--mode"

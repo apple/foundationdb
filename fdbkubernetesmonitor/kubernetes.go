@@ -24,8 +24,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"strconv"
 
+	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -67,7 +69,7 @@ type PodClient struct {
 }
 
 // CreatePodClient creates a new client for working with the pod object.
-func CreatePodClient() (*PodClient, error) {
+func CreatePodClient(logger logr.Logger) (*PodClient, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, err
@@ -83,7 +85,7 @@ func CreatePodClient() (*PodClient, error) {
 		return nil, err
 	}
 
-	podClient := &PodClient{podApi: podApi, pod: pod, TimestampFeed: make(chan int64, 10)}
+	podClient := &PodClient{podApi: podApi, pod: pod, TimestampFeed: make(chan int64, 10), Logger: logger}
 	err = podClient.watchPod()
 	if err != nil {
 		return nil, err
@@ -94,7 +96,7 @@ func CreatePodClient() (*PodClient, error) {
 
 // retrieveEnvironmentVariables extracts the environment variables we have for
 // an argument into a map.
-func retrieveEnvironmentVariables(argument Argument, target map[string]string) {
+func retrieveEnvironmentVariables(argument api.Argument, target map[string]string) {
 	if argument.Source != "" {
 		target[argument.Source] = os.Getenv(argument.Source)
 	}
@@ -112,6 +114,7 @@ func (client *PodClient) UpdateAnnotations(monitor *Monitor) error {
 	for _, argument := range monitor.ActiveConfiguration.Arguments {
 		retrieveEnvironmentVariables(argument, environment)
 	}
+	environment["BINARY_DIR"] = path.Dir(monitor.ActiveConfiguration.BinaryPath)
 	jsonEnvironment, err := json.Marshal(environment)
 	if err != nil {
 		return err
@@ -180,7 +183,7 @@ func (client *PodClient) processPodUpdate(pod *corev1.Pod) {
 	}
 	timestamp, err := strconv.ParseInt(annotation, 10, 64)
 	if err != nil {
-		client.Logger.Error(err, "Error parsing annotation", "key", OutdatedConfigMapAnnotation, "rawAnnotation", annotation, err)
+		client.Logger.Error(err, "Error parsing annotation", "key", OutdatedConfigMapAnnotation, "rawAnnotation", annotation)
 		return
 	}
 

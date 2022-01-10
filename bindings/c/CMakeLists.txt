@@ -7,18 +7,26 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/foundationdb)
 
 set(asm_file ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.g.S)
 
-set(platform "linux")
+set(os "linux")
+set(cpu "intel")
 if(APPLE)
-  set(platform "osx")
+  set(os "osx")
 elseif(WIN32)
-  set(platform "windows")
+  set(os "windows")
   set(asm_file ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.g.asm)
-elseif(CMAKE_SYSTEM_NAME MATCHES "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  set(platform "linux-aarch64")
+endif()
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+  set(cpu "aarch64")
+endif()
+
+set(IS_ARM_MAC NO)
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+  set(IS_ARM_MAC YES)
 endif()
 
 add_custom_command(OUTPUT ${asm_file} ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h
-  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/generate_asm.py ${platform}
+  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/generate_asm.py ${os} ${cpu}
       ${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.cpp
       ${asm_file}
       ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h
@@ -66,8 +74,10 @@ if(WIN32)
   set_property(SOURCE ${asm_file} PROPERTY LANGUAGE ASM_MASM)
 endif()
 
-# The tests don't build on windows
-if(NOT WIN32)
+# The tests don't build on windows and ARM macs
+# doctest doesn't seem to compile on ARM macs, we should
+# check later whether this works
+if(NOT WIN32 AND NOT IS_ARM_MAC)
   set(MAKO_SRCS
     test/mako/mako.c
     test/mako/mako.h

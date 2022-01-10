@@ -18,7 +18,10 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+#include <chrono>
 #include <iterator>
+#include <ratio>
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
@@ -45,9 +48,12 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
+#include "flow/IRandom.h"
 #include "flow/Trace.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+#define HackathaonTrace(...) false && TraceEvent(__VA_ARGS__)
 
 struct CommitProxyVersionReplies {
 	std::map<uint64_t, GetCommitVersionReply> replies;
@@ -170,6 +176,22 @@ private:
 	}
 };
 
+struct TlogCommitReqInfo {
+	int64_t commitBytes;
+	std::chrono::high_resolution_clock::time_point start;
+
+	explicit TlogCommitReqInfo(int64_t bytes, std::chrono::high_resolution_clock::time_point& now)
+	  : commitBytes(bytes), start(now) {}
+};
+
+struct TlogCommitGroupInfo {
+	int tlogGroupIdx;
+	int commitBytes;
+
+	TlogCommitGroupInfo() : tlogGroupIdx(-1), commitBytes(-1) {}
+	explicit TlogCommitGroupInfo(int gIdx, int bytes) : tlogGroupIdx(gIdx), commitBytes(bytes) {}
+};
+
 struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	UID dbgid;
 
@@ -178,10 +200,13 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    recoveryTransactionVersion; // The first version in this epoch
 	double lastCommitTime;
 
-	Version liveCommittedVersion; // The largest live committed version reported by commit proxies.
+	NotifiedVersion liveCommittedVersion; // The largest live committed version reported by commit proxies.
 	bool databaseLocked;
 	Optional<Value> proxyMetadataVersion;
-	Version minKnownCommittedVersion;
+	std::vector<Version> groupKnownCommittedVersions;
+	std::vector<Version> groupMinKnownCommittedVersions;
+	Version knownCommittedVersion = 0;
+	Version minKnownCommittedVersion = 0;
 
 	DatabaseConfiguration originalConfiguration;
 	DatabaseConfiguration configuration;
@@ -193,6 +218,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	Reference<ILogSystem> logSystem;
 	Version version; // The last version assigned to a proxy by getVersion()
+	int tLogGroups = 0;
+	std::vector<Version> tLogGroupVersions;
 	double lastVersionTime;
 	LogSystemDiskQueueAdapter* txnStateLogAdapter;
 	IKeyValueStore* txnStateStore;
@@ -217,6 +244,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
 
+	UID clusterId;
 	Standalone<StringRef> dbId;
 
 	MasterInterface myInterface;
@@ -224,6 +252,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    clusterController; // If the cluster controller changes, this master will die, so this is immutable.
 
 	ReusableCoordinatedState cstate;
+	Promise<Void> recoveryReadyForCommits;
 	Promise<Void> cstateUpdated;
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	int64_t registrationCount; // Number of different MasterRegistrationRequests sent to clusterController
@@ -240,6 +269,17 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	bool neverCreated;
 	int8_t safeLocality;
 	int8_t primaryLocality;
+
+	// Hackathon-2021
+	// support 'round-robin' mode
+	int prvTLogGroup;
+	// support 'least-loaded' mode
+	std::vector<int> tlogBytesToFlushTracker;
+	std::map<Version, TlogCommitGroupInfo> tlogVersionInfoTracker;
+	// support 'time-decay' mode
+	std::vector<std::list<TlogCommitReqInfo>> tlogCommitReqList;
+	// support 'shortest-wait' mode
+	std::vector<std::chrono::high_resolution_clock::time_point> tlogCommitFlushWait;
 
 	std::vector<WorkerInterface> backupWorkers; // Recruited backup workers from cluster controller.
 
@@ -273,8 +313,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    myInterface(myInterface), clusterController(clusterController), cstate(coordinators, addActor, dbgid),
 	    dbInfo(dbInfo), registrationCount(0), addActor(addActor),
 	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery), neverCreated(false),
-	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), cc("Master", dbgid.toString()),
-	    changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
+	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), prvTLogGroup(-1),
+	    cc("Master", dbgid.toString()), changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
@@ -419,6 +459,7 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		self->logSystem = Reference<ILogSystem>(); // Cancels the actors in the previous log system.
 		Reference<ILogSystem> newLogSystem = wait(oldLogSystem->newEpoch(recr,
 		                                                                 fRemoteWorkers,
+		                                                                 self->clusterId,
 		                                                                 self->configuration,
 		                                                                 self->cstate.myDBState.recoveryCount + 1,
 		                                                                 self->primaryLocality,
@@ -431,6 +472,7 @@ ACTOR Future<Void> newTLogServers(Reference<MasterData> self,
 		self->logSystem = Reference<ILogSystem>(); // Cancels the actors in the previous log system.
 		Reference<ILogSystem> newLogSystem = wait(oldLogSystem->newEpoch(recr,
 		                                                                 Never(),
+		                                                                 self->clusterId,
 		                                                                 self->configuration,
 		                                                                 self->cstate.myDBState.recoveryCount + 1,
 		                                                                 self->primaryLocality,
@@ -464,6 +506,7 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 		isr.storeType = self->configuration.storageServerStoreType;
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
+		isr.clusterId = self->clusterId;
 
 		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
 
@@ -481,6 +524,7 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 			}
 
 			Tag& tag = dcId_tags[recruits.storageServers[idx].locality.dcId()];
+			self->allTags.push_back(tag);
 			tag.id++;
 			idx++;
 
@@ -611,6 +655,7 @@ Future<Void> sendMasterRegistration(MasterData* self,
 	masterReq.priorCommittedLogServers = priorCommittedLogServers;
 	masterReq.recoveryState = self->recoveryState;
 	masterReq.recoveryStalled = self->recruitmentStalled->get();
+	masterReq.clusterId = self->clusterId;
 	return brokenPromiseToNever(self->clusterController.registerMaster.getReply(masterReq));
 }
 
@@ -629,7 +674,9 @@ ACTOR Future<Void> updateRegistration(Reference<MasterData> self, Reference<ILog
 		TraceEvent("MasterUpdateRegistration", self->dbgid)
 		    .detail("RecoveryCount", self->cstate.myDBState.recoveryCount)
 		    .detail("OldestBackupEpoch", logSystemConfig.oldestBackupEpoch)
-		    .detail("Logs", describe(logSystemConfig.tLogs));
+		    .detail("Logs", describe(logSystemConfig.tLogs))
+		    .detail("CStateUpdated", self->cstateUpdated.isSet())
+		    .detail("RecoveryState", self->recoveryState);
 
 		if (!self->cstateUpdated.isSet()) {
 			wait(sendMasterRegistration(self.getPtr(),
@@ -640,7 +687,7 @@ ACTOR Future<Void> updateRegistration(Reference<MasterData> self, Reference<ILog
 			                            self->versionIndexers,
 			                            self->cstate.myDBState.recoveryCount,
 			                            self->cstate.prevDBState.getPriorCommittedLogServers()));
-		} else {
+		} else if (self->recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 			updateLogsKey = updateLogsValue(self, cx);
 			wait(sendMasterRegistration(self.getPtr(),
 			                            logSystemConfig,
@@ -650,6 +697,9 @@ ACTOR Future<Void> updateRegistration(Reference<MasterData> self, Reference<ILog
 			                            self->versionIndexers,
 			                            self->cstate.myDBState.recoveryCount,
 			                            std::vector<UID>()));
+		} else {
+			// The master should enter the accepting commits phase soon, and then we will register again
+			TEST(true); // cstate is updated but we aren't accepting commits yet
 		}
 	}
 }
@@ -1086,7 +1136,8 @@ ACTOR Future<Void> recoverFrom(Reference<MasterData> self,
                                Reference<ILogSystem> oldLogSystem,
                                std::vector<StorageServerInterface>* seedServers,
                                std::vector<Standalone<CommitTransactionRef>>* initialConfChanges,
-                               Future<Version> poppedTxsVersion) {
+                               Future<Version> poppedTxsVersion,
+                               bool* clusterIdExists) {
 	TraceEvent("MasterRecoveryState", self->dbgid)
 	    .detail("StatusCode", RecoveryStatus::reading_transaction_system_state)
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::reading_transaction_system_state])
@@ -1109,6 +1160,16 @@ ACTOR Future<Void> recoverFrom(Reference<MasterData> self,
 	}
 
 	debug_checkMaxRestoredVersion(UID(), self->lastEpochEnd, "DBRecovery");
+
+	// Generate a cluster ID to uniquely identify the cluster if it doesn't
+	// already exist in the txnStateStore.
+	Optional<Value> clusterId = self->txnStateStore->readValue(clusterIdKey).get();
+	*clusterIdExists = clusterId.present();
+	if (!clusterId.present()) {
+		self->clusterId = deterministicRandom()->randomUniqueID();
+	} else {
+		self->clusterId = BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
+	}
 
 	// Ordinarily we pass through this loop once and recover.  We go around the loop if recovery stalls for more than a
 	// second, a provisional master is initialized, and an "emergency transaction" is submitted that might change the
@@ -1187,14 +1248,18 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 	auto itr = proxyItr->second.replies.find(req.requestNum);
 	if (itr != proxyItr->second.replies.end()) {
 		TEST(true); // Duplicate request for sequence
-		req.reply.send(itr->second);
+		if (itr->second.version != self->recoveryTransactionVersion) {
+			wait(self->liveCommittedVersion.whenAtLeast(itr->second.version -
+			                                            SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
+		}
+		req.reply.send(proxyItr->second.replies[req.requestNum]);
 	} else if (req.requestNum <= proxyItr->second.latestRequestNum.get()) {
 		TEST(true); // Old request for previously acknowledged sequence - may be impossible with current FlowTransport
 		ASSERT(req.requestNum <
 		       proxyItr->second.latestRequestNum.get()); // The latest request can never be acknowledged
 		req.reply.send(Never());
 	} else {
-		GetCommitVersionReply rep;
+		state GetCommitVersionReply rep;
 
 		if (self->version == invalidVersion) {
 			self->lastVersionTime = now();
@@ -1206,15 +1271,16 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 				t1 = self->lastVersionTime;
 			}
 			rep.prevVersion = self->version;
-			self->version +=
-			    std::max<Version>(1,
-			                      std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
-			                                        SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
+			// FIXME: do something more efficient, think more carefully about this scenario
+			Version minPrevVer = rep.prevVersion;
+			for (auto& it : self->tLogGroupVersions) {
+				minPrevVer = std::min(minPrevVer, it);
+			}
+			self->version = std::max<Version>(
+			    self->version + 1,
+			    std::min<Version>(minPrevVer + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS - self->tLogGroups,
+			                      self->version + SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
 
-			TEST(self->version - rep.prevVersion == 1); // Minimum possible version gap
-
-			bool maxVersionGap = self->version - rep.prevVersion == SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
-			TEST(maxVersionGap); // Maximum possible version gap
 			self->lastVersionTime = t1;
 
 			if (self->resolverNeedingChanges.count(req.requestingProxy)) {
@@ -1227,6 +1293,138 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 			}
 		}
 
+		if (req.commitBytes == 0) {
+			for (int tlogGroup = 0; tlogGroup < self->tLogGroups; tlogGroup++) {
+				auto& groupVersion = self->tLogGroupVersions[tlogGroup];
+				rep.tlogGroups.push_back(std::make_pair(tlogGroup, groupVersion));
+				groupVersion = self->version;
+			}
+		} else {
+			// Hackathon - 2021
+			// 0 -> Random tlog group selection
+			// 1 -> Round-robin tlog group selection
+			// 2 -> least-loaded tlog group selection
+			HackathaonTrace("GetVersion", self->dbgid).detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY);
+
+			std::string mode = SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY;
+			int tlogGroup = -1;
+			if (mode == "random") {
+				tlogGroup = deterministicRandom()->randomInt(0, self->tLogGroups);
+			} else if (mode == "round-robin") {
+				tlogGroup = self->prvTLogGroup == -1 ? 0 : (self->prvTLogGroup + 1) % self->tLogGroups;
+
+				HackathaonTrace("GetVersion", self->dbgid)
+				    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
+				    .detail("NextGIdx", tlogGroup)
+				    .detail("PrvGIdx", self->prvTLogGroup);
+
+				self->prvTLogGroup = tlogGroup;
+			} else if (mode == "least-loaded") {
+				// determine the least loaded TLog using bytes tracker map
+				tlogGroup = 0;
+				int64_t minTLogBytes = self->tlogBytesToFlushTracker[tlogGroup];
+				for (int i = 1; i < self->tLogGroups; i++) {
+					if (self->tlogBytesToFlushTracker[i] < minTLogBytes) {
+						minTLogBytes = self->tlogBytesToFlushTracker[i];
+						tlogGroup = i;
+					}
+					HackathaonTrace("GetVersion", self->dbgid)
+					    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
+					    .detail("GroupIdx", i)
+					    .detail("CurrTLogBytesToFlush", self->tlogBytesToFlushTracker[i])
+					    .detail("MinTlogBytesToFlush", minTLogBytes);
+				}
+
+				HackathaonTrace("GetVersion", self->dbgid)
+				    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
+				    .detail("CandidateGIdx", tlogGroup)
+				    .detail("CandidateTLogBytesToFlush", self->tlogBytesToFlushTracker[tlogGroup]);
+
+				ASSERT(tlogGroup >= 0 && tlogGroup < self->tLogGroups);
+				// record the version <-> {tlogGroup, bytes} information
+				ASSERT(self->tlogVersionInfoTracker.find(self->version) == self->tlogVersionInfoTracker.end());
+				self->tlogVersionInfoTracker.emplace(self->version, TlogCommitGroupInfo(tlogGroup, req.commitBytes));
+				self->tlogBytesToFlushTracker[tlogGroup] += req.commitBytes;
+
+			} else if (mode == "time-decay") {
+				std::vector<int64_t> tlogEffectiveBytesToFlush;
+				tlogEffectiveBytesToFlush.resize(self->tLogGroups, 0);
+				auto now = std::chrono::high_resolution_clock::now();
+				tlogGroup = -1;
+				int64_t minTLogBytesToFlush = INT_MAX;
+				for (int gIdx = 0; gIdx < self->tLogGroups; gIdx++) {
+					// iterate over all pending flushes and compute the effective 'bytesRemainingToFlush'
+					auto lItr = self->tlogCommitReqList[gIdx].begin();
+					while (lItr != self->tlogCommitReqList[gIdx].end()) {
+						double elapsed_time_ms = std::chrono::duration<double, std::milli>(now - lItr->start).count();
+						int64_t bytesFlushedSoFar = static_cast<int64_t>(
+						    (SERVER_KNOBS->HACKATHON_TLOG_FLUSH_BYTES_PER_SECOND * elapsed_time_ms) / 1000);
+						HackathaonTrace("GetVersionTimeDecay", self->dbgid)
+						    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
+						    .detail("GroupIdx", gIdx)
+						    .detail("ElapsedMs", elapsed_time_ms)
+						    .detail("CommitBytes", lItr->commitBytes)
+						    .detail("FlushedBytes", bytesFlushedSoFar);
+						if (bytesFlushedSoFar >= lItr->commitBytes) {
+							lItr = self->tlogCommitReqList[gIdx].erase(lItr);
+						} else {
+							// record the bytes still needs to be flushed
+							tlogEffectiveBytesToFlush[gIdx] += (lItr->commitBytes - bytesFlushedSoFar);
+							lItr++;
+						}
+					}
+					// keep track of the tlogs with mininum bytesToFlush
+					if (minTLogBytesToFlush > tlogEffectiveBytesToFlush[gIdx]) {
+						tlogGroup = gIdx;
+						minTLogBytesToFlush = tlogEffectiveBytesToFlush[gIdx];
+					}
+					HackathaonTrace("GetVersion", self->dbgid)
+					    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
+					    .detail("CandidateIdx", tlogGroup)
+					    .detail("EffectiveTLogBytesToFlush", tlogEffectiveBytesToFlush[gIdx])
+					    .detail("MinTLogBytesToFlush", minTLogBytesToFlush);
+				}
+				ASSERT(tlogGroup >= 0 && tlogGroup < self->tLogGroups);
+				// update the candidate tLog bytesToFlush entry
+				self->tlogCommitReqList[tlogGroup].emplace_back(TlogCommitReqInfo(req.commitBytes, now));
+			} else if (mode == "shortest-wait") {
+				tlogGroup = 0;
+				auto now = std::chrono::high_resolution_clock::now();
+				std::chrono::high_resolution_clock::time_point minFlushWaitTime = self->tlogCommitFlushWait[0];
+				for (int gIdx = 1; gIdx < self->tLogGroups; gIdx++) {
+					if (minFlushWaitTime > self->tlogCommitFlushWait[gIdx]) {
+						tlogGroup = gIdx;
+						minFlushWaitTime = self->tlogCommitFlushWait[gIdx];
+					}
+				}
+				ASSERT(tlogGroup >= 0 && tlogGroup < self->tLogGroups);
+				int64_t estimateFlushTimeUS =
+				    ((int64_t)req.commitBytes * 1000 * 1000) / SERVER_KNOBS->HACKATHON_TLOG_FLUSH_BYTES_PER_SECOND;
+				if (self->tlogCommitFlushWait[tlogGroup] < now) {
+					self->tlogCommitFlushWait[tlogGroup] = now + std::chrono::microseconds(estimateFlushTimeUS);
+				} else {
+					self->tlogCommitFlushWait[tlogGroup] += std::chrono::microseconds(estimateFlushTimeUS);
+				}
+				HackathaonTrace("GetVersion", self->dbgid)
+				    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
+				    .detail("CandidateIdx", tlogGroup)
+				    .detail("Now", now.time_since_epoch().count())
+				    .detail("GroupFlushWaitTime", self->tlogCommitFlushWait[tlogGroup].time_since_epoch().count())
+				    .detail("CommitFlushTimeUS", estimateFlushTimeUS);
+			} else {
+				// TOOD: invalid mode config, may send an error reponse; for now assert.
+				ASSERT(false);
+			}
+			HackathaonTrace("GetVersion", self->dbgid)
+			    .detail("Mode", SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY)
+			    .detail("GroupIdx", tlogGroup)
+			    .detail("Ver", self->version);
+			ASSERT(tlogGroup >= 0 && tlogGroup < self->tLogGroups);
+			auto& groupVersion = self->tLogGroupVersions[tlogGroup];
+			rep.tlogGroups.push_back(std::make_pair(tlogGroup, groupVersion));
+			groupVersion = self->version;
+		}
+
 		rep.version = self->version;
 		rep.requestNum = req.requestNum;
 
@@ -1234,6 +1432,10 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		                               proxyItr->second.replies.upper_bound(req.mostRecentProcessedRequestNum));
 		proxyItr->second.replies[req.requestNum] = rep;
 		ASSERT(rep.prevVersion >= 0);
+		if (rep.version != self->recoveryTransactionVersion) {
+			wait(
+			    self->liveCommittedVersion.whenAtLeast(rep.version - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
+		}
 		req.reply.send(rep);
 
 		ASSERT(proxyItr->second.latestRequestNum.get() == req.requestNum - 1);
@@ -1259,6 +1461,55 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	}
 }
 
+ACTOR Future<Void> handleCommitVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
+	// NOTE: update the tlogBytesFlushTracker before wait-on-request ordering is done
+	if (SERVER_KNOBS->HACKATHON_TLOG_SELECTION_STRATEGY == "least-loaded") {
+		// update tlog byte tracker with completed commit
+		auto itr = self->tlogVersionInfoTracker.find(req.version);
+		if (itr != self->tlogVersionInfoTracker.end()) {
+			int commitBytes = itr->second.commitBytes;
+			int tlogGroup = itr->second.tlogGroupIdx;
+			ASSERT(tlogGroup < self->tLogGroups);
+			ASSERT(self->tlogBytesToFlushTracker[tlogGroup] >= commitBytes);
+			// commit is durable; update tlogGroup bytesToFlush tracker
+			self->tlogBytesToFlushTracker[tlogGroup] -= commitBytes;
+
+			// remove tracking commit version {tlogGroup, bytes} info
+			self->tlogVersionInfoTracker.erase(req.version);
+		} else {
+			// duplicate request processing; do nothing
+		}
+	}
+
+	wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion));
+
+	for (auto& it : req.tlogGroups) {
+		self->groupKnownCommittedVersions[it.first] =
+		    std::max(self->groupKnownCommittedVersions[it.first], req.version);
+		self->groupMinKnownCommittedVersions[it.first] =
+		    std::max(self->groupMinKnownCommittedVersions[it.first], req.minKnownCommittedVersion);
+	}
+
+	self->knownCommittedVersion = std::numeric_limits<Version>::max();
+	for (auto& it : self->groupKnownCommittedVersions) {
+		self->knownCommittedVersion = std::min(self->knownCommittedVersion, it);
+	}
+
+	self->minKnownCommittedVersion = std::numeric_limits<Version>::max();
+	for (auto& it : self->groupMinKnownCommittedVersions) {
+		self->minKnownCommittedVersion = std::min(self->minKnownCommittedVersion, it);
+	}
+
+	if (req.version > self->liveCommittedVersion.get()) {
+		self->databaseLocked = req.locked;
+		self->proxyMetadataVersion = req.metadataVersion;
+		self->liveCommittedVersion.set(req.version);
+	}
+	++self->reportLiveCommittedVersionRequests;
+	req.reply.send(ReportRawCommittedVersionReply(self->knownCommittedVersion, self->minKnownCommittedVersion));
+	return Void();
+}
+
 ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 	loop {
 		choose {
@@ -1267,13 +1518,9 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 					g_traceBatch.addEvent("TransactionDebug",
 					                      req.debugID.get().first(),
 					                      "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
-
-				if (self->liveCommittedVersion == invalidVersion) {
-					self->liveCommittedVersion = self->recoveryTransactionVersion;
-				}
 				++self->getLiveCommittedVersionRequests;
 				GetRawCommittedVersionReply reply;
-				reply.version = self->liveCommittedVersion;
+				reply.version = self->liveCommittedVersion.get();
 				reply.locked = self->databaseLocked;
 				reply.metadataVersion = self->proxyMetadataVersion;
 				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
@@ -1281,14 +1528,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 			}
 			when(ReportRawCommittedVersionRequest req =
 			         waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
-				self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
-				if (req.version > self->liveCommittedVersion) {
-					self->liveCommittedVersion = req.version;
-					self->databaseLocked = req.locked;
-					self->proxyMetadataVersion = req.metadataVersion;
-				}
-				++self->reportLiveCommittedVersionRequests;
-				req.reply.send(Void());
+				self->addActor.send(handleCommitVersion(self, req));
 			}
 		}
 	}
@@ -1512,10 +1752,15 @@ ACTOR Future<Void> trackTlogRecovery(Reference<MasterData> self,
 		    configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>());
 		state bool finalUpdate = !newState.oldTLogData.size() && allLogs;
 		wait(self->cstate.write(newState, finalUpdate));
-		wait(minRecoveryDuration);
-		self->logSystem->coreStateWritten(newState);
 		if (self->cstateUpdated.canBeSet()) {
 			self->cstateUpdated.send(Void());
+		}
+
+		wait(minRecoveryDuration);
+		self->logSystem->coreStateWritten(newState);
+
+		if (self->recoveryReadyForCommits.canBeSet()) {
+			self->recoveryReadyForCommits.send(Void());
 		}
 
 		if (finalUpdate) {
@@ -1524,6 +1769,7 @@ ACTOR Future<Void> trackTlogRecovery(Reference<MasterData> self,
 			    .detail("StatusCode", RecoveryStatus::fully_recovered)
 			    .detail("Status", RecoveryStatus::names[RecoveryStatus::fully_recovered])
 			    .detail("FullyRecoveredAtVersion", self->version)
+			    .detail("ClusterId", self->clusterId)
 			    .trackLatest(self->masterRecoveryStateEventHolder->trackingKey);
 
 			TraceEvent("MasterRecoveryGenerations", self->dbgid)
@@ -1791,6 +2037,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	state Future<Void> logChanges;
 	state Future<Void> minRecoveryDuration;
 	state Future<Version> poppedTxsVersion;
+	state bool clusterIdExists = false;
 
 	loop {
 		Reference<ILogSystem> oldLogSystem = oldLogSystems->get();
@@ -1806,9 +2053,13 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		self->registrationTrigger.trigger();
 
 		choose {
-			when(wait(oldLogSystem
-			              ? recoverFrom(self, oldLogSystem, &seedServers, &initialConfChanges, poppedTxsVersion)
-			              : Never())) {
+			when(wait(oldLogSystem ? recoverFrom(self,
+			                                     oldLogSystem,
+			                                     &seedServers,
+			                                     &initialConfChanges,
+			                                     poppedTxsVersion,
+			                                     std::addressof(clusterIdExists))
+			                       : Never())) {
 				reg.cancel();
 				break;
 			}
@@ -1839,6 +2090,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
 	    .detail("PrimaryLocality", self->primaryLocality)
 	    .detail("DcId", self->myInterface.locality.dcId())
+	    .detail("ClusterId", self->clusterId)
 	    .trackLatest(self->masterRecoveryStateEventHolder->trackingKey);
 
 	// Recovery transaction
@@ -1919,6 +2171,11 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 		}
 	}
 
+	// Write cluster ID into txnStateStore if it is missing.
+	if (!clusterIdExists) {
+		tr.set(recoveryCommitRequest.arena, clusterIdKey, BinaryWriter::toValue(self->clusterId, Unversioned()));
+	}
+
 	applyMetadataMutations(SpanID(),
 	                       self->dbgid,
 	                       recoveryCommitRequest.arena,
@@ -1930,6 +2187,15 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 	                                                     // window of the resolver(s)
 
 	TraceEvent("MasterRecoveryCommit", self->dbgid).log();
+	self->tLogGroups = self->logSystem->getTLogGroups();
+	self->tLogGroupVersions.resize(self->tLogGroups, self->lastEpochEnd);
+	self->groupKnownCommittedVersions.resize(self->tLogGroups);
+	self->groupMinKnownCommittedVersions.resize(self->tLogGroups);
+	self->tlogBytesToFlushTracker.resize(self->tLogGroups, 0);
+	self->tlogCommitReqList.resize(self->tLogGroups);
+	auto now = std::chrono::high_resolution_clock::now();
+	self->tlogCommitFlushWait.resize(self->tLogGroups, now);
+	self->liveCommittedVersion.set(self->lastEpochEnd);
 	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send(self->logSystem->onError());
 	self->addActor.send(waitResolverFailure(self->resolvers));
@@ -1974,7 +2240,7 @@ ACTOR Future<Void> masterCore(Reference<MasterData> self) {
 
 	self->addActor.send(trackTlogRecovery(self, oldLogSystems, minRecoveryDuration));
 	debug_advanceMaxCommittedVersion(UID(), self->recoveryTransactionVersion);
-	wait(self->cstateUpdated.getFuture());
+	wait(self->recoveryReadyForCommits.getFuture());
 	debug_advanceMinCommittedVersion(UID(), self->recoveryTransactionVersion);
 
 	if (debugResult) {
