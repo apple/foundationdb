@@ -1171,7 +1171,7 @@ class Database(_TransactionCreator):
         self.capi.fdb_database_create_transaction(self.dpointer, ctypes.byref(pointer))
         return Transaction(pointer.value, self)
 
-    def create_tenant(self, name):
+    def allocate_tenant(self, name):
         return FutureVoid(self.capi.fdb_database_allocate_tenant(self.dpointer, name, len(name)))
 
     def delete_tenant(self, name):
