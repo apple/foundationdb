@@ -1008,16 +1008,17 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 
 		ASSERT(this->error.code() != error_code_success);
 		this->error = err;
-		if (shouldFireImmediately()) {
-			SingleCallback<T>::next->error(err);
-		}
 
 		// end_of_stream error is "expected", don't terminate reading stream early for this
-		// weird destruction issue with sending broken_promise, so just ignore it. Stream is dead anyway. TODO better
-		// fix?
+		// onError must be triggered before callback, otherwise callback could cause delPromiseRef/delFutureRef. This
+		// could destroy *this* in the callback, causing onError to be referenced after this object is destroyed.
 		if (err.code() != error_code_end_of_stream && err.code() != error_code_broken_promise && onError.isValid()) {
 			ASSERT(onError.canBeSet());
 			onError.sendError(err);
+		}
+
+		if (shouldFireImmediately()) {
+			SingleCallback<T>::next->error(err);
 		}
 	}
 
