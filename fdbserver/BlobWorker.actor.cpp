@@ -1102,12 +1102,27 @@ ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
 	// make sure the change feed has consumed mutations up through grvVersion to ensure none of them are rollbacks
 
 	loop {
-		// if not valid, we're about to be cancelled anyway
-		state Future<Void> atLeast =
-		    metadata->activeCFData.get().isValid() ? metadata->activeCFData.get()->whenAtLeast(grvVersion) : Never();
-		choose {
-			when(wait(atLeast)) { break; }
-			when(wait(metadata->activeCFData.onChange())) {}
+		try {
+			// if not valid, we're about to be cancelled anyway
+			state Future<Void> atLeast = metadata->activeCFData.get().isValid()
+			                                 ? metadata->activeCFData.get()->whenAtLeast(grvVersion)
+			                                 : Never();
+			choose {
+				when(wait(atLeast)) { break; }
+				when(wait(metadata->activeCFData.onChange())) {}
+			}
+		} catch (Error& e) {
+
+			// if waiting on a parent granule change feed and we change to the child, the parent will get end_of_stream,
+			// which could cause this waiting whenAtLeast to get change_feed_cancelled. We should simply retry and wait
+			// a bit, as blobGranuleUpdateFiles will switch to the new change feed
+			if (e.code() != error_code_change_feed_cancelled) {
+				if (BW_DEBUG) {
+					printf("waitVersionCommitted WAL got unexpected error %s\n", e.name());
+				}
+				throw e;
+			}
+			wait(delay(0.05));
 		}
 	}
 	// sanity check to make sure whenAtLeast didn't return early
@@ -1943,13 +1958,13 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 }
 
 ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, BlobGranuleFileRequest req) {
-	/*if (BW_REQUEST_DEBUG) {
-	    printf("BW %s processing blobGranuleFileRequest for range [%s-%s) @ %lld\n",
-	           bwData->id.toString().c_str(),
-	           req.keyRange.begin.printable().c_str(),
-	           req.keyRange.end.printable().c_str(),
-	           req.readVersion);
-	}*/
+	if (BW_REQUEST_DEBUG || DEBUG_BW_WAIT_VERSION == req.readVersion) {
+		printf("BW %s processing blobGranuleFileRequest for range [%s-%s) @ %lld\n",
+		       bwData->id.toString().c_str(),
+		       req.keyRange.begin.printable().c_str(),
+		       req.keyRange.end.printable().c_str(),
+		       req.readVersion);
+	}
 
 	try {
 		// TODO REMOVE in api V2
@@ -2005,6 +2020,11 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 			choose {
 				when(wait(metadata->readable.getFuture())) {}
 				when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
+			}
+
+			// in case both readable and cancelled are ready, check cancelled
+			if (!metadata->cancelled.canBeSet()) {
+				throw wrong_shard_server();
 			}
 
 			state KeyRange chunkRange;
@@ -2088,7 +2108,8 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 			} else {
 				// this is an active granule query
 				loop {
-					if (!metadata->activeCFData.get().isValid()) {
+					if (!metadata->activeCFData.get().isValid() || !metadata->cancelled.canBeSet()) {
+
 						throw wrong_shard_server();
 					}
 					Future<Void> waitForVersionFuture = waitForVersion(metadata, req.readVersion);
@@ -2112,6 +2133,15 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 				}
 				chunkFiles = metadata->files;
 				chunkRange = metadata->keyRange;
+			}
+
+			if (!metadata->cancelled.canBeSet()) {
+				printf("ERROR: Request [%s - %s) @ %lld cancelled for granule [%s - %s) after waitForVersion!\n",
+				       req.keyRange.begin.printable().c_str(),
+				       req.keyRange.end.printable().c_str(),
+				       req.readVersion,
+				       metadata->keyRange.begin.printable().c_str(),
+				       metadata->keyRange.end.printable().c_str());
 			}
 
 			// granule is up to date, do read
