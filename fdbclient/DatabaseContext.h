@@ -294,12 +294,6 @@ public:
 	Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
 
-	Future<Void> getBlobGranuleRangesStream(const PromiseStream<KeyRange>& results, KeyRange range);
-	Future<Void> readBlobGranulesStream(const PromiseStream<Standalone<BlobGranuleChunkRef>>& results,
-	                                    KeyRange range,
-	                                    Version begin,
-	                                    Optional<Version> end);
-
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
 	                         Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
@@ -444,6 +438,7 @@ public:
 
 	bool transactionTracingSample;
 	double verifyCausalReadsProp = 0.0;
+	bool blobGranuleNoMaterialize = false;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;

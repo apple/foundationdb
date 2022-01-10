@@ -3,6 +3,7 @@ buggify = false
 minimumReplication = 3
 minimumRegions = 3
 logAntiQuorum = 0
+storageEngineExcludeTypes = [4]
 
 [[test]]
 testTitle = 'DiskFailureCycle'

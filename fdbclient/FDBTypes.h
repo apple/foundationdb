@@ -1173,13 +1173,32 @@ inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 	return ((pos > 0 && pos < locality.size() - 1) || locality == "0");
 }
 
+// matches what's in fdb_c.h
+struct ReadBlobGranuleContext {
+	// User context to pass along to functions
+	void* userContext;
+
+	// Returns a unique id for the load. Asynchronous to support queueing multiple in parallel.
+	int64_t (*start_load_f)(const char* filename, int filenameLength, int64_t offset, int64_t length, void* context);
+
+	// Returns data for the load. Pass the loadId returned by start_load_f
+	uint8_t* (*get_load_f)(int64_t loadId, void* context);
+
+	// Frees data from load. Pass the loadId returned by start_load_f
+	void (*free_load_f)(int64_t loadId, void* context);
+
+	// Set this to true for testing if you don't want to read the granule files,
+	// just do the request to the blob workers
+	bool debugNoMaterialize;
+};
+
 // Store metadata associated with each storage server
 struct StorageMetadataType {
 	constexpr static FileIdentifier file_identifier = 732123;
 	uint64_t createdTime; // comes from Platform::timer_int()
 	bool expireNow;
-	StorageMetadataType():createdTime(0), expireNow(false) {}
-	StorageMetadataType(uint64_t t, bool expireNow = false): createdTime(t), expireNow(expireNow) {}
+	StorageMetadataType() : createdTime(0), expireNow(false) {}
+	StorageMetadataType(uint64_t t, bool expireNow = false) : createdTime(t), expireNow(expireNow) {}
 
 	// To change this serialization, ProtocolVersion::StorageMetadata must be updated, and downgrades need
 	// to be considered
@@ -1193,5 +1212,4 @@ struct StorageMetadataType {
 		return getGMTimeStr(&time);
 	}
 };
-
 #endif

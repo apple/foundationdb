@@ -1826,9 +1826,9 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 				// boundaries. For now with only splits we can skip the whole range
 				continue;
 			}
-			ASSERT(readThrough == m->keyRange.begin);
 			state Reference<GranuleMetadata> metadata = m;
 
+			// don't do 'if (canBeSet)'
 			if (metadata->readable.canBeSet()) {
 				wait(metadata->readable.getFuture());
 			}
@@ -1951,7 +1951,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 				j--;
 			}
 			j++;
-			Version latestDeltaVersion = invalidVersion;
+			[[maybe_unused]] Version latestDeltaVersion = invalidVersion;
 			while (j <= i) {
 				BlobFileIndex deltaF = chunkFiles.deltaFiles[j];
 				chunk.deltaFiles.emplace_back_deep(rep.arena, deltaF.filename, deltaF.offset, deltaF.length);

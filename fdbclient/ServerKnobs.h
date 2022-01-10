@@ -286,6 +286,9 @@ public:
 	int ROCKSDB_READ_QUEUE_HARD_MAX;
 	int ROCKSDB_FETCH_QUEUE_SOFT_MAX;
 	int ROCKSDB_FETCH_QUEUE_HARD_MAX;
+	// These histograms are in read and write path which can cause performance overhead.
+	// Set to 0 to disable histograms.
+	double ROCKSDB_HISTOGRAMS_SAMPLE_RATE;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -732,6 +735,9 @@ public:
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
+
+	// Cluster recovery
+	std::string CLUSTER_RECOVERY_EVENT_NAME_PREFIX;
 
 	// blob granule stuff
 	// FIXME: configure url with database configuration instead of knob eventually

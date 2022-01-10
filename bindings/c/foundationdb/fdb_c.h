@@ -65,6 +65,7 @@ extern "C" {
 
 /* Pointers to these opaque types represent objects in the FDB API */
 typedef struct FDB_future FDBFuture;
+typedef struct FDB_result FDBResult;
 typedef struct FDB_database FDBDatabase;
 typedef struct FDB_transaction FDBTransaction;
 
@@ -112,7 +113,31 @@ typedef struct keyvalue {
 	int value_length;
 } FDBKeyValue;
 #endif
+typedef struct keyrange {
+	const uint8_t* begin_key;
+	int begin_key_length;
+	const uint8_t* end_key;
+	int end_key_length;
+} FDBKeyRange;
 #pragma pack(pop)
+
+typedef struct readgranulecontext {
+	/* User context to pass along to functions */
+	void* userContext;
+
+	/* Returns a unique id for the load. Asynchronous to support queueing multiple in parallel. */
+	int64_t (*start_load_f)(const char* filename, int filenameLength, int64_t offset, int64_t length, void* context);
+
+	/* Returns data for the load. Pass the loadId returned by start_load_f */
+	uint8_t* (*get_load_f)(int64_t loadId, void* context);
+
+	/* Frees data from load. Pass the loadId returned by start_load_f */
+	void (*free_load_f)(int64_t loadId, void* context);
+
+	/* Set this to true for testing if you don't want to read the granule files,
+	   just do the request to the blob workers */
+	fdb_bool_t debugNoMaterialize;
+} FDBReadBlobGranuleContext;
 
 DLLEXPORT void fdb_future_cancel(FDBFuture* f);
 
@@ -158,6 +183,20 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_key_array(FDBFuture* f,
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_string_array(FDBFuture* f,
                                                                      const char*** out_strings,
                                                                      int* out_count);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_keyrange_array(FDBFuture* f,
+                                                                       FDBKeyRange const** out_ranges,
+                                                                       int* out_count);
+
+/* FDBResult is a synchronous computation result, as opposed to a future that is asynchronous. */
+DLLEXPORT void fdb_result_destroy(FDBResult* r);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_result_get_keyvalue_array(FDBResult* r,
+                                                                       FDBKeyValue const** out_kv,
+                                                                       int* out_count,
+                                                                       fdb_bool_t* out_more);
+
+/* TODO: add other return types as we need them */
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_create_database(const char* cluster_file_path, FDBDatabase** out_database);
 
@@ -326,6 +365,23 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_split_points(F
                                                                                uint8_t const* end_key_name,
                                                                                int end_key_name_length,
                                                                                int64_t chunk_size);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_blob_granule_ranges(FDBTransaction* db,
+                                                                                uint8_t const* begin_key_name,
+                                                                                int begin_key_name_length,
+                                                                                uint8_t const* end_key_name,
+                                                                                int end_key_name_length);
+
+/* InvalidVersion (-1) for readVersion means get read version from transaction
+   Separated out as optional because BG reads can support longer-lived reads than normal FDB transactions */
+DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_transaction_read_blob_granules(FDBTransaction* db,
+                                                                           uint8_t const* begin_key_name,
+                                                                           int begin_key_name_length,
+                                                                           uint8_t const* end_key_name,
+                                                                           int end_key_name_length,
+                                                                           int64_t beginVersion,
+                                                                           int64_t readVersion,
+                                                                           FDBReadBlobGranuleContext granuleContext);
 
 #define FDB_KEYSEL_LAST_LESS_THAN(k, l) k, l, 0, 0
 #define FDB_KEYSEL_LAST_LESS_OR_EQUAL(k, l) k, l, 1, 0

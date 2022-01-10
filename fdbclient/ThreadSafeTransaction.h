@@ -118,6 +118,13 @@ public:
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                int64_t chunkSize) override;
 
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
+
+	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
+	                                           Version beginVersion,
+	                                           Optional<Version> readVersion,
+	                                           ReadBlobGranuleContext granuleContext) override;
+
 	void addReadConflictRange(const KeyRangeRef& keys) override;
 	void makeSelfConflicting();
 
