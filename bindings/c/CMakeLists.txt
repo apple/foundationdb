@@ -157,14 +157,11 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
     set(FDB_C_TARGET $<TARGET_FILE:fdb_c>)
   endif()
   add_custom_command(
-    TARGET fdb_c POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy ${FDB_C_TARGET} ${CMAKE_BINARY_DIR}/lib/libfdb_c_external.so)
-  add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
-    COMMAND ${CMAKE_COMMAND} -E copy ${FDB_C_TARGET} ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+    COMMAND ${CMAKE_COMMAND} -E copy ${FDB_C_TARGET} ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
     DEPENDS fdb_c
     COMMENT "Copy libfdb_c to use as external client for test")
-  add_custom_target(external_client DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so)
+  add_custom_target(external_client DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so)
   add_dependencies(fdb_c_unit_tests external_client)
   add_dependencies(disconnected_timeout_unit_tests external_client)
 
@@ -191,7 +188,7 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
     COMMAND $<TARGET_FILE:fdb_c_unit_tests>
             @CLUSTER_FILE@
             fdb
-            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
             )
   add_unavailable_fdbclient_test(
     NAME disconnected_timeout_unit_tests
@@ -202,7 +199,7 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
     NAME disconnected_timeout_external_client_unit_tests
     COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
             @CLUSTER_FILE@
-            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
             )
 endif()
 
