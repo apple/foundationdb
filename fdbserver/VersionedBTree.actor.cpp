@@ -9733,14 +9733,28 @@ TEST_CASE("Lredwood/correctness/btree") {
 	return Void();
 }
 
-ACTOR Future<Void> randomSeeks(VersionedBTree* btree, int count, char firstChar, char lastChar) {
-	state Version readVer = btree->getLastCommittedVersion();
+ACTOR Future<Void> randomSeeks(VersionedBTree* btree,
+                               Optional<Version> v,
+                               bool reInitCursor,
+                               int count,
+                               char firstChar,
+                               char lastChar,
+                               int keyLen) {
 	state int c = 0;
 	state double readStart = timer();
 	state VersionedBTree::BTreeCursor cur;
+	state Version readVer = v.orDefault(btree->getLastCommittedVersion());
 	wait(btree->initBTreeCursor(&cur, readVer, PagerEventReasons::PointRead));
+
 	while (c < count) {
-		state Key k = randomString(20, firstChar, lastChar);
+		if (!v.present()) {
+			readVer = btree->getLastCommittedVersion();
+		}
+		if (reInitCursor) {
+			wait(btree->initBTreeCursor(&cur, readVer, PagerEventReasons::PointRead));
+		}
+
+		state Key k = randomString(keyLen, firstChar, lastChar);
 		wait(cur.seekGTE(k));
 		++c;
 	}
@@ -10155,7 +10169,8 @@ TEST_CASE(":/redwood/performance/set") {
 	if (seeks > 0) {
 		printf("Parallel seeks, concurrency=%d, seeks=%d ...\n", concurrentSeeks, seeks);
 		for (int x = 0; x < concurrentSeeks; ++x) {
-			actors.add(randomSeeks(btree, seeks / concurrentSeeks, firstKeyChar, lastKeyChar));
+			actors.add(
+			    randomSeeks(btree, Optional<Version>(), true, seeks / concurrentSeeks, firstKeyChar, lastKeyChar, 4));
 		}
 		wait(actors.signalAndReset());
 		if (!traceMetrics) {
