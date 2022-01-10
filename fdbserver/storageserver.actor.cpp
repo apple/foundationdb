@@ -1795,7 +1795,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    1 << 30,
 		    remainingDurableBytes));
 
-		if (!req.range.empty()) {
+		if (!inverted && !req.range.empty()) {
 			data->checkChangeCounter(changeCounter, req.range);
 		}
 
