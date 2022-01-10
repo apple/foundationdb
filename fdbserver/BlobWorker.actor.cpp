@@ -2077,10 +2077,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 				// lazily load files for old granule if not present
 				chunkRange = cur->range;
 				if (!cur->files.isValid() || cur->files.isError()) {
-					Transaction tr(bwData->db);
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					cur->files = loadHistoryFiles(&tr, cur->granuleID, BW_DEBUG);
+					cur->files = loadHistoryFiles(bwData->db, cur->granuleID, BW_DEBUG);
 				}
 
 				choose {

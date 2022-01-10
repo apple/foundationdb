@@ -71,5 +71,5 @@ ACTOR Future<Void> readGranuleFiles(Transaction* tr,
                                     UID granuleID,
                                     bool debug);
 
-ACTOR Future<GranuleFiles> loadHistoryFiles(Transaction* tr, UID granuleID, bool debug);
+ACTOR Future<GranuleFiles> loadHistoryFiles(Database cx, UID granuleID, bool debug);
 #endif
