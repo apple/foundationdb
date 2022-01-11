@@ -90,13 +90,13 @@ if (NOT WIN32 AND NOT OPEN_FOR_IDE)
             @CLUSTER_FILE@
             5
             )
-  if (TARGET external_client) # external_client copies fdb_c to bindings/c/libfdb_c.so
+  if (TARGET external_client) # external_client copies fdb_c to bindings/c/libfdb_c_external.so
     add_fdbclient_test(
     NAME single_process_external_client_fdbcli_tests
     COMMAND ${CMAKE_SOURCE_DIR}/bindings/python/tests/fdbcli_tests.py
             ${CMAKE_BINARY_DIR}
             @CLUSTER_FILE@
-            --external-client-library ${CMAKE_BINARY_DIR}/bindings/c/libfdb_c.so
+            --external-client-library ${CMAKE_BINARY_DIR}/bindings/c/libfdb_c_external.so
             )
     add_fdbclient_test(
     NAME multi_process_external_client_fdbcli_tests
@@ -105,7 +105,7 @@ if (NOT WIN32 AND NOT OPEN_FOR_IDE)
             ${CMAKE_BINARY_DIR}
             @CLUSTER_FILE@
             5
-            --external-client-library ${CMAKE_BINARY_DIR}/bindings/c/libfdb_c.so
+            --external-client-library ${CMAKE_BINARY_DIR}/bindings/c/libfdb_c_external.so
             )
   endif()
 endif()
