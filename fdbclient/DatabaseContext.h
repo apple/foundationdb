@@ -159,6 +159,7 @@ struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
 	NotifiedVersion version;
 	NotifiedVersion desired;
 	Promise<Void> destroyed;
+	UID interfToken;
 
 	bool debug = false; // TODO REMOVE
 
@@ -172,6 +173,7 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	Version getVersion();
 	Future<Void> whenAtLeast(Version version);
 
+	Key id; // TODO REMOVE eventually? for debugging
 	NotifiedVersion lastReturnedVersion;
 	std::vector<Reference<ChangeFeedStorageData>> storageData;
 	AsyncVar<int> notAtLatest;
