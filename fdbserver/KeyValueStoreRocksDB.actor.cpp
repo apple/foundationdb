@@ -1305,12 +1305,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (it.value() == nullptr)
 				continue;
 
-				if (range.singleKeyRange()) {
-				    it.value()->writeBatch.Delete(toSlice(range.begin));
-			    } else {
-				    it.value()->writeBatch.DeleteRange(toSlice(range.begin), toSlice(range.end));
-			    }
-			    dirtyShards->insert(it.value());
+			if (range.singleKeyRange()) {
+				it.value()->writeBatch.Delete(toSlice(range.begin));
+			} else {
+				it.value()->writeBatch.DeleteRange(toSlice(range.begin), toSlice(range.end));
+			}
+			dirtyShards->insert(it.value());
 		}
 	}
 
