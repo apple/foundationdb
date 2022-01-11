@@ -108,6 +108,9 @@ struct TestDriverContext {
 	// For a given storageTeamID, returns the pair(prevVersion, currentVersion).
 	std::pair<Version, Version> getCommitVersionPair(const TLogGroupID& tLogGroupID, const Version& currentVersion);
 
+	std::unordered_map<ptxn::TLogGroupID, IKeyValueStore*> ds;
+	std::unordered_map<ptxn::TLogGroupID, IDiskQueue*> qs;
+
 	// Storage Server
 	bool useFakeStorageServer;
 	int numStorageServers;
