@@ -21,6 +21,9 @@ class JoshuaBuilder:
             dirname = os.path.dirname(arg)
             for potential_dep in glob.glob("{}/*.py".format(dirname)):
                 self._add_arg(potential_dep)
+        if ".jar:" in arg:
+            # Assume it's a classpath
+            return ":".join(self._add_arg(jar) for jar in arg.split(":"))
         return self._add_arg(arg)
 
     def _add_arg(self, arg: str) -> str:
@@ -88,24 +91,27 @@ Unknown arguments are forwarded to ctest, so you may use -R to filter tests e.g.
     joshua_builder = JoshuaBuilder(args.build_dir, args.src_dir)
     commands = []
     for test in ctest_json["tests"]:
-        commands.append(
-            " ".join(
-                shlex.quote(joshua_builder.add_arg(arg)) for arg in test["command"]
+        command = test.get("command")
+        if command is not None:
+            commands.append(
+                " ".join(shlex.quote(joshua_builder.add_arg(arg)) for arg in command)
             )
-        )
-        print("Found test: {}".format(commands[-1]))
-    joshua_builder.add_arg(args.build_dir + "/bin/fdbserver")
-    joshua_builder.add_arg(args.build_dir + "/bin/fdbmonitor")
-    joshua_builder.add_arg(args.build_dir + "/bin/fdbcli")
+            print("Found test: {}".format(commands[-1]))
+    joshua_builder.add_arg(os.path.join(args.build_dir, "bin/fdbbackup"))
+    joshua_builder.add_arg(os.path.join(args.build_dir, "bin/fdbcli"))
+    joshua_builder.add_arg(os.path.join(args.build_dir, "bin/fdbmonitor"))
+    joshua_builder.add_arg(os.path.join(args.build_dir, "bin/fdbserver"))
     if platform.system() == "Darwin":
-        joshua_builder.add_arg(args.build_dir + "/lib/libfdb_c.dylib")
+        joshua_builder.add_arg(os.path.join(args.build_dir, "lib/libfdb_c.dylib"))
     else:
-        joshua_builder.add_arg(args.build_dir + "/lib/libfdb_c.so")
+        joshua_builder.add_arg(os.path.join(args.build_dir, "lib/libfdb_c.so"))
 
-    joshua_test = '#!/bin/bash\nexport {library_path}=build/lib:"${library_path}"\n'.format(
-        library_path="DYLD_LIBRARY_PATH"
-        if platform.system() == "Darwin"
-        else "LD_LIBRARY_PATH"
+    joshua_test = (
+        '#!/bin/bash\nexport {library_path}=build/lib:"${library_path}"\n'.format(
+            library_path="DYLD_LIBRARY_PATH"
+            if platform.system() == "Darwin"
+            else "LD_LIBRARY_PATH"
+        )
     )
 
     joshua_builder.write_tarball(
