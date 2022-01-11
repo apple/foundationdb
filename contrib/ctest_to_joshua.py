@@ -108,12 +108,10 @@ Unknown arguments are forwarded to ctest, so you may use -R to filter tests e.g.
     else:
         joshua_builder.add_arg(os.path.join(args.build_dir, "lib/libfdb_c.so"))
 
-    joshua_test = (
-        '#!/bin/bash\nexport {library_path}=build/lib:"${library_path}"\n'.format(
-            library_path="DYLD_LIBRARY_PATH"
-            if platform.system() == "Darwin"
-            else "LD_LIBRARY_PATH"
-        )
+    joshua_test = '#!/bin/bash\nset -euxo pipefail\nexport {library_path}=build/lib:"${library_path}"\n'.format(
+        library_path="DYLD_LIBRARY_PATH"
+        if platform.system() == "Darwin"
+        else "LD_LIBRARY_PATH"
     )
 
     joshua_builder.write_tarball(
