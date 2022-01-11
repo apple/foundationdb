@@ -174,6 +174,8 @@ public:
 	uint8_t* mutateData() const { return (uint8_t*)pPayload; }
 	int dataSize() const { return payloadSize; }
 
+	StringRef dataAsStringRef() const { return StringRef((uint8_t*)pPayload, payloadSize); }
+
 	const uint8_t* rawData() const { return buffer; }
 	uint8_t* rawData() { return buffer; }
 	int rawSize() const { return bufferSize; }
@@ -619,16 +621,13 @@ public:
 	// The snapshot shall be usable until setOldVersion() is called with a version > v.
 	virtual Reference<IPagerSnapshot> getReadSnapshot(Version v) = 0;
 
-	// Atomically make durable all pending page writes, page frees, and update the metadata string,
-	// setting the committed version to v
-	// v must be >= the highest versioned page write.
-	virtual Future<Void> commit(Version v) = 0;
+	// Atomically make durable all pending page writes, page frees, and update the user commit
+	// record at version v
+	// v must be higher than the highest committed version
+	virtual Future<Void> commit(Version v, Value commitRecord) = 0;
 
-	// Get the latest meta key set or committed
-	virtual Key getMetaKey() const = 0;
-
-	// Set the metakey which will be stored in the next commit
-	virtual void setMetaKey(KeyRef metaKey) = 0;
+	// Get the latest committed user commit record
+	virtual Value getCommitRecord() const = 0;
 
 	virtual StorageBytes getStorageBytes() const = 0;
 
