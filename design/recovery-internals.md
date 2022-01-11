@@ -118,7 +118,7 @@ Consider an old generation with three TLogs: `A, B, C`. Their durable versions a
 * Situation 2: A tLog may die after it reports alive to the CC in the RECRUITING phase. This may cause the `knownCommittedVersion` calculated by the CC in this phase to no longer be valid in the next phases. When this happens, the CC will detect it, terminate the current recovery, and start a new recovery.
 
 
-Once we have a `knownCommittedVersion`, the CC will reconstruct the transaction state store (txnStateStore, https://github.com/apple/foundationdb/blob/master/design/transaction-state-store.md) by peeking the txnStateTag in oldLogSystem.
+Once we have a `knownCommittedVersion`, the CC will reconstruct the [transaction state store](https://github.com/apple/foundationdb/blob/master/design/transaction-state-store.md) by peeking the txnStateTag in oldLogSystem.
 Recall that the txnStateStore includes the transaction system’s configuration, such as the assignment of shards to SS and to tLogs and that the txnStateStore was durable on disk in the oldLogSystem.
 Once we get the txnStateStore, we know the configuration of the transaction system, such as the number of GRV proxies and commit proxies. The CC recruits roles for the new generation in the `recruitEverything()` function. Those recruited roles includes GRV proxies, commit proxies, tLogs and seed SSes, which are the storage servers created for an empty database in the first generation to host the first shard and serve as the starting point of the bootstrap process to recruit more SSes. Once all roles are recruited, the CC starts a new epoch in `newEpoch()`.
 
