@@ -969,7 +969,7 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 				    rep.granuleRange.end == lastReqForGranule.end() && rep.epoch == lastReqForGranule.value().first &&
 				    rep.seqno == lastReqForGranule.value().second) {
 					if (BM_DEBUG) {
-						fmt::print("Manager {0} received repeat status for the same granule [{1} - {2}), ignoring.",
+						fmt::print("Manager {0} received repeat status for the same granule [{1} - {2}), ignoring.\n",
 						           bmData->epoch,
 						           rep.granuleRange.begin.printable(),
 						           rep.granuleRange.end.printable());

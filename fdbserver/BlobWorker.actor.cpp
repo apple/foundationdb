@@ -977,7 +977,14 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 		for (auto& f : inFlightFiles) {
 			if (f.snapshot) {
 				if (f.version > rollbackVersion) {
+					if (BW_DEBUG) {
+						fmt::print("[{0} - {1}) rollback cancelling snapshot file @ {2}\n",
+						           metadata->keyRange.begin.printable(),
+						           metadata->keyRange.end.printable(),
+						           f.version);
+					}
 					f.future.cancel();
+					toPop++;
 				} else {
 					metadata->pendingSnapshotVersion = f.version;
 					metadata->bytesInNewDeltaFiles = 0;
@@ -1709,7 +1716,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 	} catch (Error& e) {
 		// TODO REMOVE
 		if (BW_DEBUG) {
-			printf("BGUF got error %s\n", e.name());
+			fmt::print("BGUF {0} [{1} - {2}) got error {3}\n",
+			           startState.granuleID.toString(),
+			           metadata->keyRange.begin.printable(),
+			           metadata->keyRange.end.printable(),
+			           e.name());
 		}
 		// Free last change feed data
 		metadata->activeCFData.set(Reference<ChangeFeedData>());

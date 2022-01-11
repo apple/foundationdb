@@ -6725,12 +6725,17 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				when(wait(IFailureMonitor::failureMonitor().onStateEqual(
 				    location->get(0, &BlobWorkerInterface::blobGranuleFileRequest).getEndpoint(),
 				    FailureStatus(true)))) {
-					printf("readBlobGranules got BW %s failed\n", workerId.toString().c_str());
+					if (BG_REQUEST_DEBUG) {
+						printf("readBlobGranules got BW %s failed\n", workerId.toString().c_str());
+					}
 
 					throw connection_failed();
 				}
 			}
 		} catch (Error& e) {
+			if (BG_REQUEST_DEBUG) {
+				printf("BGReq got error %s\n", e.name());
+			}
 			// worker is up but didn't actually have granule, or connection failed
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed) {
 				// need to re-read mapping, throw transaction_too_old so client retries. TODO better error?
