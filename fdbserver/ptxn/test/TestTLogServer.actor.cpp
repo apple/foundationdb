@@ -803,7 +803,9 @@ TEST_CASE("/fdbserver/ptxn/test/read_tlog_spilled") {
 	// only wrote to a single storageTeamId, thus only 1 tlogGroup, while each tlogGroup has their own disk queue.
 	state bool exist = false;
 	state int i = 0;
-	// commit to IKeyValueStore might happen in any version of our commits(might happen more than time)
+
+	ASSERT(!res.second.empty());
+	// commit to IKeyValueStore might happen in any version of our commits(multiple versions might be combined)
 	for (i = 0; i < res.second.size(); i++) {
 		state Key k = ptxn::persistStorageTeamMessageRefsKey(
 		    pContext->getTLogLeaderByStorageTeamID(storageTeamID)->id(), storageTeamID, res.second[i]);
@@ -849,7 +851,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_tlog_not_spilled_with_default_threshold") {
 
 	// only wrote to a single storageTeamId, thus only 1 tlogGroup, while each tlogGroup has their own disk queue.
 	state int i = 0;
-	// commit to IKeyValueStore might happen in any version of our commits(might happen more than time)
+	ASSERT(!res.second.empty());
 	for (i = 0; i < res.second.size(); i++) {
 		state Key k = ptxn::persistStorageTeamMessageRefsKey(
 		    pContext->getTLogLeaderByStorageTeamID(storageTeamID)->id(), storageTeamID, res.second[i]);
