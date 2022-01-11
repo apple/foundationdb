@@ -369,11 +369,32 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 
 struct DataShard {
 	DataShard(std::string name) : name(name) {}
+	~DataShard() {
+		if (db == nullptr)
+			return;
+		// Close DB
+		auto s = db->Close();
+		if (!s.ok()) {
+			logRocksDBError(s, "CloseShard");
+		}
+
+		if (deletePending) {
+			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
+				"default", getCFOptions() } };
+			auto s = rocksdb::DestroyDB(name, getOptions(), defaultCF);
+			if (!s.ok()) {
+				logRocksDBError(s, "DestroyShard");
+			} else {
+				TraceEvent(SevInfo, "RocksDB").detail("ShardName", name).detail("Method", "DestroyShard");
+			}
+		}
+	}
 
 	rocksdb::DB* db = nullptr;
 	rocksdb::WriteBatch writeBatch;
 	std::string name;
 	bool deletePending = false;
+	bool specialKeysShard = false;
 };
 
 struct RocksDBKeyValueStore : IKeyValueStore {
@@ -451,6 +472,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			auto defaultShard = std::make_shared<DataShard>(a.path);
 			defaultShard->db = db;
+			defaultShard->specialKeysShard = true;
 
 			// The current thread and main thread are same when the code runs in simulation.
 			// blockUntilReady() is getting the thread into deadlock state, so avoiding the
@@ -473,8 +495,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.done.send(Void());
 			}
 
-			// Add system key space update should go to default shard.
-			a.shardMap->insert(systemKeys, defaultShard);
+			// Add server metadata key space to default shard.
+			a.shardMap->insert(specialKeys, defaultShard);
 
 			auto mappingRange = prefixRange(persistShardMappingPrefix);
 			RangeResult rangeResult;
@@ -506,14 +528,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::string dataPath;
 			ThreadReturnPromise<Void> done;
 			ShardMap* shardMap;
-			std::vector<DB>* deletePendingShards;
+			std::set<std::shared_ptr<DataShard>>* dirtyShards;
 
 			RestoreDurableStateAction(std::string path,
 			                          std::string dataPath,
 			                          ShardMap* shardMap,
-			                          std::vector<DB>* deletePendingShards)
-			  : path(std::move(path)), dataPath(std::move(dataPath)), shardMap(shardMap),
-			    deletePendingShards(deletePendingShards) {
+			                          std::set<std::shared_ptr<DataShard>>* dirtyShards)
+			  : path(std::move(path)), dataPath(std::move(dataPath)), shardMap(shardMap), dirtyShards(dirtyShards) {
 				ASSERT(shardMap);
 			}
 
@@ -523,7 +544,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		void action(RestoreDurableStateAction& a) {
 			ASSERT(db); // Database should have been created.
 
-			a.deletePendingShards->clear(); // All the shards should have been closed.
+			a.dirtyShards->clear(); // All the shards should have been closed.
 
 			// Read and reload metadata.
 			auto mappingRange = prefixRange(persistShardMappingPrefix);
@@ -740,6 +761,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				}
 				if (!shard->db) {
 					// create DB
+					std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
+						"default", getCFOptions() } };
+					std::vector<rocksdb::ColumnFamilyHandle*> handle;
+					auto options = getOptions();
+					rocksdb::Status status = rocksdb::DB::Open(options, shard->name, defaultCF, &handle, &shard->db);
+					if (!status.ok()) {
+						logRocksDBError(status, "AddShard");
+						a.done.sendError(statusToError(status));
+						return;
+					}
 				}
 
 				s = doCommit(&shard->writeBatch, shard->db, a.getHistograms);
@@ -785,6 +816,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
+			if (a.deleteOnClose) {
+				for (auto it : a.shardMap->ranges()) {
+					if (it.value()) {
+						it.value()->deletePending = true;
+					}
+				}
+			}
+
 			/*
 			for (auto it : a.shardMap->ranges()) {
 			    // KeyRangeMap maintains all available key ranges, however we may not have a corresponding instance.
@@ -809,6 +848,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    }
 			}*/
 
+			// Close and delete shard if needed.
 			a.shardMap->clear();
 
 			TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Close");
@@ -1184,8 +1224,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			// Restore durable state if KVS is open. KVS will be re-initialized during rollback. To avoid the cost of
 			// opening and closing multiple rocksdb instances, we reconcile the shard map using persist shard mapping
 			// data.
-			auto a = std::make_unique<Writer::RestoreDurableStateAction>(
-			    path, dataPath, &shardMap, deletePendingShards.get());
+			auto a = std::make_unique<Writer::RestoreDurableStateAction>(path, dataPath, &shardMap, dirtyShards.get());
 
 			Future<Void> future = a->done.getFuture();
 			writeThread->post(a.release());
