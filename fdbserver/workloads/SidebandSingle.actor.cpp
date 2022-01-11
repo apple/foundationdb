@@ -221,7 +221,7 @@ struct SidebandSingleWorkload : TestWorkload {
 						loop {
 							try {
 								TraceEvent("DebugSidebandNoCacheGetBefore");
-								Optional<Value> val2 = wait(tr2.get(messageKey));
+								wait(store(val2, tr2.get(messageKey)));
 								TraceEvent("DebugSidebandNoCacheGetAfter");
 								break;
 							} catch (Error& e) {

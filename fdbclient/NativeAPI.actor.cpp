@@ -220,11 +220,6 @@ void DatabaseContext::updateCachedRV(double t, Version v) {
 	}
 }
 
-void DatabaseContext::invalidateRvCache() {
-	cachedRv = 0;
-	lastTimedGrv = 0.0;
-}
-
 Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
                                                              StorageServerInterface const& ssi,
                                                              LocalityData const& locality) {
@@ -1302,9 +1297,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
     bytesPerCommit(1000), outstandingWatches(0), lastTimedGrv(0.0), cachedRv(0), lastTimedRkThrottle(0.0),
-    lastProxyRequest(0.0), rvCacheGeneration(0), transactionTracingSample(false), taskID(taskID),
-    clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion),
-    mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    lastProxyRequest(0.0), transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo),
+    clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0),
+    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
@@ -5348,14 +5343,7 @@ ACTOR static Future<Void> tryCommit(Database cx,
 					if (CLIENT_BUGGIFY) {
 						throw commit_unknown_result();
 					}
-					// TraceEvent("CheckpointSideband1");
-					// if (cx->rvCacheGeneration != tr->getRvGeneration()) {
-					// 	TraceEvent("CheckpointSideband1.1");
-					// 	cx->invalidateRvCache();
-					// } else {
-					TraceEvent("CheckpointSideband1.2");
 					cx->updateCachedRV(grvTime, v);
-					// }
 					if (info.debugID.present())
 						TraceEvent(interval.end()).detail("CommittedVersion", v);
 					*pCommittedVersion = v;
@@ -5420,10 +5408,6 @@ ACTOR static Future<Void> tryCommit(Database cx,
 	} catch (Error& e) {
 		if (e.code() == error_code_request_maybe_delivered || e.code() == error_code_commit_unknown_result) {
 			// We don't know if the commit happened, and it might even still be in flight.
-			TraceEvent("DebugSidebandCommitUnknownResult");
-
-			// Advance the cached RV generation to create a time boundary where a commit (possibly) failed.
-			cx->rvCacheGeneration++;
 			if (!options.causalWriteRisky) {
 				// Make sure it's not still in flight, either by ensuring the master we submitted to is dead, or the
 				// version we submitted with is dead, or by committing a conflicting transaction successfully
@@ -6053,7 +6037,6 @@ bool rkThrottlingCooledDown(DatabaseContext* cx) {
 }
 
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
-	rvGeneration = cx->rvCacheGeneration;
 	if (!readVersion.isValid()) {
 		if (!CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && !options.skipGrvCache &&
 		    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE || options.useGrvCache) &&
