@@ -2256,9 +2256,9 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 					logSystem->recoverAt = std::max(val, logSystem->recoverAt.get());
 				}
 				// TraceEvent("RecoveryVersionInfo").detail("RecoverAt", logSystem->recoverAt);
-			} else {
-				lastEnd = minEnd;
 			}
+
+			lastEnd = minEnd;
 
 			logSystem->rvLogs = rvLogs;
 			logSystem->tLogs = logServers;
