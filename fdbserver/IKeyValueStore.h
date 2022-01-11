@@ -87,15 +87,28 @@ public:
 
 	virtual void enableSnapshot() {}
 
-	virtual Future<Void> addShard(KeyRangeRef range, UID uid) { return Future<Void>(); }
+	/*
+	Creating a new Shard
+	    step 1 - addShard(): adds a shard to KVS can accept future writes to the requested key range.
+	    step 2 - getPersistShardMutations(): generates metadata for a newly added shard.
+	    step 3 - commit(): Persists the shard's metadata on disk (generated in last step).
+
+	Disposing an existing Shard
+	    step 1 - getDisposeRangedMutations(): generates metadata to exclude the shard that overlaps with the key range
+	from KVS. Shard is still available for use. step 2 - disposeRange(): removes one or more shards that overlap with
+	the key range from KVS and marks them as delete pending. step 3 - commit(): persists and metadata to exclude the
+	shards, closes and destroys (may not be synchronous) the physical instance.
+	*/
+
+	virtual void addShard(KeyRangeRef range, UID uid) {}
 
 	virtual void persistShard(KeyRangeRef range) {} // To be removed.
 
-	virtual std::vector<MutationRef> getPersistShardMutation(KeyRangeRef range) { return std::vector<MutationRef>(); }
+	virtual std::vector<MutationRef> getPersistShardMutations(KeyRangeRef range) { return std::vector<MutationRef>(); }
 
-	virtual Future<Void> disposeShard(KeyRangeRef range) { return Future<Void>(); }
+	virtual void disposeRange(KeyRangeRef range) {}
 
-	virtual std::vector<MutationRef> getDisposeShardMutation(KeyRangeRef range) { return std::vector<MutationRef>(); };
+	virtual std::vector<MutationRef> getDisposeRangeMutations(KeyRangeRef range) { return std::vector<MutationRef>(); };
 
 	/*
 	Concurrency contract
