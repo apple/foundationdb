@@ -4556,7 +4556,23 @@ ACTOR Future<Void> serverMetricsPolling(TCServerInfo* server) {
 	}
 }
 
-// // Set the server's storeType; Read storage metadata from database; Error is catched by the caller
+// Set the server's storeType; Error is catched by the caller
+ACTOR Future<Void> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo* server) {
+	// Update server's storeType, especially when it was created
+	state KeyValueStoreType type =
+	    wait(brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(
+	        TaskPriority::DataDistribution)));
+	server->storeType = type;
+	if (type != self->configuration.storageServerStoreType) {
+		if (self->wrongStoreTypeRemover.isReady()) {
+			self->wrongStoreTypeRemover = removeWrongStoreType(self);
+			self->addActor.send(self->wrongStoreTypeRemover);
+		}
+	}
+	return Never();
+}
+
+// Read storage metadata from database; Error is catched by the caller
 ACTOR Future<Void> checkStorageMetadata(DDTeamCollection* self, TCServerInfo* server) {
 	state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
 	                                                                                           IncludeVersion());
@@ -4587,19 +4603,6 @@ ACTOR Future<Void> checkStorageMetadata(DDTeamCollection* self, TCServerInfo* se
 		self->storageWiggler->updateMetadata(server->id, data);
 	} else {
 		self->storageWiggler->addServer(server->id, data);
-	}
-
-	// Update server's storeType, especially when it was created
-	state KeyValueStoreType type =
-	    wait(brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(
-	        TaskPriority::DataDistribution)));
-	server->storeType = type;
-
-	if (type != self->configuration.storageServerStoreType) {
-		if (self->wrongStoreTypeRemover.isReady()) {
-			self->wrongStoreTypeRemover = removeWrongStoreType(self);
-			self->addActor.send(self->wrongStoreTypeRemover);
-		}
 	}
 
 	return Never();
@@ -4749,6 +4752,7 @@ ACTOR Future<Void> storageServerTracker(
 
 	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
 
+	state Future<Void> storeTypeTracker = (isTss) ? Never() : keyValueStoreTypeTracker(self, server);
 	state bool hasWrongDC = !isCorrectDC(self, server);
 	state bool hasInvalidLocality =
 	    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
@@ -5070,6 +5074,7 @@ ACTOR Future<Void> storageServerTracker(
 					recordTeamCollectionInfo = true;
 					// Restart the storeTracker for the new interface. This will cancel the previous
 					// keyValueStoreTypeTracker
+					storeTypeTracker = (isTss) ? Never() : keyValueStoreTypeTracker(self, server);
 					storageMetadataTracker = (isTss) ? Never() : checkStorageMetadata(self, server);
 					hasWrongDC = !isCorrectDC(self, server);
 					hasInvalidLocality =
@@ -5090,7 +5095,7 @@ ACTOR Future<Void> storageServerTracker(
 					    .detail("WrongStoreTypeRemoved", server->wrongStoreTypeToRemove.get());
 				}
 				when(wait(server->wakeUpTracker.getFuture())) { server->wakeUpTracker = Promise<Void>(); }
-				when(wait(storageMetadataTracker)) {}
+				when(wait(storageMetadataTracker || storeTypeTracker)) {}
 				when(wait(server->ssVersionTooFarBehind.onChange())) {}
 				when(wait(self->disableFailingLaggingServers.onChange())) {}
 			}
