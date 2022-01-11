@@ -803,7 +803,9 @@ TEST_CASE("/fdbserver/ptxn/test/read_tlog_spilled") {
 	// only wrote to a single storageTeamId, thus only 1 tlogGroup, while each tlogGroup has their own disk queue.
 	state bool exist = false;
 	state int i = 0;
-	// commit to IKeyValueStore might happen in any version of our commits(might happen more than time)
+
+	ASSERT(!res.second.empty());
+	// commit to IKeyValueStore might happen in any version of our commits(multiple versions might be combined)
 	for (i = 0; i < res.second.size(); i++) {
 		state Key k = ptxn::persistStorageTeamMessageRefsKey(
 		    pContext->getTLogLeaderByStorageTeamID(storageTeamID)->id(), storageTeamID, res.second[i]);
@@ -815,6 +817,48 @@ TEST_CASE("/fdbserver/ptxn/test/read_tlog_spilled") {
 	// TODO: assert the value of the spilled data,
 	// there are many factors that can change the encoding of the value, such whether it is spilled by value of ref.
 	ASSERT(exist);
+	platform::eraseDirectoryRecursive(folder);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ptxn/test/read_tlog_not_spilled_with_default_threshold") {
+	state ptxn::test::TestDriverOptions options(params);
+	state std::vector<Future<Void>> actors;
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD =
+	    1500e6; // set it as default, in case other tests change it since it is global
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL = 0.5;
+	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
+
+	for (const auto& group : pContext->tLogGroups) {
+		ptxn::test::print::print(group);
+	}
+	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
+	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
+
+	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
+	platform::createDirectory(folder);
+
+	wait(startTLogServers(&actors, pContext, folder, true));
+	state IKeyValueStore* d = pContext->kvStores[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
+
+	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>> res =
+	    wait(commitInjectReturnVersions(pContext, storageTeamID, pContext->numCommits));
+	state std::vector<Standalone<StringRef>> expectedMessages = res.first;
+	wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
+
+	// wait 1s so that actors who update persistent data can do their job.
+	wait(delay(1.5));
+
+	// only wrote to a single storageTeamId, thus only 1 tlogGroup, while each tlogGroup has their own disk queue.
+	state int i = 0;
+	ASSERT(!res.second.empty());
+	for (i = 0; i < res.second.size(); i++) {
+		state Key k = ptxn::persistStorageTeamMessageRefsKey(
+		    pContext->getTLogLeaderByStorageTeamID(storageTeamID)->id(), storageTeamID, res.second[i]);
+		state Optional<Value> v = wait(d->readValue(k));
+		ASSERT(!v.present());
+	}
+
 	platform::eraseDirectoryRecursive(folder);
 	return Void();
 }
