@@ -88,18 +88,16 @@ public:
 	virtual void enableSnapshot() {}
 
 	/*
-	Creating a new Shard 
-		step 1 - addShard(): adds a shard to KVS's internal state so KVS can accept future writes to the requested key range.
-			However, the new shard will not be visible to any read requests.
-		step 2 - getPersistShardMutation(): generates metadata for a newly added shard.
-		step 3 - commit(): creates a physical instance for the shard and persists it's metadata (generated in last step). Shard
-			will be able to accept read requests after this step.
-	
+	Creating a new Shard
+	    step 1 - addShard(): adds a shard to KVS can accept future writes to the requested key range.
+	    step 2 - getPersistShardMutations(): generates metadata for a newly added shard.
+	    step 3 - commit(): Persists the shard's metadata on disk (generated in last step).
+
 	Disposing an existing Shard
-		step 1 - getDisposeShardMutation(): generates metadata to exclude the shard from KVS. Shard is still available for use.
-		step 2 - disposeShard(): removes shard from KVS's state and marks it as delete pending. The shard will no longer be able to accept
-			any read or write requests.
-		step 3 - commit(): persists and metadata to exclude the shard, closes and destroys (may not be synchronous) the physical instance.
+	    step 1 - getDisposeRangedMutations(): generates metadata to exclude the shard that overlaps with the key range
+	from KVS. Shard is still available for use. step 2 - disposeRange(): removes one or more shards that overlap with
+	the key range from KVS and marks them as delete pending. step 3 - commit(): persists and metadata to exclude the
+	shards, closes and destroys (may not be synchronous) the physical instance.
 	*/
 
 	virtual void addShard(KeyRangeRef range, UID uid) {}
