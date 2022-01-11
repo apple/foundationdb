@@ -6910,6 +6910,26 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
 }
 
+ACTOR static Future<UID> getClusterIdActor(DatabaseContext* cx) {
+	Database db(cx);
+	state Transaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> clusterId = wait(tr.get(clusterIdKey));
+			ASSERT(clusterId.present());
+			return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+Future<UID> DatabaseContext::getClusterId() {
+	return getClusterIdActor(this);
+}
+
 ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, ChangeFeedStorageData* self) {
 	loop {
 		if (self->version.get() < self->desired.get()) {

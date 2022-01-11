@@ -398,6 +398,25 @@ double DLDatabase::getMainThreadBusyness() {
 	return 0;
 }
 
+ThreadFuture<UID> DLDatabase::getClusterId() {
+	if (api->getClusterId != nullptr) {
+		FdbCApi::FDBFuture* f = api->getClusterId();
+		return toThreadFuture<UID>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+			const uint8_t* res;
+			int resLen;
+			FdbCApi::fdb_error_t error = api->futureGetKey(f, &res, &resLen);
+			ASSERT(!error);
+			// UID loading code taken from
+			// IRandom.h:load(const uint8_t* i, UID& out, Context& context)
+			const uint64_t* in = reinterpret_cast<const uint64_t*>(res);
+			UID out = UID(in[0], in[1]);
+			return out;
+		});
+	}
+
+	return UID();
+}
+
 // Returns the protocol version reported by the coordinator this client is connected to
 // If an expected version is given, the future won't return until the protocol version is different than expected
 // Note: this will never return if the server is running a protocol from FDB 5.0 or older
@@ -1181,6 +1200,13 @@ double MultiVersionDatabase::getMainThreadBusyness() {
 	}
 
 	return localClientBusyness;
+}
+
+ThreadFuture<UID> MultiVersionDatabase::getClusterId() {
+	if (dbState->db) {
+		return dbState->db->getClusterId();
+	}
+	return UID();
 }
 
 // Returns the protocol version reported by the coordinator this client is connected to

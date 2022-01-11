@@ -274,6 +274,8 @@ public:
 	// Management API, create snapshot
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
+	Future<UID> getClusterId();
+
 	Future<Void> getChangeFeedStream(Reference<ChangeFeedData> results,
 	                                 Key rangeID,
 	                                 Version begin = 0,

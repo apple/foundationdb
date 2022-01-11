@@ -358,6 +358,10 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_create_snapshot(FDBDatabase* db,
 	                        .extractPtr());
 }
 
+extern "C" DLLEXPORT FDBFuture* fdb_database_get_cluster_id(FDBDatabase* db) {
+	return (FDBFuture*)(DB(db)->getClusterId().extractPtr());
+}
+
 // Get network thread busyness (updated every 1s)
 // A value of 0 indicates that the client is more or less idle
 // A value of 1 (or more) indicates that the client is saturated
