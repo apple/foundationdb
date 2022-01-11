@@ -54,7 +54,7 @@ Recovery has 9 phases, which are defined as the 9 states in the source code: REA
 
 The recovery process is like a state machine, changing from one state to the next state. `ClusterRecovery.actor` implements the cluster recovery. We will describe in the rest of this document what each phase does to drive the recovery to the next state.
 
-The system tracks the information of each recovery phase via trace events. The `ServerKnob::CLUSTER_RECOVERY_EVENT_NAME_PREFIX` determines the event name prefix.  Recovery tracks the information of each recovery phase in `<Prefix>RecoveryState` trace event. By checking the message, we can find which phase the recovery is stuck at. The status used in the `<Prefix>RecoveryState` trace event is defined as `RecoveryStatus` structure in `RecoveryState.h`. The status, instead of the name of the 9 phases, is typically used in diagnosing production issues.
+The system tracks the information of each recovery phase via trace events. In past recovery state machine was driven by the `Master` process, hence, the events used `Master` as event prefix name (for instance: `MasterRecoveryState`). Given the recovery state machine is currently driven by CC, updating name to `ClusterRecoveryState` would have been more appropriate, however, it breaks existing tooling scripts. For now, `ServerKnob::CLUSTER_RECOVERY_EVENT_NAME_PREFIX` determines the event name prefix, default prefix value is `Master`. Recovery tracks the information of each recovery phase in `<Prefix>RecoveryState` trace event. By checking the message, we can find which phase the recovery is stuck at. The status used in the `<Prefix>RecoveryState` trace event is defined as `RecoveryStatus` structure in `RecoveryState.h`. The status, instead of the name of the 9 phases, is typically used in diagnosing production issues.
 
 
 ## Phase 1: READING_CSTATE
@@ -118,7 +118,7 @@ Consider an old generation with three TLogs: `A, B, C`. Their durable versions a
 * Situation 2: A tLog may die after it reports alive to the CC in the RECRUITING phase. This may cause the `knownCommittedVersion` calculated by the CC in this phase to no longer be valid in the next phases. When this happens, the CC will detect it, terminate the current recovery, and start a new recovery.
 
 
-Once we have a `knownCommittedVersion`, the CC will reconstruct the transaction state store (txnStateStore) by peeking the txnStateTag in oldLogSystem.
+Once we have a `knownCommittedVersion`, the CC will reconstruct the transaction state store (txnStateStore, https://github.com/apple/foundationdb/blob/master/design/transaction-state-store.md) by peeking the txnStateTag in oldLogSystem.
 Recall that the txnStateStore includes the transaction system’s configuration, such as the assignment of shards to SS and to tLogs and that the txnStateStore was durable on disk in the oldLogSystem.
 Once we get the txnStateStore, we know the configuration of the transaction system, such as the number of GRV proxies and commit proxies. The CC recruits roles for the new generation in the `recruitEverything()` function. Those recruited roles includes GRV proxies, commit proxies, tLogs and seed SSes, which are the storage servers created for an empty database in the first generation to host the first shard and serve as the starting point of the bootstrap process to recruit more SSes. Once all roles are recruited, the CC starts a new epoch in `newEpoch()`.
 
@@ -154,7 +154,7 @@ Storage servers (SSes) are not involved in the recovery phase 1 - 3. To notify S
 Commit proxies haven’t recovered the transaction system state and cannot accept transactions yet. The CC recovers proxies’ states by sending the txnStateStore to commit proxies through commit proxies’ (`txnState`) interfaces in `sendInitialCommitToResolvers()` function. Once commit proxies have recovered their states, they can start processing transactions. The recovery transaction that was waiting on commit proxies will be processed.
 
 
-The resolvers haven’t known the recovery version either. The CC would upate `recoveryTransactionVersion`, `lastEpochEnd` and elected `commitProxies` details to the master. The master needs to send the lastEpochEnd version (i.e., last commit of the previous generation) to resolvers via resolvers’ (`resolve`) interface.
+The resolvers haven’t known the recovery version either. The CC would update `recoveryTransactionVersion`, `lastEpochEnd` and elected `commitProxies` details to the master. The master needs to send the `lastEpochEnd` version (i.e., last commit of the previous generation) to resolvers via resolvers’ (`resolve`) interface.
 
 
 At the end of this phase, every role should be aware of the recovery and start recovering their states.
