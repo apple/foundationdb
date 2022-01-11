@@ -97,8 +97,8 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 			                        "fdq",
 			                        tlogGroup.logGroupId,
 			                        DiskQueueVersion::V1);
-			pContext->qs[tlogGroup.logGroupId] = queue;
-			pContext->ds[tlogGroup.logGroupId] = data;
+			pContext->diskQueues[tlogGroup.logGroupId] = queue;
+			pContext->kvStores[tlogGroup.logGroupId] = data;
 			persistentDataAndQueues[tlogGroup.logGroupId] = std::make_pair(data, queue);
 		}
 
@@ -749,7 +749,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	wait(delay(1.5));
 
 	// only wrote to a single storageTeamId, thus only 1 tlogGroup, while each tlogGroup has their own disk queue.
-	state IDiskQueue* q = pContext->qs[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
+	state IDiskQueue* q = pContext->diskQueues[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
 	// in this test, Location must has the same `lo` and `hi`
 	// because I did not implement merging multiple location into a single StringRef and return for InMemoryDiskQueue
 	ASSERT(q->getNextReadLocation().hi + pContext->numCommits == q->getNextCommitLocation().hi);
@@ -790,7 +790,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_tlog_spilled") {
 	platform::createDirectory(folder);
 
 	wait(startTLogServers(&actors, pContext, folder, true));
-	state IKeyValueStore* d = pContext->ds[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
+	state IKeyValueStore* d = pContext->kvStores[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
 
 	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>> res =
 	    wait(commitInjectReturnVersions(pContext, storageTeamID, pContext->numCommits));
@@ -836,7 +836,7 @@ TEST_CASE("/fdbserver/ptxn/test/single_tlog_recovery") {
 	platform::createDirectory(folder);
 
 	wait(startTLogServers(&actors, pContext, folder));
-	state IKeyValueStore* d = pContext->ds[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
+	state IKeyValueStore* d = pContext->kvStores[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
 
 	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>> res =
 	    wait(commitInjectReturnVersions(pContext, storageTeamID, pContext->numCommits));
@@ -849,14 +849,14 @@ TEST_CASE("/fdbserver/ptxn/test/single_tlog_recovery") {
 	state ptxn::TLogGroupID targetGroup = pContext->storageTeamIDTLogGroupIDMapper[storageTeamID];
 	state std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> dqs;
 	state int writtenTLogID = pContext->groupToLeaderId[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
-	state PromiseStream<ptxn::InitializePtxnTLogRequest> initializeTLogRecover;
+	PromiseStream<ptxn::InitializePtxnTLogRequest> initializeTLogRecover;
 
-	state IDiskQueue::location previousNextPushLocation = pContext->qs[targetGroup]->getNextPushLocation();
+	state IDiskQueue::location previousNextPushLocation = pContext->diskQueues[targetGroup]->getNextPushLocation();
 	StringRef fileVersionedLogDataPrefix = "log2-"_sr;
 	StringRef fileLogDataPrefix = "log-"_sr;
 	std::string diskQueueFilePrefix = "logqueue-";
 
-	state ptxn::InitializePtxnTLogRequest req;
+	ptxn::InitializePtxnTLogRequest req;
 	req.isPrimary = true;
 	req.storeType = KeyValueStoreType::MEMORY;
 	req.tlogGroups = pContext->groupsPerTLog[writtenTLogID];
