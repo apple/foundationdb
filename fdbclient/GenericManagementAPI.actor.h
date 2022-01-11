@@ -596,26 +596,28 @@ Future<ConfigurationResult> autoConfig(Reference<DB> db, ConfigureAutoResult con
 
 ACTOR template <class DB>
 Future<Void> createTenant(Reference<DB> db, TenantName name) {
+	state HighContentionAllocator allocator = HighContentionAllocator(Subspace(tenantAllocatorPrefix));
+
 	if (name.startsWith("\xff"_sr)) {
 		throw invalid_tenant_name();
 	}
 
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
-
-	// TODO: add a real prefix allocator
-	state Standalone<StringRef> prefix(deterministicRandom()->randomUniqueID().toString());
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
 			Optional<Value> val = wait(safeThreadFutureToFuture(tr->get(tenantMapKey)));
 			if (val.present()) {
 				throw tenant_already_exists();
 			}
 
+			Standalone<StringRef> prefix = wait(allocator.allocate(tr));
 			tr->set(tenantMapKey, prefix);
+
 			wait(safeThreadFutureToFuture(tr->commit()));
 			return Void();
 		} catch (Error& e) {

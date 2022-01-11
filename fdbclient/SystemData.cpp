@@ -1330,6 +1330,7 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 const KeyRangeRef tenantMapKeys("\xff\x02/tenantMap/"_sr, "\xff\x02/tenantMap0"_sr);
 const KeyRef tenantMapPrefix = tenantMapKeys.begin;
 const KeyRef tenantMapPrivatePrefix = "\xff\xff\x02/tenantMap/"_sr;
+const KeyRef tenantAllocatorPrefix = "\xff\x02/tenantAllocator/"_sr;
 const StringRef lockedTenantPrefix = "\xfflockedTenant/"_sr;
 
 // for tests
