@@ -195,7 +195,6 @@ public:
 
 	void addref() override { ReferenceCounted<AsyncFileKAIO>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileKAIO>::delref(); }
-
 	Future<int> read(void* data, int length, int64_t offset) override {
 		++countFileLogicalReads;
 		++countLogicalReads;

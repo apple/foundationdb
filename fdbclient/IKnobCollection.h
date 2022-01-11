@@ -36,7 +36,7 @@
  *  - TestKnobs
  */
 class IKnobCollection {
-	static std::unique_ptr<IKnobCollection> globalKnobCollection;
+	static std::unique_ptr<IKnobCollection>& globalKnobCollection();
 
 public:
 	virtual ~IKnobCollection() = default;

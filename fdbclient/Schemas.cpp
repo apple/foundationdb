@@ -493,6 +493,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "name":{
                "$enum":[
                   "unreachable_master_worker",
+                  "unreachable_cluster_controller_worker",
                   "unreachable_dataDistributor_worker",
                   "unreachable_ratekeeper_worker",
                   "unreachable_blobManager_worker",
@@ -728,7 +729,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-experimental",
+             "ssd-redwood-1-experimental",
              "ssd-rocksdb-experimental",
              "memory",
              "memory-1",
@@ -741,7 +742,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-experimental",
+             "ssd-redwood-1-experimental",
              "ssd-rocksdb-experimental",
              "memory",
              "memory-1",

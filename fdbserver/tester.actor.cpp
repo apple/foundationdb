@@ -284,15 +284,49 @@ struct CompoundWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		std::vector<Future<Void>> all;
 		all.reserve(workloads.size());
-		for (int w = 0; w < workloads.size(); w++)
-			all.push_back(workloads[w]->start(cx));
+		auto wCount = std::make_shared<unsigned>(0);
+		for (int i = 0; i < workloads.size(); i++) {
+			std::string workloadName = workloads[i]->description();
+			++(*wCount);
+			TraceEvent("WorkloadRunStatus")
+			    .detail("Name", workloadName)
+			    .detail("Count", *wCount)
+			    .detail("Phase", "Start");
+			all.push_back(fmap(
+			    [workloadName, wCount](Void value) {
+				    --(*wCount);
+				    TraceEvent("WorkloadRunStatus")
+				        .detail("Name", workloadName)
+				        .detail("Remaining", *wCount)
+				        .detail("Phase", "End");
+				    return Void();
+			    },
+			    workloads[i]->start(cx)));
+		}
 		return waitForAll(all);
 	}
 	Future<bool> check(Database const& cx) override {
 		std::vector<Future<bool>> all;
 		all.reserve(workloads.size());
-		for (int w = 0; w < workloads.size(); w++)
-			all.push_back(workloads[w]->check(cx));
+		auto wCount = std::make_shared<unsigned>(0);
+		for (int i = 0; i < workloads.size(); i++) {
+			++(*wCount);
+			std::string workloadName = workloads[i]->description();
+			TraceEvent("WorkloadCheckStatus")
+			    .detail("Name", workloadName)
+			    .detail("Count", *wCount)
+			    .detail("Phase", "Start");
+			all.push_back(fmap(
+			    [workloadName, wCount](bool ret) {
+				    --(*wCount);
+				    TraceEvent("WorkloadCheckStatus")
+				        .detail("Name", workloadName)
+				        .detail("Remaining", *wCount)
+				        .detail("Phase", "End");
+				    return true;
+			    },
+			    workloads[i]->check(cx)));
+		}
 		return allTrue(all);
 	}
 	void getMetrics(std::vector<PerfMetric>& m) override {
@@ -422,7 +456,7 @@ void printSimulatedTopology() {
 			printf("%smachineId: %s\n", indent.c_str(), p->locality.describeMachineId().c_str());
 		}
 		indent += "  ";
-		printf("%sAddress: %s\n", indent.c_str(), p->address.toString().c_str(), p->name);
+		printf("%sAddress: %s\n", indent.c_str(), p->address.toString().c_str());
 		indent += "  ";
 		printf("%sClass: %s\n", indent.c_str(), p->startingClass.toString().c_str());
 		printf("%sName: %s\n", indent.c_str(), p->name);
@@ -1439,7 +1473,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		cx = openDBOnServer(dbInfo);
 	}
 
-	state Future<Void> disabler = disableConnectionFailuresAfter(450, "Tester");
+	state Future<Void> disabler = disableConnectionFailuresAfter(FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, "Tester");
 
 	// Change the configuration (and/or create the database) if necessary
 	printf("startingConfiguration:%s start\n", startingConfiguration.toString().c_str());

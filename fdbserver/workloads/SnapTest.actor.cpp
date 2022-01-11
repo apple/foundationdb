@@ -21,10 +21,10 @@ void getVersionAndnumTags(TraceEventFields md, Version& version, int& numTags) {
 }
 
 void getTagAndDurableVersion(TraceEventFields md, Version version, Tag& tag, Version& durableVersion) {
-	Version verifyVersion;
 	durableVersion = -1;
 
-	verifyVersion = boost::lexical_cast<int64_t>(md.getValue("Version"));
+	// verify version:
+	boost::lexical_cast<int64_t>(md.getValue("Version"));
 	std::string tagString = md.getValue("Tag");
 	int colon = tagString.find_first_of(':');
 	std::string localityString = tagString.substr(0, colon);
@@ -40,11 +40,11 @@ void getMinAndMaxTLogVersions(TraceEventFields md,
                               Tag tag,
                               Version& minTLogVersion,
                               Version& maxTLogVersion) {
-	Version verifyVersion;
 	Tag verifyTag;
 	minTLogVersion = maxTLogVersion = -1;
 
-	verifyVersion = boost::lexical_cast<int64_t>(md.getValue("Version"));
+	// verify version:
+	boost::lexical_cast<int64_t>(md.getValue("Version"));
 	std::string tagString = md.getValue("Tag");
 	int colon = tagString.find_first_of(':');
 	std::string localityString = tagString.substr(0, colon);

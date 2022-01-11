@@ -328,6 +328,8 @@ def run_simulation_test(basedir, options):
         pargs.append('on')
     if options.crash:
         pargs.append('--crash')
+
+    # Use old style argument with underscores because old binaries don't support hyphens
     pargs.append('--trace_format')
     pargs.append(options.log_format)
     test_dir = td.get_current_test_dir()

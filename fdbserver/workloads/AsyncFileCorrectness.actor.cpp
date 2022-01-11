@@ -20,6 +20,7 @@
 
 #include <cinttypes>
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
@@ -83,11 +84,12 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 
 		if (maxOperationSize * numSimultaneousOperations > targetFileSize * 0.25) {
 			targetFileSize *= (int)ceil((maxOperationSize * numSimultaneousOperations * 4.0) / targetFileSize);
-			printf("Target file size is insufficient to support %d simultaneous operations of size %d; changing to "
-			       "%" PRId64 "\n",
-			       numSimultaneousOperations,
-			       maxOperationSize,
-			       targetFileSize);
+			fmt::print(
+			    "Target file size is insufficient to support {0} simultaneous operations of size {1}; changing to "
+			    "{2}\n",
+			    numSimultaneousOperations,
+			    maxOperationSize,
+			    targetFileSize);
 		}
 	}
 
@@ -396,12 +398,12 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 			int64_t fileSize = wait(self->fileHandle->file->size());
 			int64_t fileSizeChange = fileSize - self->fileSize;
 			if (fileSizeChange >= _PAGE_SIZE) {
-				printf("Reopened file increased in size by %" PRId64 " bytes (at most %d allowed)\n",
-				       fileSizeChange,
-				       _PAGE_SIZE - 1);
+				fmt::print("Reopened file increased in size by {0} bytes (at most {1} allowed)\n",
+				           fileSizeChange,
+				           _PAGE_SIZE - 1);
 				self->success = false;
 			} else if (fileSizeChange < 0) {
-				printf("Reopened file decreased in size by %" PRId64 " bytes\n", -fileSizeChange);
+				fmt::print("Reopened file decreased in size by {} bytes\n", -fileSizeChange);
 				self->success = false;
 			}
 

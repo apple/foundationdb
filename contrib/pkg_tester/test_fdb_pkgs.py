@@ -54,7 +54,9 @@ class Container:
         # https://developers.redhat.com/blog/2016/09/13/running-systemd-in-a-non-privileged-container#the_quest
         extra_initd_args = []
         if initd:
-            extra_initd_args = "--tmpfs /tmp --tmpfs /run -v /sys/fs/cgroup:/sys/fs/cgroup:ro".split()
+            extra_initd_args = (
+                "--tmpfs /tmp --tmpfs /run -v /sys/fs/cgroup:/sys/fs/cgroup:ro".split()
+            )
 
         self.uid = str(uuid.uuid4())
 
@@ -103,6 +105,8 @@ def ubuntu_image_with_fdb_helper(versioned: bool) -> Iterator[Optional[Image]]:
         container = Container("ubuntu")
         for deb in debs:
             container.copy_to(deb, "/opt")
+        container.run(["bash", "-c", "apt-get update"])
+        container.run(["bash", "-c", "apt-get install --yes binutils"]) # this is for testing libfdb_c execstack permissions
         container.run(["bash", "-c", "dpkg -i /opt/*.deb"])
         container.run(["bash", "-c", "rm /opt/*.deb"])
         image = container.commit()
@@ -146,6 +150,8 @@ def centos_image_with_fdb_helper(versioned: bool) -> Iterator[Optional[Image]]:
         container = Container("centos", initd=True)
         for rpm in rpms:
             container.copy_to(rpm, "/opt")
+        container.run(["bash", "-c", "yum update -y"])
+        container.run(["bash", "-c", "yum install -y binutils"]) # this is for testing libfdb_c execstack permissions
         container.run(["bash", "-c", "yum install -y /opt/*.rpm"])
         container.run(["bash", "-c", "rm /opt/*.rpm"])
         image = container.commit()
@@ -235,6 +241,17 @@ def test_fdbcli_help_text(linux_container: Container, snapshot):
     assert snapshot == linux_container.run(["fdbcli", "--help"])
 
 
+def test_execstack_permissions_libfdb_c(linux_container: Container, snapshot):
+    linux_container.run(["ldconfig"])
+    assert snapshot == linux_container.run(
+        [
+            "bash",
+            "-c",
+            "readelf -l $(ldconfig -p | grep libfdb_c | awk '{print $(NF)}') | grep -A1 GNU_STACK",
+        ]
+    )
+
+
 def test_backup_restore(linux_container: Container, snapshot, tmp_path: pathlib.Path):
     linux_container.run(["fdbcli", "--exec", "writemode on; set x y"])
     assert snapshot == linux_container.run(
@@ -245,7 +262,7 @@ def test_backup_restore(linux_container: Container, snapshot, tmp_path: pathlib.
         [
             "bash",
             "-c",
-            "fdbrestore start -r file://$(echo /tmp/fdb_backup/*) -w --dest_cluster_file /etc/foundationdb/fdb.cluster",
+            "fdbrestore start -r file://$(echo /tmp/fdb_backup/*) -w --dest-cluster-file /etc/foundationdb/fdb.cluster",
         ]
     )
     assert snapshot == linux_container.run(["fdbcli", "--exec", "get x"])

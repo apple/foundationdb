@@ -58,7 +58,7 @@ fdb_error_t wait_future(fdb::Future& f) {
 void validateTimeoutDuration(double expectedSeconds, std::chrono::time_point<std::chrono::steady_clock> start) {
 	std::chrono::duration<double> duration = std::chrono::steady_clock::now() - start;
 	double actualSeconds = duration.count();
-	CHECK(actualSeconds >= expectedSeconds - 1e-6);
+	CHECK(actualSeconds >= expectedSeconds - 1e-3);
 	CHECK(actualSeconds < expectedSeconds * 2);
 }
 

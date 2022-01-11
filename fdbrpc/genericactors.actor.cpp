@@ -25,9 +25,8 @@
 #include "flow/actorcompiler.h"
 
 ACTOR Future<Void> disableConnectionFailuresAfter(double time, std::string context) {
-	wait(delay(time));
-
 	if (g_network->isSimulated()) {
+		wait(delayUntil(time));
 		g_simulator.connectionFailuresDisableDuration = 1e6;
 		g_simulator.speedUpSimulation = true;
 		TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());

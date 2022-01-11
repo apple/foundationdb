@@ -809,7 +809,7 @@ TEST_CASE("/flow/flow/chooseTwoActor") {
 	return Void();
 }
 
-TEST_CASE("/flow/flow/perf/actor patterns") {
+TEST_CASE("#flow/flow/perf/actor patterns") {
 	double start;
 	int N = 1000000;
 

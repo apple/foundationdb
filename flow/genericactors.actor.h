@@ -845,53 +845,6 @@ Future<bool> quorumEqualsTrue(std::vector<Future<bool>> const& futures, int cons
 Future<Void> lowPriorityDelay(double const& waitTime);
 
 ACTOR template <class T>
-Future<T> ioTimeoutError(Future<T> what, double time) {
-	Future<Void> end = lowPriorityDelay(time);
-	choose {
-		when(T t = wait(what)) { return t; }
-		when(wait(end)) {
-			Error err = io_timeout();
-			if (g_network->isSimulated()) {
-				err = err.asInjectedFault();
-			}
-			TraceEvent(SevError, "IoTimeoutError").error(err);
-			throw err;
-		}
-	}
-}
-
-ACTOR template <class T>
-Future<T> ioDegradedOrTimeoutError(Future<T> what,
-                                   double errTime,
-                                   Reference<AsyncVar<bool>> degraded,
-                                   double degradedTime) {
-	if (degradedTime < errTime) {
-		Future<Void> degradedEnd = lowPriorityDelay(degradedTime);
-		choose {
-			when(T t = wait(what)) { return t; }
-			when(wait(degradedEnd)) {
-				TEST(true); // TLog degraded
-				TraceEvent(SevWarnAlways, "IoDegraded").log();
-				degraded->set(true);
-			}
-		}
-	}
-
-	Future<Void> end = lowPriorityDelay(errTime - degradedTime);
-	choose {
-		when(T t = wait(what)) { return t; }
-		when(wait(end)) {
-			Error err = io_timeout();
-			if (g_network->isSimulated()) {
-				err = err.asInjectedFault();
-			}
-			TraceEvent(SevError, "IoTimeoutError").error(err);
-			throw err;
-		}
-	}
-}
-
-ACTOR template <class T>
 Future<Void> streamHelper(PromiseStream<T> output, PromiseStream<Error> errors, Future<T> input) {
 	try {
 		T value = wait(input);
@@ -917,7 +870,7 @@ template <class T>
 class QuorumCallback;
 
 template <class T>
-struct Quorum : SAV<Void> {
+struct Quorum final : SAV<Void> {
 	int antiQuorum;
 	int count;
 
@@ -1605,7 +1558,9 @@ Future<Void> yieldPromiseStream(FutureStream<T> input,
 	}
 }
 
-struct YieldedFutureActor : SAV<Void>, ActorCallback<YieldedFutureActor, 1, Void>, FastAllocated<YieldedFutureActor> {
+struct YieldedFutureActor final : SAV<Void>,
+                                  ActorCallback<YieldedFutureActor, 1, Void>,
+                                  FastAllocated<YieldedFutureActor> {
 	Error in_error_state;
 
 	typedef ActorCallback<YieldedFutureActor, 1, Void> CB1;
