@@ -4101,51 +4101,64 @@ ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getSe
 	return results;
 }
 
-// Create a transaction reading the value of `wigglingStorageServerKey` and update it to the next serverID according
-// to a sorted wiggle_pq maintained by the wiggler.
-ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection) {
-	state ReadYourWritesTransaction tr(teamCollection->cx);
-	state const Key writeKey =
-	    wigglingStorageServerKey.withSuffix(teamCollection->primary ? "/primary"_sr : "/remote"_sr);
-	state UID nextId;
-	state std::string& localityKeyValue = teamCollection->configuration.perpetualStorageWiggleLocality;
+// return the next ServerID in storageWiggler
+ACTOR Future<UID> getNextWigglingServerID(DDTeamCollection* teamCollection) {
+	state Optional<Value> localityKey;
+	state Optional<Value> localityValue;
+
+	if (teamCollection->configuration.perpetualStorageWiggleLocality != "0") {
+		std::string& localityKeyValue = teamCollection->configuration.perpetualStorageWiggleLocality;
+		ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValue));
+		// get key and value from perpetual_storage_wiggle_locality.
+		int split = localityKeyValue.find(':');
+		localityKey = Optional<Value>(ValueRef((uint8_t*)localityKeyValue.c_str(), split));
+		localityValue = Optional<Value>(
+		    ValueRef((uint8_t*)localityKeyValue.c_str() + split + 1, localityKeyValue.size() - split - 1));
+	}
 
 	loop {
 		// wait until the wiggle queue is not empty
 		if (teamCollection->storageWiggler->empty()) {
 			wait(teamCollection->storageWiggler->nonEmpty.onChange());
 		}
-		auto id = teamCollection->storageWiggler->getNextServerId();
-		if (id.present()) {
-			if (localityKeyValue.compare("0")) {
-				// if perpetual_storage_wiggle_locality has value and not 0(disabled).
-				ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValue));
-				// get key and value from perpetual_storage_wiggle_locality.
-				int split = localityKeyValue.find(':');
-				StringRef localityKey((uint8_t*)localityKeyValue.c_str(), split);
-				StringRef localityValue((uint8_t*)localityKeyValue.c_str() + split + 1,
-				                        localityKeyValue.size() - split - 1);
 
-				// Whether the selected server matches the locality
-				auto server = teamCollection->server_info.at(id.get());
-				// TraceEvent("PerpetualLocality").detail("Server", server->lastKnownInterface.locality.get(localityKey)).detail("Desire", localityValue);
-				if (server->lastKnownInterface.locality.get(localityKey) == localityValue) {
-					nextId = id.get();
-				} else {
-					if (teamCollection->storageWiggler->empty()) {
-						// None of the entries in wiggle queue matches the given locality.
-						TraceEvent("PerpetualNextWigglingStoragePIDNotFound", teamCollection->distributorId)
-						    .detail("WriteValue", "No process matched the given perpetualStorageWiggleLocality")
-						    .detail("PerpetualStorageWiggleLocality", localityKeyValue);
-					}
-					continue;
-				}
+		// if perpetual_storage_wiggle_locality has value and not 0(disabled).
+		if (localityKey.present()) {
+			// Whether the selected server matches the locality
+			auto id = teamCollection->storageWiggler->getNextServerId();
+			if (!id.present())
+				continue;
+			auto server = teamCollection->server_info.at(id.get());
+
+			// TraceEvent("PerpetualLocality").detail("Server", server->lastKnownInterface.locality.get(localityKey)).detail("Desire", localityValue);
+			if (server->lastKnownInterface.locality.get(localityKey.get()) == localityValue) {
+				return id.get();
 			} else {
-				nextId = id.get();
+				if (teamCollection->storageWiggler->empty()) {
+					// None of the entries in wiggle queue matches the given locality.
+					TraceEvent("PerpetualNextWigglingStoragePIDNotFound", teamCollection->distributorId)
+					    .detail("WriteValue", "No process matched the given perpetualStorageWiggleLocality")
+					    .detail("PerpetualStorageWiggleLocality",
+					            teamCollection->configuration.perpetualStorageWiggleLocality);
+				}
+				continue;
 			}
-			break;
+		} else {
+			auto id = teamCollection->storageWiggler->getNextServerId();
+			if (!id.present())
+				continue;
+			return id.get();
 		}
 	}
+}
+
+// Create a transaction updating `wigglingStorageServerKey` to the next serverID according to a sorted wiggle_pq
+// maintained by the wiggler.
+ACTOR Future<Void> updateNextWigglingStoragePID(DDTeamCollection* teamCollection) {
+	state ReadYourWritesTransaction tr(teamCollection->cx);
+	state const Key writeKey =
+	    wigglingStorageServerKey.withSuffix(teamCollection->primary ? "/primary"_sr : "/remote"_sr);
+	state UID nextId = wait(getNextWigglingServerID(teamCollection));
 
 	loop {
 		// write the next server id
