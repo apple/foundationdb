@@ -38,8 +38,10 @@ class JoshuaBuilder:
                 return relpath
             elif os.access(arg, os.X_OK):
                 # Hope it's on the path
-                relpath = os.path.basename(arg)
-                return relpath
+                name = os.path.basename(arg)
+                if name.startswith("python3"):
+                    name = "python3"
+                return name
             else:
                 assert False, "Not sure what to do with {}".format(arg)
         return arg
