@@ -6544,6 +6544,7 @@ ACTOR Future<CheckpointRecord> getCheckpoint(Database cx, KeyRange keys, Version
 	                              &StorageServerInterface::checkpoint,
 	                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
 
+	// TODO: check all SS for existing checkpoint files, and then create a new one if none.
 	state int idx = deterministicRandom()->randomInt(0, locations[0].second->size());
 	state CheckpointRecord reply = wait(
 	    locations[0].second->getInterface(idx).checkpoint.getReply(CheckpointRequest(minVersion, locations[0].first)));
