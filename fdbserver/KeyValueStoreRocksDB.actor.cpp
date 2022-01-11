@@ -394,7 +394,7 @@ struct DataShard {
 	rocksdb::WriteBatch writeBatch;
 	std::string name;
 	bool deletePending = false;
-	bool specialKeysShard = false;
+	bool isSpecialKeysShard = false;
 };
 
 struct RocksDBKeyValueStore : IKeyValueStore {
@@ -472,7 +472,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			auto defaultShard = std::make_shared<DataShard>(a.path);
 			defaultShard->db = db;
-			defaultShard->specialKeysShard = true;
+			defaultShard->isSpecialKeysShard = true;
 
 			// The current thread and main thread are same when the code runs in simulation.
 			// blockUntilReady() is getting the thread into deadlock state, so avoiding the
@@ -754,7 +754,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    }
 			}*/
 
+			std::shared_ptr<DataShard> specialKeysShard;
+
 			for (auto shard : *(a.dirtyShards)) {
+				if (shard->isSpecialKeysShard) {
+					specialKeysShard = shard;
+					continue;
+				}
+
 				if (shard->deletePending) {
 					// Destroy shard.
 					continue;
@@ -794,6 +801,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    a.done.sendError(statusToError(s));
 			    return;
 			}*/
+			if (specialKeysShard) {
+				s = doCommit(&specialKeysShard->writeBatch, specialKeysShard->db, a.getHistograms);
+				if (!s.ok()) {
+					a.done.sendError(statusToError(s));
+					return;
+				}
+			}
+
+			// Destroy all the delete pending shards.
+			a.dirtyShards->clear();
 
 			// TODO: Destroy all delete pending shards.
 			a.done.send(Void());
@@ -1502,7 +1519,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                           shard.value()->db->GetName()));
 
 		// TODO: should we include sys key range here?
-		if (range.end < normalKeys.end) {
+		if (range.end < allKeys.end) {
 			auto it = shardMap.rangeContaining(range.end);
 			refs.push_back(MutationRef(MutationRef::SetValue,
 			                           persistShardMappingPrefix.toString() + range.end.toString(),
