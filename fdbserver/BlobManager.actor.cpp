@@ -678,6 +678,32 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 	}
 }
 
+// split recursively in the middle to guarantee roughly equal splits across different parts of key space
+static void downsampleSplit(const Standalone<VectorRef<KeyRef>>& splits,
+                            Standalone<VectorRef<KeyRef>>& out,
+                            int startIdx,
+                            int endIdx,
+                            int remaining) {
+	ASSERT(endIdx - startIdx >= remaining);
+	ASSERT(remaining >= 0);
+	if (remaining == 0) {
+		return;
+	}
+	if (endIdx - startIdx == remaining) {
+		out.append(out.arena(), splits.begin() + startIdx, remaining);
+	} else {
+		int mid = (startIdx + endIdx) / 2;
+		int startCount = (remaining - 1) / 2;
+		int endCount = remaining - startCount - 1;
+		// ensure no infinite recursion
+		ASSERT(mid != endIdx);
+		ASSERT(mid + 1 != startIdx);
+		downsampleSplit(splits, out, startIdx, mid, startCount);
+		out.push_back(out.arena(), splits[mid]);
+		downsampleSplit(splits, out, mid + 1, endIdx, endCount);
+	}
+}
+
 ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
                                    UID currentWorkerId,
                                    KeyRange granuleRange,
@@ -707,6 +733,28 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
 		raContinue.assign = RangeAssignmentData(AssignRequestType::Continue); // continue assignment and re-snapshot
 		bmData->rangesToAssign.send(raContinue);
 		return Void();
+	}
+
+	// TODO KNOB for this.
+	// Enforce max split fanout of 10 for performance reasons
+	int maxSplitFanout = 10;
+	if (newRanges.size() >= maxSplitFanout + 2) { // +2 because this is boundaries, so N keys would have N+1 bounaries.
+		TEST(true); // downsampling granule split because fanout too high
+		Standalone<VectorRef<KeyRef>> coalescedRanges;
+		coalescedRanges.arena().dependsOn(newRanges.arena());
+		coalescedRanges.push_back(coalescedRanges.arena(), newRanges.front());
+
+		// since we include start + end boundaries here, only need maxSplitFanout-1 split boundaries to produce
+		// maxSplitFanout granules
+		downsampleSplit(newRanges, coalescedRanges, 1, newRanges.size() - 1, maxSplitFanout - 1);
+
+		coalescedRanges.push_back(coalescedRanges.arena(), newRanges.back());
+		ASSERT(coalescedRanges.size() == maxSplitFanout + 1);
+		if (BM_DEBUG) {
+			fmt::print("Downsampled split from {0} -> {1} granules", newRanges.size() - 1, maxSplitFanout);
+		}
+
+		newRanges = coalescedRanges;
 	}
 
 	if (BM_DEBUG) {
