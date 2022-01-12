@@ -147,11 +147,11 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Data distribution
 	init( RETRY_RELOCATESHARD_DELAY,                             0.1 );
 	init( DATA_DISTRIBUTION_FAILURE_REACTION_TIME,              60.0 ); if( randomize && BUGGIFY ) DATA_DISTRIBUTION_FAILURE_REACTION_TIME = 1.0;
-	bool buggifySmallShards = randomize && BUGGIFY;
-	bool buggifyMediumShards = !buggifySmallShards && randomize && BUGGIFY_WITH_PROB(0.75); // prefer smaller shards in simulation
-	init( MIN_SHARD_BYTES,                                  50000000 ); if( buggifySmallShards ) MIN_SHARD_BYTES = 40000; if (buggifyMediumShards) MIN_SHARD_BYTES = 200000; //FIXME: data distribution tracker (specifically StorageMetrics) relies on this number being larger than the maximum size of a key value pair
+	bool smallShards = randomize && !BUGGIFY;
+	bool buggifyMediumShards = !smallShards && randomize && BUGGIFY_WITH_PROB(0.75); // prefer smaller shards in simulation
+	init( MIN_SHARD_BYTES,                                  50000000 ); if( smallShards ) MIN_SHARD_BYTES = 40000; if (buggifyMediumShards) MIN_SHARD_BYTES = 200000; //FIXME: data distribution tracker (specifically StorageMetrics) relies on this number being larger than the maximum size of a key value pair
 	init( SHARD_BYTES_RATIO,                                       4 );
-	init( SHARD_BYTES_PER_SQRT_BYTES,                             45 ); if( buggifySmallShards ) SHARD_BYTES_PER_SQRT_BYTES = 0;//Approximately 10000 bytes per shard
+	init( SHARD_BYTES_PER_SQRT_BYTES,                             45 ); if( smallShards ) SHARD_BYTES_PER_SQRT_BYTES = 0;//Approximately 10000 bytes per shard
 	init( MAX_SHARD_BYTES,                                 500000000 );
 	init( KEY_SERVER_SHARD_BYTES,                          500000000 );
 	init( SHARD_MAX_READ_DENSITY_RATIO,                           8.0); if (randomize && BUGGIFY) SHARD_MAX_READ_DENSITY_RATIO = 2.0;
