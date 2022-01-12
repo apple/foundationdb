@@ -3311,12 +3311,6 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 		if (recovering) {
 			logData->unrecoveredBefore = req.startVersion;
 			state Version recoverAt = req.recoverAt;
-			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				if (req.rvLogs.find(self->dbgid) != req.rvLogs.end()) {
-					recoverAt = req.rvLogs[self->dbgid];
-					// TraceEvent("TLogUnicastRecovered").detail("U", recoverAt);
-				}
-			}
 			logData->recoveredAt = recoverAt;
 			logData->knownCommittedVersion = req.startVersion - 1;
 			logData->persistentDataVersion = logData->unrecoveredBefore - 1;
