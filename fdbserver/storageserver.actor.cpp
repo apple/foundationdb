@@ -1670,8 +1670,7 @@ MutationsAndVersionRef filterMutationsInverted(Arena& arena, MutationsAndVersion
 		} else {
 			ASSERT(m.mutations[i].type == MutationRef::ClearRange);
 			if (!modifiedMutations.present() &&
-			    ((m.mutations[i].param1 < range.begin && m.mutations[i].param2 > range.begin) ||
-			     (m.mutations[i].param2 > range.end && m.mutations[i].param1 < range.end))) {
+			    (m.mutations[i].param2 > range.begin && m.mutations[i].param1 < range.end)) {
 				modifiedMutations = m.mutations.slice(0, i);
 				arena.dependsOn(range.arena());
 			}
@@ -3909,6 +3908,14 @@ ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
 				Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(feedResults->mutations.getFuture());
 				for (auto& it : res) {
 					if (it.mutations.size()) {
+						if (MUTATION_TRACKING_ENABLED) {
+							for (auto& m : it.mutations) {
+								DEBUG_MUTATION("ChangeFeedWriteMove", it.version, m, data->thisServerID)
+								    .detail("Range", range)
+								    .detail("Existing", existing)
+								    .detail("ChangeFeedID", rangeId);
+							}
+						}
 						data->storage.writeKeyValue(
 						    KeyValueRef(changeFeedDurableKey(rangeId, it.version),
 						                changeFeedDurableValue(it.mutations, it.knownCommittedVersion)));
@@ -3943,6 +3950,15 @@ ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
 			while (remoteLoc < remoteResult.size()) {
 				if (remoteResult[remoteLoc].version < localResult.version) {
 					if (remoteResult[remoteLoc].mutations.size()) {
+						if (MUTATION_TRACKING_ENABLED) {
+							for (auto& m : remoteResult[remoteLoc].mutations) {
+								DEBUG_MUTATION(
+								    "ChangeFeedWriteMove", remoteResult[remoteLoc].version, m, data->thisServerID)
+								    .detail("Range", range)
+								    .detail("Existing", existing)
+								    .detail("ChangeFeedID", rangeId);
+							}
+						}
 						data->storage.writeKeyValue(
 						    KeyValueRef(changeFeedDurableKey(rangeId, remoteResult[remoteLoc].version),
 						                changeFeedDurableValue(remoteResult[remoteLoc].mutations,
@@ -3954,9 +3970,21 @@ ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
 				} else if (remoteResult[remoteLoc].version == localResult.version) {
 					if (remoteResult[remoteLoc].mutations.size() &&
 					    remoteResult[remoteLoc].mutations.back().param1 != lastEpochEndPrivateKey) {
+						int remoteSize = remoteResult[remoteLoc].mutations.size();
 						ASSERT(localResult.mutations.size());
 						remoteResult[remoteLoc].mutations.append(
 						    remoteResult.arena(), localResult.mutations.begin(), localResult.mutations.size());
+						if (MUTATION_TRACKING_ENABLED) {
+							int midx = 0;
+							for (auto& m : remoteResult[remoteLoc].mutations) {
+								DEBUG_MUTATION(
+								    "ChangeFeedWriteMoveMerge", remoteResult[remoteLoc].version, m, data->thisServerID)
+								    .detail("Range", range)
+								    .detail("FromLocal", midx >= remoteSize)
+								    .detail("ChangeFeedID", rangeId);
+								midx++;
+							}
+						}
 						data->storage.writeKeyValue(
 						    KeyValueRef(changeFeedDurableKey(rangeId, remoteResult[remoteLoc].version),
 						                changeFeedDurableValue(remoteResult[remoteLoc].mutations,
