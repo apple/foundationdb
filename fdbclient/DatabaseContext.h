@@ -179,6 +179,7 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	AsyncVar<int> notAtLatest;
 	Promise<Void> refresh;
 	Version maxSeenVersion;
+	Version endVersion = invalidVersion;
 
 	ChangeFeedData() : notAtLatest(1) {}
 };

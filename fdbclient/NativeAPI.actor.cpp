@@ -7252,6 +7252,14 @@ ACTOR Future<Void> changeFeedWaitLatest(Reference<ChangeFeedData> self, Version 
 }
 
 ACTOR Future<Void> changeFeedWhenAtLatest(Reference<ChangeFeedData> self, Version version) {
+	if (version >= self->endVersion) {
+		if (DEBUG_CF_WAIT(self->id, version)) {
+			fmt::print(
+			    "CFW {0}) WhenAtLeast: After CF end version {1}, returning Never()\n", version, self->endVersion);
+		}
+		return Never();
+	}
+
 	if (DEBUG_CF_WAIT(self->id, version)) {
 		fmt::print("CFW {0}) WhenAtLeast: LR={1}\n", version, self->lastReturnedVersion.get());
 	}
@@ -7771,6 +7779,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 	state Span span("NAPI:GetChangeFeedStream"_loc);
 
 	results->id = rangeID;
+	results->endVersion = end;
 
 	/*printf("CFStream %s [%s - %s): [%lld - %lld]\n",
 	       rangeID.printable().substr(0, 6).c_str(),
