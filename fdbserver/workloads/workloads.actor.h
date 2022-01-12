@@ -115,6 +115,7 @@ struct IWorkloadFactory : ReferenceCounted<IWorkloadFactory> {
 		return theFactories;
 	}
 
+	virtual ~IWorkloadFactory() = default;
 	virtual Reference<TestWorkload> create(WorkloadContext const& wcx) = 0;
 };
 
