@@ -202,7 +202,23 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 	}
 }
 
+void updateCachedRVShared(double t, Version v, GRVCacheSpace* s) {
+	MutexHolder mutex(s->cacheLock);
+	TraceEvent("CheckpointCacheUpdateShared")
+	    .detail("Version", v)
+	    .detail("CurTime", t)
+	    .detail("LastVersion", s->cachedRv)
+	    .detail("LastTime", s->lastTimedGrv);
+	s->cachedRv = v;
+	if (t > s->lastTimedGrv) {
+		s->lastTimedGrv = t;
+	}
+}
+
 void DatabaseContext::updateCachedRV(double t, Version v) {
+	if (sharedCachePtr) {
+		return updateCachedRVShared(t, v, sharedCachePtr);
+	}
 	if (v >= cachedRv) {
 		TraceEvent("CheckpointCacheUpdate")
 		    .detail("Version", v)
@@ -218,6 +234,22 @@ void DatabaseContext::updateCachedRV(double t, Version v) {
 			lastTimedGrv = t;
 		}
 	}
+}
+
+Version DatabaseContext::getCachedRV() {
+	if (sharedCachePtr) {
+		MutexHolder mutex(sharedCachePtr->cacheLock);
+		return sharedCachePtr->cachedRv;
+	}
+	return cachedRv;
+}
+
+double DatabaseContext::getLastTimedGRV() {
+	if (sharedCachePtr) {
+		MutexHolder mutex(sharedCachePtr->cacheLock);
+		return sharedCachePtr->lastTimedGrv;
+	}
+	return lastTimedGrv;
 }
 
 Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
@@ -1033,14 +1065,14 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 		loop {
 			wait(refreshTransaction(cx, &tr));
 			state double curTime = now();
-			state double lastTime = cx->lastTimedGrv;
+			state double lastTime = cx->getLastTimedGRV();
 			state double lastProxyTime = cx->lastProxyRequest;
 			TraceEvent("BackgroundGrvUpdaterBefore")
 			    .detail("CurTime", curTime)
 			    .detail("LastTime", lastTime)
 			    .detail("GrvDelay", grvDelay)
-			    .detail("CachedRv", cx->cachedRv)
-			    .detail("CachedTime", cx->lastTimedGrv)
+			    .detail("CachedRv", cx->getCachedRV())
+			    .detail("CachedTime", cx->getLastTimedGRV())
 			    .detail("Gap", curTime - lastTime)
 			    .detail("Bound", CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay);
 			if (curTime - lastTime >= (CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay) ||
@@ -1052,8 +1084,8 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 					grvDelay = (grvDelay + (now() - curTime)) / 2.0;
 					TraceEvent("BackgroundGrvUpdaterSuccess")
 					    .detail("GrvDelay", grvDelay)
-					    .detail("CachedRv", cx->cachedRv)
-					    .detail("CachedTime", cx->lastTimedGrv);
+					    .detail("CachedRv", cx->getCachedRV())
+					    .detail("CachedTime", cx->getLastTimedGRV());
 				} catch (Error& e) {
 					TraceEvent("BackgroundGrvUpdaterTxnError").error(e, true);
 					wait(tr.onError(e));
@@ -1296,10 +1328,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), outstandingWatches(0), lastTimedGrv(0.0), cachedRv(0), lastTimedRkThrottle(0.0),
-    lastProxyRequest(0.0), transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo),
-    clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0),
-    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    bytesPerCommit(1000), outstandingWatches(0), lastTimedGrv(0.0), cachedRv(0), sharedCachePtr(nullptr),
+    lastTimedRkThrottle(0.0), lastProxyRequest(0.0), transactionTracingSample(false), taskID(taskID),
+    clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion),
+    mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
@@ -6046,11 +6078,11 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 			if (!cx->grvUpdateHandler.isValid()) {
 				cx->grvUpdateHandler = backgroundGrvUpdater(getDatabase().getPtr());
 			}
-			if (now() - cx->lastTimedGrv <= CLIENT_KNOBS->MAX_VERSION_CACHE_LAG && cx->cachedRv != Version(0)) {
-				TraceEvent("DebugGrvUseCache")
-				    .detail("LastRV", cx->cachedRv)
-				    .detail("LastTime", format("%.6f", cx->lastTimedGrv));
-				readVersion = cx->cachedRv;
+			Version rv = cx->getCachedRV();
+			double lastTime = cx->getLastTimedGRV();
+			if (now() - lastTime <= CLIENT_KNOBS->MAX_VERSION_CACHE_LAG && rv != Version(0)) {
+				TraceEvent("DebugGrvUseCache").detail("LastRV", rv).detail("LastTime", format("%.6f", lastTime));
+				readVersion = rv;
 				return readVersion;
 			} // else go through regular GRV path
 		}
@@ -6928,6 +6960,10 @@ ACTOR static Future<UID> getClusterIdActor(DatabaseContext* cx) {
 
 Future<UID> DatabaseContext::getClusterId() {
 	return getClusterIdActor(this);
+}
+
+void DatabaseContext::setSharedCacheSpace(GRVCacheSpace* p) {
+	sharedCachePtr = p;
 }
 
 ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, ChangeFeedStorageData* self) {

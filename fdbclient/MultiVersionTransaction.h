@@ -532,6 +532,8 @@ public:
 
 	struct LegacyVersionMonitor;
 
+	std::map<UID, GRVCacheSpace> clusterCacheMap;
+
 	// A struct that manages the current connection state of the MultiVersionDatabase. This wraps the underlying
 	// IDatabase object that is currently interacting with the cluster.
 	struct DatabaseState : ThreadSafeReferenceCounted<DatabaseState> {

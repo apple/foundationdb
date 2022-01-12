@@ -1167,6 +1167,12 @@ struct StorageMigrationType {
 	uint32_t type;
 };
 
+struct GRVCacheSpace {
+	Mutex cacheLock;
+	Version cachedRv;
+	double lastTimedGrv;
+};
+
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 	int pos = locality.find(':');
 	// locality should be either 0 or in the format '<non_empty_string>:<non_empty_string>'
