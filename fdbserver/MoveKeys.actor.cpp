@@ -1472,7 +1472,6 @@ void seedShardServers(Arena& arena,
 		}
 
 		for (auto& [teamId, servers] : teamToServers) {
-			std::sort(servers.begin(), servers.end());
 			tr.set(arena, storageTeamIdKey(teamId), encodeStorageTeams(servers)); // TeamId -> Vec<StorageServers>
 			Key teamListKey = storageServerListToTeamIdKey(servers);
 			tr.set(arena, teamListKey, BinaryWriter::toValue(teamId, Unversioned())); // Vec<StorageServer> -> TeamId
@@ -1525,16 +1524,21 @@ void seedShardServers(Arena& arena,
 
 
 	std::vector<Tag> serverTags;
-	std::vector<UID> serverSrcUID;
+	std::set<UID> serverSrcUID;
 	serverTags.reserve(servers.size());
 	for (const auto& [s, team] : servers) {
+		if (serverSrcUID.count(s.id())) {
+			continue;
+		}
+
 		serverTags.push_back(server_tag[s.id()]);
-		serverSrcUID.push_back(s.id());
+		serverSrcUID.emplace(s.id());
 	}
 
 	if (!SERVER_KNOBS->TLOG_NEW_INTERFACE) {
-		auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS ? keyServersValue(serverTags)
-		                                                    : keyServersValue(RangeResult(), serverSrcUID);
+		auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS
+		                   ? keyServersValue(serverTags)
+		                   : keyServersValue(RangeResult(), std::vector<UID>(serverSrcUID.begin(), serverSrcUID.end()));
 		// We have to set this range in two blocks, because the master tracking of "keyServersLocations" depends on a
 		// change to a specific
 		//   key (keyServersKeyServersKey)
@@ -1548,13 +1552,13 @@ void seedShardServers(Arena& arena,
 	} else {
 		auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS
 		                   ? keyServersValue(serverTags)
-		                   : keyServersValue(RangeResult(), serverSrcUID, seedServerId);
+		                   : keyServersValue(RangeResult(), std::vector<UID>(serverSrcUID.begin(), serverSrcUID.end()), seedServerId);
 		krmSetPreviouslyEmptyRange(
 		    tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, serverKeysFalse);
 
-		for (const auto& [s, _] : servers) {
+		for (const auto& s : serverSrcUID) {
 			krmSetPreviouslyEmptyRange(
-			    tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysTrue, serverKeysFalse);
+			    tr, arena, serverKeysPrefixFor(s), KeyRangeRef(KeyRef(), allKeys.end), serverKeysTrue, serverKeysFalse);
 		}
 		return;
 	}
