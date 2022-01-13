@@ -700,6 +700,9 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 				}
 			}
 			BlobFileIndex f = wait(snapshotWriter);
+			TraceEvent("BlobGranuleSnapshotFile", bwData->id)
+			    .detail("Granule", metadata->keyRange)
+			    .detail("Version", readVersion);
 			DEBUG_KEY_RANGE("BlobWorkerFDBSnapshot", readVersion, metadata->keyRange, bwData->id);
 			return f;
 		} catch (Error& e) {

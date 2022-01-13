@@ -535,12 +535,14 @@ ACTOR Future<Void> writeInitialGranuleMapping(BlobManagerData* bmData, Standalon
 	while (i < boundaries.size() - 1) {
 		TEST(i > 0); // multiple transactions for large granule split
 		tr->reset();
+		// TODO COMMENT AND USE BELOW INSTEAD
 		tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
 		tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
 		state int j = 0;
 		loop {
 			try {
-
+				// tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
+				// tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
 				while (i + j < boundaries.size() - 1 && j < transactionChunkSize) {
 					// TODO REMOVE
 					if (BM_DEBUG) {
@@ -558,6 +560,9 @@ ACTOR Future<Void> writeInitialGranuleMapping(BlobManagerData* bmData, Standalon
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
+				if (BM_DEBUG) {
+					printf("Persisting initial mapping got error %s\n", e.name());
+				}
 				wait(tr->onError(e));
 				j = 0;
 			}
@@ -2152,6 +2157,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	// TODO add loop with retries here!!!
 	try {
 		wait(checkManagerLock(tr, &self));
 	} catch (Error& e) {

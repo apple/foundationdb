@@ -7090,16 +7090,28 @@ ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, Chan
 				if (self->debug) {
 					fmt::print("CFSD {0}: requesting {1}\n", self->id.toString().substr(0, 4), self->desired.get());
 				}
-				ChangeFeedVersionUpdateReply rep = wait(brokenPromiseToNever(
-				    interf.changeFeedVersionUpdate.getReply(ChangeFeedVersionUpdateRequest(self->desired.get()))));
-				if (self->debug) {
-					fmt::print("CFSD {0}: got {1}\n", self->id.toString().substr(0, 4), rep.version);
-				}
-				if (rep.version > self->version.get()) {
+				try {
+					ChangeFeedVersionUpdateReply rep = wait(brokenPromiseToNever(
+					    interf.changeFeedVersionUpdate.getReply(ChangeFeedVersionUpdateRequest(self->desired.get()))));
+
 					if (self->debug) {
-						fmt::print("CFSD {0}: V={1} (req)\n", self->id.toString().substr(0, 4), rep.version);
+						fmt::print("CFSD {0}: got {1}\n", self->id.toString().substr(0, 4), rep.version);
 					}
-					self->version.set(rep.version);
+					if (rep.version > self->version.get()) {
+						if (self->debug) {
+							fmt::print("CFSD {0}: V={1} (req)\n", self->id.toString().substr(0, 4), rep.version);
+						}
+						self->version.set(rep.version);
+					}
+				} catch (Error& e) {
+					if (e.code() == error_code_server_overloaded) {
+						if (FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY > CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME) {
+							wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY -
+							           CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME));
+						}
+					} else {
+						throw e;
+					}
 				}
 			}
 		} else {
