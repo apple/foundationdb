@@ -2967,10 +2967,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 };
 
-StorageWiggler::StorageWiggler(DDTeamCollection* collection)
-  : teamCollection(collection), smoothed_step_duration(10.0 * 60), smoothed_round_duration(20.0 * 60), nonEmpty(false) {
-}
-
 // add server to wiggling queue
 void StorageWiggler::addServer(const UID& serverId, const StorageMetadataType& metadata) {
 	// std::cout << "size: " << pq_handles.size() << " add " << serverId.toString() << " DC: "<< teamCollection->primary
@@ -3006,6 +3002,47 @@ Optional<UID> StorageWiggler::getNextServerId() {
 		return Optional<UID>(id);
 	}
 	return Optional<UID>();
+}
+
+Future<Void> StorageWiggler::resetStats() {
+	metrics.finished_step = 0;
+	metrics.finished_round = 0;
+	metrics.last_step_start = 0;
+	metrics.last_step_finish = 0;
+	metrics.last_round_start = 0;
+	metrics.last_round_finish = 0;
+	return metrics.runSetTransaction(teamCollection->cx);
+}
+
+Future<Void> StorageWiggler::restoreStats() {
+	auto& metricsRef = metrics;
+	auto assignFunc = [&metricsRef](Optional<Value> v) {
+		if (v.present()) {
+			metricsRef = BinaryReader::fromStringRef<StorageWiggleMetrics>(v.get(), IncludeVersion());
+		}
+		return Void();
+	};
+	auto readFuture = metrics.runGetTransaction(teamCollection->cx);
+	return map(readFuture, assignFunc);
+}
+Future<Void> StorageWiggler::startStep() {
+	metrics.last_step_start = timer_int();
+	return metrics.runSetTransaction(teamCollection->cx);
+}
+
+Future<Void> StorageWiggler::finishStep() {
+	metrics.last_step_finish = timer_int();
+	metrics.finished_step += 1;
+	auto duration = metrics.last_step_finish - metrics.last_step_start;
+	metrics.smoothed_step_duration.setTotal((double)duration);
+
+	if(shouldFinishRound()) {
+		metrics.last_round_finish = metrics.last_step_finish;
+		metrics.finished_round += 1;
+		duration = metrics.last_round_finish - metrics.last_round_start;
+		metrics.smoothed_round_duration.setTotal((double)duration);
+	}
+	return metrics.runSetTransaction(teamCollection->cx);
 }
 
 TCServerInfo::~TCServerInfo() {
@@ -4309,6 +4346,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				choose {
 					when(wait(waitUntilHealthy(self))) {
 						TEST(true); // start wiggling
+						wait(self->storageWiggler->startStep());
 						auto fv = self->excludeStorageServersForWiggle(id);
 						moveFinishFuture = fv;
 						TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
@@ -4342,6 +4380,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 			}
 			when(wait(moveFinishFuture)) {
 				ASSERT(self->wigglingId.present());
+				wait(self->storageWiggler->finishStep());
 				self->waitUntilRecruited.set(true);
 				self->restartTeamBuilder.trigger();
 
@@ -4400,6 +4439,7 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 
 				ASSERT(speed == 1 || speed == 0);
 				if (speed == 1 && stopWiggleSignal.get()) { // avoid duplicated start
+					wait(teamCollection->storageWiggler->restoreStats());
 					stopWiggleSignal.set(false);
 					collection.add(perpetualStorageWiggleIterator(
 					    &stopWiggleSignal, finishStorageWiggleSignal.getFuture(), teamCollection));
@@ -4413,6 +4453,7 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 						wait(collection.signalAndReset());
 						teamCollection->pauseWiggle->set(true);
 					}
+					wait(teamCollection->storageWiggler->resetStats());
 					TraceEvent("PerpetualStorageWiggleClose", teamCollection->distributorId)
 					    .detail("Primary", teamCollection->primary);
 				}

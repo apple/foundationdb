@@ -29,6 +29,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/LogSystem.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct RelocateShard {
@@ -291,19 +292,67 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
 int64_t getMaxShardSize(double dbSizeEstimate);
 
 struct DDTeamCollection;
+struct StorageWiggleMetrics {
+	// step statistics
+	uint64_t last_step_start = 0; // wall timer: timer_int()
+	uint64_t last_step_finish = 0;
+	TimerSmoother smoothed_step_duration;
+	int finished_step = 0; // finished step since storage wiggle is open
+	// round statistics
+	uint64_t last_round_start = 0; // wall timer: timer_int()
+	uint64_t last_round_finish = 0;
+	TimerSmoother smoothed_round_duration;
+	int finished_round = 0; // finished round since storage wiggle is open
+
+	StorageWiggleMetrics() : smoothed_step_duration(10.0 * 60), smoothed_round_duration(20.0 * 60) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		if (ar.isDeserializing) {
+			double step_total, round_total;
+			serializer(ar,
+			           last_step_start,
+			           last_step_finish,
+			           step_total,
+			           finished_step,
+			           last_round_start,
+			           last_round_finish,
+			           round_total,
+			           finished_round);
+			smoothed_round_duration.reset(round_total);
+			smoothed_step_duration.reset(step_total);
+		} else {
+			serializer(ar,
+			           last_step_start,
+			           last_step_finish,
+			           smoothed_step_duration.total,
+			           finished_step,
+			           last_round_start,
+			           last_round_finish,
+			           smoothed_round_duration.total,
+			           finished_round);
+		}
+	}
+
+	Future<Void> runSetTransaction(Database cx) {
+		auto& metricsRef = *this;
+		return runRYWTransaction(cx, [metricsRef](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->set(storageWiggleStatsKey, BinaryWriter::toValue(metricsRef, IncludeVersion()));
+			return Void();
+		});
+	}
+	Future<Optional<Value>> runGetTransaction(Database cx) {
+		return runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			return tr->get(storageWiggleStatsKey);
+		});
+	}
+};
+
 struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	DDTeamCollection* teamCollection;
-	// step statistics
-	uint64_t last_step_start = 0; // wall timer
-	TimerSmoother smoothed_step_duration;
-	int finished_step = 0;
-	int ongoing_step = 0;
-
-	// round statistics
-	uint64_t last_round_start = 0; // wall timer
-	TimerSmoother smoothed_round_duration;
-	int finished_round = 0;
-	int remained_step = 0;
+	StorageWiggleMetrics metrics;
 
 	// data structures
 	typedef std::pair<StorageMetadataType, UID> MetadataUIDP;
@@ -326,7 +375,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 
 	AsyncVar<bool> nonEmpty;
 
-	explicit StorageWiggler(DDTeamCollection* collection);
+	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection), nonEmpty(false){};
 	// add server to wiggling queue
 	void addServer(const UID& serverId, const StorageMetadataType& metadata);
 	// remove server from wiggling queue
@@ -336,6 +385,22 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	bool contains(const UID& serverId) { return pq_handles.count(serverId) > 0; }
 	bool empty() { return wiggle_pq.empty(); }
 	Optional<UID> getNextServerId();
+
+	// -- statistic update
+
+	// reset Statistic in database when perpetual wiggle is closed by user
+	Future<Void> resetStats();
+	// restore Statistic from database when the perpetual wiggle is opened
+	Future<Void> restoreStats();
+	// called when start wiggling a SS
+	Future<Void> startStep();
+	Future<Void> finishStep();
+	bool shouldStartNewRound() { return metrics.last_round_finish >= metrics.last_round_start; }
+	bool shouldFinishRound() {
+		if (wiggle_pq.empty())
+			return true;
+		return (!wiggle_pq.top().first.expireNow && wiggle_pq.top().first.createdTime >= metrics.last_round_start);
+	}
 };
 
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
