@@ -7686,17 +7686,6 @@ ACTOR Future<Void> doSingleCFStream(KeyRange range,
 		state ChangeFeedStreamReply feedReply = waitNext(results->streams[0].getFuture());
 		*begin = feedReply.mutations.back().version + 1;
 
-		// TODO REMOVE, for debugging
-		if (feedReply.mutations.back().version < results->lastReturnedVersion.get()) {
-			printf("out of order mutation for CF %s from (%d) %s! %lld < %lld\n",
-			       rangeID.toString().substr(0, 6).c_str(),
-			       results->storageData.size(),
-			       results->storageData.empty() ? "????" : results->storageData[0]->id.toString().substr(0, 4).c_str(),
-			       feedReply.mutations.back().version,
-			       results->lastReturnedVersion.get());
-		}
-		ASSERT(feedReply.mutations.back().version >= results->lastReturnedVersion.get());
-
 		// don't send completely empty set of mutations to promise stream
 		bool anyMutations = false;
 		for (auto& it : feedReply.mutations) {
@@ -7706,6 +7695,19 @@ ACTOR Future<Void> doSingleCFStream(KeyRange range,
 			}
 		}
 		if (anyMutations) {
+			// empty versions can come out of order, as we sometimes send explicit empty versions when restarting a
+			// stream. Anything with mutations should be strictly greater than lastReturnedVersion
+			if (feedReply.mutations.front().version <= results->lastReturnedVersion.get()) {
+				printf("out of order mutation for CF %s from (%d) %s! %lld < %lld\n",
+				       rangeID.toString().substr(0, 6).c_str(),
+				       results->storageData.size(),
+				       results->storageData.empty() ? "????"
+				                                    : results->storageData[0]->id.toString().substr(0, 4).c_str(),
+				       feedReply.mutations.front().version,
+				       results->lastReturnedVersion.get());
+			}
+			ASSERT(feedReply.mutations.front().version > results->lastReturnedVersion.get());
+
 			results->mutations.send(
 			    Standalone<VectorRef<MutationsAndVersionRef>>(feedReply.mutations, feedReply.arena));
 
