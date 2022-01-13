@@ -7364,7 +7364,10 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 						}
 						resultLoc++;
 					}
-					nextVersion = rep.mutations.back().version + 1;
+					// if we got the empty version that went backwards, don't decrease nextVersion
+					if (rep.mutations.back().version + 1 > nextVersion) {
+						nextVersion = rep.mutations.back().version + 1;
+					}
 
 					if (!atLatestVersion && rep.atLatestVersion) {
 						atLatestVersion = true;
@@ -7450,7 +7453,7 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 		if (nextStream.next.version == checkVersion) {
 			// TODO REMOVE
 			if (atCheckVersion == 0) {
-				printf("atCheckVersion == 0 at %lld\n", nextStream.next.version);
+				printf("atCheckVersion %lld == 0 at %lld\n", checkVersion, nextStream.next.version);
 			}
 			ASSERT(atCheckVersion > 0);
 		}
@@ -7548,6 +7551,7 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 			if (DEBUG_CF_VERSION(results->id, res.version)) {
 				fmt::print("  CFNA (merge1): {0} ({1})\n", res.version, res.mutations.size());
 			}
+			ASSERT(res.version > nextStream.next.version);
 			nextStream.next = res;
 			mutations.push(nextStream);
 		} catch (Error& e) {
