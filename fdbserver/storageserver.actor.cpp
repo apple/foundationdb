@@ -237,13 +237,13 @@ struct StorageServerDisk {
 	void addShard(KeyRangeRef range, UID uid) { storage->addShard(range, uid); }
 
 	// TODO: This can be removed once KV shard map is merged with SS's shard map.
-	std::vector<MutationRef> getPersistShardMutation(KeyRangeRef range) {
+	Standalone<VectorRef<MutationRef>> getPersistShardMutation(KeyRangeRef range) {
 		return storage->getPersistShardMutations(range);
 	}
 
 	void disposeShard(KeyRangeRef range) { return storage->disposeRange(range); }
 
-	std::vector<MutationRef> getDisposeShardMutation(KeyRangeRef range) {
+	Standalone<VectorRef<MutationRef>> getDisposeShardMutation(KeyRangeRef range) {
 		return storage->getDisposeRangeMutations(range);
 	};
 
@@ -5651,9 +5651,10 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 		                                           availableKeys.end,
 		                                           endAvailable ? LiteralStringRef("1") : LiteralStringRef("0")));
 	}
-	std::vector<MutationRef> shardMutations =
+	Standalone<VectorRef<MutationRef>> shardMutations =
 	    available ? self->storage.getPersistShardMutation(keys) : self->storage.getDisposeShardMutation(keys);
 	for (const auto& m : shardMutations) {
+		std::cout << "Shard mutations " << m.toString();
 		self->addMutationToMutationLog(mLV, m);
 	}
 }
