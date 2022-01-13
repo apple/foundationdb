@@ -1015,7 +1015,7 @@ ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bo
 	loop {
 		choose {
 			when(wait(cx->onProxiesChanged())) {}
-			when(GetHealthMetricsReply rep = wait(basicLoadBalance(cx->getGrvProxies(false),
+			when(GetHealthMetricsReply rep = wait(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies::False),
 			                                                       &GrvProxyInterface::getHealthMetrics,
 			                                                       GetHealthMetricsRequest(sendDetailedRequest)))) {
 				cx->healthMetrics.update(rep.healthMetrics, detailed, true);
@@ -2230,7 +2230,7 @@ void DatabaseContext::updateProxies() {
 	}
 }
 
-Reference<CommitProxyInfo> DatabaseContext::getCommitProxies(bool useProvisionalProxies) {
+Reference<CommitProxyInfo> DatabaseContext::getCommitProxies(UseProvisionalProxies useProvisionalProxies) {
 	updateProxies();
 	if (proxyProvisional && !useProvisionalProxies) {
 		return Reference<CommitProxyInfo>();
@@ -2238,7 +2238,7 @@ Reference<CommitProxyInfo> DatabaseContext::getCommitProxies(bool useProvisional
 	return commitProxies;
 }
 
-Reference<GrvProxyInfo> DatabaseContext::getGrvProxies(bool useProvisionalProxies) {
+Reference<GrvProxyInfo> DatabaseContext::getGrvProxies(UseProvisionalProxies useProvisionalProxies) {
 	updateProxies();
 	if (proxyProvisional && !useProvisionalProxies) {
 		return Reference<GrvProxyInfo>();
@@ -2248,7 +2248,8 @@ Reference<GrvProxyInfo> DatabaseContext::getGrvProxies(bool useProvisionalProxie
 
 // Actor which will wait until the MultiInterface<CommitProxyInterface> returned by the DatabaseContext cx is not
 // nullptr
-ACTOR Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(DatabaseContext* cx, bool useProvisionalProxies) {
+ACTOR Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(DatabaseContext* cx,
+                                                                UseProvisionalProxies useProvisionalProxies) {
 	loop {
 		Reference<CommitProxyInfo> commitProxies = cx->getCommitProxies(useProvisionalProxies);
 		if (commitProxies)
@@ -2258,7 +2259,8 @@ ACTOR Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(DatabaseContext*
 }
 
 // Returns a future which will not be set until the CommitProxyInfo of this DatabaseContext is not nullptr
-Future<Reference<CommitProxyInfo>> DatabaseContext::getCommitProxiesFuture(bool useProvisionalProxies) {
+Future<Reference<CommitProxyInfo>> DatabaseContext::getCommitProxiesFuture(
+    UseProvisionalProxies useProvisionalProxies) {
 	return ::getCommitProxiesFuture(this, useProvisionalProxies);
 }
 
@@ -2468,13 +2470,8 @@ Future<std::pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Reference<Tr
                                                                     Key const& key,
                                                                     F StorageServerInterface::*member,
                                                                     Reverse isBackward = Reverse::False) {
-	return getKeyLocation(trState->cx,
-	                      key,
-	                      member,
-	                      trState->spanID,
-	                      trState->debugID,
-	                      UseProvisionalProxies(trState->useProvisionalProxies),
-	                      isBackward);
+	return getKeyLocation(
+	    trState->cx, key, member, trState->spanID, trState->debugID, trState->useProvisionalProxies, isBackward);
 }
 
 ACTOR Future<std::vector<std::pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocations_internal(
@@ -2575,14 +2572,8 @@ Future<std::vector<std::pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLoc
     int limit,
     Reverse reverse,
     F StorageServerInterface::*member) {
-	return getKeyRangeLocations(trState->cx,
-	                            keys,
-	                            limit,
-	                            reverse,
-	                            member,
-	                            trState->spanID,
-	                            trState->debugID,
-	                            UseProvisionalProxies(trState->useProvisionalProxies));
+	return getKeyRangeLocations(
+	    trState->cx, keys, limit, reverse, member, trState->spanID, trState->debugID, trState->useProvisionalProxies);
 }
 
 ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange keys) {
@@ -2596,7 +2587,7 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 		                                       Reverse::False,
 		                                       trState->spanID,
 		                                       trState->debugID,
-		                                       UseProvisionalProxies(trState->useProvisionalProxies)));
+		                                       trState->useProvisionalProxies));
 		totalRanges += CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT;
 		totalRequests++;
 		if (locations.size() == 0 || totalRanges >= trState->cx->locationCacheSize ||
@@ -2837,7 +2828,7 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, Span
 			choose {
 				when(wait(cx->onProxiesChanged())) {}
 				when(GetReadVersionReply v =
-				         wait(basicLoadBalance(cx->getGrvProxies(false),
+				         wait(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies::False),
 				                               &GrvProxyInterface::getConsistentReadVersion,
 				                               GetReadVersionRequest(span.context, 0, TransactionPriority::IMMEDIATE),
 				                               cx->taskID))) {
@@ -2864,7 +2855,7 @@ ACTOR Future<Version> getRawVersion(Reference<TransactionState> trState) {
 		choose {
 			when(wait(trState->cx->onProxiesChanged())) {}
 			when(GetReadVersionReply v =
-			         wait(basicLoadBalance(trState->cx->getGrvProxies(false),
+			         wait(basicLoadBalance(trState->cx->getGrvProxies(UseProvisionalProxies::False),
 			                               &GrvProxyInterface::getConsistentReadVersion,
 			                               GetReadVersionRequest(trState->spanID, 0, TransactionPriority::IMMEDIATE),
 			                               trState->cx->taskID))) {
@@ -2892,7 +2883,7 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 		                        &StorageServerInterface::watchValue,
 		                        parameters->spanID,
 		                        parameters->debugID,
-		                        UseProvisionalProxies(parameters->useProvisionalProxies)));
+		                        parameters->useProvisionalProxies));
 
 		try {
 			state Optional<UID> watchValueID = Optional<UID>();
@@ -4463,7 +4454,7 @@ Future<Void> Transaction::watch(Reference<Watch> watch) {
 	               trState->spanID,
 	               trState->taskID,
 	               trState->debugID,
-	               UseProvisionalProxies(trState->useProvisionalProxies));
+	               trState->useProvisionalProxies);
 }
 
 ACTOR Future<Standalone<VectorRef<const char*>>> getAddressesForKeyActor(Reference<TransactionState> trState,
@@ -5111,7 +5102,7 @@ void Transaction::setupWatches() {
 			                                   trState->spanID,
 			                                   trState->taskID,
 			                                   trState->debugID,
-			                                   UseProvisionalProxies(trState->useProvisionalProxies)));
+			                                   trState->useProvisionalProxies));
 
 		watches.clear();
 	} catch (Error&) {
@@ -5639,7 +5630,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 	case FDBTransactionOptions::USE_PROVISIONAL_PROXIES:
 		validateOptionValueNotPresent(value);
 		trState->options.getReadVersionFlags |= GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES;
-		trState->useProvisionalProxies = true;
+		trState->useProvisionalProxies = UseProvisionalProxies::True;
 		break;
 
 	case FDBTransactionOptions::INCLUDE_PORT_IN_ADDRESS:
@@ -5699,11 +5690,12 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan,
 
 			choose {
 				when(wait(cx->onProxiesChanged())) {}
-				when(GetReadVersionReply v = wait(basicLoadBalance(
-				         cx->getGrvProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES),
-				         &GrvProxyInterface::getConsistentReadVersion,
-				         req,
-				         cx->taskID))) {
+				when(GetReadVersionReply v =
+				         wait(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies(
+				                                   flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES)),
+				                               &GrvProxyInterface::getConsistentReadVersion,
+				                               req,
+				                               cx->taskID))) {
 					if (tags.size() != 0) {
 						auto& priorityThrottledTags = cx->throttledTags[priority];
 						for (auto& tag : tags) {
@@ -6408,7 +6400,7 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 		choose {
 			when(wait(cx->onProxiesChanged())) {}
 			when(ErrorOr<GetDDMetricsReply> rep =
-			         wait(errorOr(basicLoadBalance(cx->getCommitProxies(false),
+			         wait(errorOr(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
 			                                       &CommitProxyInterface::getDDMetrics,
 			                                       GetDDMetricsRequest(keys, shardLimit))))) {
 				if (rep.isError()) {
@@ -6817,7 +6809,7 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 		loop {
 			choose {
 				when(wait(cx->onProxiesChanged())) {}
-				when(wait(basicLoadBalance(cx->getCommitProxies(false),
+				when(wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
 				                           &CommitProxyInterface::proxySnapReq,
 				                           ProxySnapRequest(snapCmd, snapUID, snapUID),
 				                           cx->taskID,
@@ -6844,7 +6836,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 			choose {
 				when(wait(cx->onProxiesChanged())) {}
 				when(ExclusionSafetyCheckReply _ddCheck =
-				         wait(basicLoadBalance(cx->getCommitProxies(false),
+				         wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
 				                               &CommitProxyInterface::exclusionSafetyCheckReq,
 				                               req,
 				                               cx->taskID))) {

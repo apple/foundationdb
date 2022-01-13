@@ -46,6 +46,8 @@
 	(getSBVar(__FILE__, __LINE__, BuggifyType::Client) && deterministicRandom()->random01() < (x))
 #define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)])
 
+FDB_DECLARE_BOOLEAN_PARAM(UseProvisionalProxies);
+
 // Incomplete types that are reference counted
 class DatabaseContext;
 template <>
@@ -238,7 +240,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	Optional<UID> debugID;
 	TaskPriority taskID;
 	SpanID spanID;
-	bool useProvisionalProxies = false;
+	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
 
 	int numErrors = 0;
 	double startTime = 0;

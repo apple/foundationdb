@@ -105,7 +105,7 @@ struct TargetedKillWorkload : TestWorkload {
 		if (self->machineToKill == "master") {
 			machine = self->dbInfo->get().master.address();
 		} else if (self->machineToKill == "commitproxy") {
-			auto commitProxies = cx->getCommitProxies(false);
+			auto commitProxies = cx->getCommitProxies(UseProvisionalProxies::False);
 			int o = deterministicRandom()->randomInt(0, commitProxies->size());
 			for (int i = 0; i < commitProxies->size(); i++) {
 				CommitProxyInterface mpi = commitProxies->getInterface(o);
@@ -115,7 +115,7 @@ struct TargetedKillWorkload : TestWorkload {
 				o = ++o % commitProxies->size();
 			}
 		} else if (self->machineToKill == "grvproxy") {
-			auto grvProxies = cx->getGrvProxies(false);
+			auto grvProxies = cx->getGrvProxies(UseProvisionalProxies::False);
 			int o = deterministicRandom()->randomInt(0, grvProxies->size());
 			for (int i = 0; i < grvProxies->size(); i++) {
 				GrvProxyInterface gpi = grvProxies->getInterface(o);

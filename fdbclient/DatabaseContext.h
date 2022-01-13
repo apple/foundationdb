@@ -40,8 +40,6 @@
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbrpc/Smoother.h"
 
-FDB_DECLARE_BOOLEAN_PARAM(UseProvisionalProxies);
-
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
 public:
 	static Reference<StorageServerInfo> getInterface(DatabaseContext* cx,
@@ -143,7 +141,7 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	const SpanID spanID;
 	const TaskPriority taskID;
 	const Optional<UID> debugID;
-	const bool useProvisionalProxies;
+	const UseProvisionalProxies useProvisionalProxies;
 
 	WatchParameters(Key key,
 	                Optional<Value> value,
@@ -247,9 +245,9 @@ public:
 	bool sampleOnCost(uint64_t cost) const;
 
 	void updateProxies();
-	Reference<CommitProxyInfo> getCommitProxies(bool useProvisionalProxies);
-	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(bool useProvisionalProxies);
-	Reference<GrvProxyInfo> getGrvProxies(bool useProvisionalProxies);
+	Reference<CommitProxyInfo> getCommitProxies(UseProvisionalProxies useProvisionalProxies);
+	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(UseProvisionalProxies useProvisionalProxies);
+	Reference<GrvProxyInfo> getGrvProxies(UseProvisionalProxies useProvisionalProxies);
 	Future<Void> onProxiesChanged() const;
 	Future<Void> onClientLibStatusChanged() const;
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
