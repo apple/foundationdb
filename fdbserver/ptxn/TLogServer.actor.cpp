@@ -172,6 +172,7 @@ static const KeyRangeRef persistRecoveryCountKeys =
     KeyRangeRef(LiteralStringRef("DbRecoveryCount/"), LiteralStringRef("DbRecoveryCount0"));
 
 // Updated on updatePersistentData()
+// persistCurrentVersionKeys stores verion of the interface of a certain recruitment.
 static const KeyRangeRef persistCurrentVersionKeys =
     KeyRangeRef(LiteralStringRef("version/"), LiteralStringRef("version0"));
 static const KeyRangeRef persistKnownCommittedVersionKeys =
@@ -185,6 +186,7 @@ static const KeyRangeRef persistTxsTagsKeys = KeyRangeRef(LiteralStringRef("TxsT
 static const KeyRange persistTagMessagesKeys = prefixRange(LiteralStringRef("TagMsg/"));
 static const KeyRange persistTagMessageRefsKeys = prefixRange(LiteralStringRef("TagMsgRef/"));
 static const KeyRange persistTagPoppedKeys = prefixRange(LiteralStringRef("TagPop/"));
+static const KeyRange persistStorageTeamKeys = prefixRange(LiteralStringRef("StorageTeam/"));
 static const KeyRange persistStorageTeamPoppedKeys = prefixRange(LiteralStringRef("StorageTeamPop/"));
 static const KeyRange persistStorageTeamMessagesKeys = prefixRange(LiteralStringRef("StorageTeamMsg/"));
 static const KeyRange persistStorageTeamMessageRefsKeys = prefixRange(LiteralStringRef("StorageTeamMsgRef/"));
@@ -215,12 +217,49 @@ static Key persistStorageTeamPoppedKey(UID id, StorageTeamID storageTeamId) {
 	return wr.toValue();
 }
 
+static Key persistStorageTeamKey() {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+	wr.serializeBytes(persistStorageTeamKeys.begin);
+	return wr.toValue();
+}
+
+static Value persistStorageTeamValue(
+    std::unordered_map<ptxn::TLogGroupID, std::map<StorageTeamID, std::vector<Tag>>> vs) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+	std::vector<std::pair<TLogGroupID, std::vector<std::pair<StorageTeamID, std::vector<Tag>>>>> content;
+	for (auto& it : vs) {
+		std::vector<std::pair<StorageTeamID, std::vector<Tag>>> teams;
+		for (auto& team : it.second) {
+			teams.push_back(std::make_pair(team.first, team.second));
+		}
+		content.push_back(std::make_pair(it.first, teams));
+	}
+	wr << content;
+	return wr.toValue();
+}
+
 static Value persistStorageTeamPoppedValue(Version popped) {
 	return BinaryWriter::toValue(popped, Unversioned());
 }
 
 static StorageTeamID decodeStorageTeamIDPoppedKey(KeyRef key) {
 	return BinaryReader::fromStringRef<StorageTeamID>(key, Unversioned());
+}
+
+static std::unordered_map<ptxn::TLogGroupID, std::map<StorageTeamID, std::vector<Tag>>> decodePersistStorageTeamValue(
+    ValueRef const& value) {
+	std::unordered_map<ptxn::TLogGroupID, std::map<StorageTeamID, std::vector<Tag>>> groupToTeams;
+	std::vector<std::pair<TLogGroupID, std::vector<std::pair<StorageTeamID, std::vector<Tag>>>>> content;
+	BinaryReader reader(value, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+	reader >> content;
+	for (auto& it : content) {
+		std::map<StorageTeamID, std::vector<Tag>> team;
+		for (auto& sub : it.second) {
+			team[sub.first] = sub.second;
+		}
+		groupToTeams[it.first] = team;
+	}
+	return groupToTeams;
 }
 
 static std::pair<std::vector<Tag>, Version> decodePairValue(ValueRef value) {
@@ -345,6 +384,7 @@ struct TLogGroupData : NonCopyable, public ReferenceCounted<TLogGroupData> {
 
 struct TLogServerData : NonCopyable, public ReferenceCounted<TLogServerData> {
 	std::unordered_map<TLogGroupID, Reference<TLogGroupData>> tlogGroups;
+	std::unordered_map<TLogGroupID, Reference<TLogGroupData>> oldTLogGroups;
 
 	// There is one interface for each recruitment, during recovery previous recruitments are fetched and interfaces are
 	// started
@@ -389,7 +429,8 @@ struct TLogServerData : NonCopyable, public ReferenceCounted<TLogServerData> {
 	UID dbgid;
 	UID workerID;
 
-	IKeyValueStore* persistentData; // Durable data on disk that were spilled.
+	// not sure if we need this.
+	IKeyValueStore* persistentData; // Durable data on disk that were spilled
 
 	int64_t diskQueueCommitBytes = 0;
 	// becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
@@ -550,7 +591,7 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 
 	// Storage teams tracker
 	std::unordered_map<StorageTeamID, Reference<StorageTeamData>> storageTeamData;
-	std::unordered_map<ptxn::StorageTeamID, std::vector<Tag>> storageTeams;
+	std::map<ptxn::StorageTeamID, std::vector<Tag>> storageTeams;
 
 	Future<Void> terminated;
 	AsyncTrigger stopCommit; // Trigger to stop the commit
@@ -582,6 +623,7 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	Version unrecoveredBefore = 1;
 	Version recoveredAt = 1;
 
+	// why do we need it, what does it do?
 	int8_t locality; // data center id?
 	UID recruitmentID;
 	TLogSpillType logSpillType;
@@ -614,9 +656,9 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	                           UID recruitmentID,
 	                           ProtocolVersion protocolVersion,
 	                           TLogSpillType logSpillType,
-	                           std::unordered_map<ptxn::StorageTeamID, std::vector<Tag>>& storageTeams,
+	                           std::map<ptxn::StorageTeamID, std::vector<Tag>>& storageTeams,
 	                           int8_t locality,
-	                           DBRecoveryCount epoch,
+	                           //    UID epoch,
 	                           const std::string& context)
 	  : tlogGroupData(tlogGroupData), logId(interf.id()), cc("TLog", interf.id().toString()),
 	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), protocolVersion(protocolVersion),
@@ -666,6 +708,7 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 			tlogGroupData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistProtocolVersionKeys.begin)));
 			tlogGroupData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistTLogSpillTypeKeys.begin)));
 			tlogGroupData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistRecoveryLocationKey)));
+			tlogGroupData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistStorageTeamKeys.begin)));
 			Key msgKey = logIdKey.withPrefix(persistTagMessagesKeys.begin);
 			tlogGroupData->persistentData->clear(KeyRangeRef(msgKey, strinc(msgKey)));
 			Key msgRefKey = logIdKey.withPrefix(persistTagMessageRefsKeys.begin);
@@ -1124,6 +1167,10 @@ ACTOR Future<Void> initPersistentState(Reference<TLogGroupData> self, Reference<
 	storage->set(
 	    KeyValueRef(BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistTLogSpillTypeKeys.begin),
 	                BinaryWriter::toValue(logData->logSpillType, AssumeVersion(logData->protocolVersion))));
+	storage->set(KeyValueRef(
+	    BinaryWriter::toValue(logData->logId, IncludeVersion(ProtocolVersion::withPartitionTransaction()))
+	        .withPrefix(persistStorageTeamKeys.begin),
+	    BinaryWriter::toValue(logData->storageTeams, IncludeVersion(ProtocolVersion::withPartitionTransaction()))));
 
 	for (auto team : logData->storageTeams) {
 		ASSERT(!logData->getStorageTeamData(team.first));
@@ -1410,7 +1457,7 @@ ACTOR Future<Void> checkEmptyQueue(Reference<TLogGroupData> self) {
 		bool recoveryFinished = wait(self->persistentQueue->initializeRecovery(0));
 		if (recoveryFinished)
 			return Void();
-		TLogQueueEntry r = wait(self->persistentQueue->readNext(self.getPtr()));
+		TLogQueueEntry r = wait(self->persistentQueue->readNext(self.getPtr())); // readNext might return endofstream
 		throw internal_error();
 	} catch (Error& e) {
 		if (e.code() != error_code_end_of_stream)
@@ -1475,8 +1522,6 @@ void stopAllTLogs(Reference<TLogServerData> self, UID newLogId) {
 }
 
 ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
-                                          InitializePtxnTLogRequest req,
-                                          ptxn::TLogGroup group,
                                           LocalityData locality,
                                           Reference<TLogServerData> serverData) {
 	state double startt = now();
@@ -1497,6 +1542,7 @@ ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
 	state Future<RangeResult> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);
 	state Future<RangeResult> fProtocolVersions = storage->readRange(persistProtocolVersionKeys);
 	state Future<RangeResult> fTLogSpillTypes = storage->readRange(persistTLogSpillTypeKeys);
+	state Future<RangeResult> fStorageTeams = storage->readRange(persistStorageTeamKeys);
 
 	// FIXME: metadata in queue?
 
@@ -1574,12 +1620,21 @@ ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
 		    BinaryReader::fromStringRef<IDiskQueue::location>(fRecoveryLocation.get().get(), Unversioned());
 	}
 
+	state std::map<UID, std::map<StorageTeamID, std::vector<Tag>>> storageTeams;
+	for (auto it : fStorageTeams.get()) {
+		storageTeams[BinaryReader::fromStringRef<UID>(it.key.removePrefix(persistStorageTeamKeys.begin),
+		                                              IncludeVersion(ProtocolVersion::withPartitionTransaction()))] =
+		    BinaryReader::fromStringRef<std::map<StorageTeamID, std::vector<Tag>>>(
+		        it.value, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+	}
+
 	state int idx = 0;
 	state std::vector<std::pair<Version, UID>> logsByVersion;
 	serverData->removed = Never();
 
 	for (idx = 0; idx < fVers.get().size(); idx++) {
-		state KeyRef rawId = fVers.get()[idx].key.removePrefix(persistCurrentVersionKeys.begin);
+		state KeyRef rawId =
+		    fVers.get()[idx].key.removePrefix(persistCurrentVersionKeys.begin); // get interface.id for each generation
 		UID id1 = BinaryReader::fromStringRef<UID>(rawId, Unversioned());
 		UID id2 = BinaryReader::fromStringRef<UID>(
 		    fRecoverCounts.get()[idx].key.removePrefix(persistRecoveryCountKeys.begin), Unversioned());
@@ -1615,9 +1670,9 @@ ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
 		                                           UID(),
 		                                           protocolVersion,
 		                                           logSpillType,
-		                                           group.storageTeams,
-		                                           req.locality,
-		                                           req.epoch,
+		                                           storageTeams[id1],
+		                                           0, // TODO: find whether/why we need this parameter
+		                                           //    id1,  // TODO: find whether we need this parameter
 		                                           "Restored");
 		logData->locality = id_locality[id1];
 		logData->stopped = true;
@@ -1828,9 +1883,11 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializePtxnTLogR
 		                                                                                  req.spillType,
 		                                                                                  group.storageTeams,
 		                                                                                  req.locality,
-		                                                                                  req.epoch,
+		                                                                                  //   req.epoch,
 		                                                                                  "Recruited");
-
+		// groups belong to the same interface(implying they have the same generation) share the same key(i.e.
+		// interface.id) it will be persisted in each group, during recovery we will aggregate it by interface.id and
+		// re-build the interface who serves many groups.
 		tlogGroupData->id_data[recruited.id()] = newGenerationData;
 		newGenerationData->removed = self->removed;
 		activeGeneration->emplace(group.logGroupId, newGenerationData);
@@ -2008,13 +2065,16 @@ ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self,
 		self->persistentData->set(
 		    KeyValueRef(persistRecoveryLocationKey, BinaryWriter::toValue(locationIter->value.first, Unversioned())));
 	}
-
+	// key : persistCurrentVersionKeys + interface.id
+	// value : persistentDataVersion
+	// for groups served by the same interface(implying they have the same generation), they should have the same key.
 	self->persistentData->set(
 	    KeyValueRef(BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistCurrentVersionKeys.begin),
 	                BinaryWriter::toValue(newPersistentDataVersion, Unversioned())));
 	self->persistentData->set(KeyValueRef(
 	    BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistKnownCommittedVersionKeys.begin),
 	    BinaryWriter::toValue(logData->knownCommittedVersion, Unversioned())));
+	// TODO: update teams -> tags mapping when it changes!
 	logData->persistentDataVersion = newPersistentDataVersion;
 
 	wait(self->persistentData->commit()); // SOMEDAY: This seems to be running pretty often, should we slow it down???
@@ -2237,7 +2297,7 @@ ACTOR Future<Void> updateStorageLoop(Reference<TLogGroupData> self) {
 }
 
 ACTOR Future<Void> tLog(
-    std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues,
+    std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> oldPersistentDataAndQueues,
     Reference<AsyncVar<ServerDBInfo>> db,
     LocalityData locality,
     PromiseStream<InitializePtxnTLogRequest> tlogRequests,
@@ -2261,16 +2321,26 @@ ACTOR Future<Void> tLog(
 		state std::vector<Future<Void>> tlogGroupTerminated = { Never() };
 		state std::vector<Future<Void>> tlogGroupRecoveries;
 
+		for (auto& [id, p] : oldPersistentDataAndQueues) {
+			// old log groups must be recovered by restored from persistent state from disk.
+			// each group might have multiple generations
+			Reference<TLogGroupData> tlogGroup =
+			    makeReference<TLogGroupData>(tlogId, id, workerID, p.first, p.second, db, degraded, folder, self);
+			self->oldTLogGroups[id] = tlogGroup; // Reference, so that restorePersistentState should change this var
+			tlogGroupRecoveries.push_back(restorePersistentState(tlogGroup, locality, self));
+		}
+
 		loop choose {
 			// TODO: build overlapping tlog groups from disk
 			when(state InitializePtxnTLogRequest req = waitNext(tlogRequests.getFuture())) {
+				// question : what happens if multiple InitializePtxnTLogRequest are received?
 				if (!self->tlogCache.exists(req.recruitmentID)) {
 					self->tlogCache.set(req.recruitmentID, req.reply.getFuture());
 					std::vector<Future<Void>> tlogGroupRecoveries;
 					for (auto& group : req.tlogGroups) {
 						// memory managed by each tlog group
-						IKeyValueStore* persistentData = persistentDataAndQueues[group.logGroupId].first;
-						IDiskQueue* persistentQueue = persistentDataAndQueues[group.logGroupId].second;
+						IKeyValueStore* persistentData = req.persistentDataAndQueues[group.logGroupId].first;
+						IDiskQueue* persistentQueue = req.persistentDataAndQueues[group.logGroupId].second;
 						Reference<TLogGroupData> tlogGroup = makeReference<TLogGroupData>(tlogId,
 						                                                                  group.logGroupId,
 						                                                                  workerID,
@@ -2283,9 +2353,8 @@ ACTOR Future<Void> tLog(
 						TraceEvent("SharedTlogGroup").detail("LogId", tlogId).detail("GroupID", group.logGroupId);
 						self->tlogGroups[group.logGroupId] = tlogGroup;
 						tlogGroupRecoveries.push_back(
-						    restoreFromDisk ? restorePersistentState(tlogGroup, req, group, locality, self)
-						                    : ioTimeoutError(checkEmptyQueue(tlogGroup) && checkRecovered(tlogGroup),
-						                                     SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+						    ioTimeoutError(checkEmptyQueue(tlogGroup) && checkRecovered(tlogGroup),
+						                   SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
 						tlogGroupTerminated.push_back(tlogGroup->terminated.getFuture());
 					}
 					choose {
@@ -2294,14 +2363,16 @@ ACTOR Future<Void> tLog(
 					}
 
 					if (restoreFromDisk) {
+						// restore information for each (generation, group), aggregated by generation, then group.
+						// then cal tLogCore() for each generation.
 						std::unordered_map<
 						    UID,
 						    std::shared_ptr<std::unordered_map<TLogGroupID, Reference<LogGenerationData>>>>
 						    generations;
-						for (auto& [_, tlogGroup] : self->tlogGroups) {
-							for (auto it : tlogGroup->id_data) {
+						for (auto& [_, group] : self->oldTLogGroups) {
+							for (auto it : group->id_data) {
 								if (it.second->queueCommittedVersion.get() == 0) {
-									TraceEvent("TLogZeroVersion", tlogGroup->dbgid).detail("LogId", it.first);
+									TraceEvent("TLogZeroVersion", group->dbgid).detail("LogId", it.first);
 									it.second->queueCommittedVersion.set(it.second->version.get());
 								}
 								it.second->recoveryComplete.sendError(end_of_stream());
@@ -2310,7 +2381,7 @@ ACTOR Future<Void> tLog(
 									generations[it.first] = std::make_shared<
 									    std::unordered_map<TLogGroupID, Reference<LogGenerationData>>>();
 								}
-								(*generations[it.first])[tlogGroup->tlogGroupID] = it.second;
+								(*generations[it.first])[group->tlogGroupID] = it.second;
 							}
 						}
 						for (auto& [id, generation] : generations) {

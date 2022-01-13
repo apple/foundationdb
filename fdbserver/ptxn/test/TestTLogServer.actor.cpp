@@ -86,11 +86,11 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 		std::string diskQueueFilePrefix = "logqueue-";
 		ptxn::InitializePtxnTLogRequest req = tLogInitializations.back();
 		const StringRef prefix = req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
-		std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues;
+
 		for (ptxn::TLogGroup& tlogGroup : pContext->groupsPerTLog[i]) {
 			std::string filename =
 			    filenameFromId(req.storeType, folder, prefix.toString() + "test", tlogGroup.logGroupId);
-			IKeyValueStore* data = keyValueStoreMemory(joinPath(folder, "loggroup"), tlogGroup.logGroupId, 500e6);
+			IKeyValueStore* data = keyValueStoreMemory(filename, tlogGroup.logGroupId, 500e6);
 			IDiskQueue* queue =
 			    mockDiskQueue
 			        ? new InMemoryDiskQueue(tlogGroup.logGroupId)
@@ -100,11 +100,10 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 			                        DiskQueueVersion::V1);
 			pContext->diskQueues[tlogGroup.logGroupId] = queue;
 			pContext->kvStores[tlogGroup.logGroupId] = data;
-			persistentDataAndQueues[tlogGroup.logGroupId] = std::make_pair(data, queue);
+			tLogInitializations.back().persistentDataAndQueues[tlogGroup.logGroupId] = std::make_pair(data, queue);
 		}
-
-		actors->push_back(ptxn::tLog(persistentDataAndQueues,
-		                             dbInfo,
+		actors->push_back(ptxn::tLog(std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>>(),
+		                             makeReference<AsyncVar<ServerDBInfo>>(),
 		                             LocalityData(),
 		                             initializeTLog,
 		                             tlogId,
@@ -310,6 +309,7 @@ TEST_CASE("/fdbserver/ptxn/test/run_tlog_server") {
 	// Commit validation in real TLog is not supported for now
 	options.skipCommitValidation = true;
 	state std::vector<Future<Void>> actors;
+	state std::vector<Future<Void>> proxies;
 	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
 
 	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
@@ -318,8 +318,9 @@ TEST_CASE("/fdbserver/ptxn/test/run_tlog_server") {
 	wait(startTLogServers(&actors, pContext, folder));
 	// TODO: start fake proxy to talk to real TLog servers.
 	startFakeSequencer(actors, pContext);
-	startFakeProxy(actors, pContext);
-	wait(quorum(actors, 1));
+	startFakeProxy(proxies, pContext);
+	wait(waitForAll(proxies));
+
 	platform::eraseDirectoryRecursive(folder);
 	return Void();
 }
@@ -882,7 +883,6 @@ TEST_CASE("/fdbserver/ptxn/test/single_tlog_recovery") {
 	// Start to recover, put the same tlog groups in the requests as initial assignment
 	state ptxn::TLogGroupID targetGroup = pContext->storageTeamIDTLogGroupIDMapper[storageTeamID];
 	state std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> dqs;
-	state int writtenTLogID = pContext->groupToLeaderId[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
 	PromiseStream<ptxn::InitializePtxnTLogRequest> initializeTLogRecover;
 
 	state IDiskQueue::location previousNextPushLocation = pContext->diskQueues[targetGroup]->getNextPushLocation();
@@ -890,30 +890,36 @@ TEST_CASE("/fdbserver/ptxn/test/single_tlog_recovery") {
 	StringRef fileLogDataPrefix = "log-"_sr;
 	std::string diskQueueFilePrefix = "logqueue-";
 
+	ptxn::TLogGroup newGroup = ptxn::TLogGroup(ptxn::test::randomUID());
 	ptxn::InitializePtxnTLogRequest req;
 	req.isPrimary = true;
 	req.storeType = KeyValueStoreType::MEMORY;
-	req.tlogGroups = pContext->groupsPerTLog[writtenTLogID];
-	// nede to set recruitementId to avoid caching
-	req.recruitmentID = ptxn::test::randomUID();
+	req.tlogGroups.push_back(newGroup); // a new group is needed when starting a new tlog, but only for recovery test
+	req.recruitmentID = ptxn::test::randomUID(); // need to set recruitementId to avoid caching
 	const StringRef prefix = req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 
-	for (ptxn::TLogGroup& tlogGroup : pContext->groupsPerTLog[writtenTLogID]) {
-		std::string filename = filenameFromId(req.storeType, folder, prefix.toString() + "test", tlogGroup.logGroupId);
-		IKeyValueStore* data = keyValueStoreMemory(joinPath(folder, "loggroup"), tlogGroup.logGroupId, 500e6);
-		IDiskQueue* queue = openDiskQueue(joinPath(folder, diskQueueFilePrefix + tlogGroup.logGroupId.toString() + "-"),
-		                                  "fdq",
-		                                  tlogGroup.logGroupId,
-		                                  DiskQueueVersion::V1);
-		dqs[tlogGroup.logGroupId] = std::make_pair(data, queue);
-	}
+	std::string oldFilename =
+	    filenameFromId(KeyValueStoreType::MEMORY, folder, prefix.toString() + "test", targetGroup);
+	IKeyValueStore* data = keyValueStoreMemory(oldFilename, targetGroup, 500e6);
+	IDiskQueue* queue = openDiskQueue(
+	    joinPath(folder, diskQueueFilePrefix + targetGroup.toString() + "-"), "fdq", targetGroup, DiskQueueVersion::V1);
+	dqs[targetGroup] = std::make_pair(data, queue);
+
+	UID newGroupID = deterministicRandom()->randomUniqueID();
+	std::string filename = filenameFromId(req.storeType, folder, prefix.toString() + "test", newGroupID);
+	req.persistentDataAndQueues[newGroup.logGroupId] =
+	    std::make_pair(openKVStore(req.storeType, filename, newGroupID, 500e6),
+	                   openDiskQueue(joinPath(folder, diskQueueFilePrefix + newGroupID.toString() + "-"),
+	                                 "fdq",
+	                                 newGroupID,
+	                                 DiskQueueVersion::V1));
 
 	// cancel all actors to shutdown all tlogs, but disk files would not be erase so that we can recover from it.
 	for (auto& a : actors) {
 		a.cancel();
 	}
 	actors.clear();
-
+	ASSERT(dqs[targetGroup].second->getNextReadLocation() < previousNextPushLocation);
 	// start recovery
 	state std::vector<Future<Void>> actors_recover;
 	UID tlogId = ptxn::test::randomUID();
@@ -934,12 +940,15 @@ TEST_CASE("/fdbserver/ptxn/test/single_tlog_recovery") {
 	// wait for the recovery of TLog,
 	// cannot read the data and compare bit-by-bit because read operation is only allowed during recovery time.
 	wait(success(req.reply.getFuture()));
+	wait(delay(5.0)); // give some time for the updateStorageLoop to run
 
 	// From results I see the diff of location::low is always 36(size of DiskQueue::PageHeader)
 	// not sure why though, asserting >= would also make sense to me.
 	// it is hard to verify through peeking, because the interface is recruited from inside.
 	ASSERT(dqs[targetGroup].second->getNextReadLocation() >= previousNextPushLocation);
 	ASSERT(dqs[targetGroup].second->getNextReadLocation().lo == previousNextPushLocation.lo + 36);
+
+	// TODO: test the old generations interfaces are started and can serve requests such as peek
 	platform::eraseDirectoryRecursive(folder);
 	return Void();
 }

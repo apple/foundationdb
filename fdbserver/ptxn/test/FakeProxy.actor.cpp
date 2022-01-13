@@ -128,7 +128,6 @@ ACTOR Future<Void> fakeProxy(std::shared_ptr<FakeProxyContext> pFakeProxyContext
 		}
 
 		wait(waitForAll(tLogCommitReplies));
-
 		if (++commitCount == pFakeProxyContext->numCommits) {
 			break;
 		}

@@ -1554,11 +1554,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					logQueueBasename = fileLogQueuePrefix.toString() + optionsString.toString() + "-";
 				}
 				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder);
+				// created the IKeyValueStore with the files exist in file system so that can access files persited in
+				// old generations
 				IKeyValueStore* kv = openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles);
 				const DiskQueueVersion dqv =
 				    s.tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
 				const int64_t diskQueueWarnSize =
 				    s.tLogOptions.spillType == TLogSpillType::VALUE ? 10 * SERVER_KNOBS->TARGET_BYTES_PER_TLOG : -1;
+				// read the file existed on the file system, so we open the same file that persisted in the old
+				// generations.
 				IDiskQueue* queue = openDiskQueue(joinPath(folder, logQueueBasename + s.storeID.toString() + "-"),
 				                                  tlogQueueExtension.toString(),
 				                                  s.storeID,
@@ -1579,6 +1583,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				auto& logData = sharedLogs[SharedLogsKey(s.tLogOptions, s.storeType)];
 				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
 				// be sending a fake InitializeTLogRequest rather than calling tLog() ?
+
+				// start a tlog server for each tlog file persisted on disk, with restoreFromDisk flag as true.
 				Future<Void> tl =
 				    tLogFn(persistentDataAndQueues,
 				           dbInfo,
@@ -1587,7 +1593,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                                                               : PromiseStream<InitializeTLogRequest>(),
 				           s.storeID,
 				           interf.id(),
-				           true,
+				           true, // restoreFromDisk is true
 				           oldLog,
 				           recovery,
 				           folder,
@@ -1924,6 +1930,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 					std::string filename =
 					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
+					// file name encodes logId, but this logId is totally different from the interface.uniqueId
+					// each tlog config has their own file, rather than each generation.
 					IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit);
 					const DiskQueueVersion dqv =
 					    tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
