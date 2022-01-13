@@ -2693,7 +2693,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 			trState->cx->getValueCompleted->latency = timer_int() - startTime;
 			trState->cx->getValueCompleted->log();
 
-			if (trState->debugID.present()) {
+			if (getValueID.present()) {
 				g_traceBatch.addEvent("GetValueDebug",
 				                      getValueID.get().first(),
 				                      "NativeAPI.getValue.After"); //.detail("TaskID", g_network->getCurrentTask());
@@ -2709,7 +2709,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 		} catch (Error& e) {
 			trState->cx->getValueCompleted->latency = timer_int() - startTime;
 			trState->cx->getValueCompleted->log();
-			if (trState->debugID.present()) {
+			if (getValueID.present()) {
 				g_traceBatch.addEvent("GetValueDebug",
 				                      getValueID.get().first(),
 				                      "NativeAPI.getValue.Error"); //.detail("TaskID", g_network->getCurrentTask());
@@ -2762,7 +2762,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Fut
 		    wait(getKeyLocation(trState, locationKey, &StorageServerInterface::getKey, Reverse{ k.isBackward() }));
 
 		try {
-			if (trState->debugID.present())
+			if (getKeyID.present())
 				g_traceBatch.addEvent(
 				    "GetKeyDebug",
 				    getKeyID.get().first(),
@@ -2797,7 +2797,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Fut
 				++trState->cx->transactionPhysicalReadsCompleted;
 				throw;
 			}
-			if (trState->debugID.present())
+			if (getKeyID.present())
 				g_traceBatch.addEvent("GetKeyDebug",
 				                      getKeyID.get().first(),
 				                      "NativeAPI.getKey.After"); //.detail("NextKey",reply.sel.key).detail("Offset",
@@ -2807,7 +2807,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Fut
 				return k.getKey();
 			}
 		} catch (Error& e) {
-			if (trState->debugID.present())
+			if (getKeyID.present())
 				g_traceBatch.addEvent("GetKeyDebug", getKeyID.get().first(), "NativeAPI.getKey.Error");
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				trState->cx->invalidateCache(k.getKey(), Reverse{ k.isBackward() });
@@ -2913,7 +2913,7 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 				}
 				when(wait(cx->connectionRecord ? cx->connectionRecord->onChange() : Never())) { wait(Never()); }
 			}
-			if (parameters->debugID.present()) {
+			if (watchValueID.present()) {
 				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.After");
 			}
 
@@ -3177,7 +3177,7 @@ Future<RangeResult> getExactRange(Reference<TransactionState> trState,
 				if (trState->debugID.present()) {
 					g_traceBatch.addEvent(
 					    "TransactionDebug", trState->debugID.get().first(), "NativeAPI.getExactRange.Before");
-					/*TraceEvent("TransactionDebugGetExactRangeInfo", info.debugID.get())
+					/*TraceEvent("TransactionDebugGetExactRangeInfo", trState->debugID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
 					    .detail("ReqEndKey", req.end.getKey())
 					    .detail("ReqLimit", req.limit)
@@ -3522,7 +3522,7 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 				if (trState->debugID.present()) {
 					g_traceBatch.addEvent(
 					    "TransactionDebug", trState->debugID.get().first(), "NativeAPI.getRange.Before");
-					/*TraceEvent("TransactionDebugGetRangeInfo", info.debugID.get())
+					/*TraceEvent("TransactionDebugGetRangeInfo", trState->debugID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
 					    .detail("ReqEndKey", req.end.getKey())
 					    .detail("OriginalBegin", originalBegin.toString())
@@ -3565,7 +3565,7 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 					g_traceBatch.addEvent("TransactionDebug",
 					                      trState->debugID.get().first(),
 					                      "NativeAPI.getRange.After"); //.detail("SizeOf", rep.data.size());
-					/*TraceEvent("TransactionDebugGetRangeDone", info.debugID.get())
+					/*TraceEvent("TransactionDebugGetRangeDone", trState->debugID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
 					    .detail("ReqEndKey", req.end.getKey())
 					    .detail("RepIsMore", rep.more)
@@ -5188,8 +5188,10 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 	state TraceInterval interval("TransactionCommit");
 	state double startTime = now();
 	state Span span("NAPI:tryCommit"_loc, trState->spanID);
-	if (trState->debugID.present())
-		TraceEvent(interval.begin()).detail("Parent", trState->debugID.get());
+	state Optional<UID> debugID = trState->debugID;
+	if (debugID.present()) {
+		TraceEvent(interval.begin()).detail("Parent", debugID.get());
+	}
 	try {
 		if (CLIENT_BUGGIFY) {
 			throw deterministicRandom()->randomChoice(std::vector<Error>{
@@ -5205,9 +5207,10 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
-		if (trState->debugID.present()) {
+
+		if (debugID.present()) {
 			commitID = nondeterministicRandom()->randomUniqueID();
-			g_traceBatch.addAttach("CommitAttachID", trState->debugID.get().first(), commitID.get().first());
+			g_traceBatch.addAttach("CommitAttachID", debugID.get().first(), commitID.get().first());
 			g_traceBatch.addEvent("CommitDebug", commitID.get().first(), "NativeAPI.commit.Before");
 		}
 
@@ -5241,7 +5244,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 					if (CLIENT_BUGGIFY) {
 						throw commit_unknown_result();
 					}
-					if (trState->debugID.present())
+					if (debugID.present())
 						TraceEvent(interval.end()).detail("CommittedVersion", v);
 					trState->committedVersion = v;
 					if (v > trState->cx->metadataVersionCache[trState->cx->mvCacheInsertLocation].first) {
@@ -5260,7 +5263,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 					trState->cx->transactionCommittedMutations += req.transaction.mutations.size();
 					trState->cx->transactionCommittedMutationBytes += req.transaction.mutations.expectedSize();
 
-					if (trState->debugID.present())
+					if (commitID.present())
 						g_traceBatch.addEvent("CommitDebug", commitID.get().first(), "NativeAPI.commit.After");
 
 					double latency = now() - startTime;
@@ -5295,10 +5298,10 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 						}
 					}
 
-					if (trState->debugID.present())
+					if (debugID.present())
 						TraceEvent(interval.end()).detail("Conflict", 1);
 
-					if (trState->debugID.present())
+					if (commitID.present())
 						g_traceBatch.addEvent("CommitDebug", commitID.get().first(), "NativeAPI.commit.After");
 
 					throw not_committed();
