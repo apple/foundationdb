@@ -7429,6 +7429,8 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 	// previous version of change feed may have put a mutation in the promise stream and then immediately died. Wait for
 	// that mutation first, so the promise stream always starts empty
 	wait(results->mutations.onEmpty());
+	wait(delay(0));
+	ASSERT(results->mutations.isEmpty());
 
 	while (interfNum < interfs.size()) {
 		try {
@@ -7677,7 +7679,10 @@ ACTOR Future<Void> doSingleCFStream(KeyRange range,
 
 	state bool atLatest = false;
 	loop {
+		// wait for any previous mutations in stream to be consumed
 		wait(results->mutations.onEmpty());
+		wait(delay(0));
+		ASSERT(results->mutations.isEmpty());
 		state ChangeFeedStreamReply feedReply = waitNext(results->streams[0].getFuture());
 		*begin = feedReply.mutations.back().version + 1;
 
