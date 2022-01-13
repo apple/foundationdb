@@ -5567,6 +5567,12 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				// handle case where fetch had version ahead of last in-memory mutation
 				if (info->second->fetchVersion > info->second->storageVersion) {
 					info->second->storageVersion = std::min(info->second->fetchVersion, newOldestVersion);
+					if (info->second->fetchVersion > info->second->storageVersion) {
+						// This change feed still has pending mutations fetched and written to storage that are not yet
+						// durable. To ensure its storageVersion gets updated once its fetchVersion is durable, we need
+						// to add it back to fetchingChangeFeeds
+						data->fetchingChangeFeeds.insert(info->first);
+					}
 				}
 				wait(yield(TaskPriority::UpdateStorage));
 			}
