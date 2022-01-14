@@ -316,7 +316,7 @@ void ptxnTLogFixture::setUp(const int numTLogs) {
 		int tLogContextIndex = 0;
 		for (; tLogGroupIndex < tLogGroupFixture.getNumTLogGroups(); ++tLogGroupIndex) {
 			assignTLogGroup(tLogGroupFixture.tLogGroupIDs[tLogGroupIndex], tLogContexts[tLogContextIndex]);
-			tLogContextIndex = (tLogContextIndex + 1) % tLogGroupFixture.getNumTLogGroups();
+			tLogContextIndex = (tLogContextIndex + 1) % tLogContexts.size();
 		}
 	}
 }
@@ -349,6 +349,83 @@ std::shared_ptr<FakeTLogContext> ptxnFakeTLogFixture::getTLogContextByIndex(cons
 
 	return tLogContexts[index];
 }
+
+#pragma region ptxnStorageServerFixture
+
+const KeyValueStoreType ptxnStorageServerFixture::keyValueStoreType(KeyValueStoreType::MEMORY);
+
+std::string ptxnStorageServerFixture::StorageServerResources::getFolder() const {
+	return concatToString("./", "storage-", storageTeamID, ".", keyValueStoreType);
+}
+
+ptxnStorageServerFixture::StorageServerResources::StorageServerResources(const StorageTeamID& storageTeamID_)
+  : storageTeamID(storageTeamID_),
+    interface(std::make_shared<::StorageServerInterface>(deterministicRandom()->randomUniqueID())),
+    /* IKeyValueStore has protected destructor and is not intended to be deleted */
+    kvStore(openKVStore(keyValueStoreType, getFolder(), interface->id(), MEMORY_LIMIT),
+            [](IKeyValueStore* _) { ASSERT(false); }),
+    seedTag(Tag(tagLocalitySpecial, deterministicRandom()->randomInt(1, 65536))), seedVersion(0) {}
+
+void ptxnStorageServerFixture::setUp(const int numStorageServers) {
+	// TODO At this stage the number of storage servers should equal to the number of storage team ids, i.e. 1 -- 1
+	// mapping relationship, but this is not true in the future.
+	ASSERT(numStorageServers == static_cast<int>(tLogGroupFixture.storageTeamIDs.size()));
+
+	const auto& asyncServerDBInfoRef = serverDBInfoFixture.getAsyncServerDBInfoRef();
+	for (const auto& storageTeamID : tLogGroupFixture.storageTeamIDs) {
+		storageServerResources.emplace_back(storageTeamID);
+		initializeStorageReplies.emplace_back();
+
+		const auto& resource = storageServerResources.back();
+		const auto& initializeReply = initializeStorageReplies.back();
+		actors.push_back(storageServer(resource.kvStore.get(),
+		                               *resource.interface,
+		                               resource.seedTag,
+		                               resource.seedVersion,
+		                               initializeReply,
+		                               asyncServerDBInfoRef,
+		                               "./"));
+	}
+}
+
+ptxnStorageServerFixture::~ptxnStorageServerFixture() {
+	for (auto& actor : actors) {
+		actor.cancel();
+	}
+}
+
+#pragma endregion ptxnStorageServerFixture
+
+#pragma region ServerDBInfoFixture
+
+void ServerDBInfoFixture::setUp() {
+	serverDBInfo.id = deterministicRandom()->randomUniqueID();
+	serverDBInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
+	serverDBInfo.isTestEnvironment = true;
+
+	auto tLogFixture = TestEnvironment::getTLogs();
+
+	auto& logSystemConfig = serverDBInfo.logSystemConfig;
+	logSystemConfig.logSystemType = LogSystemType::teamPartitioned;
+	logSystemConfig.tLogs.emplace_back();
+
+	auto& tLogSet = logSystemConfig.tLogs.back();
+	for (auto tLogInterface : tLogFixture->tLogInterfaces) {
+		tLogSet.tLogsPtxn.emplace_back(*std::dynamic_pointer_cast<TLogInterface_PassivelyPull>(tLogInterface));
+	}
+	for (const auto& [tLogGroupID, tLogLeaderInterface] : tLogFixture->tLogGroupLeaders) {
+		tLogSet.tLogGroupIDs.push_back(tLogGroupID);
+		tLogSet.ptxnTLogGroups.emplace_back();
+		tLogSet.ptxnTLogGroups.back().emplace_back(
+		    *std::dynamic_pointer_cast<TLogInterface_PassivelyPull>(tLogLeaderInterface));
+	}
+}
+
+Reference<const AsyncVar<ServerDBInfo>> ServerDBInfoFixture::getAsyncServerDBInfoRef() const {
+	return makeReference<AsyncVar<ServerDBInfo>>(serverDBInfo);
+}
+
+#pragma endregion ServerDBInfoFixture
 
 #pragma region ptxnTLogPassivelyPullFixture
 
@@ -422,6 +499,31 @@ TestEnvironment& TestEnvironment::initMessages(const int initialVersion,
 	return *this;
 }
 
+TestEnvironment& TestEnvironment::initPtxnStorageServer(const int numStorageServers) {
+	ASSERT(pImpl->tLogGroup);
+	ASSERT(pImpl->serverDBInfo);
+	ASSERT(!pImpl->storageServers);
+
+	pImpl->storageServers =
+	    std::make_shared<details::ptxnStorageServerFixture>(*pImpl->tLogGroup, *pImpl->serverDBInfo);
+
+	pImpl->storageServers->setUp(numStorageServers);
+
+	return *this;
+}
+
+TestEnvironment& TestEnvironment::initServerDBInfo() {
+	ASSERT(pImpl);
+	// TODO Rethink is -- does server db info depends on TLogs in test?
+	ASSERT(pImpl->tLogs);
+	ASSERT(!pImpl->serverDBInfo);
+
+	pImpl->serverDBInfo = std::make_unique<details::ServerDBInfoFixture>();
+	pImpl->serverDBInfo->setUp();
+
+	return *this;
+}
+
 CommitRecord& TestEnvironment::getCommitRecords() {
 	ASSERT(pImpl);
 	ASSERT(pImpl->testDriverContextImpl);
@@ -441,6 +543,20 @@ std::shared_ptr<details::ptxnTLogFixture> TestEnvironment::getTLogs() {
 	ASSERT(pImpl->tLogs);
 
 	return pImpl->tLogs;
+}
+
+details::ServerDBInfoFixture& TestEnvironment::getServerDBInfo() {
+	ASSERT(pImpl);
+	ASSERT(pImpl->serverDBInfo);
+
+	return *pImpl->serverDBInfo;
+}
+
+std::shared_ptr<details::ptxnStorageServerFixture> TestEnvironment::getStorageServers() {
+	ASSERT(pImpl);
+	ASSERT(pImpl->storageServers);
+
+	return pImpl->storageServers;
 }
 
 #pragma endregion TestEnvironment
