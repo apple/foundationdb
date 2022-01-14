@@ -535,14 +535,11 @@ ACTOR Future<Void> writeInitialGranuleMapping(BlobManagerData* bmData, Standalon
 	while (i < boundaries.size() - 1) {
 		TEST(i > 0); // multiple transactions for large granule split
 		tr->reset();
-		// TODO COMMENT AND USE BELOW INSTEAD
-		tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
-		tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
 		state int j = 0;
 		loop {
 			try {
-				// tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
-				// tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
 				while (i + j < boundaries.size() - 1 && j < transactionChunkSize) {
 					// TODO REMOVE
 					if (BM_DEBUG) {
@@ -2151,25 +2148,6 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	}
 
 	self.epoch = epoch;
-
-	// make sure the epoch hasn't gotten stale
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self.db);
-
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	// TODO add loop with retries here!!!
-	try {
-		wait(checkManagerLock(tr, &self));
-	} catch (Error& e) {
-		if (BM_DEBUG) {
-			printf("Blob manager lock check got unexpected error %s. Dying...\n", e.name());
-		}
-		return Void();
-	}
-
-	if (BM_DEBUG) {
-		fmt::print("Blob manager acquired lock at epoch {}\n", epoch);
-	}
 
 	// although we start the recruiter, we wait until existing workers are ack'd
 	auto recruitBlobWorker = IAsyncListener<RequestStream<RecruitBlobWorkerRequest>>::create(
