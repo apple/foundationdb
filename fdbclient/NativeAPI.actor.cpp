@@ -6517,9 +6517,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Trans
 	state KeyRange currentRange = keyRange;
 	state Standalone<VectorRef<KeyRangeRef>> results;
 	if (BG_REQUEST_DEBUG) {
-		printf("Getting Blob Granules for [%s - %s)\n",
-		       keyRange.begin.printable().c_str(),
-		       keyRange.end.printable().c_str());
+		fmt::print("Getting Blob Granules for [{0} - {1})\n", keyRange.begin.printable(), keyRange.end.printable());
 	}
 	self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	loop {
@@ -6609,9 +6607,9 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		granuleEndKey = blobGranuleMapping[i + 1].key;
 		if (!blobGranuleMapping[i].value.size()) {
 			if (BG_REQUEST_DEBUG) {
-				printf("Key range [%s - %s) missing worker assignment!\n",
-				       granuleStartKey.printable().c_str(),
-				       granuleEndKey.printable().c_str());
+				fmt::print("Key range [{0} - {1}) missing worker assignment!\n",
+				           granuleStartKey.printable(),
+				           granuleEndKey.printable());
 				// TODO probably new exception type instead
 			}
 			throw blob_granule_transaction_too_old();
@@ -6620,17 +6618,15 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
 		if (workerId == UID()) {
 			if (BG_REQUEST_DEBUG) {
-				printf("Key range [%s - %s) has no assigned worker yet!\n",
-				       granuleStartKey.printable().c_str(),
-				       granuleEndKey.printable().c_str());
+				fmt::print("Key range [{0} - {1}) has no assigned worker yet!\n",
+				           granuleStartKey.printable(),
+				           granuleEndKey.printable());
 			}
 			throw blob_granule_transaction_too_old();
 		}
 		if (BG_REQUEST_DEBUG) {
-			printf("  [%s - %s): %s\n",
-			       granuleStartKey.printable().c_str(),
-			       granuleEndKey.printable().c_str(),
-			       workerId.toString().c_str());
+			fmt::print(
+			    "  [{0} - {1}): {2}\n", granuleStartKey.printable(), granuleEndKey.printable(), workerId.toString());
 		}
 
 		if (!cx->blobWorker_interf.count(workerId)) {
@@ -6647,7 +6643,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			// something?
 			cx->blobWorker_interf[workerId] = decodeBlobWorkerListValue(workerInterface.get());
 			if (BG_REQUEST_DEBUG) {
-				printf("    decoded worker interface for %s\n", workerId.toString().c_str());
+				fmt::print("    decoded worker interface for {0}\n", workerId.toString());
 			}
 		}
 	}
@@ -6726,7 +6722,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				    location->get(0, &BlobWorkerInterface::blobGranuleFileRequest).getEndpoint(),
 				    FailureStatus(true)))) {
 					if (BG_REQUEST_DEBUG) {
-						printf("readBlobGranules got BW %s failed\n", workerId.toString().c_str());
+						fmt::print("readBlobGranules got BW {0} failed\n", workerId.toString());
 					}
 
 					throw connection_failed();
@@ -6734,7 +6730,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			}
 		} catch (Error& e) {
 			if (BG_REQUEST_DEBUG) {
-				printf("BGReq got error %s\n", e.name());
+				fmt::print("BGReq got error {}\n", e.name());
 			}
 			// worker is up but didn't actually have granule, or connection failed
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed) {
@@ -7368,12 +7364,12 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 						} else {
 							// TODO REMOVE eventually, useful for debugging for now
 							if (!rep.mutations[resultLoc].mutations.empty()) {
-								printf("non-empty mutations (%d), but versions out of order from %s! mv=%lld, "
-								       "nv=%lld\n",
-								       rep.mutations.size(),
-								       interf.id().toString().substr(0, 4).c_str(),
-								       rep.mutations[resultLoc].version,
-								       nextVersion);
+								fmt::print("non-empty mutations ({0}), but versions out of order from {1}! mv={2}, "
+								           "nv={3}\n",
+								           rep.mutations.size(),
+								           interf.id().toString().substr(0, 4),
+								           rep.mutations[resultLoc].version,
+								           nextVersion);
 							}
 							ASSERT(rep.mutations[resultLoc].mutations.empty());
 						}
@@ -7427,7 +7423,7 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 		}
 	} catch (Error& e) {
 		// TODO REMOVE eventually, useful for debugging for now
-		printf("NAS: CFError %s\n", e.name());
+		fmt::print("NAS: CFError {}\n", e.name());
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
 		}
@@ -7530,7 +7526,9 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 		} else {
 			// TODO REMOVE, for debugging
 			if (nextOut.back().version <= results->lastReturnedVersion.get()) {
-				printf("ERROR: merge cursor got mutations <= lastReturnedVersion");
+				fmt::print("ERROR: merge cursor got mutations {0} <= lastReturnedVersion {1}",
+				           nextOut.back().version,
+				           results->lastReturnedVersion.get());
 			}
 			ASSERT(nextOut.back().version > results->lastReturnedVersion.get());
 
@@ -7645,7 +7643,6 @@ ACTOR Future<Void> doSingleCFStream(KeyRange range,
                                     Version* begin,
                                     Version end) {
 	state Promise<Void> refresh = results->refresh;
-	printf("Single stream starting %lld - %lld\n", *begin, end);
 	ASSERT(results->streams.size() == 1);
 	ASSERT(results->storageData.size() == 1);
 	state bool atLatest = false;
@@ -7669,13 +7666,12 @@ ACTOR Future<Void> doSingleCFStream(KeyRange range,
 			// empty versions can come out of order, as we sometimes send explicit empty versions when restarting a
 			// stream. Anything with mutations should be strictly greater than lastReturnedVersion
 			if (feedReply.mutations.front().version <= results->lastReturnedVersion.get()) {
-				printf("out of order mutation for CF %s from (%d) %s! %lld < %lld\n",
-				       rangeID.toString().substr(0, 6).c_str(),
-				       results->storageData.size(),
-				       results->storageData.empty() ? "????"
-				                                    : results->storageData[0]->id.toString().substr(0, 4).c_str(),
-				       feedReply.mutations.front().version,
-				       results->lastReturnedVersion.get());
+				fmt::print("out of order mutation for CF {0} from ({1}) {2}! {3} < {4}\n",
+				           rangeID.toString().substr(0, 6),
+				           results->storageData.size(),
+				           results->storageData[0]->id.toString().substr(0, 4).c_str(),
+				           feedReply.mutations.front().version,
+				           results->lastReturnedVersion.get());
 			}
 			ASSERT(feedReply.mutations.front().version > results->lastReturnedVersion.get());
 
@@ -7762,8 +7758,6 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
                                             KeyRange range) {
 	state Database cx(db);
 	state Span span("NAPI:GetChangeFeedStream"_loc);
-
-	printf("Get Change Feed Stream %lld - %lld\n", begin, end);
 
 	results->id = rangeID;
 	results->endVersion = end;

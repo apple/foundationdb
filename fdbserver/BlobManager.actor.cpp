@@ -54,10 +54,8 @@ void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            KeyRef rangeEnd,
                            bool rangeActive) {
 	if (BM_DEBUG) {
-		printf("db range [%s - %s): %s\n",
-		       rangeStart.printable().c_str(),
-		       rangeEnd.printable().c_str(),
-		       rangeActive ? "T" : "F");
+		fmt::print(
+		    "db range [{0} - {1}): {2}\n", rangeStart.printable(), rangeEnd.printable(), rangeActive ? "T" : "F");
 	}
 	KeyRange keyRange(KeyRangeRef(rangeStart, rangeEnd));
 	auto allRanges = knownBlobRanges->intersectingRanges(keyRange);
@@ -68,16 +66,16 @@ void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
 			KeyRangeRef overlap(overlapStart, overlapEnd);
 			if (rangeActive) {
 				if (BM_DEBUG) {
-					printf("BM Adding client range [%s - %s)\n",
-					       overlapStart.printable().c_str(),
-					       overlapEnd.printable().c_str());
+					fmt::print("BM Adding client range [{0} - {1})\n",
+					           overlapStart.printable().c_str(),
+					           overlapEnd.printable().c_str());
 				}
 				rangesToAdd->push_back_deep(ar, overlap);
 			} else {
 				if (BM_DEBUG) {
-					printf("BM Removing client range [%s - %s)\n",
-					       overlapStart.printable().c_str(),
-					       overlapEnd.printable().c_str());
+					fmt::print("BM Removing client range [{0} - {1})\n",
+					           overlapStart.printable().c_str(),
+					           overlapEnd.printable().c_str());
 				}
 				rangesToRemove->push_back_deep(ar, overlap);
 			}
@@ -92,9 +90,9 @@ void updateClientBlobRanges(KeyRangeMap<bool>* knownBlobRanges,
                             VectorRef<KeyRangeRef>* rangesToAdd,
                             VectorRef<KeyRangeRef>* rangesToRemove) {
 	if (BM_DEBUG) {
-		printf("Updating %d client blob ranges", dbBlobRanges.size() / 2);
+		fmt::print("Updating {0} client blob ranges", dbBlobRanges.size() / 2);
 		for (int i = 0; i < dbBlobRanges.size() - 1; i += 2) {
-			printf(" [%s - %s)", dbBlobRanges[i].key.printable().c_str(), dbBlobRanges[i + 1].key.printable().c_str());
+			fmt::print("  [{0} - {1})", dbBlobRanges[i].key.printable(), dbBlobRanges[i + 1].key.printable());
 		}
 		printf("\n");
 	}
@@ -119,7 +117,7 @@ void updateClientBlobRanges(KeyRangeMap<bool>* knownBlobRanges,
 		for (int i = 0; i < dbBlobRanges.size() - 1; i++) {
 			if (dbBlobRanges[i].key >= normalKeys.end) {
 				if (BM_DEBUG) {
-					printf("Found invalid blob range start %s\n", dbBlobRanges[i].key.printable().c_str());
+					fmt::print("Found invalid blob range start {0}\n", dbBlobRanges[i].key.printable());
 				}
 				break;
 			}
@@ -127,17 +125,17 @@ void updateClientBlobRanges(KeyRangeMap<bool>* knownBlobRanges,
 			if (active) {
 				ASSERT(dbBlobRanges[i + 1].value == StringRef());
 				if (BM_DEBUG) {
-					printf("BM sees client range [%s - %s)\n",
-					       dbBlobRanges[i].key.printable().c_str(),
-					       dbBlobRanges[i + 1].key.printable().c_str());
+					fmt::print("BM sees client range [{0} - {1})\n",
+					           dbBlobRanges[i].key.printable(),
+					           dbBlobRanges[i + 1].key.printable());
 				}
 			}
 			KeyRef endKey = dbBlobRanges[i + 1].key;
 			if (endKey > normalKeys.end) {
 				if (BM_DEBUG) {
-					printf("Removing system keyspace from blob range [%s - %s)\n",
-					       dbBlobRanges[i].key.printable().c_str(),
-					       endKey.printable().c_str());
+					fmt::print("Removing system keyspace from blob range [{0} - {1})\n",
+					           dbBlobRanges[i].key.printable(),
+					           endKey.printable());
 				}
 				endKey = normalKeys.end;
 			}
@@ -165,8 +163,7 @@ void getRanges(std::vector<std::pair<KeyRangeRef, bool>>& results, KeyRangeMap<b
 	for (auto& r : allRanges) {
 		results.emplace_back(r.range(), r.value());
 		if (BM_DEBUG) {
-			printf(
-			    "  [%s - %s): %s\n", r.begin().printable().c_str(), r.end().printable().c_str(), r.value() ? "T" : "F");
+			fmt::print("  [{0} - {1}): {2}\n", r.begin().printable(), r.end().printable(), r.value() ? "T" : "F");
 		}
 	}
 }
@@ -234,7 +231,7 @@ struct BlobManagerData {
 	BlobManagerData(UID id, Database db, Optional<Key> dcId)
 	  : id(id), db(db), dcId(dcId), knownBlobRanges(false, normalKeys.end),
 	    restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), recruitingStream(0) {}
-	~BlobManagerData() { printf("Destroying blob manager data for %s\n", id.toString().c_str()); }
+	~BlobManagerData() { fmt::print("Destroying blob manager data for {}\n", id.toString()); }
 };
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesTransaction> tr, KeyRange range) {
@@ -243,8 +240,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 	loop {
 		try {
 			if (BM_DEBUG) {
-				printf(
-				    "Splitting new range [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
+				fmt::print("Splitting new range [{0} - {1})\n", range.begin.printable(), range.end.printable());
 			}
 			StorageMetrics estimated = wait(tr->getTransaction().getStorageMetrics(range, CLIENT_KNOBS->TOO_MANY));
 
@@ -314,9 +310,9 @@ ACTOR Future<UID> pickWorkerForAssign(BlobManagerData* bmData) {
 	ASSERT(eligibleWorkers.size() > 0);
 	int idx = deterministicRandom()->randomInt(0, eligibleWorkers.size());
 	if (BM_DEBUG) {
-		printf("picked worker %s, which has a minimal number (%d) of granules assigned\n",
-		       eligibleWorkers[idx].toString().c_str(),
-		       minGranulesAssigned);
+		fmt::print("picked worker {0}, which has a minimal number ({1}) of granules assigned\n",
+		           eligibleWorkers[idx].toString(),
+		           minGranulesAssigned);
 	}
 
 	return eligibleWorkers[idx];
@@ -325,13 +321,14 @@ ACTOR Future<UID> pickWorkerForAssign(BlobManagerData* bmData) {
 ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment assignment, UID workerID, int64_t seqNo) {
 
 	if (BM_DEBUG) {
-		fmt::print("BM {0} {1} range [{2} - {3}) @ ({4}, {5})\n",
-		           bmData->id.toString(),
+		fmt::print("BM {0} {1} range [{2} - {3}) @ ({4}, {5}) to {6}\n",
+		           bmData->epoch,
 		           assignment.isAssign ? "assigning" : "revoking",
 		           assignment.keyRange.begin.printable(),
 		           assignment.keyRange.end.printable(),
 		           bmData->epoch,
-		           seqNo);
+		           seqNo,
+		           workerID.toString());
 	}
 
 	try {
@@ -384,17 +381,28 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 		if (e.code() == error_code_operation_cancelled) {
 			throw;
 		}
-		if (!bmData->workersById.count(workerID)) {
+		// If the worker is no longer present, the ranges were already moved off by that function, so don't retry.
+		// If the request is a reassign though, we need to retry it since the worker it was on is now dead and nobody
+		// owns it
+		if (!bmData->workersById.count(workerID) &&
+		    (!assignment.assign.present() || assignment.assign.get().type != AssignRequestType::Reassign)) {
+			if (BM_DEBUG) {
+				fmt::print("BM {0} got error assigning range [{1} - {2}) to now dead worker {3}, ignoring\n",
+				           bmData->epoch,
+				           assignment.keyRange.begin.printable(),
+				           assignment.keyRange.end.printable(),
+				           workerID.toString());
+			}
 			return Void();
 		}
 		// TODO confirm: using reliable delivery this should only trigger if the worker is marked as failed, right?
 		// So assignment needs to be retried elsewhere, and a revoke is trivially complete
 		if (assignment.isAssign) {
 			if (BM_DEBUG) {
-				printf("BM got error assigning range [%s - %s) to worker %s, requeueing\n",
-				       assignment.keyRange.begin.printable().c_str(),
-				       assignment.keyRange.end.printable().c_str(),
-				       workerID.toString().c_str());
+				fmt::print("BM got error assigning range [%s - %s) to worker %s, requeueing\n",
+				           assignment.keyRange.begin.printable(),
+				           assignment.keyRange.end.printable(),
+				           workerID.toString());
 			}
 			// re-send revoke to queue to handle range being un-assigned from that worker before the new one
 			RangeAssignment revokeOld;
@@ -410,9 +418,9 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 			// FIXME: improvement would be to add history of failed workers to assignment so it can try other ones first
 		} else {
 			if (BM_DEBUG) {
-				printf("BM got error revoking range [%s - %s) from worker",
-				       assignment.keyRange.begin.printable().c_str(),
-				       assignment.keyRange.end.printable().c_str());
+				fmt::print("BM got error revoking range [{0} - {1}) from worker",
+				           assignment.keyRange.begin.printable(),
+				           assignment.keyRange.end.printable());
 			}
 
 			if (assignment.revoke.get().dispose) {
@@ -463,14 +471,17 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 			ASSERT(count == 1);
 
 			if (assignment.worker.present() && assignment.worker.get().isValid()) {
+				if (BM_DEBUG) {
+					fmt::print("BW {0} already chosen for seqno {1} in BM {2}\n",
+					           assignment.worker.get().toString(),
+					           seqNo,
+					           bmData->id.toString());
+				}
 				workerId = assignment.worker.get();
 			} else {
-				if (BM_DEBUG) {
-					printf("About to pick worker for seqno %d in BM %s\n", seqNo, bmData->id.toString().c_str());
-				}
 				UID _workerId = wait(pickWorkerForAssign(bmData));
 				if (BM_DEBUG) {
-					printf("Found worker BW %s for seqno %d\n", _workerId.toString().c_str(), seqNo);
+					fmt::print("Chose BW {0} for seqno {1} in BM {2}\n", _workerId.toString(), seqNo, bmData->epoch);
 				}
 				workerId = _workerId;
 			}
@@ -546,9 +557,9 @@ ACTOR Future<Void> writeInitialGranuleMapping(BlobManagerData* bmData, Standalon
 				while (i + j < boundaries.size() - 1 && j < transactionChunkSize) {
 					// TODO REMOVE
 					if (BM_DEBUG) {
-						printf("Persisting initial mapping for [%s - %s)\n",
-						       boundaries[i + j].printable().c_str(),
-						       boundaries[i + j + 1].printable().c_str());
+						fmt::print("Persisting initial mapping for [{0} - {1})\n",
+						           boundaries[i + j].printable(),
+						           boundaries[i + j + 1].printable());
 					}
 					// set to empty UID - no worker assigned yet
 					wait(krmSetRange(tr,
@@ -561,7 +572,7 @@ ACTOR Future<Void> writeInitialGranuleMapping(BlobManagerData* bmData, Standalon
 				break;
 			} catch (Error& e) {
 				if (BM_DEBUG) {
-					printf("Persisting initial mapping got error %s\n", e.name());
+					fmt::print("Persisting initial mapping got error {}\n", e.name());
 				}
 				wait(tr->onError(e));
 				j = 0;
@@ -603,9 +614,8 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 
 				for (KeyRangeRef range : rangesToRemove) {
 					if (BM_DEBUG) {
-						printf("BM Got range to revoke [%s - %s)\n",
-						       range.begin.printable().c_str(),
-						       range.end.printable().c_str());
+						fmt::print(
+						    "BM Got range to revoke [{0} - {1})\n", range.begin.printable(), range.end.printable());
 					}
 
 					RangeAssignment ra;
@@ -624,10 +634,10 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 				for (auto f : splitFutures) {
 					state Standalone<VectorRef<KeyRef>> splits = wait(f);
 					if (BM_DEBUG) {
-						printf("Split client range [%s - %s) into %d ranges:\n",
-						       splits[0].printable().c_str(),
-						       splits[splits.size() - 1].printable().c_str(),
-						       splits.size() - 1);
+						fmt::print("Split client range [{0} - {1}) into {2} ranges:\n",
+						           splits[0].printable(),
+						           splits[splits.size() - 1].printable(),
+						           splits.size() - 1);
 					}
 
 					// Write to DB BEFORE sending assign requests, so that if manager dies before/during, new manager
@@ -638,7 +648,8 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 						KeyRange range = KeyRange(KeyRangeRef(splits[i], splits[i + 1]));
 						// only add the client range if this is the first BM or it's not already assigned
 						if (BM_DEBUG) {
-							printf("    [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
+							fmt::print(
+							    "    [{0} - {1})\n", range.begin.printable().c_str(), range.end.printable().c_str());
 						}
 
 						RangeAssignment ra;
@@ -675,7 +686,7 @@ ACTOR Future<Void> monitorClientRanges(BlobManagerData* bmData) {
 				break;
 			} catch (Error& e) {
 				if (BM_DEBUG) {
-					printf("Blob manager got error looking for range updates %s\n", e.name());
+					fmt::print("Blob manager got error looking for range updates {}\n", e.name());
 				}
 				wait(tr->onError(e));
 			}
@@ -726,10 +737,10 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
 	if (newRanges.size() == 2) {
 		// not large enough to split, just reassign back to worker
 		if (BM_DEBUG) {
-			printf("Not splitting existing range [%s - %s). Continuing assignment to %s\n",
-			       granuleRange.begin.printable().c_str(),
-			       granuleRange.end.printable().c_str(),
-			       currentWorkerId.toString().c_str());
+			fmt::print("Not splitting existing range [{0} - {1}). Continuing assignment to {2}\n",
+			           granuleRange.begin.printable(),
+			           granuleRange.end.printable(),
+			           currentWorkerId.toString());
 		}
 		RangeAssignment raContinue;
 		raContinue.isAssign = true;
@@ -889,12 +900,12 @@ ACTOR Future<Void> deregisterBlobWorker(BlobManagerData* bmData, BlobWorkerInter
 			wait(tr->commit());
 
 			if (BM_DEBUG) {
-				printf("Deregistered blob worker %s\n", interf.id().toString().c_str());
+				fmt::print("Deregistered blob worker {0}\n", interf.id().toString());
 			}
 			return Void();
 		} catch (Error& e) {
 			if (BM_DEBUG) {
-				printf("Deregistering blob worker %s got error %s\n", interf.id().toString().c_str(), e.name());
+				fmt::print("Deregistering blob worker {0} got error {1}\n", interf.id().toString(), e.name());
 			}
 			wait(tr->onError(e));
 		}
@@ -926,7 +937,7 @@ ACTOR Future<Void> killBlobWorker(BlobManagerData* bmData, BlobWorkerInterface b
 	// - send a revoke request for that range
 	// - add the range back to the stream of ranges to be assigned
 	if (BM_DEBUG) {
-		printf("Taking back ranges from BW %s\n", bwId.toString().c_str());
+		fmt::print("Taking back ranges from BW {0}\n", bwId.toString());
 	}
 	// copy ranges into vector before sending, because send then modifies workerAssignments
 	state std::vector<KeyRange> rangesToMove;
@@ -954,7 +965,7 @@ ACTOR Future<Void> killBlobWorker(BlobManagerData* bmData, BlobWorkerInterface b
 
 	// Send halt to blob worker, with no expectation of hearing back
 	if (BM_DEBUG) {
-		printf("Sending halt to BW %s\n", bwId.toString().c_str());
+		fmt::print("Sending halt to BW {}\n", bwId.toString());
 	}
 	bmData->addActor.send(
 	    brokenPromiseToNever(bwInterf.haltBlobWorker.getReply(HaltBlobWorkerRequest(bmData->epoch, bmData->id))));
@@ -991,8 +1002,8 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 				}
 				if (rep.epoch > bmData->epoch) {
 					if (BM_DEBUG) {
-						printf("BM heard from BW %s that there is a new manager with higher epoch\n",
-						       bwInterf.id().toString().c_str());
+						fmt::print("BM heard from BW {0} that there is a new manager with higher epoch\n",
+						           bwInterf.id().toString());
 					}
 					if (bmData->iAmReplaced.canBeSet()) {
 						bmData->iAmReplaced.send(Void());
@@ -1059,9 +1070,8 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 				continue;
 			} else {
 				if (BM_DEBUG) {
-					printf("BM got unexpected error %s monitoring BW %s status\n",
-					       e.name(),
-					       bwInterf.id().toString().c_str());
+					fmt::print(
+					    "BM got unexpected error {0} monitoring BW {1} status\n", e.name(), bwInterf.id().toString());
 				}
 				// TODO change back from SevError?
 				TraceEvent(SevError, "BWStatusMonitoringFailed", bmData->id)
@@ -1105,7 +1115,7 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 		// Expected errors here are: [broken_promise]
 		if (e.code() != error_code_broken_promise) {
 			if (BM_DEBUG) {
-				printf("BM got unexpected error %s monitoring BW %s\n", e.name(), bwInterf.id().toString().c_str());
+				fmt::print("BM got unexpected error {0} monitoring BW {1}\n", e.name(), bwInterf.id().toString());
 			}
 			// TODO change back from SevError?
 			TraceEvent(SevError, "BWMonitoringFailed", bmData->id).detail("BlobWorkerID", bwInterf.id()).error(e);
@@ -1117,7 +1127,7 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 	wait(killBlobWorker(bmData, bwInterf, true));
 
 	if (BM_DEBUG) {
-		printf("No longer monitoring BW %s\n", bwInterf.id().toString().c_str());
+		fmt::print("No longer monitoring BW {0}\n", bwInterf.id().toString());
 	}
 	return Void();
 }
@@ -1308,10 +1318,10 @@ ACTOR Future<Void> chaosRangeMover(BlobManagerData* bmData) {
 				auto randomRange = bmData->workerAssignments.randomRange();
 				if (randomRange.value() != UID()) {
 					if (BM_DEBUG) {
-						printf("Range mover moving range [%s - %s): %s\n",
-						       randomRange.begin().printable().c_str(),
-						       randomRange.end().printable().c_str(),
-						       randomRange.value().toString().c_str());
+						fmt::print("Range mover moving range [{0} - {1}): {2}\n",
+						           randomRange.begin().printable().c_str(),
+						           randomRange.end().printable().c_str(),
+						           randomRange.value().toString().c_str());
 					}
 
 					// FIXME: with low probability, could immediately revoke it from the new assignment and move
@@ -1336,7 +1346,7 @@ ACTOR Future<Void> chaosRangeMover(BlobManagerData* bmData) {
 				printf("Range mover couldn't find random range to move, skipping\n");
 			}
 		} else if (BM_DEBUG) {
-			printf("Range mover found %d workers, skipping\n", bmData->workerAssignments.size());
+			fmt::print("Range mover found {0} workers, skipping\n", bmData->workerAssignments.size());
 		}
 	}
 }
@@ -1532,7 +1542,7 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(BlobManagerData* bmData, UID granule
  */
 ACTOR Future<Void> fullyDeleteGranule(BlobManagerData* self, UID granuleId, KeyRef historyKey) {
 	if (BM_DEBUG) {
-		printf("Fully deleting granule %s: init\n", granuleId.toString().c_str());
+		fmt::print("Fully deleting granule {0}: init\n", granuleId.toString());
 	}
 
 	// get files
@@ -1554,9 +1564,9 @@ ACTOR Future<Void> fullyDeleteGranule(BlobManagerData* self, UID granuleId, KeyR
 	}
 
 	if (BM_DEBUG) {
-		printf("Fully deleting granule %s: deleting %d files\n", granuleId.toString().c_str(), deletions.size());
+		fmt::print("Fully deleting granule {0}: deleting {1} files\n", granuleId.toString(), deletions.size());
 		for (auto filename : filesToDelete) {
-			printf(" - %s\n", filename.c_str());
+			fmt::print(" - {}\n", filename.c_str());
 		}
 	}
 
@@ -1568,7 +1578,7 @@ ACTOR Future<Void> fullyDeleteGranule(BlobManagerData* self, UID granuleId, KeyR
 
 	// delete metadata in FDB (history entry and file keys)
 	if (BM_DEBUG) {
-		printf("Fully deleting granule %s: deleting history and file keys\n", granuleId.toString().c_str());
+		fmt::print("Fully deleting granule {0}: deleting history and file keys\n", granuleId.toString());
 	}
 
 	state Transaction tr(self->db);
@@ -1588,7 +1598,7 @@ ACTOR Future<Void> fullyDeleteGranule(BlobManagerData* self, UID granuleId, KeyR
 	}
 
 	if (BM_DEBUG) {
-		printf("Fully deleting granule %s: success\n", granuleId.toString().c_str());
+		fmt::print("Fully deleting granule {0}: success\n", granuleId.toString());
 	}
 
 	return Void();
@@ -1604,7 +1614,7 @@ ACTOR Future<Void> fullyDeleteGranule(BlobManagerData* self, UID granuleId, KeyR
  */
 ACTOR Future<Void> partiallyDeleteGranule(BlobManagerData* self, UID granuleId, Version pruneVersion) {
 	if (BM_DEBUG) {
-		printf("Partially deleting granule %s: init\n", granuleId.toString().c_str());
+		fmt::print("Partially deleting granule {0}: init\n", granuleId.toString());
 	}
 
 	// get files
@@ -1651,9 +1661,9 @@ ACTOR Future<Void> partiallyDeleteGranule(BlobManagerData* self, UID granuleId, 
 	}
 
 	if (BM_DEBUG) {
-		printf("Partially deleting granule %s: deleting %d files\n", granuleId.toString().c_str(), deletions.size());
+		fmt::print("Partially deleting granule {0}: deleting {1} files\n", granuleId.toString(), deletions.size());
 		for (auto filename : filesToDelete) {
-			printf(" - %s\n", filename.c_str());
+			fmt::print(" - {0}\n", filename);
 		}
 	}
 
@@ -1669,7 +1679,7 @@ ACTOR Future<Void> partiallyDeleteGranule(BlobManagerData* self, UID granuleId, 
 
 	// delete metadata in FDB (deleted file keys)
 	if (BM_DEBUG) {
-		printf("Partially deleting granule %s: deleting file keys\n", granuleId.toString().c_str());
+		fmt::print("Partially deleting granule {0}: deleting file keys\n", granuleId.toString());
 	}
 
 	state Transaction tr(self->db);
@@ -1689,7 +1699,7 @@ ACTOR Future<Void> partiallyDeleteGranule(BlobManagerData* self, UID granuleId, 
 	}
 
 	if (BM_DEBUG) {
-		printf("Partially deleting granule %s: success\n", granuleId.toString().c_str());
+		fmt::print("Partially deleting granule {0}: success\n", granuleId.toString());
 	}
 	return Void();
 }
@@ -1704,10 +1714,11 @@ ACTOR Future<Void> partiallyDeleteGranule(BlobManagerData* self, UID granuleId, 
  */
 ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef endKey, Version pruneVersion, bool force) {
 	if (BM_DEBUG) {
-		printf("pruneRange starting for range [%s-%s) @ pruneVersion=%lld, force=%s\n",
-		       startKey.printable().c_str(),
-		       endKey.printable().c_str(),
-		       pruneVersion);
+		fmt::print("pruneRange starting for range [{0} - {1}) @ pruneVersion={2}, force={3}\n",
+		           startKey.printable(),
+		           endKey.printable(),
+		           pruneVersion,
+		           force);
 	}
 
 	// queue of <range, startVersion, endVersion> for BFS traversal of history
@@ -1735,10 +1746,10 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 	state KeyRangeMap<UID>::iterator activeRange;
 	for (activeRange = activeRanges.begin(); activeRange != activeRanges.end(); ++activeRange) {
 		if (BM_DEBUG) {
-			printf("Checking if active range [%s-%s), owned by BW %s, should be pruned\n",
-			       activeRange.begin().printable().c_str(),
-			       activeRange.end().printable().c_str(),
-			       activeRange.value().toString().c_str());
+			fmt::print("Checking if active range [{0} - {1}), owned by BW {2}, should be pruned\n",
+			           activeRange.begin().printable(),
+			           activeRange.end().printable(),
+			           activeRange.value().toString());
 		}
 
 		// assumption: prune boundaries must respect granule boundaries
@@ -1753,9 +1764,9 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 		loop {
 			try {
 				if (BM_DEBUG) {
-					printf("Fetching latest history entry for range [%s-%s)\n",
-					       activeRange.begin().printable().c_str(),
-					       activeRange.end().printable().c_str());
+					fmt::print("Fetching latest history entry for range [{0} - {1})\n",
+					           activeRange.begin().printable(),
+					           activeRange.end().printable());
 				}
 				Optional<GranuleHistory> history = wait(getLatestGranuleHistory(&tr, activeRange.range()));
 				// TODO: can we tell from the krm that this range is not valid, so that we don't need to do a get
@@ -1785,11 +1796,11 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 		historyEntryQueue.pop();
 
 		if (BM_DEBUG) {
-			printf("Processing history node [%s-%s) with versions [%lld, %lld)\n",
-			       currRange.begin.printable().c_str(),
-			       currRange.end.printable().c_str(),
-			       startVersion,
-			       endVersion);
+			fmt::print("Processing history node [{0} - {1}) with versions [{2}, {3})\n",
+			           currRange.begin.printable(),
+			           currRange.end.printable(),
+			           startVersion,
+			           endVersion);
 		}
 
 		// get the persisted history entry for this granule
@@ -1807,8 +1818,8 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 		}
 
 		if (BM_DEBUG) {
-			printf("Found history entry for this node. It's granuleID is %s\n",
-			       currHistoryNode.granuleID.toString().c_str());
+			fmt::print("Found history entry for this node. It's granuleID is {0}\n",
+			           currHistoryNode.granuleID.toString());
 		}
 
 		// There are three cases this granule can fall into:
@@ -1819,12 +1830,12 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 		// - otherwise, this granule is active, so don't schedule it for deletion
 		if (force || endVersion <= pruneVersion) {
 			if (BM_DEBUG) {
-				printf("Granule %s will be FULLY deleted\n", currHistoryNode.granuleID.toString().c_str());
+				fmt::print("Granule {0} will be FULLY deleted\n", currHistoryNode.granuleID.toString());
 			}
 			toFullyDelete.push_back({ currHistoryNode.granuleID, historyKey });
 		} else if (startVersion < pruneVersion) {
 			if (BM_DEBUG) {
-				printf("Granule %s will be partially deleted\n", currHistoryNode.granuleID.toString().c_str());
+				fmt::print("Granule {0} will be partially deleted\n", currHistoryNode.granuleID.toString());
 			}
 			toPartiallyDelete.push_back({ currHistoryNode.granuleID });
 		}
@@ -1834,18 +1845,18 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 			// if we already added this node to queue, skip it; otherwise, mark it as visited
 			if (visited.count({ parent.first.begin.begin(), parent.second })) {
 				if (BM_DEBUG) {
-					printf("Already added %s to queue, so skipping it\n", currHistoryNode.granuleID.toString().c_str());
+					fmt::print("Already added {0} to queue, so skipping it\n", currHistoryNode.granuleID.toString());
 				}
 				continue;
 			}
 			visited.insert({ parent.first.begin.begin(), parent.second });
 
 			if (BM_DEBUG) {
-				printf("Adding parent [%s-%s) with versions [%lld-%lld) to queue\n",
-				       parent.first.begin.printable().c_str(),
-				       parent.first.end.printable().c_str(),
-				       parent.second,
-				       startVersion);
+				fmt::print("Adding parent [{0} - {1}) with versions [{2} - {3}) to queue\n",
+				           parent.first.begin.printable(),
+				           parent.first.end.printable(),
+				           parent.second,
+				           startVersion);
 			}
 
 			// the parent's end version is this node's startVersion,
@@ -1871,7 +1882,7 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 
 	state int i;
 	if (BM_DEBUG) {
-		printf("%d granules to fully delete\n", toFullyDelete.size());
+		fmt::print("{0} granules to fully delete\n", toFullyDelete.size());
 	}
 	for (i = toFullyDelete.size() - 1; i >= 0; --i) {
 		UID granuleId;
@@ -1879,19 +1890,19 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 		std::tie(granuleId, historyKey) = toFullyDelete[i];
 		// FIXME: consider batching into a single txn (need to take care of txn size limit)
 		if (BM_DEBUG) {
-			printf("About to fully delete granule %s\n", granuleId.toString().c_str());
+			fmt::print("About to fully delete granule {0}\n", granuleId.toString());
 		}
 		wait(fullyDeleteGranule(self, granuleId, historyKey));
 	}
 
 	if (BM_DEBUG) {
-		printf("%d granules to partially delete\n", toPartiallyDelete.size());
+		fmt::print("{0} granules to partially delete\n", toPartiallyDelete.size());
 	}
 	std::vector<Future<Void>> partialDeletions;
 	for (i = toPartiallyDelete.size() - 1; i >= 0; --i) {
 		UID granuleId = toPartiallyDelete[i];
 		if (BM_DEBUG) {
-			printf("About to partially delete granule %s\n", granuleId.toString().c_str());
+			fmt::print("About to partially delete granule {0}\n", granuleId.toString());
 		}
 		partialDeletions.emplace_back(partiallyDeleteGranule(self, granuleId, pruneVersion));
 	}
@@ -1926,16 +1937,16 @@ ACTOR Future<Void> pruneRange(BlobManagerData* self, KeyRef startKey, KeyRef end
 			}
 			break;
 		} catch (Error& e) {
-			printf("Attempt to clear prune intent got error %s\n", e.name());
+			fmt::print("Attempt to clear prune intent got error {}\n", e.name());
 			wait(tr.onError(e));
 		}
 	}
 
 	if (BM_DEBUG) {
-		printf("Successfully pruned range [%s-%s) at pruneVersion=%lld\n",
-		       startKey.printable().c_str(),
-		       endKey.printable().c_str(),
-		       pruneVersion);
+		fmt::print("Successfully pruned range [{0} - {1}) at pruneVersion={2}\n",
+		           startKey.printable(),
+		           endKey.printable(),
+		           pruneVersion);
 	}
 	return Void();
 }
@@ -1964,7 +1975,7 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 	// setup bstore
 	try {
 		if (BM_DEBUG) {
-			printf("BM constructing backup container from %s\n", SERVER_KNOBS->BG_URL.c_str());
+			fmt::print("BM constructing backup container from {}\n", SERVER_KNOBS->BG_URL.c_str());
 		}
 		self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
 		if (BM_DEBUG) {
@@ -1972,7 +1983,7 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 		}
 	} catch (Error& e) {
 		if (BM_DEBUG) {
-			printf("BM got backup container init error %s\n", e.name());
+			fmt::print("BM got backup container init error {0}\n", e.name());
 		}
 		throw e;
 	}
@@ -2088,11 +2099,11 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 							bool force;
 							std::tie(pruneVersion, force) = decodeBlobGranulePruneValue(pruneIntents[rangeIdx].value);
 
-							printf("about to prune range [%s-%s) @ %d, force=%s\n",
-							       rangeStartKey.printable().c_str(),
-							       rangeEndKey.printable().c_str(),
-							       pruneVersion,
-							       force ? "T" : "F");
+							fmt::print("about to prune range [{0} - {1}) @ {2}, force={3}\n",
+							           rangeStartKey.printable(),
+							           rangeEndKey.printable(),
+							           pruneVersion,
+							           force ? "T" : "F");
 							prunes.emplace_back(pruneRange(self, rangeStartKey, rangeEndKey, pruneVersion, force));
 						}
 
@@ -2120,7 +2131,7 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 					throw e;
 				}
 				if (BM_DEBUG) {
-					printf("monitorPruneKeys for BM %s saw error %s\n", self->id.toString().c_str(), e.name());
+					fmt::print("monitorPruneKeys for BM {0} saw error {1}\n", self->id.toString(), e.name());
 				}
 				// don't want to kill the blob manager for errors around pruning
 				TraceEvent("MonitorPruneKeysError", self->id).detail("Error", e.name());
@@ -2131,7 +2142,7 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 		}
 	} catch (Error& e) {
 		if (BM_DEBUG) {
-			printf("monitorPruneKeys got error %s\n", e.name());
+			fmt::print("monitorPruneKeys got error {}\n", e.name());
 		}
 		throw e;
 	}

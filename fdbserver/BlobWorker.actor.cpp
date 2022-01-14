@@ -319,7 +319,7 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 	if (totalState.empty()) {
 		ASSERT(newState == BlobGranuleSplitState::Done);
 		if (BW_DEBUG) {
-			printf("Found empty split state for parent granule %s\n", parentGranuleID.toString().c_str());
+			fmt::print("Found empty split state for parent granule {0}\n", parentGranuleID.toString());
 		}
 		// must have retried and successfully nuked everything
 		return Void();
@@ -355,11 +355,11 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 
 	if (currentState < newState) {
 		if (BW_DEBUG) {
-			printf("Updating granule %s split state from %s %d -> %d\n",
-			       currentGranuleID.toString().c_str(),
-			       parentGranuleID.toString().c_str(),
-			       currentState,
-			       newState);
+			fmt::print("Updating granule {0} split state from {1} {2} -> {3}\n",
+			           currentGranuleID.toString(),
+			           parentGranuleID.toString(),
+			           currentState,
+			           newState);
 		}
 
 		Key myStateKey = blobGranuleSplitKeyFor(parentGranuleID, currentGranuleID);
@@ -368,9 +368,7 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 			// we are the last one to change from Assigned -> Done, so everything can be cleaned up for the old
 			// change feed and splitting state
 			if (BW_DEBUG) {
-				printf("%s destroying old granule %s\n",
-				       currentGranuleID.toString().c_str(),
-				       parentGranuleID.toString().c_str());
+				fmt::print("{0} destroying old granule {1}\n", currentGranuleID.toString(), parentGranuleID.toString());
 			}
 
 			// FIXME: appears change feed destroy isn't working! ADD BACK
@@ -384,20 +382,20 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 			    totalStarted == 1) {
 				// We are the last one to change from Start -> Assigned, so we can stop the parent change feed.
 				if (BW_DEBUG) {
-					printf("%s stopping change feed for old granule %s\n",
-					       currentGranuleID.toString().c_str(),
-					       parentGranuleID.toString().c_str());
+					fmt::print("{0} stopping change feed for old granule {1}\n",
+					           currentGranuleID.toString().c_str(),
+					           parentGranuleID.toString().c_str());
 				}
 
 				wait(updateChangeFeed(tr, KeyRef(parentGranuleID.toString()), ChangeFeedStatus::CHANGE_FEED_STOP));
 			}
 		}
 	} else if (BW_DEBUG) {
-		printf("Ignoring granule %s split state from %s %d -> %d\n",
-		       currentGranuleID.toString().c_str(),
-		       parentGranuleID.toString().c_str(),
-		       currentState,
-		       newState);
+		fmt::print("Ignoring granule {0} split state from {1} {2} -> {3}\n",
+		           currentGranuleID.toString(),
+		           parentGranuleID.toString(),
+		           currentState,
+		           newState);
 	}
 
 	return Void();
@@ -515,7 +513,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 		}
 
 		if (BW_DEBUG) {
-			printf("deleting s3 delta file %s after error %s\n", fname.c_str(), e.name());
+			fmt::print("deleting s3 delta file {0} after error {1}\n", fname, e.name());
 		}
 		state Error eState = e;
 		++bwData->stats.s3DeleteReqs;
@@ -558,10 +556,10 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
 	if (BW_DEBUG) {
-		printf("Granule [%s - %s) read %d snapshot rows\n",
-		       keyRange.begin.printable().c_str(),
-		       keyRange.end.printable().c_str(),
-		       snapshot.size());
+		fmt::print("Granule [{0} - {1}) read {2} snapshot rows\n",
+		           keyRange.begin.printable(),
+		           keyRange.end.printable(),
+		           snapshot.size());
 	}
 
 	// TODO REMOVE sanity checks!
@@ -571,9 +569,9 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	}
 	for (int i = 0; i < snapshot.size() - 1; i++) {
 		if (snapshot[i].key >= snapshot[i + 1].key) {
-			printf("SORT ORDER VIOLATION IN SNAPSHOT FILE: %s, %s\n",
-			       snapshot[i].key.printable().c_str(),
-			       snapshot[i + 1].key.printable().c_str());
+			fmt::print("SORT ORDER VIOLATION IN SNAPSHOT FILE: {0}, {1}\n",
+			           snapshot[i].key.printable(),
+			           snapshot[i + 1].key.printable());
 		}
 		ASSERT(snapshot[i].key < snapshot[i + 1].key);
 	}
@@ -636,7 +634,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 		}
 
 		if (BW_DEBUG) {
-			printf("deleting s3 snapshot file %s after error %s\n", fname.c_str(), e.name());
+			fmt::print("deleting s3 snapshot file {0} after error {1}\n", fname, e.name());
 		}
 		state Error eState = e;
 		++bwData->stats.s3DeleteReqs;
@@ -645,11 +643,11 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	}
 
 	if (BW_DEBUG) {
-		printf("Granule [%s - %s) committed new snapshot file %s with %d bytes\n\n",
-		       keyRange.begin.printable().c_str(),
-		       keyRange.end.printable().c_str(),
-		       fname.c_str(),
-		       serialized.size());
+		fmt::print("Granule [{0} - {1}) committed new snapshot file {2} with {3} bytes\n\n",
+		           keyRange.begin.printable(),
+		           keyRange.end.printable(),
+		           fname,
+		           serialized.size());
 	}
 
 	if (BUGGIFY_WITH_PROB(0.1)) {
@@ -663,9 +661,9 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
                                                        Reference<GranuleMetadata> metadata,
                                                        UID granuleID) {
 	if (BW_DEBUG) {
-		printf("Dumping snapshot from FDB for [%s - %s)\n",
-		       metadata->keyRange.begin.printable().c_str(),
-		       metadata->keyRange.end.printable().c_str());
+		fmt::print("Dumping snapshot from FDB for [{0} - {1})\n",
+		           metadata->keyRange.begin.printable(),
+		           metadata->keyRange.end.printable());
 	}
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
 
@@ -707,10 +705,10 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			return f;
 		} catch (Error& e) {
 			if (BW_DEBUG) {
-				printf("Dumping snapshot from FDB for [%s - %s) got error %s\n",
-				       metadata->keyRange.begin.printable().c_str(),
-				       metadata->keyRange.end.printable().c_str(),
-				       e.name());
+				fmt::print("Dumping snapshot from FDB for [{0} - {1}) got error {2}\n",
+				           metadata->keyRange.begin.printable(),
+				           metadata->keyRange.end.printable(),
+				           e.name());
 			}
 			wait(tr->onError(e));
 		}
@@ -727,9 +725,9 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
                                             Version version) {
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 	if (BW_DEBUG) {
-		printf("Compacting snapshot from blob for [%s - %s)\n",
-		       metadata->keyRange.begin.printable().c_str(),
-		       metadata->keyRange.end.printable().c_str());
+		fmt::print("Compacting snapshot from blob for [{0} - {1})\n",
+		           metadata->keyRange.begin.printable().c_str(),
+		           metadata->keyRange.end.printable().c_str());
 	}
 
 	ASSERT(!files.snapshotFiles.empty());
@@ -800,10 +798,10 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 			return f;
 		} catch (Error& e) {
 			if (BW_DEBUG) {
-				printf("Compacting snapshot from blob for [%s - %s) got error %s\n",
-				       metadata->keyRange.begin.printable().c_str(),
-				       metadata->keyRange.end.printable().c_str(),
-				       e.name());
+				fmt::print("Compacting snapshot from blob for [{0} - {1}) got error {2}\n",
+				           metadata->keyRange.begin.printable(),
+				           metadata->keyRange.end.printable(),
+				           e.name());
 			}
 			throw e;
 		}
@@ -1022,10 +1020,10 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 		}
 		metadata->pendingDeltaVersion = cfRollbackVersion;
 		if (BW_DEBUG) {
-			printf("[%s - %s) rollback discarding all %d in-memory mutations\n",
-			       metadata->keyRange.begin.printable().c_str(),
-			       metadata->keyRange.end.printable().c_str(),
-			       metadata->currentDeltas.size());
+			fmt::print("[{0} - {1}) rollback discarding all {2} in-memory mutations\n",
+			           metadata->keyRange.begin.printable(),
+			           metadata->keyRange.end.printable(),
+			           metadata->currentDeltas.size());
 		}
 
 		// discard all in-memory mutations
@@ -1131,7 +1129,7 @@ ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
 			// a bit, as blobGranuleUpdateFiles will switch to the new change feed
 			if (e.code() != error_code_change_feed_cancelled) {
 				if (BW_DEBUG) {
-					printf("waitVersionCommitted WAL got unexpected error %s\n", e.name());
+					fmt::print("waitVersionCommitted WAL got unexpected error {}\n", e.name());
 				}
 				throw e;
 			}
@@ -1703,9 +1701,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 					if (inFlightFiles.size() > 10 && inFlightFiles.front().version <= metadata->knownCommittedVersion) {
 						if (BW_DEBUG) {
-							printf("[%s - %s) Waiting on delta file b/c old change feed\n",
-							       metadata->keyRange.begin.printable().c_str(),
-							       metadata->keyRange.end.printable().c_str());
+							fmt::print("[{0} - {1}) Waiting on delta file b/c old change feed\n",
+							           metadata->keyRange.begin.printable(),
+							           metadata->keyRange.end.printable());
 						}
 						choose {
 							when(BlobFileIndex completedDeltaFile = wait(inFlightFiles.front().future)) {}
@@ -1742,10 +1740,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		} else {
 			++bwData->stats.granuleUpdateErrors;
 			if (BW_DEBUG) {
-				printf("Granule file updater for [%s - %s) got error %s, exiting\n",
-				       metadata->keyRange.begin.printable().c_str(),
-				       metadata->keyRange.end.printable().c_str(),
-				       e.name());
+				fmt::print("Granule file updater for [{0} - {1}) got error {2}, exiting\n",
+				           metadata->keyRange.begin.printable(),
+				           metadata->keyRange.end.printable(),
+				           e.name());
 			}
 			TraceEvent(SevWarn, "GranuleFileUpdaterError", bwData->id).detail("Granule", metadata->keyRange).error(e);
 
@@ -1868,7 +1866,7 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 			return Void();
 		}
 		if (BW_DEBUG) {
-			printf("Loading blob granule history got unexpected error %s\n", e.name());
+			fmt::print("Loading blob granule history got unexpected error {}\n", e.name());
 		}
 		// TODO this should never happen?
 		ASSERT(false);
@@ -2008,11 +2006,11 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 
 ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, BlobGranuleFileRequest req) {
 	if (BW_REQUEST_DEBUG || DEBUG_BW_WAIT_VERSION == req.readVersion) {
-		printf("BW %s processing blobGranuleFileRequest for range [%s-%s) @ %lld\n",
-		       bwData->id.toString().c_str(),
-		       req.keyRange.begin.printable().c_str(),
-		       req.keyRange.end.printable().c_str(),
-		       req.readVersion);
+		fmt::print("BW {0} processing blobGranuleFileRequest for range [{1} -{2}) @ {3}\n",
+		           bwData->id.toString(),
+		           req.keyRange.begin.printable(),
+		           req.keyRange.end.printable(),
+		           req.readVersion);
 	}
 
 	try {
@@ -2030,12 +2028,12 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 			bool isValid = r.value().activeMetadata.isValid();
 			if (lastRangeEnd < r.begin() || !isValid) {
 				if (BW_REQUEST_DEBUG || DEBUG_BW_WAIT_VERSION == req.readVersion) {
-					printf("No %s blob data for [%s - %s) in request range [%s - %s), skipping request\n",
-					       isValid ? "" : "valid",
-					       lastRangeEnd.printable().c_str(),
-					       r.begin().printable().c_str(),
-					       req.keyRange.begin.printable().c_str(),
-					       req.keyRange.end.printable().c_str());
+					fmt::print("No {0} blob data for [{1} - {2}) in request range [{3} - {4}), skipping request\n",
+					           isValid ? "" : "valid",
+					           lastRangeEnd.printable(),
+					           r.begin().printable(),
+					           req.keyRange.begin.printable(),
+					           req.keyRange.end.printable());
 				}
 
 				throw wrong_shard_server();
@@ -2045,11 +2043,11 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 		}
 		if (lastRangeEnd < req.keyRange.end) {
 			if (BW_REQUEST_DEBUG || DEBUG_BW_WAIT_VERSION == req.readVersion) {
-				printf("No blob data for [%s - %s) in request range [%s - %s), skipping request\n",
-				       lastRangeEnd.printable().c_str(),
-				       req.keyRange.end.printable().c_str(),
-				       req.keyRange.begin.printable().c_str(),
-				       req.keyRange.end.printable().c_str());
+				fmt::print("No blob data for [{0} - {1}) in request range [{2} - {3}), skipping request\n",
+				           lastRangeEnd.printable(),
+				           req.keyRange.end.printable(),
+				           req.keyRange.begin.printable(),
+				           req.keyRange.end.printable());
 			}
 
 			throw wrong_shard_server();
@@ -2202,12 +2200,12 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 			}
 
 			if (!metadata->cancelled.canBeSet()) {
-				printf("ERROR: Request [%s - %s) @ %lld cancelled for granule [%s - %s) after waitForVersion!\n",
-				       req.keyRange.begin.printable().c_str(),
-				       req.keyRange.end.printable().c_str(),
-				       req.readVersion,
-				       metadata->keyRange.begin.printable().c_str(),
-				       metadata->keyRange.end.printable().c_str());
+				fmt::print("ERROR: Request [{0} - {1}) @ {2} cancelled for granule [{3} - {4}) after waitForVersion!\n",
+				           req.keyRange.begin.printable(),
+				           req.keyRange.end.printable(),
+				           req.readVersion,
+				           metadata->keyRange.begin.printable(),
+				           metadata->keyRange.end.printable());
 			}
 
 			// granule is up to date, do read
@@ -2326,10 +2324,10 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 	state Key lockKey = blobGranuleLockKeyFor(req.keyRange);
 
 	if (BW_DEBUG) {
-		printf("%s [%s - %s) opening\n",
-		       bwData->id.toString().c_str(),
-		       req.keyRange.begin.printable().c_str(),
-		       req.keyRange.end.printable().c_str());
+		fmt::print("{0} [{1} - {2}) opening\n",
+		           bwData->id.toString(),
+		           req.keyRange.begin.printable(),
+		           req.keyRange.end.printable());
 	}
 
 	loop {
@@ -2416,7 +2414,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 					    decodeBlobGranuleLockValue(parentGranuleLockValue.get());
 					UID parentGranuleID = std::get<2>(parentGranuleLock);
 					if (BW_DEBUG) {
-						printf("  parent granule id %s\n", parentGranuleID.toString().c_str());
+						fmt::print("  parent granule id {}\n", parentGranuleID.toString());
 					}
 
 					info.parentGranule = std::pair(parentGranuleRange, parentGranuleID);
@@ -2580,7 +2578,7 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 		}*/
 		bool thisAssignmentNewer = newerRangeAssignment(r.value(), epoch, seqno);
 		if (BW_DEBUG) {
-			printf("thisAssignmentNewer=%s\n", thisAssignmentNewer ? "true" : "false");
+			fmt::print("thisAssignmentNewer={}\n", thisAssignmentNewer ? "true" : "false");
 		}
 
 		// if this granule already has it, and this was a specialassignment (i.e. a new blob maanger is
@@ -2594,7 +2592,7 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 		}
 
 		if (BW_DEBUG) {
-			printf("last: (%d, %d). now: (%d, %d)\n", r.value().lastEpoch, r.value().lastSeqno, epoch, seqno);
+			fmt::print("last: ({0}, {1}). now: ({2}, {3})\n", r.value().lastEpoch, r.value().lastSeqno, epoch, seqno);
 		}
 
 		if (r.value().lastEpoch == epoch && r.value().lastSeqno == seqno) {
@@ -2722,12 +2720,12 @@ ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData, BlobWork
 			wait(tr->commit());
 
 			if (BW_DEBUG) {
-				printf("Registered blob worker %s\n", interf.id().toString().c_str());
+				fmt::print("Registered blob worker {}\n", interf.id().toString());
 			}
 			return Void();
 		} catch (Error& e) {
 			if (BW_DEBUG) {
-				printf("Registering blob worker %s got error %s\n", interf.id().toString().c_str(), e.name());
+				fmt::print("Registering blob worker {0} got error {1}\n", interf.id().toString(), e.name());
 			}
 			wait(tr->onError(e));
 		}
@@ -2884,7 +2882,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 
 	try {
 		if (BW_DEBUG) {
-			printf("BW constructing backup container from %s\n", SERVER_KNOBS->BG_URL.c_str());
+			fmt::print("BW constructing backup container from {0}\n", SERVER_KNOBS->BG_URL);
 		}
 		self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
 		if (BW_DEBUG) {
@@ -2895,7 +2893,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		wait(registerBlobWorker(self, bwInterf));
 	} catch (Error& e) {
 		if (BW_DEBUG) {
-			printf("BW got backup container init error %s\n", e.name());
+			fmt::print("BW got backup container init error {0}\n", e.name());
 		}
 		// if any errors came up while initializing the blob worker, let the blob manager know
 		// that recruitment failed
@@ -2928,7 +2926,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			when(state GranuleStatusStreamRequest req = waitNext(bwInterf.granuleStatusStreamRequest.getFuture())) {
 				if (self->managerEpochOk(req.managerEpoch)) {
 					if (BW_DEBUG) {
-						printf("Worker %s got new granule status endpoint\n", self->id.toString().c_str());
+						fmt::print("Worker {0} got new granule status endpoint\n", self->id.toString());
 					}
 					// TODO: pick a reasonable byte limit instead of just piggy-backing
 					req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
