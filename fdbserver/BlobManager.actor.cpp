@@ -384,6 +384,9 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 		if (e.code() == error_code_operation_cancelled) {
 			throw;
 		}
+		if (!bmData->workersById.count(workerID)) {
+			return Void();
+		}
 		// TODO confirm: using reliable delivery this should only trigger if the worker is marked as failed, right?
 		// So assignment needs to be retried elsewhere, and a revoke is trivially complete
 		if (assignment.isAssign) {
