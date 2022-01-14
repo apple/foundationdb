@@ -145,10 +145,10 @@ set(FDBSERVER_SRCS
   ptxn/test/CommitUtils.h
   ptxn/test/Driver.actor.cpp
   ptxn/test/Driver.h
-  ptxn/test/FakeLogSystem.h
   ptxn/test/FakeLogSystem.cpp
-  ptxn/test/FakePeekCursor.h
+  ptxn/test/FakeLogSystem.h
   ptxn/test/FakePeekCursor.cpp
+  ptxn/test/FakePeekCursor.h
   ptxn/test/FakeProxy.actor.cpp
   ptxn/test/FakeProxy.actor.h
   ptxn/test/FakeResolver.actor.h

@@ -95,6 +95,7 @@ struct TLogSet {
 	// TODO: redundant information in "tLogsPtxn" and "ptxnTLogGroups".
 	//       We could use map<TLogGroupID, std::vector<int>> instead.
 
+	// FIXME TLogSetBase <- TLogSet/ptxnTLogSet
 	std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>> tLogsPtxn;
 	// A list of TLog Group IDs
 	std::vector<ptxn::TLogGroupID> tLogGroupIDs;

@@ -140,8 +140,9 @@ public:
 	}
 
 	Future<Void> commit(bool sequential) override {
-		if (getAvailableSize() <= 0) {
-			TraceEvent(SevError, "KeyValueStoreMemory_OutOfSpace", id).log();
+		auto availableSize = getAvailableSize();
+		if (availableSize <= 0) {
+			TraceEvent(SevError, "KeyValueStoreMemory_OutOfSpace", id).detail("AvailableSize", availableSize).log();
 			return Never();
 		}
 
