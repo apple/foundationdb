@@ -41,6 +41,10 @@ public:
 	void removeMockTCPEndpoint(const std::string& host, const std::string& service);
 	void clearMockTCPEndpoints();
 	std::vector<NetworkAddress> getTCPEndpoint(const std::string& host, const std::string& service);
+	const std::map<std::string, std::vector<NetworkAddress>> getMockDNS() const { return hostnameToAddresses; }
+	void setMockDNS(const std::map<std::string, std::vector<NetworkAddress>>& mockDNS) {
+		hostnameToAddresses = mockDNS;
+	}
 
 private:
 	std::map<std::string, std::vector<NetworkAddress>> hostnameToAddresses;
