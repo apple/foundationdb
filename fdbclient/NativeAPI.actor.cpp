@@ -7526,12 +7526,6 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 
 		// send mutations at nextVersion to the client
 		if (nextOut.back().mutations.empty()) {
-			// TODO REMOVE, for debugging
-			if (nextOut.back().version < results->lastReturnedVersion.get()) {
-				printf("ERROR: merge cursor got empty version <= lastReturnedVersion");
-			}
-			ASSERT(nextOut.back().version >= results->lastReturnedVersion.get());
-
 			ASSERT(results->mutations.isEmpty());
 		} else {
 			// TODO REMOVE, for debugging
