@@ -276,7 +276,7 @@ public:
 
 	// watch map operations
 	Reference<WatchMetadata> getWatchMetadata(KeyRef key) const;
-	KeyRef setWatchMetadata(Reference<WatchMetadata> metadata);
+	Key setWatchMetadata(Reference<WatchMetadata> metadata);
 	void deleteWatchMetadata(KeyRef key);
 	void clearWatchMetadata();
 
