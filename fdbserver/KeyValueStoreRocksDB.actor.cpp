@@ -744,9 +744,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::string path;
 			std::string dataPath;
 			ShardMap* shardMap;
+			std::set<std::shared_ptr<DataShard>>* dirtyShards;
 			bool deleteOnClose;
-			CloseAction(std::string path, std::string dataPath, ShardMap* shardMap, bool deleteOnClose)
-			  : path(path), dataPath(dataPath), shardMap(shardMap), deleteOnClose(deleteOnClose) {}
+			CloseAction(std::string path,
+			            std::string dataPath,
+			            ShardMap* shardMap,
+			            std::set<std::shared_ptr<DataShard>>* dirtyShards,
+			            bool deleteOnClose)
+			  : path(path), dataPath(dataPath), shardMap(shardMap), dirtyShards(dirtyShards),
+			    deleteOnClose(deleteOnClose) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 
@@ -762,10 +768,19 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 						it.value()->deletePending = true;
 					}
 				}
+				if (a.dirtyShards) {
+					for (auto shard : *(a.dirtyShards)) {
+						shard->deletePending = true;
+					}
+				}
 			}
 
 			// Close and delete shard if needed.
 			a.shardMap->clear();
+
+			if (a.dirtyShards) {
+				a.dirtyShards->clear();
+			}
 
 			TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Close");
 			a.done.send(Void());
@@ -1106,7 +1121,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		self->metrics.reset();
 
 		wait(self->readThreads->stop());
-		auto a = new Writer::CloseAction(self->path, self->dataPath, &self->shardMap, deleteOnClose);
+		auto a = new Writer::CloseAction(
+		    self->path, self->dataPath, &self->shardMap, self->dirtyShards.get(), deleteOnClose);
 		auto f = a->done.getFuture();
 		self->writeThread->post(a);
 		wait(f);
@@ -1152,8 +1168,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		auto it = shardMap.rangeContaining(kv.key);
 		if (it.value() == nullptr) {
-			std::cout << "Write to non exist shard " << kv.key.toString() << ", " << it.range().begin.toString() << " : " << it.range().end.toString();
-			ASSERT(it.value()); // Non-exist shard.
+			std::cout << "Write to non exist shard " << kv.key.toString() << ", " << it.range().begin.toString()
+			          << " : " << it.range().end.toString() << "\n";
+			// ASSERT(it.value()); // Non-exist shard.
+			TraceEvent(SevError, "RocksDB")
+			    .detail("Method", "Set")
+			    .detail("Key", kv.key)
+			    .detail("Begin", it.range().begin)
+			    .detail("End", it.range().end);
+			return;
 		}
 
 		it.value()->writeBatch.Put(toSlice(kv.key), toSlice(kv.value));
@@ -1259,7 +1282,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (it.value() == nullptr || it.value()->db == nullptr) {
 			// TODO: Add new error code, e.g., shard not found.
 			// a.result.sendError(internal_error());
-			return internal_error();
+			return Optional<Value>();
 		}
 
 		if (!shouldThrottle(type, key)) {
@@ -1521,220 +1544,221 @@ IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
 
 namespace {
 
+/*
 TEST_CASE("RocksDBKVS/SystemKeySpace") {
-	state const std::string rocksDBTestDir = "rocksdb-kvstore";
-	platform::eraseDirectoryRecursive(rocksDBTestDir);
+    state const std::string rocksDBTestDir = "rocksdb-kvstore";
+    platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+    state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+    wait(kvStore->init());
 
-	kvStore->set({ LiteralStringRef("\xff/foo"), LiteralStringRef("bxx") });
-	kvStore->set({ LiteralStringRef("\xff/bar"), LiteralStringRef("b") });
-	wait(kvStore->commit(false));
+    kvStore->set({ LiteralStringRef("\xff/foo"), LiteralStringRef("bxx") });
+    kvStore->set({ LiteralStringRef("\xff/bar"), LiteralStringRef("b") });
+    wait(kvStore->commit(false));
 
-	RangeResult result = wait(kvStore->readRange(defaultShardRange, 100, 500, IKeyValueStore::ReadType::NORMAL));
-	std::cout << "Default shard " << result.toString() << "\n";
+    RangeResult result = wait(kvStore->readRange(defaultShardRange, 100, 500, IKeyValueStore::ReadType::NORMAL));
+    std::cout << "Default shard " << result.toString() << "\n";
 
-	for (auto kv : result) {
-		std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
-	}
+    for (auto kv : result) {
+        std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
+    }
 
-	kvStore->clear(KeyRangeRef("\xff"_sr, "\xff/c"_sr));
-	wait(kvStore->commit(false));
+    kvStore->clear(KeyRangeRef("\xff"_sr, "\xff/c"_sr));
+    wait(kvStore->commit(false));
 
-	RangeResult result = wait(kvStore->readRange(defaultShardRange, 100, 500, IKeyValueStore::ReadType::NORMAL));
-	std::cout << "After clear range " << result.toString() << "\n";
+    RangeResult result = wait(kvStore->readRange(defaultShardRange, 100, 500, IKeyValueStore::ReadType::NORMAL));
+    std::cout << "After clear range " << result.toString() << "\n";
 
-	for (auto kv : result) {
-		std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
-	}
+    for (auto kv : result) {
+        std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
+    }
 
-	Future<Void> closed = kvStore->onClosed();
-	kvStore->dispose();
-	wait(closed);
-	return Void();
+    Future<Void> closed = kvStore->onClosed();
+    kvStore->dispose();
+    wait(closed);
+    return Void();
 }
 
 TEST_CASE("RocksDBKVS/CrossShardOps") {
-	state const std::string rocksDBTestDir = "rocksdb-kvstore";
-	platform::eraseDirectoryRecursive(rocksDBTestDir);
+    state const std::string rocksDBTestDir = "rocksdb-kvstore";
+    platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+    state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+    wait(kvStore->init());
 
-	kvStore->addShard(KeyRangeRef("f"_sr, "g"_sr), deterministicRandom()->randomUniqueID());
-	kvStore->set({ LiteralStringRef("foo"), LiteralStringRef("bar") });
-	kvStore->set({ LiteralStringRef("fd"), LiteralStringRef("baf") });
-	kvStore->set({ LiteralStringRef("fko"), LiteralStringRef("sr") });
-	kvStore->set({ LiteralStringRef("fp"), LiteralStringRef("kddr") });
-	wait(kvStore->commit(false));
+    kvStore->addShard(KeyRangeRef("f"_sr, "g"_sr), deterministicRandom()->randomUniqueID());
+    kvStore->set({ LiteralStringRef("foo"), LiteralStringRef("bar") });
+    kvStore->set({ LiteralStringRef("fd"), LiteralStringRef("baf") });
+    kvStore->set({ LiteralStringRef("fko"), LiteralStringRef("sr") });
+    kvStore->set({ LiteralStringRef("fp"), LiteralStringRef("kddr") });
+    wait(kvStore->commit(false));
 
-	RangeResult result =
-	    wait(kvStore->readRange(KeyRangeRef("f"_sr, "g"_sr), 100, 500, IKeyValueStore::ReadType::NORMAL));
+    RangeResult result =
+        wait(kvStore->readRange(KeyRangeRef("f"_sr, "g"_sr), 100, 500, IKeyValueStore::ReadType::NORMAL));
 
-	std::cout << "Single Shard Read\n";
-	for (auto kv : result) {
-		std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
-	}
+    std::cout << "Single Shard Read\n";
+    for (auto kv : result) {
+        std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
+    }
 
-	kvStore->addShard(KeyRangeRef("g"_sr, "m"_sr), deterministicRandom()->randomUniqueID());
-	kvStore->set({ LiteralStringRef("fc"), LiteralStringRef("bxx") });
-	kvStore->set({ LiteralStringRef("g"), LiteralStringRef("b") });
-	kvStore->set({ LiteralStringRef("if"), LiteralStringRef("fi") });
-	kvStore->set({ LiteralStringRef("h"), LiteralStringRef("r") });
-	wait(kvStore->commit(false));
+    kvStore->addShard(KeyRangeRef("g"_sr, "m"_sr), deterministicRandom()->randomUniqueID());
+    kvStore->set({ LiteralStringRef("fc"), LiteralStringRef("bxx") });
+    kvStore->set({ LiteralStringRef("g"), LiteralStringRef("b") });
+    kvStore->set({ LiteralStringRef("if"), LiteralStringRef("fi") });
+    kvStore->set({ LiteralStringRef("h"), LiteralStringRef("r") });
+    wait(kvStore->commit(false));
 
-	RangeResult result =
-	    wait(kvStore->readRange(KeyRangeRef("f"_sr, "m"_sr), 100, 500, IKeyValueStore::ReadType::NORMAL));
-	std::cout << "Cross Shard Read " << result.toString() << "\n";
+    RangeResult result =
+        wait(kvStore->readRange(KeyRangeRef("f"_sr, "m"_sr), 100, 500, IKeyValueStore::ReadType::NORMAL));
+    std::cout << "Cross Shard Read " << result.toString() << "\n";
 
-	for (auto kv : result) {
-		std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
-	}
+    for (auto kv : result) {
+        std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
+    }
 
-	kvStore->clear(KeyRangeRef("a"_sr, "fm"_sr));
-	wait(kvStore->commit(false));
+    kvStore->clear(KeyRangeRef("a"_sr, "fm"_sr));
+    wait(kvStore->commit(false));
 
-	RangeResult result =
-	    wait(kvStore->readRange(KeyRangeRef("f"_sr, "m"_sr), 100, 500, IKeyValueStore::ReadType::NORMAL));
-	std::cout << "After clear range " << result.toString() << "\n";
+    RangeResult result =
+        wait(kvStore->readRange(KeyRangeRef("f"_sr, "m"_sr), 100, 500, IKeyValueStore::ReadType::NORMAL));
+    std::cout << "After clear range " << result.toString() << "\n";
 
-	for (auto kv : result) {
-		std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
-	}
+    for (auto kv : result) {
+        std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
+    }
 
-	Future<Void> closed = kvStore->onClosed();
-	kvStore->dispose();
-	wait(closed);
-	return Void();
+    Future<Void> closed = kvStore->onClosed();
+    kvStore->dispose();
+    wait(closed);
+    return Void();
 }
 
 TEST_CASE("RocksDBKVS/ClearRange") {
-	state const std::string rocksDBTestDir = "rocksdb-kvstore";
-	platform::eraseDirectoryRecursive(rocksDBTestDir);
+    state const std::string rocksDBTestDir = "rocksdb-kvstore";
+    platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+    state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+    wait(kvStore->init());
 
-	kvStore->addShard(KeyRangeRef("f"_sr, "g"_sr), deterministicRandom()->randomUniqueID());
-	kvStore->set({ LiteralStringRef("foo"), LiteralStringRef("bar") });
-	kvStore->set({ LiteralStringRef("fd"), LiteralStringRef("baf") });
-	kvStore->set({ LiteralStringRef("fko"), LiteralStringRef("sr") });
-	kvStore->set({ LiteralStringRef("fp"), LiteralStringRef("kddr") });
-	wait(kvStore->commit(false));
+    kvStore->addShard(KeyRangeRef("f"_sr, "g"_sr), deterministicRandom()->randomUniqueID());
+    kvStore->set({ LiteralStringRef("foo"), LiteralStringRef("bar") });
+    kvStore->set({ LiteralStringRef("fd"), LiteralStringRef("baf") });
+    kvStore->set({ LiteralStringRef("fko"), LiteralStringRef("sr") });
+    kvStore->set({ LiteralStringRef("fp"), LiteralStringRef("kddr") });
+    wait(kvStore->commit(false));
 
-	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
-	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
-	std::cout << "Finish read";
+    Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
+    ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+    std::cout << "Finish read";
 
-	RangeResult result =
-	    wait(kvStore->readRange(KeyRangeRef("f"_sr, "g"_sr), 100, 500, IKeyValueStore::ReadType::NORMAL));
-	std::cout << "Range result user " << result.toString();
+    RangeResult result =
+        wait(kvStore->readRange(KeyRangeRef("f"_sr, "g"_sr), 100, 500, IKeyValueStore::ReadType::NORMAL));
+    std::cout << "Range result user " << result.toString();
 
-	for (auto kv : result) {
-		std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
-	}
+    for (auto kv : result) {
+        std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
+    }
 
-	kvStore->clear(KeyRangeRef("f"_sr, "fm"_sr), nullptr);
-	wait(kvStore->commit(false));
+    kvStore->clear(KeyRangeRef("f"_sr, "fm"_sr), nullptr);
+    wait(kvStore->commit(false));
 
-	RangeResult result =
-	    wait(kvStore->readRange(KeyRangeRef("f"_sr, "g"_sr), 100, 500, IKeyValueStore::ReadType::NORMAL));
-	std::cout << "Range result after delete " << result.toString() << "\n";
+    RangeResult result =
+        wait(kvStore->readRange(KeyRangeRef("f"_sr, "g"_sr), 100, 500, IKeyValueStore::ReadType::NORMAL));
+    std::cout << "Range result after delete " << result.toString() << "\n";
 
-	for (auto kv : result) {
-		std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
-	}
+    for (auto kv : result) {
+        std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
+    }
 
-	Future<Void> closed = kvStore->onClosed();
-	kvStore->dispose();
-	wait(closed);
-	return Void();
+    Future<Void> closed = kvStore->onClosed();
+    kvStore->dispose();
+    wait(closed);
+    return Void();
 }
 
 TEST_CASE("RocksDBKVS/Destroy") {
-	state const std::string rocksDBTestDir = "rocksdb-kvstore-destroy";
-	platform::eraseDirectoryRecursive(rocksDBTestDir);
+    state const std::string rocksDBTestDir = "rocksdb-kvstore-destroy";
+    platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+    state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+    wait(kvStore->init());
 
-	kvStore->addShard(KeyRangeRef("f"_sr, "g"_sr), deterministicRandom()->randomUniqueID());
-	kvStore->set({ LiteralStringRef("foo"), LiteralStringRef("bar") });
-	kvStore->set({ LiteralStringRef("fd"), LiteralStringRef("baf") });
-	kvStore->set({ LiteralStringRef("fko"), LiteralStringRef("sr") });
-	kvStore->set({ LiteralStringRef("fp"), LiteralStringRef("kddr") });
-	wait(kvStore->commit(false));
+    kvStore->addShard(KeyRangeRef("f"_sr, "g"_sr), deterministicRandom()->randomUniqueID());
+    kvStore->set({ LiteralStringRef("foo"), LiteralStringRef("bar") });
+    kvStore->set({ LiteralStringRef("fd"), LiteralStringRef("baf") });
+    kvStore->set({ LiteralStringRef("fko"), LiteralStringRef("sr") });
+    kvStore->set({ LiteralStringRef("fp"), LiteralStringRef("kddr") });
+    wait(kvStore->commit(false));
 
-	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
-	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
-	std::cout << "Finish read";
+    Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
+    ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+    std::cout << "Finish read";
 
-	RangeResult result =
-	    wait(kvStore->readRange(KeyRangeRef("f"_sr, "g"_sr), 100, 500, IKeyValueStore::ReadType::NORMAL));
-	std::cout << "Range result user " << result.toString();
+    RangeResult result =
+        wait(kvStore->readRange(KeyRangeRef("f"_sr, "g"_sr), 100, 500, IKeyValueStore::ReadType::NORMAL));
+    std::cout << "Range result user " << result.toString();
 
-	for (auto kv : result) {
-		std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
-	}
+    for (auto kv : result) {
+        std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
+    }
 
-	Future<Void> closed = kvStore->onClosed();
-	kvStore->dispose();
-	wait(closed);
-	return Void();
+    Future<Void> closed = kvStore->onClosed();
+    kvStore->dispose();
+    wait(closed);
+    return Void();
 }
 
 TEST_CASE("RocksDBKVS/Reopen") {
-	state const std::string rocksDBTestDir = "rocksdb-kvstore-reopen-test-db";
-	platform::eraseDirectoryRecursive(rocksDBTestDir);
+    state const std::string rocksDBTestDir = "rocksdb-kvstore-reopen-test-db";
+    platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+    state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+    wait(kvStore->init());
 
-	state KeyRangeRef shardRange = KeyRangeRef("f"_sr, "g"_sr);
-	kvStore->addShard(shardRange, deterministicRandom()->randomUniqueID());
-	kvStore->set({ LiteralStringRef("foo"), LiteralStringRef("bar") });
-	kvStore->set({ LiteralStringRef("fd"), LiteralStringRef("baf") });
-	kvStore->set({ LiteralStringRef("fko"), LiteralStringRef("sr") });
-	kvStore->set({ LiteralStringRef("fp"), LiteralStringRef("kddr") });
-	wait(kvStore->commit(false));
+    state KeyRangeRef shardRange = KeyRangeRef("f"_sr, "g"_sr);
+    kvStore->addShard(shardRange, deterministicRandom()->randomUniqueID());
+    kvStore->set({ LiteralStringRef("foo"), LiteralStringRef("bar") });
+    kvStore->set({ LiteralStringRef("fd"), LiteralStringRef("baf") });
+    kvStore->set({ LiteralStringRef("fko"), LiteralStringRef("sr") });
+    kvStore->set({ LiteralStringRef("fp"), LiteralStringRef("kddr") });
+    wait(kvStore->commit(false));
 
-	kvStore->persistShard(shardRange);
-	wait(kvStore->commit(false));
+    kvStore->persistShard(shardRange);
+    wait(kvStore->commit(false));
 
-	std::cout << "Persist shard\n";
+    std::cout << "Persist shard\n";
 
-	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
-	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
-	std::cout << "Finish read";
+    Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
+    ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+    std::cout << "Finish read";
 
-	RangeResult result =
-	    wait(kvStore->readRange(KeyRangeRef("f"_sr, "g"_sr), 100, 500, IKeyValueStore::ReadType::NORMAL));
-	std::cout << "Range result user " << result.toString();
+    RangeResult result =
+        wait(kvStore->readRange(KeyRangeRef("f"_sr, "g"_sr), 100, 500, IKeyValueStore::ReadType::NORMAL));
+    std::cout << "Range result user " << result.toString();
 
-	for (auto kv : result) {
-		std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
-	}
+    for (auto kv : result) {
+        std::cout << "kv " << kv.key.toString() << " " << kv.value.toString() << "\n";
+    }
 
-	Future<Void> closed = kvStore->onClosed();
-	kvStore->close();
-	wait(closed);
+    Future<Void> closed = kvStore->onClosed();
+    kvStore->close();
+    wait(closed);
 
-	kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
-	// Confirm that `init()` is idempotent.
-	wait(kvStore->init());
+    kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+    wait(kvStore->init());
+    // Confirm that `init()` is idempotent.
+    wait(kvStore->init());
 
-	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
-	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+    Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
+    ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
 
-	Future<Void> closed = kvStore->onClosed();
-	kvStore->dispose();
-	wait(closed);
+    Future<Void> closed = kvStore->onClosed();
+    kvStore->dispose();
+    wait(closed);
 
-	platform::eraseDirectoryRecursive(rocksDBTestDir);
-	return Void();
-}
+    platform::eraseDirectoryRecursive(rocksDBTestDir);
+    return Void();
+}*/
 
 TEST_CASE("RocksDBKVS/multiRocks") {
 	state std::string cwd = platform::getWorkingDirectory() + "/";
@@ -1746,15 +1770,7 @@ TEST_CASE("RocksDBKVS/multiRocks") {
 	state RocksDBKeyValueStore* rocksDB = dynamic_cast<RocksDBKeyValueStore*>(kvStore);
 	wait(kvStore->init());
 
-	for (auto* rocks : rocksDB->getAllInstances()) {
-		std::cout << "Rocks: " << rocks->GetName() << std::endl;
-	}
-
 	rocksDB->addShard(KeyRangeRef("a"_sr, "b"_sr), deterministicRandom()->randomUniqueID());
-
-	for (auto* rocks : rocksDB->getAllInstances()) {
-		std::cout << "Rocks: " << rocks->GetName() << std::endl;
-	}
 
 	kvStore->set({ LiteralStringRef("a"), LiteralStringRef("bar") });
 	wait(kvStore->commit(false));
