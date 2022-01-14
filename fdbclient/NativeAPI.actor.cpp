@@ -1915,7 +1915,7 @@ Reference<WatchMetadata> DatabaseContext::getWatchMetadata(KeyRef key) const {
 	return it->second;
 }
 
-KeyRef DatabaseContext::setWatchMetadata(Reference<WatchMetadata> metadata) {
+Key DatabaseContext::setWatchMetadata(Reference<WatchMetadata> metadata) {
 	watchMap[metadata->parameters->key] = metadata;
 	return metadata->parameters->key;
 }
@@ -2962,7 +2962,7 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 	}
 }
 
-ACTOR Future<Void> watchStorageServerResp(KeyRef key, Database cx) {
+ACTOR Future<Void> watchStorageServerResp(Key key, Database cx) {
 	loop {
 		try {
 			state Reference<WatchMetadata> metadata = cx->getWatchMetadata(key);
@@ -3030,9 +3030,9 @@ ACTOR Future<Void> sameVersionDiffValue(Database cx, Reference<WatchParameters> 
 			// val_3 == val_2 (storage server value matches value passed into the function -> new watch)
 			if (valSS == parameters->value) {
 				metadata = makeReference<WatchMetadata>(parameters);
-				KeyRef keyRef = cx->setWatchMetadata(metadata);
+				Key key = cx->setWatchMetadata(metadata);
 
-				metadata->watchFutureSS = watchStorageServerResp(keyRef, cx);
+				metadata->watchFutureSS = watchStorageServerResp(key, cx);
 			}
 
 			// if val_3 != val_2
@@ -3055,9 +3055,9 @@ Future<Void> getWatchFuture(Database cx, Reference<WatchParameters> parameters) 
 	// case 1: key not in map
 	if (!metadata.isValid()) {
 		metadata = makeReference<WatchMetadata>(parameters);
-		KeyRef keyRef = cx->setWatchMetadata(metadata);
+		Key key = cx->setWatchMetadata(metadata);
 
-		metadata->watchFutureSS = watchStorageServerResp(keyRef, cx);
+		metadata->watchFutureSS = watchStorageServerResp(key, cx);
 		return success(metadata->watchPromise.getFuture());
 	}
 	// case 2: val_1 == val_2 (received watch with same value as key already in the map so just update)
@@ -3078,9 +3078,9 @@ Future<Void> getWatchFuture(Database cx, Reference<WatchParameters> parameters) 
 		metadata->watchFutureSS.cancel();
 
 		metadata = makeReference<WatchMetadata>(parameters);
-		KeyRef keyRef = cx->setWatchMetadata(metadata);
+		Key key = cx->setWatchMetadata(metadata);
 
-		metadata->watchFutureSS = watchStorageServerResp(keyRef, cx);
+		metadata->watchFutureSS = watchStorageServerResp(key, cx);
 
 		return success(metadata->watchPromise.getFuture());
 	}
