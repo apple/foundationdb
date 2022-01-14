@@ -945,6 +945,13 @@ public:
 	                        const std::vector<NetworkAddress>& addresses) override {
 		mockDNS.addMockTCPEndpoint(host, service, addresses);
 	}
+	void removeMockTCPEndpoint(const std::string& host, const std::string& service) override {
+		mockDNS.removeMockTCPEndpoint(host, service);
+	}
+	const std::map<std::string, std::vector<NetworkAddress>> getMockDNS() override { return mockDNS.getMockDNS(); }
+	void setMockDNS(std::map<std::string, std::vector<NetworkAddress>> otherMockDNS) override {
+		mockDNS.setMockDNS(otherMockDNS);
+	}
 	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                       const std::string& service) override {
 		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
