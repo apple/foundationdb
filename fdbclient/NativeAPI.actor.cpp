@@ -7442,6 +7442,8 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
                              std::vector<MutationAndVersionStream> streams,
                              Version* begin,
                              Version end) {
+	// TODO REMOVE, a sanity check
+	state int eosCount = 0;
 	state Promise<Void> refresh = results->refresh;
 	// with empty version handling in the partial cursor, all streams will always have a next element with version >=
 	// the minimum version of any stream's next element
@@ -7466,9 +7468,6 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 	for (auto& stream : streams) {
 		streamsUsed.push_back(stream);
 	}
-	// TODO REMOVE - i always mess reserve vs resize up
-	ASSERT(streamsUsed.size() == 0);
-	ASSERT(streamsUsed.capacity() == interfs.size());
 
 	loop {
 		// bring all of the streams up to date to ensure we have the latest element from each stream in mutations
@@ -7482,9 +7481,12 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 				if (e.code() != error_code_end_of_stream) {
 					throw e;
 				}
+				eosCount++;
 			}
 			interfNum++;
 		}
+
+		ASSERT(streams.size() - mutations.size() == eosCount);
 
 		if (mutations.empty()) {
 			throw end_of_stream();
