@@ -381,6 +381,7 @@ void ptxnStorageServerFixture::setUp(const int numStorageServers) {
 		actors.push_back(storageServer(resource.kvStore.get(),
 		                               *resource.interface,
 		                               resource.seedTag,
+		                               /* clusterId */ deterministicRandom()->randomUniqueID(),
 		                               resource.seedVersion,
 		                               initializeReply,
 		                               asyncServerDBInfoRef,
