@@ -257,7 +257,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
 	// Only available so that Transaction can have a default constructor, for use in state variables
-	TransactionState(TaskPriority taskID, SpanID spanID) : taskID(taskID), spanID(spanID) {}
+	TransactionState(TaskPriority taskID, SpanID spanID) : taskID(taskID), spanID(spanID), tenantPrefix(Key()) {}
 
 	TransactionState(Database cx,
 	                 Optional<TenantName> tenant,
@@ -435,11 +435,11 @@ public:
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.write_conflict_ranges, tr.arena);
 	}
 
+	Future<Key> getTenantPrefix();
+
 	Reference<TransactionState> trState;
 	std::vector<Reference<Watch>> watches;
 	Span span;
-
-	Future<Key> getTenantPrefix();
 
 private:
 	Future<Version> getReadVersion(uint32_t flags);

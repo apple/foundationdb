@@ -124,7 +124,9 @@ Future<REPLY_TYPE(Request)> loadBalance(
 }
 } // namespace
 
+FDB_BOOLEAN_PARAM(UseTenant);
 FDB_BOOLEAN_PARAM(TransactionRecordLogInfo);
+FDB_BOOLEAN_PARAM(ApplyTenantPrefix);
 FDB_DEFINE_BOOLEAN_PARAM(UseProvisionalProxies);
 
 NetworkOptions networkOptions;
@@ -2351,10 +2353,10 @@ AddressExclusion AddressExclusion::parse(StringRef const& key) {
 }
 
 Future<Optional<Value>> getValue(Reference<TransactionState> const& trState,
-                                 Future<Key> const& tenantPrefix,
                                  Key const& key,
                                  Future<Version> const& version,
-                                 TransactionRecordLogInfo const& recordLogInfo);
+                                 UseTenant const& useTenant = UseTenant::True,
+                                 TransactionRecordLogInfo const& recordLogInfo = TransactionRecordLogInfo::True);
 
 Future<RangeResult> getRange(Reference<TransactionState> const& trState,
                              Future<Version> const& fVersion,
@@ -2366,7 +2368,8 @@ Future<RangeResult> getRange(Reference<TransactionState> const& trState,
 ACTOR Future<Optional<StorageServerInterface>> fetchServerInterface(Reference<TransactionState> trState,
                                                                     Future<Version> ver,
                                                                     UID id) {
-	Optional<Value> val = wait(getValue(trState, Key(), serverListKeyFor(id), ver, TransactionRecordLogInfo::False));
+	Optional<Value> val =
+	    wait(getValue(trState, serverListKeyFor(id), ver, UseTenant::False, TransactionRecordLogInfo::False));
 
 	if (!val.present()) {
 		// A storage server has been removed from serverList since we read keyServers
@@ -2677,22 +2680,24 @@ Future<Void> Transaction::warmRange(KeyRange keys) {
 }
 
 ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
-                                       Future<Key> tenantPrefix,
                                        Key key,
                                        Future<Version> version,
-                                       TransactionRecordLogInfo recordLogInfo = TransactionRecordLogInfo::True) {
+                                       UseTenant useTenant,
+                                       TransactionRecordLogInfo recordLogInfo) {
 	state Version ver = wait(version);
 	state Span span("NAPI:getValue"_loc, trState->spanID);
-	if (trState->tenant.present()) {
+	if (useTenant && trState->tenant.present()) {
 		span.addTag("tenant"_sr, trState->tenant.get());
 	}
 
 	span.addTag("key"_sr, key);
 	trState->cx->validateVersion(ver);
 
-	Key resolvedTenantPrefix = wait(tenantPrefix);
-	if (resolvedTenantPrefix.size() > 0) {
-		key = key.withPrefix(resolvedTenantPrefix);
+	if (useTenant) {
+		Key resolvedTenantPrefix = wait(trState->tenantPrefix);
+		if (resolvedTenantPrefix.size() > 0) {
+			key = key.withPrefix(resolvedTenantPrefix);
+		}
 	}
 
 	loop {
@@ -2733,7 +2738,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					         ssi.second,
 					         &StorageServerInterface::getValue,
 					         GetValueRequest(span.context,
-					                         trState->tenant,
+					                         useTenant ? trState->tenant : Optional<TenantName>(),
 					                         key,
 					                         ver,
 					                         trState->cx->sampleReadTags() ? trState->options.readTags
@@ -2800,7 +2805,10 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 	}
 }
 
-ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Future<Version> version) {
+ACTOR Future<Key> getKey(Reference<TransactionState> trState,
+                         KeySelector k,
+                         Future<Version> version,
+                         ApplyTenantPrefix applyTenantPrefix = ApplyTenantPrefix::True) {
 	wait(success(version));
 
 	state Optional<UID> getKeyID = Optional<UID>();
@@ -2816,13 +2824,20 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Fut
 		                                      // k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
 	}
 
+	state Key resolvedTenantPrefix = wait(trState->tenantPrefix);
+	if (applyTenantPrefix && resolvedTenantPrefix.size() > 0) {
+		k = KeySelectorRef(k.getKey().withPrefix(resolvedTenantPrefix), k.orEqual, k.offset);
+	}
+
 	loop {
-		if (k.getKey() == allKeys.end) {
-			if (k.offset > 0)
-				return allKeys.end;
+		if (k.getKey().removePrefix(resolvedTenantPrefix) == allKeys.end) {
+			if (k.offset > 0) {
+				return resolvedTenantPrefix.empty() || applyTenantPrefix ? allKeys.end
+				                                                         : allKeys.end.withPrefix(resolvedTenantPrefix);
+			}
 			k.orEqual = false;
-		} else if (k.getKey() == allKeys.begin && k.offset <= 0) {
-			return Key();
+		} else if (k.getKey().removePrefix(resolvedTenantPrefix) == allKeys.begin && k.offset <= 0) {
+			return applyTenantPrefix ? Key() : resolvedTenantPrefix;
 		}
 
 		Key locationKey(k.getKey(), k.arena());
@@ -2839,6 +2854,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Fut
 			++trState->cx->transactionPhysicalReads;
 
 			GetKeyRequest req(span.context,
+			                  trState->tenant,
 			                  k,
 			                  version.get(),
 			                  trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>(),
@@ -2872,7 +2888,11 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Fut
 				                                                 // reply.sel.offset).detail("OrEqual", k.orEqual);
 			k = reply.sel;
 			if (!k.offset && k.orEqual) {
-				return k.getKey();
+				if (applyTenantPrefix) {
+					return k.getKey().removePrefix(resolvedTenantPrefix);
+				} else {
+					return k.getKey();
+				}
 			}
 		} catch (Error& e) {
 			if (getKeyID.present())
@@ -3226,6 +3246,7 @@ Future<RangeResult> getExactRange(Reference<TransactionState> trState,
 			req.mapper = mapper;
 			req.arena.dependsOn(mapper.arena());
 
+			req.tenant = trState->tenant;
 			req.version = version;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
@@ -3381,7 +3402,7 @@ Future<Key> resolveKey(Reference<TransactionState> trState, KeySelector const& k
 	if (key.isFirstGreaterThan())
 		return Future<Key>(keyAfter(key.getKey()));
 
-	return getKey(trState, key, version);
+	return getKey(trState, key, version, ApplyTenantPrefix::False);
 }
 
 ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
@@ -3410,9 +3431,9 @@ Future<RangeResult> getRangeFallback(Reference<TransactionState> trState,
 		return RangeResult();
 	}
 
-	// if e is allKeys.end, we have read through the end of the database
-	// if b is allKeys.begin, we have either read through the beginning of the database,
-	// or allKeys.begin exists in the database and will be part of the conflict range anyways
+	// if e is allKeys.end, we have read through the end of the database/tenant
+	// if b is allKeys.begin, we have either read through the beginning of the database/tenant,
+	// or allKeys.begin exists in the database/tenant and will be part of the conflict range anyways
 
 	RangeResult _r = wait(getExactRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply>(
 	    trState, version, KeyRangeRef(b, e), mapper, limits, reverse));
@@ -3449,9 +3470,14 @@ void getRangeFinished(Reference<TransactionState> trState,
                       Promise<std::pair<Key, Key>> conflictRange,
                       Reverse reverse,
                       RangeResult result) {
+	ASSERT(trState->tenantPrefix.isReady());
+
 	int64_t bytes = 0;
-	for (const KeyValueRef& kv : result) {
+	for (KeyValueRef& kv : result) {
 		bytes += kv.key.size() + kv.value.size();
+		if (trState->tenantPrefix.get().size()) {
+			kv.key = kv.key.removePrefix(trState->tenantPrefix.get());
+		}
 	}
 
 	trState->cx->transactionBytesRead += bytes;
@@ -3509,8 +3535,6 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
                              Snapshot snapshot,
                              Reverse reverse) {
 	state GetRangeLimits originalLimits(limits);
-	state KeySelector originalBegin = begin;
-	state KeySelector originalEnd = end;
 	state RangeResult output;
 	state Span span("NAPI:getRange"_loc, trState->spanID);
 
@@ -3524,7 +3548,16 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 		                                     // FIXME: Is this really right?  Weaken this and see if there is a problem;
 		                                     // if so maybe there is a much subtler problem even with this.
 
-		if (begin.getKey() == allKeys.begin && begin.offset < 1) {
+		state Key resolvedTenantPrefix = wait(trState->tenantPrefix);
+		if (resolvedTenantPrefix.size() > 0) {
+			begin = KeySelectorRef(begin.getKey().withPrefix(resolvedTenantPrefix), begin.orEqual, begin.offset);
+			end = KeySelectorRef(end.getKey().withPrefix(resolvedTenantPrefix), end.orEqual, end.offset);
+		}
+
+		state KeySelector originalBegin = begin;
+		state KeySelector originalEnd = end;
+
+		if (begin.getKey().removePrefix(resolvedTenantPrefix) == allKeys.begin && begin.offset < 1) {
 			output.readToBegin = true;
 			begin = KeySelector(firstGreaterOrEqual(begin.getKey()), begin.arena());
 		}
@@ -3533,7 +3566,8 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 		ASSERT((!limits.hasRowLimit() || limits.rows >= limits.minRows) && limits.minRows >= 0);
 
 		loop {
-			if (end.getKey() == allKeys.begin && (end.offset < 1 || end.isFirstGreaterOrEqual())) {
+			if (end.getKey().removePrefix(resolvedTenantPrefix) == allKeys.begin &&
+			    (end.offset < 1 || end.isFirstGreaterOrEqual())) {
 				getRangeFinished(
 				    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
 				return output;
@@ -3549,11 +3583,12 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 			req.mapper = mapper;
 			req.arena.dependsOn(mapper.arena());
 
+			req.tenant = trState->tenant;
 			req.isFetchKeys = (trState->taskID == TaskPriority::FetchKeys);
 			req.version = readVersion;
 
 			// In case of async tss comparison, also make req arena depend on begin, end, and/or shard's arena depending
-			// on which  is used
+			// on which is used
 			bool dependOnShard = false;
 			if (reverse && (begin - 1).isDefinitelyLess(shard.begin) &&
 			    (!begin.isFirstGreaterOrEqual() ||
@@ -4335,7 +4370,8 @@ ACTOR Future<Key> getTenantPrefixImpl(Reference<TransactionState> trState, Futur
 	// TODO: This bypasses Transaction::get(), which means we don't set a conflict range or do some metric accounting.
 	//       Should we incorporate that here? If we use the stateless role caching, we could avoid doing an explicit
 	//       read.
-	Optional<Value> val = wait(getValue(trState, Key(), trState->tenant.get().withPrefix(tenantMapPrefix), version));
+	Optional<Value> val =
+	    wait(getValue(trState, trState->tenant.get().withPrefix(tenantMapPrefix), version, UseTenant::False));
 
 	if (!val.present()) {
 		throw tenant_not_found();
@@ -4403,6 +4439,7 @@ void Transaction::setVersion(Version v) {
 	if (v <= 0)
 		throw version_invalid();
 	readVersion = v;
+	trState->tenantPrefix = getTenantPrefix();
 }
 
 Future<Optional<Value>> Transaction::get(const Key& key, Snapshot snapshot) {
@@ -4457,7 +4494,7 @@ Future<Optional<Value>> Transaction::get(const Key& key, Snapshot snapshot) {
 		}
 	}
 
-	return getValue(trState, getTenantPrefix(), key, ver);
+	return getValue(trState, key, ver);
 }
 
 void Watch::setWatch(Future<Void> watchFuture) {
@@ -5299,7 +5336,6 @@ void applyTenantPrefix(CommitTransactionRequest req, Key tenantPrefix) {
 }
 
 ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
-                                    Future<Key> tenantPrefix,
                                     CommitTransactionRequest req,
                                     Future<Version> readVersion) {
 	state TraceInterval interval("TransactionCommit");
@@ -5322,7 +5358,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			wait(store(req.transaction.read_snapshot, readVersion));
 		}
 
-		Key resolvedTenantPrefix = wait(tenantPrefix);
+		Key resolvedTenantPrefix = wait(trState->tenantPrefix);
 		// TODO: Can we optimize this by sending the prefix as part of the request?
 		//       To do this most efficiently, we'd want the ability to pass around StringRef like objects
 		//       that are composed of a prefix that isn't contiguous with the rest of the data, or we'd need
@@ -5557,7 +5593,7 @@ Future<Void> Transaction::commitMutations() {
 			tr.transaction.report_conflicting_keys = true;
 		}
 
-		Future<Void> commitResult = tryCommit(trState, getTenantPrefix(), tr, readVersion);
+		Future<Void> commitResult = tryCommit(trState, tr, readVersion);
 
 		if (isCheckingWrites) {
 			Promise<Void> committed;
@@ -5622,6 +5658,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 			throw read_version_already_set();
 		readVersion = Version(0);
 		trState->options.causalWriteRisky = true;
+		trState->tenantPrefix = Key(); // TODO: does this expose raw writes?
 		break;
 
 	case FDBTransactionOptions::CAUSAL_READ_RISKY:
@@ -6089,6 +6126,8 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		batcher.stream.send(req);
 		trState->startTime = now();
 		readVersion = extractReadVersion(trState, location, spanContext, req.reply.getFuture(), metadataVersion);
+
+		trState->tenantPrefix = getTenantPrefix();
 	}
 	return readVersion;
 }

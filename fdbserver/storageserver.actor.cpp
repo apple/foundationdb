@@ -463,6 +463,9 @@ public:
 	void insertTenant(KeyRef key, ValueRef value, Version version);
 	void clearTenants(KeyRef startKey, KeyRef endKey, Version version);
 
+	void checkTenant(Version version, Optional<TenantName> tenant, KeyRef begin, Optional<KeyRef> end);
+	KeyRangeRef clampRangeToTenant(KeyRangeRef range, Optional<TenantName> tenant, Version version, Arena& arena);
+
 	class CurrentRunningFetchKeys {
 		std::unordered_map<UID, double> startTimeMap;
 		std::unordered_map<UID, KeyRange> keyRangeMap;
@@ -1366,39 +1369,30 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	}
 }
 
-std::vector<KeyRef> checkTenant(StorageServer* data,
-                                Version version,
-                                Optional<TenantName> const& tenantName,
+void StorageServer::checkTenant(Version version,
+                                Optional<TenantName> tenantName,
                                 KeyRef begin,
                                 Optional<KeyRef> end = Optional<KeyRef>()) {
 	std::vector<KeyRef> lockedPrefixes;
 	if (tenantName.present()) {
-		auto view = data->tenantMap.at(version);
+		auto view = tenantMap.at(version);
 		auto itr = view.find(tenantName.get());
 		if (itr == view.end()) {
 			throw tenant_not_found();
 		}
 
 		if (!begin.startsWith(*itr) || (end.present() && !end.get().startsWith(*itr))) {
+			TraceEvent(SevWarn, "KeyNotInTenant", thisServerID)
+			    .detail("Tenant", tenantName)
+			    .detail("TenantPrefix", *itr)
+			    .detail("Begin", begin)
+			    .detail("End", end)
+			    .backtrace();
 			throw key_not_in_tenant();
 		}
-	} else {
-		if (!data->allowDefaultTenant) {
-			throw tenant_name_required();
-		}
-
-		auto view = data->lockedTenantsIndex.at(version);
-		auto itr = view.lastLessOrEqual(begin);
-		while (itr != view.end()) {
-			if (begin.substr(0, itr.key().size()) <= itr.key() && itr.key() <= end.orDefault(begin)) {
-				lockedPrefixes.push_back(itr.key());
-			}
-
-			++itr;
-		}
+	} else if (!allowDefaultTenant) {
+		throw tenant_name_required();
 	}
-
-	return lockedPrefixes;
 }
 
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
@@ -1434,8 +1428,8 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			                      req.debugID.get().first(),
 			                      "getValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
 
+		data->checkTenant(version, req.tenant, req.key);
 		state uint64_t changeCounter = data->shardChangeCounter;
-		std::vector<KeyRef> lockedPrefixes = checkTenant(data, version, req.tenant, req.key);
 
 		if (!data->shards[req.key]->isReadable()) {
 			//TraceEvent("WrongShardServer", data->thisServerID).detail("Key", req.key).detail("Version", version).detail("In", "getValueQ");
@@ -1443,20 +1437,21 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		}
 
 		state int path = 0;
-		if (lockedPrefixes.empty()) {
-			auto i = data->data().at(version).lastLessOrEqual(req.key);
-			if (i && i->isValue() && i.key() == req.key) {
-				v = (Value)i->getValue();
-				path = 1;
-			} else if (!i || !i->isClearTo() || i->getEndKey() <= req.key) {
-				path = 2;
-				Optional<Value> vv = wait(data->storage.readValue(req.key, IKeyValueStore::ReadType::NORMAL, req.debugID));
-				data->counters.kvGetBytes += vv.expectedSize();
-				// Validate that while we were reading the data we didn't lose the version or shard
-				if (version < data->storageVersion()) {
-					TEST(true); // transaction_too_old after readValue
-					throw transaction_too_old();
+		auto i = data->data().at(version).lastLessOrEqual(req.key);
+		if (i && i->isValue() && i.key() == req.key) {
+			v = (Value)i->getValue();
+			path = 1;
+		} else if (!i || !i->isClearTo() || i->getEndKey() <= req.key) {
+			path = 2;
+			Optional<Value> vv = wait(data->storage.readValue(req.key, IKeyValueStore::ReadType::NORMAL, req.debugID));
+			data->counters.kvGetBytes += vv.expectedSize();
+			// Validate that while we were reading the data we didn't lose the version or shard
+			if (version < data->storageVersion()) {
+				TEST(true); // transaction_too_old after readValue
+				throw transaction_too_old();
 			}
+			data->checkChangeCounter(changeCounter, req.key);
+			v = vv;
 		}
 
 		DEBUG_MUTATION("ShardGetValue",
@@ -1854,6 +1849,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	if (!inverted && !data->isReadable(req.range)) {
 		throw wrong_shard_server();
 	}
+
+	data->checkTenant(req.begin, req.tenant, req.range.begin, req.range.end);
 
 	auto feed = data->uidChangeFeed.find(req.rangeID);
 	if (feed == data->uidChangeFeed.end()) {
@@ -2439,6 +2436,22 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 //	return sel.getKey() >= range.begin && (sel.isBackward() ? sel.getKey() <= range.end : sel.getKey() < range.end);
 //}
 
+KeyRangeRef StorageServer::clampRangeToTenant(KeyRangeRef range,
+                                              Optional<TenantName> tenant,
+                                              Version version,
+                                              Arena& arena) {
+	if (tenant.present()) {
+		auto view = tenantMap.at(version);
+		auto itr = view.find(tenant.get());
+		ASSERT(itr != view.end());
+
+		return KeyRangeRef(range.begin.startsWith(*itr) ? range.begin : *itr,
+		                   range.end.startsWith(*itr) ? range.end : allKeys.end.withPrefix(*itr));
+	} else {
+		return range;
+	}
+}
+
 ACTOR Future<Key> findKey(StorageServer* data,
                           KeySelectorRef sel,
                           Version version,
@@ -2560,6 +2573,11 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	state int64_t resultSize = 0;
 	state IKeyValueStore::ReadType type =
 	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
+
+	if (req.tenant.present()) {
+		span.addTag("tenant"_sr, req.tenant.get());
+	}
+
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
 	++data->counters.getRangeQueries;
@@ -2581,6 +2599,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Before");
 		state Version version = wait(waitForVersion(data, req.version, span.context));
 
+		data->checkTenant(version, req.tenant, req.begin.getKey(), req.end.getKey());
 		state uint64_t changeCounter = data->shardChangeCounter;
 		//		try {
 		state KeyRange shard = getShardKeyRange(data, req.begin);
@@ -2600,14 +2619,16 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			throw wrong_shard_server();
 		}
 
+		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenant, version, req.arena);
+
 		state int offset1 = 0;
 		state int offset2;
 		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
 		                               ? Future<Key>(req.begin.getKey())
-		                               : findKey(data, req.begin, version, shard, &offset1, span.context, type);
+		                               : findKey(data, req.begin, version, searchRange, &offset1, span.context, type);
 		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
 		                             ? Future<Key>(req.end.getKey())
-		                             : findKey(data, req.end, version, shard, &offset2, span.context, type);
+		                             : findKey(data, req.end, version, searchRange, &offset2, span.context, type);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 
@@ -2943,6 +2964,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	return Void();
 }
 
+// TODO: flat map implicitly uses tenant prefix?
 ACTOR Future<GetKeyValuesAndFlatMapReply> flatMap(StorageServer* data,
                                                   GetKeyValuesReply input,
                                                   StringRef mapper,
@@ -3005,6 +3027,11 @@ ACTOR Future<Void> getKeyValuesAndFlatMapQ(StorageServer* data, GetKeyValuesAndF
 	state int64_t resultSize = 0;
 	state IKeyValueStore::ReadType type =
 	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
+
+	if (req.tenant.present()) {
+		span.addTag("tenant"_sr, req.tenant.get());
+	}
+
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
 	++data->counters.getRangeAndFlatMapQueries;
@@ -3027,6 +3054,7 @@ ACTOR Future<Void> getKeyValuesAndFlatMapQ(StorageServer* data, GetKeyValuesAndF
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesAndFlatMap.Before");
 		state Version version = wait(waitForVersion(data, req.version, span.context));
 
+		data->checkTenant(req.version, req.tenant, req.begin.getKey(), req.end.getKey());
 		state uint64_t changeCounter = data->shardChangeCounter;
 		//		try {
 		state KeyRange shard = getShardKeyRange(data, req.begin);
@@ -3046,14 +3074,16 @@ ACTOR Future<Void> getKeyValuesAndFlatMapQ(StorageServer* data, GetKeyValuesAndF
 			throw wrong_shard_server();
 		}
 
+		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenant, version, req.arena);
+
 		state int offset1 = 0;
 		state int offset2;
 		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
 		                               ? Future<Key>(req.begin.getKey())
-		                               : findKey(data, req.begin, version, shard, &offset1, span.context, type);
+		                               : findKey(data, req.begin, version, searchRange, &offset1, span.context, type);
 		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
 		                             ? Future<Key>(req.end.getKey())
-		                             : findKey(data, req.end, version, shard, &offset2, span.context, type);
+		                             : findKey(data, req.end, version, searchRange, &offset2, span.context, type);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 
@@ -3187,6 +3217,10 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	state IKeyValueStore::ReadType type =
 	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
 
+	if (req.tenant.present()) {
+		span.addTag("tenant"_sr, req.tenant.get());
+	}
+
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 	++data->counters.getRangeStreamQueries;
 	++data->counters.allQueries;
@@ -3208,6 +3242,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesStream.Before");
 		state Version version = wait(waitForVersion(data, req.version, span.context));
 
+		data->checkTenant(req.version, req.tenant, req.begin.getKey(), req.end.getKey());
 		state uint64_t changeCounter = data->shardChangeCounter;
 		//		try {
 		state KeyRange shard = getShardKeyRange(data, req.begin);
@@ -3227,14 +3262,16 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			throw wrong_shard_server();
 		}
 
+		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenant, version, req.arena);
+
 		state int offset1 = 0;
 		state int offset2;
 		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
 		                               ? Future<Key>(req.begin.getKey())
-		                               : findKey(data, req.begin, version, shard, &offset1, span.context, type);
+		                               : findKey(data, req.begin, version, searchRange, &offset1, span.context, type);
 		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
 		                             ? Future<Key>(req.end.getKey())
-		                             : findKey(data, req.end, version, shard, &offset2, span.context, type);
+		                             : findKey(data, req.end, version, searchRange, &offset2, span.context, type);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 		if (req.debugID.present())
@@ -3364,6 +3401,9 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	state Span span("SS:getKey"_loc, { req.spanContext });
+	if (req.tenant.present()) {
+		span.addTag("tenant"_sr, req.tenant.get());
+	}
 	state int64_t resultSize = 0;
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
@@ -3380,12 +3420,16 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	try {
 		state Version version = wait(waitForVersion(data, req.version, req.spanContext));
 
+		data->checkTenant(version, req.tenant, req.sel.getKey());
 		state uint64_t changeCounter = data->shardChangeCounter;
-		state KeyRange shard = getShardKeyRange(data, req.sel);
 
+		KeyRange shard = getShardKeyRange(data, req.sel);
+		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenant, req.version, req.arena);
+
+		// TODO: skip locked ranges
 		state int offset;
-		Key k =
-		    wait(findKey(data, req.sel, version, shard, &offset, req.spanContext, IKeyValueStore::ReadType::NORMAL));
+		Key k = wait(
+		    findKey(data, req.sel, version, searchRange, &offset, req.spanContext, IKeyValueStore::ReadType::NORMAL));
 
 		data->checkChangeCounter(
 		    changeCounter, KeyRangeRef(std::min<KeyRef>(req.sel.getKey(), k), std::max<KeyRef>(req.sel.getKey(), k)));
@@ -6550,6 +6594,7 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 					TEST(true); // getSplitPoints immediate wrong_shard_server()
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
+					self->checkTenant(self->version.get(), req.tenant, req.keys.begin, req.keys.end);
 					self->metrics.getSplitPoints(req);
 				}
 			}
@@ -6662,9 +6707,13 @@ ACTOR Future<Void> watchValueWaitForVersion(StorageServer* self,
                                             WatchValueRequest req,
                                             PromiseStream<WatchValueRequest> stream) {
 	state Span span("SS:watchValueWaitForVersion"_loc, { req.spanContext });
+	if (req.tenant.present()) {
+		span.addTag("tenant"_sr, req.tenant.get());
+	}
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 	try {
 		wait(success(waitForVersionNoTooOld(self, req.version)));
+		self->checkTenant(req.version, req.tenant, req.key);
 		stream.send(req);
 	} catch (Error& e) {
 		if (!canReplyWith(e))

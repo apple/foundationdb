@@ -472,13 +472,6 @@ struct GetKeyRequest : TimedRequest {
 	GetKeyRequest() {}
 
 	GetKeyRequest(SpanID spanContext,
-	              KeySelectorRef const& sel,
-	              Version version,
-	              Optional<TagSet> tags,
-	              Optional<UID> debugID)
-	  : spanContext(spanContext), sel(sel), version(version), debugID(debugID) {}
-
-	GetKeyRequest(SpanID spanContext,
 	              Optional<TenantName> tenant,
 	              KeySelectorRef const& sel,
 	              Version version,
@@ -720,16 +713,19 @@ struct SplitRangeReply {
 struct SplitRangeRequest {
 	constexpr static FileIdentifier file_identifier = 10725174;
 	Arena arena;
+	Optional<TenantName> tenant;
 	KeyRangeRef keys;
 	int64_t chunkSize;
 	ReplyPromise<SplitRangeReply> reply;
 
 	SplitRangeRequest() {}
 	SplitRangeRequest(KeyRangeRef const& keys, int64_t chunkSize) : keys(arena, keys), chunkSize(chunkSize) {}
+	SplitRangeRequest(Optional<TenantName> tenant, KeyRangeRef const& keys, int64_t chunkSize)
+	  : tenant(tenant), keys(arena, keys), chunkSize(chunkSize) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, chunkSize, reply, arena);
+		serializer(ar, keys, chunkSize, reply, tenant, arena);
 	}
 };
 
@@ -760,6 +756,7 @@ struct ChangeFeedStreamRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
 	SpanID spanContext;
 	Arena arena;
+	Optional<TenantName> tenant;
 	Key rangeID;
 	Version begin = 0;
 	Version end = 0;
@@ -769,7 +766,7 @@ struct ChangeFeedStreamRequest {
 	ChangeFeedStreamRequest() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeID, begin, end, range, reply, spanContext, arena);
+		serializer(ar, rangeID, begin, end, range, reply, spanContext, tenant, arena);
 	}
 };
 
