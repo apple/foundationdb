@@ -399,7 +399,7 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 		// So assignment needs to be retried elsewhere, and a revoke is trivially complete
 		if (assignment.isAssign) {
 			if (BM_DEBUG) {
-				fmt::print("BM got error assigning range [%s - %s) to worker %s, requeueing\n",
+				fmt::print("BM got error assigning range [{0} - {1}) to worker {2}, requeueing\n",
 				           assignment.keyRange.begin.printable(),
 				           assignment.keyRange.end.printable(),
 				           workerID.toString());
@@ -844,11 +844,11 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
 				historyValue.parentGranules.push_back(historyValue.arena(),
 				                                      std::pair(granuleRange, granuleStartVersion));
 
-				/*printf("Creating history entry [%s - %s) - [%lld - %lld)\n",
-				       newRanges[i].printable().c_str(),
-				       newRanges[i + 1].printable().c_str(),
-				       granuleStartVersion,
-				       latestVersion);*/
+				/*fmt::print("Creating history entry [{0} - {1}) - [{2} - {3})\n",
+				           newRanges[i].printable(),
+				           newRanges[i + 1].printable(),
+				           granuleStartVersion,
+				           latestVersion);*/
 				tr->set(historyKey, blobGranuleHistoryValueFor(historyValue));
 			}
 
@@ -1185,7 +1185,9 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 	//    BM is recovering. Now the mapping at this time looks like G->deadBW. But the rangeAssigner handles this:
 	//    we'll try to assign a range to a dead worker and fail and reassign it to the next best worker.
 	//
-	// 2. We get the existing split intentions that were Started but not acknowledged by any blob workers and
+	// 2. We get all granule history entries, to get a mapping from granule id to key range, for step 3.
+	//
+	// 3. We get the existing split intentions that were Started but not acknowledged by any blob workers and
 	//    add them to our key range map, bmData->granuleAssignments. Note that we are adding them on top of
 	//    the granule mappings and since we are using a key range map, we end up with the same set of shard
 	//    boundaries as the old blob manager had. For these splits, we simply assign the range to the next
@@ -1193,14 +1195,22 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 	//    Details: Note that this means that if a worker we intended to give a splitted range to dies
 	//    before the new BM recovers, then we'll simply assign the range to the next best worker.
 	//
-	// 3. For every range in our granuleAssignments, we send an assign request to the stream of requests,
+	// 4. For every range in our granuleAssignments, we send an assign request to the stream of requests,
 	//    ultimately giving every range back to some worker (trying to mimic the state of the old BM).
 	//    If the worker already had the range, this is a no-op. If the worker didn't have it, it will
 	//    begin persisting it. The worker that had the same range before will now be at a lower seqno.
 
 	state KeyRangeMap<Optional<UID>> workerAssignments;
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
+	state std::unordered_map<UID, KeyRange> granuleIdToRange;
 
+	// TODO KNOB
+	state int rowLimit = BUGGIFY ? deterministicRandom()->randomInt(2, 10) : 10000;
+
+	if (BM_DEBUG) {
+		printf("BM %lld recovering:\n", bmData->epoch);
+		printf("BM %lld found old assignments:\n", bmData->epoch);
+	}
 	// Step 1. Get the latest known mapping of granules to blob workers (i.e. assignments)
 	state KeyRef beginKey = normalKeys.begin;
 	loop {
@@ -1211,8 +1221,8 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 
 			// TODO: replace row limit with knob
 			KeyRange nextRange(KeyRangeRef(beginKey, normalKeys.end));
-			RangeResult results = wait(
-			    krmGetRanges(tr, blobGranuleMappingKeys.begin, nextRange, 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+			RangeResult results = wait(krmGetRanges(
+			    tr, blobGranuleMappingKeys.begin, nextRange, rowLimit, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
 			Key lastEndKey;
 
 			// Add the mappings to our in memory key range map
@@ -1225,6 +1235,18 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 					UID existingOwner = decodeBlobGranuleMappingValue(results[rangeIdx].value);
 					workerAssignments.insert(KeyRangeRef(granuleStartKey, granuleEndKey), existingOwner);
 					bmData->knownBlobRanges.insert(KeyRangeRef(granuleStartKey, granuleEndKey), true);
+					if (BM_DEBUG) {
+						fmt::print("  [{0} - {1})={2}\n",
+						           results[rangeIdx].key.printable(),
+						           results[rangeIdx + 1].key.printable(),
+						           results[rangeIdx].value.printable());
+					}
+				} else {
+					if (BM_DEBUG) {
+						fmt::print("  [{0} - {1})=\n",
+						           results[rangeIdx].key.printable(),
+						           results[rangeIdx + 1].key.printable());
+					}
 				}
 			}
 
@@ -1238,32 +1260,33 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 		}
 	}
 
-	// Step 2. Get the latest known split intentions
+	// TODO could avoid if no splits in progress
+	// Step 2. Read all history entries, so we can know the range of each sub-granule that is splitting
 	tr->reset();
-	beginKey = blobGranuleSplitKeys.begin;
+	beginKey = blobGranuleHistoryKeys.begin;
+	if (BM_DEBUG) {
+		printf("BM %lld found history entries:\n", bmData->epoch);
+	}
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			wait(checkManagerLock(tr, bmData));
 
-			// TODO: replace row limit with knob
-			RangeResult results = wait(tr->getRange(KeyRangeRef(beginKey, blobGranuleSplitKeys.end), 10000));
+			RangeResult results = wait(tr->getRange(KeyRangeRef(beginKey, blobGranuleHistoryKeys.end), rowLimit));
 
 			// Add the granules for the started split intentions to the in-memory key range map
-			for (auto split : results) {
-				UID parentGranuleID, granuleID;
-				BlobGranuleSplitState splitState;
+			for (auto history : results) {
+				KeyRange granuleRange;
 				Version version;
-				if (split.expectedSize() == 0) {
-					continue;
-				}
-				std::tie(parentGranuleID, granuleID) = decodeBlobGranuleSplitKey(split.key);
-				std::tie(splitState, version) = decodeBlobGranuleSplitValue(split.value);
-				const KeyRange range = blobGranuleSplitKeyRangeFor(parentGranuleID);
-				if (splitState <= BlobGranuleSplitState::Initialized) {
-					// the empty UID signifies that we need to find an owner (worker) for this range
-					workerAssignments.insert(range, UID());
+				std::tie(granuleRange, version) = decodeBlobGranuleHistoryKey(history.key);
+				Standalone<BlobGranuleHistoryValue> v = decodeBlobGranuleHistoryValue(history.value);
+				granuleIdToRange[v.granuleID] = granuleRange;
+				if (BM_DEBUG) {
+					fmt::print("  {0}=[{1} - {2})\n",
+					           v.granuleID,
+					           granuleRange.begin.printable(),
+					           granuleRange.end.printable());
 				}
 			}
 
@@ -1277,13 +1300,70 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 		}
 	}
 
-	bmData->knownBlobRanges.coalesce(normalKeys);
+	// Step 3. Get the latest known split intentions
+	tr->reset();
+	beginKey = blobGranuleSplitKeys.begin;
+	if (BM_DEBUG) {
+		printf("BM %lld found in progress splits:\n", bmData->epoch);
+	}
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			wait(checkManagerLock(tr, bmData));
 
-	// Step 3. Send assign requests for all the granules and transfer assignments
+			// TODO: replace row limit with knob
+			RangeResult results = wait(tr->getRange(KeyRangeRef(beginKey, blobGranuleSplitKeys.end), rowLimit));
+
+			// Add the granules for the started split intentions to the in-memory key range map
+			for (auto split : results) {
+				UID parentGranuleID, granuleID;
+				BlobGranuleSplitState splitState;
+				Version version;
+
+				std::tie(parentGranuleID, granuleID) = decodeBlobGranuleSplitKey(split.key);
+				if (split.value.size() == 0) {
+					printf("No value for %s/%s split??\n",
+					       parentGranuleID.toString().c_str(),
+					       granuleID.toString().c_str());
+					ASSERT(split.value.size() > 0);
+				}
+				std::tie(splitState, version) = decodeBlobGranuleSplitValue(split.value);
+
+				// TODO THIS RANGE IS WRONG
+				ASSERT(granuleIdToRange.count(granuleID) == 1);
+				const KeyRange range = granuleIdToRange[granuleID];
+				if (splitState <= BlobGranuleSplitState::Initialized) {
+					// the empty UID signifies that we need to find an owner (worker) for this range
+					workerAssignments.insert(range, UID());
+					if (BM_DEBUG) {
+						fmt::print("  [{0} - {1})\n", range.begin.printable(), range.end.printable());
+					}
+				}
+			}
+
+			if (!results.more) {
+				break;
+			}
+
+			beginKey = results.readThrough.get();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+
+	if (BM_DEBUG) {
+		fmt::print("BM {0} final ranges:\n", bmData->epoch);
+	}
+	// Step 4. Send assign requests for all the granules and transfer assignments
 	// from local workerAssignments to bmData
 	for (auto& range : workerAssignments.intersectingRanges(normalKeys)) {
 		if (!range.value().present()) {
 			continue;
+		}
+
+		if (BM_DEBUG) {
+			fmt::print("  [{0} - {1})\n", range.begin().printable(), range.end().printable());
 		}
 
 		bmData->workerAssignments.insert(range.range(), range.value().get());
@@ -2109,12 +2189,13 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 
 						// wait for this set of prunes to complete before starting the next ones since if we prune
 						// a range R at version V and while we are doing that, the time expires, we will end up
-						// trying to prune the same range again since the work isn't finished and the prunes will race
+						// trying to prune the same range again since the work isn't finished and the prunes will
+						// race
 						//
-						// TODO: this isn't that efficient though. Instead we could keep metadata as part of the BM's
-						// memory that tracks which prunes are active. Once done, we can mark that work as done. If the
-						// BM fails then all prunes will fail and so the next BM will have a clear set of metadata (i.e.
-						// no work in progress) so we will end up doing the work in the new BM
+						// TODO: this isn't that efficient though. Instead we could keep metadata as part of the
+						// BM's memory that tracks which prunes are active. Once done, we can mark that work as
+						// done. If the BM fails then all prunes will fail and so the next BM will have a clear set
+						// of metadata (i.e. no work in progress) so we will end up doing the work in the new BM
 						wait(waitForAll(prunes));
 
 						if (!pruneIntents.more) {
