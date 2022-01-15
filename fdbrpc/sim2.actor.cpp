@@ -948,10 +948,10 @@ public:
 	void removeMockTCPEndpoint(const std::string& host, const std::string& service) override {
 		mockDNS.removeMockTCPEndpoint(host, service);
 	}
-	const std::map<std::string, std::vector<NetworkAddress>> getMockDNS() override { return mockDNS.getMockDNS(); }
-	void setMockDNS(std::map<std::string, std::vector<NetworkAddress>> otherMockDNS) override {
-		mockDNS.setMockDNS(otherMockDNS);
-	}
+	// Convert hostnameToAddresses from/to string. The format is:
+	// hostname1,host1Address1,host1Address2;hostname2,host2Address1,host2Address2...
+	void parseMockDNSFromString(const std::string& s) override { mockDNS = MockDNS::parseFromString(s); }
+	std::string convertMockDNSToString() override { return mockDNS.toString(); }
 	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                       const std::string& service) override {
 		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.

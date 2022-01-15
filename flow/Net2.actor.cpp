@@ -161,10 +161,8 @@ public:
 	void removeMockTCPEndpoint(const std::string& host, const std::string& service) override {
 		throw operation_failed();
 	}
-	const std::map<std::string, std::vector<NetworkAddress>> getMockDNS() override { throw operation_failed(); }
-	void setMockDNS(std::map<std::string, std::vector<NetworkAddress>> otherMockDNS) override {
-		throw operation_failed();
-	}
+	void parseMockDNSFromString(const std::string& s) override { throw operation_failed(); }
+	std::string convertMockDNSToString() override { throw operation_failed(); }
 
 	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                       const std::string& service) override;

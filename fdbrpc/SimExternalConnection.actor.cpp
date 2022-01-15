@@ -108,6 +108,57 @@ void MockDNS::clearMockTCPEndpoints() {
 	hostnameToAddresses.clear();
 }
 
+std::string MockDNS::toString() {
+	std::string ret;
+	int i = 0;
+	for (auto it = hostnameToAddresses.begin(); it != hostnameToAddresses.end(); ++it, ++i) {
+		ret += it->first + ',';
+		std::vector<NetworkAddress> addresses = it->second;
+		for (int j = 0; j < addresses.size(); ++j) {
+			ret += addresses[j].toString();
+			if (j != addresses.size() - 1) {
+				ret += ',';
+			}
+		}
+		if (i != hostnameToAddresses.size() - 1) {
+			ret += ';';
+		}
+	}
+	return ret;
+}
+
+MockDNS MockDNS::parseFromString(const std::string& s) {
+	std::map<std::string, std::vector<NetworkAddress>> mockDNS;
+
+	for (int p = 0; p < s.length();) {
+		int pSemiColumn = s.find_first_of(';', p);
+		if (pSemiColumn == s.npos) {
+			pSemiColumn = s.length();
+		}
+		std::string oneMapping = s.substr(p, pSemiColumn - p);
+
+		std::string hostname;
+		std::vector<NetworkAddress> addresses;
+		for (int i = 0; i < oneMapping.length();) {
+			int pComma = oneMapping.find_first_of(',', i);
+			if (pComma == oneMapping.npos) {
+				pComma = oneMapping.length();
+			}
+			if (!i) {
+				// The first part is hostname
+				hostname = oneMapping.substr(i, pComma - i);
+			} else {
+				addresses.push_back(NetworkAddress::parse(oneMapping.substr(i, pComma - i)));
+			}
+			i = pComma + 1;
+		}
+		mockDNS[hostname] = addresses;
+		p = pSemiColumn + 1;
+	}
+
+	return MockDNS(mockDNS);
+}
+
 void SimExternalConnection::close() {
 	socket.close();
 }
@@ -301,16 +352,12 @@ TEST_CASE("fdbrpc/MockDNS") {
 TEST_CASE("fdbrpc/MockTCPEndpoints") {
 	state std::vector<NetworkAddress> networkAddresses;
 	state NetworkAddress address1(IPAddress(0x13131313), 1);
-	state NetworkAddress address2(IPAddress(0x14141414), 2);
 	networkAddresses.push_back(address1);
-	networkAddresses.push_back(address2);
 	INetworkConnections::net()->addMockTCPEndpoint("testhost1", "port1", networkAddresses);
 	state std::vector<NetworkAddress> resolvedNetworkAddresses =
 	    wait(INetworkConnections::net()->resolveTCPEndpoint("testhost1", "port1"));
-	ASSERT(resolvedNetworkAddresses.size() == 2);
+	ASSERT(resolvedNetworkAddresses.size() == 1);
 	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address1) !=
-	       resolvedNetworkAddresses.end());
-	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address2) !=
 	       resolvedNetworkAddresses.end());
 	// Adding a hostname twice should fail.
 	try {
@@ -324,15 +371,31 @@ TEST_CASE("fdbrpc/MockTCPEndpoints") {
 	} catch (Error& e) {
 		ASSERT(e.code() == error_code_operation_failed);
 	}
-	state std::map<std::string, std::vector<NetworkAddress>> mockDNS = INetworkConnections::net()->getMockDNS();
 	INetworkConnections::net()->removeMockTCPEndpoint("testhost1", "port1");
-	ASSERT(INetworkConnections::net()->getMockDNS().empty());
-	INetworkConnections::net()->setMockDNS(mockDNS);
-	ASSERT(!INetworkConnections::net()->getMockDNS().empty());
-	resolvedNetworkAddresses.clear();
-	// testhost1:port1 can be resolved again after setting mock DNS.
+	state NetworkAddress address2(IPAddress(0x14141414), 2);
+	networkAddresses.push_back(address2);
+	INetworkConnections::net()->addMockTCPEndpoint("testhost1", "port1", networkAddresses);
 	wait(store(resolvedNetworkAddresses, INetworkConnections::net()->resolveTCPEndpoint("testhost1", "port1")));
 	ASSERT(resolvedNetworkAddresses.size() == 2);
+	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address2) !=
+	       resolvedNetworkAddresses.end());
+
+	return Void();
+}
+
+TEST_CASE("fdbrpc/MockDNSParsing") {
+	std::string mockDNSString;
+	INetworkConnections::net()->parseMockDNSFromString(mockDNSString);
+	ASSERT(INetworkConnections::net()->convertMockDNSToString() == mockDNSString);
+
+	mockDNSString = "testhost1:port1,[::1]:4800:tls(fromHostname)";
+	INetworkConnections::net()->parseMockDNSFromString(mockDNSString);
+	ASSERT(INetworkConnections::net()->convertMockDNSToString() == mockDNSString);
+
+	mockDNSString = "testhost1:port1,[::1]:4800,[2001:db8:85a3::8a2e:370:7334]:4800;testhost2:port2,[2001:"
+	                "db8:85a3::8a2e:370:7334]:4800:tls(fromHostname),8.8.8.8:12";
+	INetworkConnections::net()->parseMockDNSFromString(mockDNSString);
+	ASSERT(INetworkConnections::net()->convertMockDNSToString() == mockDNSString);
 
 	return Void();
 }

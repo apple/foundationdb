@@ -696,8 +696,8 @@ public:
 	                                const std::string& service,
 	                                const std::vector<NetworkAddress>& addresses) = 0;
 	virtual void removeMockTCPEndpoint(const std::string& host, const std::string& service) = 0;
-	virtual const std::map<std::string, std::vector<NetworkAddress>> getMockDNS() = 0;
-	virtual void setMockDNS(std::map<std::string, std::vector<NetworkAddress>> otherMockDNS) = 0;
+	virtual void parseMockDNSFromString(const std::string& s) = 0;
+	virtual std::string convertMockDNSToString() = 0;
 	// Resolve host name and service name (such as "http" or can be a plain number like "80") to a list of 1 or more
 	// NetworkAddresses
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
