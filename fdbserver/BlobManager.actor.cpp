@@ -204,6 +204,7 @@ struct BlobManagerData {
 	Database db;
 	Optional<Key> dcId;
 	PromiseStream<Future<Void>> addActor;
+	Promise<Void> doLockCheck;
 
 	Reference<BackupContainerFileSystem> bstore;
 
@@ -212,6 +213,7 @@ struct BlobManagerData {
 	std::unordered_set<NetworkAddress> workerAddresses;
 	std::unordered_set<UID> deadWorkers;
 	KeyRangeMap<UID> workerAssignments;
+	KeyRangeActorMap assignsInProgress;
 	KeyRangeMap<bool> knownBlobRanges;
 
 	AsyncTrigger startRecruiting;
@@ -231,7 +233,13 @@ struct BlobManagerData {
 	BlobManagerData(UID id, Database db, Optional<Key> dcId)
 	  : id(id), db(db), dcId(dcId), knownBlobRanges(false, normalKeys.end),
 	    restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), recruitingStream(0) {}
-	~BlobManagerData() { fmt::print("Destroying blob manager data for {}\n", id.toString()); }
+
+	// TODO REMOVE
+	~BlobManagerData() {
+		if (BM_DEBUG) {
+			fmt::print("Destroying blob manager data for {0} {1}\n", epoch, id.toString());
+		}
+	}
 };
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesTransaction> tr, KeyRange range) {
@@ -284,7 +292,7 @@ ACTOR Future<UID> pickWorkerForAssign(BlobManagerData* bmData) {
 	while (bmData->workerStats.size() == 0) {
 		// TODO REMOVE
 		if (BM_DEBUG) {
-			printf("BM waiting for blob workers before assigning granules\n");
+			fmt::print("BM {0} waiting for blob workers before assigning granules\n", bmData->epoch);
 		}
 		bmData->restartRecruiting.trigger();
 		wait(bmData->recruitingStream.onChange());
@@ -381,20 +389,39 @@ ACTOR Future<Void> doRangeAssignment(BlobManagerData* bmData, RangeAssignment as
 		if (e.code() == error_code_operation_cancelled) {
 			throw;
 		}
-		// If the worker is no longer present, the ranges were already moved off by that function, so don't retry.
-		// If the request is a reassign though, we need to retry it since the worker it was on is now dead and nobody
-		// owns it
-		if (!bmData->workersById.count(workerID) &&
-		    (!assignment.assign.present() || assignment.assign.get().type != AssignRequestType::Reassign)) {
+		if (e.code() == error_code_granule_assignment_conflict) {
+			// Another blob worker already owns the range, don't retry.
+			// And, if it was us that send the request to another worker for this range, this actor should have been
+			// cancelled. So if it wasn't, it's likely that the conflict is from a new blob manager. Trigger the lock
+			// check to make sure, and die if so.
 			if (BM_DEBUG) {
-				fmt::print("BM {0} got error assigning range [{1} - {2}) to now dead worker {3}, ignoring\n",
+				fmt::print("BM {0} got conflict assigning [{1} - {2}) to worker {3}, ignoring\n",
 				           bmData->epoch,
 				           assignment.keyRange.begin.printable(),
 				           assignment.keyRange.end.printable(),
 				           workerID.toString());
 			}
+			if (bmData->doLockCheck.canBeSet()) {
+				bmData->doLockCheck.send(Void());
+			}
 			return Void();
 		}
+
+		// TODO: i think this is no longer necessary with the cancelling and actor map, but keep it around just in case
+		// for a bit If the worker is no longer present, the ranges were already moved off by that function, so don't
+		// retry. If the request is a reassign though, we need to retry it since the worker it was on is now dead and
+		// nobody owns it
+		/*if (!bmData->workersById.count(workerID) &&
+		    (!assignment.assign.present() || assignment.assign.get().type != AssignRequestType::Reassign)) {
+		    if (BM_DEBUG) {
+		        fmt::print("BM {0} got error assigning range [{1} - {2}) to now dead worker {3}, ignoring\n",
+		                   bmData->epoch,
+		                   assignment.keyRange.begin.printable(),
+		                   assignment.keyRange.end.printable(),
+		                   workerID.toString());
+		    }
+		    return Void();
+		}*/
 		// TODO confirm: using reliable delivery this should only trigger if the worker is marked as failed, right?
 		// So assignment needs to be retried elsewhere, and a revoke is trivially complete
 		if (assignment.isAssign) {
@@ -494,7 +521,8 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 
 			// FIXME: if range is assign, have some sort of semaphore for outstanding assignments so we don't assign
 			// a ton ranges at once and blow up FDB with reading initial snapshots.
-			bmData->addActor.send(doRangeAssignment(bmData, assignment, workerId, seqNo));
+			bmData->assignsInProgress.insert(assignment.keyRange,
+			                                 doRangeAssignment(bmData, assignment, workerId, seqNo));
 		} else {
 			// Revoking a range could be a large range that contains multiple ranges.
 			auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
@@ -509,6 +537,8 @@ ACTOR Future<Void> rangeAssigner(BlobManagerData* bmData) {
 				if (bmData->workerStats.count(it.value())) {
 					bmData->workerStats[it.value()].numGranulesAssigned -= 1;
 				}
+
+				bmData->assignsInProgress.cancel(assignment.keyRange);
 
 				// revoke the range for the worker that owns it, not the worker specified in the revoke
 				bmData->addActor.send(doRangeAssignment(bmData, assignment, it.value(), seqNo));
@@ -2331,6 +2361,40 @@ ACTOR Future<Void> monitorPruneKeys(BlobManagerData* self) {
 	}
 }
 
+ACTOR Future<Void> doLockChecks(BlobManagerData* bmData) {
+	loop {
+		Promise<Void> check = bmData->doLockCheck;
+		wait(check.getFuture());
+		wait(delay(0.5)); // don't do this too often if a lot of conflict
+
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
+
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				wait(checkManagerLock(tr, bmData));
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_granule_assignment_conflict) {
+					if (BM_DEBUG) {
+						fmt::print("BM {0} got lock out of date in lock check on conflict! Dying\n", bmData->epoch);
+					}
+					if (bmData->iAmReplaced.canBeSet()) {
+						bmData->iAmReplaced.send(Void());
+					}
+					return Void();
+				}
+				wait(tr->onError(e));
+				if (BM_DEBUG) {
+					fmt::print("BM {0} still ok after checking lock on conflict\n", bmData->epoch);
+				}
+			}
+		}
+		bmData->doLockCheck = Promise<Void>();
+	}
+}
+
 ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
                                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                int64_t epoch) {
@@ -2341,7 +2405,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	state Future<Void> collection = actorCollection(self.addActor.getFuture());
 
 	if (BM_DEBUG) {
-		printf("Blob manager starting...\n");
+		fmt::print("Blob manager {0} starting...\n", epoch);
 	}
 
 	self.epoch = epoch;
@@ -2355,6 +2419,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	// before the new blob manager does anything
 	wait(recoverBlobManager(&self));
 
+	self.addActor.send(doLockChecks(&self));
 	self.addActor.send(monitorClientRanges(&self));
 	self.addActor.send(rangeAssigner(&self));
 	self.addActor.send(monitorPruneKeys(&self));
