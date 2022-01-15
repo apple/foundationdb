@@ -2965,16 +2965,12 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	state std::map<UID, TLogInterface> id_interf;
 	state std::vector<std::pair<Version, UID>> logsByVersion;
 	for (idx = 0; idx < fVers.get().size(); idx++) {
-		// persistCurrentVersionKeys is a prefix of recruitment id, and each recruitment can have only one version
-		// thus we need to create a new TLogInterface for each round, it is for each recruitment.
 		state KeyRef rawId = fVers.get()[idx].key.removePrefix(persistCurrentVersionKeys.begin);
 		UID id1 = BinaryReader::fromStringRef<UID>(rawId, Unversioned());
 		UID id2 = BinaryReader::fromStringRef<UID>(
 		    fRecoverCounts.get()[idx].key.removePrefix(persistRecoveryCountKeys.begin), Unversioned());
 		ASSERT(id1 == id2);
 
-		// when recovery, in my understnding, dbinfo needs to keep track of the id1, which is the recruitment id of
-		// previous interfaces so that SS can still find data on old generations.
 		TLogInterface recruited(id1, self->dbgid, locality);
 		recruited.initEndpoints();
 

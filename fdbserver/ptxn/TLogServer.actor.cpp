@@ -1633,6 +1633,8 @@ ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
 	serverData->removed = Never();
 
 	for (idx = 0; idx < fVers.get().size(); idx++) {
+		// persistCurrentVersionKeys is a prefix of recruitment id, and each recruitment can have only one version
+		// thus we need to create a new TLogInterface for each round, it is for each recruitment.
 		state KeyRef rawId =
 		    fVers.get()[idx].key.removePrefix(persistCurrentVersionKeys.begin); // get interface.id for each generation
 		UID id1 = BinaryReader::fromStringRef<UID>(rawId, Unversioned());
