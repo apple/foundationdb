@@ -1492,12 +1492,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										                                    metadata->keyRange);
 
 									} else {
-										if (cfRollbackVersion <= startState.changeFeedStartVersion) {
+										if (cfRollbackVersion < startState.changeFeedStartVersion) {
 											fmt::print("Rollback past CF start??. rollback={0}, start={1}\n",
 											           cfRollbackVersion,
 											           startState.changeFeedStartVersion);
 										}
-										ASSERT(cfRollbackVersion > startState.changeFeedStartVersion);
+										ASSERT(cfRollbackVersion >= startState.changeFeedStartVersion);
 
 										changeFeedFuture = bwData->db->getChangeFeedStream(metadata->activeCFData.get(),
 										                                                   cfKey,
