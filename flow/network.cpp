@@ -134,12 +134,12 @@ Optional<NetworkAddress> NetworkAddress::parseOptional(std::string const& s) {
 std::vector<NetworkAddress> NetworkAddress::parseList(std::string const& addrs) {
 	// Split addrs on ',' and parse them individually
 	std::vector<NetworkAddress> coord;
-	for (int p = 0; p <= addrs.size();) {
+	for (int p = 0; p < addrs.length();) {
 		int pComma = addrs.find_first_of(',', p);
-		if (pComma == addrs.npos)
-			pComma = addrs.size();
-		NetworkAddress parsedAddress = NetworkAddress::parse(addrs.substr(p, pComma - p));
-		coord.push_back(parsedAddress);
+		if (pComma == addrs.npos) {
+			pComma = addrs.length();
+		}
+		coord.push_back(NetworkAddress::parse(addrs.substr(p, pComma - p)));
 		p = pComma + 1;
 	}
 	return coord;
