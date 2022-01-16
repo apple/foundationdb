@@ -1445,12 +1445,12 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 	return Void();
 }
 
-ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, std::vector<UID> team) {
-	state ptxn::StorageTeamID teamId = ptxn::StorageTeamID();
+ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, std::vector<UID> storageServerIDs) {
+	state ptxn::StorageTeamID storageTeamID = ptxn::StorageTeamID();
 	state Transaction tr(cx);
 
-	std::sort(team.begin(), team.end());
-	state Key teamListKey = storageServerListToTeamIdKey(team);
+	std::sort(std::begin(storageServerIDs), std::end(storageServerIDs));
+	state Key storageServerTeamListKey = storageServerListToTeamIdKey(storageServerIDs);
 
 	loop {
 		try {
@@ -1458,31 +1458,44 @@ ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, std::vector<U
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			Optional<Value> _teamId = wait(tr.get(teamListKey));
-			if (_teamId.present()) {
-				teamId = BinaryReader::fromStringRef<ptxn::StorageTeamID>(_teamId.get(), Unversioned());
-				break;
+			{
+				Optional<Value> _teamId = wait(tr.get(storageServerTeamListKey));
+				if (_teamId.present()) {
+					storageTeamID = BinaryReader::fromStringRef<ptxn::StorageTeamID>(_teamId.get(), Unversioned());
+					break;
+				}
 			}
 
 			// New team, update maps.
-			teamId = deterministicRandom()->randomUniqueID();
-			tr.set(storageTeamIdKey(teamId), encodeStorageTeams(team)); // TeamId -> Vec<StorageServers>
-			tr.set(teamListKey, BinaryWriter::toValue(teamId, Unversioned())); // Vec<StorageServer> -> TeamId
+			storageTeamID = deterministicRandom()->randomUniqueID();
+
+			// Storage Team ID -> Vec<StorageServerIDs>
+			tr.set(storageTeamIdKey(storageTeamID), encodeStorageTeams(storageServerIDs));
+			// Vec<StorageServerIDs> -> TeamId
+			tr.set(storageServerTeamListKey, BinaryWriter::toValue(storageTeamID, Unversioned()));
 
 			// Store StorageServer -> {storageTeamID, set<storageTeamID>}
-			for (const auto& ss : team) {
-				state Key teamIdKey = storageServerToTeamIdKey(ss);
-				Optional<Value> existingTeamsInServer = wait(tr.get(teamIdKey));
+			state int i = 0;
+			for (i = 0; i < static_cast<int>(storageServerIDs.size()); ++i) {
+				state UID storageServerID = storageServerIDs[i];
+				state Key storageServerStorageTeamIdKey = storageServerToTeamIdKey(storageServerID);
+				// FIXME at this stage we assume the storage server's teamMutationStorageTeamID is the same to the
+				// storage server ID
+				Optional<Value> existingTeamInServer = wait(tr.get(storageServerStorageTeamIdKey));
+				ptxn::StorageServerStorageTeams storageTeamIDsInServer(storageServerID);
+				if (existingTeamInServer.present()) {
+					storageTeamIDsInServer = ptxn::StorageServerStorageTeams(existingTeamInServer.get());
+				}
 
-				ASSERT(existingTeamsInServer.present());
-				ptxn::StorageServerStorageTeams teamIDsInServer(existingTeamsInServer.get());
-
-				teamIDsInServer.insert(teamId);
-				tr.set(teamIdKey, teamIDsInServer.toValue());
+				storageTeamIDsInServer.insert(storageTeamID);
+				tr.set(storageServerStorageTeamIdKey, storageTeamIDsInServer.toValue());
 			}
-
 			wait(tr.commit());
-			TraceEvent("StorageTeamCreated").detail("TeamId", teamId).detail("StorageServers", describe(team));
+
+			TraceEvent("StorageTeamCreated")
+			    .detail("StorageTeamId", storageTeamID)
+			    .detail("StorageServerTeams", describe(storageServerIDs));
+
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
@@ -1490,15 +1503,15 @@ ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, std::vector<U
 			}
 
 			TraceEvent(SevWarn, "MoveKeysUpdateTeamMapError")
-			    .detail("TeamId", teamId)
-			    .detail("TeamServers", describe(team))
+			    .detail("StorageTeamID", storageTeamID)
+			    .detail("StorageServerTeams", describe(storageServerIDs))
 			    .detail("ErrorName", e.name())
 			    .error(e);
 			wait(tr.onError(e));
 		}
 	}
 
-	return teamId;
+	return storageTeamID;
 }
 
 ACTOR Future<Void> moveKeys(Database cx,
