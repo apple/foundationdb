@@ -88,6 +88,7 @@ struct serializable_traits<OptionalInterface<Interface>> : std::true_type {
 };
 
 // Contains a generation of tLogs for an individual DC.
+// FIXME TLogSetBase <- TLogSet/ptxnTLogSet
 struct TLogSet {
 	constexpr static FileIdentifier file_identifier = 6302317;
 	std::vector<OptionalInterface<TLogInterface>> tLogs;
@@ -95,7 +96,6 @@ struct TLogSet {
 	// TODO: redundant information in "tLogsPtxn" and "ptxnTLogGroups".
 	//       We could use map<TLogGroupID, std::vector<int>> instead.
 
-	// FIXME TLogSetBase <- TLogSet/ptxnTLogSet
 	std::vector<OptionalInterface<ptxn::TLogInterface_PassivelyPull>> tLogsPtxn;
 	// A list of TLog Group IDs
 	std::vector<ptxn::TLogGroupID> tLogGroupIDs;
