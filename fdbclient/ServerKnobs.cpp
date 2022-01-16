@@ -356,6 +356,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_FETCH_QUEUE_HARD_MAX,                          100 );
 	init( ROCKSDB_FETCH_QUEUE_SOFT_MAX,                           50 );
 	init( ROCKSDB_HISTOGRAMS_SAMPLE_RATE,                      0.001 ); if( randomize && BUGGIFY ) ROCKSDB_HISTOGRAMS_SAMPLE_RATE = 0;
+<<<<<<< HEAD
 	init( ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME,             30.0 ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME = 0.1;
 	init( ROCKSDB_READ_RANGE_REUSE_ITERATORS,                   true ); if( randomize && BUGGIFY ) ROCKSDB_READ_RANGE_REUSE_ITERATORS = deterministicRandom()->coinflip() ? true : false;
 	// Set to 0 to disable rocksdb write rate limiting. Rate limiter unit: bytes per second.
@@ -363,6 +364,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// If true, enables dynamic adjustment of ROCKSDB_WRITE_RATE_LIMITER_BYTES according to the recent demand of background IO.
 	init( ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE,                 true );
 	init( ROCKSDB_PERFCONTEXT_ENABLE,                          true  ); if( randomize && BUGGIFY ) ROCKSDB_PERFCONTEXT_ENABLE = deterministicRandom()->coinflip() ? false : true;
+=======
+	init( ROCKSDB_PERFCONTEXT_ENABLE,                          false ); if( randomize && BUGGIFY ) ROCKSDB_PERFCONTEXT_ENABLE = deterministicRandom()->coinflip() ? false : true;
+>>>>>>> f57abe6d0 (Disable RocksDB PerfContext Metrics by default)
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
