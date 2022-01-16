@@ -389,9 +389,11 @@ ptxn::StorageTeamID storageTeamIdKeyDecode(const KeyRef& key) {
 	return teamId;
 }
 
+// FIXME: Consider other ways to enforce ordering properly
 // This prefix should come before "keyServers" prefix so that this is processed
 // before keyServers at processCompleteTransactionStateRequest().
 const KeyRef storageServerToTeamIdKeyPrefix = "\xff/astorageServerToTeam/"_sr;
+
 const Key storageServerToTeamIdKey(UID serverId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(storageServerToTeamIdKeyPrefix);
@@ -403,13 +405,51 @@ UID decodeStorageServerToTeamIdKey(Key k) {
 	return BinaryReader::fromStringRef<UID>(k.removePrefix(storageServerToTeamIdKeyPrefix), Unversioned());
 }
 
-const Value encodeStorageServerToTeamIdValue(const std::set<UID>& teamIds) {
-	return BinaryWriter::toValue(teamIds, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+const Value encodeStorageServerToTeamIdValue(const ptxn::StorageTeamID& privateMutationsStorageTeamID,
+                                             const std::set<ptxn::StorageTeamID>& teamIds) {
+	return BinaryWriter::toValue(std::make_pair(privateMutationsStorageTeamID, teamIds),
+	                             IncludeVersion(ProtocolVersion::withPartitionTransaction()));
 }
-const std::set<UID> decodeStorageServerToTeamIdValue(const ValueRef& value) {
-	return BinaryReader::fromStringRef<std::set<UID>>(value,
-	                                                  IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+
+const std::pair<ptxn::StorageTeamID, ptxn::StorageServerStorageTeams::StorageTeamIDContainer>
+decodeStorageServerToTeamIdValue(const ValueRef& value) {
+
+	return BinaryReader::fromStringRef<std::pair<ptxn::StorageTeamID, std::set<ptxn::StorageTeamID>>>(
+	    value, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
 }
+
+namespace ptxn {
+
+StorageServerStorageTeams::StorageServerStorageTeams(const StorageTeamID& privateMutationsStorageTeamID_,
+                                                     const StorageTeamIDContainer& storageTeamIDs_)
+  : privateMutationsStorageTeamID(privateMutationsStorageTeamID_), storageTeamIDs(storageTeamIDs_) {}
+
+StorageServerStorageTeams::StorageServerStorageTeams(const ValueRef& serializedValue) {
+	auto [privateMutationsStorageTeamID_, storageTeamIDs_] = decodeStorageServerToTeamIdValue(serializedValue);
+
+	privateMutationsStorageTeamID = privateMutationsStorageTeamID_;
+	storageTeamIDs.swap(storageTeamIDs_);
+}
+
+StorageServerStorageTeams& StorageServerStorageTeams::insert(const StorageTeamID& storageTeamID) {
+	storageTeamIDs.insert(storageTeamID);
+	return *this;
+}
+
+StorageServerStorageTeams& StorageServerStorageTeams::erase(const StorageTeamID& storageTeamID) {
+	storageTeamIDs.erase(storageTeamID);
+	return *this;
+}
+
+const Value StorageServerStorageTeams::toValue() const {
+        return encodeStorageServerToTeamIdValue(privateMutationsStorageTeamID, storageTeamIDs);
+}
+
+std::string StorageServerStorageTeams::toString() const {
+        return concatToString("{", privateMutationsStorageTeamID, ", {", joinToString(storageTeamIDs), "}}");
+}
+
+} // namespace ptxn
 
 const KeyRef storageServerListToTeamIdKeyPrefix = "\xff/storageServerListToTeamId/"_sr;
 const Key storageServerListToTeamIdKey(std::vector<UID> servers) {

@@ -1446,7 +1446,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 }
 
 ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, std::vector<UID> team) {
-	state ptxn::StorageTeamID teamId = UID();
+	state ptxn::StorageTeamID teamId = ptxn::StorageTeamID();
 	state Transaction tr(cx);
 
 	std::sort(team.begin(), team.end());
@@ -1469,18 +1469,16 @@ ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, std::vector<U
 			tr.set(storageTeamIdKey(teamId), encodeStorageTeams(team)); // TeamId -> Vec<StorageServers>
 			tr.set(teamListKey, BinaryWriter::toValue(teamId, Unversioned())); // Vec<StorageServer> -> TeamId
 
-			// Store StorageServer -> Vector<TeamId>
+			// Store StorageServer -> {storageTeamID, set<storageTeamID>}
 			for (const auto& ss : team) {
 				state Key teamIdKey = storageServerToTeamIdKey(ss);
 				Optional<Value> existingTeamsInServer = wait(tr.get(teamIdKey));
-				std::set<UID> teamIdsInServer;
 
-				if (existingTeamsInServer.present()) {
-					teamIdsInServer = decodeStorageServerToTeamIdValue(existingTeamsInServer.get());
-				}
+				ASSERT(existingTeamsInServer.present());
+				ptxn::StorageServerStorageTeams teamIDsInServer(existingTeamsInServer.get());
 
-				teamIdsInServer.insert(teamId);
-				tr.set(teamIdKey, encodeStorageServerToTeamIdValue(teamIdsInServer));
+				teamIDsInServer.insert(teamId);
+				tr.set(teamIdKey, teamIDsInServer.toValue());
 			}
 
 			wait(tr.commit());

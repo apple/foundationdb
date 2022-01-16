@@ -42,7 +42,7 @@
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/RecoveryState.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/TLogGroup.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -451,7 +451,7 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 	state int idx = 0;
 	state std::map<Optional<Value>, Tag> dcId_tags;
 	state int8_t nextLocality = 0;
-	state UID teamId;
+	state ptxn::StorageTeamID teamId;
 	state std::vector<StorageServerInterface> ssInterfaces;
 	while (idx < recruits.storageServers.size()) {
 		TraceEvent("MasterRecruitingInitialStorageServer", self->dbgid)
@@ -468,7 +468,8 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
 		if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 			// XXX: each storage server belongs to a unique team
-			isr.storageTeamId = teamId = deterministicRandom()->randomUniqueID();
+			teamId = deterministicRandom()->randomUniqueID();
+			isr.storageTeamId = teamId;
 		}
 		isr.clusterId = self->clusterId;
 
@@ -493,6 +494,13 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 
 			servers->emplace_back(newServer.get().interf, teamId);
 			ssInterfaces.push_back(newServer.get().interf);
+
+			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
+				ASSERT(newServer.present());
+				TraceEvent("PtxnStorageServerCreated")
+				    .detail("StorageServerID", newServer.get().interf.id().toString())
+				    .detail("InitialStorageTeamID", teamId);
+			}
 		}
 	}
 
@@ -999,7 +1007,7 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(
 			TraceEvent("MasterAssignTeam").detail("SS", pair.first.id()).detail("Team", teamId);
 			for (const auto& ss : serverSrcUID) {
 				Key teamIdKey = storageServerToTeamIdKey(ss);
-				Value val = encodeStorageServerToTeamIdValue({ teamId });
+				Value val = ptxn::StorageServerStorageTeams(teamId).toValue();
 				self->txnStateStore->set(KeyValueRef(teamIdKey, val));
 			}
 		}

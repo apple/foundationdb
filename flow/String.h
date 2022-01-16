@@ -71,4 +71,33 @@ std::string concatToString(const Args&... args) {
 	return _concatHelper(std::stringstream(), args...).str();
 }
 
+// Concatencates a container of objects to string. Uses toString() if possible.
+// NOTE It is more intuitive to think that the template should be
+// 	template <template <typename, typename> Container, typename Value>
+// however C++ will not compile since the allocator part can NOT be automatically deduced.
+// Another argument is that this supports non-standard container, i.e. those without allocator.
+template <typename Container>
+std::string joinToString(const Container& container, const std::string separator = ", ") {
+	bool containerEmpty = true;
+	std::stringstream ss;
+
+	for (const auto& item : container) {
+		containerEmpty = false;
+		if constexpr (HasToString<decltype(item)>::value) {
+			ss << item.toString() << separator;
+		} else {
+			ss << item << separator;
+		}
+	}
+
+	std::string result = ss.str();
+	if (!containerEmpty) {
+		// Removing tailing ", "
+		for(size_t i = 0; i < separator.size(); ++i) {
+			result.pop_back();
+		}
+	}
+	return result;
+}
+
 #endif // FLOW_STRING_H
