@@ -35,7 +35,7 @@
 #include "fdbserver/ptxn/TLogGroupVersionTracker.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbserver/RestoreUtil.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/StorageMetrics.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -148,7 +148,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 	bool forceRecovery = false;
 
 	Reference<TLogGroupCollection> tLogGroupCollection = Reference<TLogGroupCollection>(nullptr);
-	// Each storage server's own team.
+	// Each storage server's own team, i.e. the private mutations team
 	std::unordered_map<UID, ptxn::StorageTeamID> ssToStorageTeam;
 
 	Version debugMinRecentStateVersion = 0;
@@ -551,11 +551,8 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		for (auto& kv : data) {
 			if (kv.key.startsWith(storageServerToTeamIdKeyPrefix)) {
 				UID k = decodeStorageServerToTeamIdKey(kv.key);
-				std::set<ptxn::StorageTeamID> storageTeamIDs = decodeStorageServerToTeamIdValue(kv.value);
-				// For demo purpose, each storage server can only belong to single storage team.
-				ASSERT(storageTeamIDs.size() == 1);
-				// The first team of a storage server is its own team.
-				pContext->pResolverData->ssToStorageTeam.emplace(k, *storageTeamIDs.begin());
+				pContext->pResolverData->ssToStorageTeam.emplace(
+				    k, ptxn::StorageServerStorageTeams(kv.value).getPrivateMutationsStorageTeamID());
 				continue;
 			} else if (!kv.key.startsWith(keyServersPrefix)) {
 				mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);

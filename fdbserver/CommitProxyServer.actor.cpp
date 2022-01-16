@@ -2162,11 +2162,9 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		for (auto& kv : data) {
 			if (kv.key.startsWith(storageServerToTeamIdKeyPrefix)) {
 				UID k = decodeStorageServerToTeamIdKey(kv.key);
-				std::set<ptxn::StorageTeamID> storageTeamIDs = decodeStorageServerToTeamIdValue(kv.value);
-				// For demo purpose, each storage server can only belong to single storage team.
-				ASSERT(storageTeamIDs.size() == 1);
+				ptxn::StorageServerStorageTeams teamIDs(kv.value);
 				// The first team of a storage server is its own team.
-				pContext->pCommitData->ssToStorageTeam.emplace(k, *storageTeamIDs.begin());
+				pContext->pCommitData->ssToStorageTeam.emplace(k, teamIDs.getPrivateMutationsStorageTeamID());
 				continue;
 			} else if (!kv.key.startsWith(keyServersPrefix)) {
 				mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);

@@ -126,13 +126,67 @@ const ptxn::StorageTeamID decodeStorageTeamIdToTLogGroupKey(const KeyRef& k);
 const Key storageTeamIdToTLogGroupKey(ptxn::StorageTeamID teamId);
 
 // A map from a storage server ID to a list of teams associated with that SS.
-// The first team in the list is that storage server's own team, i.e., no
-// other storage servers are in that team.
+// The format of the key/value pair is:
+//    Key:   Storage server ID
+//    Value: {Private mutations storage team ID, {storage team IDs}}
 extern const KeyRef storageServerToTeamIdKeyPrefix;
+
+// Converts storage server ID to StorageServerToTeamID key
+// serverId is the server ID, It is not the team ID.
 const Key storageServerToTeamIdKey(UID serverId);
+
+// Converts StorageServerToTeamID key to storage server ID.
 UID decodeStorageServerToTeamIdKey(Key k);
-const Value encodeStorageServerToTeamIdValue(const std::set<UID>& teamIds);
-const std::set<UID> decodeStorageServerToTeamIdValue(const ValueRef& value);
+
+namespace ptxn {
+
+// Manages the storage teams the storage server subscribe
+class StorageServerStorageTeams {
+public:
+	using StorageTeamIDContainer = std::set<StorageTeamID>;
+
+private:
+	StorageTeamID privateMutationsStorageTeamID;
+	StorageTeamIDContainer storageTeamIDs;
+
+public:
+	// Constructs a StorageServerStorageTeams object with private muations and general storage team IDs
+	explicit StorageServerStorageTeams(const StorageTeamID& privateMutationsStorageTeamID_,
+	                                   const std::set<StorageTeamID>& storageTeamIDs_ = {});
+
+	// Constructs a StorageServerStorageTeams object with encoded
+	explicit StorageServerStorageTeams(const ValueRef& serializedValue);
+
+	// Gets the storage team ID for private mutations
+	const StorageTeamID& getPrivateMutationsStorageTeamID() const { return privateMutationsStorageTeamID; }
+
+	// Gets the set of storage team IDs
+	const StorageTeamIDContainer& getStorageTeams() const { return storageTeamIDs; }
+
+	// Add a new storage team ID to list
+	StorageServerStorageTeams& insert(const StorageTeamID& storageTeamID);
+
+	// Removes a storage team ID
+	StorageServerStorageTeams& erase(const StorageTeamID& storageTeamID);
+
+	// Checks if a storage team ID is included
+	bool contains(const StorageTeamID& storageTeamID) const {
+		return storageTeamIDs.count(storageTeamID) == 1 || privateMutationsStorageTeamID == storageTeamID;
+	}
+
+	// Encodes the object into a Value object
+	const Value toValue() const;
+
+	// Encodes the object into a std::string object
+	std::string toString() const;
+};
+
+} // namespace ptxn
+
+const Value encodeStorageServerToTeamIdValue(const ptxn::StorageTeamID&,
+                                             const ptxn::StorageServerStorageTeams::StorageTeamIDContainer& teamIds);
+const std::pair<ptxn::StorageTeamID, ptxn::StorageServerStorageTeams::StorageTeamIDContainer>
+decodeStorageServerToTeamIdValue(const ValueRef& value);
 
 // Create a map from list of storage servers to teamId. The list of server ID in
 // key is stored in sorted order.
