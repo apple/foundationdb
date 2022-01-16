@@ -111,12 +111,12 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
                                               MoveKeysLock lock,
                                               const DDEnabledState* ddEnabledState);
 
-// Gives a unique ID for each storage team and creates three maps for storage teams. `team` is list
-// of strage servers in the storage team:
+// Gives a unique ID for each storage team and creates three maps for storage teams. `team` is a list
+// of storage servers in the storage team:
 // (1) List of Storage Servers (Team) -> TeamID
 // (2) TeamID -> List of Storage Servers (Team)
 // (3) Storage Server -> List of TeamsIDs
-ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, std::vector<UID> team);
+ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, std::vector<UID> storageServerIDs);
 
 #include "flow/unactorcompiler.h"
 #endif
