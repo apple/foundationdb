@@ -126,12 +126,15 @@ set(FDBSERVER_SRCS
   TeamPartitionedLogSystem.actor.cpp
   TeamPartitionedLogSystem.actor.h
   template_fdb.h
+  Timing.h
 
   ptxn/Config.h
   ptxn/MessageSerializer.cpp
   ptxn/MessageSerializer.h
   ptxn/MessageTypes.cpp
   ptxn/MessageTypes.h
+  ptxn/MutableTeamPeekCursor.actor.cpp
+  ptxn/MutableTeamPeekCursor.actor.h
   ptxn/Serializer.h
   ptxn/StorageServerInterface.cpp
   ptxn/StorageServerInterface.h

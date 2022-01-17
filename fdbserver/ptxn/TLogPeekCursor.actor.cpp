@@ -22,7 +22,7 @@
 
 #include <algorithm>
 #include <iterator>
-#include <unordered_set>
+#include <set>
 #include <vector>
 
 #include "fdbserver/Knobs.h"
@@ -180,9 +180,7 @@ namespace details {
 
 #pragma region VersionSubsequencePeekCursorBase
 
-VersionSubsequencePeekCursorBase::VersionSubsequencePeekCursorBase(const Version version_,
-                                                                   const Subsequence subsequence_)
-  : PeekCursorBase() {}
+VersionSubsequencePeekCursorBase::VersionSubsequencePeekCursorBase() : PeekCursorBase() {}
 
 const Version& VersionSubsequencePeekCursorBase::getVersion() const {
 	return get().version;
@@ -311,6 +309,15 @@ void OrderedCursorContainer::popImpl() {
 	container.pop_back();
 }
 
+void OrderedCursorContainer::eraseImpl(const StorageTeamID& storageTeamID) {
+	container.erase(std::remove_if(
+	                    std::begin(container),
+	                    std::end(container),
+	                    [&](const auto& pCursor) -> auto { return pCursor->getStorageTeamID() == storageTeamID; }),
+	                std::end(container));
+	std::make_heap(std::begin(container), std::end(container), heapElementComparator);
+}
+
 #pragma endregion OrderedCursorContainer
 
 #pragma region UnorderedCursorContainer
@@ -321,6 +328,14 @@ void UnorderedCursorContainer::pushImpl(const UnorderedCursorContainer::element_
 
 void UnorderedCursorContainer::popImpl() {
 	container.pop_front();
+}
+
+void UnorderedCursorContainer::eraseImpl(const StorageTeamID& storageTeamID) {
+	container.erase(std::remove_if(
+	                    std::begin(container),
+	                    std::end(container),
+	                    [&](const auto& pCursor) -> auto { return pCursor->getStorageTeamID() == storageTeamID; }),
+	                std::end(container));
 }
 
 #pragma endregion UnorderedCursorContainer
@@ -338,13 +353,11 @@ void StorageTeamIDCursorMapper::addCursorImpl(const std::shared_ptr<StorageTeamP
 }
 
 std::shared_ptr<StorageTeamPeekCursor> StorageTeamIDCursorMapper::removeCursor(const StorageTeamID& storageTeamID) {
-
 	ASSERT(isCursorExists(storageTeamID));
 	return removeCursorImpl(storageTeamID);
 }
 
 std::shared_ptr<StorageTeamPeekCursor> StorageTeamIDCursorMapper::removeCursorImpl(const StorageTeamID& storageTeamID) {
-
 	std::shared_ptr<StorageTeamPeekCursor> result = mapper[storageTeamID];
 	mapper.erase(storageTeamID);
 	return result;
@@ -390,16 +403,16 @@ struct PeekRemoteContext {
 	using GetCursorPtrFunc_t = std::function<std::shared_ptr<StorageTeamPeekCursor>(const StorageTeamID&)>;
 
 	// Cursors that are empty
-	std::list<StorageTeamID>& emptyCursorStorageTeamIDs;
+	std::set<StorageTeamID>& emptyCursorStorageTeamIDs;
 
 	// Cursors that meets end-of-stream when querying the TLog server
-	std::list<StorageTeamID>& retiredCursorStorageTeamIDs;
+	std::set<StorageTeamID>& retiredCursorStorageTeamIDs;
 
 	// Function that called to get the corresponding cursor by storage team id
 	GetCursorPtrFunc_t getCursorPtr;
 
-	PeekRemoteContext(std::list<StorageTeamID>& emptyCursorStorageTeamIDs_,
-	                  std::list<StorageTeamID>& retiredCursorStorageTeamIDs_,
+	PeekRemoteContext(std::set<StorageTeamID>& emptyCursorStorageTeamIDs_,
+	                  std::set<StorageTeamID>& retiredCursorStorageTeamIDs_,
 	                  GetCursorPtrFunc_t getCursorPtr_)
 	  : emptyCursorStorageTeamIDs(emptyCursorStorageTeamIDs_),
 	    retiredCursorStorageTeamIDs(retiredCursorStorageTeamIDs_), getCursorPtr(getCursorPtr_) {}
@@ -415,6 +428,8 @@ ACTOR Future<PeekSingleCursorResult> peekSingleCursor(std::shared_ptr<StorageTea
 	state ptxn::test::ExponentalBackoffDelay exponentalBackoff(SERVER_KNOBS->MERGE_CURSOR_RETRY_DELAY);
 	exponentalBackoff.enable();
 
+	// It is assumed in this scenario, a commit is sent periodically to push the versions of storage servers; so the
+	// expoential backup is meaningful.
 	while (i < SERVER_KNOBS->MERGE_CURSOR_RETRY_TIMES) {
 		try {
 			state bool receivedData = wait(pCursor->remoteMoreAvailable());
@@ -437,7 +452,7 @@ ACTOR Future<PeekSingleCursorResult> peekSingleCursor(std::shared_ptr<StorageTea
 	return PeekSingleCursorResult{ false, false };
 }
 
-// Returns the number of cursors reported that has received messages from TLogs
+// Returns true if all cursors are ready to consume, or any of them timeouts
 ACTOR Future<bool> peekRemote(std::shared_ptr<PeekRemoteContext> pPeekRemoteContext) {
 	if (pPeekRemoteContext->emptyCursorStorageTeamIDs.empty()) {
 		throw end_of_stream();
@@ -473,7 +488,9 @@ ACTOR Future<bool> peekRemote(std::shared_ptr<PeekRemoteContext> pPeekRemoteCont
 
 		if (peekResult.endOfStream) {
 			TraceEvent(SevInfo, "CursorEndOfStream").detail("StorageTeamID", storageTeamID);
-			pPeekRemoteContext->retiredCursorStorageTeamIDs.push_back(storageTeamID);
+			UNSTOPPABLE_ASSERT(pPeekRemoteContext->retiredCursorStorageTeamIDs.count(storageTeamID) == 0);
+			// NOTE The cursors might be marked retired, yet there could be remaining data.
+			pPeekRemoteContext->retiredCursorStorageTeamIDs.insert(storageTeamID);
 		}
 
 		pPeekRemoteContext->emptyCursorStorageTeamIDs.erase(emptyCursorStorageTeamIDsIter++);
@@ -492,10 +509,6 @@ bool BroadcastedStorageTeamPeekCursorBase::tryFillCursorContainer() {
 	ASSERT(getNumCursors() != 0);
 	ASSERT(pCursorContainer && pCursorContainer->empty());
 
-	for (const auto& storageTeamID : retiredCursorStorageTeamIDs) {
-		removeCursor(storageTeamID);
-	}
-
 	if (getNumCursors() == 0) {
 		// We have no active cursors, fail the cursor filling process
 		// In this case, the caller should do the RPC, and peekRemote should throw end_of_stream to indicate the cursor
@@ -503,13 +516,15 @@ bool BroadcastedStorageTeamPeekCursorBase::tryFillCursorContainer() {
 		return false;
 	}
 
+	// The previous code assumes in broadcasted model, all cursors should share the same version; however it may not be
+	// possible if we supports cursor add/remove mechanism. The shippet here is kept when we revisit the implementation.
 	// Find the current version all the cursors are sharing
 	currentVersion = invalidVersion;
 	bool isFirstElement = true;
 	for (auto iter = cursorsBegin(); iter != cursorsEnd(); ++iter) {
 		auto pCursor = iter->second;
 		if (!pCursor->hasRemaining()) {
-			emptyCursorStorageTeamIDs.push_back(pCursor->getStorageTeamID());
+			emptyCursorStorageTeamIDs.insert(pCursor->getStorageTeamID());
 			continue;
 		}
 
@@ -526,12 +541,38 @@ bool BroadcastedStorageTeamPeekCursorBase::tryFillCursorContainer() {
 		}
 	}
 
+	// The cursor can be empty due to end_of_stream, in this case, remove these cursors from empty cursor set
+	std::set<StorageTeamID> retiredAndAllConsumedStorageTeamIDs;
+	std::set_intersection(
+	    std::begin(emptyCursorStorageTeamIDs),
+	    std::end(emptyCursorStorageTeamIDs),
+	    std::begin(retiredCursorStorageTeamIDs),
+	    std::end(retiredCursorStorageTeamIDs),
+	    std::inserter(retiredAndAllConsumedStorageTeamIDs, std::end(retiredAndAllConsumedStorageTeamIDs)));
+	std::set<StorageTeamID> notRetiredEmptyCursorStorageTeamIDs;
+	std::set_difference(
+	    std::begin(emptyCursorStorageTeamIDs),
+	    std::end(emptyCursorStorageTeamIDs),
+	    std::begin(retiredAndAllConsumedStorageTeamIDs),
+	    std::end(retiredAndAllConsumedStorageTeamIDs),
+	    std::inserter(notRetiredEmptyCursorStorageTeamIDs, std::end(notRetiredEmptyCursorStorageTeamIDs)));
+	std::swap(emptyCursorStorageTeamIDs, notRetiredEmptyCursorStorageTeamIDs);
+
+	// Remove retired/consumed cursors
+	for (const auto& retiredAndAllConsumedStorageTeamID : retiredAndAllConsumedStorageTeamIDs) {
+		removeCursor(retiredAndAllConsumedStorageTeamID);
+	}
+
+	// Do we still have storage teams needs RPC call for a refill?
 	if (!emptyCursorStorageTeamIDs.empty()) {
-		// There are cursors locally consumed. Requires RPC to get a refill.
+		return false;
+	}
+	// No remaining cursors? Report no more data and let remoteMoreAvailable reports end_of_stream
+	if (getNumCursors() == 0) {
 		return false;
 	}
 
-	// No cursor should report its version invalidVersion
+	// Now all cursors hasRemaining and are sharing the same version, ready to consume
 	ASSERT(currentVersion != invalidVersion);
 
 	// Now the cursors are all sharing the same version, fill the cursor container for consumption
@@ -557,31 +598,43 @@ const VersionSubsequenceMessage& BroadcastedStorageTeamPeekCursorBase::getImpl()
 
 void BroadcastedStorageTeamPeekCursorBase::addCursorImpl(const std::shared_ptr<StorageTeamPeekCursor>& cursor) {
 	ASSERT(!cursor->isEmptyVersionsIgnored());
-	emptyCursorStorageTeamIDs.push_back(cursor->getStorageTeamID());
+	// It is possible that a StorageTeamID being inserted for multiple times
+	emptyCursorStorageTeamIDs.insert(cursor->getStorageTeamID());
 	details::StorageTeamIDCursorMapper::addCursorImpl(cursor);
 }
 
-bool BroadcastedStorageTeamPeekCursorBase::hasRemainingImpl() const {
-	while (true) {
-		// Remove all empty version message
-		while (!pCursorContainer->empty() &&
-		       pCursorContainer->front()->get().message.getType() == Message::Type::EMPTY_VERSION_MESSAGE) {
-			auto& pCursorContainer = const_cast<BroadcastedStorageTeamPeekCursorBase*>(this)->pCursorContainer;
-			auto pConsumedCursor = pCursorContainer->front();
-			pConsumedCursor->next();
-			pCursorContainer->pop();
-		}
+std::shared_ptr<StorageTeamPeekCursor> BroadcastedStorageTeamPeekCursorBase::removeCursorImpl(
+    const StorageTeamID& storageTeamID) {
 
-		if (!pCursorContainer->empty()) {
-			return true;
-		} else {
-			// FIXME Rethink this... const_cast is bitter yet setting hasRemainingImpl non-const is also painful
-			bool tryFillResult = const_cast<BroadcastedStorageTeamPeekCursorBase*>(this)->tryFillCursorContainer();
-			if (!tryFillResult) {
-				return false;
-			}
-			return true;
+	pCursorContainer->erase(storageTeamID);
+	emptyCursorStorageTeamIDs.erase(storageTeamID);
+	return details::StorageTeamIDCursorMapper::removeCursorImpl(storageTeamID);
+}
+
+bool BroadcastedStorageTeamPeekCursorBase::hasRemainingImpl() const {
+	// Remove all empty version message
+	// NOTE: Consider the following situation: *ALL* storage team cursors returned empty version message. In this
+	// case, since hasRemaining is called after get, the receiver recieves exact one of the empty version message
+	// while others are dropped here.
+	while (!pCursorContainer->empty() &&
+	       /* FIXME Rethink if this is necessary */
+	       pCursorContainer->front()->hasRemaining() &&
+	       pCursorContainer->front()->get().message.getType() == Message::Type::EMPTY_VERSION_MESSAGE) {
+		auto& pCursorContainer = const_cast<BroadcastedStorageTeamPeekCursorBase*>(this)->pCursorContainer;
+		auto pConsumedCursor = pCursorContainer->front();
+		pConsumedCursor->next();
+		pCursorContainer->pop();
+	}
+
+	if (!pCursorContainer->empty()) {
+		return true;
+	} else {
+		// FIXME Rethink this... const_cast is bitter yet setting hasRemainingImpl non-const is also painful
+		bool tryFillResult = const_cast<BroadcastedStorageTeamPeekCursorBase*>(this)->tryFillCursorContainer();
+		if (!tryFillResult) {
+			return false;
 		}
+		return true;
 	}
 }
 
@@ -589,7 +642,8 @@ bool BroadcastedStorageTeamPeekCursorBase::hasRemainingImpl() const {
 
 void BroadcastedStorageTeamPeekCursor_Ordered::nextImpl() {
 	if (pCursorContainer->empty() && !tryFillCursorContainer()) {
-		// Calling BroadcastedStorageTeamPeekCursor::next while hasRemaining is fals
+		// Calling BroadcastedStorageTeamPeekCursor::next while hasRemaining is true...
+		// TODO: Rethink this, need better description of this assertion
 		ASSERT(false);
 	}
 
@@ -604,7 +658,7 @@ void BroadcastedStorageTeamPeekCursor_Ordered::nextImpl() {
 
 void BroadcastedStorageTeamPeekCursor_Unordered::nextImpl() {
 	if (pCursorContainer->empty() && !tryFillCursorContainer()) {
-		// Calling BroadcastedStorageTeamPeekCursor::next while hasRemaining is fals
+		// Calling BroadcastedStorageTeamPeekCursor::next while hasRemaining is true
 		ASSERT(false);
 	}
 

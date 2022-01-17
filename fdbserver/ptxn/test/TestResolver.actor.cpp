@@ -162,7 +162,6 @@ TEST_CASE("fdbserver/ptxn/test/resolver") {
 	for (const auto& f : replies) {
 		ASSERT(f.isReady() && f.isValid());
 	}
-	std::cout << "Initialized " << replies.size() << " Resolvers\n";
 
 	// Generate 10 batches, send in a random order, and verify all responses.
 	state Version beginVersion = 200;

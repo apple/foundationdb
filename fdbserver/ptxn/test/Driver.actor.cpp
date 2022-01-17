@@ -271,19 +271,19 @@ void TLogGroupWithPrivateMutationsFixture::setUp(const int numTLogGroups, const 
 
 	TLogGroupFixture::setUp(numTLogGroups, numStorageTeamIDs);
 
-	UID teamMutationTLogGroupID = randomUID();
-	printTiming << "Team mutation TLog group ID: " << teamMutationTLogGroupID << std::endl;
-	tLogGroupIDs.push_back(teamMutationTLogGroupID);
+	UID privateMutationsTLogGroupID = randomUID();
+	printTiming << "Team mutation TLog group ID: " << privateMutationsTLogGroupID << std::endl;
+	tLogGroupIDs.push_back(privateMutationsTLogGroupID);
 
-	teamMutationStorageTeamID = getNewStorageTeamID();
-	printTiming << "Team mutation storage team ID: " << teamMutationTLogGroupID << std::endl;
-	storageTeamIDs.push_back(teamMutationStorageTeamID);
+	privateMutationsStorageTeamID = getNewStorageTeamID();
+	printTiming << "Team mutation storage team ID: " << privateMutationsTLogGroupID << std::endl;
+	storageTeamIDs.push_back(privateMutationsStorageTeamID);
 
-	tLogGroupStorageTeamMapping[teamMutationTLogGroupID].insert(teamMutationStorageTeamID);
-	storageTeamTLogGroupMapping[teamMutationStorageTeamID] = teamMutationTLogGroupID;
+	tLogGroupStorageTeamMapping[privateMutationsTLogGroupID].insert(privateMutationsStorageTeamID);
+	storageTeamTLogGroupMapping[privateMutationsStorageTeamID] = privateMutationsTLogGroupID;
 
-	tLogGroups.emplace_back(teamMutationTLogGroupID);
-	tLogGroups.back().storageTeams[teamMutationStorageTeamID];
+	tLogGroups.emplace_back(privateMutationsTLogGroupID);
+	tLogGroups.back().storageTeams[privateMutationsStorageTeamID];
 }
 
 void MessageFixture::generateMutationsToStorageTeamIDs(const std::vector<StorageTeamID>& storageTeamIDs,
@@ -329,9 +329,9 @@ void MessageWithPrivateMutationsFixture::setUp(const TLogGroupWithPrivateMutatio
 	// All storage team ids but the private mutation team
 	auto storageTeamIDs = tLogGroupFixture.storageTeamIDs;
 	storageTeamIDs.erase(
-	    std::remove(std::begin(storageTeamIDs), std::end(storageTeamIDs), tLogGroupFixture.teamMutationStorageTeamID),
+	    std::remove(std::begin(storageTeamIDs), std::end(storageTeamIDs), tLogGroupFixture.privateMutationsStorageTeamID),
 	    std::end(storageTeamIDs));
-	printTiming << "Excluded storage team ID: " << tLogGroupFixture.teamMutationStorageTeamID << std::endl;
+	printTiming << "Excluded storage team ID: " << tLogGroupFixture.privateMutationsStorageTeamID << std::endl;
 
 	Version storageTeamVersion = 0;
 	Version commitVersion = initialVersion;
@@ -645,7 +645,7 @@ TestEnvironment& TestEnvironment::initMessagesWithPrivateMutations(const int ini
 	           initialVersion,
 	           numVersions,
 	           numMutationsInVersion,
-	           tLogGroup.teamMutationStorageTeamID,
+	           tLogGroup.privateMutationsStorageTeamID,
 	           storageServerIDs);
 
 	return *this;

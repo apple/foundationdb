@@ -107,12 +107,35 @@ ACTOR Future<Void> processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFa
 	return Void();
 }
 
+namespace {
+
+void fakeTLogPeekReplyEmpty(TLogPeekRequest& request, const StorageTeamID& storageTeamID) {
+	SubsequencedMessageSerializer serializer(storageTeamID);
+	serializer.completeMessageWriting();
+	Standalone<StringRef> serialized = serializer.getSerialized();
+
+	TLogPeekReply reply({}, serialized.arena(), serialized);
+	reply.beginVersion = invalidVersion;
+	reply.endVersion = invalidVersion;
+
+	request.reply.send(reply);
+}
+
+} // anonymous namespace
+
 ACTOR Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogContext> pFakeTLogContext) {
 	state print::PrintTiming printTiming("FakeTLogPeek");
 
 	const StorageTeamID storageTeamID = request.storageTeamID;
 	const auto& storageTeamEpochVersionRange =
 	    pFakeTLogContext->pTestDriverContext->commitRecord.storageTeamEpochVersionRange;
+
+	if (storageTeamEpochVersionRange.find(storageTeamID) == std::end(storageTeamEpochVersionRange)) {
+		printTiming << "No storage team ID " << storageTeamID << " in FakeTLog" << std::endl;
+		fakeTLogPeekReplyEmpty(request, storageTeamID);
+		return Void();
+	}
+
 	const std::pair<Version, Version>& versionRange = storageTeamEpochVersionRange.at(storageTeamID);
 
 	printTiming << "Storage Team ID = " << storageTeamID.toString() << "\tVersion range [" << versionRange.first << ", "

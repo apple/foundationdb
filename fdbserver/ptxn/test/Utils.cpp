@@ -191,7 +191,7 @@ void printTLogGroup() {
 
 	// Check if is TLogGroupWithPrivateMutationsFixture
 	if (const auto* ptr = dynamic_cast<const details::TLogGroupWithPrivateMutationsFixture*>(&fixture)) {
-		std::cout << formatKVPair("Team mutation storage team ID", ptr->teamMutationStorageTeamID) << std::endl;
+		std::cout << formatKVPair("Team mutation storage team ID", ptr->privateMutationsStorageTeamID) << std::endl;
 	}
 
 	std::cout << std::endl;

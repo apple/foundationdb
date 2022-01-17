@@ -72,6 +72,7 @@ namespace details {
 namespace {
 template <typename T>
 std::shared_ptr<T> TLogInterfaceCastHelper(std::shared_ptr<TLogInterfaceBase> ptr) {
+	ASSERT(ptr);
 	std::shared_ptr<T> result = std::dynamic_pointer_cast<T>(ptr);
 	ASSERT(result);
 	return result;

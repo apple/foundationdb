@@ -177,7 +177,7 @@ public:
 };
 
 struct TLogGroupWithPrivateMutationsFixture : public TLogGroupFixture {
-	StorageTeamID teamMutationStorageTeamID;
+	StorageTeamID privateMutationsStorageTeamID;
 
 public:
 	TLogGroupWithPrivateMutationsFixture(TestDriverContext& testDriverContext) : TLogGroupFixture(testDriverContext) {}
