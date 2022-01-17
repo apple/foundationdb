@@ -1,5 +1,5 @@
 /*
- * storageserver.actor.cpp
+ * StorageServer.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,22 +23,11 @@
 #include <type_traits>
 #include <unordered_map>
 
-#include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/LoadBalance.h"
-#include "flow/ActorCollection.h"
-#include "flow/Arena.h"
-#include "flow/Hash3.h"
-#include "flow/Histogram.h"
-#include "flow/IRandom.h"
-#include "flow/IndexedSet.h"
-#include "flow/SystemMonitor.h"
-#include "flow/Tracing.h"
-#include "flow/Util.h"
 #include "fdbclient/Atomic.h"
-#include "fdbclient/DatabaseContext.h"
-#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StatusClient.h"
@@ -46,6 +35,11 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TransactionLineage.h"
 #include "fdbclient/VersionedMap.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/LoadBalance.h"
+#include "fdbrpc/sim_validation.h"
+#include "fdbrpc/Smoother.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
@@ -55,17 +49,27 @@
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/MutationTracking.h"
+#include "fdbserver/ptxn/MutableTeamPeekCursor.actor.h"
 #include "fdbserver/RecoveryState.h"
+#include "fdbserver/ServerDBInfo.actor.h"
+#include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/StorageMetrics.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/TeamPartitionedLogSystem.actor.h"
+#include "fdbserver/Timing.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbrpc/sim_validation.h"
-#include "fdbrpc/Smoother.h"
-#include "fdbrpc/Stats.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/ActorCollection.h"
+#include "flow/Arena.h"
 #include "flow/genericactors.actor.h"
+#include "flow/Hash3.h"
+#include "flow/Histogram.h"
+#include "flow/IndexedSet.h"
+#include "flow/IRandom.h"
+#include "flow/SystemMonitor.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/Tracing.h"
+#include "flow/Util.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -115,7 +119,7 @@ struct AddingShard : NonCopyable {
 	// completes.
 	std::deque<Standalone<VerUpdateRef>> updates;
 
-	struct StorageServerBase* server;
+	StorageServerBase* server;
 	Version transferredVersion;
 
 	// To learn more details of the phase transitions, see function fetchKeys(). The phases below are sorted in
@@ -157,7 +161,7 @@ class ShardInfo : public ReferenceCounted<ShardInfo>, NonCopyable {
 public:
 	// A shard has 3 mutual exclusive states: adding, readWrite and notAssigned.
 	std::unique_ptr<AddingShard> adding;
-	struct StorageServerBase* readWrite;
+	StorageServerBase* readWrite;
 	KeyRange keys;
 	uint64_t changeCounter;
 
@@ -663,7 +667,6 @@ public:
 	ProtocolVersion logProtocol;
 
 	Reference<ILogSystem> logSystem;
-	Reference<ILogSystem::IPeekCursor> logCursor;
 
 	Promise<UID> clusterId;
 	UID thisServerID;
@@ -886,6 +889,8 @@ public:
 
 	Reference<EventCacheHolder> storageServerSourceTLogIDEventHolder;
 
+	virtual ~StorageServerBase() {}
+
 	StorageServerBase(IKeyValueStore* storage_,
 	                  Reference<AsyncVar<ServerDBInfo> const> const& db,
 	                  StorageServerInterface const& ssi)
@@ -1085,11 +1090,31 @@ public:
 
 class StorageServer : public StorageServerBase {
 public:
+	Reference<ILogSystem::IPeekCursor> logCursor;
+
 	StorageServer(IKeyValueStore* pKVStore,
 	              const Reference<const AsyncVar<ServerDBInfo>>& serverDBInfo,
 	              const StorageServerInterface& storageServerInterface)
 	  : StorageServerBase(pKVStore, serverDBInfo, storageServerInterface) {}
 };
+
+namespace ptxn {
+
+class StorageServer : public StorageServerBase {
+public:
+	std::shared_ptr<ptxn::PeekCursorBase> logCursor;
+
+	StorageServerStorageTeams storageServerStorageTeams;
+
+	StorageServer(IKeyValueStore* pKVStore,
+	              const Reference<const AsyncVar<ServerDBInfo>>& serverDBInfo,
+	              const StorageServerInterface& storageServerInterface,
+	              const StorageTeamID& privateMutationsStorageTeamID_)
+	  : StorageServerBase(pKVStore, serverDBInfo, storageServerInterface),
+	    storageServerStorageTeams(privateMutationsStorageTeamID_) {}
+};
+
+} // namespace ptxn
 
 const StringRef StorageServerBase::CurrentRunningFetchKeys::emptyString = LiteralStringRef("");
 const KeyRangeRef StorageServerBase::CurrentRunningFetchKeys::emptyKeyRange =
@@ -5036,7 +5061,115 @@ ACTOR Future<Void> tssDelayForever() {
 	}
 }
 
-ACTOR Future<Void> update(StorageServerBase* data, bool* pReceivedUpdate) {
+namespace ptxn {
+
+const StorageTeamID& getStoragePrivateMutationTeam(const ptxn::StorageServer& storageServerContext) {
+	ASSERT(storageServerContext.storageTeamID.present());
+	return storageServerContext.storageTeamID.get();
+}
+
+std::vector<ptxn::TLogInterfaceBase*> getTLogInterfaceByStorageTeamID(const ServerDBInfo& serverDBInfo,
+                                                                      const StorageTeamID& storageTeamID) {
+	std::vector<ptxn::TLogInterfaceBase*> tLogInterfaces;
+
+	for (const auto& tLogs : serverDBInfo.logSystemConfig.tLogs) {
+		TLogGroupID tLogGroupID = tLogGroupByStorageTeamID(tLogs.tLogGroupIDs, storageTeamID);
+		int tLogGroupIDIndex =
+		    std::distance(std::begin(tLogs.tLogGroupIDs),
+		                  std::find(std::begin(tLogs.tLogGroupIDs), std::end(tLogs.tLogGroupIDs), tLogGroupID));
+		ASSERT(tLogGroupIDIndex != static_cast<int>(tLogs.ptxnTLogGroups.size()));
+		const auto& interfaces = tLogs.ptxnTLogGroups[tLogGroupIDIndex];
+		for (const auto& interface : interfaces) {
+			if (interface.present()) {
+				// FIXME Rethink about this const_cast
+				tLogInterfaces.push_back(
+				    static_cast<TLogInterfaceBase*>(const_cast<TLogInterface_PassivelyPull*>(&interface.interf())));
+			}
+		}
+		TraceEvent("PtxnGetTLogInterfaceByStorageTeamID")
+		    .detail("StorageTeamID", storageTeamID.toString())
+		    .detail("TLogGroupID", tLogGroupID.toString())
+		    .detail("NumTLogInterfaces", tLogInterfaces.size());
+	}
+
+	TraceEvent("PtxnGetTLogInterfaceByStorageTeamID")
+	    .detail("StorageTeamID", storageTeamID.toString())
+	    .detail("TotalNumTLogInterfaces", tLogInterfaces.size());
+	return tLogInterfaces;
+}
+
+void initializeUpdateCursor(ptxn::StorageServer& storageServerContext) {
+	auto referencedServerDBInfo = storageServerContext.db;
+	storageServerContext.logCursor = std::make_shared<merged::OrderedMutableTeamPeekCursor>(
+	    storageServerContext.thisServerID,
+	    getStoragePrivateMutationTeam(storageServerContext),
+	    [referencedServerDBInfo](const StorageTeamID& storageTeamID) -> auto {
+		    return getTLogInterfaceByStorageTeamID(referencedServerDBInfo->get(), storageTeamID);
+	    });
+}
+
+ACTOR Future<bool> loadFromRemote(ptxn::StorageServer* storageServerContext) {
+	ASSERT(storageServerContext->logCursor);
+
+	state Timing beforeTLogCursorReads;
+	try {
+		loop {
+			state bool remoteAvailable = wait(storageServerContext->logCursor->remoteMoreAvailable());
+			if (remoteAvailable) {
+				break;
+			}
+		}
+	} catch (Error& error) {
+		if (error.code() == error_code_end_of_stream) {
+			return false;
+		}
+		throw error;
+	}
+	storageServerContext->tlogCursorReadsLatencyHistogram->sampleSeconds(beforeTLogCursorReads.duration());
+
+	return true;
+}
+
+ACTOR Future<Void> updateImpl(std::shared_ptr<ptxn::StorageServer> storageServerContext, bool* pReceivedRemoteData) {
+	state bool remoteAvailable = wait(loadFromRemote(storageServerContext.get()));
+	if (!remoteAvailable) {
+		// TODO throw worker_removed() since all cursor has retired
+		return Void();
+	}
+
+	// FIXME check if popped??
+
+	ASSERT(!*pReceivedRemoteData);
+	*pReceivedRemoteData = true;
+
+	// Scan the
+
+	// Eager
+
+	return Void();
+}
+
+// Reads data from TLogs and persists to KVStore
+ACTOR Future<Void> update(std::shared_ptr<ptxn::StorageServer> data, bool* pReceivedRemoteData) {
+	try {
+		wait(updateImpl(data, pReceivedRemoteData));
+
+		loop { wait(delay(1.0)); }
+	} catch (Error& error) {
+		// Need a local copy of error as there is a wait in the catch clause
+		state Error error_ = error;
+		if (error.code() != error_code_worker_removed && error.code() != error_code_please_reboot) {
+			TraceEvent(SevError, "SSUpdateError", data->thisServerID).error(error).backtrace();
+		} else if (error.code() == error_code_please_reboot) {
+			wait(data->durableInProgress);
+		}
+		throw error_;
+	}
+}
+
+} // namespace ptxn
+
+ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double start;
 	try {
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of memory
@@ -5183,8 +5316,8 @@ ACTOR Future<Void> update(StorageServerBase* data, bool* pReceivedUpdate) {
 				auto fk = data->readyFetchKeys.back();
 				data->readyFetchKeys.pop_back();
 				fk.send(&fii);
-				// fetchKeys() would put the data it fetched into the fii. The thread will not return back to this actor
-				// until it was completed.
+				// fetchKeys() would put the data it fetched into the fii. The thread will not return back to this
+				// actor until it was completed.
 			}
 
 			for (auto& c : fii.changes)
@@ -5232,8 +5365,8 @@ ACTOR Future<Void> update(StorageServerBase* data, bool* pReceivedUpdate) {
 			for (; mutationNum < pUpdate->mutations.size(); mutationNum++) {
 				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version, true);
 				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
-				// data->counters.mutationBytes or data->counters.mutations should not be updated because they should
-				// have counted when the mutations arrive from cursor initially.
+				// data->counters.mutationBytes or data->counters.mutations should not be updated because they
+				// should have counted when the mutations arrive from cursor initially.
 				injectedChanges = true;
 				if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 					mutationBytes = 0;
@@ -5365,9 +5498,9 @@ ACTOR Future<Void> update(StorageServerBase* data, bool* pReceivedUpdate) {
 
 		// TODO: Question: why minus 1?
 		// version() is the smallest possible version the subsequent message might have. We are guaranteed to already
-		// have all data at version ver (i.e. version() - 1) and before. But it is possible the next message will have
-		// same version as the last updated one, so `ver` here may be smaller than the (partially) updated version by 1.
-		// This doesn't sound right.
+		// have all data at version ver (i.e. version() - 1) and before. But it is possible the next message will
+		// have same version as the last updated one, so `ver` here may be smaller than the (partially) updated version
+		// by 1. This doesn't sound right.
 		ver = cloneCursor2->version().version - 1;
 
 		if (injectedChanges)
@@ -6583,7 +6716,8 @@ ACTOR Future<Void> serveOverlappingChangeFeedsRequests(
 	}
 }
 
-ACTOR Future<Void> serveChangeFeedPopRequests(StorageServerBase* self, FutureStream<ChangeFeedPopRequest> changeFeedPops) {
+ACTOR Future<Void> serveChangeFeedPopRequests(StorageServerBase* self,
+                                              FutureStream<ChangeFeedPopRequest> changeFeedPops) {
 	loop {
 		ChangeFeedPopRequest req = waitNext(changeFeedPops);
 		self->actors.add(self->readGuard(req, changeFeedPopQ));
@@ -6628,7 +6762,9 @@ ACTOR Future<Void> reportStorageServerState(StorageServerBase* self) {
 	}
 }
 
-ACTOR Future<Void> storageServerCore(StorageServerBase* self, StorageServerInterface ssi) {
+// FIXME std::shared_ptr overall
+ACTOR Future<Void> storageServerCore(std::shared_ptr<StorageServerBase> self_, StorageServerInterface ssi) {
+	state StorageServerBase* self = self_.get();
 	state Future<Void> doUpdate = Void();
 	state bool updateReceived =
 	    false; // true iff the current update() actor assigned to doUpdate has already received an update from the tlog
@@ -6692,8 +6828,17 @@ ACTOR Future<Void> storageServerCore(StorageServerBase* self, StorageServerInter
 						if (self->db->get().logSystemConfig.recoveredAt.present()) {
 							self->poppedAllAfter = self->db->get().logSystemConfig.recoveredAt.get();
 						}
-						self->logCursor = self->logSystem->peekSingle(
-						    self->thisServerID, self->version.get() + 1, self->tag, self->storageTeamID, self->history);
+						if (!SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
+							dynamic_cast<StorageServer*>(self)->logCursor =
+							    self->logSystem->peekSingle(self->thisServerID,
+							                                self->version.get() + 1,
+							                                self->tag,
+							                                self->storageTeamID,
+							                                self->history);
+						} else {
+							ASSERT(std::dynamic_pointer_cast<ptxn::StorageServer>(self_));
+							ptxn::initializeUpdateCursor(*std::dynamic_pointer_cast<ptxn::StorageServer>(self_));
+						}
 						self->popVersion(self->durableVersion.get() + 1, true);
 					}
 					// If update() is waiting for results from the tlog, it might never get them, so needs to be
@@ -6736,10 +6881,16 @@ ACTOR Future<Void> storageServerCore(StorageServerBase* self, StorageServerInter
 			}
 			when(wait(doUpdate)) {
 				updateReceived = false;
-				if (!self->logSystem)
+				if (!self->logSystem) {
 					doUpdate = Never();
-				else
-					doUpdate = update(self, &updateReceived);
+				} else {
+					if (!SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
+						doUpdate = update(dynamic_cast<StorageServer*>(self), &updateReceived);
+					} else {
+						ASSERT(std::dynamic_pointer_cast<ptxn::StorageServer>(self_));
+						doUpdate = ptxn::update(std::dynamic_pointer_cast<ptxn::StorageServer>(self_), &updateReceived);
+					}
+				}
 			}
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);
@@ -6750,7 +6901,7 @@ ACTOR Future<Void> storageServerCore(StorageServerBase* self, StorageServerInter
 	}
 }
 
-bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData, Error const& e) {
+bool storageServerTerminated(StorageServerBase& self, IKeyValueStore* persistentData, Error const& e) {
 	self.shuttingDown = true;
 
 	// Clearing shards shuts down any fetchKeys actors; these may do things on cancellation that are best done with self
@@ -6809,91 +6960,6 @@ ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<IClusterC
 			wait(tr->onError(e));
 			TraceEvent("RemoveStorageServerRetrying").error(err);
 		}
-	}
-}
-
-// for creating a new storage server
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Tag seedTag,
-                                 UID clusterId,
-                                 Version tssSeedVersion,
-                                 ReplyPromise<InitializeStorageReply> recruitReply,
-                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder,
-                                 Optional<ptxn::StorageTeamID> storageTeamID) {
-
-	state StorageServer self(persistentData, db, ssi);
-
-	self.storageTeamID = storageTeamID;
-	if (storageTeamID.present()) {
-		self.logProtocol = ProtocolVersion::withPartitionTransaction();
-	}
-
-	state Future<Void> ssCore;
-	self.clusterId.send(clusterId);
-	if (ssi.isTss()) {
-		self.setTssPair(ssi.tssPairID.get());
-		ASSERT(self.isTss());
-	}
-
-	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
-	              .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
-	self.folder = folder;
-
-	try {
-		wait(self.storage.init());
-		wait(self.storage.commit());
-
-		if (seedTag == invalidTag) {
-			std::pair<Version, Tag> verAndTag = wait(addStorageServer(
-			    self.cx, ssi)); // Might throw recruitment_failed in case of simultaneous master failure
-			self.tag = verAndTag.second;
-			if (ssi.isTss()) {
-				self.setInitialVersion(tssSeedVersion);
-			} else {
-				self.setInitialVersion(verAndTag.first - 1);
-			}
-		} else {
-			self.tag = seedTag;
-		}
-
-		self.storage.makeNewStorageServerDurable();
-		wait(self.storage.commit());
-
-		TraceEvent("StorageServerInit", ssi.id())
-		    .detail("Version", self.version.get())
-		    .detail("SeedTag", seedTag.toString())
-		    .detail("TssPair", ssi.isTss() ? ssi.tssPairID.get().toString() : "");
-		InitializeStorageReply rep;
-		rep.interf = ssi;
-		rep.addedVersion = self.version.get();
-		recruitReply.send(rep);
-		self.byteSampleRecovery = Void();
-
-		ssCore = storageServerCore(&self, ssi);
-		wait(ssCore);
-
-		throw internal_error();
-	} catch (Error& e) {
-		// If we die with an error before replying to the recruitment request, send the error to the recruiter
-		// (ClusterController, and from there to the DataDistributionTeamCollection)
-		if (!recruitReply.isSet())
-			recruitReply.sendError(recruitment_failed());
-
-		// If the storage server dies while something that uses self is still on the stack,
-		// we want that actor to complete before we terminate and that memory goes out of scope
-		state Error err = e;
-		if (storageServerTerminated(self, persistentData, err)) {
-			ssCore.cancel();
-			self.actors.clear(true);
-			wait(delay(0));
-			return Void();
-		}
-		ssCore.cancel();
-		self.actors.clear(true);
-		wait(delay(0));
-		throw err;
 	}
 }
 
@@ -7033,73 +7099,176 @@ ACTOR Future<Void> replaceTSSInterface(StorageServerBase* self, StorageServerInt
 	return Void();
 }
 
+namespace {
+
+std::shared_ptr<StorageServerBase> getStorageServerInstance(IKeyValueStore* persistentData,
+                                                            Reference<const AsyncVar<ServerDBInfo>> serverDBInfo,
+                                                            const StorageServerInterface& storageServerInterface,
+                                                            const Optional<ptxn::StorageTeamID>& storageTeamID) {
+	if (!SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
+		return std::make_shared<StorageServer>(persistentData, serverDBInfo, storageServerInterface);
+	} else {
+		ASSERT(storageTeamID.present());
+		return std::make_shared<ptxn::StorageServer>(
+		    persistentData, serverDBInfo, storageServerInterface, storageTeamID.get());
+	}
+}
+
+} // anonymous namespace
+
+// for creating a new storage server
+ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
+                                 StorageServerInterface ssi,
+                                 Tag seedTag,
+                                 UID clusterId,
+                                 Version tssSeedVersion,
+                                 ReplyPromise<InitializeStorageReply> recruitReply,
+                                 Reference<AsyncVar<ServerDBInfo> const> db,
+                                 std::string folder,
+                                 Optional<ptxn::StorageTeamID> storageTeamID) {
+
+	state std::shared_ptr<StorageServerBase> self = getStorageServerInstance(persistentData, db, ssi, storageTeamID);
+	state Future<Void> ssCore;
+
+	self->storageTeamID = storageTeamID;
+	self->folder = folder;
+	if (storageTeamID.present()) {
+		self->logProtocol = ProtocolVersion::withPartitionTransaction();
+	}
+	self->clusterId.send(clusterId);
+
+	if (ssi.isTss()) {
+		self->setTssPair(ssi.tssPairID.get());
+		ASSERT(self->isTss());
+	}
+
+	self->sk = serverKeysPrefixFor(self->tssPairID.present() ? self->tssPairID.get() : self->thisServerID)
+	               .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
+
+	try {
+		wait(self->storage.init());
+		wait(self->storage.commit());
+
+		if (seedTag == invalidTag) {
+			// Might throw recruitment_failed in case of simultaneous master failure
+			std::pair<Version, Tag> verAndTag = wait(addStorageServer(self->cx, ssi));
+			self->tag = verAndTag.second;
+			if (ssi.isTss()) {
+				self->setInitialVersion(tssSeedVersion);
+			} else {
+				self->setInitialVersion(verAndTag.first - 1);
+			}
+		} else {
+			self->tag = seedTag;
+		}
+
+		self->storage.makeNewStorageServerDurable();
+		wait(self->storage.commit());
+
+		TraceEvent("StorageServerInit", ssi.id())
+		    .detail("Version", self->version.get())
+		    .detail("SeedTag", seedTag.toString())
+		    .detail("TssPair", ssi.isTss() ? ssi.tssPairID.get().toString() : "");
+		InitializeStorageReply rep;
+		rep.interf = ssi;
+		rep.addedVersion = self->version.get();
+		recruitReply.send(rep);
+		self->byteSampleRecovery = Void();
+
+		ssCore = storageServerCore(self, ssi);
+		wait(ssCore);
+
+		throw internal_error();
+	} catch (Error& e) {
+		// If we die with an error before replying to the recruitment request, send the error to the recruiter
+		// (ClusterController, and from there to the DataDistributionTeamCollection)
+		if (!recruitReply.isSet())
+			recruitReply.sendError(recruitment_failed());
+
+		// If the storage server dies while something that uses self is still on the stack,
+		// we want that actor to complete before we terminate and that memory goes out of scope
+		state Error err = e;
+		if (storageServerTerminated(*self, persistentData, e)) {
+			ssCore.cancel();
+			self->actors.clear(true);
+			wait(delay(0));
+			return Void();
+		}
+		ssCore.cancel();
+		self->actors.clear(true);
+		wait(delay(0));
+		throw err;
+	}
+}
+
 // for recovering an existing storage server
+// FIXME StorageTeamID
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
                                  Promise<Void> recovered,
                                  Reference<IClusterConnectionRecord> connRecord) {
-	state StorageServer self(persistentData, db, ssi);
+	state std::shared_ptr<StorageServerBase> self = getStorageServerInstance(persistentData, db, ssi, {});
 	state Future<Void> ssCore;
-	self.folder = folder;
+	self->folder = folder;
 
 	try {
 		state double start = now();
-		TraceEvent("StorageServerRebootStart", self.thisServerID).log();
+		TraceEvent("StorageServerRebootStart", self->thisServerID).log();
 
-		wait(self.storage.init());
+		wait(self->storage.init());
 		choose {
 			// after a rollback there might be uncommitted changes.
 			// for memory storage engine type, wait until recovery is done before commit
-			when(wait(self.storage.commit())) {}
+			when(wait(self->storage.commit())) {}
 
-			when(wait(memoryStoreRecover(persistentData, connRecord, self.thisServerID))) {
-				TraceEvent("DisposeStorageServer", self.thisServerID).log();
+			when(wait(memoryStoreRecover(persistentData, connRecord, self->thisServerID))) {
+				TraceEvent("DisposeStorageServer", self->thisServerID).log();
 				throw worker_removed();
 			}
 		}
 
-		bool ok = wait(self.storage.restoreDurableState());
+		bool ok = wait(self->storage.restoreDurableState());
 		if (!ok) {
 			if (recovered.canBeSet())
 				recovered.send(Void());
 			return Void();
 		}
-		TraceEvent("SSTimeRestoreDurableState", self.thisServerID).detail("TimeTaken", now() - start);
+		TraceEvent("SSTimeRestoreDurableState", self->thisServerID).detail("TimeTaken", now() - start);
 
 		// if this is a tss storage file, use that as source of truth for this server being a tss instead of the
 		// presence of the tss pair key in the storage engine
 		if (ssi.isTss()) {
-			ASSERT(self.isTss());
-			ssi.tssPairID = self.tssPairID.get();
+			ASSERT(self->isTss());
+			ssi.tssPairID = self->tssPairID.get();
 		} else {
-			ASSERT(!self.isTss());
+			ASSERT(!self->isTss());
 		}
 
-		ASSERT(self.thisServerID == ssi.id());
+		ASSERT(self->thisServerID == ssi.id());
 
-		self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
-		              .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
+		self->sk = serverKeysPrefixFor(self->tssPairID.present() ? self->tssPairID.get() : self->thisServerID)
+		               .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
 
-		TraceEvent("StorageServerReboot", self.thisServerID).detail("Version", self.version.get());
+		TraceEvent("StorageServerReboot", self->thisServerID).detail("Version", self->version.get());
 
 		if (recovered.canBeSet())
 			recovered.send(Void());
 
 		try {
-			if (self.isTss()) {
-				wait(replaceTSSInterface(&self, ssi));
+			if (self->isTss()) {
+				wait(replaceTSSInterface(self.get(), ssi));
 			} else {
-				wait(replaceInterface(&self, ssi));
+				wait(replaceInterface(self.get(), ssi));
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_worker_removed) {
 				throw;
 			}
-			state UID clusterId = wait(getClusterId(&self));
-			ASSERT(self.clusterId.isValid());
-			UID durableClusterId = wait(self.clusterId.getFuture());
+			state UID clusterId = wait(getClusterId(self.get()));
+			ASSERT(self->clusterId.isValid());
+			UID durableClusterId = wait(self->clusterId.getFuture());
 			ASSERT(durableClusterId.isValid());
 			if (clusterId == durableClusterId) {
 				throw worker_removed();
@@ -7115,10 +7284,10 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			wait(Future<Void>(Never()));
 		}
 
-		TraceEvent("StorageServerStartingCore", self.thisServerID).detail("TimeTaken", now() - start);
+		TraceEvent("StorageServerStartingCore", self->thisServerID).detail("TimeTaken", now() - start);
 
 		// wait( delay(0) );  // To make sure self->zkMasterInfo.onChanged is available to wait on
-		ssCore = storageServerCore(&self, ssi);
+		ssCore = storageServerCore(self, ssi);
 		wait(ssCore);
 
 		throw internal_error();
@@ -7129,14 +7298,14 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		// If the storage server dies while something that uses self is still on the stack,
 		// we want that actor to complete before we terminate and that memory goes out of scope
 		state Error err = e;
-		if (storageServerTerminated(self, persistentData, err)) {
+		if (storageServerTerminated(*self, persistentData, err)) {
 			ssCore.cancel();
-			self.actors.clear(true);
+			self->actors.clear(true);
 			wait(delay(0));
 			return Void();
 		}
 		ssCore.cancel();
-		self.actors.clear(true);
+		self->actors.clear(true);
 		wait(delay(0));
 		throw err;
 	}
