@@ -1479,7 +1479,7 @@ ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, std::vector<U
 			for (i = 0; i < static_cast<int>(storageServerIDs.size()); ++i) {
 				state UID storageServerID = storageServerIDs[i];
 				state Key storageServerStorageTeamIdKey = storageServerToTeamIdKey(storageServerID);
-				// FIXME at this stage we assume the storage server's teamMutationStorageTeamID is the same to the
+				// FIXME at this stage we assume the storage server's privateMutationsStorageTeamID is the same to the
 				// storage server ID
 				Optional<Value> existingTeamInServer = wait(tr.get(storageServerStorageTeamIdKey));
 				ptxn::StorageServerStorageTeams storageTeamIDsInServer(storageServerID);
