@@ -55,6 +55,24 @@ std::vector<VersionSubsequenceMessage> CommitRecord::getMessagesFromStorageTeams
 	return vsm;
 }
 
+void CommitRecord::updateVersionInformation() {
+	ASSERT(messages.size() > 0);
+
+	firstVersion = std::begin(messages)->first;
+	lastVersion = std::rbegin(messages)->first;
+
+	for(const auto& [version, storageTeamSubsequenceMessages] : messages) {
+		for(const auto& [storageTeamID, subsequenceMessages] : storageTeamSubsequenceMessages) {
+			if (storageTeamEpochVersionRange.count(storageTeamID) == 0) {
+				storageTeamEpochVersionRange[storageTeamID] = {version, version + 1};
+			} else {
+				// Note that the end version is not inclusiv
+				storageTeamEpochVersionRange[storageTeamID].second = version + 1;
+			}
+		}
+	}
+}
+
 const std::pair<int, int> DEFAULT_KEY_LENGTH_RANGE = { 10, 20 };
 const std::pair<int, int> DEFAULT_VALUE_LENGTH_RANGE = { 100, 200 };
 
@@ -82,14 +100,6 @@ void distributeMutationRefs(VectorRef<MutationRef>& mutationRefs,
                             const std::vector<StorageTeamID>& allStorageTeamIDs,
                             CommitRecord& commitRecord) {
 
-	for (auto storageTeamID : allStorageTeamIDs) {
-		if (commitRecord.storageTeamEpochVersionRange.count(storageTeamID) == 0) {
-			commitRecord.storageTeamEpochVersionRange[storageTeamID] = { commitVersion, commitVersion + 1 };
-		} else {
-			commitRecord.storageTeamEpochVersionRange.at(storageTeamID).second = commitVersion + 1;
-		}
-	}
-
 	auto& storageTeamMessageMap = commitRecord.messages[commitVersion];
 	auto storageTeamIDs = randomlyPick<std::vector<StorageTeamID>>(
 	    allStorageTeamIDs, deterministicRandom()->randomInt(1, allStorageTeamIDs.size() + 1));
@@ -102,11 +112,11 @@ void distributeMutationRefs(VectorRef<MutationRef>& mutationRefs,
 		    commitRecord.messageArena, { ++subsequence, MutationRef(commitRecord.messageArena, mutationRef) });
 	}
 
-	// Update commit version range
-	commitRecord.firstVersion = std::min(commitRecord.firstVersion, commitVersion);
-	commitRecord.lastVersion = std::max(commitRecord.lastVersion, commitVersion);
-
 	commitRecord.commitVersionStorageTeamVersionMapper[commitVersion] = storageTeamVersion;
+}
+
+void increaseVersion(Version& version) {
+	version += deterministicRandom()->randomInt(5, 11);
 }
 
 void prepareProxySerializedMessages(

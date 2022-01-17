@@ -21,10 +21,11 @@
 #include "fdbserver/ptxn/test/Driver.h"
 
 #include <algorithm>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <memory>
-#include <functional>
+#include <set>
 #include <unordered_map>
 #include <utility>
 
@@ -46,6 +47,16 @@
 #include "flow/actorcompiler.h" // This must be the last #include
 
 namespace ptxn::test {
+
+const int TestDriverOptions::DEFAULT_NUM_COMMITS = 3;
+const int TestDriverOptions::DEFAULT_NUM_TEAMS = 3;
+const int TestDriverOptions::DEFAULT_NUM_PROXIES = 1;
+const int TestDriverOptions::DEFAULT_NUM_TLOGS = 3;
+const int TestDriverOptions::DEFAULT_NUM_TLOG_GROUPS = 4;
+const int TestDriverOptions::DEFAULT_NUM_STORAGE_SERVERS = 3;
+const int TestDriverOptions::DEFAULT_NUM_RESOLVERS = 2;
+const int TestDriverOptions::DEFAULT_SKIP_COMMIT_VALIDATION = false;
+const MessageTransferModel TestDriverOptions::DEFAULT_MESSAGE_TRANSFER_MODEL = MessageTransferModel::TLogActivelyPush;
 
 TestDriverOptions::TestDriverOptions(const UnitTestParameters& params)
   : numCommits(params.getInt("numCommits").orDefault(DEFAULT_NUM_COMMITS)),
@@ -218,9 +229,7 @@ void startFakeStorageServer(std::vector<Future<Void>>& actors, std::shared_ptr<T
 
 namespace details {
 
-void TLogGroupFixture::setUp(TestDriverContext& testDriverContext,
-                             const int numTLogGroups,
-                             const int numStorageTeamIDs) {
+void TLogGroupFixture::setUp(const int numTLogGroups, const int numStorageTeamIDs) {
 
 	ASSERT(numTLogGroups <= numStorageTeamIDs);
 
@@ -257,23 +266,110 @@ void TLogGroupFixture::setUp(TestDriverContext& testDriverContext,
 	}
 }
 
-void MessageFixture::setUp(const TLogGroupFixture& tLogGroupStorageTeamMapping,
+void TLogGroupWithPrivateMutationsFixture::setUp(const int numTLogGroups, const int numStorageTeamIDs) {
+	test::print::PrintTiming printTiming("TLogGroupWithPrivateMutationsFixture::setUp");
+
+	TLogGroupFixture::setUp(numTLogGroups, numStorageTeamIDs);
+
+	UID teamMutationTLogGroupID = randomUID();
+	printTiming << "Team mutation TLog group ID: " << teamMutationTLogGroupID << std::endl;
+	tLogGroupIDs.push_back(teamMutationTLogGroupID);
+
+	teamMutationStorageTeamID = getNewStorageTeamID();
+	printTiming << "Team mutation storage team ID: " << teamMutationTLogGroupID << std::endl;
+	storageTeamIDs.push_back(teamMutationStorageTeamID);
+
+	tLogGroupStorageTeamMapping[teamMutationTLogGroupID].insert(teamMutationStorageTeamID);
+	storageTeamTLogGroupMapping[teamMutationStorageTeamID] = teamMutationTLogGroupID;
+
+	tLogGroups.emplace_back(teamMutationTLogGroupID);
+	tLogGroups.back().storageTeams[teamMutationStorageTeamID];
+}
+
+void MessageFixture::generateMutationsToStorageTeamIDs(const std::vector<StorageTeamID>& storageTeamIDs,
+                                                       const int initialVersion,
+                                                       const int numVersions,
+                                                       const int numMutationsInVersion) {}
+
+void MessageFixture::setUp(const TLogGroupFixture& tLogGroupFixture,
                            const int initialVersion,
                            const int numVersions,
                            const int numMutationsInVersion) {
-	const std::vector<StorageTeamID>& storageTeamIDs = tLogGroupStorageTeamMapping.storageTeamIDs;
+	// FIXME Think about generations
+	test::print::PrintTiming printTiming("MessageFixture::setUp");
+
 	Version storageTeamVersion = 0;
 	Version commitVersion = initialVersion;
 	for (int _ = 0; _ < numVersions; ++_) {
 		Arena mutationArena;
 		VectorRef<MutationRef> mutationRefs;
 		generateMutationRefs(numMutationsInVersion, mutationArena, mutationRefs);
-		distributeMutationRefs(mutationRefs, commitVersion, ++storageTeamVersion, storageTeamIDs, commitRecord);
-		commitVersion += deterministicRandom()->randomInt(5, 11);
+		distributeMutationRefs(
+		    mutationRefs, commitVersion, ++storageTeamVersion, tLogGroupFixture.storageTeamIDs, commitRecord);
+		increaseVersion(commitVersion);
 	}
+
+	commitRecord.updateVersionInformation();
+}
+
+void MessageWithPrivateMutationsFixture::setUp(const TLogGroupWithPrivateMutationsFixture& tLogGroupFixture,
+                                            const int initialVersion,
+                                            const int numVersions,
+                                            const int numMutationsInVersion,
+                                            const StorageTeamID& privateMutationStorageTeamID,
+                                            const std::vector<UID>& storageServerIDs) {
+	// FIXME Think about generations
+
+	test::print::PrintTiming printTiming("MessageWithPrivateMutationsFixture::setUp");
+	static const int INV_TEAM_MUTATION_INJECTION_RATE = 2;
+
+	// FIXME At this stage we only set up storage server ID for one server
+	ASSERT(storageServerIDs.size() == 1);
+
+	// All storage team ids but the private mutation team
+	auto storageTeamIDs = tLogGroupFixture.storageTeamIDs;
+	storageTeamIDs.erase(
+	    std::remove(std::begin(storageTeamIDs), std::end(storageTeamIDs), tLogGroupFixture.teamMutationStorageTeamID),
+	    std::end(storageTeamIDs));
+	printTiming << "Excluded storage team ID: " << tLogGroupFixture.teamMutationStorageTeamID << std::endl;
+
+	Version storageTeamVersion = 0;
+	Version commitVersion = initialVersion;
+	for (int _ = 0; _ < numVersions; ++_) {
+		// Create fake mutations for storage teams, excluding the private mutation team
+		Arena mutationArena;
+		VectorRef<MutationRef> mutationRefs;
+		generateMutationRefs(numMutationsInVersion, mutationArena, mutationRefs);
+		distributeMutationRefs(mutationRefs, commitVersion, ++storageTeamVersion, storageTeamIDs, commitRecord);
+		increaseVersion(commitVersion);
+
+		// Inject a team mutation change if possible
+		if (deterministicRandom()->randomInt(0, INV_TEAM_MUTATION_INJECTION_RATE) != 0) {
+			continue;
+		}
+
+		// The team mutation commit is not generated, thus not included in numVersions
+		const int numSamples = deterministicRandom()->randomInt(1, storageTeamIDs.size() + 1);
+		const auto storageTeamIDs_ = randomlyPick<std::vector<StorageTeamID>>(storageTeamIDs, numSamples);
+		const auto storageTeamIDs = std::set<StorageTeamID>(std::begin(storageTeamIDs_), std::end(storageTeamIDs_));
+		StorageServerStorageTeams storageTeams(privateMutationStorageTeamID, storageTeamIDs);
+		// FIXME consider multiple storage server IDs
+		Key key = storageServerToTeamIdKey(storageServerIDs[0]);
+		Value value = storageTeams.toValue();
+		// The team mutation storage team version will always be 1
+		commitRecord.messages[commitVersion][privateMutationStorageTeamID].push_back(
+		    commitRecord.messageArena,
+		    { ++storageTeamVersion, MutationRef(commitRecord.messageArena, MutationRef::SetValue, key, value) });
+		commitRecord.commitVersionStorageTeamVersionMapper[commitVersion] = storageTeamVersion;
+		increaseVersion(commitVersion);
+	}
+
+	commitRecord.updateVersionInformation();
 }
 
 #pragma region ptxnTLogFixture
+
+const int ptxnTLogFixture::NUM_TLOG_PER_GROUP = 3;
 
 ptxnTLogFixture::~ptxnTLogFixture() {
 	for (auto& actor : actors) {
@@ -282,13 +378,7 @@ ptxnTLogFixture::~ptxnTLogFixture() {
 }
 
 void ptxnTLogFixture::setUp(const int numTLogs) {
-	int tLogGroupIndex = 0;
-	auto assignTLogGroup = [this](const TLogGroupID& tLogGroupID, std::shared_ptr<FakeTLogContext> pTLogContext) {
-		for (const auto& storageTeamID : tLogGroupFixture.tLogGroupStorageTeamMapping.at(tLogGroupID)) {
-			pTLogContext->storageTeamIDs.push_back(storageTeamID);
-		}
-		tLogGroupLeaders[tLogGroupID] = pTLogContext->pTLogInterface;
-	};
+	ptxn::test::print::PrintTiming printTiming("ptxnTLogFixture::setUp");
 
 	// Create TLog servers
 	for (int i = 0; i < numTLogs; ++i) {
@@ -303,21 +393,28 @@ void ptxnTLogFixture::setUp(const int numTLogs) {
 		tLogInterfaces.push_back(pTLogInterface);
 		pTLogContext->pTLogInterface = pTLogInterface;
 
-		// Assign tLog group and storage team IDs
-		const auto& tLogGroupID = tLogGroupFixture.tLogGroupIDs[tLogGroupIndex];
-		tLogGroupIndex = (tLogGroupIndex + 1) % tLogGroupFixture.getNumTLogGroups();
-		assignTLogGroup(tLogGroupID, pTLogContext);
-
-		actors.push_back(createTLogActor(pTLogContext));
+		printTiming << "Created TLogInterface " << i << " with ID " << pTLogInterface->id() << std::endl;
 	}
 
-	// Assign remaining TLogGroups to TLog interfaces
-	if (numTLogs < tLogGroupFixture.getNumTLogGroups()) {
-		int tLogContextIndex = 0;
-		for (; tLogGroupIndex < tLogGroupFixture.getNumTLogGroups(); ++tLogGroupIndex) {
-			assignTLogGroup(tLogGroupFixture.tLogGroupIDs[tLogGroupIndex], tLogContexts[tLogContextIndex]);
-			tLogContextIndex = (tLogContextIndex + 1) % tLogContexts.size();
+	// Assign tLog group and storage team IDs
+	int tLogContextIndex = 0;
+	for (auto tLogGroupIndex = 0; tLogGroupIndex < tLogGroupFixture.getNumTLogGroups(); ++tLogGroupIndex) {
+		const auto& tLogGroupID = tLogGroupFixture.tLogGroupIDs[tLogGroupIndex];
+		const auto& pTLogContext = tLogContexts[tLogContextIndex];
+
+		for (const auto& storageTeamID : tLogGroupFixture.tLogGroupStorageTeamMapping.at(tLogGroupID)) {
+			pTLogContext->storageTeamIDs.push_back(storageTeamID);
 		}
+		tLogGroupLeaders[tLogGroupID] = pTLogContext->pTLogInterface;
+		printTiming << "Assigned TLogInterface " << pTLogContext->pTLogInterface->id() << " to TLogGroup "
+		            << tLogGroupID << std::endl;
+
+		tLogContextIndex = (tLogContextIndex + 1) % numTLogs;
+	}
+
+	// Start TLogs
+	for (const auto& pTLogContext : tLogContexts) {
+		actors.push_back(createTLogActor(pTLogContext));
 	}
 }
 
@@ -328,6 +425,9 @@ ptxn::details::TLogInterfaceSharedPtrWrapper ptxnTLogFixture::getTLogLeaderByTLo
 		return tLogGroupLeaders.at(tLogGroupID);
 	}
 
+	ASSERT(false);
+
+	// This is to mute the compiler warning of not returning a value
 	return {};
 }
 
@@ -339,6 +439,9 @@ ptxn::details::TLogInterfaceSharedPtrWrapper ptxnTLogFixture::getTLogLeaderBySto
 		return getTLogLeaderByTLogGroupID(iter->second);
 	}
 
+	ASSERT(false);
+
+	// This is to mute the compiler warning of not returning a value
 	return {};
 }
 
@@ -385,7 +488,8 @@ void ptxnStorageServerFixture::setUp(const int numStorageServers) {
 		                               resource.seedVersion,
 		                               initializeReply,
 		                               asyncServerDBInfoRef,
-		                               "./"));
+		                               /* folder */ "./",
+		                               storageTeamID));
 	}
 }
 
@@ -459,7 +563,19 @@ TestEnvironment& TestEnvironment::initTLogGroup(const int numTLogGroupIDs, const
 	ASSERT(!pImpl->tLogGroup);
 
 	pImpl->tLogGroup = std::make_unique<details::TLogGroupFixture>(*pImpl->testDriverContextImpl);
-	pImpl->tLogGroup->setUp(*pImpl->testDriverContextImpl, numTLogGroupIDs, numStorageTeamIDs);
+	pImpl->tLogGroup->setUp(numTLogGroupIDs, numStorageTeamIDs);
+
+	return *this;
+}
+
+TestEnvironment& TestEnvironment::initTLogGroupWithPrivateMutationsFixture(const int numTLogGroupIDs,
+                                                                        const int numStorageTeamIDs) {
+	ASSERT(pImpl->testDriverContextImpl);
+	ASSERT(!pImpl->tLogGroup);
+
+	pImpl->tLogGroup = std::make_unique<details::TLogGroupWithPrivateMutationsFixture>(*pImpl->testDriverContextImpl);
+	dynamic_cast<details::TLogGroupWithPrivateMutationsFixture&>(*pImpl->tLogGroup)
+	    .setUp(numTLogGroupIDs, numStorageTeamIDs);
 
 	return *this;
 }
@@ -496,6 +612,41 @@ TestEnvironment& TestEnvironment::initMessages(const int initialVersion,
 
 	pImpl->messages = std::make_unique<details::MessageFixture>(pImpl->testDriverContextImpl->commitRecord);
 	pImpl->messages->setUp(*pImpl->tLogGroup, initialVersion, numVersions, numMutationsInVersion);
+
+	return *this;
+}
+
+// storageServerIDs are used if exists, otherwise use the
+TestEnvironment& TestEnvironment::initMessagesWithPrivateMutations(const int initialVersion,
+                                                                const int numVersions,
+                                                                const int numMutationsInVersion,
+                                                                Optional<std::vector<UID>> optionalStorageServerIDs) {
+	ASSERT(pImpl->testDriverContextImpl);
+	ASSERT(pImpl->tLogGroup);
+	ASSERT(!pImpl->messages);
+
+	std::vector<UID> storageServerIDs;
+
+	if (optionalStorageServerIDs.present()) {
+		storageServerIDs = optionalStorageServerIDs.get();
+	} else {
+		ASSERT(pImpl->storageServers);
+		for (const auto& storageServerResource : pImpl->storageServers->storageServerResources) {
+			ASSERT(storageServerResource.interface);
+			storageServerIDs.push_back(storageServerResource.interface->id());
+		}
+	}
+
+	pImpl->messages =
+	    std::make_unique<details::MessageWithPrivateMutationsFixture>(pImpl->testDriverContextImpl->commitRecord);
+	const auto& tLogGroup = dynamic_cast<details::TLogGroupWithPrivateMutationsFixture&>(*pImpl->tLogGroup);
+	dynamic_cast<details::MessageWithPrivateMutationsFixture&>(*pImpl->messages)
+	    .setUp(tLogGroup,
+	           initialVersion,
+	           numVersions,
+	           numMutationsInVersion,
+	           tLogGroup.teamMutationStorageTeamID,
+	           storageServerIDs);
 
 	return *this;
 }
