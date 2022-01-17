@@ -574,7 +574,7 @@ void flushTraceFileVoid();
 // Changes the format of trace files. Returns false if the format is unrecognized. No longer safe to call after a call
 // to openTraceFile.
 bool selectTraceFormatter(std::string format);
-// Returns true iff format is recognized.
+// Returns true iff format is recognized. Internally the format string is changed, thus not using const std::string&.
 bool validateTraceFormat(std::string format);
 
 // Select the clock source for trace files. Returns false if the format is unrecognized. No longer safe to call after a

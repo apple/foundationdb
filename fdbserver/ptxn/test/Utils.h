@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "fdbserver/ptxn/test/CommitUtils.h"
+#include "fdbserver/ptxn/test/Driver.h"
 #include "fdbserver/ptxn/test/TestTLogPeek.h"
 #include "fdbserver/ptxn/TLogInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -104,7 +105,9 @@ void print(const TestDriverOptions&);
 void print(const CommitRecord&);
 void print(const ptxn::test::TestTLogPeekOptions&);
 
-void printCommitRecords(const CommitRecord&);
+void printTLogs();
+void printTLogGroup();
+void printCommitRecords();
 
 // Prints timing per step
 class PrintTiming {

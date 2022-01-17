@@ -142,16 +142,73 @@ void print(const ptxn::test::TestTLogPeekOptions& option) {
 	          << formatKVPair("Intial version", option.initialVersion) << std::endl;
 }
 
-void printCommitRecords(const CommitRecord& record) {
+template <typename Container>
+void printUIDs(const Container& uidContainer) {
+	const int rowMaxItems = 3;
+	int itemRowCount = 0;
+	for (auto iter = std::begin(uidContainer); iter != std::end(uidContainer); ++iter) {
+		if (itemRowCount == 0) {
+			std::cout << "\t\t";
+		}
+		std::cout << iter->toString() << '\t';
+		if (++itemRowCount == rowMaxItems) {
+			std::cout << std::endl;
+			itemRowCount = 0;
+		}
+	}
+	if (itemRowCount != 0) {
+		std::cout << std::endl;
+	}
+}
+
+void printTLogs() {
+	const auto& fixture = TestEnvironment::getTLogs();
+
+	std::cout << std::endl << ">> ptxn/test/Driver.actor.cpp:TLogFixture:" << std::endl;
+	for (const auto& tLogGroupLeader : fixture->tLogGroupLeaders) {
+		std::cout << formatKVPair("tLogGroup", tLogGroupLeader.first.toString()) << '\t'
+		          << formatKVPair("Leader UID", tLogGroupLeader.second->id()) << std::endl;
+	}
+	std::cout << std::endl;
+}
+
+void printTLogGroup() {
+	const auto& fixture = TestEnvironment::getTLogGroup();
+
+	std::cout << std::endl << ">> ptxn/test/Driver.actor.cpp:ptxnTLogFixture" << std::endl;
+	std::cout << formatKVPair("numTLogGroups", fixture.getNumTLogGroups()) << std::endl;
+	for (const auto& [tLogGroupID, storageTeamIDSet] : fixture.tLogGroupStorageTeamMapping) {
+		std::cout << "\t" << formatKVPair("TLog Group", tLogGroupID) << "\t"
+		          << formatKVPair("numStorageTeamIDs", storageTeamIDSet.size()) << std::endl;
+		printUIDs(storageTeamIDSet);
+	}
+	std::cout << "\t"
+	          << formatKVPair("Reverse StorageTeamID -> TLogGroupID", fixture.storageTeamTLogGroupMapping.size())
+	          << std::endl;
+	for (const auto& [storageTeamID, tLogGroupID] : fixture.storageTeamTLogGroupMapping) {
+		std::cout << "\t\t" << formatKVPair(storageTeamID.toString(), tLogGroupID) << std::endl;
+	}
+
+	// Check if is TLogGroupWithPrivateMutationsFixture
+	if (const auto* ptr = dynamic_cast<const details::TLogGroupWithPrivateMutationsFixture*>(&fixture)) {
+		std::cout << formatKVPair("Team mutation storage team ID", ptr->teamMutationStorageTeamID) << std::endl;
+	}
+
+	std::cout << std::endl;
+}
+
+void printCommitRecords() {
+	const auto& record = TestEnvironment::getCommitRecords();
 	std::cout << ">> ptxn/test/CommitUtils.h:CommitRecord:" << std::endl;
 	for (const auto& [version, storageTeamIDMessageMap] : record.messages) {
 		std::cout << "\n\tCommit version: " << std::setw(10) << version
 		          << "\tStorage Team Version: " << record.commitVersionStorageTeamVersionMapper.at(version)
 		          << std::endl;
 		for (const auto& [storageTeamID, sms] : storageTeamIDMessageMap) {
-			std::cout << "\t\tStorage Team ID: " << storageTeamID.toString() << std::endl;
+			std::cout << "\t\t\t"
+			          << "Storage Team ID = " << storageTeamID.toString() << std::endl;
 			for (const auto& [subsequence, message] : sms) {
-				std::cout << "\t\t\t" << std::setw(10) << subsequence << '\t' << message.toString() << std::endl;
+				std::cout << "\t\t\t\t" << std::setw(10) << subsequence << '\t' << message.toString() << std::endl;
 			}
 		}
 	}
