@@ -1,11 +1,5 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
-#include "fdbclient/SystemData.h"
-#include "fdbclient/KeyRangeMap.h"
-#include "fdbserver/CoroFlow.h"
-#include "flow/IThreadPool.h"
-#include "flow/ThreadHelper.actor.h"
-#include "flow/flow.h"
 #include <rocksdb/cache.h>
 #include <rocksdb/db.h>
 #include <rocksdb/filter_policy.h>
@@ -19,10 +13,12 @@
 #include <rocksdb/options.h>
 #include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
+#include <rocksdb/version.h>
 #include <rocksdb/types.h>
 #include <rocksdb/utilities/checkpoint.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
 #include <rocksdb/version.h>
+
 #include "fdbclient/SystemData.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
@@ -50,7 +46,8 @@ static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 22) ? ROCKSDB_PATCH >= 1 :
 
 namespace {
 
-const KeyRangeRef persistRocksColumnFamilyKeys = KeyRangeRef("\xff\xff/ColumnFamily/"_sr, "\xff\xff/ColumnFamily0"_sr);
+#define PERSIST_PREFIX "\xff\xff"
+const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
 const StringRef ROCKSDBSTORAGE_HISTOGRAM_GROUP = LiteralStringRef("RocksDBStorage");
 const StringRef ROCKSDB_COMMIT_LATENCY_HISTOGRAM = LiteralStringRef("RocksDBCommitLatency");
 const StringRef ROCKSDB_COMMIT_ACTION_HISTOGRAM = LiteralStringRef("RocksDBCommitAction");
@@ -69,6 +66,68 @@ const StringRef ROCKSDB_READPREFIX_QUEUEWAIT_HISTOGRAM = LiteralStringRef("Rocks
 const StringRef ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM = LiteralStringRef("RocksDBReadRangeNewIterator");
 const StringRef ROCKSDB_READVALUE_GET_HISTOGRAM = LiteralStringRef("RocksDBReadValueGet");
 const StringRef ROCKSDB_READPREFIX_GET_HISTOGRAM = LiteralStringRef("RocksDBReadPrefixGet");
+
+const std::string defaultFdbCFName = "fdb";
+
+rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointRecord& checkpoint) {
+	rocksdb::ExportImportFilesMetaData metaData;
+	metaData.db_comparator_name = checkpoint.dbComparatorName;
+
+	for (const LiveFileMetaData& fileMetaData : checkpoint.sstFiles) {
+		rocksdb::LiveFileMetaData liveFileMetaData;
+		liveFileMetaData.size = fileMetaData.size;
+		liveFileMetaData.name = fileMetaData.name;
+		liveFileMetaData.file_number = fileMetaData.file_number;
+		liveFileMetaData.db_path = fileMetaData.db_path;
+		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
+		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
+		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
+		liveFileMetaData.largestkey = fileMetaData.largestkey;
+		liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
+		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
+		liveFileMetaData.num_entries = fileMetaData.num_entries;
+		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
+		liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
+		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
+		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
+		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
+		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
+		liveFileMetaData.level = fileMetaData.level;
+		metaData.files.push_back(liveFileMetaData);
+	}
+
+	return metaData;
+}
+
+void populateMetaData(CheckpointRecord* checkpoint, const rocksdb::ExportImportFilesMetaData& metaData) {
+	checkpoint->dbComparatorName = metaData.db_comparator_name;
+	for (const rocksdb::LiveFileMetaData& fileMetaData : metaData.files) {
+		LiveFileMetaData liveFileMetaData;
+		liveFileMetaData.size = fileMetaData.size;
+		liveFileMetaData.name = fileMetaData.name;
+		liveFileMetaData.file_number = fileMetaData.file_number;
+		liveFileMetaData.db_path = fileMetaData.db_path;
+		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
+		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
+		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
+		liveFileMetaData.largestkey = fileMetaData.largestkey;
+		liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
+		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
+		liveFileMetaData.num_entries = fileMetaData.num_entries;
+		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
+		liveFileMetaData.temperature = static_cast<uint8_t>(fileMetaData.temperature);
+		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
+		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
+		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
+		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
+		liveFileMetaData.level = fileMetaData.level;
+		checkpoint->sstFiles.push_back(liveFileMetaData);
+	}
+}
 
 rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
@@ -265,6 +324,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	struct Writer : IThreadPoolReceiver {
 		DB& db;
+		CF& cf;
 		UID id;
 		Reference<Histogram> commitLatencyHistogram;
 		Reference<Histogram> commitActionHistogram;
@@ -272,10 +332,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		Reference<Histogram> writeHistogram;
 		Reference<Histogram> deleteCompactRangeHistogram;
 
-		explicit Writer(DB& db, UID id)
-		  : db(db), id(id), commitLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                                   ROCKSDB_COMMIT_LATENCY_HISTOGRAM,
-		                                                                   Histogram::Unit::microseconds)),
+		explicit Writer(DB& db, CF& cf, UID id)
+		  : db(db), cf(cf), id(id), commitLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                                           ROCKSDB_COMMIT_LATENCY_HISTOGRAM,
+		                                                                           Histogram::Unit::microseconds)),
 		    commitActionHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
 		                                                  ROCKSDB_COMMIT_ACTION_HISTOGRAM,
 		                                                  Histogram::Unit::microseconds)),
@@ -291,6 +351,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		~Writer() override {
 			if (db) {
+				// if (cf) {
+				// 	rocksdb::Status ignored = db->DestroyColumnFamilyHandle(cf);
+				// }
 				delete db;
 			}
 		}
@@ -312,79 +375,63 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(OpenAction& a) {
-			// std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
-			// 	"default", getCFOptions() } };
+			//   {
+			// 	rocksdb::ColumnFamilyDescriptor{ "default", getCFOptions() },
+			// 	rocksdb::ColumnFamilyDescriptor{ defaultFdbCFName, getCFOptions() }
+			// };
+			ASSERT(cf == nullptr);
+
 			std::vector<std::string> columnFamilies;
-			auto options = getOptions();
-			rocksdb::Status s = rocksdb::DB::ListColumnFamilies(options, a.path, &columnFamilies);
-			std::cout << s.ToString() << std::endl;
-			std::vector<rocksdb::ColumnFamilyDescriptor> CFs;
-			bool newRocks = false;
-			if (s.ok()) {
-				for (const std::string& name : columnFamilies) {
-					CFs.push_back(rocksdb::ColumnFamilyDescriptor{ name, getCFOptions() });
-				}
-			} else if (s.IsPathNotFound()) {
-				CFs.push_back(rocksdb::ColumnFamilyDescriptor{ "default", getCFOptions() });
-				newRocks = true;
-			} else {
-				a.done.sendError(statusToError(s));
-				return;
+			rocksdb::Options options = getOptions();
+			rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, a.path, &columnFamilies);
+			std::cout << "Open RocksDB Found Column Families: " << describe(columnFamilies) << std::endl;
+			if (std::find(columnFamilies.begin(), columnFamilies.end(), "default") == columnFamilies.end()) {
+				columnFamilies.push_back("default");
 			}
-			std::vector<rocksdb::ColumnFamilyHandle*> handle;
-			auto status = rocksdb::DB::Open(options, a.path, CFs, &handle, &db);
-			std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*> handles;
-			for (auto& h : handle) {
-				handles[h->GetID()] = h;
+
+			rocksdb::ColumnFamilyOptions cfOptions = getCFOptions();
+			std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
+			for (const std::string& name : columnFamilies) {
+				descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, cfOptions });
 			}
+
+			std::vector<rocksdb::ColumnFamilyHandle*> handles;
+			status = rocksdb::DB::Open(options, a.path, descriptors, &handles, &db);
+
 			if (!status.ok()) {
 				logRocksDBError(status, "Open");
 				a.done.sendError(statusToError(status));
-			} else {
-				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
-				if (newRocks) {
-					rocksdb::WriteOptions options;
-					options.sync = true;
-					db->Put(options, db->DefaultColumnFamily(), persistRocksColumnFamilyKeys.begin.toString(), "");
-					db->Put(options,
-					        db->DefaultColumnFamily(),
-					        persistRocksColumnFamilyKeys.begin.toString() + systemKeys.begin.toString(),
-					        std::to_string(db->DefaultColumnFamily()->GetID()));
-					db->Put(options,
-					        db->DefaultColumnFamily(),
-					        persistRocksColumnFamilyKeys.begin.toString() + systemKeys.end.toString(),
-					        "");
-				}
-
-				rocksdb::ReadOptions options = getReadOptions();
-				auto endSlice = toSlice(persistRocksColumnFamilyKeys.end);
-				options.iterate_upper_bound = &endSlice;
-				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
-				cursor->Seek(toSlice(persistRocksColumnFamilyKeys.begin));
-				while (cursor->Valid() && toStringRef(cursor->key()) < persistRocksColumnFamilyKeys.end) {
-					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-					
-					// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
-					cursor->Next();
-				}
-				s = cursor->status();
-				// The current thread and main thread are same when the code runs in simulation.
-				// blockUntilReady() is getting the thread into deadlock state, so avoiding the
-				// metric logger in simulation.
-				if (g_network->isSimulated()) {
-					// The current thread and main thread are same when the code runs in simulation.
-					// blockUntilReady() is getting the thread into deadlock state, so directly calling
-					// the metricsLogger.
-					a.metrics = rocksDBMetricLogger(options.statistics, db) && flowLockLogger(a.readLock, a.fetchLock);
-				} else {
-					onMainThread([&] {
-						a.metrics =
-						    rocksDBMetricLogger(options.statistics, db) && flowLockLogger(a.readLock, a.fetchLock);
-						return Future<bool>(true);
-					}).blockUntilReady();
-				}
-				a.done.send(Void());
 			}
+
+			for (rocksdb::ColumnFamilyHandle* handle : handles) {
+				if (handle->GetName() == defaultFdbCFName) {
+					cf = handle;
+					break;
+				}
+			}
+
+			if (cf == nullptr) {
+				status = db->CreateColumnFamily(cfOptions, "new_cf", &cf);
+				if (!status.ok()) {
+					logRocksDBError(status, "Open");
+					a.done.sendError(statusToError(status));
+				}
+			}
+
+			TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
+			if (g_network->isSimulated()) {
+				// The current thread and main thread are same when the code runs in simulation.
+				// blockUntilReady() is getting the thread into deadlock state, so directly calling
+				// the metricsLogger.
+				a.metrics = rocksDBMetricLogger(options.statistics, db) && flowLockLogger(a.readLock, a.fetchLock);
+			} else {
+				onMainThread([&] {
+					a.metrics = rocksDBMetricLogger(options.statistics, db) && flowLockLogger(a.readLock, a.fetchLock);
+					return Future<bool>(true);
+				}).blockUntilReady();
+			}
+			a.done.send(Void());
+			// }
 		}
 
 		struct DeleteVisitor : public rocksdb::WriteBatch::Handler {
@@ -424,15 +471,20 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				commitQueueWaitHistogram->sampleSeconds(commitBeginTime - a.startTime);
 			}
 			Standalone<VectorRef<KeyRangeRef>> deletes;
-			DeleteVisitor dv(deletes, deletes.arena());
-			ASSERT(a.batchToCommit->Iterate(&dv).ok());
+			// DeleteVisitor dv(deletes, deletes.arena());
+			// rocksdb::Status s = a.batchToCommit->Iterate(&dv);
+			// if (!s.ok()) {
+			// 	logRocksDBError(s, "Commit");
+			// 	a.done.sendError(statusToError(s));
+			// 	return;
+			// }
 			// If there are any range deletes, we should have added them to be deleted.
-			ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
+			// ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 
 			double writeBeginTime = a.getHistograms ? timer_monotonic() : 0;
-			auto s = db->Write(options, a.batchToCommit.get());
+			rocksdb::Status s = db->Write(options, a.batchToCommit.get());
 			if (a.getHistograms) {
 				writeHistogram->sampleSeconds(timer_monotonic() - writeBeginTime);
 			}
@@ -447,7 +499,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				for (const auto& keyRange : deletes) {
 					auto begin = toSlice(keyRange.begin);
 					auto end = toSlice(keyRange.end);
-					ASSERT(db->SuggestCompactRange(db->DefaultColumnFamily(), &begin, &end).ok());
+					ASSERT(db->SuggestCompactRange(cf, &begin, &end).ok());
 				}
 				if (a.getHistograms) {
 					deleteCompactRangeHistogram->sampleSeconds(timer_monotonic() - compactRangeBeginTime);
@@ -477,9 +529,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				logRocksDBError(s, "Close");
 			}
 			if (a.deleteOnClose) {
-				std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
-					"default", getCFOptions() } };
-				s = rocksdb::DestroyDB(a.path, getOptions(), defaultCF);
+				// std::vector<rocksdb::ColumnFamilyDescriptor> columnFamilies = { rocksdb::ColumnFamilyDescriptor{
+				// 	"default", getCFOptions() } };
+				std::vector<rocksdb::ColumnFamilyDescriptor> columnFamilies = {
+					rocksdb::ColumnFamilyDescriptor{ "default", getCFOptions() },
+					rocksdb::ColumnFamilyDescriptor{ defaultFdbCFName, getCFOptions() }
+				};
+				s = rocksdb::DestroyDB(a.path, getOptions(), columnFamilies);
 				if (!s.ok()) {
 					logRocksDBError(s, "Destroy");
 				} else {
@@ -497,9 +553,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		void action(CheckpointAction& a) {
+			TraceEvent("RocksDBServeCheckpointBegin").detail("CheckpointDir", a.checkpointDir);
 			rocksdb::Checkpoint* checkpoint;
 			rocksdb::Status s = rocksdb::Checkpoint::Create(db, &checkpoint);
-			ASSERT(s.ok());
+			if (!s.ok()) {
+				logRocksDBError(s, "Checkpoint");
+				a.reply.sendError(statusToError(s));
+				return;
+			}
 
 			const std::string& checkpointDir = a.checkpointDir;
 
@@ -508,35 +569,91 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			platform::eraseDirectoryRecursive(checkpointDir);
 			std::string cwd = platform::getWorkingDirectory() + "/";
 			std::cout << "Working directory: " << cwd << std::endl;
-			s = checkpoint->ExportColumnFamily(db->DefaultColumnFamily(), checkpointDir, &pMetadata);
+			s = checkpoint->ExportColumnFamily(cf, checkpointDir, &pMetadata);
 			if (!s.ok()) {
 				logRocksDBError(s, "Checkpoint");
 				a.reply.sendError(statusToError(s));
 				return;
 			}
-
+			rocksdb::PinnableSlice value;
+			rocksdb::ReadOptions readOptions = getReadOptions();
+			s = db->Get(readOptions, cf, toSlice(persistVersion), &value);
+			
 			CheckpointRecord res;
-			std::vector<std::string> files = platform::listFiles(checkpointDir);
-			for (auto& file : files) {
-				res.sstFiles.push_back(checkpointDir + file);
-				std::cout << file << std::endl;
-			}
+			res.version = BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned());
+			TraceEvent("RocksDBServeCheckpointSuccess").detail("Version", res.version);
+
+			// std::vector<std::string> files = platform::listFiles(checkpointDir);
+			// for (auto& file : files) {
+			// 	res.sstFiles.push_back(checkpointDir + file);
+			// 	std::cout << file << std::endl;
+			// }
 			std::cout << "Metadata: " << pMetadata->db_comparator_name << std::endl;
 			for (const auto& md : pMetadata->files) {
-				std::cout << "CF: " << md.column_family_name << ", LV: " << md.level << std::endl;
+				std::cout << "Name: " << md.name << "CF: " << md.column_family_name << ", LV: " << md.level
+				          << std::endl;
 			}
 
 			res.dbComparatorName = pMetadata->db_comparator_name;
-			for (const auto& md : pMetadata->files) {
-				res.sstFileMetadata.emplace_back(md.column_family_name, md.level);
-			}
+			// for (const auto& md : pMetadata->files) {
+			// 	res.sstFileMetadata.emplace_back(md.column_family_name, md.level);
+			// }
+			populateMetaData(&res, *pMetadata);
 			delete pMetadata;
 			a.reply.send(res);
+		}
+
+		struct RestoreAction : TypedAction<Writer, RestoreAction> {
+			std::string path;
+			CheckpointRecord checkpoint;
+			ThreadReturnPromise<Void> done;
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+		};
+
+		void action(RestoreAction& a) {
+			std::cout << "Restore Begin" << std::endl;
+			auto options = getOptions();
+			rocksdb::Status status = rocksdb::DB::Open(options, a.path, &db);
+			if (!status.ok()) {
+				logRocksDBError(status, "Restore");
+				a.done.sendError(statusToError(status));
+				return;
+			}
+
+			rocksdb::ExportImportFilesMetaData metaData = getMetaData(a.checkpoint);
+			for (const auto& file : metaData.files) {
+				std::cout << file.db_path + file.name << std::endl;
+				std::vector<std::string> files = platform::listFiles(file.db_path);
+				std::cout << "Listing files in " << file.db_path << std::endl;
+				for (const std::string& f : files) {
+					std::cout << f << std::endl;
+				}
+			}
+
+			// status = db->DropColumnFamily(db->DefaultColumnFamily());
+			// if (!status.ok()) {
+			// 	logRocksDBError(status, "Restore");
+			// 	a.done.sendError(statusToError(status));
+			// 	return;
+			// }
+
+			rocksdb::ImportColumnFamilyOptions importOptions;
+			importOptions.move_files = true;
+			status = db->CreateColumnFamilyWithImport(getCFOptions(), defaultFdbCFName, importOptions, metaData, &cf);
+
+			if (!status.ok()) {
+				logRocksDBError(status, "Restore");
+				a.done.sendError(statusToError(status));
+			} else {
+				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Restore");
+				a.done.send(Void());
+			}
 		}
 	};
 
 	struct Reader : IThreadPoolReceiver {
 		DB& db;
+		CF& cf;
 		double readValueTimeout;
 		double readValuePrefixTimeout;
 		double readRangeTimeout;
@@ -553,10 +670,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		Reference<Histogram> readValueGetHistogram;
 		Reference<Histogram> readPrefixGetHistogram;
 
-		explicit Reader(DB& db)
-		  : db(db), readRangeLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                              ROCKSDB_READRANGE_LATENCY_HISTOGRAM,
-		                                                              Histogram::Unit::microseconds)),
+		explicit Reader(DB& db, CF& cf)
+		  : db(db), cf(cf), readRangeLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                                      ROCKSDB_READRANGE_LATENCY_HISTOGRAM,
+		                                                                      Histogram::Unit::microseconds)),
 		    readValueLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
 		                                                      ROCKSDB_READVALUE_LATENCY_HISTOGRAM,
 		                                                      Histogram::Unit::microseconds)),
@@ -619,6 +736,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& a) {
+			ASSERT(cf != nullptr);
 			double readBeginTime = timer_monotonic();
 			if (a.getHistograms) {
 				readValueQueueWaitHistogram->sampleSeconds(readBeginTime - a.startTime);
@@ -645,7 +763,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
 
 			double dbGetBeginTime = a.getHistograms ? timer_monotonic() : 0;
-			auto s = db->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
+			auto s = db->Get(options, cf, toSlice(a.key), &value);
+			if (!s.ok() && !s.IsNotFound()) {
+				logRocksDBError(s, "ReadValue");
+				a.result.sendError(statusToError(s));
+				return;
+			}
+
 			if (a.getHistograms) {
 				readValueGetHistogram->sampleSeconds(timer_monotonic() - dbGetBeginTime);
 			}
@@ -713,7 +837,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
 
 			double dbGetBeginTime = a.getHistograms ? timer_monotonic() : 0;
-			auto s = db->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
+			auto s = db->Get(options, cf, toSlice(a.key), &value);
 			if (a.getHistograms) {
 				readPrefixGetHistogram->sampleSeconds(timer_monotonic() - dbGetBeginTime);
 			}
@@ -786,7 +910,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				options.iterate_upper_bound = &endSlice;
 
 				double iterCreationBeginTime = a.getHistograms ? timer_monotonic() : 0;
-				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
+				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options, cf));
 				if (a.getHistograms) {
 					readRangeNewIteratorHistogram->sampleSeconds(timer_monotonic() - iterCreationBeginTime);
 				}
@@ -816,7 +940,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				options.iterate_lower_bound = &beginSlice;
 
 				double iterCreationBeginTime = a.getHistograms ? timer_monotonic() : 0;
-				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
+				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options, cf));
 				if (a.getHistograms) {
 					readRangeNewIteratorHistogram->sampleSeconds(timer_monotonic() - iterCreationBeginTime);
 				}
@@ -867,6 +991,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	DB db = nullptr;
 	std::string path;
+	rocksdb::ColumnFamilyHandle* defaultFdbCF = nullptr;
 	UID id;
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
@@ -891,8 +1016,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Counters counters;
 
-	KeyRangeMap<Optional<rocksdb::ColumnFamilyHandle*>> columnFamilies;
-
 	explicit RocksDBKeyValueStore(const std::string& path, UID id)
 	  : path(path), id(id), readSemaphore(SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
@@ -915,9 +1038,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			writeThread = createGenericThreadPool();
 			readThreads = createGenericThreadPool();
 		}
-		writeThread->addThread(new Writer(db, id), "fdb-rocksdb-wr");
+		writeThread->addThread(new Writer(db, defaultFdbCF, id), "fdb-rocksdb-wr");
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
-			readThreads->addThread(new Reader(db), "fdb-rocksdb-re");
+			readThreads->addThread(new Reader(db, defaultFdbCF), "fdb-rocksdb-re");
 		}
 	}
 
@@ -962,7 +1085,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch());
 		}
-		writeBatch->Put(toSlice(kv.key), toSlice(kv.value));
+		ASSERT(defaultFdbCF != nullptr);
+		writeBatch->Put(defaultFdbCF, toSlice(kv.key), toSlice(kv.value));
 	}
 
 	void clear(KeyRangeRef keyRange, const Arena*) override {
@@ -970,10 +1094,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			writeBatch.reset(new rocksdb::WriteBatch());
 		}
 
+		ASSERT(defaultFdbCF != nullptr);
+
 		if (keyRange.singleKeyRange()) {
-			writeBatch->Delete(toSlice(keyRange.begin));
+			writeBatch->Delete(defaultFdbCF, toSlice(keyRange.begin));
 		} else {
-			writeBatch->DeleteRange(toSlice(keyRange.begin), toSlice(keyRange.end));
+			writeBatch->DeleteRange(defaultFdbCF, toSlice(keyRange.begin), toSlice(keyRange.end));
 		}
 	}
 
@@ -1113,6 +1239,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		writeThread->post(a);
 		return res;
 	}
+
+	Future<Void> restore(const CheckpointRecord& checkpoint) override {
+		// std::cout << "RocksDB received restore request: " << checkpointDir << std::endl;
+		auto a = new Writer::RestoreAction();
+		a->path = path;
+		a->checkpoint = checkpoint;
+		auto res = a->done.getFuture();
+		writeThread->post(a);
+		return res;
+	}
 };
 
 } // namespace
@@ -1227,7 +1363,7 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/RocksDBReopen") {
 	return Void();
 }
 
-TEST_CASE("/rocks/fileops") {
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/fileops") {
 	state std::string cwd = platform::getWorkingDirectory() + "/";
 	std::cout << "Working directory: " << cwd << std::endl;
 	state std::string rocksDBTestDir = "rocksdb-kvstore-reopen-test-db";
@@ -1271,7 +1407,8 @@ TEST_CASE("/rocks/fileops") {
 	}
 	std::cout << pMetadata->db_comparator_name << std::endl;
 	for (const auto& md : pMetadata->files) {
-		std::cout << "CF: " << md.column_family_name << ", LV: " << md.level << std::endl;
+		std::cout << "CF: " << md.column_family_name << ", LV: " << md.level << ", name: " << md.name
+		          << ", path: " << md.db_path << ", file no: " << md.file_number << std::endl;
 	}
 	// kvStore->clear(allKeys);
 	// wait(kvStore->commit(false));

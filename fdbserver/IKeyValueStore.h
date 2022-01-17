@@ -90,6 +90,8 @@ public:
 
 	virtual Future<CheckpointRecord> checkpoint(std::string checkpointDir) { throw internal_error(); }
 
+	virtual Future<Void> restore(const CheckpointRecord& checkpoint) { throw internal_error(); }
+
 	/*
 	Concurrency contract
 	    Causal consistency:

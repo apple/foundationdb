@@ -21,6 +21,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -73,23 +74,55 @@ struct SSCheckpointWorkload : TestWorkload {
 		state Value oldValue = "TestValue"_sr;
 		state Value newValue = "TestNewValue"_sr;
 
-		wait(self->writeAndVerify(self, cx, key, oldValue));
+		state version = wait(self->writeAndVerify(self, cx, key, oldValue));
+
+		std::cout << "Initialized" << std::endl;
 
 		// Disable DD to avoid DD undoing of our move.
 		int ignore = wait(setDDMode(cx, 0));
-		CheckpointRecord checkpoint = wait(createCheckpoint(cx, normalKeys, latestVersion));
-		std::cout << checkpoint.toString() << std::endl;
+		loop {
+			try {
+				std::cout << "Creating checkpoint." << std::endl;
+				state CheckpointRecord checkpoint = wait(createCheckpoint(cx, normalKeys, version));
+				break;
+			} catch (Error& e) {
+				std::cout << "Creating checkpoint failure: " << e.name() << std::endl;
+				wait(delay(1));
+			}
+		}
+		std::cout << "Created checkpoint:" << checkpoint.toString() << std::endl;
 
-		state std::string folder = platform::getWorkingDirectory() + "/checkpoints";
+		state std::string pwd = platform::getWorkingDirectory();
+		state std::string folder = pwd + "/checkpoints";
 		platform::eraseDirectoryRecursive(folder);
 		ASSERT(platform::createDirectory(folder));
 
-		CheckpointRecord record = wait(getCheckpoint(cx, KeyRangeRef(key, endKey), checkpoint.version, folder));
+		loop {
+			try {
+				std::cout << "Getting checkpoint." << std::endl;
+				state CheckpointRecord record =
+				    wait(getCheckpoint(cx, KeyRangeRef(key, endKey), checkpoint.version, folder));
+				break;
+			} catch (Error& e) {
+				std::cout << "Getting checkpoint failure: " << e.name() << std::endl;
+				wait(delay(1));
+			}
+		}
+
+		std::cout << "Got checkpoint:" << checkpoint.toString() << std::endl;
 
 		std::vector<std::string> files = platform::listFiles(folder);
-		std::cout << "Received checkpoint files:" << std::endl;
+		std::cout << "Received checkpoint files: " << folder << std::endl;
 		for (auto& file : files) {
 			std::cout << file << std::endl;
+		}
+		std::cout << std::endl;
+
+		ASSERT(files.size() == record.sstFiles.size());
+		std::unordered_set<std::string> sstFiles(files.begin(), files.end());
+		for (const LiveFileMetaData& metaData : record.sstFiles) {
+			std::cout << "Checkpoint file:" << metaData.db_path << metaData.name << std::endl;
+			// ASSERT(sstFiles.count(metaData.name.subString) > 0);
 		}
 
 		rocksdb::Options options;
@@ -103,23 +136,49 @@ struct SSCheckpointWorkload : TestWorkload {
 			std::unique_ptr<rocksdb::Iterator> iter(reader.NewIterator(ropts));
 			iter->SeekToFirst();
 			while (iter->Valid()) {
-				std::cout << "Key: " << iter->key().ToString() << ", Value: " << iter->value().ToString() << std::endl;
-				// writer.Put(iter->key().ToString(), iter->value().ToString());
-				kvs[Key(iter->key().ToString())] = Value(iter->value().ToString());
+				if (normalKeys.contains(Key(iter->key().ToString()))) {
+					std::cout << "Key: " << iter->key().ToString() << ", Value: " << iter->value().ToString()
+					          << std::endl;
+				}
+				// std::endl; writer.Put(iter->key().ToString(), iter->value().ToString());
+				// kvs[Key(iter->key().ToString())] = Value(iter->value().ToString());
 				iter->Next();
 			}
 		}
 
-		std::cout << "Done print." << std::endl;
+		state std::string rocksDBTestDir = "rocksdb-kvstore-test-db";
+		platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-		state std::unordered_map<Key, Value>::iterator it = kvs.begin();
-		for (; it != kvs.end(); ++it) {
-			if (normalKeys.contains(it->first)) {
-				std::cout << "Key: " << it->first.toString() << ", Value: " << it->second.toString() << std::endl;
-				ErrorOr<Optional<Value>> value(Optional<Value>(it->second));
-				wait(self->readAndVerify(self, cx, it->first, value));
-			}
+		state IKeyValueStore* kvStore = keyValueStoreRocksDB(
+		    rocksDBTestDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_ROCKSDB_V1);
+		try {
+			wait(kvStore->restore(record));
+		} catch (Error& e) {
+			std::cout << e.name() << std::endl;
 		}
+
+		state Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		state RangeResult res = wait(tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
+		state int i = 0;
+
+		for (i = 0; i < res.size(); ++i) {
+			std::cout << "Reading key:" << res[i].key.toString() << std::endl;
+			Optional<Value> value = wait(kvStore->readValue(res[i].key));
+			ASSERT(value.present());
+			ASSERT(value.get() == res[i].value);
+		}
+
+		// std::cout << "Done print." << std::endl;
+
+		// state std::unordered_map<Key, Value>::iterator it = kvs.begin();
+		// for (; it != kvs.end(); ++it) {
+		// 	if (normalKeys.contains(it->first)) {
+		// 		std::cout << "Key: " << it->first.toString() << ", Value: " << it->second.toString() << std::endl;
+		// 		ErrorOr<Optional<Value>> value(Optional<Value>(it->second));
+		// 		wait(self->readAndVerify(self, cx, it->first, value));
+		// 	}
+		// }
 
 		std::cout << "Done verify." << std::endl;
 
@@ -153,8 +212,9 @@ struct SSCheckpointWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> writeAndVerify(SSCheckpointWorkload* self, Database cx, Key key, Optional<Value> value) {
+	ACTOR Future<Version> writeAndVerify(SSCheckpointWorkload* self, Database cx, Key key, Optional<Value> value) {
 		state Transaction tr(cx);
+		Version version;
 		loop {
 			try {
 				if (value.present()) {
@@ -163,6 +223,7 @@ struct SSCheckpointWorkload : TestWorkload {
 					tr.clear(key);
 				}
 				wait(timeoutError(tr.commit(), 30.0));
+				version = tr.getCommittedVersion();
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -171,7 +232,7 @@ struct SSCheckpointWorkload : TestWorkload {
 
 		wait(self->readAndVerify(self, cx, key, value));
 
-		return Void();
+		return version;
 	}
 
 	Future<bool> check(Database const& cx) override { return pass; }

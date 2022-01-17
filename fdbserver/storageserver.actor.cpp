@@ -1622,24 +1622,41 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 }
 
 ACTOR Future<Void> checkpointQ(StorageServer* self, CheckpointRequest req) {
+	wait(delay(0));
+
+	TraceEvent(SevDebug, "ServeCheckpointBegin", self->thisServerID)
+	    .detail("MinVersion", req.minVersion)
+	    .detail("Range", req.range.toString());
+
 	state Version minVersion = req.minVersion == latestVersion ? self->version.get() : req.minVersion;
 	wait(self->durableVersion.whenAtLeast(minVersion));
-	// wait(delay(0, TaskPriority::UpdateStorage));
-	state Version version = self->durableVersion.get();
+
 	try {
+		// Taking the lock is necessary to prevent data move.
 		wait(self->durableVersionLock.take(TaskPriority::MoveKeys, 1));
 		state FlowLock::Releaser holdingDVL(self->durableVersionLock);
+
+		if (!self->isReadable(req.range)) {
+			req.reply.sendError(wrong_shard_server());
+			return Void();
+		}
+
 		state CheckpointRecord checkpointRecord =
-		    wait(self->storage.checkpoint(self->folder + "/rockscheckpoints_" + std::to_string(version) + "/"));
-		checkpointRecord.version = version;
-		self->checkpoints.emplace(version, checkpointRecord);
+		    wait(self->storage.checkpoint(self->folder + "/rockscheckpoints_" + std::to_string(minVersion) + "/"));
+		self->checkpoints.emplace(checkpointRecord.version, checkpointRecord);
 		req.reply.send(checkpointRecord);
-		TraceEvent("CheckpointSucceeded").detail("MinVersion", minVersion).detail("CheckpointVersion", version);
-	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "CheckpointFailed")
+		TraceEvent("ServeCheckpointSuccess")
 		    .detail("MinVersion", minVersion)
-		    .detail("DurableVersion", version)
+		    .detail("CheckpointVersion", checkpointRecord.version)
+		    .detail("Range", req.range.toString());
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "ServerCheckpointFailure")
+		    .detail("MinVersion", minVersion)
+		    .detail("Range", req.range.toString())
 		    .error(e, /*includeCancel=*/true);
+		if (!canReplyWith(e)) {
+			throw;
+		}
 		req.reply.sendError(e);
 	}
 	return Void();
@@ -6646,6 +6663,8 @@ ACTOR Future<Void> serveCheckpointRequests(StorageServer* self, FutureStream<Che
 		CheckpointRequest req = waitNext(checkpoint);
 		const auto it = self->checkpoints.lower_bound(req.minVersion);
 		if (it != self->checkpoints.end()) {
+			TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)
+			    .detail("Version", it->second.version);
 			req.reply.send(it->second);
 		} else {
 			self->actors.add(checkpointQ(self, req));
