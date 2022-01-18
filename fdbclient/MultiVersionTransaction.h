@@ -62,7 +62,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*setupNetwork)();
 	fdb_error_t (*runNetwork)();
 	fdb_error_t (*stopNetwork)();
-	fdb_error_t (*createDatabase)(const char* clusterFilePath, FDBDatabase** db);
+	fdb_error_t (*createDatabase)(const char* clusterFilePath, FDBDatabase** db, GRVCacheSpace* sharedCachePtr);
 
 	// Database
 	fdb_error_t (*databaseCreateTransaction)(FDBDatabase* database, FDBTransaction** tr);
@@ -331,7 +331,7 @@ public:
 	void runNetwork() override;
 	void stopNetwork() override;
 
-	Reference<IDatabase> createDatabase(const char* clusterFilePath) override;
+	Reference<IDatabase> createDatabase(const char* clusterFilePath, GRVCacheSpace* sharedCachePtr = nullptr) override;
 	Reference<IDatabase> createDatabase609(const char* clusterFilePath); // legacy database creation
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
@@ -532,8 +532,6 @@ public:
 
 	struct LegacyVersionMonitor;
 
-	std::map<UID, GRVCacheSpace> clusterCacheMap;
-
 	// A struct that manages the current connection state of the MultiVersionDatabase. This wraps the underlying
 	// IDatabase object that is currently interacting with the cluster.
 	struct DatabaseState : ThreadSafeReferenceCounted<DatabaseState> {
@@ -639,7 +637,7 @@ public:
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 
 	// Creates an IDatabase object that represents a connection to the cluster
-	Reference<IDatabase> createDatabase(const char* clusterFilePath) override;
+	Reference<IDatabase> createDatabase(const char* clusterFilePath, GRVCacheSpace* sharedCachePtr = nullptr) override;
 	static MultiVersionApi* api;
 
 	Reference<ClientInfo> getLocalClient();
@@ -675,6 +673,7 @@ private:
 	Reference<ClientInfo> localClient;
 	std::map<std::string, ClientDesc> externalClientDescriptions;
 	std::map<std::string, std::vector<Reference<ClientInfo>>> externalClients;
+	std::map<std::string, GRVCacheSpace> clusterCacheMap;
 
 	bool networkStartSetup;
 	volatile bool networkSetup;

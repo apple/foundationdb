@@ -115,7 +115,7 @@ ThreadFuture<ProtocolVersion> ThreadSafeDatabase::getServerProtocol(Optional<Pro
 	    [db, expectedVersion]() -> Future<ProtocolVersion> { return db->getClusterProtocol(expectedVersion); });
 }
 
-ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
+ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion, GRVCacheSpace* sharedCachePtr) {
 	ClusterConnectionFile* connFile =
 	    new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first);
 
@@ -124,7 +124,7 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 	DatabaseContext* db = this->db = DatabaseContext::allocateOnForeignThread();
 
 	onMainThreadVoid(
-	    [db, connFile, apiVersion]() {
+	    [db, connFile, apiVersion, sharedCachePtr]() {
 		    try {
 			    Database::createDatabase(
 			        Reference<ClusterConnectionFile>(connFile), apiVersion, IsInternal::False, LocalityData(), db)
@@ -134,6 +134,7 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 		    } catch (...) {
 			    new (db) DatabaseContext(unknown_error());
 		    }
+		    db->setSharedCacheSpace(sharedCachePtr);
 	    },
 	    nullptr);
 }
@@ -499,8 +500,8 @@ void ThreadSafeApi::stopNetwork() {
 	::stopNetwork();
 }
 
-Reference<IDatabase> ThreadSafeApi::createDatabase(const char* clusterFilePath) {
-	return Reference<IDatabase>(new ThreadSafeDatabase(clusterFilePath, apiVersion));
+Reference<IDatabase> ThreadSafeApi::createDatabase(const char* clusterFilePath, GRVCacheSpace* sharedCachePtr) {
+	return Reference<IDatabase>(new ThreadSafeDatabase(clusterFilePath, apiVersion, sharedCachePtr));
 }
 
 void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) {

@@ -649,10 +649,11 @@ Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
 	return makeReference<DLDatabase>(api, dbFuture);
 }
 
-Reference<IDatabase> DLApi::createDatabase(const char* clusterFilePath) {
+Reference<IDatabase> DLApi::createDatabase(const char* clusterFilePath, GRVCacheSpace* sharedCachePtr) {
 	if (headerVersion >= 610) {
 		FdbCApi::FDBDatabase* db;
-		throwIfError(api->createDatabase(clusterFilePath, &db));
+		// can the FdbCApi wrapper signature be changed to add this ptr?
+		throwIfError(api->createDatabase(clusterFilePath, &db, sharedCachePtr));
 		return Reference<IDatabase>(new DLDatabase(api, db));
 	} else {
 		return DLApi::createDatabase609(clusterFilePath);
@@ -1995,13 +1996,17 @@ void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* 
 }
 
 // Creates an IDatabase object that represents a connection to the cluster
-Reference<IDatabase> MultiVersionApi::createDatabase(const char* clusterFilePath) {
+Reference<IDatabase> MultiVersionApi::createDatabase(const char* clusterFilePath, GRVCacheSpace* sharedCachePtr) {
 	lock.enter();
 	if (!networkSetup) {
 		lock.leave();
 		throw network_not_setup();
 	}
 	std::string clusterFile(clusterFilePath);
+	if (clusterCacheMap.find(clusterFile) == clusterCacheMap.end()) {
+		clusterCacheMap[clusterFile] = GRVCacheSpace();
+	}
+	sharedCachePtr = &clusterCacheMap[clusterFile];
 
 	if (localClientDisabled) {
 		ASSERT(!bypassMultiClientApi);
@@ -2010,7 +2015,7 @@ Reference<IDatabase> MultiVersionApi::createDatabase(const char* clusterFilePath
 		nextThread = (nextThread + 1) % threadCount;
 		lock.leave();
 
-		Reference<IDatabase> localDb = localClient->api->createDatabase(clusterFilePath);
+		Reference<IDatabase> localDb = localClient->api->createDatabase(clusterFilePath, sharedCachePtr);
 		return Reference<IDatabase>(
 		    new MultiVersionDatabase(this, threadIdx, clusterFile, Reference<IDatabase>(), localDb));
 	}
@@ -2019,7 +2024,7 @@ Reference<IDatabase> MultiVersionApi::createDatabase(const char* clusterFilePath
 
 	ASSERT_LE(threadCount, 1);
 
-	Reference<IDatabase> localDb = localClient->api->createDatabase(clusterFilePath);
+	Reference<IDatabase> localDb = localClient->api->createDatabase(clusterFilePath, sharedCachePtr);
 	if (bypassMultiClientApi) {
 		return localDb;
 	} else {

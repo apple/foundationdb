@@ -1171,6 +1171,8 @@ struct GRVCacheSpace {
 	Mutex cacheLock;
 	Version cachedRv;
 	double lastTimedGrv;
+
+	GRVCacheSpace() : cacheLock(Mutex()), cachedRv(Version(0)), lastTimedGrv(0.0) {}
 };
 
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
