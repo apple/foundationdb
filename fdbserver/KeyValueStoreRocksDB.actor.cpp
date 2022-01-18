@@ -69,7 +69,7 @@ const StringRef ROCKSDB_READPREFIX_GET_HISTOGRAM = LiteralStringRef("RocksDBRead
 
 const std::string defaultFdbCFName = "fdb";
 
-rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointRecord& checkpoint) {
+rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
 	rocksdb::ExportImportFilesMetaData metaData;
 	metaData.db_comparator_name = checkpoint.dbComparatorName;
 
@@ -101,7 +101,7 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointRecord& checkpoin
 	return metaData;
 }
 
-void populateMetaData(CheckpointRecord* checkpoint, const rocksdb::ExportImportFilesMetaData& metaData) {
+void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImportFilesMetaData& metaData) {
 	checkpoint->dbComparatorName = metaData.db_comparator_name;
 	for (const rocksdb::LiveFileMetaData& fileMetaData : metaData.files) {
 		LiveFileMetaData liveFileMetaData;
@@ -548,7 +548,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		struct CheckpointAction : TypedAction<Writer, CheckpointAction> {
 			std::string checkpointDir;
-			ThreadReturnPromise<CheckpointRecord> reply;
+			ThreadReturnPromise<CheckpointMetaData> reply;
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 
@@ -579,7 +579,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::ReadOptions readOptions = getReadOptions();
 			s = db->Get(readOptions, cf, toSlice(persistVersion), &value);
 			
-			CheckpointRecord res;
+			CheckpointMetaData res;
 			res.version = BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned());
 			TraceEvent("RocksDBServeCheckpointSuccess").detail("Version", res.version);
 
@@ -605,7 +605,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		struct RestoreAction : TypedAction<Writer, RestoreAction> {
 			std::string path;
-			CheckpointRecord checkpoint;
+			CheckpointMetaData checkpoint;
 			ThreadReturnPromise<Void> done;
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -1231,7 +1231,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return StorageBytes(free, total, live, free);
 	}
 
-	Future<CheckpointRecord> checkpoint(std::string checkpointDir) override {
+	Future<CheckpointMetaData> checkpoint(std::string checkpointDir) override {
 		std::cout << "RocksDB received checkpoint request: " << checkpointDir << std::endl;
 		auto a = new Writer::CheckpointAction();
 		a->checkpointDir = checkpointDir;
@@ -1240,7 +1240,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
-	Future<Void> restore(const CheckpointRecord& checkpoint) override {
+	Future<Void> restore(const CheckpointMetaData& checkpoint) override {
 		// std::cout << "RocksDB received restore request: " << checkpointDir << std::endl;
 		auto a = new Writer::RestoreAction();
 		a->path = path;

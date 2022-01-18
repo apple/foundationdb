@@ -228,7 +228,7 @@ struct StorageServerDisk {
 		return storage->readRange(keys, rowLimit, byteLimit, type);
 	}
 
-	Future<CheckpointRecord> checkpoint(std::string checkpointDir) { return storage->checkpoint(checkpointDir); }
+	Future<CheckpointMetaData> checkpoint(std::string checkpointDir) { return storage->checkpoint(checkpointDir); }
 
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
@@ -402,7 +402,7 @@ private:
 
 public:
 public:
-	std::map<Version, CheckpointRecord> checkpoints;
+	std::map<Version, CheckpointMetaData> checkpoints;
 
 	// Histograms
 	struct FetchKeysHistograms {
@@ -1621,7 +1621,7 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 	return Void();
 }
 
-ACTOR Future<Void> checkpointQ(StorageServer* self, CheckpointRequest req) {
+ACTOR Future<Void> checkpointQ(StorageServer* self, GetCheckpointRequest req) {
 	wait(delay(0));
 
 	TraceEvent(SevDebug, "ServeCheckpointBegin", self->thisServerID)
@@ -1641,13 +1641,13 @@ ACTOR Future<Void> checkpointQ(StorageServer* self, CheckpointRequest req) {
 			return Void();
 		}
 
-		state CheckpointRecord checkpointRecord =
+		state CheckpointMetaData checkpointMetaData =
 		    wait(self->storage.checkpoint(self->folder + "/rockscheckpoints_" + std::to_string(minVersion) + "/"));
-		self->checkpoints.emplace(checkpointRecord.version, checkpointRecord);
-		req.reply.send(checkpointRecord);
+		self->checkpoints.emplace(checkpointMetaData.version, checkpointMetaData);
+		req.reply.send(checkpointMetaData);
 		TraceEvent("ServeCheckpointSuccess")
 		    .detail("MinVersion", minVersion)
-		    .detail("CheckpointVersion", checkpointRecord.version)
+		    .detail("CheckpointVersion", checkpointMetaData.version)
 		    .detail("Range", req.range.toString());
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "ServerCheckpointFailure")
@@ -5603,25 +5603,25 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
-		// while (!data->pendingCheckpointRequests.empty() &&
-		//        data->pendingCheckpointRequests.begin()->first <= newOldestVersion) {
+		// while (!data->pendingGetCheckpointRequests.empty() &&
+		//        data->pendingGetCheckpointRequests.begin()->first <= newOldestVersion) {
 		// 	try {
-		// 		state CheckpointRecord checkpointRecord = wait(data->storage.checkpoint(
+		// 		state CheckpointMetaData CheckpointMetaData = wait(data->storage.checkpoint(
 		// 		    data->folder + "/rockscheckpoints" + std::to_string(newOldestVersion) + "/"));
-		// 		checkpointRecord.version = newOldestVersion;
+		// 		CheckpointMetaData.version = newOldestVersion;
 		// 	} catch (Error& e) {
-		// 		data->pendingCheckpointRequests.begin()->second.sendError(e);
-		// 		data->pendingCheckpointRequests.erase(data->pendingCheckpointRequests.begin());
+		// 		data->pendingGetCheckpointRequests.begin()->second.sendError(e);
+		// 		data->pendingGetCheckpointRequests.erase(data->pendingGetCheckpointRequests.begin());
 		// 		TraceEvent(SevWarnAlways, "CheckpointFailed")
-		// 		    .detail("MinVerison", data->pendingCheckpointRequests.begin()->first)
+		// 		    .detail("MinVerison", data->pendingGetCheckpointRequests.begin()->first)
 		// 		    .error(e, /*includeCancel=*/true);
 		// 		continue;
 		// 	}
-		// 	data->checkpoints.emplace(newOldestVersion, checkpointRecord);
-		// 	data->pendingCheckpointRequests.begin()->second.send(checkpointRecord);
-		// 	data->pendingCheckpointRequests.erase(data->pendingCheckpointRequests.begin());
+		// 	data->checkpoints.emplace(newOldestVersion, CheckpointMetaData);
+		// 	data->pendingGetCheckpointRequests.begin()->second.send(CheckpointMetaData);
+		// 	data->pendingGetCheckpointRequests.erase(data->pendingGetCheckpointRequests.begin());
 		// 	TraceEvent("CheckpointSucceeded")
-		// 	    .detail("MinVerison", data->pendingCheckpointRequests.begin()->first)
+		// 	    .detail("MinVerison", data->pendingGetCheckpointRequests.begin()->first)
 		// 	    .detail("CheckpointVersion", newOldestVersion);
 		// }
 
@@ -6658,16 +6658,20 @@ ACTOR Future<Void> serveChangeFeedPopRequests(StorageServer* self, FutureStream<
 	}
 }
 
-ACTOR Future<Void> serveCheckpointRequests(StorageServer* self, FutureStream<CheckpointRequest> checkpoint) {
+ACTOR Future<Void> serveGetCheckpointRequests(StorageServer* self, FutureStream<GetCheckpointRequest> checkpoint) {
 	loop {
-		CheckpointRequest req = waitNext(checkpoint);
+		GetCheckpointRequest req = waitNext(checkpoint);
 		const auto it = self->checkpoints.lower_bound(req.minVersion);
 		if (it != self->checkpoints.end()) {
 			TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)
 			    .detail("Version", it->second.version);
 			req.reply.send(it->second);
-		} else {
+		} else if (req.createNew) {
 			self->actors.add(checkpointQ(self, req));
+		} else {
+			TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)
+			    .detail("Version", it->second.version);
+			req.reply.sendError(checkpoint_not_found());
 		}
 	}
 }
@@ -6741,7 +6745,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(serveChangeFeedStreamRequests(self, ssi.changeFeedStream.getFuture()));
 	self->actors.add(serveOverlappingChangeFeedsRequests(self, ssi.overlappingChangeFeeds.getFuture()));
 	self->actors.add(serveChangeFeedPopRequests(self, ssi.changeFeedPop.getFuture()));
-	self->actors.add(serveCheckpointRequests(self, ssi.checkpoint.getFuture()));
+	self->actors.add(serveGetCheckpointRequests(self, ssi.checkpoint.getFuture()));
 	self->actors.add(serveGetFileRequests(self, ssi.getFile.getFuture()));
 	self->actors.add(serveChangeFeedVersionUpdateRequests(self, ssi.changeFeedVersionUpdate.getFuture()));
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));

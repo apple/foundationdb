@@ -88,9 +88,9 @@ public:
 
 	virtual void enableSnapshot() {}
 
-	virtual Future<CheckpointRecord> checkpoint(std::string checkpointDir) { throw internal_error(); }
+	virtual Future<CheckpointMetaData> checkpoint(std::string checkpointDir) { throw internal_error(); }
 
-	virtual Future<Void> restore(const CheckpointRecord& checkpoint) { throw internal_error(); }
+	virtual Future<Void> restore(const CheckpointMetaData& checkpoint) { throw internal_error(); }
 
 	/*
 	Concurrency contract

@@ -81,7 +81,7 @@ struct SSCheckpointWorkload : TestWorkload {
 		loop {
 			try {
 				std::cout << "Creating checkpoint." << std::endl;
-				state CheckpointRecord checkpoint = wait(createCheckpoint(cx, normalKeys, version));
+				state CheckpointMetaData checkpoint = wait(getCheckpoint(cx, normalKeys, version));
 				break;
 			} catch (Error& e) {
 				std::cout << "Creating checkpoint failure: " << e.name() << std::endl;
@@ -98,8 +98,8 @@ struct SSCheckpointWorkload : TestWorkload {
 		loop {
 			try {
 				std::cout << "Getting checkpoint." << std::endl;
-				state CheckpointRecord record =
-				    wait(getCheckpoint(cx, KeyRangeRef(key, endKey), checkpoint.version, folder));
+				state CheckpointMetaData record =
+				    wait(fetchCheckpoint(cx, KeyRangeRef(key, endKey), checkpoint.version, folder));
 				break;
 			} catch (Error& e) {
 				std::cout << "Getting checkpoint failure: " << e.name() << std::endl;
@@ -155,9 +155,19 @@ struct SSCheckpointWorkload : TestWorkload {
 			std::cout << e.name() << std::endl;
 		}
 
+		std::cout << "Restore complete" << std::endl;
+
 		state Transaction tr(cx);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		state RangeResult res = wait(tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
+		loop {
+			try {
+				state RangeResult res = wait(tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
 		state int i = 0;
 
 		for (i = 0; i < res.size(); ++i) {

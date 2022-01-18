@@ -87,7 +87,7 @@ struct StorageServerInterface {
 	RequestStream<struct ChangeFeedStreamRequest> changeFeedStream;
 	RequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
 	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
-	RequestStream<struct CheckpointRequest> checkpoint;
+	RequestStream<struct GetCheckpointRequest> checkpoint;
 	RequestStream<struct GetFileRequest> getFile;
 	RequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
 
@@ -142,7 +142,7 @@ struct StorageServerInterface {
 				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
 				changeFeedVersionUpdate = RequestStream<struct ChangeFeedVersionUpdateRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(18));
-				checkpoint = RequestStream<struct CheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
+				checkpoint = RequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
 				getFile = RequestStream<struct GetFileRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
 			}
 		} else {
@@ -886,7 +886,7 @@ struct LiveFileMetaData : public SstFileMetaData {
 	}
 };
 
-struct CheckpointRecord {
+struct CheckpointMetaData {
 	constexpr static FileIdentifier file_identifier = 13804342;
 	Version version;
 	KeyRange range;
@@ -902,8 +902,8 @@ struct CheckpointRecord {
 
 	std::vector<LiveFileMetaData> sstFiles;
 
-	CheckpointRecord() {}
-	CheckpointRecord(Version version, KeyRange const& range) : version(version), range(range) {}
+	CheckpointMetaData() {}
+	CheckpointMetaData(Version version, KeyRange const& range) : version(version), range(range) {}
 
 	std::string toString() const {
 		std::string res = "Version: " + std::to_string(version) + "\nSST Files:\n";
@@ -919,14 +919,18 @@ struct CheckpointRecord {
 	}
 };
 
-struct CheckpointRequest {
+struct GetCheckpointRequest {
 	constexpr static FileIdentifier file_identifier = 13804343;
 	Version minVersion;
 	KeyRange range;
-	ReplyPromise<CheckpointRecord> reply;
+	bool createNew; // Create a new checkpoint if not exist.
+	ReplyPromise<CheckpointMetaData> reply;
 
-	CheckpointRequest() {}
-	CheckpointRequest(Version minVersion, KeyRange const& range) : minVersion(minVersion), range(range) {}
+	GetCheckpointRequest() {}
+	GetCheckpointRequest(Version minVersion, KeyRange const& range)
+	  : minVersion(minVersion), range(range), createNew(false) {}
+	GetCheckpointRequest(Version minVersion, KeyRange const& range, bool createNew)
+	  : minVersion(minVersion), range(range), createNew(createNew) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
