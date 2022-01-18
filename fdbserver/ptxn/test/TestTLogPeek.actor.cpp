@@ -57,7 +57,6 @@ TestTLogPeekMergeCursorOptions::TestTLogPeekMergeCursorOptions(const UnitTestPar
     initialVersion(params.getInt("initialVersion").orDefault(DEFAULT_INITIAL_VERSION)),
     numVersions(params.getInt("numVersions").orDefault(DEFAULT_NUM_VERSIONS)) {}
 
-namespace {
 // FIXME this should be moved to a more generic place
 // Feed the message generated in CommitRecord to TLog servers
 ACTOR Future<Void> messageFeeder() {
@@ -160,8 +159,6 @@ ACTOR Future<std::vector<VersionSubsequenceMessage>> getAllMessageFromCursor(std
 	}
 	return messages;
 }
-
-} // anonymous namespace
 
 } // namespace ptxn::test
 
@@ -460,13 +457,15 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/merged/OrderedMutableTeamPeekCur
 	state std::shared_ptr<ptxn::merged::OrderedMutableTeamPeekCursor> pCursor;
 	state ptxn::test::print::PrintTiming printTiming("testOrderedMutableTeamPeekCursor");
 
-	testEnvironment.initDriverContext()
+	testEnvironment
+	    .initDriverContext()
+	    // At this stage we set num tLogs same to numStorageTeams
 	    .initTLogGroupWithPrivateMutationsFixture(options.numTLogs, options.numTLogs)
 	    .initPtxnTLog(ptxn::MessageTransferModel::StorageServerActivelyPull, options.numTLogs)
 	    .initMessagesWithPrivateMutations(options.initialVersion,
-	                                   options.numVersions,
-	                                   options.numMutationsPerVersion,
-	                                   Optional<std::vector<ptxn::StorageTeamID>>(storageServerIDs));
+	                                      options.numVersions,
+	                                      options.numMutationsPerVersion,
+	                                      Optional<std::vector<UID>>(storageServerIDs));
 
 	// Force multiple time peek, and peek causes latency
 	for (auto pFakeTLogContext : ptxn::test::TestEnvironment::getTLogs()->tLogContexts) {

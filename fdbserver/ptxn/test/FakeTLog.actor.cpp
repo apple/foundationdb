@@ -121,6 +121,21 @@ void fakeTLogPeekReplyEmpty(TLogPeekRequest& request, const StorageTeamID& stora
 	request.reply.send(reply);
 }
 
+std::pair<Version, Version> getReceivedVersionRange(const StorageTeamID& storageTeamID,
+                                                    std::shared_ptr<FakeTLogContext> pFakeTLogContext) {
+	Version minVersion = MAX_VERSION;
+	Version maxVersion = invalidVersion;
+
+	for (const auto& [version, storageTeamMessages] : pFakeTLogContext->epochVersionMessages) {
+		if (storageTeamMessages.count(storageTeamID)) {
+			minVersion = std::min(minVersion, version);
+			maxVersion = std::max(maxVersion, version);
+		}
+	}
+
+	return { minVersion, maxVersion };
+}
+
 } // anonymous namespace
 
 ACTOR Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLogContext> pFakeTLogContext) {
@@ -136,10 +151,16 @@ ACTOR Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLo
 		return Void();
 	}
 
+	// The version range from commit record
 	const std::pair<Version, Version>& versionRange = storageTeamEpochVersionRange.at(storageTeamID);
+	// The version range TLog has received
+	const std::pair<Version, Version>& receivedVersionRange = getReceivedVersionRange(storageTeamID, pFakeTLogContext);
 
-	printTiming << "Storage Team ID = " << storageTeamID.toString() << "\tVersion range [" << versionRange.first << ", "
-	            << versionRange.second << ")" << std::endl;
+	printTiming << "Storage Team ID = " << storageTeamID.toString() << std::endl;
+	printTiming << "Commit record version range [" << versionRange.first << ", " << versionRange.second << ")"
+	            << std::endl;
+	printTiming << "Received version range [" << receivedVersionRange.first << ", " << receivedVersionRange.second
+	            << "]" << std::endl;
 	printTiming << "Request begin commit version = " << request.beginVersion << std::endl;
 
 	Version firstVersion = std::max(versionRange.first, request.beginVersion);

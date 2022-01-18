@@ -23,6 +23,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include "flow/flow.h"
 
 class Timing {
@@ -31,9 +33,24 @@ class Timing {
 public:
 	Timing() : m_start(now()) {}
 
+	// Gets the time the Timing object created
 	double getStart() const { return m_start; }
 
+	// Gets the duration of the timing object
 	double duration() const { return now() - m_start; }
+};
+
+class Stopwatch {
+	std::vector<double> m_laps;
+
+public:
+	Stopwatch() : m_laps{ now() } {}
+
+	// Laps the watch, stores the current time and return the duration between this lap and the previous one
+	double lap() {
+		m_laps.push_back(now());
+		return *(m_laps.rbegin()) - *std::next(m_laps.rbegin());
+	}
 };
 
 #endif // FDBSERVER_TIMING_H

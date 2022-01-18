@@ -101,8 +101,25 @@ struct StorageServerTestDriver : ServerTestDriver {
 	}
 };
 
+namespace {
+class TemporaryDisablePartitionedTransactionKnob {
+private:
+	const int m_partitionedTransactions;
+
+public:
+	TemporaryDisablePartitionedTransactionKnob()
+	  : m_partitionedTransactions(SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
+		const_cast<ServerKnobs*>(SERVER_KNOBS)->ENABLE_PARTITIONED_TRANSACTIONS = 0;
+	}
+	~TemporaryDisablePartitionedTransactionKnob() {
+		const_cast<ServerKnobs*>(SERVER_KNOBS)->ENABLE_PARTITIONED_TRANSACTIONS = m_partitionedTransactions;
+	}
+};
+} // namespace
+
 ACTOR Future<Void> runStorageServer(StorageServerTestDriver* self) {
 	state print::PrintTiming printTiming(__FUNCTION__);
+	state TemporaryDisablePartitionedTransactionKnob partitionTransactionKnobDisabler;
 
 	wait(delay(1));
 
@@ -130,6 +147,8 @@ ACTOR Future<Void> runStorageServer(StorageServerTestDriver* self) {
 
 	printTiming << "Starting Storage Server." << std::endl;
 	UID clusterId = deterministicRandom()->randomUniqueID();
+
+	// FIXME The storage server is not partitioned transaction storage server
 	state Future<Void> ss =
 	    storageServer(data, ssi, self->tag, clusterId, tssSeedVersion, storageReady, dbInfo, folder);
 	printTiming << "Storage Server started." << std::endl;

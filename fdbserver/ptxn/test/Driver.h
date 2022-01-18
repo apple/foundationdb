@@ -294,15 +294,16 @@ public:
 	struct StorageServerResources {
 		static constexpr int MEMORY_LIMIT = 256 * 1024 * 1024; // 256MB per storage server
 
-		StorageTeamID storageTeamID;
+		const StorageTeamID storageTeamID;
 		std::shared_ptr<::StorageServerInterface> interface;
+		const UID clusterID;
 		std::shared_ptr<::IKeyValueStore> kvStore;
 		const Tag seedTag;
 		const Version seedVersion;
 
 		std::string getFolder() const;
 
-		StorageServerResources(const StorageTeamID& storageTeamID);
+		StorageServerResources(const StorageTeamID& storageTeamID_);
 	};
 
 	std::vector<StorageServerResources> storageServerResources;

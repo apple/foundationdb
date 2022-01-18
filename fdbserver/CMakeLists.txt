@@ -168,6 +168,8 @@ set(FDBSERVER_SRCS
   ptxn/test/RealTLog.actor.h
   ptxn/test/TestResolver.actor.cpp
   ptxn/test/TestSerialization.cpp
+  ptxn/test/TestStorageServer.actor.cpp
+  ptxn/test/TestStorageServer.actor.h
   ptxn/test/TestTLogPeek.actor.cpp
   ptxn/test/TestTLogPeek.h
   ptxn/test/TestTLogServer.actor.cpp
