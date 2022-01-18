@@ -187,9 +187,7 @@ THREAD_HANDLE startThread(void*(func)(void*), void* arg, int stackSize = 0, cons
 
 void waitThread(THREAD_HANDLE thread);
 
-// Linux-only for now.  Set thread priority "low"
-void deprioritizeThread();
-
+// Linux-only for now.  Set thread priority.
 void setThreadPriority(int pri);
 
 #define DEBUG_DETERMINISM 0
