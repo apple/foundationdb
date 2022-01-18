@@ -2304,7 +2304,7 @@ public:
 	// FIXME: determine when to fail the cluster controller when a primaryDC has not been set
 
 	// This function returns true when the cluster controller determines it is worth forcing
-	// a master recovery in order to change the recruited processes in the transaction subsystem.
+	// a cluster recovery in order to change the recruited processes in the transaction subsystem.
 	bool betterMasterExists() {
 		const ServerDBInfo dbi = db.serverInfo->get();
 

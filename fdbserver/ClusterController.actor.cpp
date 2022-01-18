@@ -207,7 +207,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 
 			state Future<Void> spinDelay = delay(
 			    SERVER_KNOBS
-			        ->MASTER_SPIN_DELAY); // Don't retry master recovery more than once per second, but don't delay
+			        ->MASTER_SPIN_DELAY); // Don't retry cluster recovery more than once per second, but don't delay
 			                              // the "first" recovery after more than a second of normal operation
 
 			TraceEvent("CCWDB", cluster->id).detail("Watching", iMaster.id());
