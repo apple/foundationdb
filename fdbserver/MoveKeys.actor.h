@@ -75,8 +75,8 @@ void seedShardServers(Arena& trArena,
 // it returns (since it needs to execute the finishMoveKeys transaction).
 ACTOR Future<Void> moveKeys(Database occ,
                             KeyRange keys,
-                            vector<UID> destinationTeam,
-                            vector<UID> healthyDestinations,
+                            std::vector<UID> destinationTeam,
+                            std::vector<UID> healthyDestinations,
                             MoveKeysLock lock,
                             Promise<Void> dataMovementComplete,
                             FlowLock* startMoveKeysParallelismLock,
@@ -107,15 +107,16 @@ ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> t
 // Performed when a storage server is marked as permanently failed.
 ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
                                               UID serverID,
+                                              std::vector<UID> teamForDroppedRange,
                                               MoveKeysLock lock,
                                               const DDEnabledState* ddEnabledState);
 
-// Gives a unique ID for each storage team and creates three maps for storage teams. `team` is list
-// of strage servers in the storage team:
+// Gives a unique ID for each storage team and creates three maps for storage teams. `team` is a list
+// of storage servers in the storage team:
 // (1) List of Storage Servers (Team) -> TeamID
 // (2) TeamID -> List of Storage Servers (Team)
 // (3) Storage Server -> List of TeamsIDs
-ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, std::vector<UID> team);
+ACTOR Future<ptxn::StorageTeamID> maybeUpdateTeamMaps(Database cx, std::vector<UID> storageServerIDs);
 
 #include "flow/unactorcompiler.h"
 #endif

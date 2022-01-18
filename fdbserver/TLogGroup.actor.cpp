@@ -178,7 +178,7 @@ void TLogGroupCollection::addTLogGroup(UID debugID, TLogGroupRef group) {
 	recruitedGroups.push_back(group);
 }
 
-bool TLogGroupCollection::tryAddStorageTeam(ptxn::StorageTeamID teamId, vector<UID> servers) {
+bool TLogGroupCollection::tryAddStorageTeam(ptxn::StorageTeamID teamId, std::vector<UID> servers) {
 	auto it = storageTeams.find(teamId);
 	if (it != storageTeams.end()) {
 		ASSERT(it->second == servers);
@@ -262,14 +262,14 @@ void TLogGroupCollection::seedTLogGroupAssignment(
 		// Step 2: Map from SS to teamID.
 		for (const auto& ss : serverSrcUID) {
 			Key teamIdKey = storageServerToTeamIdKey(ss);
-			Value val = encodeStorageServerToTeamIdValue({ teamId });
+			Value val = encodeStorageServerToTeamIdValue(teamId, {});
 			tr.set(arena, teamIdKey, val);
 		}
 
 		// Step 3: Assign the storage team to a TLogGroup (Storage Team -> TLogGroup).
 		TLogGroupRef group = assignStorageTeam(teamId);
 		TraceEvent("TLogGroupSeedTeam").detail("StorageTeamId", teamId);
-		tr.set(arena, storageTeamIdToTLogGroupKey(teamId), encodeStorageServerToTeamIdValue({ group->id() }));
+		tr.set(arena, storageTeamIdToTLogGroupKey(teamId), encodeStorageServerToTeamIdValue(group->id(), {}));
 		storageTeams[teamId] = serverSrcUID;
 	}
 }

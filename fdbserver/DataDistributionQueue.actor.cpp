@@ -23,6 +23,8 @@
 #include <vector>
 
 #include "flow/ActorCollection.h"
+#include "flow/FastRef.h"
+#include "flow/Trace.h"
 #include "flow/Util.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/SystemData.h"
@@ -67,7 +69,8 @@ struct RelocateData {
 		       priority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || priority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT ||
 		       priority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT || priority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT ||
 		       priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT || priority == SERVER_KNOBS->PRIORITY_TEAM_HEALTHY ||
-		       priority == SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
+		       priority == SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER ||
+		       priority == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE;
 	}
 
 	static bool isBoundaryPriority(int priority) {
@@ -102,7 +105,7 @@ class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDa
 	}
 
 	template <class T>
-	std::vector<T> collect(std::function<vector<T>(IDataDistributionTeam const&)> func) const {
+	std::vector<T> collect(std::function<std::vector<T>(IDataDistributionTeam const&)> func) const {
 		std::vector<T> result;
 
 		for (const auto& team : teams) {
@@ -146,7 +149,7 @@ public:
 	}
 
 	std::vector<UID> const& getServerIDs() const override {
-		static vector<UID> tempServerIDs;
+		static std::vector<UID> tempServerIDs;
 		tempServerIDs.clear();
 		for (const auto& team : teams) {
 			std::vector<UID> const& childIDs = team->getServerIDs();
@@ -400,9 +403,13 @@ struct DDQueueData {
 
 	Reference<AsyncVar<bool>> rawProcessingUnhealthy; // many operations will remove relocations before adding a new
 	                                                  // one, so delay a small time before settling on a new number.
+	Reference<AsyncVar<bool>> rawProcessingWiggle;
 
 	std::map<int, int> priority_relocations;
 	int unhealthyRelocations;
+
+	Reference<EventCacheHolder> movedKeyServersEventHolder;
+
 	void startRelocation(int priority, int healthPriority) {
 		// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
 		// we must count it into unhealthyRelocations; because team removers relies on unhealthyRelocations to
@@ -417,6 +424,9 @@ struct DDQueueData {
 		    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT) {
 			unhealthyRelocations++;
 			rawProcessingUnhealthy->set(true);
+		}
+		if (healthPriority == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE) {
+			rawProcessingWiggle->set(true);
 		}
 		priority_relocations[priority]++;
 	}
@@ -434,6 +444,9 @@ struct DDQueueData {
 			}
 		}
 		priority_relocations[priority]--;
+		if (priority_relocations[SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE] == 0) {
+			rawProcessingWiggle->set(false);
+		}
 	}
 
 	DDQueueData(UID mid,
@@ -455,7 +468,9 @@ struct DDQueueData {
 	    fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), activeRelocations(0),
 	    queuedRelocations(0), bytesWritten(0), teamSize(teamSize), singleRegionTeamSize(singleRegionTeamSize),
 	    output(output), input(input), getShardMetrics(getShardMetrics), lastLimited(lastLimited), lastInterval(0),
-	    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)), unhealthyRelocations(0) {}
+	    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
+	    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
+	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")) {}
 
 	void validate() {
 		if (EXPENSIVE_VALIDATION) {
@@ -1012,8 +1027,18 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
 					// server that hosts the relocateData. This is possible, for example, in a fearless configuration
 					// when the remote DC is just brought up.
-					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> bestTeam =
-					    wait(brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req)));
+					Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
+					    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
+					state bool bestTeamReady = fbestTeam.isReady();
+					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> bestTeam = wait(fbestTeam);
+					if (tciIndex > 0 && !bestTeamReady) {
+						// self->shardsAffectedByTeamFailure->moveShard must be called without any waits after getting
+						// the destination team or we could miss failure notifications for the storage servers in the
+						// destination team
+						TraceEvent("BestTeamNotReady");
+						foundTeams = false;
+						break;
+					}
 					// If a DC has no healthy team, we stop checking the other DCs until
 					// the unhealthy DC is healthy again or is excluded.
 					if (!bestTeam.first.present()) {
@@ -1218,7 +1243,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					if (rd.keys.begin == keyServersPrefix) {
 						TraceEvent("MovedKeyServerKeys")
 						    .detail("Dest", describe(destIds))
-						    .trackLatest("MovedKeyServers");
+						    .trackLatest(self->movedKeyServersEventHolder->trackingKey);
 					}
 
 					if (!signalledTransferComplete) {
@@ -1552,6 +1577,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,
                                          Reference<AsyncVar<bool>> processingUnhealthy,
+                                         Reference<AsyncVar<bool>> processingWiggle,
                                          std::vector<TeamCollectionInterface> teamCollections,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                          MoveKeysLock lock,
@@ -1590,6 +1616,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 		balancingFutures.push_back(BgDDValleyFiller(&self, i));
 	}
 	balancingFutures.push_back(delayedAsyncVar(self.rawProcessingUnhealthy, processingUnhealthy, 0));
+	balancingFutures.push_back(delayedAsyncVar(self.rawProcessingWiggle, processingWiggle, 0));
 
 	try {
 		loop {
@@ -1684,7 +1711,9 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					    .detail("PriorityTeam1Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_1_LEFT])
 					    .detail("PriorityTeam0Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_0_LEFT])
 					    .detail("PrioritySplitShard", self.priority_relocations[SERVER_KNOBS->PRIORITY_SPLIT_SHARD])
-					    .trackLatest("MovingData");
+					    .trackLatest("MovingData"); // This trace event's trackLatest lifetime is controlled by
+					                                // DataDistributorData::movingDataEventHolder. The track latest key
+					                                // we use here must match the key used in the holder.
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 				when(wait(waitForAll(balancingFutures))) {}

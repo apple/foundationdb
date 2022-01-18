@@ -303,7 +303,8 @@ public:
 
 	static std::string lastOpenError;
 
-private:
+	// TODO: change the following back to `private` once blob obj access is refactored
+protected:
 	std::string URL;
 	Optional<std::string> encryptionKeyFileName;
 };

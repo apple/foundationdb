@@ -155,11 +155,11 @@ public: // workload functions
 		return _check(cx, this);
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override { TraceEvent("SnapTestWorkloadGetMetrics"); }
+	void getMetrics(std::vector<PerfMetric>& m) override { TraceEvent("SnapTestWorkloadGetMetrics"); }
 
 	ACTOR Future<Void> _create_keys(Database cx, std::string prefix, bool even = true) {
 		state Transaction tr(cx);
-		state vector<int64_t> keys;
+		state std::vector<int64_t> keys;
 
 		keys.reserve(1000);
 		for (int i = 0; i < 1000; i++) {

@@ -25,10 +25,10 @@
 #define FDBSERVER_PTXN_TLOGPEEKCURSOR_ACTOR_H
 
 #include <deque>
-#include <list>
 #include <functional>
 #include <memory>
 #include <unordered_map>
+#include <set>
 #include <vector>
 
 #include "fdbclient/FDBTypes.h"
@@ -91,6 +91,12 @@ public:
 
 	// Any remaining mutation *LOCALLY* available. This *MUST* be verified prior to get or next, otherwise the
 	// behavior is undefined.
+	// A typical loop over peeked data would look like:
+	//     while(hasRemaining()) {
+	//         auto value = get();
+	//         visit(value);
+	//         next();
+	//     }
 	bool hasRemaining() const;
 
 	// Returns an iterator that represents the begin of the data still undeserialized.
@@ -121,8 +127,7 @@ namespace details {
 
 class VersionSubsequencePeekCursorBase : public PeekCursorBase {
 public:
-	VersionSubsequencePeekCursorBase(const Version version_ = invalidVersion,
-	                                 const Subsequence subsequence_ = invalidSubsequence);
+	VersionSubsequencePeekCursorBase();
 
 	// Returns the commit version of the current message,
 	// If there is no message under cursor, the behavior is undefined.
@@ -279,10 +284,11 @@ namespace merged {
 
 namespace details {
 
+// A container of pointers to StorageTeamPeekCursors
 class CursorContainerBase {
 public:
 	// Type of the cursor
-	using element_t = std::shared_ptr<ptxn::details::VersionSubsequencePeekCursorBase>;
+	using element_t = StorageTeamPeekCursor*;
 
 	// Type of the container
 	using container_t = std::deque<element_t>;
@@ -295,6 +301,7 @@ protected:
 
 	virtual void pushImpl(const element_t& pCursor) = 0;
 	virtual void popImpl() = 0;
+	virtual void eraseImpl(const StorageTeamID& storageTeamID) = 0;
 
 public:
 	// Accesses the first element in the container
@@ -312,18 +319,24 @@ public:
 	// Returns an iterator points to the end of the container
 	iterator_t end() const { return std::cend(container); }
 
+	// Removes all elements in the container
+	void clear() { container.clear(); }
+
 	// Returns true if there is no element in the container
 	bool empty() const { return container.empty(); }
 
 	// Returns the count of the elements in the container
 	int size() const { return container.size(); }
 
-	// Adds a new cursor (in pointer type) to the container
+	// Adds a new cursor (in raw pointer type) to the container
 	void push(const element_t& pCursor) { pushImpl(pCursor); }
 
 	// Remove the first element in the container
 	// Here "first" is implementation-specific, see the documentation of subclass
 	void pop() { popImpl(); }
+
+	// Erase a cursor by its storage team ID
+	void erase(const StorageTeamID& storageTeamID) { eraseImpl(storageTeamID); }
 };
 
 // Provides an ordered container of cursors. In the container the first element is defined as the container that is
@@ -336,6 +349,7 @@ class OrderedCursorContainer : public CursorContainerBase {
 protected:
 	virtual void pushImpl(const element_t& pCursor) override;
 	virtual void popImpl() override;
+	virtual void eraseImpl(const StorageTeamID& storageTeamID) override;
 
 public:
 	OrderedCursorContainer();
@@ -343,10 +357,13 @@ public:
 
 // Provides an unordered container of cursors, the container behaves like a FIFO-queue. The first element is defined as
 // the earliest element in the container.
+// TODO Merge UnorderedCursorContainer to CursorContainerBase, or let OrderedCursorContainer inherit from
+// UnorderedCursorContainer.
 class UnorderedCursorContainer : public CursorContainerBase {
 protected:
 	virtual void pushImpl(const element_t& pCursor) override;
 	virtual void popImpl() override;
+	virtual void eraseImpl(const StorageTeamID& storageTeamID) override;
 };
 
 // Provides a Storage Team ID to StorageTeamPeekCursor mapping functionality
@@ -359,7 +376,7 @@ private:
 
 public:
 	// Moves a cursor to the mapping system, the original cursor is invalidated
-	void addCursor(std::shared_ptr<StorageTeamPeekCursor>&& cursor);
+	void addCursor(const std::shared_ptr<StorageTeamPeekCursor>& cursor);
 
 	// Removes a cursor from the mapping system
 	std::shared_ptr<StorageTeamPeekCursor> removeCursor(const StorageTeamID& storageTeamID);
@@ -383,7 +400,7 @@ public:
 	StorageTeamIDCursorMapper_t::iterator cursorsEnd();
 
 protected:
-	virtual void addCursorImpl(std::shared_ptr<StorageTeamPeekCursor>&& cursor);
+	virtual void addCursorImpl(const std::shared_ptr<StorageTeamPeekCursor>& cursor);
 	virtual std::shared_ptr<StorageTeamPeekCursor> removeCursorImpl(const StorageTeamID& cursor);
 
 	// Gets the shared_ptr for the given storage team ID
@@ -403,15 +420,16 @@ protected:
 	// The current version the cursorContainer is using
 	Version currentVersion;
 
-	// The list of cursors that requires RPC
-	std::list<StorageTeamID> emptyCursorStorageTeamIDs;
+	// The set of cursors that requires RPC
+	std::set<StorageTeamID> emptyCursorStorageTeamIDs;
 
-	// The list of cursors that has finished epoch
-	std::list<StorageTeamID> retiredCursorStorageTeamIDs;
+	// The set of cursors that has finished epoch
+	std::set<StorageTeamID> retiredCursorStorageTeamIDs;
 
 protected:
-	BroadcastedStorageTeamPeekCursorBase(std::unique_ptr<details::CursorContainerBase>&& pCursorContainer_)
-	  : pCursorContainer(std::move(pCursorContainer_)) {}
+	BroadcastedStorageTeamPeekCursorBase(std::unique_ptr<details::CursorContainerBase>&& pCursorContainer_,
+	                                     const Version& version_ = 0)
+	  : pCursorContainer(std::move(pCursorContainer_)), currentVersion(version_) {}
 
 	// Tries to fill the cursor heap, returns true if the cursorContainer is filled with cursors.
 	// If cursorContainer is not empty, the behavior is undefined.
@@ -421,7 +439,8 @@ protected:
 	virtual const VersionSubsequenceMessage& getImpl() const override;
 	virtual bool hasRemainingImpl() const override;
 
-	virtual void addCursorImpl(std::shared_ptr<StorageTeamPeekCursor>&& cursor) override;
+	virtual void addCursorImpl(const std::shared_ptr<StorageTeamPeekCursor>& cursor) override;
+	virtual std::shared_ptr<StorageTeamPeekCursor> removeCursorImpl(const StorageTeamID& cursor) override;
 
 public:
 	using details::StorageTeamIDCursorMapper::addCursor;

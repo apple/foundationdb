@@ -283,19 +283,12 @@ else()
       -Woverloaded-virtual
       -Wshift-sign-overflow
       # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 11
-      -Wno-comment
       -Wno-delete-non-virtual-dtor
-      -Wno-format
-      -Wno-mismatched-tags
-      -Wno-missing-field-initializers
       -Wno-sign-compare
-      -Wno-tautological-pointer-compare
       -Wno-undefined-var-template
-      -Wno-unknown-pragmas
       -Wno-unknown-warning-option
-      -Wno-unused-function
-      -Wno-unused-local-typedef
       -Wno-unused-parameter
+      -Wno-constant-logical-operand
       )
     if (USE_CCACHE)
       add_compile_options(
@@ -321,7 +314,7 @@ else()
     -fvisibility=hidden
     -Wreturn-type
     -fPIC)
-  if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
+  if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86" AND NOT CLANG)
     add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wclass-memaccess>)
   endif()
   if (GPERFTOOLS_FOUND AND GCC)
@@ -347,9 +340,19 @@ else()
     set(DTRACE_PROBES 1)
   endif()
 
-  if(CMAKE_COMPILER_IS_GNUCXX)
-    set(USE_LTO OFF CACHE BOOL "Do link time optimization")
-    if (USE_LTO)
+  set(USE_LTO OFF CACHE BOOL "Do link time optimization")
+  if (USE_LTO)
+    if (CLANG)
+      set(CLANG_LTO_STRATEGY "Thin" CACHE STRING "LLVM LTO strategy (Thin, or Full)")
+      if (CLANG_LTO_STRATEGY STREQUAL "Full")
+        add_compile_options($<$<CONFIG:Release>:-flto=full>)
+      else()
+        add_compile_options($<$<CONFIG:Release>:-flto=thin>)
+      endif()
+      set(CMAKE_RANLIB "llvm-ranlib")
+      set(CMAKE_AR "llvm-ar")
+    endif()
+    if(CMAKE_COMPILER_IS_GNUCXX)
       add_compile_options($<$<CONFIG:Release>:-flto>)
       set(CMAKE_AR  "gcc-ar")
       set(CMAKE_C_ARCHIVE_CREATE "<CMAKE_AR> qcs <TARGET> <LINK_FLAGS> <OBJECTS>")

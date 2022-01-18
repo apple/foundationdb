@@ -28,6 +28,7 @@
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/WorkerInterface.actor.h"
 
+#include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -58,7 +59,7 @@ struct ServerTestDriver {
 		        currentProtocolVersion),
 		    TaskPriority::DefaultYield));
 		Sim2FileSystem::newFileSystem();
-		FlowTransport::createInstance(false, 1);
+		FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
 		return Void();
 	}
 
@@ -100,8 +101,25 @@ struct StorageServerTestDriver : ServerTestDriver {
 	}
 };
 
+namespace {
+class TemporaryDisablePartitionedTransactionKnob {
+private:
+	const int m_partitionedTransactions;
+
+public:
+	TemporaryDisablePartitionedTransactionKnob()
+	  : m_partitionedTransactions(SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
+		const_cast<ServerKnobs*>(SERVER_KNOBS)->ENABLE_PARTITIONED_TRANSACTIONS = 0;
+	}
+	~TemporaryDisablePartitionedTransactionKnob() {
+		const_cast<ServerKnobs*>(SERVER_KNOBS)->ENABLE_PARTITIONED_TRANSACTIONS = m_partitionedTransactions;
+	}
+};
+} // namespace
+
 ACTOR Future<Void> runStorageServer(StorageServerTestDriver* self) {
 	state print::PrintTiming printTiming(__FUNCTION__);
+	state TemporaryDisablePartitionedTransactionKnob partitionTransactionKnobDisabler;
 
 	wait(delay(1));
 
@@ -128,7 +146,11 @@ ACTOR Future<Void> runStorageServer(StorageServerTestDriver* self) {
 	FakeLogSystem_CustomPeekCursor::getCursorByID(ssi.uniqueID) = self->cursor;
 
 	printTiming << "Starting Storage Server." << std::endl;
-	state Future<Void> ss = storageServer(data, ssi, self->tag, tssSeedVersion, storageReady, dbInfo, folder);
+	UID clusterId = deterministicRandom()->randomUniqueID();
+
+	// FIXME The storage server is not partitioned transaction storage server
+	state Future<Void> ss =
+	    storageServer(data, ssi, self->tag, clusterId, tssSeedVersion, storageReady, dbInfo, folder);
 	printTiming << "Storage Server started." << std::endl;
 
 	self->actors.add(ss);

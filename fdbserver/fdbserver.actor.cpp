@@ -36,11 +36,13 @@
 #include <boost/interprocess/managed_shared_memory.hpp>
 
 #include "fdbclient/ActorLineageProfiler.h"
+#include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbmonitor/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
@@ -61,6 +63,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/pubsub.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
@@ -97,22 +100,22 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_CONNFILE,              "-C",                          SO_REQ_SEP },
-	{ OPT_CONNFILE,              "--cluster_file",              SO_REQ_SEP },
-	{ OPT_SEEDCONNFILE,          "--seed_cluster_file",         SO_REQ_SEP },
-	{ OPT_SEEDCONNSTRING,        "--seed_connection_string",    SO_REQ_SEP },
+	{ OPT_CONNFILE,              "--cluster-file",              SO_REQ_SEP },
+	{ OPT_SEEDCONNFILE,          "--seed-cluster-file",         SO_REQ_SEP },
+	{ OPT_SEEDCONNSTRING,        "--seed-connection-string",    SO_REQ_SEP },
 	{ OPT_ROLE,                  "-r",                          SO_REQ_SEP },
 	{ OPT_ROLE,                  "--role",                      SO_REQ_SEP },
 	{ OPT_PUBLICADDR,            "-p",                          SO_REQ_SEP },
-	{ OPT_PUBLICADDR,            "--public_address",            SO_REQ_SEP },
+	{ OPT_PUBLICADDR,            "--public-address",            SO_REQ_SEP },
 	{ OPT_LISTEN,                "-l",                          SO_REQ_SEP },
-	{ OPT_LISTEN,                "--listen_address",            SO_REQ_SEP },
+	{ OPT_LISTEN,                "--listen-address",            SO_REQ_SEP },
 #ifdef __linux__
-	{ OPT_FILESYSTEM,           "--data_filesystem",           SO_REQ_SEP },
+	{ OPT_FILESYSTEM,           "--data-filesystem",           SO_REQ_SEP },
 	{ OPT_PROFILER_RSS_SIZE,    "--rsssize",                   SO_REQ_SEP },
 #endif
 	{ OPT_DATAFOLDER,            "-d",                          SO_REQ_SEP },
@@ -130,7 +133,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_NEWCONSOLE,            "-n",                          SO_NONE },
 	{ OPT_NEWCONSOLE,            "--newconsole",                SO_NONE },
 	{ OPT_NOBOX,                 "-q",                          SO_NONE },
-	{ OPT_NOBOX,                 "--no_dialog",                 SO_NONE },
+	{ OPT_NOBOX,                 "--no-dialog",                 SO_NONE },
 #endif
 	{ OPT_KVFILE,                "--kvfile",                    SO_REQ_SEP },
 	{ OPT_TESTFILE,              "-f",                          SO_REQ_SEP },
@@ -144,47 +147,48 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_MEMLIMIT,              "-m",                          SO_REQ_SEP },
 	{ OPT_MEMLIMIT,              "--memory",                    SO_REQ_SEP },
 	{ OPT_STORAGEMEMLIMIT,       "-M",                          SO_REQ_SEP },
-	{ OPT_STORAGEMEMLIMIT,       "--storage_memory",            SO_REQ_SEP },
-	{ OPT_CACHEMEMLIMIT,         "--cache_memory",              SO_REQ_SEP },
+	{ OPT_STORAGEMEMLIMIT,       "--storage-memory",            SO_REQ_SEP },
+	{ OPT_CACHEMEMLIMIT,         "--cache-memory",              SO_REQ_SEP },
 	{ OPT_MACHINEID,             "-i",                          SO_REQ_SEP },
-	{ OPT_MACHINEID,             "--machine_id",                SO_REQ_SEP },
+	{ OPT_MACHINEID,             "--machine-id",                SO_REQ_SEP },
 	{ OPT_DCID,                  "-a",                          SO_REQ_SEP },
-	{ OPT_DCID,                  "--datacenter_id",             SO_REQ_SEP },
+	{ OPT_DCID,                  "--datacenter-id",             SO_REQ_SEP },
 	{ OPT_MACHINE_CLASS,         "-c",                          SO_REQ_SEP },
 	{ OPT_MACHINE_CLASS,         "--class",                     SO_REQ_SEP },
 	{ OPT_BUGGIFY,               "-b",                          SO_REQ_SEP },
 	{ OPT_BUGGIFY,               "--buggify",                   SO_REQ_SEP },
 	{ OPT_VERSION,               "-v",                          SO_NONE },
 	{ OPT_VERSION,               "--version",                   SO_NONE },
-	{ OPT_BUILD_FLAGS,           "--build_flags",               SO_NONE },
+	{ OPT_BUILD_FLAGS,           "--build-flags",               SO_NONE },
 	{ OPT_CRASHONERROR,          "--crash",                     SO_NONE },
 	{ OPT_NETWORKIMPL,           "-N",                          SO_REQ_SEP },
 	{ OPT_NETWORKIMPL,           "--network",                   SO_REQ_SEP },
 	{ OPT_NOBUFSTDOUT,           "--unbufferedout",             SO_NONE },
 	{ OPT_BUFSTDOUTERR,          "--bufferedout",               SO_NONE },
 	{ OPT_TRACECLOCK,            "--traceclock",                SO_REQ_SEP },
-	{ OPT_NUMTESTERS,            "--num_testers",               SO_REQ_SEP },
+	{ OPT_NUMTESTERS,            "--num-testers",               SO_REQ_SEP },
 	{ OPT_HELP,                  "-?",                          SO_NONE },
 	{ OPT_HELP,                  "-h",                          SO_NONE },
 	{ OPT_HELP,                  "--help",                      SO_NONE },
 	{ OPT_DEVHELP,               "--dev-help",                  SO_NONE },
-	{ OPT_KNOB,                  "--knob_",                     SO_REQ_SEP },
-	{ OPT_UNITTESTPARAM,         "--test_",                     SO_REQ_SEP },
-	{ OPT_LOCALITY,              "--locality_",                 SO_REQ_SEP },
+	{ OPT_KNOB,                  "--knob-",                     SO_REQ_SEP },
+	{ OPT_UNITTESTPARAM,         "--test-",                     SO_REQ_SEP },
+	{ OPT_LOCALITY,              "--locality-",                 SO_REQ_SEP },
 	{ OPT_TESTSERVERS,           "--testservers",               SO_REQ_SEP },
 	{ OPT_TEST_ON_SERVERS,       "--testonservers",             SO_NONE },
-	{ OPT_METRICSCONNFILE,       "--metrics_cluster",           SO_REQ_SEP },
-	{ OPT_METRICSPREFIX,         "--metrics_prefix",            SO_REQ_SEP },
-	{ OPT_IO_TRUST_SECONDS,      "--io_trust_seconds",          SO_REQ_SEP },
-	{ OPT_IO_TRUST_WARN_ONLY,    "--io_trust_warn_only",        SO_NONE },
-	{ OPT_TRACE_FORMAT,          "--trace_format",              SO_REQ_SEP },
-	{ OPT_WHITELIST_BINPATH,     "--whitelist_binpath",         SO_REQ_SEP },
-	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob_credential_file",      SO_REQ_SEP },
-	{ OPT_CONFIG_PATH,           "--config_path",               SO_REQ_SEP },
-	{ OPT_USE_TEST_CONFIG_DB,    "--use_test_config_db",        SO_NONE },
+	{ OPT_METRICSCONNFILE,       "--metrics-cluster",           SO_REQ_SEP },
+	{ OPT_METRICSPREFIX,         "--metrics-prefix",            SO_REQ_SEP },
+	{ OPT_IO_TRUST_SECONDS,      "--io-trust-seconds",          SO_REQ_SEP },
+	{ OPT_IO_TRUST_WARN_ONLY,    "--io-trust-warn-only",        SO_NONE },
+	{ OPT_TRACE_FORMAT,          "--trace-format",              SO_REQ_SEP },
+	{ OPT_WHITELIST_BINPATH,     "--whitelist-binpath",         SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob-credential-file",      SO_REQ_SEP },
+	{ OPT_CONFIG_PATH,           "--config-path",               SO_REQ_SEP },
+	{ OPT_USE_TEST_CONFIG_DB,    "--use-test-config-db",        SO_NONE },
 	{ OPT_FAULT_INJECTION,       "-fi",                         SO_REQ_SEP },
-	{ OPT_FAULT_INJECTION,       "--fault_injection",           SO_REQ_SEP },
-	{ OPT_PROFILER,	             "--profiler_",                 SO_REQ_SEP},
+	{ OPT_FAULT_INJECTION,       "--fault-injection",           SO_REQ_SEP },
+	{ OPT_PROFILER,	             "--profiler-",                 SO_REQ_SEP},
+	{ OPT_PRINT_SIMTIME,         "--print-sim-time",             SO_NONE },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -217,7 +221,7 @@ bool enableFailures = true;
 
 #define test_assert(x)                                                                                                 \
 	if (!(x)) {                                                                                                        \
-		cout << "Test failed: " #x << endl;                                                                            \
+		std::cout << "Test failed: " #x << std::endl;                                                                  \
 		return false;                                                                                                  \
 	}
 
@@ -527,7 +531,7 @@ static void printOptionUsage(std::string option, std::string description) {
 
 	std::stringstream sstream(description);
 	if (sstream.eof()) {
-		printf(result.c_str());
+		printf("%s", result.c_str());
 		return;
 	}
 
@@ -550,35 +554,35 @@ static void printOptionUsage(std::string option, std::string description) {
 	}
 	result += currLine + '\n';
 
-	printf(result.c_str());
+	printf("%s", result.c_str());
 }
 
 static void printUsage(const char* name, bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("Usage: %s -p ADDRESS [OPTIONS]\n\n", name);
-	printOptionUsage("-p ADDRESS, --public_address ADDRESS",
+	printOptionUsage("-p ADDRESS, --public-address ADDRESS",
 	                 " Public address, specified as `IP_ADDRESS:PORT' or `auto:PORT'.");
-	printOptionUsage("-l ADDRESS, --listen_address ADDRESS",
+	printOptionUsage("-l ADDRESS, --listen-address ADDRESS",
 	                 " Listen address, specified as `IP_ADDRESS:PORT' (defaults to"
 	                 " public address).");
-	printOptionUsage("-C CONNFILE, --cluster_file CONNFILE",
+	printOptionUsage("-C CONNFILE, --cluster-file CONNFILE",
 	                 " The path of a file containing the connection string for the"
 	                 " FoundationDB cluster. The default is first the value of the"
 	                 " FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',"
 	                 " then `" +
 	                     platform::getDefaultClusterFilePath() + "'.");
-	printOptionUsage("--seed_cluster_file SEEDCONNFILE",
+	printOptionUsage("--seed-cluster-file SEEDCONNFILE",
 	                 " The path of a seed cluster file which will be used to connect"
 	                 " if the -C cluster file does not exist. If the server connects"
 	                 " successfully using the seed file, then it copies the file to"
 	                 " the -C file location.");
-	printOptionUsage("--seed_connection_string SEEDCONNSTRING",
+	printOptionUsage("--seed-connection-string SEEDCONNSTRING",
 	                 " The path of a seed connection string which will be used to connect"
 	                 " if the -C cluster file does not exist. If the server connects"
 	                 " successfully using the seed string, then it copies the string to"
 	                 " the -C file location.");
 #ifdef __linux__
-	printOptionUsage("--data_filesystem PATH",
+	printOptionUsage("--data-filesystem PATH",
 	                 " Turns on validation that all data files are written to a drive"
 	                 " mounted at the specified PATH. This checks that the device at PATH"
 	                 " is currently mounted and that any data files get written to the"
@@ -598,28 +602,28 @@ static void printUsage(const char* name, bool devhelp) {
 	printOptionUsage("--loggroup LOG_GROUP",
 	                 " Sets the LogGroup field with the specified value for all"
 	                 " events in the trace output (defaults to `default').");
-	printOptionUsage("--trace_format FORMAT",
+	printOptionUsage("--trace-format FORMAT",
 	                 " Select the format of the log files. xml (the default) and json"
 	                 " are supported.");
 	printOptionUsage("--tracer       TRACER",
 	                 " Select a tracer for transaction tracing. Currently disabled"
 	                 " (the default) and log_file are supported.");
-	printOptionUsage("-i ID, --machine_id ID",
+	printOptionUsage("-i ID, --machine-id ID",
 	                 " Machine and zone identifier key (up to 16 hex characters)."
 	                 " Defaults to a random value shared by all fdbserver processes"
 	                 " on this machine.");
-	printOptionUsage("-a ID, --datacenter_id ID", " Data center identifier key (up to 16 hex characters).");
-	printOptionUsage("--locality_LOCALITYKEY LOCALITYVALUE",
+	printOptionUsage("-a ID, --datacenter-id ID", " Data center identifier key (up to 16 hex characters).");
+	printOptionUsage("--locality-LOCALITYKEY LOCALITYVALUE",
 	                 " Define a locality key. LOCALITYKEY is case-insensitive though"
 	                 " LOCALITYVALUE is not.");
 	printOptionUsage("-m SIZE, --memory SIZE",
 	                 " Memory limit. The default value is 8GiB. When specified"
 	                 " without a unit, MiB is assumed.");
-	printOptionUsage("-M SIZE, --storage_memory SIZE",
+	printOptionUsage("-M SIZE, --storage-memory SIZE",
 	                 " Maximum amount of memory used for storage. The default"
 	                 " value is 1GiB. When specified without a unit, MB is"
 	                 " assumed.");
-	printOptionUsage("--cache_memory SIZE",
+	printOptionUsage("--cache-memory SIZE",
 	                 " The amount of memory to use for caching disk pages."
 	                 " The default value is 2GiB. When specified without a unit,"
 	                 " MiB is assumed.");
@@ -627,7 +631,7 @@ static void printUsage(const char* name, bool devhelp) {
 	                 " Machine class (valid options are storage, transaction,"
 	                 " resolution, grv_proxy, commit_proxy, master, test, unset, stateless, log, router,"
 	                 " and cluster_controller).");
-	printOptionUsage("--profiler_",
+	printOptionUsage("--profiler-",
 	                 "Set an actor profiler option. Supported options are:\n"
 	                 "  collector -- None or FluentD (FluentD requires collector_endpoint to be set)\n"
 	                 "  collector_endpoint -- IP:PORT of the fluentd server\n"
@@ -638,7 +642,7 @@ static void printUsage(const char* name, bool devhelp) {
 	printOptionUsage("-v, --version", "Print version information and exit.");
 	printOptionUsage("-h, -?, --help", "Display this help and exit.");
 	if (devhelp) {
-		printf("  --build_flags  Print build information and exit.\n");
+		printf("  --build-flags  Print build information and exit.\n");
 		printOptionUsage(
 		    "-r ROLE, --role ROLE",
 		    " Server role (valid options are fdbd, test, multitest,"
@@ -646,7 +650,7 @@ static void printUsage(const char* name, bool devhelp) {
 		    " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, unittests). The default is `fdbd'.");
 #ifdef _WIN32
 		printOptionUsage("-n, --newconsole", " Create a new console.");
-		printOptionUsage("-q, --no_dialog", " Disable error dialog on crash.");
+		printOptionUsage("-q, --no-dialog", " Disable error dialog on crash.");
 		printOptionUsage("--parentpid PID", " Specify a process after whose termination to exit.");
 #endif
 		printOptionUsage("-f TESTFILE, --testfile",
@@ -659,7 +663,7 @@ static void printUsage(const char* name, bool devhelp) {
 		    "--kvfile FILE",
 		    "Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.");
 		printOptionUsage("-b [on,off], --buggify [on,off]", " Sets Buggify system state, defaults to `off'.");
-		printOptionUsage("-fi [on,off], --fault_injection [on,off]", " Sets fault injection, defaults to `on'.");
+		printOptionUsage("-fi [on,off], --fault-injection [on,off]", " Sets fault injection, defaults to `on'.");
 		printOptionUsage("--crash", "Crash on serious errors instead of continuing.");
 		printOptionUsage("-N NETWORKIMPL, --network NETWORKIMPL",
 		                 " Select network implementation, `net2' (default),"
@@ -669,10 +673,10 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("--traceclock CLOCKIMPL",
 		                 " Select clock source for trace files, `now' (default) or"
 		                 " `realtime'.");
-		printOptionUsage("--num_testers NUM",
+		printOptionUsage("--num-testers NUM",
 		                 " A multitester will wait for NUM testers before starting"
 		                 " (defaults to 1).");
-		printOptionUsage("--test_PARAMNAME PARAMVALUE",
+		printOptionUsage("--test-PARAMNAME PARAMVALUE",
 		                 " Set a UnitTest named parameter to the given value.  Names are case sensitive.");
 #ifdef __linux__
 		printOptionUsage("--rsssize SIZE",
@@ -684,20 +688,20 @@ static void printUsage(const char* name, bool devhelp) {
 		                 " The addresses of networktestservers"
 		                 " specified as ADDRESS:PORT,ADDRESS:PORT...");
 		printOptionUsage("--testonservers", " Testers are recruited on servers.");
-		printOptionUsage("--metrics_cluster CONNFILE",
+		printOptionUsage("--metrics-cluster CONNFILE",
 		                 " The cluster file designating where this process will"
 		                 " store its metric data. By default metrics will be stored"
 		                 " in the same database the process is participating in.");
-		printOptionUsage("--metrics_prefix PREFIX",
+		printOptionUsage("--metrics-prefix PREFIX",
 		                 " The prefix where this process will store its metric data."
 		                 " Must be specified if using a different database for metrics.");
-		printOptionUsage("--knob_KNOBNAME KNOBVALUE", " Changes a database knob. KNOBNAME should be lowercase.");
-		printOptionUsage("--io_trust_seconds SECONDS",
+		printOptionUsage("--knob-KNOBNAME KNOBVALUE", " Changes a database knob. KNOBNAME should be lowercase.");
+		printOptionUsage("--io-trust-seconds SECONDS",
 		                 " Sets the time in seconds that a read or write operation is allowed to take"
 		                 " before timing out with an error. If an operation times out, all future"
 		                 " operations on that file will fail with an error as well. Only has an effect"
 		                 " when using AsyncFileKAIO in Linux.");
-		printOptionUsage("--io_trust_warn_only",
+		printOptionUsage("--io-trust-warn-only",
 		                 " Instead of failing when an I/O operation exceeds io_trust_seconds, just"
 		                 " log a warning to the trace log. Has no effect if io_trust_seconds is unspecified.");
 	} else {
@@ -803,9 +807,10 @@ Optional<bool> checkBuggifyOverride(const char* testFile) {
 
 // Takes a vector of public and listen address strings given via command line, and returns vector of NetworkAddress
 // objects.
-std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const ClusterConnectionFile& connectionFile,
-                                                                        const vector<std::string>& publicAddressStrs,
-                                                                        vector<std::string>& listenAddressStrs) {
+std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
+    const IClusterConnectionRecord& connectionRecord,
+    const std::vector<std::string>& publicAddressStrs,
+    std::vector<std::string>& listenAddressStrs) {
 	if (listenAddressStrs.size() > 0 && publicAddressStrs.size() != listenAddressStrs.size()) {
 		fprintf(stderr,
 		        "ERROR: Listen addresses (if provided) should be equal to the number of public addresses in order.\n");
@@ -821,7 +826,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 	NetworkAddressList publicNetworkAddresses;
 	NetworkAddressList listenNetworkAddresses;
 
-	auto& coordinators = connectionFile.getConnectionString().coordinators();
+	auto& coordinators = connectionRecord.getConnectionString().coordinators();
 	ASSERT(coordinators.size() > 0);
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
@@ -831,7 +836,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 		if (autoPublicAddress) {
 			try {
 				const NetworkAddress& parsedAddress = NetworkAddress::parse("0.0.0.0:" + publicAddressStr.substr(5));
-				const IPAddress publicIP = determinePublicIPAutomatically(connectionFile.getConnectionString());
+				const IPAddress publicIP = determinePublicIPAutomatically(connectionRecord.getConnectionString());
 				currentPublicAddress = NetworkAddress(publicIP, parsedAddress.port, true, parsedAddress.isTLS());
 			} catch (Error& e) {
 				fprintf(stderr,
@@ -996,11 +1001,12 @@ struct CLIOptions {
 	std::string configPath;
 	ConfigDBType configDBType{ ConfigDBType::DISABLED };
 
-	Reference<ClusterConnectionFile> connectionFile;
+	Reference<IClusterConnectionRecord> connectionFile;
 	Standalone<StringRef> machineId;
 	UnitTestParameters testParams;
 
 	std::map<std::string, std::string> profilerConfig;
+	bool printSimTime = false;
 
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
@@ -1018,7 +1024,7 @@ private:
 			commandLine += argv[a];
 		}
 
-		CSimpleOpt args(argc, argv, g_rgOptions, SO_O_EXACT);
+		CSimpleOpt args(argc, argv, g_rgOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 
 		if (argc == 1) {
 			printUsage(argv[0], false);
@@ -1066,46 +1072,42 @@ private:
 				flushAndExit(FDB_EXIT_SUCCESS);
 				break;
 			case OPT_KNOB: {
-				std::string syn = args.OptionSyntax();
-				if (!StringRef(syn).startsWith(LiteralStringRef("--knob_"))) {
-					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
+				Optional<std::string> knobName = extractPrefixedArgument("--knob", args.OptionSyntax());
+				if (!knobName.present()) {
+					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", args.OptionSyntax());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
-				syn = syn.substr(7);
-				knobs.emplace_back(syn, args.OptionArg());
-				manualKnobOverrides[syn] = args.OptionArg();
+				knobs.emplace_back(knobName.get(), args.OptionArg());
+				manualKnobOverrides[knobName.get()] = args.OptionArg();
 				break;
 			}
 			case OPT_PROFILER: {
-				std::string syn = args.OptionSyntax();
-				std::string_view key = syn;
-				auto prefix = "--profiler_"sv;
-				if (key.find(prefix) != 0) {
-					fprintf(stderr, "ERROR: unable to parse profiler option '%s'\n", syn.c_str());
+				Optional<std::string> profilerArg = extractPrefixedArgument("--profiler", args.OptionSyntax());
+				if (!profilerArg.present()) {
+					fprintf(stderr, "ERROR: unable to parse profiler option '%s'\n", args.OptionSyntax());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
-				key.remove_prefix(prefix.size());
-				profilerConfig.emplace(key, args.OptionArg());
+				profilerConfig.emplace(profilerArg.get(), args.OptionArg());
 				break;
 			};
 			case OPT_UNITTESTPARAM: {
-				std::string syn = args.OptionSyntax();
-				if (!StringRef(syn).startsWith(LiteralStringRef("--test_"))) {
-					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", syn.c_str());
+				Optional<std::string> testArg = extractPrefixedArgument("--test", args.OptionSyntax());
+				if (!testArg.present()) {
+					fprintf(stderr, "ERROR: unable to parse unit test option '%s'\n", args.OptionSyntax());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
-				testParams.set(syn.substr(7), args.OptionArg());
+				testParams.set(testArg.get(), args.OptionArg());
 				break;
 			}
 			case OPT_LOCALITY: {
-				std::string syn = args.OptionSyntax();
-				if (!StringRef(syn).startsWith(LiteralStringRef("--locality_"))) {
-					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", syn.c_str());
+				Optional<std::string> localityKey = extractPrefixedArgument("--locality", args.OptionSyntax());
+				if (!localityKey.present()) {
+					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", args.OptionSyntax());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
-				syn = syn.substr(11);
-				std::transform(syn.begin(), syn.end(), syn.begin(), ::tolower);
-				localities.set(Standalone<StringRef>(syn), Standalone<StringRef>(std::string(args.OptionArg())));
+				Standalone<StringRef> key = StringRef(localityKey.get());
+				std::transform(key.begin(), key.end(), mutateString(key), ::tolower);
+				localities.set(key, Standalone<StringRef>(std::string(args.OptionArg())));
 				break;
 			}
 			case OPT_VERSION:
@@ -1481,6 +1483,9 @@ private:
 			case OPT_USE_TEST_CONFIG_DB:
 				configDBType = ConfigDBType::SIMPLE;
 				break;
+			case OPT_PRINT_SIMTIME:
+				printSimTime = true;
+				break;
 
 #ifndef TLS_DISABLED
 			case TLSConfig::OPT_TLS_PLUGIN:
@@ -1514,7 +1519,7 @@ private:
 
 		if (seedConnString.length() && seedConnFile.length()) {
 			fprintf(
-			    stderr, "%s\n", "--seed_cluster_file and --seed_connection_string may not both be specified at once.");
+			    stderr, "%s\n", "--seed-cluster-file and --seed-connection-string may not both be specified at once.");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
@@ -1523,7 +1528,7 @@ private:
 		if (seedSpecified && !connFile.length()) {
 			fprintf(stderr,
 			        "%s\n",
-			        "If -seed_cluster_file or --seed_connection_string is specified, -C must be specified as well.");
+			        "If -seed-cluster-file or --seed-connection-string is specified, -C must be specified as well.");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
@@ -1680,6 +1685,14 @@ int main(int argc, char* argv[]) {
 		const auto opts = CLIOptions::parseArgs(argc, argv);
 		const auto role = opts.role;
 
+#ifdef _WIN32
+		// For now, ignore all tests for Windows
+		if (role == ServerRole::Simulation || role == ServerRole::UnitTests || role == ServerRole::Test) {
+			printf("Windows tests are not supported yet\n");
+			flushAndExit(FDB_EXIT_SUCCESS);
+		}
+#endif
+
 		if (role == ServerRole::Simulation)
 			printf("Random seed is %u...\n", opts.randomSeed);
 
@@ -1735,7 +1748,7 @@ int main(int argc, char* argv[]) {
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
 
 		if (opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
-			fprintf(stderr, "ERROR: --memory has to be larger than --cache_memory\n");
+			fprintf(stderr, "ERROR: --memory has to be larger than --cache-memory\n");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
@@ -1764,20 +1777,20 @@ int main(int argc, char* argv[]) {
 
 		if (role == ServerRole::Simulation || role == ServerRole::CreateTemplateDatabase) {
 			// startOldSimulator();
-			startNewSimulator();
+			startNewSimulator(opts.printSimTime);
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			openTracer(TracerType(deterministicRandom()->randomInt(static_cast<int>(TracerType::DISABLED),
 			                                                       static_cast<int>(TracerType::SIM_END))));
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 			g_network->addStopCallback(Net2FileSystem::stop);
-			FlowTransport::createInstance(false, 1);
+			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
 
 			const bool expectsPublicAddress =
 			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::Restore);
 			if (opts.publicAddressStrs.empty()) {
 				if (expectsPublicAddress) {
-					fprintf(stderr, "ERROR: The -p or --public_address option is required\n");
+					fprintf(stderr, "ERROR: The -p or --public-address option is required\n");
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1839,7 +1852,7 @@ int main(int argc, char* argv[]) {
 		    .detail("FileSystem", opts.fileSystemPath)
 		    .detail("DataFolder", opts.dataFolder)
 		    .detail("WorkingDirectory", cwd)
-		    .detail("ClusterFile", opts.connectionFile ? opts.connectionFile->getFilename().c_str() : "")
+		    .detail("ClusterFile", opts.connectionFile ? opts.connectionFile->toString() : "")
 		    .detail("ConnectionString",
 		            opts.connectionFile ? opts.connectionFile->getConnectionString().toString() : "")
 		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
@@ -2010,7 +2023,7 @@ int main(int argc, char* argv[]) {
 				if (!dataFolder.size())
 					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
-				vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
+				std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 				actors.push_back(restoreWorker(opts.connectionFile, opts.localities, dataFolder));
 				f = stopAfter(waitForAll(actors));
 				printf("Fast restore worker started\n");
@@ -2025,7 +2038,7 @@ int main(int argc, char* argv[]) {
 				if (!dataFolder.size())
 					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
-				vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
+				std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 				actors.push_back(fdbd(opts.connectionFile,
 				                      opts.localities,
 				                      opts.processClass,
@@ -2151,13 +2164,13 @@ int main(int argc, char* argv[]) {
 		        printf("  #%lld %p\n", (*a)->creationIndex, (*a));
 		}*/
 
-		/*cout << Actor::allActors.size() << " surviving actors:" << endl;
+		/*cout << Actor::allActors.size() << " surviving actors:" << std::endl;
 		std::map<std::string,int> actorCount;
 		for(int i=0; i<Actor::allActors.size(); i++)
 		    ++actorCount[Actor::allActors[i]->getName()];
 		for(auto i = actorCount.rbegin(); !(i == actorCount.rend()); ++i)
-		    cout << "  " << i->second << " " << i->first << endl;*/
-		//	cout << "  " << Actor::allActors[i]->getName() << endl;
+		    std::cout << "  " << i->second << " " << i->first << std::endl;*/
+		//	std::cout << "  " << Actor::allActors[i]->getName() << std::endl;
 
 		if (role == ServerRole::Simulation) {
 			unsigned long sevErrorEventsLogged = TraceEvent::CountEventsLoggedAt(SevError);
@@ -2178,7 +2191,7 @@ int main(int argc, char* argv[]) {
 			          << FastAllocator<4096>::pageCount << " " << FastAllocator<8192>::pageCount << " "
 			          << FastAllocator<16384>::pageCount << std::endl;
 
-			vector<std::pair<std::string, const char*>> typeNames;
+			std::vector<std::pair<std::string, const char*>> typeNames;
 			for (auto i = allocInstr.begin(); i != allocInstr.end(); ++i) {
 				std::string s;
 

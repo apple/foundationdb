@@ -191,11 +191,12 @@ std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> FakeLogSystem::getOldEpoch
 Future<Reference<ILogSystem>> FakeLogSystem::newEpoch(
     const RecruitFromConfigurationReply& recr,
     const Future<struct RecruitRemoteFromConfigurationReply>& fRemoteWorkers,
+    UID clusterId,
     const DatabaseConfiguration& config,
     LogEpoch recoveryCount,
     int8_t primaryLocality,
     int8_t remoteLocality,
-    const vector<Tag>& allTags,
+    const std::vector<Tag>& allTags,
     const Reference<AsyncVar<bool>>& recruitmentStalled,
     TLogGroupCollectionRef tLogGroupCollection) {
 	logMethodName(__func__);
@@ -217,7 +218,7 @@ Future<Void> FakeLogSystem::onLogSystemConfigChange() {
 	return Future<Void>();
 }
 
-void FakeLogSystem::getPushLocations(VectorRef<Tag> tags, vector<int>& locations, bool allLocations) const {
+void FakeLogSystem::getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, bool allLocations) const {
 	logMethodName(__func__);
 }
 

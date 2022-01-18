@@ -143,7 +143,7 @@ static int mvccStorageBytes(MutationRef const& m) {
 
 struct FetchInjectionInfo {
 	Arena arena;
-	vector<VerUpdateRef> changes;
+	std::vector<VerUpdateRef> changes;
 };
 
 struct StorageCacheData {
@@ -198,7 +198,7 @@ public:
 
 	FlowLock updateVersionLock;
 	FlowLock fetchKeysParallelismLock;
-	vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
+	std::vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
 
 	// TODO do we need otherError here?
 	Promise<Void> otherError;
@@ -1612,7 +1612,7 @@ void cacheWarmup(StorageCacheData* data, const KeyRangeRef& keys, bool nowAssign
 
 	// Save a backup of the CacheRangeInfo references before we start messing with cacheRanges, in order to defer
 	// fetchKeys cancellation (and its potential call to removeDataRange()) until cacheRanges is again valid
-	vector<Reference<CacheRangeInfo>> oldCacheRanges;
+	std::vector<Reference<CacheRangeInfo>> oldCacheRanges;
 	auto ocr = data->cachedRangeMap.intersectingRanges(keys);
 	for (auto r = ocr.begin(); r != ocr.end(); ++r)
 		oldCacheRanges.push_back(r->value());

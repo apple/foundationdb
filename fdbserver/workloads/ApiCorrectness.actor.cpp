@@ -139,7 +139,7 @@ public:
 
 	std::string description() const override { return "ApiCorrectness"; }
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.emplace_back("Number of Random Operations Performed", numRandomOperations.getValue(), Averaged::False);
 	}
 
@@ -244,7 +244,7 @@ public:
 				               20,
 				               (int)(100 * (1 - setProbability)),
 				               (int)(10 * (1 - setProbability)) };
-			vector<int> pdf = vector<int>(pdfArray, pdfArray + 8);
+			std::vector<int> pdf = std::vector<int>(pdfArray, pdfArray + 8);
 
 			OperationType operation = UNINITIALIZED;
 
@@ -388,7 +388,7 @@ public:
 		for (int i = 0; i < numReads; i++)
 			keys.push_back_deep(keys.arena(), self->selectRandomKey(data, 0.9));
 
-		state vector<Optional<Value>> values;
+		state std::vector<Optional<Value>> values;
 
 		state int currentIndex = 0;
 		while (currentIndex < keys.size()) {
@@ -397,7 +397,7 @@ public:
 			// Get the values from the database
 			loop {
 				try {
-					state vector<Future<Optional<Value>>> dbValueFutures;
+					state std::vector<Future<Optional<Value>>> dbValueFutures;
 					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size());
 					     i++)
 						dbValueFutures.push_back(transaction->get(keys[i]));
@@ -594,7 +594,7 @@ public:
 
 			loop {
 				try {
-					state vector<Future<Standalone<KeyRef>>> dbKeyFutures;
+					state std::vector<Future<Standalone<KeyRef>>> dbKeyFutures;
 					for (int i = currentIndex;
 					     i < std::min(currentIndex + self->maxKeysPerTransaction, selectors.size());
 					     i++)

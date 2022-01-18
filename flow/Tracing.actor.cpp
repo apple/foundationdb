@@ -122,26 +122,28 @@ ACTOR Future<Void> simulationStartServer() {
 	}
 }
 
+/*
 // Runs on an interval, printing debug information and performing other
 // connection tasks.
 ACTOR Future<Void> traceLog(int* pendingMessages, bool* sendError) {
-	state bool sendErrorReset = false;
+    state bool sendErrorReset = false;
 
-	loop {
-		TraceEvent("TracingSpanQueueSize").detail("PendingMessages", *pendingMessages);
+    loop {
+        TraceEvent("TracingSpanQueueSize").detail("PendingMessages", *pendingMessages);
 
-		// Wait at least one full loop before attempting to send messages
-		// again.
-		if (sendErrorReset) {
-			sendErrorReset = false;
-			*sendError = false;
-		} else if (*sendError) {
-			sendErrorReset = true;
-		}
+        // Wait at least one full loop before attempting to send messages
+        // again.
+        if (sendErrorReset) {
+            sendErrorReset = false;
+            *sendError = false;
+        } else if (*sendError) {
+            sendErrorReset = true;
+        }
 
-		wait(delay(kQueueSizeLogInterval));
-	}
+        wait(delay(kQueueSizeLogInterval));
+    }
 }
+*/
 
 struct UDPTracer : public ITracer {
 protected:
@@ -373,7 +375,7 @@ void openTracer(TracerType type) {
 ITracer::~ITracer() {}
 
 Span& Span::operator=(Span&& o) {
-	if (begin > 0.0) {
+	if (begin > 0.0 && context.second() > 0) {
 		end = g_network->now();
 		g_tracer->trace(*this);
 	}
@@ -388,7 +390,7 @@ Span& Span::operator=(Span&& o) {
 }
 
 Span::~Span() {
-	if (begin > 0.0) {
+	if (begin > 0.0 && context.second() > 0) {
 		end = g_network->now();
 		g_tracer->trace(*this);
 	}

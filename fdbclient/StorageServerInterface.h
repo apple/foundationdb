@@ -22,6 +22,7 @@
 #define FDBCLIENT_STORAGESERVERINTERFACE_H
 #pragma once
 
+#include <ostream>
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
@@ -30,6 +31,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
 #include "fdbrpc/TSSComparison.h"
+#include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "flow/UnitTest.h"
 
@@ -64,6 +66,7 @@ struct StorageServerInterface {
 	// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 	// selector offset prevents all data from being read in one range read
 	RequestStream<struct GetKeyValuesRequest> getKeyValues;
+	RequestStream<struct GetKeyValuesAndFlatMapRequest> getKeyValuesAndFlatMap;
 
 	RequestStream<struct GetShardStateRequest> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
@@ -77,6 +80,10 @@ struct StorageServerInterface {
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
 	RequestStream<struct GetKeyValuesStreamRequest> getKeyValuesStream;
+	RequestStream<struct ChangeFeedStreamRequest> changeFeedStream;
+	RequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
+	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
+	RequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
@@ -119,6 +126,16 @@ struct StorageServerInterface {
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
 				getKeyValuesStream =
 				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
+				getKeyValuesAndFlatMap =
+				    RequestStream<struct GetKeyValuesAndFlatMapRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
+				changeFeedStream =
+				    RequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
+				overlappingChangeFeeds =
+				    RequestStream<struct OverlappingChangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
+				changeFeedPop =
+				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
+				changeFeedVersionUpdate = RequestStream<struct ChangeFeedVersionUpdateRequest>(
+				    getValue.getEndpoint().getAdjustedEndpoint(18));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -161,6 +178,11 @@ struct StorageServerInterface {
 		streams.push_back(getReadHotRanges.getReceiver());
 		streams.push_back(getRangeSplitPoints.getReceiver());
 		streams.push_back(getKeyValuesStream.getReceiver(TaskPriority::LoadBalancedEndpoint));
+		streams.push_back(getKeyValuesAndFlatMap.getReceiver(TaskPriority::LoadBalancedEndpoint));
+		streams.push_back(changeFeedStream.getReceiver());
+		streams.push_back(overlappingChangeFeeds.getReceiver());
+		streams.push_back(changeFeedPop.getReceiver());
+		streams.push_back(changeFeedVersionUpdate.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -286,6 +308,9 @@ struct GetKeyValuesRequest : TimedRequest {
 	SpanID spanContext;
 	Arena arena;
 	KeySelectorRef begin, end;
+	// This is a dummy field there has never been used.
+	// TODO: Get rid of this by constexpr or other template magic in getRange
+	KeyRef mapper = KeyRef();
 	Version version; // or latestVersion
 	int limit, limitBytes;
 	bool isFetchKeys;
@@ -297,6 +322,43 @@ struct GetKeyValuesRequest : TimedRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
+	}
+};
+
+struct GetKeyValuesAndFlatMapReply : public LoadBalancedReply {
+	constexpr static FileIdentifier file_identifier = 1783067;
+	Arena arena;
+	VectorRef<KeyValueRef, VecSerStrategy::String> data;
+	Version version; // useful when latestVersion was requested
+	bool more;
+	bool cached = false;
+
+	GetKeyValuesAndFlatMapReply() : version(invalidVersion), more(false), cached(false) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, cached, arena);
+	}
+};
+
+struct GetKeyValuesAndFlatMapRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 6795747;
+	SpanID spanContext;
+	Arena arena;
+	KeySelectorRef begin, end;
+	KeyRef mapper;
+	Version version; // or latestVersion
+	int limit, limitBytes;
+	bool isFetchKeys;
+	Optional<TagSet> tags;
+	Optional<UID> debugID;
+	ReplyPromise<GetKeyValuesAndFlatMapReply> reply;
+
+	GetKeyValuesAndFlatMapRequest() : isFetchKeys(false) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(
+		    ar, begin, end, mapper, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
 	}
 };
 
@@ -316,7 +378,14 @@ struct GetKeyValuesStreamReply : public ReplyPromiseStreamReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, data, version, more, cached, arena);
+		serializer(ar,
+		           ReplyPromiseStreamReply::acknowledgeToken,
+		           ReplyPromiseStreamReply::sequence,
+		           data,
+		           version,
+		           more,
+		           cached,
+		           arena);
 	}
 };
 
@@ -615,6 +684,140 @@ struct SplitRangeRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keys, chunkSize, reply, arena);
+	}
+};
+
+struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
+	constexpr static FileIdentifier file_identifier = 1783066;
+	Arena arena;
+	VectorRef<MutationsAndVersionRef> mutations;
+	bool atLatestVersion = false;
+	Version minStreamVersion = invalidVersion;
+
+	ChangeFeedStreamReply() {}
+
+	int expectedSize() const { return sizeof(ChangeFeedStreamReply) + mutations.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar,
+		           ReplyPromiseStreamReply::acknowledgeToken,
+		           ReplyPromiseStreamReply::sequence,
+		           mutations,
+		           atLatestVersion,
+		           minStreamVersion,
+		           arena);
+	}
+};
+
+struct ChangeFeedStreamRequest {
+	constexpr static FileIdentifier file_identifier = 6795746;
+	SpanID spanContext;
+	Arena arena;
+	Key rangeID;
+	Version begin = 0;
+	Version end = 0;
+	KeyRange range;
+	ReplyPromiseStream<ChangeFeedStreamReply> reply;
+
+	ChangeFeedStreamRequest() {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rangeID, begin, end, range, reply, spanContext, arena);
+	}
+};
+
+struct ChangeFeedPopRequest {
+	constexpr static FileIdentifier file_identifier = 10726174;
+	Key rangeID;
+	Version version;
+	KeyRange range;
+	ReplyPromise<Void> reply;
+
+	ChangeFeedPopRequest() {}
+	ChangeFeedPopRequest(Key const& rangeID, Version version, KeyRange const& range)
+	  : rangeID(rangeID), version(version), range(range) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rangeID, version, range, reply);
+	}
+};
+
+struct OverlappingChangeFeedEntry {
+	Key rangeId;
+	KeyRange range;
+	bool stopped = false;
+
+	bool operator==(const OverlappingChangeFeedEntry& r) const {
+		return rangeId == r.rangeId && range == r.range && stopped == r.stopped;
+	}
+
+	OverlappingChangeFeedEntry() {}
+	OverlappingChangeFeedEntry(Key const& rangeId, KeyRange const& range, bool stopped)
+	  : rangeId(rangeId), range(range), stopped(stopped) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rangeId, range, stopped);
+	}
+};
+
+struct OverlappingChangeFeedsReply {
+	constexpr static FileIdentifier file_identifier = 11815134;
+	std::vector<OverlappingChangeFeedEntry> rangeIds;
+	bool cached;
+	Arena arena;
+
+	OverlappingChangeFeedsReply() : cached(false) {}
+	explicit OverlappingChangeFeedsReply(std::vector<OverlappingChangeFeedEntry> const& rangeIds)
+	  : rangeIds(rangeIds), cached(false) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rangeIds, arena);
+	}
+};
+
+struct OverlappingChangeFeedsRequest {
+	constexpr static FileIdentifier file_identifier = 10726174;
+	KeyRange range;
+	Version minVersion;
+	ReplyPromise<OverlappingChangeFeedsReply> reply;
+
+	OverlappingChangeFeedsRequest() {}
+	explicit OverlappingChangeFeedsRequest(KeyRange const& range) : range(range) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, range, minVersion, reply);
+	}
+};
+
+struct ChangeFeedVersionUpdateReply {
+	constexpr static FileIdentifier file_identifier = 11815134;
+	Version version = 0;
+
+	ChangeFeedVersionUpdateReply() {}
+	explicit ChangeFeedVersionUpdateReply(Version version) : version(version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version);
+	}
+};
+
+struct ChangeFeedVersionUpdateRequest {
+	constexpr static FileIdentifier file_identifier = 6795746;
+	Version minVersion;
+	ReplyPromise<ChangeFeedVersionUpdateReply> reply;
+
+	ChangeFeedVersionUpdateRequest() {}
+	explicit ChangeFeedVersionUpdateRequest(Version minVersion) : minVersion(minVersion) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, minVersion, reply);
 	}
 };
 

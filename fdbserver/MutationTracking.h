@@ -32,7 +32,7 @@
 TraceEvent debugMutation(const char* context, Version version, MutationRef const& mutation, UID id = UID());
 
 // debugKeyRange and debugTagsAndMessage only log the *first* occurrence of a key in their range/commit.
-// TODO: Create a TraceEventGroup that forwards all calls to each element of a vector<TraceEvent>,
+// TODO: Create a TraceEventGroup that forwards all calls to each element of a std::vector<TraceEvent>,
 //       to allow "multiple" TraceEvents to be returned.
 
 #define DEBUG_KEY_RANGE(...) MUTATION_TRACKING_ENABLED&& debugKeyRange(__VA_ARGS__)

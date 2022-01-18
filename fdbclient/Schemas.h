@@ -35,6 +35,7 @@ struct JSONSchemas {
 	static const KeyRef storageHealthSchema;
 	static const KeyRef aggregateHealthSchema;
 	static const KeyRef managementApiErrorSchema;
+	static const KeyRef clientLibMetadataSchema;
 };
 
 #endif /* FDBCLIENT_SCHEMAS_H */

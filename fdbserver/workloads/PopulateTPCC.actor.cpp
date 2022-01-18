@@ -493,7 +493,7 @@ struct PopulateTPCC : TestWorkload {
 			wait(populateItems(self, cx));
 		}
 
-		state vector<Future<Void>> populateActors;
+		state std::vector<Future<Void>> populateActors;
 		state int actorId;
 		for (actorId = 0; actorId < self->actorsPerClient; ++actorId) {
 			populateActors.push_back(populateActor(self, cx, actorId));
@@ -513,7 +513,7 @@ struct PopulateTPCC : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 } // namespace

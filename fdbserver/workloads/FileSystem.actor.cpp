@@ -30,7 +30,7 @@ struct FileSystemWorkload : TestWorkload {
 	bool discardEdgeMeasurements, performingWrites, loggingQueries;
 	std::string operationName;
 
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter queries, writes;
 	ContinuousSample<double> latencies;
 	ContinuousSample<double> writeLatencies;
@@ -74,7 +74,7 @@ struct FileSystemWorkload : TestWorkload {
 		return true;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		double duration = testDuration * (discardEdgeMeasurements ? 0.75 : 1.0);
 		m.emplace_back("Measured Duration", duration, Averaged::True);
 		m.emplace_back("Transactions/sec", queries.getValue() / duration, Averaged::False);
@@ -140,7 +140,7 @@ struct FileSystemWorkload : TestWorkload {
 
 	ACTOR Future<Void> nodeSetup(Database cx, FileSystemWorkload* self) {
 		state int i;
-		state vector<int> order;
+		state std::vector<int> order;
 		state int nodesToSetUp = self->fileCount / self->clientCount + 1;
 		state int startingNode = nodesToSetUp * self->clientId;
 		state int batchCount = 5;
@@ -148,7 +148,7 @@ struct FileSystemWorkload : TestWorkload {
 			order.push_back(o * batchCount);
 		deterministicRandom()->randomShuffle(order);
 		for (i = 0; i < order.size();) {
-			vector<Future<Void>> fs;
+			std::vector<Future<Void>> fs;
 			for (int j = 0; j < 100 && i < order.size(); j++) {
 				fs.push_back(self->setupRange(
 				    cx,

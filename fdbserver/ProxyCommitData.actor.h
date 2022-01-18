@@ -163,7 +163,7 @@ struct ProxyCommitData {
 	int64_t commitBatchesMemBytesCount;
 	ProxyStats stats;
 	MasterInterface master;
-	vector<ResolverInterface> resolvers;
+	std::vector<ResolverInterface> resolvers;
 	LogSystemDiskQueueAdapter* logAdapter;
 	Reference<ILogSystem> logSystem;
 	IKeyValueStore* txnStateStore;
@@ -206,7 +206,7 @@ struct ProxyCommitData {
 	Deque<std::pair<Version, Version>> txsPopVersions;
 	Version lastTxsPop;
 	bool popRemoteTxs;
-	vector<Standalone<StringRef>> whitelistedBinPathVec;
+	std::vector<Standalone<StringRef>> whitelistedBinPathVec;
 
 	Optional<LatencyBandConfig> latencyBandConfig;
 	double lastStartCommit;

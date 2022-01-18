@@ -221,7 +221,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> addInitTasks(Reference<ReadYourWritesTransaction> tr,
 	                                Reference<TaskBucket> taskBucket,

@@ -112,7 +112,7 @@ struct LowLatencyWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return ok; }
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		double duration = testDuration;
 		m.emplace_back("Operations/sec", operations.getValue() / duration, Averaged::False);
 		m.push_back(operations.getMetric());

@@ -30,7 +30,7 @@ struct MetricLoggingWorkload : TestWorkload {
 	double testDuration;
 	bool testBool, enabled;
 
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter changes;
 	std::vector<BoolMetricHandle> boolMetrics;
 	std::vector<Int64MetricHandle> int64Metrics;
@@ -78,7 +78,7 @@ struct MetricLoggingWorkload : TestWorkload {
 		return true;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(changes.getMetric());
 		m.emplace_back("Changes/sec", changes.getValue() / testDuration, Averaged::False);
 	}

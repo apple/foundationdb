@@ -7,18 +7,26 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/foundationdb)
 
 set(asm_file ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.g.S)
 
-set(platform "linux")
+set(os "linux")
+set(cpu "intel")
 if(APPLE)
-  set(platform "osx")
+  set(os "osx")
 elseif(WIN32)
-  set(platform "windows")
+  set(os "windows")
   set(asm_file ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.g.asm)
-elseif(CMAKE_SYSTEM_NAME MATCHES "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  set(platform "linux-aarch64")
+endif()
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+  set(cpu "aarch64")
+endif()
+
+set(IS_ARM_MAC NO)
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+  set(IS_ARM_MAC YES)
 endif()
 
 add_custom_command(OUTPUT ${asm_file} ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h
-  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/generate_asm.py ${platform}
+  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/generate_asm.py ${os} ${cpu}
       ${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.cpp
       ${asm_file}
       ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h
@@ -39,6 +47,8 @@ else()
   strip_debug_symbols(fdb_c)
 endif()
 add_dependencies(fdb_c fdb_c_generated fdb_c_options)
+add_dependencies(fdbclient fdb_c_options)
+add_dependencies(fdbclient_sampling fdb_c_options)
 target_link_libraries(fdb_c PUBLIC $<BUILD_INTERFACE:fdbclient>)
 if(APPLE)
   set(symbols ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.symbols)
@@ -53,7 +63,7 @@ if(APPLE)
   target_link_options(fdb_c PRIVATE "LINKER:-no_weak_exports,-exported_symbols_list,${symbols}")
 elseif(WIN32)
 else()
-  target_link_options(fdb_c PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map,-z,nodelete")
+  target_link_options(fdb_c PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map,-z,nodelete,-z,noexecstack")
 endif()
 target_include_directories(fdb_c PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
@@ -64,8 +74,10 @@ if(WIN32)
   set_property(SOURCE ${asm_file} PROPERTY LANGUAGE ASM_MASM)
 endif()
 
-# The tests don't build on windows
-if(NOT WIN32)
+# The tests don't build on windows and ARM macs
+# doctest doesn't seem to compile on ARM macs, we should
+# check later whether this works
+if(NOT WIN32 AND NOT IS_ARM_MAC)
   set(MAKO_SRCS
     test/mako/mako.c
     test/mako/mako.h
@@ -80,6 +92,10 @@ if(NOT WIN32)
 
   set(UNIT_TEST_VERSION_510_SRCS test/unit/unit_tests_version_510.cpp)
   set(TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS test/unit/trace_partial_file_suffix_test.cpp)
+  set(DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS 
+    test/unit/disconnected_timeout_tests.cpp
+    test/unit/fdb_api.cpp
+    test/unit/fdb_api.hpp)
 
   if(OPEN_FOR_IDE)
     add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)
@@ -90,6 +106,7 @@ if(NOT WIN32)
     add_library(fdb_c_unit_tests OBJECT ${UNIT_TEST_SRCS})
     add_library(fdb_c_unit_tests_version_510 OBJECT ${UNIT_TEST_VERSION_510_SRCS})
     add_library(trace_partial_file_suffix_test OBJECT ${TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS})
+    add_library(disconnected_timeout_unit_tests OBJECT ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
   else()
     add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
     add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
@@ -99,6 +116,7 @@ if(NOT WIN32)
     add_executable(fdb_c_unit_tests ${UNIT_TEST_SRCS})
     add_executable(fdb_c_unit_tests_version_510 ${UNIT_TEST_VERSION_510_SRCS})
     add_executable(trace_partial_file_suffix_test ${TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS})
+    add_executable(disconnected_timeout_unit_tests ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
     strip_debug_symbols(fdb_c_performance_test)
     strip_debug_symbols(fdb_c_ryw_benchmark)
     strip_debug_symbols(fdb_c_txn_size_test)
@@ -110,13 +128,16 @@ if(NOT WIN32)
   add_dependencies(fdb_c_setup_tests doctest)
   add_dependencies(fdb_c_unit_tests doctest)
   add_dependencies(fdb_c_unit_tests_version_510 doctest)
+  add_dependencies(disconnected_timeout_unit_tests doctest)
   target_include_directories(fdb_c_setup_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_include_directories(fdb_c_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_include_directories(fdb_c_unit_tests_version_510 PUBLIC ${DOCTEST_INCLUDE_DIR})
+  target_include_directories(disconnected_timeout_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads)
   target_link_libraries(fdb_c_unit_tests PRIVATE fdb_c Threads::Threads)
   target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads)
   target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads)
+  target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
@@ -130,13 +151,19 @@ if(NOT WIN32)
     target_link_libraries(fdb_c90_test PRIVATE fdb_c)
   endif()
 
+  if(OPEN_FOR_IDE)
+    set(FDB_C_TARGET $<TARGET_OBJECTS:fdb_c>)
+  else()
+    set(FDB_C_TARGET $<TARGET_FILE:fdb_c>)
+  endif()
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_c> ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
+    COMMAND ${CMAKE_COMMAND} -E copy ${FDB_C_TARGET} ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
     DEPENDS fdb_c
     COMMENT "Copy libfdb_c to use as external client for test")
   add_custom_target(external_client DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so)
   add_dependencies(fdb_c_unit_tests external_client)
+  add_dependencies(disconnected_timeout_unit_tests external_client)
 
   add_fdbclient_test(
     NAME fdb_c_setup_tests
@@ -161,6 +188,17 @@ if(NOT WIN32)
     COMMAND $<TARGET_FILE:fdb_c_unit_tests>
             @CLUSTER_FILE@
             fdb
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
+            )
+  add_unavailable_fdbclient_test(
+    NAME disconnected_timeout_unit_tests
+    COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
+            @CLUSTER_FILE@
+            )
+  add_unavailable_fdbclient_test(
+    NAME disconnected_timeout_external_client_unit_tests
+    COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
+            @CLUSTER_FILE@
             ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c.so
             )
 endif()

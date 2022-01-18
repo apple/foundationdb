@@ -7,7 +7,9 @@
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
+#include <rocksdb/version.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
+#include "fdbclient/SystemData.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
@@ -23,6 +25,13 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
+
+// Enforcing rocksdb version to be 6.22.1 or greater.
+static_assert(ROCKSDB_MAJOR >= 6, "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
+static_assert(ROCKSDB_MAJOR == 6 ? ROCKSDB_MINOR >= 22 : true,
+              "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
+static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 22) ? ROCKSDB_PATCH >= 1 : true,
+              "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
 
 namespace {
 
@@ -43,19 +52,6 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	}
 	// Compact sstables when there's too much deleted stuff.
 	options.table_properties_collector_factories = { rocksdb::NewCompactOnDeletionCollectorFactory(128, 1) };
-	return options;
-}
-
-rocksdb::Options getOptions() {
-	rocksdb::Options options({}, getCFOptions());
-	options.avoid_unnecessary_blocking_io = true;
-	options.create_if_missing = true;
-	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
-		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
-	}
-
-	options.statistics = rocksdb::CreateDBStatistics();
-	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
 
 	rocksdb::BlockBasedTableOptions bbOpts;
 	// TODO: Add a knob for the block cache size. (Default is 8 MB)
@@ -88,6 +84,21 @@ rocksdb::Options getOptions() {
 	}
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
+
+	return options;
+}
+
+rocksdb::Options getOptions() {
+	rocksdb::Options options({}, getCFOptions());
+	options.avoid_unnecessary_blocking_io = true;
+	options.create_if_missing = true;
+	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
+		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
+	}
+
+	options.statistics = rocksdb::CreateDBStatistics();
+	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
+
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
 	return options;
 }
@@ -97,6 +108,19 @@ rocksdb::ReadOptions getReadOptions() {
 	rocksdb::ReadOptions options;
 	options.background_purge_on_iterator_cleanup = true;
 	return options;
+}
+
+ACTOR Future<Void> flowLockLogger(const FlowLock* readLock, const FlowLock* fetchLock) {
+	loop {
+		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
+		TraceEvent e(SevInfo, "RocksDBFlowLock");
+		e.detail("ReadAvailable", readLock->available());
+		e.detail("ReadActivePermits", readLock->activePermits());
+		e.detail("ReadWaiters", readLock->waiters());
+		e.detail("FetchAvailable", fetchLock->available());
+		e.detail("FetchActivePermits", fetchLock->activePermits());
+		e.detail("FetchWaiters", fetchLock->waiters());
+	}
 }
 
 ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> statistics, rocksdb::DB* db) {
@@ -182,7 +206,8 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 }
 
 void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
-	TraceEvent e(SevError, "RocksDBError");
+	auto level = status.IsTimedOut() ? SevWarn : SevError;
+	TraceEvent e(level, "RocksDBError");
 	e.detail("Error", status.ToString()).detail("Method", method).detail("RocksDBSeverity", status.severity());
 	if (status.IsIOError()) {
 		e.detail("SubCode", status.subcode());
@@ -221,7 +246,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::string path;
 			ThreadReturnPromise<Void> done;
 			Optional<Future<Void>>& metrics;
-			OpenAction(std::string path, Optional<Future<Void>>& metrics) : path(std::move(path)), metrics(metrics) {}
+			const FlowLock* readLock;
+			const FlowLock* fetchLock;
+			OpenAction(std::string path,
+			           Optional<Future<Void>>& metrics,
+			           const FlowLock* readLock,
+			           const FlowLock* fetchLock)
+			  : path(std::move(path)), metrics(metrics), readLock(readLock), fetchLock(fetchLock) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -236,10 +267,18 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.done.sendError(statusToError(status));
 			} else {
 				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
-				onMainThread([&] {
-					a.metrics = rocksDBMetricLogger(options.statistics, db);
-					return Future<bool>(true);
-				}).blockUntilReady();
+				if (g_network->isSimulated()) {
+					// The current thread and main thread are same when the code runs in simulation.
+					// blockUntilReady() is getting the thread into deadlock state, so directly calling
+					// the metricsLogger.
+					a.metrics = rocksDBMetricLogger(options.statistics, db) && flowLockLogger(a.readLock, a.fetchLock);
+				} else {
+					onMainThread([&] {
+						a.metrics =
+						    rocksDBMetricLogger(options.statistics, db) && flowLockLogger(a.readLock, a.fetchLock);
+						return Future<bool>(true);
+					}).blockUntilReady();
+				}
 				a.done.send(Void());
 			}
 		}
@@ -378,7 +417,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			} else if (s.IsNotFound()) {
 				a.result.send(Optional<Value>());
 			} else {
-				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValue");
+				logRocksDBError(s, "ReadValue");
 				a.result.sendError(statusToError(s));
 			}
 		}
@@ -543,8 +582,27 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> openFuture;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	Optional<Future<Void>> metrics;
+	FlowLock readSemaphore;
+	int numReadWaiters;
+	FlowLock fetchSemaphore;
+	int numFetchWaiters;
 
-	explicit RocksDBKeyValueStore(const std::string& path, UID id) : path(path), id(id) {
+	struct Counters {
+		CounterCollection cc;
+		Counter immediateThrottle;
+		Counter failedToAcquire;
+
+		Counters()
+		  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("failedToAcquire", cc) {}
+	};
+
+	Counters counters;
+
+	explicit RocksDBKeyValueStore(const std::string& path, UID id)
+	  : path(path), id(id), readSemaphore(SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
+	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
+	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
+	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage engine
 		// is still multi-threaded as background compaction threads are still present. Reads/writes to disk will also
 		// block the network thread in a way that would be unacceptable in production but is a necessary evil here. When
@@ -568,7 +626,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-	Future<Void> getError() override { return errorPromise.getFuture(); }
+	Future<Void> getError() const override { return errorPromise.getFuture(); }
 
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
 		// The metrics future retains a reference to the DB, so stop it before we delete it.
@@ -587,7 +645,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		delete self;
 	}
 
-	Future<Void> onClosed() override { return closePromise.getFuture(); }
+	Future<Void> onClosed() const override { return closePromise.getFuture(); }
 
 	void dispose() override { doClose(this, true); }
 
@@ -599,7 +657,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (openFuture.isValid()) {
 			return openFuture;
 		}
-		auto a = std::make_unique<Writer::OpenAction>(path, metrics);
+		auto a = std::make_unique<Writer::OpenAction>(path, metrics, &readSemaphore, &fetchSemaphore);
 		openFuture = a->done.getFuture();
 		writeThread->post(a.release());
 		return openFuture;
@@ -632,25 +690,109 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID) override {
-		auto a = new Reader::ReadValueAction(key, debugID);
-		auto res = a->result.getFuture();
-		readThreads->post(a);
-		return res;
+	void checkWaiters(const FlowLock& semaphore, int maxWaiters) {
+		if (semaphore.waiters() > maxWaiters) {
+			++counters.immediateThrottle;
+			throw server_overloaded();
+		}
 	}
 
-	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID) override {
-		auto a = new Reader::ReadValuePrefixAction(key, maxLength, debugID);
-		auto res = a->result.getFuture();
-		readThreads->post(a);
-		return res;
+	// We don't throttle eager reads and reads to the FF keyspace because FDB struggles when those reads fail.
+	// Thus far, they have been low enough volume to not cause an issue.
+	static bool shouldThrottle(IKeyValueStore::ReadType type, KeyRef key) {
+		return type != IKeyValueStore::ReadType::EAGER && !(key.startsWith(systemKeys.begin));
 	}
 
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit) override {
-		auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
-		auto res = a->result.getFuture();
-		readThreads->post(a);
-		return res;
+	ACTOR template <class Action>
+	static Future<Optional<Value>> read(Action* action, FlowLock* semaphore, IThreadPool* pool, Counter* counter) {
+		state std::unique_ptr<Action> a(action);
+		state Optional<Void> slot = wait(timeout(semaphore->take(), SERVER_KNOBS->ROCKSDB_READ_QUEUE_WAIT));
+		if (!slot.present()) {
+			++(*counter);
+			throw server_overloaded();
+		}
+
+		state FlowLock::Releaser release(*semaphore);
+
+		auto fut = a->result.getFuture();
+		pool->post(a.release());
+		Optional<Value> result = wait(fut);
+
+		return result;
+	}
+
+	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType type, Optional<UID> debugID) override {
+		if (!shouldThrottle(type, key)) {
+			auto a = new Reader::ReadValueAction(key, debugID);
+			auto res = a->result.getFuture();
+			readThreads->post(a);
+			return res;
+		}
+
+		auto& semaphore = (type == IKeyValueStore::ReadType::FETCH) ? fetchSemaphore : readSemaphore;
+		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
+
+		checkWaiters(semaphore, maxWaiters);
+		auto a = std::make_unique<Reader::ReadValueAction>(key, debugID);
+		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
+	}
+
+	Future<Optional<Value>> readValuePrefix(KeyRef key,
+	                                        int maxLength,
+	                                        IKeyValueStore::ReadType type,
+	                                        Optional<UID> debugID) override {
+		if (!shouldThrottle(type, key)) {
+			auto a = new Reader::ReadValuePrefixAction(key, maxLength, debugID);
+			auto res = a->result.getFuture();
+			readThreads->post(a);
+			return res;
+		}
+
+		auto& semaphore = (type == IKeyValueStore::ReadType::FETCH) ? fetchSemaphore : readSemaphore;
+		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
+
+		checkWaiters(semaphore, maxWaiters);
+		auto a = std::make_unique<Reader::ReadValuePrefixAction>(key, maxLength, debugID);
+		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
+	}
+
+	ACTOR static Future<Standalone<RangeResultRef>> read(Reader::ReadRangeAction* action,
+	                                                     FlowLock* semaphore,
+	                                                     IThreadPool* pool,
+	                                                     Counter* counter) {
+		state std::unique_ptr<Reader::ReadRangeAction> a(action);
+		state Optional<Void> slot = wait(timeout(semaphore->take(), SERVER_KNOBS->ROCKSDB_READ_QUEUE_WAIT));
+		if (!slot.present()) {
+			++(*counter);
+			throw server_overloaded();
+		}
+
+		state FlowLock::Releaser release(*semaphore);
+
+		auto fut = a->result.getFuture();
+		pool->post(a.release());
+		Standalone<RangeResultRef> result = wait(fut);
+
+		return result;
+	}
+
+	Future<RangeResult> readRange(KeyRangeRef keys,
+	                              int rowLimit,
+	                              int byteLimit,
+	                              IKeyValueStore::ReadType type) override {
+		if (!shouldThrottle(type, keys.begin)) {
+			auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
+			auto res = a->result.getFuture();
+			readThreads->post(a);
+			return res;
+		}
+
+		auto& semaphore = (type == IKeyValueStore::ReadType::FETCH) ? fetchSemaphore : readSemaphore;
+		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
+
+		checkWaiters(semaphore, maxWaiters);
+		auto a = std::make_unique<Reader::ReadRangeAction>(keys, rowLimit, byteLimit);
+		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
 	StorageBytes getStorageBytes() const override {

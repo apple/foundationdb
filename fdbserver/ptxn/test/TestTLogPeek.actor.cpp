@@ -23,6 +23,7 @@
 #include <numeric>
 
 #include "fdbserver/ptxn/MessageTypes.h"
+#include "fdbserver/ptxn/MutableTeamPeekCursor.actor.h"
 #include "fdbserver/ptxn/test/Driver.h"
 #include "fdbserver/ptxn/test/FakeTLog.actor.h"
 #include "fdbserver/ptxn/test/Utils.h"
@@ -32,6 +33,12 @@
 
 namespace ptxn::test {
 
+const int TestTLogPeekOptions::DEFAULT_NUM_VERSIONS = 100;
+const int TestTLogPeekOptions::DEFAULT_NUM_MUTATIONS_PER_VERSION = 100;
+const int TestTLogPeekOptions::DEFAULT_NUM_TEAMS = 3;
+const int TestTLogPeekOptions::DEFAULT_INITIAL_VERSION = 1000;
+const int TestTLogPeekOptions::DEFAULT_PEEK_TIMES = 1000;
+
 TestTLogPeekOptions::TestTLogPeekOptions(const UnitTestParameters& params)
   : numVersions(params.getInt("numVersions").orDefault(DEFAULT_NUM_VERSIONS)),
     numMutationsPerVersion(params.getInt("numMutationsPerVersion").orDefault(DEFAULT_NUM_MUTATIONS_PER_VERSION)),
@@ -39,13 +46,17 @@ TestTLogPeekOptions::TestTLogPeekOptions(const UnitTestParameters& params)
     initialVersion(params.getInt("initialVersion").orDefault(DEFAULT_INITIAL_VERSION)),
     peekTimes(params.getInt("peekTimes").orDefault(DEFAULT_PEEK_TIMES)) {}
 
+const int TestTLogPeekMergeCursorOptions::DEFAULT_INITIAL_VERSION = 1000;
+const int TestTLogPeekMergeCursorOptions::DEFAULT_NUM_VERSIONS = 10;
+const int TestTLogPeekMergeCursorOptions::DEFAULT_NUM_MUTATIONS_PER_VERSION = 100;
+const int TestTLogPeekMergeCursorOptions::DEFAULT_NUM_TLOGS = 5;
+
 TestTLogPeekMergeCursorOptions::TestTLogPeekMergeCursorOptions(const UnitTestParameters& params)
   : numTLogs(params.getInt("numTLogs").orDefault(DEFAULT_NUM_TLOGS)),
     numMutationsPerVersion(params.getInt("numMutationsPerVersion").orDefault(DEFAULT_NUM_MUTATIONS_PER_VERSION)),
     initialVersion(params.getInt("initialVersion").orDefault(DEFAULT_INITIAL_VERSION)),
     numVersions(params.getInt("numVersions").orDefault(DEFAULT_NUM_VERSIONS)) {}
 
-namespace {
 // FIXME this should be moved to a more generic place
 // Feed the message generated in CommitRecord to TLog servers
 ACTOR Future<Void> messageFeeder() {
@@ -118,7 +129,6 @@ ACTOR Future<std::vector<VersionSubsequenceMessage>> getAllMessageFromCursor(std
                                                                              Arena* arena) {
 	state std::vector<VersionSubsequenceMessage> messages;
 	state RandomDelay randomDelay(0.01, 0.02);
-	state int i = 0;
 	loop {
 		try {
 			state bool remoteAvailable = wait(pCursor->remoteMoreAvailable());
@@ -149,8 +159,6 @@ ACTOR Future<std::vector<VersionSubsequenceMessage>> getAllMessageFromCursor(std
 	}
 	return messages;
 }
-
-} // anonymous namespace
 
 } // namespace ptxn::test
 
@@ -193,7 +201,7 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/StorageTeamPeekCursor") {
 	    wait(ptxn::test::getAllMessageFromCursor(pCursor, &arena));
 
 	// Verify
-	ASSERT(messagesFromTLog.size() == messagesGenerated.size());
+	ASSERT_EQ(messagesFromTLog.size(), messagesGenerated.size());
 	for (int i = 0; i < static_cast<int>(messagesFromTLog.size()); ++i) {
 		ASSERT(messagesFromTLog[i] == messagesGenerated[i]);
 	}
@@ -205,7 +213,7 @@ namespace {
 
 void verifyMergedCursorResult_Ordered(const std::vector<ptxn::VersionSubsequenceMessage>& messagesFromTLogs) {
 	auto messagesGenerated = ptxn::test::TestEnvironment::getCommitRecords().getMessagesFromStorageTeams();
-	ASSERT(messagesFromTLogs.size() == messagesGenerated.size());
+	ASSERT_EQ(messagesFromTLogs.size(), messagesGenerated.size());
 	for (int i = 0; i < static_cast<int>(messagesFromTLogs.size()); ++i) {
 		ASSERT(messagesFromTLogs[i] == messagesGenerated[i]);
 	}
@@ -214,7 +222,7 @@ void verifyMergedCursorResult_Ordered(const std::vector<ptxn::VersionSubsequence
 void verifyMergedCursorResult_Unordered(const std::vector<ptxn::VersionSubsequenceMessage>& messagesFromTLogs) {
 	auto& commitRecords = ptxn::test::TestEnvironment::getCommitRecords();
 	auto messagesGenerated = commitRecords.getMessagesFromStorageTeams();
-	ASSERT(messagesFromTLogs.size() == messagesGenerated.size());
+	ASSERT_EQ(messagesFromTLogs.size(), messagesGenerated.size());
 
 	Version currentVersion = invalidVersion;
 	ptxn::StorageTeamID currentStorageTeamID;
@@ -295,9 +303,9 @@ Future<Void> runMergedCursorTest(ptxn::test::TestTLogPeekMergeCursorOptions opti
 	wait(waitForAll(actors));
 
 	// FIXME: Use constexpr when actor compiler supports this
-	if (std::is_same<CursorType, ptxn::merged::BroadcastedStorageTeamPeekCursor_Ordered>::value) {
+	if (std::is_base_of<ptxn::merged::BroadcastedStorageTeamPeekCursor_Ordered, CursorType>::value) {
 		verifyMergedCursorResult_Ordered(messagesFromTLogs);
-	} else if (std::is_same<CursorType, ptxn::merged::BroadcastedStorageTeamPeekCursor_Unordered>::value) {
+	} else if (std::is_base_of<ptxn::merged::BroadcastedStorageTeamPeekCursor_Unordered, CursorType>::value) {
 		verifyMergedCursorResult_Unordered(messagesFromTLogs);
 	} else {
 		// Unsupported cursor type
@@ -388,6 +396,104 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/advanceTo") {
 		printTiming << "Cursor reached " << vsm.version << ", " << vsm.subsequence << std::endl;
 		ASSERT_EQ(vsm.version, advanceToVersion);
 		ASSERT_EQ(vsm.subsequence, advanceToSubsequence);
+	}
+
+	return Void();
+}
+
+namespace {
+
+std::vector<ptxn::TLogInterfaceBase*> getTLogInterfaceByStorageTeamID(const ptxn::StorageTeamID& storageTeamID) {
+	return { static_cast<std::shared_ptr<ptxn::TLogInterface_PassivelyPull>>(
+		         ptxn::test::TestEnvironment::getTLogs()->getTLogLeaderByStorageTeamID(storageTeamID))
+		         .get() };
+}
+
+// Collects all messages, with respect to
+// NOTE It is assumed that only one storage server is used, i.e. not checking the storage server ID for simplicity
+// purpose.
+// NOTE It is assumed only one single privateMutationsStorageTeamID exists.
+std::vector<ptxn::VersionSubsequenceMessage> getMessagesFromMutableTeams(
+    const ptxn::StorageTeamID& privateMutationsStorageTeamID) {
+
+	const auto& commitRecord = ptxn::test::TestEnvironment::getCommitRecords();
+	std::vector<ptxn::VersionSubsequenceMessage> result;
+	ptxn::StorageServerStorageTeams activeStorageServerTeams(privateMutationsStorageTeamID);
+
+	for (const auto& [commitVersion, storageTeamSubsequenceMessages] : commitRecord.messages) {
+		for (const auto& [storageTeamID, subsequenceMessages] : storageTeamSubsequenceMessages) {
+			if (storageTeamID == privateMutationsStorageTeamID) {
+				// The team mutation KV pair will always have subsequence 1
+				const auto& message = subsequenceMessages[0].second;
+				result.emplace_back(commitVersion, subsequenceMessages[0].first, message);
+				auto newStorageTeam = ptxn::StorageServerStorageTeams(std::get<MutationRef>(message).param2);
+				ASSERT(newStorageTeam.getPrivateMutationsStorageTeamID() == privateMutationsStorageTeamID);
+				activeStorageServerTeams = newStorageTeam;
+				continue;
+			}
+
+			if (!activeStorageServerTeams.contains(storageTeamID)) {
+				continue;
+			}
+
+			for (const auto& [subsequence, message] : subsequenceMessages) {
+				result.emplace_back(commitVersion, subsequence, message);
+			}
+		}
+	}
+
+	std::sort(std::begin(result), std::end(result));
+
+	return result;
+}
+
+} // anonymous namespace
+
+TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/merged/OrderedMutableTeamPeekCursor") {
+	state ptxn::test::TestTLogPeekMergeCursorOptions options(params);
+	state ptxn::test::TestEnvironment testEnvironment;
+	state std::vector<Future<Void>> actors;
+	state const std::vector<UID> storageServerIDs = { deterministicRandom()->randomUniqueID() };
+	state std::shared_ptr<ptxn::merged::OrderedMutableTeamPeekCursor> pCursor;
+	state ptxn::test::print::PrintTiming printTiming("testOrderedMutableTeamPeekCursor");
+
+	testEnvironment
+	    .initDriverContext()
+	    // At this stage we set num tLogs same to numStorageTeams
+	    .initTLogGroupWithPrivateMutationsFixture(options.numTLogs, options.numTLogs)
+	    .initPtxnTLog(ptxn::MessageTransferModel::StorageServerActivelyPull, options.numTLogs)
+	    .initMessagesWithPrivateMutations(options.initialVersion,
+	                                      options.numVersions,
+	                                      options.numMutationsPerVersion,
+	                                      Optional<std::vector<UID>>(storageServerIDs));
+
+	// Force multiple time peek, and peek causes latency
+	for (auto pFakeTLogContext : ptxn::test::TestEnvironment::getTLogs()->tLogContexts) {
+		pFakeTLogContext->maxVersionsPerPeek = 10;
+		pFakeTLogContext->latency.enable();
+	}
+
+	// Inject the commits to TLogs
+	actors.push_back(ptxn::test::messageFeeder());
+
+	state ptxn::StorageTeamID privateMutationsStorageTeamID =
+	    dynamic_cast<const ptxn::test::details::TLogGroupWithPrivateMutationsFixture&>(
+	        ptxn::test::TestEnvironment::getTLogGroup())
+	        .privateMutationsStorageTeamID;
+
+	pCursor = std::make_shared<ptxn::merged::OrderedMutableTeamPeekCursor>(
+	    storageServerIDs[0], privateMutationsStorageTeamID, getTLogInterfaceByStorageTeamID);
+
+	state Arena storageArena;
+	state std::vector<ptxn::VersionSubsequenceMessage> messagesFromTLogs =
+	    wait(ptxn::test::getAllMessageFromCursor(pCursor, &storageArena));
+
+	const std::vector<ptxn::VersionSubsequenceMessage> messagesFromCommitRecord =
+	    getMessagesFromMutableTeams(privateMutationsStorageTeamID);
+
+	ASSERT_EQ(messagesFromTLogs.size(), messagesFromCommitRecord.size());
+	for (int i = 0; i < static_cast<int>(messagesFromTLogs.size()); ++i) {
+		ASSERT(messagesFromTLogs[i] == messagesFromCommitRecord[i]);
 	}
 
 	return Void();

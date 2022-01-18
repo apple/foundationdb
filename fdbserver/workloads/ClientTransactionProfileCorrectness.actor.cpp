@@ -366,7 +366,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		return _check(cx, this);
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<ClientTransactionProfileCorrectnessWorkload> ClientTransactionProfileCorrectnessWorkloadFactory(

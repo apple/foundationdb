@@ -66,7 +66,7 @@ void OptionalInterface<Interface>::serialize(Ar& ar) {
 		ident = iface.get().id();
 }
 
-struct LogSet;
+class LogSet;
 struct OldLogData;
 
 template <class Interface>
@@ -88,6 +88,7 @@ struct serializable_traits<OptionalInterface<Interface>> : std::true_type {
 };
 
 // Contains a generation of tLogs for an individual DC.
+// FIXME TLogSetBase <- TLogSet/ptxnTLogSet
 struct TLogSet {
 	constexpr static FileIdentifier file_identifier = 6302317;
 	std::vector<OptionalInterface<TLogInterface>> tLogs;

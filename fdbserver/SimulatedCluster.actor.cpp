@@ -26,6 +26,8 @@
 #include <toml.hpp>
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/simulator.h"
+#include "fdbclient/ClusterConnectionFile.h"
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -38,6 +40,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/versions.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/network.h"
 #include "flow/TypeTraits.h"
@@ -251,7 +254,9 @@ class TestConfig {
 			}
 
 			if (attrib == "configureLocked") {
-				sscanf(value.c_str(), "%d", &configureLocked);
+				int configureLockedInt;
+				sscanf(value.c_str(), "%d", &configureLockedInt);
+				configureLocked = (configureLockedInt != 0);
 			}
 
 			if (attrib == "startIncompatibleProcess") {
@@ -308,7 +313,7 @@ public:
 	//	0 = "ssd"
 	//	1 = "memory"
 	//	2 = "memory-radixtree-beta"
-	//	3 = "ssd-redwood-experimental"
+	//	3 = "ssd-redwood-1-experimental"
 	//	4 = "ssd-rocksdb-experimental"
 	// Requires a comma-separated list of numbers WITHOUT whitespaces
 	std::vector<int> storageEngineExcludeTypes;
@@ -317,6 +322,7 @@ public:
 	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
 	// Set true to simplify simulation configs for easier debugging
 	bool simpleConfig = false;
+	int extraMachineCountDC = 0;
 	Optional<bool> generateFearless, buggify;
 	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
 	    stderrSeverity, machineCount, processesPerMachine, coordinators;
@@ -372,7 +378,8 @@ public:
 		    .add("machineCount", &machineCount)
 		    .add("processesPerMachine", &processesPerMachine)
 		    .add("coordinators", &coordinators)
-		    .add("configDB", &configDBType);
+		    .add("configDB", &configDBType)
+		    .add("extraMachineCountDC", &extraMachineCountDC);
 		try {
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
@@ -419,7 +426,7 @@ T simulate(const T& in) {
 	return out;
 }
 
-ACTOR Future<Void> runBackup(Reference<ClusterConnectionFile> connFile) {
+ACTOR Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
 	state std::vector<Future<Void>> agentFutures;
 
 	while (g_simulator.backupAgents == ISimulator::BackupAgentType::WaitForType) {
@@ -427,7 +434,7 @@ ACTOR Future<Void> runBackup(Reference<ClusterConnectionFile> connFile) {
 	}
 
 	if (g_simulator.backupAgents == ISimulator::BackupAgentType::BackupToFile) {
-		Database cx = Database::createDatabase(connFile, -1);
+		Database cx = Database::createDatabase(connRecord, -1);
 
 		state FileBackupAgent fileAgent;
 		agentFutures.push_back(fileAgent.run(
@@ -446,7 +453,7 @@ ACTOR Future<Void> runBackup(Reference<ClusterConnectionFile> connFile) {
 	throw internal_error();
 }
 
-ACTOR Future<Void> runDr(Reference<ClusterConnectionFile> connFile) {
+ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 	state std::vector<Future<Void>> agentFutures;
 
 	while (g_simulator.drAgents == ISimulator::BackupAgentType::WaitForType) {
@@ -454,13 +461,13 @@ ACTOR Future<Void> runDr(Reference<ClusterConnectionFile> connFile) {
 	}
 
 	if (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
-		Database cx = Database::createDatabase(connFile, -1);
+		Database cx = Database::createDatabase(connRecord, -1);
 
-		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
+		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
 		state Database extraDB = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("StartingDrAgents")
-		    .detail("ConnFile", connFile->getConnectionString().toString())
+		    .detail("ConnectionString", connRecord->getConnectionString().toString())
 		    .detail("ExtraString", extraFile->getConnectionString().toString());
 
 		state DatabaseBackupAgent dbAgent = DatabaseBackupAgent(cx);
@@ -491,7 +498,7 @@ enum AgentMode { AgentNone = 0, AgentOnly = 1, AgentAddition = 2 };
 // SOMEDAY: when a process can be rebooted in isolation from the other on that machine,
 //  a loop{} will be needed around the waiting on simulatedFDBD(). For now this simply
 //  takes care of house-keeping such as context switching and file closing.
-ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnectionFile> connFile,
+ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionRecord> connRecord,
                                                          IPAddress ip,
                                                          bool sslEnabled,
                                                          uint16_t port,
@@ -557,7 +564,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 			    .detail("Version", FDB_VT_VERSION)
 			    .detail("PackageName", FDB_VT_PACKAGE_NAME)
 			    .detail("DataFolder", *dataFolder)
-			    .detail("ConnectionString", connFile ? connFile->getConnectionString().toString() : "")
+			    .detail("ConnectionString", connRecord ? connRecord->getConnectionString().toString() : "")
 			    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 			    .detail("CommandLine", "fdbserver -r simulation")
 			    .detail("BuggifyEnabled", isBuggifyEnabled(BuggifyType::General))
@@ -568,16 +575,17 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 				// SOMEDAY: test lower memory limits, without making them too small and causing the database to stop
 				// making progress
 				FlowTransport::createInstance(processClass == ProcessClass::TesterClass || runBackupAgents == AgentOnly,
-				                              1);
+				                              1,
+				                              WLTOKEN_RESERVED_COUNT);
 				Sim2FileSystem::newFileSystem();
 
-				vector<Future<Void>> futures;
+				std::vector<Future<Void>> futures;
 				for (int listenPort = port; listenPort < port + listenPerProcess; ++listenPort) {
 					NetworkAddress n(ip, listenPort, true, sslEnabled && listenPort == port);
 					futures.push_back(FlowTransport::transport().bind(n, n));
 				}
 				if (runBackupAgents != AgentOnly) {
-					futures.push_back(fdbd(connFile,
+					futures.push_back(fdbd(connRecord,
 					                       localities,
 					                       processClass,
 					                       *dataFolder,
@@ -592,8 +600,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 					                       configDBType));
 				}
 				if (runBackupAgents != AgentNone) {
-					futures.push_back(runBackup(connFile));
-					futures.push_back(runDr(connFile));
+					futures.push_back(runBackup(connRecord));
+					futures.push_back(runDr(connRecord));
 				}
 
 				futures.push_back(success(onShutdown));
@@ -697,9 +705,9 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 
 			if (!useSeedFile) {
 				writeFile(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
-				connFile = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"));
+				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"));
 			} else {
-				connFile =
+				connRecord =
 				    makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
 			}
 		} else {
@@ -778,9 +786,9 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			state std::vector<Future<ISimulator::KillType>> processes;
 			for (int i = 0; i < ips.size(); i++) {
 				std::string path = joinPath(myFolders[i], "fdb.cluster");
-				Reference<ClusterConnectionFile> clusterFile(useSeedFile
-				                                                 ? new ClusterConnectionFile(path, connStr.toString())
-				                                                 : new ClusterConnectionFile(path));
+				Reference<IClusterConnectionRecord> clusterFile(
+				    useSeedFile ? new ClusterConnectionFile(path, connStr.toString())
+				                : new ClusterConnectionFile(path));
 				const int listenPort = i * listenPerProcess + 1;
 				AgentMode agentMode =
 				    runBackupAgents == AgentOnly ? (i == ips.size() - 1 ? AgentOnly : AgentNone) : runBackupAgents;
@@ -1032,7 +1040,7 @@ IPAddress makeIPAddressForSim(bool isIPv6, std::array<int, 4> parts) {
 // Configures the system according to the given specifications in order to run
 // simulation, but with the additional consideration that it is meant to act
 // like a "rebooted" machine, mostly used for restarting tests.
-ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
+ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActors,
                                           std::string baseFolder,
                                           int* pTesterCount,
                                           Optional<ClusterConnectionString>* pConnString,
@@ -1059,6 +1067,10 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors,
 		}
 		int desiredCoordinators = atoi(ini.GetValue("META", "desiredCoordinators"));
 		int testerCount = atoi(ini.GetValue("META", "testerCount"));
+		auto tssModeStr = ini.GetValue("META", "tssMode");
+		if (tssModeStr != nullptr) {
+			g_simulator.tssMode = (ISimulator::TSSMode)atoi(tssModeStr);
+		}
 		bool enableExtraDB = (testConfig.extraDB == 3);
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
 		if (enableExtraDB) {
@@ -1258,7 +1270,7 @@ void SimulationConfig::setSplits(const TestConfig& testConfig) {
 	}
 }
 
-StringRef StringRefOf(const char* s) {
+[[maybe_unused]] StringRef StringRefOf(const char* s) {
 	return StringRef((uint8_t*)s, strlen(s));
 }
 
@@ -1374,7 +1386,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	}
 	case 3: {
 		TEST(true); // Simulated cluster using redwood storage engine
-		set_config("ssd-redwood-experimental");
+		set_config("ssd-redwood-1-experimental");
 		break;
 	}
 	case 4: {
@@ -1382,7 +1394,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		set_config("ssd-rocksdb-experimental");
 		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
 		// background threads.
-		TraceEvent(SevWarn, "RocksDBNonDeterminism")
+		TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
 		    .detail("Explanation", "The RocksDB storage engine is threaded and non-deterministic");
 		noUnseed = true;
 		break;
@@ -1694,6 +1706,7 @@ void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
 			machine_count = std::max(machine_count, deterministicRandom()->randomInt(5, extraDB ? 6 : 10));
 		}
 	}
+	machine_count += datacenters * testConfig.extraMachineCountDC;
 }
 
 // Sets the coordinator count based on the testConfig. May be overwritten later
@@ -1732,13 +1745,13 @@ void SimulationConfig::setTss(const TestConfig& testConfig) {
 
 	// reduce tss to half of extra non-seed servers that can be recruited in usable regions.
 	tssCount =
-	    std::max(0, std::min(tssCount, (db.usableRegions * (machine_count / datacenters) - replication_type) / 2));
+	    std::max(0, std::min(tssCount, db.usableRegions * ((machine_count / datacenters) - db.storageTeamSize) / 2));
 
-	if (!testConfig.config.present() && tssCount > 0 && faultInjectionActivated) {
+	if (!testConfig.config.present() && tssCount > 0) {
 		std::string confStr = format("tss_count:=%d tss_storage_engine:=%d", tssCount, db.storageServerStoreType);
 		set_config(confStr);
 		double tssRandom = deterministicRandom()->random01();
-		if (tssRandom > 0.5) {
+		if (tssRandom > 0.5 || !faultInjectionActivated) {
 			// normal tss mode
 			g_simulator.tssMode = ISimulator::TSSMode::EnabledNormal;
 		} else if (tssRandom < 0.25 && !testConfig.isFirstTestInRestart) {
@@ -1798,7 +1811,7 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 
 // Configures the system according to the given specifications in order to run
 // simulation under the correct conditions
-void setupSimulatedSystem(vector<Future<Void>>* systemActors,
+void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
                           std::string baseFolder,
                           int* pTesterCount,
                           Optional<ClusterConnectionString>* pConnString,
@@ -1821,11 +1834,22 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		if ("tss_storage_engine" == kv.first) {
 			continue;
 		}
+		if ("perpetual_storage_wiggle_locality" == kv.first) {
+			if (deterministicRandom()->random01() < 0.25) {
+				int dcId = deterministicRandom()->randomInt(0, simconfig.datacenters);
+				startingConfigString += " " + kv.first + "=" + "data_hall:" + std::to_string(dcId);
+			}
+			continue;
+		}
 		startingConfigString += " ";
 		if (kv.second.type() == json_spirit::int_type) {
 			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int());
 		} else if (kv.second.type() == json_spirit::str_type) {
-			startingConfigString += kv.second.get_str();
+			if ("storage_migration_type" == kv.first) {
+				startingConfigString += kv.first + "=" + kv.second.get_str();
+			} else {
+				startingConfigString += kv.second.get_str();
+			}
 		} else if (kv.second.type() == json_spirit::array_type) {
 			startingConfigString += kv.first + "=" +
 			                        json_spirit::write_string(json_spirit::mValue(kv.second.get_array()),
@@ -1914,8 +1938,8 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	TEST(useIPv6); // Use IPv6
 	TEST(!useIPv6); // Use IPv4
 
-	vector<NetworkAddress> coordinatorAddresses;
-	vector<NetworkAddress> extraCoordinatorAddresses; // Used by extra DB if the DR db is a new one
+	std::vector<NetworkAddress> coordinatorAddresses;
+	std::vector<NetworkAddress> extraCoordinatorAddresses; // Used by extra DB if the DR db is a new one
 	if (testConfig.minimumRegions > 1) {
 		// do not put coordinators in the primary region so that we can kill that region safely
 		int nonPrimaryDcs = dataCenters / 2;
@@ -2016,6 +2040,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 
 	bool requiresExtraDBMachines = testConfig.extraDB && g_simulator.extraDB->toString() != conn.toString();
 	int assignedMachines = 0, nonVersatileMachines = 0;
+	bool gradualMigrationPossible = true;
 	std::vector<ProcessClass::ClassType> processClassesSubSet = { ProcessClass::UnsetClass,
 		                                                          ProcessClass::StatelessClass };
 	for (int dc = 0; dc < dataCenters; dc++) {
@@ -2024,6 +2049,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		std::vector<UID> machineIdentities;
 		int machines = machineCount / dataCenters +
 		               (dc < machineCount % dataCenters); // add remainder of machines to first datacenter
+		int possible_ss = 0;
 		int dcCoordinators = coordinatorCount / dataCenters + (dc < coordinatorCount % dataCenters);
 		printf("Datacenter %d: %d/%d machines, %d/%d coordinators\n",
 		       dc,
@@ -2064,8 +2090,12 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 3),
 					                            ProcessClass::CommandLineSource); // Unset, Storage, or Transaction
 				if (processClass ==
-				    ProcessClass::StatelessClass) // *can't* be assigned to other roles, even in an emergency
+				    ProcessClass::StatelessClass) { // *can't* be assigned to other roles, even in an emergency
 					nonVersatileMachines++;
+				}
+				if (processClass == ProcessClass::UnsetClass || processClass == ProcessClass::StorageClass) {
+					possible_ss++;
+				}
 			}
 
 			// FIXME: temporarily code to test storage cache
@@ -2133,6 +2163,10 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 
 			assignedMachines++;
 		}
+
+		if (possible_ss - simconfig.db.desiredTSSCount / simconfig.db.usableRegions <= simconfig.db.storageTeamSize) {
+			gradualMigrationPossible = false;
+		}
 	}
 
 	g_simulator.desiredCoordinators = coordinatorCount;
@@ -2157,14 +2191,14 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 		systemActors->push_back(
 		    reportErrors(simulatedMachine(conn,
 		                                  ips,
-		                                  sslEnabled && sslOnly,
+		                                  sslEnabled,
 		                                  localities,
 		                                  ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
 		                                  baseFolder,
 		                                  false,
 		                                  i == useSeedForMachine,
 		                                  AgentNone,
-		                                  sslEnabled && sslOnly,
+		                                  sslOnly,
 		                                  whitelistBinPaths,
 		                                  protocolVersion,
 		                                  configDBType),
@@ -2180,6 +2214,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	// save some state that we only need when restarting the simulator.
 	g_simulator.connectionString = conn.toString();
 	g_simulator.testerCount = testerCount;
+	g_simulator.allowStorageMigrationTypeChange = gradualMigrationPossible;
 
 	TraceEvent("SimulatedClusterStarted")
 	    .detail("DataCenters", dataCenters)
@@ -2188,6 +2223,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors,
 	    .detail("SSLEnabled", sslEnabled)
 	    .detail("SSLOnly", sslOnly)
 	    .detail("ClassesAssigned", assignClasses)
+	    .detail("GradualMigrationPossible", gradualMigrationPossible)
 	    .detail("StartingConfiguration", pStartingConfiguration->toString());
 }
 
@@ -2200,7 +2236,7 @@ bool rocksDBEnabled = false;
 #endif
 
 // Populates the TestConfig fields according to what is found in the test file.
-void checkTestConf(const char* testFile, TestConfig* testConfig) {}
+[[maybe_unused]] void checkTestConf(const char* testFile, TestConfig* testConfig) {}
 
 } // namespace
 
@@ -2209,8 +2245,8 @@ ACTOR void setupAndRun(std::string dataFolder,
                        bool rebooting,
                        bool restoring,
                        std::string whitelistBinPaths) {
-	state vector<Future<Void>> systemActors;
-	state Optional<ClusterConnectionString> connFile;
+	state std::vector<Future<Void>> systemActors;
+	state Optional<ClusterConnectionString> connectionString;
 	state Standalone<StringRef> startingConfiguration;
 	state int testerCount = 1;
 	state TestConfig testConfig;
@@ -2222,6 +2258,13 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// snapshot of the storage engine without a snapshotting file system.
 	// https://github.com/apple/foundationdb/issues/5155
 	if (std::string_view(testFile).find("restarting") != std::string_view::npos) {
+		testConfig.storageEngineExcludeTypes.push_back(4);
+	}
+
+	// TODO: Currently backup and restore related simulation tests are failing when run with rocksDB storage engine
+	// possibly due to running the rocksdb in single thread in simulation.
+	// Re-enable the backup and restore related simulation tests when the tests are passing again.
+	if (std::string_view(testFile).find("Backup") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.push_back(4);
 	}
 
@@ -2256,7 +2299,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	                           currentProtocolVersion),
 	    TaskPriority::DefaultYield));
 	Sim2FileSystem::newFileSystem();
-	FlowTransport::createInstance(true, 1);
+	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
 	TEST(true); // Simulation start
 
 	try {
@@ -2265,7 +2308,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 			wait(timeoutError(restartSimulatedSystem(&systemActors,
 			                                         dataFolder,
 			                                         &testerCount,
-			                                         &connFile,
+			                                         &connectionString,
 			                                         &startingConfiguration,
 			                                         testConfig,
 			                                         whitelistBinPaths,
@@ -2280,7 +2323,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 			setupSimulatedSystem(&systemActors,
 			                     dataFolder,
 			                     &testerCount,
-			                     &connFile,
+			                     &connectionString,
 			                     &startingConfiguration,
 			                     whitelistBinPaths,
 			                     testConfig,
@@ -2289,7 +2332,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 		}
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(clusterFileDir);
-		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connFile.get().toString());
+		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connectionString.get().toString());
 		wait(timeoutError(runTests(makeReference<ClusterConnectionFile>(joinPath(clusterFileDir, "fdb.cluster")),
 		                           TEST_TYPE_FROM_FILE,
 		                           TEST_ON_TESTERS,

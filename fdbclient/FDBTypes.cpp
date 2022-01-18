@@ -68,9 +68,19 @@ std::string KeySelectorRef::toString() const {
 
 namespace ptxn {
 
-TLogGroupID tLogGroupByStorageTeamID(std::vector<TLogGroupID>& tLogGroups, const StorageTeamID& storageTeamID) {
-	std::sort(tLogGroups.begin(), tLogGroups.end());
-	return tLogGroups[storageTeamID.hash() % tLogGroups.size()];
+// FIXME Incoming tLogGroups should be ordered
+TLogGroupID tLogGroupByStorageTeamID(const std::vector<TLogGroupID>& tLogGroups, const StorageTeamID& storageTeamID) {
+	std::vector<TLogGroupID> sortedTLogGroups(std::begin(tLogGroups), std::end(tLogGroups));
+	std::sort(sortedTLogGroups.begin(), sortedTLogGroups.end());
+	return sortedTLogGroups[storageTeamID.hash() % sortedTLogGroups.size()];
 }
 
 } // namespace ptxn
+
+std::string describe(const std::string& s) {
+	return s;
+}
+
+std::string describe(UID const& item) {
+	return item.shortString();
+}

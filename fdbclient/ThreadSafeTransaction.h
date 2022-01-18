@@ -106,11 +106,24 @@ public:
 	                                   bool reverse = false) override {
 		return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 	}
+	ThreadFuture<RangeResult> getRangeAndFlatMap(const KeySelectorRef& begin,
+	                                             const KeySelectorRef& end,
+	                                             const StringRef& mapper,
+	                                             GetRangeLimits limits,
+	                                             bool snapshot,
+	                                             bool reverse) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                int64_t chunkSize) override;
+
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
+
+	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
+	                                           Version beginVersion,
+	                                           Optional<Version> readVersion,
+	                                           ReadBlobGranuleContext granuleContext) override;
 
 	void addReadConflictRange(const KeyRangeRef& keys) override;
 	void makeSelfConflicting();
@@ -166,9 +179,8 @@ public:
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 
-	static IClientApi* api;
-
 private:
+	friend IClientApi* getLocalClientAPI();
 	ThreadSafeApi();
 
 	int apiVersion;

@@ -109,12 +109,15 @@ struct CommitProxyInterface {
 struct ClientDBInfo {
 	constexpr static FileIdentifier file_identifier = 5355080;
 	UID id; // Changes each time anything else changes
-	vector<GrvProxyInterface> grvProxies;
-	vector<CommitProxyInterface> commitProxies;
+	std::vector<GrvProxyInterface> grvProxies;
+	std::vector<CommitProxyInterface> commitProxies;
 	Optional<CommitProxyInterface>
 	    firstCommitProxy; // not serialized, used for commitOnFirstProxy when the commit proxies vector has been shrunk
 	Optional<Value> forward;
-	vector<VersionHistory> history;
+	std::vector<VersionHistory> history;
+	// a counter increased every time a change of uploaded client libraries
+	// happens, the clients need to be aware of
+	uint64_t clientLibChangeCounter = 0;
 
 	ClientDBInfo() {}
 
@@ -126,7 +129,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history);
+		serializer(ar, grvProxies, commitProxies, id, forward, history, clientLibChangeCounter);
 	}
 };
 
@@ -285,7 +288,7 @@ struct GetReadVersionRequest : TimedRequest {
 struct GetKeyServerLocationsReply {
 	constexpr static FileIdentifier file_identifier = 10636023;
 	Arena arena;
-	std::vector<std::pair<KeyRangeRef, vector<StorageServerInterface>>> results;
+	std::vector<std::pair<KeyRangeRef, std::vector<StorageServerInterface>>> results;
 
 	// if any storage servers in results have a TSS pair, that mapping is in here
 	std::vector<std::pair<UID, StorageServerInterface>> resultsTssMapping;
@@ -499,11 +502,11 @@ struct ExclusionSafetyCheckReply {
 
 struct ExclusionSafetyCheckRequest {
 	constexpr static FileIdentifier file_identifier = 13852702;
-	vector<AddressExclusion> exclusions;
+	std::vector<AddressExclusion> exclusions;
 	ReplyPromise<ExclusionSafetyCheckReply> reply;
 
 	ExclusionSafetyCheckRequest() {}
-	explicit ExclusionSafetyCheckRequest(vector<AddressExclusion> exclusions) : exclusions(exclusions) {}
+	explicit ExclusionSafetyCheckRequest(std::vector<AddressExclusion> exclusions) : exclusions(exclusions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

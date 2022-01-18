@@ -29,6 +29,7 @@
 #include "fdbserver/IDiskQueue.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/LogSystem.h"
+#include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // These tests start TLogs and drive transactions through them. There is one test that calls
@@ -118,6 +119,7 @@ ACTOR Future<Void> getTLogCreateActor(std::shared_ptr<TLogDriverContext> pTLogDr
 	initTLogReq.allTags = tags;
 	initTLogReq.isPrimary = true;
 	initTLogReq.locality = 0;
+	initTLogReq.clusterId = deterministicRandom()->randomUniqueID();
 	TLogInterface interface = wait(promiseStream.getReply(initTLogReq));
 	pTLogContext->realTLogInterface = interface;
 
@@ -214,7 +216,7 @@ ACTOR Future<Void> TLogDriverContext::sendPushMessages_impl(TLogDriverContext* p
 		// for each tag
 		for (uint32_t tagID = 0; tagID < pTLogDriverContext->numTagsPerServer; tagID++) {
 			Tag tag(pTLogDriverContext->tagLocality, tagID);
-			vector<Tag> tags = { tag };
+			std::vector<Tag> tags = { tag };
 			toCommit.addTags(tags);
 			toCommit.writeTypedMessage(m);
 		}

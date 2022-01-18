@@ -12,9 +12,6 @@ then
     mkdir ${PKG_CONFIG_DIR}
 fi
 
-getent group foundationdb >/dev/null || addgroup --system foundationdb
-getent passwd foundationdb >/dev/null || adduser --system --disabled-login --ingroup foundationdb --no-create-home --home /var/lib/foundationdb --gecos "FoundationDB" --shell /bin/false foundationdb
-
 mkdir -p /usr/lib/foundationdb/backup_agent
 
 update-alternatives --install /usr/bin/fdbcli fdbclients /usr/lib/foundationdb-@FDB_VERSION@/bin/fdbcli @ALTERNATIVES_PRIORITY@ \

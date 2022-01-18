@@ -43,7 +43,7 @@ ACTOR Future<Void> readTSSMappingRYW(Reference<ReadYourWritesTransaction> tr,
 ACTOR Future<Void> readTSSMapping(Transaction* tr, std::map<UID, StorageServerInterface>* tssMapping);
 
 // Removes the TSS pairs from the cluster
-ACTOR Future<Void> removeTSSPairsFromCluster(Database cx, vector<std::pair<UID, UID>> pairsToRemove);
+ACTOR Future<Void> removeTSSPairsFromCluster(Database cx, std::vector<std::pair<UID, UID>> pairsToRemove);
 
 #include "flow/unactorcompiler.h"
 #endif

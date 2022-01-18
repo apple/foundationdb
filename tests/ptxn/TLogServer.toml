@@ -126,3 +126,34 @@ startDelay = 0
     numStorageTeams = 40
     numTLogGroups = 3
     numCommits = 5
+
+[[test]]
+testTitle = 'Team Partitioned TLog Server Test 9: Read from TLog spilled data'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/read_tlog_spilled'
+
+    numTLogs = 3
+    numStorageTeams = 40
+    numTLogGroups = 7
+    numCommits = 20
+
+[[test]]
+testTitle = 'Team Partitioned TLog Server Test 10: Spilling not happen with default threshold'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/read_tlog_not_spilled_with_default_threshold'
+
+    numTLogs = 3
+    numStorageTeams = 40
+    numTLogGroups = 7
+    numCommits = 10
+

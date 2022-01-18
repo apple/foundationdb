@@ -66,18 +66,23 @@ struct CommitRecord {
 	// Add tag for each Commit version -- Storage Team ID pair. The tag is used for verifying the data.
 	std::map<Version, std::unordered_map<StorageTeamID, CommitRecordTag>> tags;
 
-	// Get messages from a given set of storage teams, in format
-	//     CommitVersion -- Subsequence -- Messag
-	// If the set is empty, return *all* messages in CommitRecord
-	std::vector<VersionSubsequenceMessage> getMessagesFromStorageTeams(
-	    const std::unordered_set<StorageTeamID>& storageTeamIDs = std::unordered_set<StorageTeamID>()) const;
-	int getNumTotalMessages() const;
-
 	// The first commit version
 	Version firstVersion = MAX_VERSION;
 
 	// The last commit version
 	Version lastVersion = invalidVersion;
+
+public:
+	// Get messages from a given set of storage teams, in format
+	//     CommitVersion -- Subsequence -- Messag
+	// If the set is empty, return *all* messages in CommitRecord
+	std::vector<VersionSubsequenceMessage> getMessagesFromStorageTeams(
+	    const std::unordered_set<StorageTeamID>& storageTeamIDs = std::unordered_set<StorageTeamID>()) const;
+
+	int getNumTotalMessages() const;
+
+	// Update the version informationbase on the messages, this should be called after messages have been written.
+	void updateVersionInformation();
 };
 
 extern const std::pair<int, int> DEFAULT_KEY_LENGTH_RANGE;
@@ -95,12 +100,15 @@ void generateMutationRefs(const int numMutations,
                           const std::pair<int, int>& keyLengthRange = DEFAULT_KEY_LENGTH_RANGE,
                           const std::pair<int, int>& valueLengthRange = DEFAULT_VALUE_LENGTH_RANGE);
 
-// Distribute MutationRefs to StorageTeamIDs in CommitRecord.
+// Distribute MutationRefs to StorageTeamIDs in CommitRecord. Randomly pick a subset of storage team IDs.
 void distributeMutationRefs(VectorRef<MutationRef>& mutationRefs,
                             const Version& commitVersion,
                             const Version& storageTeamVersion,
                             const std::vector<StorageTeamID>& storageTeamIDs,
                             CommitRecord& commitRecord);
+
+// Increase the version by a random number
+void increaseVersion(Version& version);
 
 // For a given version, serialize the messages from CommitRecord for Proxy use
 // The function will receive a StorageTeamID, and return the serializer for its corresponding TLogGroupID

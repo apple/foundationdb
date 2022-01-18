@@ -176,7 +176,7 @@ The *LogPushData* class is used to hold serialized mutations on a per transactio
 
 *LogPushData.writeTypedMessage* is the function that serializes each mutation and writes it to the correct binary stream to be sent to the corresponding transaction log. Each serialized mutation contains additional metadata about the message, with the format:
 
-.. image:: /images/serialized_mutation_metadata_format.png
+.. image:: images/serialized_mutation_metadata_format.png
 
 * Message size: size of the message, in bytes, excluding the four bytes used for the message size
 

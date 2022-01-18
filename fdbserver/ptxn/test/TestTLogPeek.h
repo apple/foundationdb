@@ -29,11 +29,11 @@
 namespace ptxn::test {
 
 struct TestTLogPeekOptions {
-	static const int DEFAULT_NUM_VERSIONS = 100;
-	static const int DEFAULT_NUM_MUTATIONS_PER_VERSION = 100;
-	static const int DEFAULT_NUM_TEAMS = 3;
-	static const int DEFAULT_INITIAL_VERSION = 1000;
-	static const int DEFAULT_PEEK_TIMES = 1000;
+	static const int DEFAULT_NUM_VERSIONS;
+	static const int DEFAULT_NUM_MUTATIONS_PER_VERSION;
+	static const int DEFAULT_NUM_TEAMS;
+	static const int DEFAULT_INITIAL_VERSION;
+	static const int DEFAULT_PEEK_TIMES;
 
 	// The number of versions for peek
 	int numVersions;
@@ -50,10 +50,10 @@ struct TestTLogPeekOptions {
 };
 
 struct TestTLogPeekMergeCursorOptions {
-	static const int DEFAULT_INITIAL_VERSION = 1000;
-	static const int DEFAULT_NUM_VERSIONS = 10;
-	static const int DEFAULT_NUM_MUTATIONS_PER_VERSION = 100;
-	static const int DEFAULT_NUM_TLOGS = 5;
+	static const int DEFAULT_INITIAL_VERSION;
+	static const int DEFAULT_NUM_VERSIONS;
+	static const int DEFAULT_NUM_MUTATIONS_PER_VERSION;
+	static const int DEFAULT_NUM_TLOGS;
 
 	// The number of TLogGroup/StorageTeam/TLog
 	// One TLogGroup has one StorageTeam and one TLog server

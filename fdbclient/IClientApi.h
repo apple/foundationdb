@@ -59,6 +59,12 @@ public:
 	                                           GetRangeLimits limits,
 	                                           bool snapshot = false,
 	                                           bool reverse = false) = 0;
+	virtual ThreadFuture<RangeResult> getRangeAndFlatMap(const KeySelectorRef& begin,
+	                                                     const KeySelectorRef& end,
+	                                                     const StringRef& mapper,
+	                                                     GetRangeLimits limits,
+	                                                     bool snapshot = false,
+	                                                     bool reverse = false) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) = 0;
 	virtual ThreadFuture<Standalone<StringRef>> getVersionstamp() = 0;
 
@@ -66,6 +72,13 @@ public:
 	virtual ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                        int64_t chunkSize) = 0;
+
+	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) = 0;
+
+	virtual ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
+	                                                   Version beginVersion,
+	                                                   Optional<Version> readVersion,
+	                                                   ReadBlobGranuleContext granuleContext) = 0;
 
 	virtual void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) = 0;
 	virtual void set(const KeyRef& key, const ValueRef& value) = 0;

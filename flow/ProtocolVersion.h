@@ -139,7 +139,10 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, TagThrottleValueReason);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, SpanContext);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, TSS);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, PartitionTransaction);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, PartitionTransaction); // FIXME: Change to the new release number
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010001LL, ChangeFeed);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010001LL, BlobGranule);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010001LL, NetworkAddressHostnameFlag);
 };
 
 template <>
@@ -156,10 +159,10 @@ struct Traceable<ProtocolVersion> : std::true_type {
 //
 //                                                         xyzdev
 //                                                         vvvv
-constexpr ProtocolVersion currentProtocolVersion(0x0FDB00B070010001LL);
+constexpr ProtocolVersion currentProtocolVersion(0x0FDB00B071010001LL);
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
 static_assert(currentProtocolVersion.version() < 0x0FDB00B100000000LL, "Unexpected protocol version");
 
 // Downgrades are only supported for one minor version
-constexpr ProtocolVersion minInvalidProtocolVersion(0x0FDB00B072000000LL);
+constexpr ProtocolVersion minInvalidProtocolVersion(0x0FDB00B073000000LL);

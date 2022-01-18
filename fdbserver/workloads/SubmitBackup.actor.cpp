@@ -77,7 +77,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return clientId ? Void() : _start(this, cx); }
 	Future<bool> check(Database const& cx) override { return true; }
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<SubmitBackupWorkload> SubmitBackupWorkloadFactory(SubmitBackupWorkload::DESCRIPTION);

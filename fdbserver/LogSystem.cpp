@@ -19,12 +19,14 @@
  */
 
 #include "fdbserver/LogSystem.h"
+
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/ptxn/MessageSerializer.h"
 #include "fdbserver/ptxn/MessageTypes.h"
 #include "fdbserver/ptxn/test/FakeLogSystem.h"
 #include "fdbserver/TagPartitionedLogSystem.actor.h"
+#include "fdbserver/TeamPartitionedLogSystem.actor.h"
 #include "flow/Error.h"
 #include "flow/serialize.h"
 
@@ -243,7 +245,7 @@ void LogSet::getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, 
 
 	if (allLocations) {
 		// special handling for allLocations
-		TraceEvent("AllLocationsSet");
+		TraceEvent("AllLocationsSet").log();
 		for (int i = 0; i < logServers.size(); i++) {
 			newLocations.push_back(i);
 		}
@@ -450,14 +452,18 @@ Reference<ILogSystem> ILogSystem::fromLogSystemConfig(UID const& dbgid,
 		TraceEvent(SevDebug, "ILogSystem::fromLogSystemConfig").detail("LogSystemType", "empty");
 		return Reference<ILogSystem>();
 	case LogSystemType::tagPartitioned:
-		TraceEvent(SevDebug, "ILogSystem::fromLogSystemConfig").detail("LogSystemType", "empty");
+		TraceEvent(SevDebug, "ILogSystem::fromLogSystemConfig").detail("LogSystemType", "tagPartitioned");
 		return TagPartitionedLogSystem::fromLogSystemConfig(
 		    dbgid, locality, conf, excludeRemote, useRecoveredAt, addActor);
 	case LogSystemType::teamPartitioned:
-		throw internal_error_msg("Not supported yet");
+		TraceEvent(SevDebug, "ILogSystem::fromLogSystemConfig").detail("LogSystemType", "teamPartitioned");
+		return ptxn::TeamPartitionedLogSystem::fromLogSystemConfig(
+		    dbgid, locality, conf, excludeRemote, useRecoveredAt, addActor);
 	case LogSystemType::fake:
+		TraceEvent(SevDebug, "ILogSystem::fromLogSystemConfig").detail("LogSystemType", "fake");
 		return makeReference<ptxn::test::FakeLogSystem>(dbgid);
 	case LogSystemType::fake_FakePeekCursor:
+		TraceEvent(SevDebug, "ILogSystem::fromLogSystemConfig").detail("LogSystemType", "fake_FakePeekCursor");
 		return makeReference<ptxn::test::FakeLogSystem_CustomPeekCursor>(dbgid);
 	default:
 		throw internal_error();
@@ -469,14 +475,19 @@ Reference<ILogSystem> ILogSystem::fromOldLogSystemConfig(UID const& dbgid,
                                                          struct LogSystemConfig const& conf) {
 	switch (conf.logSystemType) {
 	case LogSystemType::empty:
+		TraceEvent(SevDebug, "ILogSystem::fromOldLogSystemConfig").detail("LogSystemType", "empty");
 		return Reference<ILogSystem>();
 	case LogSystemType::tagPartitioned:
+		TraceEvent(SevDebug, "ILogSystem::fromOldLogSystemConfig").detail("LogSystemType", "tagPartitioned");
 		return TagPartitionedLogSystem::fromOldLogSystemConfig(dbgid, locality, conf);
 	case LogSystemType::teamPartitioned:
+		TraceEvent(SevDebug, "ILogSystem::fromOldLogSystemConfig").detail("LogSystemType", "teamPartitioned");
 		throw internal_error_msg("Not supported yet");
 	case LogSystemType::fake:
+		TraceEvent(SevDebug, "ILogSystem::fromOldLogSystemConfig").detail("LogSystemType", "fake");
 		return makeReference<ptxn::test::FakeLogSystem>(dbgid);
 	case LogSystemType::fake_FakePeekCursor:
+		TraceEvent(SevDebug, "ILogSystem::fromOldLogSystemConfig").detail("LogSystemType", "fake_FakePeekCursor");
 		return makeReference<ptxn::test::FakeLogSystem_CustomPeekCursor>(dbgid);
 	default:
 		throw internal_error();

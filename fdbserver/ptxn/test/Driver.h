@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/ptxn/Config.h"
 #include "fdbserver/ptxn/MessageSerializer.h"
 #include "fdbserver/ptxn/MessageTypes.h"
@@ -34,6 +35,7 @@
 #include "fdbserver/ptxn/test/CommitUtils.h"
 #include "fdbserver/ptxn/TLogInterface.h"
 #include "fdbserver/ptxn/test/FakeTLog.actor.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/UnitTest.h"
@@ -42,17 +44,17 @@ namespace ptxn::test {
 
 // Driver options for starting mock environment.
 struct TestDriverOptions {
-	static const int DEFAULT_NUM_COMMITS = 3;
+	static const int DEFAULT_NUM_COMMITS;
 	// Default is equal to numStorageTeamIDs so that an assertion in
 	// startStorageServers() won't fail.
-	static const int DEFAULT_NUM_TEAMS = 3;
-	static const int DEFAULT_NUM_PROXIES = 1;
-	static const int DEFAULT_NUM_TLOGS = 3;
-	static const int DEFAULT_NUM_TLOG_GROUPS = 4;
-	static const int DEFAULT_NUM_STORAGE_SERVERS = 3;
-	static const int DEFAULT_NUM_RESOLVERS = 2;
-	static const int DEFAULT_SKIP_COMMIT_VALIDATION = false;
-	static const MessageTransferModel DEFAULT_MESSAGE_TRANSFER_MODEL = MessageTransferModel::TLogActivelyPush;
+	static const int DEFAULT_NUM_TEAMS;
+	static const int DEFAULT_NUM_PROXIES;
+	static const int DEFAULT_NUM_TLOGS;
+	static const int DEFAULT_NUM_TLOG_GROUPS;
+	static const int DEFAULT_NUM_STORAGE_SERVERS;
+	static const int DEFAULT_NUM_RESOLVERS;
+	static const int DEFAULT_SKIP_COMMIT_VALIDATION;
+	static const MessageTransferModel DEFAULT_MESSAGE_TRANSFER_MODEL;
 
 	int numCommits;
 	int numStorageTeams;
@@ -108,6 +110,9 @@ struct TestDriverContext {
 	// For a given storageTeamID, returns the pair(prevVersion, currentVersion).
 	std::pair<Version, Version> getCommitVersionPair(const TLogGroupID& tLogGroupID, const Version& currentVersion);
 
+	std::unordered_map<ptxn::TLogGroupID, IKeyValueStore*> kvStores;
+	std::unordered_map<ptxn::TLogGroupID, IDiskQueue*> diskQueues;
+
 	// Storage Server
 	bool useFakeStorageServer;
 	int numStorageServers;
@@ -143,6 +148,10 @@ namespace details {
 
 // FIXME: change the struct to class, hide all member variables
 struct TLogGroupFixture {
+	// FIXME: Should not use testDriverContext in the future, each fixture should either store the data inside the class
+	// or depend on other fixtures.
+	TestDriverContext& testDriverContext;
+
 	std::vector<TLogGroup>& tLogGroups;
 
 	// Handy variable for accessing all TLog group IDs
@@ -158,22 +167,41 @@ struct TLogGroupFixture {
 	std::unordered_map<StorageTeamID, TLogGroupID>& storageTeamTLogGroupMapping;
 
 public:
-	TLogGroupFixture(TestDriverContext& testDriverContext)
-	  : tLogGroups(testDriverContext.tLogGroups),
-	    storageTeamTLogGroupMapping(testDriverContext.storageTeamIDTLogGroupIDMapper) {}
+	TLogGroupFixture(TestDriverContext& testDriverContext_)
+	  : testDriverContext(testDriverContext_), tLogGroups(testDriverContext_.tLogGroups),
+	    storageTeamTLogGroupMapping(testDriverContext_.storageTeamIDTLogGroupIDMapper) {}
 
 	int getNumTLogGroups() const { return tLogGroups.size(); }
 
-	void setUp(TestDriverContext& testDriverContext, const int numTLogGroups, const int numStorageTeamIDs);
+	virtual void setUp(const int numTLogGroups, const int numStorageTeamIDs);
+};
+
+struct TLogGroupWithPrivateMutationsFixture : public TLogGroupFixture {
+	StorageTeamID privateMutationsStorageTeamID;
+
+public:
+	TLogGroupWithPrivateMutationsFixture(TestDriverContext& testDriverContext) : TLogGroupFixture(testDriverContext) {}
+
+	virtual void setUp(const int numTLogGroups, const int numStorageTeamIDs);
 };
 
 // FIXME: change the struct to class, hide all member variables
+// Initializes a set of commits to be sent to TLogs
 struct MessageFixture {
+
+protected:
+	void generateMutationsToStorageTeamIDs(const std::vector<StorageTeamID>& storageTeamIDs,
+	                                       const int initialVersion,
+	                                       const int numVersions,
+	                                       const int numMutationsInVersion);
+
+public:
 	CommitRecord& commitRecord;
 
 	MessageFixture(CommitRecord& commitRecord_) : commitRecord(commitRecord_) {}
+	virtual ~MessageFixture() {}
 
-	void setUp(const TLogGroupFixture& tLogGroupStorageTeamMapping,
+	void setUp(const TLogGroupFixture& tLogGroupFixture,
 	           const int initialVersion,
 	           const int numVersions,
 	           const int numMutationsInVersion);
@@ -181,10 +209,23 @@ struct MessageFixture {
 	const decltype(std::declval<CommitRecord>().messages)& getMessages() const { return commitRecord.messages; }
 };
 
+// Initializes a set of commits to be sent to TLogs, with a special storage team
+struct MessageWithPrivateMutationsFixture : public MessageFixture {
+	MessageWithPrivateMutationsFixture(CommitRecord& commitRecord_) : MessageFixture(commitRecord_) {}
+	virtual ~MessageWithPrivateMutationsFixture() {}
+
+	void setUp(const TLogGroupWithPrivateMutationsFixture& tLogGroupFixture,
+	           const int initialVersion,
+	           const int numVersions,
+	           const int numMutationsInVersion,
+	           const StorageTeamID& privateMutationStorageTeamID,
+	           const std::vector<UID>& storageServerIDs);
+};
+
 // FIXME: Hide member varaible access
 struct ptxnTLogFixture {
 	// FIXME make this configurable
-	static const int NUM_TLOG_PER_GROUP = 3;
+	static const int NUM_TLOG_PER_GROUP;
 
 	const TLogGroupFixture& tLogGroupFixture;
 	std::shared_ptr<TestDriverContext> pTestDriverContext;
@@ -234,6 +275,48 @@ protected:
 	virtual Future<Void> createTLogActor(std::shared_ptr<FakeTLogContext>) override;
 };
 
+struct ServerDBInfoFixture {
+	ServerDBInfo serverDBInfo;
+
+	virtual void setUp();
+	Reference<const AsyncVar<ServerDBInfo>> getAsyncServerDBInfoRef() const;
+};
+
+struct ptxnStorageServerFixture {
+protected:
+	const TLogGroupFixture& tLogGroupFixture;
+	const ServerDBInfoFixture& serverDBInfoFixture;
+
+public:
+	// TODO For test, only support in-memory store type at this stage
+	static const KeyValueStoreType keyValueStoreType;
+
+	struct StorageServerResources {
+		static constexpr int MEMORY_LIMIT = 256 * 1024 * 1024; // 256MB per storage server
+
+		const StorageTeamID storageTeamID;
+		std::shared_ptr<::StorageServerInterface> interface;
+		const UID clusterID;
+		std::shared_ptr<::IKeyValueStore> kvStore;
+		const Tag seedTag;
+		const Version seedVersion;
+
+		std::string getFolder() const;
+
+		StorageServerResources(const StorageTeamID& storageTeamID_);
+	};
+
+	std::vector<StorageServerResources> storageServerResources;
+	std::vector<ReplyPromise<InitializeStorageReply>> initializeStorageReplies;
+	std::vector<Future<Void>> actors;
+
+	ptxnStorageServerFixture(const TLogGroupFixture& tLogGroupFixture_, const ServerDBInfoFixture& serverDBInfoFixture_)
+	  : tLogGroupFixture(tLogGroupFixture_), serverDBInfoFixture(serverDBInfoFixture_) {}
+	~ptxnStorageServerFixture();
+
+	void setUp(const int numStorageServers);
+};
+
 struct TestEnvironmentImpl {
 	// FIXME At this stage, we use testDriverContextImpl to implement the fixtures, in the future each fixture should
 	// have its own class.
@@ -241,6 +324,8 @@ struct TestEnvironmentImpl {
 	std::unique_ptr<TLogGroupFixture> tLogGroup;
 	std::shared_ptr<ptxnTLogFixture> tLogs;
 	std::unique_ptr<MessageFixture> messages;
+	std::unique_ptr<ServerDBInfoFixture> serverDBInfo;
+	std::shared_ptr<ptxnStorageServerFixture> storageServers;
 };
 
 } // namespace details
@@ -266,13 +351,27 @@ public:
 	TestEnvironment& operator=(TestEnvironment&&) = delete;
 
 	TestEnvironment& initDriverContext();
+
 	TestEnvironment& initTLogGroup(const int numTLogGroupIDs, const int numStorageTeamIDs);
+	TestEnvironment& initTLogGroupWithPrivateMutationsFixture(const int numTLogGroups, const int numStorageTeamIDs);
+
 	TestEnvironment& initPtxnTLog(const MessageTransferModel model, const int numTLogs, bool useFake = true);
+
 	TestEnvironment& initMessages(const int initialVersion, const int numVersions, const int numMutationsInVersion);
+	TestEnvironment& initMessagesWithPrivateMutations(const int initialVersion,
+	                                               const int numVersions,
+	                                               const int numMutationsInVersion,
+	                                               Optional<std::vector<UID>> optionalStorageServerIDs);
+
+	TestEnvironment& initServerDBInfo();
+
+	TestEnvironment& initPtxnStorageServer(const int numStorageServers);
 
 	static CommitRecord& getCommitRecords();
 	static const details::TLogGroupFixture& getTLogGroup();
 	static std::shared_ptr<details::ptxnTLogFixture> getTLogs();
+	static details::ServerDBInfoFixture& getServerDBInfo();
+	static std::shared_ptr<details::ptxnStorageServerFixture> getStorageServers();
 };
 
 } // namespace ptxn::test

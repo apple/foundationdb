@@ -574,7 +574,7 @@ void flushTraceFileVoid();
 // Changes the format of trace files. Returns false if the format is unrecognized. No longer safe to call after a call
 // to openTraceFile.
 bool selectTraceFormatter(std::string format);
-// Returns true iff format is recognized.
+// Returns true iff format is recognized. Internally the format string is changed, thus not using const std::string&.
 bool validateTraceFormat(std::string format);
 
 // Select the clock source for trace files. Returns false if the format is unrecognized. No longer safe to call after a
@@ -588,8 +588,8 @@ void removeTraceRole(std::string const& role);
 void retrieveTraceLogIssues(std::set<std::string>& out);
 void setTraceLogGroup(const std::string& role);
 template <class T>
-struct Future;
-struct Void;
+class Future;
+class Void;
 Future<Void> pingTraceLogWriterThread();
 
 enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };

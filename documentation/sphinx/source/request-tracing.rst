@@ -85,11 +85,10 @@ Control options
 In addition to the command line parameter described above, tracing can be set
 at a database and transaction level.
 
-Tracing can be globally disabled by setting the
-``distributed_transaction_trace_disable`` database option. It can be enabled by
-setting the ``distributed_transaction_trace_enable`` database option. If
-neither option is specified but a tracer option is set as described above,
-tracing will be enabled.
+Tracing can be controlled on a global level by setting the
+``TRACING_SAMPLE_RATE`` knob. Set the knob to 0.0 to record no traces, to 1.0
+to record all traces, or somewhere in the middle. Traces are sampled as a unit.
+All individual spans in the trace will be included in the sample.
 
 Tracing can be enabled or disabled for individual transactions. The special key
 space exposes an API to set a custom trace ID for a transaction, or to disable

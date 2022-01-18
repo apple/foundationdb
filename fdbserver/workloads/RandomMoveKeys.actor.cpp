@@ -77,7 +77,7 @@ struct MoveKeysWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override {
 		return tag(delay(testDuration / 2), true);
 	} // Give the database time to recover from our damage
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	KeyRange getRandomKeys() const {
 		double len = deterministicRandom()->random01() * this->maxKeyspace;
@@ -85,7 +85,8 @@ struct MoveKeysWorkload : TestWorkload {
 		return KeyRangeRef(doubleToTestKey(pos), doubleToTestKey(pos + len));
 	}
 
-	vector<StorageServerInterface> getRandomTeam(vector<StorageServerInterface> storageServers, int teamSize) {
+	std::vector<StorageServerInterface> getRandomTeam(std::vector<StorageServerInterface> storageServers,
+	                                                  int teamSize) {
 		if (storageServers.size() < teamSize) {
 			TraceEvent(SevWarnAlways, "LessThanThreeStorageServers").log();
 			throw operation_failed();
@@ -109,13 +110,13 @@ struct MoveKeysWorkload : TestWorkload {
 			throw operation_failed();
 		}
 
-		return vector<StorageServerInterface>(t.begin(), t.end());
+		return std::vector<StorageServerInterface>(t.begin(), t.end());
 	}
 
 	ACTOR Future<Void> doMoveKeys(Database cx,
 	                              MoveKeysWorkload* self,
 	                              KeyRange keys,
-	                              vector<StorageServerInterface> destinationTeam,
+	                              std::vector<StorageServerInterface> destinationTeam,
 	                              MoveKeysLock lock) {
 		state TraceInterval relocateShardInterval("RelocateShard");
 		state FlowLock fl1(1);
@@ -124,7 +125,7 @@ struct MoveKeysWorkload : TestWorkload {
 		for (int s = 0; s < destinationTeam.size(); s++)
 			desc +=
 			    format("%s (%llx),", destinationTeam[s].address().toString().c_str(), destinationTeam[s].id().first());
-		vector<UID> destinationTeamIDs;
+		std::vector<UID> destinationTeamIDs;
 		destinationTeamIDs.reserve(destinationTeam.size());
 		for (int s = 0; s < destinationTeam.size(); s++)
 			destinationTeamIDs.push_back(destinationTeam[s].id());
@@ -158,7 +159,7 @@ struct MoveKeysWorkload : TestWorkload {
 		}
 	}
 
-	static void eliminateDuplicates(vector<StorageServerInterface>& servers) {
+	static void eliminateDuplicates(std::vector<StorageServerInterface>& servers) {
 		// The real data distribution algorithm doesn't want to deal with multiple servers
 		// with the same address having keys.  So if there are two servers with the same address,
 		// don't use either one (so we don't have to find out which of them, if any, already has keys).
@@ -183,7 +184,7 @@ struct MoveKeysWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> worker(Database cx, MoveKeysWorkload* self) {
-		state KeyRangeMap<vector<StorageServerInterface>> inFlight;
+		state KeyRangeMap<std::vector<StorageServerInterface>> inFlight;
 		state KeyRangeActorMap inFlightActors;
 		state double lastTime = now();
 
@@ -196,18 +197,18 @@ struct MoveKeysWorkload : TestWorkload {
 		loop {
 			try {
 				state MoveKeysLock lock = wait(takeMoveKeysLock(cx, UID()));
-				state vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+				state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
 				eliminateDuplicates(storageServers);
 
 				loop {
 					wait(poisson(&lastTime, self->meanDelay));
 
 					KeyRange keys = self->getRandomKeys();
-					vector<StorageServerInterface> team =
+					std::vector<StorageServerInterface> team =
 					    self->getRandomTeam(storageServers, self->configuration.storageTeamSize);
 
 					// update both inFlightActors and inFlight key range maps, cancelling deleted RelocateShards
-					vector<KeyRange> ranges;
+					std::vector<KeyRange> ranges;
 					inFlightActors.getRangesAffectedByInsertion(keys, ranges);
 					inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
 					inFlight.insert(keys, team);

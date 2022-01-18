@@ -30,7 +30,7 @@ const int sampleSize = 10000;
 struct WatchesWorkload : TestWorkload {
 	int nodes, keyBytes, extraPerNode;
 	double testDuration;
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter cycles;
 	ContinuousSample<double> cycleLatencies;
 	std::vector<int> nodeOrder;
@@ -66,7 +66,7 @@ struct WatchesWorkload : TestWorkload {
 		return ok;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		if (clientId == 0) {
 			m.push_back(cycles.getMetric());
 			m.emplace_back("Mean Latency (ms)", 1000 * cycleLatencies.mean() / nodes, Averaged::True);
@@ -85,7 +85,7 @@ struct WatchesWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _setup(Database cx, WatchesWorkload* self) {
-		vector<Future<Void>> setupActors;
+		std::vector<Future<Void>> setupActors;
 		for (int i = 0; i < self->nodes; i++)
 			if (i % self->clientCount == self->clientId)
 				setupActors.push_back(self->watcherInit(cx,

@@ -96,7 +96,7 @@ struct ConfigError {
 class ProfilerConfigT {
 private: // private types
 	using Lock = std::unique_lock<std::mutex>;
-	friend class crossbow::create_static<ProfilerConfigT>;
+	friend struct crossbow::create_static<ProfilerConfigT>;
 
 private: // members
 	std::shared_ptr<SampleIngestor> ingestor = std::make_shared<NoneIngestor>();

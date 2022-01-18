@@ -48,7 +48,7 @@ struct GetRangeStream : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>& m) override { m.push_back(bytesRead.getMetric()); }
+	void getMetrics(std::vector<PerfMetric>& m) override { m.push_back(bytesRead.getMetric()); }
 
 	ACTOR static Future<Void> logThroughput(GetRangeStream* self, Key* next) {
 		loop {
