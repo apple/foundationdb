@@ -556,6 +556,9 @@ extern const KeyRangeRef blobGranuleLockKeys;
 // \xff\x02/bgs/(parentGranuleUID, granuleUID) = [[BlobGranuleSplitState]]
 extern const KeyRangeRef blobGranuleSplitKeys;
 
+// \xff\x02/bgsb/(parentGranuleID, granuleStartKey) = []
+extern const KeyRangeRef blobGranuleSplitBoundaryKeys;
+
 // \xff\x02/bgh/(beginKey,endKey,startVersion) = { granuleUID, [parentGranuleHistoryKeys] }
 extern const KeyRangeRef blobGranuleHistoryKeys;
 
@@ -588,6 +591,10 @@ const KeyRange blobGranuleSplitKeyRangeFor(UID const& parentGranuleID);
 // these are versionstamped
 const Value blobGranuleSplitValueFor(BlobGranuleSplitState st);
 std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(ValueRef const& value);
+
+const Key blobGranuleSplitBoundaryKeyFor(UID const& parentGranuleID, KeyRef const& granuleStart);
+std::pair<UID, Key> decodeBlobGranuleSplitBoundaryKey(KeyRef const& key);
+const KeyRange blobGranuleSplitBoundaryKeyRangeFor(UID const& parentGranuleID);
 
 const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version);
 std::pair<KeyRange, Version> decodeBlobGranuleHistoryKey(KeyRef const& key);

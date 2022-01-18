@@ -1129,6 +1129,7 @@ const KeyRangeRef blobGranuleFileKeys(LiteralStringRef("\xff\x02/bgf/"), Literal
 const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff\x02/bgm/"), LiteralStringRef("\xff\x02/bgm0"));
 const KeyRangeRef blobGranuleLockKeys(LiteralStringRef("\xff\x02/bgl/"), LiteralStringRef("\xff\x02/bgl0"));
 const KeyRangeRef blobGranuleSplitKeys(LiteralStringRef("\xff\x02/bgs/"), LiteralStringRef("\xff\x02/bgs0"));
+const KeyRangeRef blobGranuleSplitBoundaryKeys(LiteralStringRef("\xff\x02/bgsb/"), LiteralStringRef("\xff\x02/bgsb0"));
 const KeyRangeRef blobGranuleHistoryKeys(LiteralStringRef("\xff\x02/bgh/"), LiteralStringRef("\xff\x02/bgh0"));
 const KeyRangeRef blobGranulePruneKeys(LiteralStringRef("\xff\x02/bgp/"), LiteralStringRef("\xff\x02/bgp0"));
 const KeyRef blobGranulePruneChangeKey = LiteralStringRef("\xff\x02/bgpChange");
@@ -1281,6 +1282,34 @@ std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(const Valu
 	reader >> v;
 
 	return std::pair(st, bigEndian64(v));
+}
+
+const Key blobGranuleSplitBoundaryKeyFor(UID const& parentGranuleID, KeyRef const& granuleStart) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobGranuleSplitBoundaryKeys.begin);
+	wr << parentGranuleID;
+	wr << granuleStart;
+	return wr.toValue();
+}
+
+std::pair<UID, Key> decodeBlobGranuleSplitBoundaryKey(KeyRef const& key) {
+	UID parentGranuleID;
+	Key granuleStart;
+	BinaryReader reader(key.removePrefix(blobGranuleSplitBoundaryKeys.begin),
+	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
+
+	reader >> parentGranuleID;
+	reader >> granuleStart;
+	return std::pair(parentGranuleID, granuleStart);
+}
+
+const KeyRange blobGranuleSplitBoundaryKeyRangeFor(UID const& parentGranuleID) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobGranuleSplitBoundaryKeys.begin);
+	wr << parentGranuleID;
+
+	Key startKey = wr.toValue();
+	return KeyRangeRef(startKey, strinc(startKey));
 }
 
 const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version) {
