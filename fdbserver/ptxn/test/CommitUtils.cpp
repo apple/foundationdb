@@ -61,10 +61,10 @@ void CommitRecord::updateVersionInformation() {
 	firstVersion = std::begin(messages)->first;
 	lastVersion = std::rbegin(messages)->first;
 
-	for(const auto& [version, storageTeamSubsequenceMessages] : messages) {
-		for(const auto& [storageTeamID, subsequenceMessages] : storageTeamSubsequenceMessages) {
+	for (const auto& [version, storageTeamSubsequenceMessages] : messages) {
+		for (const auto& [storageTeamID, subsequenceMessages] : storageTeamSubsequenceMessages) {
 			if (storageTeamEpochVersionRange.count(storageTeamID) == 0) {
-				storageTeamEpochVersionRange[storageTeamID] = {version, version + 1};
+				storageTeamEpochVersionRange[storageTeamID] = { version, version + 1 };
 			} else {
 				// Note that the end version is not inclusiv
 				storageTeamEpochVersionRange[storageTeamID].second = version + 1;

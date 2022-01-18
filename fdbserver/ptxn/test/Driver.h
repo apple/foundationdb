@@ -359,9 +359,9 @@ public:
 
 	TestEnvironment& initMessages(const int initialVersion, const int numVersions, const int numMutationsInVersion);
 	TestEnvironment& initMessagesWithPrivateMutations(const int initialVersion,
-	                                               const int numVersions,
-	                                               const int numMutationsInVersion,
-	                                               Optional<std::vector<UID>> optionalStorageServerIDs);
+	                                                  const int numVersions,
+	                                                  const int numMutationsInVersion,
+	                                                  Optional<std::vector<UID>> optionalStorageServerIDs);
 
 	TestEnvironment& initServerDBInfo();
 
