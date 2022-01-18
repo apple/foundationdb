@@ -223,43 +223,12 @@ static Key persistStorageTeamKey() {
 	return wr.toValue();
 }
 
-static Value persistStorageTeamValue(
-    std::unordered_map<ptxn::TLogGroupID, std::map<StorageTeamID, std::vector<Tag>>> vs) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withPartitionTransaction()));
-	std::vector<std::pair<TLogGroupID, std::vector<std::pair<StorageTeamID, std::vector<Tag>>>>> content;
-	for (auto& it : vs) {
-		std::vector<std::pair<StorageTeamID, std::vector<Tag>>> teams;
-		for (auto& team : it.second) {
-			teams.push_back(std::make_pair(team.first, team.second));
-		}
-		content.push_back(std::make_pair(it.first, teams));
-	}
-	wr << content;
-	return wr.toValue();
-}
-
 static Value persistStorageTeamPoppedValue(Version popped) {
 	return BinaryWriter::toValue(popped, Unversioned());
 }
 
 static StorageTeamID decodeStorageTeamIDPoppedKey(KeyRef key) {
 	return BinaryReader::fromStringRef<StorageTeamID>(key, Unversioned());
-}
-
-static std::unordered_map<ptxn::TLogGroupID, std::map<StorageTeamID, std::vector<Tag>>> decodePersistStorageTeamValue(
-    ValueRef const& value) {
-	std::unordered_map<ptxn::TLogGroupID, std::map<StorageTeamID, std::vector<Tag>>> groupToTeams;
-	std::vector<std::pair<TLogGroupID, std::vector<std::pair<StorageTeamID, std::vector<Tag>>>>> content;
-	BinaryReader reader(value, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
-	reader >> content;
-	for (auto& it : content) {
-		std::map<StorageTeamID, std::vector<Tag>> team;
-		for (auto& sub : it.second) {
-			team[sub.first] = sub.second;
-		}
-		groupToTeams[it.first] = team;
-	}
-	return groupToTeams;
 }
 
 static std::pair<std::vector<Tag>, Version> decodePairValue(ValueRef value) {
@@ -658,7 +627,6 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	                           TLogSpillType logSpillType,
 	                           std::map<ptxn::StorageTeamID, std::vector<Tag>>& storageTeams,
 	                           int8_t locality,
-	                           //    UID epoch,
 	                           const std::string& context)
 	  : tlogGroupData(tlogGroupData), logId(interf.id()), cc("TLog", interf.id().toString()),
 	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), protocolVersion(protocolVersion),
@@ -1674,7 +1642,6 @@ ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
 		                                           logSpillType,
 		                                           storageTeams[id1],
 		                                           0, // TODO: find whether/why we need this parameter
-		                                           //    id1,  // TODO: find whether we need this parameter
 		                                           "Restored");
 		logData->locality = id_locality[id1];
 		logData->stopped = true;
@@ -1885,7 +1852,6 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializePtxnTLogR
 		                                                                                  req.spillType,
 		                                                                                  group.storageTeams,
 		                                                                                  req.locality,
-		                                                                                  //   req.epoch,
 		                                                                                  "Recruited");
 		// groups belong to the same interface(implying they have the same generation) share the same key(i.e.
 		// interface.id) it will be persisted in each group, during recovery we will aggregate it by interface.id and
