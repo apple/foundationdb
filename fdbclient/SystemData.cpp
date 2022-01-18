@@ -442,11 +442,11 @@ StorageServerStorageTeams& StorageServerStorageTeams::erase(const StorageTeamID&
 }
 
 const Value StorageServerStorageTeams::toValue() const {
-        return encodeStorageServerToTeamIdValue(privateMutationsStorageTeamID, storageTeamIDs);
+	return encodeStorageServerToTeamIdValue(privateMutationsStorageTeamID, storageTeamIDs);
 }
 
 std::string StorageServerStorageTeams::toString() const {
-        return concatToString("{", privateMutationsStorageTeamID, ", {", joinToString(storageTeamIDs), "}}");
+	return concatToString("{", privateMutationsStorageTeamID, ", {", joinToString(storageTeamIDs), "}}");
 }
 
 } // namespace ptxn

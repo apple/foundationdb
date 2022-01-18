@@ -40,7 +40,6 @@ public:
 	double MAX_COMMIT_BATCH_INTERVAL; // Each commit proxy generates a CommitTransactionBatchRequest at least this
 	                                  // often, so that versions always advance smoothly
 
-
 	bool ENABLE_PARTITIONED_TRANSACTIONS;
 
 	// TLogs

@@ -93,7 +93,7 @@ std::string joinToString(const Container& container, const std::string separator
 	std::string result = ss.str();
 	if (!containerEmpty) {
 		// Removing tailing ", "
-		for(size_t i = 0; i < separator.size(); ++i) {
+		for (size_t i = 0; i < separator.size(); ++i) {
 			result.pop_back();
 		}
 	}
