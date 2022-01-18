@@ -74,12 +74,10 @@ struct SSCheckpointWorkload : TestWorkload {
 		state Value oldValue = "TestValue"_sr;
 		state Value newValue = "TestNewValue"_sr;
 
-		state version = wait(self->writeAndVerify(self, cx, key, oldValue));
+		state Version version = wait(self->writeAndVerify(self, cx, key, oldValue));
 
 		std::cout << "Initialized" << std::endl;
 
-		// Disable DD to avoid DD undoing of our move.
-		int ignore = wait(setDDMode(cx, 0));
 		loop {
 			try {
 				std::cout << "Creating checkpoint." << std::endl;
@@ -180,9 +178,6 @@ struct SSCheckpointWorkload : TestWorkload {
 		// 	}
 		// }
 
-		std::cout << "Done verify." << std::endl;
-
-		int ignore = wait(setDDMode(cx, 1));
 		return Void();
 	}
 
@@ -214,7 +209,7 @@ struct SSCheckpointWorkload : TestWorkload {
 
 	ACTOR Future<Version> writeAndVerify(SSCheckpointWorkload* self, Database cx, Key key, Optional<Value> value) {
 		state Transaction tr(cx);
-		Version version;
+		state Version version;
 		loop {
 			try {
 				if (value.present()) {

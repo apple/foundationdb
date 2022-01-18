@@ -6884,7 +6884,7 @@ ACTOR Future<CheckpointRecord> createCheckpoint(Database cx, KeyRange keys, Vers
 			// 	throw unknown_change_feed();
 			// }
 
-			const int idx = nondeterministicRandom()->randomInt(0, locations[0].second->size());
+			const int idx = deterministicRandom()->randomInt(0, locations[0].second->size());
 			TraceEvent("CreateCheckpointSendingRequest")
 			    .detail("TargetStorageServer", locations[0].second->getInterface(idx).toString());
 
