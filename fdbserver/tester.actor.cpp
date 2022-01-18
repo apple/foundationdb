@@ -256,18 +256,14 @@ Standalone<VectorRef<KeyValueRef>> checkAllOptionsConsumed(VectorRef<KeyValueRef
 }
 
 struct CompoundWorkload : TestWorkload {
-	std::vector<TestWorkload*> workloads;
+	std::vector<Reference<TestWorkload>> workloads;
 
 	CompoundWorkload(WorkloadContext& wcx) : TestWorkload(wcx) {}
-	CompoundWorkload* add(TestWorkload* w) {
-		workloads.push_back(w);
+	CompoundWorkload* add(Reference<TestWorkload>&& w) {
+		workloads.push_back(std::move(w));
 		return this;
 	}
 
-	~CompoundWorkload() override {
-		for (int w = 0; w < workloads.size(); w++)
-			delete workloads[w];
-	}
 	std::string description() const override {
 		std::string d;
 		for (int w = 0; w < workloads.size(); w++)
@@ -345,9 +341,9 @@ struct CompoundWorkload : TestWorkload {
 	}
 };
 
-TestWorkload* getWorkloadIface(WorkloadRequest work,
-                               VectorRef<KeyValueRef> options,
-                               Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+Reference<TestWorkload> getWorkloadIface(WorkloadRequest work,
+                                         VectorRef<KeyValueRef> options,
+                                         Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	Value testName = getOption(options, LiteralStringRef("testName"), LiteralStringRef("no-test-specified"));
 	WorkloadContext wcx;
 	wcx.clientId = work.clientId;
@@ -356,7 +352,7 @@ TestWorkload* getWorkloadIface(WorkloadRequest work,
 	wcx.options = options;
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
 
-	TestWorkload* workload = IWorkloadFactory::create(testName.toString(), wcx);
+	auto workload = IWorkloadFactory::create(testName.toString(), wcx);
 
 	auto unconsumedOptions = checkAllOptionsConsumed(workload ? workload->options : VectorRef<KeyValueRef>());
 	if (!workload || unconsumedOptions.size()) {
@@ -375,14 +371,13 @@ TestWorkload* getWorkloadIface(WorkloadRequest work,
 				        " '%s' = '%s'\n",
 				        unconsumedOptions[i].key.toString().c_str(),
 				        unconsumedOptions[i].value.toString().c_str());
-			delete workload;
 		}
 		throw test_specification_invalid();
 	}
 	return workload;
 }
 
-TestWorkload* getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+Reference<TestWorkload> getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	if (work.options.size() < 1) {
 		TraceEvent(SevError, "TestCreationError").detail("Reason", "No options provided");
 		fprintf(stderr, "ERROR: No options were provided for workload.\n");
@@ -397,10 +392,9 @@ TestWorkload* getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDB
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
 	// FIXME: Other stuff not filled in; why isn't this constructed here and passed down to the other
 	// getWorkloadIface()?
-	CompoundWorkload* compound = new CompoundWorkload(wcx);
+	auto compound = makeReference<CompoundWorkload>(wcx);
 	for (int i = 0; i < work.options.size(); i++) {
-		TestWorkload* workload = getWorkloadIface(work, work.options[i], dbInfo);
-		compound->add(workload);
+		compound->add(getWorkloadIface(work, work.options[i], dbInfo));
 	}
 	return compound;
 }
@@ -526,9 +520,8 @@ void sendResult(ReplyPromise<T>& reply, Optional<ErrorOr<T>> const& result) {
 
 ACTOR Future<Void> runWorkloadAsync(Database cx,
                                     WorkloadInterface workIface,
-                                    TestWorkload* workload,
+                                    Reference<TestWorkload> workload,
                                     double databasePingDelay) {
-	state std::unique_ptr<TestWorkload> delw(workload);
 	state Optional<ErrorOr<Void>> setupResult;
 	state Optional<ErrorOr<Void>> startResult;
 	state Optional<ErrorOr<CheckReply>> checkResult;
@@ -654,7 +647,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 
 		// add test for "done" ?
 		TraceEvent("WorkloadReceived", workIface.id()).detail("Title", work.title);
-		TestWorkload* workload = getWorkloadIface(work, dbInfo);
+		auto workload = getWorkloadIface(work, dbInfo);
 		if (!workload) {
 			TraceEvent("TestCreationError").detail("Reason", "Workload could not be created");
 			fprintf(stderr, "ERROR: The workload could not be created.\n");

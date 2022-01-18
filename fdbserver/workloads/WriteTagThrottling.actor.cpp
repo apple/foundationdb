@@ -236,8 +236,8 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 				// give tag to client
 				if (self->writeThrottle) {
 					ASSERT(CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION >= MIN_TAGS_PER_TRANSACTION);
-					tr.options.tags.clear();
-					tr.options.readTags.clear();
+					tr.trState->options.tags.clear();
+					tr.trState->options.readTags.clear();
 					if (isBadActor) {
 						tr.setOption(FDBTransactionOptions::AUTO_THROTTLE_TAG, self->badTag);
 					} else if (deterministicRandom()->coinflip()) {

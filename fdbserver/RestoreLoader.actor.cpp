@@ -891,8 +891,8 @@ ACTOR Future<Void> sendMutationsToApplier(
 				for (splitMutationIndex = 0; splitMutationIndex < mvector.size(); splitMutationIndex++) {
 					MutationRef mutation = mvector[splitMutationIndex];
 					UID applierID = nodeIDs[splitMutationIndex];
-					DEBUG_MUTATION("RestoreLoaderSplittedMutation", commitVersion.version, mutation)
-					    .detail("Version", commitVersion.toString());
+					DEBUG_MUTATION("RestoreLoaderSplitMutation", commitVersion.version, mutation)
+					    .detail("CommitVersion", commitVersion.toString());
 					// CAREFUL: The splitted mutations' lifetime is shorter than the for-loop
 					// Must use deep copy for splitted mutations
 					applierVersionedMutationsBuffer[applierID].push_back_deep(

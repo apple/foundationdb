@@ -76,7 +76,7 @@ struct IndexScanWorkload : KVWorkload {
 		loop {
 			state Transaction tr(cx);
 			try {
-				wait(tr.warmRange(cx, allKeys));
+				wait(tr.warmRange(allKeys));
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));

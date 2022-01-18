@@ -877,7 +877,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Span span(deterministicRandom()->randomUniqueID(), "WL:ConsistencyCheck"_loc);
 
 		while (begin < end) {
-			state Reference<CommitProxyInfo> commitProxyInfo = wait(cx->getCommitProxiesFuture(false));
+			state Reference<CommitProxyInfo> commitProxyInfo =
+			    wait(cx->getCommitProxiesFuture(UseProvisionalProxies::False));
 			keyServerLocationFutures.clear();
 			for (int i = 0; i < commitProxyInfo->size(); i++)
 				keyServerLocationFutures.push_back(
@@ -1124,7 +1125,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		loop {
 			try {
 				StorageMetrics metrics =
-				    wait(tr.getStorageMetrics(KeyRangeRef(allKeys.begin, keyServersPrefix), 100000));
+				    wait(tr.getDatabase()->getStorageMetrics(KeyRangeRef(allKeys.begin, keyServersPrefix), 100000));
 				return metrics.bytes;
 			} catch (Error& e) {
 				wait(tr.onError(e));

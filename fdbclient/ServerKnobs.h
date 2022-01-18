@@ -736,6 +736,9 @@ public:
 	int LATENCY_SAMPLE_SIZE;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
 
+	// Cluster recovery
+	std::string CLUSTER_RECOVERY_EVENT_NAME_PREFIX;
+
 	// blob granule stuff
 	// FIXME: configure url with database configuration instead of knob eventually
 	std::string BG_URL;
