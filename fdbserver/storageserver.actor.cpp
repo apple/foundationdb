@@ -5108,63 +5108,52 @@ void initializeUpdateCursor(ptxn::StorageServer& storageServerContext) {
 	    });
 }
 
-ACTOR Future<bool> loadFromRemote(ptxn::StorageServer* storageServerContext) {
-	ASSERT(storageServerContext->logCursor);
+ACTOR Future<Void> updateImpl(std::shared_ptr<ptxn::StorageServer> storageServerContext, bool* pReceivedRemoteData) {
 
-	state Timing beforeTLogCursorReads;
-	try {
-		loop {
-			state bool remoteAvailable = wait(storageServerContext->logCursor->remoteMoreAvailable());
-			if (remoteAvailable) {
-				break;
+	state Stopwatch stopwatch;
+
+	state std::shared_ptr<ptxn::PeekCursorBase> cursor = storageServerContext->logCursor;
+	ASSERT(cursor);
+
+	// FIXME rethink this
+	ASSERT(!cursor->hasRemaining());
+
+	stopwatch.lap();
+	loop {
+		try {
+			state bool remoteDataRetrieved = wait(cursor->remoteMoreAvailable());
+		} catch (Error& err) {
+			if (err.code() == error_code_end_of_stream) {
+				TraceEvent("CursorEndOfStream", storageServerContext->thisServerID);
+			}
+			// FIXME Rethink this
+			if (err.code())
+				throw;
+		}
+		if (remoteDataRetrieved) {
+			for (const auto& vsm : *cursor) {
+				std::cout << vsm.toString() << std::endl;
 			}
 		}
-	} catch (Error& error) {
-		if (error.code() == error_code_end_of_stream) {
-			return false;
-		}
-		throw error;
 	}
-	storageServerContext->tlogCursorReadsLatencyHistogram->sampleSeconds(beforeTLogCursorReads.duration());
-
-	return true;
-}
-
-ACTOR Future<Void> updateImpl(std::shared_ptr<ptxn::StorageServer> storageServerContext, bool* pReceivedRemoteData) {
-	state bool remoteAvailable = wait(loadFromRemote(storageServerContext.get()));
-	if (!remoteAvailable) {
-		// TODO throw worker_removed() since all cursor has retired
-		return Void();
-	}
-
-	// FIXME check if popped??
-
-	ASSERT(!*pReceivedRemoteData);
-	*pReceivedRemoteData = true;
-
-	// Scan the
-
-	// Eager
-
-	return Void();
 }
 
 // Reads data from TLogs and persists to KVStore
-ACTOR Future<Void> update(std::shared_ptr<ptxn::StorageServer> data, bool* pReceivedRemoteData) {
+ACTOR Future<Void> update(std::shared_ptr<ptxn::StorageServer> storageServerContext, bool* pReceivedRemoteData) {
 	try {
-		wait(updateImpl(data, pReceivedRemoteData));
-
-		loop { wait(delay(1.0)); }
+		wait(updateImpl(storageServerContext, pReceivedRemoteData));
 	} catch (Error& error) {
 		// Need a local copy of error as there is a wait in the catch clause
 		state Error error_ = error;
 		if (error.code() != error_code_worker_removed && error.code() != error_code_please_reboot) {
-			TraceEvent(SevError, "SSUpdateError", data->thisServerID).error(error).backtrace();
+			TraceEvent(SevError, "SSUpdateError", storageServerContext->thisServerID).error(error).backtrace();
 		} else if (error.code() == error_code_please_reboot) {
-			wait(data->durableInProgress);
+			wait(storageServerContext->durableInProgress);
 		}
 		throw error_;
 	}
+
+	return Void();
 }
 
 } // namespace ptxn

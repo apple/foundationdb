@@ -313,11 +313,11 @@ void MessageFixture::setUp(const TLogGroupFixture& tLogGroupFixture,
 }
 
 void MessageWithPrivateMutationsFixture::setUp(const TLogGroupWithPrivateMutationsFixture& tLogGroupFixture,
-                                            const int initialVersion,
-                                            const int numVersions,
-                                            const int numMutationsInVersion,
-                                            const StorageTeamID& privateMutationStorageTeamID,
-                                            const std::vector<UID>& storageServerIDs) {
+                                               const int initialVersion,
+                                               const int numVersions,
+                                               const int numMutationsInVersion,
+                                               const StorageTeamID& privateMutationStorageTeamID,
+                                               const std::vector<UID>& storageServerIDs) {
 	// FIXME Think about generations
 
 	test::print::PrintTiming printTiming("MessageWithPrivateMutationsFixture::setUp");
@@ -328,9 +328,10 @@ void MessageWithPrivateMutationsFixture::setUp(const TLogGroupWithPrivateMutatio
 
 	// All storage team ids but the private mutation team
 	auto storageTeamIDs = tLogGroupFixture.storageTeamIDs;
-	storageTeamIDs.erase(
-	    std::remove(std::begin(storageTeamIDs), std::end(storageTeamIDs), tLogGroupFixture.privateMutationsStorageTeamID),
-	    std::end(storageTeamIDs));
+	storageTeamIDs.erase(std::remove(std::begin(storageTeamIDs),
+	                                 std::end(storageTeamIDs),
+	                                 tLogGroupFixture.privateMutationsStorageTeamID),
+	                     std::end(storageTeamIDs));
 	printTiming << "Excluded storage team ID: " << tLogGroupFixture.privateMutationsStorageTeamID << std::endl;
 
 	Version storageTeamVersion = 0;
@@ -464,33 +465,33 @@ std::string ptxnStorageServerFixture::StorageServerResources::getFolder() const 
 ptxnStorageServerFixture::StorageServerResources::StorageServerResources(const StorageTeamID& storageTeamID_)
   : storageTeamID(storageTeamID_),
     interface(std::make_shared<::StorageServerInterface>(deterministicRandom()->randomUniqueID())),
+    clusterID(deterministicRandom()->randomUniqueID()),
     /* IKeyValueStore has protected destructor and is not intended to be deleted, since we are doing test we tolerate
        this memory leakage */
     kvStore(openKVStore(keyValueStoreType, getFolder(), interface->id(), MEMORY_LIMIT), [](IKeyValueStore* _) {}),
     seedTag(Tag(tagLocalitySpecial, deterministicRandom()->randomInt(1, 65536))), seedVersion(0) {}
 
 void ptxnStorageServerFixture::setUp(const int numStorageServers) {
-	// TODO At this stage the number of storage servers should equal to the number of storage team ids, i.e. 1 -- 1
-	// mapping relationship, but this is not true in the future.
-	ASSERT(numStorageServers == static_cast<int>(tLogGroupFixture.storageTeamIDs.size()));
+	// FIXME At this stage we only support one single storage server, as there is only one private mutation team
+	ASSERT(numStorageServers == 1);
 
 	const auto& asyncServerDBInfoRef = serverDBInfoFixture.getAsyncServerDBInfoRef();
-	for (const auto& storageTeamID : tLogGroupFixture.storageTeamIDs) {
-		storageServerResources.emplace_back(storageTeamID);
-		initializeStorageReplies.emplace_back();
+	const auto& storageTeamID =
+	    dynamic_cast<const TLogGroupWithPrivateMutationsFixture&>(tLogGroupFixture).privateMutationsStorageTeamID;
+	storageServerResources.emplace_back(storageTeamID);
+	initializeStorageReplies.emplace_back();
 
-		const auto& resource = storageServerResources.back();
-		const auto& initializeReply = initializeStorageReplies.back();
-		actors.push_back(storageServer(resource.kvStore.get(),
-		                               *resource.interface,
-		                               resource.seedTag,
-		                               /* clusterId */ deterministicRandom()->randomUniqueID(),
-		                               resource.seedVersion,
-		                               initializeReply,
-		                               asyncServerDBInfoRef,
-		                               /* folder */ "./",
-		                               storageTeamID));
-	}
+	const auto& resource = storageServerResources.back();
+	const auto& initializeReply = initializeStorageReplies.back();
+	actors.push_back(storageServer(resource.kvStore.get(),
+	                               *resource.interface,
+	                               resource.seedTag,
+	                               /* clusterId */ deterministicRandom()->randomUniqueID(),
+	                               resource.seedVersion,
+	                               initializeReply,
+	                               asyncServerDBInfoRef,
+	                               /* folder */ "./",
+	                               storageTeamID));
 }
 
 ptxnStorageServerFixture::~ptxnStorageServerFixture() {
@@ -569,7 +570,7 @@ TestEnvironment& TestEnvironment::initTLogGroup(const int numTLogGroupIDs, const
 }
 
 TestEnvironment& TestEnvironment::initTLogGroupWithPrivateMutationsFixture(const int numTLogGroupIDs,
-                                                                        const int numStorageTeamIDs) {
+                                                                           const int numStorageTeamIDs) {
 	ASSERT(pImpl->testDriverContextImpl);
 	ASSERT(!pImpl->tLogGroup);
 
@@ -617,10 +618,11 @@ TestEnvironment& TestEnvironment::initMessages(const int initialVersion,
 }
 
 // storageServerIDs are used if exists, otherwise use the
-TestEnvironment& TestEnvironment::initMessagesWithPrivateMutations(const int initialVersion,
-                                                                const int numVersions,
-                                                                const int numMutationsInVersion,
-                                                                Optional<std::vector<UID>> optionalStorageServerIDs) {
+TestEnvironment& TestEnvironment::initMessagesWithPrivateMutations(
+    const int initialVersion,
+    const int numVersions,
+    const int numMutationsInVersion,
+    Optional<std::vector<UID>> optionalStorageServerIDs) {
 	ASSERT(pImpl->testDriverContextImpl);
 	ASSERT(pImpl->tLogGroup);
 	ASSERT(!pImpl->messages);
