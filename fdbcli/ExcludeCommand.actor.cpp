@@ -33,7 +33,7 @@
 
 namespace {
 
-// Exclue the given servers and localities
+// Exclude the given servers and localities
 ACTOR Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
                                                std::vector<AddressExclusion> servers,
                                                std::unordered_set<std::string> localities,
