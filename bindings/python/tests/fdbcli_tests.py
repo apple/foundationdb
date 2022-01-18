@@ -504,6 +504,18 @@ def profile(logger):
 
 
 @enable_logging()
+def test_available(logger):
+    duration = 0  # seconds we already wait
+    while not get_value_from_status_json(False, 'client', 'database_status', 'available') and duration < 10:
+        logger.debug("Sleep for 1 second to wait cluster recovery")
+        time.sleep(1)
+        duration += 1
+    if duration >= 10:
+        logger.debug(run_fdbcli_command('status', 'json'))
+        assert False
+
+
+@enable_logging()
 def triggerddteaminfolog(logger):
     # this command is straightforward and only has one code path
     output = run_fdbcli_command('triggerddteaminfolog')
@@ -538,6 +550,7 @@ if __name__ == '__main__':
     command_template = [args.build_dir + '/bin/fdbcli', '-C', args.cluster_file, '--exec']
     # tests for fdbcli commands
     # assertions will fail if fdbcli does not work as expected
+    test_available()
     if args.process_number == 1:
         # TODO: disable for now, the change can cause the database unavailable
         # advanceversion()

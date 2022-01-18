@@ -119,7 +119,7 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 		}
 	};
 
-	struct Worker : Threadlike {
+	struct Worker final : Threadlike {
 		Pool* pool;
 		IThreadPoolReceiver* userData;
 		bool stop;

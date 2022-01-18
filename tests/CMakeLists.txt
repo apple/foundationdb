@@ -176,6 +176,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/WriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/WriteDuringReadClean.toml)
   add_fdb_test(TEST_FILES noSim/RandomUnitTests.toml UNIT)
+  add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml IGNORE) # re-enable as needed for RocksDB. Breaks correctness tests if RocksDB is disabled.
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)
   add_fdb_test(TEST_FILES rare/CloggedCycleWithKills.toml)
@@ -315,6 +316,13 @@ if(WITH_PYTHON)
       COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /flow/safeThreadFutureToFuture/
     )
     set_tests_properties("threadsafe_threadfuture_to_future/unit_tests" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
+  endif()
+
+  if(NOT OPEN_FOR_IDE)
+    add_test(
+      NAME command_line_argument_test
+      COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/argument_parsing/test_argument_parsing.py ${CMAKE_BINARY_DIR}
+    )
   endif()
 
   verify_testing()
