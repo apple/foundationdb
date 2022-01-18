@@ -110,18 +110,17 @@ void MockDNS::clearMockTCPEndpoints() {
 
 std::string MockDNS::toString() {
 	std::string ret;
-	int i = 0;
-	for (auto it = hostnameToAddresses.begin(); it != hostnameToAddresses.end(); ++it, ++i) {
+	for (auto it = hostnameToAddresses.begin(); it != hostnameToAddresses.end(); ++it) {
+		if (it != hostnameToAddresses.begin()) {
+			ret += ';';
+		}
 		ret += it->first + ',';
-		std::vector<NetworkAddress> addresses = it->second;
-		for (int j = 0; j < addresses.size(); ++j) {
-			ret += addresses[j].toString();
-			if (j != addresses.size() - 1) {
+		const std::vector<NetworkAddress>& addresses = it->second;
+		for (int i = 0; i < addresses.size(); ++i) {
+			ret += addresses[i].toString();
+			if (i != addresses.size() - 1) {
 				ret += ',';
 			}
-		}
-		if (i != hostnameToAddresses.size() - 1) {
-			ret += ';';
 		}
 	}
 	return ret;
