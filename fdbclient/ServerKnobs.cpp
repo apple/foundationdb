@@ -781,6 +781,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( LATENCY_SAMPLE_SIZE,                                100000 );
 	init( LATENCY_METRICS_LOGGING_INTERVAL,                     60.0 );
 
+	// Cluster recovery
+	init ( CLUSTER_RECOVERY_EVENT_NAME_PREFIX,               "Master");
+
 	// Blob granlues
 	init( BG_URL,                                                 "" ); // TODO: store in system key space, eventually
 	init( BG_SNAPSHOT_FILE_TARGET_BYTES,                    10000000 ); if( randomize && BUGGIFY ) { deterministicRandom()->random01() < 0.1 ? BG_SNAPSHOT_FILE_TARGET_BYTES /= 100 : BG_SNAPSHOT_FILE_TARGET_BYTES /= 10; }

@@ -30,7 +30,7 @@
 
 #include <random>
 
-class DeterministicRandom : public IRandom, public ReferenceCounted<DeterministicRandom> {
+class DeterministicRandom final : public IRandom, public ReferenceCounted<DeterministicRandom> {
 private:
 	std::mt19937 random;
 	uint64_t next;
