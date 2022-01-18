@@ -73,7 +73,6 @@ TEST_CASE("fdbserver/ptxn/test/StorageServerPull") {
 	               [](ReplyPromise<InitializeStorageReply>& reply) { return reply.getFuture(); });
 	wait(waitForAll(initializeStoreReplyFutures));
 
-
 	printTiming << "All storage servers are ready" << std::endl;
 
 	wait(delay(100));
