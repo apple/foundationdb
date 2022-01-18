@@ -71,7 +71,7 @@ This phase locks the coordinated state (cstate) to make sure there is only one m
 Recall that `ServerDBInfo` has master's interface and is propagated by CC to every process in a cluster. The current running tLogs can use the master interface in its `ServerDBInfo` to send itself's interface to master.
 Master simply waits on receiving the `TLogRejoinRequest` streams: for each tLog’s interface received, the master compares the interface ID with the tLog ID read from cstate. Once the master collects enough old tLog interfaces, it will use the interfaces to lock those tLogs.
 The logic of collecting tLogs’ interfaces is implemented in `trackRejoins()` function.
-The logic of locking the tLogs is implemented in `epochEnd()` function in [TagPartitionedLogSystems.actor.cpp](https://github.com/apple/foundationdb/blob/master/fdbserver/TagPartitionedLogSystem.actor.cpp).
+The logic of locking the tLogs is implemented in `epochEnd()` function in [TagPartitionedLogSystems.actor.cpp](https://github.com/apple/foundationdb/blob/main/fdbserver/TagPartitionedLogSystem.actor.cpp).
 
 
 Once we lock the cstate, we bump the `recoveryCount` by 1 and write the `recoveryCount` to the cstate. Each tLog in a recovery attempt records the `recoveryCount` and monitors the change of the variable. If the `recoveryCount` increases, becoming larger than the recorded value, the tLog will terminate itself. This mechanism makes sure that when multiple recovery attempts happen concurrently, only tLogs in the most recent recovery will be running. tLogs in other recovery attempts can release their memory earlier, reducing the memory pressure during recovery. This is an important memory optimization before shared tLogs, which allows tLogs in different generations to share the same memory, is introduced.
@@ -118,7 +118,7 @@ Consider an old generation with three TLogs: `A, B, C`. Their durable versions a
 * Situation 2: A tLog may die after it reports alive to the CC in the RECRUITING phase. This may cause the `knownCommittedVersion` calculated by the CC in this phase to no longer be valid in the next phases. When this happens, the CC will detect it, terminate the current recovery, and start a new recovery.
 
 
-Once we have a `knownCommittedVersion`, the CC will reconstruct the [transaction state store](https://github.com/apple/foundationdb/blob/master/design/transaction-state-store.md) by peeking the txnStateTag in oldLogSystem.
+Once we have a `knownCommittedVersion`, the CC will reconstruct the [transaction state store](https://github.com/apple/foundationdb/blob/main/design/transaction-state-store.md) by peeking the txnStateTag in oldLogSystem.
 Recall that the txnStateStore includes the transaction system’s configuration, such as the assignment of shards to SS and to tLogs and that the txnStateStore was durable on disk in the oldLogSystem.
 Once we get the txnStateStore, we know the configuration of the transaction system, such as the number of GRV proxies and commit proxies. The CC recruits roles for the new generation in the `recruitEverything()` function. Those recruited roles includes GRV proxies, commit proxies, tLogs and seed SSes, which are the storage servers created for an empty database in the first generation to host the first shard and serve as the starting point of the bootstrap process to recruit more SSes. Once all roles are recruited, the CC starts a new epoch in `newEpoch()`.
 
