@@ -280,7 +280,11 @@ enum _ESOFlags {
 	SO_O_ICASE_WORD = 0x0400,
 
 	/*! Case-insensitive comparisons for all arg types */
-	SO_O_ICASE = 0x0700
+	SO_O_ICASE = 0x0700,
+
+	/*! Treat all hyphens from flag names as underscores except leading hyphens
+	    For example: --cluster-file ==> --cluster_file while comparing. */
+	SO_O_HYPHEN_TO_UNDERSCORE = 0x1000
 };
 
 /*! Types of arguments that options may have. Note that some of the _ESOFlags
@@ -912,8 +916,9 @@ int CSimpleOptTempl<SOCHAR>::CalcMatch(const SOCHAR* a_pszSource, const SOCHAR* 
 			return -1;
 		}
 
-		// and the source is a "wildcard option", then it's a perfect match (e.g. "--knob_" matches "--knob_foo")
-		if (a_pszSource[-1] == '_') {
+		// and the source is a "wildcard option", then it's a perfect match (e.g. "--knob_" or "--knob-" matches
+		// "--knob_foo" and "--knob-foo")
+		if (a_pszSource[-1] == '_' || a_pszSource[-1] == '-') {
 			return -1;
 		}
 
@@ -940,6 +945,14 @@ bool CSimpleOptTempl<SOCHAR>::IsEqual(SOCHAR a_cLeft, SOCHAR a_cRight, int a_nAr
 			a_cLeft += 'a' - 'A';
 		if (a_cRight >= 'A' && a_cRight <= 'Z')
 			a_cRight += 'a' - 'A';
+	}
+	if (m_nFlags & SO_O_HYPHEN_TO_UNDERSCORE) {
+		if (a_cLeft == (SOCHAR)'-') {
+			a_cLeft = (SOCHAR)'_';
+		}
+		if (a_cRight == (SOCHAR)'-') {
+			a_cRight = (SOCHAR)'_';
+		}
 	}
 	return a_cLeft == a_cRight;
 }

@@ -613,7 +613,7 @@ minor impacts on recovery times:
 : How many bytes of memory can be allocated to hold the results of reads from disk to respond to peek requests.<br>
   Increasing it will increase the number of parallel peek requests a TLog can handle at once.<br>
 	Decreasing it will reduce TLog memory usage.<br>
-	If increased, `--max_memory` should be increased by the same amount.<br>
+	If increased, `--memory` should be increased by the same amount.<br>
 
 `TLOG_DISK_QUEUE_EXTENSION_BYTES`
 : When a DiskQueue needs to extend a file, by how many bytes should it extend the file.<br>
