@@ -104,12 +104,12 @@ struct StorageServerTestDriver : ServerTestDriver {
 namespace {
 class TemporaryDisablePartitionedTransactionKnob {
 private:
-	const int m_partitionedTransactions;
+	const bool m_partitionedTransactions;
 
 public:
 	TemporaryDisablePartitionedTransactionKnob()
 	  : m_partitionedTransactions(SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
-		const_cast<ServerKnobs*>(SERVER_KNOBS)->ENABLE_PARTITIONED_TRANSACTIONS = 0;
+		const_cast<ServerKnobs*>(SERVER_KNOBS)->ENABLE_PARTITIONED_TRANSACTIONS = false;
 	}
 	~TemporaryDisablePartitionedTransactionKnob() {
 		const_cast<ServerKnobs*>(SERVER_KNOBS)->ENABLE_PARTITIONED_TRANSACTIONS = m_partitionedTransactions;
