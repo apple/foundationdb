@@ -236,6 +236,13 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 						continue;
 					}
 
+					// If tenants are required, then check that a tenant was set
+					if (!req.tenantInfo.name.present() && !commitData->allowDefaultTenant) {
+						++commitData->stats.txnCommitErrors;
+						req.reply.sendError(tenant_name_required());
+						continue;
+					}
+
 					if (bytes > FLOW_KNOBS->PACKET_WARNING) {
 						TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "LargeTransaction")
 						    .suppressFor(1.0)
@@ -567,7 +574,6 @@ bool canReject(const std::vector<CommitTransactionRequest>& trs) {
 }
 
 ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
-
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	state std::vector<CommitTransactionRequest>& trs = self->trs;
 	state const int64_t localBatchNumber = self->localBatchNumber;
@@ -762,6 +768,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				                       self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations,
 				                       /* pToCommit= */ nullptr,
 				                       self->forceRecovery,
+				                       /* version= */ self->commitVersion,
 				                       /* popVersion= */ 0,
 				                       /* initialCommit */ false);
 			}
@@ -836,6 +843,34 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 	}
 }
 
+ErrorOr<Void> checkTenant(ProxyCommitData* commitData, CommitTransactionRequest const& tr, Version commitVersion) {
+	if (tr.tenantInfo.name.present()) {
+		auto view = commitData->tenantMap.at(commitVersion);
+		auto itr = view.find(tr.tenantInfo.name.get());
+		if (itr == view.end()) {
+			return tenant_not_found();
+		}
+
+		for (auto mutation : tr.transaction.mutations) {
+			if (!mutation.param1.startsWith(*itr) ||
+			    (mutation.type == MutationRef::ClearRange && !mutation.param2.startsWith(*itr))) {
+				TraceEvent(SevWarn, "KeyNotInTenant", commitData->dbgid)
+				    .detail("Tenant", tr.tenantInfo.name.get())
+				    .detail("TenantPrefix", *itr)
+				    .detail("Key", mutation.param1)
+				    .detail("EndKey",
+				            mutation.type == MutationRef::ClearRange ? mutation.param2 : Optional<StringRef>());
+				throw key_not_in_tenant();
+			}
+		}
+	} else if (!commitData->allowDefaultTenant) {
+		// We already check this when the request came in, but it's possible the configuration has changed
+		return tenant_name_required();
+	}
+
+	return Void();
+}
+
 // This first pass through committed transactions deals with "metadata" effects (modifications of txnStateStore, changes
 // to storage servers' responsibilities)
 ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self) {
@@ -845,16 +880,24 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
-			self->commitCount++;
-			applyMetadataMutations(trs[t].spanContext,
-			                       *pProxyCommitData,
-			                       self->arena,
-			                       pProxyCommitData->logSystem,
-			                       trs[t].transaction.mutations,
-			                       &self->toCommit,
-			                       self->forceRecovery,
-			                       self->commitVersion + 1,
-			                       /* initialCommit= */ false);
+			ErrorOr<Void> result = checkTenant(pProxyCommitData, trs[t], self->commitVersion);
+
+			if (result.isError()) {
+				self->committed[t] = ConflictBatch::TransactionTenantFailure;
+				trs[t].reply.sendError(result.getError());
+			} else {
+				self->commitCount++;
+				applyMetadataMutations(trs[t].spanContext,
+				                       *pProxyCommitData,
+				                       self->arena,
+				                       pProxyCommitData->logSystem,
+				                       trs[t].transaction.mutations,
+				                       &self->toCommit,
+				                       self->forceRecovery,
+				                       self->commitVersion,
+				                       self->commitVersion + 1,
+				                       /* initialCommit= */ false);
+			}
 		}
 		if (self->firstStateMutations) {
 			ASSERT(self->committed[t] == ConflictBatch::TransactionCommitted);
@@ -1346,6 +1389,9 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 			tr.reply.send(CommitID(self->commitVersion, t, self->metadataVersionAfter));
 		} else if (self->committed[t] == ConflictBatch::TransactionTooOld) {
 			tr.reply.sendError(transaction_too_old());
+		} else if (self->committed[t] == ConflictBatch::TransactionTenantFailure) {
+			// We already sent the error
+			ASSERT(tr.reply.isSet());
 		} else {
 			// If enable the option to report conflicting keys from resolvers, we send back all keyranges' indices
 			// through CommitID
@@ -1958,6 +2004,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		                       mutations,
 		                       /* pToCommit= */ nullptr,
 		                       confChanges,
+		                       /* version= */ 0,
 		                       /* popVersion= */ 0,
 		                       /* initialCommit= */ true);
 	} // loop

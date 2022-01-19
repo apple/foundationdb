@@ -157,6 +157,8 @@ struct ProxyStats {
 };
 
 struct ProxyCommitData {
+	typedef VersionedMap<Standalone<StringRef>, Key> TenantMap;
+
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
 	ProxyStats stats;
@@ -213,6 +215,10 @@ struct ProxyCommitData {
 	UIDTransactionTagMap<TransactionCommitCostEstimation> ssTrTagCommitCost;
 	double lastMasterReset;
 	double lastResolverReset;
+
+	// TODO: use cluster configuration
+	bool allowDefaultTenant = true;
+	TenantMap tenantMap;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
