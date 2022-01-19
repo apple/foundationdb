@@ -78,7 +78,7 @@ ACTOR Future<bool> setProcessClass(Reference<IDatabase> db, KeyRef network_addre
 	loop {
 		preCheckFilterTr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
-			ThreadFuture<Optional<Value>> result = preCheckFilterTr->get(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin));
+			state ThreadFuture<Optional<Value>> result = preCheckFilterTr->get(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin));
 			Optional<Value> val = wait(safeThreadFutureToFuture(result));
 			if (!val.present()) {
 				printf("No matching addresses found\n");
