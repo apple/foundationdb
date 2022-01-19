@@ -294,14 +294,6 @@ struct WatchValueRequest {
 	WatchValueRequest() {}
 
 	WatchValueRequest(SpanID spanContext,
-	                  const Key& key,
-	                  Optional<Value> value,
-	                  Version ver,
-	                  Optional<TagSet> tags,
-	                  Optional<UID> debugID)
-	  : spanContext(spanContext), value(value), version(ver), tags(tags), debugID(debugID) {}
-
-	WatchValueRequest(SpanID spanContext,
 	                  TenantInfo tenantInfo,
 	                  const Key& key,
 	                  Optional<Value> value,

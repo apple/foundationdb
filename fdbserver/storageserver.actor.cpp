@@ -5224,6 +5224,9 @@ void StorageServer::clearTenants(KeyRef startKey, KeyRef endKey, Version version
 	// TODO: this only works if version is latest version
 	auto view = tenantMap.at(version);
 	for (auto itr = view.lower_bound(startTenant); itr != view.lower_bound(endTenant); ++itr) {
+		// Trigger any watches on the prefix associated with the tenant.
+		watches.triggerRange(*itr, strinc(*itr));
+
 		tenantMap.erase(itr);
 		if (itr->startsWith(lockedTenantPrefix)) {
 			lockedTenantsIndex.erase(*itr);

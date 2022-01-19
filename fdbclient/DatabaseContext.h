@@ -133,6 +133,7 @@ public:
 };
 
 struct WatchParameters : public ReferenceCounted<WatchParameters> {
+	const Optional<TenantName> tenant;
 	const Key key;
 	const Optional<Value> value;
 
@@ -143,7 +144,8 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	const Optional<UID> debugID;
 	const UseProvisionalProxies useProvisionalProxies;
 
-	WatchParameters(Key key,
+	WatchParameters(Optional<TenantName> tenant,
+	                Key key,
 	                Optional<Value> value,
 	                Version version,
 	                TagSet tags,
@@ -151,8 +153,8 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	                TaskPriority taskID,
 	                Optional<UID> debugID,
 	                UseProvisionalProxies useProvisionalProxies)
-	  : key(key), value(value), version(version), tags(tags), spanID(spanID), taskID(taskID), debugID(debugID),
-	    useProvisionalProxies(useProvisionalProxies) {}
+	  : tenant(tenant), key(key), value(value), version(version), tags(tags), spanID(spanID), taskID(taskID),
+	    debugID(debugID), useProvisionalProxies(useProvisionalProxies) {}
 };
 
 class WatchMetadata : public ReferenceCounted<WatchMetadata> {
@@ -275,9 +277,9 @@ public:
 	void removeWatch();
 
 	// watch map operations
-	Reference<WatchMetadata> getWatchMetadata(KeyRef key) const;
-	Key setWatchMetadata(Reference<WatchMetadata> metadata);
-	void deleteWatchMetadata(KeyRef key);
+	Reference<WatchMetadata> getWatchMetadata(Optional<TenantName> tenant, KeyRef key) const;
+	void setWatchMetadata(Reference<WatchMetadata> metadata);
+	void deleteWatchMetadata(Optional<TenantName> tenant, KeyRef key);
 	void clearWatchMetadata();
 
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
@@ -531,7 +533,10 @@ public:
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
 private:
-	std::unordered_map<Key, Reference<WatchMetadata>> watchMap;
+	std::unordered_map<std::pair<Optional<TenantName>, Key>,
+	                   Reference<WatchMetadata>,
+	                   boost::hash<std::pair<Optional<TenantName>, Key>>>
+	    watchMap;
 };
 
 #endif
