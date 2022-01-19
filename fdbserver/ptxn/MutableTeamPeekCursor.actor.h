@@ -91,8 +91,8 @@ public:
 		BaseClass::addCursor(createCursor(privateMutationStorageTeamID));
 
 		TraceEvent("MutableTeamPeekCursorCreated")
-		    .detail("ServerID", serverID.toString())
-		    .detail("PrivateMutationStorageTeamID", privateMutationStorageTeamID.toString());
+		    .detail("ServerID", serverID)
+		    .detail("PrivateMutationStorageTeamID", privateMutationStorageTeamID);
 	}
 
 	const StorageServerStorageTeams getStorageTeamIDs() const { return storageTeamIDs; }
@@ -123,7 +123,7 @@ bool MutableTeamPeekCursor<BaseClass>::updateStorageTeams() {
 
 	// NOTE: Do NOT use BaseCalss::getVersion() since it will trigger getImpl
 	TraceEvent("MutableTeamPeekCursorUpdateTeam")
-	    .detail("StorageServerID", serverID.toString())
+	    .detail("StorageServerID", serverID)
 	    .detail("Version", BaseClass::currentVersion);
 
 	// Storage teams to be removed in the next version, oldStorageTeams - newStorageTeams
@@ -137,15 +137,15 @@ bool MutableTeamPeekCursor<BaseClass>::updateStorageTeams() {
 		if (!BaseClass::isCursorExists(storageTeamID)) {
 			// The cursor might get end-of-stream already, and being removed automatically by tryFillCursorContainer
 			TraceEvent("MutableTeamPeekCursorRemoveTeam")
-			    .detail("StorageServerID", serverID.toString())
-			    .detail("StorageTeamID", storageTeamID.toString())
+			    .detail("StorageServerID", serverID)
+			    .detail("StorageTeamID", storageTeamID)
 			    .detail("PreviouslyRemoved", true);
 			continue;
 		}
 		BaseClass::removeCursor(storageTeamID);
 		TraceEvent("MutableTeamPeekCursorRemoveTeam")
-		    .detail("StorageServerID", serverID.toString())
-		    .detail("StorageTeamID", storageTeamID.toString());
+		    .detail("StorageServerID", serverID)
+		    .detail("StorageTeamID", storageTeamID);
 	}
 
 	// Storage teams to be added, newStorageTeams - oldStorageTeams
@@ -162,7 +162,7 @@ bool MutableTeamPeekCursor<BaseClass>::updateStorageTeams() {
 		BaseClass::addCursor(newCursor);
 
 		TraceEvent("MutableTeamPeekCursorAddTeam")
-		    .detail("StorageServerID", serverID.toString())
+		    .detail("StorageServerID", serverID)
 		    .detail("StorageTeamID", storageTeamID)
 		    .detail("BeginVersion", newCursor->getBeginVersion());
 	}

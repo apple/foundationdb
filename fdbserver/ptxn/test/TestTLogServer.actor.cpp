@@ -52,7 +52,7 @@ std::string filenameFromId(KeyValueStoreType storeType, std::string folder, std:
 	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
 		return joinPath(folder, prefix + id.toString() + ".rocksdb");
 
-	TraceEvent(SevError, "UnknownStoreType").detail("StoreType", storeType.toString());
+	TraceEvent(SevError, "UnknownStoreType").detail("StoreType", storeType);
 	UNREACHABLE();
 }
 
