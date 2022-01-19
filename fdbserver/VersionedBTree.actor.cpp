@@ -2681,7 +2681,9 @@ public:
 		}
 
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
+		debug_printf("DWALPager(%s) op=writeBlock %s\n", self->filename.c_str(), toString(pageID).c_str());
 		wait(self->pageFile->write((void*)data, blockSize, (int64_t)pageID * blockSize));
+		debug_printf("DWALPager(%s) op=writeBlockDone %s\n", self->filename.c_str(), toString(pageID).c_str());
 		return Void();
 	}
 
@@ -2713,11 +2715,9 @@ public:
 	                               bool header = false) {
 		debug_printf("DWALPager(%s) op=%s %s ptr=%p\n",
 		             filename.c_str(),
-		             (header ? "writePhysicalHeader" : "writePhysical"),
+		             (header ? "writePhysicalHeader" : "writePhysicalPage"),
 		             toString(pageIDs).c_str(),
-		             page->data());
-
-		debug_printf("DWALPager(%s) writePhysicalPage %s\n", filename.c_str(), toString(pageIDs).c_str());
+		             page->rawData());
 
 		// Set metadata before prewrite so it's in the pre-encrypted page in cache if the page is encrypted
 		// The actual next commit version is unknown, so the write version of a page is always the
@@ -2981,7 +2981,7 @@ public:
 				page->encryptionKey = k;
 			}
 			page->postReadPayload(pageID);
-			debug_printf("DWALPager(%s) op=readPhysicalVerifyComplete %s ptr=%p\n",
+			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p\n",
 			             self->filename.c_str(),
 			             toString(pageID).c_str(),
 			             page->rawData());
@@ -3021,7 +3021,7 @@ public:
 		// }
 
 		state Reference<ArenaPage> page = self->newPageBuffer(pageIDs.size());
-		debug_printf("DWALPager(%s) op=readPhysicalStart %s ptr=%p\n",
+		debug_printf("DWALPager(%s) op=readPhysicalMultiStart %s ptr=%p\n",
 		             self->filename.c_str(),
 		             toString(pageIDs).c_str(),
 		             page->rawData());
@@ -3036,7 +3036,7 @@ public:
 		// wait for all the parallel read futures
 		wait(waitForAll(reads));
 
-		debug_printf("DWALPager(%s) op=readPhysicalComplete %s ptr=%p bytes=%d\n",
+		debug_printf("DWALPager(%s) op=readPhysicalMultiDiskReadsComplete %s ptr=%p bytes=%d\n",
 		             self->filename.c_str(),
 		             toString(pageIDs).c_str(),
 		             page->rawData(),
@@ -3049,6 +3049,11 @@ public:
 				page->encryptionKey = k;
 			}
 			page->postReadPayload(pageIDs.front());
+			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p bytes=%d\n",
+						self->filename.c_str(),
+						toString(pageIDs).c_str(),
+						page->rawData(),
+						pageIDs.size() * blockSize);
 		} catch (Error& e) {
 			// For header pages, error is a warning because recovery may still be possible
 			TraceEvent(SevError, "RedwoodPageError")
@@ -3084,7 +3089,7 @@ public:
 	                                      bool noHit) override {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
-		debug_printf("DWALPager(%s) op=read %s noHit=%d\n", filename.c_str(), toString(pageID).c_str(), noHit);
+		debug_printf("DWALPager(%s) op=read %s reason=%s  noHit=%d\n", filename.c_str(), toString(pageID).c_str(), PagerEventReasonsStrings[(int)reason], noHit);
 		auto& eventReasons = g_redwoodMetrics.level(level).metrics.events;
 		eventReasons.addEventReason(PagerEvents::CacheLookup, reason);
 		if (!cacheable) {
@@ -3129,7 +3134,7 @@ public:
 	                                           bool noHit) override {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
-		debug_printf("DWALPager(%s) op=read %s noHit=%d\n", filename.c_str(), toString(pageIDs).c_str(), noHit);
+		debug_printf("DWALPager(%s) op=read %s reason=%s noHit=%d\n", filename.c_str(), toString(pageIDs).c_str(), PagerEventReasonsStrings[(int)reason], noHit);
 		auto& eventReasons = g_redwoodMetrics.level(level).metrics.events;
 		eventReasons.addEventReason(PagerEvents::CacheLookup, reason);
 		if (!cacheable) {
@@ -5942,7 +5947,7 @@ private:
 		if (REDWOOD_DEBUG) {
 			const BTreePage* btPage = (const BTreePage*)page->mutateData();
 			BTreePage::BinaryTree::DecodeCache* cache = (BTreePage::BinaryTree::DecodeCache*)page->userData;
-			debug_printf_always(
+			debug_printf(
 			    "updateBTreePage(%s, %s) %s\n",
 			    ::toString(oldID).c_str(),
 			    ::toString(writeVersion).c_str(),
