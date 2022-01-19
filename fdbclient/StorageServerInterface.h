@@ -214,6 +214,19 @@ struct ServerCacheInfo {
 	}
 };
 
+struct TenantInfo {
+	Optional<TenantName> name;
+
+	TenantInfo() {}
+	TenantInfo(Optional<TenantName> name) : name(name) {}
+	TenantInfo(TenantName name) : name(name) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, name);
+	}
+};
+
 struct GetValueReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 1378929;
 	Optional<Value> value;
@@ -231,7 +244,7 @@ struct GetValueReply : public LoadBalancedReply {
 struct GetValueRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 8454530;
 	SpanID spanContext;
-	Optional<TenantName> tenant;
+	TenantInfo tenantInfo;
 	Key key;
 	Version version;
 	Optional<TagSet> tags;
@@ -240,16 +253,16 @@ struct GetValueRequest : TimedRequest {
 
 	GetValueRequest() {}
 	GetValueRequest(SpanID spanContext,
-	                const Optional<TenantName>& tenant,
+	                const TenantInfo& tenantInfo,
 	                const Key& key,
 	                Version ver,
 	                Optional<TagSet> tags,
 	                Optional<UID> debugID)
-	  : spanContext(spanContext), tenant(tenant), key(key), version(ver), tags(tags), debugID(debugID) {}
+	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), tags(tags), debugID(debugID) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, version, tags, debugID, reply, spanContext, tenant);
+		serializer(ar, key, version, tags, debugID, reply, spanContext, tenantInfo);
 	}
 };
 
@@ -270,7 +283,7 @@ struct WatchValueReply {
 struct WatchValueRequest {
 	constexpr static FileIdentifier file_identifier = 14747733;
 	SpanID spanContext;
-	Optional<TenantName> tenant;
+	TenantInfo tenantInfo;
 	Key key;
 	Optional<Value> value;
 	Version version;
@@ -289,17 +302,18 @@ struct WatchValueRequest {
 	  : spanContext(spanContext), value(value), version(ver), tags(tags), debugID(debugID) {}
 
 	WatchValueRequest(SpanID spanContext,
-	                  Optional<TenantName> tenant,
+	                  TenantInfo tenantInfo,
 	                  const Key& key,
 	                  Optional<Value> value,
 	                  Version ver,
 	                  Optional<TagSet> tags,
 	                  Optional<UID> debugID)
-	  : spanContext(spanContext), tenant(tenant), key(key), value(value), version(ver), tags(tags), debugID(debugID) {}
+	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), value(value), version(ver), tags(tags),
+	    debugID(debugID) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, value, version, tags, debugID, reply, spanContext, tenant);
+		serializer(ar, key, value, version, tags, debugID, reply, spanContext, tenantInfo);
 	}
 };
 
@@ -323,7 +337,7 @@ struct GetKeyValuesRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
 	SpanID spanContext;
 	Arena arena;
-	Optional<TenantName> tenant;
+	TenantInfo tenantInfo;
 	KeySelectorRef begin, end;
 	// This is a dummy field there has never been used.
 	// TODO: Get rid of this by constexpr or other template magic in getRange
@@ -339,8 +353,19 @@ struct GetKeyValuesRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, tenant, arena);
+		serializer(ar,
+		           begin,
+		           end,
+		           version,
+		           limit,
+		           limitBytes,
+		           isFetchKeys,
+		           tags,
+		           debugID,
+		           reply,
+		           spanContext,
+		           tenantInfo,
+		           arena);
 	}
 };
 
@@ -364,7 +389,7 @@ struct GetKeyValuesAndFlatMapRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 6795747;
 	SpanID spanContext;
 	Arena arena;
-	Optional<TenantName> tenant;
+	TenantInfo tenantInfo;
 	KeySelectorRef begin, end;
 	KeyRef mapper;
 	Version version; // or latestVersion
@@ -390,7 +415,7 @@ struct GetKeyValuesAndFlatMapRequest : TimedRequest {
 		           debugID,
 		           reply,
 		           spanContext,
-		           tenant,
+		           tenantInfo,
 		           arena);
 	}
 };
@@ -426,7 +451,7 @@ struct GetKeyValuesStreamRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
 	SpanID spanContext;
 	Arena arena;
-	Optional<TenantName> tenant;
+	TenantInfo tenantInfo;
 	KeySelectorRef begin, end;
 	Version version; // or latestVersion
 	int limit, limitBytes;
@@ -439,8 +464,19 @@ struct GetKeyValuesStreamRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, tenant, arena);
+		serializer(ar,
+		           begin,
+		           end,
+		           version,
+		           limit,
+		           limitBytes,
+		           isFetchKeys,
+		           tags,
+		           debugID,
+		           reply,
+		           spanContext,
+		           tenantInfo,
+		           arena);
 	}
 };
 
@@ -462,7 +498,7 @@ struct GetKeyRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 10457870;
 	SpanID spanContext;
 	Arena arena;
-	Optional<TenantName> tenant;
+	TenantInfo tenantInfo;
 	KeySelectorRef sel;
 	Version version; // or latestVersion
 	Optional<TagSet> tags;
@@ -472,16 +508,16 @@ struct GetKeyRequest : TimedRequest {
 	GetKeyRequest() {}
 
 	GetKeyRequest(SpanID spanContext,
-	              Optional<TenantName> tenant,
+	              TenantInfo tenantInfo,
 	              KeySelectorRef const& sel,
 	              Version version,
 	              Optional<TagSet> tags,
 	              Optional<UID> debugID)
-	  : spanContext(spanContext), tenant(tenant), sel(sel), version(version), debugID(debugID) {}
+	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), debugID(debugID) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sel, version, tags, debugID, reply, spanContext, tenant, arena);
+		serializer(ar, sel, version, tags, debugID, reply, spanContext, tenantInfo, arena);
 	}
 };
 
@@ -713,19 +749,19 @@ struct SplitRangeReply {
 struct SplitRangeRequest {
 	constexpr static FileIdentifier file_identifier = 10725174;
 	Arena arena;
-	Optional<TenantName> tenant;
+	TenantInfo tenantInfo;
 	KeyRangeRef keys;
 	int64_t chunkSize;
 	ReplyPromise<SplitRangeReply> reply;
 
 	SplitRangeRequest() {}
 	SplitRangeRequest(KeyRangeRef const& keys, int64_t chunkSize) : keys(arena, keys), chunkSize(chunkSize) {}
-	SplitRangeRequest(Optional<TenantName> tenant, KeyRangeRef const& keys, int64_t chunkSize)
-	  : tenant(tenant), keys(arena, keys), chunkSize(chunkSize) {}
+	SplitRangeRequest(TenantInfo tenantInfo, KeyRangeRef const& keys, int64_t chunkSize)
+	  : tenantInfo(tenantInfo), keys(arena, keys), chunkSize(chunkSize) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, chunkSize, reply, tenant, arena);
+		serializer(ar, keys, chunkSize, reply, tenantInfo, arena);
 	}
 };
 
@@ -756,7 +792,7 @@ struct ChangeFeedStreamRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
 	SpanID spanContext;
 	Arena arena;
-	Optional<TenantName> tenant;
+	TenantInfo tenantInfo;
 	Key rangeID;
 	Version begin = 0;
 	Version end = 0;
@@ -766,7 +802,7 @@ struct ChangeFeedStreamRequest {
 	ChangeFeedStreamRequest() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeID, begin, end, range, reply, spanContext, tenant, arena);
+		serializer(ar, rangeID, begin, end, range, reply, spanContext, tenantInfo, arena);
 	}
 };
 

@@ -2738,7 +2738,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					         ssi.second,
 					         &StorageServerInterface::getValue,
 					         GetValueRequest(span.context,
-					                         useTenant ? trState->tenant : Optional<TenantName>(),
+					                         useTenant ? TenantInfo(trState->tenant) : TenantInfo(),
 					                         key,
 					                         ver,
 					                         trState->cx->sampleReadTags() ? trState->options.readTags
@@ -2854,7 +2854,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 			++trState->cx->transactionPhysicalReads;
 
 			GetKeyRequest req(span.context,
-			                  trState->tenant,
+			                  TenantInfo(trState->tenant),
 			                  k,
 			                  version.get(),
 			                  trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>(),
@@ -3246,7 +3246,7 @@ Future<RangeResult> getExactRange(Reference<TransactionState> trState,
 			req.mapper = mapper;
 			req.arena.dependsOn(mapper.arena());
 
-			req.tenant = trState->tenant;
+			req.tenantInfo = TenantInfo(trState->tenant);
 			req.version = version;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
@@ -3583,7 +3583,7 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 			req.mapper = mapper;
 			req.arena.dependsOn(mapper.arena());
 
-			req.tenant = trState->tenant;
+			req.tenantInfo = TenantInfo(trState->tenant);
 			req.isFetchKeys = (trState->taskID == TaskPriority::FetchKeys);
 			req.version = readVersion;
 

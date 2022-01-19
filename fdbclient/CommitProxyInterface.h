@@ -170,15 +170,16 @@ struct CommitTransactionRequest : TimedRequest {
 	Optional<ClientTrCommitCostEstimation> commitCostEstimation;
 	Optional<TagSet> tagSet;
 
-	Optional<TenantName> tenant;
+	TenantInfo tenantInfo;
 
-	CommitTransactionRequest() : CommitTransactionRequest(Optional<TenantName>(), SpanID()) {}
-	CommitTransactionRequest(Optional<TenantName> const& tenant, SpanID const& context)
-	  : spanContext(context), flags(0), tenant(tenant) {}
+	CommitTransactionRequest() : CommitTransactionRequest(TenantInfo(), SpanID()) {}
+	CommitTransactionRequest(TenantInfo const& tenantInfo, SpanID const& context)
+	  : spanContext(context), flags(0), tenantInfo(tenantInfo) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transaction, reply, arena, flags, debugID, commitCostEstimation, tagSet, spanContext, tenant);
+		serializer(
+		    ar, transaction, reply, arena, flags, debugID, commitCostEstimation, tagSet, spanContext, tenantInfo);
 	}
 };
 
