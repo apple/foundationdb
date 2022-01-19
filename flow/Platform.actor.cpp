@@ -2772,10 +2772,10 @@ void waitThread(THREAD_HANDLE thread) {
 #endif
 }
 
-void deprioritizeThread() {
+void setThreadPriority(int pri) {
 #ifdef __linux__
 	int tid = syscall(SYS_gettid);
-	setpriority(PRIO_PROCESS, tid, 10);
+	setpriority(PRIO_PROCESS, tid, pri);
 #elif defined(_WIN32)
 #endif
 }
