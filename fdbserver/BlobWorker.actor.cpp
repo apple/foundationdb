@@ -947,14 +947,6 @@ struct InFlightFile {
 	  : future(future), version(version), bytes(bytes), snapshot(snapshot) {}
 };
 
-static Reference<ChangeFeedData> newChangeFeedData(Version startVersion) {
-	// FIXME: should changeFeedStream guarantee that this is always set to begin-1 instead?
-	Reference<ChangeFeedData> r = makeReference<ChangeFeedData>();
-	// TODO uncomment?
-	// r->lastReturnedVersion.set(startVersion);
-	return r;
-}
-
 // TODO REMOVE once correctness clean
 #define DEBUG_BW_START_VERSION invalidVersion
 #define DEBUG_BW_END_VERSION invalidVersion
@@ -1257,22 +1249,24 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		metadata->pendingDeltaVersion = startVersion;
 		metadata->bufferedDeltaVersion = startVersion;
 
-		metadata->activeCFData.set(newChangeFeedData(startVersion));
+		Reference<ChangeFeedData> newCFData = makeReference<ChangeFeedData>();
+
 		if (startState.parentGranule.present() && startVersion < startState.changeFeedStartVersion) {
 			// read from parent change feed up until our new change feed is started
 			readOldChangeFeed = true;
 
-			oldChangeFeedFuture = bwData->db->getChangeFeedStream(metadata->activeCFData.get(),
-			                                                      oldCFKey.get(),
-			                                                      startVersion + 1,
-			                                                      startState.changeFeedStartVersion,
-			                                                      metadata->keyRange);
+			oldChangeFeedFuture = bwData->db->getChangeFeedStream(
+			    newCFData, oldCFKey.get(), startVersion + 1, startState.changeFeedStartVersion, metadata->keyRange);
 
 		} else {
 			readOldChangeFeed = false;
-			changeFeedFuture = bwData->db->getChangeFeedStream(
-			    metadata->activeCFData.get(), cfKey, startVersion + 1, MAX_VERSION, metadata->keyRange);
+			changeFeedFuture =
+			    bwData->db->getChangeFeedStream(newCFData, cfKey, startVersion + 1, MAX_VERSION, metadata->keyRange);
 		}
+
+		// Start actors BEFORE setting new change feed data to ensure the change feed data is properly initialized by
+		// the client
+		metadata->activeCFData.set(newCFData);
 
 		ASSERT(metadata->readable.canBeSet());
 		metadata->readable.send(Void());
@@ -1389,12 +1383,14 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					           metadata->bufferedDeltaVersion);
 				}
 
-				metadata->activeCFData.set(newChangeFeedData(startState.changeFeedStartVersion - 1));
-				changeFeedFuture = bwData->db->getChangeFeedStream(metadata->activeCFData.get(),
-				                                                   cfKey,
-				                                                   startState.changeFeedStartVersion,
-				                                                   MAX_VERSION,
-				                                                   metadata->keyRange);
+				Reference<ChangeFeedData> newCFData = makeReference<ChangeFeedData>();
+
+				changeFeedFuture = bwData->db->getChangeFeedStream(
+				    newCFData, cfKey, startState.changeFeedStartVersion, MAX_VERSION, metadata->keyRange);
+
+				// Start actors BEFORE setting new change feed data to ensure the change feed data is properly
+				// initialized by the client
+				metadata->activeCFData.set(newCFData);
 			}
 
 			// process mutations
@@ -1469,7 +1465,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										           cfRollbackVersion);
 										metadata->waitForVersionReturned = cfRollbackVersion;
 									}
-									metadata->activeCFData.set(newChangeFeedData(cfRollbackVersion));
+
+									Reference<ChangeFeedData> newCFData = makeReference<ChangeFeedData>();
 
 									if (!readOldChangeFeed && cfRollbackVersion < startState.changeFeedStartVersion) {
 										// It isn't possible to roll back across the parent/child feed boundary, but as
@@ -1486,7 +1483,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									if (readOldChangeFeed) {
 										ASSERT(cfRollbackVersion < startState.changeFeedStartVersion);
 										oldChangeFeedFuture =
-										    bwData->db->getChangeFeedStream(metadata->activeCFData.get(),
+										    bwData->db->getChangeFeedStream(newCFData,
 										                                    oldCFKey.get(),
 										                                    cfRollbackVersion + 1,
 										                                    startState.changeFeedStartVersion,
@@ -1500,12 +1497,13 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										}
 										ASSERT(cfRollbackVersion >= startState.changeFeedStartVersion);
 
-										changeFeedFuture = bwData->db->getChangeFeedStream(metadata->activeCFData.get(),
-										                                                   cfKey,
-										                                                   cfRollbackVersion + 1,
-										                                                   MAX_VERSION,
-										                                                   metadata->keyRange);
+										changeFeedFuture = bwData->db->getChangeFeedStream(
+										    newCFData, cfKey, cfRollbackVersion + 1, MAX_VERSION, metadata->keyRange);
 									}
+
+									// Start actors BEFORE setting new change feed data to ensure the change feed data
+									// is properly initialized by the client
+									metadata->activeCFData.set(newCFData);
 
 									justDidRollback = true;
 									break;
