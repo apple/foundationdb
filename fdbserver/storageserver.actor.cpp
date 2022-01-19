@@ -4933,88 +4933,115 @@ private:
 			ChangeFeedStatus status;
 			std::tie(changeFeedRange, popVersion, status) = decodeChangeFeedValue(m.param2);
 			auto feed = data->uidChangeFeed.find(changeFeedId);
-			if (feed == data->uidChangeFeed.end()) {
-				if (status == ChangeFeedStatus::CHANGE_FEED_CREATE) {
-					TraceEvent(SevDebug, "AddingChangeFeed", data->thisServerID)
-					    .detail("RangeID", changeFeedId.printable())
-					    .detail("Range", changeFeedRange.toString())
-					    .detail("Version", currentVersion);
-					Reference<ChangeFeedInfo> changeFeedInfo(new ChangeFeedInfo());
-					changeFeedInfo->range = changeFeedRange;
-					changeFeedInfo->id = changeFeedId;
-					changeFeedInfo->emptyVersion = currentVersion - 1;
-					data->uidChangeFeed[changeFeedId] = changeFeedInfo;
 
-					auto rs = data->keyChangeFeed.modify(changeFeedRange);
-					for (auto r = rs.begin(); r != rs.end(); ++r) {
-						r->value().push_back(changeFeedInfo);
-					}
-					data->keyChangeFeed.coalesce(changeFeedRange.contents());
-					auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-					data->addMutationToMutationLog(
-					    mLV,
-					    MutationRef(MutationRef::SetValue,
-					                persistChangeFeedKeys.begin.toString() + changeFeedId.toString(),
-					                m.param2));
+			// TODO REMOVE eventually
+			TraceEvent(SevDebug, "ChangeFeedPrivateMutation", data->thisServerID)
+			    .detail("RangeID", changeFeedId.printable())
+			    .detail("Range", changeFeedRange.toString())
+			    .detail("Version", currentVersion)
+			    .detail("PopVersion", popVersion)
+			    .detail("Status", status);
+
+			// Because of data moves, we can get mutations operating on a change feed we don't yet know about, because
+			// the fetch hasn't started yet
+			bool createdFeed = false;
+			if (feed == data->uidChangeFeed.end() && status != ChangeFeedStatus::CHANGE_FEED_DESTROY) {
+				createdFeed = true;
+
+				Reference<ChangeFeedInfo> changeFeedInfo(new ChangeFeedInfo());
+				changeFeedInfo->range = changeFeedRange;
+				changeFeedInfo->id = changeFeedId;
+				if (status == ChangeFeedStatus::CHANGE_FEED_CREATE && popVersion == invalidVersion) {
+					// for a create, the empty version should be now, otherwise it will be set in a later pop
+					changeFeedInfo->emptyVersion = currentVersion - 1;
+				} else {
+					TEST(true); // SS got non-create change feed private mutation before move created its metadata
+					changeFeedInfo->emptyVersion = invalidVersion;
 				}
-			} else {
-				if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
-					TraceEvent(SevDebug, "DestroyingChangeFeed", data->thisServerID)
-					    .detail("RangeID", changeFeedId.printable())
-					    .detail("Range", changeFeedRange.toString())
-					    .detail("Version", currentVersion);
-					Key beginClearKey = changeFeedId.withPrefix(persistChangeFeedKeys.begin);
-					auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-					data->addMutationToMutationLog(
-					    mLV, MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
-					data->addMutationToMutationLog(mLV,
-					                               MutationRef(MutationRef::ClearRange,
-					                                           changeFeedDurableKey(feed->second->id, 0),
-					                                           changeFeedDurableKey(feed->second->id, currentVersion)));
-					auto rs = data->keyChangeFeed.modify(feed->second->range);
-					for (auto r = rs.begin(); r != rs.end(); ++r) {
-						auto& feedList = r->value();
-						for (int i = 0; i < feedList.size(); i++) {
-							if (feedList[i] == feed->second) {
-								swapAndPop(&feedList, i--);
-							}
-						}
-					}
-					data->keyChangeFeed.coalesce(feed->second->range.contents());
-					data->uidChangeFeed.erase(feed);
-				} else if (status != ChangeFeedStatus::CHANGE_FEED_CREATE) {
-					// Can be a change feed create from move, ignore
-					// must be pop or stop
-					if (status == ChangeFeedStatus::CHANGE_FEED_STOP) {
-						TraceEvent(SevDebug, "StoppingChangeFeed", data->thisServerID)
-						    .detail("RangeID", changeFeedId.printable())
-						    .detail("Range", changeFeedRange.toString())
-						    .detail("Version", currentVersion);
-					}
-					if (popVersion != invalidVersion && popVersion - 1 > feed->second->emptyVersion) {
-						feed->second->emptyVersion = popVersion - 1;
-						while (!feed->second->mutations.empty() &&
-						       feed->second->mutations.front().version < popVersion) {
-							feed->second->mutations.pop_front();
-						}
-						if (feed->second->storageVersion != invalidVersion) {
-							data->storage.clearRange(KeyRangeRef(changeFeedDurableKey(feed->second->id, 0),
-							                                     changeFeedDurableKey(feed->second->id, popVersion)));
-							if (popVersion > feed->second->storageVersion) {
-								feed->second->storageVersion = invalidVersion;
-								feed->second->durableVersion = invalidVersion;
-								// don't set fetchVersion to invalidVersion here because there could be an active fetch
-							}
-						}
-					}
-					feed->second->stopped = (status == ChangeFeedStatus::CHANGE_FEED_STOP);
-					auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-					data->addMutationToMutationLog(
-					    mLV,
-					    MutationRef(MutationRef::SetValue,
-					                persistChangeFeedKeys.begin.toString() + changeFeedId.toString(),
-					                m.param2));
+				data->uidChangeFeed[changeFeedId] = changeFeedInfo;
+
+				feed = data->uidChangeFeed.find(changeFeedId);
+				ASSERT(feed != data->uidChangeFeed.end());
+
+				TraceEvent(SevDebug, "AddingChangeFeed", data->thisServerID)
+				    .detail("RangeID", changeFeedId.printable())
+				    .detail("Range", changeFeedRange.toString())
+				    .detail("EmptyVersion", feed->second->emptyVersion);
+
+				auto rs = data->keyChangeFeed.modify(changeFeedRange);
+				for (auto r = rs.begin(); r != rs.end(); ++r) {
+					r->value().push_back(changeFeedInfo);
 				}
+				data->keyChangeFeed.coalesce(changeFeedRange.contents());
+			}
+
+			bool addMutationToLog = false;
+			if (popVersion != invalidVersion) {
+				// pop the change feed at pop version, no matter what state it is in
+				if (popVersion - 1 > feed->second->emptyVersion) {
+					feed->second->emptyVersion = popVersion - 1;
+					while (!feed->second->mutations.empty() && feed->second->mutations.front().version < popVersion) {
+						feed->second->mutations.pop_front();
+					}
+					if (feed->second->storageVersion != invalidVersion) {
+						data->storage.clearRange(KeyRangeRef(changeFeedDurableKey(feed->second->id, 0),
+						                                     changeFeedDurableKey(feed->second->id, popVersion)));
+						if (popVersion > feed->second->storageVersion) {
+							feed->second->storageVersion = invalidVersion;
+							feed->second->durableVersion = invalidVersion;
+							// don't set fetchVersion to invalidVersion here because there could be an active fetch
+						}
+					}
+				}
+				feed->second->stopped = (status == ChangeFeedStatus::CHANGE_FEED_STOP);
+				addMutationToLog = true;
+			} else if (status == ChangeFeedStatus::CHANGE_FEED_CREATE) {
+				TraceEvent(SevDebug, "CreatingChangeFeed", data->thisServerID)
+				    .detail("RangeID", changeFeedId.printable())
+				    .detail("Range", changeFeedRange.toString())
+				    .detail("Version", currentVersion);
+				// no-op, already created
+				addMutationToLog = true;
+			} else if (status == ChangeFeedStatus::CHANGE_FEED_STOP) {
+				TraceEvent(SevDebug, "StoppingChangeFeed", data->thisServerID)
+				    .detail("RangeID", changeFeedId.printable())
+				    .detail("Range", changeFeedRange.toString())
+				    .detail("Version", currentVersion);
+				feed->second->stopped = true;
+				addMutationToLog = true;
+			} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY && !createdFeed) {
+				TraceEvent(SevDebug, "DestroyingChangeFeed", data->thisServerID)
+				    .detail("RangeID", changeFeedId.printable())
+				    .detail("Range", changeFeedRange.toString())
+				    .detail("Version", currentVersion);
+				Key beginClearKey = changeFeedId.withPrefix(persistChangeFeedKeys.begin);
+				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+				data->addMutationToMutationLog(
+				    mLV, MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
+				data->addMutationToMutationLog(mLV,
+				                               MutationRef(MutationRef::ClearRange,
+				                                           changeFeedDurableKey(feed->second->id, 0),
+				                                           changeFeedDurableKey(feed->second->id, currentVersion)));
+				auto rs = data->keyChangeFeed.modify(feed->second->range);
+				for (auto r = rs.begin(); r != rs.end(); ++r) {
+					auto& feedList = r->value();
+					for (int i = 0; i < feedList.size(); i++) {
+						if (feedList[i] == feed->second) {
+							swapAndPop(&feedList, i--);
+						}
+					}
+				}
+				data->keyChangeFeed.coalesce(feed->second->range.contents());
+				data->uidChangeFeed.erase(feed);
+			}
+
+			if (addMutationToLog) {
+				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+				data->addMutationToMutationLog(
+				    mLV,
+				    MutationRef(MutationRef::SetValue,
+				                persistChangeFeedKeys.begin.toString() + changeFeedId.toString(),
+				                m.param2));
 			}
 		} else if (m.param1.substr(1).startsWith(tssMappingKeys.begin) &&
 		           (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange)) {

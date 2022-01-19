@@ -1526,7 +1526,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 								    .detail("OldChangeFeed", readOldChangeFeed ? "T" : "F");
 							}
 							if (DEBUG_BW_VERSION(deltas.version)) {
-								fmt::print("BW {0}: ({1})\n", deltas.version, deltas.mutations.size());
+								fmt::print("BWB {0}: ({1})\n", deltas.version, deltas.mutations.size());
 							}
 							metadata->currentDeltas.push_back_deep(metadata->deltaArena, deltas);
 
