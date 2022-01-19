@@ -1355,22 +1355,26 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 					ASSERT(!splitResult.more);
 					break;
 				}
-			} else {
-				break;
 			}
+			bool foundNext = false;
 			while (splitResultIdx < splitResult.size()) {
 				UID parentGranuleID, granuleID;
 
 				std::tie(parentGranuleID, granuleID) = decodeBlobGranuleSplitKey(splitResult[splitResultIdx].key);
 				if (parentGranuleID != currentParentID) {
 					nextParentID = parentGranuleID;
+					foundNext = true;
 					break;
 				}
+
 				BlobGranuleSplitState splitState;
 				Version version;
 				std::tie(splitState, version) = decodeBlobGranuleSplitValue(splitResult[splitResultIdx].value);
 				splitStates.push_back(std::pair(granuleID, splitState));
 				splitResultIdx++;
+			}
+			if (foundNext) {
+				break;
 			}
 		}
 
@@ -1403,34 +1407,44 @@ ACTOR Future<Void> recoverBlobManager(BlobManagerData* bmData) {
 				if (boundaryResult.empty()) {
 					break;
 				}
-			} else {
-				break;
 			}
+			bool foundNext = false;
 			while (boundaryResultIdx < boundaryResult.size()) {
 				UID parentGranuleID;
 				Key boundaryKey;
+
 				std::tie(parentGranuleID, boundaryKey) =
 				    decodeBlobGranuleSplitBoundaryKey(boundaryResult[boundaryResultIdx].key);
+
 				if (parentGranuleID != currentParentID) {
 					// nextParentID should have already been set by split reader
 					ASSERT(nextParentID.present());
 					ASSERT(nextParentID.get() == parentGranuleID);
+					foundNext = true;
 					break;
 				}
+
 				splitBoundaries.push_back(boundaryKey);
 				boundaryResultIdx++;
+			}
+			if (foundNext) {
+				break;
 			}
 		}
 
 		// process this split
 		if (currentParentID != UID()) {
+			ASSERT(splitStates.size() > 0);
+			ASSERT(splitBoundaries.size() - 1 == splitStates.size());
+
+			std::sort(splitBoundaries.begin(), splitBoundaries.end());
+
 			if (BM_DEBUG) {
 				fmt::print("    [{0} - {1}) {2}:\n",
 				           splitBoundaries.front().printable(),
 				           splitBoundaries.back().printable(),
 				           currentParentID.toString().substr(0, 6));
 			}
-			ASSERT(splitBoundaries.size() - 1 == splitStates.size());
 			for (int i = 0; i < splitStates.size(); i++) {
 				// if this split boundary had not been opened by a blob worker before the last manager crashed, we must
 				// ensure it gets assigned to one

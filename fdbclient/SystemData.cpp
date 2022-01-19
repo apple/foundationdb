@@ -1294,7 +1294,7 @@ const Key blobGranuleSplitBoundaryKeyFor(UID const& parentGranuleID, KeyRef cons
 
 std::pair<UID, Key> decodeBlobGranuleSplitBoundaryKey(KeyRef const& key) {
 	UID parentGranuleID;
-	Key granuleStart;
+	KeyRef granuleStart;
 	BinaryReader reader(key.removePrefix(blobGranuleSplitBoundaryKeys.begin),
 	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
 
