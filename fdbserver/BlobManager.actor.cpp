@@ -1360,13 +1360,18 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				if (!splitResult.more) {
 					break;
 				}
-				ASSERT(splitResult.readThrough.present());
-				splitBeginKey = splitResult.readThrough.get();
+				ASSERT(splitResult.readThrough.present() || splitResult.size() > 0);
+				splitBeginKey = splitResult.readThrough.present() ? splitResult.readThrough.get()
+				                                                  : keyAfter(splitResult.back().key);
 				loop {
 					try {
 						RangeResult r =
 						    wait(tr->getRange(KeyRangeRef(splitBeginKey, blobGranuleSplitKeys.end), rowLimit));
 						ASSERT(r.size() > 0 || !r.more);
+						fmt::print("Split cursor got {0} rows, readThrough={1}, more={2}\n",
+						           r.size(),
+						           r.readThrough.present() ? r.readThrough.get().printable().c_str() : "<n/a>",
+						           r.more ? "T" : "F");
 						splitResult = r;
 						splitResultIdx = 0;
 						break;
@@ -1413,8 +1418,9 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				if (!boundaryResult.more) {
 					break;
 				}
-				ASSERT(boundaryResult.readThrough.present());
-				boundaryBeginKey = boundaryResult.readThrough.get();
+				ASSERT(boundaryResult.readThrough.present() || boundaryResult.size() > 0);
+				boundaryBeginKey = boundaryResult.readThrough.present() ? boundaryResult.readThrough.get()
+				                                                        : keyAfter(boundaryResult.back().key);
 				loop {
 					try {
 						RangeResult r = wait(
