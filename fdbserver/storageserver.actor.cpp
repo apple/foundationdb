@@ -4023,6 +4023,7 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data,
 	TraceEvent(SevDebug, "FetchChangeFeed", data->thisServerID)
 	    .detail("RangeID", rangeId.printable())
 	    .detail("Range", range.toString())
+	    .detail("FetchVersion", fetchVersion)
 	    .detail("Existing", existing);
 
 	if (!existing) {
@@ -4068,6 +4069,7 @@ ACTOR Future<Void> dispatchChangeFeeds(StorageServer* data, UID fetchKeysID, Key
 	try {
 		state std::vector<OverlappingChangeFeedEntry> feeds =
 		    wait(data->cx->getOverlappingChangeFeeds(keys, fetchVersion + 1));
+		// TODO add trace events for some of these
 		for (auto& feed : feeds) {
 			feedFetches[feed.rangeId] = fetchChangeFeed(data, feed.rangeId, feed.range, feed.stopped, fetchVersion);
 		}
@@ -4492,6 +4494,10 @@ void AddingShard::addMutation(Version version, bool fromFetch, MutationRef const
 						}
 						it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), mutation);
 						server->currentChangeFeeds.insert(it->id);
+						DEBUG_MUTATION("ChangeFeedWriteSet", version, mutation, server->thisServerID)
+						    .detail("Range", it->range)
+						    .detail("ChangeFeedID", it->id)
+						    .detail("Source", "Adding");
 					}
 				}
 			} else if (mutation.type == MutationRef::ClearRange) {
@@ -4504,6 +4510,10 @@ void AddingShard::addMutation(Version version, bool fromFetch, MutationRef const
 							}
 							it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), mutation);
 							server->currentChangeFeeds.insert(it->id);
+							DEBUG_MUTATION("ChangeFeedWriteClear", version, mutation, server->thisServerID)
+							    .detail("Range", it->range)
+							    .detail("ChangeFeedID", it->id)
+							    .detail("Source", "Adding");
 						}
 					}
 				}
@@ -4972,7 +4982,8 @@ private:
 					}
 					data->keyChangeFeed.coalesce(feed->second->range.contents());
 					data->uidChangeFeed.erase(feed);
-				} else {
+				} else if (status != ChangeFeedStatus::CHANGE_FEED_CREATE) {
+					// Can be a change feed create from move, ignore
 					// must be pop or stop
 					if (status == ChangeFeedStatus::CHANGE_FEED_STOP) {
 						TraceEvent(SevDebug, "StoppingChangeFeed", data->thisServerID)
