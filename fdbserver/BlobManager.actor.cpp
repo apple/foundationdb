@@ -764,6 +764,7 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
 	Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(tr, granuleRange));
 	newRanges = _newRanges;
 
+	ASSERT(newRanges.size() >= 2);
 	if (newRanges.size() == 2) {
 		// not large enough to split, just reassign back to worker
 		if (BM_DEBUG) {
@@ -813,8 +814,20 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
 			fmt::print("    {}\n", newRanges[i].printable());
 		}
 	}
+	ASSERT(granuleRange.begin == newRanges.front());
+	ASSERT(granuleRange.end == newRanges.back());
 
-	// Need to split range. Persist intent to split and split metadata to DB BEFORE sending split requests
+	// Have to make set of granule ids deterministic across retries to not end up with extra UIDs in the split
+	// state, which could cause recovery to fail and resources to not be cleaned up.
+	// This entire transaction must be idempotent across retries for all splitting state
+	state std::vector<UID> newGranuleIDs;
+	newGranuleIDs.reserve(newRanges.size() - 1);
+	for (int i = 0; i < newRanges.size() - 1; i++) {
+		newGranuleIDs.push_back(deterministicRandom()->randomUniqueID());
+	}
+
+	// Need to split range. Persist intent to split and split metadata to DB BEFORE sending split assignments to blob
+	// workers, so that nothing is lost on blob manager recovery
 	loop {
 		try {
 			tr->reset();
@@ -858,10 +871,18 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
 			tr->set(lockKey, blobGranuleLockValueFor(bmData->epoch, newLockSeqno, std::get<2>(prevGranuleLock)));
 
 			// set up split metadata
-			for (int i = 0; i < newRanges.size() - 1; i++) {
-				UID newGranuleID = deterministicRandom()->randomUniqueID();
+			/*fmt::print("Persisting granule split {0} [{1} - {2})\n",
+			           granuleID.toString().substr(0, 6),
+			           granuleRange.begin.printable(),
+			           granuleRange.end.printable());*/
 
-				Key splitKey = blobGranuleSplitKeyFor(granuleID, newGranuleID);
+			for (int i = 0; i < newRanges.size() - 1; i++) {
+				/*fmt::print("    {0} [{1} - {2})\n",
+				           newGranuleIDs[i].toString().substr(0, 6),
+				           newRanges[i].printable(),
+				           newRanges[i + 1].printable());*/
+
+				Key splitKey = blobGranuleSplitKeyFor(granuleID, newGranuleIDs[i]);
 				tr->set(blobGranuleSplitBoundaryKeyFor(granuleID, newRanges[i]), Value());
 
 				tr->atomicOp(splitKey,
@@ -871,7 +892,7 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
 				Key historyKey = blobGranuleHistoryKeyFor(KeyRangeRef(newRanges[i], newRanges[i + 1]), latestVersion);
 
 				Standalone<BlobGranuleHistoryValue> historyValue;
-				historyValue.granuleID = newGranuleID;
+				historyValue.granuleID = newGranuleIDs[i];
 				historyValue.parentGranules.push_back(historyValue.arena(),
 				                                      std::pair(granuleRange, granuleStartVersion));
 
@@ -887,6 +908,12 @@ ACTOR Future<Void> maybeSplitRange(BlobManagerData* bmData,
 			wait(tr->commit());
 			break;
 		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) {
+				throw;
+			}
+			if (BM_DEBUG) {
+				fmt::print("BM {0} Persisting granule split got error {1}\n", bmData->epoch, e.name());
+			}
 			if (e.code() == error_code_granule_assignment_conflict) {
 				if (bmData->iAmReplaced.canBeSet()) {
 					bmData->iAmReplaced.send(Void());
