@@ -463,7 +463,7 @@ public:
 	void insertTenant(KeyRef key, ValueRef value, Version version);
 	void clearTenants(KeyRef startKey, KeyRef endKey, Version version);
 
-	void checkTenant(Version version, Optional<TenantName> tenant, KeyRef begin, Optional<KeyRef> end);
+	Optional<Key> checkTenant(Version version, Optional<TenantName> tenant, KeyRef begin, Optional<KeyRef> end);
 	KeyRangeRef clampRangeToTenant(KeyRangeRef range, Optional<TenantName> tenant, Version version, Arena& arena);
 
 	class CurrentRunningFetchKeys {
@@ -1369,10 +1369,10 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	}
 }
 
-void StorageServer::checkTenant(Version version,
-                                Optional<TenantName> tenantName,
-                                KeyRef begin,
-                                Optional<KeyRef> end = Optional<KeyRef>()) {
+Optional<Key> StorageServer::checkTenant(Version version,
+                                         Optional<TenantName> tenantName,
+                                         KeyRef begin,
+                                         Optional<KeyRef> end = Optional<KeyRef>()) {
 	std::vector<KeyRef> lockedPrefixes;
 	if (tenantName.present()) {
 		auto view = tenantMap.at(version);
@@ -1390,9 +1390,13 @@ void StorageServer::checkTenant(Version version,
 			    .backtrace();
 			throw key_not_in_tenant();
 		}
+
+		return *itr;
 	} else if (!allowDefaultTenant) {
 		throw tenant_name_required();
 	}
+
+	return Optional<Key>();
 }
 
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
@@ -2786,7 +2790,10 @@ ACTOR Future<RangeResult> quickGetKeyValues(StorageServer* data,
 	}
 };
 
-Key constructMappedKey(KeyValueRef* keyValue, Tuple& mappedKeyFormatTuple, bool& isRangeQuery) {
+Key constructMappedKey(KeyValueRef* keyValue,
+                       Tuple& mappedKeyFormatTuple,
+                       bool& isRangeQuery,
+                       Optional<Key> tenantPrefix) {
 	// Lazily parse key and/or value to tuple because they may not need to be a tuple if not used.
 	Optional<Tuple> keyTuple;
 	Optional<Tuple> valueTuple;
@@ -2875,7 +2882,14 @@ Key constructMappedKey(KeyValueRef* keyValue, Tuple& mappedKeyFormatTuple, bool&
 			mappedKeyTuple.append(mappedKeyFormatTuple.subTuple(i, i + 1));
 		}
 	}
-	return mappedKeyTuple.getDataAsStandalone();
+
+	KeyRef mappedKey = mappedKeyTuple.pack();
+
+	if (tenantPrefix.present() && !tenantPrefix.get().empty()) {
+		return mappedKey.withPrefix(tenantPrefix.get());
+	}
+
+	return mappedKey;
 }
 
 TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
@@ -2891,7 +2905,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		                        .append("{...}"_sr);
 
 		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
 
 		Key expectedMappedKey = Tuple()
 		                            .append("normal"_sr)
@@ -2904,10 +2918,32 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		ASSERT(isRangeQuery == true);
 	}
 	{
+		Tuple mapperTuple = Tuple()
+		                        .append("normal"_sr)
+		                        .append("{{escaped}}"_sr)
+		                        .append("{K[2]}"_sr)
+		                        .append("{V[0]}"_sr)
+		                        .append("{...}"_sr);
+
+		bool isRangeQuery = false;
+		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, "Prefix"_sr);
+
+		Key expectedMappedKey = Tuple()
+		                            .append("normal"_sr)
+		                            .append("{escaped}"_sr)
+		                            .append("key-2"_sr)
+		                            .append("value-0"_sr)
+		                            .getDataAsStandalone()
+		                            .withPrefix("Prefix"_sr);
+		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
+		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
+		ASSERT(isRangeQuery == true);
+	}
+	{
 		Tuple mapperTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
 
 		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
 
 		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
@@ -2918,7 +2954,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		Tuple mapperTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
 
 		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
 
 		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
@@ -2930,7 +2966,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		bool isRangeQuery = false;
 		state bool throwException = false;
 		try {
-			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException = true;
@@ -2942,7 +2978,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		bool isRangeQuery = false;
 		state bool throwException2 = false;
 		try {
-			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_range_decriptor);
 			throwException2 = true;
@@ -2954,7 +2990,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		bool isRangeQuery = false;
 		state bool throwException3 = false;
 		try {
-			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException3 = true;
@@ -2964,12 +3000,12 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	return Void();
 }
 
-// TODO: flat map implicitly uses tenant prefix?
 ACTOR Future<GetKeyValuesAndFlatMapReply> flatMap(StorageServer* data,
                                                   GetKeyValuesReply input,
                                                   StringRef mapper,
                                                   // To provide span context, tags, debug ID to underlying lookups.
-                                                  GetKeyValuesAndFlatMapRequest* pOriginalReq) {
+                                                  GetKeyValuesAndFlatMapRequest* pOriginalReq,
+                                                  Optional<Key> tenantPrefix) {
 	state GetKeyValuesAndFlatMapReply result;
 	result.version = input.version;
 	if (input.more) {
@@ -2984,9 +3020,9 @@ ACTOR Future<GetKeyValuesAndFlatMapReply> flatMap(StorageServer* data,
 	state Tuple mappedKeyFormatTuple = Tuple::unpack(mapper);
 	state KeyValueRef* it = input.data.begin();
 	for (; it != input.data.end(); it++) {
-		state StringRef key = it->key;
-
-		state Key mappedKey = constructMappedKey(it, mappedKeyFormatTuple, isRangeQuery);
+		// TODO: raw access is not currently supported for tenants using flat map. Should we try to support it or
+		// provide an error?
+		state Key mappedKey = constructMappedKey(it, mappedKeyFormatTuple, isRangeQuery, tenantPrefix);
 		// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
 		result.arena.dependsOn(mappedKey.arena());
 
@@ -3054,7 +3090,9 @@ ACTOR Future<Void> getKeyValuesAndFlatMapQ(StorageServer* data, GetKeyValuesAndF
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesAndFlatMap.Before");
 		state Version version = wait(waitForVersion(data, req.version, span.context));
 
-		data->checkTenant(req.version, req.tenantInfo.name, req.begin.getKey(), req.end.getKey());
+		state Optional<Key> tenantPrefix =
+		    data->checkTenant(req.version, req.tenantInfo.name, req.begin.getKey(), req.end.getKey());
+
 		state uint64_t changeCounter = data->shardChangeCounter;
 		//		try {
 		state KeyRange shard = getShardKeyRange(data, req.begin);
@@ -3130,7 +3168,7 @@ ACTOR Future<Void> getKeyValuesAndFlatMapQ(StorageServer* data, GetKeyValuesAndF
 			state GetKeyValuesAndFlatMapReply r;
 			try {
 				// Map the scanned range to another list of keys and look up.
-				GetKeyValuesAndFlatMapReply _r = wait(flatMap(data, getKeyValuesReply, req.mapper, &req));
+				GetKeyValuesAndFlatMapReply _r = wait(flatMap(data, getKeyValuesReply, req.mapper, &req, tenantPrefix));
 				r = _r;
 			} catch (Error& e) {
 				TraceEvent("FlatMapError").error(e);
