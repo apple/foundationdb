@@ -1452,7 +1452,7 @@ void stopAllTLogs(Reference<TLogServerData> self, UID newLogId) {
 			if (!it.second->stopped) {
 				TraceEvent("TLogStoppedByNewRecruitment", self->dbgid)
 				    .detail("LogId", it.second->logId)
-				    .detail("StoppedId", it.first.toString())
+				    .detail("StoppedId", it.first)
 				    .detail("RecruitedId", newLogId)
 				    .detail("EndEpoch", it.second->logSystem->get().getPtr() != 0);
 				if (it.second->committingQueue.canBeSet()) {
@@ -1513,7 +1513,7 @@ ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
 
 		TraceEvent(SevError, "UnsupportedDBFormat", self->dbgid)
 		    .detail("Format", fFormat.get().get())
-		    .detail("Expected", persistFormat.value.toString());
+		    .detail("Expected", persistFormat.value);
 		throw worker_recovery_failed();
 	}
 
@@ -1653,7 +1653,7 @@ ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
 				std::vector<Tag> tags = v.first;
 				Version popped = v.second;
 				TraceEvent("TLogRestorePopped", logData->logId)
-				    .detail("StorageTeamID", id.toString())
+				    .detail("StorageTeamID", id)
 				    .detail("To", popped);
 
 				auto storageTeamData = logData->getStorageTeamData(id);
@@ -1853,7 +1853,7 @@ ACTOR Future<Void> tLogPop(Reference<TLogGroupData> self, TLogPopRequest req, Re
 
 		TraceEvent(SevDebug, "IgnoringPopRequest")
 		    .detail("IgnorePopDeadline", self->ignorePopDeadline)
-		    .detail("Tag", req.tag.toString())
+		    .detail("Tag", req.tag)
 		    .detail("Version", req.version);
 	} else {
 		// TODO: pop from tlog

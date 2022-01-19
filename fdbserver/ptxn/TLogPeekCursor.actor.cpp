@@ -726,7 +726,7 @@ ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInte
 	TraceEvent(SevDebug, "SPC_Starting", dbgid)
 	    .detail("Team", storageTeamId)
 	    .detail("Group", tLogGroupID)
-	    .detail("Tag", tag.toString())
+	    .detail("Tag", tag)
 	    .detail("Begin", begin)
 	    .detail("End", end);
 }
