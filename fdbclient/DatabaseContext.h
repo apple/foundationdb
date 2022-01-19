@@ -20,6 +20,7 @@
 
 #ifndef DatabaseContext_h
 #define DatabaseContext_h
+#include "fdbclient/Notified.h"
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -132,19 +133,70 @@ public:
 	}
 };
 
+struct WatchParameters : public ReferenceCounted<WatchParameters> {
+	const Key key;
+	const Optional<Value> value;
+
+	const Version version;
+	const TagSet tags;
+	const SpanID spanID;
+	const TaskPriority taskID;
+	const Optional<UID> debugID;
+	const UseProvisionalProxies useProvisionalProxies;
+
+	WatchParameters(Key key,
+	                Optional<Value> value,
+	                Version version,
+	                TagSet tags,
+	                SpanID spanID,
+	                TaskPriority taskID,
+	                Optional<UID> debugID,
+	                UseProvisionalProxies useProvisionalProxies)
+	  : key(key), value(value), version(version), tags(tags), spanID(spanID), taskID(taskID), debugID(debugID),
+	    useProvisionalProxies(useProvisionalProxies) {}
+};
+
 class WatchMetadata : public ReferenceCounted<WatchMetadata> {
 public:
-	Key key;
-	Optional<Value> value;
-	Version version;
 	Promise<Version> watchPromise;
 	Future<Version> watchFuture;
 	Future<Void> watchFutureSS;
 
-	TransactionInfo info;
-	TagSet tags;
+	Reference<const WatchParameters> parameters;
 
-	WatchMetadata(Key key, Optional<Value> value, Version version, TransactionInfo info, TagSet tags);
+	WatchMetadata(Reference<const WatchParameters> parameters)
+	  : watchFuture(watchPromise.getFuture()), parameters(parameters) {}
+};
+
+struct MutationAndVersionStream {
+	Standalone<MutationsAndVersionRef> next;
+	PromiseStream<Standalone<MutationsAndVersionRef>> results;
+	bool operator<(MutationAndVersionStream const& rhs) const { return next.version > rhs.next.version; }
+};
+
+struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
+	UID id;
+	Future<Void> updater;
+	NotifiedVersion version;
+	NotifiedVersion desired;
+	Promise<Void> destroyed;
+
+	~ChangeFeedStorageData() { destroyed.send(Void()); }
+};
+
+struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
+	PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>> mutations;
+	std::vector<ReplyPromiseStream<ChangeFeedStreamReply>> streams;
+
+	Version getVersion();
+	Future<Void> whenAtLeast(Version version);
+
+	NotifiedVersion lastReturnedVersion;
+	std::vector<Reference<ChangeFeedStorageData>> storageData;
+	AsyncVar<int> notAtLatest;
+	Promise<Void> refresh;
+
+	ChangeFeedData() : notAtLatest(1) {}
 };
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
@@ -194,11 +246,25 @@ public:
 	bool sampleOnCost(uint64_t cost) const;
 
 	void updateProxies();
-	Reference<CommitProxyInfo> getCommitProxies(bool useProvisionalProxies);
-	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(bool useProvisionalProxies);
-	Reference<GrvProxyInfo> getGrvProxies(bool useProvisionalProxies);
+	Reference<CommitProxyInfo> getCommitProxies(UseProvisionalProxies useProvisionalProxies);
+	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(UseProvisionalProxies useProvisionalProxies);
+	Reference<GrvProxyInfo> getGrvProxies(UseProvisionalProxies useProvisionalProxies);
 	Future<Void> onProxiesChanged() const;
+	Future<Void> onClientLibStatusChanged() const;
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
+	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
+	Future<StorageMetrics> getStorageMetrics(KeyRange const& keys, int shardLimit);
+	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
+	                                                                    StorageMetrics const& min,
+	                                                                    StorageMetrics const& max,
+	                                                                    StorageMetrics const& permittedError,
+	                                                                    int shardLimit,
+	                                                                    int expectedShardCount);
+	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
+	                                                          StorageMetrics const& limit,
+	                                                          StorageMetrics const& estimated);
+
+	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys);
 
 	// Returns the protocol version reported by the coordinator this client is connected to
 	// If an expected version is given, the future won't return until the protocol version is different than expected
@@ -211,7 +277,7 @@ public:
 
 	// watch map operations
 	Reference<WatchMetadata> getWatchMetadata(KeyRef key) const;
-	KeyRef setWatchMetadata(Reference<WatchMetadata> metadata);
+	Key setWatchMetadata(Reference<WatchMetadata> metadata);
 	void deleteWatchMetadata(KeyRef key);
 	void clearWatchMetadata();
 
@@ -253,7 +319,7 @@ public:
 	// Management API, create snapshot
 	Future<Void> createSnapshot(StringRef uid, StringRef snapshot_command);
 
-	Future<Void> getChangeFeedStream(const PromiseStream<Standalone<VectorRef<MutationsAndVersionRef>>>& results,
+	Future<Void> getChangeFeedStream(Reference<ChangeFeedData> results,
 	                                 Key rangeID,
 	                                 Version begin = 0,
 	                                 Version end = std::numeric_limits<Version>::max(),
@@ -261,12 +327,6 @@ public:
 
 	Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
-
-	Future<Void> getBlobGranuleRangesStream(const PromiseStream<KeyRange>& results, KeyRange range);
-	Future<Void> readBlobGranulesStream(const PromiseStream<Standalone<BlobGranuleChunkRef>>& results,
-	                                    KeyRange range,
-	                                    Version begin,
-	                                    Optional<Version> end);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
@@ -288,7 +348,8 @@ public:
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord;
 	AsyncTrigger proxiesChangeTrigger;
-	Future<Void> monitorProxiesInfoChange;
+	AsyncTrigger clientLibChangeTrigger;
+	Future<Void> clientDBInfoMonitor;
 	Future<Void> monitorTssInfoChange;
 	Future<Void> tssMismatchHandler;
 	PromiseStream<std::pair<UID, std::vector<DetailedTSSMismatch>>> tssMismatchStream;
@@ -346,6 +407,9 @@ public:
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
 	// map from changeFeedId -> changeFeedRange
 	std::unordered_map<Key, KeyRange> changeFeedCache;
+	std::unordered_map<UID, Reference<ChangeFeedStorageData>> changeFeedUpdaters;
+
+	Reference<ChangeFeedStorageData> getStorageData(StorageServerInterface interf);
 
 	// map from ssid -> ss tag
 	// @note this map allows the client to identify the latest commit versions
@@ -376,6 +440,7 @@ public:
 	Counter transactionGetKeyRequests;
 	Counter transactionGetValueRequests;
 	Counter transactionGetRangeRequests;
+	Counter transactionGetRangeAndFlatMapRequests;
 	Counter transactionGetRangeStreamRequests;
 	Counter transactionWatchRequests;
 	Counter transactionGetAddressesForKeyRequests;
@@ -411,8 +476,9 @@ public:
 
 	int snapshotRywEnabled;
 
-	int transactionTracingEnabled;
+	bool transactionTracingSample;
 	double verifyCausalReadsProp = 0.0;
+	bool blobGranuleNoMaterialize = false;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;
@@ -476,15 +542,17 @@ public:
 	// commit version of that storage server is below the specified "readVersion".
 	void getLatestCommitVersions(const Reference<LocationInfo>& locationInfo,
 	                             Version readVersion,
-	                             const TransactionInfo& info,
+	                             Reference<TransactionState> info,
 	                             VersionVector& latestCommitVersions);
 
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;
 	Reference<TransactionT> createTransaction();
 
+	EventCacheHolder connectToDatabaseEventCacheHolder;
+
 private:
-	std::unordered_map<KeyRef, Reference<WatchMetadata>> watchMap;
+	std::unordered_map<Key, Reference<WatchMetadata>> watchMap;
 };
 
 #endif

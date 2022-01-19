@@ -5,6 +5,7 @@ set(FLOW_SRCS
   ActorCollection.h
   Arena.cpp
   Arena.h
+  ArgParseUtil.h
   AsioReactor.h
   BooleanParam.h
   CompressedInt.actor.cpp
@@ -129,6 +130,7 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY
 
 add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
 target_link_libraries(flow PRIVATE stacktrace)
+target_link_libraries(flow PUBLIC fmt::fmt)
 
 add_flow_target(STATIC_LIBRARY NAME flow_sampling SRCS ${FLOW_SRCS})
 target_link_libraries(flow_sampling PRIVATE stacktrace)

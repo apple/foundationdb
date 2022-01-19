@@ -272,13 +272,10 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;
 		ConflictBatch conflictBatch(self->conflictSet, &reply.conflictingKeyRangeMap, &reply.arena);
-		int keys = 0;
 		for (int t = 0; t < req.transactions.size(); t++) {
 			conflictBatch.addTransaction(req.transactions[t]);
 			self->resolvedReadConflictRanges += req.transactions[t].read_conflict_ranges.size();
 			self->resolvedWriteConflictRanges += req.transactions[t].write_conflict_ranges.size();
-			keys += req.transactions[t].write_conflict_ranges.size() * 2 +
-			        req.transactions[t].read_conflict_ranges.size() * 2;
 
 			if (self->resolverCount > 1) {
 				for (auto it : req.transactions[t].write_conflict_ranges)
@@ -646,7 +643,7 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> onError =
-	    transformError(actorCollection(addActor.getFuture()), broken_promise(), master_resolver_failed());
+	    transformError(actorCollection(addActor.getFuture()), broken_promise(), resolver_failed());
 	state TransactionStateResolveContext transactionStateResolveContext;
 	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 		self->logAdapter = new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);

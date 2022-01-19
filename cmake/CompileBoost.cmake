@@ -49,8 +49,8 @@ function(compile_boost)
   include(ExternalProject)
   set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
   ExternalProject_add("${COMPILE_BOOST_TARGET}Project"
-    URL "https://boostorg.jfrog.io/artifactory/main/release/1.72.0/source/boost_1_72_0.tar.bz2"
-    URL_HASH SHA256=59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722
+    URL "https://boostorg.jfrog.io/artifactory/main/release/1.77.0/source/boost_1_77_0.tar.bz2"
+    URL_HASH SHA256=fc9f85fc030e233142908241af7a846e60630aa7388de9a5fafb1f3a26840854
     CONFIGURE_COMMAND ${BOOTSTRAP_COMMAND} ${BOOTSTRAP_ARGS} --with-libraries=${BOOTSTRAP_LIBRARIES} --with-toolset=${BOOST_TOOLSET}
     BUILD_COMMAND ${B2_COMMAND} link=static ${COMPILE_BOOST_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
     BUILD_IN_SOURCE ON
@@ -113,7 +113,7 @@ if(WIN32)
   return()
 endif()
 
-find_package(Boost 1.72.0 EXACT QUIET COMPONENTS context CONFIG PATHS ${BOOST_HINT_PATHS})
+find_package(Boost 1.77.0 EXACT QUIET COMPONENTS context CONFIG PATHS ${BOOST_HINT_PATHS})
 set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
 
 if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)

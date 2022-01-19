@@ -24,12 +24,15 @@ set(FDBCLIENT_SRCS
   BlobGranuleReader.actor.cpp
   BlobGranuleReader.actor.h
   BlobGranuleCommon.h
+  BlobGranuleFiles.cpp
+  BlobGranuleFiles.h
   BlobWorkerCommon.h
   ClientKnobCollection.cpp
   ClientKnobCollection.h
   ClientKnobs.cpp
   ClientKnobs.h
   ClientLogEvents.h
+  ClientVersion.h
   ClientWorkerInterface.h
   ClusterConnectionFile.actor.cpp
   ClusterConnectionFile.h
@@ -73,6 +76,8 @@ set(FDBCLIENT_SRCS
   Knobs.h
   IKnobCollection.cpp
   IKnobCollection.h
+  LocalClientAPI.cpp
+  LocalClientAPI.h
   ManagementAPI.actor.cpp
   ManagementAPI.actor.h
   MonitorLeader.actor.cpp

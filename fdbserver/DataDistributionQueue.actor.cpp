@@ -1027,8 +1027,18 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
 					// server that hosts the relocateData. This is possible, for example, in a fearless configuration
 					// when the remote DC is just brought up.
-					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> bestTeam =
-					    wait(brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req)));
+					Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
+					    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
+					state bool bestTeamReady = fbestTeam.isReady();
+					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> bestTeam = wait(fbestTeam);
+					if (tciIndex > 0 && !bestTeamReady) {
+						// self->shardsAffectedByTeamFailure->moveShard must be called without any waits after getting
+						// the destination team or we could miss failure notifications for the storage servers in the
+						// destination team
+						TraceEvent("BestTeamNotReady");
+						foundTeams = false;
+						break;
+					}
 					// If a DC has no healthy team, we stop checking the other DCs until
 					// the unhealthy DC is healthy again or is excluded.
 					if (!bestTeam.first.present()) {

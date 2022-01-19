@@ -216,22 +216,26 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 		    ClientStatusInfo(req.traceLogGroup, req.supportedVersions, req.issues);
 	}
 
-	while (db->clientInfo->get().read().id == req.knownClientInfoID &&
-	       !db->clientInfo->get().read().forward.present()) {
+	while (!db->clientInfo->get().read().id.isValid() || (db->clientInfo->get().read().id == req.knownClientInfoID &&
+	                                                      !db->clientInfo->get().read().forward.present())) {
 		choose {
 			when(wait(checkStuck)) {
 				replyContents = failed_to_progress();
 				break;
 			}
-			when(wait(yieldedFuture(db->clientInfo->onChange()))) {}
+			when(wait(yieldedFuture(db->clientInfo->onChange()))) { replyContents = db->clientInfo->get(); }
 			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) {
-				if (req.supportedVersions.size() > 0) {
-					db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
+				if (db->clientInfo->get().read().id.isValid()) {
+					replyContents = db->clientInfo->get();
 				}
-				replyContents = db->clientInfo->get();
+				// Otherwise, we still break out of the loop and return a default_error_or.
 				break;
 			} // The client might be long gone!
 		}
+	}
+
+	if (req.supportedVersions.size() > 0) {
+		db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	if (replyContents.present()) {
@@ -295,7 +299,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 
 	loop choose {
 		when(OpenDatabaseCoordRequest req = waitNext(interf.openDatabase.getFuture())) {
-			if (clientData.clientInfo->get().read().id != req.knownClientInfoID &&
+			if (clientData.clientInfo->get().read().id.isValid() &&
+			    clientData.clientInfo->get().read().id != req.knownClientInfoID &&
 			    !clientData.clientInfo->get().read().forward.present()) {
 				req.reply.send(clientData.clientInfo->get());
 			} else {
@@ -528,7 +533,11 @@ struct LeaderRegisterCollection {
 	// When the lead coordinator changes, store the new connection ID in the "fwd" keyspace.
 	// If a request arrives using an old connection id, resend it to the new coordinator using the stored connection id.
 	// Store when this change took place in the fwdTime keyspace.
-	ACTOR static Future<Void> setForward(LeaderRegisterCollection* self, KeyRef key, ClusterConnectionString conn) {
+	ACTOR static Future<Void> setForward(LeaderRegisterCollection* self,
+	                                     KeyRef key,
+	                                     ClusterConnectionString conn,
+	                                     ForwardRequest req,
+	                                     UID id) {
 		double forwardTime = now();
 		LeaderInfo forwardInfo;
 		forwardInfo.forward = true;
@@ -539,6 +548,8 @@ struct LeaderRegisterCollection {
 		store->set(KeyValueRef(key.withPrefix(fwdKeys.begin), conn.toString()));
 		store->set(KeyValueRef(key.withPrefix(fwdTimeKeys.begin), BinaryWriter::toValue(forwardTime, Unversioned())));
 		wait(store->commit());
+		// Do not process a forwarding request until after it has been made durable in case the coordinator restarts
+		self->getInterface(req.key, id).forward.send(req);
 		return Void();
 	}
 
@@ -708,8 +719,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 					req.reply.sendError(wrong_connection_file());
 				} else {
 					forwarders.add(LeaderRegisterCollection::setForward(
-					    &regs, req.key, ClusterConnectionString(req.conn.toString())));
-					regs.getInterface(req.key, id).forward.send(req);
+					    &regs, req.key, ClusterConnectionString(req.conn.toString()), req, id));
 				}
 			}
 		}

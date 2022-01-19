@@ -447,6 +447,7 @@ public:
 	const uint8_t* begin() const { return data; }
 	const uint8_t* end() const { return data + length; }
 	int size() const { return length; }
+	bool empty() const { return length == 0; }
 
 	uint8_t operator[](int i) const { return data[i]; }
 

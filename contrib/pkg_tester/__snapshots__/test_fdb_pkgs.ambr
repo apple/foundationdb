@@ -46,6 +46,34 @@
   
   '
 ---
+# name: test_execstack_permissions_libfdb_c[centos-versioned]
+  '
+    GNU_STACK      0x0000000000000000 0x0000000000000000 0x0000000000000000
+                   0x0000000000000000 0x0000000000000000  RW     0x0
+  
+  '
+---
+# name: test_execstack_permissions_libfdb_c[centos]
+  '
+    GNU_STACK      0x0000000000000000 0x0000000000000000 0x0000000000000000
+                   0x0000000000000000 0x0000000000000000  RW     0x0
+  
+  '
+---
+# name: test_execstack_permissions_libfdb_c[ubuntu-versioned]
+  '
+    GNU_STACK      0x0000000000000000 0x0000000000000000 0x0000000000000000
+                   0x0000000000000000 0x0000000000000000  RW     0x0
+  
+  '
+---
+# name: test_execstack_permissions_libfdb_c[ubuntu]
+  '
+    GNU_STACK      0x0000000000000000 0x0000000000000000 0x0000000000000000
+                   0x0000000000000000 0x0000000000000000  RW     0x0
+  
+  '
+---
 # name: test_fdbcli_help_text[centos-versioned]
   '
   FoundationDB CLI 7.1 (v7.1.0)
@@ -59,7 +87,7 @@
     --log-dir PATH Specifes the output directory for trace files. If
                    unspecified, defaults to the current directory. Has
                    no effect unless --log is specified.
-    --trace_format FORMAT
+    --trace-format FORMAT
                    Select the format of the log files. xml (the default) and json
                    are supported. Has no effect unless --log is specified.
     --exec CMDS    Immediately executes the semicolon separated CLI commands
@@ -68,24 +96,24 @@
                    the CLI.
     --api-version  APIVERSION
                    Specifies the version of the API for the CLI to use.
-    --tls_certificate_file CERTFILE
+    --tls-certificate-file CERTFILE
                    The path of a file containing the TLS certificate and CA
                    chain.
-    --tls_ca_file CERTAUTHFILE
+    --tls-ca-file CERTAUTHFILE
                    The path of a file containing the CA certificates chain.
-    --tls_key_file KEYFILE
+    --tls-key-file KEYFILE
                    The path of a file containing the private key corresponding
                    to the TLS certificate.
-    --tls_password PASSCODE
+    --tls-password PASSCODE
                    The passphrase of encrypted private key
-    --tls_verify_peers CONSTRAINTS
+    --tls-verify-peers CONSTRAINTS
                    The constraints by which to validate TLS peers. The contents
                    and format of CONSTRAINTS are plugin-specific.
-    --knob_KNOBNAME KNOBVALUE
+    --knob-KNOBNAME KNOBVALUE
                    Changes a knob option. KNOBNAME should be lowercase.
     --debug-tls    Prints the TLS configuration and certificate chain, then exits.
                    Useful in reporting and diagnosing TLS issues.
-    --build_flags  Print build information and exit.
+    --build-flags  Print build information and exit.
     -v, --version  Print FoundationDB CLI version information and exit.
     -h, --help     Display this help and exit.
   
@@ -104,7 +132,7 @@
     --log-dir PATH Specifes the output directory for trace files. If
                    unspecified, defaults to the current directory. Has
                    no effect unless --log is specified.
-    --trace_format FORMAT
+    --trace-format FORMAT
                    Select the format of the log files. xml (the default) and json
                    are supported. Has no effect unless --log is specified.
     --exec CMDS    Immediately executes the semicolon separated CLI commands
@@ -113,24 +141,24 @@
                    the CLI.
     --api-version  APIVERSION
                    Specifies the version of the API for the CLI to use.
-    --tls_certificate_file CERTFILE
+    --tls-certificate-file CERTFILE
                    The path of a file containing the TLS certificate and CA
                    chain.
-    --tls_ca_file CERTAUTHFILE
+    --tls-ca-file CERTAUTHFILE
                    The path of a file containing the CA certificates chain.
-    --tls_key_file KEYFILE
+    --tls-key-file KEYFILE
                    The path of a file containing the private key corresponding
                    to the TLS certificate.
-    --tls_password PASSCODE
+    --tls-password PASSCODE
                    The passphrase of encrypted private key
-    --tls_verify_peers CONSTRAINTS
+    --tls-verify-peers CONSTRAINTS
                    The constraints by which to validate TLS peers. The contents
                    and format of CONSTRAINTS are plugin-specific.
-    --knob_KNOBNAME KNOBVALUE
+    --knob-KNOBNAME KNOBVALUE
                    Changes a knob option. KNOBNAME should be lowercase.
     --debug-tls    Prints the TLS configuration and certificate chain, then exits.
                    Useful in reporting and diagnosing TLS issues.
-    --build_flags  Print build information and exit.
+    --build-flags  Print build information and exit.
     -v, --version  Print FoundationDB CLI version information and exit.
     -h, --help     Display this help and exit.
   
@@ -149,7 +177,7 @@
     --log-dir PATH Specifes the output directory for trace files. If
                    unspecified, defaults to the current directory. Has
                    no effect unless --log is specified.
-    --trace_format FORMAT
+    --trace-format FORMAT
                    Select the format of the log files. xml (the default) and json
                    are supported. Has no effect unless --log is specified.
     --exec CMDS    Immediately executes the semicolon separated CLI commands
@@ -158,24 +186,24 @@
                    the CLI.
     --api-version  APIVERSION
                    Specifies the version of the API for the CLI to use.
-    --tls_certificate_file CERTFILE
+    --tls-certificate-file CERTFILE
                    The path of a file containing the TLS certificate and CA
                    chain.
-    --tls_ca_file CERTAUTHFILE
+    --tls-ca-file CERTAUTHFILE
                    The path of a file containing the CA certificates chain.
-    --tls_key_file KEYFILE
+    --tls-key-file KEYFILE
                    The path of a file containing the private key corresponding
                    to the TLS certificate.
-    --tls_password PASSCODE
+    --tls-password PASSCODE
                    The passphrase of encrypted private key
-    --tls_verify_peers CONSTRAINTS
+    --tls-verify-peers CONSTRAINTS
                    The constraints by which to validate TLS peers. The contents
                    and format of CONSTRAINTS are plugin-specific.
-    --knob_KNOBNAME KNOBVALUE
+    --knob-KNOBNAME KNOBVALUE
                    Changes a knob option. KNOBNAME should be lowercase.
     --debug-tls    Prints the TLS configuration and certificate chain, then exits.
                    Useful in reporting and diagnosing TLS issues.
-    --build_flags  Print build information and exit.
+    --build-flags  Print build information and exit.
     -v, --version  Print FoundationDB CLI version information and exit.
     -h, --help     Display this help and exit.
   
@@ -194,7 +222,7 @@
     --log-dir PATH Specifes the output directory for trace files. If
                    unspecified, defaults to the current directory. Has
                    no effect unless --log is specified.
-    --trace_format FORMAT
+    --trace-format FORMAT
                    Select the format of the log files. xml (the default) and json
                    are supported. Has no effect unless --log is specified.
     --exec CMDS    Immediately executes the semicolon separated CLI commands
@@ -203,24 +231,24 @@
                    the CLI.
     --api-version  APIVERSION
                    Specifies the version of the API for the CLI to use.
-    --tls_certificate_file CERTFILE
+    --tls-certificate-file CERTFILE
                    The path of a file containing the TLS certificate and CA
                    chain.
-    --tls_ca_file CERTAUTHFILE
+    --tls-ca-file CERTAUTHFILE
                    The path of a file containing the CA certificates chain.
-    --tls_key_file KEYFILE
+    --tls-key-file KEYFILE
                    The path of a file containing the private key corresponding
                    to the TLS certificate.
-    --tls_password PASSCODE
+    --tls-password PASSCODE
                    The passphrase of encrypted private key
-    --tls_verify_peers CONSTRAINTS
+    --tls-verify-peers CONSTRAINTS
                    The constraints by which to validate TLS peers. The contents
                    and format of CONSTRAINTS are plugin-specific.
-    --knob_KNOBNAME KNOBVALUE
+    --knob-KNOBNAME KNOBVALUE
                    Changes a knob option. KNOBNAME should be lowercase.
     --debug-tls    Prints the TLS configuration and certificate chain, then exits.
                    Useful in reporting and diagnosing TLS issues.
-    --build_flags  Print build information and exit.
+    --build-flags  Print build information and exit.
     -v, --version  Print FoundationDB CLI version information and exit.
     -h, --help     Display this help and exit.
   

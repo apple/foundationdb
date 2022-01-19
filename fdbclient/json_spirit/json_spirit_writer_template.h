@@ -32,8 +32,6 @@ inline char to_hex_char(unsigned int c) {
 
 template <class String_type>
 String_type non_printable_to_string(unsigned int c) {
-	typedef typename String_type::value_type Char_type;
-
 	String_type result(6, '\\');
 
 	result[1] = 'u';

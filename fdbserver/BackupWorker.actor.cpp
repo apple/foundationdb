@@ -435,10 +435,11 @@ struct BackupData {
 			                              GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
 			choose {
 				when(wait(self->cx->onProxiesChanged())) {}
-				when(GetReadVersionReply reply = wait(basicLoadBalance(self->cx->getGrvProxies(false),
-				                                                       &GrvProxyInterface::getConsistentReadVersion,
-				                                                       request,
-				                                                       self->cx->taskID))) {
+				when(GetReadVersionReply reply =
+				         wait(basicLoadBalance(self->cx->getGrvProxies(UseProvisionalProxies::False),
+				                               &GrvProxyInterface::getConsistentReadVersion,
+				                               request,
+				                               self->cx->taskID))) {
 					self->cx->ssVersionVectorCache.applyDelta(reply.ssVersionVectorDelta);
 					return reply.version;
 				}
@@ -1087,7 +1088,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 				TraceEvent("BackupWorkerDone", self.myId).detail("BackupEpoch", self.backupEpoch);
 				// Notify master so that this worker can be removed from log system, then this
 				// worker (for an old epoch's unfinished work) can safely exit.
-				wait(brokenPromiseToNever(db->get().master.notifyBackupWorkerDone.getReply(
+				wait(brokenPromiseToNever(db->get().clusterInterface.notifyBackupWorkerDone.getReply(
 				    BackupWorkerDoneRequest(self.myId, self.backupEpoch))));
 				break;
 			}
