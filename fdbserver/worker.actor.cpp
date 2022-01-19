@@ -1965,7 +1965,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				}
 				activeSharedTLog->set(logData.uid);
 			}
-			when(ptxn::InitializePtxnTLogRequest req = waitNext(interf.ptxnTLog.getFuture())) {
+			when(ptxn::InitializePtxnTLogRequest originalReq = waitNext(interf.ptxnTLog.getFuture())) {
+				ptxn::InitializePtxnTLogRequest req = originalReq;
 				if (req.logVersion < TLogVersion::MIN_RECRUITABLE) {
 					TraceEvent(SevError, "InitializeTLogInvalidLogVersion")
 					    .detail("Version", req.logVersion)
@@ -1975,6 +1976,19 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				// id seems confusing -- sometimes tlog groups, sometimes tlog. need to finalize it.
 				TLogOptions tLogOptions(req.logVersion, req.spillType);
 				auto& logData = sharedLogs[SharedLogsKey(tLogOptions, req.storeType)];
+
+				// create kv and disk queue per TLog group
+				for (auto& group : req.tlogGroups) {
+					IKeyValueStore* data = keyValueStoreMemory(joinPath(folder, "loggroup"), group.logGroupId, 500e6);
+					IDiskQueue* queue = openDiskQueue(joinPath(folder, "logqueue-" + group.logGroupId.toString() + "-"),
+					                                  "fdq",
+					                                  group.logGroupId,
+					                                  DiskQueueVersion::V1);
+					req.persistentDataAndQueues[group.logGroupId] = std::make_pair(data, queue);
+					filesClosed.add(data->onClosed());
+					filesClosed.add(queue->onClosed());
+				}
+
 				logData.ptxnRequests.send(req);
 				if (!logData.actor.isValid() || logData.actor.isReady()) {
 					UID logId = deterministicRandom()->randomUniqueID();
@@ -1986,36 +2000,21 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					// different role type for the shared actor
 					startRole(Role::SHARED_TRANSACTION_LOG, logId, interf.id(), details);
 
-					// TODO: create kv and disk queue per TLog group.
-					std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>>
-					    persistentDataAndQueues;
-					for (auto& group : req.tlogGroups) {
-						IKeyValueStore* data =
-						    keyValueStoreMemory(joinPath(folder, "loggroup"), group.logGroupId, 500e6);
-						IDiskQueue* queue =
-						    openDiskQueue(joinPath(folder, "logqueue-" + group.logGroupId.toString() + "-"),
-						                  "fdq",
-						                  group.logGroupId,
-						                  DiskQueueVersion::V1);
-						persistentDataAndQueues[group.logGroupId] = std::make_pair(data, queue);
-						filesClosed.add(data->onClosed());
-						filesClosed.add(queue->onClosed());
-					}
+					Future<Void> tLogCore =
+					    ptxn::tLog(std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>>(),
+					               dbInfo,
+					               locality,
+					               logData.ptxnRequests,
+					               logId,
+					               interf.id(),
+					               false,
+					               Promise<Void>(),
+					               Promise<Void>(),
+					               folder,
+					               degraded,
+					               activeSharedTLog);
 
-					Future<Void> tLogCore = ptxn::tLog(persistentDataAndQueues,
-					                                   dbInfo,
-					                                   locality,
-					                                   logData.ptxnRequests,
-					                                   logId,
-					                                   interf.id(),
-					                                   false,
-					                                   Promise<Void>(),
-					                                   Promise<Void>(),
-					                                   folder,
-					                                   degraded,
-					                                   activeSharedTLog);
-
-					for (auto& entry : persistentDataAndQueues) {
+					for (auto& entry : req.persistentDataAndQueues) {
 						tLogCore = handleIOErrors(tLogCore, entry.second.first, entry.first);
 						tLogCore = handleIOErrors(tLogCore, entry.second.second, entry.first);
 					}
