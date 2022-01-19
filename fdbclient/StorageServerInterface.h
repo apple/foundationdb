@@ -924,6 +924,7 @@ struct GetCheckpointRequest {
 	Version minVersion;
 	KeyRange range;
 	bool createNew; // Create a new checkpoint if not exist.
+	// TODO: add ttl.
 	ReplyPromise<CheckpointMetaData> reply;
 
 	GetCheckpointRequest() {}
