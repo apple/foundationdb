@@ -95,7 +95,7 @@ public:
 	    initialCommit(initialCommit_), tagToServer(&proxyCommitData_.tagToServer),
 	    ssToStorageTeam(&proxyCommitData_.ssToStorageTeam), changedTeams(&proxyCommitData_.changedTeams) {
 
-		for (const auto [ss, team] : proxyCommitData_.ssToStorageTeam) {
+		for (const auto& [ss, team] : proxyCommitData_.ssToStorageTeam) {
 			TraceEvent(SevDebug, "SSTeam", dbgid).detail("SS", ss).detail("Team", team);
 			allTeams.insert(team);
 		}

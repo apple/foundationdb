@@ -245,7 +245,7 @@ ACTOR Future<std::vector<UID>> addReadWriteDestinations(KeyRangeRef shard,
 ACTOR Future<std::vector<UID>> pickReadWriteServers(Transaction* tr, std::vector<UID> candidates, KeyRangeRef range) {
 	std::vector<Future<Optional<Value>>> serverListEntries;
 
-	for (const UID id : candidates) {
+	for (const UID& id : candidates) {
 		serverListEntries.push_back(tr->get(serverListKeyFor(id)));
 	}
 
