@@ -901,7 +901,7 @@ ACTOR Future<Void> handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
                                             BlobFileIndex completedDeltaFile,
                                             Key cfKey,
                                             Version cfStartVersion,
-                                            std::deque<std::pair<Version, Version>> rollbacksCompleted) {
+                                            std::deque<std::pair<Version, Version>>* rollbacksCompleted) {
 	metadata->files.deltaFiles.push_back(completedDeltaFile);
 	ASSERT(metadata->durableDeltaVersion.get() < completedDeltaFile.version);
 	metadata->durableDeltaVersion.set(completedDeltaFile.version);
@@ -917,8 +917,12 @@ ACTOR Future<Void> handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 		Future<Void> popFuture = bwData->db->popChangeFeedMutations(cfKey, completedDeltaFile.version);
 		wait(popFuture);
 	}
-	while (!rollbacksCompleted.empty() && completedDeltaFile.version >= rollbacksCompleted.front().first) {
-		rollbacksCompleted.pop_front();
+	while (!rollbacksCompleted->empty() && completedDeltaFile.version >= rollbacksCompleted->front().second) {
+		fmt::print("Completed rollback {0} -> {1} with delta file {2}\n",
+		           rollbacksCompleted->front().second,
+		           rollbacksCompleted->front().first,
+		           completedDeltaFile.version);
+		rollbacksCompleted->pop_front();
 	}
 	return Void();
 }
@@ -1292,7 +1296,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						                              completedFile,
 						                              cfKey,
 						                              startState.changeFeedStartVersion,
-						                              rollbacksCompleted));
+						                              &rollbacksCompleted));
 					}
 
 					inFlightFiles.pop_front();
@@ -1418,7 +1422,20 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							ASSERT(rollbackVersion >= metadata->durableDeltaVersion.get());
 
 							if (!rollbacksInProgress.empty()) {
+								// TODO REMOVE, for debugging
+								if (rollbacksInProgress.front().first != rollbackVersion) {
+									fmt::print("Found out of order rollbacks! Current in progress: {0}, mutation "
+									           "version: {1}\n",
+									           rollbacksInProgress.front().first,
+									           rollbackVersion);
+								}
 								ASSERT(rollbacksInProgress.front().first == rollbackVersion);
+								if (rollbacksInProgress.front().first != rollbackVersion) {
+									fmt::print("Found out of order rollbacks! Current in progress: {0}, rollback "
+									           "version: {1}\n",
+									           rollbacksInProgress.front().second,
+									           deltas.version);
+								}
 								ASSERT(rollbacksInProgress.front().second == deltas.version);
 								if (BW_DEBUG) {
 									fmt::print("Passed rollback {0} -> {1}\n", deltas.version, rollbackVersion);
@@ -1438,6 +1455,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										           deltas.version,
 										           rollbackVersion);
 									}
+									// Still have to add to rollbacksCompleted. If we later roll the granule back past
+									// this because of cancelling a delta file, we need to count this as in progress so
+									// we can match the rollback mutation to a rollbackInProgress when we restart the
+									// stream.
+									rollbacksCompleted.push_back(std::pair(rollbackVersion, deltas.version));
 								} else {
 									if (BW_DEBUG) {
 										fmt::print("BW [{0} - {1}) ROLLBACK @ {2} -> {3}\n",
@@ -1683,7 +1705,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 								                              completedFile,
 								                              cfKey,
 								                              startState.changeFeedStartVersion,
-								                              rollbacksCompleted));
+								                              &rollbacksCompleted));
 							}
 
 							inFlightFiles.pop_front();
