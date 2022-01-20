@@ -456,7 +456,7 @@ const Key storageServerListToTeamIdKey(std::vector<UID> servers) {
 	BinaryWriter wr(Unversioned());
 	std::sort(servers.begin(), servers.end());
 	wr.serializeBytes(storageServerToTeamIdKeyPrefix);
-	wr << servers.size();
+	wr << static_cast<int>(servers.size());
 	for (auto& s : servers) {
 		wr << s;
 	}
