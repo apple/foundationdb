@@ -1643,6 +1643,7 @@ ACTOR Future<Void> checkpointQ(StorageServer* self, GetCheckpointRequest req) {
 
 		state CheckpointMetaData checkpointMetaData =
 		    wait(self->storage.checkpoint(self->folder + "/rockscheckpoints_" + std::to_string(minVersion) + "/"));
+		checkpointMetaData.ssID = self->thisServerID;
 		self->checkpoints.emplace(checkpointMetaData.version, checkpointMetaData);
 		req.reply.send(checkpointMetaData);
 		TraceEvent("ServeCheckpointSuccess")

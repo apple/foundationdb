@@ -890,6 +890,7 @@ struct CheckpointMetaData {
 	constexpr static FileIdentifier file_identifier = 13804342;
 	Version version;
 	KeyRange range;
+	UID ssID;
 
 	// Used by RocksDB for safty check during import.
 	std::string dbComparatorName;
@@ -915,7 +916,7 @@ struct CheckpointMetaData {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, range, dbComparatorName, sstFiles);
+		serializer(ar, version, range, ssID, dbComparatorName, sstFiles);
 	}
 };
 

@@ -6867,44 +6867,47 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 	}
 }
 
-ACTOR Future<CheckpointMetaData> getCheckpoint(Database cx, KeyRange keys, Version minVersion) {
-	state Span span("NAPI:CreateCheckpoint"_loc);
-	TraceEvent("CreateCheckpointStart").detail("Version", minVersion);
+ACTOR static Future<CheckpointMetaData> getCheckpointInternal(Database cx,
+                                                              KeyRange keys,
+                                                              Version minVersion,
+                                                              bool createNew) {
+	state Span span("NAPI:GetCheckpointInternal"_loc);
+
+	TraceEvent("GetCheckpointInternalBegin").detail("Range", keys.toString()).detail("MinVersion", minVersion);
+
+	state CheckpointMetaData metaData;
+	state std::vector<Future<CheckpointMetaData>> alternatives;
 
 	loop {
+		alternatives.clear();
+
 		try {
 			state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
 			    wait(getKeyRangeLocations(cx,
 			                              keys,
-			                              3,
+			                              2,
 			                              Reverse::False,
 			                              &StorageServerInterface::checkpoint,
 			                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
-			// if (locations.size() > 1) {
-			// 	throw unknown_change_feed();
-			// }
+			state int i = 0;
+			state int e = locations[0].second->size();
+			if (createNew) {
+				i = deterministicRandom()->randomInt(0, e);
+				e = i + 1;
+			}
 
-			const int idx = deterministicRandom()->randomInt(0, locations[0].second->size());
-			TraceEvent("CreateCheckpointSendingRequest")
-			    .detail("TargetStorageServer", locations[0].second->getInterface(idx).toString());
-
-			Future<CheckpointMetaData> fCheckpoint = locations[0].second->getInterface(idx).checkpoint.getReply(
-			    GetCheckpointRequest(minVersion, locations[0].first));
+			for (; i < e; ++i) {
+				alternatives.push_back(locations[0].second->getInterface(i).checkpoint.getReply(
+				    GetCheckpointRequest(minVersion, keys, createNew)));
+			}
 			choose {
-				when(wait(cx->connectionFileChanged())) {
-					cx->invalidateCache(keys);
-					wait(delay(1));
-				}
-				when(state CheckpointMetaData reply = wait(timeoutError(fCheckpoint, 30))) {
-					TraceEvent("CreateCheckpointFinish").detail("Version", reply.version);
-					break;
-				}
+				when(wait(cx->connectionFileChanged())) {}
+				when(wait(waitForAny(alternatives))) { break; }
 			}
 		} catch (Error& e) {
-			TraceEvent("CreateCheckpointError").error(e, true);
+			TraceEvent("GetCheckpointInternalError").detail("Range", keys.toString()).error(e, true);
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-			    e.code() == error_code_connection_failed || e.code() == error_code_unknown_change_feed ||
-			    e.code() == error_code_broken_promise) {
+			    e.code() == error_code_connection_failed || e.code() == error_code_broken_promise) {
 				cx->invalidateCache(keys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
 			} else {
@@ -6912,22 +6915,64 @@ ACTOR Future<CheckpointMetaData> getCheckpoint(Database cx, KeyRange keys, Versi
 			}
 		}
 	}
-	return reply;
+
+	for (int j = 0; j < alternatives.size(); ++j) {
+		if (alternatives[j].isReady()) {
+			TraceEvent("GetCheckpointInternalEnd")
+			    .detail("Range", metaData.range.toString())
+			    .detail("Version", metaData.version)
+			    .detail("StorageServer", alternatives[j].get().ssID);
+			return alternatives[j].get();
+		}
+	}
+
+	throw internal_error();
 }
 
-ACTOR static Future<Void> getCheckpointFile(StorageServerInterface ss,
-                                            std::string remoteFile,
-                                            std::string localFile,
-                                            int maxRetries = 3) {
-	state Span span("NAPI:GetCheckpointFile"_loc);
+ACTOR Future<CheckpointMetaData> getCheckpoint(Database cx, KeyRange keys, Version minVersion) {
+	state Span span("NAPI:CreateCheckpoint"_loc);
+	TraceEvent("GetCheckpointStart").detail("Version", minVersion);
+	try {
+		state CheckpointMetaData m1 = wait(getCheckpointInternal(cx, keys, minVersion, /*createNew=*/false));
+		return m1;
+	} catch (Error& e) {
+		if (e.code() != error_code_checkpoint_not_found) {
+			throw e;
+		}
+	}
+	CheckpointMetaData m2 = wait(getCheckpointInternal(cx, keys, minVersion, /*createNew=*/true));
+	return m2;
+}
+
+ACTOR static Future<Void> fetchCheckpointFile(Database cx,
+                                              UID ssID,
+                                              std::string remoteFile,
+                                              std::string localFile,
+                                              int maxRetries = 3) {
+	state Span span("NAPI:FetchCheckpointFile"_loc);
+
+	state Transaction tr(cx);
+	state StorageServerInterface ssi;
+	loop {
+		try {
+			Optional<Value> ss = wait(tr.get(serverListKeyFor(ssID)));
+			if (!ss.present()) {
+				throw checkpoint_not_found();
+			}
+			StorageServerInterface ssi = decodeServerListValue(ss.get());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 
 	state int attempt = 0;
 	loop {
 		try {
 			++attempt;
-			TraceEvent("GetCheckpointFileBegin")
+			TraceEvent("FetchCheckpointFileBegin")
 			    .detail("RemoteFile", remoteFile)
-			    .detail("StorageServer", ss.toString())
+			    .detail("StorageServer", ssi.toString())
 			    .detail("LocalFile", localFile)
 			    .detail("Attempt", attempt);
 
@@ -6937,7 +6982,7 @@ ACTOR static Future<Void> getCheckpointFile(StorageServerInterface ss,
 			state int64_t offset = 0;
 			state Reference<IAsyncFile> asyncFile = wait(IAsyncFileSystem::filesystem()->open(localFile, flags, 0666));
 
-			state ReplyPromiseStream<GetFileReply> stream = ss.getFile.getReplyStream(GetFileRequest(remoteFile, 0));
+			state ReplyPromiseStream<GetFileReply> stream = ssi.getFile.getReplyStream(GetFileRequest(remoteFile, 0));
 			loop {
 				state GetFileReply rep = waitNext(stream.getFuture());
 				std::cout << "Received data: " << rep.sequence << "size: " << rep.data.size() << std::endl;
@@ -6947,9 +6992,9 @@ ACTOR static Future<Void> getCheckpointFile(StorageServerInterface ss,
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_end_of_stream) {
-				TraceEvent("GetCheckpointFileError")
+				TraceEvent("FetchCheckpointFileError")
 				    .detail("RemoteFile", remoteFile)
-				    .detail("StorageServer", ss.toString())
+				    .detail("StorageServer", ssi.toString())
 				    .detail("LocalFile", localFile)
 				    .detail("Attempt", attempt)
 				    .error(e, true);
@@ -6975,69 +7020,17 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx, KeyRange keys, Ver
 	    .detail("MinVersion", minVersion)
 	    .detail("CheckpointDir", dir);
 
-	state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
-	    wait(getKeyRangeLocations(cx,
-	                              keys,
-	                              3,
-	                              Reverse::False,
-	                              &StorageServerInterface::checkpoint,
-	                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
+	state CheckpointMetaData metaData = wait(getCheckpoint(cx, keys, minVersion));
 
-	// TODO: check all SS for existing checkpoint files, and then create a new one if none.
-	state int idx = 0;
-	state CheckpointMetaData metaData;
-	for (; idx < locations.size(); ++idx) {
-		try {
-			state CheckpointMetaData md1 = wait(locations[0].second->getInterface(idx).checkpoint.getReply(
-			    GetCheckpointRequest(minVersion, keys, /* createNew= */ false)));
-			metaData = md1;
-			break;
-		} catch (Error& e) {
-			if (e.code() != error_code_checkpoint_not_found) {
-				throw e;
-			}
-		}
-	}
+	TraceEvent("GetCheckpointMetaData").detail("Checkpoint", metaData.toString());
 
-	TraceEvent("CreateCheckpointFinish").detail("Checkpoint", metaData.toString());
-
-	if (idx >= locations.size()) {
-
-	idx = deterministicRandom()->randomInt(0, locations[0].second->size());
-	}
-
-	// for (state std::string& sstFile : metaData.sstFiles) {
+	state int i = 0;
 	for (; i < metaData.sstFiles.size(); ++i) {
-		// state std::string sstFile = metaData.sstFiles[i];
-		// size_t pos = sstFile.rfind("/");
-		// std::string name = pos == std::string::npos ? sstFile : sstFile.substr(pos + 1);
-		int64_t flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE |
-		                IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
-		state int64_t offset = 0;
-		state Reference<IAsyncFile> asyncFile =
-		    wait(IAsyncFileSystem::filesystem()->open(dir + metaData.sstFiles[i].name, flags, 0666));
-		state ReplyPromiseStream<GetFileReply> stream = locations[0].second->getInterface(idx).getFile.getReplyStream(
-		    GetFileRequest(metaData.sstFiles[i].db_path + metaData.sstFiles[i].name, 0));
-		try {
-			loop {
-				state GetFileReply rep = waitNext(stream.getFuture());
-				std::cout << "Received data: " << rep.sequence << "size: " << rep.data.size() << std::endl;
-				wait(asyncFile->write(rep.data.begin(), rep.size, offset));
-				wait(asyncFile->flush());
-				offset += rep.data.size();
-			}
-		} catch (Error& e) {
-			if (e.code() != error_code_end_of_stream) {
-				throw e;
-			} else {
-				int64_t fileSize = wait(asyncFile->size());
-				std::cout << "File " << asyncFile->getFilename() << " transfer complete, size: " << fileSize
-				          << std::endl;
-				wait(asyncFile->sync());
-				metaData.sstFiles[i].db_path = dir;
-			}
-			// if (e.code() == error_code_end_of_stream || e.code() == error_code_connection_failed);
-		}
+		wait(fetchCheckpointFile(cx,
+		                         metaData.ssID,
+		                         dir + metaData.sstFiles[i].name,
+		                         metaData.sstFiles[i].db_path + metaData.sstFiles[i].name));
+		metaData.sstFiles[i].db_path = dir;
 	}
 
 	return metaData;
