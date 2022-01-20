@@ -109,6 +109,30 @@ void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
 	}
 }
 
+enum class ShardOp {
+	ADD,
+	DELETE,
+	MODIFY_RANGE,
+};
+
+const char* ShardOpToString(ShardOp op) {
+	switch (op) {
+	case ShardOp::ADD:
+		return "Add";
+	case ShardOp::DELETE:
+		return "Delete";
+	case ShardOp::MODIFY_RANGE:
+		return "ModifyRange";
+	default:
+		return "Unknown";
+	}
+}
+
+void logShardMovement(KeyRangeRef range, ShardOp op, Severity severity = SevInfo) {
+	TraceEvent e(severity, "KVSShardMovement");
+	e.detail("Action", ShardOpToString(op)).detail("Begin", range.begin).detail("End", range.end);
+}
+
 Error statusToError(const rocksdb::Status& s) {
 	if (s.IsIOError()) {
 		return io_error();
@@ -371,6 +395,7 @@ struct DataShard {
 		if (db == nullptr)
 			return;
 		// Close DB
+		std::cout << "Close shard --- ";
 		auto s = db->Close();
 		if (!s.ok()) {
 			logRocksDBError(s, "CloseShard");
@@ -1170,13 +1195,17 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (it.value() == nullptr) {
 			std::cout << "Write to non exist shard " << kv.key.toString() << ", " << it.range().begin.toString()
 			          << " : " << it.range().end.toString() << "\n";
+			if (kv.key.startsWith(systemKeys.begin)) {
+				std::cout << "System key range not found ";
+			}
 			// ASSERT(it.value()); // Non-exist shard.
 			TraceEvent(SevError, "RocksDB")
 			    .detail("Method", "Set")
 			    .detail("Key", kv.key)
 			    .detail("Begin", it.range().begin)
 			    .detail("End", it.range().end);
-			return;
+
+			raise(SIGSEGV);
 		}
 
 		it.value()->writeBatch.Put(toSlice(kv.key), toSlice(kv.value));
@@ -1385,8 +1414,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		auto shard = std::make_shared<DataShard>(dataPath + id.toString());
+		std::cout << "*** insert begin";
 		shardMap.insert(range, shard);
+		std::cout << "insert end ***";
 		dirtyShards->insert(shard);
+
+		logShardMovement(range, ShardOp::ADD);
 
 		TraceEvent(SevInfo, "RocksDB")
 		    .detail("Method", "AddShard")
@@ -1483,6 +1516,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			dirtyShards.reset(new std::set<std::shared_ptr<DataShard>>());
 		}
 
+		if (range.intersects(specialKeys)) {
+			std::cout << "Invalid range to dispose " << range.begin.toString() << " : " << range.end.toString() << "\n";
+			raise(SIGSEGV);
+		}
+
+		if (range.intersects(systemKeys)) {
+			std::cout << "Remove system keys range";
+		}
+
 		auto shards = shardMap.intersectingRanges(range);
 
 		for (auto shard : shards) {
@@ -1492,14 +1534,24 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (range.contains(shard.range())) {
 				shard.value()->deletePending = true;
 				dirtyShards->insert(shard.value());
+
+				logShardMovement(shard.range(), ShardOp::DELETE);
 			} else {
 				// truncate shard
+				logShardMovement(shard.range(), ShardOp::MODIFY_RANGE);
 			}
 		}
 
+		std::cout << "*** insert begin";
 		shardMap.insert(range, nullptr);
+		std::cout << "insert end ***";
 
-		TraceEvent(SevInfo, "RocksDB").detail("Method", "DisposeRange").detail("Begin", range.begin.toString()).detail("End", range.end.toString());
+		TraceEvent(SevError, "RocksDB")
+		    .detail("Method", "DisposeRange")
+		    .detail("Begin", range.begin.toString())
+		    .detail("End", range.end.toString());
+
+		// raise(SIGSEGV);
 	}
 
 	DB db = nullptr;
