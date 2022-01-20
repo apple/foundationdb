@@ -1368,10 +1368,6 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 						RangeResult r =
 						    wait(tr->getRange(KeyRangeRef(splitBeginKey, blobGranuleSplitKeys.end), rowLimit));
 						ASSERT(r.size() > 0 || !r.more);
-						fmt::print("Split cursor got {0} rows, readThrough={1}, more={2}\n",
-						           r.size(),
-						           r.readThrough.present() ? r.readThrough.get().printable().c_str() : "<n/a>",
-						           r.more ? "T" : "F");
 						splitResult = r;
 						splitResultIdx = 0;
 						break;
