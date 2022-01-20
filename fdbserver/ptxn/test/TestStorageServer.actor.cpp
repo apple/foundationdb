@@ -64,8 +64,6 @@ TEST_CASE("fdbserver/ptxn/test/StorageServerPull") {
 
 	wait(ptxn::test::messageFeeder());
 
-	ptxn::test::print::printCommitRecords();
-
 	std::vector<Future<InitializeStorageReply>> initializeStoreReplyFutures;
 	std::transform(std::begin(ptxn::test::TestEnvironment::getStorageServers()->initializeStorageReplies),
 	               std::end(ptxn::test::TestEnvironment::getStorageServers()->initializeStorageReplies),
@@ -75,7 +73,7 @@ TEST_CASE("fdbserver/ptxn/test/StorageServerPull") {
 
 	printTiming << "All storage servers are ready" << std::endl;
 
-	wait(delay(100));
+	wait(delay(10));
 
 	return Void();
 }

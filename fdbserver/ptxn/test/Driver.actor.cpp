@@ -236,18 +236,17 @@ void TLogGroupFixture::setUp(const int numTLogGroups, const int numStorageTeamID
 	test::print::PrintTiming printTiming("TLogGroupFixture::setUp");
 
 	for (int i = 0; i < numTLogGroups; ++i) {
-		tLogGroupIDs.push_back(randomUID());
+		const auto tLogGroupID = randomUID();
+		tLogGroupIDs.push_back(tLogGroupID);
+		tLogGroupStorageTeamMapping[tLogGroupID];
 	}
+	std::sort(std::begin(tLogGroupIDs), std::end(tLogGroupIDs));
 	storageTeamIDs = generateRandomStorageTeamIDs(numStorageTeamIDs);
 
 	// Assign storageTeamIDs to TLog groups
-	for (const auto& tLogGroupID : tLogGroupIDs) {
-		tLogGroupStorageTeamMapping[tLogGroupID];
-	}
-	auto iter = std::begin(tLogGroupStorageTeamMapping);
 	for (const auto& storageTeamID : storageTeamIDs) {
-		iter->second.insert(storageTeamID);
-		iter = (++iter == std::end(tLogGroupStorageTeamMapping)) ? std::begin(tLogGroupStorageTeamMapping) : iter;
+		const auto tLogGroupID = tLogGroupByStorageTeamID(tLogGroupIDs, storageTeamID);
+		tLogGroupStorageTeamMapping[tLogGroupID].insert(storageTeamID);
 	}
 
 	// Reverse mapping
@@ -271,19 +270,14 @@ void TLogGroupWithPrivateMutationsFixture::setUp(const int numTLogGroups, const 
 
 	TLogGroupFixture::setUp(numTLogGroups, numStorageTeamIDs);
 
-	UID privateMutationsTLogGroupID = randomUID();
-	printTiming << "Team mutation TLog group ID: " << privateMutationsTLogGroupID << std::endl;
-	tLogGroupIDs.push_back(privateMutationsTLogGroupID);
-
 	privateMutationsStorageTeamID = getNewStorageTeamID();
-	printTiming << "Team mutation storage team ID: " << privateMutationsTLogGroupID << std::endl;
+	printTiming << "Team mutation storage team ID: " << privateMutationsStorageTeamID << std::endl;
 	storageTeamIDs.push_back(privateMutationsStorageTeamID);
+
+	const auto privateMutationsTLogGroupID = tLogGroupByStorageTeamID(tLogGroupIDs, privateMutationsStorageTeamID);
 
 	tLogGroupStorageTeamMapping[privateMutationsTLogGroupID].insert(privateMutationsStorageTeamID);
 	storageTeamTLogGroupMapping[privateMutationsStorageTeamID] = privateMutationsTLogGroupID;
-
-	tLogGroups.emplace_back(privateMutationsTLogGroupID);
-	tLogGroups.back().storageTeams[privateMutationsStorageTeamID];
 }
 
 void MessageFixture::generateMutationsToStorageTeamIDs(const std::vector<StorageTeamID>& storageTeamIDs,
@@ -399,10 +393,13 @@ void ptxnTLogFixture::setUp(const int numTLogs) {
 
 	// Assign tLog group and storage team IDs
 	int tLogContextIndex = 0;
+	ASSERT(tLogGroupFixture.tLogGroupIDs.size() == tLogGroupFixture.getNumTLogGroups());
+	ASSERT(numTLogs == tLogContexts.size());
 	for (auto tLogGroupIndex = 0; tLogGroupIndex < tLogGroupFixture.getNumTLogGroups(); ++tLogGroupIndex) {
 		const auto& tLogGroupID = tLogGroupFixture.tLogGroupIDs[tLogGroupIndex];
 		const auto& pTLogContext = tLogContexts[tLogContextIndex];
 
+		ASSERT(tLogGroupFixture.tLogGroupStorageTeamMapping.count(tLogGroupID));
 		for (const auto& storageTeamID : tLogGroupFixture.tLogGroupStorageTeamMapping.at(tLogGroupID)) {
 			pTLogContext->storageTeamIDs.push_back(storageTeamID);
 		}
