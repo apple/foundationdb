@@ -6875,7 +6875,6 @@ ACTOR static Future<CheckpointMetaData> getCheckpointInternal(Database cx,
 
 	TraceEvent("GetCheckpointInternalBegin").detail("Range", keys.toString()).detail("MinVersion", minVersion);
 
-	state CheckpointMetaData metaData;
 	state std::vector<Future<CheckpointMetaData>> alternatives;
 
 	loop {
@@ -6919,8 +6918,8 @@ ACTOR static Future<CheckpointMetaData> getCheckpointInternal(Database cx,
 	for (int j = 0; j < alternatives.size(); ++j) {
 		if (alternatives[j].isReady()) {
 			TraceEvent("GetCheckpointInternalEnd")
-			    .detail("Range", metaData.range.toString())
-			    .detail("Version", metaData.version)
+			    .detail("Range", alternatives[j].get().toString())
+			    .detail("Version", alternatives[j].get().version)
 			    .detail("StorageServer", alternatives[j].get().ssID);
 			return alternatives[j].get();
 		}
@@ -6931,15 +6930,19 @@ ACTOR static Future<CheckpointMetaData> getCheckpointInternal(Database cx,
 
 ACTOR Future<CheckpointMetaData> getCheckpoint(Database cx, KeyRange keys, Version minVersion) {
 	state Span span("NAPI:CreateCheckpoint"_loc);
-	TraceEvent("GetCheckpointStart").detail("Version", minVersion);
+
+	TraceEvent("GetCheckpointStart").detail("Version", minVersion).detail("Range", keys.toString());
+
 	try {
 		state CheckpointMetaData m1 = wait(getCheckpointInternal(cx, keys, minVersion, /*createNew=*/false));
+		TraceEvent("GetCheckpointReuse").detail("MetaData", m1.toString());
 		return m1;
 	} catch (Error& e) {
 		if (e.code() != error_code_checkpoint_not_found) {
 			throw e;
 		}
 	}
+	TraceEvent("GetCheckpointCreateNew").detail("Version", minVersion);
 	CheckpointMetaData m2 = wait(getCheckpointInternal(cx, keys, minVersion, /*createNew=*/true));
 	return m2;
 }
@@ -6959,7 +6962,7 @@ ACTOR static Future<Void> fetchCheckpointFile(Database cx,
 			if (!ss.present()) {
 				throw checkpoint_not_found();
 			}
-			StorageServerInterface ssi = decodeServerListValue(ss.get());
+			ssi = decodeServerListValue(ss.get());
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -6972,7 +6975,8 @@ ACTOR static Future<Void> fetchCheckpointFile(Database cx,
 			++attempt;
 			TraceEvent("FetchCheckpointFileBegin")
 			    .detail("RemoteFile", remoteFile)
-			    .detail("StorageServer", ssi.toString())
+			    .detail("TargetUID", ssID.toString())
+			    .detail("StorageServer", ssi.id().toString())
 			    .detail("LocalFile", localFile)
 			    .detail("Attempt", attempt);
 
@@ -6983,6 +6987,12 @@ ACTOR static Future<Void> fetchCheckpointFile(Database cx,
 			state Reference<IAsyncFile> asyncFile = wait(IAsyncFileSystem::filesystem()->open(localFile, flags, 0666));
 
 			state ReplyPromiseStream<GetFileReply> stream = ssi.getFile.getReplyStream(GetFileRequest(remoteFile, 0));
+			TraceEvent("FetchCheckpointFileReceivingData")
+			    .detail("RemoteFile", remoteFile)
+			    .detail("TargetUID", ssID.toString())
+			    .detail("StorageServer", ssi.id().toString())
+			    .detail("LocalFile", localFile)
+			    .detail("Attempt", attempt);
 			loop {
 				state GetFileReply rep = waitNext(stream.getFuture());
 				std::cout << "Received data: " << rep.sequence << "size: " << rep.data.size() << std::endl;
@@ -7013,7 +7023,7 @@ ACTOR static Future<Void> fetchCheckpointFile(Database cx,
 }
 
 ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx, KeyRange keys, Version minVersion, std::string dir) {
-	state Span span("NAPI:CreateCheckpoint"_loc);
+	state Span span("NAPI:FetchCheckpoint"_loc);
 
 	TraceEvent("FetchCheckpointBegin")
 	    .detail("Range", keys.toString())
@@ -7026,10 +7036,13 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx, KeyRange keys, Ver
 
 	state int i = 0;
 	for (; i < metaData.sstFiles.size(); ++i) {
+		TraceEvent("GetCheckpointFetchingFile")
+		    .detail("FileName", metaData.sstFiles[i].name)
+		    .detail("Server", metaData.ssID.toString());
 		wait(fetchCheckpointFile(cx,
 		                         metaData.ssID,
-		                         dir + metaData.sstFiles[i].name,
-		                         metaData.sstFiles[i].db_path + metaData.sstFiles[i].name));
+		                         metaData.sstFiles[i].db_path + metaData.sstFiles[i].name,
+		                         dir + metaData.sstFiles[i].name));
 		metaData.sstFiles[i].db_path = dir;
 	}
 

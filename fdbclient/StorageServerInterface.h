@@ -907,7 +907,8 @@ struct CheckpointMetaData {
 	CheckpointMetaData(Version version, KeyRange const& range) : version(version), range(range) {}
 
 	std::string toString() const {
-		std::string res = "Version: " + std::to_string(version) + "\nSST Files:\n";
+		std::string res = "Checkpoint MetaData:\nServer: " + ssID.toString() + "\nVersion: " + std::to_string(version) +
+		                  "\nSST Files:\n";
 		for (const auto& file : sstFiles) {
 			res += file.db_path + file.name + "\n";
 		}

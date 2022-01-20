@@ -1646,10 +1646,7 @@ ACTOR Future<Void> checkpointQ(StorageServer* self, GetCheckpointRequest req) {
 		checkpointMetaData.ssID = self->thisServerID;
 		self->checkpoints.emplace(checkpointMetaData.version, checkpointMetaData);
 		req.reply.send(checkpointMetaData);
-		TraceEvent("ServeCheckpointSuccess")
-		    .detail("MinVersion", minVersion)
-		    .detail("CheckpointVersion", checkpointMetaData.version)
-		    .detail("Range", req.range.toString());
+		TraceEvent("ServeCheckpointSuccess").detail("Checkpoint", checkpointMetaData.toString());
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "ServerCheckpointFailure")
 		    .detail("MinVersion", minVersion)
@@ -6662,17 +6659,21 @@ ACTOR Future<Void> serveChangeFeedPopRequests(StorageServer* self, FutureStream<
 ACTOR Future<Void> serveGetCheckpointRequests(StorageServer* self, FutureStream<GetCheckpointRequest> checkpoint) {
 	loop {
 		GetCheckpointRequest req = waitNext(checkpoint);
-		const auto it = self->checkpoints.lower_bound(req.minVersion);
-		if (it != self->checkpoints.end()) {
-			TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)
-			    .detail("Version", it->second.version);
-			req.reply.send(it->second);
-		} else if (req.createNew) {
-			self->actors.add(checkpointQ(self, req));
+		if (!self->isReadable(req.range)) {
+			req.reply.sendError(wrong_shard_server());
 		} else {
-			TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)
-			    .detail("Version", it->second.version);
-			req.reply.sendError(checkpoint_not_found());
+			const auto it = self->checkpoints.lower_bound(req.minVersion);
+			if (it != self->checkpoints.end()) {
+				TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)
+				    .detail("Version", it->second.version);
+				req.reply.send(it->second);
+			} else if (req.createNew) {
+				self->actors.add(checkpointQ(self, req));
+			} else {
+				TraceEvent(SevDebug, "ServeCheckpointNotFoundExisting", self->thisServerID)
+				    .detail("Version", it->second.version);
+				req.reply.sendError(checkpoint_not_found());
+			}
 		}
 	}
 }

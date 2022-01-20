@@ -553,7 +553,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		void action(CheckpointAction& a) {
-			TraceEvent("RocksDBServeCheckpointBegin").detail("CheckpointDir", a.checkpointDir);
+			TraceEvent("RocksDBServeCheckpointBegin", id).detail("CheckpointDir", a.checkpointDir);
 			rocksdb::Checkpoint* checkpoint;
 			rocksdb::Status s = rocksdb::Checkpoint::Create(db, &checkpoint);
 			if (!s.ok()) {
@@ -578,10 +578,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::PinnableSlice value;
 			rocksdb::ReadOptions readOptions = getReadOptions();
 			s = db->Get(readOptions, cf, toSlice(persistVersion), &value);
-			
+
 			CheckpointMetaData res;
 			res.version = BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned());
-			TraceEvent("RocksDBServeCheckpointSuccess").detail("Version", res.version);
 
 			// std::vector<std::string> files = platform::listFiles(checkpointDir);
 			// for (auto& file : files) {
@@ -600,6 +599,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			// }
 			populateMetaData(&res, *pMetadata);
 			delete pMetadata;
+			TraceEvent("RocksDBServeCheckpointSuccess", id)
+			    .detail("Version", res.version)
+			    .detail("MetaData", res.toString());
 			a.reply.send(res);
 		}
 
