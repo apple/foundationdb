@@ -60,19 +60,14 @@ class ClusterConnectionString {
 public:
 	ClusterConnectionString() {}
 	ClusterConnectionString(std::string const& connStr);
-	ClusterConnectionString(std::vector<NetworkAddress>, Key);
-	ClusterConnectionString(std::vector<Hostname> hostnames, Key key);
+	ClusterConnectionString(std::vector<NetworkAddress> coordinators, Key key);
+	ClusterConnectionString(std::vector<Hostname> hosts, Key key);
 
-	std::vector<NetworkAddress> const& coordinators() const { return coord; }
-	std::vector<NetworkAddress>* mutableCoordinators() { return &coord; }
-	std::vector<Hostname> const& hostnames() const { return hosts; }
-	std::vector<Hostname>* mutableHostnames() { return &hosts; }
-	std::unordered_map<NetworkAddress, Hostname>* mutableNetworkAddressToHostname() {
-		return &_networkAddressToHostname;
+	std::vector<NetworkAddress> const& coordinators() const { return coords; }
+	void addResolved(Hostname hostname, NetworkAddress address) {
+		coords.push_back(address);
+		networkAddressToHostname.emplace(address, hostname);
 	}
-	std::unordered_map<NetworkAddress, Hostname> const& networkAddressToHostname() const {
-		return _networkAddressToHostname;
-	};
 	Key clusterKey() const { return key; }
 	Key clusterKeyName() const {
 		return keyDesc;
@@ -83,13 +78,13 @@ public:
 	void resetToUnresolved();
 
 	bool hasUnresolvedHostnames = false;
+	std::vector<NetworkAddress> coords;
+	std::vector<Hostname> hostnames;
 
 private:
 	void parseConnString();
 	void parseKey(std::string const& key);
-	std::vector<Hostname> hosts;
-	std::unordered_map<NetworkAddress, Hostname> _networkAddressToHostname;
-	std::vector<NetworkAddress> coord;
+	std::unordered_map<NetworkAddress, Hostname> networkAddressToHostname;
 	Key key, keyDesc;
 	std::string connectionString;
 };
