@@ -7009,15 +7009,15 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx, KeyRange keys, Ver
 	TraceEvent("GetCheckpointMetaData").detail("Checkpoint", metaData.toString());
 
 	state int i = 0;
-	for (; i < metaData.sstFiles.size(); ++i) {
+	for (; i < metaData.rocksCF.get().sstFiles.size(); ++i) {
 		TraceEvent("GetCheckpointFetchingFile")
-		    .detail("FileName", metaData.sstFiles[i].name)
+		    .detail("FileName", metaData.rocksCF.get().sstFiles[i].name)
 		    .detail("Server", metaData.ssID.toString());
 		wait(fetchCheckpointFile(cx,
 		                         metaData.ssID,
-		                         metaData.sstFiles[i].db_path + metaData.sstFiles[i].name,
-		                         dir + metaData.sstFiles[i].name));
-		metaData.sstFiles[i].db_path = dir;
+		                         metaData.rocksCF.get().sstFiles[i].db_path + metaData.rocksCF.get().sstFiles[i].name,
+		                         dir + metaData.rocksCF.get().sstFiles[i].name));
+		metaData.rocksCF.get().sstFiles[i].db_path = dir;
 	}
 
 	return metaData;

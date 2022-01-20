@@ -751,6 +751,12 @@ struct ChangeFeedPopRequest {
 	}
 };
 
+// Format or FDB storage checkpoint.
+enum CheckpointFormat {
+	RocksDBColumnFamily = 0,
+	RocksDBSSTFile = 1,
+};
+
 // Copied from rocksdb/metadata.h, so that we can add serializer.
 struct SstFileMetaData {
 	constexpr static FileIdentifier file_identifier = 3804347;
@@ -886,13 +892,8 @@ struct LiveFileMetaData : public SstFileMetaData {
 	}
 };
 
-struct CheckpointMetaData {
-	constexpr static FileIdentifier file_identifier = 13804342;
-	Version version;
-	KeyRange range;
-	UID ssID;
-
-	// Used by RocksDB for safty check during import.
+struct RocksDBColumnFamilyCheckpoint {
+	constexpr static FileIdentifier file_identifier = 13804346;
 	std::string dbComparatorName;
 
 	// Each pair describes an SST file in the format of {<File name>, <SST file level>}.
@@ -903,12 +904,10 @@ struct CheckpointMetaData {
 
 	std::vector<LiveFileMetaData> sstFiles;
 
-	CheckpointMetaData() {}
-	CheckpointMetaData(Version version, KeyRange const& range) : version(version), range(range) {}
+	CheckpointFormat format() const { return RocksDBColumnFamily; }
 
 	std::string toString() const {
-		std::string res = "Checkpoint MetaData:\nServer: " + ssID.toString() + "\nVersion: " + std::to_string(version) +
-		                  "\nSST Files:\n";
+		std::string res = "RocksDBColumnFamilyCheckpoint:\nSST Files:\n";
 		for (const auto& file : sstFiles) {
 			res += file.db_path + file.name + "\n";
 		}
@@ -917,7 +916,32 @@ struct CheckpointMetaData {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, range, ssID, dbComparatorName, sstFiles);
+		serializer(ar, dbComparatorName, sstFiles);
+	}
+};
+
+struct CheckpointMetaData {
+	constexpr static FileIdentifier file_identifier = 13804342;
+	Version version;
+	KeyRange range;
+	UID ssID;
+	CheckpointFormat format;
+
+	Optional<RocksDBColumnFamilyCheckpoint> rocksCF;
+
+	CheckpointMetaData() {}
+	CheckpointMetaData(Version version, KeyRange const& range) : version(version), range(range) {}
+
+	std::string toString() const {
+		std::string res =
+		    "Checkpoint MetaData:\nServer: " + ssID.toString() + "\nVersion: " + std::to_string(version) + "\n";
+		if (rocksCF.present()) res += rocksCF.get().toString();
+		return res;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, range, ssID, format, rocksCF);
 	}
 };
 

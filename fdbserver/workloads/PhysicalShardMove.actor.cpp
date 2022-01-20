@@ -110,18 +110,18 @@ struct SSCheckpointWorkload : TestWorkload {
 		std::cout << "Got checkpoint:" << checkpoint.toString() << std::endl;
 
 		std::vector<std::string> files = platform::listFiles(folder);
-		std::cout << "Received checkpoint files: " << folder << std::endl;
+		std::cout << "Received checkpoint files on disk: " << folder << std::endl;
 		for (auto& file : files) {
 			std::cout << file << std::endl;
 		}
 		std::cout << std::endl;
 
-		ASSERT(files.size() == record.sstFiles.size());
+		ASSERT(files.size() == record.rocksCF.get().sstFiles.size());
 		std::unordered_set<std::string> sstFiles(files.begin(), files.end());
-		for (const LiveFileMetaData& metaData : record.sstFiles) {
-			std::cout << "Checkpoint file:" << metaData.db_path << metaData.name << std::endl;
-			// ASSERT(sstFiles.count(metaData.name.subString) > 0);
-		}
+		// for (const LiveFileMetaData& metaData : record.sstFiles) {
+		// 	std::cout << "Checkpoint file:" << metaData.db_path << metaData.name << std::endl;
+		// 	// ASSERT(sstFiles.count(metaData.name.subString) > 0);
+		// }
 
 		rocksdb::Options options;
 		rocksdb::ReadOptions ropts;
