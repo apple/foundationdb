@@ -1652,9 +1652,7 @@ ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
 				std::pair<std::vector<Tag>, Version> v = decodePairValue(kv.value);
 				std::vector<Tag> tags = v.first;
 				Version popped = v.second;
-				TraceEvent("TLogRestorePopped", logData->logId)
-				    .detail("StorageTeamID", id)
-				    .detail("To", popped);
+				TraceEvent("TLogRestorePopped", logData->logId).detail("StorageTeamID", id).detail("To", popped);
 
 				auto storageTeamData = logData->getStorageTeamData(id);
 				ASSERT(!storageTeamData);
