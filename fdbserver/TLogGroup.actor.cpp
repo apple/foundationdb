@@ -269,7 +269,7 @@ void TLogGroupCollection::seedTLogGroupAssignment(
 		// Step 3: Assign the storage team to a TLogGroup (Storage Team -> TLogGroup).
 		TLogGroupRef group = assignStorageTeam(teamId);
 		TraceEvent("TLogGroupSeedTeam").detail("StorageTeamId", teamId);
-		tr.set(arena, storageTeamIdToTLogGroupKey(teamId), encodeStorageServerToTeamIdValue(group->id(), {}));
+		tr.set(arena, storageTeamIdToTLogGroupKey(teamId), encodeStorageServerToTeamIdValue(teamId, {}));
 		storageTeams[teamId] = serverSrcUID;
 	}
 }
