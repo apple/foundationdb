@@ -403,27 +403,12 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			return Void();
 		}
 
-		// TODO: i think this is no longer necessary with the cancelling and actor map, but keep it around just in case
-		// for a bit If the worker is no longer present, the ranges were already moved off by that function, so don't
-		// retry. If the request is a reassign though, we need to retry it since the worker it was on is now dead and
-		// nobody owns it
-		/*if (!bmData->workersById.count(workerID) &&
-		    (!assignment.assign.present() || assignment.assign.get().type != AssignRequestType::Reassign)) {
-		    if (BM_DEBUG) {
-		        fmt::print("BM {0} got error assigning range [{1} - {2}) to now dead worker {3}, ignoring\n",
-		                   bmData->epoch,
-		                   assignment.keyRange.begin.printable(),
-		                   assignment.keyRange.end.printable(),
-		                   workerID.toString());
-		    }
-		    return Void();
-		}*/
-
 		// TODO confirm: using reliable delivery this should only trigger if the worker is marked as failed, right?
 		// So assignment needs to be retried elsewhere, and a revoke is trivially complete
 		if (assignment.isAssign) {
 			if (BM_DEBUG) {
-				fmt::print("BM got error assigning range [{0} - {1}) to worker {2}, requeueing\n",
+				fmt::print("BM got error {0} assigning range [{1} - {2}) to worker {3}, requeueing\n",
+				           e.name(),
 				           assignment.keyRange.begin.printable(),
 				           assignment.keyRange.end.printable(),
 				           workerID.toString());
@@ -438,6 +423,10 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			bmData->rangesToAssign.send(revokeOld);
 
 			// send assignment back to queue as is, clearing designated worker if present
+			// if we failed to send continue or reassign to the worker we thought owned the shard, it should be retried
+			// as a normal assign
+			ASSERT(assignment.assign.present());
+			assignment.assign.get().type = AssignRequestType::Normal;
 			assignment.worker.reset();
 			bmData->rangesToAssign.send(assignment);
 			// FIXME: improvement would be to add history of failed workers to assignment so it can try other ones first
@@ -970,11 +959,13 @@ ACTOR Future<Void> deregisterBlobWorker(Reference<BlobManagerData> bmData, BlobW
 	}
 }
 
-ACTOR Future<Void> haltBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerInterface bwInterf) {
+ACTOR Future<Void> haltBlobWorker(Reference<BlobManagerData> bmData,
+                                  BlobWorkerInterface bwInterf,
+                                  bool removeFromDead) {
 	loop {
 		try {
 			wait(bwInterf.haltBlobWorker.getReply(HaltBlobWorkerRequest(bmData->epoch, bmData->id)));
-			return Void();
+			break;
 		} catch (Error& e) {
 			// throw other errors instead of returning?
 			if (e.code() == error_code_operation_cancelled) {
@@ -986,13 +977,25 @@ ACTOR Future<Void> haltBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 			           e.name(),
 			           bwInterf.id().toString());
 			if (e.code() != error_code_blob_manager_replaced) {
-				return Void();
+				break;
 			}
 			if (bmData->iAmReplaced.canBeSet()) {
 				bmData->iAmReplaced.send(Void());
 			}
 		}
 	}
+
+	// Remove blob worker from persisted list of blob workers
+	Future<Void> deregister = deregisterBlobWorker(bmData, bwInterf);
+
+	// restart recruiting to replace the dead blob worker
+	bmData->restartRecruiting.trigger();
+
+	if (removeFromDead) {
+		bmData->deadWorkers.erase(bwInterf.id());
+	}
+
+	return Void();
 }
 
 ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerInterface bwInterf, bool registered) {
@@ -1009,12 +1012,6 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 		bmData->workersById.erase(bwId);
 		bmData->workerAddresses.erase(bwInterf.stableAddress());
 	}
-
-	// Remove blob worker from persisted list of blob workers
-	Future<Void> deregister = deregisterBlobWorker(bmData, bwInterf);
-
-	// restart recruiting to replace the dead blob worker
-	bmData->restartRecruiting.trigger();
 
 	// for every range owned by this blob worker, we want to
 	// - send a revoke request for that range
@@ -1050,13 +1047,7 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 	if (BM_DEBUG) {
 		fmt::print("Sending halt to BW {}\n", bwId.toString());
 	}
-	bmData->addActor.send(haltBlobWorker(bmData, bwInterf));
-
-	wait(deregister);
-
-	if (registered) {
-		bmData->deadWorkers.erase(bwId);
-	}
+	bmData->addActor.send(haltBlobWorker(bmData, bwInterf, registered));
 
 	return Void();
 }
@@ -1795,7 +1786,7 @@ ACTOR Future<Void> haltBlobGranules(Reference<BlobManagerData> bmData) {
 	std::vector<Future<Void>> deregisterBlobWorkers;
 	for (auto& worker : blobWorkers) {
 		// TODO: send a special req to blob workers so they clean up granules/CFs
-		bmData->addActor.send(haltBlobWorker(bmData, worker));
+		bmData->addActor.send(haltBlobWorker(bmData, worker, false));
 		deregisterBlobWorkers.emplace_back(deregisterBlobWorker(bmData, worker));
 	}
 	waitForAll(deregisterBlobWorkers);
