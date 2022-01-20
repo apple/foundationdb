@@ -2199,7 +2199,7 @@ ACTOR Future<Void> advanceVersion(Database cx, Version v) {
 				tr.set(minRequiredCommitVersionKey, BinaryWriter::toValue(v + 1, Unversioned()));
 				wait(tr.commit());
 			} else {
-				printf("Current read version is %ld\n", rv);
+				std::cout << "Current read version is " << rv << std::endl;
 				return Void();
 			}
 		} catch (Error& e) {
