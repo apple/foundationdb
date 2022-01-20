@@ -106,13 +106,13 @@ bool trackerTest() {
 	tracker.addGroups(newGroups, cv2);
 	tracker.removeGroups(removedGroups);
 
-	for (const auto group : updatedGroups) {
+	for (const auto& group : updatedGroups) {
 		ASSERT_EQ(tracker.getCommitVersion(group), cv1);
 	}
-	for (const auto group : newGroups) {
+	for (const auto& group : newGroups) {
 		ASSERT_EQ(tracker.getCommitVersion(group), cv2);
 	}
-	for (const auto group : removedGroups) {
+	for (const auto& group : removedGroups) {
 		ASSERT_EQ(tracker.getCommitVersion(group), invalidVersion);
 	}
 	std::pair<ptxn::TLogGroupID, Version> p = tracker.mostLaggingGroup();
