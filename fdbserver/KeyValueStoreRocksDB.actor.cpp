@@ -465,6 +465,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		Reference<Histogram> commitQueueWaitHistogram;
 		Reference<Histogram> writeHistogram;
 		Reference<Histogram> deleteCompactRangeHistogram;
+		std::shared_ptr<ReadIteratorPool> readIterPool;
 
 		explicit Writer(DB& db, CF& cf, UID id, std::shared_ptr<ReadIteratorPool> readIterPool)
 		  : db(db), cf(cf), id(id), readIterPool(readIterPool),

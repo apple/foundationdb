@@ -6859,7 +6859,9 @@ ACTOR static Future<CheckpointMetaData> getCheckpointInternal(Database cx,
 			                              2,
 			                              Reverse::False,
 			                              &StorageServerInterface::checkpoint,
-			                              TransactionInfo(TaskPriority::DefaultEndpoint, span.context)));
+			                              span.context,
+			                              Optional<UID>(),
+			                              UseProvisionalProxies::False));
 			state int i = 0;
 			state int e = locations[0].second->size();
 			if (createNew) {
