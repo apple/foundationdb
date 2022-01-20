@@ -141,6 +141,7 @@ struct Hostname {
 	bool isTLS;
 
 	Hostname(std::string host, std::string service, bool isTLS) : host(host), service(service), isTLS(isTLS) {}
+	Hostname() : host(""), service(""), isTLS(false) {}
 
 	// Allow hostnames in forms like following:
 	//    hostname:1234
