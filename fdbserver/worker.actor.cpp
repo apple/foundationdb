@@ -2026,7 +2026,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				} else if (storageCache.exists(req.reqId)) {
 					forwardPromise(req.reply, storageCache.get(req.reqId));
 				} else {
-					TraceEvent("AttemptedDoubleRecruitement", interf.id()).detail("ForRole", "StorageServer");
+					TraceEvent("AttemptedDoubleRecruitment", interf.id()).detail("ForRole", "StorageServer");
 					errorForwarders.add(map(delay(0.5), [reply = req.reply](Void) {
 						reply.sendError(recruitment_failed());
 						return Void();

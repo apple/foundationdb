@@ -289,6 +289,10 @@ public:
 	// These histograms are in read and write path which can cause performance overhead.
 	// Set to 0 to disable histograms.
 	double ROCKSDB_HISTOGRAMS_SAMPLE_RATE;
+	double ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME;
+	bool ROCKSDB_READ_RANGE_REUSE_ITERATORS;
+	int64_t ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
+	bool ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
