@@ -213,8 +213,7 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 	                                  endVersion,
 	                                  false,
 	                                  false,
-	                                  storageTeamID,
-	                                  pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]);
+	                                  storageTeamID);
 	ptxn::test::print::print(peekRequest);
 
 	ptxn::TLogPeekReply peekReply = wait(tli->peek.getReply(peekRequest));
@@ -444,7 +443,7 @@ ACTOR Future<Void> verifyPeek(std::shared_ptr<ptxn::test::TestDriverContext> pCo
 
 	state int receivedVersions = 0;
 	loop {
-		ptxn::TLogPeekRequest request(Optional<UID>(), version, 0, false, false, storageTeamID, tLogGroupID);
+		ptxn::TLogPeekRequest request(Optional<UID>(), version, 0, false, false, storageTeamID);
 		request.endVersion.reset();
 		ptxn::TLogPeekReply reply = wait(pInterface->peek.getReply(request));
 

@@ -953,8 +953,7 @@ ACTOR Future<Void> serverPeekParallelGetMore(ServerPeekCursor* self, TaskPriorit
 					                                                               Optional<Version>(),
 					                                                               self->returnIfBlocked,
 					                                                               self->onlySpilled,
-					                                                               self->storageTeamId,
-					                                                               self->tLogGroupID),
+					                                                               self->storageTeamId),
 					                                               taskID)));
 				}
 				if (self->sequence == std::numeric_limits<decltype(self->sequence)>::max()) {
@@ -1038,8 +1037,7 @@ ACTOR Future<Void> serverPeekGetMore(ServerPeekCursor* self, TaskPriority taskID
 			                                                        Optional<Version>(),
 			                                                        self->returnIfBlocked,
 			                                                        self->onlySpilled,
-			                                                        self->storageTeamId,
-			                                                        self->tLogGroupID),
+			                                                        self->storageTeamId),
 			                                        taskID))
 			                                  : Never())) {
 				self->results = res;
