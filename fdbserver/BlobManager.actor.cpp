@@ -418,6 +418,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 		    }
 		    return Void();
 		}*/
+
 		// TODO confirm: using reliable delivery this should only trigger if the worker is marked as failed, right?
 		// So assignment needs to be retried elsewhere, and a revoke is trivially complete
 		if (assignment.isAssign) {
@@ -427,6 +428,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 				           assignment.keyRange.end.printable(),
 				           workerID.toString());
 			}
+
 			// re-send revoke to queue to handle range being un-assigned from that worker before the new one
 			RangeAssignment revokeOld;
 			revokeOld.isAssign = false;
@@ -1184,8 +1186,8 @@ ACTOR Future<Void> monitorBlobWorker(Reference<BlobManagerData> bmData, BlobWork
 				TraceEvent("BlobWorkerFailed", bmData->id).detail("BlobWorkerID", bwInterf.id());
 			}
 			when(wait(monitorStatus)) {
-				ASSERT(false);
-				throw internal_error();
+				// should only return when manager got replaced
+				ASSERT(!bmData->iAmReplaced.canBeSet());
 			}
 		}
 	} catch (Error& e) {
