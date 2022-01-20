@@ -66,6 +66,7 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SetValue("META", "connectionString", g_simulator.connectionString.c_str());
 		ini.SetValue("META", "testerCount", format("%d", g_simulator.testerCount).c_str());
 		ini.SetValue("META", "tssMode", format("%d", g_simulator.tssMode).c_str());
+		ini.SetValue("META", "mockDNS", INetworkConnections::net()->convertMockDNSToString().c_str());
 
 		std::vector<ISimulator::ProcessInfo*> processes = g_simulator.getAllProcesses();
 		std::map<NetworkAddress, ISimulator::ProcessInfo*> rebootingProcesses = g_simulator.currentlyRebootingProcesses;
