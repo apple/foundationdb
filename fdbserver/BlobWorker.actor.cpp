@@ -2774,7 +2774,7 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 		}
 		if (!isSelfReassign) {
 			ASSERT(!req.reply.isSet());
-			req.reply.send(AssignBlobRangeReply(true));
+			req.reply.send(Void());
 		}
 		return Void();
 	} catch (Error& e) {
@@ -2807,9 +2807,9 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 
 ACTOR Future<Void> handleRangeRevoke(Reference<BlobWorkerData> bwData, RevokeBlobRangeRequest req) {
 	try {
-		bool _shouldStart =
-		    wait(changeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno, false, req.dispose, false));
-		req.reply.send(AssignBlobRangeReply(true));
+		wait(success(
+		    changeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno, false, req.dispose, false)));
+		req.reply.send(Void());
 		return Void();
 	} catch (Error& e) {
 		// FIXME: retry on error if dispose fails?
@@ -2952,6 +2952,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 					// TODO: pick a reasonable byte limit instead of just piggy-backing
 					req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 					self->currentManagerStatusStream.set(req.reply);
+				} else {
+					req.reply.sendError(blob_manager_replaced());
 				}
 			}
 			when(AssignBlobRangeRequest _req = waitNext(bwInterf.assignBlobRangeRequest.getFuture())) {
@@ -2970,7 +2972,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				if (self->managerEpochOk(assignReq.managerEpoch)) {
 					self->addActor.send(handleRangeAssign(self, assignReq, false));
 				} else {
-					assignReq.reply.send(AssignBlobRangeReply(false));
+					assignReq.reply.sendError(blob_manager_replaced());
 				}
 			}
 			when(RevokeBlobRangeRequest _req = waitNext(bwInterf.revokeBlobRangeRequest.getFuture())) {
@@ -2988,14 +2990,13 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				if (self->managerEpochOk(revokeReq.managerEpoch)) {
 					self->addActor.send(handleRangeRevoke(self, revokeReq));
 				} else {
-					revokeReq.reply.send(AssignBlobRangeReply(false));
+					revokeReq.reply.sendError(blob_manager_replaced());
 				}
 			}
 			when(AssignBlobRangeRequest granuleToReassign = waitNext(self->granuleUpdateErrors.getFuture())) {
 				self->addActor.send(handleRangeAssign(self, granuleToReassign, true));
 			}
 			when(HaltBlobWorkerRequest req = waitNext(bwInterf.haltBlobWorker.getFuture())) {
-				req.reply.send(Void());
 				if (self->managerEpochOk(req.managerEpoch)) {
 					TraceEvent("BlobWorkerHalted", self->id)
 					    .detail("ReqID", req.requesterID)
@@ -3003,7 +3004,10 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 					if (BW_DEBUG) {
 						fmt::print("BW {0} was halted by manager {1}\n", bwInterf.id().toString(), req.managerEpoch);
 					}
+					req.reply.send(Void());
 					break;
+				} else {
+					req.reply.sendError(blob_manager_replaced());
 				}
 			}
 			when(wait(collection)) {

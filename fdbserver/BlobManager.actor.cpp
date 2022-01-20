@@ -341,7 +341,6 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 	}
 
 	try {
-		state AssignBlobRangeReply rep;
 		if (assignment.isAssign) {
 			ASSERT(assignment.assign.present());
 			ASSERT(!assignment.revoke.present());
@@ -357,8 +356,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			if (bmData->workersById.count(workerID) == 0) {
 				throw no_more_servers();
 			}
-			AssignBlobRangeReply _rep = wait(bmData->workersById[workerID].assignBlobRangeRequest.getReply(req));
-			rep = _rep;
+			wait(bmData->workersById[workerID].assignBlobRangeRequest.getReply(req));
 		} else {
 			ASSERT(!assignment.assign.present());
 			ASSERT(assignment.revoke.present());
@@ -372,23 +370,20 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 
 			// if that worker isn't alive anymore, this is a noop
 			if (bmData->workersById.count(workerID)) {
-				AssignBlobRangeReply _rep = wait(bmData->workersById[workerID].revokeBlobRangeRequest.getReply(req));
-				rep = _rep;
+				wait(bmData->workersById[workerID].revokeBlobRangeRequest.getReply(req));
 			} else {
 				return Void();
-			}
-		}
-		if (!rep.epochOk) {
-			if (BM_DEBUG) {
-				printf("BM heard from BW that there is a new manager with higher epoch\n");
-			}
-			if (bmData->iAmReplaced.canBeSet()) {
-				bmData->iAmReplaced.send(Void());
 			}
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_operation_cancelled) {
 			throw;
+		}
+		if (e.code() == error_code_blob_manager_replaced) {
+			if (bmData->iAmReplaced.canBeSet()) {
+				bmData->iAmReplaced.send(Void());
+			}
+			return Void();
 		}
 		if (e.code() == error_code_granule_assignment_conflict) {
 			// Another blob worker already owns the range, don't retry.
@@ -565,7 +560,7 @@ ACTOR Future<Void> checkManagerLock(Reference<ReadYourWritesTransaction> tr, Ref
 			bmData->iAmReplaced.send(Void());
 		}
 
-		throw granule_assignment_conflict();
+		throw blob_manager_replaced();
 	}
 	tr->addReadConflictRange(singleKeyRange(blobManagerEpochKey));
 
@@ -973,6 +968,31 @@ ACTOR Future<Void> deregisterBlobWorker(Reference<BlobManagerData> bmData, BlobW
 	}
 }
 
+ACTOR Future<Void> haltBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerInterface bwInterf) {
+	loop {
+		try {
+			wait(bwInterf.haltBlobWorker.getReply(HaltBlobWorkerRequest(bmData->epoch, bmData->id)));
+			return Void();
+		} catch (Error& e) {
+			// throw other errors instead of returning?
+			if (e.code() == error_code_operation_cancelled) {
+				throw;
+			}
+			// TODO REMOVE
+			fmt::print("BM {0} got error {1} trying to halt blob worker {2}\n",
+			           bmData->epoch,
+			           e.name(),
+			           bwInterf.id().toString());
+			if (e.code() != error_code_blob_manager_replaced) {
+				return Void();
+			}
+			if (bmData->iAmReplaced.canBeSet()) {
+				bmData->iAmReplaced.send(Void());
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerInterface bwInterf, bool registered) {
 	state UID bwId = bwInterf.id();
 
@@ -1028,8 +1048,7 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 	if (BM_DEBUG) {
 		fmt::print("Sending halt to BW {}\n", bwId.toString());
 	}
-	bmData->addActor.send(
-	    brokenPromiseToNever(bwInterf.haltBlobWorker.getReply(HaltBlobWorkerRequest(bmData->epoch, bmData->id))));
+	bmData->addActor.send(haltBlobWorker(bmData, bwInterf));
 
 	wait(deregister);
 
@@ -1119,6 +1138,14 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 			// on known network errors or stream close errors, throw
 			if (e.code() == error_code_broken_promise) {
 				throw e;
+			}
+
+			// if manager is replaced, die
+			if (e.code() == error_code_blob_manager_replaced) {
+				if (bmData->iAmReplaced.canBeSet()) {
+					bmData->iAmReplaced.send(Void());
+				}
+				return Void();
 			}
 
 			// if we got an error constructing or reading from stream that is retryable, wait and retry.
@@ -1766,8 +1793,7 @@ ACTOR Future<Void> haltBlobGranules(Reference<BlobManagerData> bmData) {
 	std::vector<Future<Void>> deregisterBlobWorkers;
 	for (auto& worker : blobWorkers) {
 		// TODO: send a special req to blob workers so they clean up granules/CFs
-		bmData->addActor.send(
-		    brokenPromiseToNever(worker.haltBlobWorker.getReply(HaltBlobWorkerRequest(bmData->epoch, bmData->id))));
+		bmData->addActor.send(haltBlobWorker(bmData, worker));
 		deregisterBlobWorkers.emplace_back(deregisterBlobWorker(bmData, worker));
 	}
 	waitForAll(deregisterBlobWorkers);
