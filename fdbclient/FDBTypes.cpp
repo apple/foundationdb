@@ -74,3 +74,11 @@ TLogGroupID tLogGroupByStorageTeamID(std::vector<TLogGroupID>& tLogGroups, const
 }
 
 } // namespace ptxn
+
+std::string describe(const std::string& s) {
+	return s;
+}
+
+std::string describe(UID const& item) {
+	return item.shortString();
+}

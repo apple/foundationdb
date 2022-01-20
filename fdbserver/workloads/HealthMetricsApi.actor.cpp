@@ -107,7 +107,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		return correctHealthMetricsState;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.emplace_back("WorstStorageQueue", worstStorageQueue, Averaged::True);
 		m.emplace_back("DetailedWorstStorageQueue", detailedWorstStorageQueue, Averaged::True);
 		m.emplace_back("WorstStorageDurabilityLag", worstStorageDurabilityLag, Averaged::True);

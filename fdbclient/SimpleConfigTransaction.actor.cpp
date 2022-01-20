@@ -126,7 +126,7 @@ class SimpleConfigTransactionImpl {
 
 public:
 	SimpleConfigTransactionImpl(Database const& cx) : cx(cx) {
-		auto coordinators = cx->getConnectionFile()->getConnectionString().coordinators();
+		auto coordinators = cx->getConnectionRecord()->getConnectionString().coordinators();
 		std::sort(coordinators.begin(), coordinators.end());
 		cti = ConfigTransactionInterface(coordinators[0]);
 	}

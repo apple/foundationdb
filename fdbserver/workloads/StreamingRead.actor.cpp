@@ -32,7 +32,7 @@ struct StreamingReadWorkload : TestWorkload {
 	double testDuration, warmingDelay;
 	Value constantValue;
 
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, readKeys;
 	PerfIntCounter readValueBytes;
 	ContinuousSample<double> latencies;
@@ -70,7 +70,7 @@ struct StreamingReadWorkload : TestWorkload {
 		return true;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(transactions.getMetric());
 		m.push_back(readKeys.getMetric());
 		m.emplace_back("Bytes read/sec",

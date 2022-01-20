@@ -1,0 +1,285 @@
+# statefulset.yaml
+#
+# This source file is part of the FoundationDB open source project
+#
+# Copyright 2021 Apple Inc. and the FoundationDB project authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# This file provides an example of using a statefulset to launch FDB processes
+# using the foundationdb-kubernetes image.
+#
+# This is not a recommended way to run production clusters, but it can be useful
+# to test the image in development.
+#
+# For more information on using this file, see fdbkubernetesmonitor/README.md
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: fdb-kubernetes-example
+  labels:
+    app: fdb-kubernetes-example
+spec:
+  selector:
+    matchLabels:
+      app: fdb-kubernetes-example
+  replicas: 5
+  serviceName: fdb-kubernetes-example
+  template:
+    metadata:
+      labels:
+        app: fdb-kubernetes-example
+    spec:
+      containers:
+        - name: foundationdb
+          image: foundationdb/foundationdb-kubernetes:6.3.13-local
+          imagePullPolicy: IfNotPresent
+          args:
+            - --input-dir
+            - /var/fdb/dynamic-conf
+            - --log-path
+            - /var/fdb/logs/monitor.log
+          env:
+            - name: FDB_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: FDB_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: FDB_CLUSTER_FILE
+              value: /var/fdb/data/fdb.cluster
+            - name: FDB_PUBLIC_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: FDB_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: FDB_MACHINE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: FDB_ZONE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: FDB_INSTANCE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          volumeMounts:
+            - name: dynamic-conf
+              mountPath: /var/fdb/dynamic-conf
+            - name: shared-binaries
+              mountPath: /var/fdb/shared-binaries
+            - name: data
+              mountPath: /var/fdb/data
+            - name: logs
+              mountPath: /var/fdb/logs
+        - name: foundationdb-sidecar
+          image: foundationdb/foundationdb-kubernetes:6.3.15-local
+          imagePullPolicy: IfNotPresent
+          args:
+            - --mode
+            - sidecar
+            - --main-container-version
+            - 6.3.13
+            - --output-dir
+            - /var/fdb/shared-binaries
+            - --copy-binary
+            - fdbserver
+            - --copy-binary
+            - fdbcli
+            - --log-path
+            - /var/fdb/logs/sidecar.log
+          volumeMounts:
+            - name: shared-binaries
+              mountPath: /var/fdb/shared-binaries
+            - name: logs
+              mountPath: /var/fdb/logs
+      serviceAccountName: fdb-kubernetes-example
+      volumes:
+        - name: dynamic-conf
+          configMap:
+            name: fdb-kubernetes-example-config
+        - name: logs
+          emptyDir: {}
+        - name: shared-binaries
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fdb-kubernetes-example-config
+data:
+  fdb.cluster: ""
+  config.json: |
+    {
+      "runProcesses": false,
+      "version": "6.3.13",
+      "arguments": [
+        {"value": "--cluster-file"},
+        {"value": "/var/fdb/data/fdb.cluster"},
+        {"value": "--seed-cluster-file"},
+        {"value": "/var/fdb/dynamic-conf/fdb.cluster"},
+        {"value": "--public-address"},
+        {"type": "Concatenate", "values": [
+          {"type": "Environment", "source": "FDB_PUBLIC_IP"},
+          {"value": ":"},
+          {"type": "ProcessNumber", "offset": 4499, "multiplier": 2}
+        ]},
+        {"value": "--listen-address"},
+        {"type": "Concatenate", "values": [
+          {"type": "Environment", "source": "FDB_POD_IP"},
+          {"value": ":"},
+          {"type": "ProcessNumber", "offset": 4499, "multiplier": 2}
+        ]},
+        {"value": "--datadir"},
+        {"type": "Concatenate", "values": [
+          {"value": "/var/fdb/data/"},
+          {"type": "ProcessNumber"}
+        ]},
+        {"value": "--class"},
+        {"value": "storage"},
+        {"value": "--locality-zoneid"},
+        {"type": "Environment", "source": "FDB_ZONE_ID"},
+        {"value": "--locality-instance-id"},
+        {"type": "Environment", "source": "FDB_INSTANCE_ID"},
+        {"value": "--locality-process-id"},
+        {"type": "Concatenate", "values": [
+          {"type": "Environment", "source": "FDB_INSTANCE_ID"},
+          {"value": "-"},
+          {"type": "ProcessNumber"}
+        ]},
+        {"value": "--logdir"},
+        {"value": "/var/fdb/logs"},
+        {"value": "--trace-format"},
+        {"value": "json"}
+      ]
+    }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fdb-kubernetes-example
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: fdb-kubernetes-example
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - "pods"
+    verbs:
+      - "get"
+      - "watch"
+      - "update"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: fdb-kubernetes-example
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: fdb-kubernetes-example
+subjects:
+- kind: ServiceAccount
+  name: fdb-kubernetes-example
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fdb-kubernetes-example-client
+spec:
+  replicas: 2
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: fdb-kubernetes-example-client
+  template:
+    metadata:
+      labels:
+        app: fdb-kubernetes-example-client
+      name: fdb-kubernetes-example-client
+    spec:
+      volumes:
+        - name: config-map
+          configMap:
+            name: fdb-kubernetes-example-config
+            items:
+              - key: fdb.cluster
+                path: fdb.cluster
+        - name: dynamic-conf
+          emptyDir: {}
+      initContainers:
+        - name: foundationdb-kubernetes-init
+          image: foundationdb/foundationdb-kubernetes:6.3.13-local
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--mode"
+            - "init"
+            - "--input-dir"
+            - "/var/input-files"
+            - "--output-dir"
+            - "/var/output-files"
+            - "--copy-file"
+            - "fdb.cluster"
+            - "--require-not-empty"
+            - "fdb.cluster"
+            - "--copy-library"
+            - "6.1"
+            - "--copy-library"
+            - "6.2"
+            - "--copy-primary-library"
+            - "6.3"
+            - "--copy-binary"
+            - "fdbcli"
+          volumeMounts:
+            - name: config-map
+              mountPath: /var/input-files
+            - name: dynamic-conf
+              mountPath: /var/output-files
+      containers:
+        - name: client
+          image: foundationdb/foundationdb-sample-python-app:latest
+          imagePullPolicy: Always
+          env:
+            - name: FDB_CLUSTER_FILE
+              value: /var/dynamic-conf/fdb.cluster
+            - name: FDB_API_VERSION
+              value: "610"
+            - name: FDB_NETWORK_OPTION_TRACE_LOG_GROUP
+              value: fdb-kubernetes-example-client
+            - name: FDB_NETWORK_OPTION_EXTERNAL_CLIENT_DIRECTORY
+              value: /var/dynamic-conf/lib/multiversion
+            - name: LD_LIBRARY_PATH
+              value: /var/dynamic-conf/lib
+          volumeMounts:
+            - name: dynamic-conf
+              mountPath: /var/dynamic-conf

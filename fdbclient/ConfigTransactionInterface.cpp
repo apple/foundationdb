@@ -34,10 +34,11 @@ void ConfigTransactionInterface::setupWellKnownEndpoints() {
 }
 
 ConfigTransactionInterface::ConfigTransactionInterface(NetworkAddress const& remote)
-  : getGeneration(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GETGENERATION)),
-    get(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GET)), getClasses(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GETCLASSES)),
-    getKnobs(Endpoint({ remote }, WLTOKEN_CONFIGTXN_GETKNOBS)), commit(Endpoint({ remote }, WLTOKEN_CONFIGTXN_COMMIT)) {
-}
+  : getGeneration(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGTXN_GETGENERATION)),
+    get(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGTXN_GET)),
+    getClasses(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGTXN_GETCLASSES)),
+    getKnobs(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGTXN_GETKNOBS)),
+    commit(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGTXN_COMMIT)) {}
 
 bool ConfigTransactionInterface::operator==(ConfigTransactionInterface const& rhs) const {
 	return _id == rhs._id;

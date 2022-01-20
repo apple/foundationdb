@@ -218,18 +218,14 @@ inline std::string describe(const int item) {
 }
 
 // Allows describeList to work on a vector of std::string
-static std::string describe(const std::string& s) {
-	return s;
-}
+std::string describe(const std::string& s);
 
 template <class T>
 std::string describe(Reference<T> const& item) {
 	return item->toString();
 }
 
-static std::string describe(UID const& item) {
-	return item.shortString();
-}
+std::string describe(UID const& item);
 
 template <class T>
 std::string describe(T const& item) {
@@ -738,7 +734,7 @@ struct KeyValueStoreType {
 		case SSD_BTREE_V2:
 			return "ssd-2";
 		case SSD_REDWOOD_V1:
-			return "ssd-redwood-experimental";
+			return "ssd-redwood-1-experimental";
 		case SSD_ROCKSDB_V1:
 			return "ssd-rocksdb-experimental";
 		case MEMORY:
@@ -908,6 +904,14 @@ struct StorageBytes {
 		              available / 1e6,
 		              used / 1e6,
 		              temp / 1e6);
+	}
+
+	void toTraceEvent(TraceEvent& e) const {
+		e.detail("StorageBytesUsed", used)
+		    .detail("StorageBytesTemp", temp)
+		    .detail("StorageBytesTotal", total)
+		    .detail("StorageBytesFree", free)
+		    .detail("StorageBytesAvailable", available);
 	}
 };
 
@@ -1171,5 +1175,67 @@ inline const char* transactionPriorityToString(TransactionPriority priority, boo
 	ASSERT(false);
 	throw internal_error();
 }
+
+struct StorageMigrationType {
+	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
+	// just before END.
+	enum MigrationType { DEFAULT = 1, UNSET = 0, DISABLED = 1, AGGRESSIVE = 2, GRADUAL = 3, END = 4 };
+
+	StorageMigrationType() : type(UNSET) {}
+	StorageMigrationType(MigrationType type) : type(type) {
+		if ((uint32_t)type >= END) {
+			this->type = UNSET;
+		}
+	}
+	operator MigrationType() const { return MigrationType(type); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, type);
+	}
+
+	std::string toString() const {
+		switch (type) {
+		case DISABLED:
+			return "disabled";
+		case AGGRESSIVE:
+			return "aggressive";
+		case GRADUAL:
+			return "gradual";
+		case UNSET:
+			return "unset";
+		default:
+			ASSERT(false);
+		}
+		return "";
+	}
+
+	uint32_t type;
+};
+
+inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
+	int pos = locality.find(':');
+	// locality should be either 0 or in the format '<non_empty_string>:<non_empty_string>'
+	return ((pos > 0 && pos < locality.size() - 1) || locality == "0");
+}
+
+// matches what's in fdb_c.h
+struct ReadBlobGranuleContext {
+	// User context to pass along to functions
+	void* userContext;
+
+	// Returns a unique id for the load. Asynchronous to support queueing multiple in parallel.
+	int64_t (*start_load_f)(const char* filename, int filenameLength, int64_t offset, int64_t length, void* context);
+
+	// Returns data for the load. Pass the loadId returned by start_load_f
+	uint8_t* (*get_load_f)(int64_t loadId, void* context);
+
+	// Frees data from load. Pass the loadId returned by start_load_f
+	void (*free_load_f)(int64_t loadId, void* context);
+
+	// Set this to true for testing if you don't want to read the granule files,
+	// just do the request to the blob workers
+	bool debugNoMaterialize;
+};
 
 #endif

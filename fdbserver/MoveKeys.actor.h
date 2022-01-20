@@ -75,8 +75,8 @@ void seedShardServers(Arena& trArena,
 // it returns (since it needs to execute the finishMoveKeys transaction).
 ACTOR Future<Void> moveKeys(Database occ,
                             KeyRange keys,
-                            vector<UID> destinationTeam,
-                            vector<UID> healthyDestinations,
+                            std::vector<UID> destinationTeam,
+                            std::vector<UID> healthyDestinations,
                             MoveKeysLock lock,
                             Promise<Void> dataMovementComplete,
                             FlowLock* startMoveKeysParallelismLock,
@@ -107,6 +107,7 @@ ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> t
 // Performed when a storage server is marked as permanently failed.
 ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
                                               UID serverID,
+                                              std::vector<UID> teamForDroppedRange,
                                               MoveKeysLock lock,
                                               const DDEnabledState* ddEnabledState);
 

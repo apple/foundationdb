@@ -22,8 +22,10 @@
 #define FLOW_TREEBENCHMARK_H
 #pragma once
 
-#include "flow/flow.h"
+#include <map>
 #include <random>
+
+#include "flow/flow.h"
 
 struct opTimer {
 	double start = timer();

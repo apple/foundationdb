@@ -449,6 +449,7 @@ public:
 	const uint8_t* begin() const { return data; }
 	const uint8_t* end() const { return data + length; }
 	int size() const { return length; }
+	bool empty() const { return length == 0; }
 
 	uint8_t operator[](int i) const { return data[i]; }
 
@@ -642,6 +643,16 @@ struct hash<StringRef> {
 };
 } // namespace std
 
+namespace std {
+template <>
+struct hash<Standalone<StringRef>> {
+	static constexpr std::hash<std::string_view> hashFunc{};
+	std::size_t operator()(Standalone<StringRef> const& tag) const {
+		return hashFunc(std::string_view((const char*)tag.begin(), tag.size()));
+	}
+};
+} // namespace std
+
 template <>
 struct TraceableString<StringRef> {
 	static const char* begin(StringRef value) { return reinterpret_cast<const char*>(value.begin()); }
@@ -679,6 +690,10 @@ inline StringRef operator"" _sr(const char* str, size_t size) {
 	return StringRef(reinterpret_cast<const uint8_t*>(str), size);
 }
 
+inline static uintptr_t getAlignedUpperBound(uintptr_t value, uintptr_t alignment) {
+	return ((value + alignment - 1) / alignment) * alignment;
+}
+
 // makeString is used to allocate a Standalone<StringRef> of a known length for later
 // mutation (via mutateString).  If you need to append to a string of unknown length,
 // consider factoring StringBuffer from DiskQueue.actor.cpp.
@@ -692,13 +707,19 @@ inline static Standalone<StringRef> makeString(int length) {
 inline static Standalone<StringRef> makeAlignedString(int alignment, int length) {
 	Standalone<StringRef> returnString;
 	uint8_t* outData = new (returnString.arena()) uint8_t[alignment + length];
-	outData = (uint8_t*)((((uintptr_t)outData + (alignment - 1)) / alignment) * alignment);
+	outData = (uint8_t*)getAlignedUpperBound((uintptr_t)outData, alignment);
 	((StringRef&)returnString) = StringRef(outData, length);
 	return returnString;
 }
 
 inline static StringRef makeString(int length, Arena& arena) {
 	uint8_t* outData = new (arena) uint8_t[length];
+	return StringRef(outData, length);
+}
+
+inline static StringRef makeAlignedString(int alignment, int length, Arena& arena) {
+	uint8_t* outData = new (arena) uint8_t[alignment + length];
+	outData = (uint8_t*)getAlignedUpperBound((uintptr_t)outData, alignment);
 	return StringRef(outData, length);
 }
 

@@ -196,9 +196,6 @@ std::string removeWhitespace(const std::string& t) {
 #error What platform is this?
 #endif
 
-using std::cout;
-using std::endl;
-
 #if defined(_WIN32)
 __int64 FiletimeAsInt64(FILETIME& t) {
 	return *(__int64*)&t;
@@ -1932,7 +1929,7 @@ static int ModifyPrivilege(const char* szPrivilege, bool fEnable) {
 		return ERROR_FUNCTION_FAILED;
 	}
 
-	// cout << luid.HighPart << " " << luid.LowPart << endl;
+	// std::cout << luid.HighPart << " " << luid.LowPart << std::endl;
 
 	// Assign values to the TOKEN_PRIVILEGE structure.
 	NewState.PrivilegeCount = 1;
@@ -2520,12 +2517,12 @@ bool acceptDirectory(FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name
 	return (fileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
-ACTOR Future<vector<std::string>> findFiles(std::string directory,
-                                            std::string extension,
-                                            bool directoryOnly,
-                                            bool async) {
+ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
+                                                 std::string extension,
+                                                 bool directoryOnly,
+                                                 bool async) {
 	INJECT_FAULT(platform_error, "findFiles"); // findFiles failed (Win32)
-	state vector<std::string> result;
+	state std::vector<std::string> result;
 	state int64_t tsc_begin = timestampCounter();
 
 	state WIN32_FIND_DATA fd;
@@ -2577,12 +2574,12 @@ bool acceptDirectory(FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name
 	return S_ISDIR(fileAttributes);
 }
 
-ACTOR Future<vector<std::string>> findFiles(std::string directory,
-                                            std::string extension,
-                                            bool directoryOnly,
-                                            bool async) {
+ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
+                                                 std::string extension,
+                                                 bool directoryOnly,
+                                                 bool async) {
 	INJECT_FAULT(platform_error, "findFiles"); // findFiles failed
-	state vector<std::string> result;
+	state std::vector<std::string> result;
 	state int64_t tsc_begin = timestampCounter();
 
 	state DIR* dip = nullptr;
@@ -2635,7 +2632,7 @@ std::vector<std::string> listFiles(std::string const& directory, std::string con
 	return findFiles(directory, extension, false /* directoryOnly */, false).get();
 }
 
-Future<vector<std::string>> listFilesAsync(std::string const& directory, std::string const& extension) {
+Future<std::vector<std::string>> listFilesAsync(std::string const& directory, std::string const& extension) {
 	return findFiles(directory, extension, false /* directoryOnly */, true);
 }
 
@@ -2643,7 +2640,7 @@ std::vector<std::string> listDirectories(std::string const& directory) {
 	return findFiles(directory, "", true /* directoryOnly */, false).get();
 }
 
-Future<vector<std::string>> listDirectoriesAsync(std::string const& directory) {
+Future<std::vector<std::string>> listDirectoriesAsync(std::string const& directory) {
 	return findFiles(directory, "", true /* directoryOnly */, true);
 }
 
@@ -2661,14 +2658,14 @@ void findFilesRecursively(std::string const& path, std::vector<std::string>& out
 	}
 }
 
-ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, vector<std::string>* out) {
+ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, std::vector<std::string>* out) {
 	// Add files to output, prefixing path
-	state vector<std::string> files = wait(listFilesAsync(path, ""));
+	state std::vector<std::string> files = wait(listFilesAsync(path, ""));
 	for (auto const& f : files)
 		out->push_back(joinPath(path, f));
 
 	// Recurse for directories
-	state vector<std::string> directories = wait(listDirectoriesAsync(path));
+	state std::vector<std::string> directories = wait(listDirectoriesAsync(path));
 	for (auto const& dir : directories) {
 		if (dir != "." && dir != "..")
 			wait(findFilesRecursivelyAsync(joinPath(path, dir), out));
@@ -3178,16 +3175,9 @@ extern "C" void flushAndExit(int exitCode) {
 #include <link.h>
 #endif
 
-struct ImageInfo {
-	void* offset;
-	std::string symbolFileName;
-
-	ImageInfo() : offset(nullptr), symbolFileName("") {}
-};
-
-ImageInfo getImageInfo(const void* symbol) {
+platform::ImageInfo getImageInfo(const void* symbol) {
 	Dl_info info;
-	ImageInfo imageInfo;
+	platform::ImageInfo imageInfo;
 
 #ifdef __linux__
 	link_map* linkMap = nullptr;
@@ -3197,6 +3187,7 @@ ImageInfo getImageInfo(const void* symbol) {
 #endif
 
 	if (res != 0) {
+		imageInfo.fileName = info.dli_fname;
 		std::string imageFile = basename(info.dli_fname);
 		// If we have a client library that doesn't end in the appropriate extension, we will get the wrong debug
 		// suffix. This should only be a cosmetic problem, though.
@@ -3214,25 +3205,23 @@ ImageInfo getImageInfo(const void* symbol) {
 		else {
 			imageInfo.symbolFileName = imageFile + ".debug";
 		}
-	} else {
-		imageInfo.symbolFileName = "unknown";
 	}
 
 	return imageInfo;
 }
 
-ImageInfo getCachedImageInfo() {
+platform::ImageInfo getCachedImageInfo() {
 	// The use of "getCachedImageInfo" is arbitrary and was a best guess at a good way to get the image of the
 	//  most likely candidate for the "real" flow library or binary
-	static ImageInfo info = getImageInfo((const void*)&getCachedImageInfo);
+	static platform::ImageInfo info = getImageInfo((const void*)&getCachedImageInfo);
 	return info;
 }
 
 #include <execinfo.h>
 
 namespace platform {
-void* getImageOffset() {
-	return getCachedImageInfo().offset;
+ImageInfo getImageInfo() {
+	return getCachedImageInfo();
 }
 
 size_t raw_backtrace(void** addresses, int maxStackDepth) {
@@ -3275,8 +3264,8 @@ std::string get_backtrace() {
 std::string format_backtrace(void** addresses, int numAddresses) {
 	return std::string();
 }
-void* getImageOffset() {
-	return nullptr;
+ImageInfo getImageInfo() {
+	return ImageInfo();
 }
 } // namespace platform
 #endif
@@ -3584,8 +3573,10 @@ void* checkThread(void* arg) {
 	int64_t lastRunLoopIterations = net2RunLoopIterations.load();
 	int64_t lastRunLoopSleeps = net2RunLoopSleeps.load();
 
+	double slowTaskStart = 0;
 	double lastSlowTaskSignal = 0;
 	double lastSaturatedSignal = 0;
+	double lastSlowTaskBlockedLog = 0;
 
 	const double minSlowTaskLogInterval =
 	    std::max(FLOW_KNOBS->SLOWTASK_PROFILING_LOG_INTERVAL, FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
@@ -3606,7 +3597,19 @@ void* checkThread(void* arg) {
 
 		if (slowTask) {
 			double t = timer();
-			if (lastSlowTaskSignal == 0 || t - lastSlowTaskSignal >= slowTaskLogInterval) {
+			bool newSlowTask = lastSlowTaskSignal == 0;
+
+			if (newSlowTask) {
+				slowTaskStart = t;
+			} else if (t - std::max(slowTaskStart, lastSlowTaskBlockedLog) > FLOW_KNOBS->SLOWTASK_BLOCKED_INTERVAL) {
+				lastSlowTaskBlockedLog = t;
+				// When this gets logged, it will be with a current timestamp (using timer()). If the network thread
+				// unblocks, it will log any slow task related events at an earlier timestamp. That means the order of
+				// events during this sequence will not match their timestamp order.
+				TraceEvent(SevWarnAlways, "RunLoopBlocked").detail("Duration", t - slowTaskStart);
+			}
+
+			if (newSlowTask || t - lastSlowTaskSignal >= slowTaskLogInterval) {
 				if (lastSlowTaskSignal > 0) {
 					slowTaskLogInterval = std::min(FLOW_KNOBS->SLOWTASK_PROFILING_MAX_LOG_INTERVAL,
 					                               FLOW_KNOBS->SLOWTASK_PROFILING_LOG_BACKOFF * slowTaskLogInterval);
@@ -3617,6 +3620,7 @@ void* checkThread(void* arg) {
 				pthread_kill(mainThread, SIGPROF);
 			}
 		} else {
+			slowTaskStart = 0;
 			lastSlowTaskSignal = 0;
 			lastRunLoopIterations = currentRunLoopIterations;
 			slowTaskLogInterval = minSlowTaskLogInterval;

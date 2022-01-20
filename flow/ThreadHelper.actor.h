@@ -250,19 +250,21 @@ public:
 		this->status = NeverSet;
 	}
 
-	void sendError(const Error& err) {
+	// Sends an error through the assignment var if it is not already set. Otherwise does nothing.
+	// Returns true if the assignment var was not already set; otherwise returns false.
+	bool trySendError(const Error& err) {
 		if (TRACE_SAMPLE())
 			TraceEvent(SevSample, "Promise_sendError").detail("ErrorCode", err.code());
 		this->mutex.enter();
 		if (!canBeSetUnsafe()) {
 			this->mutex.leave();
-			ASSERT(false); // Promise fulfilled twice
+			return false;
 		}
 		error = err;
 		status = ErrorSet;
 		if (!callback) {
 			this->mutex.leave();
-			return;
+			return true;
 		}
 		auto func = callback;
 		if (!callback->isMultiCallback())
@@ -277,7 +279,12 @@ public:
 			int userParam = 0;
 			func->error(err, userParam);
 		}
+
+		return true;
 	}
+
+	// Like trySendError, except that it is assumed the assignment var is not already set.
+	void sendError(const Error& err) { ASSERT(trySendError(err)); }
 
 	SetCallbackResult::Result callOrSetAsCallback(ThreadCallback* callback, int& userParam1, int notMadeActive) {
 		this->mutex.enter();
@@ -718,6 +725,76 @@ private:
 	V value;
 	Reference<ThreadSingleAssignmentVar<Void>> nextChange;
 	ThreadSpinLock lock;
+};
+
+// Like a future (very similar to ThreadFuture) but only for computations that already completed. Reuses the SAV's
+// implementation for memory management error handling though. Essentially a future that's returned from a synchronous
+// computation and guaranteed to be complete.
+
+template <class T>
+class ThreadResult {
+public:
+	T get() { return sav->get(); }
+
+	bool isValid() const { return sav != 0; }
+	bool isError() { return sav->isError(); }
+	Error& getError() {
+		if (!isError())
+			throw future_not_error();
+
+		return sav->error;
+	}
+
+	ThreadResult() : sav(0) {}
+	explicit ThreadResult(ThreadSingleAssignmentVar<T>* sav) : sav(sav) {
+		ASSERT(sav->isReady());
+		// sav->addref();
+	}
+	ThreadResult(const ThreadResult<T>& rhs) : sav(rhs.sav) {
+		if (sav)
+			sav->addref();
+	}
+	ThreadResult(ThreadResult<T>&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
+	ThreadResult(const T& presentValue) : sav(new ThreadSingleAssignmentVar<T>()) { sav->send(presentValue); }
+	ThreadResult(const Error& error) : sav(new ThreadSingleAssignmentVar<T>()) { sav->sendError(error); }
+	ThreadResult(const ErrorOr<T> errorOr) : sav(new ThreadSingleAssignmentVar<T>()) {
+		if (errorOr.isError()) {
+			sav->sendError(errorOr.getError());
+		} else {
+			sav->send(errorOr.get());
+		}
+	}
+	~ThreadResult() {
+		if (sav)
+			sav->delref();
+	}
+	void operator=(const ThreadFuture<T>& rhs) {
+		if (rhs.sav)
+			rhs.sav->addref();
+		if (sav)
+			sav->delref();
+		sav = rhs.sav;
+	}
+	void operator=(ThreadFuture<T>&& rhs) noexcept {
+		if (sav != rhs.sav) {
+			if (sav)
+				sav->delref();
+			sav = rhs.sav;
+			rhs.sav = 0;
+		}
+	}
+	bool operator==(const ThreadResult& rhs) { return rhs.sav == sav; }
+	bool operator!=(const ThreadResult& rhs) { return rhs.sav != sav; }
+
+	ThreadSingleAssignmentVarBase* getPtr() const { return sav; }
+	ThreadSingleAssignmentVarBase* extractPtr() {
+		auto* p = sav;
+		sav = nullptr;
+		return p;
+	}
+
+private:
+	ThreadSingleAssignmentVar<T>* sav;
 };
 
 #include "flow/unactorcompiler.h"

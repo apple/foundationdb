@@ -30,38 +30,38 @@ void XmlTraceLogFormatter::delref() {
 	ReferenceCounted<XmlTraceLogFormatter>::delref();
 }
 
-const char* XmlTraceLogFormatter::getExtension() {
+const char* XmlTraceLogFormatter::getExtension() const {
 	return "xml";
 }
 
-const char* XmlTraceLogFormatter::getHeader() {
+const char* XmlTraceLogFormatter::getHeader() const {
 	return "<?xml version=\"1.0\"?>\r\n<Trace>\r\n";
 }
 
-const char* XmlTraceLogFormatter::getFooter() {
+const char* XmlTraceLogFormatter::getFooter() const {
 	return "</Trace>\r\n";
 }
 
-void XmlTraceLogFormatter::escape(std::stringstream& ss, std::string source) {
+void XmlTraceLogFormatter::escape(std::ostringstream& oss, std::string source) const {
 	loop {
 		int index = source.find_first_of(std::string({ '&', '"', '<', '>', '\r', '\n', '\0' }));
 		if (index == source.npos) {
 			break;
 		}
 
-		ss << source.substr(0, index);
+		oss << source.substr(0, index);
 		if (source[index] == '&') {
-			ss << "&amp;";
+			oss << "&amp;";
 		} else if (source[index] == '"') {
-			ss << "&quot;";
+			oss << "&quot;";
 		} else if (source[index] == '<') {
-			ss << "&lt;";
+			oss << "&lt;";
 		} else if (source[index] == '>') {
-			ss << "&gt;";
+			oss << "&gt;";
 		} else if (source[index] == '\n' || source[index] == '\r') {
-			ss << " ";
+			oss << " ";
 		} else if (source[index] == '\0') {
-			ss << " ";
+			oss << " ";
 			TraceEvent(SevWarnAlways, "StrippedIllegalCharacterFromTraceEvent")
 			    .detail("Source", StringRef(source).printable())
 			    .detail("Character", StringRef(source.substr(index, 1)).printable());
@@ -72,20 +72,20 @@ void XmlTraceLogFormatter::escape(std::stringstream& ss, std::string source) {
 		source = source.substr(index + 1);
 	}
 
-	ss << source;
+	oss << std::move(source);
 }
 
-std::string XmlTraceLogFormatter::formatEvent(const TraceEventFields& fields) {
-	std::stringstream ss;
-	ss << "<Event ";
+std::string XmlTraceLogFormatter::formatEvent(const TraceEventFields& fields) const {
+	std::ostringstream oss;
+	oss << "<Event ";
 
 	for (auto itr : fields) {
-		escape(ss, itr.first);
-		ss << "=\"";
-		escape(ss, itr.second);
-		ss << "\" ";
+		escape(oss, itr.first);
+		oss << "=\"";
+		escape(oss, itr.second);
+		oss << "\" ";
 	}
 
-	ss << "/>\r\n";
-	return ss.str();
+	oss << "/>\r\n";
+	return std::move(oss).str();
 }

@@ -2,9 +2,44 @@
 Release Notes
 #############
 
+6.3.23
+======
+* Fixed a bug that remoteDCIsHealthy logic is not guarded by CC_ENABLE_WORKER_HEALTH_MONITOR, which may prevent HA failback. `(PR #6106) <https://github.com/apple/foundationdb/pull/6106>`_
+* Fixed a race condition with updating the coordinated state and updating the master registration. `(PR #6088) <https://github.com/apple/foundationdb/pull/6088>`_
+* Changed dbinfo broadcast to be explicitly requested by the worker registration message. `(PR #6073) <https://github.com/apple/foundationdb/pull/6073>`_
+
+6.3.22
+======
+* Added histograms to client GRV batcher. `(PR #5760) <https://github.com/apple/foundationdb/pull/5760>`_
+* Added FastAlloc memory utilization trace. `(PR #5759) <https://github.com/apple/foundationdb/pull/5759>`_
+* Added locality cache size to TransactionMetrics. `(PR #5771) <https://github.com/apple/foundationdb/pull/5771>`_
+* Added a new feature that allows FDB to failover to remote DC when the primary is experiencing massive grey failure. This feature is turned off by default. `(PR #5774) <https://github.com/apple/foundationdb/pull/5774>`_
+
+6.3.21
+======
+* Added a ThreadID field to all trace events for the purpose of multi-threaded client debugging. `(PR #5665) <https://github.com/apple/foundationdb/pull/5665>`_
+* Fixed some histograms' group name in the master proxy. `(PR #5674) <https://github.com/apple/foundationdb/pull/5674>`_
+* Added histograms for GRV path components in the proxy. `(PR #5689) <https://github.com/apple/foundationdb/pull/5689>`_
+* Fixed race condition introduced in 6.3.20 between setting timeouts and resetting or destroying transactions. `(PR #5695) <https://github.com/apple/foundationdb/pull/5695>`_
+* Disable detailed transaction log pop tracing by default. `(PR #5696) <https://github.com/apple/foundationdb/pull/5696>`_
+
+6.3.20
+======
+* Several minor problems with the versioned packages have been fixed. `(PR 5607) <https://github.com/apple/foundationdb/pull/5607>`_
+* A client might not honor transaction timeouts when using the multi-version client if it cannot connect to the cluster. `(Issue #5595) <https://github.com/apple/foundationdb/issues/5595>`_
+* Fixed a very rare bug where recovery could potentially roll back a committed transaction `(PR 5461) <https://github.com/apple/foundationdb/pull/5461>`_
+* Added histograms for commit path components in the proxy. `(PR #5367) <https://github.com/apple/foundationdb/pull/5367>`_
+* Fixed a false checkRegions call that could cause unwanted primary DC failover. `(PR #5330) <https://github.com/apple/foundationdb/pull/5330>`_
+
 6.3.19
 ======
-* Add the ``trace_partial_file_suffix`` network option. This option will give unfinished trace files a special suffix to indicate they're not complete yet. When the trace file is complete, it is renamed to remove the suffix. `(PR #5330) <https://github.com/apple/foundationdb/pull/5330>`_
+* Added the ``trace_partial_file_suffix`` network option. This option will give unfinished trace files a special suffix to indicate they're not complete yet. When the trace file is complete, it is renamed to remove the suffix. `(PR #5330) <https://github.com/apple/foundationdb/pull/5330>`_
+* Added error details in ``RemovedDeadBackupLayerStatus`` trace event. `(PR #5356) <https://github.com/apple/foundationdb/pull/5356>`_
+* Added RepeatableReadMultiThreadClientTest. `(PR #5212) <https://github.com/apple/foundationdb/pull/5212>`_
+* Added a new feature that allows FDB to detect grey failures and automatically recover from them. `(PR #5249) <https://github.com/apple/foundationdb/pull/5249>`_
+* Added version and timestamp to ``TimeKeeperCommit`` trace event. `(PR #5415) <https://github.com/apple/foundationdb/pull/5415>`_
+* Added ``RecruitFromConfigurationRetry`` trace event to improve recruitment observability. `(PR #5455) <https://github.com/apple/foundationdb/pull/5455>`_
+* Several fixes to pkg_tester and packaging. `(PR #5460) <https://github.com/apple/foundationdb/pull/5460>`_
 
 6.3.18
 ======

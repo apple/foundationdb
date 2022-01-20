@@ -256,7 +256,7 @@
             "excluded":false,
             "address":"1.2.3.4:1234",
             "disk":{
-               "free_bytes":3451233456234, // an estimate of how many bytes are free to allocate to fdbservers without swapping
+               "free_bytes":3451233456234,
                "reads":{
                   "hz":0.0,
                   "counter":0,
@@ -268,7 +268,7 @@
                   "counter":0,
                   "sectors":0
                },
-               "total_bytes":123412341234 // an estimate of total physical RAM
+               "total_bytes":123412341234
             },
             "uptime_seconds":1234.2345,
             "cpu":{
@@ -700,7 +700,7 @@
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-experimental",
+             "ssd-redwood-1-experimental",
              "ssd-rocksdb-experimental",
              "memory",
              "memory-1",
@@ -713,7 +713,7 @@
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-experimental",
+             "ssd-redwood-1-experimental",
              "ssd-rocksdb-experimental",
              "memory",
              "memory-1",
@@ -735,7 +735,14 @@
          "grv_proxies":1, // this field will be absent if a value has not been explicitly set
          "proxies":6, // this field will be absent if a value has not been explicitly set
          "backup_worker_enabled":1,
-         "perpetual_storage_wiggle": 0
+         "perpetual_storage_wiggle": 0,
+         "perpetual_storage_wiggle_locality":"0",
+         "storage_migration_type":{
+         "$enum":[
+             "disabled",
+             "gradual",
+             "aggressive"
+         ]}
       },
       "data":{
          "least_operating_space_bytes_log_server":0,

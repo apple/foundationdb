@@ -53,7 +53,7 @@ class SimpleConfigConsumerImpl {
 	ACTOR static Future<Version> getCommittedVersion(SimpleConfigConsumerImpl* self) {
 		ConfigFollowerGetCommittedVersionReply committedVersionReply =
 		    wait(self->cfi.getCommittedVersion.getReply(ConfigFollowerGetCommittedVersionRequest{}));
-		return committedVersionReply.version;
+		return committedVersionReply.lastCommitted;
 	}
 
 	ACTOR static Future<Void> fetchChanges(SimpleConfigConsumerImpl* self, ConfigBroadcaster* broadcaster) {

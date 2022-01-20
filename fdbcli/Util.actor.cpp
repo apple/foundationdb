@@ -25,6 +25,7 @@
 
 #include "flow/Arena.h"
 
+#include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -46,7 +47,9 @@ void printUsage(StringRef command) {
 }
 
 ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr) {
-	Optional<Value> errorMsg = wait(safeThreadFutureToFuture(tr->get(fdb_cli::errorMsgSpecialKey)));
+	// hold the returned standalone object's memory
+	state ThreadFuture<Optional<Value>> errorMsgF = tr->get(fdb_cli::errorMsgSpecialKey);
+	Optional<Value> errorMsg = wait(safeThreadFutureToFuture(errorMsgF));
 	// Error message should be present
 	ASSERT(errorMsg.present());
 	// Read the json string
@@ -110,6 +113,51 @@ ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
 	}
 	wait(waitForAll(addInterfs));
 	return Void();
+}
+
+ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers) {
+	state Reference<ITransaction> tr = db->createTransaction();
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			state ThreadFuture<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
+			state ThreadFuture<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
+
+			wait(success(safeThreadFutureToFuture(processClasses)) && success(safeThreadFutureToFuture(processData)));
+			ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
+			ASSERT(!processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY);
+
+			state std::map<Optional<Standalone<StringRef>>, ProcessClass> id_class;
+			state int i;
+			for (i = 0; i < processClasses.get().size(); i++) {
+				try {
+					id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
+					    decodeProcessClassValue(processClasses.get()[i].value);
+				} catch (Error& e) {
+					fprintf(stderr, "Error: %s; Client version is too old, please use a newer version\n", e.what());
+					return false;
+				}
+			}
+
+			for (i = 0; i < processData.get().size(); i++) {
+				ProcessData data = decodeWorkerListValue(processData.get()[i].value);
+				ProcessClass processClass = id_class[data.locality.processId()];
+
+				if (processClass.classSource() == ProcessClass::DBSource ||
+				    data.processClass.classType() == ProcessClass::UnsetClass)
+					data.processClass = processClass;
+
+				if (data.processClass.classType() != ProcessClass::TesterClass)
+					workers->push_back(data);
+			}
+
+			return true;
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
 }
 
 } // namespace fdb_cli

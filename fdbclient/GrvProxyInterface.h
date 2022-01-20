@@ -22,6 +22,9 @@
 #ifndef FDBCLIENT_GRVPROXYINTERFACE_H
 #define FDBCLIENT_GRVPROXYINTERFACE_H
 #pragma once
+#include "flow/FileIdentifier.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbclient/FDBTypes.h"
 
 // GrvProxy is proxy primarily specializing on serving GetReadVersion. It also serves health metrics since it
 // communicates with RateKeeper to gather health information of the cluster.

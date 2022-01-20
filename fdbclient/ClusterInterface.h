@@ -27,6 +27,7 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
+#include "fdbclient/ClientVersion.h"
 
 struct ClusterInterface {
 	constexpr static FileIdentifier file_identifier = 15888863;
@@ -36,6 +37,9 @@ struct ClusterInterface {
 	RequestStream<ReplyPromise<Void>> ping;
 	RequestStream<struct GetClientWorkersRequest> getClientWorkers;
 	RequestStream<struct ForceRecoveryRequest> forceRecovery;
+	RequestStream<struct MoveShardRequest> moveShard;
+	RequestStream<struct RepairSystemDataRequest> repairSystemData;
+	RequestStream<struct SplitShardRequest> splitShard;
 
 	bool operator==(ClusterInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ClusterInterface const& r) const { return id() != r.id(); }
@@ -45,7 +49,9 @@ struct ClusterInterface {
 	bool hasMessage() const {
 		return openDatabase.getFuture().isReady() || failureMonitoring.getFuture().isReady() ||
 		       databaseStatus.getFuture().isReady() || ping.getFuture().isReady() ||
-		       getClientWorkers.getFuture().isReady() || forceRecovery.getFuture().isReady();
+		       getClientWorkers.getFuture().isReady() || forceRecovery.getFuture().isReady() ||
+		       moveShard.getFuture().isReady() || repairSystemData.getFuture().isReady() ||
+		       splitShard.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -55,11 +61,23 @@ struct ClusterInterface {
 		ping.getEndpoint(TaskPriority::ClusterController);
 		getClientWorkers.getEndpoint(TaskPriority::ClusterController);
 		forceRecovery.getEndpoint(TaskPriority::ClusterController);
+		moveShard.getEndpoint(TaskPriority::ClusterController);
+		repairSystemData.getEndpoint(TaskPriority::ClusterController);
+		splitShard.getEndpoint(TaskPriority::ClusterController);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, openDatabase, failureMonitoring, databaseStatus, ping, getClientWorkers, forceRecovery);
+		serializer(ar,
+		           openDatabase,
+		           failureMonitoring,
+		           databaseStatus,
+		           ping,
+		           getClientWorkers,
+		           forceRecovery,
+		           moveShard,
+		           repairSystemData,
+		           splitShard);
 	}
 };
 
@@ -77,56 +95,6 @@ struct ClusterControllerClientInterface {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, clientInterface);
-	}
-};
-
-struct ClientVersionRef {
-	StringRef clientVersion;
-	StringRef sourceVersion;
-	StringRef protocolVersion;
-
-	ClientVersionRef() { initUnknown(); }
-
-	ClientVersionRef(Arena& arena, ClientVersionRef const& cv)
-	  : clientVersion(arena, cv.clientVersion), sourceVersion(arena, cv.sourceVersion),
-	    protocolVersion(arena, cv.protocolVersion) {}
-	ClientVersionRef(StringRef clientVersion, StringRef sourceVersion, StringRef protocolVersion)
-	  : clientVersion(clientVersion), sourceVersion(sourceVersion), protocolVersion(protocolVersion) {}
-	ClientVersionRef(StringRef versionString) {
-		std::vector<StringRef> parts = versionString.splitAny(LiteralStringRef(","));
-		if (parts.size() != 3) {
-			initUnknown();
-			return;
-		}
-		clientVersion = parts[0];
-		sourceVersion = parts[1];
-		protocolVersion = parts[2];
-	}
-
-	void initUnknown() {
-		clientVersion = LiteralStringRef("Unknown");
-		sourceVersion = LiteralStringRef("Unknown");
-		protocolVersion = LiteralStringRef("Unknown");
-	}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, clientVersion, sourceVersion, protocolVersion);
-	}
-
-	size_t expectedSize() const { return clientVersion.size() + sourceVersion.size() + protocolVersion.size(); }
-
-	bool operator<(const ClientVersionRef& rhs) const {
-		if (protocolVersion != rhs.protocolVersion) {
-			return protocolVersion < rhs.protocolVersion;
-		}
-
-		// These comparisons are arbitrary because they aren't ordered
-		if (clientVersion != rhs.clientVersion) {
-			return clientVersion < rhs.clientVersion;
-		}
-
-		return sourceVersion < rhs.sourceVersion;
 	}
 };
 
@@ -267,7 +235,7 @@ struct StatusRequest {
 
 struct GetClientWorkersRequest {
 	constexpr static FileIdentifier file_identifier = 10771791;
-	ReplyPromise<vector<ClientWorkerInterface>> reply;
+	ReplyPromise<std::vector<ClientWorkerInterface>> reply;
 
 	GetClientWorkersRequest() {}
 
@@ -291,4 +259,68 @@ struct ForceRecoveryRequest {
 	}
 };
 
+// Request to move a keyrange (shard) to a new team represented as addresses.
+struct MoveShardRequest {
+	constexpr static FileIdentifier file_identifier = 2799592;
+
+	KeyRange shard;
+	std::vector<NetworkAddress> addresses;
+	ReplyPromise<Void> reply;
+
+	MoveShardRequest() {}
+	MoveShardRequest(KeyRange shard, std::vector<NetworkAddress> addresses)
+	  : shard{ std::move(shard) }, addresses{ std::move(addresses) } {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, shard, addresses, reply);
+	}
+};
+
+// Request to trigger a master recovery, and during the following recovery, the system metadata will be
+// reconstructed from TLogs, and written to a new SS team.
+// This is used when metadata on SSes are lost or corrupted.
+struct RepairSystemDataRequest {
+	constexpr static FileIdentifier file_identifier = 2799593;
+
+	ReplyPromise<Void> reply;
+
+	RepairSystemDataRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+// Returns the actual shards generated by the SplitShardRequest.
+struct SplitShardReply {
+	constexpr static FileIdentifier file_identifier = 1384440;
+	std::vector<KeyRange> shards;
+
+	SplitShardReply() {}
+	explicit SplitShardReply(std::vector<KeyRange> shards) : shards{ std::move(shards) } {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, shards);
+	}
+};
+
+// Split keyrange [shard.begin, shard.end) into num shards.
+// Split points are chosen as the arithmeticlly equal division points of the given range.
+struct SplitShardRequest {
+	constexpr static FileIdentifier file_identifier = 1384443;
+	KeyRange shard;
+	int num;
+	ReplyPromise<SplitShardReply> reply;
+
+	SplitShardRequest() : num(0) {}
+	SplitShardRequest(KeyRange shard, int num) : shard{ std::move(shard) }, num(num) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, shard, num, reply);
+	}
+};
 #endif

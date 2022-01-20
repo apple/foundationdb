@@ -23,19 +23,8 @@
 #pragma once
 
 #include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/WellKnownEndpoints.h"
 #include "fdbserver/ConfigFollowerInterface.h"
-
-constexpr UID WLTOKEN_LEADERELECTIONREG_CANDIDACY(-1, 4);
-constexpr UID WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT(-1, 5);
-constexpr UID WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT(-1, 6);
-constexpr UID WLTOKEN_LEADERELECTIONREG_FORWARD(-1, 7);
-constexpr UID WLTOKEN_GENERATIONREG_READ(-1, 8);
-constexpr UID WLTOKEN_GENERATIONREG_WRITE(-1, 9);
-
-constexpr UID WLTOKEN_CONFIGFOLLOWER_GETSNAPSHOTANDCHANGES(-1, 17);
-constexpr UID WLTOKEN_CONFIGFOLLOWER_GETCHANGES(-1, 18);
-constexpr UID WLTOKEN_CONFIGFOLLOWER_COMPACT(-1, 19);
-constexpr UID WLTOKEN_CONFIGFOLLOWER_GETCOMMITTEDVERSION(-1, 20);
 
 struct GenerationRegInterface {
 	constexpr static FileIdentifier file_identifier = 16726744;
@@ -160,7 +149,7 @@ struct CandidacyRequest {
 struct ElectionResultRequest {
 	constexpr static FileIdentifier file_identifier = 11815465;
 	Key key;
-	vector<NetworkAddress> coordinators;
+	std::vector<NetworkAddress> coordinators;
 	UID knownLeader;
 	ReplyPromise<Optional<LeaderInfo>> reply;
 
@@ -225,7 +214,7 @@ struct ForwardRequest {
 
 class ServerCoordinators : public ClientCoordinators {
 public:
-	explicit ServerCoordinators(Reference<ClusterConnectionFile>);
+	explicit ServerCoordinators(Reference<IClusterConnectionRecord>);
 
 	std::vector<LeaderElectionRegInterface> leaderElectionServers;
 	std::vector<GenerationRegInterface> stateServers;
@@ -233,7 +222,7 @@ public:
 };
 
 Future<Void> coordinationServer(std::string const& dataFolder,
-                                Reference<ClusterConnectionFile> const& ccf,
+                                Reference<IClusterConnectionRecord> const& ccf,
                                 ConfigDBType const&);
 
 #endif

@@ -743,7 +743,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 
 	if (!isDuplicated) {
 		self->inflightSendingReqs++;
-		vector<Future<Void>> fSendMutations;
+		std::vector<Future<Void>> fSendMutations;
 		batchData->rangeToApplier = req.rangeToApplier;
 		for (auto& [loadParam, kvOps] : batchData->kvOpsPerLP) {
 			if (loadParam.isRangeFile == req.useRangeFile) {

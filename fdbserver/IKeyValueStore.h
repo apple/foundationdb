@@ -30,10 +30,12 @@ public:
 	// IClosable is a base interface for any disk-backed data structure that needs to support asynchronous errors,
 	// shutdown and deletion
 
-	virtual Future<Void> getError() = 0; // asynchronously throws an error if there is an internal error. Never set
-	                                     // inside (on the stack of) a call to another API function on this object.
-	virtual Future<Void> onClosed() = 0; // the future is set to Void when this is totally shut down after dispose() or
-	                                     // close().  But this function cannot be called after dispose or close!
+	virtual Future<Void> getError()
+	    const = 0; // asynchronously throws an error if there is an internal error. Never set
+	               // inside (on the stack of) a call to another API function on this object.
+	virtual Future<Void> onClosed()
+	    const = 0; // the future is set to Void when this is totally shut down after dispose() or
+	               // close().  But this function cannot be called after dispose or close!
 	virtual void dispose() = 0; // permanently delete the data AND invalidate this interface
 	virtual void close() = 0; // invalidate this interface, but do not delete the data.  Outstanding operations may or
 	                          // may not take effect in the background.
@@ -47,16 +49,30 @@ public:
 	virtual Future<Void> commit(
 	    bool sequential = false) = 0; // returns when prior sets and clears are (atomically) durable
 
-	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) = 0;
+	enum class ReadType {
+		EAGER,
+		FETCH,
+		LOW,
+		NORMAL,
+		HIGH,
+	};
+
+	virtual Future<Optional<Value>> readValue(KeyRef key,
+	                                          ReadType type = ReadType::NORMAL,
+	                                          Optional<UID> debugID = Optional<UID>()) = 0;
 
 	// Like readValue(), but returns only the first maxLength bytes of the value if it is longer
 	virtual Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                                int maxLength,
+	                                                ReadType type = ReadType::NORMAL,
 	                                                Optional<UID> debugID = Optional<UID>()) = 0;
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	virtual Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) = 0;
+	virtual Future<RangeResult> readRange(KeyRangeRef keys,
+	                                      int rowLimit = 1 << 30,
+	                                      int byteLimit = 1 << 30,
+	                                      ReadType type = ReadType::NORMAL) = 0;
 
 	// To debug MEMORY_RADIXTREE type ONLY
 	// Returns (1) how many key & value pairs have been inserted (2) how many nodes have been created (3) how many

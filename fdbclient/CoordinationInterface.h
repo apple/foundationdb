@@ -27,22 +27,9 @@
 #include "fdbrpc/Locality.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClusterInterface.h"
+#include "fdbclient/WellKnownEndpoints.h"
 
 const int MAX_CLUSTER_FILE_BYTES = 60000;
-
-// well known endpoints published to the client.
-constexpr UID WLTOKEN_CLIENTLEADERREG_GETLEADER(-1, 2);
-constexpr UID WLTOKEN_CLIENTLEADERREG_OPENDATABASE(-1, 3);
-
-// the value of this endpoint should be stable and not change.
-constexpr UID WLTOKEN_PROTOCOL_INFO(-1, 10);
-constexpr UID WLTOKEN_CLIENTLEADERREG_DESCRIPTOR_MUTABLE(-1, 11);
-
-constexpr UID WLTOKEN_CONFIGTXN_GETGENERATION(-1, 12);
-constexpr UID WLTOKEN_CONFIGTXN_GET(-1, 13);
-constexpr UID WLTOKEN_CONFIGTXN_GETCLASSES(-1, 14);
-constexpr UID WLTOKEN_CONFIGTXN_GETKNOBS(-1, 15);
-constexpr UID WLTOKEN_CONFIGTXN_COMMIT(-1, 16);
 
 struct ClientLeaderRegInterface {
 	RequestStream<struct GetLeaderRequest> getLeader;
@@ -58,12 +45,24 @@ struct ClientLeaderRegInterface {
 	}
 };
 
+// A string containing the information necessary to connect to a cluster.
+//
+// The format of the connection string is: description:id@[addrs]+
+// The description and id together are called the "key"
+//
+// The following is enforced about the format of the file:
+//  - The key must contain one (and only one) ':' character
+//  - The description contains only allowed characters (a-z, A-Z, 0-9, _)
+//  - The ID contains only allowed characters (a-z, A-Z, 0-9)
+//  - At least one address is specified
+//  - There is no address present more than once
 class ClusterConnectionString {
 public:
 	ClusterConnectionString() {}
 	ClusterConnectionString(std::string const& connectionString);
-	ClusterConnectionString(vector<NetworkAddress>, Key);
-	vector<NetworkAddress> const& coordinators() const { return coord; }
+	ClusterConnectionString(std::vector<NetworkAddress>, Key);
+
+	std::vector<NetworkAddress> const& coordinators() const { return coord; }
 	Key clusterKey() const { return key; }
 	Key clusterKeyName() const {
 		return keyDesc;
@@ -74,49 +73,76 @@ public:
 private:
 	void parseKey(std::string const& key);
 
-	vector<NetworkAddress> coord;
+	std::vector<NetworkAddress> coord;
 	Key key, keyDesc;
 };
 
-class ClusterConnectionFile : NonCopyable, public ReferenceCounted<ClusterConnectionFile> {
+FDB_DECLARE_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
+
+// A record that stores the connection string used to connect to a cluster. This record can be updated when a cluster
+// notifies a connected party that the connection string has changed.
+//
+// The typically used cluster connection record is a cluster file (implemented in ClusterConnectionFile). This interface
+// provides an abstraction over the cluster file so that we can persist the connection string in other locations or have
+// one that is only stored in memory.
+class IClusterConnectionRecord {
 public:
-	ClusterConnectionFile() {}
-	// Loads and parses the file at 'path', throwing errors if the file cannot be read or the format is invalid.
-	//
-	// The format of the file is: description:id@[addrs]+
-	//  The description and id together are called the "key"
-	//
-	// The following is enforced about the format of the file:
-	//  - The key must contain one (and only one) ':' character
-	//  - The description contains only allowed characters (a-z, A-Z, 0-9, _)
-	//  - The ID contains only allowed characters (a-z, A-Z, 0-9)
-	//  - At least one address is specified
-	//  - There is no address present more than once
-	explicit ClusterConnectionFile(std::string const& path);
-	explicit ClusterConnectionFile(ClusterConnectionString const& cs) : cs(cs), setConn(false) {}
-	explicit ClusterConnectionFile(std::string const& filename, ClusterConnectionString const& contents);
+	IClusterConnectionRecord(ConnectionStringNeedsPersisted connectionStringNeedsPersisted)
+	  : connectionStringNeedsPersisted(connectionStringNeedsPersisted) {}
+	virtual ~IClusterConnectionRecord() {}
 
-	// returns <resolved name, was default file>
-	static std::pair<std::string, bool> lookupClusterFileName(std::string const& filename);
-	// get a human readable error message describing the error returned from the constructor
-	static std::string getErrorString(std::pair<std::string, bool> const& resolvedFile, Error const& e);
-
+	// Returns the connection string currently held in this object. This may not match the stored record if it hasn't
+	// been persisted or if the persistent storage for the record has been modified externally.
 	ClusterConnectionString const& getConnectionString() const;
-	bool writeFile();
-	void setConnectionString(ClusterConnectionString const&);
-	std::string const& getFilename() const {
-		ASSERT(filename.size());
-		return filename;
-	}
-	bool canGetFilename() const { return filename.size() != 0; }
-	bool fileContentsUpToDate() const;
-	bool fileContentsUpToDate(ClusterConnectionString& fileConnectionString) const;
+
+	// Sets the connections string held by this object and persists it.
+	virtual Future<Void> setConnectionString(ClusterConnectionString const&) = 0;
+
+	// If this record is backed by persistent storage, get the connection string from that storage. Otherwise, return
+	// the connection string stored in memory.
+	virtual Future<ClusterConnectionString> getStoredConnectionString() = 0;
+
+	// Checks whether the connection string in persisten storage matches the connection string stored in memory.
+	Future<bool> upToDate();
+
+	// Checks whether the connection string in persisten storage matches the connection string stored in memory. The
+	// cluster string stored in persistent storage is returned via the reference parameter connectionString.
+	virtual Future<bool> upToDate(ClusterConnectionString& connectionString) = 0;
+
+	// Returns a string representing the location of the cluster record. For example, this could be the filename or key
+	// that stores the connection string.
+	virtual std::string getLocation() const = 0;
+
+	// Creates a copy of this object with a modified connection string but that isn't persisted.
+	virtual Reference<IClusterConnectionRecord> makeIntermediateRecord(
+	    ClusterConnectionString const& connectionString) const = 0;
+
+	// Returns a string representation of this cluster connection record. This will include the type and location of the
+	// record.
+	virtual std::string toString() const = 0;
+
+	// Signals to the connection record that it was successfully used to connect to a cluster.
 	void notifyConnected();
 
-private:
+	virtual void addref() = 0;
+	virtual void delref() = 0;
+
+protected:
+	// Writes the connection string to the backing persistent storage, if applicable.
+	virtual Future<bool> persist() = 0;
+
+	// Returns whether the connection record contains a connection string that needs to be persisted upon connection.
+	bool needsToBePersisted() const;
+
+	// Clears the flag needs persisted flag.
+	void setPersisted();
+
 	ClusterConnectionString cs;
-	std::string filename;
-	bool setConn;
+
+private:
+	// A flag that indicates whether this connection record needs to be persisted when it succesfully establishes a
+	// connection.
+	bool connectionStringNeedsPersisted;
 };
 
 struct LeaderInfo {
@@ -199,7 +225,7 @@ struct OpenDatabaseCoordRequest {
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
 	UID knownClientInfoID;
 	Key clusterKey;
-	vector<NetworkAddress> coordinators;
+	std::vector<NetworkAddress> coordinators;
 	ReplyPromise<CachedSerialization<struct ClientDBInfo>> reply;
 
 	template <class Ar>
@@ -210,11 +236,11 @@ struct OpenDatabaseCoordRequest {
 
 class ClientCoordinators {
 public:
-	vector<ClientLeaderRegInterface> clientLeaderServers;
+	std::vector<ClientLeaderRegInterface> clientLeaderServers;
 	Key clusterKey;
-	Reference<ClusterConnectionFile> ccf;
+	Reference<IClusterConnectionRecord> ccr;
 
-	explicit ClientCoordinators(Reference<ClusterConnectionFile> ccf);
+	explicit ClientCoordinators(Reference<IClusterConnectionRecord> ccr);
 	explicit ClientCoordinators(Key clusterKey, std::vector<NetworkAddress> coordinators);
 	ClientCoordinators() {}
 };

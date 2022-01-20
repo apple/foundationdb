@@ -22,6 +22,7 @@
 #include <ostream>
 
 // FIXME: Trim this down
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "flow/Platform.actor.h"
 #include "fdbclient/AsyncTaskThread.h"
 #include "fdbclient/BackupContainer.h"
@@ -75,13 +76,13 @@ std::string IBackupContainer::ExpireProgress::toString() const {
 
 void BackupFileList::toStream(FILE* fout) const {
 	for (const RangeFile& f : ranges) {
-		fprintf(fout, "range %" PRId64 " %s\n", f.fileSize, f.fileName.c_str());
+		fmt::print(fout, "range {0} {1}\n", f.fileSize, f.fileName);
 	}
 	for (const LogFile& f : logs) {
-		fprintf(fout, "log %" PRId64 " %s\n", f.fileSize, f.fileName.c_str());
+		fmt::print(fout, "log {0} {1}\n", f.fileSize, f.fileName);
 	}
 	for (const KeyspaceSnapshotFile& f : snapshots) {
-		fprintf(fout, "snapshotManifest %" PRId64 " %s\n", f.totalSize, f.fileName.c_str());
+		fmt::print(fout, "snapshotManifest {0} {1}\n", f.totalSize, f.fileName);
 	}
 }
 

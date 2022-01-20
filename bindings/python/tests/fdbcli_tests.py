@@ -188,7 +188,7 @@ def kill(logger):
     # and then specify the certain process to kill
     process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
     #
-    output2, err = process.communicate(input='kill; kill {}\n'.format(address).encode())
+    output2, err = process.communicate(input='kill; kill {}; sleep 1\n'.format(address).encode())
     logger.debug(output2)
     # wait for a second for the cluster recovery
     time.sleep(1)
@@ -218,7 +218,7 @@ def suspend(logger):
     logger.debug("Pid: {}".format(pid))
     process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
     # suspend the process for enough long time
-    output2, err = process.communicate(input='suspend; suspend 3600 {}\n'.format(address).encode())
+    output2, err = process.communicate(input='suspend; suspend 3600 {}; sleep 1\n'.format(address).encode())
     # the cluster should be unavailable after the only process being suspended
     assert not get_value_from_status_json(False, 'client', 'database_status', 'available')
     # check the process pid still exists
@@ -385,7 +385,7 @@ def coordinators(logger):
     # verify now we have 5 coordinators and the description is updated
     output2 = run_fdbcli_command('coordinators')
     assert output2.split('\n')[0].split(': ')[-1] == new_cluster_description
-    assert output2.split('\n')[1] == 'Cluster coordinators ({}): {}'.format(5, ','.join(addresses))
+    assert output2.split('\n')[1] == 'Cluster coordinators ({}): {}'.format(args.process_number, ','.join(addresses))
     # auto change should go back to 1 coordinator
     run_fdbcli_command('coordinators', 'auto')
     assert len(get_value_from_status_json(True, 'client', 'coordinators', 'coordinators')) == 1

@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbrpc/simulator.h"
@@ -37,7 +38,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 
 	DifferentClustersSameRVWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		ASSERT(g_simulator.extraDB != nullptr);
-		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
+		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
 		extraDB = Database::createDatabase(extraFile, -1);
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 100.0);
 		switchAfter = getOption(options, LiteralStringRef("switchAfter"), 50.0);
@@ -53,7 +54,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		if (clientId != 0) {
 			return Void();
 		}
-		auto switchConnFileDb = Database::createDatabase(cx->getConnectionFile(), -1);
+		auto switchConnFileDb = Database::createDatabase(cx->getConnectionRecord(), -1);
 		originalDB = cx;
 		std::vector<Future<Void>> clients = { readerClientSeparateDBs(cx, this),
 			                                  doSwitch(switchConnFileDb, this),
@@ -70,7 +71,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		return true;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<std::pair<Version, Optional<Value>>> doRead(Database cx,
 	                                                                DifferentClustersSameRVWorkload* self) {
@@ -141,8 +142,8 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		TraceEvent("DifferentClusters_CopiedDatabase").log();
 		wait(advanceVersion(self->extraDB, rv));
 		TraceEvent("DifferentClusters_AdvancedVersion").log();
-		wait(cx->switchConnectionFile(
-		    makeReference<ClusterConnectionFile>(self->extraDB->getConnectionFile()->getConnectionString())));
+		wait(cx->switchConnectionRecord(
+		    makeReference<ClusterConnectionMemoryRecord>(self->extraDB->getConnectionRecord()->getConnectionString())));
 		TraceEvent("DifferentClusters_SwitchedConnectionFile").log();
 		state Transaction tr(cx);
 		tr.setVersion(rv);
@@ -156,7 +157,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 			TraceEvent("DifferentClusters_ReadError").error(e);
 			wait(tr.onError(e));
 		}
-		// In an actual switch we would call switchConnectionFile after unlocking the database. But it's possible
+		// In an actual switch we would call switchConnectionRecord after unlocking the database. But it's possible
 		// that a storage server serves a read at |rv| even after the recovery caused by unlocking the database, and we
 		// want to make that more likely for this test. So read at |rv| then unlock.
 		wait(unlockDatabase(self->extraDB, lockUid));

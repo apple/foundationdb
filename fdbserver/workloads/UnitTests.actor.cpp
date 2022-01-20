@@ -93,7 +93,7 @@ struct UnitTestWorkload : TestWorkload {
 		return Void();
 	}
 	Future<bool> check(Database const& cx) override { return testsFailed.getValue() == 0; }
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(testsAvailable.getMetric());
 		m.push_back(testsExecuted.getMetric());
 		m.push_back(testsFailed.getMetric());

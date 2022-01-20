@@ -313,7 +313,7 @@ ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, 
 	loop {
 		state Future<Void> registrationChange = collection->metricRegistrationChanged.onTrigger();
 		state Future<Void> newMetric = collection->metricAdded.onTrigger();
-		state vector<Standalone<StringRef>> keys;
+		state std::vector<Standalone<StringRef>> keys;
 		state bool fieldsChanged = false;
 		state bool enumsChanged = false;
 

@@ -242,7 +242,7 @@ function startFdbServer
     let status="${status} + 1"
 
   else
-    "${BINDIR}/fdbserver" --knob_disable_posix_kernel_aio=1 -C "${FDBCONF}" -p "${FDBCLUSTERTEXT}" -L "${LOGDIR}" -d "${WORKDIR}/fdb/${$}" &> "${LOGDIR}/fdbserver.log" &
+    "${BINDIR}/fdbserver" --knob-disable-posix-kernel-aio=1 -C "${FDBCONF}" -p "${FDBCLUSTERTEXT}" -L "${LOGDIR}" -d "${WORKDIR}/fdb/${$}" &> "${LOGDIR}/fdbserver.log" &
     if [ "${?}" -ne 0 ]
     then
         log "Failed to start FDB Server"

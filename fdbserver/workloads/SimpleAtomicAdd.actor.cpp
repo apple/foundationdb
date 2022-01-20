@@ -32,7 +32,7 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 	int initialValue;
 	Key sumKey;
 	double testDuration;
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 
 	SimpleAtomicAddWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
@@ -131,7 +131,7 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 		}
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<SimpleAtomicAddWorkload> SimpleAtomicAddWorkloadFactory("SimpleAtomicAdd");

@@ -128,7 +128,7 @@ struct TLogCommitRequest {
 	                  const Version minKnownCommittedVersion_,
 	                  const std::set<ptxn::StorageTeamID>& addedTeams_,
 	                  const std::set<ptxn::StorageTeamID>& removedTeams_,
-	                  std::map<ptxn::StorageTeamID, vector<Tag>> teamToTags_,
+	                  std::map<ptxn::StorageTeamID, std::vector<Tag>> teamToTags_,
 	                  const Optional<UID>& debugID_)
 	  : spanID(spanID_), tLogGroupID(tLogGroupID_), arena(arena_), messages(std::move(messages_)),
 	    prevVersion(prevVersion_), version(version_), knownCommittedVersion(knownCommittedVersion_),

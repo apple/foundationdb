@@ -33,29 +33,6 @@ std::string TLogSet::toString() const {
 	    locality);
 }
 
-bool TLogSet::isEqualIds(TLogSet const& r) const {
-	if (tLogWriteAntiQuorum != r.tLogWriteAntiQuorum || tLogReplicationFactor != r.tLogReplicationFactor ||
-	    isLocal != r.isLocal || satelliteTagLocations != r.satelliteTagLocations || startVersion != r.startVersion ||
-	    tLogs.size() != r.tLogs.size() || locality != r.locality) {
-		return false;
-	}
-	if ((tLogPolicy && !r.tLogPolicy) || (!tLogPolicy && r.tLogPolicy) ||
-	    (tLogPolicy && (tLogPolicy->info() != r.tLogPolicy->info()))) {
-		return false;
-	}
-	for (int i = 0; i < tLogs.size(); i++) {
-		if (tLogs[i].id() != r.tLogs[i].id()) {
-			return false;
-		}
-	}
-	for (int i = 0; i < tLogGroupIDs.size(); i++) {
-		if (tLogGroupIDs[i] != r.tLogGroupIDs[i]) {
-			return false;
-		}
-	}
-	return true;
-}
-
 bool TLogSet::operator==(const TLogSet& rhs) const {
 	if (tLogWriteAntiQuorum != rhs.tLogWriteAntiQuorum || tLogReplicationFactor != rhs.tLogReplicationFactor ||
 	    isLocal != rhs.isLocal || satelliteTagLocations != rhs.satelliteTagLocations ||
@@ -115,6 +92,29 @@ bool TLogSet::operator==(const TLogSet& rhs) const {
 		    backupWorkers[j].present() != rhs.backupWorkers[j].present() ||
 		    (backupWorkers[j].present() &&
 		     backupWorkers[j].interf().getToken() != rhs.backupWorkers[j].interf().getToken())) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool TLogSet::isEqualIds(TLogSet const& r) const {
+	if (tLogWriteAntiQuorum != r.tLogWriteAntiQuorum || tLogReplicationFactor != r.tLogReplicationFactor ||
+	    isLocal != r.isLocal || satelliteTagLocations != r.satelliteTagLocations || startVersion != r.startVersion ||
+	    tLogs.size() != r.tLogs.size() || locality != r.locality) {
+		return false;
+	}
+	if ((tLogPolicy && !r.tLogPolicy) || (!tLogPolicy && r.tLogPolicy) ||
+	    (tLogPolicy && (tLogPolicy->info() != r.tLogPolicy->info()))) {
+		return false;
+	}
+	for (int i = 0; i < tLogs.size(); i++) {
+		if (tLogs[i].id() != r.tLogs[i].id()) {
+			return false;
+		}
+	}
+	for (int i = 0; i < tLogGroupIDs.size(); i++) {
+		if (tLogGroupIDs[i] != r.tLogGroupIDs[i]) {
 			return false;
 		}
 	}

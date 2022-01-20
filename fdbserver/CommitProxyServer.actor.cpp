@@ -237,7 +237,7 @@ struct ResolutionRequestBuilder {
 			getOutTransaction(0, trIn.read_snapshot).spanContext = trRequest.spanContext;
 		}
 
-		vector<int> resolversUsed;
+		std::vector<int> resolversUsed;
 		for (int r = 0; r < outTr.size(); r++)
 			if (outTr[r]) {
 				resolversUsed.push_back(r);
@@ -328,7 +328,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 	}
 }
 
-void createWhitelistBinPathVec(const std::string& binPath, vector<Standalone<StringRef>>& binPathVec) {
+void createWhitelistBinPathVec(const std::string& binPath, std::vector<Standalone<StringRef>>& binPathVec) {
 	TraceEvent(SevDebug, "BinPathConverter").detail("Input", binPath);
 	StringRef input(binPath);
 	while (input != StringRef()) {
@@ -348,7 +348,7 @@ void createWhitelistBinPathVec(const std::string& binPath, vector<Standalone<Str
 	return;
 }
 
-bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef binPath) {
+bool isWhitelisted(const std::vector<Standalone<StringRef>>& binPathVec, StringRef binPath) {
 	TraceEvent("BinPath").detail("Value", binPath);
 	for (const auto& item : binPathVec) {
 		TraceEvent("Element").detail("Value", item);
@@ -864,7 +864,6 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	self->previousCommitVersionByGroup.swap(self->resolution[0].previousCommitVersions);
 	for (auto& it : self->previousCommitVersionByGroup) {
 		if (self->pGroupMessageBuilders.count(it.first) == 0) {
-			// std::cout << "Adding to group: " << it.first.toString() << std::endl;
 			self->pGroupMessageBuilders[it.first] =
 			    std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(self->commitVersion);
 		}
@@ -1388,6 +1387,12 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		std::vector<Future<Version>> pushResults;
 		pushResults.reserve(self->pGroupMessageBuilders.size());
 		for (auto& [groupId, _] : self->pGroupMessageBuilders) {
+			auto pcvIt = self->previousCommitVersionByGroup.find(groupId);
+			if (pcvIt == self->previousCommitVersionByGroup.end()) {
+				ASSERT(!SERVER_KNOBS->BROADCAST_TLOG_GROUPS);
+				continue;
+			}
+
 			std::set<ptxn::StorageTeamID> addedTeams;
 			std::set<ptxn::StorageTeamID> removedTeams;
 
@@ -1398,7 +1403,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 					removedTeams.insert(team);
 			}
 
-			pushResults.push_back(pProxyCommitData->logSystem->push(self->previousCommitVersionByGroup[groupId],
+			pushResults.push_back(pProxyCommitData->logSystem->push(pcvIt->second,
 			                                                        self->commitVersion,
 			                                                        pProxyCommitData->committedVersion.get(),
 			                                                        pProxyCommitData->minKnownCommittedVersion,
@@ -1523,7 +1528,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	// client may get a commit version that the master is not aware of, and next GRV request may get a version less than
 	// self->committedVersion.
 	TEST(pProxyCommitData->committedVersion.get() > self->commitVersion); // later version was reported committed first
-	if (self->commitVersion >= pProxyCommitData->committedVersion.get()) {
+	if (self->commitVersion >= pProxyCommitData->committedVersion.get() || SERVER_KNOBS->TLOG_NEW_INTERFACE) {
 		wait(pProxyCommitData->master.reportLiveCommittedVersion.getReply(
 		    ReportRawCommittedVersionRequest(self->commitVersion,
 		                                     self->lockedAfter,
@@ -1651,7 +1656,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 
 // Commit one batch of transactions trs
 ACTOR Future<Void> commitBatch(ProxyCommitData* self,
-                               vector<CommitTransactionRequest>* trs,
+                               std::vector<CommitTransactionRequest>* trs,
                                int currentBatchMemBytesCount) {
 	// WARNING: this code is run at a high priority (until the first delay(0)), so it needs to do as little work as
 	// possible
@@ -1717,7 +1722,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 	if (!req.end.present()) {
 		auto r = req.reverse ? commitData->keyInfo.rangeContainingKeyBefore(req.begin)
 		                     : commitData->keyInfo.rangeContaining(req.begin);
-		vector<StorageServerInterface> ssis;
+		std::vector<StorageServerInterface> ssis;
 		ssis.reserve(r.value().src_info.size());
 		for (auto& it : r.value().src_info) {
 			ssis.push_back(it->interf);
@@ -1729,7 +1734,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 		for (auto r = commitData->keyInfo.rangeContaining(req.begin);
 		     r != commitData->keyInfo.ranges().end() && count < req.limit && r.begin() < req.end.get();
 		     ++r) {
-			vector<StorageServerInterface> ssis;
+			std::vector<StorageServerInterface> ssis;
 			ssis.reserve(r.value().src_info.size());
 			for (auto& it : r.value().src_info) {
 				ssis.push_back(it->interf);
@@ -1742,7 +1747,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 		int count = 0;
 		auto r = commitData->keyInfo.rangeContainingKeyBefore(req.end.get());
 		while (count < req.limit && req.begin < r.end()) {
-			vector<StorageServerInterface> ssis;
+			std::vector<StorageServerInterface> ssis;
 			ssis.reserve(r.value().src_info.size());
 			for (auto& it : r.value().src_info) {
 				ssis.push_back(it->interf);
@@ -1973,7 +1978,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 		// FIXME: logAntiQuorum not supported, remove it later,
 		// In version2, we probably don't need this limtiation, but this needs to be tested.
 		if (logAntiQuorum > 0) {
-			TraceEvent("SnapCommitProxy_LogAnitQuorumNotSupported")
+			TraceEvent("SnapCommitProxy_LogAntiQuorumNotSupported")
 			    .detail("SnapPayload", snapReq.snapPayload)
 			    .detail("SnapUID", snapReq.snapUID);
 			throw snap_log_anti_quorum_unsupported();
@@ -2277,7 +2282,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	    proxy.id(), master, proxy.getConsistentReadVersion, recoveryTransactionVersion, proxy.commit, db, firstProxy);
 
 	state Future<Sequence> sequenceFuture = (Sequence)0;
-	state PromiseStream<std::pair<vector<CommitTransactionRequest>, int>> batchedCommits;
+	state PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int>> batchedCommits;
 	state Future<Void> commitBatcherActor;
 	state Future<Void> lastCommitComplete = Void();
 
@@ -2380,9 +2385,10 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 			commitData.updateLatencyBandConfig(commitData.db->get().latencyBandConfig);
 		}
 		when(wait(onError)) {}
-		when(std::pair<vector<CommitTransactionRequest>, int> batchedRequests = waitNext(batchedCommits.getFuture())) {
+		when(std::pair<std::vector<CommitTransactionRequest>, int> batchedRequests =
+		         waitNext(batchedCommits.getFuture())) {
 			// WARNING: this code is run at a high priority, so it needs to do as little work as possible
-			const vector<CommitTransactionRequest>& trs = batchedRequests.first;
+			const std::vector<CommitTransactionRequest>& trs = batchedRequests.first;
 			int batchBytes = batchedRequests.second;
 			//TraceEvent("CommitProxyCTR", proxy.id()).detail("CommitTransactions", trs.size()).detail("TransactionRate", transactionRate).detail("TransactionQueue", transactionQueue.size()).detail("ReleasedTransactionCount", transactionCount);
 			if (trs.size() || (commitData.db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&

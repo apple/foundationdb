@@ -30,7 +30,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 	int actorCount, keyCount;
 
 	double testDuration, transactionsPerSecond;
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	Future<Void> readHotCheck;
 	Key readKey;
 	KeyRange wholeRange;
@@ -132,7 +132,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		}
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> keyReader(Database cx, ReadHotDetectionWorkload* self, double delay, bool useReadKey) {
 		state double lastTime = now();

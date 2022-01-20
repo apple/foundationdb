@@ -69,7 +69,7 @@ struct StatusWorkload : TestWorkload {
 	}
 	Future<bool> check(Database const& cx) override { return errors.getValue() == 0; }
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		if (clientId != 0)
 			return;
 

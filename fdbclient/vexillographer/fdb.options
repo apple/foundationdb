@@ -58,7 +58,7 @@ description is not currently required but encouraged.
             paramType="String" paramDescription="The identifier that will be part of all trace file names"
             description="Once provided, this string will be used to replace the port/PID in the log file names." />
     <Option name="trace_partial_file_suffix" code="39"
-            paramType="String" paramDesciption="Append this suffix to partially written log files. When a log file is complete, it is renamed to remove the suffix. No separator is added between the file and the suffix. If you want to add a file extension, you should include the separator - e.g. '.tmp' instead of 'tmp' to add the 'tmp' extension."
+            paramType="String" paramDescription="Append this suffix to partially written log files. When a log file is complete, it is renamed to remove the suffix. No separator is added between the file and the suffix. If you want to add a file extension, you should include the separator - e.g. '.tmp' instead of 'tmp' to add the 'tmp' extension."
             description="" />
     <Option name="knob" code="40"
             paramType="String" paramDescription="knob_name=knob_value"
@@ -191,15 +191,13 @@ description is not currently required but encouraged.
     <Option name="transaction_include_port_in_address" code="505"
             description="Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect."
             defaultFor="23"/>
-    <Option name="distributed_transaction_trace_enable" code="600"
-            description="Enable tracing for all transactions. This is the default." />
-    <Option name="distributed_transaction_trace_disable" code="601"
-            description="Disable tracing for all transactions." />
     <Option name="transaction_bypass_unreadable" code="700"
             description="Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. This sets the ``bypass_unreadable`` option of each transaction created by this database. See the transaction option description for more information."
             defaultFor="1100"/>
     <Option name="use_config_database" code="800"
             description="Use configuration database." />
+    <Option name="test_causal_read_risky" code="900"
+            description="An integer between 0 and 100 (default is 0) expressing the probability that a client will verify it can't read stale data whenever it detects a recovery." />
   </Scope>
   
   <Scope name="TransactionOption">

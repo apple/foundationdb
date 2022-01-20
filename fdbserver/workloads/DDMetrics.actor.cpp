@@ -71,7 +71,7 @@ struct DDMetricsWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>& m) override { m.emplace_back("DDDuration", ddDone, Averaged::False); }
+	void getMetrics(std::vector<PerfMetric>& m) override { m.emplace_back("DDDuration", ddDone, Averaged::False); }
 };
 
 WorkloadFactory<DDMetricsWorkload> DDMetricsWorkloadFactory("DDMetrics");
