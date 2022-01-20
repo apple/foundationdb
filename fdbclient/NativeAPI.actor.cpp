@@ -6080,8 +6080,10 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 			}
 			Version rv = cx->getCachedRV();
 			double lastTime = cx->getLastTimedGRV();
-			if (now() - lastTime <= CLIENT_KNOBS->MAX_VERSION_CACHE_LAG && rv != Version(0)) {
+			double requestTime = now();
+			if (requestTime - lastTime <= CLIENT_KNOBS->MAX_VERSION_CACHE_LAG && rv != Version(0)) {
 				TraceEvent("DebugGrvUseCache").detail("LastRV", rv).detail("LastTime", format("%.6f", lastTime));
+				ASSERT(!debug_checkVersionTime(rv, requestTime, "CheckStaleness"));
 				readVersion = rv;
 				return readVersion;
 			} // else go through regular GRV path
