@@ -955,6 +955,9 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 				}
 
 				wait(logData->queueCommittedVersion.whenAtLeast(nextVersion));
+				if (logData->queueCommittedVersion.get() == std::numeric_limits<Version>::max()) {
+					return Void();
+				}
 				wait(delay(0, TaskPriority::UpdateStorage));
 
 				//TraceEvent("TlogUpdatePersist", self->dbgid).detail("LogId", logData->logId).detail("NextVersion", nextVersion).detail("Version", logData->version.get()).detail("PersistentDataDurableVer", logData->persistentDataDurableVersion).detail("QueueCommitVer", logData->queueCommittedVersion.get()).detail("PersistDataVer", logData->persistentDataVersion);
@@ -1002,6 +1005,9 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 		//TraceEvent("UpdateStorageVer", logData->logId).detail("NextVersion", nextVersion).detail("PersistentDataVersion", logData->persistentDataVersion).detail("TotalSize", totalSize);
 
 		wait(logData->queueCommittedVersion.whenAtLeast(nextVersion));
+		if (logData->queueCommittedVersion.get() == std::numeric_limits<Version>::max()) {
+			return Void();
+		}
 		wait(delay(0, TaskPriority::UpdateStorage));
 
 		if (nextVersion > logData->persistentDataVersion) {
@@ -1591,6 +1597,9 @@ ACTOR Future<Void> commitQueue(TLogData* self) {
 						wait(self->queueCommitEnd.whenAtLeast(self->queueCommitBegin) ||
 						     self->largeDiskQueueCommitBytes.onChange());
 					}
+					if (logData->queueCommittedVersion.get() == std::numeric_limits<Version>::max()) {
+						break;
+					}
 					self->sharedActors.send(doQueueCommit(self, logData, missingFinalCommit));
 					missingFinalCommit.clear();
 				}
@@ -1720,12 +1729,12 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 	return Void();
 }
 
-ACTOR Future<Void> rejoinMasters(TLogData* self,
-                                 TLogInterface tli,
-                                 DBRecoveryCount recoveryCount,
-                                 Future<Void> registerWithMaster,
-                                 bool isPrimary) {
-	state UID lastMasterID(0, 0);
+ACTOR Future<Void> rejoinClusterController(TLogData* self,
+                                           TLogInterface tli,
+                                           DBRecoveryCount recoveryCount,
+                                           Future<Void> registerWithCC,
+                                           bool isPrimary) {
+	state LifetimeToken lastMasterLifetime;
 	loop {
 		auto const& inf = self->dbInfo->get();
 		bool isDisplaced =
@@ -1753,17 +1762,20 @@ ACTOR Future<Void> rejoinMasters(TLogData* self,
 			throw worker_removed();
 		}
 
-		if (registerWithMaster.isReady()) {
-			if (self->dbInfo->get().master.id() != lastMasterID) {
+		if (registerWithCC.isReady()) {
+			if (!lastMasterLifetime.isEqual(self->dbInfo->get().masterLifetime)) {
 				// The TLogRejoinRequest is needed to establish communications with a new master, which doesn't have our
 				// TLogInterface
 				TLogRejoinRequest req(tli);
-				TraceEvent("TLogRejoining", tli.id()).detail("Master", self->dbInfo->get().master.id());
+				TraceEvent("TLogRejoining", tli.id())
+				    .detail("ClusterController", self->dbInfo->get().clusterInterface.id())
+				    .detail("DbInfoMasterLifeTime", self->dbInfo->get().masterLifetime.toString())
+				    .detail("LastMasterLifeTime", lastMasterLifetime.toString());
 				choose {
-					when(TLogRejoinReply rep =
-					         wait(brokenPromiseToNever(self->dbInfo->get().master.tlogRejoin.getReply(req)))) {
+					when(TLogRejoinReply rep = wait(
+					         brokenPromiseToNever(self->dbInfo->get().clusterInterface.tlogRejoin.getReply(req)))) {
 						if (rep.masterIsRecovered)
-							lastMasterID = self->dbInfo->get().master.id();
+							lastMasterLifetime = self->dbInfo->get().masterLifetime;
 					}
 					when(wait(self->dbInfo->onChange())) {}
 				}
@@ -1771,7 +1783,7 @@ ACTOR Future<Void> rejoinMasters(TLogData* self,
 				wait(self->dbInfo->onChange());
 			}
 		} else {
-			wait(registerWithMaster || self->dbInfo->onChange());
+			wait(registerWithCC || self->dbInfo->onChange());
 		}
 	}
 }
@@ -2061,6 +2073,11 @@ void removeLog(TLogData* self, Reference<LogData> logData) {
 		return;
 	} else {
 		throw worker_removed();
+	}
+	if (logData->queueCommittingVersion == 0) {
+		// If the removed tlog never attempted a queue commit, the update storage loop could become stuck waiting for
+		// queueCommittedVersion to advance.
+		logData->queueCommittedVersion.set(std::numeric_limits<Version>::max());
 	}
 }
 
@@ -2370,7 +2387,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	}
 
 	state int idx = 0;
-	state Promise<Void> registerWithMaster;
+	state Promise<Void> registerWithCC;
 	state std::map<UID, TLogInterface> id_interf;
 	for (idx = 0; idx < fVers.get().size(); idx++) {
 		state KeyRef rawId = fVers.get()[idx].key.removePrefix(persistCurrentVersionKeys.begin);
@@ -2418,7 +2435,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		logData->recoveryCount =
 		    BinaryReader::fromStringRef<DBRecoveryCount>(fRecoverCounts.get()[idx].value, Unversioned());
 		logData->removed =
-		    rejoinMasters(self, recruited, logData->recoveryCount, registerWithMaster.getFuture(), false);
+		    rejoinClusterController(self, recruited, logData->recoveryCount, registerWithCC.getFuture(), false);
 		removed.push_back(errorOr(logData->removed));
 
 		TraceEvent("TLogRestorePersistentStateVer", id1).detail("Ver", ver);
@@ -2520,8 +2537,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		self->sharedActors.send(tLogCore(self, it.second, id_interf[it.first], false));
 	}
 
-	if (registerWithMaster.canBeSet())
-		registerWithMaster.send(Void());
+	if (registerWithCC.canBeSet())
+		registerWithCC.send(Void());
 	return Void();
 }
 
@@ -2639,7 +2656,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	self->id_data[recruited.id()] = logData;
 	logData->locality = req.locality;
 	logData->recoveryCount = req.epoch;
-	logData->removed = rejoinMasters(self, recruited, req.epoch, Future<Void>(Void()), req.isPrimary);
+	logData->removed = rejoinClusterController(self, recruited, req.epoch, Future<Void>(Void()), req.isPrimary);
 	self->queueOrder.push_back(recruited.id());
 
 	TraceEvent("TLogStart", logData->logId).log();

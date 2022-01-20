@@ -51,7 +51,7 @@ struct ServerDBInfo {
 	Optional<BlobManagerInterface> blobManager;
 	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount
-	    recoveryCount; // A recovery count from DBCoreState.  A successful master recovery increments it twice;
+	    recoveryCount; // A recovery count from DBCoreState.  A successful cluster recovery increments it twice;
 	                   // unsuccessful recoveries may increment it once. Depending on where the current master is in its
 	                   // recovery process, this might not have been written by the current master.
 	RecoveryState recoveryState;

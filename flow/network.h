@@ -84,6 +84,7 @@ enum class TaskPriority {
 	GetConsistentReadVersion = 8500,
 	GetLiveCommittedVersionReply = 8490,
 	GetLiveCommittedVersion = 8480,
+	UpdateRecoveryTransactionVersion = 8470,
 	DefaultPromiseEndpoint = 8000,
 	DefaultOnMainThread = 7500,
 	DefaultDelay = 7010,
@@ -234,7 +235,7 @@ struct NetworkAddress {
 	IPAddress ip;
 	uint16_t port;
 	uint16_t flags;
-	NetworkAddressFromHostname fromHostname;
+	bool fromHostname;
 
 	enum { FLAG_PRIVATE = 1, FLAG_TLS = 2 };
 
@@ -296,8 +297,7 @@ struct NetworkAddress {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (is_fb_function<Ar>) {
-			bool fromHN = fromHostname == NetworkAddressFromHostname::True;
-			serializer(ar, ip, port, flags, fromHN);
+			serializer(ar, ip, port, flags, fromHostname);
 		} else {
 			if (ar.isDeserializing && !ar.protocolVersion().hasIPv6()) {
 				uint32_t ipV4;
@@ -307,8 +307,7 @@ struct NetworkAddress {
 				serializer(ar, ip, port, flags);
 			}
 			if (ar.protocolVersion().hasNetworkAddressHostnameFlag()) {
-				bool fromHN = fromHostname == NetworkAddressFromHostname::True;
-				serializer(ar, fromHN);
+				serializer(ar, fromHostname);
 			}
 		}
 	}
@@ -696,6 +695,9 @@ public:
 	virtual void addMockTCPEndpoint(const std::string& host,
 	                                const std::string& service,
 	                                const std::vector<NetworkAddress>& addresses) = 0;
+	virtual void removeMockTCPEndpoint(const std::string& host, const std::string& service) = 0;
+	virtual void parseMockDNSFromString(const std::string& s) = 0;
+	virtual std::string convertMockDNSToString() = 0;
 	// Resolve host name and service name (such as "http" or can be a plain number like "80") to a list of 1 or more
 	// NetworkAddresses
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,

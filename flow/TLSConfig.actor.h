@@ -37,22 +37,6 @@
 #include "flow/Knobs.h"
 #include "flow/flow.h"
 
-namespace TLS {
-
-// Force OpenSSL to not register an atexit handler to clean up global state before process exit.
-// If you call this, you must also call DestroyOpenSSLGlobalState() before the program exits.
-// Calls OPENSSL_init_crypto with OPENSSL_INIT_NO_ATEXIT.
-// Must be called before any other OpenSSL function.
-void DisableOpenSSLAtExitHandler();
-
-// Frees all global state maintained by OpenSSL.
-// Calls OPENSSL_cleanup.
-// Must be called before program exit if using DisableOpenSSLAtExitHandler.
-// No OpenSSL code may be run after calling this function.
-void DestroyOpenSSLGlobalState();
-
-} // namespace TLS
-
 #ifndef TLS_DISABLED
 
 #include <openssl/x509.h>
@@ -265,12 +249,12 @@ public:
 	bool is_client;
 };
 
-#define TLS_PLUGIN_FLAG "--tls_plugin"
-#define TLS_CERTIFICATE_FILE_FLAG "--tls_certificate_file"
-#define TLS_KEY_FILE_FLAG "--tls_key_file"
-#define TLS_VERIFY_PEERS_FLAG "--tls_verify_peers"
-#define TLS_CA_FILE_FLAG "--tls_ca_file"
-#define TLS_PASSWORD_FLAG "--tls_password"
+#define TLS_PLUGIN_FLAG "--tls-plugin"
+#define TLS_CERTIFICATE_FILE_FLAG "--tls-certificate-file"
+#define TLS_KEY_FILE_FLAG "--tls-key-file"
+#define TLS_VERIFY_PEERS_FLAG "--tls-verify-peers"
+#define TLS_CA_FILE_FLAG "--tls-ca-file"
+#define TLS_PASSWORD_FLAG "--tls-password"
 
 #define TLS_OPTION_FLAGS                                                                                               \
 	{ TLSConfig::OPT_TLS_PLUGIN, TLS_PLUGIN_FLAG, SO_REQ_SEP },                                                        \

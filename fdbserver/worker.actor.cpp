@@ -700,8 +700,8 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 
 	// Manually set up a master address.
 	NetworkAddress testAddress(IPAddress(0x13131313), 1);
-	testDbInfo.master.changeCoordinators =
-	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ testAddress }, UID(1, 2)));
+	testDbInfo.master.getCommitVersion =
+	    RequestStream<struct GetCommitVersionRequest>(Endpoint({ testAddress }, UID(1, 2)));
 
 	// First, create an empty TLogInterface, and check that it shouldn't be considered as in primary DC.
 	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
@@ -1404,7 +1404,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
 
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
-		TraceEvent(SevWarnAlways, "ChaosFeaturesEnabled");
+		TraceEvent(SevInfo, "ChaosFeaturesEnabled");
 		chaosMetricsActor = chaosMetricsLogger();
 	}
 
@@ -1772,12 +1772,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				startRole(Role::MASTER, recruited.id(), interf.id());
 
 				DUMPTOKEN(recruited.waitFailure);
-				DUMPTOKEN(recruited.tlogRejoin);
-				DUMPTOKEN(recruited.changeCoordinators);
 				DUMPTOKEN(recruited.getCommitVersion);
 				DUMPTOKEN(recruited.getLiveCommittedVersion);
 				DUMPTOKEN(recruited.reportLiveCommittedVersion);
-				DUMPTOKEN(recruited.notifyBackupWorkerDone);
+				DUMPTOKEN(recruited.updateRecoveryData);
 
 				// printf("Recruited as masterServer\n");
 				Future<Void> masterProcess = masterServer(
@@ -2028,7 +2026,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				} else if (storageCache.exists(req.reqId)) {
 					forwardPromise(req.reply, storageCache.get(req.reqId));
 				} else {
-					TraceEvent("AttemptedDoubleRecruitement", interf.id()).detail("ForRole", "StorageServer");
+					TraceEvent("AttemptedDoubleRecruitment", interf.id()).detail("ForRole", "StorageServer");
 					errorForwarders.add(map(delay(0.5), [reply = req.reply](Void) {
 						reply.sendError(recruitment_failed());
 						return Void();

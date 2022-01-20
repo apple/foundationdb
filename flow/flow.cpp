@@ -86,9 +86,9 @@ void* rte_memcpy_noinline(void* __restrict __dest, const void* __restrict __src,
 }
 #endif // (defined (__linux__) || defined (__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER)
 
-INetwork* g_network = 0;
+INetwork* g_network = nullptr;
 
-FILE* randLog = 0;
+FILE* randLog = nullptr;
 thread_local Reference<IRandom> seededRandom;
 Reference<IRandom> seededDebugRandom;
 uint64_t debug_lastLoadBalanceResultEndpointToken = 0;

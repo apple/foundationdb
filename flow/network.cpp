@@ -134,12 +134,12 @@ Optional<NetworkAddress> NetworkAddress::parseOptional(std::string const& s) {
 std::vector<NetworkAddress> NetworkAddress::parseList(std::string const& addrs) {
 	// Split addrs on ',' and parse them individually
 	std::vector<NetworkAddress> coord;
-	for (int p = 0; p <= addrs.size();) {
+	for (int p = 0; p < addrs.length();) {
 		int pComma = addrs.find_first_of(',', p);
-		if (pComma == addrs.npos)
-			pComma = addrs.size();
-		NetworkAddress parsedAddress = NetworkAddress::parse(addrs.substr(p, pComma - p));
-		coord.push_back(parsedAddress);
+		if (pComma == addrs.npos) {
+			pComma = addrs.length();
+		}
+		coord.push_back(NetworkAddress::parse(addrs.substr(p, pComma - p)));
 		p = pComma + 1;
 	}
 	return coord;
@@ -185,7 +185,7 @@ Future<Reference<IConnection>> INetworkConnections::connect(const std::string& h
 	Future<NetworkAddress> pickEndpoint =
 	    map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
 		    NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
-		    addr.fromHostname = NetworkAddressFromHostname::True;
+		    addr.fromHostname = true;
 		    if (useTLS) {
 			    addr.flags = NetworkAddress::FLAG_TLS;
 		    }
@@ -214,7 +214,7 @@ TEST_CASE("/flow/network/ipaddress") {
 		auto addrCompressed = "[2001:db8:85a3::8a2e:370:7334]:4800";
 		ASSERT(addrParsed.isV6());
 		ASSERT(!addrParsed.isTLS());
-		ASSERT(addrParsed.fromHostname == NetworkAddressFromHostname::False);
+		ASSERT(addrParsed.fromHostname == false);
 		ASSERT(addrParsed.toString() == addrCompressed);
 		ASSERT(addrParsed.toString() == addrCompressed);
 	}
@@ -225,7 +225,7 @@ TEST_CASE("/flow/network/ipaddress") {
 		auto addrCompressed = "[2001:db8:85a3::8a2e:370:7334]:4800:tls(fromHostname)";
 		ASSERT(addrParsed.isV6());
 		ASSERT(addrParsed.isTLS());
-		ASSERT(addrParsed.fromHostname == NetworkAddressFromHostname::True);
+		ASSERT(addrParsed.fromHostname == true);
 		ASSERT(addrParsed.toString() == addrCompressed);
 	}
 

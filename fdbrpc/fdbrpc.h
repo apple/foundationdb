@@ -124,6 +124,8 @@ public:
 		sav->sendError(exc);
 	}
 
+	void send(Never) { sendError(never_reply()); }
+
 	Future<T> getFuture() const {
 		sav->addFutureRef();
 		return Future<T>(sav);
@@ -500,6 +502,17 @@ public:
 	bool operator!=(const ReplyPromiseStream<T>& rhs) const { return !(*this == rhs); }
 
 	bool isEmpty() const { return !queue->isReady(); }
+
+	Future<Void> onEmpty() {
+		if (isEmpty()) {
+			return Void();
+		}
+		if (!queue->onEmpty.isValid()) {
+			queue->onEmpty = Promise<Void>();
+		}
+		return queue->onEmpty.getFuture();
+	}
+
 	uint32_t size() const { return queue->size(); }
 
 	// Must be called on the server before sending results on the stream to ratelimit the amount of data outstanding to

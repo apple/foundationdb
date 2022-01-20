@@ -92,6 +92,7 @@ bool canReplyWith(Error e) {
 	case error_code_quick_get_key_values_has_more:
 	case error_code_quick_get_value_miss:
 	case error_code_quick_get_key_values_miss:
+	case error_code_get_key_values_and_map_has_more:
 		// case error_code_all_alternatives_failed:
 		return true;
 	default:
@@ -345,6 +346,7 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	Key id;
 	AsyncTrigger newMutations;
 	bool stopped = false; // A stopped change feed no longer adds new mutations, but is still queriable
+	bool removing = false;
 };
 
 class ServerWatchMetadata : public ReferenceCounted<ServerWatchMetadata> {
@@ -1725,9 +1727,9 @@ MutationsAndVersionRef filterMutations(Arena& arena,
 	return m;
 }
 
-ACTOR Future<ChangeFeedStreamReply> getChangeFeedMutations(StorageServer* data,
-                                                           ChangeFeedStreamRequest req,
-                                                           bool inverted) {
+ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(StorageServer* data,
+                                                                            ChangeFeedStreamRequest req,
+                                                                            bool inverted) {
 	state ChangeFeedStreamReply reply;
 	state ChangeFeedStreamReply memoryReply;
 	state int remainingLimitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
@@ -1753,7 +1755,7 @@ ACTOR Future<ChangeFeedStreamReply> getChangeFeedMutations(StorageServer* data,
 
 	if (req.end > feed->second->emptyVersion + 1) {
 		for (auto& it : feed->second->mutations) {
-			if (it.version >= req.end || remainingLimitBytes <= 0) {
+			if (it.version >= req.end || it.version > dequeVersion || remainingLimitBytes <= 0) {
 				break;
 			}
 			if (it.version >= req.begin) {
@@ -1827,7 +1829,7 @@ ACTOR Future<ChangeFeedStreamReply> getChangeFeedMutations(StorageServer* data,
 		}
 	}
 
-	return reply;
+	return std::make_pair(reply, remainingLimitBytes > 0 && remainingDurableBytes > 0);
 }
 
 ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
@@ -1843,14 +1845,15 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
 			feedRequest.begin = begin;
 			feedRequest.end = end;
 			feedRequest.range = range;
-			state ChangeFeedStreamReply feedReply = wait(getChangeFeedMutations(data, feedRequest, true));
-			begin = feedReply.mutations.back().version + 1;
+			state std::pair<ChangeFeedStreamReply, bool> feedReply =
+			    wait(getChangeFeedMutations(data, feedRequest, true));
+			begin = feedReply.first.mutations.back().version + 1;
 			state int resultLoc = 0;
-			while (resultLoc < feedReply.mutations.size()) {
-				if (feedReply.mutations[resultLoc].mutations.size() ||
-				    feedReply.mutations[resultLoc].version == end - 1) {
+			while (resultLoc < feedReply.first.mutations.size()) {
+				if (feedReply.first.mutations[resultLoc].mutations.size() ||
+				    feedReply.first.mutations[resultLoc].version == end - 1) {
 					wait(results.onEmpty());
-					results.send(feedReply.mutations[resultLoc]);
+					results.send(feedReply.first.mutations[resultLoc]);
 				}
 				resultLoc++;
 			}
@@ -1870,6 +1873,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 	state bool atLatest = false;
 	state UID streamUID = deterministicRandom()->randomUniqueID();
 	state bool removeUID = false;
+	state Optional<Version> blockedVersion;
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 
 	wait(delay(0, TaskPriority::DefaultEndpoint));
@@ -1879,21 +1883,23 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			Future<Void> onReady = req.reply.onReady();
 			if (atLatest && !onReady.isReady()) {
 				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
-				    data->version.get();
+				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
 				removeUID = true;
 			}
 			wait(onReady);
-			state Future<ChangeFeedStreamReply> feedReplyFuture = getChangeFeedMutations(data, req, false);
+			state Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture =
+			    getChangeFeedMutations(data, req, false);
 			if (atLatest && !removeUID && !feedReplyFuture.isReady()) {
 				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
-				    data->prevVersion;
+				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
 				removeUID = true;
 			}
-			ChangeFeedStreamReply _feedReply = wait(feedReplyFuture);
-			ChangeFeedStreamReply feedReply = _feedReply;
+			std::pair<ChangeFeedStreamReply, bool> _feedReply = wait(feedReplyFuture);
+			ChangeFeedStreamReply feedReply = _feedReply.first;
+			bool gotAll = _feedReply.second;
 
 			req.begin = feedReply.mutations.back().version + 1;
-			if (!atLatest && feedReply.mutations.back().mutations.empty()) {
+			if (!atLatest && gotAll) {
 				atLatest = true;
 			}
 			auto& clientVersions = data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()];
@@ -1907,21 +1913,34 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 				minVersion = std::min(minVersion, it.second);
 			}
 			feedReply.atLatestVersion = atLatest;
-			feedReply.minStreamVersion = minVersion;
+			feedReply.minStreamVersion = gotAll ? minVersion : feedReply.mutations.back().version;
 			req.reply.send(feedReply);
 			if (feedReply.mutations.back().version == req.end - 1) {
 				req.reply.sendError(end_of_stream());
 				return Void();
 			}
-			if (feedReply.mutations.back().mutations.empty()) {
+			if (gotAll) {
+				blockedVersion = Optional<Version>();
 				auto feed = data->uidChangeFeed.find(req.rangeID);
-				if (feed == data->uidChangeFeed.end()) {
+				if (feed == data->uidChangeFeed.end() || feed->second->removing) {
 					req.reply.sendError(unknown_change_feed());
 					return Void();
 				}
-				wait(feed->second->newMutations
-				         .onTrigger()); // FIXME: check that this is triggered when the range is moved to a different
-				                        // server, also check that the stream is closed
+				choose {
+					when(wait(feed->second->newMutations.onTrigger())) {
+					} // FIXME: check that this is triggered when the range is moved to a different
+					  // server, also check that the stream is closed
+					when(wait(req.end == std::numeric_limits<Version>::max() ? Future<Void>(Never())
+					                                                         : data->version.whenAtLeast(req.end))) {}
+					when(wait(delay(5.0))) {} // TODO REMOVE this once empty version logic is fully implemented
+				}
+				auto feed = data->uidChangeFeed.find(req.rangeID);
+				if (feed == data->uidChangeFeed.end() || feed->second->removing) {
+					req.reply.sendError(unknown_change_feed());
+					return Void();
+				}
+			} else {
+				blockedVersion = feedReply.mutations.back().version;
 			}
 		}
 	} catch (Error& e) {
@@ -2055,28 +2074,37 @@ void merge(Arena& arena,
 	}
 }
 
-ACTOR Future<Optional<Value>> quickGetValue(StorageServer* data, StringRef key, Version version) {
+ACTOR Future<Optional<Value>> quickGetValue(StorageServer* data,
+                                            StringRef key,
+                                            Version version,
+                                            // To provide span context, tags, debug ID to underlying lookups.
+                                            GetKeyValuesAndFlatMapRequest* pOriginalReq) {
 	if (data->shards[key]->isReadable()) {
 		try {
 			// TODO: Use a lower level API may be better? Or tweak priorities?
-			GetValueRequest req(Span().context, key, version, Optional<TagSet>(), Optional<UID>());
-			data->actors.add(data->readGuard(req, getValueQ));
+			GetValueRequest req(pOriginalReq->spanContext, key, version, pOriginalReq->tags, pOriginalReq->debugID);
+			// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
+			// original request level, rather than individual underlying lookups. The reason is that throttle any
+			// individual underlying lookup will fail the original request, which is not productive.
+			data->actors.add(getValueQ(data, req));
 			GetValueReply reply = wait(req.reply.getFuture());
-			++data->counters.quickGetValueHit;
-			return reply.value;
+			if (!reply.error.present()) {
+				++data->counters.quickGetValueHit;
+				return reply.value;
+			}
+			// Otherwise fallback.
 		} catch (Error& e) {
 			// Fallback.
 		}
-	} else {
-		//	Fallback.
 	}
+	// Otherwise fallback.
 
 	++data->counters.quickGetValueMiss;
 	if (SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK) {
 		state Transaction tr(data->cx);
 		tr.setVersion(version);
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
-		tr.info.taskID = TaskPriority::DefaultPromiseEndpoint;
+		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
 		Future<Optional<Value>> valueFuture = tr.get(key, Snapshot::True);
 		// TODO: async in case it needs to read from other servers.
 		state Optional<Value> valueOption = wait(valueFuture);
@@ -2571,22 +2599,33 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	return Void();
 }
 
-ACTOR Future<RangeResult> quickGetKeyValues(StorageServer* data, StringRef prefix, Version version) {
+ACTOR Future<RangeResult> quickGetKeyValues(StorageServer* data,
+                                            StringRef prefix,
+                                            Version version,
+                                            // To provide span context, tags, debug ID to underlying lookups.
+                                            GetKeyValuesAndFlatMapRequest* pOriginalReq) {
 	try {
 		// TODO: Use a lower level API may be better? Or tweak priorities?
 		GetKeyValuesRequest req;
-		req.spanContext = Span().context;
+		req.spanContext = pOriginalReq->spanContext;
 		req.arena = Arena();
 		req.begin = firstGreaterOrEqual(KeyRef(req.arena, prefix));
 		req.end = firstGreaterOrEqual(strinc(prefix, req.arena));
 		req.version = version;
+		req.tags = pOriginalReq->tags;
+		req.debugID = pOriginalReq->debugID;
 
-		data->actors.add(data->readGuard(req, getKeyValuesQ));
+		// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
+		// original request level, rather than individual underlying lookups. The reason is that throttle any individual
+		// underlying lookup will fail the original request, which is not productive.
+		data->actors.add(getKeyValuesQ(data, req));
 		GetKeyValuesReply reply = wait(req.reply.getFuture());
-		++data->counters.quickGetKeyValuesHit;
-
-		// Convert GetKeyValuesReply to RangeResult.
-		return RangeResult(RangeResultRef(reply.data, reply.more), reply.arena);
+		if (!reply.error.present()) {
+			++data->counters.quickGetKeyValuesHit;
+			// Convert GetKeyValuesReply to RangeResult.
+			return RangeResult(RangeResultRef(reply.data, reply.more), reply.arena);
+		}
+		// Otherwise fallback.
 	} catch (Error& e) {
 		// Fallback.
 	}
@@ -2596,7 +2635,7 @@ ACTOR Future<RangeResult> quickGetKeyValues(StorageServer* data, StringRef prefi
 		state Transaction tr(data->cx);
 		tr.setVersion(version);
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
-		tr.info.taskID = TaskPriority::DefaultPromiseEndpoint;
+		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
 		Future<RangeResult> rangeResultFuture = tr.getRange(prefixRange(prefix), Snapshot::True);
 		// TODO: async in case it needs to read from other servers.
 		RangeResult rangeResult = wait(rangeResultFuture);
@@ -2784,9 +2823,16 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	return Void();
 }
 
-ACTOR Future<GetKeyValuesAndFlatMapReply> flatMap(StorageServer* data, GetKeyValuesReply input, StringRef mapper) {
+ACTOR Future<GetKeyValuesAndFlatMapReply> flatMap(StorageServer* data,
+                                                  GetKeyValuesReply input,
+                                                  StringRef mapper,
+                                                  // To provide span context, tags, debug ID to underlying lookups.
+                                                  GetKeyValuesAndFlatMapRequest* pOriginalReq) {
 	state GetKeyValuesAndFlatMapReply result;
 	result.version = input.version;
+	if (input.more) {
+		throw get_key_values_and_map_has_more();
+	}
 	result.more = input.more;
 	result.cached = input.cached;
 	result.arena.dependsOn(input.arena);
@@ -2804,7 +2850,7 @@ ACTOR Future<GetKeyValuesAndFlatMapReply> flatMap(StorageServer* data, GetKeyVal
 
 		if (isRangeQuery) {
 			// Use the mappedKey as the prefix of the range query.
-			RangeResult rangeResult = wait(quickGetKeyValues(data, mappedKey, input.version));
+			RangeResult rangeResult = wait(quickGetKeyValues(data, mappedKey, input.version, pOriginalReq));
 
 			if (rangeResult.more) {
 				// Probably the fan out is too large. The user should use the old way to query.
@@ -2815,7 +2861,7 @@ ACTOR Future<GetKeyValuesAndFlatMapReply> flatMap(StorageServer* data, GetKeyVal
 				result.data.emplace_back(result.arena, rangeResult[i].key, rangeResult[i].value);
 			}
 		} else {
-			Optional<Value> valueOption = wait(quickGetValue(data, mappedKey, input.version));
+			Optional<Value> valueOption = wait(quickGetValue(data, mappedKey, input.version, pOriginalReq));
 
 			if (valueOption.present()) {
 				Value value = valueOption.get();
@@ -2934,7 +2980,7 @@ ACTOR Future<Void> getKeyValuesAndFlatMapQ(StorageServer* data, GetKeyValuesAndF
 			state GetKeyValuesAndFlatMapReply r;
 			try {
 				// Map the scanned range to another list of keys and look up.
-				GetKeyValuesAndFlatMapReply _r = wait(flatMap(data, getKeyValuesReply, req.mapper));
+				GetKeyValuesAndFlatMapReply _r = wait(flatMap(data, getKeyValuesReply, req.mapper, &req));
 				r = _r;
 			} catch (Error& e) {
 				TraceEvent("FlatMapError").error(e);
@@ -4097,7 +4143,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			while (!shard->updates.empty() && shard->updates[0].version <= fetchVersion)
 				shard->updates.pop_front();
 			tr.setVersion(fetchVersion);
-			tr.info.taskID = TaskPriority::FetchKeys;
+			tr.trState->taskID = TaskPriority::FetchKeys;
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold = SERVER_KNOBS->FETCH_USING_STREAMING
 			                              ? tr.getRangeStream(results, keys, GetRangeLimits(), Snapshot::True)
@@ -4615,7 +4661,12 @@ void changeServerKeys(StorageServer* data,
 						}
 					}
 				}
-				data->uidChangeFeed.erase(f.first);
+				auto feed = data->uidChangeFeed.find(f.first);
+				if (feed != data->uidChangeFeed.end()) {
+					feed->second->removing = true;
+					feed->second->newMutations.trigger();
+					data->uidChangeFeed.erase(feed);
+				}
 			}
 		}
 	}
@@ -5182,8 +5233,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			if (cloneCursor2->version().version > ver && cloneCursor2->version().version > data->version.get()) {
 				++data->counters.updateVersions;
 				if (data->currentChangeFeeds.size()) {
-					data->changeFeedVersions.push_back(std::make_pair(
-					    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver));
+					data->changeFeedVersions.emplace_back(
+					    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver);
 					updatedChangeFeeds.insert(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end());
 					data->currentChangeFeeds.clear();
 				}
@@ -5269,8 +5320,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		}
 		data->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeTLogMsgsUpdates);
 		if (data->currentChangeFeeds.size()) {
-			data->changeFeedVersions.push_back(std::make_pair(
-			    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver));
+			data->changeFeedVersions.emplace_back(
+			    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver);
 			updatedChangeFeeds.insert(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end());
 			data->currentChangeFeeds.clear();
 		}

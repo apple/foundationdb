@@ -440,6 +440,7 @@ namespace SummarizeTest
                     string tlsPluginArg = "";
                     if (tlsPluginFile.Length > 0) {
                         process.StartInfo.EnvironmentVariables["FDB_TLS_PLUGIN"] = tlsPluginFile;
+                        // Use the old-style option with underscores because old binaries do not support hyphens
                         tlsPluginArg = "--tls_plugin=" + tlsPluginFile;
                     }
                     process.StartInfo.RedirectStandardOutput = true;
@@ -1636,8 +1637,8 @@ namespace SummarizeTest
         {
             Console.WriteLine("Version:         1.02");
 
-            Console.WriteLine("FDB Project Ver: " + "${CMAKE_PROJECT_VERSION}");
-            Console.WriteLine("FDB Version:     " + "${CMAKE_PROJECT_VERSION_MAJOR}" + "." + "${CMAKE_PROJECT_VERSION_MINOR}");
+            Console.WriteLine("FDB Project Ver: " + "${FDB_VERSION}");
+            Console.WriteLine("FDB Version:     " + "${FDB_VERSION_MAJOR}" + "." + "${FDB_VERSION_MINOR}");
             Console.WriteLine("Source Version:  " + "${CURRENT_GIT_VERSION}");
             return 1;
         }

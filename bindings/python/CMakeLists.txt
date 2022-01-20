@@ -60,12 +60,12 @@ else()
   add_custom_target(fdb_python_check COMMAND ${CMAKE_COMMAND} -E echo "Skipped Python style check! Missing: pycodestyle")
 endif()
 if(NOT FDB_RELEASE)
-  set(prerelease_string "a1")
+  set(not_fdb_release_string "a1")
 else()
-  set(prerelease_string "")
+  set(not_fdb_release_string "")
 endif()
 set(setup_file_name foundationdb-${FDB_VERSION}.tar.gz)
-set(package_file ${CMAKE_BINARY_DIR}/packages/foundationdb-${FDB_VERSION}${prerelease_string}.tar.gz)
+set(package_file ${CMAKE_BINARY_DIR}/packages/foundationdb-${FDB_VERSION}${not_fdb_release_string}.tar.gz)
 add_custom_command(OUTPUT ${package_file}
   COMMAND $<TARGET_FILE:Python::Interpreter> setup.py sdist --formats=gztar &&
           ${CMAKE_COMMAND} -E copy dist/${setup_file_name} ${package_file}
@@ -85,29 +85,27 @@ if (NOT WIN32 AND NOT OPEN_FOR_IDE)
   add_fdbclient_test(
     NAME multi_process_fdbcli_tests
     PROCESS_NUMBER 5
-    TEST_TIMEOUT 120 # The test can take near to 1 minutes sometime, set timeout to 2 minutes to be safe
     COMMAND ${CMAKE_SOURCE_DIR}/bindings/python/tests/fdbcli_tests.py
             ${CMAKE_BINARY_DIR}
             @CLUSTER_FILE@
             5
             )
-  if (TARGET external_client) # external_client copies fdb_c to bindings/c/libfdb_c.so
+  if (TARGET external_client) # external_client copies fdb_c to bindings/c/libfdb_c_external.so
     add_fdbclient_test(
     NAME single_process_external_client_fdbcli_tests
     COMMAND ${CMAKE_SOURCE_DIR}/bindings/python/tests/fdbcli_tests.py
             ${CMAKE_BINARY_DIR}
             @CLUSTER_FILE@
-            --external-client-library ${CMAKE_BINARY_DIR}/bindings/c/libfdb_c.so
+            --external-client-library ${CMAKE_BINARY_DIR}/bindings/c/libfdb_c_external.so
             )
     add_fdbclient_test(
     NAME multi_process_external_client_fdbcli_tests
     PROCESS_NUMBER 5
-    TEST_TIMEOUT 120 # The test can take near to 1 minutes sometime, set timeout to 2 minutes to be safe
     COMMAND ${CMAKE_SOURCE_DIR}/bindings/python/tests/fdbcli_tests.py
             ${CMAKE_BINARY_DIR}
             @CLUSTER_FILE@
             5
-            --external-client-library ${CMAKE_BINARY_DIR}/bindings/c/libfdb_c.so
+            --external-client-library ${CMAKE_BINARY_DIR}/bindings/c/libfdb_c_external.so
             )
   endif()
 endif()

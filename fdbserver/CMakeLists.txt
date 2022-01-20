@@ -8,7 +8,10 @@ set(FDBSERVER_SRCS
   BlobManager.actor.cpp
   BlobManagerInterface.h
   BlobWorker.actor.cpp
+  ClusterController.actor.h
   ClusterController.actor.cpp
+  ClusterRecovery.actor.h
+  ClusterRecovery.actor.cpp
   ConfigBroadcaster.actor.cpp
   ConfigBroadcaster.h
   ConfigDatabaseUnitTests.actor.cpp
@@ -209,8 +212,9 @@ set(FDBSERVER_SRCS
   workloads/MemoryKeyValueStore.h
   workloads/MemoryLifetime.actor.cpp
   workloads/MetricLogging.actor.cpp
+  workloads/MiniCycle.actor.cpp
   workloads/MutationLogReaderCorrectness.actor.cpp
-  workloads/IndexPrefetchDemo.actor.cpp
+  workloads/GetRangeAndMap.actor.cpp
   workloads/ParallelRestore.actor.cpp
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp
@@ -271,8 +275,7 @@ set(FDBSERVER_SRCS
   workloads/WriteTagThrottling.actor.cpp
 )
 
-# ugly hack to make Windows work for now
-if(WIN32)
+if(${COROUTINE_IMPL} STREQUAL libcoro)
   list(APPEND FDBSERVER_SRCS CoroFlowCoro.actor.cpp)
 else()
   list(APPEND FDBSERVER_SRCS CoroFlow.actor.cpp)

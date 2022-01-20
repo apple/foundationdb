@@ -1653,7 +1653,7 @@ Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyR
 	if (resetPromise.isSet())
 		return resetPromise.getFuture().getError();
 
-	return map(waitOrError(tr.getStorageMetrics(keys, -1), resetPromise.getFuture()),
+	return map(waitOrError(tr.getDatabase()->getStorageMetrics(keys, -1), resetPromise.getFuture()),
 	           [](const StorageMetrics& m) { return m.bytes; });
 }
 
@@ -1670,6 +1670,46 @@ Future<Standalone<VectorRef<KeyRef>>> ReadYourWritesTransaction::getRangeSplitPo
 		return key_outside_legal_range();
 
 	return waitOrError(tr.getRangeSplitPoints(range, chunkSize), resetPromise.getFuture());
+}
+
+Future<Standalone<VectorRef<KeyRangeRef>>> ReadYourWritesTransaction::getBlobGranuleRanges(const KeyRange& range) {
+	if (checkUsedDuringCommit()) {
+		return used_during_commit();
+	}
+	if (resetPromise.isSet())
+		return resetPromise.getFuture().getError();
+
+	KeyRef maxKey = getMaxReadKey();
+	if (range.begin > maxKey || range.end > maxKey)
+		return key_outside_legal_range();
+
+	return waitOrError(tr.getBlobGranuleRanges(range), resetPromise.getFuture());
+}
+
+Future<Standalone<VectorRef<BlobGranuleChunkRef>>> ReadYourWritesTransaction::readBlobGranules(
+    const KeyRange& range,
+    Version begin,
+    Optional<Version> readVersion,
+    Version* readVersionOut) {
+	// Remove in V2 of API
+	ASSERT(begin == 0);
+
+	if (!options.readYourWritesDisabled) {
+		return blob_granule_no_ryw();
+	}
+
+	if (checkUsedDuringCommit()) {
+		return used_during_commit();
+	}
+
+	if (resetPromise.isSet())
+		return resetPromise.getFuture().getError();
+
+	KeyRef maxKey = getMaxReadKey();
+	if (range.begin > maxKey || range.end > maxKey)
+		return key_outside_legal_range();
+
+	return waitOrError(tr.readBlobGranules(range, begin, readVersion, readVersionOut), resetPromise.getFuture());
 }
 
 void ReadYourWritesTransaction::addReadConflictRange(KeyRangeRef const& keys) {
@@ -1871,7 +1911,7 @@ void ReadYourWritesTransaction::setToken(uint64_t token) {
 RangeResult ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRangeRef kr) {
 	TEST(true); // Special keys read conflict range
 	ASSERT(readConflictRangeKeysRange.contains(kr));
-	ASSERT(!tr.options.checkWritesEnabled);
+	ASSERT(!tr.trState->options.checkWritesEnabled);
 	RangeResult result;
 	if (!options.readYourWritesDisabled) {
 		kr = kr.removePrefix(readConflictRangeKeysRange.begin);
