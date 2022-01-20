@@ -95,6 +95,7 @@ struct RatekeeperSingleton : Singleton<RatekeeperInterface> {
 
 	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
 		if (interface.present()) {
+			TraceEvent("CCRK_SetInf", cc->id).detail("Id", interface.get().id());
 			cc->db.setRatekeeper(interface.get());
 		}
 	}
@@ -116,6 +117,7 @@ struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
 
 	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
 		if (interface.present()) {
+			TraceEvent("CCDD_SetInf", cc->id).detail("Id", interface.get().id());
 			cc->db.setDistributor(interface.get());
 		}
 	}
@@ -137,6 +139,7 @@ struct BlobManagerSingleton : Singleton<BlobManagerInterface> {
 
 	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
 		if (interface.present()) {
+			TraceEvent("CCBM_SetInf", cc->id).detail("Id", interface.get().id());
 			cc->db.setBlobManager(interface.get());
 		}
 	}
