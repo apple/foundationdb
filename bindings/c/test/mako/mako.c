@@ -2891,6 +2891,8 @@ int main(int argc, char* argv[]) {
 	mako_stats_t* stats;
 	pid_t pid_main;
 
+	setlinebuf(stdout);
+
 	rc = init_args(&args);
 	if (rc < 0) {
 		fprintf(stderr, "ERROR: init_args failed\n");
