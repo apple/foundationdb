@@ -211,12 +211,7 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 	ptxn::test::print::print(commitReply);
 
 	// Peek
-	ptxn::TLogPeekRequest peekRequest(debugID,
-	                                  beginVersion,
-	                                  endVersion,
-	                                  false,
-	                                  false,
-	                                  storageTeamID);
+	ptxn::TLogPeekRequest peekRequest(debugID, beginVersion, endVersion, false, false, storageTeamID);
 	ptxn::test::print::print(peekRequest);
 
 	ptxn::TLogPeekReply peekReply = wait(tli->peek.getReply(peekRequest));
