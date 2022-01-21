@@ -1113,8 +1113,9 @@ public:
 	              const StorageServerInterface& storageServerInterface,
 	              const StorageTeamID& privateMutationsStorageTeamID_)
 	  : StorageServerBase(pKVStore, serverDBInfo, storageServerInterface),
-	    storageServerStorageTeams(privateMutationsStorageTeamID_),
-		subscribedStorageTeamIDs{ privateMutationsStorageTeamID_ } {}
+	    storageServerStorageTeams(privateMutationsStorageTeamID_), subscribedStorageTeamIDs{
+		    privateMutationsStorageTeamID_
+	    } {}
 
 	void updateSubscribedStorageTeamIDs();
 };
