@@ -601,7 +601,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				return rocksdb::Status::OK();
 			}
 
-			rocksdb::Status PutCF(uint32_t column_family_id, const rocksdb::Slice& key, const rocksdb::Slice& value) override {
+			rocksdb::Status PutCF(uint32_t column_family_id,
+			                      const rocksdb::Slice& key,
+			                      const rocksdb::Slice& value) override {
+				return rocksdb::Status::OK();
+			}
+
+			rocksdb::Status DeleteCF(uint32_t column_family_id, const rocksdb::Slice& key) override {
 				return rocksdb::Status::OK();
 			}
 
@@ -609,7 +615,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				return rocksdb::Status::OK();
 			}
 
-			rocksdb::Status MergeCF(uint32_t column_family_id, const rocksdb::Slice& key, const rocksdb::Slice& value) override {
+			rocksdb::Status MergeCF(uint32_t column_family_id,
+			                        const rocksdb::Slice& key,
+			                        const rocksdb::Slice& value) override {
 				return rocksdb::Status::OK();
 			}
 		};
@@ -722,14 +730,20 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			CheckpointAction(const GetCheckpointRequest& request, const std::string& checkpointDir)
 			  : request(request), checkpointDir(checkpointDir) {}
 
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+
 			const GetCheckpointRequest request;
 			const std::string checkpointDir;
 			ThreadReturnPromise<CheckpointMetaData> reply;
-			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 
 		void action(CheckpointAction& a) {
-			TraceEvent("RocksDBServeCheckpointBegin", id).detail("CheckpointDir", a.checkpointDir);
+			TraceEvent("RocksDBServeCheckpointBegin", id)
+			    .detail("MinVersion", a.request.minVersion)
+			    .detail("Range", a.request.range.toString())
+			    .detail("Format", static_cast<int>(a.request.format))
+			    .detail("CheckpointDir", a.checkpointDir);
+
 			rocksdb::Checkpoint* checkpoint;
 			rocksdb::Status s = rocksdb::Checkpoint::Create(db, &checkpoint);
 			if (!s.ok()) {
@@ -747,13 +761,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			                       a.request.range,
 			                       a.request.format,
 			                       deterministicRandom()->randomUniqueID());
-
 			const std::string& checkpointDir = a.checkpointDir;
 
 			if (a.request.format == RocksDBColumnFamily) {
 				rocksdb::ExportImportFilesMetaData* pMetadata;
 				platform::eraseDirectoryRecursive(checkpointDir);
-				std::string cwd = platform::getWorkingDirectory() + "/";
+				const std::string cwd = platform::getWorkingDirectory() + "/";
 				s = checkpoint->ExportColumnFamily(cf, checkpointDir, &pMetadata);
 
 				if (!s.ok()) {
@@ -773,17 +786,25 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		struct RestoreAction : TypedAction<Writer, RestoreAction> {
-			std::string path;
-			CheckpointMetaData checkpoint;
-			ThreadReturnPromise<Void> done;
+			RestoreAction(const std::string& path, const CheckpointMetaData& checkpoint)
+			  : path(path), checkpoint(checkpoint) {}
+
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+
+			const std::string path;
+			const CheckpointMetaData checkpoint;
+			ThreadReturnPromise<Void> done;
 		};
 
 		void action(RestoreAction& a) {
-			std::cout << "Restore Begin" << std::endl;
+			TraceEvent("RocksDBServeRestoreBegin", id)
+			    .detail("Path", a.path)
+			    .detail("CheckpointMetaData", a.checkpoint.toString());
+
 			if (a.checkpoint.format == RocksDBColumnFamily) {
 				auto options = getOptions();
 				rocksdb::Status status = rocksdb::DB::Open(options, a.path, &db);
+
 				if (!status.ok()) {
 					logRocksDBError(status, "Restore");
 					a.done.sendError(statusToError(status));
@@ -791,22 +812,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				}
 
 				rocksdb::ExportImportFilesMetaData metaData = getMetaData(a.checkpoint);
-				for (const auto& file : metaData.files) {
-					std::cout << file.db_path + file.name << std::endl;
-					std::vector<std::string> files = platform::listFiles(file.db_path);
-					std::cout << "Listing files in " << file.db_path << std::endl;
-					for (const std::string& f : files) {
-						std::cout << f << std::endl;
-					}
-				}
-
-				// status = db->DropColumnFamily(db->DefaultColumnFamily());
-				// if (!status.ok()) {
-				// 	logRocksDBError(status, "Restore");
-				// 	a.done.sendError(statusToError(status));
-				// 	return;
-				// }
-
 				rocksdb::ImportColumnFamilyOptions importOptions;
 				importOptions.move_files = true;
 				status = db->CreateColumnFamilyWithImport(
@@ -820,7 +825,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					a.done.send(Void());
 				}
 			} else {
-				a.done.sendError(internal_error());
+				throw internal_error(); // Not implemented yet.
 			}
 		}
 	};
@@ -1401,7 +1406,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Future<CheckpointMetaData> checkpoint(const GetCheckpointRequest& request,
 	                                      const std::string& checkpointDir) override {
-		std::cout << "RocksDB received checkpoint request: " << checkpointDir << std::endl;
 		auto a = new Writer::CheckpointAction(request, checkpointDir);
 
 		auto res = a->reply.getFuture();
@@ -1410,10 +1414,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<Void> restore(const CheckpointMetaData& checkpoint) override {
-		// std::cout << "RocksDB received restore request: " << checkpointDir << std::endl;
-		auto a = new Writer::RestoreAction();
-		a->path = path;
-		a->checkpoint = checkpoint;
+		auto a = new Writer::RestoreAction(path, checkpoint);
 		auto res = a->done.getFuture();
 		writeThread->post(a);
 		return res;
