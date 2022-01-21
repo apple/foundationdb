@@ -6775,7 +6775,8 @@ ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
                                                                 KeyRange keys,
                                                                 StorageMetrics limit,
-                                                                StorageMetrics estimated) {
+                                                                StorageMetrics estimated,
+                                                                bool allowPartial) {
 	state Span span("NAPI:SplitStorageMetrics"_loc);
 	loop {
 		state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
@@ -6790,7 +6791,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 
 		// SOMEDAY: Right now, if there are too many shards we delay and check again later. There may be a better
 		// solution to this.
-		if (locations.size() == CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT) {
+		if (locations.size() == CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT && !allowPartial) {
 			wait(delay(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskPriority::DataDistribution));
 			cx->invalidateCache(keys);
 		} else {
@@ -6826,7 +6827,9 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 					results.resize(results.arena(), results.size() - 1);
 				}
 
-				results.push_back_deep(results.arena(), keys.end);
+				if (!allowPartial || keys.end <= locations.back().first.end) {
+					results.push_back_deep(results.arena(), keys.end);
+				}
 				return results;
 			} catch (Error& e) {
 				if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
@@ -6842,8 +6845,9 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 
 Future<Standalone<VectorRef<KeyRef>>> Transaction::splitStorageMetrics(KeyRange const& keys,
                                                                        StorageMetrics const& limit,
-                                                                       StorageMetrics const& estimated) {
-	return ::splitStorageMetrics(cx, keys, limit, estimated);
+                                                                       StorageMetrics const& estimated,
+                                                                       bool allowPartial) {
+	return ::splitStorageMetrics(cx, keys, limit, estimated, allowPartial);
 }
 
 void Transaction::checkDeferredError() const {

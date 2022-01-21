@@ -248,7 +248,8 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 			if (BM_DEBUG) {
 				fmt::print("Splitting new range [{0} - {1})\n", range.begin.printable(), range.end.printable());
 			}
-			StorageMetrics estimated = wait(tr->getTransaction().getStorageMetrics(range, CLIENT_KNOBS->TOO_MANY));
+			state StorageMetrics estimated =
+			    wait(tr->getTransaction().getStorageMetrics(range, CLIENT_KNOBS->TOO_MANY));
 
 			if (BM_DEBUG) {
 				fmt::print("Estimated bytes for [{0} - {1}): {2}\n",
@@ -260,14 +261,28 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 			if (estimated.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
 				// printf("  Splitting range\n");
 				// only split on bytes
-				StorageMetrics splitMetrics;
+				state Standalone<VectorRef<KeyRef>> keys;
+				state StorageMetrics splitMetrics;
 				splitMetrics.bytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
 				splitMetrics.bytesPerKSecond = splitMetrics.infinity;
 				splitMetrics.iosPerKSecond = splitMetrics.infinity;
 				splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidth
 
-				Standalone<VectorRef<KeyRef>> keys =
-				    wait(tr->getTransaction().splitStorageMetrics(range, splitMetrics, estimated));
+				while (keys.empty() || keys.back() < range.end) {
+					// allow partial in case we have a large split
+					Standalone<VectorRef<KeyRef>> newKeys =
+					    wait(tr->getTransaction().splitStorageMetrics(range, splitMetrics, estimated, true));
+					ASSERT(!newKeys.empty());
+					if (keys.empty()) {
+						keys = newKeys;
+					} else {
+						TEST(true); // large split that requires multiple rounds
+						// start key was repeated with last request, so don't include it
+						ASSERT(newKeys[0] == keys.back());
+						keys.append_deep(keys.arena(), newKeys.begin() + 1, newKeys.size() - 1);
+					}
+					range = KeyRangeRef(keys.back(), range.end);
+				}
 				ASSERT(keys.size() >= 2);
 				return keys;
 			} else {
@@ -940,7 +955,7 @@ ACTOR Future<Void> deregisterBlobWorker(Reference<BlobManagerData> bmData, BlobW
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		try {
-			checkManagerLock(tr, bmData);
+			wait(checkManagerLock(tr, bmData));
 			Key blobWorkerListKey = blobWorkerListKeyFor(interf.id());
 			tr->addReadConflictRange(singleKeyRange(blobWorkerListKey));
 			tr->clear(blobWorkerListKey);
@@ -1039,7 +1054,7 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 	if (BM_DEBUG) {
 		fmt::print("Sending halt to BW {}\n", bwId.toString());
 	}
-	bmData->addActor.send(haltBlobWorker(bmData, bwInterf, registered));
+	bmData->addActor.send(haltBlobWorker(bmData, bwInterf));
 
 	wait(deregister);
 
@@ -1787,7 +1802,7 @@ ACTOR Future<Void> haltBlobGranules(Reference<BlobManagerData> bmData) {
 	std::vector<Future<Void>> deregisterBlobWorkers;
 	for (auto& worker : blobWorkers) {
 		// TODO: send a special req to blob workers so they clean up granules/CFs
-		bmData->addActor.send(haltBlobWorker(bmData, worker, false));
+		bmData->addActor.send(haltBlobWorker(bmData, worker));
 		deregisterBlobWorkers.emplace_back(deregisterBlobWorker(bmData, worker));
 	}
 	waitForAll(deregisterBlobWorkers);

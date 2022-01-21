@@ -366,7 +366,8 @@ public:
 	Future<StorageMetrics> getStorageMetrics(KeyRange const& keys, int shardLimit);
 	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
 	                                                          StorageMetrics const& limit,
-	                                                          StorageMetrics const& estimated);
+	                                                          StorageMetrics const& estimated,
+	                                                          bool allowPartial = false);
 	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys);
 
 	// Try to split the given range into equally sized chunks based on estimated size.
