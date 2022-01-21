@@ -70,6 +70,23 @@ TestDriverOptions::TestDriverOptions(const UnitTestParameters& params)
     transferModel(static_cast<MessageTransferModel>(
         params.getInt("messageTransferModel").orDefault(static_cast<int>(DEFAULT_MESSAGE_TRANSFER_MODEL)))) {}
 
+void TestDriverContext::updateServerDBInfo(Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+	ServerDBInfo info;
+	LogSystemConfig& lsConfig = info.logSystemConfig;
+	lsConfig.logSystemType = LogSystemType::teamPartitioned;
+
+	// For now, assume we only have primary TLog set
+	lsConfig.tLogs.clear();
+	lsConfig.tLogs.emplace_back(TLogSet());
+	TLogSet& logset = lsConfig.tLogs[0];
+	for (const auto& group : tLogGroups) {
+		logset.tLogGroupIDs.push_back(group.logGroupId);
+	}
+	// TODO: fill in tLogsPtxn and ptxnTLogGroups fields
+
+	dbInfo->setUnconditional(info);
+}
+
 std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions& options) {
 	print::PrintTiming printTiming(__FUNCTION__);
 	print::print(options);

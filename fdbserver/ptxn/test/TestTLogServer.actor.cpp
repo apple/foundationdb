@@ -62,6 +62,7 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
                                     bool mockDiskQueue = false) {
 	state ptxn::test::print::PrintTiming printTiming("startTLogServers");
 	state std::vector<ptxn::InitializePtxnTLogRequest> tLogInitializations;
+	state Reference<AsyncVar<ServerDBInfo>> dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
 	pContext->groupsPerTLog.resize(pContext->numTLogs);
 	for (int i = 0, index = 0; i < pContext->numTLogGroups; ++i) {
 		ptxn::TLogGroup& tLogGroup = pContext->tLogGroups[i];
@@ -103,7 +104,7 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 		}
 
 		actors->push_back(ptxn::tLog(persistentDataAndQueues,
-		                             makeReference<AsyncVar<ServerDBInfo>>(),
+		                             dbInfo,
 		                             LocalityData(),
 		                             initializeTLog,
 		                             tlogId,
@@ -137,6 +138,8 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 	for (auto& [tLogGroupID, tLogGroupLeader] : pContext->tLogGroupLeaders) {
 		tLogGroupLeader = pContext->tLogInterfaces[pContext->groupToLeaderId[tLogGroupID]];
 	}
+	// Update TLogGroups & TLogInterfaces in ServerDBInfo
+	pContext->updateServerDBInfo(dbInfo);
 	return Void();
 }
 
