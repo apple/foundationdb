@@ -861,13 +861,37 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 				}
 				return Void();
 			}
+			int64_t ownerEpoch = std::get<0>(prevGranuleLock);
+			int64_t ownerSeqno = std::get<1>(prevGranuleLock);
 			if (newLockSeqno == -1) {
 				newLockSeqno = bmData->seqNo;
 				bmData->seqNo++;
-				ASSERT(newLockSeqno > std::get<1>(prevGranuleLock));
+				if (!(bmData->epoch > ownerEpoch || (bmData->epoch == ownerEpoch && newLockSeqno > ownerSeqno))) {
+					printf("BM seqno for granule [%s - %s) out of order for lock! manager: (%lld, %lld), owner: %lld, "
+					       "%lld)\n",
+					       granuleRange.begin.printable().c_str(),
+					       granuleRange.end.printable().c_str(),
+					       bmData->epoch,
+					       newLockSeqno,
+					       ownerEpoch,
+					       ownerSeqno);
+				}
+				ASSERT(bmData->epoch > ownerEpoch || (bmData->epoch == ownerEpoch && newLockSeqno > ownerSeqno));
 			} else {
-				// previous transaction could have succeeded but got commit_unknown_result
-				ASSERT(newLockSeqno >= std::get<1>(prevGranuleLock));
+				if (!(bmData->epoch > ownerEpoch || (bmData->epoch == ownerEpoch && newLockSeqno >= ownerSeqno))) {
+					printf("BM seqno for granule [%s - %s) out of order for lock on retry! manager: (%lld, %lld), "
+					       "owner: %lld, "
+					       "%lld)\n",
+					       granuleRange.begin.printable().c_str(),
+					       granuleRange.end.printable().c_str(),
+					       bmData->epoch,
+					       newLockSeqno,
+					       ownerEpoch,
+					       ownerSeqno);
+				}
+				// previous transaction could have succeeded but got commit_unknown_result, so use >= instead of > for
+				// seqno if epochs are equal
+				ASSERT(bmData->epoch > ownerEpoch || (bmData->epoch == ownerEpoch && newLockSeqno >= ownerSeqno));
 			}
 
 			// acquire granule lock so nobody else can make changes to this granule.
