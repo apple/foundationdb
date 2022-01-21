@@ -1215,7 +1215,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekSingle(UID dbgid
 		    .detail("TLog", tlogIf->get().id());
 		ASSERT(tLogGroup.present());
 		return makeReference<ptxn::ServerPeekCursor>(
-		    tlogIf, tag, storageTeam.get(), tLogGroup.get(), begin, getPeekEnd(), false, false);
+		    tlogIf, tag, storageTeam.get(), begin, getPeekEnd(), false, false);
 	}
 
 	while (history.size() && begin >= history.back().first) {
