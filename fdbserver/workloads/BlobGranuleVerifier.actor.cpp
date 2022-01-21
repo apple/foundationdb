@@ -501,6 +501,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					}
 				}
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
 				if (e.code() == error_code_end_of_stream) {
 					break;
 				}
