@@ -119,6 +119,8 @@ struct GranuleRangeMetadata {
 			activeMetadata->cancelled.send(Void());
 		}
 		activeMetadata.clear();
+		assignFuture.cancel();
+		historyLoaderFuture.cancel();
 	}
 
 	GranuleRangeMetadata() : lastEpoch(0), lastSeqno(0) {}
