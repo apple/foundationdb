@@ -39,6 +39,8 @@
 #include "fdbserver/ptxn/test/FakeTLog.actor.h"
 #include "fdbserver/ptxn/test/Utils.h"
 #include "fdbserver/ResolverInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "flow/Error.h"
 #include "flow/genericactors.actor.h"
 #include "flow/IRandom.h"
 #include "flow/String.h"
@@ -85,6 +87,15 @@ void TestDriverContext::updateServerDBInfo(Reference<AsyncVar<ServerDBInfo>> dbI
 	// TODO: fill in tLogsPtxn and ptxnTLogGroups fields
 
 	dbInfo->setUnconditional(info);
+}
+
+TLogGroup& TestDriverContext::getTLogGroup(TLogGroupID gid) {
+	for (auto& group : tLogGroups) {
+		if (group.logGroupId == gid) {
+			return group;
+		}
+	}
+	UNREACHABLE();
 }
 
 std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions& options) {
@@ -156,15 +167,16 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 	assignTeamToInterface(context->storageTeamIDStorageServerInterfaceMapper, context->storageServerInterfaces);
 
 	// Assign storage teams to tlog groups
-	for (int i = 0, index = 0; i < context->numStorageTeamIDs; ++i) {
-		const StorageTeamID& storageTeamID = context->storageTeamIDs[i];
-		TLogGroup& tLogGroup = context->tLogGroups[index];
-		context->storageTeamIDTLogGroupIDMapper[storageTeamID] = tLogGroup.logGroupId;
+	std::vector<TLogGroupID> groups;
+	for (const auto& g : context->tLogGroups) {
+		groups.push_back(g.logGroupId);
+	}
+	for (const StorageTeamID& storageTeamID : context->storageTeamIDs) {
+		TLogGroupID groupId = tLogGroupByStorageTeamID(groups, storageTeamID);
+		TLogGroup& tLogGroup = context->getTLogGroup(groupId);
+		context->storageTeamIDTLogGroupIDMapper[storageTeamID] = groupId;
 		// TODO: support tags when implementing pop
 		tLogGroup.storageTeams[storageTeamID] = {};
-
-		++index;
-		index %= context->tLogGroups.size();
 	}
 	return context;
 }

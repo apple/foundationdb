@@ -729,8 +729,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	for (const auto& group : pContext->tLogGroups) {
 		ptxn::test::print::print(group);
 	}
-	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
-	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
+	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
 
 	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
@@ -780,8 +779,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_tlog_spilled") {
 	for (const auto& group : pContext->tLogGroups) {
 		ptxn::test::print::print(group);
 	}
-	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
-	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
+	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
 
 	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
@@ -829,8 +827,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_tlog_not_spilled_with_default_threshold") {
 	for (const auto& group : pContext->tLogGroups) {
 		ptxn::test::print::print(group);
 	}
-	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
-	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
+	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
 
 	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
@@ -870,8 +867,7 @@ TEST_CASE("/fdbserver/ptxn/test/single_tlog_recovery") {
 	for (const auto& group : pContext->tLogGroups) {
 		ptxn::test::print::print(group);
 	}
-	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
-	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
+	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
 
 	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
