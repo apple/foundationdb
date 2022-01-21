@@ -632,15 +632,14 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	TraceEvent("ResolverInit", resolver.id()).detail("RecoveryCount", initReq.recoveryCount);
 
 	// Wait until we can load the "real" logsystem, since we don't support switching them currently
-	while (!(db->get().master.id() == initReq.masterId &&
+	while (!(initReq.masterLifetime.isEqual(db->get().masterLifetime) &&
 	         db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION)) {
-		//TraceEvent("ResolverInit2", resolver.id()).detail("LSEpoch", db->get().logSystemConfig.epoch);
+		// TraceEvent("ResolverInit2", resolver.id()).detail("LSEpoch", db->get().logSystemConfig.epoch);
 		wait(db->onChange());
 	}
 
 	// Initialize txnStateStore
 	self->logSystem = ILogSystem::fromServerDBInfo(resolver.id(), db->get(), false, addActor);
-
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> onError =
 	    transformError(actorCollection(addActor.getFuture()), broken_promise(), resolver_failed());

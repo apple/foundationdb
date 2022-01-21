@@ -226,6 +226,7 @@ ACTOR Future<Void> newResolvers(Reference<ClusterRecoveryData> self, RecruitFrom
 	std::vector<Future<ResolverInterface>> initializationReplies;
 	for (int i = 0; i < recr.resolvers.size(); i++) {
 		InitializeResolverRequest req;
+		req.masterLifetime = self->masterLifetime;
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
 		req.commitProxyCount = recr.commitProxies.size();
 		req.resolverCount = recr.resolvers.size();
@@ -578,7 +579,9 @@ std::pair<KeyRangeRef, bool> findRange(CoalescedKeyRangeMap<int>& key_resolver,
 }
 
 ACTOR Future<Void> resolutionBalancing(Reference<ClusterRecoveryData> self) {
-	state CoalescedKeyRangeMap<int> key_resolver;
+	state CoalescedKeyRangeMap<int> key_resolver(
+	    0, SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys.end : allKeys.end);
+	key_resolver.insert(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys : allKeys, 0);
 	key_resolver.insert(allKeys, 0);
 	loop {
 		wait(delay(SERVER_KNOBS->MIN_BALANCE_TIME, TaskPriority::ResolutionMetrics));
@@ -1282,7 +1285,12 @@ ACTOR Future<Void> sendInitialCommitToResolvers(Reference<ClusterRecoveryData> s
 	for (auto& it : self->commitProxies) {
 		endpoints.push_back(it.txnState.getEndpoint());
 	}
-
+	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+		// Broadcasts transaction state store to resolvers.
+		for (auto& it : self->resolvers) {
+			endpoints.push_back(it.txnState.getEndpoint());
+		}
+	}
 	loop {
 		if (!data.size())
 			break;

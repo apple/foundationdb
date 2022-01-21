@@ -732,6 +732,7 @@ struct InitializeBlobManagerRequest {
 
 struct InitializeResolverRequest {
 	constexpr static FileIdentifier file_identifier = 7413317;
+	LifetimeToken masterLifetime;
 	uint64_t recoveryCount;
 	int commitProxyCount;
 	int resolverCount;
@@ -740,7 +741,7 @@ struct InitializeResolverRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, recoveryCount, commitProxyCount, resolverCount, masterId, reply);
+		serializer(ar, masterLifetime, recoveryCount, commitProxyCount, resolverCount, masterId, reply);
 	}
 };
 
