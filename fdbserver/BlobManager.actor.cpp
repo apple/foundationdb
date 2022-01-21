@@ -218,6 +218,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	Debouncer restartRecruiting;
 	std::set<NetworkAddress> recruitingLocalities; // the addrs of the workers being recruited on
 	AsyncVar<int> recruitingStream;
+	Promise<Void> foundBlobWorkers;
 
 	int64_t epoch = -1;
 	int64_t seqNo = 1;
@@ -308,7 +309,7 @@ ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData) {
 			fmt::print("BM {0} waiting for blob workers before assigning granules\n", bmData->epoch);
 		}
 		bmData->restartRecruiting.trigger();
-		wait(bmData->recruitingStream.onChange());
+		wait(bmData->recruitingStream.onChange() || bmData->foundBlobWorkers.getFuture());
 	}
 
 	int minGranulesAssigned = INT_MAX;
@@ -1080,7 +1081,12 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 	}
 	bmData->addActor.send(haltBlobWorker(bmData, bwInterf));
 
-	wait(deregister);
+	// wait for blob worker to be removed from DB and in-memory mapping to have reassigned all shards from this worker
+	// before removing it from deadWorkers, to avoid a race with checkBlobWorkerList
+	wait(deregister && bmData->rangesToAssign.onEmpty());
+	// delay(0) after onEmpty to yield back to the range assigner on the final pop to ensure it gets processed before
+	// deadWorkers.erase
+	wait(delay(0));
 
 	// restart recruiting to replace the dead blob worker
 	bmData->restartRecruiting.trigger();
@@ -1254,28 +1260,45 @@ ACTOR Future<Void> monitorBlobWorker(Reference<BlobManagerData> bmData, BlobWork
 }
 
 ACTOR Future<Void> checkBlobWorkerList(Reference<BlobManagerData> bmData, Promise<Void> workerListReady) {
-	loop {
-		// Get list of last known blob workers
-		// note: the list will include every blob worker that the old manager knew about,
-		// but it might also contain blob workers that died while the new manager was being recruited
-		std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db));
-		// add all blob workers to this new blob manager's records and start monitoring it
-		for (auto& worker : blobWorkers) {
-			if (!bmData->deadWorkers.count(worker.id())) {
-				if (!bmData->workerAddresses.count(worker.stableAddress()) && worker.locality.dcId() == bmData->dcId) {
-					bmData->workerAddresses.insert(worker.stableAddress());
-					bmData->workersById[worker.id()] = worker;
-					bmData->workerStats[worker.id()] = BlobWorkerStats();
-					bmData->addActor.send(monitorBlobWorker(bmData, worker));
-				} else if (!bmData->workersById.count(worker.id())) {
-					bmData->addActor.send(killBlobWorker(bmData, worker, false));
+
+	try {
+		loop {
+			// Get list of last known blob workers
+			// note: the list will include every blob worker that the old manager knew about,
+			// but it might also contain blob workers that died while the new manager was being recruited
+			std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db));
+			// add all blob workers to this new blob manager's records and start monitoring it
+			bool foundAnyNew = false;
+			for (auto& worker : blobWorkers) {
+				if (!bmData->deadWorkers.count(worker.id())) {
+					if (!bmData->workerAddresses.count(worker.stableAddress()) &&
+					    worker.locality.dcId() == bmData->dcId) {
+						bmData->workerAddresses.insert(worker.stableAddress());
+						bmData->workersById[worker.id()] = worker;
+						bmData->workerStats[worker.id()] = BlobWorkerStats();
+						bmData->addActor.send(monitorBlobWorker(bmData, worker));
+						foundAnyNew = true;
+					} else if (!bmData->workersById.count(worker.id())) {
+						bmData->addActor.send(killBlobWorker(bmData, worker, false));
+					}
 				}
 			}
+			if (workerListReady.canBeSet()) {
+				workerListReady.send(Void());
+			}
+			// if any assigns are stuck on workers, and we have workers, wake them
+			if (foundAnyNew || !bmData->workersById.empty()) {
+				Promise<Void> hold = bmData->foundBlobWorkers;
+				bmData->foundBlobWorkers = Promise<Void>();
+				hold.send(Void());
+			}
+			wait(delay(SERVER_KNOBS->BLOB_WORKERLIST_FETCH_INTERVAL));
 		}
-		if (workerListReady.canBeSet()) {
-			workerListReady.send(Void());
+	} catch (Error& e) {
+		if (BM_DEBUG) {
+			fmt::print("BM {0} got error {1} reading blob worker list!!\n", bmData->epoch, e.name());
 		}
-		wait(delay(SERVER_KNOBS->BLOB_WORKERLIST_FETCH_INTERVAL));
+		throw e;
 	}
 }
 
