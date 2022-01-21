@@ -438,11 +438,28 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		return delay(testDuration);
 	}
 
+	// handle retries + errors
+	// It's ok to reset the transaction here because its read version is only used for reading the granule mapping from
+	// the system keyspace
+	ACTOR Future<Version> doGrv(Transaction* tr) {
+		loop {
+			try {
+				Version readVersion = wait(tr->getReadVersion());
+				return readVersion;
+			} catch (Error& e) {
+				// TODO REMOVE print
+				printf("BGV GRV got error %s\n", e.name());
+				wait(tr->onError(e));
+			}
+		}
+	}
+
 	ACTOR Future<bool> _check(Database cx, BlobGranuleVerifierWorkload* self) {
 		// check error counts, and do an availability check at the end
 
+		// TODO need to have retry loop for getReadVersion, it's throwing tag throttled for some reason?
 		state Transaction tr(cx);
-		state Version readVersion = wait(tr.getReadVersion());
+		state Version readVersion = wait(self->doGrv(&tr));
 		state Version startReadVersion = readVersion;
 		state int checks = 0;
 
@@ -493,7 +510,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						if (e.code() == error_code_blob_granule_transaction_too_old) {
 							wait(delay(1.0));
 							tr.reset();
-							Version rv = wait(tr.getReadVersion());
+							Version rv = wait(self->doGrv(&tr));
 							readVersion = rv;
 						} else {
 							wait(tr.onError(e));
