@@ -96,11 +96,6 @@ ThreadFuture<Void> ThreadSafeDatabase::createSnapshot(const StringRef& uid, cons
 	return onMainThread([db, snapUID, cmd]() -> Future<Void> { return db->createSnapshot(snapUID, cmd); });
 }
 
-ThreadFuture<UID> ThreadSafeDatabase::getClusterId() {
-	DatabaseContext* db = this->db;
-	return onMainThread([db]() -> Future<UID> { return db->getClusterId(); });
-}
-
 // Return the main network thread busyness
 double ThreadSafeDatabase::getMainThreadBusyness() {
 	ASSERT(g_network);

@@ -137,8 +137,6 @@ public:
 	// Management API, create snapshot
 	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
 
-	virtual ThreadFuture<UID> getClusterId() = 0;
-
 	// used in template functions as the Transaction type that can be created through createTransaction()
 	using TransactionT = ITransaction;
 };

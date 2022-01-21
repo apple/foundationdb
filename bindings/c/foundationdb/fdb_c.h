@@ -226,8 +226,6 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_create_snapshot(FDBDatabase
                                                                      uint8_t const* snap_command,
                                                                      int snap_command_length);
 
-DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_cluster_id(FDBDatabase* db);
-
 DLLEXPORT WARN_UNUSED_RESULT double fdb_database_get_main_thread_busyness(FDBDatabase* db);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db, uint64_t expected_version);
