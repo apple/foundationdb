@@ -451,7 +451,7 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 	state int idx = 0;
 	state std::map<Optional<Value>, Tag> dcId_tags;
 	state int8_t nextLocality = 0;
-	state ptxn::StorageTeamID teamId;
+	state UID seedTeamId = deterministicRandom()->randomUniqueID();
 	state std::vector<StorageServerInterface> ssInterfaces;
 	while (idx < recruits.storageServers.size()) {
 		TraceEvent("MasterRecruitingInitialStorageServer", self->dbgid)
@@ -467,9 +467,11 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
 		if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
-			// XXX: each storage server belongs to a unique team
-			teamId = deterministicRandom()->randomUniqueID();
-			isr.storageTeamId = teamId;
+			// Each storage server belongs to two teams initially (1) team
+			// containing just itself for private mutations, (2) seed team
+			// containing all SS.
+			isr.storageTeams = Optional<std::vector<ptxn::StorageTeamID>>(
+			    std::vector<ptxn::StorageTeamID>{ isr.interfaceId, seedTeamId });
 		}
 		isr.clusterId = self->clusterId;
 
@@ -492,7 +494,8 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 			tag.id++;
 			idx++;
 
-			servers->emplace_back(newServer.get().interf, teamId);
+			servers->emplace_back(newServer.get().interf, seedTeamId);
+			servers->emplace_back(newServer.get().interf, newServer.get().interf.id());
 			ssInterfaces.push_back(newServer.get().interf);
 
 			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
@@ -511,7 +514,8 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 
 	TraceEvent("MasterRecruitedInitialStorageServers", self->dbgid)
 	    .detail("TargetCount", self->configuration.storageTeamSize)
-	    .detail("Servers", describe(ssInterfaces));
+	    .detail("Servers", describe(ssInterfaces))
+		.detail("SeedStorageTeamId", seedTeamId);
 
 	return Void();
 }
@@ -973,7 +977,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 	// Load storage teams from \xff keyspace to tLogGroupCollection.
 	RangeResult ssTeams = wait(self->txnStateStore->readRange(storageTeamIdKeyRange));
 	for (auto& r : ssTeams) {
-		auto teamId = storageTeamIdKeyDecode(r.key);
+		auto teamId = decodeStorageTeamIdKey(r.key);
 		self->tLogGroupCollection->tryAddStorageTeam(teamId, decodeStorageTeams(r.value));
 	}
 
@@ -1001,16 +1005,29 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(
 	ASSERT(self->recoveryTransactionVersion);
 
 	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS && self->lastEpochEnd == 0) {
-		for (const auto& pair : *servers) {
-			std::vector<UID> serverSrcUID(1, pair.first.id());
-			auto teamId = pair.second;
-			TraceEvent("MasterAssignTeam").detail("SS", pair.first.id()).detail("Team", teamId);
-			for (const auto& ss : serverSrcUID) {
-				Key teamIdKey = storageServerToTeamIdKey(ss);
-				Value val = ptxn::StorageServerStorageTeams(teamId).toValue();
-				self->txnStateStore->set(KeyValueRef(teamIdKey, val));
-			}
+
+		// Copies the seed server mutations from recovery commit to over here.
+		// TODO (Vishesh): Why do have to do this? Why can't we just do it at one place?
+		std::unordered_map<UID, std::set<ptxn::StorageTeamID>> serverToTeams;
+
+		for (const auto& [s, teamId] : *servers) {
+			if (teamId != s.id())
+				serverToTeams[s.id()].emplace(teamId);
 		}
+
+		for (auto& [ss, teams] : serverToTeams) {
+			Value val = ptxn::StorageServerStorageTeams(ss, teams).toValue();
+			self->txnStateStore->set(KeyValueRef(storageServerToTeamIdKey(ss), val));
+		}
+
+		// for (auto& [teamId, servers] : teamToServers) {
+		//	std::sort(servers.begin(), servers.end());
+		//	self->txnStateStore->set(
+		//	    KeyValueRef(storageTeamIdKey(teamId), encodeStorageTeams(servers))); // TeamId -> Vec<StorageServers>
+		//	Key teamListKey = storageServerListToTeamIdKey(servers);
+		//	self->txnStateStore->set(
+		//	    KeyValueRef(teamListKey, BinaryWriter::toValue(teamId, Unversioned()))); // Vec<StorageServer> -> TeamId
+		// }
 	}
 
 	state RangeResult data =

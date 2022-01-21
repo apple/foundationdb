@@ -445,7 +445,7 @@ ACTOR Future<Void> addBackupMutations(
 			//				TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To",
 			// describe(tags)).detail("BackupMutation", backupMutation.toString())
 			// .detail("BackupMutationSize", val.size()).detail("Version", commitVersion).detail("DestPath",
-			// logRangeMutation.first) 					.detail("PartIndex", part).detail("PartIndexEndian",
+			// logRangeMutation.first)					.detail("PartIndex", part).detail("PartIndexEndian",
 			// bigEndian32(part)).detail("PartData", backupMutation.param1);
 			//			}
 		}
@@ -628,7 +628,6 @@ void CommitBatchContext::evaluateBatchSize() {
 
 void CommitBatchContext::trackStorageTeams(const std::set<ptxn::StorageTeamID>& storageTeams) {
 	ASSERT(!pProxyCommitData->tLogGroupCollection->groups().empty());
-	ASSERT(storageTeams.size() == 1);
 	auto tLogGroupId = pProxyCommitData->tLogGroupCollection->assignStorageTeam(*storageTeams.begin())->id();
 	if (!pGroupMessageBuilders.count(tLogGroupId)) {
 		pGroupMessageBuilders.emplace(tLogGroupId,
@@ -2085,15 +2084,16 @@ ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
 
 namespace {
 
+// Collects data and sequences from TxnStateRequest parts.
 struct TransactionStateResolveContext {
+	ProxyCommitData* pCommitData = nullptr;
+
 	// Maximum sequence for txnStateRequest, this is defined when the request last flag is set.
 	Sequence maxSequence = std::numeric_limits<Sequence>::max();
 
 	// Flags marks received transaction state requests, we only process the transaction request when *all* requests are
 	// received.
 	std::unordered_set<Sequence> receivedSequences;
-
-	ProxyCommitData* pCommitData = nullptr;
 
 	// Pointer to transaction state store, shortcut for commitData.txnStateStore
 	IKeyValueStore* pTxnStateStore = nullptr;
@@ -2113,6 +2113,9 @@ struct TransactionStateResolveContext {
 	}
 };
 
+// Called once all parts of TxnStateStore are received via TxnStateRequests. Goes through all KV pairs in TxnStateStore
+// and (1) Updates the ServerCacheInfo which keeps tracks of shards and the related storage team info (including SSID
+// and tags) (2) Calls applyMetadataMutations.
 ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveContext* pContext) {
 	state KeyRange txnKeys = allKeys;
 	state std::map<Tag, UID> tag_uid;
@@ -2150,9 +2153,10 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 				if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 					// Add storage teams of storage servers
 					ASSERT(pContext->pCommitData->ssToStorageTeam.count(id));
-					if (pContext->pCommitData->ssToStorageTeam[id] == srcDstTeams[0]) {
+					ASSERT(pContext->pCommitData->ssToStorageTeam[id].size());
+					if (pContext->pCommitData->ssToStorageTeam[id].count(srcDstTeams[0])) {
 						info.storageTeams.insert(srcDstTeams[0]);
-					} else if (pContext->pCommitData->ssToStorageTeam[id] == srcDstTeams[1]) {
+					} else if (pContext->pCommitData->ssToStorageTeam[id].count(srcDstTeams[1])) {
 						info.storageTeams.insert(srcDstTeams[1]);
 					} else {
 						ASSERT(false);
@@ -2160,12 +2164,22 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 				}
 			}
 		};
+
 		for (auto& kv : data) {
 			if (kv.key.startsWith(storageServerToTeamIdKeyPrefix)) {
 				UID k = decodeStorageServerToTeamIdKey(kv.key);
-				ptxn::StorageServerStorageTeams teamIDs(kv.value);
 				// The first team of a storage server is its own team.
-				pContext->pCommitData->ssToStorageTeam.emplace(k, teamIDs.getPrivateMutationsStorageTeamID());
+				ptxn::StorageServerStorageTeams teamIDs(kv.value);
+
+				// Initially, each storage server belongs to two teams (1) Seed
+				// team and (2) its own team for private mutations.
+				const auto& teamSet = teamIDs.getStorageTeams();
+				pContext->pCommitData->ssToStorageTeam[k].insert(teamSet.begin(), teamSet.end());
+			}
+		}
+
+		for (auto& kv : data) {
+			if (kv.key.startsWith(storageServerToTeamIdKeyPrefix)) {
 				continue;
 			} else if (!kv.key.startsWith(keyServersPrefix)) {
 				mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);
@@ -2183,10 +2197,6 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 			updateTagInfo(src, info, srcDstTeams, info.src_info);
 			updateTagInfo(dest, info, srcDstTeams, info.dest_info);
 			uniquify(info.tags);
-			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
-				// A shard can only correspond to single storage team in the primary DC for now
-				ASSERT(info.storageTeams.size() == 1);
-			}
 			keyInfoData.emplace_back(MapPair<Key, ServerCacheInfo>(k, info), 1);
 		}
 
@@ -2220,13 +2230,16 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 	return Void();
 }
 
+// Receives TxnStateRequest parts and (1) Re-broadcast to other processes (2)
+// collects the entire sequence of TxnStateRequest into `pContext`.
 ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveContext* pContext,
                                                       TxnStateRequest request) {
 	ASSERT(pContext->pCommitData != nullptr);
 	ASSERT(pContext->pActors != nullptr);
 
+	// Check if part is already received.
 	if (pContext->receivedSequences.count(request.sequence)) {
-		// This part is already received. Still we will re-broadcast it to other CommitProxies
+		// We will still re-broadcast it to other CommitProxies
 		pContext->pActors->send(broadcastTxnRequest(request, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, true));
 		wait(yield());
 		return Void();
