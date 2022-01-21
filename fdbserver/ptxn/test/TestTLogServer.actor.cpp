@@ -172,9 +172,7 @@ const int COMMIT_PEEK_CHECK_MUTATIONS = 20;
 ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverContext> pContext) {
 	state ptxn::test::print::PrintTiming printTiming("tlog/commitPeekAndCheck");
 
-	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
-	ASSERT(!group.storageTeams.empty());
-	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
+	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
 	printTiming << "Storage Team ID: " << storageTeamID.toString() << std::endl;
 
 	state std::shared_ptr<ptxn::TLogInterfaceBase> tli = pContext->getTLogLeaderByStorageTeamID(storageTeamID);
@@ -570,13 +568,12 @@ TEST_CASE("/fdbserver/ptxn/test/commit_peek") {
 		ptxn::test::print::print(group);
 	}
 
-	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
-	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
-
 	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 
 	wait(startTLogServers(&actors, pContext, folder));
+
+	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
 	std::vector<Standalone<StringRef>> messages = wait(commitInject(pContext, storageTeamID, NUM_COMMITS));
 	wait(verifyPeek(pContext, storageTeamID, NUM_COMMITS));
 	platform::eraseDirectoryRecursive(folder);
