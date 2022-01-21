@@ -214,7 +214,7 @@ void printCommitRecords() {
 }
 
 void print(const TLogGroup& tLogGroup) {
-	std::cout << ">> WorkInterface.actor.h:TLogGroup:" << std::endl;
+	std::cout << ">> WorkInterface.actor.h:TLogGroup: " << tLogGroup.logGroupId << std::endl;
 	for (const auto& [storageTeamID, tags] : tLogGroup.storageTeams) {
 		std::cout << concatToString("\tStorage Team ID: ", storageTeamID, "\n");
 		std::cout << "\tTags:" << std::endl;

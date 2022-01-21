@@ -124,6 +124,9 @@ struct TestDriverContext {
 
 	// Generated commits
 	CommitRecord commitRecord;
+
+	// Updates a ServerDBInfo object with this context.
+	void updateServerDBInfo(Reference<AsyncVar<ServerDBInfo>> dbInfo);
 };
 
 // Returns an initialized TestDriverContext with default values specified in "options".
