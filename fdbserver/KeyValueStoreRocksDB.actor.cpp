@@ -70,8 +70,6 @@ const StringRef ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM = LiteralStringRef("Rock
 const StringRef ROCKSDB_READVALUE_GET_HISTOGRAM = LiteralStringRef("RocksDBReadValueGet");
 const StringRef ROCKSDB_READPREFIX_GET_HISTOGRAM = LiteralStringRef("RocksDBReadPrefixGet");
 
-const std::string defaultFdbCFName = "fdb";
-
 rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
 	rocksdb::ExportImportFilesMetaData metaData;
 	metaData.db_comparator_name = checkpoint.rocksCF.get().dbComparatorName;
@@ -501,9 +499,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		~Writer() override {
 			if (db) {
-				// if (cf) {
-				// 	rocksdb::Status ignored = db->DestroyColumnFamilyHandle(cf);
-				// }
 				delete db;
 			}
 		}
@@ -555,14 +550,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			for (rocksdb::ColumnFamilyHandle* handle : handles) {
-				if (handle->GetName() == defaultFdbCFName) {
+				if (handle->GetName() == SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY) {
 					cf = handle;
 					break;
 				}
 			}
 
 			if (cf == nullptr) {
-				status = db->CreateColumnFamily(cfOptions, defaultFdbCFName, &cf);
+				status = db->CreateColumnFamily(cfOptions, SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY, &cf);
 				if (!status.ok()) {
 					logRocksDBError(status, "Open");
 					a.done.sendError(statusToError(status));
@@ -605,6 +600,18 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				deletes.push_back_deep(arena, kr);
 				return rocksdb::Status::OK();
 			}
+
+			rocksdb::Status PutCF(uint32_t column_family_id, const rocksdb::Slice& key, const rocksdb::Slice& value) override {
+				return rocksdb::Status::OK();
+			}
+
+			rocksdb::Status SingleDeleteCF(uint32_t column_family_id, const rocksdb::Slice& key) override {
+				return rocksdb::Status::OK();
+			}
+
+			rocksdb::Status MergeCF(uint32_t column_family_id, const rocksdb::Slice& key, const rocksdb::Slice& value) override {
+				return rocksdb::Status::OK();
+			}
 		};
 
 		struct CommitAction : TypedAction<Writer, CommitAction> {
@@ -629,15 +636,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				commitQueueWaitHistogram->sampleSeconds(commitBeginTime - a.startTime);
 			}
 			Standalone<VectorRef<KeyRangeRef>> deletes;
-			// DeleteVisitor dv(deletes, deletes.arena());
-			// rocksdb::Status s = a.batchToCommit->Iterate(&dv);
-			// if (!s.ok()) {
-			// 	logRocksDBError(s, "Commit");
-			// 	a.done.sendError(statusToError(s));
-			// 	return;
-			// }
+			DeleteVisitor dv(deletes, deletes.arena());
+			rocksdb::Status s = a.batchToCommit->Iterate(&dv);
+			if (!s.ok()) {
+				logRocksDBError(s, "CommitDeleteVisitor");
+				a.done.sendError(statusToError(s));
+				return;
+			}
 			// If there are any range deletes, we should have added them to be deleted.
-			// ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
+			ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 
@@ -647,7 +654,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				// Request for batchToCommit bytes. If this request cannot be satisfied, the call is blocked.
 				rateLimiter->Request(a.batchToCommit->GetDataSize() /* bytes */, rocksdb::Env::IO_HIGH);
 			}
-			auto s = db->Write(options, a.batchToCommit.get());
+			s = db->Write(options, a.batchToCommit.get());
 			readIterPool->update();
 			if (a.getHistograms) {
 				writeHistogram->sampleSeconds(timer_monotonic() - writeBeginTime);
@@ -695,7 +702,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			if (a.deleteOnClose) {
 				std::set<std::string> columnFamilies{ "default" };
-				columnFamilies.insert(defaultFdbCFName);
+				columnFamilies.insert(SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY);
 				std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
 				for (const std::string name : columnFamilies) {
 					descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, getCFOptions() });
@@ -802,8 +809,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 				rocksdb::ImportColumnFamilyOptions importOptions;
 				importOptions.move_files = true;
-				status =
-				    db->CreateColumnFamilyWithImport(getCFOptions(), defaultFdbCFName, importOptions, metaData, &cf);
+				status = db->CreateColumnFamilyWithImport(
+				    getCFOptions(), SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY, importOptions, metaData, &cf);
 
 				if (!status.ok()) {
 					logRocksDBError(status, "Restore");
