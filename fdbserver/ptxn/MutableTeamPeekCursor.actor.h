@@ -194,6 +194,10 @@ const VersionSubsequenceMessage& MutableTeamPeekCursor<BaseClass>::getImpl() con
 
 template <typename BaseClass>
 bool MutableTeamPeekCursor<BaseClass>::hasRemainingImpl() const {
+	if (BaseClass::getNumCursors() == 0) {
+		return false;
+	}
+
 	bool newCursorsAdded = false;
 	if (shouldUpdateStorageTeamCursor) {
 		// FIXME Rethink this const_cast, perhaps relax the function not to be const??

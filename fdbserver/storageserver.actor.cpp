@@ -5132,20 +5132,31 @@ ACTOR Future<Void> updateImpl(std::shared_ptr<ptxn::StorageServer> storageServer
 	loop {
 		try {
 			state bool remoteDataRetrieved = wait(cursor->remoteMoreAvailable());
+			if (remoteDataRetrieved) {
+				break;
+			}
+
 		} catch (Error& err) {
 			if (err.code() == error_code_end_of_stream) {
-				TraceEvent("CursorEndOfStream", storageServerContext->thisServerID);
+				TraceEvent("StorageServerWorkerRemoved", storageServerContext->thisServerID)
+				    .detail("Reason", "NoActiveStorageTeamID");
+				throw worker_removed();
 			}
-			// FIXME Rethink this
-			if (err.code())
-				throw;
-		}
-		if (remoteDataRetrieved) {
-			for (const auto& vsm : *cursor) {
-				std::cout << vsm.toString() << std::endl;
-			}
+			throw;
 		}
 	}
+	storageServerContext->tlogCursorReadsLatencyHistogram->sampleSeconds(stopwatch.lap());
+
+	ASSERT(!*pReceivedRemoteData);
+	*pReceivedRemoteData = true;
+
+	if (remoteDataRetrieved) {
+		for (const auto& vsm : *cursor) {
+			std::cout << vsm.toString() << std::endl;
+		}
+	}
+
+	return Void();
 }
 
 // Reads data from TLogs and persists to KVStore
