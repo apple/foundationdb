@@ -756,11 +756,17 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::ReadOptions readOptions = getReadOptions();
 			s = db->Get(readOptions, cf, toSlice(persistVersion), &value);
 
+			if (!s.ok() && !s.IsNotFound()) {
+				logRocksDBError(s, "Checkpoint");
+				a.reply.sendError(statusToError(s));
+				return;
+			}
+
+			const Version version = s.IsNotFound()
+			                            ? latestVersion
+			                            : BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned());
 			// TODO: set the range as the actual shard range.
-			CheckpointMetaData res(BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned()),
-			                       a.request.range,
-			                       a.request.format,
-			                       deterministicRandom()->randomUniqueID());
+			CheckpointMetaData res(version, a.request.range, a.request.format, deterministicRandom()->randomUniqueID());
 			const std::string& checkpointDir = a.checkpointDir;
 
 			if (a.request.format == RocksDBColumnFamily) {
@@ -1533,10 +1539,9 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/RocksDBReopen") {
 	return Void();
 }
 
-TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/fileops") {
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestore") {
 	state std::string cwd = platform::getWorkingDirectory() + "/";
-	std::cout << "Working directory: " << cwd << std::endl;
-	state std::string rocksDBTestDir = "rocksdb-kvstore-reopen-test-db";
+	state std::string rocksDBTestDir = "rocksdb-kvstore-br-test-db";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
 	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
@@ -1551,85 +1556,21 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/fileops") {
 	state rocksdb::DB* db = ((RocksDBKeyValueStore*)kvStore)->db;
 	ASSERT(db != nullptr);
 
-	rocksdb::SequenceNumber seq = db->GetLatestSequenceNumber();
-
-	std::cout << "Sequence Number: " << (uint64_t)seq << std::endl;
-
 	platform::eraseDirectoryRecursive("checkpoint");
-	std::string checkpointDir = cwd + "checkpoint";
-	rocksdb::Checkpoint* checkpoint;
-	rocksdb::Status s = rocksdb::Checkpoint::Create(db, &checkpoint);
-	ASSERT(s.ok());
-	// uint64_t checkpointSeq = -1;
-	// s = checkpoint->CreateCheckpoint(checkpointDir, /*log_size_for_flush=*/0, &checkpointSeq);
-	// ColumnFamilyHandle* DefaultColumnFamily()
-	rocksdb::ExportImportFilesMetaData* pMetadata;
-	ASSERT(checkpoint->ExportColumnFamily(db->DefaultColumnFamily(), checkpointDir, &pMetadata).ok());
-	// std::cout << "Checkpoint Sequence Number: " << checkpointSeq << std::endl;
-	// ASSERT(s.ok());
-	// std::vector<std::string> files = platform::listFiles(checkpointDir, "sst");
-	std::vector<std::string> files = platform::listFiles(checkpointDir);
-	// state std::vector<std::pair<std::string, std::string>> sstFiles;
-	for (auto& file : files) {
-		// std::string path = checkpointDir + "/" + file, pPath = checkpointDir + "/processed" + file;
-		std::cout << file << std::endl;
-		// sstFiles.push_back(std::pair(path, pPath));
-	}
-	std::cout << pMetadata->db_comparator_name << std::endl;
-	for (const auto& md : pMetadata->files) {
-		std::cout << "CF: " << md.column_family_name << ", LV: " << md.level << ", name: " << md.name
-		          << ", path: " << md.db_path << ", file no: " << md.file_number << std::endl;
-	}
-	// kvStore->clear(allKeys);
-	// wait(kvStore->commit(false));
+	state std::string checkpointDir = cwd + "checkpoint";
 
-	// rocksdb::Options options;
-	// rocksdb::ReadOptions ropts;
-	// state std::vector<std::string> importFiles;
-	// for (const auto& [file, pFile] : sstFiles) {
-	// 	std::cout << "File: " << file << ", pFile: " << pFile << std::endl;
-	// 	rocksdb::SstFileReader reader(options);
-	// 	rocksdb::SstFileWriter writer(rocksdb::EnvOptions(), options);
-	// 	ASSERT(writer.Open(pFile).ok());
-	// 	ASSERT(reader.Open(file).ok());
-	// 	ASSERT(reader.VerifyChecksum().ok());
-	// 	std::unique_ptr<rocksdb::Iterator> iter(reader.NewIterator(ropts));
-	// 	iter->SeekToFirst();
-	// 	while (iter->Valid()) {
-	// 		std::cout << "Key: " << iter->key().ToString() << ", Value: " << iter->value().ToString() << std::endl;
-	// 		writer.Put(iter->key().ToString(), iter->value().ToString());
-	// 		iter->Next();
-	// 	}
-	// 	ASSERT(writer.Finish().ok());
-	// 	importFiles.push_back(pFile);
-	// }
+	GetCheckpointRequest request(latestVersion, allKeys, RocksDBColumnFamily, true);
+	CheckpointMetaData metaData = wait(kvStore->checkpoint(request, checkpointDir));
 
-	// state std::string rocksDBTestDir2 = "rocksdb-kvstore-reopen-test-db2";
-	// state IKeyValueStore* kvStore2 = new RocksDBKeyValueStore(rocksDBTestDir,
-	// deterministicRandom()->randomUniqueID()); wait(kvStore2->init()); RocksDBKeyValueStore::DB db2 =
-	// ((RocksDBKeyValueStore*)kvStore2)->db; ASSERT(db2 != nullptr);
-	// Create a new db and import the files.
-	rocksdb::DB* db_copy;
-	platform::eraseDirectoryRecursive("db_copy");
-	ASSERT(rocksdb::DB::Open(getOptions(), ((RocksDBKeyValueStore*)kvStore)->path + "/db_copy", &db_copy).ok());
-	rocksdb::ColumnFamilyHandle* cfh = nullptr;
-	ASSERT(db_copy
-	           ->CreateColumnFamilyWithImport(
-	               rocksdb::ColumnFamilyOptions(), "detault", rocksdb::ImportColumnFamilyOptions(), *pMetadata, &cfh)
-	           .ok());
-	rocksdb::PinnableSlice value;
-	db_copy->Get(rocksdb::ReadOptions(), db->DefaultColumnFamily(), "foo", &value);
-	std::cout << "Value: " << value.ToString() << std::endl;
-	ASSERT("bar" == value.ToString());
-	// Optional<Value> val1 = wait(kvStore->readValue(LiteralStringRef("foo")));
-	// ASSERT(Optional<Value>() == val1);
+	state std::string rocksDBRestoreDir = "rocksdb-kvstore-br-restore-db";
+	platform::eraseDirectoryRecursive(rocksDBRestoreDir);
 
-	// rocksdb::IngestExternalFileOptions ifo;
-	// rocksdb::Status s = db->IngestExternalFile(importFiles, ifo);
-	// std::cout << s.ToString() << std::endl;
+	state IKeyValueStore* kvStoreCopy = new RocksDBKeyValueStore(rocksDBRestoreDir, deterministicRandom()->randomUniqueID());
 
-	// Optional<Value> val2 = wait(kvStore->readValue(LiteralStringRef("foo")));
-	// ASSERT(Optional<Value>(LiteralStringRef("bar")) == val2);
+	wait(kvStoreCopy->restore(metaData));
+
+	Optional<Value> val = wait(kvStoreCopy->readValue(LiteralStringRef("foo")));
+	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
 
 	return Void();
 }
