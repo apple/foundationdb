@@ -465,9 +465,13 @@ int64_t extractIntOption(Optional<StringRef> value,
 // states: coordinator, TLog and storage state
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
-ACTOR Future<CheckpointMetaData> getCheckpoint(Database cx, KeyRange keys, Version minVersion);
+ACTOR Future<CheckpointMetaData> getCheckpoint(Database cx, KeyRange keys, Version minVersion, CheckpointFormat format);
 
-ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx, KeyRange keys, Version minVersion, std::string dir);
+ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
+                                                 KeyRange keys,
+                                                 Version minVersion,
+                                                 CheckpointFormat format,
+                                                 std::string dir);
 
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);

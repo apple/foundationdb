@@ -930,12 +930,16 @@ struct CheckpointMetaData {
 	Optional<RocksDBColumnFamilyCheckpoint> rocksCF;
 
 	CheckpointMetaData() {}
-	CheckpointMetaData(Version version, KeyRange const& range) : version(version), range(range) {}
+	CheckpointMetaData(Version version, KeyRange const& range)
+	  : version(version), range(range), format(RocksDBColumnFamily) {}
+	CheckpointMetaData(Version version, KeyRange const& range, CheckpointFormat format)
+	  : version(version), range(range), format(format) {}
 
 	std::string toString() const {
 		std::string res =
 		    "Checkpoint MetaData:\nServer: " + ssID.toString() + "\nVersion: " + std::to_string(version) + "\n";
-		if (rocksCF.present()) res += rocksCF.get().toString();
+		if (rocksCF.present())
+			res += rocksCF.get().toString();
 		return res;
 	}
 
@@ -949,19 +953,22 @@ struct GetCheckpointRequest {
 	constexpr static FileIdentifier file_identifier = 13804343;
 	Version minVersion;
 	KeyRange range;
+	CheckpointFormat format;
 	bool createNew; // Create a new checkpoint if not exist.
 	// TODO: add ttl.
 	ReplyPromise<CheckpointMetaData> reply;
 
 	GetCheckpointRequest() {}
 	GetCheckpointRequest(Version minVersion, KeyRange const& range)
-	  : minVersion(minVersion), range(range), createNew(false) {}
+	  : minVersion(minVersion), range(range), format(RocksDBColumnFamily), createNew(false) {}
 	GetCheckpointRequest(Version minVersion, KeyRange const& range, bool createNew)
-	  : minVersion(minVersion), range(range), createNew(createNew) {}
+	  : minVersion(minVersion), range(range), format(RocksDBColumnFamily), createNew(createNew) {}
+	GetCheckpointRequest(Version minVersion, KeyRange const& range, CheckpointFormat format, bool createNew)
+	  : minVersion(minVersion), range(range), format(format), createNew(createNew) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, minVersion, range, reply);
+		serializer(ar, minVersion, range, format, createNew, reply);
 	}
 };
 

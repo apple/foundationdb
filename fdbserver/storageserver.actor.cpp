@@ -228,7 +228,9 @@ struct StorageServerDisk {
 		return storage->readRange(keys, rowLimit, byteLimit, type);
 	}
 
-	Future<CheckpointMetaData> checkpoint(std::string checkpointDir) { return storage->checkpoint(checkpointDir); }
+	Future<CheckpointMetaData> checkpoint(const GetCheckpointRequest& request, const std::string& checkpointDir) {
+		return storage->checkpoint(request, checkpointDir);
+	}
 
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
@@ -402,7 +404,7 @@ private:
 
 public:
 public:
-	std::map<Version, CheckpointMetaData> checkpoints;
+	std::unordered_map<CheckpointFormat, std::map<Version, CheckpointMetaData>> checkpoints;
 
 	// Histograms
 	struct FetchKeysHistograms {
@@ -1631,6 +1633,10 @@ ACTOR Future<Void> checkpointQ(StorageServer* self, GetCheckpointRequest req) {
 	state Version minVersion = req.minVersion == latestVersion ? self->version.get() : req.minVersion;
 	wait(self->durableVersion.whenAtLeast(minVersion));
 
+	TraceEvent(SevDebug, "ServeCheckpointVersionSatisfied", self->thisServerID)
+	    .detail("MinVersion", req.minVersion)
+	    .detail("Range", req.range.toString());
+
 	try {
 		// Taking the lock is necessary to prevent data move.
 		wait(self->durableVersionLock.take(TaskPriority::MoveKeys, 1));
@@ -1642,9 +1648,9 @@ ACTOR Future<Void> checkpointQ(StorageServer* self, GetCheckpointRequest req) {
 		}
 
 		state CheckpointMetaData checkpointMetaData =
-		    wait(self->storage.checkpoint(self->folder + "/rockscheckpoints_" + std::to_string(minVersion) + "/"));
+		    wait(self->storage.checkpoint(req, self->folder + "/rockscheckpoints_" + std::to_string(minVersion) + "/"));
 		checkpointMetaData.ssID = self->thisServerID;
-		self->checkpoints.emplace(checkpointMetaData.version, checkpointMetaData);
+		self->checkpoints[req.format].emplace(checkpointMetaData.version, checkpointMetaData);
 		req.reply.send(checkpointMetaData);
 		TraceEvent("ServeCheckpointSuccess").detail("Checkpoint", checkpointMetaData.toString());
 	} catch (Error& e) {
@@ -6662,8 +6668,8 @@ ACTOR Future<Void> serveGetCheckpointRequests(StorageServer* self, FutureStream<
 		if (!self->isReadable(req.range)) {
 			req.reply.sendError(wrong_shard_server());
 		} else {
-			const auto it = self->checkpoints.lower_bound(req.minVersion);
-			if (it != self->checkpoints.end()) {
+			const auto it = self->checkpoints[req.format].lower_bound(req.minVersion);
+			if (it != self->checkpoints[req.format].end()) {
 				TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)
 				    .detail("Version", it->second.version);
 				req.reply.send(it->second);

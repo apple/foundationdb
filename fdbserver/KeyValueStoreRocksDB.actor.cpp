@@ -712,7 +712,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		struct CheckpointAction : TypedAction<Writer, CheckpointAction> {
-			std::string checkpointDir;
+			CheckpointAction(const GetCheckpointRequest& request, const std::string& checkpointDir)
+			  : request(request), checkpointDir(checkpointDir) {}
+
+			const GetCheckpointRequest request;
+			const std::string checkpointDir;
 			ThreadReturnPromise<CheckpointMetaData> reply;
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -747,22 +751,25 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			CheckpointMetaData res;
 			res.version = BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned());
 
-			// std::vector<std::string> files = platform::listFiles(checkpointDir);
-			// for (auto& file : files) {
-			// 	res.sstFiles.push_back(checkpointDir + file);
-			// 	std::cout << file << std::endl;
+			// std::cout << "Metadata: " << pMetadata->db_comparator_name << std::endl;
+			// for (const auto& md : pMetadata->files) {
+			// 	std::cout << "Name: " << md.name << "CF: " << md.column_family_name << ", LV: " << md.level
+			// 	          << std::endl;
 			// }
-			std::cout << "Metadata: " << pMetadata->db_comparator_name << std::endl;
-			for (const auto& md : pMetadata->files) {
-				std::cout << "Name: " << md.name << "CF: " << md.column_family_name << ", LV: " << md.level
-				          << std::endl;
-			}
 
 			// res.dbComparatorName = pMetadata->db_comparator_name;
 			// for (const auto& md : pMetadata->files) {
 			// 	res.sstFileMetadata.emplace_back(md.column_family_name, md.level);
 			// }
-			populateMetaData(&res, *pMetadata);
+			if (a.request.format == RocksDBColumnFamily) {
+				populateMetaData(&res, *pMetadata);
+			} else {
+				ASSERT(false);
+			}
+
+			// TODO: set the range as the actual shard range.
+			res.range = a.request.range;
+
 			delete pMetadata;
 			TraceEvent("RocksDBServeCheckpointSuccess", id)
 			    .detail("Version", res.version)
@@ -779,41 +786,46 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		void action(RestoreAction& a) {
 			std::cout << "Restore Begin" << std::endl;
-			auto options = getOptions();
-			rocksdb::Status status = rocksdb::DB::Open(options, a.path, &db);
-			if (!status.ok()) {
-				logRocksDBError(status, "Restore");
-				a.done.sendError(statusToError(status));
-				return;
-			}
-
-			rocksdb::ExportImportFilesMetaData metaData = getMetaData(a.checkpoint);
-			for (const auto& file : metaData.files) {
-				std::cout << file.db_path + file.name << std::endl;
-				std::vector<std::string> files = platform::listFiles(file.db_path);
-				std::cout << "Listing files in " << file.db_path << std::endl;
-				for (const std::string& f : files) {
-					std::cout << f << std::endl;
+			if (a.checkpoint.format == RocksDBColumnFamily) {
+				auto options = getOptions();
+				rocksdb::Status status = rocksdb::DB::Open(options, a.path, &db);
+				if (!status.ok()) {
+					logRocksDBError(status, "Restore");
+					a.done.sendError(statusToError(status));
+					return;
 				}
-			}
 
-			// status = db->DropColumnFamily(db->DefaultColumnFamily());
-			// if (!status.ok()) {
-			// 	logRocksDBError(status, "Restore");
-			// 	a.done.sendError(statusToError(status));
-			// 	return;
-			// }
+				rocksdb::ExportImportFilesMetaData metaData = getMetaData(a.checkpoint);
+				for (const auto& file : metaData.files) {
+					std::cout << file.db_path + file.name << std::endl;
+					std::vector<std::string> files = platform::listFiles(file.db_path);
+					std::cout << "Listing files in " << file.db_path << std::endl;
+					for (const std::string& f : files) {
+						std::cout << f << std::endl;
+					}
+				}
 
-			rocksdb::ImportColumnFamilyOptions importOptions;
-			importOptions.move_files = true;
-			status = db->CreateColumnFamilyWithImport(getCFOptions(), defaultFdbCFName, importOptions, metaData, &cf);
+				// status = db->DropColumnFamily(db->DefaultColumnFamily());
+				// if (!status.ok()) {
+				// 	logRocksDBError(status, "Restore");
+				// 	a.done.sendError(statusToError(status));
+				// 	return;
+				// }
 
-			if (!status.ok()) {
-				logRocksDBError(status, "Restore");
-				a.done.sendError(statusToError(status));
+				rocksdb::ImportColumnFamilyOptions importOptions;
+				importOptions.move_files = true;
+				status =
+				    db->CreateColumnFamilyWithImport(getCFOptions(), defaultFdbCFName, importOptions, metaData, &cf);
+
+				if (!status.ok()) {
+					logRocksDBError(status, "Restore");
+					a.done.sendError(statusToError(status));
+				} else {
+					TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Restore");
+					a.done.send(Void());
+				}
 			} else {
-				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Restore");
-				a.done.send(Void());
+				a.done.sendError(internal_error());
 			}
 		}
 	};
@@ -1392,10 +1404,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return StorageBytes(free, total, live, free);
 	}
 
-	Future<CheckpointMetaData> checkpoint(std::string checkpointDir) override {
+	Future<CheckpointMetaData> checkpoint(const GetCheckpointRequest& request,
+	                                      const std::string& checkpointDir) override {
 		std::cout << "RocksDB received checkpoint request: " << checkpointDir << std::endl;
-		auto a = new Writer::CheckpointAction();
-		a->checkpointDir = checkpointDir;
+		auto a = new Writer::CheckpointAction(request, checkpointDir);
+
 		auto res = a->reply.getFuture();
 		writeThread->post(a);
 		return res;

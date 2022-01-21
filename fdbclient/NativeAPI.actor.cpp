@@ -6842,14 +6842,14 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 ACTOR static Future<CheckpointMetaData> getCheckpointInternal(Database cx,
                                                               KeyRange keys,
                                                               Version minVersion,
+                                                              CheckpointFormat format,
                                                               bool createNew) {
 	state Span span("NAPI:GetCheckpointInternal"_loc);
-
-	TraceEvent("GetCheckpointInternalBegin").detail("Range", keys.toString()).detail("MinVersion", minVersion);
 
 	state std::vector<Future<CheckpointMetaData>> alternatives;
 
 	loop {
+		TraceEvent("GetCheckpointInternalBegin").detail("Range", keys.toString()).detail("MinVersion", minVersion);
 		alternatives.clear();
 
 		try {
@@ -6871,11 +6871,16 @@ ACTOR static Future<CheckpointMetaData> getCheckpointInternal(Database cx,
 
 			for (; i < e; ++i) {
 				alternatives.push_back(locations[0].second->getInterface(i).checkpoint.getReply(
-				    GetCheckpointRequest(minVersion, keys, createNew)));
+				    GetCheckpointRequest(minVersion, keys, format, createNew)));
 			}
+			TraceEvent("GetCheckpointInternalWait")
+			    .detail("Range", keys.toString())
+			    .detail("MinVersion", minVersion)
+			    .detail("Alternatives", locations[0].second->description());
 			choose {
-				when(wait(cx->connectionFileChanged())) {}
+				when(wait(cx->connectionFileChanged())) { cx->invalidateCache(keys); }
 				when(wait(waitForAny(alternatives))) { break; }
+				when(wait(delay(5))) { cx->invalidateCache(keys); }
 			}
 		} catch (Error& e) {
 			TraceEvent("GetCheckpointInternalError").detail("Range", keys.toString()).error(e, true);
@@ -6902,13 +6907,16 @@ ACTOR static Future<CheckpointMetaData> getCheckpointInternal(Database cx,
 	throw internal_error();
 }
 
-ACTOR Future<CheckpointMetaData> getCheckpoint(Database cx, KeyRange keys, Version minVersion) {
+ACTOR Future<CheckpointMetaData> getCheckpoint(Database cx,
+                                               KeyRange keys,
+                                               Version minVersion,
+                                               CheckpointFormat format) {
 	state Span span("NAPI:CreateCheckpoint"_loc);
 
 	TraceEvent("GetCheckpointStart").detail("Version", minVersion).detail("Range", keys.toString());
 
 	try {
-		state CheckpointMetaData m1 = wait(getCheckpointInternal(cx, keys, minVersion, /*createNew=*/false));
+		state CheckpointMetaData m1 = wait(getCheckpointInternal(cx, keys, minVersion, format, /*createNew=*/false));
 		TraceEvent("GetCheckpointReuse").detail("MetaData", m1.toString());
 		return m1;
 	} catch (Error& e) {
@@ -6917,7 +6925,7 @@ ACTOR Future<CheckpointMetaData> getCheckpoint(Database cx, KeyRange keys, Versi
 		}
 	}
 	TraceEvent("GetCheckpointCreateNew").detail("Version", minVersion);
-	CheckpointMetaData m2 = wait(getCheckpointInternal(cx, keys, minVersion, /*createNew=*/true));
+	CheckpointMetaData m2 = wait(getCheckpointInternal(cx, keys, minVersion, format, /*createNew=*/true));
 	return m2;
 }
 
@@ -6996,7 +7004,11 @@ ACTOR static Future<Void> fetchCheckpointFile(Database cx,
 	}
 }
 
-ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx, KeyRange keys, Version minVersion, std::string dir) {
+ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
+                                                 KeyRange keys,
+                                                 Version minVersion,
+                                                 CheckpointFormat format,
+                                                 std::string dir) {
 	state Span span("NAPI:FetchCheckpoint"_loc);
 
 	TraceEvent("FetchCheckpointBegin")
@@ -7004,20 +7016,25 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx, KeyRange keys, Ver
 	    .detail("MinVersion", minVersion)
 	    .detail("CheckpointDir", dir);
 
-	state CheckpointMetaData metaData = wait(getCheckpoint(cx, keys, minVersion));
+	state CheckpointMetaData metaData = wait(getCheckpoint(cx, keys, minVersion, format));
 
 	TraceEvent("GetCheckpointMetaData").detail("Checkpoint", metaData.toString());
 
-	state int i = 0;
-	for (; i < metaData.rocksCF.get().sstFiles.size(); ++i) {
-		TraceEvent("GetCheckpointFetchingFile")
-		    .detail("FileName", metaData.rocksCF.get().sstFiles[i].name)
-		    .detail("Server", metaData.ssID.toString());
-		wait(fetchCheckpointFile(cx,
-		                         metaData.ssID,
-		                         metaData.rocksCF.get().sstFiles[i].db_path + metaData.rocksCF.get().sstFiles[i].name,
-		                         dir + metaData.rocksCF.get().sstFiles[i].name));
-		metaData.rocksCF.get().sstFiles[i].db_path = dir;
+	if (format == RocksDBColumnFamily) {
+		state int i = 0;
+		for (; i < metaData.rocksCF.get().sstFiles.size(); ++i) {
+			TraceEvent("GetCheckpointFetchingFile")
+			    .detail("FileName", metaData.rocksCF.get().sstFiles[i].name)
+			    .detail("Server", metaData.ssID.toString());
+			wait(fetchCheckpointFile(cx,
+			                         metaData.ssID,
+			                         metaData.rocksCF.get().sstFiles[i].db_path +
+			                             metaData.rocksCF.get().sstFiles[i].name,
+			                         dir + metaData.rocksCF.get().sstFiles[i].name));
+			metaData.rocksCF.get().sstFiles[i].db_path = dir;
+		}
+	} else {
+		throw internal_error();
 	}
 
 	return metaData;

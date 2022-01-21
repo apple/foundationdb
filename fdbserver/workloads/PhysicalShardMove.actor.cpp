@@ -81,7 +81,7 @@ struct SSCheckpointWorkload : TestWorkload {
 		loop {
 			try {
 				std::cout << "Creating checkpoint." << std::endl;
-				state CheckpointMetaData checkpoint = wait(getCheckpoint(cx, normalKeys, version));
+				state CheckpointMetaData checkpoint = wait(getCheckpoint(cx, normalKeys, version, RocksDBColumnFamily));
 				break;
 			} catch (Error& e) {
 				std::cout << "Creating checkpoint failure: " << e.name() << std::endl;
@@ -98,8 +98,8 @@ struct SSCheckpointWorkload : TestWorkload {
 		loop {
 			try {
 				std::cout << "Getting checkpoint." << std::endl;
-				state CheckpointMetaData record =
-				    wait(fetchCheckpoint(cx, KeyRangeRef(key, endKey), checkpoint.version, folder));
+				state CheckpointMetaData record = wait(
+				    fetchCheckpoint(cx, KeyRangeRef(key, endKey), checkpoint.version, RocksDBColumnFamily, folder));
 				break;
 			} catch (Error& e) {
 				std::cout << "Getting checkpoint failure: " << e.name() << std::endl;

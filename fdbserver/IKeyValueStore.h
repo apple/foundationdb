@@ -88,7 +88,9 @@ public:
 
 	virtual void enableSnapshot() {}
 
-	virtual Future<CheckpointMetaData> checkpoint(std::string checkpointDir) { throw internal_error(); }
+	virtual Future<CheckpointMetaData> checkpoint(const GetCheckpointRequest& request, const std::string& checkpointDir) {
+		throw internal_error();
+	}
 
 	virtual Future<Void> restore(const CheckpointMetaData& checkpoint) { throw internal_error(); }
 
