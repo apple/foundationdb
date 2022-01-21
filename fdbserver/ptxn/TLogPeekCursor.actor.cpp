@@ -350,6 +350,7 @@ void StorageTeamIDCursorMapper::addCursorImpl(const std::shared_ptr<StorageTeamP
 	const StorageTeamID& storageTeamID = cursor->getStorageTeamID();
 	ASSERT(!isCursorExists(storageTeamID));
 	mapper[storageTeamID] = std::shared_ptr<StorageTeamPeekCursor>(cursor);
+	storageTeamIDs.insert(storageTeamID);
 }
 
 std::shared_ptr<StorageTeamPeekCursor> StorageTeamIDCursorMapper::removeCursor(const StorageTeamID& storageTeamID) {
@@ -359,6 +360,7 @@ std::shared_ptr<StorageTeamPeekCursor> StorageTeamIDCursorMapper::removeCursor(c
 
 std::shared_ptr<StorageTeamPeekCursor> StorageTeamIDCursorMapper::removeCursorImpl(const StorageTeamID& storageTeamID) {
 	std::shared_ptr<StorageTeamPeekCursor> result = mapper[storageTeamID];
+	storageTeamIDs.erase(storageTeamID);
 	mapper.erase(storageTeamID);
 	return result;
 }

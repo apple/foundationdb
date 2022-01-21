@@ -28,6 +28,7 @@
 #include <functional>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <set>
 #include <vector>
 
@@ -373,6 +374,7 @@ public:
 
 private:
 	StorageTeamIDCursorMapper_t mapper;
+	std::unordered_set<StorageTeamID> storageTeamIDs;
 
 public:
 	// Moves a cursor to the mapping system, the original cursor is invalidated
@@ -392,6 +394,9 @@ public:
 
 	// Gets the number of storage teams
 	int getNumCursors() const;
+
+	// Get currently active storage team IDs
+	const auto& getCursorStorageTeamIDs() const { return storageTeamIDs; }
 
 	// Returns the iterator points at the beginning of the (Storage Team ID, cursor) pair list.
 	StorageTeamIDCursorMapper_t::iterator cursorsBegin();
@@ -444,6 +449,7 @@ protected:
 
 public:
 	using details::StorageTeamIDCursorMapper::addCursor;
+	using details::StorageTeamIDCursorMapper::getCursorStorageTeamIDs;
 	using details::StorageTeamIDCursorMapper::getNumCursors;
 	using details::StorageTeamIDCursorMapper::isCursorExists;
 };
