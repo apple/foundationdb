@@ -64,10 +64,6 @@ public:
 	ClusterConnectionString(const std::vector<Hostname>& hosts, Key key);
 
 	std::vector<NetworkAddress> const& coordinators() const { return coords; }
-	void addResolved(Hostname hostname, NetworkAddress address) {
-		coords.push_back(address);
-		networkAddressToHostname.emplace(address, hostname);
-	}
 	Key clusterKey() const { return key; }
 	Key clusterKeyName() const {
 		return keyDesc;
@@ -83,11 +79,11 @@ public:
 	bool hasUnresolvedHostnames = false;
 	std::vector<NetworkAddress> coords;
 	std::vector<Hostname> hostnames;
+	std::unordered_map<NetworkAddress, Hostname> networkAddressToHostname;
 
 private:
 	void parseConnString();
 	void parseKey(const std::string& key);
-	std::unordered_map<NetworkAddress, Hostname> networkAddressToHostname;
 	Key key, keyDesc;
 	std::string connectionString;
 };
