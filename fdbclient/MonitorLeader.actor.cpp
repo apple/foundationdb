@@ -172,7 +172,7 @@ void ClusterConnectionString::parseConnString() {
 	}
 }
 
-ClusterConnectionString::ClusterConnectionString(std::string const& connStr) {
+ClusterConnectionString::ClusterConnectionString(const std::string& connStr) {
 	connectionString = trim(connStr);
 	parseConnString();
 }
@@ -399,7 +399,8 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 	return Void();
 }
 
-ClusterConnectionString::ClusterConnectionString(std::vector<NetworkAddress> servers, Key key) : coords(servers) {
+ClusterConnectionString::ClusterConnectionString(const std::vector<NetworkAddress>& servers, Key key)
+  : coords(servers) {
 	std::string keyString = key.toString();
 	parseKey(keyString);
 	connectionString = keyString + "@";
@@ -411,7 +412,7 @@ ClusterConnectionString::ClusterConnectionString(std::vector<NetworkAddress> ser
 	}
 }
 
-ClusterConnectionString::ClusterConnectionString(std::vector<Hostname> hosts, Key key)
+ClusterConnectionString::ClusterConnectionString(const std::vector<Hostname>& hosts, Key key)
   : hasUnresolvedHostnames(true), hostnames(hosts) {
 	std::string keyString = key.toString();
 	parseKey(keyString);
@@ -424,7 +425,7 @@ ClusterConnectionString::ClusterConnectionString(std::vector<Hostname> hosts, Ke
 	}
 }
 
-void ClusterConnectionString::parseKey(std::string const& key) {
+void ClusterConnectionString::parseKey(const std::string& key) {
 	// Check the structure of the given key, and fill in this->key and this->keyDesc
 
 	// The key must contain one (and only one) : character

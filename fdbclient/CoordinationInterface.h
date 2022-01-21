@@ -59,9 +59,9 @@ struct ClientLeaderRegInterface {
 class ClusterConnectionString {
 public:
 	ClusterConnectionString() {}
-	ClusterConnectionString(std::string const& connStr);
-	ClusterConnectionString(std::vector<NetworkAddress> coordinators, Key key);
-	ClusterConnectionString(std::vector<Hostname> hosts, Key key);
+	ClusterConnectionString(const std::string& connStr);
+	ClusterConnectionString(const std::vector<NetworkAddress>& coordinators, Key key);
+	ClusterConnectionString(const std::vector<Hostname>& hosts, Key key);
 
 	std::vector<NetworkAddress> const& coordinators() const { return coords; }
 	void addResolved(Hostname hostname, NetworkAddress address) {
@@ -83,7 +83,7 @@ public:
 
 private:
 	void parseConnString();
-	void parseKey(std::string const& key);
+	void parseKey(const std::string& key);
 	std::unordered_map<NetworkAddress, Hostname> networkAddressToHostname;
 	Key key, keyDesc;
 	std::string connectionString;
