@@ -469,15 +469,18 @@ public:
 	int outstandingWatches;
 	int maxOutstandingWatches;
 
+	// Manage any shared state that may be used by MVC
+	std::shared_ptr<DatabaseSharedState> sharedStatePtr;
+	std::shared_ptr<DatabaseSharedState> initSharedState();
+	void setSharedState(std::shared_ptr<DatabaseSharedState> p);
+
 	// GRV Cache
 	// Database-level read version cache storing the most recent successful GRV as well as the time it was requested.
 	double lastTimedGrv;
 	Version cachedRv;
-	GRVCacheSpace* sharedCachePtr;
 	void updateCachedRV(double t, Version v);
 	Version getCachedRV();
 	double getLastTimedGRV();
-	void setSharedCacheSpace(GRVCacheSpace* p);
 	double lastTimedRkThrottle;
 	// Cached RVs can be updated through commits, and using cached RVs avoids the proxies altogether
 	// Because our checks for ratekeeper throttling requires communication with the proxies,

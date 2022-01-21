@@ -63,7 +63,7 @@ private:
 	DatabaseContext* db;
 
 public: // Internal use only
-	ThreadSafeDatabase(std::string connFilename, int apiVersion, GRVCacheSpace* sharedCachePtr = nullptr);
+	ThreadSafeDatabase(std::string connFilename, int apiVersion);
 	ThreadSafeDatabase(DatabaseContext* db) : db(db) {}
 	DatabaseContext* unsafeGetPtr() const { return db; }
 };
@@ -175,7 +175,7 @@ public:
 	void runNetwork() override;
 	void stopNetwork() override;
 
-	Reference<IDatabase> createDatabase(const char* clusterFilePath, GRVCacheSpace* sharedCachePtr = nullptr) override;
+	Reference<IDatabase> createDatabase(const char* clusterFilePath) override;
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 

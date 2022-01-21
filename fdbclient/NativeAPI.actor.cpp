@@ -209,22 +209,22 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 	}
 }
 
-void updateCachedRVShared(double t, Version v, GRVCacheSpace* s) {
-	MutexHolder mutex(s->cacheLock);
+void updateCachedRVShared(double t, Version v, std::shared_ptr<DatabaseSharedState> p) {
+	MutexHolder mutex(p->mutexLock);
 	TraceEvent("CheckpointCacheUpdateShared")
 	    .detail("Version", v)
 	    .detail("CurTime", t)
-	    .detail("LastVersion", s->cachedRv)
-	    .detail("LastTime", s->lastTimedGrv);
-	s->cachedRv = v;
-	if (t > s->lastTimedGrv) {
-		s->lastTimedGrv = t;
+	    .detail("LastVersion", p->grvCacheSpace.cachedRv)
+	    .detail("LastTime", p->grvCacheSpace.lastTimedGrv);
+	p->grvCacheSpace.cachedRv = v;
+	if (t > p->grvCacheSpace.lastTimedGrv) {
+		p->grvCacheSpace.lastTimedGrv = t;
 	}
 }
 
 void DatabaseContext::updateCachedRV(double t, Version v) {
-	if (sharedCachePtr) {
-		return updateCachedRVShared(t, v, sharedCachePtr);
+	if (sharedStatePtr) {
+		return updateCachedRVShared(t, v, sharedStatePtr);
 	}
 	if (v >= cachedRv) {
 		TraceEvent("CheckpointCacheUpdate")
@@ -244,17 +244,17 @@ void DatabaseContext::updateCachedRV(double t, Version v) {
 }
 
 Version DatabaseContext::getCachedRV() {
-	if (sharedCachePtr) {
-		MutexHolder mutex(sharedCachePtr->cacheLock);
-		return sharedCachePtr->cachedRv;
+	if (sharedStatePtr) {
+		MutexHolder mutex(sharedStatePtr->mutexLock);
+		return sharedStatePtr->grvCacheSpace.cachedRv;
 	}
 	return cachedRv;
 }
 
 double DatabaseContext::getLastTimedGRV() {
-	if (sharedCachePtr) {
-		MutexHolder mutex(sharedCachePtr->cacheLock);
-		return sharedCachePtr->lastTimedGrv;
+	if (sharedStatePtr) {
+		MutexHolder mutex(sharedStatePtr->mutexLock);
+		return sharedStatePtr->grvCacheSpace.lastTimedGrv;
 	}
 	return lastTimedGrv;
 }
@@ -1335,7 +1335,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), outstandingWatches(0), lastTimedGrv(0.0), cachedRv(0), sharedCachePtr(nullptr),
+    bytesPerCommit(1000), outstandingWatches(0), lastTimedGrv(0.0), cachedRv(0), sharedStatePtr(nullptr),
     lastTimedRkThrottle(0.0), lastProxyRequest(0.0), transactionTracingSample(false), taskID(taskID),
     clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion),
     mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
@@ -6052,7 +6052,7 @@ bool rkThrottlingCooledDown(DatabaseContext* cx) {
 		return true;
 	}
 	TraceEvent("DebugGrvRkCd")
-		.detail("LastTimedRkThrottle", cx->lastTimedRkThrottle)
+	    .detail("LastTimedRkThrottle", cx->lastTimedRkThrottle)
 	    .detail("TimeElapsed", now() - cx->lastTimedRkThrottle)
 	    .detail("CooldownTime", CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
 	return (now() - cx->lastTimedRkThrottle > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
@@ -6061,7 +6061,8 @@ bool rkThrottlingCooledDown(DatabaseContext* cx) {
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	if (!readVersion.isValid()) {
 		if (!CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && !trState->options.skipGrvCache &&
-		    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE || trState->options.useGrvCache) &&
+		    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE ||
+		     trState->options.useGrvCache) &&
 		    rkThrottlingCooledDown(getDatabase().getPtr())) {
 			TraceEvent("DebugGrvEnterCachePath");
 			// Upon our first request to use cached RVs, start the background updater
@@ -7162,8 +7163,14 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
 }
 
-void DatabaseContext::setSharedCacheSpace(GRVCacheSpace* p) {
-	sharedCachePtr = p;
+std::shared_ptr<DatabaseSharedState> DatabaseContext::initSharedState() {
+	std::shared_ptr<DatabaseSharedState> newState = std::make_shared<DatabaseSharedState>();
+	setSharedState(newState);
+	return newState;
+}
+
+void DatabaseContext::setSharedState(std::shared_ptr<DatabaseSharedState> p) {
+	sharedStatePtr = p;
 }
 
 ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, ChangeFeedStorageData* self) {
