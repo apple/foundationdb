@@ -1106,13 +1106,27 @@ public:
 
 	StorageServerStorageTeams storageServerStorageTeams;
 
+	std::unordered_set<StorageTeamID> subscribedStorageTeamIDs;
+
 	StorageServer(IKeyValueStore* pKVStore,
 	              const Reference<const AsyncVar<ServerDBInfo>>& serverDBInfo,
 	              const StorageServerInterface& storageServerInterface,
 	              const StorageTeamID& privateMutationsStorageTeamID_)
 	  : StorageServerBase(pKVStore, serverDBInfo, storageServerInterface),
-	    storageServerStorageTeams(privateMutationsStorageTeamID_) {}
+	    storageServerStorageTeams(privateMutationsStorageTeamID_),
+		subscribedStorageTeamIDs{ privateMutationsStorageTeamID_ } {}
+
+	void updateSubscribedStorageTeamIDs();
 };
+
+void StorageServer::updateSubscribedStorageTeamIDs() {
+	ASSERT(logCursor);
+	// NOTE A better choice might be cast it to merged::details::StorageTeamIDCursorMapper, but this breaks the
+	// inheritance structure
+	auto ptr = dynamic_cast<merged::BroadcastedStorageTeamPeekCursorBase*>(logCursor.get());
+	ASSERT(ptr);
+	subscribedStorageTeamIDs = ptr->getCursorStorageTeamIDs();
+}
 
 } // namespace ptxn
 
@@ -5109,7 +5123,6 @@ void initializeUpdateCursor(ptxn::StorageServer& storageServerContext) {
 }
 
 ACTOR Future<Void> updateImpl(std::shared_ptr<ptxn::StorageServer> storageServerContext, bool* pReceivedRemoteData) {
-
 	state Stopwatch stopwatch;
 
 	state std::shared_ptr<ptxn::PeekCursorBase> cursor = storageServerContext->logCursor;
