@@ -108,6 +108,9 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                     int uidLength,
 	                                     uint8_t const* snapshotCommmand,
 	                                     int snapshotCommandLength);
+	DatabaseSharedState* (*databaseCreateSharedState)(FDBDatabase* database);
+	void (*databaseSetSharedState)(FDBDatabase* database, DatabaseSharedState* p);
+
 	double (*databaseGetMainThreadBusyness)(FDBDatabase* database);
 	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
 
@@ -359,6 +362,9 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
+	DatabaseSharedState* createSharedState() override;
+	void setSharedState(DatabaseSharedState* p) override;
+
 private:
 	const Reference<FdbCApi> api;
 	FdbCApi::FDBDatabase*
@@ -587,6 +593,9 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
+	DatabaseSharedState* createSharedState() override;
+	void setSharedState(DatabaseSharedState* p) override;
+
 	// private:
 
 	struct LegacyVersionMonitor;
@@ -732,7 +741,7 @@ private:
 	Reference<ClientInfo> localClient;
 	std::map<std::string, ClientDesc> externalClientDescriptions;
 	std::map<std::string, std::vector<Reference<ClientInfo>>> externalClients;
-	std::map<std::string, GRVCacheSpace> clusterCacheMap;
+	std::map<std::string, DatabaseSharedState*> clusterSharedStateMap;
 
 	bool networkStartSetup;
 	volatile bool networkSetup;

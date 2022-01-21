@@ -63,6 +63,8 @@
 extern "C" {
 #endif
 
+#ifndef FDB_API_OBJECTS
+#define FDB_API_OBJECTS
 /* Pointers to these opaque types represent objects in the FDB API */
 typedef struct FDB_future FDBFuture;
 typedef struct FDB_result FDBResult;
@@ -71,6 +73,7 @@ typedef struct FDB_transaction FDBTransaction;
 
 typedef int fdb_error_t;
 typedef int fdb_bool_t;
+#endif
 
 DLLEXPORT const char* fdb_get_error(fdb_error_t code);
 

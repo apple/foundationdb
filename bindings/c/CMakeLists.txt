@@ -1,6 +1,7 @@
 set(FDB_C_SRCS
   fdb_c.cpp
   foundationdb/fdb_c.h
+  foundationdb/fdb_c_internal.h
   ThreadCleanup.cpp)
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/foundationdb)

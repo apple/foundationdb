@@ -209,7 +209,7 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 	}
 }
 
-void updateCachedRVShared(double t, Version v, std::shared_ptr<DatabaseSharedState> p) {
+void updateCachedRVShared(double t, Version v, DatabaseSharedState* p) {
 	MutexHolder mutex(p->mutexLock);
 	TraceEvent("CheckpointCacheUpdateShared")
 	    .detail("Version", v)
@@ -7163,13 +7163,13 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
 }
 
-std::shared_ptr<DatabaseSharedState> DatabaseContext::initSharedState() {
-	std::shared_ptr<DatabaseSharedState> newState = std::make_shared<DatabaseSharedState>();
+DatabaseSharedState* DatabaseContext::initSharedState() {
+	DatabaseSharedState* newState = new DatabaseSharedState();
 	setSharedState(newState);
 	return newState;
 }
 
-void DatabaseContext::setSharedState(std::shared_ptr<DatabaseSharedState> p) {
+void DatabaseContext::setSharedState(DatabaseSharedState* p) {
 	sharedStatePtr = p;
 }
 

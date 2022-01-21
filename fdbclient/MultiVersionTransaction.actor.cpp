@@ -446,6 +446,19 @@ ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const String
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
+DatabaseSharedState* DLDatabase::createSharedState() {
+	if (!api->databaseCreateSharedState) {
+		return nullptr;
+	}
+	return api->databaseCreateSharedState(db);
+}
+
+void DLDatabase::setSharedState(DatabaseSharedState* p) {
+	if (api->databaseSetSharedState) {
+		api->databaseSetSharedState(db, p);
+	}
+}
+
 // Get network thread busyness
 double DLDatabase::getMainThreadBusyness() {
 	if (api->databaseGetMainThreadBusyness != nullptr) {
@@ -1288,6 +1301,19 @@ ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, co
 	return abortableFuture(f, dbState->dbVar->get().onChange);
 }
 
+DatabaseSharedState* MultiVersionDatabase::createSharedState() {
+	if (dbState->db) {
+		return dbState->db->createSharedState();
+	}
+	return nullptr;
+}
+
+void MultiVersionDatabase::setSharedState(DatabaseSharedState* p) {
+	if (dbState->db) {
+		dbState->db->setSharedState(p);
+	}
+}
+
 // Get network thread busyness
 // Return the busyness for the main thread. When using external clients, take the larger of the local client
 // and the external client's busyness.
@@ -2121,6 +2147,13 @@ Reference<IDatabase> MultiVersionApi::createDatabase(const char* clusterFilePath
 		lock.leave();
 
 		Reference<IDatabase> localDb = localClient->api->createDatabase(clusterFilePath);
+		if (clusterSharedStateMap.find(clusterFile) == clusterSharedStateMap.end() ||
+		    clusterSharedStateMap[clusterFile] == nullptr) {
+			DatabaseSharedState* p = localDb->createSharedState();
+			clusterSharedStateMap[clusterFile] = p;
+		} else {
+			localDb->setSharedState(clusterSharedStateMap[clusterFile]);
+		}
 		return Reference<IDatabase>(
 		    new MultiVersionDatabase(this, threadIdx, clusterFile, Reference<IDatabase>(), localDb));
 	}
@@ -2130,6 +2163,13 @@ Reference<IDatabase> MultiVersionApi::createDatabase(const char* clusterFilePath
 	ASSERT_LE(threadCount, 1);
 
 	Reference<IDatabase> localDb = localClient->api->createDatabase(clusterFilePath);
+	if (clusterSharedStateMap.find(clusterFile) == clusterSharedStateMap.end() ||
+	    clusterSharedStateMap[clusterFile] == nullptr) {
+		DatabaseSharedState* p = localDb->createSharedState();
+		clusterSharedStateMap[clusterFile] = p;
+	} else {
+		localDb->setSharedState(clusterSharedStateMap[clusterFile]);
+	}
 	if (bypassMultiClientApi) {
 		return localDb;
 	} else {
