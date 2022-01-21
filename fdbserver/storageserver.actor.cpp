@@ -1106,23 +1106,26 @@ public:
 
 	StorageServerStorageTeams storageServerStorageTeams;
 
-	const std::unordered_set<StorageTeamID>& getSubscribedStorageTeamIDs() const;
+	std::unordered_set<StorageTeamID> subscribedStorageTeamIDs;
 
 	StorageServer(IKeyValueStore* pKVStore,
 	              const Reference<const AsyncVar<ServerDBInfo>>& serverDBInfo,
 	              const StorageServerInterface& storageServerInterface,
 	              const StorageTeamID& privateMutationsStorageTeamID_)
 	  : StorageServerBase(pKVStore, serverDBInfo, storageServerInterface),
-	    storageServerStorageTeams(privateMutationsStorageTeamID_) {}
+	    storageServerStorageTeams(privateMutationsStorageTeamID_),
+		subscribedStorageTeamIDs{ privateMutationsStorageTeamID_ } {}
 
 	void updateSubscribedStorageTeamIDs();
 };
 
-const std::unordered_set<StorageTeamID>& StorageServer::getSubscribedStorageTeamIDs() const {
+void StorageServer::updateSubscribedStorageTeamIDs() {
 	ASSERT(logCursor);
+	// NOTE A better choice might be cast it to merged::details::StorageTeamIDCursorMapper, but this breaks the
+	// inheritance structure
 	auto ptr = dynamic_cast<merged::BroadcastedStorageTeamPeekCursorBase*>(logCursor.get());
 	ASSERT(ptr);
-	return ptr->getCursorStorageTeamIDs();
+	subscribedStorageTeamIDs = ptr->getCursorStorageTeamIDs();
 }
 
 } // namespace ptxn
