@@ -1623,19 +1623,22 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 	return Void();
 }
 
+// Create a checkpoint.
 ACTOR Future<Void> checkpointQ(StorageServer* self, GetCheckpointRequest req) {
 	wait(delay(0));
 
 	TraceEvent(SevDebug, "ServeCheckpointBegin", self->thisServerID)
 	    .detail("MinVersion", req.minVersion)
-	    .detail("Range", req.range.toString());
+	    .detail("Range", req.range.toString())
+	    .detail("Format", static_cast<int>(req.format));
 
 	state Version minVersion = req.minVersion == latestVersion ? self->version.get() : req.minVersion;
 	wait(self->durableVersion.whenAtLeast(minVersion));
 
 	TraceEvent(SevDebug, "ServeCheckpointVersionSatisfied", self->thisServerID)
 	    .detail("MinVersion", req.minVersion)
-	    .detail("Range", req.range.toString());
+	    .detail("Range", req.range.toString())
+	    .detail("Format", static_cast<int>(req.format));
 
 	try {
 		// Taking the lock is necessary to prevent data move.
@@ -1649,8 +1652,11 @@ ACTOR Future<Void> checkpointQ(StorageServer* self, GetCheckpointRequest req) {
 
 		state CheckpointMetaData checkpointMetaData =
 		    wait(self->storage.checkpoint(req, self->folder + "/rockscheckpoints_" + std::to_string(minVersion) + "/"));
+
 		checkpointMetaData.ssID = self->thisServerID;
 		self->checkpoints[req.format].emplace(checkpointMetaData.version, checkpointMetaData);
+		// TODO: persist the checkpoint metadata.
+
 		req.reply.send(checkpointMetaData);
 		TraceEvent("ServeCheckpointSuccess").detail("Checkpoint", checkpointMetaData.toString());
 	} catch (Error& e) {
@@ -1667,46 +1673,53 @@ ACTOR Future<Void> checkpointQ(StorageServer* self, GetCheckpointRequest req) {
 }
 
 ACTOR Future<Void> getFileQ(StorageServer* self, GetFileRequest req) {
-	TraceEvent("GetFileQBegin").detail("File", req.path).detail("Offset", req.offset);
-	state int transactionSize = 4096;
-	state size_t fileOffset = 0;
-	// state MD5_CTX sum;
+	TraceEvent("ServeGetFileBegin").detail("File", req.path).detail("Offset", req.offset);
+
+	state int transactionSize = 64 * 1024;
+	state size_t fileOffset = req.offset;
 	state Arena arena;
 	state StringRef buf;
 
 	size_t pos = req.path.rfind("/");
 	state std::string name = pos == std::string::npos ? req.path : req.path.substr(pos + 1);
 
-	// Disabling AIO, because it currently supports only page-aligned writes, but the size of a client library
-	// is not necessariliy page-aligned, need to investigate if it is a limitation of AIO or just the way
-	// we are wrapping it
 	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
 	    req.path, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO, 0));
 
-	// ::MD5_Init(&sum);
-	req.reply.setByteLimit(10240);
+	req.reply.setByteLimit(SERVER_KNOBS->FILE_TRANSFER_BLOCK_BYTES);
 
-	loop {
-		arena = Arena();
-		// Use page-aligned buffers for enabling possible future use with AIO
-		buf = makeAlignedString(_PAGE_SIZE, transactionSize, arena);
-		state int bytesRead = wait(file->read(mutateString(buf), transactionSize, fileOffset));
-		fileOffset += bytesRead;
-		if (bytesRead <= 0) {
-			break;
+	try {
+		loop {
+			arena = Arena();
+			buf = makeAlignedString(_PAGE_SIZE, transactionSize, arena);
+			state int bytesRead = wait(file->read(mutateString(buf), transactionSize, fileOffset));
+			fileOffset += bytesRead;
+			if (bytesRead <= 0) {
+				break;
+			}
+
+			wait(req.reply.onReady());
+			GetFileReply reply(name, fileOffset, bytesRead);
+			reply.data = buf;
+			req.reply.send(reply);
 		}
-
-		// ::MD5_Update(&sum, buf.begin(), bytesRead);
-
-		wait(req.reply.onReady());
-		std::cout << "Sending" << bytesRead << std::endl;
-		GetFileReply reply(name, fileOffset, bytesRead);
-		// reply.data = StringRef(arena, buf.begin(), bytesRead);
-		reply.data = buf;
-		req.reply.send(reply);
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "ServerGetFileFailure")
+		    .detail("File", req.path)
+		    .detail("Offset", req.offset)
+		    .error(e, /*includeCancel=*/true);
+		if (!canReplyWith(e)) {
+			throw;
+		}
+		req.reply.sendError(e);
 	}
-	req.reply.sendError(end_of_stream());
 
+	TraceEvent(SevWarnAlways, "ServerGetFileEnd")
+	    .detail("File", req.path)
+	    .detail("Offset", req.offset)
+	    .detail("TotalBytes", fileOffset - req.offset);
+
+	req.reply.sendError(end_of_stream());
 	return Void();
 }
 
@@ -6668,6 +6681,8 @@ ACTOR Future<Void> serveGetCheckpointRequests(StorageServer* self, FutureStream<
 		if (!self->isReadable(req.range)) {
 			req.reply.sendError(wrong_shard_server());
 		} else {
+			// TODO: Load existing checkpoints from disk once persisting checkpoint metadata is implemented.
+			// TODO: Implement lookup on checkpointID.
 			const auto it = self->checkpoints[req.format].lower_bound(req.minVersion);
 			if (it != self->checkpoints[req.format].end()) {
 				TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)

@@ -762,18 +762,24 @@ enum CheckpointFormat {
 
 namespace {
 
-std::string getCheckpointFormatName(const CheckpointFormat& format) {
+std::string getFdbCheckpointFormatName(const CheckpointFormat& format) {
+	std::string name;
 	switch (format) {
 	case InvalidFormat:
-		return "Invalid";
+		name = "Invalid";
+		break;
 	case RocksDBColumnFamily:
-		return "RocksDBColumnFamily";
+		name = "RocksDBColumnFamily";
+		break;
 	case RocksDBSSTFile:
-		return "RocksDBSSTFile";
+		name = "RocksDBSSTFile";
 	}
+
+	return name;
 }
 
 } // namespace
+
 // Copied from rocksdb/metadata.h, so that we can add serializer.
 struct SstFileMetaData {
 	constexpr static FileIdentifier file_identifier = 3804347;
@@ -952,7 +958,7 @@ struct CheckpointMetaData {
 
 	std::string toString() const {
 		std::string res = "Checkpoint MetaData:\nServer: " + ssID.toString() + "\nVersion: " + std::to_string(version) +
-		                  "\nFormat: " + getCheckpointFormatName(format) + "\n";
+		                  "\nFormat: " + getFdbCheckpointFormatName(format) + "\n";
 		if (rocksCF.present()) {
 			res += rocksCF.get().toString();
 		}
