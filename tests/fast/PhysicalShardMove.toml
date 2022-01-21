@@ -1,6 +1,5 @@
 [configuration]
-config = 'single'
-buggify = false
+config = 'triple'
 storageEngineType = 4
 processesPerMachine = 1
 coordinators = 3

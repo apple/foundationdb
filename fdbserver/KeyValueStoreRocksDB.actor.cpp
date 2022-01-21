@@ -731,49 +731,37 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
-			const std::string& checkpointDir = a.checkpointDir;
-
-			rocksdb::ExportImportFilesMetaData* pMetadata;
-			std::cout << "RocksDB export dir: " << checkpointDir << std::endl;
-			platform::eraseDirectoryRecursive(checkpointDir);
-			std::string cwd = platform::getWorkingDirectory() + "/";
-			std::cout << "Working directory: " << cwd << std::endl;
-			s = checkpoint->ExportColumnFamily(cf, checkpointDir, &pMetadata);
-			if (!s.ok()) {
-				logRocksDBError(s, "Checkpoint");
-				a.reply.sendError(statusToError(s));
-				return;
-			}
 			rocksdb::PinnableSlice value;
 			rocksdb::ReadOptions readOptions = getReadOptions();
 			s = db->Get(readOptions, cf, toSlice(persistVersion), &value);
 
-			CheckpointMetaData res;
-			res.version = BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned());
+			// TODO: set the range as the actual shard range.
+			CheckpointMetaData res(BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned()),
+			                       a.request.range,
+			                       a.request.format,
+			                       deterministicRandom()->randomUniqueID());
 
-			// std::cout << "Metadata: " << pMetadata->db_comparator_name << std::endl;
-			// for (const auto& md : pMetadata->files) {
-			// 	std::cout << "Name: " << md.name << "CF: " << md.column_family_name << ", LV: " << md.level
-			// 	          << std::endl;
-			// }
+			const std::string& checkpointDir = a.checkpointDir;
 
-			// res.dbComparatorName = pMetadata->db_comparator_name;
-			// for (const auto& md : pMetadata->files) {
-			// 	res.sstFileMetadata.emplace_back(md.column_family_name, md.level);
-			// }
 			if (a.request.format == RocksDBColumnFamily) {
+				rocksdb::ExportImportFilesMetaData* pMetadata;
+				platform::eraseDirectoryRecursive(checkpointDir);
+				std::string cwd = platform::getWorkingDirectory() + "/";
+				s = checkpoint->ExportColumnFamily(cf, checkpointDir, &pMetadata);
+
+				if (!s.ok()) {
+					logRocksDBError(s, "Checkpoint");
+					a.reply.sendError(statusToError(s));
+					return;
+				}
+
 				populateMetaData(&res, *pMetadata);
+				delete pMetadata;
 			} else {
-				ASSERT(false);
+				throw internal_error(); // Not implemented yet.
 			}
 
-			// TODO: set the range as the actual shard range.
-			res.range = a.request.range;
-
-			delete pMetadata;
-			TraceEvent("RocksDBServeCheckpointSuccess", id)
-			    .detail("Version", res.version)
-			    .detail("MetaData", res.toString());
+			TraceEvent("RocksDBServeCheckpointSuccess", id).detail("CheckpointMetaData", res.toString());
 			a.reply.send(res);
 		}
 

@@ -751,12 +751,29 @@ struct ChangeFeedPopRequest {
 	}
 };
 
-// Format or FDB storage checkpoint.
+// FDB storage checkpoint format.
 enum CheckpointFormat {
-	RocksDBColumnFamily = 0,
-	RocksDBSSTFile = 1,
+	InvalidFormat = 0,
+	// Checkpoint generated via rocksdb::Checkpoint::ExportColumnFamily().
+	RocksDBColumnFamily = 1,
+	// Checkpoint generated via rocksdb::Checkpoint::CreateCheckpoint().
+	RocksDBSSTFile = 2,
 };
 
+namespace {
+
+std::string getCheckpointFormatName(const CheckpointFormat& format) {
+	switch (format) {
+	case InvalidFormat:
+		return "Invalid";
+	case RocksDBColumnFamily:
+		return "RocksDBColumnFamily";
+	case RocksDBSSTFile:
+		return "RocksDBSSTFile";
+	}
+}
+
+} // namespace
 // Copied from rocksdb/metadata.h, so that we can add serializer.
 struct SstFileMetaData {
 	constexpr static FileIdentifier file_identifier = 3804347;
@@ -860,6 +877,7 @@ struct SstFileMetaData {
 	}
 };
 
+// Copied from rocksdb::LiveFileMetaData.
 struct LiveFileMetaData : public SstFileMetaData {
 	constexpr static FileIdentifier file_identifier = 3804346;
 	std::string column_family_name; // Name of the column family
@@ -892,15 +910,11 @@ struct LiveFileMetaData : public SstFileMetaData {
 	}
 };
 
+// Checkpoint metadata associated with RockDBColumnFamily format.
+// Based on rocksdb::ExportImportFilesMetaData.
 struct RocksDBColumnFamilyCheckpoint {
 	constexpr static FileIdentifier file_identifier = 13804346;
 	std::string dbComparatorName;
-
-	// Each pair describes an SST file in the format of {<File name>, <SST file level>}.
-	// std::vector<std::pair<std::string, int64_t>> sstFileMetadata;
-
-	// Each pair describes an SST file in the format of {<File name>, <SST file level>}.
-	// std::vector<std::string> sstFiles;
 
 	std::vector<LiveFileMetaData> sstFiles;
 
@@ -920,42 +934,46 @@ struct RocksDBColumnFamilyCheckpoint {
 	}
 };
 
+// Metadata of a FDB checkpoint.
 struct CheckpointMetaData {
 	constexpr static FileIdentifier file_identifier = 13804342;
 	Version version;
 	KeyRange range;
-	UID ssID;
 	CheckpointFormat format;
+	UID checkpointID; // A unique id for this checkpoint.
+	UID ssID; // Storage server ID on which this checkpoint is created.
+	int64_t gcTime; // Time to delete this checkpoint, a Unix timestamp in seconds.
 
-	Optional<RocksDBColumnFamilyCheckpoint> rocksCF;
+	Optional<RocksDBColumnFamilyCheckpoint> rocksCF; // Present when format == RocksDBColumnFamily.
 
-	CheckpointMetaData() {}
-	CheckpointMetaData(Version version, KeyRange const& range)
-	  : version(version), range(range), format(RocksDBColumnFamily) {}
-	CheckpointMetaData(Version version, KeyRange const& range, CheckpointFormat format)
-	  : version(version), range(range), format(format) {}
+	CheckpointMetaData() : format(InvalidFormat) {}
+	CheckpointMetaData(Version version, KeyRange const& range, CheckpointFormat format, UID checkpointID)
+	  : version(version), range(range), format(format), checkpointID(checkpointID) {}
 
 	std::string toString() const {
-		std::string res =
-		    "Checkpoint MetaData:\nServer: " + ssID.toString() + "\nVersion: " + std::to_string(version) + "\n";
-		if (rocksCF.present())
+		std::string res = "Checkpoint MetaData:\nServer: " + ssID.toString() + "\nVersion: " + std::to_string(version) +
+		                  "\nFormat: " + getCheckpointFormatName(format) + "\n";
+		if (rocksCF.present()) {
 			res += rocksCF.get().toString();
+		}
 		return res;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, range, ssID, format, rocksCF);
+		serializer(ar, version, range, format, checkpointID, ssID, gcTime, rocksCF);
 	}
 };
 
+// Request to create a checkpoint for keyrange: `range`, with a minimum version of `minVersion`, in the specific format;
 struct GetCheckpointRequest {
 	constexpr static FileIdentifier file_identifier = 13804343;
 	Version minVersion;
 	KeyRange range;
 	CheckpointFormat format;
 	bool createNew; // Create a new checkpoint if not exist.
-	// TODO: add ttl.
+	int64_t ttl; // Retention in seconds.
+	Optional<UID> checkpointID; // When present, look for the checkpoint with the exact UID.
 	ReplyPromise<CheckpointMetaData> reply;
 
 	GetCheckpointRequest() {}
@@ -968,22 +986,23 @@ struct GetCheckpointRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, minVersion, range, format, createNew, reply);
+		serializer(ar, minVersion, range, format, createNew, ttl, checkpointID, reply);
 	}
 };
 
+// Reply to GetFileRequest, used to transfer files.
 struct GetFileReply : public ReplyPromiseStreamReply {
 	constexpr static FileIdentifier file_identifier = 13804345;
-	std::string name;
+	std::string name; // File name.
 	int64_t offset;
-	int64_t size;
+	int64_t size; // Size of `data`.
 	Standalone<StringRef> data;
 
 	GetFileReply() {}
 	GetFileReply(std::string name, int64_t offset, int64_t size) : name(name), offset(offset), size(size) {}
 	GetFileReply(std::string name) : GetFileReply(name, 0, 0) {}
 
-	int expectedSize() const { return sizeof(GetFileReply) + data.expectedSize(); }
+	int expectedSize() const { return data.expectedSize(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -992,9 +1011,10 @@ struct GetFileReply : public ReplyPromiseStreamReply {
 	}
 };
 
+// Request to get a file from a storage server.
 struct GetFileRequest {
 	constexpr static FileIdentifier file_identifier = 13804344;
-	std::string path;
+	std::string path; // File path on the storage server.
 	int64_t offset;
 	ReplyPromiseStream<GetFileReply> reply;
 
