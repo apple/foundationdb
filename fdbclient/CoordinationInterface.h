@@ -99,11 +99,11 @@ public:
 	AsyncTrigger resolveFinish;
 	std::vector<NetworkAddress> coords;
 	std::vector<Hostname> hostnames;
+	std::unordered_map<NetworkAddress, Hostname> networkAddressToHostname;
 
 private:
 	void parseConnString();
 	void parseKey(const std::string& key);
-	std::unordered_map<NetworkAddress, Hostname> networkAddressToHostname;
 	Key key, keyDesc;
 	std::string connectionString;
 };
