@@ -1101,6 +1101,10 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, BlobWorkerInterface bwInterf) {
 	state KeyRangeMap<std::pair<int64_t, int64_t>> lastSeenSeqno;
 	// outer loop handles reconstructing stream if it got a retryable error
+	// do backoff, we can get a lot of retries in a row
+
+	// TODO knob?
+	state double backoff = 0.1;
 	loop {
 		try {
 			state ReplyPromiseStream<GranuleStatusReply> statusStream =
@@ -1119,6 +1123,8 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 					           bwInterf.id().toString(),
 					           rep.doSplit ? "split" : "");
 				}
+				// if we get a reply from the stream, reset backoff
+				backoff = 0.1;
 				if (rep.epoch > bmData->epoch) {
 					if (BM_DEBUG) {
 						fmt::print("BM heard from BW {0} that there is a new manager with higher epoch\n",
@@ -1193,7 +1199,8 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 			// if it is permanent, the failure monitor will eventually trip.
 			ASSERT(e.code() != error_code_end_of_stream);
 			if (e.code() == error_code_request_maybe_delivered || e.code() == error_code_connection_failed) {
-				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				wait(delay(backoff));
+				backoff = std::min(backoff * 1.5, 5.0);
 				continue;
 			} else {
 				if (BM_DEBUG) {
