@@ -486,7 +486,6 @@ struct ServerPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<Server
 	Reference<AsyncVar<OptionalInterface<TLogInterface_PassivelyPull>>> interf;
 	const Tag tag;
 	const StorageTeamID storageTeamId;
-	const TLogGroupID tLogGroupID;
 
 	ptxn::TLogPeekReply results;
 	ArenaReader rd;
@@ -522,7 +521,6 @@ struct ServerPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<Server
 	ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface_PassivelyPull>>> interf,
 	                 Tag tag,
 	                 StorageTeamID storageTeamID,
-	                 TLogGroupID tLogGroupID,
 	                 Version begin,
 	                 Version end,
 	                 bool returnIfBlocked,
@@ -534,8 +532,7 @@ struct ServerPeekCursor final : ILogSystem::IPeekCursor, ReferenceCounted<Server
 	                 bool hasMsg,
 	                 Version poppedVersion,
 	                 Tag tag,
-	                 StorageTeamID storageTeamID,
-	                 TLogGroupID tLogGroupID);
+	                 StorageTeamID storageTeamID);
 
 	Reference<IPeekCursor> cloneNoMore() override;
 	void setProtocolVersion(ProtocolVersion version) override;
