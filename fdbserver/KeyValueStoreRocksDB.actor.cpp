@@ -784,7 +784,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				populateMetaData(&res, *pMetadata);
 				delete pMetadata;
 			} else {
-				throw internal_error(); // Not implemented yet.
+				throw not_implemented();
 			}
 
 			TraceEvent("RocksDBServeCheckpointSuccess", id).detail("CheckpointMetaData", res.toString());
@@ -831,7 +831,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					a.done.send(Void());
 				}
 			} else {
-				throw internal_error(); // Not implemented yet.
+				throw not_implemented();
 			}
 		}
 	};

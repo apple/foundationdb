@@ -6839,11 +6839,17 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 	}
 }
 
+// Get a checkpoint, if a storage server has a checkpoint satisfying `keys`, `minVersion` and `format`, the
+// existing checkpoint will be returned.
+// If such existing checkpoint does not exist, and createNew == false, a `checkpoint_not_found` error will be
+// thrown.
+// If such existing checkpoint does not exist, and createNew == true, a new checkpoint will be created.
 ACTOR static Future<CheckpointMetaData> getCheckpointInternal(Database cx,
                                                               KeyRange keys,
                                                               Version minVersion,
                                                               CheckpointFormat format,
-                                                              bool createNew) {
+                                                              bool createNew,
+                                                              double timeout = 5.0) {
 	state Span span("NAPI:GetCheckpointInternal"_loc);
 
 	state std::vector<Future<CheckpointMetaData>> alternatives;
@@ -6862,6 +6868,9 @@ ACTOR static Future<CheckpointMetaData> getCheckpointInternal(Database cx,
 			                              span.context,
 			                              Optional<UID>(),
 			                              UseProvisionalProxies::False));
+
+			// If not createNew, we search all storage servers for existing checkpoint,
+			// otherwise, only one storage server is selected to create a new checkpoint.
 			state int i = 0;
 			state int e = locations[0].second->size();
 			if (createNew) {
@@ -6873,14 +6882,22 @@ ACTOR static Future<CheckpointMetaData> getCheckpointInternal(Database cx,
 				alternatives.push_back(locations[0].second->getInterface(i).checkpoint.getReply(
 				    GetCheckpointRequest(minVersion, keys, format, createNew)));
 			}
+
 			TraceEvent("GetCheckpointInternalWait")
 			    .detail("Range", keys.toString())
 			    .detail("MinVersion", minVersion)
 			    .detail("Alternatives", locations[0].second->description());
+
 			choose {
 				when(wait(cx->connectionFileChanged())) { cx->invalidateCache(keys); }
 				when(wait(waitForAny(alternatives))) { break; }
-				when(wait(delay(5))) { cx->invalidateCache(keys); }
+				when(wait(delay(timeout))) {
+					TraceEvent("GetCheckpointInternalTimeout")
+					    .detail("Range", keys.toString())
+					    .detail("MinVersion", minVersion)
+					    .detail("Alternatives", locations[0].second->description());
+					cx->invalidateCache(keys);
+				}
 			}
 		} catch (Error& e) {
 			TraceEvent("GetCheckpointInternalError").detail("Range", keys.toString()).error(e, true);
@@ -6911,9 +6928,12 @@ ACTOR Future<CheckpointMetaData> getCheckpoint(Database cx,
                                                KeyRange keys,
                                                Version minVersion,
                                                CheckpointFormat format) {
-	state Span span("NAPI:CreateCheckpoint"_loc);
+	state Span span("NAPI:GetCheckpoint"_loc);
 
-	TraceEvent("GetCheckpointStart").detail("Version", minVersion).detail("Range", keys.toString());
+	TraceEvent("GetCheckpointBegin")
+	    .detail("MinVersion", minVersion)
+	    .detail("Range", keys.toString())
+	    .detail("Format", static_cast<int>(format));
 
 	try {
 		state CheckpointMetaData m1 = wait(getCheckpointInternal(cx, keys, minVersion, format, /*createNew=*/false));
@@ -6924,11 +6944,13 @@ ACTOR Future<CheckpointMetaData> getCheckpoint(Database cx,
 			throw e;
 		}
 	}
+
 	TraceEvent("GetCheckpointCreateNew").detail("Version", minVersion);
 	CheckpointMetaData m2 = wait(getCheckpointInternal(cx, keys, minVersion, format, /*createNew=*/true));
 	return m2;
 }
 
+// Fetch a single file from storage server with ID of `ssID`.
 ACTOR static Future<Void> fetchCheckpointFile(Database cx,
                                               UID ssID,
                                               std::string remoteFile,
@@ -6977,7 +6999,6 @@ ACTOR static Future<Void> fetchCheckpointFile(Database cx,
 			    .detail("Attempt", attempt);
 			loop {
 				state GetFileReply rep = waitNext(stream.getFuture());
-				std::cout << "Received data: " << rep.sequence << "size: " << rep.data.size() << std::endl;
 				wait(asyncFile->write(rep.data.begin(), rep.size, offset));
 				wait(asyncFile->flush());
 				offset += rep.data.size();
@@ -6994,10 +7015,14 @@ ACTOR static Future<Void> fetchCheckpointFile(Database cx,
 					throw e;
 				}
 			} else {
-				int64_t fileSize = wait(asyncFile->size());
-				std::cout << "File " << asyncFile->getFilename() << " transfer complete, size: " << fileSize
-				          << std::endl;
 				wait(asyncFile->sync());
+				int64_t fileSize = wait(asyncFile->size());
+				TraceEvent("FetchCheckpointFileEnd")
+				    .detail("RemoteFile", remoteFile)
+				    .detail("StorageServer", ssi.toString())
+				    .detail("LocalFile", localFile)
+				    .detail("Attempt", attempt)
+				    .detail("FileSize", fileSize);
 				return Void();
 			}
 		}
@@ -7034,7 +7059,7 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
 			metaData.rocksCF.get().sstFiles[i].db_path = dir;
 		}
 	} else {
-		throw internal_error();
+		throw not_implemented();
 	}
 
 	return metaData;

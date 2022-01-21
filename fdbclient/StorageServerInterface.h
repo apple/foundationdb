@@ -35,10 +35,6 @@
 #include "fdbclient/TagThrottle.actor.h"
 #include "flow/UnitTest.h"
 
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
-#include <rocksdb/metadata.h>
-#endif // SSD_ROCKSDB_EXPERIMENTAL
-
 // Dead code, removed in the next protocol version
 struct VersionReply {
 	constexpr static FileIdentifier file_identifier = 3;

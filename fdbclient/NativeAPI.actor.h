@@ -465,8 +465,10 @@ int64_t extractIntOption(Optional<StringRef> value,
 // states: coordinator, TLog and storage state
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
+// Get a checkpoint for keys with a minimum version, in the specific format.
 ACTOR Future<CheckpointMetaData> getCheckpoint(Database cx, KeyRange keys, Version minVersion, CheckpointFormat format);
 
+// Fetch a checkpoint to dir, a new checkpoint will be created on the storage server(s) if none exists.
 ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  KeyRange keys,
                                                  Version minVersion,

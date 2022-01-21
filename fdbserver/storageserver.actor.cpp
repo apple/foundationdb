@@ -1683,12 +1683,12 @@ ACTOR Future<Void> getFileQ(StorageServer* self, GetFileRequest req) {
 	size_t pos = req.path.rfind("/");
 	state std::string name = pos == std::string::npos ? req.path : req.path.substr(pos + 1);
 
-	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
-	    req.path, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO, 0));
-
 	req.reply.setByteLimit(SERVER_KNOBS->FILE_TRANSFER_BLOCK_BYTES);
 
 	try {
+		state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
+		    req.path, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO, 0));
+
 		loop {
 			arena = Arena();
 			buf = makeAlignedString(_PAGE_SIZE, transactionSize, arena);
@@ -5619,28 +5619,6 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		data->storageCommitLatencyHistogram->sampleSeconds(now() - beforeStorageCommit);
 
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
-
-		// while (!data->pendingGetCheckpointRequests.empty() &&
-		//        data->pendingGetCheckpointRequests.begin()->first <= newOldestVersion) {
-		// 	try {
-		// 		state CheckpointMetaData CheckpointMetaData = wait(data->storage.checkpoint(
-		// 		    data->folder + "/rockscheckpoints" + std::to_string(newOldestVersion) + "/"));
-		// 		CheckpointMetaData.version = newOldestVersion;
-		// 	} catch (Error& e) {
-		// 		data->pendingGetCheckpointRequests.begin()->second.sendError(e);
-		// 		data->pendingGetCheckpointRequests.erase(data->pendingGetCheckpointRequests.begin());
-		// 		TraceEvent(SevWarnAlways, "CheckpointFailed")
-		// 		    .detail("MinVerison", data->pendingGetCheckpointRequests.begin()->first)
-		// 		    .error(e, /*includeCancel=*/true);
-		// 		continue;
-		// 	}
-		// 	data->checkpoints.emplace(newOldestVersion, CheckpointMetaData);
-		// 	data->pendingGetCheckpointRequests.begin()->second.send(CheckpointMetaData);
-		// 	data->pendingGetCheckpointRequests.erase(data->pendingGetCheckpointRequests.begin());
-		// 	TraceEvent("CheckpointSucceeded")
-		// 	    .detail("MinVerison", data->pendingGetCheckpointRequests.begin()->first)
-		// 	    .detail("CheckpointVersion", newOldestVersion);
-		// }
 
 		if (newOldestVersion > data->rebootAfterDurableVersion) {
 			TraceEvent("RebootWhenDurableTriggered", data->thisServerID)
