@@ -940,6 +940,7 @@ ACTOR Future<Void> deregisterBlobWorker(Reference<BlobManagerData> bmData, BlobW
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		try {
+			checkManagerLock(tr, bmData);
 			Key blobWorkerListKey = blobWorkerListKeyFor(interf.id());
 			tr->addReadConflictRange(singleKeyRange(blobWorkerListKey));
 			tr->clear(blobWorkerListKey);
@@ -959,9 +960,7 @@ ACTOR Future<Void> deregisterBlobWorker(Reference<BlobManagerData> bmData, BlobW
 	}
 }
 
-ACTOR Future<Void> haltBlobWorker(Reference<BlobManagerData> bmData,
-                                  BlobWorkerInterface bwInterf,
-                                  bool removeFromDead) {
+ACTOR Future<Void> haltBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerInterface bwInterf) {
 	loop {
 		try {
 			wait(bwInterf.haltBlobWorker.getReply(HaltBlobWorkerRequest(bmData->epoch, bmData->id)));
@@ -985,16 +984,6 @@ ACTOR Future<Void> haltBlobWorker(Reference<BlobManagerData> bmData,
 		}
 	}
 
-	// Remove blob worker from persisted list of blob workers
-	Future<Void> deregister = deregisterBlobWorker(bmData, bwInterf);
-
-	// restart recruiting to replace the dead blob worker
-	bmData->restartRecruiting.trigger();
-
-	if (removeFromDead) {
-		bmData->deadWorkers.erase(bwInterf.id());
-	}
-
 	return Void();
 }
 
@@ -1012,6 +1001,9 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 		bmData->workersById.erase(bwId);
 		bmData->workerAddresses.erase(bwInterf.stableAddress());
 	}
+
+	// Remove blob worker from persisted list of blob workers
+	Future<Void> deregister = deregisterBlobWorker(bmData, bwInterf);
 
 	// for every range owned by this blob worker, we want to
 	// - send a revoke request for that range
@@ -1048,6 +1040,15 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 		fmt::print("Sending halt to BW {}\n", bwId.toString());
 	}
 	bmData->addActor.send(haltBlobWorker(bmData, bwInterf, registered));
+
+	wait(deregister);
+
+	// restart recruiting to replace the dead blob worker
+	bmData->restartRecruiting.trigger();
+
+	if (registered) {
+		bmData->deadWorkers.erase(bwInterf.id());
+	}
 
 	return Void();
 }
