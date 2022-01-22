@@ -128,7 +128,15 @@ public interface EventKeeper {
 		 * The number of JNI calls that were exercised.
 		 */
 		JNI_CALL,
-
+		/**
+		 * The time spent in the FDBTransaction finalizer
+		 */
+		TRANSACTION_FINALIZER_TIME_NANOS {
+			@Override
+			public boolean isTimeEvent() {
+				return true;
+			}
+		},
 		/**
 		 * The total number of bytes pulled from the native layer, including length delimiters., from
 		 * {@link Transaction#get(byte[])}, {@link Transaction#getKey(KeySelector)},

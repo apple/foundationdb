@@ -24,6 +24,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import com.apple.foundationdb.EventKeeper.Events;
@@ -756,12 +757,17 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	@Override
 	protected void finalize() throws Throwable {
+		long start = System.nanoTime();
 		try {
 			checkUnclosed("Transaction");
 			close();
 		}
 		finally {
 			super.finalize();
+			long end = System.nanoTime();
+			if(eventKeeper!=null){
+				eventKeeper.time(EventKeeper.Events.TRANSACTION_FINALIZER_TIME_NANOS, end-start, TimeUnit.NANOSECONDS);
+			}
 		}
 	}
 
