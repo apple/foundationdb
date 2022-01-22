@@ -1982,6 +1982,7 @@ ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamReq
 	}
 	state Future<Void> moved = feed->second->onMove.getFuture();
 	wait(moved);
+	printf("CF Moved! %lld - %lld. sending WSS\n", req.begin, req.end);
 	// DO NOT call req.reply.onReady before sending - we want to propagate this error through regardless of how far
 	// behind client is
 	req.reply.sendError(wrong_shard_server());

@@ -179,6 +179,11 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	NotifiedVersion grvVersion;
 
 	BlobWorkerData(UID id, Database db) : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
+	~BlobWorkerData() {
+		if (BW_DEBUG) {
+			printf("Destroying BW %s data\n", id.toString().c_str());
+		}
+	}
 
 	bool managerEpochOk(int64_t epoch) {
 		if (epoch < currentManagerEpoch) {
@@ -2201,7 +2206,6 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 				// this is an active granule query
 				loop {
 					if (!metadata->activeCFData.get().isValid() || !metadata->cancelled.canBeSet()) {
-
 						throw wrong_shard_server();
 					}
 					Future<Void> waitForVersionFuture = waitForVersion(metadata, req.readVersion);
@@ -2211,10 +2215,19 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 					}
 					// rollback resets all of the version information, so we have to redo wait for
 					// version on rollback
-					choose {
-						when(wait(waitForVersionFuture)) { break; }
-						when(wait(metadata->activeCFData.onChange())) {}
-						when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
+					try {
+						choose {
+							when(wait(waitForVersionFuture)) { break; }
+							when(wait(metadata->activeCFData.onChange())) {}
+							when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
+						}
+					} catch (Error& e) {
+						// we can get change feed cancelled from whenAtLeast. This is effectively
+						if (e.code() != error_code_change_feed_cancelled) {
+							throw e;
+						}
+						// wait 1ms and try again
+						wait(delay(0.001));
 					}
 					if ((BW_REQUEST_DEBUG || DEBUG_BW_WAIT_VERSION == req.readVersion) &&
 					    metadata->activeCFData.get().isValid()) {
