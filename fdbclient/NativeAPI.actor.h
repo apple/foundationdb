@@ -157,6 +157,7 @@ struct TransactionOptions {
 	bool includePort : 1;
 	bool reportConflictingKeys : 1;
 	bool expensiveClearCostEstimation : 1;
+	bool rawAccess : 1;
 
 	TransactionPriority priority;
 
@@ -263,10 +264,10 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	                 Optional<TenantName> tenant,
 	                 TaskPriority taskID,
 	                 SpanID spanID,
-	                 Reference<TransactionLogInfo> trLogInfo)
-	  : cx(cx), tenant(tenant), trLogInfo(trLogInfo), options(cx), taskID(taskID), spanID(spanID) {}
+	                 Reference<TransactionLogInfo> trLogInfo);
 
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
+	TenantInfo getTenantInfo() const;
 };
 
 class Transaction : NonCopyable {

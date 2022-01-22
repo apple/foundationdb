@@ -747,7 +747,6 @@ struct SplitRangeRequest {
 	ReplyPromise<SplitRangeReply> reply;
 
 	SplitRangeRequest() {}
-	SplitRangeRequest(KeyRangeRef const& keys, int64_t chunkSize) : keys(arena, keys), chunkSize(chunkSize) {}
 	SplitRangeRequest(TenantInfo tenantInfo, KeyRangeRef const& keys, int64_t chunkSize)
 	  : tenantInfo(tenantInfo), keys(arena, keys), chunkSize(chunkSize) {}
 
@@ -784,7 +783,7 @@ struct ChangeFeedStreamRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
 	SpanID spanContext;
 	Arena arena;
-	TenantInfo tenantInfo;
+	TenantInfo tenantInfo; // TODO: this needs to be set
 	Key rangeID;
 	Version begin = 0;
 	Version end = 0;

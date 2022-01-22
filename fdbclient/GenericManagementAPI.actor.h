@@ -594,6 +594,38 @@ Future<ConfigurationResult> autoConfig(Reference<DB> db, ConfigureAutoResult con
 	}
 }
 
+// Accepts tokens separated by spaces in a single string
+template <class DB>
+Future<ConfigurationResult> changeConfig(Reference<DB> db, std::string const& modes, bool force) {
+	TraceEvent("ChangeConfig").detail("Mode", modes);
+	std::map<std::string, std::string> m;
+	auto r = buildConfiguration(modes, m);
+	if (r != ConfigurationResult::SUCCESS)
+		return r;
+	return changeConfig(db, m, force);
+}
+
+// Accepts a vector of configuration tokens
+template <class DB>
+Future<ConfigurationResult> changeConfig(Reference<DB> db,
+                                         std::vector<StringRef> const& modes,
+                                         Optional<ConfigureAutoResult> const& conf,
+                                         bool force) {
+	if (modes.size() && modes[0] == LiteralStringRef("auto") && conf.present()) {
+		return autoConfig(db, conf.get());
+	}
+
+	std::map<std::string, std::string> m;
+	auto r = buildConfiguration(modes, m);
+	if (r != ConfigurationResult::SUCCESS)
+		return r;
+	return changeConfig(db, m, force);
+}
+
+// return the corresponding error message for the CoordinatorsResult
+// used by special keys and fdbcli
+std::string generateErrorMessage(const CoordinatorsResult& res);
+
 ACTOR template <class DB>
 Future<Void> createTenant(Reference<DB> db, TenantName name) {
 	state HighContentionAllocator allocator = HighContentionAllocator(Subspace(tenantAllocatorPrefix));
@@ -700,37 +732,6 @@ Future<Key> getTenant(Reference<DB> db, TenantName name) {
 	}
 }
 
-// Accepts tokens separated by spaces in a single string
-template <class DB>
-Future<ConfigurationResult> changeConfig(Reference<DB> db, std::string const& modes, bool force) {
-	TraceEvent("ChangeConfig").detail("Mode", modes);
-	std::map<std::string, std::string> m;
-	auto r = buildConfiguration(modes, m);
-	if (r != ConfigurationResult::SUCCESS)
-		return r;
-	return changeConfig(db, m, force);
-}
-
-// Accepts a vector of configuration tokens
-template <class DB>
-Future<ConfigurationResult> changeConfig(Reference<DB> db,
-                                         std::vector<StringRef> const& modes,
-                                         Optional<ConfigureAutoResult> const& conf,
-                                         bool force) {
-	if (modes.size() && modes[0] == LiteralStringRef("auto") && conf.present()) {
-		return autoConfig(db, conf.get());
-	}
-
-	std::map<std::string, std::string> m;
-	auto r = buildConfiguration(modes, m);
-	if (r != ConfigurationResult::SUCCESS)
-		return r;
-	return changeConfig(db, m, force);
-}
-
-// return the corresponding error message for the CoordinatorsResult
-// used by special keys and fdbcli
-std::string generateErrorMessage(const CoordinatorsResult& res);
 
 } // namespace ManagementAPI
 

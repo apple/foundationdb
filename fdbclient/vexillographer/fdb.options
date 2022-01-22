@@ -230,9 +230,11 @@ description is not currently required but encouraged.
     <Option name="initialize_new_database" code="300"
             description="This is a write-only transaction which sets the initial configuration. This option is designed for use by database system tools only." />
     <Option name="access_system_keys" code="301"
-            description="Allows this transaction to read and modify system keys (those that start with the byte 0xFF)"/>
+            description="Allows this transaction to read and modify system keys (those that start with the byte 0xFF). Implies raw_access."/>
     <Option name="read_system_keys" code="302"
-            description="Allows this transaction to read system keys (those that start with the byte 0xFF)"/>
+            description="Allows this transaction to read system keys (those that start with the byte 0xFF). Implies raw_access."/>
+    <Option name="raw_access" code="303"
+            description="Allows this transaction to access the raw key-space when tenant mode is on."/>
     <Option name="debug_dump" code="400" 
             hidden="true" />
     <Option name="debug_retry_logging" code="401" paramType="String" paramDescription="Optional transaction name" />

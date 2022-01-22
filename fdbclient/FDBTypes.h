@@ -1171,6 +1171,39 @@ struct StorageMigrationType {
 	uint32_t type;
 };
 
+struct TenantMode {
+	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
+	// just before END.
+	enum Mode { OPTIONAL = 0, REQUIRED = 1, END = 2 };
+
+	TenantMode() : mode(OPTIONAL) {}
+	TenantMode(Mode mode) : mode(mode) {
+		if ((uint32_t)mode >= END) {
+			this->mode = OPTIONAL;
+		}
+	}
+	operator Mode() const { return Mode(mode); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mode);
+	}
+
+	std::string toString() const {
+		switch (mode) {
+		case OPTIONAL:
+			return "optional";
+		case REQUIRED:
+			return "required";
+		default:
+			ASSERT(false);
+		}
+		return "";
+	}
+
+	uint32_t mode;
+};
+
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 	int pos = locality.find(':');
 	// locality should be either 0 or in the format '<non_empty_string>:<non_empty_string>'

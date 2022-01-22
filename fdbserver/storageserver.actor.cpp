@@ -423,9 +423,6 @@ public:
 	TenantMap tenantMap;
 	TenantIndex lockedTenantsIndex;
 
-	// TODO: make this a variable configured for the cluster
-	bool allowDefaultTenant = true;
-
 	// Histograms
 	struct FetchKeysHistograms {
 		const Reference<Histogram> latency;
@@ -1392,7 +1389,10 @@ Optional<Key> StorageServer::checkTenant(Version version,
 		}
 
 		return *itr;
-	} else if (!allowDefaultTenant) {
+	}
+	// TODO: integrate with trusted connections proposal to reject
+	// raw access from untrusted peers when in tenant mode
+	else if (db->get().client.tenantMode == TenantMode::REQUIRED && false) {
 		throw tenant_name_required();
 	}
 

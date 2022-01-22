@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/SystemData.h"

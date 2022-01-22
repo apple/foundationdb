@@ -216,8 +216,6 @@ struct ProxyCommitData {
 	double lastMasterReset;
 	double lastResolverReset;
 
-	// TODO: use cluster configuration
-	bool allowDefaultTenant = true;
 	TenantMap tenantMap;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly

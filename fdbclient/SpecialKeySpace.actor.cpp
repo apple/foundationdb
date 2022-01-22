@@ -28,6 +28,7 @@
 
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ProcessInterface.h"
 #include "fdbclient/GlobalConfig.actor.h"
@@ -1265,6 +1266,7 @@ void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& 
 }
 
 ACTOR Future<RangeResult> getProcessClassSourceActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
+	ryw->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	std::vector<ProcessData> _workers = wait(getWorkers(&ryw->getTransaction()));
 	auto workers = _workers; // strip const
 	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5

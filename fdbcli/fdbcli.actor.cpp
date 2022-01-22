@@ -55,6 +55,7 @@
 #include "fdbcli/fdbcli.actor.h"
 
 #include <cinttypes>
+#include <cstdio>
 #include <type_traits>
 #include <signal.h>
 
@@ -1218,7 +1219,8 @@ void configureGenerator(const char* text, const char* line, std::vector<std::str
 		                   "resolvers=",
 		                   "perpetual_storage_wiggle=",
 		                   "perpetual_storage_wiggle_locality=",
-		                   "storage_migration_type=",
+		                   "storage_migration_type="
+		                   "tenant_mode=",
 		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
@@ -2446,8 +2448,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", line).detail("IsError", is_error);
 
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled)
+			if (e.code() == error_code_tenant_name_required) {
+				printAtCol("ERROR: tenant name required. Use the `usetenant' command to select a tenant or enable the "
+				           "`RAW_ACCESS' option to read raw keys.",
+				           80,
+				           stderr);
+			} else if (e.code() != error_code_actor_cancelled) {
 				fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
+			}
 			is_error = true;
 			if (intrans) {
 				printf("Rolling back current transaction\n");

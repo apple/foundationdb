@@ -236,8 +236,10 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 						continue;
 					}
 
-					// If tenants are required, then check that a tenant was set
-					if (!req.tenantInfo.name.present() && !commitData->allowDefaultTenant) {
+					// TODO: integrate with trusted connections proposal to reject
+					// raw access from untrusted peers when in tenant mode
+					if (!req.tenantInfo.name.present() &&
+					    commitData->db->get().client.tenantMode == TenantMode::REQUIRED && false) {
 						++commitData->stats.txnCommitErrors;
 						req.reply.sendError(tenant_name_required());
 						continue;
@@ -863,7 +865,10 @@ ErrorOr<Void> checkTenant(ProxyCommitData* commitData, CommitTransactionRequest 
 				throw key_not_in_tenant();
 			}
 		}
-	} else if (!commitData->allowDefaultTenant) {
+	}
+	// TODO: integrate with trusted connections proposal to reject
+	// raw access from untrusted peers when in tenant mode
+	else if (commitData->db->get().client.tenantMode == TenantMode::REQUIRED && false) {
 		// We already check this when the request came in, but it's possible the configuration has changed
 		return tenant_name_required();
 	}

@@ -2656,6 +2656,13 @@ SpanID generateSpanID(bool transactionTracingSample, SpanID parentContext = Span
 	}
 }
 
+TransactionState::TransactionState(Database cx,
+                                   Optional<TenantName> tenant,
+                                   TaskPriority taskID,
+                                   SpanID spanID,
+                                   Reference<TransactionLogInfo> trLogInfo)
+  : cx(cx), tenant(tenant), trLogInfo(trLogInfo), options(cx), taskID(taskID), spanID(spanID) {}
+
 Reference<TransactionState> TransactionState::cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo,
                                                             bool generateNewSpan) const {
 
@@ -2672,6 +2679,15 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
 	newState->conflictingKeys = conflictingKeys;
 
 	return newState;
+}
+
+TenantInfo TransactionState::getTenantInfo() const {
+	if (!cx->internal && !options.rawAccess && cx->clientInfo->get().tenantMode == TenantMode::REQUIRED &&
+	    !tenant.present()) {
+		throw tenant_name_required();
+	}
+
+	return TenantInfo(tenant);
 }
 
 Future<Void> Transaction::warmRange(KeyRange keys) {
@@ -2737,7 +2753,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					         ssi.second,
 					         &StorageServerInterface::getValue,
 					         GetValueRequest(span.context,
-					                         useTenant ? TenantInfo(trState->tenant) : TenantInfo(),
+					                         useTenant ? trState->getTenantInfo() : TenantInfo(),
 					                         key,
 					                         ver,
 					                         trState->cx->sampleReadTags() ? trState->options.readTags
@@ -2853,7 +2869,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 			++trState->cx->transactionPhysicalReads;
 
 			GetKeyRequest req(span.context,
-			                  TenantInfo(trState->tenant),
+			                  trState->getTenantInfo(),
 			                  k,
 			                  version.get(),
 			                  trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>(),
@@ -2924,8 +2940,8 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, Span
 						cx->smoothMidShardSize.setTotal(v.midShardSize);
 					if (v.version >= version)
 						return v.version;
-					// SOMEDAY: Do the wait on the server side, possibly use less expensive source of committed version
-					// (causal consistency is not needed for this purpose)
+					// SOMEDAY: Do the wait on the server side, possibly use less expensive source of committed
+					// version (causal consistency is not needed for this purpose)
 					wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, cx->taskID));
 				}
 			}
@@ -2990,7 +3006,7 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 				                     ssi.second,
 				                     &StorageServerInterface::watchValue,
 				                     WatchValueRequest(span.context,
-				                                       parameters->tenant,
+				                                       TenantInfo(parameters->tenant),
 				                                       parameters->key,
 				                                       parameters->value,
 				                                       ver,
@@ -3006,8 +3022,8 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 			}
 
 			// FIXME: wait for known committed version on the storage server before replying,
-			// cannot do this until the storage server is notified on knownCommittedVersion changes from tlog (faster
-			// than the current update loop)
+			// cannot do this until the storage server is notified on knownCommittedVersion changes from tlog
+			// (faster than the current update loop)
 			Version v = wait(waitForCommittedVersion(cx, resp.version, span.context));
 
 			// False if there is a master failure between getting the response and getting the committed version,
@@ -3026,8 +3042,8 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 				TEST(e.code() == error_code_process_behind); // The storage servers are all behind
 				// clang-format on
 				wait(delay(CLIENT_KNOBS->WATCH_POLLING_TIME, parameters->taskID));
-			} else if (e.code() == error_code_timed_out) { // The storage server occasionally times out watches in case
-				                                           // it was cancelled
+			} else if (e.code() == error_code_timed_out) { // The storage server occasionally times out watches in
+				                                           // case it was cancelled
 				TEST(true); // A watch timed out
 				wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, parameters->taskID));
 			} else {
@@ -3060,7 +3076,8 @@ ACTOR Future<Void> watchStorageServerResp(Optional<TenantName> tenant, Key key, 
 			}
 			// ABA happens
 			else {
-				TEST(true); // ABA issue where the version returned from the server is less than the version in the map
+				TEST(true); // ABA issue where the version returned from the server is less than the version in the
+				            // map
 
 				// case 2: version_1 < version_2 and future_count == 1
 				if (metadata->watchPromise.getFutureReferenceCount() == 1) {
@@ -3148,7 +3165,8 @@ Future<Void> getWatchFuture(Database cx, Reference<WatchParameters> parameters) 
 	// case 3: val_1 != val_2 && version_2 > version_1 (received watch with different value and a higher version so
 	// recreate in SS)
 	else if (parameters->version > metadata->parameters->version) {
-		TEST(true); // Setting a watch that has a different value than the one in the map but a higher version (newer)
+		TEST(true); // Setting a watch that has a different value than the one in the map but a higher version
+		            // (newer)
 		cx->deleteWatchMetadata(parameters->tenant, parameters->key);
 
 		metadata->watchPromise.send(parameters->version);
@@ -3248,7 +3266,7 @@ Future<RangeResult> getExactRange(Reference<TransactionState> trState,
 			req.mapper = mapper;
 			req.arena.dependsOn(mapper.arena());
 
-			req.tenantInfo = TenantInfo(trState->tenant);
+			req.tenantInfo = trState->getTenantInfo();
 			req.version = version;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
@@ -3545,10 +3563,10 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 		trState->cx->validateVersion(version);
 
 		state double startTime = now();
-		state Version readVersion = version; // Needed for latestVersion requests; if more, make future requests at the
-		                                     // version that the first one completed
-		                                     // FIXME: Is this really right?  Weaken this and see if there is a problem;
-		                                     // if so maybe there is a much subtler problem even with this.
+		state Version readVersion = version; // Needed for latestVersion requests; if more, make future requests at
+		                                     // the version that the first one completed
+		                                     // FIXME: Is this really right?  Weaken this and see if there is a
+		                                     // problem; if so maybe there is a much subtler problem even with this.
 
 		state Key resolvedTenantPrefix = wait(trState->tenantPrefix);
 		if (resolvedTenantPrefix.size() > 0) {
@@ -3585,17 +3603,17 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 			req.mapper = mapper;
 			req.arena.dependsOn(mapper.arena());
 
-			req.tenantInfo = TenantInfo(trState->tenant);
+			req.tenantInfo = trState->getTenantInfo();
 			req.isFetchKeys = (trState->taskID == TaskPriority::FetchKeys);
 			req.version = readVersion;
 
-			// In case of async tss comparison, also make req arena depend on begin, end, and/or shard's arena depending
-			// on which is used
+			// In case of async tss comparison, also make req arena depend on begin, end, and/or shard's arena
+			// depending on which is used
 			bool dependOnShard = false;
 			if (reverse && (begin - 1).isDefinitelyLess(shard.begin) &&
 			    (!begin.isFirstGreaterOrEqual() ||
-			     begin.getKey() != shard.begin)) { // In this case we would be setting modifiedSelectors to true, but
-				                                   // not modifying anything
+			     begin.getKey() != shard.begin)) { // In this case we would be setting modifiedSelectors to true,
+				                                   // but not modifying anything
 
 				req.begin = firstGreaterOrEqual(shard.begin);
 				modifiedSelectors = true;
@@ -3702,8 +3720,8 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 					output.readThroughEnd = readThroughEnd;
 
 					if (BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows)) {
-						// Copy instead of resizing because TSS maybe be using output's arena for comparison. This only
-						// happens in simulation so it's fine
+						// Copy instead of resizing because TSS maybe be using output's arena for comparison. This
+						// only happens in simulation so it's fine
 						RangeResult copy;
 						int newSize =
 						    deterministicRandom()->randomInt(std::max(1, originalLimits.minRows), output.size());
@@ -3904,8 +3922,9 @@ static Future<Void> tssStreamComparison(Request request,
 		if (ssReply.present() && tssReply.present()) {
 			// compare results
 			// FIXME: this code is pretty much identical to LoadBalance.h
-			// TODO could add team check logic in if we added synchronous way to turn this into a fixed getRange request
-			// and send it to the whole team and compare? I think it's fine to skip that for streaming though
+			// TODO could add team check logic in if we added synchronous way to turn this into a fixed getRange
+			// request and send it to the whole team and compare? I think it's fine to skip that for streaming
+			// though
 			TEST(ssEndOfStream != tssEndOfStream); // SS or TSS stream finished early!
 
 			// skip tss comparison if both are end of stream
@@ -3922,8 +3941,8 @@ static Future<Void> tssStreamComparison(Request request,
 				if (tssData.metrics->shouldRecordDetailedMismatch()) {
 					TSS_traceMismatch(mismatchEvent, request, ssReply.get(), tssReply.get());
 
-					TEST(FLOW_KNOBS
-					         ->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL); // Tracing Full TSS Mismatch in stream comparison
+					TEST(FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL); // Tracing Full TSS Mismatch in stream
+					                                                        // comparison
 					TEST(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL); // Tracing Partial TSS Mismatch in stream
 					                                                         // comparison and storing the rest in FDB
 
@@ -3967,7 +3986,8 @@ maybeDuplicateTSSStreamFragment(Request& req, QueueModel* model, RequestStream<R
 		if (tssData.present()) {
 			TEST(true); // duplicating stream to TSS
 			resetReply(req);
-			// FIXME: optimize to avoid creating new netNotifiedQueueWithAcknowledgements for each stream duplication
+			// FIXME: optimize to avoid creating new netNotifiedQueueWithAcknowledgements for each stream
+			// duplication
 			RequestStream<Request> tssRequestStream(tssData.get().endpoint);
 			ReplyPromiseStream<REPLYSTREAM_TYPE(Request)> tssReplyStream = tssRequestStream.getReplyStream(req);
 			PromiseStream<REPLYSTREAM_TYPE(Request)> ssDuplicateReplyStream;
@@ -3998,6 +4018,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 
 			state Optional<TSSDuplicateStreamData<GetKeyValuesStreamReply>> tssDuplicateStream;
 			state GetKeyValuesStreamRequest req;
+			req.tenantInfo = trState->getTenantInfo();
 			req.version = version;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
@@ -4031,8 +4052,8 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 				state int useIdx = -1;
 
 				loop {
-					// FIXME: create a load balance function for this code so future users of reply streams do not have
-					// to duplicate this code
+					// FIXME: create a load balance function for this code so future users of reply streams do not
+					// have to duplicate this code
 					int count = 0;
 					for (int i = 0; i < locations[shard].second->size(); i++) {
 						if (!IFailureMonitor::failureMonitor()
@@ -4247,8 +4268,8 @@ static KeyRange intersect(KeyRangeRef lhs, KeyRangeRef rhs) {
 	return KeyRange(KeyRangeRef(std::max(lhs.begin, rhs.begin), std::min(lhs.end, rhs.end)));
 }
 
-// Divides the requested key range into 1MB fragments, create range streams for each fragment, and merges the results so
-// the client get them in order
+// Divides the requested key range into 1MB fragments, create range streams for each fragment, and merges the
+// results so the client get them in order
 ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
                                   PromiseStream<RangeResult> _results,
                                   Future<Version> fVersion,
@@ -4369,7 +4390,8 @@ void debugAddTags(Reference<TransactionState> trState) {
 
 ACTOR Future<Key> getTenantPrefixImpl(Reference<TransactionState> trState, Future<Version> version) {
 	// TODO: Support local and/or stateless role caching
-	// TODO: This bypasses Transaction::get(), which means we don't set a conflict range or do some metric accounting.
+	// TODO: This bypasses Transaction::get(), which means we don't set a conflict range or do some metric
+	// accounting.
 	//       Should we incorporate that here? If we use the stateless role caching, we could avoid doing an explicit
 	//       read.
 	Optional<Value> val =
@@ -4562,6 +4584,12 @@ Future<Version> Transaction::getRawReadVersion() {
 
 Future<Void> Transaction::watch(Reference<Watch> watch) {
 	++trState->cx->transactionWatchRequests;
+
+	if (!trState->cx->internal && !trState->options.rawAccess &&
+	    trState->cx->clientInfo->get().tenantMode == TenantMode::REQUIRED && !trState->tenant.present()) {
+		throw tenant_name_required();
+	}
+
 	trState->cx->addWatch();
 	watches.push_back(watch);
 	return ::watch(watch,
@@ -4596,15 +4624,15 @@ ACTOR Future<Standalone<VectorRef<const char*>>> getAddressesForKeyActor(Referen
 	ASSERT(serverUids.size()); // every shard needs to have a team
 
 	std::vector<UID> src;
-	std::vector<UID> ignore; // 'ignore' is so named because it is the vector into which we decode the 'dest' servers in
-	                         // the case where this key is being relocated. But 'src' is the canonical location until
-	                         // the move is finished, because it could be cancelled at any time.
+	std::vector<UID> ignore; // 'ignore' is so named because it is the vector into which we decode the 'dest'
+	                         // servers in the case where this key is being relocated. But 'src' is the canonical
+	                         // location until the move is finished, because it could be cancelled at any time.
 	decodeKeyServersValue(serverTagResult, serverUids[0].value, src, ignore);
 	Optional<std::vector<StorageServerInterface>> serverInterfaces =
 	    wait(transactionalGetServerInterfaces(trState, ver, src));
 
-	ASSERT(serverInterfaces.present()); // since this is happening transactionally, /FF/keyServers and /FF/serverList
-	                                    // need to be consistent with one another
+	ASSERT(serverInterfaces.present()); // since this is happening transactionally, /FF/keyServers and
+	                                    // /FF/serverList need to be consistent with one another
 	ssi = serverInterfaces.get();
 
 	Standalone<VectorRef<const char*>> addresses;
@@ -4735,8 +4763,8 @@ Future<RangeResult> Transaction::getRange(const KeySelector& begin,
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
-// A method for streaming data from the storage server that is more efficient than getRange when reading large amounts
-// of data
+// A method for streaming data from the storage server that is more efficient than getRange when reading large
+// amounts of data
 Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& results,
                                          const KeySelector& begin,
                                          const KeySelector& end,
@@ -5015,6 +5043,7 @@ void TransactionOptions::clear() {
 	readTags = TagSet{};
 	priority = TransactionPriority::DEFAULT;
 	expensiveClearCostEstimation = false;
+	rawAccess = false;
 }
 
 TransactionOptions::TransactionOptions() {
@@ -5098,8 +5127,8 @@ ACTOR void checkWrites(Reference<TransactionState> trState,
 	state Version version;
 	try {
 		wait(committed);
-		// If the commit is successful, by definition the transaction still exists for now.  Grab the version, and don't
-		// use it again.
+		// If the commit is successful, by definition the transaction still exists for now.  Grab the version, and
+		// don't use it again.
 		version = trState->committedVersion;
 		outCommitted.send(Void());
 	} catch (Error& e) {
@@ -5272,10 +5301,10 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Referen
 
 	// sample clear op: the expectation of #sampledOp is every COMMIT_SAMPLE_COST sample once
 	// we also scale the cost of mutations whose cost is less than COMMIT_SAMPLE_COST as scaledCost =
-	// min(COMMIT_SAMPLE_COST, cost) If we have 4 transactions: A - 100 1-cost mutations: E[sampled ops] = 1, E[sampled
-	// cost] = 100 B - 1 100-cost mutation: E[sampled ops] = 1, E[sampled cost] = 100 C - 50 2-cost mutations: E[sampled
-	// ops] = 1, E[sampled cost] = 100 D - 1 150-cost mutation and 150 1-cost mutations: E[sampled ops] = 3, E[sampled
-	// cost] = 150cost * 1 + 150 * 100cost * 0.01 = 300
+	// min(COMMIT_SAMPLE_COST, cost) If we have 4 transactions: A - 100 1-cost mutations: E[sampled ops] = 1,
+	// E[sampled cost] = 100 B - 1 100-cost mutation: E[sampled ops] = 1, E[sampled cost] = 100 C - 50 2-cost
+	// mutations: E[sampled ops] = 1, E[sampled cost] = 100 D - 1 150-cost mutation and 150 1-cost mutations:
+	// E[sampled ops] = 3, E[sampled cost] = 150cost * 1 + 150 * 100cost * 0.01 = 300
 	ASSERT(trCommitCosts.writeCosts > 0);
 	std::deque<std::pair<int, uint64_t>> newClearIdxCosts;
 	for (const auto& [idx, cost] : trCommitCosts.clearIdxCosts) {
@@ -5297,9 +5326,9 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Referen
 
 // TODO: I've written it this way so that the application of the prefix is self-contained and can be easily replaced
 //       by another approach. If we choose not to send the request without the prefix applied, then it may be more
-//       efficient for us to apply the prefix for each mutation and conflict range as we go along. The approach below
-//       defeats some of our attempts to store various operations more compactly (e.g. avoiding duplicate data for
-//       single key ranges).
+//       efficient for us to apply the prefix for each mutation and conflict range as we go along. The approach
+//       below defeats some of our attempts to store various operations more compactly (e.g. avoiding duplicate data
+//       for single key ranges).
 // TODO: Compact the result to avoid us having to keep the no longer used memory.
 void applyTenantPrefix(CommitTransactionRequest req, Key tenantPrefix) {
 	for (auto& m : req.transaction.mutations) {
@@ -5487,9 +5516,10 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 
 				// To ensure the original request is not in flight, we need a key range which intersects its read
 				// conflict ranges We pick a key range which also intersects its write conflict ranges, since that
-				// avoids potentially creating conflicts where there otherwise would be none We make the range as small
-				// as possible (a single key range) to minimize conflicts The intersection will never be empty, because
-				// if it were (since !causalWriteRisky) makeSelfConflicting would have been applied automatically to req
+				// avoids potentially creating conflicts where there otherwise would be none We make the range as
+				// small as possible (a single key range) to minimize conflicts The intersection will never be
+				// empty, because if it were (since !causalWriteRisky) makeSelfConflicting would have been applied
+				// automatically to req
 				KeyRangeRef selfConflictingRange =
 				    intersects(req.transaction.write_conflict_ranges, req.transaction.read_conflict_ranges).get();
 
@@ -5559,8 +5589,8 @@ Future<Void> Transaction::commitMutations() {
 
 		if (!readVersion.isValid())
 			getReadVersion(
-			    GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY); // sets up readVersion field.  We had no reads, so no
-			                                                    // need for (expensive) full causal consistency.
+			    GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY); // sets up readVersion field.  We had no reads, so
+			                                                    // no need for (expensive) full causal consistency.
 
 		bool isCheckingWrites = trState->options.checkWritesEnabled && deterministicRandom()->random01() < 0.01;
 		for (int i = 0; i < extraConflictRanges.size(); i++)
@@ -5837,6 +5867,15 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 	case FDBTransactionOptions::EXPENSIVE_CLEAR_COST_ESTIMATION_ENABLE:
 		validateOptionValueNotPresent(value);
 		trState->options.expensiveClearCostEstimation = true;
+		break;
+
+	case FDBTransactionOptions::READ_SYSTEM_KEYS:
+	case FDBTransactionOptions::ACCESS_SYSTEM_KEYS:
+	case FDBTransactionOptions::RAW_ACCESS:
+		// System key access implies raw access. Native API handles the raw access,
+		// system key access is handled in RYW.
+		validateOptionValueNotPresent(value);
+		trState->options.rawAccess = true;
 		break;
 
 	default:
@@ -6163,9 +6202,9 @@ ACTOR Future<ProtocolVersion> getCoordinatorProtocol(NetworkAddressList coordina
 }
 
 // Gets the protocol version reported by a coordinator in its connect packet
-// If we are unable to get a version from the connect packet (e.g. because we lost connection with the peer), then this
-// function will return with an unset result.
-// If an expected version is given, this future won't return if the actual protocol version matches the expected version
+// If we are unable to get a version from the connect packet (e.g. because we lost connection with the peer), then
+// this function will return with an unset result. If an expected version is given, this future won't return if the
+// actual protocol version matches the expected version
 ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
     NetworkAddress coordinatorAddress,
     Optional<ProtocolVersion> expectedVersion) {
@@ -6179,7 +6218,8 @@ ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
 
 		Future<Void> change = protocolVersion->onChange();
 		if (!protocolVersion->get().present()) {
-			// If we still don't have any connection info after a timeout, retry sending the protocol version request
+			// If we still don't have any connection info after a timeout, retry sending the protocol version
+			// request
 			change = timeout(change, FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT, Void());
 		}
 
@@ -6205,8 +6245,8 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 		} else {
 			Endpoint coordinatorEndpoint = coordinator->get().get().getLeader.getEndpoint();
 			if (needToConnect) {
-				// Even though we typically rely on the connect packet to get the protocol version, we need to send some
-				// request in order to start a connection. This protocol version request serves that purpose.
+				// Even though we typically rely on the connect packet to get the protocol version, we need to send
+				// some request in order to start a connection. This protocol version request serves that purpose.
 				protocolVersion = getCoordinatorProtocol(coordinatorEndpoint.addresses);
 				needToConnect = false;
 			}
@@ -6221,8 +6261,8 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 					protocolVersion = Never();
 				}
 
-				// Older versions of FDB don't have an endpoint to return the protocol version, so we get this info from
-				// the connect packet
+				// Older versions of FDB don't have an endpoint to return the protocol version, so we get this info
+				// from the connect packet
 				when(Optional<ProtocolVersion> pv = wait(getCoordinatorProtocolFromConnectPacket(
 				         coordinatorEndpoint.getPrimaryAddress(), expectedVersion))) {
 					if (pv.present()) {
@@ -6414,8 +6454,8 @@ ACTOR Future<StorageMetrics> extractMetrics(Future<std::pair<Optional<StorageMet
 ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Database cx, KeyRange keys) {
 	state Span span("NAPI:GetReadHotRanges"_loc);
 	loop {
-		int64_t shardLimit = 100; // Shard limit here does not really matter since this function is currently only used
-		                          // to find the read-hot sub ranges within a read-hot shard.
+		int64_t shardLimit = 100; // Shard limit here does not really matter since this function is currently only
+		                          // used to find the read-hot sub ranges within a read-hot shard.
 		std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
 		    wait(getKeyRangeLocations(cx,
 		                              keys,
@@ -6427,9 +6467,9 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 		                              UseProvisionalProxies::False));
 		try {
 			// TODO: how to handle this?
-			// This function is called whenever a shard becomes read-hot. But somehow the shard was splitted across more
-			// than one storage server after become read-hot and before this function is called, i.e. a race condition.
-			// Should we abort and wait the newly splitted shards to be hot again?
+			// This function is called whenever a shard becomes read-hot. But somehow the shard was splitted across
+			// more than one storage server after become read-hot and before this function is called, i.e. a race
+			// condition. Should we abort and wait the newly splitted shards to be hot again?
 			state int nLocs = locations.size();
 			// if (nLocs > 1) {
 			// 	TraceEvent("RHDDebug")
@@ -6604,7 +6644,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 			for (int i = 0; i < nLocs; i++) {
 				partBegin = (i == 0) ? keys.begin : locations[i].first.begin;
 				partEnd = (i == nLocs - 1) ? keys.end : locations[i].first.end;
-				SplitRangeRequest req(KeyRangeRef(partBegin, partEnd), chunkSize);
+				SplitRangeRequest req(trState->getTenantInfo(), KeyRangeRef(partBegin, partEnd), chunkSize);
 				fReplies[i] = loadBalance(locations[i].second->locations(),
 				                          &StorageServerInterface::getRangeSplitPoints,
 				                          req,
@@ -6647,8 +6687,8 @@ Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange 
 
 #define BG_REQUEST_DEBUG false
 
-// the blob granule requests are a bit funky because they piggyback off the existing transaction to read from the system
-// keyspace
+// the blob granule requests are a bit funky because they piggyback off the existing transaction to read from the
+// system keyspace
 ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Transaction* self, KeyRange keyRange) {
 	// FIXME: use streaming range read
 	state KeyRange currentRange = keyRange;
@@ -6904,8 +6944,8 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 					                                         req,
 					                                         TaskPriority::DataDistribution));
 					if (res.splits.size() &&
-					    res.splits[0] <= results.back()) { // split points are out of order, possibly because of moving
-						                                   // data, throw error to retry
+					    res.splits[0] <= results.back()) { // split points are out of order, possibly because of
+						                                   // moving data, throw error to retry
 						ASSERT_WE_THINK(
 						    false); // FIXME: This seems impossible and doesn't seem to be covered by testing
 						throw all_alternatives_failed();

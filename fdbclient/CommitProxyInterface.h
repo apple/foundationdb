@@ -119,6 +119,8 @@ struct ClientDBInfo {
 	// happens, the clients need to be aware of
 	uint64_t clientLibChangeCounter = 0;
 
+	TenantMode tenantMode;
+
 	ClientDBInfo() {}
 
 	bool operator==(ClientDBInfo const& r) const { return id == r.id; }
@@ -129,7 +131,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history, clientLibChangeCounter);
+		serializer(ar, grvProxies, commitProxies, id, forward, history, clientLibChangeCounter, tenantMode);
 	}
 };
 
