@@ -334,15 +334,11 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 		{ "BlockCacheUsage", rocksdb::DB::Properties::kBlockCacheUsage },
 		{ "BlockCachePinnedUsage", rocksdb::DB::Properties::kBlockCachePinnedUsage },
 	};
-
-<<<<<<< HEAD
 	state std::unordered_map<std::string, uint64_t> readIteratorPoolStats = {
 		{ "NumReadIteratorsCreated", 0 },
 		{ "NumTimesReadIteratorsReused", 0 },
 	};
 
-=======
->>>>>>> 5ccb3d7d7 (Add Rocks PerfContext)
 	loop {
 		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
 		TraceEvent e("RocksDBMetrics");
@@ -361,7 +357,6 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 			e.detail(name, stat);
 		}
 
-<<<<<<< HEAD
 		stat = readIterPool->numReadIteratorsCreated();
 		e.detail("NumReadIteratorsCreated", stat - readIteratorPoolStats["NumReadIteratorsCreated"]);
 		readIteratorPoolStats["NumReadIteratorsCreated"] = stat;
@@ -369,12 +364,11 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 		stat = readIterPool->numTimesReadIteratorsReused();
 		e.detail("NumTimesReadIteratorsReused", stat - readIteratorPoolStats["NumTimesReadIteratorsReused"]);
 		readIteratorPoolStats["NumTimesReadIteratorsReused"] = stat;
-=======
+
 		if (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE) {
 			TraceEvent("RocksDBPerfMetrics").setMaxFieldLength(2048).detail("Metrics", rocksdb_perfcontext_report(perf, true /* Exclude zero counters */));
 			rocksdb_perfcontext_reset(perf);
 		}
->>>>>>> 5ccb3d7d7 (Add Rocks PerfContext)
 	}
 }
 
@@ -410,11 +404,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		Reference<Histogram> commitQueueWaitHistogram;
 		Reference<Histogram> writeHistogram;
 		Reference<Histogram> deleteCompactRangeHistogram;
-<<<<<<< HEAD
 		std::shared_ptr<ReadIteratorPool> readIterPool;
 
-		explicit Writer(DB& db, UID id, std::shared_ptr<ReadIteratorPool> readIterPool)
-		  : db(db), id(id), readIterPool(readIterPool),
+		explicit Writer(DB& db, rocksdb_perfcontext_t* perf, UID id, std::shared_ptr<ReadIteratorPool> readIterPool)
+		  : db(db), perf(perf), id(id), readIterPool(readIterPool),
 		    rateLimiter(SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0
 		                    ? rocksdb::NewGenericRateLimiter(
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC, // rate_bytes_per_sec
@@ -426,13 +419,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		    commitLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
 		                                                   ROCKSDB_COMMIT_LATENCY_HISTOGRAM,
 		                                                   Histogram::Unit::microseconds)),
-=======
-
-		explicit Writer(DB& db, rocksdb_perfcontext_t* perf, UID id)
-		  : db(db), perf(perf), id(id), commitLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                                   ROCKSDB_COMMIT_LATENCY_HISTOGRAM,
-		                                                                   Histogram::Unit::microseconds)),
->>>>>>> 5ccb3d7d7 (Add Rocks PerfContext)
 		    commitActionHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
 		                                                  ROCKSDB_COMMIT_ACTION_HISTOGRAM,
 		                                                  Histogram::Unit::microseconds)),
@@ -986,10 +972,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			writeThread = createGenericThreadPool();
 			readThreads = createGenericThreadPool();
 		}
-<<<<<<< HEAD
-		writeThread->addThread(new Writer(db, id, readIterPool), "fdb-rocksdb-wr");
-		TraceEvent("RocksDBReadThreads").detail("KnobRocksDBReadParallelism", SERVER_KNOBS->ROCKSDB_READ_PARALLELISM);
-=======
 
 		if (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE) {
 			perf = rocksdb_perfcontext_create();
@@ -998,8 +980,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
   			rocksdb::get_perf_context()->Reset();
 		}
 
-		writeThread->addThread(new Writer(db, perf, id), "fdb-rocksdb-wr");
->>>>>>> 5ccb3d7d7 (Add Rocks PerfContext)
+		writeThread->addThread(new Writer(db, perf, id, readIterPool), "fdb-rocksdb-wr");
+		TraceEvent("RocksDBReadThreads").detail("KnobRocksDBReadParallelism", SERVER_KNOBS->ROCKSDB_READ_PARALLELISM);
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
 			readThreads->addThread(new Reader(db, readIterPool), "fdb-rocksdb-re");
 		}
