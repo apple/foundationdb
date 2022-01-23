@@ -21,10 +21,6 @@
 #ifndef FDBCLIENT_FDBTYPES_H
 #define FDBCLIENT_FDBTYPES_H
 
-#ifdef _WIN32
-#undef OPTIONAL
-#endif
-
 #include <algorithm>
 #include <set>
 #include <string>
@@ -33,6 +29,10 @@
 
 #include "flow/Arena.h"
 #include "flow/flow.h"
+
+#ifdef _WIN32
+#undef OPTIONAL
+#endif
 
 typedef int64_t Version;
 typedef uint64_t LogEpoch;
