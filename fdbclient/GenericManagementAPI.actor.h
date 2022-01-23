@@ -732,7 +732,6 @@ Future<Key> getTenant(Reference<DB> db, TenantName name) {
 	}
 }
 
-
 } // namespace ManagementAPI
 
 #include "flow/unactorcompiler.h"

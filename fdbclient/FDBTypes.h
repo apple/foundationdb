@@ -21,6 +21,10 @@
 #ifndef FDBCLIENT_FDBTYPES_H
 #define FDBCLIENT_FDBTYPES_H
 
+#ifdef _WIN32
+#undef OPTIONAL
+#endif
+
 #include <algorithm>
 #include <set>
 #include <string>
