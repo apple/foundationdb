@@ -647,7 +647,14 @@ Future<Void> createTenant(Reference<DB> db, TenantName name) {
 				throw tenant_already_exists();
 			}
 
-			Standalone<StringRef> prefix = wait(allocator.allocate(tr));
+			state typename DB::TransactionT::template FutureT<Optional<Value>> tenantDataPrefixFuture =
+			    tr->get(tenantDataPrefixKey);
+			state Standalone<StringRef> prefix = wait(allocator.allocate(tr));
+			Optional<Value> tenantDataPrefix = wait(safeThreadFutureToFuture(tenantDataPrefixFuture));
+
+			if (tenantDataPrefix.present()) {
+				prefix = prefix.withPrefix(tenantDataPrefix.get(), prefix.arena());
+			}
 			tr->set(tenantMapKey, prefix);
 
 			wait(safeThreadFutureToFuture(tr->commit()));

@@ -602,6 +602,8 @@ extern const KeyRangeRef tenantMapKeys;
 extern const KeyRef tenantMapPrefix;
 extern const KeyRef tenantMapPrivatePrefix;
 extern const KeyRef tenantAllocatorPrefix;
+extern const KeyRef tenantDataPrefixKey;
+
 // This prefix is prepended to the tenant names of locked tenants
 extern const StringRef lockedTenantPrefix;
 
