@@ -665,6 +665,10 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 		serializer(ar, ((VectorRef<KeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
 	}
 
+	int logicalSize() const {
+		return VectorRef<KeyValueRef>::expectedSize() - VectorRef<KeyValueRef>::size() * sizeof(KeyValueRef);
+	}
+
 	std::string toString() const {
 		return "more:" + std::to_string(more) +
 		       " readThrough:" + (readThrough.present() ? readThrough.get().toString() : "[unset]") +

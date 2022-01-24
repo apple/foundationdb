@@ -58,6 +58,10 @@ ClusterConnectionString const& IClusterConnectionRecord::getConnectionString() c
 	return cs;
 }
 
+ClusterConnectionString* IClusterConnectionRecord::getMutableConnectionString() {
+	return &cs;
+}
+
 Future<bool> IClusterConnectionRecord::upToDate() {
 	ClusterConnectionString temp;
 	return upToDate(temp);
@@ -77,6 +81,14 @@ void IClusterConnectionRecord::setPersisted() {
 	connectionStringNeedsPersisted = false;
 }
 
+bool IClusterConnectionRecord::hasUnresolvedHostnames() const {
+	return cs.hasUnresolvedHostnames;
+}
+
+Future<Void> IClusterConnectionRecord::resolveHostnames() {
+	return cs.resolveHostnames();
+}
+
 std::string ClusterConnectionString::getErrorString(std::string const& source, Error const& e) {
 	if (e.code() == error_code_connection_string_invalid) {
 		return format("Invalid connection string `%s: %d %s", source.c_str(), e.code(), e.what());
@@ -85,28 +97,87 @@ std::string ClusterConnectionString::getErrorString(std::string const& source, E
 	}
 }
 
-ClusterConnectionString::ClusterConnectionString(std::string const& connectionString) {
-	auto trimmed = trim(connectionString);
-
-	// Split on '@' into key@addrs
-	int pAt = trimmed.find_first_of('@');
-	if (pAt == trimmed.npos)
+ACTOR Future<Void> resolveHostnamesImpl(ClusterConnectionString* self) {
+	std::vector<Future<Void>> fs;
+	for (auto const& hostName : self->hostnames) {
+		fs.push_back(map(INetworkConnections::net()->resolveTCPEndpoint(hostName.host, hostName.service),
+		                 [=](std::vector<NetworkAddress> const& addresses) -> Void {
+			                 NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
+			                 addr.flags = 0; // Reset the parsed address to public
+			                 addr.fromHostname = NetworkAddressFromHostname::True;
+			                 if (hostName.isTLS) {
+				                 addr.flags |= NetworkAddress::FLAG_TLS;
+			                 }
+			                 self->addResolved(hostName, addr);
+			                 return Void();
+		                 }));
+	}
+	wait(waitForAll(fs));
+	std::sort(self->coords.begin(), self->coords.end());
+	if (std::unique(self->coords.begin(), self->coords.end()) != self->coords.end()) {
 		throw connection_string_invalid();
-	std::string key = trimmed.substr(0, pAt);
-	std::string addrs = trimmed.substr(pAt + 1);
-
-	parseKey(key);
-
-	coord = NetworkAddress::parseList(addrs);
-	ASSERT(coord.size() > 0); // parseList() always returns at least one address if it doesn't throw
-
-	std::sort(coord.begin(), coord.end());
-	// Check that there are no duplicate addresses
-	if (std::unique(coord.begin(), coord.end()) != coord.end())
-		throw connection_string_invalid();
+	}
+	self->hasUnresolvedHostnames = false;
+	return Void();
 }
 
-TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/basic") {
+Future<Void> ClusterConnectionString::resolveHostnames() {
+	if (!hasUnresolvedHostnames) {
+		return Void();
+	} else {
+		return resolveHostnamesImpl(this);
+	}
+}
+
+void ClusterConnectionString::resetToUnresolved() {
+	if (hostnames.size() > 0) {
+		coords.clear();
+		hostnames.clear();
+		networkAddressToHostname.clear();
+		hasUnresolvedHostnames = true;
+		parseConnString();
+	}
+}
+
+void ClusterConnectionString::parseConnString() {
+	// Split on '@' into key@addrs
+	int pAt = connectionString.find_first_of('@');
+	if (pAt == connectionString.npos) {
+		throw connection_string_invalid();
+	}
+	std::string key = connectionString.substr(0, pAt);
+	std::string addrs = connectionString.substr(pAt + 1);
+
+	parseKey(key);
+	std::string curAddr;
+	for (int p = 0; p <= addrs.size();) {
+		int pComma = addrs.find_first_of(',', p);
+		if (pComma == addrs.npos)
+			pComma = addrs.size();
+		curAddr = addrs.substr(p, pComma - p);
+		if (Hostname::isHostname(curAddr)) {
+			hostnames.push_back(Hostname::parse(curAddr));
+		} else {
+			coords.push_back(NetworkAddress::parse(curAddr));
+		}
+		p = pComma + 1;
+	}
+	hasUnresolvedHostnames = hostnames.size() > 0;
+	ASSERT((coords.size() + hostnames.size()) > 0);
+
+	std::sort(coords.begin(), coords.end());
+	// Check that there are no duplicate addresses
+	if (std::unique(coords.begin(), coords.end()) != coords.end()) {
+		throw connection_string_invalid();
+	}
+}
+
+ClusterConnectionString::ClusterConnectionString(const std::string& connStr) {
+	connectionString = trim(connStr);
+	parseConnString();
+}
+
+TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/addresses") {
 	std::string input;
 
 	{
@@ -152,6 +223,97 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/basic") {
 
 		ClusterConnectionString cs(commented);
 		ASSERT(input == cs.toString());
+	}
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/hostnames") {
+	std::string input;
+
+	{
+		input = "asdf:2345@localhost:1234";
+		ClusterConnectionString cs(input);
+		ASSERT(cs.hasUnresolvedHostnames);
+		ASSERT(cs.hostnames.size() == 1);
+		ASSERT(input == cs.toString());
+	}
+
+	{
+		input = "0xxdeadbeef:100100100@localhost:34534,host-name:23443";
+		ClusterConnectionString cs(input);
+		ASSERT(cs.hasUnresolvedHostnames);
+		ASSERT(cs.hostnames.size() == 2);
+		ASSERT(input == cs.toString());
+	}
+
+	{
+		input = "0xxdeadbeef:100100100@localhost:34534,host-name:23443";
+		std::string commented("#start of comment\n");
+		commented += input;
+		commented += "\n";
+		commented += "# asdfasdf ##";
+
+		ClusterConnectionString cs(commented);
+		ASSERT(cs.hasUnresolvedHostnames);
+		ASSERT(cs.hostnames.size() == 2);
+		ASSERT(input == cs.toString());
+	}
+
+	{
+		input = "0xxdeadbeef:100100100@localhost:34534,host-name_part1.host-name_part2:1234:tls";
+		std::string commented("#start of comment\n");
+		commented += input;
+		commented += "\n";
+		commented += "# asdfasdf ##";
+
+		ClusterConnectionString cs(commented);
+		ASSERT(cs.hasUnresolvedHostnames);
+		ASSERT(cs.hostnames.size() == 2);
+		ASSERT(input == cs.toString());
+	}
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/MonitorLeader/ConnectionString") {
+	state std::string connectionString = "TestCluster:0@localhost:1234,host-name:5678";
+	std::string hn1 = "localhost", port1 = "1234";
+	state std::string hn2 = "host-name";
+	state std::string port2 = "5678";
+	state std::vector<Hostname> hostnames;
+	hostnames.push_back(Hostname::parse(hn1 + ":" + port1));
+	hostnames.push_back(Hostname::parse(hn2 + ":" + port2));
+
+	NetworkAddress address1 = NetworkAddress::parse("127.0.0.0:1234");
+	NetworkAddress address2 = NetworkAddress::parse("127.0.0.1:5678");
+
+	INetworkConnections::net()->addMockTCPEndpoint(hn1, port1, { address1 });
+	INetworkConnections::net()->addMockTCPEndpoint(hn2, port2, { address2 });
+
+	state ClusterConnectionString cs(hostnames, LiteralStringRef("TestCluster:0"));
+	ASSERT(cs.hasUnresolvedHostnames);
+	ASSERT(cs.hostnames.size() == 2);
+	ASSERT(cs.coordinators().size() == 0);
+	wait(cs.resolveHostnames());
+	ASSERT(!cs.hasUnresolvedHostnames);
+	ASSERT(cs.hostnames.size() == 2);
+	ASSERT(cs.coordinators().size() == 2);
+	ASSERT(cs.toString() == connectionString);
+	cs.resetToUnresolved();
+	ASSERT(cs.hasUnresolvedHostnames);
+	ASSERT(cs.hostnames.size() == 2);
+	ASSERT(cs.coordinators().size() == 0);
+	ASSERT(cs.toString() == connectionString);
+
+	INetworkConnections::net()->removeMockTCPEndpoint(hn2, port2);
+	NetworkAddress address3 = NetworkAddress::parse("127.0.0.0:5678");
+	INetworkConnections::net()->addMockTCPEndpoint(hn2, port2, { address3 });
+
+	try {
+		wait(cs.resolveHostnames());
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_connection_string_invalid);
 	}
 
 	return Void();
@@ -237,29 +399,56 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 	return Void();
 }
 
-ClusterConnectionString::ClusterConnectionString(std::vector<NetworkAddress> servers, Key key) : coord(servers) {
-	parseKey(key.toString());
+ClusterConnectionString::ClusterConnectionString(const std::vector<NetworkAddress>& servers, Key key)
+  : coords(servers) {
+	std::string keyString = key.toString();
+	parseKey(keyString);
+	connectionString = keyString + "@";
+	for (int i = 0; i < coords.size(); i++) {
+		if (i) {
+			connectionString += ',';
+		}
+		connectionString += coords[i].toString();
+	}
 }
 
-void ClusterConnectionString::parseKey(std::string const& key) {
+ClusterConnectionString::ClusterConnectionString(const std::vector<Hostname>& hosts, Key key)
+  : hasUnresolvedHostnames(true), hostnames(hosts) {
+	std::string keyString = key.toString();
+	parseKey(keyString);
+	connectionString = keyString + "@";
+	for (int i = 0; i < hostnames.size(); i++) {
+		if (i) {
+			connectionString += ',';
+		}
+		connectionString += hostnames[i].toString();
+	}
+}
+
+void ClusterConnectionString::parseKey(const std::string& key) {
 	// Check the structure of the given key, and fill in this->key and this->keyDesc
 
 	// The key must contain one (and only one) : character
 	int colon = key.find_first_of(':');
-	if (colon == key.npos)
+	if (colon == key.npos) {
 		throw connection_string_invalid();
+	}
 	std::string desc = key.substr(0, colon);
 	std::string id = key.substr(colon + 1);
 
 	// Check that description contains only allowed characters (a-z, A-Z, 0-9, _)
-	for (auto c = desc.begin(); c != desc.end(); ++c)
-		if (!(isalnum(*c) || *c == '_'))
+	for (auto c = desc.begin(); c != desc.end(); ++c) {
+		if (!(isalnum(*c) || *c == '_')) {
 			throw connection_string_invalid();
+		}
+	}
 
 	// Check that ID contains only allowed characters (a-z, A-Z, 0-9)
-	for (auto c = id.begin(); c != id.end(); ++c)
-		if (!isalnum(*c))
+	for (auto c = id.begin(); c != id.end(); ++c) {
+		if (!isalnum(*c)) {
 			throw connection_string_invalid();
+		}
+	}
 
 	this->key = StringRef(key);
 	this->keyDesc = StringRef(desc);
@@ -268,11 +457,19 @@ void ClusterConnectionString::parseKey(std::string const& key) {
 std::string ClusterConnectionString::toString() const {
 	std::string s = key.toString();
 	s += '@';
-	for (int i = 0; i < coord.size(); i++) {
-		if (i) {
+	for (int i = 0; i < coords.size(); i++) {
+		if (networkAddressToHostname.find(coords[i]) == networkAddressToHostname.end()) {
+			if (s.find('@') != s.length() - 1) {
+				s += ',';
+			}
+			s += coords[i].toString();
+		}
+	}
+	for (auto const& host : hostnames) {
+		if (s.find('@') != s.length() - 1) {
 			s += ',';
 		}
-		s += coord[i].toString();
+		s += host.toString();
 	}
 	return s;
 }
@@ -669,7 +866,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
     Key traceLogGroup) {
 	state ClusterConnectionString cs = info.intermediateConnRecord->getConnectionString();
 	state std::vector<NetworkAddress> addrs = cs.coordinators();
-	state int idx = 0;
+	state int index = 0;
 	state int successIndex = 0;
 	state Optional<double> incorrectTime;
 	state std::vector<UID> lastCommitProxyUIDs;
@@ -679,7 +876,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 
 	deterministicRandom()->randomShuffle(addrs);
 	loop {
-		state ClientLeaderRegInterface clientLeaderServer(addrs[idx]);
+		state ClientLeaderRegInterface clientLeaderServer(addrs[index]);
 		state OpenDatabaseCoordRequest req;
 
 		coordinator->set(clientLeaderServer);
@@ -742,11 +939,11 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			auto& ni = rep.get().mutate();
 			shrinkProxyList(ni, lastCommitProxyUIDs, lastCommitProxies, lastGrvProxyUIDs, lastGrvProxies);
 			clientInfo->set(ni);
-			successIndex = idx;
+			successIndex = index;
 		} else {
 			TEST(rep.getError().code() == error_code_failed_to_progress); // Coordinator cant talk to cluster controller
-			idx = (idx + 1) % addrs.size();
-			if (idx == successIndex) {
+			index = (index + 1) % addrs.size();
+			if (index == successIndex) {
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
 			}
 		}

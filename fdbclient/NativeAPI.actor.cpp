@@ -1335,7 +1335,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), outstandingWatches(0), lastTimedGrv(0.0), cachedRv(0), sharedStatePtr(nullptr),
+    bytesPerCommit(1000), outstandingWatches(0), sharedStatePtr(nullptr), lastTimedGrv(0.0), cachedRv(0),
     lastTimedRkThrottle(0.0), lastProxyRequest(0.0), transactionTracingSample(false), taskID(taskID),
     clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion),
     mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),

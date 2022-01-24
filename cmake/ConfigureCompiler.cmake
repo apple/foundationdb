@@ -22,6 +22,7 @@ use_libcxx(_use_libcxx)
 env_set(USE_LIBCXX "${_use_libcxx}" BOOL "Use libc++")
 static_link_libcxx(_static_link_libcxx)
 env_set(STATIC_LINK_LIBCXX "${_static_link_libcxx}" BOOL "Statically link libstdcpp/libc++")
+env_set(TRACE_PC_GUARD_INSTRUMENTATION_LIB "" STRING "Path to a library containing an implementation for __sanitizer_cov_trace_pc_guard. See https://clang.llvm.org/docs/SanitizerCoverage.html for more info.")
 
 set(USE_SANITIZER OFF)
 if(USE_ASAN OR USE_VALGRIND OR USE_MSAN OR USE_TSAN OR USE_UBSAN)
@@ -155,6 +156,10 @@ else()
   # we always compile with debug symbols. CPack will strip them out
   # and create a debuginfo rpm
   add_compile_options(-ggdb -fno-omit-frame-pointer)
+  if(TRACE_PC_GUARD_INSTRUMENTATION_LIB)
+      add_compile_options(-fsanitize-coverage=trace-pc-guard)
+      link_libraries(${TRACE_PC_GUARD_INSTRUMENTATION_LIB})
+  endif()
   if(USE_ASAN)
     list(APPEND SANITIZER_COMPILE_OPTIONS
       -fsanitize=address
