@@ -217,12 +217,6 @@ static Key persistStorageTeamPoppedKey(UID id, StorageTeamID storageTeamId) {
 	return wr.toValue();
 }
 
-static Key persistStorageTeamKey() {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withPartitionTransaction()));
-	wr.serializeBytes(persistStorageTeamKeys.begin);
-	return wr.toValue();
-}
-
 static Value persistStorageTeamPoppedValue(Version popped) {
 	return BinaryWriter::toValue(popped, Unversioned());
 }
