@@ -1349,7 +1349,6 @@ ACTOR Future<Void> getValueQ(StorageServerBase* data, GetValueRequest req) {
 	// Temporarily disabled -- this path is hit a lot
 	// getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
-	std::cout << "GetValueReq: " << req.key.toString() << std::endl;
 	try {
 		++data->counters.getValueQueries;
 		++data->counters.allQueries;
@@ -6819,12 +6818,13 @@ ACTOR Future<Void> storageServerCore(std::shared_ptr<StorageServerBase> self_, S
 							self->poppedAllAfter = self->db->get().logSystemConfig.recoveredAt.get();
 						}
 						if (!SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
-							dynamic_cast<StorageServer*>(self)->logCursor =
-							    self->logSystem->peekSingle(self->thisServerID,
-							                                self->version.get() + 1,
-							                                self->tag,
-							                                *self->storageTeamIDs.get().begin(), // TODO(Vishesh)
-							                                self->history);
+							dynamic_cast<StorageServer*>(self)->logCursor = self->logSystem->peekSingle(
+							    self->thisServerID,
+							    self->version.get() + 1,
+							    self->tag,
+							    self->storageTeamIDs.present() ? *self->storageTeamIDs.get().begin()
+							                                   : Optional<ptxn::StorageTeamID>(), // TODO(Vishesh)
+							    self->history);
 						} else {
 							ASSERT(std::dynamic_pointer_cast<ptxn::StorageServer>(self_));
 							ptxn::initializeUpdateCursor(*std::dynamic_pointer_cast<ptxn::StorageServer>(self_));
@@ -7117,8 +7117,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  std::string folder,
                                  Optional<std::vector<ptxn::StorageTeamID>> storageTeams) {
 
-	state std::shared_ptr<StorageServerBase> self =
-	    getStorageServerInstance(persistentData, db, ssi, storageTeams.get()[0]); // TODO (Vishesh)
+	state std::shared_ptr<StorageServerBase> self = getStorageServerInstance(
+	    persistentData, db, ssi, storageTeams.present() ? storageTeams.get()[0] : Optional<ptxn::StorageTeamID>());
 	state Future<Void> ssCore;
 
 	self->storageTeamIDs = storageTeams.present()
@@ -7161,7 +7161,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		TraceEvent("StorageServerInit", ssi.id())
 		    .detail("Version", self->version.get())
 		    .detail("SeedTag", seedTag.toString())
-		    .detail("StorageTeams", describe(storageTeams.get()))
+		    .detail("StorageTeams", storageTeams.present() ? describe(storageTeams.get()) : "")
 		    .detail("TssPair", ssi.isTss() ? ssi.tssPairID.get().toString() : "");
 		InitializeStorageReply rep;
 		rep.interf = ssi;
