@@ -1005,7 +1005,6 @@ ACTOR static Future<Void> sendInitialCommitToResolvers(
 	ASSERT(self->recoveryTransactionVersion);
 
 	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS && self->lastEpochEnd == 0) {
-
 		// Copies the seed server mutations from recovery commit to over here.
 		// TODO (Vishesh): Why do have to do this? Why can't we just do it at one place?
 		std::unordered_map<UID, std::set<ptxn::StorageTeamID>> serverToTeams;

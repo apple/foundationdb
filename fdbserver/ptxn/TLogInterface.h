@@ -206,7 +206,6 @@ struct TLogPeekRequest {
 	Version beginVersion;
 	Optional<Version> endVersion;
 	StorageTeamID storageTeamID;
-	TLogGroupID tLogGroupID;
 
 	Tag tag;
 	bool returnIfBlocked;
@@ -220,10 +219,9 @@ struct TLogPeekRequest {
 	                const Optional<Version>& endVersion_,
 	                bool returnIfBlocked_,
 	                bool onlySpilled_,
-	                const StorageTeamID& storageTeamID_,
-	                const TLogGroupID& tLogGroupID_)
+	                const StorageTeamID& storageTeamID_)
 	  : debugID(debugID_), beginVersion(beginVersion_), endVersion(endVersion_), storageTeamID(storageTeamID_),
-	    tLogGroupID(tLogGroupID_), returnIfBlocked(returnIfBlocked_), onlySpilled(onlySpilled_) {}
+	    returnIfBlocked(returnIfBlocked_), onlySpilled(onlySpilled_) {}
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
@@ -233,7 +231,6 @@ struct TLogPeekRequest {
 		           beginVersion,
 		           endVersion,
 		           storageTeamID,
-		           tLogGroupID,
 		           tag,
 		           returnIfBlocked,
 		           onlySpilled,

@@ -1310,9 +1310,15 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 			logData->addActor.send(tLogCommit(logData->tlogGroupData, req, logData));
 		}
 		when(TLogPeekRequest req = waitNext(tli.peek.getFuture())) {
-			auto tlogGroup = activeGeneration->find(req.tLogGroupID);
+			// TODO: if dbInfo is not ready, block until it's ready
+			auto tLogGroupID =
+			    tLogGroupByStorageTeamID(self->dbInfo->get().logSystemConfig.tLogs[0].tLogGroupIDs, req.storageTeamID);
+			auto tlogGroup = activeGeneration->find(tLogGroupID);
 			TEST(tlogGroup == activeGeneration->end()); // TLog peek: group not found
 			if (tlogGroup == activeGeneration->end()) {
+				TraceEvent("TLogPeekGroupNotFound", self->dbgid)
+				    .detail("Group", tLogGroupID)
+				    .detail("Team", req.storageTeamID);
 				req.reply.sendError(tlog_group_not_found());
 				continue;
 			}

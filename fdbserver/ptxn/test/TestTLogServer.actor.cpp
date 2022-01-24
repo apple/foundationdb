@@ -62,6 +62,7 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
                                     bool mockDiskQueue = false) {
 	state ptxn::test::print::PrintTiming printTiming("startTLogServers");
 	state std::vector<ptxn::InitializePtxnTLogRequest> tLogInitializations;
+	state Reference<AsyncVar<ServerDBInfo>> dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
 	pContext->groupsPerTLog.resize(pContext->numTLogs);
 	for (int i = 0, index = 0; i < pContext->numTLogGroups; ++i) {
 		ptxn::TLogGroup& tLogGroup = pContext->tLogGroups[i];
@@ -103,7 +104,7 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 		}
 
 		actors->push_back(ptxn::tLog(persistentDataAndQueues,
-		                             makeReference<AsyncVar<ServerDBInfo>>(),
+		                             dbInfo,
 		                             LocalityData(),
 		                             initializeTLog,
 		                             tlogId,
@@ -137,6 +138,8 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 	for (auto& [tLogGroupID, tLogGroupLeader] : pContext->tLogGroupLeaders) {
 		tLogGroupLeader = pContext->tLogInterfaces[pContext->groupToLeaderId[tLogGroupID]];
 	}
+	// Update TLogGroups & TLogInterfaces in ServerDBInfo
+	pContext->updateServerDBInfo(dbInfo);
 	return Void();
 }
 
@@ -169,9 +172,7 @@ const int COMMIT_PEEK_CHECK_MUTATIONS = 20;
 ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverContext> pContext) {
 	state ptxn::test::print::PrintTiming printTiming("tlog/commitPeekAndCheck");
 
-	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
-	ASSERT(!group.storageTeams.empty());
-	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
+	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
 	printTiming << "Storage Team ID: " << storageTeamID.toString() << std::endl;
 
 	state std::shared_ptr<ptxn::TLogInterfaceBase> tli = pContext->getTLogLeaderByStorageTeamID(storageTeamID);
@@ -208,13 +209,7 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 	ptxn::test::print::print(commitReply);
 
 	// Peek
-	ptxn::TLogPeekRequest peekRequest(debugID,
-	                                  beginVersion,
-	                                  endVersion,
-	                                  false,
-	                                  false,
-	                                  storageTeamID,
-	                                  pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]);
+	ptxn::TLogPeekRequest peekRequest(debugID, beginVersion, endVersion, false, false, storageTeamID);
 	ptxn::test::print::print(peekRequest);
 
 	ptxn::TLogPeekReply peekReply = wait(tli->peek.getReply(peekRequest));
@@ -444,7 +439,7 @@ ACTOR Future<Void> verifyPeek(std::shared_ptr<ptxn::test::TestDriverContext> pCo
 
 	state int receivedVersions = 0;
 	loop {
-		ptxn::TLogPeekRequest request(Optional<UID>(), version, 0, false, false, storageTeamID, tLogGroupID);
+		ptxn::TLogPeekRequest request(Optional<UID>(), version, 0, false, false, storageTeamID);
 		request.endVersion.reset();
 		ptxn::TLogPeekReply reply = wait(pInterface->peek.getReply(request));
 
@@ -573,13 +568,12 @@ TEST_CASE("/fdbserver/ptxn/test/commit_peek") {
 		ptxn::test::print::print(group);
 	}
 
-	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
-	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
-
 	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 
 	wait(startTLogServers(&actors, pContext, folder));
+
+	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
 	std::vector<Standalone<StringRef>> messages = wait(commitInject(pContext, storageTeamID, NUM_COMMITS));
 	wait(verifyPeek(pContext, storageTeamID, NUM_COMMITS));
 	platform::eraseDirectoryRecursive(folder);
@@ -732,8 +726,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	for (const auto& group : pContext->tLogGroups) {
 		ptxn::test::print::print(group);
 	}
-	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
-	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
+	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
 
 	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
@@ -783,8 +776,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_tlog_spilled") {
 	for (const auto& group : pContext->tLogGroups) {
 		ptxn::test::print::print(group);
 	}
-	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
-	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
+	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
 
 	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
@@ -832,8 +824,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_tlog_not_spilled_with_default_threshold") {
 	for (const auto& group : pContext->tLogGroups) {
 		ptxn::test::print::print(group);
 	}
-	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
-	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
+	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
 
 	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
@@ -873,8 +864,7 @@ TEST_CASE("/fdbserver/ptxn/test/single_tlog_recovery") {
 	for (const auto& group : pContext->tLogGroups) {
 		ptxn::test::print::print(group);
 	}
-	const ptxn::TLogGroup& group = pContext->tLogGroups[0];
-	state ptxn::StorageTeamID storageTeamID = group.storageTeams.begin()->first;
+	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
 
 	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);

@@ -67,7 +67,7 @@ struct TestSerializerItemA {
 };
 
 struct TestSerializerItemB {
-	long item2;
+	uint64_t item2;
 
 	template <typename Ar>
 	void serialize(Ar& ar) {

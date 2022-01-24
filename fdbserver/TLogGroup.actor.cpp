@@ -296,7 +296,7 @@ void TLogGroup::assignStorageTeam(const UID& teamId) {
 
 Standalone<StringRef> TLogGroup::toValue() const {
 	BinaryWriter result(Unversioned()); // TODO: Add version
-	result << serverMap.size();
+	result << static_cast<int>(serverMap.size());
 	for (auto& [id, _] : serverMap) {
 		result << id;
 	}
@@ -442,7 +442,7 @@ void checkGroupMembersUnique(const TLogGroupCollection& collection, int groupSiz
 		}
 	}
 
-	for (const auto [id, ngroups] : groupsPerServer) {
+	for (const auto& [id, ngroups] : groupsPerServer) {
 		std::cout << format("Number of TLogGroups served by %s = %d", id.toString().c_str(), ngroups) << std::endl;
 	}
 

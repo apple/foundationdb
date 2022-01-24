@@ -711,12 +711,11 @@ ACTOR Future<Void> advanceTo(PeekCursorBase* cursor, Version version, Subsequenc
 ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInterface_PassivelyPull>>> interf,
                                    Tag tag,
                                    StorageTeamID storageTeamId,
-                                   TLogGroupID tLogGroupID,
                                    Version begin,
                                    Version end,
                                    bool returnIfBlocked,
                                    bool parallelGetMore)
-  : interf(interf), tag(tag), storageTeamId(storageTeamId), tLogGroupID(tLogGroupID),
+  : interf(interf), tag(tag), storageTeamId(storageTeamId),
     results(Optional<UID>(), emptyCursorHeader().arena(), emptyCursorHeader()),
     rd(results.arena, results.data, IncludeVersion(ProtocolVersion::withPartitionTransaction())), messageVersion(begin),
     end(end), dbgid(deterministicRandom()->randomUniqueID()), returnIfBlocked(returnIfBlocked),
@@ -725,7 +724,6 @@ ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterface<TLogInte
 	this->results.minKnownCommittedVersion = 0;
 	TraceEvent(SevDebug, "SPC_Starting", dbgid)
 	    .detail("Team", storageTeamId)
-	    .detail("Group", tLogGroupID)
 	    .detail("Tag", tag)
 	    .detail("Begin", begin)
 	    .detail("End", end);
@@ -738,9 +736,8 @@ ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
                                    bool hasMsg,
                                    Version poppedVersion,
                                    Tag tag,
-                                   StorageTeamID storageTeamId,
-                                   TLogGroupID tLogGroupID)
-  : tag(tag), storageTeamId(storageTeamId), tLogGroupID(tLogGroupID), results(results),
+                                   StorageTeamID storageTeamId)
+  : tag(tag), storageTeamId(storageTeamId), results(results),
     rd(results.arena, results.data, IncludeVersion(ProtocolVersion::withPartitionTransaction())),
     messageVersion(messageVersion), end(end), poppedVersion(poppedVersion), messageAndTags(message), hasMsg(hasMsg),
     dbgid(deterministicRandom()->randomUniqueID()) {
@@ -760,7 +757,7 @@ ServerPeekCursor::ServerPeekCursor(TLogPeekReply const& results,
 
 Reference<ILogSystem::IPeekCursor> ServerPeekCursor::cloneNoMore() {
 	return makeReference<ServerPeekCursor>(
-	    results, messageVersion, end, messageAndTags, hasMsg, poppedVersion, tag, storageTeamId, tLogGroupID);
+	    results, messageVersion, end, messageAndTags, hasMsg, poppedVersion, tag, storageTeamId);
 }
 
 void ServerPeekCursor::setProtocolVersion(ProtocolVersion version) {
@@ -953,8 +950,7 @@ ACTOR Future<Void> serverPeekParallelGetMore(ServerPeekCursor* self, TaskPriorit
 					                                                               Optional<Version>(),
 					                                                               self->returnIfBlocked,
 					                                                               self->onlySpilled,
-					                                                               self->storageTeamId,
-					                                                               self->tLogGroupID),
+					                                                               self->storageTeamId),
 					                                               taskID)));
 				}
 				if (self->sequence == std::numeric_limits<decltype(self->sequence)>::max()) {
@@ -1038,8 +1034,7 @@ ACTOR Future<Void> serverPeekGetMore(ServerPeekCursor* self, TaskPriority taskID
 			                                                        Optional<Version>(),
 			                                                        self->returnIfBlocked,
 			                                                        self->onlySpilled,
-			                                                        self->storageTeamId,
-			                                                        self->tLogGroupID),
+			                                                        self->storageTeamId),
 			                                        taskID))
 			                                  : Never())) {
 				self->results = res;

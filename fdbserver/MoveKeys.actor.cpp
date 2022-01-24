@@ -245,7 +245,7 @@ ACTOR Future<std::vector<UID>> addReadWriteDestinations(KeyRangeRef shard,
 ACTOR Future<std::vector<UID>> pickReadWriteServers(Transaction* tr, std::vector<UID> candidates, KeyRangeRef range) {
 	std::vector<Future<Optional<Value>>> serverListEntries;
 
-	for (const UID id : candidates) {
+	for (const UID& id : candidates) {
 		serverListEntries.push_back(tr->get(serverListKeyFor(id)));
 	}
 
@@ -1583,7 +1583,7 @@ void seedShardServers(Arena& arena,
 		bool seedServerSet = false;
 		ASSERT(serverToTeams.size());
 		for (auto& [ss, teams] : serverToTeams) {
-			tr.set(arena, storageServerToTeamIdKey(ss), encodeStorageServerToTeamIdValue(teams));
+			tr.set(arena, storageServerToTeamIdKey(ss), encodeStorageServerToTeamIdValue(ss, teams));
 		}
 
 		for (auto& [teamId, servers] : teamToServers) {

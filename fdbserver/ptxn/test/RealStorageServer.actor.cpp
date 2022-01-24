@@ -101,7 +101,7 @@ struct StorageServerTestDriver : ServerTestDriver {
 	}
 };
 
-namespace {
+namespace details {
 class TemporaryDisablePartitionedTransactionKnob {
 private:
 	const bool m_partitionedTransactions;
@@ -115,11 +115,11 @@ public:
 		const_cast<ServerKnobs*>(SERVER_KNOBS)->ENABLE_PARTITIONED_TRANSACTIONS = m_partitionedTransactions;
 	}
 };
-} // namespace
+} // namespace details
 
 ACTOR Future<Void> runStorageServer(StorageServerTestDriver* self) {
 	state print::PrintTiming printTiming(__FUNCTION__);
-	// state TemporaryDisablePartitionedTransactionKnob partitionTransactionKnobDisabler;
+	state details::TemporaryDisablePartitionedTransactionKnob partitionTransactionKnobDisabler;
 
 	wait(delay(1));
 

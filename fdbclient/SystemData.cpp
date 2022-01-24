@@ -393,6 +393,7 @@ ptxn::StorageTeamID decodeStorageTeamIdKey(const KeyRef& key) {
 // This prefix should come before "keyServers" prefix so that this is processed
 // before keyServers at processCompleteTransactionStateRequest().
 const KeyRef storageServerToTeamIdKeyPrefix = "\xff/astorageServerToTeam/"_sr;
+
 const Key storageServerToTeamIdKey(UID serverId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(storageServerToTeamIdKeyPrefix);
@@ -455,7 +456,7 @@ const Key storageServerListToTeamIdKey(std::vector<UID> servers) {
 	BinaryWriter wr(Unversioned());
 	std::sort(servers.begin(), servers.end());
 	wr.serializeBytes(storageServerToTeamIdKeyPrefix);
-	wr << servers.size();
+	wr << static_cast<int>(servers.size());
 	for (auto& s : servers) {
 		wr << s;
 	}
