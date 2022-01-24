@@ -124,7 +124,7 @@ startDelay = 0
     
     numTLogs = 3
     numStorageTeams = 40
-    numTLogGroups = 3
+    numTLogGroups = 10
     numCommits = 5
 
 [[test]]
