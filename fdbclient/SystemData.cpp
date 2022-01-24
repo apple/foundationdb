@@ -1312,6 +1312,21 @@ const KeyRange blobGranuleSplitBoundaryKeyRangeFor(UID const& parentGranuleID) {
 	return KeyRangeRef(startKey, strinc(startKey));
 }
 
+const Key blobGranuleSplitBoundaryValueFor(int64_t epoch, int64_t seqno) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	wr << epoch;
+	wr << seqno;
+	return wr.toValue();
+}
+
+std::pair<int64_t, int64_t> decodeBlobGranuleSplitBoundaryValue(ValueRef const& value) {
+	int64_t epoch, seqno;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> epoch;
+	reader >> seqno;
+	return std::pair(epoch, seqno);
+}
+
 const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version) {
 	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
 	wr.serializeBytes(blobGranuleHistoryKeys.begin);

@@ -596,6 +596,9 @@ const Key blobGranuleSplitBoundaryKeyFor(UID const& parentGranuleID, KeyRef cons
 std::pair<UID, Key> decodeBlobGranuleSplitBoundaryKey(KeyRef const& key);
 const KeyRange blobGranuleSplitBoundaryKeyRangeFor(UID const& parentGranuleID);
 
+const Key blobGranuleSplitBoundaryValueFor(int64_t epoch, int64_t seqno);
+std::pair<int64_t, int64_t> decodeBlobGranuleSplitBoundaryValue(ValueRef const& value);
+
 const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version);
 std::pair<KeyRange, Version> decodeBlobGranuleHistoryKey(KeyRef const& key);
 const KeyRange blobGranuleHistoryKeyRangeFor(KeyRangeRef const& range);
