@@ -3036,7 +3036,7 @@ Future<Void> StorageWiggler::finishStep() {
 	auto duration = metrics.last_step_finish - metrics.last_step_start;
 	metrics.smoothed_step_duration.setTotal((double)duration);
 
-	if(shouldFinishRound()) {
+	if (shouldFinishRound()) {
 		metrics.last_round_finish = metrics.last_step_finish;
 		metrics.finished_round += 1;
 		duration = metrics.last_round_finish - metrics.last_round_start;
@@ -5439,7 +5439,7 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 			}
 		}
 
-		TraceEvent("DDRecruiting")
+		TraceEvent("DDRecruiting", self->distributorId)
 		    .detail("Primary", self->primary)
 		    .detail("State", "Sending request to worker")
 		    .detail("WorkerID", candidateWorker.worker.id())
@@ -5498,7 +5498,7 @@ ACTOR Future<Void> initializeStorage(DDTeamCollection* self,
 		self->recruitingIds.erase(interfaceId);
 		self->recruitingLocalities.erase(candidateWorker.worker.stableAddress());
 
-		TraceEvent("DDRecruiting")
+		TraceEvent("DDRecruiting", self->distributorId)
 		    .detail("Primary", self->primary)
 		    .detail("State", "Finished request")
 		    .detail("WorkerID", candidateWorker.worker.id())
@@ -5602,7 +5602,7 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 			for (auto s = self->server_and_tss_info.begin(); s != self->server_and_tss_info.end(); ++s) {
 				auto serverStatus = self->server_status.get(s->second->lastKnownInterface.id());
 				if (serverStatus.excludeOnRecruit()) {
-					TraceEvent(SevDebug, "DDRecruitExcl1")
+					TraceEvent(SevDebug, "DDRecruitExcl1", self->distributorId)
 					    .detail("Primary", self->primary)
 					    .detail("Excluding", s->second->lastKnownInterface.address());
 					auto addr = s->second->lastKnownInterface.stableAddress();
@@ -5618,7 +5618,7 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 			auto excl = self->excludedServers.getKeys();
 			for (const auto& s : excl) {
 				if (self->excludedServers.get(s) != DDTeamCollection::Status::NONE) {
-					TraceEvent(SevDebug, "DDRecruitExcl2")
+					TraceEvent(SevDebug, "DDRecruitExcl2", self->distributorId)
 					    .detail("Primary", self->primary)
 					    .detail("Excluding", s.toString());
 					exclusions.insert(s);
@@ -5627,7 +5627,8 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 
 			// Exclude workers that have invalid locality
 			for (auto& addr : self->invalidLocalityAddr) {
-				TraceEvent(SevDebug, "DDRecruitExclInvalidAddr").detail("Excluding", addr.toString());
+				TraceEvent(SevDebug, "DDRecruitExclInvalidAddr", self->distributorId)
+				    .detail("Excluding", addr.toString());
 				exclusions.insert(addr);
 			}
 
@@ -5638,7 +5639,7 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 
 			rsr.includeDCs = self->includedDCs;
 
-			TraceEvent(rsr.criticalRecruitment ? SevWarn : SevInfo, "DDRecruiting")
+			TraceEvent(rsr.criticalRecruitment ? SevWarn : SevInfo, "DDRecruiting", self->distributorId)
 			    .detail("Primary", self->primary)
 			    .detail("State", "Sending request to CC")
 			    .detail("Exclusions", rsr.excludeAddresses.size())
@@ -5768,6 +5769,7 @@ ACTOR Future<Void> storageRecruiter(DDTeamCollection* self,
 				throw;
 			}
 			TEST(true); // Storage recruitment timed out
+			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskPriority::DataDistribution));
 		}
 	}
 }
