@@ -146,6 +146,23 @@ def setclass(logger):
             assert 'set_class' in line
     # set back to unset
     run_fdbcli_command('setclass', random_address, 'unset')
+    # Attempt to set an invalid address and check error message
+    output3 = run_fdbcli_command('setclass', '0.0.0.0:4000', 'storage')
+    logger.debug(output3)
+    assert 'No matching addresses found' in output3
+    # Verify setclass did not execute
+    output4 = run_fdbcli_command('setclass')
+    logger.debug(output4)
+    # except the first line, each line is one process
+    process_types = output4.split('\n')[1:]
+    assert len(process_types) == args.process_number
+    addresses = []
+    for line in process_types:
+        assert '127.0.0.1' in line
+        # check class type
+        assert 'unset' in line
+        # check class source
+        assert 'command_line' in line or 'set_class' in line
 
 
 @enable_logging()

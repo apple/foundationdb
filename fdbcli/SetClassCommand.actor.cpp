@@ -73,40 +73,22 @@ ACTOR Future<Void> printProcessClass(Reference<IDatabase> db) {
 };
 
 ACTOR Future<bool> setProcessClass(Reference<IDatabase> db, KeyRef network_address, KeyRef class_type) {
-	// Check if the network address filter matches any processes before proceeding.
-	state Reference<ITransaction> preCheckFilterTr = db->createTransaction();
+	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
-		preCheckFilterTr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
 			state ThreadFuture<Optional<Value>> result =
-			    preCheckFilterTr->get(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin));
+			    tr->get(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin));
 			Optional<Value> val = wait(safeThreadFutureToFuture(result));
 			if (!val.present()) {
 				printf("No matching addresses found\n");
 				return false;
 			}
-			break;
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(preCheckFilterTr->onError(e)));
-		}
-	}
-
-	state Reference<ITransaction> tr = db->createTransaction();
-	loop {
-		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		try {
 			tr->set(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin), class_type);
 			wait(safeThreadFutureToFuture(tr->commit()));
 			return true;
 		} catch (Error& e) {
-			state Error err(e);
-			if (e.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
-				// error message already has \n at the end
-				fprintf(stderr, "%s", errorMsgStr.c_str());
-				return false;
-			}
-			wait(safeThreadFutureToFuture(tr->onError(err)));
+			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
 }
