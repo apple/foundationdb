@@ -119,7 +119,7 @@ public:
 
 ACTOR Future<Void> runStorageServer(StorageServerTestDriver* self) {
 	state print::PrintTiming printTiming(__FUNCTION__);
-	state TemporaryDisablePartitionedTransactionKnob partitionTransactionKnobDisabler;
+	// state TemporaryDisablePartitionedTransactionKnob partitionTransactionKnobDisabler;
 
 	wait(delay(1));
 

@@ -502,7 +502,7 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 				ASSERT(newServer.present());
 				TraceEvent("PtxnStorageServerCreated")
 				    .detail("StorageServerID", newServer.get().interf.id().toString())
-				    .detail("InitialStorageTeamID", teamId);
+				    .detail("InitialStorageTeamID", seedTeamId);
 			}
 		}
 	}

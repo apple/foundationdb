@@ -5065,8 +5065,8 @@ ACTOR Future<Void> tssDelayForever() {
 namespace ptxn {
 
 const StorageTeamID& getStoragePrivateMutationTeam(const ptxn::StorageServer& storageServerContext) {
-	ASSERT(storageServerContext.storageTeamID.present());
-	return storageServerContext.storageTeamID.get();
+	ASSERT(storageServerContext.storageTeamIDs.present());
+	return storageServerContext.thisServerID; // NOTE: Private team is same as SSID.
 }
 
 std::vector<ptxn::TLogInterfaceBase*> getTLogInterfaceByStorageTeamID(const ServerDBInfo& serverDBInfo,
@@ -6823,7 +6823,7 @@ ACTOR Future<Void> storageServerCore(std::shared_ptr<StorageServerBase> self_, S
 							    self->logSystem->peekSingle(self->thisServerID,
 							                                self->version.get() + 1,
 							                                self->tag,
-							                                self->storageTeamID,
+							                                *self->storageTeamIDs.get().begin(), // TODO(Vishesh)
 							                                self->history);
 						} else {
 							ASSERT(std::dynamic_pointer_cast<ptxn::StorageServer>(self_));
@@ -7117,14 +7117,14 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  std::string folder,
 								 Optional<std::vector<ptxn::StorageTeamID>> storageTeams) {
 
-	state std::shared_ptr<StorageServerBase> self = getStorageServerInstance(persistentData, db, ssi, storageTeamID);
+	state std::shared_ptr<StorageServerBase> self = getStorageServerInstance(persistentData, db, ssi, storageTeams.get()[0]); //TODO (Vishesh)
 	state Future<Void> ssCore;
 
 	self->storageTeamIDs = storageTeams.present()
 	                          ? std::set<ptxn::StorageTeamID>(storageTeams.get().begin(), storageTeams.get().end())
 	                          : Optional<std::set<ptxn::StorageTeamID>>();
 	self->folder = folder;
-	if (storageTeamID.present()) {
+	if (storageTeams.present()) {
 		self->logProtocol = ProtocolVersion::withPartitionTransaction();
 	}
 	self->clusterId.send(clusterId);
