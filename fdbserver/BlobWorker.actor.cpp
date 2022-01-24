@@ -2643,8 +2643,8 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 		}
 
 		if (r.value().lastEpoch == epoch && r.value().lastSeqno == seqno) {
-			ASSERT(r.begin() == keyRange.begin);
-			ASSERT(r.end() == keyRange.end);
+			// the range in our map can be different if later the range was split, but then an old request gets retried.
+			// Assume that it's the same as initially
 
 			if (selfReassign) {
 				thisAssignmentNewer = true;
