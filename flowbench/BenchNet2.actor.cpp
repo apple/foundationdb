@@ -28,36 +28,36 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR static Future<Void> increment(TaskPriority priority, uint32_t* sum) {
-  wait(delay(0, priority));
-  ++(*sum);
-  return Void();
+	wait(delay(0, priority));
+	++(*sum);
+	return Void();
 }
 
-static inline TaskPriority getRandomTaskPriority(DeterministicRandom &rand) {
-  return static_cast<TaskPriority>(rand.randomInt(0, 100));
+static inline TaskPriority getRandomTaskPriority(DeterministicRandom& rand) {
+	return static_cast<TaskPriority>(rand.randomInt(0, 100));
 }
 
 ACTOR static Future<Void> benchNet2Actor(benchmark::State* benchState) {
-  state size_t actorCount = benchState->range(0);
-  state uint32_t sum;
-  state int seed = platform::getRandomSeed();
-  while (benchState->KeepRunning()) {
-    sum = 0;
-    std::vector<Future<Void>> futures;
-    futures.reserve(actorCount);
-    DeterministicRandom rand(seed);
-    for (int i = 0; i < actorCount; ++i) {
-      futures.push_back(increment(getRandomTaskPriority(rand), &sum));
-    }
-    wait(waitForAll(futures));
-    benchmark::DoNotOptimize(sum);
-  }
-  benchState->SetItemsProcessed(actorCount * static_cast<long>(benchState->iterations()));
-  return Void();
+	state size_t actorCount = benchState->range(0);
+	state uint32_t sum;
+	state int seed = platform::getRandomSeed();
+	while (benchState->KeepRunning()) {
+		sum = 0;
+		std::vector<Future<Void>> futures;
+		futures.reserve(actorCount);
+		DeterministicRandom rand(seed);
+		for (int i = 0; i < actorCount; ++i) {
+			futures.push_back(increment(getRandomTaskPriority(rand), &sum));
+		}
+		wait(waitForAll(futures));
+		benchmark::DoNotOptimize(sum);
+	}
+	benchState->SetItemsProcessed(actorCount * static_cast<long>(benchState->iterations()));
+	return Void();
 }
 
-static void bench_net2(benchmark::State &benchState) {
-  onMainThread([&benchState]{ return benchNet2Actor(&benchState); }).blockUntilReady();
+static void bench_net2(benchmark::State& benchState) {
+	onMainThread([&benchState] { return benchNet2Actor(&benchState); }).blockUntilReady();
 }
 
 BENCHMARK(bench_net2)->Range(1, 1 << 16)->ReportAggregatesOnly(true);
