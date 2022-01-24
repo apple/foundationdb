@@ -188,7 +188,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	bool managerEpochOk(int64_t epoch) {
 		if (epoch < currentManagerEpoch) {
 			if (BW_DEBUG) {
-				fmt::print("BW {0} got request from old epoch {1}, notifying manager it is out of date\n",
+				fmt::print("BW {0} got request from old epoch {1}, notifying them they are out of date\n",
 				           id.toString(),
 				           epoch);
 			}
@@ -2960,7 +2960,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	self->addActor.send(runGRVChecks(self));
 	state Future<Void> selfRemoved = monitorRemoval(self);
 
-	TraceEvent("BlobWorkerInit", self->id);
+	TraceEvent("BlobWorkerInit", self->id).log();
 
 	try {
 		loop choose {
@@ -2972,8 +2972,16 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			when(state GranuleStatusStreamRequest req = waitNext(bwInterf.granuleStatusStreamRequest.getFuture())) {
 				if (self->managerEpochOk(req.managerEpoch)) {
 					if (BW_DEBUG) {
-						fmt::print("Worker {0} got new granule status endpoint\n", self->id.toString());
+						fmt::print("Worker {0} got new granule status endpoint {1} from BM {2}\n",
+						           self->id.toString(),
+						           req.reply.getEndpoint().token.toString().c_str(),
+						           req.managerEpoch);
 					}
+
+					// send an error to the old stream before closing it, so it doesn't get broken_promise and mark this
+					// endpoint as failed
+					self->currentManagerStatusStream.get().sendError(connection_failed());
+
 					// TODO: pick a reasonable byte limit instead of just piggy-backing
 					req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 					self->currentManagerStatusStream.set(req.reply);

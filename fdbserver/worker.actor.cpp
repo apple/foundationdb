@@ -1376,6 +1376,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	    new AsyncVar<Optional<DataDistributorInterface>>());
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf(new AsyncVar<Optional<RatekeeperInterface>>());
 	state Reference<AsyncVar<Optional<BlobManagerInterface>>> bmInterf(new AsyncVar<Optional<BlobManagerInterface>>());
+	state int64_t myBMEpoch = -1;
 	state Future<Void> handleErrors = workerHandleErrors(errors.getFuture()); // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
@@ -1847,10 +1848,17 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				BlobManagerInterface recruited(locality, req.reqId);
 				recruited.initEndpoints();
 
-				if (bmInterf->get().present()) {
+				if (bmInterf->get().present() && myBMEpoch == req.epoch) {
 					recruited = bmInterf->get().get();
+
 					TEST(true); // Recruited while already a blob manager.
 				} else {
+					// TODO: it'd be more optimal to halt the last manager here, but it will figure it out via the epoch
+					// check
+					// Also, not halting lets us handle the case here where the last BM had a higher epoch and somehow
+					// the epochs got out of order by a delayed initialize request. The one we start here will just halt
+					// on the lock check.
+					myBMEpoch = req.epoch;
 					startRole(Role::BLOB_MANAGER, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);
 					DUMPTOKEN(recruited.haltBlobManager);

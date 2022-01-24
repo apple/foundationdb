@@ -2546,6 +2546,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	if (BM_DEBUG) {
 		fmt::print("Blob manager {0} starting...\n", epoch);
 	}
+	TraceEvent("BlobManagerInit", bmInterf.id()).detail("Epoch", epoch).log();
 
 	self->epoch = epoch;
 
