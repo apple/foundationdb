@@ -103,7 +103,7 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 			tLogInitializations.back().persistentDataAndQueues[tlogGroup.logGroupId] = std::make_pair(data, queue);
 		}
 		actors->push_back(ptxn::tLog(std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>>(),
-		                             makeReference<AsyncVar<ServerDBInfo>>(),
+		                             dbInfo,
 		                             LocalityData(),
 		                             initializeTLog,
 		                             tlogId,

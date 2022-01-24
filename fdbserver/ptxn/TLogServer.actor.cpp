@@ -1583,7 +1583,7 @@ ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
 	}
 
 	state std::map<UID, std::map<StorageTeamID, std::vector<Tag>>> storageTeams;
-	for (auto it : fStorageTeams.get()) {
+	for (const auto& it : fStorageTeams.get()) {
 		storageTeams[BinaryReader::fromStringRef<UID>(it.key.removePrefix(persistStorageTeamKeys.begin),
 		                                              IncludeVersion(ProtocolVersion::withPartitionTransaction()))] =
 		    BinaryReader::fromStringRef<std::map<StorageTeamID, std::vector<Tag>>>(
@@ -2295,7 +2295,6 @@ ACTOR Future<Void> tLog(
 		loop choose {
 			// TODO: build overlapping tlog groups from disk
 			when(state InitializePtxnTLogRequest req = waitNext(tlogRequests.getFuture())) {
-				// question : what happens if multiple InitializePtxnTLogRequest are received?
 				if (!self->tlogCache.exists(req.recruitmentID)) {
 					self->tlogCache.set(req.recruitmentID, req.reply.getFuture());
 					std::vector<Future<Void>> tlogGroupRecoveries;
