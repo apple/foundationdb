@@ -102,13 +102,19 @@ public:
 
 	virtual void addShard(KeyRangeRef range, UID uid) {}
 
+	virtual void updateShard(KeyRangeRef range) {}
+
 	virtual void persistShard(KeyRangeRef range) {} // To be removed.
 
-	virtual std::vector<MutationRef> getPersistShardMutations(KeyRangeRef range) { return std::vector<MutationRef>(); }
+	virtual Standalone<VectorRef<MutationRef>> getPersistShardMutations(KeyRangeRef range) {
+		return Standalone<VectorRef<MutationRef>>();
+	}
 
 	virtual void disposeRange(KeyRangeRef range) {}
 
-	virtual std::vector<MutationRef> getDisposeRangeMutations(KeyRangeRef range) { return std::vector<MutationRef>(); };
+	virtual Standalone<VectorRef<MutationRef>> getDisposeRangeMutations(KeyRangeRef range) {
+		return Standalone<VectorRef<MutationRef>>();
+	};
 
 	/*
 	Concurrency contract
