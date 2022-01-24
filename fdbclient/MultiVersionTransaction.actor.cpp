@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
@@ -863,19 +864,19 @@ void MultiVersionTransaction::setVersion(Version v) {
 ThreadFuture<Version> MultiVersionTransaction::getReadVersion() {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getReadVersion() : makeTimeout<Version>();
-	return abortableFuture(f, tr.onChange);
+	return abortableFuture(f, tr.onChange, cluster_version_changed());
 }
 
 ThreadFuture<Optional<Value>> MultiVersionTransaction::get(const KeyRef& key, bool snapshot) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->get(key, snapshot) : makeTimeout<Optional<Value>>();
-	return abortableFuture(f, tr.onChange);
+	return abortableFuture(f, tr.onChange, cluster_version_changed());
 }
 
 ThreadFuture<Key> MultiVersionTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getKey(key, snapshot) : makeTimeout<Key>();
-	return abortableFuture(f, tr.onChange);
+	return abortableFuture(f, tr.onChange, cluster_version_changed());
 }
 
 ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
@@ -886,7 +887,7 @@ ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeySelectorRef
 	auto tr = getTransaction();
 	auto f =
 	    tr.transaction ? tr.transaction->getRange(begin, end, limit, snapshot, reverse) : makeTimeout<RangeResult>();
-	return abortableFuture(f, tr.onChange);
+	return abortableFuture(f, tr.onChange, cluster_version_changed());
 }
 
 ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
@@ -897,7 +898,7 @@ ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeySelectorRef
 	auto tr = getTransaction();
 	auto f =
 	    tr.transaction ? tr.transaction->getRange(begin, end, limits, snapshot, reverse) : makeTimeout<RangeResult>();
-	return abortableFuture(f, tr.onChange);
+	return abortableFuture(f, tr.onChange, cluster_version_changed());
 }
 
 ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
@@ -906,7 +907,7 @@ ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& k
                                                             bool reverse) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRange(keys, limit, snapshot, reverse) : makeTimeout<RangeResult>();
-	return abortableFuture(f, tr.onChange);
+	return abortableFuture(f, tr.onChange, cluster_version_changed());
 }
 
 ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
@@ -915,7 +916,7 @@ ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& k
                                                             bool reverse) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRange(keys, limits, snapshot, reverse) : makeTimeout<RangeResult>();
-	return abortableFuture(f, tr.onChange);
+	return abortableFuture(f, tr.onChange, cluster_version_changed());
 }
 
 ThreadFuture<RangeResult> MultiVersionTransaction::getRangeAndFlatMap(const KeySelectorRef& begin,
@@ -927,20 +928,20 @@ ThreadFuture<RangeResult> MultiVersionTransaction::getRangeAndFlatMap(const KeyS
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRangeAndFlatMap(begin, end, mapper, limits, snapshot, reverse)
 	                        : makeTimeout<RangeResult>();
-	return abortableFuture(f, tr.onChange);
+	return abortableFuture(f, tr.onChange, cluster_version_changed());
 }
 
 ThreadFuture<Standalone<StringRef>> MultiVersionTransaction::getVersionstamp() {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getVersionstamp() : makeTimeout<Standalone<StringRef>>();
-	return abortableFuture(f, tr.onChange);
+	return abortableFuture(f, tr.onChange, cluster_version_changed());
 }
 
 ThreadFuture<Standalone<VectorRef<const char*>>> MultiVersionTransaction::getAddressesForKey(const KeyRef& key) {
 	auto tr = getTransaction();
 	auto f =
 	    tr.transaction ? tr.transaction->getAddressesForKey(key) : makeTimeout<Standalone<VectorRef<const char*>>>();
-	return abortableFuture(f, tr.onChange);
+	return abortableFuture(f, tr.onChange, cluster_version_changed());
 }
 
 void MultiVersionTransaction::addReadConflictRange(const KeyRangeRef& keys) {
@@ -953,7 +954,7 @@ void MultiVersionTransaction::addReadConflictRange(const KeyRangeRef& keys) {
 ThreadFuture<int64_t> MultiVersionTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getEstimatedRangeSizeBytes(keys) : makeTimeout<int64_t>();
-	return abortableFuture(f, tr.onChange);
+	return abortableFuture(f, tr.onChange, cluster_version_changed());
 }
 
 ThreadFuture<Standalone<VectorRef<KeyRef>>> MultiVersionTransaction::getRangeSplitPoints(const KeyRangeRef& range,
@@ -961,7 +962,7 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> MultiVersionTransaction::getRangeSpl
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getRangeSplitPoints(range, chunkSize)
 	                        : makeTimeout<Standalone<VectorRef<KeyRef>>>();
-	return abortableFuture(f, tr.onChange);
+	return abortableFuture(f, tr.onChange, cluster_version_changed());
 }
 
 ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> MultiVersionTransaction::getBlobGranuleRanges(
@@ -969,7 +970,7 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> MultiVersionTransaction::getBlo
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getBlobGranuleRanges(keyRange)
 	                        : makeTimeout<Standalone<VectorRef<KeyRangeRef>>>();
-	return abortableFuture(f, tr.onChange);
+	return abortableFuture(f, tr.onChange, cluster_version_changed());
 }
 
 ThreadResult<RangeResult> MultiVersionTransaction::readBlobGranules(const KeyRangeRef& keyRange,
@@ -1022,7 +1023,7 @@ void MultiVersionTransaction::clear(const KeyRef& key) {
 ThreadFuture<Void> MultiVersionTransaction::watch(const KeyRef& key) {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->watch(key) : makeTimeout<Void>();
-	return abortableFuture(f, tr.onChange);
+	return abortableFuture(f, tr.onChange, cluster_version_changed());
 }
 
 void MultiVersionTransaction::addWriteConflictRange(const KeyRangeRef& keys) {
@@ -1035,7 +1036,7 @@ void MultiVersionTransaction::addWriteConflictRange(const KeyRangeRef& keys) {
 ThreadFuture<Void> MultiVersionTransaction::commit() {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->commit() : makeTimeout<Void>();
-	return abortableFuture(f, tr.onChange);
+	return abortableFuture(f, tr.onChange, cluster_version_changed());
 }
 
 Version MultiVersionTransaction::getCommittedVersion() {
@@ -1050,7 +1051,7 @@ Version MultiVersionTransaction::getCommittedVersion() {
 ThreadFuture<int64_t> MultiVersionTransaction::getApproximateSize() {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getApproximateSize() : makeTimeout<int64_t>();
-	return abortableFuture(f, tr.onChange);
+	return abortableFuture(f, tr.onChange, cluster_version_changed());
 }
 
 void MultiVersionTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
@@ -1081,7 +1082,7 @@ ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 	} else {
 		auto tr = getTransaction();
 		auto f = tr.transaction ? tr.transaction->onError(e) : makeTimeout<Void>();
-		f = abortableFuture(f, tr.onChange);
+		f = abortableFuture(f, tr.onChange, cluster_version_changed());
 
 		return flatMapThreadFuture<Void, Void>(f, [this, e](ErrorOr<Void> ready) {
 			if (!ready.isError() || ready.getError().code() != error_code_cluster_version_changed) {
@@ -1182,7 +1183,7 @@ ThreadFuture<T> MultiVersionTransaction::makeTimeout() {
 template <class T>
 ThreadResult<T> MultiVersionTransaction::abortableTimeoutResult(ThreadFuture<Void> abortSignal) {
 	ThreadFuture<T> timeoutFuture = makeTimeout<T>();
-	ThreadFuture<T> abortable = abortableFuture(timeoutFuture, abortSignal);
+	ThreadFuture<T> abortable = abortableFuture(timeoutFuture, abortSignal, cluster_version_changed());
 	abortable.blockUntilReadyCheckOnMainThread();
 	return ThreadResult<T>((ThreadSingleAssignmentVar<T>*)abortable.extractPtr());
 }
@@ -1358,6 +1359,10 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 		                                             value.castTo<Standalone<StringRef>>());
 	}
 
+	if (option == FDBDatabaseOptions::TRANSACTION_TIMEOUT) {
+		defaultTimeout = extractIntOption(value, 0, std::numeric_limits<int>::max()) / 1000.0;
+	}
+
 	dbState->options.emplace_back(option, value.castTo<Standalone<StringRef>>());
 
 	if (dbState->db) {
@@ -1374,12 +1379,12 @@ ThreadFuture<int64_t> MultiVersionDatabase::rebootWorker(const StringRef& addres
 
 ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(const StringRef& dcid) {
 	auto f = dbState->db ? dbState->db->forceRecoveryWithDataLoss(dcid) : ThreadFuture<Void>(Never());
-	return abortableFuture(f, dbState->dbVar->get().onChange);
+	return abortableFuture(f, dbState->dbVar->get().onChange, cluster_version_changed());
 }
 
 ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, const StringRef& snapshot_command) {
 	auto f = dbState->db ? dbState->db->createSnapshot(uid, snapshot_command) : ThreadFuture<Void>(Never());
-	return abortableFuture(f, dbState->dbVar->get().onChange);
+	return abortableFuture(f, dbState->dbVar->get().onChange, cluster_version_changed());
 }
 
 // Get network thread busyness
@@ -1405,22 +1410,16 @@ ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<P
 
 // Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
 ThreadFuture<Void> MultiVersionDatabase::createTenant(StringRef const& tenantName) {
-	if (dbState->db) {
-		return dbState->db->createTenant(tenantName);
-	}
-
-	// TODO: handle upgrades and/or timeouts
-	return Never();
+	Standalone<StringRef> tenantNameCopy = tenantName;
+	return runRetryableOperation<Void>(
+	    [tenantNameCopy](Reference<IDatabase> db) { return db->createTenant(tenantNameCopy); });
 }
 
 // Deletes the tenant with the given name. The tenant must be empty.
 ThreadFuture<Void> MultiVersionDatabase::deleteTenant(StringRef const& tenantName) {
-	if (dbState->db) {
-		return dbState->db->deleteTenant(tenantName);
-	}
-
-	// TODO: handle upgrades and/or timeouts
-	return Never();
+	Standalone<StringRef> tenantNameCopy = tenantName;
+	return runRetryableOperation<Void>(
+	    [tenantNameCopy](Reference<IDatabase> db) { return db->deleteTenant(tenantNameCopy); });
 }
 
 MultiVersionDatabase::DatabaseState::DatabaseState(std::string clusterFilePath, Reference<IDatabase> versionMonitorDb)
@@ -2678,8 +2677,9 @@ struct AbortableTest {
 		ThreadSingleAssignmentVar<Void>* abort = new ThreadSingleAssignmentVar<Void>();
 		abort->addref(); // this leaks if abort is never set
 
-		auto newFuture =
-		    FutureInfo(abortableFuture(f.future, ThreadFuture<Void>(abort)), f.expectedValue, f.legalErrors);
+		auto newFuture = FutureInfo(abortableFuture(f.future, ThreadFuture<Void>(abort), cluster_version_changed()),
+		                            f.expectedValue,
+		                            f.legalErrors);
 
 		if (!abort->isReady() && deterministicRandom()->coinflip()) {
 			ASSERT_EQ(abort->status, ThreadSingleAssignmentVarBase::Unset);
