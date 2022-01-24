@@ -88,7 +88,14 @@ ACTOR Future<bool> setProcessClass(Reference<IDatabase> db, KeyRef network_addre
 			wait(safeThreadFutureToFuture(tr->commit()));
 			return true;
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			state Error err(e);
+			if (e.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+				// error message already has \n at the end
+				fprintf(stderr, "%s", errorMsgStr.c_str());
+				return false;
+			}
+			wait(safeThreadFutureToFuture(tr->onError(err)));
 		}
 	}
 }
