@@ -289,8 +289,6 @@ struct KeyRangeRef {
 		if (begin > end) {
 			TraceEvent e(SevError, "InvertedRange");
 			e.detail("Begin", begin).detail("End", end);
-			int* x;
-			*x = 5;
 			throw inverted_range();
 		}
 	}

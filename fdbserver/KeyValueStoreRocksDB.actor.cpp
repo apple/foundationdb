@@ -1446,6 +1446,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		auto shard = shardMap.rangeContaining(range.begin);
 		ASSERT(shard.range() == range);
 		ASSERT(shard.value());
+		if (!shard.value()) {
+			raise(SIGSEGV);
+		}
 
 		// Ref:
 		// https://github.com/apple/foundationdb/blob/6613ec282da87fd17ffdb9538f6da2fe42d2fa4f/fdbserver/storageserver.actor.cpp#L5608
