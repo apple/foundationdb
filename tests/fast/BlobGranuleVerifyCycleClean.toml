@@ -2,7 +2,7 @@
 blobGranulesEnabled = true 
 
 [[test]]
-testTitle = 'BlobGranuleCycleClean'
+testTitle = 'BlobGranuleVerifyCycleClean'
 
     [[test.workload]]
     testName = 'Cycle'

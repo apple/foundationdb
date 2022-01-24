@@ -2,7 +2,7 @@
 blobGranulesEnabled = true 
 
 [[test]]
-testTitle = 'BlobGranuleCorrectnessLargeTest'
+testTitle = 'BlobGranuleVerifyLarge'
 
     [[test.workload]]
     testName = 'ReadWrite'
