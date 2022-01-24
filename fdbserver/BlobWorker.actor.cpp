@@ -1071,10 +1071,11 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 		metadata->currentDeltas.resize(metadata->deltaArena, mIdx);
 
 		// delete all deltas in rollback range, but we can optimize here to just skip the uncommitted mutations
-		// directly and immediately pop the rollback out of inProgress
+		// directly and immediately pop the rollback out of inProgress to completed
 
 		metadata->bufferedDeltaVersion = rollbackVersion;
 		cfRollbackVersion = mutationVersion;
+		rollbacksCompleted.push_back(std::pair(rollbackVersion, mutationVersion));
 	}
 
 	if (BW_DEBUG) {
