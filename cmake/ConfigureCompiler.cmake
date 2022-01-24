@@ -10,6 +10,7 @@ env_set(USE_GCOV OFF BOOL "Compile with gcov instrumentation")
 env_set(USE_MSAN OFF BOOL "Compile with memory sanitizer. To avoid false positives you need to dynamically link to a msan-instrumented libc++ and libc++abi, which you must compile separately. See https://github.com/google/sanitizers/wiki/MemorySanitizerLibcxxHowTo#instrumented-libc.")
 env_set(USE_TSAN OFF BOOL "Compile with thread sanitizer. It is recommended to dynamically link to a tsan-instrumented libc++ and libc++abi, which you can compile separately.")
 env_set(USE_UBSAN OFF BOOL "Compile with undefined behavior sanitizer")
+env_set(FDB_RELEASE_CANDIDATE OFF BOOL "This is a building of a release candidate")
 env_set(FDB_RELEASE OFF BOOL "This is a building of a final release")
 env_set(USE_CCACHE OFF BOOL "Use ccache for compilation if available")
 env_set(RELATIVE_DEBUG_PATHS OFF BOOL "Use relative file paths in debug info")
@@ -21,6 +22,7 @@ use_libcxx(_use_libcxx)
 env_set(USE_LIBCXX "${_use_libcxx}" BOOL "Use libc++")
 static_link_libcxx(_static_link_libcxx)
 env_set(STATIC_LINK_LIBCXX "${_static_link_libcxx}" BOOL "Statically link libstdcpp/libc++")
+env_set(TRACE_PC_GUARD_INSTRUMENTATION_LIB "" STRING "Path to a library containing an implementation for __sanitizer_cov_trace_pc_guard. See https://clang.llvm.org/docs/SanitizerCoverage.html for more info.")
 
 set(USE_SANITIZER OFF)
 if(USE_ASAN OR USE_VALGRIND OR USE_MSAN OR USE_TSAN OR USE_UBSAN)
@@ -154,6 +156,10 @@ else()
   # we always compile with debug symbols. CPack will strip them out
   # and create a debuginfo rpm
   add_compile_options(-ggdb -fno-omit-frame-pointer)
+  if(TRACE_PC_GUARD_INSTRUMENTATION_LIB)
+      add_compile_options(-fsanitize-coverage=trace-pc-guard)
+      link_libraries(${TRACE_PC_GUARD_INSTRUMENTATION_LIB})
+  endif()
   if(USE_ASAN)
     list(APPEND SANITIZER_COMPILE_OPTIONS
       -fsanitize=address
@@ -282,12 +288,11 @@ else()
       -Woverloaded-virtual
       -Wshift-sign-overflow
       # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 11
-      -Wno-delete-non-virtual-dtor
-      -Wno-format
       -Wno-sign-compare
       -Wno-undefined-var-template
       -Wno-unknown-warning-option
       -Wno-unused-parameter
+      -Wno-constant-logical-operand
       )
     if (USE_CCACHE)
       add_compile_options(
@@ -339,9 +344,19 @@ else()
     set(DTRACE_PROBES 1)
   endif()
 
-  if(CMAKE_COMPILER_IS_GNUCXX)
-    set(USE_LTO OFF CACHE BOOL "Do link time optimization")
-    if (USE_LTO)
+  set(USE_LTO OFF CACHE BOOL "Do link time optimization")
+  if (USE_LTO)
+    if (CLANG)
+      set(CLANG_LTO_STRATEGY "Thin" CACHE STRING "LLVM LTO strategy (Thin, or Full)")
+      if (CLANG_LTO_STRATEGY STREQUAL "Full")
+        add_compile_options($<$<CONFIG:Release>:-flto=full>)
+      else()
+        add_compile_options($<$<CONFIG:Release>:-flto=thin>)
+      endif()
+      set(CMAKE_RANLIB "llvm-ranlib")
+      set(CMAKE_AR "llvm-ar")
+    endif()
+    if(CMAKE_COMPILER_IS_GNUCXX)
       add_compile_options($<$<CONFIG:Release>:-flto>)
       set(CMAKE_AR  "gcc-ar")
       set(CMAKE_C_ARCHIVE_CREATE "<CMAKE_AR> qcs <TARGET> <LINK_FLAGS> <OBJECTS>")

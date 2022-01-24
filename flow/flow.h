@@ -747,7 +747,14 @@ public:
 	int getFutureReferenceCount() const { return futures; }
 	int getPromiseReferenceCount() const { return promises; }
 
-	virtual void destroy() { delete this; }
+	// Derived classes should override destroy.
+	virtual void destroy() {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdelete-non-virtual-dtor"
+		delete this;
+#pragma clang diagnostic pop
+	}
+
 	virtual void cancel() {}
 
 	void addCallbackAndDelFutureRef(Callback<T>* cb) {
@@ -966,6 +973,8 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	NotifiedQueue(int futures, int promises) : promises(promises), futures(futures), onEmpty(nullptr) {
 		SingleCallback<T>::next = this;
 	}
+
+	virtual ~NotifiedQueue() = default;
 
 	bool isReady() const { return !queue.empty() || error.isValid(); }
 	bool isError() const { return queue.empty() && error.isValid(); } // the *next* thing queued is an error

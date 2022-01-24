@@ -221,7 +221,9 @@ class TestConfig {
 			}
 
 			if (attrib == "configureLocked") {
-				sscanf(value.c_str(), "%d", &configureLocked);
+				int configureLockedInt;
+				sscanf(value.c_str(), "%d", &configureLockedInt);
+				configureLocked = (configureLockedInt != 0);
 			}
 
 			if (attrib == "startIncompatibleProcess") {
@@ -246,6 +248,9 @@ class TestConfig {
 			}
 			if (attrib == "disableTss") {
 				disableTss = strcmp(value.c_str(), "true") == 0;
+			}
+			if (attrib == "disableHostname") {
+				disableHostname = strcmp(value.c_str(), "true") == 0;
 			}
 			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;
@@ -274,11 +279,13 @@ public:
 	bool isFirstTestInRestart = false;
 	// 7.0 cannot be downgraded to 6.3 after enabling TSS, so disable TSS for 6.3 downgrade tests
 	bool disableTss = false;
+	// 7.1 cannot be downgraded to 7.0 and below after enabling hostname, so disable hostname for 7.0 downgrade tests
+	bool disableHostname = false;
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
 	//	0 = "ssd"
 	//	1 = "memory"
 	//	2 = "memory-radixtree-beta"
-	//	3 = "ssd-redwood-experimental"
+	//	3 = "ssd-redwood-1-experimental"
 	//	4 = "ssd-rocksdb-experimental"
 	// Requires a comma-separated list of numbers WITHOUT whitespaces
 	std::vector<int> storageEngineExcludeTypes;
@@ -327,6 +334,7 @@ public:
 		    .add("storageEngineExcludeTypes", &storageEngineExcludeTypes)
 		    .add("maxTLogVersion", &maxTLogVersion)
 		    .add("disableTss", &disableTss)
+		    .add("disableHostname", &disableHostname)
 		    .add("simpleConfig", &simpleConfig)
 		    .add("generateFearless", &generateFearless)
 		    .add("datacenters", &datacenters)
@@ -1039,6 +1047,12 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		if (enableExtraDB) {
 			g_simulator.extraDB = new ClusterConnectionString(ini.GetValue("META", "connectionString"));
 		}
+		if (!testConfig.disableHostname) {
+			auto mockDNSStr = ini.GetValue("META", "mockDNS");
+			if (mockDNSStr != nullptr) {
+				INetworkConnections::net()->parseMockDNSFromString(mockDNSStr);
+			}
+		}
 		*pConnString = conn;
 		*pTesterCount = testerCount;
 		bool usingSSL = conn.toString().find(":tls") != std::string::npos || listenersPerProcess > 1;
@@ -1339,7 +1353,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	}
 	case 3: {
 		TEST(true); // Simulated cluster using redwood storage engine
-		set_config("ssd-redwood-experimental");
+		set_config("ssd-redwood-1-experimental");
 		break;
 	}
 	case 4: {
@@ -1881,6 +1895,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	// Use SSL 5% of the time
 	bool sslEnabled = deterministicRandom()->random01() < 0.10;
 	bool sslOnly = sslEnabled && deterministicRandom()->coinflip();
+	bool isTLS = sslEnabled && sslOnly;
 	g_simulator.listenersPerProcess = sslEnabled && !sslOnly ? 2 : 1;
 	TEST(sslEnabled); // SSL enabled
 	TEST(!sslEnabled); // SSL disabled
@@ -1890,8 +1905,18 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	TEST(useIPv6); // Use IPv6
 	TEST(!useIPv6); // Use IPv4
 
+	// TODO(renxuan): Use hostname 25% of the time, unless it is disabled
+	bool useHostname = false; // !testConfig.disableHostname && deterministicRandom()->random01() < 0.25;
+	TEST(useHostname); // Use hostname
+	TEST(!useHostname); // Use IP address
+	NetworkAddressFromHostname fromHostname =
+	    useHostname ? NetworkAddressFromHostname::True : NetworkAddressFromHostname::False;
+
 	std::vector<NetworkAddress> coordinatorAddresses;
+	std::vector<Hostname> coordinatorHostnames;
 	std::vector<NetworkAddress> extraCoordinatorAddresses; // Used by extra DB if the DR db is a new one
+	std::vector<Hostname> extraCoordinatorHostnames;
+
 	if (testConfig.minimumRegions > 1) {
 		// do not put coordinators in the primary region so that we can kill that region safely
 		int nonPrimaryDcs = dataCenters / 2;
@@ -1899,12 +1924,27 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			int dcCoordinators = coordinatorCount / nonPrimaryDcs + ((dc - 1) / 2 < coordinatorCount % nonPrimaryDcs);
 			for (int m = 0; m < dcCoordinators; m++) {
 				auto ip = makeIPAddressForSim(useIPv6, { 2, dc, 1, m });
-				coordinatorAddresses.push_back(
-				    NetworkAddress(ip, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
+				uint16_t port = sslEnabled && !sslOnly ? 2 : 1;
+				NetworkAddress coordinator(ip, port, true, isTLS, fromHostname);
+				coordinatorAddresses.push_back(coordinator);
 				auto extraIp = makeIPAddressForSim(useIPv6, { 4, dc, 1, m });
-				extraCoordinatorAddresses.push_back(
-				    NetworkAddress(extraIp, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
-				TraceEvent("SelectedCoordinator").detail("Address", coordinatorAddresses.back());
+				NetworkAddress extraCoordinator(extraIp, port, true, isTLS, fromHostname);
+				extraCoordinatorAddresses.push_back(extraCoordinator);
+
+				if (useHostname) {
+					std::string hostname = "fakeCoordinatorDC" + std::to_string(dc) + "M" + std::to_string(m);
+					Hostname coordinatorHostname(hostname, std::to_string(port), isTLS);
+					coordinatorHostnames.push_back(coordinatorHostname);
+					INetworkConnections::net()->addMockTCPEndpoint(hostname, std::to_string(port), { coordinator });
+					hostname = "fakeExtraCoordinatorDC" + std::to_string(dc) + "M" + std::to_string(m);
+					Hostname extraCoordinatorHostname(hostname, std::to_string(port), isTLS);
+					extraCoordinatorHostnames.push_back(extraCoordinatorHostname);
+					INetworkConnections::net()->addMockTCPEndpoint(
+					    hostname, std::to_string(port), { extraCoordinator });
+				}
+				TraceEvent("SelectedCoordinator")
+				    .detail("Hostname", useHostname ? coordinatorHostnames.back().toString().c_str() : "N/A")
+				    .detail("Address", coordinatorAddresses.back());
 			}
 		}
 	} else {
@@ -1930,12 +1970,25 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					    .detail("CoordinatorCount", coordinatorCount);
 				} else {
 					auto ip = makeIPAddressForSim(useIPv6, { 2, dc, 1, m });
-					coordinatorAddresses.push_back(
-					    NetworkAddress(ip, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
+					uint16_t port = sslEnabled && !sslOnly ? 2 : 1;
+					NetworkAddress coordinator(ip, port, true, isTLS, fromHostname);
+					coordinatorAddresses.push_back(coordinator);
 					auto extraIp = makeIPAddressForSim(useIPv6, { 4, dc, 1, m });
-					extraCoordinatorAddresses.push_back(
-					    NetworkAddress(extraIp, sslEnabled && !sslOnly ? 2 : 1, true, sslEnabled && sslOnly));
+					NetworkAddress extraCoordinator(extraIp, port, true, isTLS, fromHostname);
+					extraCoordinatorAddresses.push_back(extraCoordinator);
+					if (useHostname) {
+						std::string hostname = "fakeCoordinatorDC" + std::to_string(dc) + "M" + std::to_string(m);
+						Hostname coordinatorHostname(hostname, std::to_string(port), isTLS);
+						coordinatorHostnames.push_back(coordinatorHostname);
+						INetworkConnections::net()->addMockTCPEndpoint(hostname, std::to_string(port), { coordinator });
+						hostname = "fakeExtraCoordinatorDC" + std::to_string(dc) + "M" + std::to_string(m);
+						Hostname extraCoordinatorHostname(hostname, std::to_string(port), isTLS);
+						extraCoordinatorHostnames.push_back(extraCoordinatorHostname);
+						INetworkConnections::net()->addMockTCPEndpoint(
+						    hostname, std::to_string(port), { extraCoordinator });
+					}
 					TraceEvent("SelectedCoordinator")
+					    .detail("Hostname", useHostname ? coordinatorHostnames.back().toString().c_str() : "N/A")
 					    .detail("Address", coordinatorAddresses.back())
 					    .detail("M", m)
 					    .detail("Machines", machines)
@@ -1968,20 +2021,30 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 	ASSERT_EQ(coordinatorAddresses.size(), coordinatorCount);
 	ClusterConnectionString conn(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
+	if (useHostname) {
+		conn = ClusterConnectionString(coordinatorHostnames, LiteralStringRef("TestCluster:0"));
+	}
 
 	// If extraDB==0, leave g_simulator.extraDB as null because the test does not use DR.
 	if (testConfig.extraDB == 1) {
 		// The DR database can be either a new database or itself
 		g_simulator.extraDB =
-		    BUGGIFY ? new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0"))
-		            : new ClusterConnectionString(extraCoordinatorAddresses, LiteralStringRef("ExtraCluster:0"));
+		    BUGGIFY
+		        ? (useHostname ? new ClusterConnectionString(coordinatorHostnames, LiteralStringRef("TestCluster:0"))
+		                       : new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0")))
+		        : (useHostname
+		               ? new ClusterConnectionString(extraCoordinatorHostnames, LiteralStringRef("ExtraCluster:0"))
+		               : new ClusterConnectionString(extraCoordinatorAddresses, LiteralStringRef("ExtraCluster:0")));
 	} else if (testConfig.extraDB == 2) {
 		// The DR database is a new database
 		g_simulator.extraDB =
-		    new ClusterConnectionString(extraCoordinatorAddresses, LiteralStringRef("ExtraCluster:0"));
+		    useHostname ? new ClusterConnectionString(extraCoordinatorHostnames, LiteralStringRef("ExtraCluster:0"))
+		                : new ClusterConnectionString(extraCoordinatorAddresses, LiteralStringRef("ExtraCluster:0"));
 	} else if (testConfig.extraDB == 3) {
 		// The DR database is the same database
-		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
+		g_simulator.extraDB =
+		    useHostname ? new ClusterConnectionString(coordinatorHostnames, LiteralStringRef("TestCluster:0"))
+		                : new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
 	}
 
 	*pConnString = conn;
@@ -2143,14 +2206,14 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		systemActors->push_back(
 		    reportErrors(simulatedMachine(conn,
 		                                  ips,
-		                                  sslEnabled && sslOnly,
+		                                  sslEnabled,
 		                                  localities,
 		                                  ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
 		                                  baseFolder,
 		                                  false,
 		                                  i == useSeedForMachine,
 		                                  AgentNone,
-		                                  sslEnabled && sslOnly,
+		                                  sslOnly,
 		                                  whitelistBinPaths,
 		                                  protocolVersion,
 		                                  configDBType),

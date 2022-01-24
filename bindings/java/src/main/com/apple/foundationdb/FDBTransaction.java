@@ -350,10 +350,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	@Override
 	public AsyncIterable<KeyValue> getRangeAndFlatMap(KeySelector begin, KeySelector end, byte[] mapper, int limit,
 	                                                  boolean reverse, StreamingMode mode) {
-		if (mapper == null) {
-			throw new IllegalArgumentException("Mapper must be non-null");
-		}
-		return new RangeQuery(this, false, begin, end, mapper, limit, reverse, mode, eventKeeper);
+		throw new UnsupportedOperationException("getRangeAndFlatMap is only supported in snapshot");
 	}
 
 	///////////////////

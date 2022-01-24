@@ -263,6 +263,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	// The new epoch is only provisional until the caller updates the coordinated DBCoreState.
 	Future<Reference<ILogSystem>> newEpoch(RecruitFromConfigurationReply const& recr,
 	                                       Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
+	                                       UID clusterId,
 	                                       DatabaseConfiguration const& config,
 	                                       LogEpoch recoveryCount,
 	                                       int8_t primaryLocality,
@@ -342,6 +343,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	ACTOR static Future<Void> newRemoteEpoch(TagPartitionedLogSystem* self,
 	                                         Reference<TagPartitionedLogSystem> oldLogSystem,
 	                                         Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
+	                                         UID clusterId,
 	                                         DatabaseConfiguration configuration,
 	                                         LogEpoch recoveryCount,
 	                                         int8_t remoteLocality,
@@ -350,6 +352,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	ACTOR static Future<Reference<ILogSystem>> newEpoch(Reference<TagPartitionedLogSystem> oldLogSystem,
 	                                                    RecruitFromConfigurationReply recr,
 	                                                    Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
+	                                                    UID clusterId,
 	                                                    DatabaseConfiguration configuration,
 	                                                    LogEpoch recoveryCount,
 	                                                    int8_t primaryLocality,

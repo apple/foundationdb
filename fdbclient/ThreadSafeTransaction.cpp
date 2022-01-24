@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/DatabaseContext.h"
@@ -282,6 +283,54 @@ ThreadFuture<Standalone<VectorRef<const char*>>> ThreadSafeTransaction::getAddre
 		tr->checkDeferredError();
 		return tr->getAddressesForKey(k);
 	});
+}
+
+ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeTransaction::getBlobGranuleRanges(
+    const KeyRangeRef& keyRange) {
+	ISingleThreadTransaction* tr = this->tr;
+	KeyRange r = keyRange;
+
+	return onMainThread([tr, r]() -> Future<Standalone<VectorRef<KeyRangeRef>>> {
+		tr->checkDeferredError();
+		return tr->getBlobGranuleRanges(r);
+	});
+}
+
+ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranules(const KeyRangeRef& keyRange,
+                                                                  Version beginVersion,
+                                                                  Optional<Version> readVersion,
+                                                                  ReadBlobGranuleContext granule_context) {
+	// In V1 of api this is required, field is just for forward compatibility
+	ASSERT(beginVersion == 0);
+
+	// FIXME: prevent from calling this from another main thread!
+
+	ISingleThreadTransaction* tr = this->tr;
+	KeyRange r = keyRange;
+
+	int64_t readVersionOut;
+	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> getFilesFuture = onMainThread(
+	    [tr, r, beginVersion, readVersion, &readVersionOut]() -> Future<Standalone<VectorRef<BlobGranuleChunkRef>>> {
+		    tr->checkDeferredError();
+		    return tr->readBlobGranules(r, beginVersion, readVersion, &readVersionOut);
+	    });
+
+	// FIXME: can this safely avoid another main thread jump?
+	getFilesFuture.blockUntilReadyCheckOnMainThread();
+
+	// propagate error to client
+	if (getFilesFuture.isError()) {
+		return ThreadResult<RangeResult>(getFilesFuture.getError());
+	}
+
+	Standalone<VectorRef<BlobGranuleChunkRef>> files = getFilesFuture.get();
+
+	// do this work off of fdb network threads for performance!
+	if (granule_context.debugNoMaterialize) {
+		return ThreadResult<RangeResult>(blob_granule_not_materialized());
+	} else {
+		return loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersionOut, granule_context);
+	}
 }
 
 void ThreadSafeTransaction::addReadConflictRange(const KeyRangeRef& keys) {

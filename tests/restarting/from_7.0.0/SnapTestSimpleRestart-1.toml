@@ -1,0 +1,52 @@
+# Write 1000 Keys ending with even number
+[[test]]
+testTitle='SnapSimplePre'
+clearAfterTest=false
+
+        [[test.workload]]
+        testName='SnapTest'
+        numSnaps=1
+        maxSnapDelay=30.0
+        testID=0
+
+# Take snap
+[[test]]
+testTitle='SnapSimpleTakeSnap'
+clearAfterTest=false
+
+        [[test.workload]]
+        testName='SnapTest'
+        numSnaps=1
+        maxSnapDelay=5.0
+        testID=1
+
+# Write 1000 Keys ending with odd number
+[[test]]
+testTitle='SnapSimplePost'
+clearAfterTest=false
+
+        [[test.workload]]
+        testName='SnapTest'
+        numSnaps=1
+        maxSnapDelay=3.0
+        testID=2
+
+# snapCreate with binary path that is not whitelisted
+[[test]]
+testTitle='SnapCreateNotWhitelistedBinaryPath'
+
+        [[test.workload]]
+        testName='SnapTest'
+        numSnaps=1
+        maxSnapDelay=3.0
+        testID=4
+
+# Save and shutdown
+[[test]]
+testTitle='SnapSimpleShutdown'
+
+        [[test.workload]]
+        testName='SaveAndKill'
+        restartInfoLocation='simfdb/restartInfo.ini'
+        testDuration=10.0
+        isRestoring=1

@@ -188,7 +188,7 @@ def kill(logger):
     # and then specify the certain process to kill
     process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
     #
-    output2, err = process.communicate(input='kill; kill {}\n'.format(address).encode())
+    output2, err = process.communicate(input='kill; kill {}; sleep 1\n'.format(address).encode())
     logger.debug(output2)
     # wait for a second for the cluster recovery
     time.sleep(1)
@@ -218,7 +218,7 @@ def suspend(logger):
     logger.debug("Pid: {}".format(pid))
     process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
     # suspend the process for enough long time
-    output2, err = process.communicate(input='suspend; suspend 3600 {}\n'.format(address).encode())
+    output2, err = process.communicate(input='suspend; suspend 3600 {}; sleep 1\n'.format(address).encode())
     # the cluster should be unavailable after the only process being suspended
     assert not get_value_from_status_json(False, 'client', 'database_status', 'available')
     # check the process pid still exists
@@ -504,6 +504,18 @@ def profile(logger):
 
 
 @enable_logging()
+def test_available(logger):
+    duration = 0  # seconds we already wait
+    while not get_value_from_status_json(False, 'client', 'database_status', 'available') and duration < 10:
+        logger.debug("Sleep for 1 second to wait cluster recovery")
+        time.sleep(1)
+        duration += 1
+    if duration >= 10:
+        logger.debug(run_fdbcli_command('status', 'json'))
+        assert False
+
+
+@enable_logging()
 def triggerddteaminfolog(logger):
     # this command is straightforward and only has one code path
     output = run_fdbcli_command('triggerddteaminfolog')
@@ -538,6 +550,7 @@ if __name__ == '__main__':
     command_template = [args.build_dir + '/bin/fdbcli', '-C', args.cluster_file, '--exec']
     # tests for fdbcli commands
     # assertions will fail if fdbcli does not work as expected
+    test_available()
     if args.process_number == 1:
         # TODO: disable for now, the change can cause the database unavailable
         # advanceversion()
