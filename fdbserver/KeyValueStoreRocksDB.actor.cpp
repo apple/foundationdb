@@ -524,6 +524,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			// Add server metadata key space to default shard.
 			a.shardMap->insert(specialKeys, defaultShard);
 
+			// a.shardMap->insert(systemKeys, defaultShard);
+
 			auto mappingRange = prefixRange(persistShardMappingPrefix);
 			RangeResult rangeResult;
 			readRangeInDb(db, mappingRange, /* rowLimit= */ UINT16_MAX, /* byteLimit = */ UINT16_MAX, &rangeResult);
@@ -613,6 +615,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			a.shardMap->insert(allKeys, nullptr);
 			a.shardMap->insert(specialKeys, specialKeysShard);
+			// a.shardMap->insert(systemKeys, specialKeysShard);
 
 			auto options = getOptions();
 			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
@@ -667,7 +670,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		rocksdb::Status doCommit(rocksdb::WriteBatch* batch, rocksdb::DB* db, bool sample) {
-			// std::cout << "Committing in db " << db->GetName() << std::endl;
+			std::cout << "Committing in db " << db->GetName() << std::endl;
 			Standalone<VectorRef<KeyRangeRef>> deletes;
 			DeleteVisitor dv(deletes, deletes.arena());
 			ASSERT(batch->Iterate(&dv).ok());
@@ -1169,6 +1172,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Future<Void> init() override {
 		if (openFuture.isValid()) {
+			std::cout << "Restore action\n";
 			// Restore durable state if KVS is open. KVS will be re-initialized during rollback. To avoid the cost of
 			// opening and closing multiple rocksdb instances, we reconcile the shard map using persist shard mapping
 			// data.
@@ -1178,6 +1182,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			writeThread->post(a.release());
 			return future;
 		} else {
+			std::cout << "Open action\n";
 			auto a = std::make_unique<Writer::OpenAction>(
 			    path, dataPath, metrics, &readSemaphore, &fetchSemaphore, &shardMap);
 			openFuture = a->done.getFuture();
@@ -1205,7 +1210,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    .detail("Begin", it.range().begin)
 			    .detail("End", it.range().end);
 
-			raise(SIGSEGV);
+			// raise(SIGSEGV);
+			return;
 		}
 
 		it.value()->writeBatch.Put(toSlice(kv.key), toSlice(kv.value));
@@ -1239,6 +1245,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (dirtyShards == nullptr || dirtyShards->size() == 0) {
 			return Void();
 		}
+
+		std::cout << "Commit action\n";
 
 		auto a = new Writer::CommitAction();
 		a->dirtyShards = std::move(dirtyShards);
@@ -1280,11 +1288,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType type, Optional<UID> debugID) override {
 		auto it = shardMap.rangeContaining(key);
-		if (it.value() == nullptr || it.value()->db == nullptr) {
+		if (it.value() == nullptr) {
 			// TODO: Add new error code, e.g., shard not found.
 			// a.result.sendError(internal_error());
 			// return internal_error();
 			std::cout << "Read non-exist shard " << key.toString() << "\n";
+			return Optional<Value>();
+		}
+
+		if (it.value()->db == nullptr) {
+			std::cout << "Read uncommitted change " << key.toString() << "\n";
 			return Optional<Value>();
 		}
 
@@ -1414,9 +1427,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		auto shard = std::make_shared<DataShard>(dataPath + id.toString());
-		std::cout << "*** insert begin";
 		shardMap.insert(range, shard);
-		std::cout << "insert end ***";
 		dirtyShards->insert(shard);
 
 		logShardMovement(range, ShardOp::ADD);
@@ -1436,7 +1447,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		ASSERT(shard.range() == range);
 		ASSERT(shard.value());
 
-		std::cout << "get shard mutations " << range.begin.toString() << " " << range.end.toString() << "\n";
 		// Ref:
 		// https://github.com/apple/foundationdb/blob/6613ec282da87fd17ffdb9538f6da2fe42d2fa4f/fdbserver/storageserver.actor.cpp#L5608
 		std::string beginKey = persistShardMappingPrefix.toString() + range.begin.toString();
@@ -1450,8 +1460,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                                StringRef(persistShardMappingPrefix.toString() + range.begin.toString()),
 		                                StringRef(shard.value()->name)));
 
+		std::cout << "get shard mutations " << range.begin.toString() << " : " << range.end.toString()
+		          << ", name: " << shard.value()->name;
 		// TODO: should we include sys key range here?
-		if (range.end < allKeys.end) {
+		if (range.end <= allKeys.end) {
 			auto it = shardMap.rangeContaining(range.end);
 			refs.push_back_deep(refs.arena(),
 			                    MutationRef(MutationRef::SetValue,
@@ -1464,9 +1476,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			                                LiteralStringRef("")));
 		}
 
+		/*
 		for (auto& mutation : refs) {
-			std::cout << "mutation ref " << mutation.toString() << "\n";
-		}
+		    std::cout << "mutation ref " << mutation.toString() << "\n";
+		}*/
 		return refs;
 	}
 
@@ -1542,9 +1555,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 		}
 
-		std::cout << "*** insert begin";
 		shardMap.insert(range, nullptr);
-		std::cout << "insert end ***";
 
 		TraceEvent(SevError, "RocksDB")
 		    .detail("Method", "DisposeRange")

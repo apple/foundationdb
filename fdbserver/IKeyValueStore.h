@@ -102,6 +102,8 @@ public:
 
 	virtual void addShard(KeyRangeRef range, UID uid) {}
 
+	virtual void updateShard(KeyRangeRef range) {}
+
 	virtual void persistShard(KeyRangeRef range) {} // To be removed.
 
 	virtual Standalone<VectorRef<MutationRef>> getPersistShardMutations(KeyRangeRef range) {

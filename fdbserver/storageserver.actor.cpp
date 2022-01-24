@@ -4517,12 +4517,12 @@ void changeServerKeys(StorageServer* data,
                       ChangeServerKeysContext context) {
 	ASSERT(!keys.empty());
 
-	// TraceEvent("ChangeServerKeys", data->thisServerID)
-	//     .detail("KeyBegin", keys.begin)
-	//     .detail("KeyEnd", keys.end)
-	//     .detail("NowAssigned", nowAssigned)
-	//     .detail("Version", version)
-	//     .detail("Context", changeServerKeysContextName[(int)context]);
+	TraceEvent e(SevInfo, "ChangeServerKeys");
+	e.detail("KeyBegin", keys.begin)
+	    .detail("KeyEnd", keys.end)
+	    .detail("NowAssigned", nowAssigned)
+	    .detail("Version", version)
+	    .detail("Context", changeServerKeysContextName[(int)context]);
 	validate(data);
 
 	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
@@ -4540,7 +4540,7 @@ void changeServerKeys(StorageServer* data,
 		}
 	}
 	if (!isDifferent) {
-		// TraceEvent("CSKShortCircuit", data->thisServerID).detail("KeyBegin", keys.begin).detail("KeyEnd", keys.end);
+		TraceEvent("CSKShortCircuit", data->thisServerID).detail("KeyBegin", keys.begin).detail("KeyEnd", keys.end);
 		return;
 	}
 
@@ -4554,18 +4554,19 @@ void changeServerKeys(StorageServer* data,
 	// As addShard (called below)'s documentation requires, reinitialize any overlapping range(s)
 	auto ranges = data->shards.getAffectedRangesAfterInsertion(
 	    keys, Reference<ShardInfo>()); // null reference indicates the range being changed
+
 	for (int i = 0; i < ranges.size(); i++) {
 		if (!ranges[i].value) {
 			ASSERT((KeyRangeRef&)ranges[i] == keys); // there shouldn't be any nulls except for the range being inserted
-		} else if (ranges[i].value->notAssigned())
+		} else if (ranges[i].value->notAssigned()) {
 			data->addShard(ShardInfo::newNotAssigned(ranges[i]));
-		else if (ranges[i].value->isReadable())
+		} else if (ranges[i].value->isReadable()) {
 			data->addShard(ShardInfo::newReadWrite(ranges[i], data));
-		else {
+		} else {
 			ASSERT(ranges[i].value->adding);
 			data->addShard(ShardInfo::newAdding(data, ranges[i]));
-
-			data->storage.addDataShard(ranges[i], deterministicRandom()->randomUniqueID());
+			// Shard should already exists in KVS, reinitialize the shard with new range.
+			// data->storage.addDataShard(ranges[i], deterministicRandom()->randomUniqueID());
 			TEST(true); // ChangeServerKeys reFetchKeys
 		}
 	}
@@ -4578,6 +4579,9 @@ void changeServerKeys(StorageServer* data,
 	std::vector<std::pair<KeyRange, Version>> changeNewestAvailable;
 	std::vector<KeyRange> removeRanges;
 	std::vector<KeyRange> newEmptyRanges;
+
+	std::cout << "Find version \n";
+	TraceEvent(SevInfo, "FindVersionBegin");
 	for (auto r = vr.begin(); r != vr.end(); ++r) {
 		KeyRangeRef range = keys & r->range();
 		bool dataAvailable = r->value() == latestVersion || r->value() >= version;
@@ -4594,6 +4598,7 @@ void changeServerKeys(StorageServer* data,
 			    .detail("Begin", range.begin)
 			    .detail("End", range.end);
 			newEmptyRanges.push_back(range);
+			// Creates shards in KVS for newEmptyRanges later.
 			data->addShard(ShardInfo::newReadWrite(range, data));
 		} else if (!nowAssigned) {
 			if (dataAvailable) {
@@ -4601,35 +4606,50 @@ void changeServerKeys(StorageServer* data,
 				       latestVersion); // Not that we care, but this used to be checked instead of dataAvailable
 				ASSERT(data->mutableData().getLatestVersion() > version || context == CSK_RESTORE);
 				changeNewestAvailable.emplace_back(range, version);
+				// Drops shards in KVS when removing data.
 				removeRanges.push_back(range);
+			} else {
+				// Data may stay in KVS, need to clear the range.
+				data->storage.disposeShard(range);
 			}
 			data->addShard(ShardInfo::newNotAssigned(range));
 			data->watches.triggerRange(range.begin, range.end);
 		} else if (!dataAvailable) {
-			// data->storage.addDataShard(range, deterministicRandom()->randomUniqueID());
+			std::cout << "Data not available\n";
+			// Assigning a key range to SS. Adds shard in KVS.
+			data->storage.addDataShard(range, deterministicRandom()->randomUniqueID());
 			// SOMEDAY: Avoid restarting adding/transferred shards
 			if (version == 0) { // bypass fetchkeys; shard is known empty at version 0
 				TraceEvent("ChangeServerKeysInitialRange", data->thisServerID)
 				    .detail("Begin", range.begin)
 				    .detail("End", range.end);
 				changeNewestAvailable.emplace_back(range, latestVersion);
-				// data->storage.addDataShard(range, deterministicRandom()->randomUniqueID());
 				data->addShard(ShardInfo::newReadWrite(range, data));
 				setAvailableStatus(data, range, true);
-				// Create and persist a new shard??? May already exist???
 			} else {
 				auto& shard = data->shards[range.begin];
 				if (!shard->assigned() || shard->keys != range) {
-					data->storage.addDataShard(range, deterministicRandom()->randomUniqueID());
 					data->addShard(ShardInfo::newAdding(data, range));
 				}
 			}
 		} else {
+			std::cout << "Data already exists in SS.";
+			// Data already exist in SS.
 			changeNewestAvailable.emplace_back(range, latestVersion);
-			// data->storage.addDataShard(range, deterministicRandom()->randomUniqueID());
 			data->addShard(ShardInfo::newReadWrite(range, data));
 		}
 	}
+
+	std::cout << "End find version \n";
+	TraceEvent(SevInfo, "FindVersionEnd");
+
+	if (vr.begin() == vr.end()) {
+		std::cout << "Special key range\n";
+		if (nowAssigned) {
+			data->storage.addDataShard(keys, deterministicRandom()->randomUniqueID());
+		}
+	}
+
 	// Update newestAvailableVersion when a shard becomes (un)available (in a separate loop to avoid invalidating vr
 	// above)
 	for (auto r = changeNewestAvailable.begin(); r != changeNewestAvailable.end(); ++r)
@@ -4646,21 +4666,19 @@ void changeServerKeys(StorageServer* data,
 	ranges.clear();
 	for (auto r = removeRanges.begin(); r != removeRanges.end(); ++r) {
 		removeDataRange(data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->shards, *r);
-		// data->storage.disposeShard(*r);
+		// Shard should be created, however the data has not yet arrived at the server.
 		setAvailableStatus(data, *r, false);
 		// drop and delete shard metadata
+		data->storage.disposeShard(*r);
 	}
 
 	// Clear the moving-in empty range, and set it available at the latestVersion.
 	for (const auto& range : newEmptyRanges) {
+		data->storage.addDataShard(range, deterministicRandom()->randomUniqueID());
 		MutationRef clearRange(MutationRef::ClearRange, range.begin, range.end);
 		data->addMutation(data->data().getLatestVersion(), true, clearRange, range, data->updateEagerReads);
 		data->newestAvailableVersion.insert(range, latestVersion);
-		data->storage.disposeShard(range);
-		data->storage.addDataShard(range, deterministicRandom()->randomUniqueID());
-		// We don't need to call setAvailableStatus for the potentially existing shard?
 		setAvailableStatus(data, range, true);
-		// create and persist empty shard.
 	}
 	validate(data);
 
@@ -4774,7 +4792,7 @@ public:
 			data->mutableData().createNewVersion(ver);
 		}
 
-		if (m.param1.startsWith(systemKeys.end)) {
+		if (m.param1.startsWith(systemKeys.end) && !m.param1.startsWith("\xff\xff/ShardMapping"_sr)) {
 			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix))
 				applyPrivateCacheData(data, m);
 			else {
@@ -5657,8 +5675,8 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 	}
 	Standalone<VectorRef<MutationRef>> shardMutations =
 	    available ? self->storage.getPersistShardMutation(keys) : self->storage.getDisposeShardMutation(keys);
+
 	for (const auto& m : shardMutations) {
-		std::cout << "Shard mutations " << m.toString();
 		self->addMutationToMutationLog(mLV, m);
 	}
 }
