@@ -1578,7 +1578,6 @@ void seedShardServers(Arena& arena,
 	// Create seed teams. Initially all storage servers belong to same team.
 	ptxn::StorageTeamID seedServerId;
 
-
 	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 		bool seedServerSet = false;
 		ASSERT(serverToTeams.size());
@@ -1637,7 +1636,6 @@ void seedShardServers(Arena& arena,
 		}
 	}
 
-
 	std::vector<Tag> serverTags;
 	std::set<UID> serverSrcUID;
 	serverTags.reserve(servers.size());
@@ -1667,7 +1665,9 @@ void seedShardServers(Arena& arena,
 	} else {
 		auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS
 		                   ? keyServersValue(serverTags)
-		                   : keyServersValue(RangeResult(), std::vector<UID>(serverSrcUID.begin(), serverSrcUID.end()), seedServerId);
+		                   : keyServersValue(RangeResult(),
+		                                     std::vector<UID>(serverSrcUID.begin(), serverSrcUID.end()),
+		                                     seedServerId);
 		krmSetPreviouslyEmptyRange(
 		    tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, serverKeysFalse);
 

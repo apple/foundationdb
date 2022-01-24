@@ -361,7 +361,10 @@ private:
 
 			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 				auto team = tagToTeam(tag).get();
-				TraceEvent("SendingPrivatized_ServerTag", dbgid).detail("Server", id).detail("Tag", tag.toString()).detail("Team", team);
+				TraceEvent("SendingPrivatized_ServerTag", dbgid)
+				    .detail("Server", id)
+				    .detail("Tag", tag.toString())
+				    .detail("Team", team);
 				toCommit->writeToStorageTeams(tLogGroupCollection, { team }, LogProtocolMessage());
 				toCommit->writeToStorageTeams(tLogGroupCollection, { team }, privatized);
 			} else {

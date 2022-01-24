@@ -506,7 +506,7 @@ void ptxnStorageServerFixture::setUp(const int numStorageServers) {
 	storageServerResources.emplace_back(storageTeamID);
 	initializeStorageReplies.emplace_back();
 
-	std::vector<ptxn::StorageTeamID> storageTeams{storageTeamID};
+	std::vector<ptxn::StorageTeamID> storageTeams{ storageTeamID };
 	const auto& resource = storageServerResources.back();
 	const auto& initializeReply = initializeStorageReplies.back();
 	actors.push_back(storageServer(resource.kvStore.get(),

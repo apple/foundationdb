@@ -515,7 +515,7 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 	TraceEvent("MasterRecruitedInitialStorageServers", self->dbgid)
 	    .detail("TargetCount", self->configuration.storageTeamSize)
 	    .detail("Servers", describe(ssInterfaces))
-		.detail("SeedStorageTeamId", seedTeamId);
+	    .detail("SeedStorageTeamId", seedTeamId);
 
 	return Void();
 }

@@ -7115,14 +7115,15 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
-								 Optional<std::vector<ptxn::StorageTeamID>> storageTeams) {
+                                 Optional<std::vector<ptxn::StorageTeamID>> storageTeams) {
 
-	state std::shared_ptr<StorageServerBase> self = getStorageServerInstance(persistentData, db, ssi, storageTeams.get()[0]); //TODO (Vishesh)
+	state std::shared_ptr<StorageServerBase> self =
+	    getStorageServerInstance(persistentData, db, ssi, storageTeams.get()[0]); // TODO (Vishesh)
 	state Future<Void> ssCore;
 
 	self->storageTeamIDs = storageTeams.present()
-	                          ? std::set<ptxn::StorageTeamID>(storageTeams.get().begin(), storageTeams.get().end())
-	                          : Optional<std::set<ptxn::StorageTeamID>>();
+	                           ? std::set<ptxn::StorageTeamID>(storageTeams.get().begin(), storageTeams.get().end())
+	                           : Optional<std::set<ptxn::StorageTeamID>>();
 	self->folder = folder;
 	if (storageTeams.present()) {
 		self->logProtocol = ProtocolVersion::withPartitionTransaction();
@@ -7160,7 +7161,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		TraceEvent("StorageServerInit", ssi.id())
 		    .detail("Version", self->version.get())
 		    .detail("SeedTag", seedTag.toString())
-			.detail("StorageTeams", describe(storageTeams.get()))
+		    .detail("StorageTeams", describe(storageTeams.get()))
 		    .detail("TssPair", ssi.isTss() ? ssi.tssPairID.get().toString() : "");
 		InitializeStorageReply rep;
 		rep.interf = ssi;

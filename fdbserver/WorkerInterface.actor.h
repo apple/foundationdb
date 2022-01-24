@@ -1101,7 +1101,7 @@ ACTOR Future<Void> storageServer(
     std::string folder,
     Promise<Void> recovered,
     Reference<IClusterConnectionRecord>
-	connRecord); // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
+        connRecord); // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
