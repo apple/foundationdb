@@ -200,8 +200,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/TransactionTagSwizzledApiCorrectness.toml)
   add_fdb_test(TEST_FILES rare/WriteTagThrottling.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/SnapIncrementalRestore-1.toml
-               restarting/from_7.0.0/SnapIncrementalRestore-2.toml)
+    TEST_FILES restarting/from_7.0.0/SnapIncrementalRestore-1.txt
+               restarting/from_7.0.0/SnapIncrementalRestore-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_7.0.0_until_7.1.0/ConfigureTestRestart-1.toml
                restarting/from_7.0.0_until_7.1.0/ConfigureTestRestart-2.toml)
