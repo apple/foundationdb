@@ -1627,6 +1627,13 @@ DatabaseContext::~DatabaseContext() {
 	if (grvUpdateHandler.isValid()) {
 		grvUpdateHandler.cancel();
 	}
+	if (sharedStatePtr) {
+		sharedStatePtr->refCount--;
+		if (sharedStatePtr->refCount <= 0) {
+			delete sharedStatePtr;
+			sharedStatePtr = nullptr;
+		}
+	}
 	for (auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT(server_interf.empty());
@@ -7171,6 +7178,7 @@ DatabaseSharedState* DatabaseContext::initSharedState() {
 
 void DatabaseContext::setSharedState(DatabaseSharedState* p) {
 	sharedStatePtr = p;
+	sharedStatePtr->refCount++;
 }
 
 ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, ChangeFeedStorageData* self) {

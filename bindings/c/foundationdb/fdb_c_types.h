@@ -1,5 +1,5 @@
 /*
- * fdb_c_internal.h
+ * fdb_c_types.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,26 +18,26 @@
  * limitations under the License.
  */
 
-#ifndef FDB_C_INTERNAL_H
-#define FDB_C_INTERNAL_H
+#ifndef FDB_C_TYPES_H
+#define FDB_C_TYPES_H
 #pragma once
 
 #ifndef DLLEXPORT
 #define DLLEXPORT
 #endif
 
-#include "fdb_c_types.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// forward declaration and typedef
-typedef struct DatabaseSharedState DatabaseSharedState;
+/* Pointers to these opaque types represent objects in the FDB API */
+typedef struct FDB_future FDBFuture;
+typedef struct FDB_result FDBResult;
+typedef struct FDB_database FDBDatabase;
+typedef struct FDB_transaction FDBTransaction;
 
-DLLEXPORT DatabaseSharedState* fdb_database_create_shared_state(FDBDatabase* db);
-
-DLLEXPORT void fdb_database_set_shared_state(FDBDatabase* db, DatabaseSharedState* p);
+typedef int fdb_error_t;
+typedef int fdb_bool_t;
 
 #ifdef __cplusplus
 }

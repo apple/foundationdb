@@ -1182,6 +1182,7 @@ struct GRVCacheSpace {
 struct DatabaseSharedState {
 	Mutex mutexLock;
 	GRVCacheSpace grvCacheSpace;
+	int refCount;
 
 	DatabaseSharedState() : mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()) {}
 };
