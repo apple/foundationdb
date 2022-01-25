@@ -26,6 +26,7 @@
 #define FDBSERVER_PROXYCOMMITDATA_ACTOR_H
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/Tenant.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
@@ -157,8 +158,6 @@ struct ProxyStats {
 };
 
 struct ProxyCommitData {
-	typedef VersionedMap<Standalone<StringRef>, Key> TenantMap;
-
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
 	ProxyStats stats;

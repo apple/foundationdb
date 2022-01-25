@@ -4469,7 +4469,7 @@ ACTOR Future<Key> getTenantPrefixImpl(Reference<TransactionState> trState, Futur
 		throw tenant_not_found();
 	}
 
-	return val.get();
+	return decodeTenantEntry(val.get()).prefix;
 }
 
 Future<Key> Transaction::getTenantPrefix() {

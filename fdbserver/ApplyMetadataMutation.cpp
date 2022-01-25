@@ -118,7 +118,7 @@ private:
 	std::map<Tag, Version>* tag_popped = nullptr;
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
-	ProxyCommitData::TenantMap* tenantMap = nullptr;
+	TenantMap* tenantMap = nullptr;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
 	bool initialCommit = false;
@@ -583,9 +583,9 @@ private:
 				ASSERT(version != invalidVersion);
 				tenantMap->createNewVersion(version);
 				Standalone<StringRef> tenantName = m.param1.removePrefix(tenantMapPrefix);
-				Key tenantPrefix = m.param2;
+				TenantMapEntry tenantEntry = decodeTenantEntry(m.param2);
 
-				tenantMap->insert(tenantName, tenantPrefix);
+				tenantMap->insert(tenantName, tenantEntry);
 			}
 
 			if (!initialCommit) {

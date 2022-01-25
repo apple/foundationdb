@@ -662,7 +662,7 @@ Future<Void> createTenant(Reference<DB> db, TenantName name) {
 				throw tenant_prefix_allocator_conflict();
 			}
 
-			tr->set(tenantMapKey, prefix);
+			tr->set(tenantMapKey, encodeTenantEntry(TenantMapEntry(prefix)));
 
 			wait(safeThreadFutureToFuture(tr->commit()));
 			return Void();
@@ -725,7 +725,7 @@ Future<Standalone<VectorRef<StringRef>>> listTenants(Reference<DB> db, StringRef
 }
 
 ACTOR template <class DB>
-Future<Key> getTenant(Reference<DB> db, TenantName name) {
+Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
@@ -739,7 +739,7 @@ Future<Key> getTenant(Reference<DB> db, TenantName name) {
 				throw tenant_not_found();
 			}
 
-			return val.get();
+			return decodeTenantEntry(val.get());
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}

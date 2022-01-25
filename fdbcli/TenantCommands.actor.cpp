@@ -131,8 +131,8 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 		return false;
 	}
 
-	Key tenantPrefix = wait(ManagementAPI::getTenant(db, tokens[1]));
-	printf("  Prefix: %s\n", printable(tenantPrefix).c_str());
+	TenantMapEntry tenant = wait(ManagementAPI::getTenant(db, tokens[1]));
+	printf("  Prefix: %s\n", printable(tenant.prefix).c_str());
 
 	return true;
 }

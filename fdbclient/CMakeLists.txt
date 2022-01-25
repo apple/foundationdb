@@ -138,6 +138,7 @@ set(FDBCLIENT_SRCS
   TagThrottle.actor.h
   TaskBucket.actor.cpp
   TaskBucket.h
+  Tenant.h
   TestKnobCollection.cpp
   TestKnobCollection.h
   ThreadSafeTransaction.cpp

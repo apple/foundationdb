@@ -854,11 +854,11 @@ ErrorOr<Void> checkTenant(ProxyCommitData* commitData, CommitTransactionRequest 
 		}
 
 		for (auto mutation : tr.transaction.mutations) {
-			if (!mutation.param1.startsWith(*itr) ||
-			    (mutation.type == MutationRef::ClearRange && !mutation.param2.startsWith(*itr))) {
+			if (!mutation.param1.startsWith(itr->prefix) ||
+			    (mutation.type == MutationRef::ClearRange && !mutation.param2.startsWith(itr->prefix))) {
 				TraceEvent(SevWarn, "KeyNotInTenant", commitData->dbgid)
 				    .detail("Tenant", tr.tenantInfo.name.get())
-				    .detail("TenantPrefix", *itr)
+				    .detail("TenantPrefix", itr->prefix)
 				    .detail("Key", mutation.param1)
 				    .detail("EndKey",
 				            mutation.type == MutationRef::ClearRange ? mutation.param2 : Optional<StringRef>());

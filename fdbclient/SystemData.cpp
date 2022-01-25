@@ -1326,6 +1326,17 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 	return interf;
 }
 
+Value encodeTenantEntry(TenantMapEntry const& tenantEntry) {
+	return ObjectWriter::toValue(tenantEntry, IncludeVersion());
+}
+
+TenantMapEntry decodeTenantEntry(ValueRef const& value) {
+	TenantMapEntry entry;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(entry);
+	return entry;
+}
+
 // TODO: before we commit to this, make sure it works with broader MTC plans or can be migrated
 const KeyRangeRef tenantMapKeys("\xff\x02/tenantMap/"_sr, "\xff\x02/tenantMap0"_sr);
 const KeyRef tenantMapPrefix = tenantMapKeys.begin;

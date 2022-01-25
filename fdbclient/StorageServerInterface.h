@@ -33,6 +33,7 @@
 #include "fdbrpc/TSSComparison.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/Tenant.h"
 #include "flow/UnitTest.h"
 
 // Dead code, removed in the next protocol version
@@ -48,8 +49,6 @@ struct VersionReply {
 		serializer(ar, version);
 	}
 };
-
-typedef Standalone<StringRef> TenantName;
 
 struct StorageServerInterface {
 	constexpr static FileIdentifier file_identifier = 15302073;

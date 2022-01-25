@@ -42,6 +42,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StatusClient.h"
+#include "fdbclient/Tenant.h"
 #include "fdbclient/Tuple.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TransactionLineage.h"
@@ -384,7 +385,6 @@ public:
 
 struct StorageServer {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
-	typedef VersionedMap<Standalone<StringRef>, Key> TenantMap;
 	typedef VersionedMap<KeyRef, StringRef> TenantIndex;
 
 private:
@@ -460,7 +460,10 @@ public:
 	void insertTenant(KeyRef key, ValueRef value, Version version, bool insertIntoMutationLog);
 	void clearTenants(KeyRef startKey, KeyRef endKey, Version version);
 
-	Optional<Key> checkTenant(Version version, Optional<TenantName> tenant, KeyRef begin, Optional<KeyRef> end);
+	Optional<TenantMapEntry> checkTenant(Version version,
+	                                     Optional<TenantName> tenant,
+	                                     KeyRef begin,
+	                                     Optional<KeyRef> end);
 	KeyRangeRef clampRangeToTenant(KeyRangeRef range, Optional<TenantName> tenant, Version version, Arena& arena);
 
 	class CurrentRunningFetchKeys {
@@ -1366,10 +1369,10 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	}
 }
 
-Optional<Key> StorageServer::checkTenant(Version version,
-                                         Optional<TenantName> tenantName,
-                                         KeyRef begin,
-                                         Optional<KeyRef> end = Optional<KeyRef>()) {
+Optional<TenantMapEntry> StorageServer::checkTenant(Version version,
+                                                    Optional<TenantName> tenantName,
+                                                    KeyRef begin,
+                                                    Optional<KeyRef> end = Optional<KeyRef>()) {
 	std::vector<KeyRef> lockedPrefixes;
 	if (tenantName.present()) {
 		auto view = tenantMap.at(version);
@@ -1378,10 +1381,10 @@ Optional<Key> StorageServer::checkTenant(Version version,
 			throw tenant_not_found();
 		}
 
-		if (!begin.startsWith(*itr) || (end.present() && !end.get().startsWith(*itr))) {
+		if (!begin.startsWith(itr->prefix) || (end.present() && !end.get().startsWith(itr->prefix))) {
 			TraceEvent(SevWarn, "KeyNotInTenant", thisServerID)
 			    .detail("Tenant", tenantName)
-			    .detail("TenantPrefix", *itr)
+			    .detail("TenantPrefix", itr->prefix)
 			    .detail("Begin", begin)
 			    .detail("End", end)
 			    .backtrace();
@@ -1396,7 +1399,7 @@ Optional<Key> StorageServer::checkTenant(Version version,
 		throw tenant_name_required();
 	}
 
-	return Optional<Key>();
+	return Optional<TenantMapEntry>();
 }
 
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
@@ -2449,8 +2452,8 @@ KeyRangeRef StorageServer::clampRangeToTenant(KeyRangeRef range,
 		auto itr = view.find(tenant.get());
 		ASSERT(itr != view.end());
 
-		return KeyRangeRef(range.begin.startsWith(*itr) ? range.begin : *itr,
-		                   range.end.startsWith(*itr) ? range.end : allKeys.end.withPrefix(*itr));
+		return KeyRangeRef(range.begin.startsWith(itr->prefix) ? range.begin : itr->prefix,
+		                   range.end.startsWith(itr->prefix) ? range.end : allKeys.end.withPrefix(itr->prefix));
 	} else {
 		return range;
 	}
@@ -2793,7 +2796,7 @@ ACTOR Future<RangeResult> quickGetKeyValues(StorageServer* data,
 Key constructMappedKey(KeyValueRef* keyValue,
                        Tuple& mappedKeyFormatTuple,
                        bool& isRangeQuery,
-                       Optional<Key> tenantPrefix) {
+                       Optional<TenantMapEntry> tenantEntry) {
 	// Lazily parse key and/or value to tuple because they may not need to be a tuple if not used.
 	Optional<Tuple> keyTuple;
 	Optional<Tuple> valueTuple;
@@ -2885,8 +2888,8 @@ Key constructMappedKey(KeyValueRef* keyValue,
 
 	KeyRef mappedKey = mappedKeyTuple.pack();
 
-	if (tenantPrefix.present() && !tenantPrefix.get().empty()) {
-		return mappedKey.withPrefix(tenantPrefix.get());
+	if (tenantEntry.present() && !tenantEntry.get().prefix.empty()) {
+		return mappedKey.withPrefix(tenantEntry.get().prefix);
 	}
 
 	return mappedKey;
@@ -2905,7 +2908,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		                        .append("{...}"_sr);
 
 		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
+		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<TenantMapEntry>());
 
 		Key expectedMappedKey = Tuple()
 		                            .append("normal"_sr)
@@ -2926,7 +2929,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		                        .append("{...}"_sr);
 
 		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, "Prefix"_sr);
+		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, TenantMapEntry("Prefix"_sr));
 
 		Key expectedMappedKey = Tuple()
 		                            .append("normal"_sr)
@@ -2943,7 +2946,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		Tuple mapperTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
 
 		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
+		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<TenantMapEntry>());
 
 		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
@@ -2954,7 +2957,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		Tuple mapperTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
 
 		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
+		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<TenantMapEntry>());
 
 		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
@@ -2966,7 +2969,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		bool isRangeQuery = false;
 		state bool throwException = false;
 		try {
-			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
+			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<TenantMapEntry>());
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException = true;
@@ -2978,7 +2981,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		bool isRangeQuery = false;
 		state bool throwException2 = false;
 		try {
-			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
+			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<TenantMapEntry>());
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_range_decriptor);
 			throwException2 = true;
@@ -2990,7 +2993,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		bool isRangeQuery = false;
 		state bool throwException3 = false;
 		try {
-			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
+			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<TenantMapEntry>());
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException3 = true;
@@ -3005,7 +3008,7 @@ ACTOR Future<GetKeyValuesAndFlatMapReply> flatMap(StorageServer* data,
                                                   StringRef mapper,
                                                   // To provide span context, tags, debug ID to underlying lookups.
                                                   GetKeyValuesAndFlatMapRequest* pOriginalReq,
-                                                  Optional<Key> tenantPrefix) {
+                                                  Optional<TenantMapEntry> tenantEntry) {
 	state GetKeyValuesAndFlatMapReply result;
 	result.version = input.version;
 	if (input.more) {
@@ -3022,7 +3025,7 @@ ACTOR Future<GetKeyValuesAndFlatMapReply> flatMap(StorageServer* data,
 	for (; it != input.data.end(); it++) {
 		// TODO: raw access is not currently supported for tenants using flat map. Should we try to support it or
 		// provide an error?
-		state Key mappedKey = constructMappedKey(it, mappedKeyFormatTuple, isRangeQuery, tenantPrefix);
+		state Key mappedKey = constructMappedKey(it, mappedKeyFormatTuple, isRangeQuery, tenantEntry);
 		// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
 		result.arena.dependsOn(mappedKey.arena());
 
@@ -3090,7 +3093,7 @@ ACTOR Future<Void> getKeyValuesAndFlatMapQ(StorageServer* data, GetKeyValuesAndF
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesAndFlatMap.Before");
 		state Version version = wait(waitForVersion(data, req.version, span.context));
 
-		state Optional<Key> tenantPrefix =
+		state Optional<TenantMapEntry> tenantEntry =
 		    data->checkTenant(req.version, req.tenantInfo.name, req.begin.getKey(), req.end.getKey());
 
 		state uint64_t changeCounter = data->shardChangeCounter;
@@ -3168,7 +3171,7 @@ ACTOR Future<Void> getKeyValuesAndFlatMapQ(StorageServer* data, GetKeyValuesAndF
 			state GetKeyValuesAndFlatMapReply r;
 			try {
 				// Map the scanned range to another list of keys and look up.
-				GetKeyValuesAndFlatMapReply _r = wait(flatMap(data, getKeyValuesReply, req.mapper, &req, tenantPrefix));
+				GetKeyValuesAndFlatMapReply _r = wait(flatMap(data, getKeyValuesReply, req.mapper, &req, tenantEntry));
 				r = _r;
 			} catch (Error& e) {
 				TraceEvent("FlatMapError").error(e);
@@ -5237,13 +5240,13 @@ void StorageServer::insertTenant(KeyRef key, ValueRef value, Version version, bo
 	tenantMap.createNewVersion(version);
 	lockedTenantsIndex.createNewVersion(version);
 
-	Standalone<StringRef> tenantName = key.substr(tenantMapPrivatePrefix.size());
-	Key tenantPrefix = value;
+	TenantName tenantName = key.substr(tenantMapPrivatePrefix.size());
+	TenantMapEntry tenantEntry = decodeTenantEntry(value);
 
-	tenantMap.insert(tenantName, tenantPrefix);
+	tenantMap.insert(tenantName, tenantEntry);
 
 	if (tenantName.startsWith(lockedTenantPrefix)) {
-		lockedTenantsIndex.insert(tenantPrefix, tenantName);
+		lockedTenantsIndex.insert(tenantEntry.prefix, tenantName);
 	}
 
 	if (insertIntoMutationLog) {
@@ -5263,11 +5266,11 @@ void StorageServer::clearTenants(KeyRef startKey, KeyRef endKey, Version version
 	auto view = tenantMap.at(version);
 	for (auto itr = view.lower_bound(startTenant); itr != view.lower_bound(endTenant); ++itr) {
 		// Trigger any watches on the prefix associated with the tenant.
-		watches.triggerRange(*itr, strinc(*itr));
+		watches.triggerRange(itr->prefix, strinc(itr->prefix));
 
 		tenantMap.erase(itr);
-		if (itr->startsWith(lockedTenantPrefix)) {
-			lockedTenantsIndex.erase(*itr);
+		if (itr->prefix.startsWith(lockedTenantPrefix)) {
+			lockedTenantsIndex.erase(itr->prefix);
 		}
 	}
 
@@ -5872,7 +5875,7 @@ void StorageServerDisk::makeNewStorageServerDurable() {
 
 	auto view = data->tenantMap.atLatest();
 	for (auto itr = view.begin(); itr != view.end(); ++itr) {
-		storage->set(KeyValueRef(itr.key().withPrefix(persistTenantMapKeys.begin), *itr));
+		storage->set(KeyValueRef(itr.key().withPrefix(persistTenantMapKeys.begin), encodeTenantEntry(*itr)));
 	}
 }
 
@@ -6307,18 +6310,18 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state int tenantMapLoc;
 	for (tenantMapLoc = 0; tenantMapLoc < tenantMap.size(); tenantMapLoc++) {
 		auto const& result = tenantMap[tenantMapLoc];
-		Standalone<StringRef> tenantName = result.key.substr(persistTenantMapKeys.begin.size());
-		Key tenantPrefix = result.value;
+		TenantName tenantName = result.key.substr(persistTenantMapKeys.begin.size());
+		TenantMapEntry tenantEntry = decodeTenantEntry(result.value);
 
-		data->tenantMap.insert(tenantName, tenantPrefix);
+		data->tenantMap.insert(tenantName, tenantEntry);
 		if (tenantName.startsWith(lockedTenantPrefix)) {
-			data->lockedTenantsIndex.insert(tenantPrefix, tenantName);
+			data->lockedTenantsIndex.insert(tenantEntry.prefix, tenantName);
 		}
 
 		TraceEvent("RestoringTenant", data->thisServerID)
 		    .detail("Key", tenantMap[tenantMapLoc].key)
 		    .detail("TenantName", tenantName)
-		    .detail("Prefix", tenantPrefix);
+		    .detail("Prefix", tenantEntry.prefix);
 
 		wait(yield());
 	}
