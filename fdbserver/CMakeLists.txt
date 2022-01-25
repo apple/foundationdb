@@ -161,6 +161,7 @@ set(FDBSERVER_SRCS
   workloads/BackupToDBCorrectness.actor.cpp
   workloads/BackupToDBUpgrade.actor.cpp
   workloads/BlobStoreWorkload.h
+  workloads/BlobGranuleCorrectnessWorkload.actor.cpp
   workloads/BlobGranuleVerifier.actor.cpp
   workloads/BulkLoad.actor.cpp
   workloads/BulkSetup.actor.h

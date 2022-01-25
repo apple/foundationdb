@@ -126,7 +126,6 @@ void updateClientBlobRanges(KeyRangeMap<bool>* knownBlobRanges,
 			}
 			bool active = dbBlobRanges[i].value == LiteralStringRef("1");
 			if (active) {
-				ASSERT(dbBlobRanges[i + 1].value == StringRef());
 				if (BM_DEBUG) {
 					fmt::print("BM sees client range [{0} - {1})\n",
 					           dbBlobRanges[i].key.printable(),
