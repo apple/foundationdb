@@ -457,7 +457,7 @@ public:
 	void clearWatchMetadata();
 
 	// tenant map operations
-	void insertTenant(KeyRef key, ValueRef value, Version version);
+	void insertTenant(KeyRef key, ValueRef value, Version version, bool insertIntoMutationLog);
 	void clearTenants(KeyRef startKey, KeyRef endKey, Version version);
 
 	Optional<Key> checkTenant(Version version, Optional<TenantName> tenant, KeyRef begin, Optional<KeyRef> end);
@@ -3464,7 +3464,6 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		KeyRange shard = getShardKeyRange(data, req.sel);
 		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenantInfo.name, req.version, req.arena);
 
-		// TODO: skip locked ranges
 		state int offset;
 		Key k = wait(
 		    findKey(data, req.sel, version, searchRange, &offset, req.spanContext, IKeyValueStore::ReadType::NORMAL));
@@ -5164,7 +5163,7 @@ private:
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) &&
 		           m.param1.startsWith(tenantMapPrivatePrefix)) {
 			if (m.type == MutationRef::SetValue) {
-				data->insertTenant(m.param1, m.param2, currentVersion);
+				data->insertTenant(m.param1, m.param2, currentVersion, true);
 			} else if (m.type == MutationRef::ClearRange) {
 				data->clearTenants(m.param1, m.param2, currentVersion);
 			}
@@ -5234,7 +5233,7 @@ private:
 	}
 };
 
-void StorageServer::insertTenant(KeyRef key, ValueRef value, Version version) {
+void StorageServer::insertTenant(KeyRef key, ValueRef value, Version version, bool insertIntoMutationLog) {
 	tenantMap.createNewVersion(version);
 	lockedTenantsIndex.createNewVersion(version);
 
@@ -5247,9 +5246,11 @@ void StorageServer::insertTenant(KeyRef key, ValueRef value, Version version) {
 		lockedTenantsIndex.insert(tenantPrefix, tenantName);
 	}
 
-	auto& mLV = addVersionToMutationLog(version);
-	addMutationToMutationLog(
-	    mLV, MutationRef(MutationRef::SetValue, tenantName.withPrefix(persistTenantMapKeys.begin), value));
+	if (insertIntoMutationLog) {
+		auto& mLV = addVersionToMutationLog(version);
+		addMutationToMutationLog(
+		    mLV, MutationRef(MutationRef::SetValue, tenantName.withPrefix(persistTenantMapKeys.begin), value));
+	}
 }
 
 void StorageServer::clearTenants(KeyRef startKey, KeyRef endKey, Version version) {
@@ -5259,7 +5260,6 @@ void StorageServer::clearTenants(KeyRef startKey, KeyRef endKey, Version version
 	StringRef startTenant = startKey.substr(tenantMapPrivatePrefix.size());
 	StringRef endTenant = endKey.substr(tenantMapPrivatePrefix.size());
 
-	// TODO: this only works if version is latest version
 	auto view = tenantMap.at(version);
 	for (auto itr = view.lower_bound(startTenant); itr != view.lower_bound(endTenant); ++itr) {
 		// Trigger any watches on the prefix associated with the tenant.
@@ -5869,6 +5869,11 @@ void StorageServerDisk::makeNewStorageServerDurable() {
 	storage->set(KeyValueRef(persistVersion, BinaryWriter::toValue(data->version.get(), Unversioned())));
 	storage->set(KeyValueRef(persistShardAssignedKeys.begin.toString(), LiteralStringRef("0")));
 	storage->set(KeyValueRef(persistShardAvailableKeys.begin.toString(), LiteralStringRef("0")));
+
+	auto view = data->tenantMap.atLatest();
+	for (auto itr = view.begin(); itr != view.end(); ++itr) {
+		storage->set(KeyValueRef(itr.key().withPrefix(persistTenantMapKeys.begin), *itr));
+	}
 }
 
 void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
@@ -7113,9 +7118,7 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 			RangeResult entries = wait(tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY));
 
 			for (auto kv : entries) {
-				// TODO: we need to make sure whatever version we use for reading the tenant map is the minimum we
-				// can use for reads, and that we will get all updates after that point
-				self->insertTenant(kv.key, kv.value, version);
+				self->insertTenant(kv.key, kv.value, version, false);
 			}
 			break;
 		} catch (Error& e) {
@@ -7153,8 +7156,11 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		++self.counters.kvCommits;
 
 		if (seedTag == invalidTag) {
-			std::pair<Version, Tag> verAndTag = wait(addStorageServer(
-			    self.cx, ssi)); // Might throw recruitment_failed in case of simultaneous master failure
+			wait(initTenantMap(&self));
+
+			// Might throw recruitment_failed in case of simultaneous master failure
+			std::pair<Version, Tag> verAndTag = wait(addStorageServer(self.cx, ssi));
+
 			self.tag = verAndTag.second;
 			if (ssi.isTss()) {
 				self.setInitialVersion(tssSeedVersion);
@@ -7182,7 +7188,6 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		if (seedTag == invalidTag) {
 			// TODO: we need to make sure that if we fail before the result here is made durable, then we can
 			// recover and read it again
-			wait(initTenantMap(&self));
 		}
 
 		ssCore = storageServerCore(&self, ssi);

@@ -5694,7 +5694,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 			throw read_version_already_set();
 		readVersion = Version(0);
 		trState->options.causalWriteRisky = true;
-		trState->tenantPrefix = Key(); // TODO: does this expose raw writes?
+		trState->tenantPrefix = Key();
 		break;
 
 	case FDBTransactionOptions::CAUSAL_READ_RISKY:
