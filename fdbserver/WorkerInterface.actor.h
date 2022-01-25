@@ -52,7 +52,7 @@ namespace ptxn {
 
 struct TLogGroup {
 	TLogGroupID logGroupId;
-	std::unordered_map<StorageTeamID, std::vector<Tag>> storageTeams;
+	std::map<StorageTeamID, std::vector<Tag>> storageTeams;
 
 	TLogGroup() {}
 	explicit TLogGroup(TLogGroupID logGroupId) : logGroupId(logGroupId) {}
@@ -87,7 +87,7 @@ struct InitializePtxnTLogRequest {
 
 	ReplyPromise<struct ptxn::TLogInterface_PassivelyPull> reply;
 	std::vector<ptxn::TLogGroup> tlogGroups;
-	std::vector<std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues;
+	std::unordered_map<ptxn::TLogGroupID, std::pair<IKeyValueStore*, IDiskQueue*>> persistentDataAndQueues;
 
 	InitializePtxnTLogRequest() : recoverFrom(0) {}
 
