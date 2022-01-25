@@ -5072,6 +5072,64 @@ ACTOR Future<Void> tssDelayForever() {
 	}
 }
 
+namespace details {
+
+template <typename T>
+class UniqueObjectHolder {
+public:
+	using value_type = T;
+
+private:
+	T object;
+
+public:
+	UniqueObjectHolder() : object() {}
+	explicit UniqueObjectHolder(T&& object_) : object(std::move(object_)) {}
+	UniqueObjectHolder(const UniqueObjectHolder& other_) {
+		object = std::move(const_cast<UniqueObjectHolder&>(other_));
+	}
+	UniqueObjectHolder(UniqueObjectHolder&& other_) : object(std::move(other_.object)) {}
+	UniqueObjectHolder& operator=(T&& object_) {
+		object = std::move(object_);
+		return *this;
+	}
+	UniqueObjectHolder& operator=(const T& object_) {
+		object = std::move(const_cast<T&>(object_));
+		return *this;
+	}
+	UniqueObjectHolder& operator=(const UniqueObjectHolder& other_) {
+		object = std::move(const_cast<T&>(other_.object));
+		return *this;
+	}
+	UniqueObjectHolder& operator=(UniqueObjectHolder&& other_) {
+		object = std::move(other_.object);
+		return *this;
+	}
+};
+
+// Take the durable version lock from the storage server context
+// NOTE: In general an ACTOR should accept a shared_ptr, yet this ACTOR should be always waited by a function which
+// holds a shared_ptr of StorageServerBase*, use the raw pointer to save the thread locks.
+ACTOR Future<UniqueObjectHolder<FlowLock::Releaser>> takeDurableVersionLock(StorageServerBase* pStorageServerContext) {
+	ASSERT(pStorageServerContext);
+
+	state Stopwatch stopwatch;
+
+	wait(pStorageServerContext->durableVersionLock.take(TaskPriority::TLogPeekReply, 1));
+	FlowLock::Releaser lock(pStorageServerContext->durableVersionLock);
+
+	Stopwatch::time_t elapsedTime = stopwatch.lap();
+	if (elapsedTime > 0.1)
+		TraceEvent("SSSlowTakeLock1", pStorageServerContext->thisServerID)
+		    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken)
+		    .detail("Duration", elapsedTime)
+		    .detail("Version", pStorageServerContext->version.get());
+	pStorageServerContext->ssVersionLockLatencyHistogram->sampleSeconds(elapsedTime);
+
+	return UniqueObjectHolder<FlowLock::Releaser>(std::move(lock));
+}
+} // namespace details
+
 namespace ptxn {
 
 const StorageTeamID& getStoragePrivateMutationTeam(const ptxn::StorageServer& storageServerContext) {
@@ -5260,15 +5318,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		ASSERT(*pReceivedUpdate == false);
 		*pReceivedUpdate = true;
 
-		start = now();
-		wait(data->durableVersionLock.take(TaskPriority::TLogPeekReply, 1));
-		state FlowLock::Releaser holdingDVL(data->durableVersionLock);
-		if (now() - start > 0.1)
-			TraceEvent("SSSlowTakeLock1", data->thisServerID)
-			    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken)
-			    .detail("Duration", now() - start)
-			    .detail("Version", data->version.get());
-		data->ssVersionLockLatencyHistogram->sampleSeconds(now() - start);
+		state details::UniqueObjectHolder<FlowLock::Releaser> holdingDurableVersionLock =
+		    wait(details::takeDurableVersionLock(data));
 
 		start = now();
 		state UpdateEagerReadInfo eager;
