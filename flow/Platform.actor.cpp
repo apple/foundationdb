@@ -3686,7 +3686,7 @@ void setupRunLoopProfiler() {
 		// Start a thread which will use signals to log stacks on long events
 		pthread_t* mainThread = (pthread_t*)malloc(sizeof(pthread_t));
 		*mainThread = pthread_self();
-		startThread(&checkThread, (void*)mainThread);
+		startThread(&checkThread, (void*)mainThread, 0, "fdb-loopprofile");
 	}
 #else
 	// No slow task profiling for other platforms!
