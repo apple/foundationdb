@@ -91,7 +91,7 @@ Error statusToError(const rocksdb::Status& s) {
 
 struct RocksDBCheckpointReader : ICheckpointReader {
 	struct Reader : IThreadPoolReceiver {
-		explicit Reader(DB& db) : db(db) {
+		explicit Reader(DB& db) : db(db), cf(nullptr) {
 			if (g_network->isSimulated()) {
 				// In simulation, increasing the read operation timeouts to 5 minutes, as some of the tests have
 				// very high load and single read thread cannot process all the load within the timeouts.
@@ -122,6 +122,7 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 		void action(OpenAction& a) {
 			ASSERT(cf == nullptr);
 
+			std::cout << "Open RocksDB Checkpoint." << std::endl;
 			std::vector<std::string> columnFamilies;
 			rocksdb::Options options = getOptions();
 			rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, a.path, &columnFamilies);
@@ -139,6 +140,7 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 			std::vector<rocksdb::ColumnFamilyHandle*> handles;
 			status = rocksdb::DB::OpenForReadOnly(options, a.path, descriptors, &handles, &db);
 
+			std::cout << "Open RocksDB Checkpoint Status." << status.ToString() << std::endl;
 			if (!status.ok()) {
 				logRocksDBError(status, "OpenForReadOnly");
 				a.done.sendError(statusToError(status));
@@ -158,6 +160,8 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 			    .detail("ColumnFamily", cf->GetName());
 
 			ASSERT(db != nullptr && cf != nullptr);
+
+			std::cout << "Init Iterator." << std::endl;
 
 			begin = toSlice(a.range.begin);
 			end = toSlice(a.range.end);
@@ -232,9 +236,12 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 				return;
 			}
 
+            std::cout << "Reading batch" << std::endl;
+
 			RangeResult result;
 			if (a.rowLimit == 0 || a.byteLimit == 0) {
 				a.result.send(result);
+                return;
 			}
 
 			ASSERT(a.rowLimit > 0);
@@ -243,6 +250,7 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 			rocksdb::Status s;
 			while (cursor->Valid()) {
 				KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
+                std::cout << "Getting key " << cursor->key().ToString() << std::endl;
 				accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 				result.push_back_deep(result.arena(), kv);
 				// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
@@ -267,6 +275,9 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 				a.result.sendError(statusToError(s));
 				return;
 			}
+
+            std::cout << "Read Done." << cursor->status().ToString() << std::endl;
+			// throw end_of_stream();
 
 			a.result.send(result);
 		}
@@ -344,7 +355,7 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
-ICheckpointReader* checkpointReaderRocksDB(std::string& path, UID logID) {
+ICheckpointReader* checkpointReaderRocksDB(const std::string& path, UID logID) {
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 	return new RocksDBCheckpointReader(path, logID);
 #else

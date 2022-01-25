@@ -186,6 +186,6 @@ protected:
 	virtual ~ICheckpointReader() {}
 };
 
-extern ICheckpointReader* checkpointReaderRocksDB(std::string const& path, UID logID);
+extern ICheckpointReader* checkpointReaderRocksDB(const std::string& path, UID logID);
 
 #endif
