@@ -178,15 +178,14 @@ Future<Void> KVFileCheck(std::string const& filename, bool const& integrity);
 
 class ICheckpointReader : public IClosable {
 public:
-	virtual Future<Void> init(KeyRange range = allKeys) { return Void(); }
+	virtual Future<Void> init(KeyRange range) = 0;
 
-	virtual Future<RangeResult> next(const int rowLimit, const int ByteLimit);
+	virtual Future<RangeResult> next(const int rowLimit, const int ByteLimit) = 0;
 
 protected:
 	virtual ~ICheckpointReader() {}
-}
+};
 
-extern ICheckpointReader*
-checkpointReaderRockDB(std::string const& path, UID logID);
+extern ICheckpointReader* checkpointReaderRocksDB(std::string const& path, UID logID);
 
 #endif

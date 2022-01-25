@@ -162,9 +162,9 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 			begin = toSlice(a.range.begin);
 			end = toSlice(a.range.end);
 
-			rocksdb::ReadOptions options = getReadOptions();
-			read_options.iterate_upper_bound = &end;
-			cursor = std::unique_ptr<rocksdb::Interator>(db->NewIterator(options, cf));
+			rocksdb::ReadOptions readOptions = getReadOptions();
+			readOptions.iterate_upper_bound = &end;
+			cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions, cf));
 			cursor->Seek(begin);
 
 			a.done.send(Void());
@@ -211,7 +211,7 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 
 		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
 			ReadRangeAction(int rowLimit, int byteLimit)
-			  : rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()), {}
+			  : rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 
@@ -241,7 +241,7 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 
 			int accumulatedBytes = 0;
 			rocksdb::Status s;
-			while (cursor->Valid() && cursor->key() < end) {
+			while (cursor->Valid()) {
 				KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
 				accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 				result.push_back_deep(result.arena(), kv);
@@ -276,10 +276,10 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 		rocksdb::Slice begin;
 		rocksdb::Slice end;
 		double readRangeTimeout;
-		std::unique_ptr<rocksdb::Interator> cursor;
+		std::unique_ptr<rocksdb::Iterator> cursor;
 	};
 
-	explicit RocksDBCheckpointReader(const std::string& path, UID id) : path(path), id(id), {
+	explicit RocksDBCheckpointReader(const std::string& path, UID id) : path(path), id(id) {
 		if (g_network->isSimulated()) {
 			readThreads = CoroThreadPool::createThreadPool();
 		} else {
@@ -327,7 +327,7 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 	Future<RangeResult> next(int rowLimit, int byteLimit) override {
 		auto a = std::make_unique<Reader::ReadRangeAction>(rowLimit, byteLimit);
 		auto res = a->result.getFuture();
-		readThreads->post(a);
+		readThreads->post(a.release());
 		return res;
 	}
 
@@ -344,7 +344,7 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
-ICheckpointReader* checkpointReaderRockDB(std::string const& path, UID logID) {
+ICheckpointReader* checkpointReaderRocksDB(std::string& path, UID logID) {
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 	return new RocksDBCheckpointReader(path, logID);
 #else

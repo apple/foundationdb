@@ -8,6 +8,7 @@ set(FDBSERVER_SRCS
   BlobManager.actor.cpp
   BlobManagerInterface.h
   BlobWorker.actor.cpp
+  CheckpointReaderRocksDB.actor.cpp
   ClusterController.actor.h
   ClusterController.actor.cpp
   ClusterRecovery.actor.h
@@ -45,7 +46,6 @@ set(FDBSERVER_SRCS
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreRocksDB.actor.cpp
-  CheckpointReaderRocksDB.actor.cpp
   KeyValueStoreSQLite.actor.cpp
   Knobs.h
   LatencyBandConfig.cpp
