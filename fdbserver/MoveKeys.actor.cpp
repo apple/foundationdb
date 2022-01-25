@@ -1568,17 +1568,18 @@ void seedShardServers(Arena& arena,
                       std::vector<std::pair<StorageServerInterface, ptxn::StorageTeamID>> servers,
                       const std::vector<StringRef>& keySplits) {
 
-	std::unordered_map<ptxn::StorageTeamID, std::vector<UID>> teamToServers;
-	std::unordered_map<UID, std::set<ptxn::StorageTeamID>> serverToTeams;
-	for (const auto& [s, teamId] : servers) {
-		teamToServers[teamId].push_back(s.id());
-		serverToTeams[s.id()].emplace(teamId);
-	}
-
 	// Create seed teams. Initially all storage servers belong to same team.
 	ptxn::StorageTeamID seedServerId;
 
 	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
+		std::unordered_map<ptxn::StorageTeamID, std::vector<UID>> teamToServers;
+		std::unordered_map<UID, std::set<ptxn::StorageTeamID>> serverToTeams;
+
+		for (const auto& [s, teamId] : servers) {
+			teamToServers[teamId].push_back(s.id());
+			serverToTeams[s.id()].emplace(teamId);
+		}
+
 		bool seedServerSet = false;
 		ASSERT(serverToTeams.size());
 		for (auto& [ss, teams] : serverToTeams) {

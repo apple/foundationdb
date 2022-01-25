@@ -495,7 +495,10 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 			idx++;
 
 			servers->emplace_back(newServer.get().interf, seedTeamId);
-			servers->emplace_back(newServer.get().interf, newServer.get().interf.id());
+
+			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
+				servers->emplace_back(newServer.get().interf, newServer.get().interf.id());
+			}
 			ssInterfaces.push_back(newServer.get().interf);
 
 			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
