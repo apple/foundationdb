@@ -121,7 +121,6 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, CloseUnusedConnection);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, DBCoreState);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, TagThrottleValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, ServerListValue);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, StorageCacheValue);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreStatusValue);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreRequestValue);
@@ -136,12 +135,13 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, SmallEndpoints);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, CacheRole);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010000LL, StableInterfaces);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, ServerListValue);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, TagThrottleValueReason);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, SpanContext);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, TSS);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010001LL, ChangeFeed);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010001LL, BlobGranule);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010001LL, NetworkAddressHostnameFlag);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, ChangeFeed);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, BlobGranule);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, NetworkAddressHostnameFlag);
 };
 
 template <>
@@ -158,7 +158,7 @@ struct Traceable<ProtocolVersion> : std::true_type {
 //
 //                                                         xyzdev
 //                                                         vvvv
-constexpr ProtocolVersion currentProtocolVersion(0x0FDB00B071010001LL);
+constexpr ProtocolVersion currentProtocolVersion(0x0FDB00B071010000LL);
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
 static_assert(currentProtocolVersion.version() < 0x0FDB00B100000000LL, "Unexpected protocol version");
