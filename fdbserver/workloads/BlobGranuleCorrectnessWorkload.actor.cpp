@@ -450,9 +450,6 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				        "DBG READ:     Skip ID {0} cleared @ {1}\n", idIdx, checkIt->second.writes[idIdx].clearVersion);
 				}*/
 			}
-			if (DEBUG_READ_OP(threadData->directoryID, readVersion)) {
-				printf("Finished skipping\n");
-			}
 			for (; idIdx < checkIt->second.writes.size() && checkIt->second.writes[idIdx].writeVersion <= readVersion;
 			     idIdx++) {
 				Key nextKeyShouldBe = threadData->getKey(key, idIdx);
@@ -724,6 +721,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				uint32_t id = std::get<1>(it);
 				auto keyIt = threadData->keyData.find(key);
 				ASSERT(keyIt != threadData->keyData.end());
+
 				keyIt->second.writes[id].writeVersion = commitVersion;
 				if (DEBUG_KEY_OP(threadData->directoryID, key)) {
 					fmt::print("DBG: {0} WRITE {1} = {2}:{3}\n",
@@ -774,21 +772,18 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 		state bool result = true;
 		state int finalRowsValidated;
-		if (threadData->minSuccessfulReadVersion == MAX_VERSION) {
-			// never had a successful read during the test, likely due to many chaos events. Just wait for granules to
-			// become available and call that a pass, since writer is stopped
+		if (threadData->writeVersions.size()) {
+			// never had a successful write during the test, likely due to many chaos events. Just wait for granules to
+			// become available and call that a pass, since writer is stopped and will never guarantee anything is
+			// written
+			if (BGW_DEBUG) {
+				fmt::print("Directory {0} doing final availability check\n", threadData->directoryID);
+			}
 			wait(self->waitFirstSnapshot(self, cx, threadData, false));
 		} else {
 			// otherwise, read at last write version and ensure everything becomes available and matches
 			// it's possible that waitFirstSnapshot finished but then writer never wrote anything before test timed out
-			state Version readVersion;
-			if (threadData->writeVersions.size()) {
-				readVersion = threadData->writeVersions.back();
-			} else {
-				state Transaction tr(cx);
-				Version rv = wait(self->doGrv(&tr));
-				readVersion = rv;
-			}
+			state Version readVersion = threadData->writeVersions.back();
 			if (BGW_DEBUG) {
 				fmt::print("Directory {0} doing final data check @ {1}\n", threadData->directoryID, readVersion);
 			}
