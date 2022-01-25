@@ -647,14 +647,21 @@ Future<Void> createTenant(Reference<DB> db, TenantName name) {
 				throw tenant_already_exists();
 			}
 
-			state typename DB::TransactionT::template FutureT<Optional<Value>> tenantDataPrefixFuture =
-			    tr->get(tenantDataPrefixKey);
+			state Future<Optional<Value>> tenantDataPrefixFuture =
+			    safeThreadFutureToFuture(tr->get(tenantDataPrefixKey));
+
 			state Standalone<StringRef> prefix = wait(allocator.allocate(tr));
-			Optional<Value> tenantDataPrefix = wait(safeThreadFutureToFuture(tenantDataPrefixFuture));
+			Optional<Value> tenantDataPrefix = wait(tenantDataPrefixFuture);
 
 			if (tenantDataPrefix.present()) {
 				prefix = prefix.withPrefix(tenantDataPrefix.get(), prefix.arena());
 			}
+
+			RangeResult contents = wait(safeThreadFutureToFuture(tr->getRange(prefixRange(prefix), 1)));
+			if (!contents.empty()) {
+				throw tenant_prefix_allocator_conflict();
+			}
+
 			tr->set(tenantMapKey, prefix);
 
 			wait(safeThreadFutureToFuture(tr->commit()));

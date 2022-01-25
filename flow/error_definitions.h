@@ -205,6 +205,7 @@ ERROR( key_range_locked, 2133, "The key-range is locked" )
 ERROR( tenant_already_exists, 2134, "A tenant with the given name already exists" )
 ERROR( tenant_not_empty, 2135, "Cannot delete a non-empty tenant" )
 ERROR( invalid_tenant_name, 2136, "Tenant name cannot begin with \\xff");
+ERROR( tenant_prefix_allocator_conflict, 2137, "The database already has keys stored at the prefix allocated for the tenant");
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
