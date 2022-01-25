@@ -1580,6 +1580,7 @@ def init(event_model=None):
 
             _network_thread = NetworkThread()
             _network_thread.daemon = True
+            _network_thread.name = "fdb-network-thread"
 
             if event_model is not None:
                 if event_model == 'gevent':
