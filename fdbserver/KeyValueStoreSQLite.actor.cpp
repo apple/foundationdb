@@ -2138,6 +2138,7 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename,
 	                                                          // the cache sizes for individual threads?
 	TaskPriority taskId = g_network->getCurrentTask();
 	g_network->setCurrentTask(TaskPriority::DiskWrite);
+	// Note: the below is actually a coroutine and not a thread.
 	writeThread->addThread(new Writer(this,
 	                                  type == KeyValueStoreType::SSD_BTREE_V2,
 	                                  checkChecksums,
@@ -2148,7 +2149,7 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename,
 	                                  freeListPages,
 	                                  id,
 	                                  &readCursors),
-	                       "fdb-sqlite-wr");
+	                       "fdb-sqllite-write");
 	g_network->setCurrentTask(taskId);
 	auto p = new Writer::InitAction();
 	auto f = p->result.getFuture();
@@ -2175,10 +2176,13 @@ void KeyValueStoreSQLite::startReadThreads() {
 	int nReadThreads = readCursors.size();
 	TaskPriority taskId = g_network->getCurrentTask();
 	g_network->setCurrentTask(TaskPriority::DiskRead);
-	for (int i = 0; i < nReadThreads; i++)
+	for (int i = 0; i < nReadThreads; i++) {
+		std::string threadName = format("fdb-sqllite-reader-%d", i);
+		// Note: the below is actually a coroutine and not a thread.
 		readThreads->addThread(
 		    new Reader(filename, type == KeyValueStoreType::SSD_BTREE_V2, readsComplete, logID, &readCursors[i]),
-		    "fdb-sqlite-r");
+		    threadName.c_str());
+	}
 	g_network->setCurrentTask(taskId);
 }
 
