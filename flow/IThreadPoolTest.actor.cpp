@@ -31,7 +31,9 @@ struct ThreadNameReceiver final : IThreadPoolReceiver {
 			return;
 		}
 		std::string s = name;
+		ASSERT(a.name.isValid());
 		a.name.send(std::move(s));
+		ASSERT(!a.name.isValid());
 	}
 };
 
