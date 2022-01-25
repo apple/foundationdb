@@ -89,7 +89,8 @@ public:
 	virtual void enableSnapshot() {}
 
 	// Create a checkpoint.
-	virtual Future<CheckpointMetaData> checkpoint(const GetCheckpointRequest& request, const std::string& checkpointDir) {
+	virtual Future<CheckpointMetaData> checkpoint(const GetCheckpointRequest& request,
+	                                              const std::string& checkpointDir) {
 		throw internal_error();
 	}
 
@@ -174,5 +175,18 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 
 void GenerateIOLogChecksumFile(std::string filename);
 Future<Void> KVFileCheck(std::string const& filename, bool const& integrity);
+
+class ICheckpointReader : public IClosable {
+public:
+	virtual Future<Void> init(KeyRange range = allKeys) { return Void(); }
+
+	virtual Future<RangeResult> next(const int rowLimit, const int ByteLimit);
+
+protected:
+	virtual ~ICheckpointReader() {}
+}
+
+extern ICheckpointReader*
+checkpointReaderRockDB(std::string const& path, UID logID);
 
 #endif
