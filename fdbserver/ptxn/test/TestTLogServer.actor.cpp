@@ -624,12 +624,29 @@ TEST_CASE("/fdbserver/ptxn/test/lock_tlog") {
 	// start real TLog servers
 	wait(startTLogServers(&actors, pContext, folder));
 
-	for (const auto& group : pContext->groupsPerTLog[0]) {
+	// Pick a team, find its group and a tlog
+	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
+	auto groupItr = pContext->storageTeamIDTLogGroupIDMapper.find(storageTeamID);
+	ASSERT(groupItr != pContext->storageTeamIDTLogGroupIDMapper.end());
+	ptxn::TLogGroupID groupId = groupItr->second;
+
+	auto tlogItr = pContext->tLogGroupLeaders.find(groupId);
+	ASSERT(tlogItr != pContext->tLogGroupLeaders.end());
+	auto tlogInterf = tlogItr->second;
+
+	// Find this tlog interface's index
+	auto itr = std::find(pContext->tLogInterfaces.begin(), pContext->tLogInterfaces.end(), tlogInterf);
+	ASSERT(itr != pContext->tLogInterfaces.end());
+	int index = itr - pContext->tLogInterfaces.begin();
+	ASSERT(index < pContext->groupsPerTLog.size());
+
+	// Accumulate expected groups for this tlog
+	for (const auto& group : pContext->groupsPerTLog[index]) {
 		// insert all groups affiliated to tlog[0] into a expectedSet
 		expectedLockedGroup.insert(group.logGroupId);
 		ptxn::test::print::print(group);
 	}
-	ptxn::TLogLockResult result = wait(pContext->tLogInterfaces[0]->lock.getReply<ptxn::TLogLockResult>());
+	ptxn::TLogLockResult result = wait(tlogInterf->lock.getReply<ptxn::TLogLockResult>());
 	for (auto& it : result.groupResults) {
 		groupLocked.insert(it.id);
 	}
@@ -637,17 +654,9 @@ TEST_CASE("/fdbserver/ptxn/test/lock_tlog") {
 	ASSERT(allGroupLocked);
 	ASSERT(!groupLocked.empty()); // at least 1 group belongs to tlog[0]
 
-	int index = 0;
-	for (; index < pContext->numStorageTeamIDs; index++) {
-		// find the first storage team affiliated to tlog[0]
-		if (pContext->getTLogLeaderByStorageTeamID(pContext->storageTeamIDs[index]) == pContext->tLogInterfaces[0]) {
-			break;
-		}
-	}
-	ASSERT(index < pContext->numStorageTeamIDs);
 	state bool tlogStopped = false;
 	try {
-		std::vector<Standalone<StringRef>> messages = wait(commitInject(pContext, pContext->storageTeamIDs[index], 1));
+		std::vector<Standalone<StringRef>> messages = wait(commitInject(pContext, storageTeamID, 1));
 	} catch (Error& e) {
 		if (e.code() == error_code_tlog_stopped) {
 			tlogStopped = true;
