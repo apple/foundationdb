@@ -387,9 +387,9 @@ struct GetStorageServerRejoinInfoRequest {
 	}
 };
 
-// TxnStateRequest is use to broadcastx key-value pairs from TxnStateStore to
-// proxies and tLogs. The request can be divided into multiple parts, and
-// receiver is responsible for collecting and ordering them.
+// TxnStateRequest is used to broadcast key-value pairs in TxnStateStore from
+// master to proxies/resolvers during recovery. The request can be divided into
+// multiple parts, and receiver is responsible for collecting and ordering them.
 struct TxnStateRequest {
 	constexpr static FileIdentifier file_identifier = 15250781;
 	Arena arena;
