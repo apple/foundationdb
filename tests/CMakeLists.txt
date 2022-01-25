@@ -235,6 +235,7 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
                restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
+  # TODO: revert this after fixing downgrade tests to 7.0
   add_fdb_test(
     TEST_FILES restarting/to_7.1.0/CycleTestRestart-1.txt
                restarting/to_7.1.0/CycleTestRestart-2.txt)
