@@ -3005,12 +3005,10 @@ Optional<UID> StorageWiggler::getNextServerId() {
 }
 
 Future<Void> StorageWiggler::resetStats() {
-	metrics.finished_step = 0;
-	metrics.finished_round = 0;
-	metrics.last_step_start = 0;
-	metrics.last_step_finish = 0;
-	metrics.last_round_start = 0;
-	metrics.last_round_finish = 0;
+	auto newMetrics = StorageWiggleMetrics();
+	newMetrics.smoothed_round_duration = metrics.smoothed_round_duration;
+	newMetrics.smoothed_step_duration = metrics.smoothed_step_duration;
+	metrics = newMetrics;
 	return metrics.runSetTransaction(teamCollection->cx);
 }
 
@@ -4143,6 +4141,8 @@ ACTOR Future<UID> getNextWigglingServerID(DDTeamCollection* teamCollection) {
 	state Optional<Value> localityKey;
 	state Optional<Value> localityValue;
 
+	// NOTE: because normal \xff/conf change through `changeConfig` now will cause DD throw `movekeys_conflict()` then
+	// recruit a new DD, we only need to read current configuration once
 	if (teamCollection->configuration.perpetualStorageWiggleLocality != "0") {
 		std::string& localityKeyValue = teamCollection->configuration.perpetualStorageWiggleLocality;
 		ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValue));

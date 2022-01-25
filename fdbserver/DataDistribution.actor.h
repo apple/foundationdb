@@ -293,18 +293,22 @@ int64_t getMaxShardSize(double dbSizeEstimate);
 
 struct DDTeamCollection;
 struct StorageWiggleMetrics {
-	// step statistics
-	uint64_t last_step_start = 0; // wall timer: timer_int()
-	uint64_t last_step_finish = 0;
-	TimerSmoother smoothed_step_duration;
-	int finished_step = 0; // finished step since storage wiggle is open
 	// round statistics
+	// 1 wiggle round as all storage servers that created before a wiggle round start time T are wiggled.  The Round is
+	// done when all defined (but not necessarily alive/active) Storage Servers have a CreateTime >= T.
 	uint64_t last_round_start = 0; // wall timer: timer_int()
 	uint64_t last_round_finish = 0;
 	TimerSmoother smoothed_round_duration;
 	int finished_round = 0; // finished round since storage wiggle is open
 
-	StorageWiggleMetrics() : smoothed_step_duration(10.0 * 60), smoothed_round_duration(20.0 * 60) {}
+	// step statistics
+	// 1 wiggle step as 1 storage server is wiggled in the current round
+	uint64_t last_step_start = 0; // wall timer: timer_int()
+	uint64_t last_step_finish = 0;
+	TimerSmoother smoothed_step_duration;
+	int finished_step = 0; // finished step since storage wiggle is open
+
+	StorageWiggleMetrics() : smoothed_round_duration(20.0 * 60), smoothed_step_duration(10.0 * 60) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
