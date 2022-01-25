@@ -2362,7 +2362,8 @@ Future<RangeResult> getRange(Reference<TransactionState> const& trState,
                              KeySelector const& begin,
                              KeySelector const& end,
                              GetRangeLimits const& limits,
-                             Reverse const& reverse);
+                             Reverse const& reverse,
+                             UseTenant const& useTenant);
 
 ACTOR Future<Optional<StorageServerInterface>> fetchServerInterface(Reference<TransactionState> trState,
                                                                     Future<Version> ver,
@@ -3245,9 +3246,14 @@ Future<RangeResult> getExactRange(Reference<TransactionState> trState,
                                   KeyRange keys,
                                   Key mapper,
                                   GetRangeLimits limits,
-                                  Reverse reverse) {
+                                  Reverse reverse,
+                                  UseTenant useTenant) {
 	state RangeResult output;
 	state Span span("NAPI:getExactRange"_loc, trState->spanID);
+
+	if (useTenant && trState->tenant.present()) {
+		span.addTag("tenant"_sr, trState->tenant.get());
+	}
 
 	// printf("getExactRange( '%s', '%s' )\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
 	loop {
@@ -3266,7 +3272,7 @@ Future<RangeResult> getExactRange(Reference<TransactionState> trState,
 			req.mapper = mapper;
 			req.arena.dependsOn(mapper.arena());
 
-			req.tenantInfo = trState->getTenantInfo();
+			req.tenantInfo = useTenant ? trState->getTenantInfo() : TenantInfo();
 			req.version = version;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
@@ -3432,7 +3438,8 @@ Future<RangeResult> getRangeFallback(Reference<TransactionState> trState,
                                      KeySelector end,
                                      Key mapper,
                                      GetRangeLimits limits,
-                                     Reverse reverse) {
+                                     Reverse reverse,
+                                     UseTenant useTenant) {
 	if (version == latestVersion) {
 		state Transaction transaction(trState->cx);
 		transaction.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
@@ -3456,7 +3463,7 @@ Future<RangeResult> getRangeFallback(Reference<TransactionState> trState,
 	// or allKeys.begin exists in the database/tenant and will be part of the conflict range anyways
 
 	RangeResult _r = wait(getExactRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply>(
-	    trState, version, KeyRangeRef(b, e), mapper, limits, reverse));
+	    trState, version, KeyRangeRef(b, e), mapper, limits, reverse, useTenant));
 	RangeResult r = _r;
 
 	if (b == allKeys.begin && ((reverse && !r.more) || !reverse))
@@ -3489,13 +3496,14 @@ void getRangeFinished(Reference<TransactionState> trState,
                       Snapshot snapshot,
                       Promise<std::pair<Key, Key>> conflictRange,
                       Reverse reverse,
-                      RangeResult result) {
+                      RangeResult result,
+                      UseTenant useTenant) {
 	ASSERT(trState->tenantPrefix.isReady());
 
 	int64_t bytes = 0;
 	for (KeyValueRef& kv : result) {
 		bytes += kv.key.size() + kv.value.size();
-		if (trState->tenantPrefix.get().size()) {
+		if (useTenant && trState->tenantPrefix.get().size()) {
 			kv.key = kv.key.removePrefix(trState->tenantPrefix.get());
 		}
 	}
@@ -3553,10 +3561,14 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
                              GetRangeLimits limits,
                              Promise<std::pair<Key, Key>> conflictRange,
                              Snapshot snapshot,
-                             Reverse reverse) {
+                             Reverse reverse,
+                             UseTenant useTenant = UseTenant::True) {
 	state GetRangeLimits originalLimits(limits);
 	state RangeResult output;
 	state Span span("NAPI:getRange"_loc, trState->spanID);
+	if (useTenant && trState->tenant.present()) {
+		span.addTag("tenant"_sr, trState->tenant.get());
+	}
 
 	try {
 		state Version version = wait(fVersion);
@@ -3568,16 +3580,21 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 		                                     // FIXME: Is this really right?  Weaken this and see if there is a
 		                                     // problem; if so maybe there is a much subtler problem even with this.
 
-		state Key resolvedTenantPrefix = wait(trState->tenantPrefix);
-		if (resolvedTenantPrefix.size() > 0) {
-			begin = KeySelectorRef(begin.getKey().withPrefix(resolvedTenantPrefix), begin.orEqual, begin.offset);
-			end = KeySelectorRef(end.getKey().withPrefix(resolvedTenantPrefix), end.orEqual, end.offset);
+		state Key tenantPrefix;
+		if (useTenant) {
+			Key resolvedTenantPrefix = wait(trState->tenantPrefix);
+			tenantPrefix = resolvedTenantPrefix;
+
+			if (tenantPrefix.size() > 0) {
+				begin = KeySelectorRef(begin.getKey().withPrefix(tenantPrefix), begin.orEqual, begin.offset);
+				end = KeySelectorRef(end.getKey().withPrefix(tenantPrefix), end.orEqual, end.offset);
+			}
 		}
 
 		state KeySelector originalBegin = begin;
 		state KeySelector originalEnd = end;
 
-		if (begin.getKey().removePrefix(resolvedTenantPrefix) == allKeys.begin && begin.offset < 1) {
+		if (begin.getKey().removePrefix(tenantPrefix) == allKeys.begin && begin.offset < 1) {
 			output.readToBegin = true;
 			begin = KeySelector(firstGreaterOrEqual(begin.getKey()), begin.arena());
 		}
@@ -3586,10 +3603,17 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 		ASSERT((!limits.hasRowLimit() || limits.rows >= limits.minRows) && limits.minRows >= 0);
 
 		loop {
-			if (end.getKey().removePrefix(resolvedTenantPrefix) == allKeys.begin &&
+			if (end.getKey().removePrefix(tenantPrefix) == allKeys.begin &&
 			    (end.offset < 1 || end.isFirstGreaterOrEqual())) {
-				getRangeFinished(
-				    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
+				getRangeFinished(trState,
+				                 startTime,
+				                 originalBegin,
+				                 originalEnd,
+				                 snapshot,
+				                 conflictRange,
+				                 reverse,
+				                 output,
+				                 useTenant);
 				return output;
 			}
 
@@ -3603,7 +3627,7 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 			req.mapper = mapper;
 			req.arena.dependsOn(mapper.arena());
 
-			req.tenantInfo = trState->getTenantInfo();
+			req.tenantInfo = useTenant ? trState->getTenantInfo() : TenantInfo();
 			req.isFetchKeys = (trState->taskID == TaskPriority::FetchKeys);
 			req.version = readVersion;
 
@@ -3731,8 +3755,15 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 						output = copy;
 						output.more = true;
 
-						getRangeFinished(
-						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
+						getRangeFinished(trState,
+						                 startTime,
+						                 originalBegin,
+						                 originalEnd,
+						                 snapshot,
+						                 conflictRange,
+						                 reverse,
+						                 output,
+						                 useTenant);
 						return output;
 					}
 
@@ -3741,8 +3772,15 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 						output.readThrough = reverse ? shard.begin : shard.end;
 					}
 
-					getRangeFinished(
-					    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
+					getRangeFinished(trState,
+					                 startTime,
+					                 originalBegin,
+					                 originalEnd,
+					                 snapshot,
+					                 conflictRange,
+					                 reverse,
+					                 output,
+					                 useTenant);
 					return output;
 				}
 
@@ -3756,8 +3794,15 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 					}
 					output.more = modifiedSelectors || limits.isReached() || rep.more;
 
-					getRangeFinished(
-					    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
+					getRangeFinished(trState,
+					                 startTime,
+					                 originalBegin,
+					                 originalEnd,
+					                 snapshot,
+					                 conflictRange,
+					                 reverse,
+					                 output,
+					                 useTenant);
 					return output;
 				}
 
@@ -3769,9 +3814,16 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 
 					if (!rep.data.size()) {
 						RangeResult result = wait(getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply>(
-						    trState, version, originalBegin, originalEnd, mapper, originalLimits, reverse));
-						getRangeFinished(
-						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result);
+						    trState, version, originalBegin, originalEnd, mapper, originalLimits, reverse, useTenant));
+						getRangeFinished(trState,
+						                 startTime,
+						                 originalBegin,
+						                 originalEnd,
+						                 snapshot,
+						                 conflictRange,
+						                 reverse,
+						                 result,
+						                 useTenant);
 						return result;
 					}
 
@@ -3800,9 +3852,16 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 
 					if (e.code() == error_code_wrong_shard_server) {
 						RangeResult result = wait(getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply>(
-						    trState, version, originalBegin, originalEnd, mapper, originalLimits, reverse));
-						getRangeFinished(
-						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result);
+						    trState, version, originalBegin, originalEnd, mapper, originalLimits, reverse, useTenant));
+						getRangeFinished(trState,
+						                 startTime,
+						                 originalBegin,
+						                 originalEnd,
+						                 snapshot,
+						                 conflictRange,
+						                 reverse,
+						                 result,
+						                 useTenant);
 						return result;
 					}
 
@@ -4355,9 +4414,18 @@ Future<RangeResult> getRange(Reference<TransactionState> const& trState,
                              KeySelector const& begin,
                              KeySelector const& end,
                              GetRangeLimits const& limits,
-                             Reverse const& reverse) {
-	return getRange<GetKeyValuesRequest, GetKeyValuesReply>(
-	    trState, fVersion, begin, end, ""_sr, limits, Promise<std::pair<Key, Key>>(), Snapshot::True, reverse);
+                             Reverse const& reverse,
+                             UseTenant const& useTenant) {
+	return getRange<GetKeyValuesRequest, GetKeyValuesReply>(trState,
+	                                                        fVersion,
+	                                                        begin,
+	                                                        end,
+	                                                        ""_sr,
+	                                                        limits,
+	                                                        Promise<std::pair<Key, Key>>(),
+	                                                        Snapshot::True,
+	                                                        reverse,
+	                                                        useTenant);
 }
 
 bool DatabaseContext::debugUseTags = false;
@@ -4607,6 +4675,14 @@ ACTOR Future<Standalone<VectorRef<const char*>>> getAddressesForKeyActor(Referen
                                                                          Key key) {
 	state std::vector<StorageServerInterface> ssi;
 
+	Key resolvedTenantPrefix = wait(trState->tenantPrefix);
+	if (resolvedTenantPrefix.size() > 0) {
+		key = key.withPrefix(resolvedTenantPrefix, key.arena());
+	}
+
+	// Check that we specified a tenant if required
+	trState->getTenantInfo();
+
 	// If key >= allKeys.end, then getRange will return a kv-pair with an empty value. This will result in our
 	// serverInterfaces vector being empty, which will cause us to return an empty addresses list.
 	state Key ksKey = keyServersKey(key);
@@ -4615,10 +4691,16 @@ ACTOR Future<Standalone<VectorRef<const char*>>> getAddressesForKeyActor(Referen
 	                                                  lastLessOrEqual(serverTagKeys.begin),
 	                                                  firstGreaterThan(serverTagKeys.end),
 	                                                  GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
-	                                                  Reverse::False));
+	                                                  Reverse::False,
+	                                                  UseTenant::False));
 	ASSERT(!serverTagResult.more && serverTagResult.size() < CLIENT_KNOBS->TOO_MANY);
-	Future<RangeResult> futureServerUids =
-	    getRange(trState, ver, lastLessOrEqual(ksKey), firstGreaterThan(ksKey), GetRangeLimits(1), Reverse::False);
+	Future<RangeResult> futureServerUids = getRange(trState,
+	                                                ver,
+	                                                lastLessOrEqual(ksKey),
+	                                                firstGreaterThan(ksKey),
+	                                                GetRangeLimits(1),
+	                                                Reverse::False,
+	                                                UseTenant::False);
 	RangeResult serverUids = wait(futureServerUids);
 
 	ASSERT(serverUids.size()); // every shard needs to have a team
