@@ -2147,7 +2147,8 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename,
 	                                  diskBytesUsed,
 	                                  freeListPages,
 	                                  id,
-	                                  &readCursors), "fdb-sqlite-wr");
+	                                  &readCursors),
+	                       "fdb-sqlite-wr");
 	g_network->setCurrentTask(taskId);
 	auto p = new Writer::InitAction();
 	auto f = p->result.getFuture();
@@ -2176,7 +2177,8 @@ void KeyValueStoreSQLite::startReadThreads() {
 	g_network->setCurrentTask(TaskPriority::DiskRead);
 	for (int i = 0; i < nReadThreads; i++)
 		readThreads->addThread(
-		    new Reader(filename, type == KeyValueStoreType::SSD_BTREE_V2, readsComplete, logID, &readCursors[i]), "fdb-sqlite-r");
+		    new Reader(filename, type == KeyValueStoreType::SSD_BTREE_V2, readsComplete, logID, &readCursors[i]),
+		    "fdb-sqlite-r");
 	g_network->setCurrentTask(taskId);
 }
 
