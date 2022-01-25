@@ -922,7 +922,7 @@ public:
 	} counters;
 
 	// Bytes read from storage engine when a storage server starts.
-	int64_t bytesRestored;
+	int64_t bytesRestored = 0;
 
 	Reference<EventCacheHolder> storageServerSourceTLogIDEventHolder;
 
