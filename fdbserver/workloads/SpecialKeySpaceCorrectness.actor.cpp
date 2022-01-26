@@ -1052,11 +1052,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					Optional<Value> res = wait(tx->get(coordinatorsKey));
 					ASSERT(res.present()); // Otherwise, database is in a bad state
 					state ClusterConnectionString csNew(res.get().toString());
-					ASSERT(csNew.coordinators().size() + csNew.hostnames.size() ==
-					       old_coordinators_processes.size() + 1);
 					if (csNew.hasUnresolvedHostnames) {
 						wait(csNew.resolveHostnames());
 					}
+					ASSERT(csNew.coordinators().size() == old_coordinators_processes.size() + 1);
 					// verify the coordinators' addresses
 					for (const auto& network_address : csNew.coordinators()) {
 						std::string address_str = network_address.toString();

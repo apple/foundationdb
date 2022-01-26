@@ -2511,7 +2511,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 			successIndex = index;
 		} else {
 			if (leader.isError() && leader.getError().code() == error_code_coordinators_changed) {
-				info.intermediateConnRecord->getMutableConnectionString()->resetToUnresolved();
+				info.intermediateConnRecord->getConnectionString().resetToUnresolved();
 				throw coordinators_changed();
 			}
 			index = (index + 1) % addrs.size();
@@ -2539,7 +2539,7 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacyImplInternal(Reference<IClus
 			info = _info;
 		} catch (Error& e) {
 			if (e.code() == error_code_coordinators_changed) {
-				info.intermediateConnRecord->getMutableConnectionString()->resetToUnresolved();
+				info.intermediateConnRecord->getConnectionString().resetToUnresolved();
 			} else {
 				throw e;
 			}
