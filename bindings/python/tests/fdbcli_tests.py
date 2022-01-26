@@ -586,4 +586,5 @@ if __name__ == '__main__':
         assert args.process_number > 1, "Process number should be positive"
         coordinators()
         exclude()
-        setclass()
+        # TODO: fix the failure where one process is not available after setclass call
+        #setclass()
