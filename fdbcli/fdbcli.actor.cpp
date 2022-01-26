@@ -125,7 +125,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 
 	                                      SO_END_OF_OPTIONS };
 
-void printAtCol(const char* text, int col) {
+void printAtCol(const char* text, int col, FILE* stream = stdout) {
 	const char* iter = text;
 	const char* start = text;
 	const char* space = nullptr;
@@ -137,7 +137,7 @@ void printAtCol(const char* text, int col) {
 		if (*iter == '\n' || *iter == '\0' || (iter - start == col)) {
 			if (!space)
 				space = iter;
-			printf("%.*s\n", (int)(space - start), start);
+			fprintf(stream, "%.*s\n", (int)(space - start), start);
 			start = space;
 			if (*start == ' ' || *start == '\n')
 				start++;
