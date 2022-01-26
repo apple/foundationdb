@@ -182,6 +182,10 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> setUpBlobRange(Database cx, KeyRange range) {
+		if (BGW_DEBUG) {
+			fmt::print(
+			    "Setting up blob granule range for [{0} - {1})\n", range.begin.printable(), range.end.printable());
+		}
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
 			try {
@@ -213,6 +217,12 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 		if (self->directories.empty()) {
 			return Void();
+		}
+
+		state int directoryIdx = 0;
+		for (; directoryIdx < self->directories.size(); directoryIdx++) {
+			// Set up the blob range first
+			wait(self->setUpBlobRange(cx, self->directories[directoryIdx]->directoryRange));
 		}
 
 		if (BGW_DEBUG) {
@@ -289,11 +299,6 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 	                                     Database cx,
 	                                     Reference<ThreadData> threadData,
 	                                     bool doSetup) {
-		if (doSetup) {
-			// Set up the blob range first
-			wait(self->setUpBlobRange(cx, threadData->directoryRange));
-		}
-
 		// read entire keyspace at the start until granules for the entire thing are available
 		loop {
 			state Transaction tr(cx);
@@ -772,7 +777,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 		state bool result = true;
 		state int finalRowsValidated;
-		if (threadData->writeVersions.size()) {
+		if (threadData->writeVersions.empty()) {
 			// never had a successful write during the test, likely due to many chaos events. Just wait for granules to
 			// become available and call that a pass, since writer is stopped and will never guarantee anything is
 			// written
