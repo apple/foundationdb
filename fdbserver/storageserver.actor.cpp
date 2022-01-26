@@ -7188,11 +7188,6 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		recruitReply.send(rep);
 		self.byteSampleRecovery = Void();
 
-		if (seedTag == invalidTag) {
-			// TODO: we need to make sure that if we fail before the result here is made durable, then we can
-			// recover and read it again
-		}
-
 		ssCore = storageServerCore(&self, ssi);
 		wait(ssCore);
 

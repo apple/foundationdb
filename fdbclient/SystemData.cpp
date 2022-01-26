@@ -1337,7 +1337,6 @@ TenantMapEntry decodeTenantEntry(ValueRef const& value) {
 	return entry;
 }
 
-// TODO: before we commit to this, make sure it works with broader MTC plans or can be migrated
 const KeyRangeRef tenantMapKeys("\xff\x02/tenantMap/"_sr, "\xff\x02/tenantMap0"_sr);
 const KeyRef tenantMapPrefix = tenantMapKeys.begin;
 const KeyRef tenantMapPrivatePrefix = "\xff\xff\x02/tenantMap/"_sr;

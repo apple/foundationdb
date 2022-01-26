@@ -4458,10 +4458,8 @@ void debugAddTags(Reference<TransactionState> trState) {
 
 ACTOR Future<Key> getTenantPrefixImpl(Reference<TransactionState> trState, Future<Version> version) {
 	// TODO: Support local and/or stateless role caching
-	// TODO: This bypasses Transaction::get(), which means we don't set a conflict range or do some metric
-	// accounting.
-	//       Should we incorporate that here? If we use the stateless role caching, we could avoid doing an explicit
-	//       read.
+	// Note: this does not set a conflict range for the tenant read. This is ok, we expect tenants to change
+	// infrequently and we will have our request rejected at commit time if it does.
 	Optional<Value> val =
 	    wait(getValue(trState, trState->tenant.get().withPrefix(tenantMapPrefix), version, UseTenant::False));
 
@@ -5407,8 +5405,11 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Referen
 }
 
 // TODO: explore optimization opportunities.
+//
 // One option would be to apply the prefix during serialization (i.e. serialize all keys with the prefix to be
 // deserialized as normal), though the implementation of this may not be trivial.
+//
+// We could also try to support a split key on the proxy where the prefix and the rest of the key are not contiguous.
 void applyTenantPrefix(CommitTransactionRequest req, Key tenantPrefix) {
 	for (auto& m : req.transaction.mutations) {
 		if (m.type == MutationRef::ClearRange) {
@@ -5473,10 +5474,6 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 		}
 
 		Key resolvedTenantPrefix = wait(trState->tenantPrefix);
-		// TODO: Can we optimize this by sending the prefix as part of the request?
-		//       To do this most efficiently, we'd want the ability to pass around StringRef like objects
-		//       that are composed of a prefix that isn't contiguous with the rest of the data, or we'd need
-		//       to change the type used in a potentially large number of places in the transaction subsystem.
 		if (!resolvedTenantPrefix.empty()) {
 			applyTenantPrefix(req, resolvedTenantPrefix);
 		}
