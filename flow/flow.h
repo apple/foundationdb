@@ -59,23 +59,23 @@
 #include <boost/version.hpp>
 
 #define TEST(condition)                                                                                                        \
-        if (!(condition)) {                                                                                                    \
-        } else {                                                                                                               \
-                std::map<int, Severity> sevmap;                                                                                \
-                sevmap[0] = SevVerbose;                                                                                        \
-                sevmap[1] = SevSample;                                                                                         \
-                sevmap[5] = SevDebug;                                                                                          \
-                sevmap[10] = SevInfo;                                                                                          \
-                sevmap[20] = SevWarn;                                                                                          \
-                sevmap[30] = SevWarnAlways;                                                                                    \
-                sevmap[40] = SevError;                                                                                         \
-                sevmap[1000000] = SevMax;                                                                                      \
-                static TraceEvent* __test = &(TraceEvent(sevmap[FLOW_KNOBS->TEST_TRACE_EVENT_SEVERITY], "CodeCoverage")        \
-                                                  .detail("File", __FILE__)                                                    \
-                                                  .detail("Line", __LINE__)                                                    \
-                                                  .detail("Condition", #condition));                                           \
-                (void)__test;                                                                                                  \
-        }
+	if (!(condition)) {                                                                                                    \
+	} else {                                                                                                               \
+		std::map<int, Severity> sevmap;                                                                                \
+		sevmap[0] = SevVerbose;                                                                                        \
+		sevmap[1] = SevSample;                                                                                         \
+		sevmap[5] = SevDebug;                                                                                          \
+		sevmap[10] = SevInfo;                                                                                          \
+		sevmap[20] = SevWarn;                                                                                          \
+		sevmap[30] = SevWarnAlways;                                                                                    \
+		sevmap[40] = SevError;                                                                                         \
+		sevmap[1000000] = SevMax;                                                                                      \
+		static TraceEvent* __test = &(TraceEvent(sevmap[FLOW_KNOBS->TEST_TRACE_EVENT_SEVERITY], "CodeCoverage")        \
+						.detail("File", __FILE__)                                                      \
+						.detail("Line", __LINE__)                                                      \
+						.detail("Condition", #condition));                                             \
+		(void)__test;                                                                                                  \
+	}
 
 /*
 usage:
