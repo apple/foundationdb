@@ -3574,42 +3574,9 @@ Optional<MutationRef> clipMutation(MutationRef const& m, KeyRangeRef range) {
 	return Optional<MutationRef>();
 }
 
-// Return true if the mutation need to be applied, otherwise (it's a CompareAndClear mutation and failed the comparison)
-// false.
-bool expandMutation(MutationRef& m,
-                    StorageServer::VersionedData const& data,
-                    UpdateEagerReadInfo* eager,
-                    KeyRef eagerTrustedEnd,
-                    Arena& ar) {
+bool convertAtomicOp(MutationRef& m, StorageServer::VersionedData const& data, UpdateEagerReadInfo* eager, Arena& ar) {
 	// After this function call, m should be copied into an arena immediately (before modifying data, shards, or eager)
-	if (m.type == MutationRef::ClearRange) {
-		// Expand the clear
-		const auto& d = data.atLatest();
-
-		// If another clear overlaps the beginning of this one, engulf it
-		auto i = d.lastLess(m.param1);
-		if (i && i->isClearTo() && i->getEndKey() >= m.param1)
-			m.param1 = i.key();
-
-		// If another clear overlaps the end of this one, engulf it; otherwise expand
-		i = d.lastLessOrEqual(m.param2);
-		if (i && i->isClearTo() && i->getEndKey() >= m.param2) {
-			m.param2 = i->getEndKey();
-		} else if (SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS) {
-			// Expand to the next set or clear (from storage or latestVersion), and if it
-			// is a clear, engulf it as well
-			i = d.lower_bound(m.param2);
-			KeyRef endKeyAtStorageVersion =
-			    m.param2 == eagerTrustedEnd ? eagerTrustedEnd : std::min(eager->getKeyEnd(m.param2), eagerTrustedEnd);
-			if (!i || endKeyAtStorageVersion < i.key())
-				m.param2 = endKeyAtStorageVersion;
-			else if (i->isClearTo())
-				m.param2 = i->getEndKey();
-			else
-				m.param2 = i.key();
-		}
-	} else if (m.type != MutationRef::SetValue && (m.type)) {
-
+	if (m.type != MutationRef::ClearRange && m.type != MutationRef::SetValue) {
 		Optional<StringRef> oldVal;
 		auto it = data.atLatest().lastLessOrEqual(m.param1);
 		if (it != data.atLatest().end() && it->isValue() && it.key() == m.param1)
@@ -3660,22 +3627,53 @@ bool expandMutation(MutationRef& m,
 			if (oldVal.present() && m.param2 == oldVal.get()) {
 				m.type = MutationRef::ClearRange;
 				m.param2 = keyAfter(m.param1, ar);
-				return expandMutation(m, data, eager, eagerTrustedEnd, ar);
+				return true;
 			}
 			return false;
 		}
 		m.type = MutationRef::SetValue;
 	}
-
 	return true;
+}
+
+void expandClear(MutationRef& m,
+                 StorageServer::VersionedData const& data,
+                 UpdateEagerReadInfo* eager,
+                 KeyRef eagerTrustedEnd) {
+	// After this function call, m should be copied into an arena immediately (before modifying data, shards, or eager)
+	ASSERT(m.type == MutationRef::ClearRange);
+	// Expand the clear
+	const auto& d = data.atLatest();
+
+	// If another clear overlaps the beginning of this one, engulf it
+	auto i = d.lastLess(m.param1);
+	if (i && i->isClearTo() && i->getEndKey() >= m.param1)
+		m.param1 = i.key();
+
+	// If another clear overlaps the end of this one, engulf it; otherwise expand
+	i = d.lastLessOrEqual(m.param2);
+	if (i && i->isClearTo() && i->getEndKey() >= m.param2) {
+		m.param2 = i->getEndKey();
+	} else if (SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS) {
+		// Expand to the next set or clear (from storage or latestVersion), and if it
+		// is a clear, engulf it as well
+		i = d.lower_bound(m.param2);
+		KeyRef endKeyAtStorageVersion =
+		    m.param2 == eagerTrustedEnd ? eagerTrustedEnd : std::min(eager->getKeyEnd(m.param2), eagerTrustedEnd);
+		if (!i || endKeyAtStorageVersion < i.key())
+			m.param2 = endKeyAtStorageVersion;
+		else if (i->isClearTo())
+			m.param2 = i->getEndKey();
+		else
+			m.param2 = i.key();
+	}
 }
 
 void applyMutation(StorageServer* self,
                    MutationRef const& m,
                    Arena& arena,
                    StorageServer::VersionedData& data,
-                   Version version,
-                   bool fromFetch) {
+                   Version version) {
 	// m is expected to be in arena already
 	// Clear split keys are added to arena
 	StorageMetrics metrics;
@@ -3708,43 +3706,43 @@ void applyMutation(StorageServer* self,
 		}
 		data.insert(m.param1, ValueOrClearToRef::value(m.param2));
 		self->watches.trigger(m.param1);
-
-		if (!fromFetch) {
-			for (auto& it : self->keyChangeFeed[m.param1]) {
-				if (!it->stopped) {
-					if (it->mutations.empty() || it->mutations.back().version != version) {
-						it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion));
-					}
-					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
-					self->currentChangeFeeds.insert(it->id);
-
-					DEBUG_MUTATION("ChangeFeedWriteSet", version, m, self->thisServerID)
-					    .detail("Range", it->range)
-					    .detail("ChangeFeedID", it->id);
-				}
-			}
-		}
 	} else if (m.type == MutationRef::ClearRange) {
 		data.erase(m.param1, m.param2);
 		ASSERT(m.param2 > m.param1);
 		ASSERT(!data.isClearContaining(data.atLatest(), m.param1));
 		data.insert(m.param1, ValueOrClearToRef::clearTo(m.param2));
 		self->watches.triggerRange(m.param1, m.param2);
+	}
+}
 
-		if (!fromFetch) {
-			auto ranges = self->keyChangeFeed.intersectingRanges(KeyRangeRef(m.param1, m.param2));
-			for (auto& r : ranges) {
-				for (auto& it : r.value()) {
-					if (!it->stopped) {
-						if (it->mutations.empty() || it->mutations.back().version != version) {
-							it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion));
-						}
-						it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
-						self->currentChangeFeeds.insert(it->id);
-						DEBUG_MUTATION("ChangeFeedWriteClear", version, m, self->thisServerID)
-						    .detail("Range", it->range)
-						    .detail("ChangeFeedID", it->id);
+void applyChangeFeedMutation(StorageServer* self, MutationRef const& m, Version version) {
+	if (m.type == MutationRef::SetValue) {
+		for (auto& it : self->keyChangeFeed[m.param1]) {
+			if (!it->stopped) {
+				if (it->mutations.empty() || it->mutations.back().version != version) {
+					it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion));
+				}
+				it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
+				self->currentChangeFeeds.insert(it->id);
+
+				DEBUG_MUTATION("ChangeFeedWriteSet", version, m, self->thisServerID)
+				    .detail("Range", it->range)
+				    .detail("ChangeFeedID", it->id);
+			}
+		}
+	} else if (m.type == MutationRef::ClearRange) {
+		auto ranges = self->keyChangeFeed.intersectingRanges(KeyRangeRef(m.param1, m.param2));
+		for (auto& r : ranges) {
+			for (auto& it : r.value()) {
+				if (!it->stopped) {
+					if (it->mutations.empty() || it->mutations.back().version != version) {
+						it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion));
 					}
+					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
+					self->currentChangeFeeds.insert(it->id);
+					DEBUG_MUTATION("ChangeFeedWriteClear", version, m, self->thisServerID)
+					    .detail("Range", it->range)
+					    .detail("ChangeFeedID", it->id);
 				}
 			}
 		}
@@ -4894,16 +4892,29 @@ void StorageServer::addMutation(Version version,
                                 KeyRangeRef const& shard,
                                 UpdateEagerReadInfo* eagerReads) {
 	MutationRef expanded = mutation;
+	MutationRef
+	    nonExpanded; // need to keep non-expanded but atomic converted version of clear mutations for change feeds
 	auto& mLog = addVersionToMutationLog(version);
 
-	if (!expandMutation(expanded, data(), eagerReads, shard.end, mLog.arena())) {
+	if (!convertAtomicOp(expanded, data(), eagerReads, mLog.arena())) {
 		return;
+	}
+	if (expanded.type == MutationRef::ClearRange) {
+		nonExpanded = expanded;
+		expandClear(expanded, data(), eagerReads, shard.end);
 	}
 	expanded = addMutationToMutationLog(mLog, expanded);
 	DEBUG_MUTATION("applyMutation", version, expanded, thisServerID)
 	    .detail("ShardBegin", shard.begin)
 	    .detail("ShardEnd", shard.end);
-	applyMutation(this, expanded, mLog.arena(), mutableData(), version, fromFetch);
+
+	if (!fromFetch) {
+		// have to do change feed before applyMutation because nonExpanded wasn't copied into the mutation log arena,
+		// and thus would go out of scope
+		applyChangeFeedMutation(this, expanded.type == MutationRef::ClearRange ? nonExpanded : expanded, version);
+	}
+	applyMutation(this, expanded, mLog.arena(), mutableData(), version);
+
 	// printf("\nSSUpdate: Printing versioned tree after applying mutation\n");
 	// mutableData().printTree(version);
 }
