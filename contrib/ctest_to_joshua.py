@@ -5,7 +5,6 @@ import json
 import os
 import platform
 import shlex
-import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -53,8 +52,7 @@ class JoshuaBuilder:
         if "bin/" in arcfile or "lib" in arcfile:
             print("Stripping debug symbols and adding {} as {}".format(file, arcfile))
             with tempfile.NamedTemporaryFile() as tmp:
-                shutil.copy(file, tmp.name)
-                subprocess.check_output(["strip", "-S", tmp.name])
+                subprocess.check_output(["strip", "-S", file, "-o", tmp.name])
                 tar.add(tmp.name, arcfile)
         else:
             print("Adding {} as {}".format(file, arcfile))
