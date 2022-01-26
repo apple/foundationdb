@@ -1384,7 +1384,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	boundaryResult.more = true;
 	state int boundaryResultIdx = 0;
 
-	// Step 3. Get the latest known split and merge state. Because we can have multiple splits in progress at the same
+	// Step 2. Get the latest known split and merge state. Because we can have multiple splits in progress at the same
 	// time, and we don't know which parts of those are reflected in the current set of worker assignments we read, we
 	// have to construct the current desired set of granules from the set of ongoing splits and merges. Then, if any of
 	// those are not represented in the worker mapping, we must add them.
@@ -1473,6 +1473,9 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				// if this split boundary has not been opened by a blob worker yet, or was not in the assignment list
 				// when we previously read it, we must ensure it gets assigned to one
 				KeyRange range = KeyRange(KeyRangeRef(splitBoundaries[i], splitBoundaries[i + 1]));
+				if (BM_DEBUG) {
+					fmt::print("    [{0} - {1})\n", range.begin.printable(), range.end.printable());
+				}
 
 				// same algorithm as worker map. If we read boundary changes from the log out of order, save the newer
 				// ones, apply this one, and re-apply the other ones over this one don't concurrently modify with
@@ -1482,7 +1485,8 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				auto intersecting = inProgressSplits.intersectingRanges(range);
 				for (auto& it : intersecting) {
 					if (splitEpochSeqno.first < it.value().first ||
-					    (splitEpochSeqno.first == it.value().first && splitEpochSeqno.second > it.value().second)) {
+					    (splitEpochSeqno.first == it.value().first && splitEpochSeqno.second < it.value().second)) {
+						// range currently there is newer than this range.
 						newer.push_back(std::pair(it.range(), it.value()));
 					}
 				}
@@ -1490,9 +1494,6 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 				for (auto& it : newer) {
 					inProgressSplits.insert(it.first, it.second);
-				}
-				if (BM_DEBUG) {
-					fmt::print("    [{0} - {1})\n", range.begin.printable(), range.end.printable());
 				}
 			}
 		}
@@ -1510,7 +1511,9 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		fmt::print("BM {0} found old assignments:\n", bmData->epoch);
 	}
 	// TODO could populate most/all of this list by just asking existing blob workers for their range sets to reduce DB
-	// read load on BM restart Step 1. Get the latest known mapping of granules to blob workers (i.e. assignments)
+	// read load on BM restart
+
+	// Step 3. Get the latest known mapping of granules to blob workers (i.e. assignments)
 	// This must happen causally AFTER reading the split boundaries, since the blob workers can clear the split
 	// boundaries for a granule as part of persisting their assignment.
 	state KeyRef beginKey = normalKeys.begin;
