@@ -1,12 +1,14 @@
 from argparse import ArgumentParser
-import platform
-import io
-import subprocess
 import glob
+import io
 import json
 import os
+import platform
 import shlex
+import shutil
+import subprocess
 import tarfile
+import tempfile
 
 
 class JoshuaBuilder:
@@ -46,12 +48,23 @@ class JoshuaBuilder:
                 assert False, "Not sure what to do with {}".format(arg)
         return arg
 
+    @staticmethod
+    def _add_file(tar, file, arcfile):
+        if "bin/" in arcfile or "lib" in arcfile:
+            print("Stripping debug symbols and adding {} as {}".format(file, arcfile))
+            with tempfile.NamedTemporaryFile() as tmp:
+                shutil.copy(file, tmp.name)
+                subprocess.check_output(["strip", "-S", tmp.name])
+                tar.add(tmp.name, arcfile)
+        else:
+            print("Adding {} as {}".format(file, arcfile))
+            tar.add(file, arcfile)
+
     def write_tarball(self, output, joshua_test):
         with tarfile.open(output, "w:gz") as tar:
             for file, arcfile in self.files.items():
                 if not os.path.isdir(file):
-                    print("Adding {} as {}".format(file, arcfile))
-                    tar.add(file, arcfile)
+                    self._add_file(tar, file, arcfile)
             tarinfo = tarfile.TarInfo("joshua_test")
             tarinfo.mode = 0o755
             joshua_bytes = joshua_test.encode("utf-8")
