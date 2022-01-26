@@ -608,9 +608,6 @@ extern const KeyRef tenantDataPrefixKey;
 Value encodeTenantEntry(TenantMapEntry const& tenantEntry);
 TenantMapEntry decodeTenantEntry(ValueRef const& value);
 
-// This prefix is prepended to the tenant names of locked tenants
-extern const StringRef lockedTenantPrefix;
-
 #pragma clang diagnostic pop
 
 #endif

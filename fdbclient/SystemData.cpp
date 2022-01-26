@@ -1342,7 +1342,6 @@ const KeyRef tenantMapPrefix = tenantMapKeys.begin;
 const KeyRef tenantMapPrivatePrefix = "\xff\xff\x02/tenantMap/"_sr;
 const KeyRef tenantAllocatorPrefix = "\xff\x02/tenantAllocator/"_sr;
 const KeyRef tenantDataPrefixKey = "\xff\x02/tenantDataPrefix"_sr;
-const StringRef lockedTenantPrefix = "\xfflockedTenant/"_sr;
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {

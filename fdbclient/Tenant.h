@@ -26,7 +26,8 @@
 #include "fdbclient/VersionedMap.h"
 #include "flow/flat_buffers.h"
 
-typedef Standalone<StringRef> TenantName;
+typedef StringRef TenantNameRef;
+typedef Standalone<TenantNameRef> TenantName;
 
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
@@ -43,5 +44,6 @@ struct TenantMapEntry {
 };
 
 typedef VersionedMap<TenantName, TenantMapEntry> TenantMap;
+typedef VersionedMap<KeyRef, TenantNameRef> TenantPrefixIndex;
 
 #endif

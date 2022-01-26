@@ -385,7 +385,6 @@ public:
 
 struct StorageServer {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
-	typedef VersionedMap<KeyRef, StringRef> TenantIndex;
 
 private:
 	// versionedData contains sets and clears.
@@ -421,7 +420,7 @@ private:
 
 public:
 	TenantMap tenantMap;
-	TenantIndex lockedTenantsIndex;
+	TenantPrefixIndex tenantPrefixIndex;
 
 	// Histograms
 	struct FetchKeysHistograms {
@@ -3023,8 +3022,6 @@ ACTOR Future<GetKeyValuesAndFlatMapReply> flatMap(StorageServer* data,
 	state Tuple mappedKeyFormatTuple = Tuple::unpack(mapper);
 	state KeyValueRef* it = input.data.begin();
 	for (; it != input.data.end(); it++) {
-		// TODO: raw access is not currently supported for tenants using flat map. Should we try to support it or
-		// provide an error?
 		state Key mappedKey = constructMappedKey(it, mappedKeyFormatTuple, isRangeQuery, tenantEntry);
 		// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
 		result.arena.dependsOn(mappedKey.arena());
@@ -3127,6 +3124,25 @@ ACTOR Future<Void> getKeyValuesAndFlatMapQ(StorageServer* data, GetKeyValuesAndF
 		                             : findKey(data, req.end, version, searchRange, &offset2, span.context, type);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
+
+		if (!tenantEntry.present()) {
+			// We do not support raw flat map requests when using tenants.
+			// When tenants are required, we disable raw flat map requests entirely.
+			// If tenants are optional, we check whether the range intersects a tenant and fail if it does.
+			if (data->db->get().client.tenantMode == TenantMode::REQUIRED) {
+				throw tenant_name_required();
+			}
+
+			auto view = data->tenantPrefixIndex.at(req.version);
+			auto beginItr = view.lastLessOrEqual(begin);
+			if (beginItr != view.end() && !begin.startsWith(beginItr.key())) {
+				++beginItr;
+			}
+			auto endItr = view.lastLessOrEqual(end);
+			if (beginItr != endItr) {
+				throw tenant_name_required();
+			}
+		}
 
 		if (req.debugID.present())
 			g_traceBatch.addEvent(
@@ -5238,16 +5254,13 @@ private:
 
 void StorageServer::insertTenant(KeyRef key, ValueRef value, Version version, bool insertIntoMutationLog) {
 	tenantMap.createNewVersion(version);
-	lockedTenantsIndex.createNewVersion(version);
+	tenantPrefixIndex.createNewVersion(version);
 
 	TenantName tenantName = key.substr(tenantMapPrivatePrefix.size());
 	TenantMapEntry tenantEntry = decodeTenantEntry(value);
 
 	tenantMap.insert(tenantName, tenantEntry);
-
-	if (tenantName.startsWith(lockedTenantPrefix)) {
-		lockedTenantsIndex.insert(tenantEntry.prefix, tenantName);
-	}
+	tenantPrefixIndex.insert(tenantEntry.prefix, tenantName);
 
 	if (insertIntoMutationLog) {
 		auto& mLV = addVersionToMutationLog(version);
@@ -5258,7 +5271,7 @@ void StorageServer::insertTenant(KeyRef key, ValueRef value, Version version, bo
 
 void StorageServer::clearTenants(KeyRef startKey, KeyRef endKey, Version version) {
 	tenantMap.createNewVersion(version);
-	lockedTenantsIndex.createNewVersion(version);
+	tenantPrefixIndex.createNewVersion(version);
 
 	StringRef startTenant = startKey.substr(tenantMapPrivatePrefix.size());
 	StringRef endTenant = endKey.substr(tenantMapPrivatePrefix.size());
@@ -5269,9 +5282,7 @@ void StorageServer::clearTenants(KeyRef startKey, KeyRef endKey, Version version
 		watches.triggerRange(itr->prefix, strinc(itr->prefix));
 
 		tenantMap.erase(itr);
-		if (itr->prefix.startsWith(lockedTenantPrefix)) {
-			lockedTenantsIndex.erase(itr->prefix);
-		}
+		tenantPrefixIndex.erase(itr->prefix);
 	}
 
 	auto& mLV = addVersionToMutationLog(version);
@@ -6314,9 +6325,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		TenantMapEntry tenantEntry = decodeTenantEntry(result.value);
 
 		data->tenantMap.insert(tenantName, tenantEntry);
-		if (tenantName.startsWith(lockedTenantPrefix)) {
-			data->lockedTenantsIndex.insert(tenantEntry.prefix, tenantName);
-		}
+		data->tenantPrefixIndex.insert(tenantEntry.prefix, tenantName);
 
 		TraceEvent("RestoringTenant", data->thisServerID)
 		    .detail("Key", tenantMap[tenantMapLoc].key)
