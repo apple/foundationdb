@@ -5406,12 +5406,9 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Referen
 	return trCommitCosts;
 }
 
-// TODO: I've written it this way so that the application of the prefix is self-contained and can be easily replaced
-//       by another approach. If we choose not to send the request without the prefix applied, then it may be more
-//       efficient for us to apply the prefix for each mutation and conflict range as we go along. The approach
-//       below defeats some of our attempts to store various operations more compactly (e.g. avoiding duplicate data
-//       for single key ranges).
-// TODO: Compact the result to avoid us having to keep the no longer used memory.
+// TODO: explore optimization opportunities.
+// One option would be to apply the prefix during serialization (i.e. serialize all keys with the prefix to be
+// deserialized as normal), though the implementation of this may not be trivial.
 void applyTenantPrefix(CommitTransactionRequest req, Key tenantPrefix) {
 	for (auto& m : req.transaction.mutations) {
 		if (m.type == MutationRef::ClearRange) {
