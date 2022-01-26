@@ -2149,7 +2149,7 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename,
 	                                  freeListPages,
 	                                  id,
 	                                  &readCursors),
-	                       "fdb-sqllite-write");
+	                       "fdb-sqlite-wr");
 	g_network->setCurrentTask(taskId);
 	auto p = new Writer::InitAction();
 	auto f = p->result.getFuture();
