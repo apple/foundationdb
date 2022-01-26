@@ -71,9 +71,9 @@
 		sevmap[40] = SevError;                                                                                         \
 		sevmap[1000000] = SevMax;                                                                                      \
 		static TraceEvent* __test = &(TraceEvent(sevmap[FLOW_KNOBS->TEST_TRACE_EVENT_SEVERITY], "CodeCoverage")        \
-						.detail("File", __FILE__)                                                      \
-						.detail("Line", __LINE__)                                                      \
-						.detail("Condition", #condition));                                             \
+		                                  .detail("File", __FILE__)                                                    \
+		                                  .detail("Line", __LINE__)                                                    \
+		                                  .detail("Condition", #condition));                                           \
 		(void)__test;                                                                                                  \
 	}
 
