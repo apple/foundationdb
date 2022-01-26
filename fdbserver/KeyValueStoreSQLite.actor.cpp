@@ -2177,7 +2177,7 @@ void KeyValueStoreSQLite::startReadThreads() {
 	TaskPriority taskId = g_network->getCurrentTask();
 	g_network->setCurrentTask(TaskPriority::DiskRead);
 	for (int i = 0; i < nReadThreads; i++) {
-		std::string threadName = format("fdb-sqllite-reader-%d", i);
+		std::string threadName = format("fdb-sqlite-r-%d", i);
 		// Note: the below is actually a coroutine and not a thread.
 		readThreads->addThread(
 		    new Reader(filename, type == KeyValueStoreType::SSD_BTREE_V2, readsComplete, logID, &readCursors[i]),
