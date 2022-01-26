@@ -19,16 +19,47 @@
  */
 
 #include "flow/StreamCipher.h"
+#include "flow/Arena.h"
+#include "flow/ITrace.h"
 #include "flow/UnitTest.h"
+#include <memory>
 
 std::unordered_set<EVP_CIPHER_CTX*> StreamCipher::ctxs;
-std::unique_ptr<StreamCipher::Key> StreamCipher::Key::globalKey;
+std::unique_ptr<StreamCipherKey> StreamCipherKey::globalKey;
 
-StreamCipher::StreamCipher() : ctx(EVP_CIPHER_CTX_new()) {
+StreamCipherKey* StreamCipherKey::getGlobalCipherKey() {
+	if (StreamCipherKey::globalKey.get() == nullptr) {
+		globalKey = std::make_unique<StreamCipherKey>(AES_256_KEY_LENGTH);
+		return globalKey.get();
+	}
+	return globalKey.get();
+}
+
+void StreamCipherKey::setGlobalCipherKey(uint8_t* const data, int len) {
+	StreamCipherKey* cipherKey = StreamCipherKey::getGlobalCipherKey();
+	cipherKey->initializeKey(data, len);
+}
+
+void StreamCipherKey::globalKeyCleanup() {
+	if (StreamCipherKey::globalKey != nullptr) {
+		StreamCipherKey* cipherKey = StreamCipherKey::getGlobalCipherKey();
+		cipherKey->cleanup();
+	}
+}
+
+StreamCipher::StreamCipher(int keySize)
+  : ctx(EVP_CIPHER_CTX_new()), hmacCtx(HMAC_CTX_new()), cipherKey(std::make_unique<StreamCipherKey>(keySize)) {
+	ctxs.insert(ctx);
+}
+
+StreamCipher::StreamCipher()
+  : ctx(EVP_CIPHER_CTX_new()), hmacCtx(HMAC_CTX_new()),
+    cipherKey(std::make_unique<StreamCipherKey>(AES_256_KEY_LENGTH)) {
 	ctxs.insert(ctx);
 }
 
 StreamCipher::~StreamCipher() {
+	HMAC_CTX_free(hmacCtx);
 	EVP_CIPHER_CTX_free(ctx);
 	ctxs.erase(ctx);
 }
@@ -37,57 +68,34 @@ EVP_CIPHER_CTX* StreamCipher::getCtx() {
 	return ctx;
 }
 
+HMAC_CTX* StreamCipher::getHmacCtx() {
+	return hmacCtx;
+}
+
 void StreamCipher::cleanup() noexcept {
-	Key::cleanup();
+	StreamCipherKey::globalKeyCleanup();
 	for (auto ctx : ctxs) {
 		EVP_CIPHER_CTX_free(ctx);
 	}
 }
 
-void StreamCipher::Key::initializeKey(RawKeyType&& arr) {
-	if (globalKey) {
-		ASSERT(globalKey->arr == arr);
-	}
-	globalKey = std::make_unique<Key>(ConstructorTag{});
-	globalKey->arr = std::move(arr);
-	memset(arr.data(), 0, arr.size());
+void applyHmacKeyDerivationFunc(StreamCipherKey* const cipherKey,
+                                HmacSha256StreamCipher* const hmacGenerator,
+                                Arena& arena) {
+	uint8_t buf[cipherKey->size() + sizeof(uint64_t)];
+	memcpy(&buf[0], cipherKey->data(), cipherKey->size());
+	uint64_t seed = deterministicRandom()->randomUInt64();
+	memcpy(&buf[0] + cipherKey->size(), &seed, sizeof(uint64_t));
+	StringRef digest = hmacGenerator->digest(&buf[0], cipherKey->size() + sizeof(uint64_t), arena);
+	std::copy(digest.begin(), digest.end(), &buf[0]);
+	cipherKey->initializeKey(&buf[0], cipherKey->size());
 }
 
-void StreamCipher::Key::initializeRandomTestKey() {
-	ASSERT(g_network->isSimulated());
-	if (globalKey)
-		return;
-	globalKey = std::make_unique<Key>(ConstructorTag{});
-	generateRandomData(globalKey->arr.data(), globalKey->arr.size());
-}
-
-const StreamCipher::Key& StreamCipher::Key::getKey() {
-	ASSERT(globalKey);
-	return *globalKey;
-}
-
-StreamCipher::Key::Key(Key&& rhs) : arr(std::move(rhs.arr)) {
-	memset(arr.data(), 0, arr.size());
-}
-
-StreamCipher::Key& StreamCipher::Key::operator=(Key&& rhs) {
-	arr = std::move(rhs.arr);
-	memset(arr.data(), 0, arr.size());
-	return *this;
-}
-
-StreamCipher::Key::~Key() {
-	memset(arr.data(), 0, arr.size());
-}
-
-void StreamCipher::Key::cleanup() noexcept {
-	globalKey.reset();
-}
-
-EncryptionStreamCipher::EncryptionStreamCipher(const StreamCipher::Key& key, const StreamCipher::IV& iv) {
-	EVP_EncryptInit_ex(cipher.getCtx(), EVP_aes_128_gcm(), nullptr, nullptr, nullptr);
+EncryptionStreamCipher::EncryptionStreamCipher(const StreamCipherKey* const key, const StreamCipher::IV& iv)
+  : cipher(StreamCipher(key->size())) {
+	EVP_EncryptInit_ex(cipher.getCtx(), EVP_aes_256_gcm(), nullptr, nullptr, nullptr);
 	EVP_CIPHER_CTX_ctrl(cipher.getCtx(), EVP_CTRL_AEAD_SET_IVLEN, iv.size(), nullptr);
-	EVP_EncryptInit_ex(cipher.getCtx(), nullptr, nullptr, key.data(), iv.data());
+	EVP_EncryptInit_ex(cipher.getCtx(), nullptr, nullptr, key->data(), iv.data());
 }
 
 StringRef EncryptionStreamCipher::encrypt(unsigned char const* plaintext, int len, Arena& arena) {
@@ -105,10 +113,11 @@ StringRef EncryptionStreamCipher::finish(Arena& arena) {
 	return StringRef(ciphertext, bytes);
 }
 
-DecryptionStreamCipher::DecryptionStreamCipher(const StreamCipher::Key& key, const StreamCipher::IV& iv) {
-	EVP_DecryptInit_ex(cipher.getCtx(), EVP_aes_128_gcm(), nullptr, nullptr, nullptr);
+DecryptionStreamCipher::DecryptionStreamCipher(const StreamCipherKey* const key, const StreamCipher::IV& iv)
+  : cipher(key->size()) {
+	EVP_DecryptInit_ex(cipher.getCtx(), EVP_aes_256_gcm(), nullptr, nullptr, nullptr);
 	EVP_CIPHER_CTX_ctrl(cipher.getCtx(), EVP_CTRL_AEAD_SET_IVLEN, iv.size(), nullptr);
-	EVP_DecryptInit_ex(cipher.getCtx(), nullptr, nullptr, key.data(), iv.data());
+	EVP_DecryptInit_ex(cipher.getCtx(), nullptr, nullptr, key->data(), iv.data());
 }
 
 StringRef DecryptionStreamCipher::decrypt(unsigned char const* ciphertext, int len, Arena& arena) {
@@ -128,14 +137,34 @@ StringRef DecryptionStreamCipher::finish(Arena& arena) {
 	return StringRef(plaintext, finalBlockBytes);
 }
 
+HmacSha256StreamCipher::HmacSha256StreamCipher() : cipher(EVP_MAX_KEY_LENGTH) {
+	HMAC_Init_ex(cipher.getHmacCtx(), NULL, 0, EVP_sha256(), nullptr);
+}
+
+StringRef HmacSha256StreamCipher::digest(unsigned char const* data, int len, Arena& arena) {
+	TEST(true); // Digest using StreamCipher
+	unsigned int digestLen = HMAC_size(cipher.getHmacCtx());
+	auto digest = new (arena) unsigned char[digestLen];
+	HMAC_Update(cipher.getHmacCtx(), data, len);
+	HMAC_Final(cipher.getHmacCtx(), digest, &digestLen);
+	return StringRef(digest, digestLen);
+}
+
+StringRef HmacSha256StreamCipher::finish(Arena& arena) {
+	unsigned int digestLen = HMAC_size(cipher.getHmacCtx());
+	auto digest = new (arena) unsigned char[digestLen];
+	HMAC_Final(cipher.getHmacCtx(), digest, &digestLen);
+	return StringRef(digest, digestLen);
+}
+
 // Only used to link unit tests
 void forceLinkStreamCipherTests() {}
 
 // Tests both encryption and decryption of random data
 // using the StreamCipher class
 TEST_CASE("flow/StreamCipher") {
-	StreamCipher::Key::initializeRandomTestKey();
-	const auto& key = StreamCipher::Key::getKey();
+	StreamCipherKey* key = StreamCipherKey::getGlobalCipherKey();
+	key->initializeRandomTestKey();
 
 	StreamCipher::IV iv;
 	generateRandomData(iv.data(), iv.size());

@@ -50,7 +50,8 @@ public:
 		state unsigned char* encrypted = new (arena) unsigned char[FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE];
 		int bytes = wait(
 		    self->file->read(encrypted, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * block));
-		DecryptionStreamCipher decryptor(StreamCipher::Key::getKey(), self->getIV(block));
+		StreamCipherKey* cipherKey = StreamCipherKey::getGlobalCipherKey();
+		DecryptionStreamCipher decryptor(cipherKey, self->getIV(block));
 		auto decrypted = decryptor.decrypt(encrypted, bytes, arena);
 		return Standalone<StringRef>(decrypted, arena);
 	}
@@ -114,7 +115,7 @@ public:
 				self->offsetInBlock = 0;
 				ASSERT_LT(self->currentBlock, std::numeric_limits<uint32_t>::max());
 				++self->currentBlock;
-				self->encryptor = std::make_unique<EncryptionStreamCipher>(StreamCipher::Key::getKey(),
+				self->encryptor = std::make_unique<EncryptionStreamCipher>(StreamCipherKey::getGlobalCipherKey(),
 				                                                           self->getIV(self->currentBlock));
 			}
 		}
@@ -143,7 +144,8 @@ AsyncFileEncrypted::AsyncFileEncrypted(Reference<IAsyncFile> file, Mode mode)
   : file(file), mode(mode), readBuffers(FLOW_KNOBS->MAX_DECRYPTED_BLOCKS), currentBlock(0) {
 	firstBlockIV = AsyncFileEncryptedImpl::getFirstBlockIV(file->getFilename());
 	if (mode == Mode::APPEND_ONLY) {
-		encryptor = std::make_unique<EncryptionStreamCipher>(StreamCipher::Key::getKey(), getIV(currentBlock));
+		encryptor =
+		    std::make_unique<EncryptionStreamCipher>(StreamCipherKey::getGlobalCipherKey(), getIV(currentBlock));
 		writeBuffer = std::vector<unsigned char>(FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE, 0);
 	}
 }
@@ -259,7 +261,8 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 	generateRandomData(&writeBuffer.front(), bytes);
 	state std::vector<unsigned char> readBuffer(bytes, 0);
 	ASSERT(g_network->isSimulated());
-	StreamCipher::Key::initializeRandomTestKey();
+	StreamCipherKey* cipherKey = StreamCipherKey::getGlobalCipherKey();
+	cipherKey->initializeRandomTestKey();
 	int flags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
 	            IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_ENCRYPTED | IAsyncFile::OPEN_UNCACHED |
 	            IAsyncFile::OPEN_NO_AIO;
