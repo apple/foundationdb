@@ -753,7 +753,7 @@ enum CheckpointFormat {
 	// Checkpoint generated via rocksdb::Checkpoint::ExportColumnFamily().
 	RocksDBColumnFamily = 1,
 	// Checkpoint generated via rocksdb::Checkpoint::CreateCheckpoint().
-	RocksDBSSTFile = 2,
+	RocksDBCheckpoint = 2,
 };
 
 namespace {
@@ -767,8 +767,8 @@ std::string getFdbCheckpointFormatName(const CheckpointFormat& format) {
 	case RocksDBColumnFamily:
 		name = "RocksDBColumnFamily";
 		break;
-	case RocksDBSSTFile:
-		name = "RocksDBSSTFile";
+	case RocksDBCheckpoint:
+		name = "RocksDBCheckpoint";
 	}
 
 	return name;
@@ -936,6 +936,22 @@ struct RocksDBColumnFamilyCheckpoint {
 	}
 };
 
+struct RocksDBCheckpoint {
+	constexpr static FileIdentifier file_identifier = 13804346;
+	std::string checkpointDir;
+
+	CheckpointFormat format() const { return RocksDBCheckpoint; }
+
+	std::string toString() const {
+		return "RocksDBCheckpoint:\nCheckpoint dir:\n" + checkpointDir;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, checkpointDir);
+	}
+}
+
 // Metadata of a FDB checkpoint.
 struct CheckpointMetaData {
 	constexpr static FileIdentifier file_identifier = 13804342;
@@ -947,6 +963,8 @@ struct CheckpointMetaData {
 	int64_t gcTime; // Time to delete this checkpoint, a Unix timestamp in seconds.
 
 	Optional<RocksDBColumnFamilyCheckpoint> rocksCF; // Present when format == RocksDBColumnFamily.
+
+	Optional<RocksDBCheckpoint> rocksCheckpoint; // Present when format == RocksDBCheckpoint.
 
 	CheckpointMetaData() : format(InvalidFormat) {}
 	CheckpointMetaData(Version version, KeyRange const& range, CheckpointFormat format, UID checkpointID)
@@ -963,7 +981,7 @@ struct CheckpointMetaData {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, range, format, checkpointID, ssID, gcTime, rocksCF);
+		serializer(ar, version, range, format, checkpointID, ssID, gcTime, rocksCF, rocksCheckpoint);
 	}
 };
 

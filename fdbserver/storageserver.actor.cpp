@@ -403,6 +403,8 @@ private:
 	std::unordered_map<KeyRef, Reference<ServerWatchMetadata>> watchMap; // keep track of server watches
 
 public:
+	std::set<Version> checkpointVersions;
+
 public:
 	std::unordered_map<CheckpointFormat, std::map<Version, CheckpointMetaData>> checkpoints;
 
