@@ -725,7 +725,7 @@ Future<Standalone<VectorRef<StringRef>>> listTenants(Reference<DB> db, StringRef
 }
 
 ACTOR template <class DB>
-Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
+Future<Optional<TenantMapEntry>> tryGetTenant(Reference<DB> db, TenantName name) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
@@ -735,17 +735,22 @@ Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
 			Optional<Value> val = wait(safeThreadFutureToFuture(tr->get(tenantMapKey)));
-			if (!val.present()) {
-				throw tenant_not_found();
-			}
-
-			return decodeTenantEntry(val.get());
+			return val.map<TenantMapEntry>([](Optional<Value> v) { return decodeTenantEntry(v.get()); });
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
 }
 
+ACTOR template <class DB>
+Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
+	Optional<TenantMapEntry> entry = wait(tryGetTenant(db, name));
+	if (!entry.present()) {
+		throw tenant_not_found();
+	}
+
+	return entry.get();
+}
 } // namespace ManagementAPI
 
 #include "flow/unactorcompiler.h"

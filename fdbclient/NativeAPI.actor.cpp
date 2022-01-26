@@ -30,6 +30,7 @@
 
 #include "contrib/fmt-8.0.1/include/fmt/format.h"
 
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/MultiInterface.h"
@@ -7751,7 +7752,6 @@ ACTOR Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeedsA
                                                                                      KeyRangeRef range,
                                                                                      Version minVersion) {
 	state Database cx(db);
-	state Transaction tr(cx);
 	state Span span("NAPI:GetOverlappingChangeFeeds"_loc);
 
 	loop {

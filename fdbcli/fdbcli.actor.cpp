@@ -1098,21 +1098,6 @@ ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens) {
 	return false;
 }
 
-ACTOR Future<bool> checkTenant(Reference<IDatabase> db, StringRef tenantName) {
-	state Reference<ITransaction> tr = db->createTransaction();
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-
-			Optional<Value> val = wait(safeThreadFutureToFuture(tr->get(tenantName.withPrefix(tenantMapPrefix))));
-			return val.present();
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
-		}
-	}
-}
-
 // TODO: Update the function to get rid of the Database after refactoring
 Reference<ITransaction> getTransaction(Reference<IDatabase> db,
                                        Reference<ITenant> tenant,
@@ -1605,6 +1590,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state Reference<IDatabase> db;
 	state Reference<ITenant> tenant;
 	state Optional<Standalone<StringRef>> tenantName;
+	state Optional<TenantMapEntry> tenantEntry;
 
 	// This tenant is kept empty for operations that perform management tasks (e.g. killing a process)
 	state const Reference<ITenant> managementTenant;
@@ -1935,16 +1921,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "changefeed")) {
-					// TODO: tenant interaction
-					bool _result = wait(makeInterruptable(changeFeedCommandActor(localDb, tokens, warn)));
+					bool _result = wait(makeInterruptable(changeFeedCommandActor(localDb, tenantEntry, tokens, warn)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "blobrange")) {
-					// TODO: tenant interaction
-					bool _result = wait(makeInterruptable(blobRangeCommandActor(localDb, tokens)));
+					bool _result = wait(makeInterruptable(blobRangeCommandActor(localDb, tenantEntry, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -2383,13 +2367,15 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printf("Using tenant `%s'\n", printable(tenantName.get()).c_str());
 						}
 					} else {
-						bool exists = wait(makeInterruptable(checkTenant(db, tokens[1])));
-						if (!exists) {
+						Optional<TenantMapEntry> entry =
+						    wait(makeInterruptable(ManagementAPI::tryGetTenant(db, tokens[1])));
+						if (!entry.present()) {
 							fprintf(stderr, "ERROR: Tenant `%s' does not exist\n", printable(tokens[1]).c_str());
 							is_error = true;
 						} else {
 							tenant = db->openTenant(tokens[1]);
 							tenantName = tokens[1];
+							tenantEntry = entry;
 							printf("Using tenant `%s'\n", printable(tokens[1]).c_str());
 						}
 					}
@@ -2407,6 +2393,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					} else {
 						tenant = Reference<ITenant>();
 						tenantName = Optional<Standalone<StringRef>>();
+						tenantEntry = Optional<TenantMapEntry>();
 						printf("Using the default tenant\n");
 					}
 

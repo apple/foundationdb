@@ -174,9 +174,14 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 ACTOR Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
 // changefeed command
-ACTOR Future<bool> changeFeedCommandActor(Database localDb, std::vector<StringRef> tokens, Future<Void> warn);
+ACTOR Future<bool> changeFeedCommandActor(Database localDb,
+                                          Optional<TenantMapEntry> tenantEntry,
+                                          std::vector<StringRef> tokens,
+                                          Future<Void> warn);
 // blobrange command
-ACTOR Future<bool> blobRangeCommandActor(Database localDb, std::vector<StringRef> tokens);
+ACTOR Future<bool> blobRangeCommandActor(Database localDb,
+                                         Optional<TenantMapEntry> tenantEntry,
+                                         std::vector<StringRef> tokens);
 // maintenance command
 ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);
 ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
