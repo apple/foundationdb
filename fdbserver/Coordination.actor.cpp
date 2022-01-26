@@ -268,7 +268,7 @@ ACTOR Future<Void> remoteMonitorLeader(int* clientCount,
                                        Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader,
                                        ElectionResultRequest req,
                                        Reference<AsyncVar<Void>> coordinatorsChanged) {
-	state bool _coordinatorsChanged = false;
+	state bool coordinatorsChangeDetected = false;
 	state Future<Void> coordinatorsChangedOnChange = coordinatorsChanged->onChange();
 	state Future<Void> currentElectedLeaderOnChange = currentElectedLeader->onChange();
 	++(*clientCount);
@@ -281,14 +281,14 @@ ACTOR Future<Void> remoteMonitorLeader(int* clientCount,
 			}
 			when(wait(coordinatorsChangedOnChange)) {
 				coordinatorsChangedOnChange = coordinatorsChanged->onChange();
-				_coordinatorsChanged = true;
+				coordinatorsChangeDetected = true;
 				break;
 			}
 			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) { break; }
 		}
 	}
 
-	if (_coordinatorsChanged) {
+	if (coordinatorsChangeDetected) {
 		req.reply.sendError(coordinators_changed());
 	} else {
 		req.reply.send(currentElectedLeader->get());

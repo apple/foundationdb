@@ -529,31 +529,31 @@ ClientLeaderRegInterface::ClientLeaderRegInterface(INetwork* local) {
 // This function contacts a coordinator coord to ask who is its nominee.
 // Note: for coordinators whose NetworkAddress is parsed out of a hostname, a connection failure will cause this actor
 // to throw `coordinators_changed()` error
-ACTOR Future<Void> monitorNominee(
-    Key key,
-    ClientLeaderRegInterface coord,
-    AsyncTrigger* nomineeChange,
-    Optional<LeaderInfo>* info,
-    Optional<Hostname> hostname = Optional<Hostname>(),
-    Reference<IClusterConnectionRecord> connRecord = Reference<IClusterConnectionRecord>()) {
+ACTOR Future<Void> monitorNominee(Key key,
+                                  ClientLeaderRegInterface coord,
+                                  AsyncTrigger* nomineeChange,
+                                  Optional<LeaderInfo>* info,
+                                  Optional<Hostname> hostname = Optional<Hostname>()) {
 	loop {
-		if (connRecord.isValid() && connRecord->hasUnresolvedHostnames()) {
-			wait(connRecord->resolveHostnames());
-		}
 		state Optional<LeaderInfo> li;
 
 		if (coord.getLeader.getEndpoint().getPrimaryAddress().fromHostname) {
 			state ErrorOr<Optional<LeaderInfo>> rep =
 			    wait(coord.getLeader.tryGetReply(GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
 			                                     TaskPriority::CoordinationReply));
-			if (rep.isError() && rep.getError().code() == error_code_request_maybe_delivered) {
+			if (rep.isError()) {
 				// Connecting to nominee failed, most likely due to connection failed.
-				TraceEvent("CoordnitorChangedMonitorNominee")
+				TraceEvent("MonitorNomineeError")
 				    .detail("Hostname", hostname.present() ? hostname.get().toString() : "UnknownHostname")
-				    .detail("OldAddr", coord.getLeader.getEndpoint().getPrimaryAddress().toString());
-				// 50 milliseconds delay to prevent tight resolving loop due to outdated DNS cache
-				wait(delay(0.05));
-				throw coordinators_changed();
+				    .detail("OldAddr", coord.getLeader.getEndpoint().getPrimaryAddress().toString())
+				    .error(rep.getError());
+				if (rep.getError().code() == error_code_request_maybe_delivered) {
+					// 50 milliseconds delay to prevent tight resolving loop due to outdated DNS cache
+					wait(delay(0.05));
+					throw coordinators_changed();
+				} else {
+					throw rep.getError();
+				}
 			} else if (rep.present()) {
 				li = rep.get();
 			}
@@ -663,12 +663,8 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterCon
 			if (r != connRecord->getConnectionString().networkAddressToHostname.end()) {
 				hostname = r->second;
 			}
-			actors.push_back(monitorNominee(coordinators.clusterKey,
-			                                coordinators.clientLeaderServers[i],
-			                                &nomineeChange,
-			                                &nominees[i],
-			                                hostname,
-			                                connRecord));
+			actors.push_back(monitorNominee(
+			    coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange, &nominees[i], hostname));
 		}
 		allActors = waitForAll(actors);
 
@@ -707,7 +703,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterCon
 				wait(nomineeChange.onTrigger() || allActors);
 			} catch (Error& e) {
 				if (e.code() == error_code_coordinators_changed) {
-					connRecord->getMutableConnectionString()->resetToUnresolved();
+					connRecord->getConnectionString().resetToUnresolved();
 					break;
 				} else {
 					throw e;
@@ -901,7 +897,7 @@ ACTOR Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
 			if (e.code() == error_code_coordinators_changed) {
 				coordinatorsChanged->trigger();
 			}
-			return Void();
+			throw e;
 		}
 	}
 }
@@ -1070,7 +1066,7 @@ ACTOR Future<Void> monitorProxies(
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_coordinators_changed) {
-				info.intermediateConnRecord->getMutableConnectionString()->resetToUnresolved();
+				info.intermediateConnRecord->getConnectionString().resetToUnresolved();
 			} else {
 				throw e;
 			}
