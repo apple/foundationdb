@@ -1746,8 +1746,8 @@ MutationsAndVersionRef filterMutations(Arena& arena,
 #define DEBUG_SS_CF_ID ""_sr
 #define DEBUG_SS_CF_BEGIN_VERSION invalidVersion
 #define DEBUG_SS_CFM(ssId, cfId, v)                                                                                    \
-	ssId.toString().substr(0, 4) == DEBUG_SS_ID&& cfId.printable().substr(0, 6) == DEBUG_SS_CF_ID&& v ==               \
-	    DEBUG_SS_CF_BEGIN_VERSION
+	ssId.toString().substr(0, 4) == DEBUG_SS_ID&& cfId.printable().substr(0, 6) == DEBUG_SS_CF_ID &&                   \
+	    (v == DEBUG_SS_CF_BEGIN_VERSION || latestVersion == DEBUG_SS_CF_BEGIN_VERSION)
 
 ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(StorageServer* data,
                                                                             ChangeFeedStreamRequest req,
@@ -1889,6 +1889,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		reply = memoryReply;
 	}
 
+	bool gotAll = remainingLimitBytes > 0 && remainingDurableBytes > 0 && data->version.get() == startVersion;
 	Version finalVersion = std::min(req.end - 1, dequeVersion);
 	if ((reply.mutations.empty() || reply.mutations.back().version < finalVersion) && remainingLimitBytes > 0 &&
 	    remainingDurableBytes > 0) {
@@ -1900,6 +1901,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 		reply.mutations.push_back(
 		    reply.arena, MutationsAndVersionRef(finalVersion, finalVersion == dequeVersion ? dequeKnownCommit : 0));
+		// if we add empty mutation, we gotAll
+		gotAll = true;
 	}
 
 	if (MUTATION_TRACKING_ENABLED) {
@@ -1934,8 +1937,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 
 	// If the SS's version advanced at all during any of the waits, the read from memory may have missed some mutations,
 	// so gotAll can only be true if data->version didn't change over the course of this actor
-	return std::make_pair(reply,
-	                      remainingLimitBytes > 0 && remainingDurableBytes > 0 && data->version.get() == startVersion);
+	return std::make_pair(reply, gotAll);
 }
 
 ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
