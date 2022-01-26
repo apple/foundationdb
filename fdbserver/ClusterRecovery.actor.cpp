@@ -582,7 +582,6 @@ ACTOR Future<Void> resolutionBalancing(Reference<ClusterRecoveryData> self) {
 	state CoalescedKeyRangeMap<int> key_resolver(
 	    0, SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys.end : allKeys.end);
 	key_resolver.insert(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys : allKeys, 0);
-	key_resolver.insert(allKeys, 0);
 	loop {
 		wait(delay(SERVER_KNOBS->MIN_BALANCE_TIME, TaskPriority::ResolutionMetrics));
 		while (self->resolverChanges.get().size())
