@@ -53,6 +53,8 @@ OPEN_EXISTING, 0, nullptr); if (f == INVALID_HANDLE_VALUE) return 0; DWORD hi,lo
     return (uint64_t(hi)<<32) + lo;
 }*/
 
+// Comment for test build
+
 struct SpringCleaningStats {
 	int64_t springCleaningCount;
 	int64_t lazyDeletePages;
