@@ -127,7 +127,7 @@ Unknown arguments are forwarded to ctest, so you may use -R to filter tests e.g.
 
     joshua_builder.write_tarball(
         args.output,
-        joshua_test + "\n".join(commands),
+        joshua_test + "\n".join(command + " &>" for command in commands),
     )
 
 
