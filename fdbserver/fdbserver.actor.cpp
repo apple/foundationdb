@@ -647,7 +647,8 @@ static void printUsage(const char* name, bool devhelp) {
 		    "-r ROLE, --role ROLE",
 		    " Server role (valid options are fdbd, test, multitest,"
 		    " simulation, networktestclient, networktestserver, restore"
-		    " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, unittests). The default is `fdbd'.");
+		    " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, kvfiledump, unittests)."
+		    " The default is `fdbd'.");
 #ifdef _WIN32
 		printOptionUsage("-n, --newconsole", " Create a new console.");
 		printOptionUsage("-q, --no-dialog", " Disable error dialog on crash.");
@@ -661,7 +662,8 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("-k KEY, --key KEY", "Target key for search role.");
 		printOptionUsage(
 		    "--kvfile FILE",
-		    "Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.");
+		    "Input file (SQLite database file) for use by the 'kvfilegeneratesums', "
+		    "'kvfileintegritycheck' and 'kvfiledump' roles.");
 		printOptionUsage("-b [on,off], --buggify [on,off]", " Sets Buggify system state, defaults to `off'.");
 		printOptionUsage("-fi [on,off], --fault-injection [on,off]", " Sets fault injection, defaults to `on'.");
 		printOptionUsage("--crash", "Crash on serious errors instead of continuing.");
@@ -941,6 +943,7 @@ enum class ServerRole {
 	FDBD,
 	KVFileGenerateIOLogChecksums,
 	KVFileIntegrityCheck,
+	KVFileDump,
 	MultiTester,
 	NetworkTestClient,
 	NetworkTestServer,
@@ -1155,6 +1158,8 @@ private:
 					role = ServerRole::KVFileIntegrityCheck;
 				else if (!strcmp(sRole, "kvfilegeneratesums"))
 					role = ServerRole::KVFileGenerateIOLogChecksums;
+				else if (!strcmp(sRole, "kvfiledump"))
+					role = ServerRole::KVFileDump;
 				else if (!strcmp(sRole, "consistencycheck"))
 					role = ServerRole::ConsistencyCheck;
 				else if (!strcmp(sRole, "unittests"))
@@ -1546,7 +1551,7 @@ private:
 		    });
 		if ((role != ServerRole::Simulation && role != ServerRole::CreateTemplateDatabase &&
 		     role != ServerRole::KVFileIntegrityCheck && role != ServerRole::KVFileGenerateIOLogChecksums &&
-		     role != ServerRole::UnitTests) ||
+		     role != ServerRole::KVFileDump && role != ServerRole::UnitTests) ||
 		    autoPublicAddress) {
 
 			if (seedSpecified && !fileExists(connFile)) {
@@ -2122,6 +2127,9 @@ int main(int argc, char* argv[]) {
 			}
 
 			f = result;
+		} else if (role == ServerRole::KVFileDump) {
+			f = stopAfter(KVFileDump(opts.kvFile));
+			g_network->run();
 		}
 
 		int rc = FDB_EXIT_SUCCESS;
