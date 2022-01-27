@@ -607,6 +607,13 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 					j++;
 				}
 				wait(tr->commit());
+				if (BM_DEBUG) {
+					for (int k = 0; k < j; k++) {
+						fmt::print("Persisted initial mapping for [{0} - {1})\n",
+						           boundaries[i + k].printable(),
+						           boundaries[i + k + 1].printable());
+					}
+				}
 				break;
 			} catch (Error& e) {
 				if (BM_DEBUG) {
@@ -1516,23 +1523,23 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	// Step 3. Get the latest known mapping of granules to blob workers (i.e. assignments)
 	// This must happen causally AFTER reading the split boundaries, since the blob workers can clear the split
 	// boundaries for a granule as part of persisting their assignment.
-	state KeyRef beginKey = normalKeys.begin;
+	state KeyRef beginKey = blobGranuleMappingKeys.begin;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			// TODO: replace row limit with knob
-			KeyRange nextRange(KeyRangeRef(beginKey, normalKeys.end));
-			RangeResult results = wait(krmGetRanges(
-			    tr, blobGranuleMappingKeys.begin, nextRange, rowLimit, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
-			Key lastEndKey;
+			KeyRange nextRange(KeyRangeRef(beginKey, blobGranuleMappingKeys.end));
+			// using the krm functions can produce incorrect behavior here as it does weird stuff with beginKey
+			state GetRangeLimits limits(rowLimit, GetRangeLimits::BYTE_LIMIT_UNLIMITED);
+			limits.minRows = 2;
+			RangeResult results = wait(tr->getRange(nextRange, limits));
 
 			// Add the mappings to our in memory key range map
 			for (int rangeIdx = 0; rangeIdx < results.size() - 1; rangeIdx++) {
-				Key granuleStartKey = results[rangeIdx].key;
-				Key granuleEndKey = results[rangeIdx + 1].key;
-				lastEndKey = granuleEndKey;
+				Key granuleStartKey = results[rangeIdx].key.removePrefix(blobGranuleMappingKeys.begin);
+				Key granuleEndKey = results[rangeIdx + 1].key.removePrefix(blobGranuleMappingKeys.begin);
 				if (results[rangeIdx].value.size()) {
 					// note: if the old owner is dead, we handle this in rangeAssigner
 					UID existingOwner = decodeBlobGranuleMappingValue(results[rangeIdx].value);
@@ -1546,18 +1553,19 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 					}
 				} else {
 					if (BM_DEBUG) {
-						fmt::print("  [{0} - {1})=\n",
+						fmt::print("  [{0} - {1})\n",
 						           results[rangeIdx].key.printable(),
 						           results[rangeIdx + 1].key.printable());
 					}
 				}
 			}
 
-			if (!results.more) {
+			if (!results.more || results.size() <= 1) {
 				break;
 			}
 
-			beginKey = lastEndKey;
+			// re-read last key to get range that starts there
+			beginKey = results.back().key;
 		} catch (Error& e) {
 			if (BM_DEBUG) {
 				fmt::print("BM {0} got error reading granule mapping during recovery: {1}\n", bmData->epoch, e.name());
@@ -1611,6 +1619,9 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 	for (auto& range : workerAssignments.intersectingRanges(normalKeys)) {
 		if (!range.value().present()) {
+			/*if (BM_DEBUG) {
+			    fmt::print("  [{0} - {1}) invalid\n", range.begin().printable(), range.end().printable());
+			}*/
 			continue;
 		}
 
