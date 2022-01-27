@@ -4301,10 +4301,10 @@ ACTOR Future<Void> clusterHealthCheckForPerpetualWiggle(DDTeamCollection* self, 
 		wait(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistributionLow));
 	}
 }
-// Watches the value change of `wigglingStorageServerPrefix`, and adds the storage server into excludeServers which prevent
-// recruiting the wiggling storage servers and let teamTracker start to move data off the affected teams. The wiggling
-// process of current storage servers will be paused if the cluster is unhealthy and restarted once the cluster is
-// healthy again.
+// Watches the value change of `wigglingStorageServerPrefix`, and adds the storage server into excludeServers which
+// prevent recruiting the wiggling storage servers and let teamTracker start to move data off the affected teams. The
+// wiggling process of current storage servers will be paused if the cluster is unhealthy and restarted once the cluster
+// is healthy again.
 ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
                                            PromiseStream<Void> finishStorageWiggleSignal,
                                            DDTeamCollection* self) {
