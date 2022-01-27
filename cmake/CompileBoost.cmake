@@ -24,12 +24,12 @@ function(compile_boost)
   if(APPLE OR USE_LIBCXX)
     list(APPEND BOOST_COMPILER_FLAGS -stdlib=libc++)
   endif()
-  set(BOOST_ADDITIONAL_COMPILE_OPTIOINS "")
+  set(BOOST_ADDITIONAL_COMPILE_OPTIONS "")
   foreach(flag IN LISTS BOOST_COMPILER_FLAGS MY_CXXFLAGS)
-    string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIOINS "<cxxflags>${flag} ")
+    string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIONS "<cxxflags>${flag} ")
   endforeach()
   foreach(flag IN LISTS MY_LDFLAGS)
-    string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIOINS "<linkflags>${flag} ")
+    string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIONS "<linkflags>${flag} ")
   endforeach()
   configure_file(${CMAKE_SOURCE_DIR}/cmake/user-config.jam.cmake ${CMAKE_BINARY_DIR}/user-config.jam)
 
@@ -38,8 +38,8 @@ function(compile_boost)
   include(ExternalProject)
   set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
   ExternalProject_add("${MY_TARGET}Project"
-    URL "https://boostorg.jfrog.io/artifactory/main/release/1.72.0/source/boost_1_72_0.tar.bz2"
-    URL_HASH SHA256=59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722
+    URL "https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2"
+    URL_HASH SHA256=8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc
     CONFIGURE_COMMAND ./bootstrap.sh ${BOOTSTRAP_ARGS}
     BUILD_COMMAND ${B2_COMMAND} link=static ${MY_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
     BUILD_IN_SOURCE ON
@@ -72,10 +72,10 @@ if(USE_SANITIZER)
   return()
 endif()
 
-list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_72_0)
+list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_78_0)
 # since boost 1.72 boost installs cmake configs. We will enforce config mode
 set(Boost_USE_STATIC_LIBS ON)
-set(BOOST_HINT_PATHS /opt/boost_1_72_0)
+set(BOOST_HINT_PATHS /opt/boost_1_78_0)
 if(BOOST_ROOT)
   list(APPEND BOOST_HINT_PATHS ${BOOST_ROOT})
 endif()
@@ -91,7 +91,7 @@ if(WIN32)
   return()
 endif()
 
-find_package(Boost 1.72.0 EXACT QUIET COMPONENTS context CONFIG PATHS ${BOOST_HINT_PATHS})
+find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context CONFIG PATHS ${BOOST_HINT_PATHS})
 set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
 
 if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
