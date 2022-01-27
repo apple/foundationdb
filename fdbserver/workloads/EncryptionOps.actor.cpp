@@ -25,13 +25,58 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include "flow/genericactors.actor.g.h"
+
+#if ENCRYPTION_ENABLED
+
 #include <chrono>
 #include <cstring>
 #include <memory>
 
 #define MEGA_BYTES (1024 * 1024)
 #define NANO_SECOND (1000 * 1000 * 1000)
+
+struct WorkloadMetrics {
+	double totalEncryptTimeNS;
+	double totalDecryptTimeNS;
+	double totalKeyDerivationTimeNS;
+	int64_t totalBytes;
+
+	void reset() {
+		totalEncryptTimeNS = 0;
+		totalDecryptTimeNS = 0;
+		totalKeyDerivationTimeNS = 0;
+		totalBytes = 0;
+	}
+
+	WorkloadMetrics() { reset(); }
+
+	double computeEncryptThroughputMBPS() {
+		// convert bytes -> MBs & nano-seonds -> seconds
+		return (totalBytes * NANO_SECOND) / (totalEncryptTimeNS * MEGA_BYTES);
+	}
+
+	double computeDecryptThroughputMBPS() {
+		// convert bytes -> MBs & nano-seonds -> seconds
+		return (totalBytes * NANO_SECOND) / (totalDecryptTimeNS * MEGA_BYTES);
+	}
+
+	void updateKeyDerivationTime(double val) { totalKeyDerivationTimeNS += val; }
+	void updateEncryptionTime(double val) { totalEncryptTimeNS += val; }
+	void updateDecryptionTime(double val) { totalDecryptTimeNS += val; }
+	void updateBytes(int64_t val) { totalBytes += val; }
+
+	void recordMetrics(const std::string& mode, const int numIterations) {
+		TraceEvent("EncryptionOpsWorkload")
+		    .detail("Mode", mode)
+		    .detail("TimeEncryptTimeMS", totalEncryptTimeNS / 1000)
+		    .detail("TimeDecryptTimeMS", totalDecryptTimeNS / 1000)
+		    .detail("EncryptMBPS", computeEncryptThroughputMBPS())
+		    .detail("DecryptMBPS", computeDecryptThroughputMBPS())
+		    .detail("KeyDerivationTimeMS", totalKeyDerivationTimeNS / 1000)
+		    .detail("TotalBytes", totalBytes)
+		    .detail("AvgCommitSize", totalBytes / numIterations);
+	}
+};
 
 struct EncryptionOpsWorkload : TestWorkload {
 	int mode;
@@ -42,13 +87,10 @@ struct EncryptionOpsWorkload : TestWorkload {
 	std::unique_ptr<uint8_t[]> validationBuff;
 
 	StreamCipher::IV iv;
-	std::unique_ptr<EncryptionStreamCipher> encryptor;
-	std::unique_ptr<DecryptionStreamCipher> decryptor;
+	std::unique_ptr<HmacSha256StreamCipher> hmacGenerator;
+	std::string parentKey;
 	Arena arena;
-
-	double totalEncryptTimeNS;
-	double totalDecryptTimeNS;
-	int64_t totalBytes;
+	std::unique_ptr<WorkloadMetrics> metrics;
 
 	EncryptionOpsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		mode = getOption(options, LiteralStringRef("fixedSize"), 1);
@@ -59,12 +101,10 @@ struct EncryptionOpsWorkload : TestWorkload {
 		validationBuff = std::make_unique<uint8_t[]>(maxBufSize);
 
 		iv = getRandomIV();
-		StreamCipher::Key::initializeRandomTestKey();
-		const auto& key = StreamCipher::Key::getKey();
-		encryptor = std::make_unique<EncryptionStreamCipher>(key, iv);
-		decryptor = std::make_unique<DecryptionStreamCipher>(key, iv);
+		hmacGenerator = std::make_unique<HmacSha256StreamCipher>();
+		parentKey = "a1b2c3d4e5f6h7i8";
 
-		totalDecryptTimeNS = totalEncryptTimeNS = totalBytes = 0;
+		metrics = std::make_unique<WorkloadMetrics>();
 
 		TraceEvent("EncryptionOpsWorkload").detail("Mode", getModeStr());
 	}
@@ -86,9 +126,52 @@ struct EncryptionOpsWorkload : TestWorkload {
 		throw internal_error();
 	}
 
-	double computeThroughputMBPS(double timeNS, double bytes) {
-		// convert bytes -> MBs & nano-seonds -> seconds
-		return (bytes * NANO_SECOND) / (timeNS * MEGA_BYTES);
+	void updateEncryptionKey() {
+		auto start = std::chrono::high_resolution_clock::now();
+		StreamCipher::Key::RawKeyType key;
+		memcpy(key.data(), parentKey.data(), parentKey.size());
+		uint64_t seed = deterministicRandom()->randomUInt64();
+		memcpy(key.data() + parentKey.size(), &seed, sizeof(uint64_t));
+		hmacGenerator->digest(key.data(), key.size(), arena);
+		StreamCipher::Key::initializeKey(std::move(key));
+		auto end = std::chrono::high_resolution_clock::now();
+
+		metrics->updateKeyDerivationTime(std::chrono::duration<double, std::nano>(end - start).count());
+	}
+
+	StringRef doEncryption(uint8_t* payload, int len) {
+		const auto& key = StreamCipher::Key::getKey();
+		EncryptionStreamCipher encryptor(key, iv);
+
+		auto start = std::chrono::high_resolution_clock::now();
+		auto encrypted = encryptor.encrypt(buff.get(), len, arena);
+		encryptor.finish(arena);
+		auto end = std::chrono::high_resolution_clock::now();
+
+		// validate encrypted buffer size and contents (not matching with plaintext)
+		ASSERT(encrypted.size() == len);
+		std::copy(encrypted.begin(), encrypted.end(), validationBuff.get());
+		ASSERT(memcmp(validationBuff.get(), buff.get(), len) != 0);
+
+		metrics->updateEncryptionTime(std::chrono::duration<double, std::nano>(end - start).count());
+		return encrypted;
+	}
+
+	void doDecryption(const StringRef& encrypted, int len, uint8_t* originalPayload, uint8_t* validationBuff) {
+		const auto& key = StreamCipher::Key::getKey();
+		DecryptionStreamCipher decryptor(key, iv);
+
+		auto start = std::chrono::high_resolution_clock::now();
+		Standalone<StringRef> decrypted = decryptor.decrypt(encrypted.begin(), len, arena);
+		decryptor.finish(arena);
+		auto end = std::chrono::high_resolution_clock::now();
+
+		// validate decrypted buffer size and contents (matching with original plaintext)
+		ASSERT(decrypted.size() == len);
+		std::copy(decrypted.begin(), decrypted.end(), validationBuff);
+		ASSERT(memcmp(validationBuff, originalPayload, len) == 0);
+
+		metrics->updateDecryptionTime(std::chrono::duration<double, std::nano>(end - start).count());
 	}
 
 	Future<Void> setup(Database const& ctx) override { return Void(); }
@@ -97,48 +180,28 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		for (int i = 0; i < numIterations; i++) {
+			// derive the encryption key
+			updateEncryptionKey();
+
 			int dataLen = isFixedSizePayload() ? pageSize : deterministicRandom()->randomInt(100, maxBufSize);
 			generateRandomData(buff.get(), dataLen);
 
 			// encrypt the payload
-			auto start = std::chrono::high_resolution_clock::now();
-			auto encrypted = encryptor->encrypt(buff.get(), dataLen, arena);
-			auto end = std::chrono::high_resolution_clock::now();
-			totalEncryptTimeNS += std::chrono::duration<double, std::nano>(end - start).count();
-			// validate encrypted buffer size and contents (not matching with plaintext)
-			ASSERT(encrypted.size() == dataLen);
-			std::copy(encrypted.begin(), encrypted.end(), validationBuff.get());
-			ASSERT(memcmp(validationBuff.get(), buff.get(), dataLen) != 0);
+			const auto& encrypted = doEncryption(buff.get(), dataLen);
 
 			// decrypt the payload
-			start = std::chrono::high_resolution_clock::now();
-			Standalone<StringRef> decrypted = decryptor->decrypt(encrypted.begin(), dataLen, arena);
-			end = std::chrono::high_resolution_clock::now();
-			totalDecryptTimeNS += std::chrono::duration<double, std::nano>(end - start).count();
-			// validate decrypted buffer size and contents (matching with original plaintext)
-			ASSERT(decrypted.size() == dataLen);
-			std::copy(decrypted.begin(), decrypted.end(), validationBuff.get());
-			ASSERT(memcmp(validationBuff.get(), buff.get(), dataLen) == 0);
+			doDecryption(encrypted, dataLen, buff.get(), validationBuff.get());
 
-			totalBytes += dataLen;
+			metrics->updateBytes(dataLen);
 		}
 		return Void();
 	}
 
-	Future<bool> check(Database const& cx) override {
-		TraceEvent("EncryptionOpsWorkload")
-		    .detail("Mode", getModeStr())
-		    .detail("TimeEncryptTimeMS", totalEncryptTimeNS / 1000)
-		    .detail("TimeDecryptTimeMS", totalDecryptTimeNS / 1000)
-		    .detail("EncryptMBPS", computeThroughputMBPS(totalEncryptTimeNS, totalBytes))
-		    .detail("DecryptMBPS", computeThroughputMBPS(totalDecryptTimeNS, totalBytes))
-		    .detail("TotalBytes", totalBytes)
-		    .detail("AvgCommitSize", totalBytes / numIterations);
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(std::vector<PerfMetric>& m) override { // Not implemented }
-	}
+	void getMetrics(std::vector<PerfMetric>& m) override { metrics->recordMetrics(getModeStr(), numIterations); }
 };
 
 WorkloadFactory<EncryptionOpsWorkload> EncryptionOpsWorkloadFactory("EncryptionOps");
+
+#endif // ENCRYPTION_ENABLED

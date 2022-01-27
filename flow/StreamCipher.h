@@ -34,6 +34,7 @@
 
 #include <openssl/aes.h>
 #include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -43,11 +44,13 @@
 class StreamCipher final : NonCopyable {
 	static std::unordered_set<EVP_CIPHER_CTX*> ctxs;
 	EVP_CIPHER_CTX* ctx;
+	HMAC_CTX* hmacCtx;
 
 public:
 	StreamCipher();
 	~StreamCipher();
 	EVP_CIPHER_CTX* getCtx();
+	HMAC_CTX* getHmacCtx();
 	class Key : NonCopyable {
 		std::array<unsigned char, 16> arr;
 		static std::unique_ptr<Key> globalKey;
@@ -84,6 +87,15 @@ class DecryptionStreamCipher final : NonCopyable, public ReferenceCounted<Decryp
 public:
 	DecryptionStreamCipher(const StreamCipher::Key& key, const StreamCipher::IV& iv);
 	StringRef decrypt(unsigned char const* ciphertext, int len, Arena&);
+	StringRef finish(Arena&);
+};
+
+class HmacSha256StreamCipher final : NonCopyable, public ReferenceCounted<HmacSha256StreamCipher> {
+	StreamCipher cipher;
+
+public:
+	HmacSha256StreamCipher();
+	StringRef digest(unsigned char const* data, int len, Arena&);
 	StringRef finish(Arena&);
 };
 

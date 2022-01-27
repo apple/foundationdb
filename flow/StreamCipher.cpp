@@ -19,12 +19,13 @@
  */
 
 #include "flow/StreamCipher.h"
+#include "flow/Arena.h"
 #include "flow/UnitTest.h"
 
 std::unordered_set<EVP_CIPHER_CTX*> StreamCipher::ctxs;
 std::unique_ptr<StreamCipher::Key> StreamCipher::Key::globalKey;
 
-StreamCipher::StreamCipher() : ctx(EVP_CIPHER_CTX_new()) {
+StreamCipher::StreamCipher() : ctx(EVP_CIPHER_CTX_new()), hmacCtx(HMAC_CTX_new()) {
 	ctxs.insert(ctx);
 }
 
@@ -35,6 +36,10 @@ StreamCipher::~StreamCipher() {
 
 EVP_CIPHER_CTX* StreamCipher::getCtx() {
 	return ctx;
+}
+
+HMAC_CTX* StreamCipher::getHmacCtx() {
+	return hmacCtx;
 }
 
 void StreamCipher::cleanup() noexcept {
@@ -126,6 +131,19 @@ StringRef DecryptionStreamCipher::finish(Arena& arena) {
 	int finalBlockBytes{ 0 };
 	EVP_DecryptFinal_ex(cipher.getCtx(), plaintext, &finalBlockBytes);
 	return StringRef(plaintext, finalBlockBytes);
+}
+
+HmacSha256StreamCipher::HmacSha256StreamCipher() {
+	HMAC_Init_ex(cipher.getHmacCtx(), NULL, 0, EVP_sha256(), nullptr);
+}
+
+StringRef HmacSha256StreamCipher::digest(unsigned char const* data, int len, Arena& arena) {
+	TEST(true); // Digest using StreamCipher
+	unsigned int digestLen = HMAC_size(cipher.getHmacCtx());
+	auto digest = new (arena) unsigned char[digestLen];
+	HMAC_Update(cipher.getHmacCtx(), data, len);
+	HMAC_Final(cipher.getHmacCtx(), digest, &digestLen);
+	return StringRef(digest, digestLen);
 }
 
 // Only used to link unit tests
