@@ -28,26 +28,34 @@
 #include "flow/flow.h"
 
 class Timing {
-	double m_start;
+public:
+	using time_t = decltype(now());
+
+private:
+	time_t m_start;
 
 public:
 	Timing() : m_start(now()) {}
 
 	// Gets the time the Timing object created
-	double getStart() const { return m_start; }
+	time_t getStart() const { return m_start; }
 
 	// Gets the duration of the timing object
-	double duration() const { return now() - m_start; }
+	time_t duration() const { return now() - m_start; }
 };
 
 class Stopwatch {
-	std::vector<double> m_laps;
+public:
+	using time_t = decltype(now());
+
+private:
+	std::vector<time_t> m_laps;
 
 public:
 	Stopwatch() : m_laps{ now() } {}
 
 	// Laps the watch, stores the current time and return the duration between this lap and the previous one
-	double lap() {
+	time_t lap() {
 		m_laps.push_back(now());
 		return *(m_laps.rbegin()) - *std::next(m_laps.rbegin());
 	}
