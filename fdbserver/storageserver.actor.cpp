@@ -1901,8 +1901,10 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 		reply.mutations.push_back(
 		    reply.arena, MutationsAndVersionRef(finalVersion, finalVersion == dequeVersion ? dequeKnownCommit : 0));
-		// if we add empty mutation, we gotAll
-		gotAll = true;
+		// if we add empty mutation after the last thing in memory, and didn't read from disk, gotAll is true
+		if (data->version.get() == startVersion) {
+			gotAll = true;
+		}
 	}
 
 	if (MUTATION_TRACKING_ENABLED) {

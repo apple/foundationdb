@@ -7389,12 +7389,22 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 						} else {
 							// TODO REMOVE eventually, useful for debugging for now
 							if (!rep.mutations[resultLoc].mutations.empty()) {
-								fmt::print("non-empty mutations ({0}), but versions out of order from {1}! mv={2}, "
-								           "nv={3}\n",
+								fmt::print("non-empty mutations ({0}), but versions out of order from {1} for {2} cf "
+								           "{3}! mv={4}, nv={5}\n",
 								           rep.mutations.size(),
 								           interf.id().toString().substr(0, 4),
+								           idx,
+								           feedData->id.toString().substr(0, 6),
 								           rep.mutations[resultLoc].version,
 								           nextVersion);
+								for (auto& it : rep.mutations[resultLoc].mutations) {
+									if (it.type == MutationRef::SetValue) {
+										printf("  %s=", it.param1.printable().c_str());
+									} else {
+										printf(
+										    "  %s - %s", it.param1.printable().c_str(), it.param2.printable().c_str());
+									}
+								}
 							}
 							ASSERT(rep.mutations[resultLoc].mutations.empty());
 						}
