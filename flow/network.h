@@ -703,6 +703,10 @@ public:
 	// NetworkAddresses
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                               const std::string& service) = 0;
+	// Resolve host name and service name. This one should only be used when resolving asynchronously is impossible. For
+	// all other cases, resolveTCPEndpoint() should be preferred.
+	virtual std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
+	                                                               const std::string& service) = 0;
 
 	// Convenience function to resolve host/service and connect to one of its NetworkAddresses randomly
 	// isTLS has to be a parameter here because it is passed to connect() as part of the toAddr object.
