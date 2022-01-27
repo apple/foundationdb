@@ -68,8 +68,8 @@ struct WorkloadMetrics {
 	void recordMetrics(const std::string& mode, const int numIterations) {
 		TraceEvent("EncryptionOpsWorkload")
 		    .detail("Mode", mode)
-		    .detail("TimeEncryptTimeMS", totalEncryptTimeNS / 1000)
-		    .detail("TimeDecryptTimeMS", totalDecryptTimeNS / 1000)
+		    .detail("EncryptTimeMS", totalEncryptTimeNS / 1000)
+		    .detail("DecryptTimeMS", totalDecryptTimeNS / 1000)
 		    .detail("EncryptMBPS", computeEncryptThroughputMBPS())
 		    .detail("DecryptMBPS", computeDecryptThroughputMBPS())
 		    .detail("KeyDerivationTimeMS", totalKeyDerivationTimeNS / 1000)
