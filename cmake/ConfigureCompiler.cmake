@@ -10,6 +10,7 @@ env_set(USE_GCOV OFF BOOL "Compile with gcov instrumentation")
 env_set(USE_MSAN OFF BOOL "Compile with memory sanitizer. To avoid false positives you need to dynamically link to a msan-instrumented libc++ and libc++abi, which you must compile separately. See https://github.com/google/sanitizers/wiki/MemorySanitizerLibcxxHowTo#instrumented-libc.")
 env_set(USE_TSAN OFF BOOL "Compile with thread sanitizer. It is recommended to dynamically link to a tsan-instrumented libc++ and libc++abi, which you can compile separately.")
 env_set(USE_UBSAN OFF BOOL "Compile with undefined behavior sanitizer")
+env_set(USE_INSTRUMENTATION OFF BOOL "Compile with instrumentation, it's primary used for Profile Guided Optimization, it can be used for code coverage too")
 env_set(FDB_RELEASE_CANDIDATE OFF BOOL "This is a building of a release candidate")
 env_set(FDB_RELEASE OFF BOOL "This is a building of a final release")
 env_set(USE_CCACHE OFF BOOL "Use ccache for compilation if available")
@@ -178,6 +179,10 @@ else()
   if(USE_GCOV)
     add_link_options(--coverage)
   endif()
+  if (USE_INSTRUMENTATION) {
+    add_compile_options(-fprofile-instr-generate)
+    add_link_options(-fprofile-instr-generate)
+  }
 
   if(USE_UBSAN)
     list(APPEND SANITIZER_COMPILE_OPTIONS
