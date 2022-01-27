@@ -1804,6 +1804,8 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	if (!g_network)
 		throw network_not_setup();
 
+	ASSERT(TraceEvent::isNetworkThread());
+
 	platform::ImageInfo imageInfo = platform::getImageInfo();
 
 	if (connRecord) {
@@ -1815,6 +1817,12 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 			auto publicIP = determinePublicIPAutomatically(connRecord->getConnectionString());
 			selectTraceFormatter(networkOptions.traceFormat);
 			selectTraceClockSource(networkOptions.traceClockSource);
+			addUniversalTraceField("ClientDescription",
+			                       format("%s-%s-%" PRIu64,
+			                              networkOptions.primaryClient ? "primary" : "external",
+			                              FDB_VT_VERSION,
+			                              getTraceThreadId()));
+
 			openTraceFile(NetworkAddress(publicIP, ::getpid()),
 			              networkOptions.traceRollSize,
 			              networkOptions.traceMaxLogsSize,

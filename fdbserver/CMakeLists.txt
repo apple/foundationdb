@@ -32,6 +32,8 @@ set(FDBSERVER_SRCS
   DataDistributorInterface.h
   DBCoreState.h
   DiskQueue.actor.cpp
+  EncryptKeyProxyInterface.h
+  EncryptKeyProxy.actor.cpp  
   fdbserver.actor.cpp
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
