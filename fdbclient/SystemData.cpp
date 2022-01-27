@@ -636,8 +636,8 @@ const KeyRef configKeysPrefix = configKeys.begin;
 
 const KeyRef perpetualStorageWiggleKey(LiteralStringRef("\xff/conf/perpetual_storage_wiggle"));
 const KeyRef perpetualStorageWiggleLocalityKey(LiteralStringRef("\xff/conf/perpetual_storage_wiggle_locality"));
-const KeyRef wigglingStorageServerKey(LiteralStringRef("\xff/storageWigglePID"));
-const KeyRef storageWiggleStatsKey(LiteralStringRef("\xff/storageWiggleStats"));
+const KeyRef wigglingStorageServerPrefix(LiteralStringRef("\xff/storageWiggleID/")); // withSuffix /primary or /remote
+const KeyRef storageWiggleStatsPrefix(LiteralStringRef("\xff/storageWiggleStats/")); // withSuffix /primary or /remote
 
 const KeyRef triggerDDTeamInfoPrintKey(LiteralStringRef("\xff/triggerDDTeamInfoPrint"));
 
