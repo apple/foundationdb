@@ -6828,7 +6828,8 @@ ACTOR Future<Void> storageServerCore(std::shared_ptr<StorageServerBase> self_, S
 							ASSERT(std::dynamic_pointer_cast<ptxn::StorageServer>(self_));
 							ptxn::initializeUpdateCursor(*std::dynamic_pointer_cast<ptxn::StorageServer>(self_));
 						}
-						self->popVersion(self->durableVersion.get() + 1, true);
+						self->popVersion(self->durableVersion.get() + 1,
+						                 true); // why do we need to pop all tags in this case?
 					}
 					// If update() is waiting for results from the tlog, it might never get them, so needs to be
 					// cancelled.  But if it is waiting later, cancelling it could cause problems (e.g. fetchKeys that

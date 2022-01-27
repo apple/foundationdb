@@ -157,3 +157,18 @@ startDelay = 0
     numTLogGroups = 7
     numCommits = 10
 
+[[test]]
+testTitle = 'Team Partitioned TLog Server Test 11: test popping TLog'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/pop_data'
+
+    numTLogs = 3
+    numStorageTeams = 40
+    numTLogGroups = 7
+    numCommits = 10
+

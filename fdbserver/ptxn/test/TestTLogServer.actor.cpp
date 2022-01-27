@@ -427,6 +427,16 @@ ACTOR Future<std::vector<Standalone<StringRef>>> commitInject(std::shared_ptr<pt
 	return writtenMessages;
 }
 
+ACTOR Future<Void> pop(std::shared_ptr<ptxn::test::TestDriverContext> pContext,
+                       Version version,
+                       ptxn::StorageTeamID storageTeamID,
+                       Tag tag) {
+	ptxn::TLogPopRequest request(version, 0, tag, storageTeamID);
+	state std::shared_ptr<ptxn::TLogInterfaceBase> pInterface = pContext->getTLogLeaderByStorageTeamID(storageTeamID);
+	wait(pInterface->pop.getReply(request));
+	return Void();
+}
+
 ACTOR Future<Void> verifyPeek(std::shared_ptr<ptxn::test::TestDriverContext> pContext,
                               ptxn::StorageTeamID storageTeamID,
                               int numCommits) {
@@ -775,6 +785,37 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	return Void();
 }
 
+TEST_CASE("/fdbserver/ptxn/test/pop_data") {
+	state ptxn::test::TestDriverOptions options(params);
+	state std::vector<Future<Void>> actors;
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL = 0.5;
+	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
+
+	for (const auto& group : pContext->tLogGroups) {
+		ptxn::test::print::print(group);
+	}
+	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
+
+	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
+	platform::createDirectory(folder);
+
+	wait(startTLogServers(&actors, pContext, folder, true));
+	state IKeyValueStore* d = pContext->kvStores[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
+
+	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>> res =
+	    wait(commitInjectReturnVersions(pContext, storageTeamID, pContext->numCommits));
+	state std::vector<Standalone<StringRef>> expectedMessages = res.first;
+	wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
+
+	wait(pop(pContext,
+	         res.second.back(),
+	         storageTeamID,
+	         pContext->getTLogGroup(pContext->storageTeamIDTLogGroupIDMapper[storageTeamID])
+	             .storageTeams[storageTeamID][0]));
+	platform::eraseDirectoryRecursive(folder);
+	return Void();
+}
+
 TEST_CASE("/fdbserver/ptxn/test/read_tlog_spilled") {
 	state ptxn::test::TestDriverOptions options(params);
 	state std::vector<Future<Void>> actors;
@@ -796,7 +837,9 @@ TEST_CASE("/fdbserver/ptxn/test/read_tlog_spilled") {
 	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>> res =
 	    wait(commitInjectReturnVersions(pContext, storageTeamID, pContext->numCommits));
 	state std::vector<Standalone<StringRef>> expectedMessages = res.first;
-	wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
+
+	// TODO: uncomment this once enable peek from disk
+	// wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
 
 	// wait 1s so that actors who update persistent data can do their job.
 	wait(delay(1.5));
@@ -818,6 +861,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_tlog_spilled") {
 	// TODO: assert the value of the spilled data,
 	// there are many factors that can change the encoding of the value, such whether it is spilled by value of ref.
 	ASSERT(exist);
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 1500e6;
 	platform::eraseDirectoryRecursive(folder);
 	return Void();
 }
@@ -883,7 +927,9 @@ TEST_CASE("/fdbserver/ptxn/test/single_tlog_recovery") {
 
 	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>> res =
 	    wait(commitInjectReturnVersions(pContext, storageTeamID, pContext->numCommits));
-	wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
+
+	// TODO: uncomment this once enable peek from disk
+	// wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
 
 	// wait here so that actors who update persistentData can do their job.
 	wait(delay(1.5));
@@ -955,6 +1001,7 @@ TEST_CASE("/fdbserver/ptxn/test/single_tlog_recovery") {
 	// it is hard to verify through peeking, because the interface is recruited from inside.
 	ASSERT(dqs[targetGroup].second->getNextReadLocation() >= previousNextPushLocation);
 	ASSERT(dqs[targetGroup].second->getNextReadLocation().lo == previousNextPushLocation.lo + 36);
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 1500e6;
 
 	// TODO: test the old generations interfaces are started and can serve requests such as peek
 	platform::eraseDirectoryRecursive(folder);

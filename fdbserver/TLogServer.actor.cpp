@@ -943,8 +943,10 @@ ACTOR Future<Void> popDiskQueue(TLogData* self, Reference<LogData> logData) {
 		IDiskQueue::location lastCommittedLocation = minLocation;
 		auto locationIter = logData->versionLocation.lower_bound(lastCommittedVersion);
 		if (locationIter != logData->versionLocation.end()) {
+			// why do we need this? committed data should always be bigger than smallest un-poped location
 			lastCommittedLocation = locationIter->value.first;
 		}
+		// actually pop from disk
 		self->persistentQueue->pop(std::min(minLocation, lastCommittedLocation));
 		logData->queuePoppedVersion = std::max(logData->queuePoppedVersion, minVersion);
 	}
@@ -3036,6 +3038,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 				break;
 			((KeyRangeRef&)tagKeys) = KeyRangeRef(keyAfter(data.back().key, tagKeys.arena()), tagKeys.end);
 
+			// restore tag_data through createTagData
 			for (auto& kv : data) {
 				Tag tag = decodeTagPoppedKey(rawId, kv.key);
 				Version popped = decodeTagPoppedValue(kv.value);
