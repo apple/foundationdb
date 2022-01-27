@@ -1547,15 +1547,13 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 					bmData->knownBlobRanges.insert(KeyRangeRef(granuleStartKey, granuleEndKey), true);
 					if (BM_DEBUG) {
 						fmt::print("  [{0} - {1})={2}\n",
-						           results[rangeIdx].key.printable(),
-						           results[rangeIdx + 1].key.printable(),
+						           granuleStartKey.printable(),
+						           granuleEndKey.printable(),
 						           results[rangeIdx].value.printable());
 					}
 				} else {
 					if (BM_DEBUG) {
-						fmt::print("  [{0} - {1})\n",
-						           results[rangeIdx].key.printable(),
-						           results[rangeIdx + 1].key.printable());
+						fmt::print("  [{0} - {1})\n", granuleStartKey.printable(), granuleEndKey.printable());
 					}
 				}
 			}

@@ -543,10 +543,10 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		state double last = now();
 		state double targetBytesReadPerQuery =
 		    SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES * 2.0 / deterministicRandom()->randomInt(1, 11);
-		state int targetKeysReadPerQuery =
-		    (int)(targetBytesReadPerQuery / (threadData->targetValLength * threadData->targetIDsPerKey));
-		// read at higher read rate than write rate
-		state double targetTps = threadData->targetByteRate * 2 / targetBytesReadPerQuery;
+
+		// read at higher read rate than write rate to validate data
+		state double targetReadBytesPerSec = threadData->targetByteRate * 4;
+		ASSERT(targetReadBytesPerSec > 0);
 
 		state Version readVersion;
 
@@ -574,8 +574,13 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				auto endKeyIt = threadData->keyData.find(startKey);
 				ASSERT(endKeyIt != threadData->keyData.end());
 
-				for (int i = 0; i < targetKeysReadPerQuery && endKeyIt != threadData->keyData.end(); i++, endKeyIt++) {
+				int targetQueryBytes = (deterministicRandom()->randomInt(1, 20) * targetBytesReadPerQuery) / 10;
+				int estimatedQueryBytes = 0;
+				for (int i = 0; estimatedQueryBytes < targetQueryBytes && endKeyIt != threadData->keyData.end();
+				     i++, endKeyIt++) {
 					// iterate forward until end or target keys have passed
+					estimatedQueryBytes += (1 + endKeyIt->second.writes.size() - endKeyIt->second.nextClearIdx) *
+					                       threadData->targetValLength;
 				}
 
 				state uint32_t endKey;
@@ -609,8 +614,11 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				    wait(self->readFromBlob(cx, self, range, readVersion));
 				self->validateResult(threadData, blob, startKey, endKey, 0, readVersion);
 
+				int resultBytes = blob.first.expectedSize();
 				threadData->rowsRead += blob.first.size();
-				threadData->bytesRead += blob.first.expectedSize();
+				threadData->bytesRead += resultBytes;
+
+				wait(poisson(&last, (resultBytes + 1) / targetReadBytesPerSec));
 			} catch (Error& e) {
 				if (e.code() == error_code_operation_cancelled) {
 					throw;
@@ -624,7 +632,6 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 					}
 				}
 			}
-			wait(poisson(&last, 1.0 / targetTps));
 		}
 	}
 
