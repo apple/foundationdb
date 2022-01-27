@@ -742,6 +742,11 @@
              "disabled",
              "gradual",
              "aggressive"
+         ]},
+         "tenant_mode": {
+             "$enum":[
+             "optional",
+             "required"
          ]}
       },
       "data":{
