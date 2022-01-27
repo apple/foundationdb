@@ -288,8 +288,10 @@ std::string S3BlobStoreEndpoint::getResourceURL(std::string resource, std::strin
 			credsString += ":" + credentials.get().secret;
 		}
 		if (!lookupSecret) {
-			credsString += credentials.get().securityToken.empty() ? std::string(":") + credentials.get().secret
-		                           : std::string(":") + credentials.get().secret + std::string(":") + credentials.get().securityToken;
+			credsString +=
+			    credentials.get().securityToken.empty()
+			        ? std::string(":") + credentials.get().secret
+			        : std::string(":") + credentials.get().secret + std::string(":") + credentials.get().securityToken;
 		}
 		credsString += "@";
 	}
@@ -519,7 +521,7 @@ ACTOR Future<Void> updateSecret_impl(Reference<S3BlobStoreEndpoint> b) {
 
 	wait(waitForAll(reads));
 
-	std::string accessKey = b->lookupKey ? "" :  b->credentials.get().key;
+	std::string accessKey = b->lookupKey ? "" : b->credentials.get().key;
 	std::string credentialsFileKey = accessKey + "@" + b->host;
 
 	int invalid = 0;
@@ -1168,10 +1170,10 @@ std::string hmac_sha256(std::string key, std::string msg) {
 
 // Date and Time parameters are used for unit testing
 void S3BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
-                                         std::string const& resource,
-                                         HTTP::Headers& headers,
-                                         std::string date,
-                                         std::string datestamp) {
+                                           std::string const& resource,
+                                           HTTP::Headers& headers,
+                                           std::string date,
+                                           std::string datestamp) {
 	if (!credentials.present()) {
 		return;
 	}
@@ -1568,13 +1570,11 @@ Future<Void> S3BlobStoreEndpoint::finishMultiPartUpload(std::string const& bucke
 	return finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint>::addRef(this), bucket, object, uploadID, parts);
 }
 
-
 TEST_CASE("/backup/s3/v4headers") {
-	S3BlobStoreEndpoint::Credentials creds {"AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", ""}
+	S3BlobStoreEndpoint::Credentials creds{ "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "" }
 	// GET without query parameters
 	{
-		S3BlobStoreEndpoint s3(
-		    "s3.amazonaws.com", "s3", creds);
+		S3BlobStoreEndpoint s3("s3.amazonaws.com", "s3", creds);
 		std::string verb("GET");
 		std::string resource("/test.txt");
 		HTTP::Headers headers;
@@ -1589,8 +1589,7 @@ TEST_CASE("/backup/s3/v4headers") {
 
 	// GET with query parameters
 	{
-		S3BlobStoreEndpoint s3(
-		    "s3.amazonaws.com", "s3", creds);
+		S3BlobStoreEndpoint s3("s3.amazonaws.com", "s3", creds);
 		std::string verb("GET");
 		std::string resource("/test/examplebucket?Action=DescribeRegions&Version=2013-10-15");
 		HTTP::Headers headers;
@@ -1605,8 +1604,7 @@ TEST_CASE("/backup/s3/v4headers") {
 
 	// POST
 	{
-		S3BlobStoreEndpoint s3(
-		    "s3.us-west-2.amazonaws.com", "s3", creds);
+		S3BlobStoreEndpoint s3("s3.us-west-2.amazonaws.com", "s3", creds);
 		std::string verb("POST");
 		std::string resource("/simple.json");
 		HTTP::Headers headers;
