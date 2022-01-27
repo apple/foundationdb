@@ -3009,7 +3009,7 @@ Future<Void> StorageWiggler::resetStats() {
 	newMetrics.smoothed_round_duration = metrics.smoothed_round_duration;
 	newMetrics.smoothed_step_duration = metrics.smoothed_step_duration;
 	metrics = newMetrics;
-	return metrics.runSetTransaction(teamCollection->cx);
+	return metrics.runSetTransaction(teamCollection->cx, teamCollection->primary);
 }
 
 Future<Void> StorageWiggler::restoreStats() {
@@ -3020,12 +3020,12 @@ Future<Void> StorageWiggler::restoreStats() {
 		}
 		return Void();
 	};
-	auto readFuture = metrics.runGetTransaction(teamCollection->cx);
+	auto readFuture = metrics.runGetTransaction(teamCollection->cx, teamCollection->primary);
 	return map(readFuture, assignFunc);
 }
 Future<Void> StorageWiggler::startStep() {
 	metrics.last_step_start = timer_int();
-	return metrics.runSetTransaction(teamCollection->cx);
+	return metrics.runSetTransaction(teamCollection->cx, teamCollection->primary);
 }
 
 Future<Void> StorageWiggler::finishStep() {
@@ -3040,7 +3040,7 @@ Future<Void> StorageWiggler::finishStep() {
 		duration = metrics.last_round_finish - metrics.last_round_start;
 		metrics.smoothed_round_duration.setTotal((double)duration);
 	}
-	return metrics.runSetTransaction(teamCollection->cx);
+	return metrics.runSetTransaction(teamCollection->cx, teamCollection->primary);
 }
 
 TCServerInfo::~TCServerInfo() {
@@ -4189,12 +4189,12 @@ ACTOR Future<UID> getNextWigglingServerID(DDTeamCollection* teamCollection) {
 	}
 }
 
-// Create a transaction updating `wigglingStorageServerKey` to the next serverID according to a sorted wiggle_pq
+// Create a transaction updating `wigglingStorageServerPrefix` to the next serverID according to a sorted wiggle_pq
 // maintained by the wiggler.
 ACTOR Future<Void> updateNextWigglingStorageID(DDTeamCollection* teamCollection) {
 	state ReadYourWritesTransaction tr(teamCollection->cx);
 	state const Key writeKey =
-	    wigglingStorageServerKey.withSuffix(teamCollection->primary ? "/primary"_sr : "/remote"_sr);
+	    wigglingStorageServerPrefix.withSuffix(teamCollection->primary ? "primary"_sr : "remote"_sr);
 	state UID nextId = wait(getNextWigglingServerID(teamCollection));
 
 	loop {
@@ -4217,7 +4217,7 @@ ACTOR Future<Void> updateNextWigglingStorageID(DDTeamCollection* teamCollection)
 
 // Iterate over each storage process to do storage wiggle. After initializing the first Process ID, it waits a signal
 // from `perpetualStorageWiggler` indicating the wiggling of current process is finished. Then it writes the next
-// Process ID to a system key: `wigglingStorageServerKey` to show the next process to wiggle.
+// Process ID to a system key: `wigglingStorageServerPrefix` to show the next process to wiggle.
 ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
                                                   FutureStream<Void> finishStorageWiggleSignal,
                                                   DDTeamCollection* teamCollection) {
@@ -4251,21 +4251,18 @@ ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
 	return Void();
 }
 
-// Watch the value change of `wigglingStorageServerKey`.
-// Return the watch future and the current value of `wigglingStorageServerKey`.
-ACTOR Future<std::pair<Future<Void>, Value>> watchPerpetualStorageIDChange(DDTeamCollection* self) {
+// Watch the value change of `wigglingStorageServerPrefix`.
+// Return the watch future and the current value of `wigglingStorageServerPrefix`.
+ACTOR Future<std::pair<Future<Void>, Optional<Value>>> watchPerpetualStorageIDChange(DDTeamCollection* self) {
 	state ReadYourWritesTransaction tr(self->cx);
 	state Future<Void> watchFuture;
-	state Value ret;
-	state const Key readKey = wigglingStorageServerKey.withSuffix(self->primary ? "/primary"_sr : "/remote"_sr);
+	state Optional<Value> ret;
+	state const Key readKey = wigglingStorageServerPrefix.withSuffix(self->primary ? "primary"_sr : "remote"_sr);
 
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> value = wait(tr.get(readKey));
-			if (value.present()) {
-				ret = value.get();
-			}
+			wait(store(ret, tr.get(readKey)));
 			watchFuture = tr.watch(readKey);
 			wait(tr.commit());
 			break;
@@ -4304,7 +4301,7 @@ ACTOR Future<Void> clusterHealthCheckForPerpetualWiggle(DDTeamCollection* self, 
 		wait(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistributionLow));
 	}
 }
-// Watches the value change of `wigglingStorageServerKey`, and adds the storage server into excludeServers which prevent
+// Watches the value change of `wigglingStorageServerPrefix`, and adds the storage server into excludeServers which prevent
 // recruiting the wiggling storage servers and let teamTracker start to move data off the affected teams. The wiggling
 // process of current storage servers will be paused if the cluster is unhealthy and restarted once the cluster is
 // healthy again.
@@ -4315,11 +4312,11 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 	state Future<Void> moveFinishFuture = Never();
 	state int extraTeamCount = 0;
 	state Future<Void> ddQueueCheck = clusterHealthCheckForPerpetualWiggle(self, &extraTeamCount);
-	state std::pair<Future<Void>, Value> res = wait(watchPerpetualStorageIDChange(self));
+	state std::pair<Future<Void>, Optional<Value>> res = wait(watchPerpetualStorageIDChange(self));
 	ASSERT(!self->wigglingId.present()); // only single process wiggle is allowed
 
-	if (res.second.size() == scalar_traits<UID>::size) {
-		self->wigglingId = Optional<UID>(BinaryReader::fromStringRef<UID>(res.second, Unversioned()));
+	if (res.second.present()) {
+		self->wigglingId = Optional<UID>(BinaryReader::fromStringRef<UID>(res.second.get(), Unversioned()));
 	} else {
 		// skip to the next valid ID
 		watchFuture = res.first;
@@ -4367,8 +4364,8 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				// read new id and set the next watch Future
 				wait(store(res, watchPerpetualStorageIDChange(self)));
 
-				if (res.second.size() == scalar_traits<UID>::size) {
-					self->wigglingId = Optional<UID>(BinaryReader::fromStringRef<UID>(res.second, Unversioned()));
+				if (res.second.present()) {
+					self->wigglingId = Optional<UID>(BinaryReader::fromStringRef<UID>(res.second.get(), Unversioned()));
 				} else {
 					// skip to the next valid ID
 					watchFuture = res.first;
@@ -4380,7 +4377,6 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 			}
 			when(wait(moveFinishFuture)) {
 				ASSERT(self->wigglingId.present());
-				wait(self->storageWiggler->finishStep());
 				self->waitUntilRecruited.set(true);
 				self->restartTeamBuilder.trigger();
 
@@ -4391,6 +4387,7 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				    .detail("ProcessId", self->wigglingId.get());
 
 				self->wigglingId.reset();
+				wait(self->storageWiggler->finishStep());
 				watchFuture = res.first;
 				finishStorageWiggleSignal.send(Void());
 				extraTeamCount = std::max(0, extraTeamCount - 1);
@@ -4450,10 +4447,9 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 				} else if (speed == 0) {
 					if (!stopWiggleSignal.get()) {
 						stopWiggleSignal.set(true);
-						wait(collection.signalAndReset());
 						teamCollection->pauseWiggle->set(true);
+						wait(collection.signalAndReset() && teamCollection->storageWiggler->resetStats());
 					}
-					wait(teamCollection->storageWiggler->resetStats());
 					TraceEvent("PerpetualStorageWiggleClose", teamCollection->distributorId)
 					    .detail("Primary", teamCollection->primary);
 				}

@@ -338,18 +338,21 @@ struct StorageWiggleMetrics {
 		}
 	}
 
-	Future<Void> runSetTransaction(Database cx) {
+	Future<Void> runSetTransaction(Database cx, bool primary) {
 		auto& metricsRef = *this;
-		return runRYWTransaction(cx, [metricsRef](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		return runRYWTransaction(cx, [metricsRef, primary](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->set(storageWiggleStatsKey, BinaryWriter::toValue(metricsRef, IncludeVersion()));
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->set(storageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr),
+			        BinaryWriter::toValue(metricsRef, IncludeVersion()));
 			return Void();
 		});
 	}
-	Future<Optional<Value>> runGetTransaction(Database cx) {
-		return runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+	Future<Optional<Value>> runGetTransaction(Database cx, bool primary) {
+		return runRYWTransaction(cx, [primary](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			return tr->get(storageWiggleStatsKey);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			return tr->get(storageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr));
 		});
 	}
 };
