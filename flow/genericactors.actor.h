@@ -870,7 +870,7 @@ template <class T>
 class QuorumCallback;
 
 template <class T>
-struct Quorum : SAV<Void> {
+struct Quorum final : SAV<Void> {
 	int antiQuorum;
 	int count;
 
@@ -1202,17 +1202,17 @@ Future<T> brokenPromiseToMaybeDelivered(Future<T> in) {
 	}
 }
 
-ACTOR template <class T>
-void tagAndForward(Promise<T>* pOutputPromise, T value, Future<Void> signal) {
+ACTOR template <class T, class U>
+void tagAndForward(Promise<T>* pOutputPromise, U value, Future<Void> signal) {
 	state Promise<T> out(std::move(*pOutputPromise));
 	wait(signal);
-	out.send(value);
+	out.send(std::move(value));
 }
 
 ACTOR template <class T>
 void tagAndForward(PromiseStream<T>* pOutput, T value, Future<Void> signal) {
 	wait(signal);
-	pOutput->send(value);
+	pOutput->send(std::move(value));
 }
 
 ACTOR template <class T>
@@ -1558,7 +1558,9 @@ Future<Void> yieldPromiseStream(FutureStream<T> input,
 	}
 }
 
-struct YieldedFutureActor : SAV<Void>, ActorCallback<YieldedFutureActor, 1, Void>, FastAllocated<YieldedFutureActor> {
+struct YieldedFutureActor final : SAV<Void>,
+                                  ActorCallback<YieldedFutureActor, 1, Void>,
+                                  FastAllocated<YieldedFutureActor> {
 	Error in_error_state;
 
 	typedef ActorCallback<YieldedFutureActor, 1, Void> CB1;

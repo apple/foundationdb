@@ -22,12 +22,14 @@
 #include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbserver/Status.h"
+#include "flow/ITrace.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include <time.h>
+#include "fdbserver/ClusterRecovery.actor.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "flow/UnitTest.h"
@@ -801,6 +803,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("blob_manager", db->get().blobManager.get());
 	}
 
+	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY && db->get().encryptKeyProxy.present()) {
+		roles.addRole("encrypt_key_proxy", db->get().encryptKeyProxy.get());
+	}
+
 	for (auto& tLogSet : db->get().logSystemConfig.tLogs) {
 		for (auto& it : tLogSet.logRouters) {
 			if (it.present()) {
@@ -1149,6 +1155,7 @@ static JsonBuilderObject clientStatusFetcher(
 }
 
 ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
+                                                                  WorkerDetails ccWorker,
                                                                   WorkerDetails mWorker,
                                                                   int workerCount,
                                                                   std::set<std::string>* incomplete_reasons,
@@ -1156,13 +1163,18 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
 	state JsonBuilderObject message;
 	state Transaction tr(cx);
 	try {
-		state Future<TraceEventFields> mdActiveGensF = timeoutError(
-		    mWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MasterRecoveryGenerations"))),
-		    1.0);
-		state Future<TraceEventFields> mdF = timeoutError(
-		    mWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MasterRecoveryState"))), 1.0);
-		state Future<TraceEventFields> mDBAvailableF = timeoutError(
-		    mWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MasterRecoveryAvailable"))), 1.0);
+		state Future<TraceEventFields> mdActiveGensF =
+		    timeoutError(ccWorker.interf.eventLogRequest.getReply(EventLogRequest(StringRef(
+		                     getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_GENERATION_EVENT_NAME)))),
+		                 1.0);
+		state Future<TraceEventFields> mdF =
+		    timeoutError(ccWorker.interf.eventLogRequest.getReply(EventLogRequest(StringRef(
+		                     getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME)))),
+		                 1.0);
+		state Future<TraceEventFields> mDBAvailableF =
+		    timeoutError(ccWorker.interf.eventLogRequest.getReply(EventLogRequest(StringRef(
+		                     getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_AVAILABLE_EVENT_NAME)))),
+		                 1.0);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		state Future<ErrorOr<Version>> rvF = errorOr(timeoutError(tr.getReadVersion(), 1.0));
 
@@ -2709,6 +2721,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	state JsonBuilderArray messages;
 	state std::set<std::string> status_incomplete_reasons;
 	state WorkerDetails mWorker; // Master worker
+	state WorkerDetails ccWorker; // Cluster-Controller worker
 	state WorkerDetails ddWorker; // DataDistributor worker
 	state WorkerDetails rkWorker; // Ratekeeper worker
 
@@ -2720,6 +2733,15 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		} else {
 			messages.push_back(
 			    JsonString::makeMessage("unreachable_master_worker", "Unable to locate the master worker."));
+		}
+
+		// Get the cluster-controller Worker interface
+		Optional<WorkerDetails> _ccWorker = getWorker(workers, db->get().clusterInterface.address());
+		if (_ccWorker.present()) {
+			ccWorker = _ccWorker.get();
+		} else {
+			messages.push_back(JsonString::makeMessage("unreachable_cluster_controller_worker",
+			                                           "Unable to locate the cluster-controller worker."));
 		}
 
 		// Get the DataDistributor worker interface
@@ -2789,8 +2811,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		// construct status information for cluster subsections
 		state int statusCode = (int)RecoveryStatus::END;
-		state JsonBuilderObject recoveryStateStatus =
-		    wait(recoveryStateStatusFetcher(cx, mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
+		state JsonBuilderObject recoveryStateStatus = wait(
+		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
 
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();

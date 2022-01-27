@@ -25,28 +25,6 @@
 // To force typeinfo to only be emitted once.
 TLSPolicy::~TLSPolicy() {}
 
-namespace TLS {
-
-void DisableOpenSSLAtExitHandler() {
-#ifdef HAVE_OPENSSL_INIT_NO_ATEXIT
-	static bool once = false;
-	if (!once) {
-		once = true;
-		int success = OPENSSL_init_crypto(OPENSSL_INIT_NO_ATEXIT, nullptr);
-		if (!success) {
-			throw tls_error();
-		}
-	}
-#endif
-}
-
-void DestroyOpenSSLGlobalState() {
-#ifdef HAVE_OPENSSL_INIT_NO_ATEXIT
-	OPENSSL_cleanup();
-#endif
-}
-
-} // namespace TLS
 #ifdef TLS_DISABLED
 
 void LoadedTLSConfig::print(FILE* fp) {
