@@ -268,6 +268,8 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
 	TenantInfo getTenantInfo() const;
+
+	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
 };
 
 class Transaction : NonCopyable {

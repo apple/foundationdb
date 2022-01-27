@@ -2692,6 +2692,25 @@ TenantInfo TransactionState::getTenantInfo() const {
 	return TenantInfo(tenant);
 }
 
+Reference<TransactionState> TransactionState::cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo,
+                                                            bool generateNewSpan) const {
+
+	SpanID newSpanID = generateNewSpan ? generateSpanID(cx->transactionTracingSample) : spanID;
+	Reference<TransactionState> newState =
+	    makeReference<TransactionState>(cx, tenant, cx->taskID, newSpanID, newTrLogInfo);
+
+	if (!cx->apiVersionAtLeast(16)) {
+		newState->options = options;
+	}
+
+	newState->numErrors = numErrors;
+	newState->startTime = startTime;
+	newState->committedVersion = committedVersion;
+	newState->conflictingKeys = conflictingKeys;
+
+	return newState;
+}
+
 Future<Void> Transaction::warmRange(KeyRange keys) {
 	return warmRange_impl(trState, keys);
 }
@@ -3499,7 +3518,7 @@ void getRangeFinished(Reference<TransactionState> trState,
                       Reverse reverse,
                       RangeResult result,
                       UseTenant useTenant) {
-	ASSERT(trState->tenantPrefix.isReady());
+	ASSERT(!useTenant || trState->tenantPrefix.isReady());
 
 	int64_t bytes = 0;
 	for (KeyValueRef& kv : result) {
