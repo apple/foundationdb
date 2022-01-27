@@ -20,6 +20,7 @@
 
 #include "flow/StreamCipher.h"
 #include "flow/Arena.h"
+#include "flow/ITrace.h"
 #include "flow/UnitTest.h"
 
 std::unordered_set<EVP_CIPHER_CTX*> StreamCipher::ctxs;
@@ -30,6 +31,7 @@ StreamCipher::StreamCipher() : ctx(EVP_CIPHER_CTX_new()), hmacCtx(HMAC_CTX_new()
 }
 
 StreamCipher::~StreamCipher() {
+	HMAC_CTX_free(hmacCtx);
 	EVP_CIPHER_CTX_free(ctx);
 	ctxs.erase(ctx);
 }
@@ -142,6 +144,13 @@ StringRef HmacSha256StreamCipher::digest(unsigned char const* data, int len, Are
 	unsigned int digestLen = HMAC_size(cipher.getHmacCtx());
 	auto digest = new (arena) unsigned char[digestLen];
 	HMAC_Update(cipher.getHmacCtx(), data, len);
+	HMAC_Final(cipher.getHmacCtx(), digest, &digestLen);
+	return StringRef(digest, digestLen);
+}
+
+StringRef HmacSha256StreamCipher::finish(Arena& arena) {
+	unsigned int digestLen = HMAC_size(cipher.getHmacCtx());
+	auto digest = new (arena) unsigned char[digestLen];
 	HMAC_Final(cipher.getHmacCtx(), digest, &digestLen);
 	return StringRef(digest, digestLen);
 }
