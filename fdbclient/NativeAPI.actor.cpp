@@ -7268,6 +7268,7 @@ ACTOR Future<KeyRange> getChangeFeedRange(Reference<DatabaseContext> db, Databas
 
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			Version readVer = wait(tr.getReadVersion());
 			if (readVer < begin) {
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
@@ -7539,6 +7540,7 @@ ACTOR static Future<Void> popChangeFeedBackup(Database cx, Key rangeID, Version 
 	state Transaction tr(cx);
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
 			Optional<Value> val = wait(tr.get(rangeIDKey));
 			if (val.present()) {
