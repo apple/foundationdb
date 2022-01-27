@@ -5107,6 +5107,44 @@ public:
 	}
 };
 
+// Applies the mutations from FetchInjectionInfo, returns true iff any mutations is applied
+ACTOR Future<bool> applyMutationsFromFetchInjectionInfo(StorageUpdater* pStorageUpdater,
+                                                        FetchInjectionInfo* pFetchInjectionInfo,
+                                                        int* pMutationBytes,
+                                                        StorageServerBase* pStorageServerContext) {
+	state Stopwatch stopwatch;
+	state bool hasInjectedChanges = false;
+	state int changeNum = 0;
+	state int mutationNum = 0;
+	state VerUpdateRef* pUpdate = nullptr;
+	state Version currentVersion = invalidVersion;
+
+	*pMutationBytes = 0;
+
+	for (changeNum = 0; changeNum < static_cast<int>(pFetchInjectionInfo->changes.size()); ++changeNum) {
+		pUpdate = &pFetchInjectionInfo->changes[changeNum];
+		currentVersion = pUpdate->version;
+
+		for (mutationNum = 0; mutationNum < static_cast<int>(pUpdate->mutations.size()); ++mutationNum) {
+			const MutationRef& mutation = pUpdate->mutations[mutationNum];
+			pStorageUpdater->applyMutation(pStorageServerContext, mutation, currentVersion, /* fromFetch = */ true);
+
+			// data->counters.mutationBytes or data->counters.mutations should not be updated because they
+			// should have been counted when the mutations arrive from cursor initially.
+			*pMutationBytes += mutation.totalSize();
+
+			hasInjectedChanges = true;
+
+			if (*pMutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
+				*pMutationBytes = 0;
+				wait(delay(SERVER_KNOBS->UPDATE_DELAY));
+			}
+		}
+	}
+	pStorageServerContext->fetchKeysPTreeUpdatesLatencyHistogram->sampleSeconds(stopwatch.lap());
+
+	return hasInjectedChanges;
+}
 // Take the durable version lock from the storage server context
 // NOTE: In general an ACTOR should accept a shared_ptr, yet this ACTOR should be always waited by a function which
 // holds a shared_ptr of StorageServerBase*, use the raw pointer to save the thread locks.
@@ -5461,33 +5499,18 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 		state StorageUpdater updater(data->lastVersionWithData, data->restoredVersion);
 
+		// TODO: Why do the validation before and after?
 		if (EXPENSIVE_VALIDATION)
 			data->data().atLatest().validate();
 		validate(data);
 
-		// Apply the mutations from FetchInjectionInfo.
-
-		state bool injectedChanges = false;
-		state int changeNum = 0;
-		// Number of bytes updated since last time we yield the thread.
+		// Total bytes of mutations the current update has been applied. If the number reachs a certain criteria
+		// (DESIRED_UPDATE_BYTES), then yield.
 		state int mutationBytes = 0;
-		state double beforeFetchKeysUpdates = now();
-		for (; changeNum < fii.changes.size(); changeNum++) {
-			state int mutationNum = 0;
-			state VerUpdateRef* pUpdate = &fii.changes[changeNum];
-			for (; mutationNum < pUpdate->mutations.size(); mutationNum++) {
-				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version, true);
-				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
-				// data->counters.mutationBytes or data->counters.mutations should not be updated because they
-				// should have counted when the mutations arrive from cursor initially.
-				injectedChanges = true;
-				if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
-					mutationBytes = 0;
-					wait(delay(SERVER_KNOBS->UPDATE_DELAY));
-				}
-			}
-		}
-		data->fetchKeysPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeFetchKeysUpdates);
+
+		// Apply the mutations from FetchInjectionInfo.
+		state bool injectedChanges =
+		    wait(details::applyMutationsFromFetchInjectionInfo(&updater, &fii, &mutationBytes, data));
 
 		// Apply the mutations from the cursor.
 
