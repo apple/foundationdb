@@ -230,9 +230,7 @@ const Key storageCacheServerKey(UID id) {
 const Value storageCacheServerValue(const StorageServerInterface& ssi) {
 	auto protocolVersion = currentProtocolVersion;
 	protocolVersion.addObjectSerializerFlag();
-	ObjectWriter writer(IncludeVersion(protocolVersion));
-	writer.serialize(ssi);
-	return writer.toStringRef();
+	return ObjectWriter::toValue(ssi, IncludeVersion(protocolVersion));
 }
 
 const KeyRangeRef ddStatsRange = KeyRangeRef(LiteralStringRef("\xff\xff/metrics/data_distribution_stats/"),
