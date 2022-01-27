@@ -25,7 +25,6 @@
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #include "boost/asio.hpp"
-#include "boost/bind.hpp"
 
 class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool> {
 	struct Thread {

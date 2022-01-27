@@ -809,7 +809,7 @@ TEST_CASE("/flow/flow/chooseTwoActor") {
 	return Void();
 }
 
-TEST_CASE("/flow/flow/perf/actor patterns") {
+TEST_CASE("#flow/flow/perf/actor patterns") {
 	double start;
 	int N = 1000000;
 
@@ -1287,8 +1287,6 @@ TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel") {
 template <class>
 struct ShouldNotGoIntoClassContextStack;
 
-ACTOR static Future<Void> shouldNotHaveFriends();
-
 class Foo1 {
 public:
 	explicit Foo1(int x) : x(x) {}
@@ -1362,8 +1360,6 @@ ACTOR Future<int> Outer::Foo5::fooActor(Outer::Foo5* self) {
 	wait(Future<Void>());
 	return self->x;
 }
-
-ACTOR static Future<Void> shouldNotHaveFriends2();
 
 // Meant to be run with -fsanitize=undefined
 TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {

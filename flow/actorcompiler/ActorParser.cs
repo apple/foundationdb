@@ -929,6 +929,8 @@ namespace actorcompiler
                         Add(ParseStateDeclaration(toks));
                     else if (toks.First().Value == "switch" && toks.Any(t => t.Value == "return"))
                         throw new Error(toks.First().SourceLine, "Unsupported compound statement containing return.");
+                    else if (toks.First().Value.StartsWith("#"))
+                        throw new Error(toks.First().SourceLine, "Found \"{0}\". Preprocessor directives are not supported within ACTORs", toks.First().Value);
                     else if (toks.RevSkipWhile(t => t.Value == ";").Any(NonWhitespace))
                         Add(new PlainOldCodeStatement
                         {
@@ -1131,7 +1133,8 @@ namespace actorcompiler
             @"\n",
             @"::",
             @":",
-            @"."
+            @"#[a-z]*", // Recognize preprocessor directives so that we can reject them
+            @".",
         }).Select( x=>new Regex(@"\G"+x, RegexOptions.Singleline) ).ToArray();
 
         IEnumerable<string> Tokenize(string text)

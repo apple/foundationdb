@@ -653,8 +653,8 @@ ConflictingKeysImpl::ConflictingKeysImpl(KeyRangeRef kr) : SpecialKeyRangeReadIm
 
 Future<RangeResult> ConflictingKeysImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
 	RangeResult result;
-	if (ryw->getTransactionInfo().conflictingKeys) {
-		auto krMapPtr = ryw->getTransactionInfo().conflictingKeys.get();
+	if (ryw->getTransactionState()->conflictingKeys) {
+		auto krMapPtr = ryw->getTransactionState()->conflictingKeys.get();
 		auto beginIter = krMapPtr->rangeContaining(kr.begin);
 		if (beginIter->begin() != kr.begin)
 			++beginIter;
@@ -1539,10 +1539,10 @@ Future<RangeResult> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
 
 		if (key.endsWith(kTracingTransactionIdKey)) {
 			result.push_back_deep(result.arena(),
-			                      KeyValueRef(key, std::to_string(ryw->getTransactionInfo().spanID.first())));
+			                      KeyValueRef(key, std::to_string(ryw->getTransactionState()->spanID.first())));
 		} else if (key.endsWith(kTracingTokenKey)) {
 			result.push_back_deep(result.arena(),
-			                      KeyValueRef(key, std::to_string(ryw->getTransactionInfo().spanID.second())));
+			                      KeyValueRef(key, std::to_string(ryw->getTransactionState()->spanID.second())));
 		}
 	}
 	return result;
@@ -1961,7 +1961,7 @@ void parse(StringRef& val, WaitState& w) {
 }
 
 void parse(StringRef& val, time_t& t) {
-	struct tm tm = { 0 };
+	struct tm tm;
 #ifdef _WIN32
 	std::istringstream s(val.toString());
 	s.imbue(std::locale(setlocale(LC_TIME, nullptr)));

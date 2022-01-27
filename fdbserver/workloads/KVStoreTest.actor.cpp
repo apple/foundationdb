@@ -20,6 +20,7 @@
 
 #include <ctime>
 #include <cinttypes>
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
@@ -278,7 +279,7 @@ ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest)
 		}
 		double elapsed = timer() - cst;
 		TraceEvent("KVStoreCount").detail("Count", count).detail("Took", elapsed);
-		printf("Counted: %" PRId64 " in %0.1fs\n", count, elapsed);
+		fmt::print("Counted: {0} in {1:01.f}s\n");
 	}
 
 	if (workload->doSetup) {
@@ -383,7 +384,7 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 		test.store = keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_BTREE_V1);
 	else if (workload->storeType == "ssd-2")
 		test.store = keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_REDWOOD_V1);
-	else if (workload->storeType == "ssd-redwood-experimental")
+	else if (workload->storeType == "ssd-redwood-1-experimental")
 		test.store = keyValueStoreRedwoodV1(fn, id);
 	else if (workload->storeType == "ssd-rocksdb-experimental")
 		test.store = keyValueStoreRocksDB(fn, id, KeyValueStoreType::SSD_ROCKSDB_V1);

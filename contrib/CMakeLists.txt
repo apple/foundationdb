@@ -1,3 +1,4 @@
+add_subdirectory(fmt-8.0.1)
 if(NOT WIN32)
   add_subdirectory(monitoring)
   add_subdirectory(TraceLogHelper)

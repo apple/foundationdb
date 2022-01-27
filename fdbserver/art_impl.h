@@ -166,7 +166,7 @@ void art_tree::art_bound_iterative(art_node* n, const KeyRef& k, int depth, art_
 
 	static stack_entry arena[ART_MAX_KEY_LEN]; // Single threaded implementation.
 
-	stack_entry *head = nullptr, *tmp, *curr_arena = arena;
+	stack_entry *head = nullptr, *curr_arena = arena;
 	int ret;
 	art_node** child;
 	unsigned char* key = (unsigned char*)k.begin();
@@ -198,7 +198,6 @@ void art_tree::art_bound_iterative(art_node* n, const KeyRef& k, int depth, art_
 			*result = minimum(next);
 			break;
 		} else {
-			tmp = head;
 			head = head->prev;
 		}
 	}

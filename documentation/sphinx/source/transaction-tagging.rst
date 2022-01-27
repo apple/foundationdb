@@ -13,14 +13,14 @@ Adding tags to transactions
 
 Tags are added to transaction by using transaction options. Each transaction can include up to five tags, and each tag must not exceed 16 characters. There are two options that can be used to add tags:
 
-* ``TAG`` - Adds a tag to the transaction. This tag will not be used for auto-throttling and is not included with read requests. Tags set in this way can only be throttled manually.
-* ``AUTO_THROTTLE_TAG`` - Adds a tag to the transaction that can be both automatically and manually throttled. To support busy tag detection, these tags may be sent as part of read requests.
+* ``TAG`` - Adds a tag to the transaction. This tag will not be used for auto-throttling and is not included with read or commit requests. Tags set in this way can only be throttled manually.
+* ``AUTO_THROTTLE_TAG`` - Adds a tag to the transaction that can be both automatically and manually throttled. To support busy tag detection, these tags may be sent as part of read or commit requests.
 
 See the documentation for your particular language binding for details about setting this option.
 
 .. note:: If setting hierarchical tags, it is recommended that you not use auto-throttle tags at multiple levels of the hierarchy. Otherwise, the cluster will favor throttling those tags set at higher levels, as they will include more transactions.
 
-.. note:: Tags must be included as part of all get read version requests, and a sample of read requests will include auto-throttled tags. Additionally, each tag imposes additional costs with those requests. It is therefore recommended that you not use excessive numbers or lengths of transaction tags.
+.. note:: Tags must be included as part of all get read version requests, and a sample of read and commit requests will include auto-throttled tags. Additionally, each tag imposes additional costs with those requests. It is therefore recommended that you not use excessive numbers or lengths of transaction tags.
 
 Tag throttling overview
 =======================
@@ -48,7 +48,7 @@ When a transaction tag is throttled, this information will be communicated to th
 Automatic transaction tag throttling
 ====================================
 
-When using the ``AUTO_THROTTLE_TAG`` transaction option, the cluster will monitor read activity for the chosen tags and may choose to reduce a tag's transaction rate limit if a storage server gets busy enough and has a sufficient portion of its read traffic coming from that one tag. 
+When using the ``AUTO_THROTTLE_TAG`` transaction option, the cluster will monitor activity for the chosen tags and may choose to reduce a tag's transaction rate limit if a storage server gets busy enough and has a sufficient portion of its traffic coming from that one tag.
 
 When a tag is auto-throttled, the default priority transaction rate will be decreased to reduce the percentage of traffic attributable to that tag to a reasonable amount of total traffic on the affected storage server(s), and batch priority transactions for that tag will be stopped completely. 
 

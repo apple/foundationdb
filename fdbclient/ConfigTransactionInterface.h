@@ -188,11 +188,11 @@ struct ConfigTransactionInterface {
 
 public:
 	static constexpr FileIdentifier file_identifier = 982485;
-	struct RequestStream<ConfigTransactionGetGenerationRequest> getGeneration;
-	struct RequestStream<ConfigTransactionGetRequest> get;
-	struct RequestStream<ConfigTransactionGetConfigClassesRequest> getClasses;
-	struct RequestStream<ConfigTransactionGetKnobsRequest> getKnobs;
-	struct RequestStream<ConfigTransactionCommitRequest> commit;
+	class RequestStream<ConfigTransactionGetGenerationRequest> getGeneration;
+	class RequestStream<ConfigTransactionGetRequest> get;
+	class RequestStream<ConfigTransactionGetConfigClassesRequest> getClasses;
+	class RequestStream<ConfigTransactionGetKnobsRequest> getKnobs;
+	class RequestStream<ConfigTransactionCommitRequest> commit;
 
 	ConfigTransactionInterface();
 	void setupWellKnownEndpoints();

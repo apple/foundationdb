@@ -269,8 +269,9 @@ std::string ClusterConnectionString::toString() const {
 	std::string s = key.toString();
 	s += '@';
 	for (int i = 0; i < coord.size(); i++) {
-		if (i)
+		if (i) {
 			s += ',';
+		}
 		s += coord[i].toString();
 	}
 	return s;

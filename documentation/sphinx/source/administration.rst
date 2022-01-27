@@ -668,7 +668,7 @@ Datacenters
 
 FoundationDB is datacenter aware and supports operation across datacenters. In a multiple-datacenter configuration, it is recommended that you set the :ref:`redundancy mode <configuration-choosing-redundancy-mode>` to ``three_datacenter`` and that you set the ``locality_dcid`` parameter for all FoundationDB processes in :ref:`foundationdb.conf <foundationdb-conf>`.
 
-If you specify the ``--datacenter_id`` option to any FoundationDB process in your cluster, you should specify it to all such processes. Processes which do not have a specified datacenter ID on the command line are considered part of a default "unset" datacenter. FoundationDB will incorrectly believe that these processes are failure-isolated from other datacenters, which can reduce performance and fault tolerance.
+If you specify the ``--datacenter-id`` option to any FoundationDB process in your cluster, you should specify it to all such processes. Processes which do not have a specified datacenter ID on the command line are considered part of a default "unset" datacenter. FoundationDB will incorrectly believe that these processes are failure-isolated from other datacenters, which can reduce performance and fault tolerance.
 
 (Re)creating a database
 -----------------------

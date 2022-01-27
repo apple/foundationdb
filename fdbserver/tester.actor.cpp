@@ -256,18 +256,14 @@ Standalone<VectorRef<KeyValueRef>> checkAllOptionsConsumed(VectorRef<KeyValueRef
 }
 
 struct CompoundWorkload : TestWorkload {
-	std::vector<TestWorkload*> workloads;
+	std::vector<Reference<TestWorkload>> workloads;
 
 	CompoundWorkload(WorkloadContext& wcx) : TestWorkload(wcx) {}
-	CompoundWorkload* add(TestWorkload* w) {
-		workloads.push_back(w);
+	CompoundWorkload* add(Reference<TestWorkload>&& w) {
+		workloads.push_back(std::move(w));
 		return this;
 	}
 
-	~CompoundWorkload() override {
-		for (int w = 0; w < workloads.size(); w++)
-			delete workloads[w];
-	}
 	std::string description() const override {
 		std::string d;
 		for (int w = 0; w < workloads.size(); w++)
@@ -284,15 +280,49 @@ struct CompoundWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		std::vector<Future<Void>> all;
 		all.reserve(workloads.size());
-		for (int w = 0; w < workloads.size(); w++)
-			all.push_back(workloads[w]->start(cx));
+		auto wCount = std::make_shared<unsigned>(0);
+		for (int i = 0; i < workloads.size(); i++) {
+			std::string workloadName = workloads[i]->description();
+			++(*wCount);
+			TraceEvent("WorkloadRunStatus")
+			    .detail("Name", workloadName)
+			    .detail("Count", *wCount)
+			    .detail("Phase", "Start");
+			all.push_back(fmap(
+			    [workloadName, wCount](Void value) {
+				    --(*wCount);
+				    TraceEvent("WorkloadRunStatus")
+				        .detail("Name", workloadName)
+				        .detail("Remaining", *wCount)
+				        .detail("Phase", "End");
+				    return Void();
+			    },
+			    workloads[i]->start(cx)));
+		}
 		return waitForAll(all);
 	}
 	Future<bool> check(Database const& cx) override {
 		std::vector<Future<bool>> all;
 		all.reserve(workloads.size());
-		for (int w = 0; w < workloads.size(); w++)
-			all.push_back(workloads[w]->check(cx));
+		auto wCount = std::make_shared<unsigned>(0);
+		for (int i = 0; i < workloads.size(); i++) {
+			++(*wCount);
+			std::string workloadName = workloads[i]->description();
+			TraceEvent("WorkloadCheckStatus")
+			    .detail("Name", workloadName)
+			    .detail("Count", *wCount)
+			    .detail("Phase", "Start");
+			all.push_back(fmap(
+			    [workloadName, wCount](bool ret) {
+				    --(*wCount);
+				    TraceEvent("WorkloadCheckStatus")
+				        .detail("Name", workloadName)
+				        .detail("Remaining", *wCount)
+				        .detail("Phase", "End");
+				    return true;
+			    },
+			    workloads[i]->check(cx)));
+		}
 		return allTrue(all);
 	}
 	void getMetrics(std::vector<PerfMetric>& m) override {
@@ -311,9 +341,9 @@ struct CompoundWorkload : TestWorkload {
 	}
 };
 
-TestWorkload* getWorkloadIface(WorkloadRequest work,
-                               VectorRef<KeyValueRef> options,
-                               Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+Reference<TestWorkload> getWorkloadIface(WorkloadRequest work,
+                                         VectorRef<KeyValueRef> options,
+                                         Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	Value testName = getOption(options, LiteralStringRef("testName"), LiteralStringRef("no-test-specified"));
 	WorkloadContext wcx;
 	wcx.clientId = work.clientId;
@@ -322,7 +352,7 @@ TestWorkload* getWorkloadIface(WorkloadRequest work,
 	wcx.options = options;
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
 
-	TestWorkload* workload = IWorkloadFactory::create(testName.toString(), wcx);
+	auto workload = IWorkloadFactory::create(testName.toString(), wcx);
 
 	auto unconsumedOptions = checkAllOptionsConsumed(workload ? workload->options : VectorRef<KeyValueRef>());
 	if (!workload || unconsumedOptions.size()) {
@@ -341,14 +371,13 @@ TestWorkload* getWorkloadIface(WorkloadRequest work,
 				        " '%s' = '%s'\n",
 				        unconsumedOptions[i].key.toString().c_str(),
 				        unconsumedOptions[i].value.toString().c_str());
-			delete workload;
 		}
 		throw test_specification_invalid();
 	}
 	return workload;
 }
 
-TestWorkload* getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+Reference<TestWorkload> getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	if (work.options.size() < 1) {
 		TraceEvent(SevError, "TestCreationError").detail("Reason", "No options provided");
 		fprintf(stderr, "ERROR: No options were provided for workload.\n");
@@ -363,10 +392,9 @@ TestWorkload* getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDB
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
 	// FIXME: Other stuff not filled in; why isn't this constructed here and passed down to the other
 	// getWorkloadIface()?
-	CompoundWorkload* compound = new CompoundWorkload(wcx);
+	auto compound = makeReference<CompoundWorkload>(wcx);
 	for (int i = 0; i < work.options.size(); i++) {
-		TestWorkload* workload = getWorkloadIface(work, work.options[i], dbInfo);
-		compound->add(workload);
+		compound->add(getWorkloadIface(work, work.options[i], dbInfo));
 	}
 	return compound;
 }
@@ -422,7 +450,7 @@ void printSimulatedTopology() {
 			printf("%smachineId: %s\n", indent.c_str(), p->locality.describeMachineId().c_str());
 		}
 		indent += "  ";
-		printf("%sAddress: %s\n", indent.c_str(), p->address.toString().c_str(), p->name);
+		printf("%sAddress: %s\n", indent.c_str(), p->address.toString().c_str());
 		indent += "  ";
 		printf("%sClass: %s\n", indent.c_str(), p->startingClass.toString().c_str());
 		printf("%sName: %s\n", indent.c_str(), p->name);
@@ -492,9 +520,8 @@ void sendResult(ReplyPromise<T>& reply, Optional<ErrorOr<T>> const& result) {
 
 ACTOR Future<Void> runWorkloadAsync(Database cx,
                                     WorkloadInterface workIface,
-                                    TestWorkload* workload,
+                                    Reference<TestWorkload> workload,
                                     double databasePingDelay) {
-	state std::unique_ptr<TestWorkload> delw(workload);
 	state Optional<ErrorOr<Void>> setupResult;
 	state Optional<ErrorOr<Void>> startResult;
 	state Optional<ErrorOr<CheckReply>> checkResult;
@@ -620,7 +647,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 
 		// add test for "done" ?
 		TraceEvent("WorkloadReceived", workIface.id()).detail("Title", work.title);
-		TestWorkload* workload = getWorkloadIface(work, dbInfo);
+		auto workload = getWorkloadIface(work, dbInfo);
 		if (!workload) {
 			TraceEvent("TestCreationError").detail("Reason", "Workload could not be created");
 			fprintf(stderr, "ERROR: The workload could not be created.\n");
@@ -1439,7 +1466,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		cx = openDBOnServer(dbInfo);
 	}
 
-	state Future<Void> disabler = disableConnectionFailuresAfter(450, "Tester");
+	state Future<Void> disabler = disableConnectionFailuresAfter(FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, "Tester");
 
 	// Change the configuration (and/or create the database) if necessary
 	printf("startingConfiguration:%s start\n", startingConfiguration.toString().c_str());

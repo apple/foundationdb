@@ -213,6 +213,8 @@ const KeyRangeRef writeConflictRangeKeysRange =
     KeyRangeRef(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
                 LiteralStringRef("\xff\xff/transaction/write_conflict_range/\xff\xff"));
 
+const KeyRef clusterIdKey = LiteralStringRef("\xff/clusterId");
+
 // "\xff/cacheServer/[[UID]] := StorageServerInterface"
 const KeyRangeRef storageCacheServerKeys(LiteralStringRef("\xff/cacheServer/"), LiteralStringRef("\xff/cacheServer0"));
 const KeyRef storageCacheServersPrefix = storageCacheServerKeys.begin;
@@ -1032,6 +1034,8 @@ const KeyRef clientLibMetadataPrefix = clientLibMetadataKeys.begin;
 const KeyRangeRef clientLibBinaryKeys(LiteralStringRef("\xff\x02/clientlib/bin/"),
                                       LiteralStringRef("\xff\x02/clientlib/bin0"));
 const KeyRef clientLibBinaryPrefix = clientLibBinaryKeys.begin;
+
+const KeyRef clientLibChangeCounterKey = "\xff\x02/clientlib/changeCounter"_sr;
 
 const KeyRangeRef testOnlyTxnStateStorePrefixRange(LiteralStringRef("\xff/TESTONLYtxnStateStore/"),
                                                    LiteralStringRef("\xff/TESTONLYtxnStateStore0"));
