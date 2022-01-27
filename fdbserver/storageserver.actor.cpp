@@ -5128,6 +5128,104 @@ ACTOR Future<UniqueObjectHolder<FlowLock::Releaser>> takeDurableVersionLock(Stor
 
 	return UniqueObjectHolder<FlowLock::Releaser>(std::move(lock));
 }
+
+// NOTE: This ACTOR must always be waited after created, since the pStorageServerContext is passed by pointer rather by
+// std::shared_ptr
+ACTOR Future<Void> prepareEagerReadInfo(UpdateEagerReadInfo* pEagerReadInfo,
+                                        FetchInjectionInfo* pFetchInjectionInfo,
+                                        StorageServer* pStorageServerContext,
+                                        Reference<ILogSystem::IPeekCursor> eagerReadCursor) {
+	UpdateEagerReadInfo& eagerReadInfo = *pEagerReadInfo;
+	FetchInjectionInfo& fetchInjectionInfo = *pFetchInjectionInfo;
+
+	// Since this function might be called again, always reset the result at the beginning, or the values are dirty.
+	eagerReadInfo = UpdateEagerReadInfo();
+
+	// TODO: FetchInjectionInfo should not be resetted. Why?
+	// fetchInjectionInfo = FetchInjectionInfo();
+
+	bool epochEnd = false;
+	bool hasPrivateData = false;
+	bool firstMutation = true;
+	bool dbgLastMessageWasProtocol = false;
+
+	eagerReadCursor->setProtocolVersion(pStorageServerContext->logProtocol);
+
+	for (; eagerReadCursor->hasMessage(); eagerReadCursor->nextMessage()) {
+		ArenaReader& cloneReader = *eagerReadCursor->reader();
+
+		if (LogProtocolMessage::isNextIn(cloneReader)) {
+			LogProtocolMessage lpm;
+			cloneReader >> lpm;
+			//TraceEvent(SevDebug, "SSReadingLPM", pStorageServerContext->thisServerID).detail("Mutation", lpm);
+			dbgLastMessageWasProtocol = true;
+			eagerReadCursor->setProtocolVersion(cloneReader.protocolVersion());
+		} else if (cloneReader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(cloneReader)) {
+			SpanContextMessage scm;
+			cloneReader >> scm;
+		} else {
+			MutationRef msg;
+			cloneReader >> msg;
+			// TraceEvent(SevDebug, "SSReadingLog", pStorageServerContext->thisServerID).detail("Mutation", msg);
+
+			if (firstMutation && msg.param1.startsWith(systemKeys.end))
+				hasPrivateData = true;
+			firstMutation = false;
+
+			if (msg.param1 == lastEpochEndPrivateKey) {
+				epochEnd = true;
+				ASSERT(dbgLastMessageWasProtocol);
+			}
+
+			eagerReadInfo.addMutation(msg);
+			dbgLastMessageWasProtocol = false;
+		}
+	}
+
+	// Any fetchKeys which are ready to transition their shards to the adding,transferred state do so now.
+	// If there is an epoch end we skip this step, to increase testability and to prevent inserting a version in
+	// the middle of a rolled back version range.
+	while (!hasPrivateData && !epochEnd && !pStorageServerContext->readyFetchKeys.empty()) {
+		auto fk = pStorageServerContext->readyFetchKeys.back();
+		pStorageServerContext->readyFetchKeys.pop_back();
+		fk.send(&fetchInjectionInfo);
+		// fetchKeys() would put the pStorageServerContext it fetched into the fetchInjectionINfo. The thread will not
+		// return back to this actor until it was completed.
+	}
+
+	for (auto& c : fetchInjectionInfo.changes)
+		eagerReadInfo.addMutations(c.mutations);
+
+	wait(doEagerReads(pStorageServerContext, pEagerReadInfo));
+
+	return Void();
+}
+
+// For a given ACTOR, start/wait repeatly, until the shardChangeCounter is unaltered during the ACTOR execution process.
+// NOTE: Must wrap the actorWrapper, if only use Future<Void> then the ACTOR will be executed only once -- later when we
+// wait, flow will just return the previous result since it is already completed.
+// NOTE: This ACTOR must always be waited after created, since the pStorageServerContext is passed by pointer rather by
+// std::shared_ptr
+ACTOR Future<Void> ensureNoShardChange(StorageServerBase* pStorageServerContext,
+                                       std::function<Future<Void>()> actorWrapper) {
+	state uint64_t shardChangeCounter = 0;
+	loop {
+		shardChangeCounter = pStorageServerContext->shardChangeCounter;
+
+		wait(actorWrapper());
+
+		const uint64_t shardChangeCounterNow = pStorageServerContext->shardChangeCounter;
+		if (shardChangeCounterNow == shardChangeCounter) {
+			break;
+		}
+		TraceEvent("ShardChangeDuringActor")
+		    .detail("BeforeActor", shardChangeCounter)
+		    .detail("AfterActor", shardChangeCounterNow);
+	}
+
+	return Void();
+}
+
 } // namespace details
 
 namespace ptxn {
@@ -5182,8 +5280,6 @@ ACTOR Future<Void> updateImpl(std::shared_ptr<ptxn::StorageServer> storageServer
 
 	state std::shared_ptr<ptxn::PeekCursorBase> cursor = storageServerContext->logCursor;
 	ASSERT(cursor);
-
-	// FIXME rethink this
 	ASSERT(!cursor->hasRemaining());
 
 	stopwatch.lap();
@@ -5208,10 +5304,13 @@ ACTOR Future<Void> updateImpl(std::shared_ptr<ptxn::StorageServer> storageServer
 	ASSERT(!*pReceivedRemoteData);
 	*pReceivedRemoteData = true;
 
-	if (remoteDataRetrieved) {
-		for (const auto& vsm : *cursor) {
-			std::cout << vsm.toString() << std::endl;
-		}
+	// TODO: Update counters and versions
+
+	state ::details::UniqueObjectHolder<FlowLock::Releaser> holdingDurableVersionLock =
+	    wait(::details::takeDurableVersionLock(storageServerContext.get()));
+
+	for (const auto& vsm : *cursor) {
+		std::cout << vsm.toString() << std::endl;
 	}
 
 	return Void();
@@ -5219,6 +5318,8 @@ ACTOR Future<Void> updateImpl(std::shared_ptr<ptxn::StorageServer> storageServer
 
 // Reads data from TLogs and persists to KVStore
 ACTOR Future<Void> update(std::shared_ptr<ptxn::StorageServer> storageServerContext, bool* pReceivedRemoteData) {
+	ASSERT(SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS);
+
 	try {
 		wait(updateImpl(storageServerContext, pReceivedRemoteData));
 	} catch (Error& error) {
@@ -5238,6 +5339,8 @@ ACTOR Future<Void> update(std::shared_ptr<ptxn::StorageServer> storageServerCont
 } // namespace ptxn
 
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
+	ASSERT(!SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS);
+
 	state double start;
 	try {
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of memory
@@ -5294,6 +5397,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			wait(data->byteSampleClearsTooLarge.onChange());
 		}
 
+		// NOTE This is anti-intuition. A reference to the cursor is created, but it is an independent cursor -- not
+		// impacting the origin cursor. data->logCursor holds no data even cursor->getMore() is called. Later
+		// data->logCursor will advanceTo the newest version.
 		state Reference<ILogSystem::IPeekCursor> cursor = data->logCursor;
 		ASSERT(cursor.isValid());
 
@@ -5322,77 +5428,22 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		    wait(details::takeDurableVersionLock(data));
 
 		start = now();
+
+		state Reference<ILogSystem::IPeekCursor> cloneCursor2;
 		state UpdateEagerReadInfo eager;
 		state FetchInjectionInfo fii;
-		state Reference<ILogSystem::IPeekCursor> cloneCursor2;
 
-		loop {
-			state uint64_t changeCounter = data->shardChangeCounter;
-			bool epochEnd = false;
-			bool hasPrivateData = false;
-			bool firstMutation = true;
-			bool dbgLastMessageWasProtocol = false;
-
-			Reference<ILogSystem::IPeekCursor> cloneCursor1 = cursor->cloneNoMore();
+		wait(details::ensureNoShardChange(data, [this]() -> Future<Void> {
+			// TODO: Understand why we *MUST* call cloneCursor2 = cursor->cloneNoMore()
+			// Without this, tests might fail rarely
 			cloneCursor2 = cursor->cloneNoMore();
+			return details::prepareEagerReadInfo(&eager, &fii, data, cursor->cloneNoMore());
+		}));
 
-			cloneCursor1->setProtocolVersion(data->logProtocol);
-
-			for (; cloneCursor1->hasMessage(); cloneCursor1->nextMessage()) {
-				ArenaReader& cloneReader = *cloneCursor1->reader();
-
-				if (LogProtocolMessage::isNextIn(cloneReader)) {
-					LogProtocolMessage lpm;
-					cloneReader >> lpm;
-					//TraceEvent(SevDebug, "SSReadingLPM", data->thisServerID).detail("Mutation", lpm);
-					dbgLastMessageWasProtocol = true;
-					cloneCursor1->setProtocolVersion(cloneReader.protocolVersion());
-				} else if (cloneReader.protocolVersion().hasSpanContext() &&
-				           SpanContextMessage::isNextIn(cloneReader)) {
-					SpanContextMessage scm;
-					cloneReader >> scm;
-				} else {
-					MutationRef msg;
-					cloneReader >> msg;
-					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
-
-					if (firstMutation && msg.param1.startsWith(systemKeys.end))
-						hasPrivateData = true;
-					firstMutation = false;
-
-					if (msg.param1 == lastEpochEndPrivateKey) {
-						epochEnd = true;
-						ASSERT(dbgLastMessageWasProtocol);
-					}
-
-					eager.addMutation(msg);
-					dbgLastMessageWasProtocol = false;
-				}
-			}
-
-			// Any fetchKeys which are ready to transition their shards to the adding,transferred state do so now.
-			// If there is an epoch end we skip this step, to increase testability and to prevent inserting a version in
-			// the middle of a rolled back version range.
-			while (!hasPrivateData && !epochEnd && !data->readyFetchKeys.empty()) {
-				auto fk = data->readyFetchKeys.back();
-				data->readyFetchKeys.pop_back();
-				fk.send(&fii);
-				// fetchKeys() would put the data it fetched into the fii. The thread will not return back to this
-				// actor until it was completed.
-			}
-
-			for (auto& c : fii.changes)
-				eager.addMutations(c.mutations);
-
-			wait(doEagerReads(data, &eager));
-			if (data->shardChangeCounter == changeCounter)
-				break;
-			TEST(true); // A fetchKeys completed while we were doing this, so eager might be outdated.  Read it again.
-			// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the reads only
-			// selectively
-			eager = UpdateEagerReadInfo();
-		}
-		data->eagerReadsLatencyHistogram->sampleSeconds(now() - start);
+		// TODO: Now if we run
+		//	cloneCursor2 = cursor->cloneNoMore();
+		// There will be other test failures, rarely happens. Basically cursor->cloneNoMore() is stateful.
+		// Needs explanation for this.
 
 		// TODO: Why is is named SSSlowTakeLock2?
 		if (now() - start > 0.1)
@@ -5400,6 +5451,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken)
 			    .detail("Duration", now() - start)
 			    .detail("Version", data->version.get());
+		data->eagerReadsLatencyHistogram->sampleSeconds(now() - start);
 
 		data->updateEagerReads = &eager;
 
