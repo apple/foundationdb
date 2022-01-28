@@ -70,7 +70,7 @@ public:
 	                           IKeyValueStore* txnStateStore_,
 	                           Reference<TLogGroupCollection> tLogGroupCollection_,
 	                           std::map<Tag, UID>* tagToServer_,
-	                           std::unordered_map<UID, std::set<ptxn::StorageTeamID>>* ssToStorageTeam_)
+	                           std::unordered_map<UID, std::unordered_set<ptxn::StorageTeamID>>* ssToStorageTeam_)
 	  : spanContext(spanContext_), dbgid(dbgid_), arena(arena_), mutations(mutations_), txnStateStore(txnStateStore_),
 	    confChange(dummyConfChange), tLogGroupCollection(tLogGroupCollection_), tagToServer(tagToServer_),
 	    ssToStorageTeam(ssToStorageTeam_) {}
@@ -96,7 +96,7 @@ public:
 	    ssToStorageTeam(&proxyCommitData_.ssToStorageTeam), changedTeams(&proxyCommitData_.changedTeams) {
 
 		for (const auto& [ss, teams] : proxyCommitData_.ssToStorageTeam) {
-			TraceEvent(SevDebug, "SSTeam", dbgid).detail("SS", ss).detail("Team", teams);
+			TraceEvent(SevDebug, "SSTeam", dbgid).detail("SS", ss).detail("Teams", describe(teams));
 			allTeams.insert(teams.begin(), teams.end());
 		}
 	}
@@ -169,7 +169,7 @@ private:
 	std::vector<std::pair<UID, UID>> tssMappingToAdd;
 
 	std::map<Tag, UID>* tagToServer = nullptr;
-	std::unordered_map<UID, std::set<ptxn::StorageTeamID>>* ssToStorageTeam = nullptr;
+	std::unordered_map<UID, std::unordered_set<ptxn::StorageTeamID>>* ssToStorageTeam = nullptr;
 	std::unordered_map<UID, std::vector<std::pair<ptxn::StorageTeamID, bool>>>* changedTeams = nullptr;
 
 	// All SSes' own teams, populated from ssToStorageTeam mapping.
@@ -1312,7 +1312,7 @@ void applyMetadataMutations(SpanID const& spanContext,
                             IKeyValueStore* txnStateStore,
                             TLogGroupCollectionRef tLogGroupCollection) {
 	std::map<Tag, UID> tagToServer;
-	std::unordered_map<UID, std::set<ptxn::StorageTeamID>> ssToStorageTeam;
+	std::unordered_map<UID, std::unordered_set<ptxn::StorageTeamID>> ssToStorageTeam;
 	ApplyMetadataMutationsImpl(
 	    spanContext, dbgid, arena, mutations, txnStateStore, tLogGroupCollection, &tagToServer, &ssToStorageTeam)
 	    .apply();
