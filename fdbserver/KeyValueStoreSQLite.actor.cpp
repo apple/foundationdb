@@ -2306,9 +2306,9 @@ ACTOR Future<Void> KVFileDump(std::string filename) {
 	state Key endk = allKeys.end;
 	state bool debug = false;
 
-	const char *startKey = getenv("FDB_DUMP_STARTKEY");
-	const char *endKey = getenv("FDB_DUMP_ENDKEY");
-	const char *debugS = getenv("FDB_DUMP_DEBUG");
+	const char* startKey = getenv("FDB_DUMP_STARTKEY");
+	const char* endKey = getenv("FDB_DUMP_ENDKEY");
+	const char* debugS = getenv("FDB_DUMP_DEBUG");
 	if (startKey != NULL)
 		k = StringRef(unprintable(std::string(startKey)));
 	if (endKey != NULL)
@@ -2316,13 +2316,15 @@ ACTOR Future<Void> KVFileDump(std::string filename) {
 	if (debugS != NULL)
 		debug = true;
 
-	fprintf(stderr, "Dump start: %s, end: %s, debug: %s\n",
-			printable(k).c_str(), printable(endk).c_str(),
-			debug ? "true" : "false");
+	fprintf(stderr,
+	        "Dump start: %s, end: %s, debug: %s\n",
+	        printable(k).c_str(),
+	        printable(endk).c_str(),
+	        debug ? "true" : "false");
 
 	while (true) {
-		RangeResult kv = wait( store->readRange( KeyRangeRef(k, endk), 1000 ) );
-		for (auto &one : kv) {
+		RangeResult kv = wait(store->readRange(KeyRangeRef(k, endk), 1000));
+		for (auto& one : kv) {
 			int size = 0;
 			const uint8_t* data = NULL;
 
@@ -2343,8 +2345,9 @@ ACTOR Future<Void> KVFileDump(std::string filename) {
 		}
 
 		count += kv.size();
-		if (kv.size() <= 0) break;
-		k = keyAfter( kv[ kv.size()-1 ].key );
+		if (kv.size() <= 0)
+			break;
+		k = keyAfter(kv[kv.size() - 1].key);
 	}
 	fflush(stdout);
 	fprintf(stderr, "Counted: %ld\n", count);
