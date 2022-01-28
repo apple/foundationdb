@@ -76,6 +76,7 @@ void TestDriverContext::updateServerDBInfo(Reference<AsyncVar<ServerDBInfo>> dbI
 	ServerDBInfo info;
 	LogSystemConfig& lsConfig = info.logSystemConfig;
 	lsConfig.logSystemType = LogSystemType::teamPartitioned;
+	info.recoveryState = RecoveryState::FULLY_RECOVERED;
 
 	// For now, assume we only have primary TLog set
 	lsConfig.tLogs.clear();
