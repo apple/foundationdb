@@ -1260,6 +1260,33 @@ ACTOR Future<Void> lockTLogServer(
 	return Void();
 }
 
+// Services a peek request.
+ACTOR Future<Void> servicePeekRequest(
+    Reference<TLogServerData> self,
+    TLogPeekRequest req,
+    std::shared_ptr<std::unordered_map<TLogGroupID, Reference<LogGenerationData>>> activeGeneration) {
+	// block until dbInfo is ready, otherwise we won't find the correct TLog group
+	while (self->dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+		wait(self->dbInfo->onChange());
+	}
+
+	auto tLogGroupID =
+		tLogGroupByStorageTeamID(self->dbInfo->get().logSystemConfig.tLogs[0].tLogGroupIDs, req.storageTeamID);
+	auto tlogGroup = activeGeneration->find(tLogGroupID);
+	TEST(tlogGroup == activeGeneration->end()); // TLog peek: group not found
+	if (tlogGroup == activeGeneration->end()) {
+		TraceEvent("TLogPeekGroupNotFound", self->dbgid)
+			.detail("Group", tLogGroupID)
+			.detail("Team", req.storageTeamID);
+		req.reply.sendError(tlog_group_not_found());
+		return Void();
+	}
+	Reference<LogGenerationData> logData = tlogGroup->second;
+	logData->addActor.send(tLogPeekMessages(req, logData));
+
+	return Void();
+}
+
 ACTOR Future<Void> serveTLogInterface_PassivelyPull(
     Reference<TLogServerData> self,
     TLogInterface_PassivelyPull tli,
@@ -1319,20 +1346,7 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 			logData->addActor.send(tLogCommit(logData->tlogGroupData, req, logData));
 		}
 		when(TLogPeekRequest req = waitNext(tli.peek.getFuture())) {
-			// TODO: if dbInfo is not ready, block until it's ready
-			auto tLogGroupID =
-			    tLogGroupByStorageTeamID(self->dbInfo->get().logSystemConfig.tLogs[0].tLogGroupIDs, req.storageTeamID);
-			auto tlogGroup = activeGeneration->find(tLogGroupID);
-			TEST(tlogGroup == activeGeneration->end()); // TLog peek: group not found
-			if (tlogGroup == activeGeneration->end()) {
-				TraceEvent("TLogPeekGroupNotFound", self->dbgid)
-				    .detail("Group", tLogGroupID)
-				    .detail("Team", req.storageTeamID);
-				req.reply.sendError(tlog_group_not_found());
-				continue;
-			}
-			Reference<LogGenerationData> logData = tlogGroup->second;
-			logData->addActor.send(tLogPeekMessages(req, logData));
+			self->addActors.send(servicePeekRequest(self, req, activeGeneration));
 		}
 		when(ReplyPromise<TLogLockResult> reply = waitNext(tli.lock.getFuture())) {
 			wait(lockTLogServer(self, reply, activeGeneration));
