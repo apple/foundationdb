@@ -706,6 +706,13 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("--io-trust-warn-only",
 		                 " Instead of failing when an I/O operation exceeds io_trust_seconds, just"
 		                 " log a warning to the trace log. Has no effect if io_trust_seconds is unspecified.");
+		printf("\n"
+		       "The 'kvfiledump' role dump all key-values from kvfile to stdout in binary format:\n"
+		       "{key length}{key binary}{value length}{value binary}, length is 4 bytes int\n"
+		       "(little endianness). This role takes 3 environment variables as parameter:\n"
+		       " - FDB_DUMP_STARTKEY: start key for the dump, default is empty\n"
+		       " - FDB_DUMP_ENDKEY: end key for the dump, default is \"\\xff\\xff\"\n"
+		       " - FDB_DUMP_DEBUG: print key-values to stderr in escaped format\n");
 	} else {
 		printOptionUsage("--dev-help", "Display developer-specific help and exit.");
 	}
