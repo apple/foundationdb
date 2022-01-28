@@ -2303,7 +2303,7 @@ ACTOR Future<Void> KVFileDump(std::string filename) {
 	// dump
 	state int64_t count = 0;
 	state Key k;
-	state Key endk = LiteralStringRef("\xff\xff\xff\xff");
+	state Key endk = allKeys.end;
 	state bool debug = false;
 
 	const char *startKey = getenv("FDB_DUMP_STARTKEY");
