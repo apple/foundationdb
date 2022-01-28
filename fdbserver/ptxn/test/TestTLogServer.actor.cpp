@@ -138,7 +138,7 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 		tLogGroupLeader = pContext->tLogInterfaces[pContext->groupToLeaderId[tLogGroupID]];
 	}
 	// Update TLogGroups & TLogInterfaces in ServerDBInfo
-	pContext->updateServerDBInfo(dbInfo);
+	pContext->updateServerDBInfo(dbInfo, interfaces);
 	return Void();
 }
 
@@ -393,7 +393,7 @@ ACTOR Future<std::vector<Standalone<StringRef>>> commitInject(std::shared_ptr<pt
 		auto serialized = serializeMutations(currVersion, storageTeamID, pContext->commitRecord);
 		std::unordered_map<ptxn::StorageTeamID, StringRef> messages = { { storageTeamID, serialized } };
 		requests.emplace_back(ptxn::test::randomUID(),
-		                      pContext->storageTeamIDTLogGroupIDMapper[storageTeamID],
+		                      tLogGroupID,
 		                      serialized.arena(),
 		                      messages,
 		                      prevVersion,
@@ -408,7 +408,7 @@ ACTOR Future<std::vector<Standalone<StringRef>>> commitInject(std::shared_ptr<pt
 		prevVersion = currVersion;
 		increaseVersion(currVersion);
 	}
-	printTiming << "Generated " << numCommits << " commit requests" << std::endl;
+	printTiming << "Generated " << numCommits << " commit requests to group " << tLogGroupID.shortString() << std::endl;
 	{
 		std::mt19937 g(deterministicRandom()->randomUInt32());
 		std::shuffle(std::begin(requests), std::end(requests), g);
@@ -432,7 +432,6 @@ ACTOR Future<Void> verifyPeek(std::shared_ptr<ptxn::test::TestDriverContext> pCo
                               int numCommits) {
 	state ptxn::test::print::PrintTiming printTiming("tlog/verifyPeek");
 
-	state const ptxn::TLogGroupID tLogGroupID = pContext->storageTeamIDTLogGroupIDMapper.at(storageTeamID);
 	state std::shared_ptr<ptxn::TLogInterfaceBase> pInterface = pContext->getTLogLeaderByStorageTeamID(storageTeamID);
 	ASSERT(pInterface);
 
@@ -692,7 +691,7 @@ ACTOR Future<std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>>
 		auto serialized = serializeMutations(currVersion, storageTeamID, pContext->commitRecord);
 		std::unordered_map<ptxn::StorageTeamID, StringRef> messages = { { storageTeamID, serialized } };
 		requests.emplace_back(ptxn::test::randomUID(),
-		                      pContext->storageTeamIDTLogGroupIDMapper[storageTeamID],
+		                      tLogGroupID,
 		                      serialized.arena(),
 		                      messages,
 		                      prevVersion,
@@ -708,7 +707,7 @@ ACTOR Future<std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>>
 		prevVersion = currVersion;
 		increaseVersion(currVersion);
 	}
-	printTiming << "Generated " << numCommits << " commit requests" << std::endl;
+	printTiming << "Generated " << numCommits << " commit requests to group " << tLogGroupID.shortString() << std::endl;
 	{
 		std::mt19937 g(deterministicRandom()->randomUInt32());
 		std::shuffle(std::begin(requests), std::end(requests), g);

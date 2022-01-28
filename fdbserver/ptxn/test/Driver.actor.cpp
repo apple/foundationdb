@@ -72,10 +72,12 @@ TestDriverOptions::TestDriverOptions(const UnitTestParameters& params)
     transferModel(static_cast<MessageTransferModel>(
         params.getInt("messageTransferModel").orDefault(static_cast<int>(DEFAULT_MESSAGE_TRANSFER_MODEL)))) {}
 
-void TestDriverContext::updateServerDBInfo(Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+void TestDriverContext::updateServerDBInfo(Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                           const std::vector<ptxn::TLogInterface_PassivelyPull>& interfaces) {
 	ServerDBInfo info;
 	LogSystemConfig& lsConfig = info.logSystemConfig;
 	lsConfig.logSystemType = LogSystemType::teamPartitioned;
+	info.recoveryState = RecoveryState::FULLY_RECOVERED;
 
 	// For now, assume we only have primary TLog set
 	lsConfig.tLogs.clear();
@@ -84,7 +86,10 @@ void TestDriverContext::updateServerDBInfo(Reference<AsyncVar<ServerDBInfo>> dbI
 	for (const auto& group : tLogGroups) {
 		logset.tLogGroupIDs.push_back(group.logGroupId);
 	}
-	// TODO: fill in tLogsPtxn and ptxnTLogGroups fields
+	for (const auto& tlogIf : interfaces) {
+		logset.tLogsPtxn.emplace_back(tlogIf);
+	}
+	// TODO: fill in ptxnTLogGroups fields
 
 	dbInfo->setUnconditional(info);
 }

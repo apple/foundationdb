@@ -1271,13 +1271,11 @@ ACTOR Future<Void> servicePeekRequest(
 	}
 
 	auto tLogGroupID =
-		tLogGroupByStorageTeamID(self->dbInfo->get().logSystemConfig.tLogs[0].tLogGroupIDs, req.storageTeamID);
+	    tLogGroupByStorageTeamID(self->dbInfo->get().logSystemConfig.tLogs[0].tLogGroupIDs, req.storageTeamID);
 	auto tlogGroup = activeGeneration->find(tLogGroupID);
 	TEST(tlogGroup == activeGeneration->end()); // TLog peek: group not found
 	if (tlogGroup == activeGeneration->end()) {
-		TraceEvent("TLogPeekGroupNotFound", self->dbgid)
-			.detail("Group", tLogGroupID)
-			.detail("Team", req.storageTeamID);
+		TraceEvent("TLogPeekGroupNotFound", self->dbgid).detail("Group", tLogGroupID).detail("Team", req.storageTeamID);
 		req.reply.sendError(tlog_group_not_found());
 		return Void();
 	}
