@@ -341,6 +341,11 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			return;
 		}
 
+		TraceEvent ev(SevError, "BGMismatch");
+		ev.detail("DirectoryID", format("%08x", threadData->directoryID))
+		    .detail("RangeStart", format("%08x", startKey))
+		    .detail("RangeEnd", format("%08x", endKey))
+		    .detail("Version", readVersion);
 		fmt::print("Found mismatch! Request for dir {0} [{1} - {2}) @ {3}\n",
 		           format("%08x", threadData->directoryID),
 		           format("%08x", startKey),
