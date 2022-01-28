@@ -438,9 +438,10 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
                                            Optional<std::pair<KeyRange, UID>> oldGranuleComplete) {
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
-	// TODO: this will induce S3 hotspotting, so we should rethink if we want to prefix the file name
-	// with the granuleID or just add it somewhere in the file name
-	state std::string fname = granuleID.toString() + "_T" + std::to_string((uint64_t)(1000.0 * now())) + "_V" +
+	// Prefix filename with random chars both to avoid hotspotting on granuleID, and to have unique file names if
+	// multiple blob workers try to create the exact same file at the same millisecond (which observably happens)
+	state std::string fname = deterministicRandom()->randomUniqueID().shortString() + "_" + granuleID.toString() +
+	                          "_T" + std::to_string((uint64_t)(1000.0 * now())) + "_V" +
 	                          std::to_string(currentDeltaVersion) + ".delta";
 
 	state Value serialized = ObjectWriter::toValue(deltasToWrite, Unversioned());
@@ -538,10 +539,11 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
                                           Version version,
                                           PromiseStream<RangeResult> rows,
                                           bool createGranuleHistory) {
-	// TODO: this will induce S3 hotspotting, so we should rethink if we want to prefix the file name
-	// with the granuleID or just add it somewhere in the file name
-	state std::string fname = granuleID.toString() + "_T" + std::to_string((uint64_t)(1000.0 * now())) + "_V" +
-	                          std::to_string(version) + ".snapshot";
+	// Prefix filename with random chars both to avoid hotspotting on granuleID, and to have unique file names if
+	// multiple blob workers try to create the exact same file at the same millisecond (which observably happens)
+	state std::string fname = deterministicRandom()->randomUniqueID().shortString() + "_" + granuleID.toString() +
+	                          "_T" + std::to_string((uint64_t)(1000.0 * now())) + "_V" + std::to_string(version) +
+	                          ".snapshot";
 	state Arena arena;
 	state GranuleSnapshot snapshot;
 
