@@ -747,19 +747,20 @@ struct ChangeFeedPopRequest {
 struct OverlappingChangeFeedEntry {
 	Key rangeId;
 	KeyRange range;
+	Version emptyVersion;
 	bool stopped = false;
 
 	bool operator==(const OverlappingChangeFeedEntry& r) const {
-		return rangeId == r.rangeId && range == r.range && stopped == r.stopped;
+		return rangeId == r.rangeId && range == r.range && stopped == r.stopped && emptyVersion == r.emptyVersion;
 	}
 
 	OverlappingChangeFeedEntry() {}
-	OverlappingChangeFeedEntry(Key const& rangeId, KeyRange const& range, bool stopped)
-	  : rangeId(rangeId), range(range), stopped(stopped) {}
+	OverlappingChangeFeedEntry(Key const& rangeId, KeyRange const& range, Version emptyVersion, bool stopped)
+	  : rangeId(rangeId), range(range), emptyVersion(emptyVersion), stopped(stopped) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeId, range, stopped);
+		serializer(ar, rangeId, range, emptyVersion, stopped);
 	}
 };
 

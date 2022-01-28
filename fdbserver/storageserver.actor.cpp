@@ -1597,43 +1597,6 @@ ACTOR Future<Void> watchValueSendReply(StorageServer* data,
 	}
 }
 
-ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req) {
-	wait(delay(0));
-
-	TraceEvent(SevDebug, "ChangeFeedPopQuery", self->thisServerID)
-	    .detail("RangeID", req.rangeID.printable())
-	    .detail("Version", req.version)
-	    .detail("Range", req.range.toString());
-
-	if (!self->isReadable(req.range)) {
-		req.reply.sendError(wrong_shard_server());
-		return Void();
-	}
-	auto feed = self->uidChangeFeed.find(req.rangeID);
-	if (feed == self->uidChangeFeed.end()) {
-		req.reply.sendError(unknown_change_feed());
-		return Void();
-	}
-	if (req.version - 1 > feed->second->emptyVersion) {
-		feed->second->emptyVersion = req.version - 1;
-		while (!feed->second->mutations.empty() && feed->second->mutations.front().version < req.version) {
-			feed->second->mutations.pop_front();
-		}
-		if (feed->second->storageVersion != invalidVersion) {
-			self->storage.clearRange(KeyRangeRef(changeFeedDurableKey(feed->second->id, 0),
-			                                     changeFeedDurableKey(feed->second->id, req.version)));
-			if (req.version > feed->second->storageVersion) {
-				feed->second->storageVersion = invalidVersion;
-				feed->second->durableVersion = invalidVersion;
-				feed->second->fetchVersion = invalidVersion;
-			}
-			wait(self->durableVersion.whenAtLeast(self->storageVersion() + 1));
-		}
-	}
-	req.reply.send(Void());
-	return Void();
-}
-
 ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChangeFeedsRequest req) {
 	wait(delay(0));
 	wait(data->version.whenAtLeast(req.minVersion));
@@ -1644,15 +1607,16 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 	}
 
 	auto ranges = data->keyChangeFeed.intersectingRanges(req.range);
-	std::map<Key, std::pair<KeyRange, bool>> rangeIds;
+	std::map<Key, std::tuple<KeyRange, Version, bool>> rangeIds;
 	for (auto r : ranges) {
 		for (auto& it : r.value()) {
-			rangeIds[it->id] = std::make_pair(it->range, it->stopped);
+			rangeIds[it->id] = std::tuple(it->range, it->emptyVersion, it->stopped);
 		}
 	}
 	OverlappingChangeFeedsReply reply;
 	for (auto& it : rangeIds) {
-		reply.rangeIds.push_back(OverlappingChangeFeedEntry(it.first, it.second.first, it.second.second));
+		reply.rangeIds.push_back(OverlappingChangeFeedEntry(
+		    it.first, std::get<0>(it.second), std::get<1>(it.second), std::get<2>(it.second)));
 	}
 	req.reply.send(reply);
 	return Void();
@@ -4005,15 +3969,64 @@ static const KeyRangeRef persistChangeFeedKeys =
     KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "RF/"), LiteralStringRef(PERSIST_PREFIX "RF0"));
 // data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
 
+ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req) {
+	wait(delay(0));
+
+	TraceEvent(SevDebug, "ChangeFeedPopQuery", self->thisServerID)
+	    .detail("RangeID", req.rangeID.printable())
+	    .detail("Version", req.version)
+	    .detail("Range", req.range.toString());
+
+	if (!self->isReadable(req.range)) {
+		req.reply.sendError(wrong_shard_server());
+		return Void();
+	}
+	auto feed = self->uidChangeFeed.find(req.rangeID);
+	if (feed == self->uidChangeFeed.end()) {
+		req.reply.sendError(unknown_change_feed());
+		return Void();
+	}
+	if (req.version - 1 > feed->second->emptyVersion) {
+		feed->second->emptyVersion = req.version - 1;
+		while (!feed->second->mutations.empty() && feed->second->mutations.front().version < req.version) {
+			feed->second->mutations.pop_front();
+		}
+		Version durableVersion = self->data().getLatestVersion();
+		auto& mLV = self->addVersionToMutationLog(durableVersion);
+		self->addMutationToMutationLog(
+		    mLV,
+		    MutationRef(MutationRef::SetValue,
+		                persistChangeFeedKeys.begin.toString() + feed->second->id.toString(),
+		                changeFeedValue(feed->second->range,
+		                                feed->second->emptyVersion + 1,
+		                                feed->second->stopped ? ChangeFeedStatus::CHANGE_FEED_STOP
+		                                                      : ChangeFeedStatus::CHANGE_FEED_CREATE)));
+		if (feed->second->storageVersion != invalidVersion) {
+			self->addMutationToMutationLog(mLV,
+			                               MutationRef(MutationRef::ClearRange,
+			                                           changeFeedDurableKey(feed->second->id, 0),
+			                                           changeFeedDurableKey(feed->second->id, req.version)));
+			if (req.version > feed->second->storageVersion) {
+				feed->second->storageVersion = invalidVersion;
+				feed->second->durableVersion = invalidVersion;
+			}
+		}
+		wait(self->durableVersion.whenAtLeast(durableVersion));
+	}
+	req.reply.send(Void());
+	return Void();
+}
+
 ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
                                           Reference<ChangeFeedInfo> changeFeedInfo,
                                           Key rangeId,
                                           KeyRange range,
+                                          Version emptyVersion,
                                           Version fetchVersion,
                                           bool existing) {
 	state Reference<ChangeFeedData> feedResults = makeReference<ChangeFeedData>();
 	state Future<Void> feed = data->cx->getChangeFeedStream(
-	    feedResults, rangeId, 0, existing ? fetchVersion + 1 : data->version.get() + 1, range, true);
+	    feedResults, rangeId, emptyVersion + 1, existing ? fetchVersion + 1 : data->version.get() + 1, range, true);
 
 	// TODO remove debugging eventually?
 	state Version firstVersion = invalidVersion;
@@ -4069,7 +4082,8 @@ ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
 
 	// Add 2 to fetch version to make sure the local stream will have more versions in the stream than the remote stream
 	// to avoid edge cases in the merge logic
-	state Future<Void> localStream = localChangeFeedStream(data, localResults, rangeId, 0, fetchVersion + 2, range);
+	state Future<Void> localStream =
+	    localChangeFeedStream(data, localResults, rangeId, emptyVersion + 1, fetchVersion + 2, range);
 	state Standalone<MutationsAndVersionRef> localResult;
 
 	Standalone<MutationsAndVersionRef> _localResult = waitNext(localResults.getFuture());
@@ -4183,8 +4197,13 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data,
 	loop {
 		try {
 			// TODO clean up existing param for !existing
-			wait(fetchChangeFeedApplier(
-			    data, changeFeedInfo, changeFeedInfo->id, changeFeedInfo->range, fetchVersion, false));
+			wait(fetchChangeFeedApplier(data,
+			                            changeFeedInfo,
+			                            changeFeedInfo->id,
+			                            changeFeedInfo->range,
+			                            changeFeedInfo->emptyVersion,
+			                            fetchVersion,
+			                            false));
 			data->fetchingChangeFeeds.insert(changeFeedInfo->id);
 			return Void();
 		} catch (Error& e) {
@@ -4197,43 +4216,70 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data,
 }
 
 ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyRange keys, Version fetchVersion) {
+	TraceEvent(SevDebug, "FetchChangeFeedMetadata", data->thisServerID)
+	    .detail("Range", keys.toString())
+	    .detail("FetchVersion", fetchVersion);
 	std::vector<OverlappingChangeFeedEntry> feeds = wait(data->cx->getOverlappingChangeFeeds(keys, fetchVersion + 1));
 	std::vector<Key> feedIds;
 	feedIds.reserve(feeds.size());
 	// create change feed metadata if it does not exist
 	for (auto& cfEntry : feeds) {
-		bool cleanupPending = data->changeFeedCleanupDurable.count(cfEntry.rangeId);
+		auto cleanupEntry = data->changeFeedCleanupDurable.find(cfEntry.rangeId);
+		bool cleanupPending = cleanupEntry != data->changeFeedCleanupDurable.end();
 		feedIds.push_back(cfEntry.rangeId);
-		bool existing = data->uidChangeFeed.count(cfEntry.rangeId);
+		auto existingEntry = data->uidChangeFeed.find(cfEntry.rangeId);
+		bool existing = existingEntry != data->uidChangeFeed.end();
+
+		TraceEvent(SevDebug, "FetchedChangeFeedInfo", data->thisServerID)
+		    .detail("RangeID", cfEntry.rangeId.printable())
+		    .detail("Range", cfEntry.range.toString())
+		    .detail("FetchVersion", fetchVersion)
+		    .detail("EmptyVersion", cfEntry.emptyVersion)
+		    .detail("Stopped", cfEntry.stopped)
+		    .detail("Existing", existing)
+		    .detail("CleanupPendingVersion", cleanupPending ? cleanupEntry->second : invalidVersion);
+
 		if (!existing) {
 			TEST(cleanupPending); // Fetch change feed which is cleanup pending. This means there was a move away and a
 			                      // move back, this will remake the metadata
-			TraceEvent(SevDebug, "FetchChangeFeedMetadata", data->thisServerID)
-			    .detail("RangeID", cfEntry.rangeId.printable())
-			    .detail("Range", cfEntry.range.toString())
-			    .detail("FetchVersion", fetchVersion)
-			    .detail("Stopped", cfEntry.stopped)
-			    .detail("CleanupPending", cleanupPending);
 
 			Reference<ChangeFeedInfo> changeFeedInfo = Reference<ChangeFeedInfo>(new ChangeFeedInfo());
 			changeFeedInfo->range = cfEntry.range;
 			changeFeedInfo->id = cfEntry.rangeId;
 
 			changeFeedInfo->stopped = cfEntry.stopped;
+			changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
 			data->uidChangeFeed[cfEntry.rangeId] = changeFeedInfo;
 			auto rs = data->keyChangeFeed.modify(cfEntry.range);
 			for (auto r = rs.begin(); r != rs.end(); ++r) {
 				r->value().push_back(changeFeedInfo);
 			}
 			data->keyChangeFeed.coalesce(cfEntry.range.contents());
+
 			auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 			data->addMutationToMutationLog(
 			    mLV,
 			    MutationRef(MutationRef::SetValue,
 			                persistChangeFeedKeys.begin.toString() + cfEntry.rangeId.toString(),
-			                changeFeedValue(cfEntry.range, invalidVersion, ChangeFeedStatus::CHANGE_FEED_CREATE)));
+			                changeFeedValue(cfEntry.range,
+			                                changeFeedInfo->emptyVersion + 1,
+			                                cfEntry.stopped ? ChangeFeedStatus::CHANGE_FEED_STOP
+			                                                : ChangeFeedStatus::CHANGE_FEED_CREATE)));
 		} else {
-			ASSERT(!cleanupPending);
+			auto changeFeedInfo = existingEntry->second;
+			if (changeFeedInfo->emptyVersion < cfEntry.emptyVersion) {
+				TEST(true); // Got updated CF emptyVersion from a parallel fetchChangeFeedMetadata
+				changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
+				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+				data->addMutationToMutationLog(
+				    mLV,
+				    MutationRef(MutationRef::SetValue,
+				                persistChangeFeedKeys.begin.toString() + cfEntry.rangeId.toString(),
+				                changeFeedValue(cfEntry.range,
+				                                changeFeedInfo->emptyVersion + 1,
+				                                cfEntry.stopped ? ChangeFeedStatus::CHANGE_FEED_STOP
+				                                                : ChangeFeedStatus::CHANGE_FEED_CREATE)));
+			}
 		}
 	}
 	return feedIds;
@@ -5211,9 +5257,9 @@ private:
 							// don't set fetchVersion to invalidVersion here because there could be an active fetch
 						}
 					}
+					addMutationToLog = true;
 				}
 				feed->second->stopped = (status == ChangeFeedStatus::CHANGE_FEED_STOP);
-				addMutationToLog = true;
 			} else if (status == ChangeFeedStatus::CHANGE_FEED_CREATE) {
 				TraceEvent(SevDebug, "CreatingChangeFeed", data->thisServerID)
 				    .detail("RangeID", changeFeedId.printable())
