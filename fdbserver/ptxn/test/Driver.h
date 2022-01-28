@@ -126,7 +126,8 @@ struct TestDriverContext {
 	CommitRecord commitRecord;
 
 	// Updates a ServerDBInfo object with this context.
-	void updateServerDBInfo(Reference<AsyncVar<ServerDBInfo>> dbInfo);
+	void updateServerDBInfo(Reference<AsyncVar<ServerDBInfo>> dbInfo,
+	                        const std::vector<ptxn::TLogInterface_PassivelyPull>& interfaces);
 
 	TLogGroup& getTLogGroup(TLogGroupID gid);
 };

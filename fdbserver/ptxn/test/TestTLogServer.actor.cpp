@@ -138,7 +138,7 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 		tLogGroupLeader = pContext->tLogInterfaces[pContext->groupToLeaderId[tLogGroupID]];
 	}
 	// Update TLogGroups & TLogInterfaces in ServerDBInfo
-	pContext->updateServerDBInfo(dbInfo);
+	pContext->updateServerDBInfo(dbInfo, interfaces);
 	return Void();
 }
 
