@@ -2762,12 +2762,12 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const 
 			TraceEvent(SevWarn, "PthreadSetNameNp")
 			    .detail("Name", name)
 			    .detail("ReturnCode", retVal)
-			    .detail("Errno", errno);
+			    .GetLastError();
 		} else {
 			TraceEvent(SevError, "PthreadSetNameNp")
 			    .detail("Name", name)
 			    .detail("ReturnCode", retVal)
-			    .detail("Errno", errno);
+			    .GetLastError();
 			throw platform_error();
 		}
 	}
