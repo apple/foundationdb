@@ -661,36 +661,6 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
-private:
-	template <class T>
-	ThreadFuture<T> retryableOperationHelper(std::function<ThreadFuture<T>(Reference<IDatabase>)> func) {
-		auto db = dbState->dbVar->get();
-		ThreadFuture<T> result = db.value ? func(db.value) : Never();
-		result = abortableFuture(result, db.onChange, cluster_version_changed());
-
-		return flatMapThreadFuture<T, T>(result, [this, func](ErrorOr<T> result) -> ErrorOr<ThreadFuture<T>> {
-			if (result.present() || result.getError().code() != error_code_cluster_version_changed) {
-				return result.template castTo<ThreadFuture<T>>();
-			} else {
-				return retryableOperationHelper(func);
-			}
-		});
-	}
-
-public:
-	template <class T>
-	ThreadFuture<T> runRetryableOperation(std::function<ThreadFuture<T>(Reference<IDatabase>)> func) {
-		ThreadFuture<T> result = retryableOperationHelper(func);
-		if (defaultTimeout > 0) {
-			double timeoutCopy = defaultTimeout;
-			return abortableFuture(result,
-			                       onMainThread([timeoutCopy]() -> Future<Void> { return delay(timeoutCopy); }),
-			                       transaction_timed_out());
-		} else {
-			return result;
-		}
-	}
-
 	// private:
 
 	struct LegacyVersionMonitor;

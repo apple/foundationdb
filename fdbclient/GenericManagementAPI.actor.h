@@ -36,6 +36,10 @@ the contents of the system key space.
 #include <map>
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/HighContentionAllocator.actor.h"
+#include "fdbclient/Status.h"
+#include "fdbclient/Subspace.h"
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "flow/actorcompiler.h" // has to be last include
@@ -637,6 +641,8 @@ Future<Void> createTenant(Reference<DB> db, TenantName name) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
+	state bool tenantCheckCompleted = false;
+
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -644,7 +650,16 @@ Future<Void> createTenant(Reference<DB> db, TenantName name) {
 
 			Optional<Value> val = wait(safeThreadFutureToFuture(tr->get(tenantMapKey)));
 			if (val.present()) {
-				throw tenant_already_exists();
+				if (!tenantCheckCompleted) {
+					throw tenant_already_exists();
+				} else {
+					// If the tenant did not exist when we started trying to create it, then we will return success
+					// even if someone else created it simultaneously. This helps us avoid problems if the commit
+					// result for creating this tenant is unknown.
+					return Void();
+				}
+			} else {
+				tenantCheckCompleted = true;
 			}
 
 			state Future<Optional<Value>> tenantDataPrefixFuture =
@@ -677,13 +692,24 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
+	state bool tenantCheckCompleted = false;
+
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> val = wait(safeThreadFutureToFuture(tr->get(tenantMapKey)));
 			if (!val.present()) {
-				throw tenant_not_found();
+				if (!tenantCheckCompleted) {
+					throw tenant_not_found();
+				} else {
+					// If the tenant existed when we started trying to delete it, then we will return success
+					// even if someone else deleted it simultaneously. This helps us avoid problems if the commit
+					// result for deleting this tenant is unknown.
+					return Void();
+				}
+			} else {
+				tenantCheckCompleted = true;
 			}
 
 			RangeResult contents = wait(safeThreadFutureToFuture(tr->getRange(prefixRange(val.get()), 1)));

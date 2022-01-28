@@ -20,6 +20,7 @@
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "fdbclient/ClientVersion.h"
@@ -1411,15 +1412,17 @@ ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<P
 // Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
 ThreadFuture<Void> MultiVersionDatabase::createTenant(StringRef const& tenantName) {
 	Standalone<StringRef> tenantNameCopy = tenantName;
-	return runRetryableOperation<Void>(
-	    [tenantNameCopy](Reference<IDatabase> db) { return db->createTenant(tenantNameCopy); });
+	Reference<MultiVersionDatabase> self = Reference<MultiVersionDatabase>::addRef(this);
+
+	return onMainThread([self, tenantNameCopy]() { return ManagementAPI::createTenant(self, tenantNameCopy); });
 }
 
 // Deletes the tenant with the given name. The tenant must be empty.
 ThreadFuture<Void> MultiVersionDatabase::deleteTenant(StringRef const& tenantName) {
 	Standalone<StringRef> tenantNameCopy = tenantName;
-	return runRetryableOperation<Void>(
-	    [tenantNameCopy](Reference<IDatabase> db) { return db->deleteTenant(tenantNameCopy); });
+	Reference<MultiVersionDatabase> self = Reference<MultiVersionDatabase>::addRef(this);
+
+	return onMainThread([self, tenantNameCopy]() { return ManagementAPI::deleteTenant(self, tenantNameCopy); });
 }
 
 MultiVersionDatabase::DatabaseState::DatabaseState(std::string clusterFilePath, Reference<IDatabase> versionMonitorDb)
