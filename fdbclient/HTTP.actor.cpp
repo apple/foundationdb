@@ -31,7 +31,7 @@ std::string awsV4URIEncode(const std::string& s, bool encodeSlash) {
 	std::string o;
 	o.reserve(s.size() * 3);
 	char buf[4];
-	for (auto c : s)
+	for (auto c : s) {
 		if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
 			o.append(&c, 1);
 		else if (c == '/')
@@ -40,6 +40,7 @@ std::string awsV4URIEncode(const std::string& s, bool encodeSlash) {
 			sprintf(buf, "%%%.02X", c);
 			o.append(buf);
 		}
+	}
 	return o;
 }
 
