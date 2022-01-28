@@ -95,9 +95,9 @@ public:
 	    initialCommit(initialCommit_), tagToServer(&proxyCommitData_.tagToServer),
 	    ssToStorageTeam(&proxyCommitData_.ssToStorageTeam), changedTeams(&proxyCommitData_.changedTeams) {
 
-		for (const auto& [ss, team] : proxyCommitData_.ssToStorageTeam) {
-			TraceEvent(SevDebug, "SSTeam", dbgid).detail("SS", ss).detail("Team", team);
-			allTeams.insert(team.begin(), team.end());
+		for (const auto& [ss, teams] : proxyCommitData_.ssToStorageTeam) {
+			TraceEvent(SevDebug, "SSTeam", dbgid).detail("SS", ss).detail("Team", teams);
+			allTeams.insert(teams.begin(), teams.end());
 		}
 	}
 
@@ -301,6 +301,7 @@ private:
 			return;
 		}
 		ASSERT_WE_THINK(tLogGroupCollection.isValid());
+		ASSERT(ssToStorageTeam != nullptr);
 
 		auto teamid = decodeStorageTeamIdKey(m.param1);
 		auto team = decodeStorageTeams(m.param2);
