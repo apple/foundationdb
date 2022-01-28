@@ -707,7 +707,7 @@ static void printUsage(const char* name, bool devhelp) {
 		printf("\n"
 		       "The 'kvfiledump' role dump all key-values from kvfile to stdout in binary format:\n"
 		       "{key length}{key binary}{value length}{value binary}, length is 4 bytes int\n"
-		       "(little endianness). This role takes 3 environment variables as parameter:\n"
+		       "(little endianness). This role takes 3 environment variables as parameters:\n"
 		       " - FDB_DUMP_STARTKEY: start key for the dump, default is empty\n"
 		       " - FDB_DUMP_ENDKEY: end key for the dump, default is \"\\xff\\xff\"\n"
 		       " - FDB_DUMP_DEBUG: print key-values to stderr in escaped format\n");
