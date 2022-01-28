@@ -5413,6 +5413,65 @@ ACTOR Future<Void> applyMutationsFromCursor(StorageUpdater* pStorageUpdater,
 	return Void();
 }
 
+ACTOR Future<Void> updatePreconditioner(StorageServerBase* pStorageServerContext) {
+	// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of memory
+	// This is often referred to as the storage server e-brake (emergency brake)
+
+	// We allow the storage server to make some progress between e-brake periods, referreed to as "overage", in
+	// order to ensure that it advances desiredOldestVersion enough for updateStorage to make enough progress on
+	// freeing up queue size.
+	state double waitStartT = 0;
+	if (pStorageServerContext->queueSize() >= SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES &&
+	    pStorageServerContext->durableVersion.get() < pStorageServerContext->desiredOldestVersion.get() &&
+	    ((pStorageServerContext->desiredOldestVersion.get() - SERVER_KNOBS->STORAGE_HARD_LIMIT_VERSION_OVERAGE >
+	      pStorageServerContext->lastDurableVersionEBrake) ||
+	     (pStorageServerContext->counters.bytesInput.getValue() - SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES_OVERAGE >
+	      pStorageServerContext->lastBytesInputEBrake))) {
+
+		while (pStorageServerContext->queueSize() >= SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES &&
+		       pStorageServerContext->durableVersion.get() < pStorageServerContext->desiredOldestVersion.get()) {
+			if (now() - waitStartT >= 1) {
+				TraceEvent(SevWarn, "StorageServerUpdateLag", pStorageServerContext->thisServerID)
+				    .detail("Version", pStorageServerContext->version.get())
+				    .detail("DurableVersion", pStorageServerContext->durableVersion.get())
+				    .detail("DesiredOldestVersion", pStorageServerContext->desiredOldestVersion.get())
+				    .detail("QueueSize", pStorageServerContext->queueSize())
+				    .detail("LastBytesInputEBrake", pStorageServerContext->lastBytesInputEBrake)
+				    .detail("LastDurableVersionEBrake", pStorageServerContext->lastDurableVersionEBrake);
+				waitStartT = now();
+			}
+
+			pStorageServerContext->behind = true;
+			wait(delayJittered(.005, TaskPriority::TLogPeekReply));
+		}
+		pStorageServerContext->lastBytesInputEBrake = pStorageServerContext->counters.bytesInput.getValue();
+		pStorageServerContext->lastDurableVersionEBrake = pStorageServerContext->durableVersion.get();
+	}
+
+	if (g_network->isSimulated() && pStorageServerContext->isTss() &&
+	    g_simulator.tssMode == ISimulator::TSSMode::EnabledAddDelay && !g_simulator.speedUpSimulation &&
+	    pStorageServerContext->tssFaultInjectTime.present() &&
+	    pStorageServerContext->tssFaultInjectTime.get() < now()) {
+		if (deterministicRandom()->random01() < 0.01) {
+			TraceEvent(SevWarnAlways, "TSSInjectDelayForever", pStorageServerContext->thisServerID).log();
+			// small random chance to just completely get stuck here, each tss should eventually hit this in this
+			// mode
+			wait(tssDelayForever());
+		} else {
+			// otherwise pause for part of a second
+			double delayTime = deterministicRandom()->random01();
+			TraceEvent(SevWarnAlways, "TSSInjectDelay", pStorageServerContext->thisServerID).detail("Delay", delayTime);
+			wait(delay(delayTime));
+		}
+	}
+
+	while (pStorageServerContext->byteSampleClearsTooLarge.get()) {
+		wait(pStorageServerContext->byteSampleClearsTooLarge.onChange());
+	}
+
+	return Void();
+}
+
 } // namespace details
 
 namespace ptxn {
@@ -5530,59 +5589,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 	state double start;
 	try {
-		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of memory
-		// This is often referred to as the storage server e-brake (emergency brake)
-
-		// We allow the storage server to make some progress between e-brake periods, referreed to as "overage", in
-		// order to ensure that it advances desiredOldestVersion enough for updateStorage to make enough progress on
-		// freeing up queue size.
-		state double waitStartT = 0;
-		if (data->queueSize() >= SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES &&
-		    data->durableVersion.get() < data->desiredOldestVersion.get() &&
-		    ((data->desiredOldestVersion.get() - SERVER_KNOBS->STORAGE_HARD_LIMIT_VERSION_OVERAGE >
-		      data->lastDurableVersionEBrake) ||
-		     (data->counters.bytesInput.getValue() - SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES_OVERAGE >
-		      data->lastBytesInputEBrake))) {
-
-			while (data->queueSize() >= SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES &&
-			       data->durableVersion.get() < data->desiredOldestVersion.get()) {
-				if (now() - waitStartT >= 1) {
-					TraceEvent(SevWarn, "StorageServerUpdateLag", data->thisServerID)
-					    .detail("Version", data->version.get())
-					    .detail("DurableVersion", data->durableVersion.get())
-					    .detail("DesiredOldestVersion", data->desiredOldestVersion.get())
-					    .detail("QueueSize", data->queueSize())
-					    .detail("LastBytesInputEBrake", data->lastBytesInputEBrake)
-					    .detail("LastDurableVersionEBrake", data->lastDurableVersionEBrake);
-					waitStartT = now();
-				}
-
-				data->behind = true;
-				wait(delayJittered(.005, TaskPriority::TLogPeekReply));
-			}
-			data->lastBytesInputEBrake = data->counters.bytesInput.getValue();
-			data->lastDurableVersionEBrake = data->durableVersion.get();
-		}
-
-		if (g_network->isSimulated() && data->isTss() && g_simulator.tssMode == ISimulator::TSSMode::EnabledAddDelay &&
-		    !g_simulator.speedUpSimulation && data->tssFaultInjectTime.present() &&
-		    data->tssFaultInjectTime.get() < now()) {
-			if (deterministicRandom()->random01() < 0.01) {
-				TraceEvent(SevWarnAlways, "TSSInjectDelayForever", data->thisServerID).log();
-				// small random chance to just completely get stuck here, each tss should eventually hit this in this
-				// mode
-				wait(tssDelayForever());
-			} else {
-				// otherwise pause for part of a second
-				double delayTime = deterministicRandom()->random01();
-				TraceEvent(SevWarnAlways, "TSSInjectDelay", data->thisServerID).detail("Delay", delayTime);
-				wait(delay(delayTime));
-			}
-		}
-
-		while (data->byteSampleClearsTooLarge.get()) {
-			wait(data->byteSampleClearsTooLarge.onChange());
-		}
+		wait(details::updatePreconditioner(data));
 
 		// NOTE This is anti-intuition. A reference to the cursor is created, but it is an independent cursor -- not
 		// impacting the origin cursor. data->logCursor holds no data even cursor->getMore() is called. Later
@@ -5664,7 +5671,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		// Apply the mutations from the cursor.
 		state Version ver = invalidVersion;
 		state std::set<Key> updatedChangeFeeds;
-		wait(details::applyMutationsFromCursor(&updater, cloneCursor2, &ver, &mutationBytes, &updatedChangeFeeds, data));
+		wait(
+		    details::applyMutationsFromCursor(&updater, cloneCursor2, &ver, &mutationBytes, &updatedChangeFeeds, data));
 
 		if (data->currentChangeFeeds.size()) {
 			data->changeFeedVersions.emplace_back(
