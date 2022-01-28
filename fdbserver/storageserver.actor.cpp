@@ -2132,12 +2132,8 @@ ACTOR Future<Optional<Value>> quickGetValue(StorageServer* data,
 	if (data->shards[key]->isReadable()) {
 		try {
 			// TODO: Use a lower level API may be better? Or tweak priorities?
-			GetValueRequest req(pOriginalReq->spanContext,
-			                    key,
-			                    version,
-			                    pOriginalReq->tags,
-			                    pOriginalReq->debugID,
-			                    pOriginalReq->ssLatestCommitVersions);
+			GetValueRequest req(
+			    pOriginalReq->spanContext, key, version, pOriginalReq->tags, pOriginalReq->debugID, VersionVector());
 			// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
 			// original request level, rather than individual underlying lookups. The reason is that throttle any
 			// individual underlying lookup will fail the original request, which is not productive.
@@ -2670,7 +2666,7 @@ ACTOR Future<RangeResult> quickGetKeyValues(StorageServer* data,
 		req.end = firstGreaterOrEqual(strinc(prefix, req.arena));
 		req.version = version;
 		req.tags = pOriginalReq->tags;
-		req.ssLatestCommitVersions = pOriginalReq->ssLatestCommitVersions;
+		req.ssLatestCommitVersions = VersionVector();
 		req.debugID = pOriginalReq->debugID;
 
 		// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
