@@ -7603,7 +7603,8 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
                                          Reference<ChangeFeedData> results,
                                          Key rangeID,
                                          Version* begin,
-                                         Version end) {
+                                         Version end,
+                                         bool canReadPopped) {
 	state std::vector<Future<Void>> fetchers(interfs.size());
 	state std::vector<Future<Void>> onErrors(interfs.size());
 	state std::vector<MutationAndVersionStream> streams(interfs.size());
@@ -7616,6 +7617,7 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		req.begin = *begin;
 		req.end = end;
 		req.range = it.second;
+		req.canReadPopped = canReadPopped;
 		UID debugID = deterministicRandom()->randomUniqueID();
 		debugIDs.push_back(debugID);
 		req.debugID = debugID;
@@ -7651,6 +7653,13 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		                                      i,
 		                                      interfs[i].second,
 		                                      debugIDs[i]);
+		if (DEBUG_CF_START_VERSION != invalidVersion) {
+			fmt::print("    [{0} - {1}): {2} {3}\n",
+			           interfs[i].second.begin.printable(),
+			           interfs[i].second.end.printable(),
+			           i,
+			           debugIDs[i].toString().substr(0, 8));
+		}
 	}
 
 	wait(onCFErrors(onErrors) || doCFMerge(results, interfs, streams, begin, end));
@@ -7697,6 +7706,7 @@ ACTOR Future<Void> doSingleCFStream(KeyRange range,
                                     Version* begin,
                                     Version end,
                                     UID debugID /*TODO REMOVE this parameter once BG is correctness clean*/) {
+
 	state Promise<Void> refresh = results->refresh;
 	ASSERT(results->streams.size() == 1);
 	ASSERT(results->storageData.size() == 1);
@@ -7776,7 +7786,8 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
                                           Reference<ChangeFeedData> results,
                                           Key rangeID,
                                           Version* begin,
-                                          Version end) {
+                                          Version end,
+                                          bool canReadPopped) {
 	state Database cx(db);
 	state ChangeFeedStreamRequest req;
 	state UID debugID = deterministicRandom()->randomUniqueID();
@@ -7784,6 +7795,7 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	req.begin = *begin;
 	req.end = end;
 	req.range = range;
+	req.canReadPopped = canReadPopped;
 	req.debugID = debugID;
 
 	results->streams.clear();
@@ -7803,6 +7815,16 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	results->notAtLatest.set(1);
 	refresh.send(Void());
 
+	if (DEBUG_CF_START_VERSION != invalidVersion) {
+		fmt::print("Starting single cursor {0} for [{1} - {2}) @ {3} - {4} from {5}\n",
+		           debugID.toString().substr(0, 8),
+		           range.begin.printable(),
+		           range.end.printable(),
+		           *begin,
+		           end,
+		           interf.id().toString().c_str());
+	}
+
 	wait(results->streams[0].onError() || doSingleCFStream(range, results, rangeID, begin, end, debugID));
 
 	return Void();
@@ -7813,7 +7835,8 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
                                             Key rangeID,
                                             Version begin,
                                             Version end,
-                                            KeyRange range) {
+                                            KeyRange range,
+                                            bool canReadPopped) {
 	state Database cx(db);
 	state Span span("NAPI:GetChangeFeedStream"_loc);
 
@@ -7892,10 +7915,11 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 					interfs.push_back(std::make_pair(locations[i].second->getInterface(chosenLocations[i]),
 					                                 locations[i].first & range));
 				}
-				wait(mergeChangeFeedStream(db, interfs, results, rangeID, &begin, end) || cx->connectionFileChanged());
+				wait(mergeChangeFeedStream(db, interfs, results, rangeID, &begin, end, canReadPopped) ||
+				     cx->connectionFileChanged());
 			} else {
 				StorageServerInterface interf = locations[0].second->getInterface(chosenLocations[0]);
-				wait(singleChangeFeedStream(db, interf, range, results, rangeID, &begin, end) ||
+				wait(singleChangeFeedStream(db, interf, range, results, rangeID, &begin, end, canReadPopped) ||
 				     cx->connectionFileChanged());
 			}
 		} catch (Error& e) {
@@ -7943,8 +7967,10 @@ Future<Void> DatabaseContext::getChangeFeedStream(Reference<ChangeFeedData> resu
                                                   Key rangeID,
                                                   Version begin,
                                                   Version end,
-                                                  KeyRange range) {
-	return getChangeFeedStreamActor(Reference<DatabaseContext>::addRef(this), results, rangeID, begin, end, range);
+                                                  KeyRange range,
+                                                  bool canReadPopped) {
+	return getChangeFeedStreamActor(
+	    Reference<DatabaseContext>::addRef(this), results, rangeID, begin, end, range, canReadPopped);
 }
 
 ACTOR Future<std::vector<OverlappingChangeFeedEntry>> singleLocationOverlappingChangeFeeds(

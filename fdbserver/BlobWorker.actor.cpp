@@ -1273,15 +1273,24 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 		if (startState.parentGranule.present() && startVersion < startState.changeFeedStartVersion) {
 			// read from parent change feed up until our new change feed is started
+			// Required to have canReadPopped = false, otherwise another granule can take over the change feed, and pop
+			// it. That could cause this worker to think it has the full correct set of data if it then reads the data,
+			// until it checks the granule lock again.
+			// passing false for canReadPopped means we will get an exception if we try to read any popped data, killing
+			// this actor
 			readOldChangeFeed = true;
 
-			oldChangeFeedFuture = bwData->db->getChangeFeedStream(
-			    newCFData, oldCFKey.get(), startVersion + 1, startState.changeFeedStartVersion, metadata->keyRange);
+			oldChangeFeedFuture = bwData->db->getChangeFeedStream(newCFData,
+			                                                      oldCFKey.get(),
+			                                                      startVersion + 1,
+			                                                      startState.changeFeedStartVersion,
+			                                                      metadata->keyRange,
+			                                                      false);
 
 		} else {
 			readOldChangeFeed = false;
-			changeFeedFuture =
-			    bwData->db->getChangeFeedStream(newCFData, cfKey, startVersion + 1, MAX_VERSION, metadata->keyRange);
+			changeFeedFuture = bwData->db->getChangeFeedStream(
+			    newCFData, cfKey, startVersion + 1, MAX_VERSION, metadata->keyRange, false);
 		}
 
 		// Start actors BEFORE setting new change feed data to ensure the change feed data is properly initialized by
@@ -1406,7 +1415,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				Reference<ChangeFeedData> newCFData = makeReference<ChangeFeedData>();
 
 				changeFeedFuture = bwData->db->getChangeFeedStream(
-				    newCFData, cfKey, startState.changeFeedStartVersion, MAX_VERSION, metadata->keyRange);
+				    newCFData, cfKey, startState.changeFeedStartVersion, MAX_VERSION, metadata->keyRange, false);
 
 				// Start actors BEFORE setting new change feed data to ensure the change feed data is properly
 				// initialized by the client
@@ -1525,7 +1534,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										                                    oldCFKey.get(),
 										                                    cfRollbackVersion + 1,
 										                                    startState.changeFeedStartVersion,
-										                                    metadata->keyRange);
+										                                    metadata->keyRange,
+										                                    false);
 
 									} else {
 										if (cfRollbackVersion < startState.changeFeedStartVersion) {
@@ -1535,8 +1545,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										}
 										ASSERT(cfRollbackVersion >= startState.changeFeedStartVersion);
 
-										changeFeedFuture = bwData->db->getChangeFeedStream(
-										    newCFData, cfKey, cfRollbackVersion + 1, MAX_VERSION, metadata->keyRange);
+										changeFeedFuture = bwData->db->getChangeFeedStream(newCFData,
+										                                                   cfKey,
+										                                                   cfRollbackVersion + 1,
+										                                                   MAX_VERSION,
+										                                                   metadata->keyRange,
+										                                                   false);
 									}
 
 									// Start actors BEFORE setting new change feed data to ensure the change feed data
@@ -2049,7 +2063,7 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 
 ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, BlobGranuleFileRequest req) {
 	if (BW_REQUEST_DEBUG || DEBUG_BW_WAIT_VERSION == req.readVersion) {
-		fmt::print("BW {0} processing blobGranuleFileRequest for range [{1} -{2}) @ {3}\n",
+		fmt::print("BW {0} processing blobGranuleFileRequest for range [{1} - {2}) @ {3}\n",
 		           bwData->id.toString(),
 		           req.keyRange.begin.printable(),
 		           req.keyRange.end.printable(),

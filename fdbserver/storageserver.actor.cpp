@@ -85,6 +85,7 @@ bool canReplyWith(Error e) {
 	case error_code_watch_cancelled:
 	case error_code_unknown_change_feed:
 	case error_code_server_overloaded:
+	case error_code_change_feed_popped:
 	// getRangeAndMap related exceptions that are not retriable:
 	case error_code_mapper_bad_index:
 	case error_code_mapper_no_such_key:
@@ -1792,12 +1793,18 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		throw unknown_change_feed();
 	}
 
+	state Reference<ChangeFeedInfo> feedInfo = feed->second;
+
 	if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
 		printf("CFM: SS %s CF %s: got version %lld >= %lld\n",
 		       data->thisServerID.toString().substr(0, 4).c_str(),
 		       req.rangeID.printable().substr(0, 6).c_str(),
 		       data->version.get(),
 		       req.begin);
+	}
+
+	if (!req.canReadPopped && req.begin <= feedInfo->emptyVersion) {
+		throw change_feed_popped();
 	}
 
 	// We must copy the mutationDeque when fetching the durable bytes in case mutations are popped from memory while
@@ -1811,14 +1818,14 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		       data->thisServerID.toString().substr(0, 4).c_str(),
 		       req.rangeID.printable().substr(0, 6).c_str(),
 		       dequeVersion,
-		       feed->second->emptyVersion,
-		       feed->second->storageVersion,
-		       feed->second->durableVersion,
-		       feed->second->fetchVersion);
+		       feedInfo->emptyVersion,
+		       feedInfo->storageVersion,
+		       feedInfo->durableVersion,
+		       feedInfo->fetchVersion);
 	}
 
-	if (req.end > feed->second->emptyVersion + 1) {
-		for (auto& it : feed->second->mutations) {
+	if (req.end > feedInfo->emptyVersion + 1) {
+		for (auto& it : feedInfo->mutations) {
 			if (it.version >= req.end || it.version > dequeVersion || remainingLimitBytes <= 0) {
 				break;
 			}
@@ -1839,8 +1846,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 	}
 
-	if (req.end > feed->second->emptyVersion + 1 && feed->second->durableVersion != invalidVersion &&
-	    req.begin <= feed->second->durableVersion) {
+	if (req.end > feedInfo->emptyVersion + 1 && feedInfo->durableVersion != invalidVersion &&
+	    req.begin <= feedInfo->durableVersion) {
 		RangeResult res = wait(data->storage.readRange(
 		    KeyRangeRef(changeFeedDurableKey(req.rangeID, std::max(req.begin, feed->second->emptyVersion)),
 		                changeFeedDurableKey(req.rangeID, req.end)),
@@ -1888,6 +1895,11 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 	} else {
 		reply = memoryReply;
+	}
+
+	// check if pop happened concurrently with read
+	if (!req.canReadPopped && req.begin <= feedInfo->emptyVersion) {
+		throw change_feed_popped();
 	}
 
 	bool gotAll = remainingLimitBytes > 0 && remainingDurableBytes > 0 && data->version.get() == startVersion;
@@ -2007,13 +2019,14 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
 	if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
-		printf("CFM: SS %s CF %s: got CFSQ [%s - %s) %lld - %lld\n",
+		printf("CFM: SS %s CF %s: got CFSQ [%s - %s) %lld - %lld, crp=%s\n",
 		       data->thisServerID.toString().substr(0, 4).c_str(),
 		       req.rangeID.printable().substr(0, 6).c_str(),
 		       req.range.begin.printable().c_str(),
 		       req.range.end.printable().c_str(),
 		       req.begin,
-		       req.end);
+		       req.end,
+		       req.canReadPopped ? "T" : "F");
 	}
 
 	try {
@@ -4000,7 +4013,7 @@ ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
                                           bool existing) {
 	state Reference<ChangeFeedData> feedResults = makeReference<ChangeFeedData>();
 	state Future<Void> feed = data->cx->getChangeFeedStream(
-	    feedResults, rangeId, 0, existing ? fetchVersion + 1 : data->version.get() + 1, range);
+	    feedResults, rangeId, 0, existing ? fetchVersion + 1 : data->version.get() + 1, range, true);
 
 	// TODO remove debugging eventually?
 	state Version firstVersion = invalidVersion;
