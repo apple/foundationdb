@@ -715,12 +715,14 @@ struct ChangeFeedStreamRequest {
 	Version begin = 0;
 	Version end = 0;
 	KeyRange range;
+	// TODO REMOVE once BG is correctness clean!! Useful for debugging
+	UID debugID;
 	ReplyPromiseStream<ChangeFeedStreamReply> reply;
 
 	ChangeFeedStreamRequest() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeID, begin, end, range, reply, spanContext, arena);
+		serializer(ar, rangeID, begin, end, range, reply, spanContext, debugID, arena);
 	}
 };
 

@@ -1996,7 +1996,9 @@ ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamReq
 ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamRequest req) {
 	state Span span("SS:getChangeFeedStream"_loc, { req.spanContext });
 	state bool atLatest = false;
-	state UID streamUID = deterministicRandom()->randomUniqueID();
+	// TODO CHANGE BACK after BG is correctness clean
+	// state UID streamUID = deterministicRandom()->randomUniqueID();
+	state UID streamUID = req.debugID;
 	state bool removeUID = false;
 	state Optional<Version> blockedVersion;
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
