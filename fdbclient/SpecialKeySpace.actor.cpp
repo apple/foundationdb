@@ -1292,7 +1292,7 @@ Future<RangeResult> ProcessClassSourceRangeImpl::getRange(ReadYourWritesTransact
 }
 
 ACTOR Future<RangeResult> getLockedKeyActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
-	ryw->getTransaction().setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
 	RangeResult result;
@@ -1372,7 +1372,7 @@ Future<Optional<std::string>> LockDatabaseImpl::commit(ReadYourWritesTransaction
 }
 
 ACTOR Future<RangeResult> getConsistencyCheckKeyActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
-	ryw->getTransaction().setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	ryw->getTransaction().setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	Optional<Value> val = wait(ryw->getTransaction().get(fdbShouldConsistencyCheckBeSuspended));
@@ -1779,7 +1779,7 @@ Future<RangeResult> CoordinatorsAutoImpl::getRange(ReadYourWritesTransaction* ry
 }
 
 ACTOR static Future<RangeResult> getMinCommitVersionActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
-	ryw->getTransaction().setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	Optional<Value> val = wait(ryw->getTransaction().get(minRequiredCommitVersionKey));
 	RangeResult result;
@@ -2267,7 +2267,7 @@ ACTOR static Future<RangeResult> MaintenanceGetRangeActor(ReadYourWritesTransact
                                                           KeyRangeRef kr) {
 	state RangeResult result;
 	// zoneId
-	ryw->getTransaction().setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	Optional<Value> val = wait(ryw->getTransaction().get(healthyZoneKey));
 	if (val.present()) {
