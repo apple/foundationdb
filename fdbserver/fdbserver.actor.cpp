@@ -643,12 +643,11 @@ static void printUsage(const char* name, bool devhelp) {
 	printOptionUsage("-h, -?, --help", "Display this help and exit.");
 	if (devhelp) {
 		printf("  --build-flags  Print build information and exit.\n");
-		printOptionUsage(
-		    "-r ROLE, --role ROLE",
-		    " Server role (valid options are fdbd, test, multitest,"
-		    " simulation, networktestclient, networktestserver, restore"
-		    " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, kvfiledump, unittests)."
-		    " The default is `fdbd'.");
+		printOptionUsage("-r ROLE, --role ROLE",
+		                 " Server role (valid options are fdbd, test, multitest,"
+		                 " simulation, networktestclient, networktestserver, restore"
+		                 " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, kvfiledump, unittests)."
+		                 " The default is `fdbd'.");
 #ifdef _WIN32
 		printOptionUsage("-n, --newconsole", " Create a new console.");
 		printOptionUsage("-q, --no-dialog", " Disable error dialog on crash.");
@@ -660,10 +659,9 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("-R, --restarting", " Restart a previous simulation that was cleanly shut down.");
 		printOptionUsage("-s SEED, --seed SEED", " Random seed.");
 		printOptionUsage("-k KEY, --key KEY", "Target key for search role.");
-		printOptionUsage(
-		    "--kvfile FILE",
-		    "Input file (SQLite database file) for use by the 'kvfilegeneratesums', "
-		    "'kvfileintegritycheck' and 'kvfiledump' roles.");
+		printOptionUsage("--kvfile FILE",
+		                 "Input file (SQLite database file) for use by the 'kvfilegeneratesums', "
+		                 "'kvfileintegritycheck' and 'kvfiledump' roles.");
 		printOptionUsage("-b [on,off], --buggify [on,off]", " Sets Buggify system state, defaults to `off'.");
 		printOptionUsage("-fi [on,off], --fault-injection [on,off]", " Sets fault injection, defaults to `on'.");
 		printOptionUsage("--crash", "Crash on serious errors instead of continuing.");
