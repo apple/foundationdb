@@ -5137,6 +5137,7 @@ ACTOR Future<bool> applyMutationsFromFetchInjectionInfo(StorageUpdater* pStorage
 
 			if (*pMutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 				*pMutationBytes = 0;
+				// Instead of just yielding, leave time for the storage server to respond to reads
 				wait(delay(SERVER_KNOBS->UPDATE_DELAY));
 			}
 		}
@@ -5145,6 +5146,7 @@ ACTOR Future<bool> applyMutationsFromFetchInjectionInfo(StorageUpdater* pStorage
 
 	return hasInjectedChanges;
 }
+
 // Take the durable version lock from the storage server context
 // NOTE: In general an ACTOR should accept a shared_ptr, yet this ACTOR should be always waited by a function which
 // holds a shared_ptr of StorageServerBase*, use the raw pointer to save the thread locks.
@@ -5260,6 +5262,153 @@ ACTOR Future<Void> ensureNoShardChange(StorageServerBase* pStorageServerContext,
 		    .detail("BeforeActor", shardChangeCounter)
 		    .detail("AfterActor", shardChangeCounterNow);
 	}
+
+	return Void();
+}
+
+// Updates the counter corresponds to the mutation type
+void updateMutationTypeCounter(StorageServerBase* pStorageServerContext, decltype(MutationRef::type) mutationType) {
+	switch (mutationType) {
+	case MutationRef::SetValue:
+		++pStorageServerContext->counters.setMutations;
+		break;
+	case MutationRef::ClearRange:
+		++pStorageServerContext->counters.clearRangeMutations;
+		break;
+	case MutationRef::AddValue:
+	case MutationRef::And:
+	case MutationRef::AndV2:
+	case MutationRef::AppendIfFits:
+	case MutationRef::ByteMax:
+	case MutationRef::ByteMin:
+	case MutationRef::Max:
+	case MutationRef::Min:
+	case MutationRef::MinV2:
+	case MutationRef::Or:
+	case MutationRef::Xor:
+	case MutationRef::CompareAndClear:
+		++pStorageServerContext->counters.atomicMutations;
+		break;
+	default:
+		// TODO Add a counter for other types of mutations, or capture some errors?
+		break;
+	}
+}
+
+// Apples the mutations
+// NOTE: Must wrap the actorWrapper, if only use Future<Void> then the ACTOR will be executed only once -- later when we
+// wait, flow will just return the previous result since it is already completed.
+ACTOR Future<Void> applyMutationsFromCursor(StorageUpdater* pStorageUpdater,
+                                            Reference<ILogSystem::IPeekCursor> cursor,
+                                            Version* pVersion,
+                                            int* pMutationBytes,
+                                            std::set<Key>* pUpdatedChangeFeeds,
+                                            StorageServerBase* pStorageServerContext) {
+	state Stopwatch stopwatch;
+	state SpanID spanContext = SpanID();
+	// Local pVersion
+	state Version ver = invalidVersion;
+	// Local updateChangeFeeds
+	state std::set<Key> updatedChangeFeeds;
+
+	cursor->setProtocolVersion(pStorageServerContext->logProtocol);
+	for (; cursor->hasMessage(); cursor->nextMessage()) {
+
+		if (*pMutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
+			*pMutationBytes = 0;
+			// Instead of just yielding, leave time for the storage server to respond to reads
+			wait(delay(SERVER_KNOBS->UPDATE_DELAY));
+		}
+
+		// The version of the message the current cursor pointing to
+		Version cursorVersion = cursor->version().version;
+		// Ensure the version is monotonicaly increasing
+		if (cursorVersion > ver) {
+			ASSERT(cursorVersion > pStorageServerContext->version.get());
+		}
+
+		auto& rd = *cursor->reader();
+
+		// Are we seeing a new version?
+		if (cursorVersion > ver && cursorVersion > pStorageServerContext->version.get()) {
+			++pStorageServerContext->counters.updateVersions;
+			if (pStorageServerContext->currentChangeFeeds.size()) {
+				pStorageServerContext->changeFeedVersions.emplace_back(
+				    std::vector<Key>(pStorageServerContext->currentChangeFeeds.begin(),
+				                     pStorageServerContext->currentChangeFeeds.end()),
+				    ver);
+				updatedChangeFeeds.insert(pStorageServerContext->currentChangeFeeds.begin(),
+				                          pStorageServerContext->currentChangeFeeds.end());
+				pStorageServerContext->currentChangeFeeds.clear();
+			}
+			ver = cursorVersion;
+		}
+
+		if (LogProtocolMessage::isNextIn(rd)) {
+			LogProtocolMessage lpm;
+			rd >> lpm;
+
+			pStorageServerContext->logProtocol = rd.protocolVersion();
+			pStorageServerContext->storage.changeLogProtocol(ver, pStorageServerContext->logProtocol);
+			cursor->setProtocolVersion(rd.protocolVersion());
+			spanContext = UID();
+		} else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
+			SpanContextMessage scm;
+			rd >> scm;
+			spanContext = scm.spanContext;
+		} else {
+			MutationRef msg;
+			rd >> msg;
+
+			Span span("SS:update"_loc, { spanContext });
+			span.addTag("key"_sr, msg.param1);
+
+			// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS in
+			// quarantine.
+			if (g_network->isSimulated() && pStorageServerContext->isTss() && !g_simulator.speedUpSimulation &&
+			    g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations &&
+			    pStorageServerContext->tssFaultInjectTime.present() &&
+			    pStorageServerContext->tssFaultInjectTime.get() < now() &&
+			    (msg.type == MutationRef::SetValue || msg.type == MutationRef::ClearRange) &&
+			    (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff) &&
+			    deterministicRandom()->random01() < 0.05) {
+				TraceEvent(SevWarnAlways, "TSSInjectDropMutation", pStorageServerContext->thisServerID)
+				    .detail("Mutation", msg)
+				    .detail("Version", cursor->version().toString());
+			} else if (pStorageServerContext->isTSSInQuarantine() &&
+			           (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff)) {
+				TraceEvent("TSSQuarantineDropMutation", pStorageServerContext->thisServerID)
+				    .suppressFor(10.0)
+				    .detail("Version", cursor->version().toString());
+			} else if (ver != invalidVersion) { // This change belongs to a version < minVersion
+				DEBUG_MUTATION("SSPeek", ver, msg, pStorageServerContext->thisServerID);
+				if (ver == 1) {
+					//TraceEvent("SSPeekMutation", pStorageServerContext->thisServerID).log();
+					// The following trace event may produce a value with special characters
+					TraceEvent("SSPeekMutation", pStorageServerContext->thisServerID)
+					    .detail("Mutation", msg)
+					    .detail("Version", cursor->version().toString());
+				}
+
+				pStorageUpdater->applyMutation(pStorageServerContext, msg, ver, false);
+
+				*pMutationBytes += msg.totalSize();
+				pStorageServerContext->counters.mutationBytes += msg.totalSize();
+				++pStorageServerContext->counters.mutations;
+
+				updateMutationTypeCounter(pStorageServerContext, msg.type);
+			} else {
+				TraceEvent(SevError, "DiscardingPeekedData", pStorageServerContext->thisServerID)
+				    .detail("Mutation", msg)
+				    .detail("Version", cursor->version().toString());
+			}
+		}
+	}
+	pStorageServerContext->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(stopwatch.lap());
+
+	// Update external variables
+	*pVersion = ver;
+	pUpdatedChangeFeeds->swap(updatedChangeFeeds);
 
 	return Void();
 }
@@ -5480,7 +5629,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 		// TODO: Now if we run
 		//	cloneCursor2 = cursor->cloneNoMore();
-		// There will be other test failures, rarely happens. Basically cursor->cloneNoMore() is stateful.
+		// There will be test failures, rarely happens. Basically cursor->cloneNoMore() is stateful.
 		// Needs explanation for this.
 
 		// TODO: Why is is named SSSlowTakeLock2?
@@ -5513,114 +5662,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		    wait(details::applyMutationsFromFetchInjectionInfo(&updater, &fii, &mutationBytes, data));
 
 		// Apply the mutations from the cursor.
-
 		state Version ver = invalidVersion;
-		cloneCursor2->setProtocolVersion(data->logProtocol);
-		state SpanID spanContext = SpanID();
-		state double beforeTLogMsgsUpdates = now();
 		state std::set<Key> updatedChangeFeeds;
-		for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
-			if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
-				mutationBytes = 0;
-				// Instead of just yielding, leave time for the storage server to respond to reads
-				wait(delay(SERVER_KNOBS->UPDATE_DELAY));
-			}
+		wait(details::applyMutationsFromCursor(&updater, cloneCursor2, &ver, &mutationBytes, &updatedChangeFeeds, data));
 
-			if (cloneCursor2->version().version > ver) {
-				ASSERT(cloneCursor2->version().version > data->version.get());
-			}
-
-			auto& rd = *cloneCursor2->reader();
-
-			if (cloneCursor2->version().version > ver && cloneCursor2->version().version > data->version.get()) {
-				++data->counters.updateVersions;
-				if (data->currentChangeFeeds.size()) {
-					data->changeFeedVersions.emplace_back(
-					    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver);
-					updatedChangeFeeds.insert(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end());
-					data->currentChangeFeeds.clear();
-				}
-				ver = cloneCursor2->version().version;
-			}
-
-			if (LogProtocolMessage::isNextIn(rd)) {
-				LogProtocolMessage lpm;
-				rd >> lpm;
-
-				data->logProtocol = rd.protocolVersion();
-				data->storage.changeLogProtocol(ver, data->logProtocol);
-				cloneCursor2->setProtocolVersion(rd.protocolVersion());
-				spanContext = UID();
-			} else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
-				SpanContextMessage scm;
-				rd >> scm;
-				spanContext = scm.spanContext;
-			} else {
-				MutationRef msg;
-				rd >> msg;
-
-				Span span("SS:update"_loc, { spanContext });
-				span.addTag("key"_sr, msg.param1);
-
-				// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS in
-				// quarantine.
-				if (g_network->isSimulated() && data->isTss() && !g_simulator.speedUpSimulation &&
-				    g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations &&
-				    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now() &&
-				    (msg.type == MutationRef::SetValue || msg.type == MutationRef::ClearRange) &&
-				    (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff) &&
-				    deterministicRandom()->random01() < 0.05) {
-					TraceEvent(SevWarnAlways, "TSSInjectDropMutation", data->thisServerID)
-					    .detail("Mutation", msg)
-					    .detail("Version", cloneCursor2->version().toString());
-				} else if (data->isTSSInQuarantine() &&
-				           (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff)) {
-					TraceEvent("TSSQuarantineDropMutation", data->thisServerID)
-					    .suppressFor(10.0)
-					    .detail("Version", cloneCursor2->version().toString());
-				} else if (ver != invalidVersion) { // This change belongs to a version < minVersion
-					DEBUG_MUTATION("SSPeek", ver, msg, data->thisServerID);
-					if (ver == 1) {
-						//TraceEvent("SSPeekMutation", data->thisServerID).log();
-						// The following trace event may produce a value with special characters
-						TraceEvent("SSPeekMutation", data->thisServerID)
-						    .detail("Mutation", msg)
-						    .detail("Version", cloneCursor2->version().toString());
-					}
-
-					updater.applyMutation(data, msg, ver, false);
-					mutationBytes += msg.totalSize();
-					data->counters.mutationBytes += msg.totalSize();
-					++data->counters.mutations;
-					switch (msg.type) {
-					case MutationRef::SetValue:
-						++data->counters.setMutations;
-						break;
-					case MutationRef::ClearRange:
-						++data->counters.clearRangeMutations;
-						break;
-					case MutationRef::AddValue:
-					case MutationRef::And:
-					case MutationRef::AndV2:
-					case MutationRef::AppendIfFits:
-					case MutationRef::ByteMax:
-					case MutationRef::ByteMin:
-					case MutationRef::Max:
-					case MutationRef::Min:
-					case MutationRef::MinV2:
-					case MutationRef::Or:
-					case MutationRef::Xor:
-					case MutationRef::CompareAndClear:
-						++data->counters.atomicMutations;
-						break;
-					}
-				} else
-					TraceEvent(SevError, "DiscardingPeekedData", data->thisServerID)
-					    .detail("Mutation", msg)
-					    .detail("Version", cloneCursor2->version().toString());
-			}
-		}
-		data->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeTLogMsgsUpdates);
 		if (data->currentChangeFeeds.size()) {
 			data->changeFeedVersions.emplace_back(
 			    std::vector<Key>(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end()), ver);
