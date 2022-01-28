@@ -54,12 +54,8 @@ FDB_DEFINE_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
 
 // Returns the connection string currently held in this object. This may not match the stored record if it hasn't
 // been persisted or if the persistent storage for the record has been modified externally.
-ClusterConnectionString const& IClusterConnectionRecord::getConnectionString() const {
+ClusterConnectionString& IClusterConnectionRecord::getConnectionString() {
 	return cs;
-}
-
-ClusterConnectionString* IClusterConnectionRecord::getMutableConnectionString() {
-	return &cs;
 }
 
 Future<bool> IClusterConnectionRecord::upToDate() {
@@ -87,6 +83,10 @@ bool IClusterConnectionRecord::hasUnresolvedHostnames() const {
 
 Future<Void> IClusterConnectionRecord::resolveHostnames() {
 	return cs.resolveHostnames();
+}
+
+void IClusterConnectionRecord::resolveHostnamesBlocking() {
+	cs.resolveHostnamesBlocking();
 }
 
 std::string ClusterConnectionString::getErrorString(std::string const& source, Error const& e) {
@@ -126,6 +126,28 @@ Future<Void> ClusterConnectionString::resolveHostnames() {
 		return Void();
 	} else {
 		return resolveHostnamesImpl(this);
+	}
+}
+
+void ClusterConnectionString::resolveHostnamesBlocking() {
+	if (hasUnresolvedHostnames) {
+		for (auto const& hostname : hostnames) {
+			std::vector<NetworkAddress> addresses =
+			    INetworkConnections::net()->resolveTCPEndpointBlocking(hostname.host, hostname.service);
+			NetworkAddress address = addresses[deterministicRandom()->randomInt(0, addresses.size())];
+			address.flags = 0; // Reset the parsed address to public
+			address.fromHostname = NetworkAddressFromHostname::True;
+			if (hostname.isTLS) {
+				address.flags |= NetworkAddress::FLAG_TLS;
+			}
+			coords.push_back(address);
+			networkAddressToHostname.emplace(address, hostname);
+		}
+		std::sort(coords.begin(), coords.end());
+		if (std::unique(coords.begin(), coords.end()) != coords.end()) {
+			throw connection_string_invalid();
+		}
+		hasUnresolvedHostnames = false;
 	}
 }
 
@@ -623,7 +645,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterCon
 					    .detail("CurrentConnectionString",
 					            info.intermediateConnRecord->getConnectionString().toString());
 				}
-				connRecord->setConnectionString(info.intermediateConnRecord->getConnectionString());
+				connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString());
 				info.intermediateConnRecord = connRecord;
 			}
 
@@ -929,7 +951,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 					    .detail("CurrentConnectionString",
 					            info.intermediateConnRecord->getConnectionString().toString());
 				}
-				connRecord->setConnectionString(info.intermediateConnRecord->getConnectionString());
+				connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString());
 				info.intermediateConnRecord = connRecord;
 			}
 

@@ -205,7 +205,7 @@ extern void copyTest();
 extern void versionedMapTest();
 extern void createTemplateDatabase();
 // FIXME: this really belongs in a header somewhere since it is actually used.
-extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs);
+extern IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs);
 
 extern const char* getSourceVersion();
 
@@ -815,7 +815,7 @@ Optional<bool> checkBuggifyOverride(const char* testFile) {
 // Takes a vector of public and listen address strings given via command line, and returns vector of NetworkAddress
 // objects.
 std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
-    const IClusterConnectionRecord& connectionRecord,
+    IClusterConnectionRecord& connectionRecord,
     const std::vector<std::string>& publicAddressStrs,
     std::vector<std::string>& listenAddressStrs) {
 	if (listenAddressStrs.size() > 0 && publicAddressStrs.size() != listenAddressStrs.size()) {
