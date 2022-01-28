@@ -150,7 +150,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 	Reference<TLogGroupCollection> tLogGroupCollection = Reference<TLogGroupCollection>(nullptr);
 
 	// Each storage server's teams.
-	std::unordered_map<UID, std::set<ptxn::StorageTeamID>> ssToStorageTeam;
+	std::unordered_map<UID, std::unordered_set<ptxn::StorageTeamID>> ssToStorageTeam;
 
 	Version debugMinRecentStateVersion = 0;
 
