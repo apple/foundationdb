@@ -2291,9 +2291,9 @@ ACTOR Future<Void> KVFileDump(std::string filename) {
 
 	StringRef kvFile(filename);
 	KeyValueStoreType type = KeyValueStoreType::END;
-	if (kvFile.endsWith(LiteralStringRef(".fdb")))
+	if (kvFile.endsWith(".fdb"_sr))
 		type = KeyValueStoreType::SSD_BTREE_V1;
-	else if (kvFile.endsWith(LiteralStringRef(".sqlite")))
+	else if (kvFile.endsWith(".sqlite"_sr))
 		type = KeyValueStoreType::SSD_BTREE_V2;
 	ASSERT(type != KeyValueStoreType::END);
 
