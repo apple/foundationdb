@@ -5087,13 +5087,13 @@ std::vector<ptxn::TLogInterfaceBase*> getTLogInterfaceByStorageTeamID(const Serv
 			}
 		}
 		TraceEvent("PtxnGetTLogInterfaceByStorageTeamID")
-		    .detail("StorageTeamID", storageTeamID.toString())
-		    .detail("TLogGroupID", tLogGroupID.toString())
+		    .detail("StorageTeamID", storageTeamID)
+		    .detail("TLogGroupID", tLogGroupID)
 		    .detail("NumTLogInterfaces", tLogInterfaces.size());
 	}
 
 	TraceEvent("PtxnGetTLogInterfaceByStorageTeamID")
-	    .detail("StorageTeamID", storageTeamID.toString())
+	    .detail("StorageTeamID", storageTeamID)
 	    .detail("TotalNumTLogInterfaces", tLogInterfaces.size());
 	return tLogInterfaces;
 }
