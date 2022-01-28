@@ -4025,8 +4025,14 @@ ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
                                           Version fetchVersion,
                                           bool existing) {
 	state Reference<ChangeFeedData> feedResults = makeReference<ChangeFeedData>();
-	state Future<Void> feed = data->cx->getChangeFeedStream(
-	    feedResults, rangeId, emptyVersion + 1, existing ? fetchVersion + 1 : data->version.get() + 1, range, true);
+	printf("DBG: fetching %lld %lld %lld\n", emptyVersion, emptyVersion + 1, fetchVersion);
+	Version startVersion = emptyVersion + 1;
+	if (startVersion < 0) {
+		startVersion = 0;
+	}
+	// TODO somwhere this is initialized to -2 instead of -1 but it's fine
+	state Future<Void> feed =
+	    data->cx->getChangeFeedStream(feedResults, rangeId, startVersion, fetchVersion, range, true);
 
 	// TODO remove debugging eventually?
 	state Version firstVersion = invalidVersion;
@@ -4175,13 +4181,13 @@ ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
 
 ACTOR Future<Void> fetchChangeFeed(StorageServer* data,
                                    Reference<ChangeFeedInfo> changeFeedInfo,
-                                   Version fetchVersion) {
+                                   Version transferredVersion) {
 	wait(delay(0)); // allow this actor to be cancelled by removals
 
 	TraceEvent(SevDebug, "FetchChangeFeed", data->thisServerID)
 	    .detail("RangeID", changeFeedInfo->id.printable())
 	    .detail("Range", changeFeedInfo->range.toString())
-	    .detail("FetchVersion", fetchVersion);
+	    .detail("FetchVersion", transferredVersion);
 
 	auto cleanupPending = data->changeFeedCleanupDurable.find(changeFeedInfo->id);
 	if (cleanupPending != data->changeFeedCleanupDurable.end()) {
@@ -4189,7 +4195,8 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data,
 		    .detail("RangeID", changeFeedInfo->id.printable())
 		    .detail("Range", changeFeedInfo->range.toString())
 		    .detail("CleanupVersion", cleanupPending->second)
-		    .detail("FetchVersion", fetchVersion);
+		    .detail("EmptyVersion", changeFeedInfo->emptyVersion)
+		    .detail("FetchVersion", transferredVersion);
 		wait(data->durableVersion.whenAtLeast(cleanupPending->second + 1));
 		ASSERT(!data->changeFeedCleanupDurable.count(changeFeedInfo->id));
 	}
@@ -4202,7 +4209,7 @@ ACTOR Future<Void> fetchChangeFeed(StorageServer* data,
 			                            changeFeedInfo->id,
 			                            changeFeedInfo->range,
 			                            changeFeedInfo->emptyVersion,
-			                            fetchVersion,
+			                            transferredVersion,
 			                            false));
 			data->fetchingChangeFeeds.insert(changeFeedInfo->id);
 			return Void();
@@ -4288,7 +4295,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyR
 ACTOR Future<Void> dispatchChangeFeeds(StorageServer* data,
                                        UID fetchKeysID,
                                        KeyRange keys,
-                                       Version fetchVersion,
+                                       Version transferredVersion,
                                        std::vector<Key> feedIds) {
 
 	// find overlapping range feeds
@@ -4303,7 +4310,7 @@ ACTOR Future<Void> dispatchChangeFeeds(StorageServer* data,
 			// TODO REMOVE this assert once we enable change feed deletion
 			ASSERT(feedIt != data->uidChangeFeed.end());
 			Reference<ChangeFeedInfo> feed = feedIt->second;
-			feedFetches[feed->id] = fetchChangeFeed(data, feed, fetchVersion);
+			feedFetches[feed->id] = fetchChangeFeed(data, feed, transferredVersion);
 		}
 
 		loop {
