@@ -1039,10 +1039,16 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 		// Track that this rollback happened, since we have to re-read mutations up to the rollback
 		// Add this rollback to in progress, and put all completed ones back in progress
 		rollbacksInProgress.push_back(std::pair(rollbackVersion, mutationVersion));
-		for (int i = rollbacksCompleted.size() - 1; i >= 0; i--) {
-			rollbacksInProgress.push_front(rollbacksCompleted[i]);
+		while (!rollbacksCompleted.empty()) {
+			if (rollbacksCompleted.back().first >= cfRollbackVersion) {
+				rollbacksInProgress.push_front(rollbacksCompleted.back());
+				rollbacksCompleted.pop_back();
+			} else {
+				// some rollbacks in completed could still have a delta file in flight after this rollback, they should
+				// remain in completed
+				break;
+			}
 		}
-		rollbacksCompleted.clear();
 
 	} else {
 		// No pending delta files to discard, just in-memory mutations
