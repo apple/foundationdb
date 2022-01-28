@@ -1191,7 +1191,14 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
   : dbState(new DatabaseState(clusterFilePath, versionMonitorDb)) {
 	dbState->db = db;
 	dbState->dbVar->set(db);
-
+	auto stateMapKey = std::make_pair(clusterFilePath, dbState->dbProtocolVersion.get());
+	if (api->clusterSharedStateMap.find(stateMapKey) == api->clusterSharedStateMap.end() ||
+	    api->clusterSharedStateMap[stateMapKey] == nullptr) {
+		DatabaseSharedState* p = db->createSharedState();
+		api->clusterSharedStateMap[stateMapKey] = p;
+	} else {
+		db->setSharedState(api->clusterSharedStateMap[stateMapKey]);
+	}
 	if (openConnectors) {
 		if (!api->localClientDisabled) {
 			dbState->addClient(api->getLocalClient());
@@ -1531,6 +1538,15 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 		}
 	}
 
+	auto stateMapKey = std::make_pair(clusterFilePath, dbProtocolVersion.get());
+	if (MultiVersionApi::api->clusterSharedStateMap.find(stateMapKey) ==
+	        MultiVersionApi::api->clusterSharedStateMap.end() ||
+	    MultiVersionApi::api->clusterSharedStateMap[stateMapKey] == nullptr) {
+		DatabaseSharedState* p = db->createSharedState();
+		MultiVersionApi::api->clusterSharedStateMap[stateMapKey] = p;
+	} else {
+		db->setSharedState(MultiVersionApi::api->clusterSharedStateMap[stateMapKey]);
+	}
 	dbVar->set(db);
 
 	ASSERT(protocolVersionMonitor.isValid());
@@ -2147,13 +2163,6 @@ Reference<IDatabase> MultiVersionApi::createDatabase(const char* clusterFilePath
 		lock.leave();
 
 		Reference<IDatabase> localDb = localClient->api->createDatabase(clusterFilePath);
-		if (clusterSharedStateMap.find(clusterFile) == clusterSharedStateMap.end() ||
-		    clusterSharedStateMap[clusterFile] == nullptr) {
-			DatabaseSharedState* p = localDb->createSharedState();
-			clusterSharedStateMap[clusterFile] = p;
-		} else {
-			localDb->setSharedState(clusterSharedStateMap[clusterFile]);
-		}
 		return Reference<IDatabase>(
 		    new MultiVersionDatabase(this, threadIdx, clusterFile, Reference<IDatabase>(), localDb));
 	}
@@ -2163,13 +2172,6 @@ Reference<IDatabase> MultiVersionApi::createDatabase(const char* clusterFilePath
 	ASSERT_LE(threadCount, 1);
 
 	Reference<IDatabase> localDb = localClient->api->createDatabase(clusterFilePath);
-	if (clusterSharedStateMap.find(clusterFile) == clusterSharedStateMap.end() ||
-	    clusterSharedStateMap[clusterFile] == nullptr) {
-		DatabaseSharedState* p = localDb->createSharedState();
-		clusterSharedStateMap[clusterFile] = p;
-	} else {
-		localDb->setSharedState(clusterSharedStateMap[clusterFile]);
-	}
 	if (bypassMultiClientApi) {
 		return localDb;
 	} else {

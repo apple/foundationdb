@@ -718,6 +718,8 @@ public:
 
 	bool callbackOnMainThread;
 	bool localClientDisabled;
+	// Map of (clusterFilePath + protocolVersion) -> DatabaseSharedState pointer
+	std::map<std::pair<std::string, ProtocolVersion>, DatabaseSharedState*> clusterSharedStateMap;
 
 	static bool apiVersionAtLeast(int minVersion);
 
@@ -741,7 +743,6 @@ private:
 	Reference<ClientInfo> localClient;
 	std::map<std::string, ClientDesc> externalClientDescriptions;
 	std::map<std::string, std::vector<Reference<ClientInfo>>> externalClients;
-	std::map<std::string, DatabaseSharedState*> clusterSharedStateMap;
 
 	bool networkStartSetup;
 	volatile bool networkSetup;
