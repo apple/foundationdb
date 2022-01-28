@@ -382,7 +382,7 @@ const Key storageTeamIdKey(ptxn::StorageTeamID teamId) {
 	return wr.toValue();
 }
 
-ptxn::StorageTeamID storageTeamIdKeyDecode(const KeyRef& key) {
+ptxn::StorageTeamID decodeStorageTeamIdKey(const KeyRef& key) {
 	ptxn::StorageTeamID teamId;
 	BinaryReader rd(key.removePrefix(storageTeamIdKeyPrefix), Unversioned());
 	rd >> teamId;

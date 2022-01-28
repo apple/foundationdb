@@ -488,7 +488,7 @@ public:
 
 	Tag tag;
 	// StorageTeamId for this storage server. Exists iff this is a ptxn storage server
-	Optional<ptxn::StorageTeamID> storageTeamID;
+	Optional<std::set<ptxn::StorageTeamID>> storageTeamIDs;
 	std::vector<std::pair<Version, Tag>> history;
 	std::vector<std::pair<Version, Tag>> allHistory;
 	Version poppedAllAfter;
@@ -538,7 +538,7 @@ public:
 
 	void popVersion(Version v, bool popAllTags = false) {
 		// Disable pop if it's ptxn storage server
-		if (storageTeamID.present()) {
+		if (storageTeamIDs.present()) {
 			return;
 		}
 
@@ -5064,8 +5064,8 @@ ACTOR Future<Void> tssDelayForever() {
 namespace ptxn {
 
 const StorageTeamID& getStoragePrivateMutationTeam(const ptxn::StorageServer& storageServerContext) {
-	ASSERT(storageServerContext.storageTeamID.present());
-	return storageServerContext.storageTeamID.get();
+	ASSERT(storageServerContext.storageTeamIDs.present());
+	return storageServerContext.thisServerID; // NOTE: Private team is same as SSID.
 }
 
 std::vector<ptxn::TLogInterfaceBase*> getTLogInterfaceByStorageTeamID(const ServerDBInfo& serverDBInfo,
@@ -6818,12 +6818,13 @@ ACTOR Future<Void> storageServerCore(std::shared_ptr<StorageServerBase> self_, S
 							self->poppedAllAfter = self->db->get().logSystemConfig.recoveredAt.get();
 						}
 						if (!SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
-							dynamic_cast<StorageServer*>(self)->logCursor =
-							    self->logSystem->peekSingle(self->thisServerID,
-							                                self->version.get() + 1,
-							                                self->tag,
-							                                self->storageTeamID,
-							                                self->history);
+							dynamic_cast<StorageServer*>(self)->logCursor = self->logSystem->peekSingle(
+							    self->thisServerID,
+							    self->version.get() + 1,
+							    self->tag,
+							    self->storageTeamIDs.present() ? *self->storageTeamIDs.get().begin()
+							                                   : Optional<ptxn::StorageTeamID>(), // TODO(Vishesh)
+							    self->history);
 						} else {
 							ASSERT(std::dynamic_pointer_cast<ptxn::StorageServer>(self_));
 							ptxn::initializeUpdateCursor(*std::dynamic_pointer_cast<ptxn::StorageServer>(self_));
@@ -7114,14 +7115,17 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
-                                 Optional<ptxn::StorageTeamID> storageTeamID) {
+                                 Optional<std::vector<ptxn::StorageTeamID>> storageTeams) {
 
-	state std::shared_ptr<StorageServerBase> self = getStorageServerInstance(persistentData, db, ssi, storageTeamID);
+	state std::shared_ptr<StorageServerBase> self = getStorageServerInstance(
+	    persistentData, db, ssi, storageTeams.present() ? storageTeams.get()[0] : Optional<ptxn::StorageTeamID>());
 	state Future<Void> ssCore;
 
-	self->storageTeamID = storageTeamID;
+	self->storageTeamIDs = storageTeams.present()
+	                           ? std::set<ptxn::StorageTeamID>(storageTeams.get().begin(), storageTeams.get().end())
+	                           : Optional<std::set<ptxn::StorageTeamID>>();
 	self->folder = folder;
-	if (storageTeamID.present()) {
+	if (storageTeams.present()) {
 		self->logProtocol = ProtocolVersion::withPartitionTransaction();
 	}
 	self->clusterId.send(clusterId);
@@ -7157,6 +7161,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		TraceEvent("StorageServerInit", ssi.id())
 		    .detail("Version", self->version.get())
 		    .detail("SeedTag", seedTag.toString())
+		    .detail("StorageTeams", storageTeams.present() ? describe(storageTeams.get()) : "")
 		    .detail("TssPair", ssi.isTss() ? ssi.tssPairID.get().toString() : "");
 		InitializeStorageReply rep;
 		rep.interf = ssi;

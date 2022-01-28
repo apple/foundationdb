@@ -309,7 +309,6 @@ void TLogGroupWithPrivateMutationsFixture::setUp(const int numTLogGroups, const 
 	storageTeamIDs.push_back(privateMutationsStorageTeamID);
 
 	const auto privateMutationsTLogGroupID = tLogGroupByStorageTeamID(tLogGroupIDs, privateMutationsStorageTeamID);
-
 	tLogGroupStorageTeamMapping[privateMutationsTLogGroupID].insert(privateMutationsStorageTeamID);
 	storageTeamTLogGroupMapping[privateMutationsStorageTeamID] = privateMutationsTLogGroupID;
 }
@@ -512,6 +511,7 @@ void ptxnStorageServerFixture::setUp(const int numStorageServers) {
 	storageServerResources.emplace_back(storageTeamID);
 	initializeStorageReplies.emplace_back();
 
+	std::vector<ptxn::StorageTeamID> storageTeams{ storageTeamID };
 	const auto& resource = storageServerResources.back();
 	const auto& initializeReply = initializeStorageReplies.back();
 	actors.push_back(storageServer(resource.kvStore.get(),
@@ -522,7 +522,7 @@ void ptxnStorageServerFixture::setUp(const int numStorageServers) {
 	                               initializeReply,
 	                               asyncServerDBInfoRef,
 	                               /* folder */ "./",
-	                               storageTeamID));
+	                               storageTeams));
 }
 
 ptxnStorageServerFixture::~ptxnStorageServerFixture() {

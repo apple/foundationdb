@@ -74,6 +74,5 @@ TEST_CASE("fdbserver/ptxn/test/StorageServerPull") {
 	printTiming << "All storage servers are ready" << std::endl;
 
 	wait(delay(10));
-
 	return Void();
 }
