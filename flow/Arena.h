@@ -31,6 +31,7 @@
 #include "flow/ObjectSerializerTraits.h"
 #include "flow/FileIdentifier.h"
 #include <algorithm>
+#include <boost/functional/hash.hpp>
 #include <stdint.h>
 #include <string>
 #include <cstring>
@@ -282,8 +283,10 @@ public:
 	bool operator<(Optional const& o) const { return impl < o.impl; }
 
 	void reset() { impl.reset(); }
+	size_t hash() const { return hashFunc(impl); }
 
 private:
+	static inline std::hash<std::optional<T>> hashFunc{};
 	std::optional<T> impl;
 };
 
@@ -650,6 +653,26 @@ struct hash<Standalone<StringRef>> {
 	}
 };
 } // namespace std
+
+namespace std {
+template <class T>
+struct hash<Optional<T>> {
+	std::size_t operator()(Optional<T> const& val) const { return val.hash(); }
+};
+} // namespace std
+
+template <class T, class V = std::void_t<>>
+struct boost_hashable : std::false_type {};
+
+template <class T>
+struct boost_hashable<T, std::void_t<decltype(boost::hash_value(std::declval<T>()))>> : std::true_type {};
+
+// Using boost hash functions on types that depend on member hashes (e.g. std::pair) expect the members
+// to be boost hashable. This provides a default boost hash function based on std::hash.
+template <class T>
+std::enable_if_t<!boost_hashable<T>::value, std::size_t> hash_value(const T& v) {
+	return std::hash<T>{}(v);
+}
 
 template <>
 struct TraceableString<StringRef> {
