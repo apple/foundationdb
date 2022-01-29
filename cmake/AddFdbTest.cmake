@@ -404,7 +404,7 @@ endfunction()
 # Creates a single cluster before running the specified command (usually a ctest test)
 function(add_fdbclient_test)
   set(options DISABLED ENABLED)
-  set(oneValueArgs NAME PROCESS_NUMBER TEST_TIMEOUT)
+  set(oneValueArgs NAME PROCESS_NUMBER TEST_TIMEOUT WORKING_DIRECTORY)
   set(multiValueArgs COMMAND)
   cmake_parse_arguments(T "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
   if(OPEN_FOR_IDE)
@@ -412,6 +412,9 @@ function(add_fdbclient_test)
   endif()
   if(NOT T_ENABLED AND T_DISABLED)
     return()
+  endif()
+  if(NOT T_WORKING_DIRECTORY)
+    set(T_WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
   endif()
   if(NOT T_NAME)
     message(FATAL_ERROR "NAME is a required argument for add_fdbclient_test")
@@ -422,6 +425,7 @@ function(add_fdbclient_test)
   message(STATUS "Adding Client test ${T_NAME}")
   if (T_PROCESS_NUMBER)
     add_test(NAME "${T_NAME}"
+    WORKING_DIRECTORY ${T_WORKING_DIRECTORY}
     COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
             --process-number ${T_PROCESS_NUMBER}
@@ -429,6 +433,7 @@ function(add_fdbclient_test)
             ${T_COMMAND})
   else()
     add_test(NAME "${T_NAME}"
+    WORKING_DIRECTORY ${T_WORKING_DIRECTORY}
     COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
             --
