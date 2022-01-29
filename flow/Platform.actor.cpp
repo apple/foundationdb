@@ -2759,15 +2759,9 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const 
 		// return ENOENT or ESRCH. We'll log when ENOENT or ESRCH is encountered and continue, otherwise we'll log and
 		// throw a platform_error.
 		if (errno == ENOENT || errno == ESRCH) {
-			TraceEvent(SevWarn, "PthreadSetNameNp")
-			    .detail("Name", name)
-			    .detail("ReturnCode", retVal)
-			    .GetLastError();
+			TraceEvent(SevWarn, "PthreadSetNameNp").detail("Name", name).detail("ReturnCode", retVal).GetLastError();
 		} else {
-			TraceEvent(SevError, "PthreadSetNameNp")
-			    .detail("Name", name)
-			    .detail("ReturnCode", retVal)
-			    .GetLastError();
+			TraceEvent(SevError, "PthreadSetNameNp").detail("Name", name).detail("ReturnCode", retVal).GetLastError();
 			throw platform_error();
 		}
 	}
