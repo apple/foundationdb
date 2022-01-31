@@ -2753,6 +2753,22 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 	}
 }
 
+// read storageWigglerStats through Read-only tx, then convert it to JSON field
+ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(DatabaseConfiguration conf, Database cx) {
+	state StorageWiggleMetrics metrics;
+	state Optional<Value> v1 = wait(metrics.runGetTransaction(cx, true));
+	state Optional<Value> v2 = wait(metrics.runGetTransaction(cx, false));
+	state JsonBuilderObject res;
+	if (v1.present()) {
+		metrics = BinaryReader::fromStringRef<StorageWiggleMetrics>(v1.get(), IncludeVersion());
+		res["primary"] = metrics.toJSON();
+	}
+	if (conf.regions.size() > 1 && v2.present()) {
+		metrics = BinaryReader::fromStringRef<StorageWiggleMetrics>(v2.get(), IncludeVersion());
+		res["remote"] = metrics.toJSON();
+	}
+	return res;
+}
 // constructs the cluster section of the json status output
 ACTOR Future<StatusReply> clusterGetStatus(
     Reference<AsyncVar<ServerDBInfo>> db,
@@ -2888,6 +2904,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state std::vector<BlobWorkerInterface> blobWorkers;
 		state JsonBuilderObject qos;
 		state JsonBuilderObject data_overlay;
+		state JsonBuilderObject storage_wiggler;
 
 		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
 		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
@@ -2975,8 +2992,14 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 			futures2.push_back(
 			    clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
+
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 			wait(success(primaryDCFO));
+
+			if (configuration.get().perpetualStorageWiggleSpeed > 0) {
+				wait(store(storage_wiggler, storageWigglerStatsFetcher(configuration.get(), cx)));
+				statusObj["storage_wiggler"] = storage_wiggler;
+			}
 
 			int logFaultTolerance = 100;
 			if (db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {

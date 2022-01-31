@@ -355,6 +355,19 @@ struct StorageWiggleMetrics {
 			return tr->get(storageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr));
 		});
 	}
+	StatusObject toJSON() {
+		StatusObject result;
+		result["last_round_start"] = last_round_start;
+		result["last_round_finish"] = last_round_finish;
+		result["smoothed_round_duration"] = smoothed_round_duration.estimate;
+		result["finished_round"] = finished_round;
+
+		result["last_step_start"] = last_step_start;
+		result["last_step_finish"] = last_step_finish;
+		result["smoothed_step_duration"] = smoothed_step_duration.estimate;
+		result["finished_step"] = finished_step;
+		return result;
+	}
 };
 
 struct StorageWiggler : ReferenceCounted<StorageWiggler> {

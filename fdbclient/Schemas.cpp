@@ -24,6 +24,28 @@
 const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
+	  "storage_wiggler": {
+         "primary": {
+          	"last_round_start": 1,
+			"last_round_finish": 1,
+			"smoothed_round_duration": 1,
+			"finished_round": 1,
+			"last_step_start": 1,
+			"last_step_finish": 1,
+			"smoothed_step_duration": 1,
+			"finished_step": 1
+          },
+         "remote": {
+         	"last_round_start": 1,
+			"last_round_finish": 1,
+			"smoothed_round_duration": 1,
+			"finished_round": 1,
+			"last_step_start": 1,
+			"last_step_finish": 1,
+			"smoothed_step_duration": 1,
+			"finished_step": 1
+         }
+      },
       "layers":{
          "_valid":true,
          "_error":"some error description"
