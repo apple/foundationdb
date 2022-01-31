@@ -156,4 +156,5 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
-WorkloadFactory<HighContentionPrefixAllocatorWorkload> HighContentionPrefixAllocatorWorkload(HighContentionPrefixAllocatorWorkload::NAME);
+WorkloadFactory<HighContentionPrefixAllocatorWorkload> HighContentionPrefixAllocatorWorkload(
+    HighContentionPrefixAllocatorWorkload::NAME);
