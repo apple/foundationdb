@@ -1,0 +1,5 @@
+[[test]]
+testTitle = 'HighContentionAllocator'
+
+    [[test.workload]]
+    testName = 'HighContentionAllocator'
