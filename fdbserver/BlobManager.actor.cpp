@@ -1731,12 +1731,12 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 			fmt::print("  [{0} - {1}){2}\n",
 			           range.begin().printable(),
 			           range.end().printable(),
-			           workerId == UID() ? " (*)" : "");
+			           workerId == UID() || epoch == 0 ? " (*)" : "");
 		}
 
-		// if worker id is already set to a known worker, range is already assigned there. If not, need to explicitly
-		// assign it
-		if (workerId == UID()) {
+		// if worker id is already set to a known worker that replied with it in the mapping, range is already assigned
+		// there. If not, need to explicitly assign it to someone
+		if (workerId == UID() || epoch == 0) {
 			RangeAssignment raAssign;
 			raAssign.isAssign = true;
 			raAssign.worker = workerId;
