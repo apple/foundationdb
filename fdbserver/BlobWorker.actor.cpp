@@ -42,6 +42,7 @@
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 #define BW_DEBUG true
@@ -714,13 +715,20 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			DEBUG_KEY_RANGE("BlobWorkerFDBSnapshot", readVersion, metadata->keyRange, bwData->id);
 			return f;
 		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) {
+				throw e;
+			}
 			if (BW_DEBUG) {
 				fmt::print("Dumping snapshot from FDB for [{0} - {1}) got error {2}\n",
 				           metadata->keyRange.begin.printable(),
 				           metadata->keyRange.end.printable(),
 				           e.name());
 			}
+			state Error err = e;
 			wait(tr->onError(e));
+			TraceEvent(SevWarn, "BlobGranuleInitialSnapshotRetry", bwData->id)
+			    .detail("Granule", metadata->keyRange)
+			    .error(err);
 		}
 	}
 }

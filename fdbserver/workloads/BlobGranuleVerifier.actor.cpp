@@ -166,20 +166,35 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 	// assumes we can read the whole range in one transaction at a single version
 	ACTOR Future<std::pair<RangeResult, Version>> readFromFDB(Database cx, KeyRange range) {
+		state bool first = true;
 		state Version v;
 		state RangeResult out;
 		state Transaction tr(cx);
 		state KeyRange currentRange = range;
 		loop {
 			try {
-				RangeResult r = wait(tr.getRange(currentRange, CLIENT_KNOBS->TOO_MANY));
+				state RangeResult r = wait(tr.getRange(currentRange, CLIENT_KNOBS->TOO_MANY));
+				Version grv = wait(tr.getReadVersion());
+				// need consistent version snapshot of range
+				if (first) {
+					v = grv;
+					first = false;
+				} else if (v != grv) {
+					// reset the range and restart the read at a higher version
+					TraceEvent(SevDebug, "BGVFDBReadReset").detail("ReadVersion", v);
+					TEST(true); // BGV transaction reset
+					printf("Resetting BGV GRV {0} -> {1}\n", v, grv);
+					first = true;
+					out = RangeResult();
+					currentRange = range;
+					tr.reset();
+					continue;
+				}
 				out.arena().dependsOn(r.arena());
 				out.append(out.arena(), r.begin(), r.size());
 				if (r.more) {
 					currentRange = KeyRangeRef(keyAfter(r.back().key), currentRange.end);
 				} else {
-					Version _v = wait(tr.getReadVersion());
-					v = _v;
 					break;
 				}
 			} catch (Error& e) {
