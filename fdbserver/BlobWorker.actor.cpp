@@ -42,6 +42,7 @@
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 #define BW_DEBUG true
@@ -720,6 +721,9 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 				           metadata->keyRange.end.printable(),
 				           e.name());
 			}
+			TraceEvent(SevWarn, "BlobGranuleInitialSnapshotError", bwData->id)
+			    .detail("Granule", metadata->keyRange)
+			    .error(e);
 			wait(tr->onError(e));
 		}
 	}
