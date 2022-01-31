@@ -1775,6 +1775,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	// waiting for the results
 	state Version dequeVersion = data->version.get();
 	state Version dequeKnownCommit = data->knownCommittedVersion;
+	state Version emptyVersion = feedInfo->emptyVersion;
 
 	if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
 		printf("CFM: SS %s CF %s: dequeVersion=%lld, emptyVersion=%lld, storageVersion=%lld, durableVersion=%lld, "
@@ -1788,7 +1789,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		       feedInfo->fetchVersion);
 	}
 
-	if (req.end > feedInfo->emptyVersion + 1) {
+	if (req.end > emptyVersion + 1) {
 		for (auto& it : feedInfo->mutations) {
 			if (it.version >= req.end || it.version > dequeVersion || remainingLimitBytes <= 0) {
 				break;
@@ -1810,13 +1811,24 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 	}
 
-	if (req.end > feedInfo->emptyVersion + 1 && feedInfo->durableVersion != invalidVersion &&
-	    req.begin <= feedInfo->durableVersion) {
-		RangeResult res = wait(data->storage.readRange(
-		    KeyRangeRef(changeFeedDurableKey(req.rangeID, std::max(req.begin, feed->second->emptyVersion)),
-		                changeFeedDurableKey(req.rangeID, req.end)),
-		    1 << 30,
-		    remainingDurableBytes));
+	bool readDurable = feedInfo->durableVersion != invalidVersion && req.begin <= feedInfo->durableVersion;
+	bool readFetched = feedInfo->durableVersion < feedInfo->fetchVersion && req.begin <= feedInfo->fetchVersion;
+	if (req.end > emptyVersion + 1 && (readDurable || readFetched)) {
+		if (readFetched && feedInfo->durableVersion == invalidVersion) {
+			// To not block fetchKeys on making change feed data written to storage, we wait in here instead for all
+			// fetched data to become readable from the storage engine.
+			while (feedInfo->durableVersion == invalidVersion) {
+				TEST(true); // getChangeFeedMutations before any fetched data durable
+				// wait for next commit
+				wait(data->durableVersion.whenAtLeast(data->durableVersion.get() + 1));
+				// TODO it may be safer to always just wait for durableVersion whenAtLeast feedVersion?
+			}
+		}
+		RangeResult res = wait(
+		    data->storage.readRange(KeyRangeRef(changeFeedDurableKey(req.rangeID, std::max(req.begin, emptyVersion)),
+		                                        changeFeedDurableKey(req.rangeID, req.end)),
+		                            1 << 30,
+		                            remainingDurableBytes));
 
 		if (!inverted && !req.range.empty()) {
 			data->checkChangeCounter(changeCounter, req.range);
