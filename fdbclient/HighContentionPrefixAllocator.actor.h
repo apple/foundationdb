@@ -1,5 +1,5 @@
 /*
- * HighContentionAllocator.actor.h
+ * HighContentionPrefixAllocator.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,11 +22,11 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_HIGHCONTENTIONALLOCATOR_ACTOR_G_H)
-#define FDBCLIENT_HIGHCONTENTIONALLOCATOR_ACTOR_G_H
-#include "fdbclient/HighContentionAllocator.actor.g.h"
-#elif !defined(FDBCLIENT_HIGHCONTENTIONALLOCATOR_ACTOR_H)
-#define FDBCLIENT_HIGHCONTENTIONALLOCATOR_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_HIGHCONTENTIONPREFIXALLOCATOR_ACTOR_G_H)
+#define FDBCLIENT_HIGHCONTENTIONPREFIXALLOCATOR_ACTOR_G_H
+#include "fdbclient/HighContentionPrefixAllocator.actor.g.h"
+#elif !defined(FDBCLIENT_HIGHCONTENTIONPREFIXALLOCATOR_ACTOR_H)
+#define FDBCLIENT_HIGHCONTENTIONPREFIXALLOCATOR_ACTOR_H
 
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/CommitTransaction.h"
@@ -35,9 +35,9 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-class HighContentionAllocator {
+class HighContentionPrefixAllocator {
 public:
-	HighContentionAllocator(Subspace subspace) : counters(subspace.get(0)), recent(subspace.get(1)) {}
+	HighContentionPrefixAllocator(Subspace subspace) : counters(subspace.get(0)), recent(subspace.get(1)) {}
 
 	template <class TransactionT>
 	Future<Standalone<StringRef>> allocate(Reference<TransactionT> tr) {
@@ -60,7 +60,7 @@ private:
 	Subspace recent;
 
 	ACTOR template <class TransactionT>
-	Future<Standalone<StringRef>> allocate(HighContentionAllocator* self, Reference<TransactionT> tr) {
+	Future<Standalone<StringRef>> allocate(HighContentionPrefixAllocator* self, Reference<TransactionT> tr) {
 		state int64_t start = 0;
 		state int64_t window = 0;
 
@@ -97,7 +97,7 @@ private:
 					count = *(int64_t*)countValue.get().begin();
 				}
 
-				window = HighContentionAllocator::windowSize(start);
+				window = HighContentionPrefixAllocator::windowSize(start);
 				if (count * 2 < window) {
 					break;
 				}

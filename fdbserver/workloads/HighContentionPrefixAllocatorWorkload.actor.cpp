@@ -1,5 +1,5 @@
 /*
- * HighContentionAllocatorWorkload.actor.cpp
+ * HighContentionPrefixAllocatorWorkload.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,17 +18,17 @@
  * limitations under the License.
  */
 
-#include "fdbclient/HighContentionAllocator.actor.h"
+#include "fdbclient/HighContentionPrefixAllocator.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // This workload tests the basic contract of the high contention allocator
-struct HighContentionAllocatorWorkload : TestWorkload {
-	static constexpr const char* NAME = "HighContentionAllocator";
+struct HighContentionPrefixAllocatorWorkload : TestWorkload {
+	static constexpr const char* NAME = "HighContentionPrefixAllocator";
 
 	Subspace allocatorSubspace;
-	HighContentionAllocator allocator;
+	HighContentionPrefixAllocator allocator;
 	int numRounds;
 	int maxTransactionsPerRound;
 	int maxAllocationsPerTransaction;
@@ -36,18 +36,18 @@ struct HighContentionAllocatorWorkload : TestWorkload {
 	int expectedPrefixes = 0;
 	std::set<Key> allocatedPrefixes;
 
-	HighContentionAllocatorWorkload(WorkloadContext const& wcx)
+	HighContentionPrefixAllocatorWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), allocatorSubspace("test_subspace"_sr), allocator(allocatorSubspace) {
 		numRounds = getOption(options, LiteralStringRef("numRounds"), 500);
 		maxTransactionsPerRound = getOption(options, LiteralStringRef("maxTransactionsPerRound"), 20);
 		maxAllocationsPerTransaction = getOption(options, LiteralStringRef("maxAllocationsPerTransaction"), 20);
 	}
 
-	std::string description() const override { return HighContentionAllocatorWorkload::NAME; }
+	std::string description() const override { return HighContentionPrefixAllocatorWorkload::NAME; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	ACTOR static Future<Void> runAllocationTransaction(Database cx, HighContentionAllocatorWorkload* self) {
+	ACTOR static Future<Void> runAllocationTransaction(Database cx, HighContentionPrefixAllocatorWorkload* self) {
 		state Reference<ReadYourWritesTransaction> tr = cx->createTransaction();
 
 		state int numAllocations = deterministicRandom()->randomInt(1, self->maxAllocationsPerTransaction + 1);
@@ -104,7 +104,7 @@ struct HighContentionAllocatorWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> runTest(Database cx, HighContentionAllocatorWorkload* self) {
+	ACTOR static Future<Void> runTest(Database cx, HighContentionPrefixAllocatorWorkload* self) {
 		state int roundNum = 0;
 		for (; roundNum < self->numRounds; ++roundNum) {
 			std::vector<Future<Void>> futures;
@@ -121,7 +121,7 @@ struct HighContentionAllocatorWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override { return runTest(cx, this); }
 
-	ACTOR static Future<bool> _check(Database cx, HighContentionAllocatorWorkload* self) {
+	ACTOR static Future<bool> _check(Database cx, HighContentionPrefixAllocatorWorkload* self) {
 		if (self->expectedPrefixes != self->allocatedPrefixes.size()) {
 			TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
 			    .detail("Reason", "Incorrect Number of Prefixes Allocated")
@@ -156,4 +156,5 @@ struct HighContentionAllocatorWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
-WorkloadFactory<HighContentionAllocatorWorkload> HighContentionAllocatorWorkload(HighContentionAllocatorWorkload::NAME);
+WorkloadFactory<HighContentionPrefixAllocatorWorkload> HighContentionPrefixAllocatorWorkload(
+    HighContentionPrefixAllocatorWorkload::NAME);
