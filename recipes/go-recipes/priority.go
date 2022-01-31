@@ -22,12 +22,13 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"math/rand"
+
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
-	"log"
-	"math/rand"
 )
 
 func clear_subspace(trtr fdb.Transactor, sub subspace.Subspace) error {
