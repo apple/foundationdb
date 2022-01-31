@@ -58,6 +58,7 @@ set(FDBCLIENT_SRCS
   FDBTypes.h
   FluentDSampleIngestor.cpp
   FileBackupAgent.actor.cpp
+  GenericManagementAPI.actor.h
   GlobalConfig.h
   GlobalConfig.actor.h
   GlobalConfig.actor.cpp
