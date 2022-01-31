@@ -34,6 +34,7 @@ struct BlobWorkerInterface {
 	RequestStream<struct BlobGranuleFileRequest> blobGranuleFileRequest;
 	RequestStream<struct AssignBlobRangeRequest> assignBlobRangeRequest;
 	RequestStream<struct RevokeBlobRangeRequest> revokeBlobRangeRequest;
+	RequestStream<struct GetGranuleAssignmentsRequest> granuleAssignmentsRequest;
 	RequestStream<struct GranuleStatusStreamRequest> granuleStatusStreamRequest;
 	RequestStream<struct HaltBlobWorkerRequest> haltBlobWorker;
 
@@ -58,6 +59,7 @@ struct BlobWorkerInterface {
 		           blobGranuleFileRequest,
 		           assignBlobRangeRequest,
 		           revokeBlobRangeRequest,
+		           granuleAssignmentsRequest,
 		           granuleStatusStreamRequest,
 		           haltBlobWorker,
 		           locality,
@@ -116,6 +118,7 @@ struct RevokeBlobRangeRequest {
  * Reassign: when a new blob manager takes over, it sends Reassign requests to workers to redistribute granules
  * Normal: Neither continue nor reassign
  */
+// TODO REMOVE reassign now!
 enum AssignRequestType { Normal = 0, Continue = 1, Reassign = 2 };
 
 struct AssignBlobRangeRequest {
@@ -210,6 +213,44 @@ struct HaltBlobWorkerRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, managerEpoch, requesterID, reply);
+	}
+};
+
+struct GranuleAssignmentRef {
+	KeyRangeRef range;
+	int64_t epochAssigned;
+	int64_t seqnoAssigned;
+
+	GranuleAssignmentRef() {}
+
+	explicit GranuleAssignmentRef(KeyRangeRef range, int64_t epochAssigned, int64_t seqnoAssigned)
+	  : range(range), epochAssigned(epochAssigned), seqnoAssigned(seqnoAssigned) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, range, epochAssigned, seqnoAssigned);
+	}
+};
+
+struct GetGranuleAssignmentsReply {
+	constexpr static FileIdentifier file_identifier = 9191718;
+	Arena arena;
+	VectorRef<GranuleAssignmentRef> assignments;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, assignments, arena);
+	}
+};
+
+struct GetGranuleAssignmentsRequest {
+	constexpr static FileIdentifier file_identifier = 4121494;
+	int64_t managerEpoch;
+	ReplyPromise<GetGranuleAssignmentsReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, managerEpoch, reply);
 	}
 };
 

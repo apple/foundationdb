@@ -2604,14 +2604,17 @@ static bool newerRangeAssignment(GranuleRangeMetadata oldMetadata, int64_t epoch
 // manager with a successful assignment And if the change produced a new granule that needs to start
 // doing work, returns the new granule so that the caller can start() it with the appropriate starting
 // state.
-ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
-                                   KeyRange keyRange,
-                                   int64_t epoch,
-                                   int64_t seqno,
-                                   bool active,
-                                   bool disposeOnCleanup,
-                                   bool selfReassign,
-                                   Optional<AssignRequestType> assignType = Optional<AssignRequestType>()) {
+
+// Not an actor because we need to guarantee it changes the synchronously as part of the request
+static bool changeBlobRange(Reference<BlobWorkerData> bwData,
+                            KeyRange keyRange,
+                            int64_t epoch,
+                            int64_t seqno,
+                            bool active,
+                            bool disposeOnCleanup,
+                            bool selfReassign,
+                            std::vector<Future<Void>>& toWaitOut,
+                            Optional<AssignRequestType> assignType = Optional<AssignRequestType>()) {
 	// since changeBlobRange is used for assigns and revokes,
 	// we assert that assign type is specified iff this is an
 	ASSERT(active == assignType.present());
@@ -2632,23 +2635,11 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 	// older, or newer. For each older range, cancel it if it is active. Insert the current range.
 	// Re-insert all newer ranges over the current range.
 
-	state std::vector<Future<Void>> futures;
-
-	state std::vector<std::pair<KeyRange, GranuleRangeMetadata>> newerRanges;
+	std::vector<std::pair<KeyRange, GranuleRangeMetadata>> newerRanges;
 
 	auto ranges = bwData->granuleMetadata.intersectingRanges(keyRange);
 	bool alreadyAssigned = false;
 	for (auto& r : ranges) {
-		// I don't think we need this?
-		/*if (!active) {
-		    if (r.value().activeMetadata.isValid() && r.value().activeMetadata->cancelled.canBeSet()) {
-		        if (BW_DEBUG) {
-		            printf("Cancelling activeMetadata\n");
-		        }
-		        bwData->stats.numRangesAssigned--;
-		        r.value().activeMetadata->cancelled.send(Void());
-		    }
-		}*/
 		bool thisAssignmentNewer = newerRangeAssignment(r.value(), epoch, seqno);
 		if (BW_DEBUG) {
 			fmt::print("thisAssignmentNewer={}\n", thisAssignmentNewer ? "true" : "false");
@@ -2684,7 +2675,7 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 				}
 				// applied the same assignment twice, make idempotent
 				if (r.value().activeMetadata.isValid()) {
-					futures.push_back(success(r.value().assignFuture));
+					toWaitOut.push_back(success(r.value().assignFuture));
 				}
 				alreadyAssigned = true;
 				break;
@@ -2711,7 +2702,6 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 	}
 
 	if (alreadyAssigned) {
-		wait(waitForAll(futures)); // already applied, nothing to do
 		return false;
 	}
 
@@ -2742,7 +2732,6 @@ ACTOR Future<bool> changeBlobRange(Reference<BlobWorkerData> bwData,
 		bwData->granuleMetadata.insert(it.first, it.second);
 	}
 
-	wait(waitForAll(futures));
 	return newerRanges.size() == 0;
 }
 
@@ -2809,6 +2798,8 @@ ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData, BlobWork
 	}
 }
 
+// the contract of handleRangeAssign and handleRangeRevoke is that they change the mapping before doing any waiting.
+// This ensures GetGranuleAssignment returns an up-to-date set of ranges
 ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
                                      AssignBlobRangeRequest req,
                                      bool isSelfReassign) {
@@ -2816,8 +2807,17 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 		if (req.type == AssignRequestType::Continue) {
 			resumeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno);
 		} else {
-			bool shouldStart = wait(changeBlobRange(
-			    bwData, req.keyRange, req.managerEpoch, req.managerSeqno, true, false, isSelfReassign, req.type));
+			std::vector<Future<Void>> toWait;
+			state bool shouldStart = changeBlobRange(bwData,
+			                                         req.keyRange,
+			                                         req.managerEpoch,
+			                                         req.managerSeqno,
+			                                         true,
+			                                         false,
+			                                         isSelfReassign,
+			                                         toWait,
+			                                         req.type);
+			wait(waitForAll(toWait));
 
 			if (shouldStart) {
 				bwData->stats.numRangesAssigned++;
@@ -2863,8 +2863,9 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 
 ACTOR Future<Void> handleRangeRevoke(Reference<BlobWorkerData> bwData, RevokeBlobRangeRequest req) {
 	try {
-		wait(success(
-		    changeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno, false, req.dispose, false)));
+		std::vector<Future<Void>> toWait;
+		changeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno, false, req.dispose, false, toWait);
+		wait(waitForAll(toWait));
 		req.reply.send(Void());
 		return Void();
 	} catch (Error& e) {
@@ -2941,6 +2942,29 @@ ACTOR Future<Void> runGRVChecks(Reference<BlobWorkerData> bwData) {
 			wait(tr.onError(e));
 		}
 	}
+}
+
+static void handleGetGranuleAssignmentsRequest(Reference<BlobWorkerData> self,
+                                               const GetGranuleAssignmentsRequest& req) {
+	GetGranuleAssignmentsReply reply;
+	auto allRanges = self->granuleMetadata.intersectingRanges(normalKeys);
+	for (auto& it : allRanges) {
+		if (it.value().activeMetadata.isValid()) {
+			// range is active, copy into reply's arena
+			StringRef start = StringRef(reply.arena, it.begin());
+			StringRef end = StringRef(reply.arena, it.end());
+
+			reply.assignments.push_back(
+			    reply.arena, GranuleAssignmentRef(KeyRangeRef(start, end), it.value().lastEpoch, it.value().lastSeqno));
+		}
+	}
+	if (BW_DEBUG) {
+		fmt::print("Worker {0} sending {1} granule assignments back to BM {2}\n",
+		           self->id.toString(),
+		           reply.assignments.size(),
+		           req.managerEpoch);
+	}
+	req.reply.send(reply);
 }
 
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
@@ -3059,6 +3083,18 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			}
 			when(AssignBlobRangeRequest granuleToReassign = waitNext(self->granuleUpdateErrors.getFuture())) {
 				self->addActor.send(handleRangeAssign(self, granuleToReassign, true));
+			}
+			when(GetGranuleAssignmentsRequest req = waitNext(bwInterf.granuleAssignmentsRequest.getFuture())) {
+				if (self->managerEpochOk(req.managerEpoch)) {
+					if (BW_DEBUG) {
+						fmt::print("Worker {0} got granule assignments request from BM {1}\n",
+						           self->id.toString(),
+						           req.managerEpoch);
+					}
+					handleGetGranuleAssignmentsRequest(self, req);
+				} else {
+					req.reply.sendError(blob_manager_replaced());
+				}
 			}
 			when(HaltBlobWorkerRequest req = waitNext(bwInterf.haltBlobWorker.getFuture())) {
 				if (self->managerEpochOk(req.managerEpoch)) {
