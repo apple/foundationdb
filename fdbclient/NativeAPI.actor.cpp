@@ -2669,7 +2669,8 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
                                                             bool generateNewSpan) const {
 
 	SpanID newSpanID = generateNewSpan ? generateSpanID(cx->transactionTracingSample) : spanID;
-	Reference<TransactionState> newState = makeReference<TransactionState>(cx, cx->taskID, newSpanID, newTrLogInfo);
+	Reference<TransactionState> newState =
+	    makeReference<TransactionState>(cx, tenant, cx->taskID, newSpanID, newTrLogInfo);
 
 	if (!cx->apiVersionAtLeast(16)) {
 		newState->options = options;
@@ -2690,25 +2691,6 @@ TenantInfo TransactionState::getTenantInfo() const {
 	}
 
 	return TenantInfo(tenant);
-}
-
-Reference<TransactionState> TransactionState::cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo,
-                                                            bool generateNewSpan) const {
-
-	SpanID newSpanID = generateNewSpan ? generateSpanID(cx->transactionTracingSample) : spanID;
-	Reference<TransactionState> newState =
-	    makeReference<TransactionState>(cx, tenant, cx->taskID, newSpanID, newTrLogInfo);
-
-	if (!cx->apiVersionAtLeast(16)) {
-		newState->options = options;
-	}
-
-	newState->numErrors = numErrors;
-	newState->startTime = startTime;
-	newState->committedVersion = committedVersion;
-	newState->conflictingKeys = conflictingKeys;
-
-	return newState;
 }
 
 Future<Void> Transaction::warmRange(KeyRange keys) {
