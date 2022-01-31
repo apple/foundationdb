@@ -5118,8 +5118,7 @@ ACTOR Future<bool> applyMutationsFromFetchInjectionInfo(StorageUpdater* pStorage
 	state int mutationNum = 0;
 	state VerUpdateRef* pUpdate = nullptr;
 	state Version currentVersion = invalidVersion;
-
-	*pMutationBytes = 0;
+	state int& mutationBytes = *pMutationBytes;
 
 	for (changeNum = 0; changeNum < static_cast<int>(pFetchInjectionInfo->changes.size()); ++changeNum) {
 		pUpdate = &pFetchInjectionInfo->changes[changeNum];
@@ -5131,12 +5130,12 @@ ACTOR Future<bool> applyMutationsFromFetchInjectionInfo(StorageUpdater* pStorage
 
 			// data->counters.mutationBytes or data->counters.mutations should not be updated because they
 			// should have been counted when the mutations arrive from cursor initially.
-			*pMutationBytes += mutation.totalSize();
+			mutationBytes += mutation.totalSize();
 
 			hasInjectedChanges = true;
 
-			if (*pMutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
-				*pMutationBytes = 0;
+			if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
+				mutationBytes = 0;
 				// Instead of just yielding, leave time for the storage server to respond to reads
 				wait(delay(SERVER_KNOBS->UPDATE_DELAY));
 			}
@@ -5192,20 +5191,20 @@ ACTOR Future<Void> prepareEagerReadInfo(UpdateEagerReadInfo* pEagerReadInfo,
 	eagerReadCursor->setProtocolVersion(pStorageServerContext->logProtocol);
 
 	for (; eagerReadCursor->hasMessage(); eagerReadCursor->nextMessage()) {
-		ArenaReader& cloneReader = *eagerReadCursor->reader();
+		ArenaReader& reader = *eagerReadCursor->reader();
 
-		if (LogProtocolMessage::isNextIn(cloneReader)) {
+		if (LogProtocolMessage::isNextIn(reader)) {
 			LogProtocolMessage lpm;
-			cloneReader >> lpm;
+			reader >> lpm;
 			//TraceEvent(SevDebug, "SSReadingLPM", pStorageServerContext->thisServerID).detail("Mutation", lpm);
 			dbgLastMessageWasProtocol = true;
-			eagerReadCursor->setProtocolVersion(cloneReader.protocolVersion());
-		} else if (cloneReader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(cloneReader)) {
+			eagerReadCursor->setProtocolVersion(reader.protocolVersion());
+		} else if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader)) {
 			SpanContextMessage scm;
-			cloneReader >> scm;
+			reader >> scm;
 		} else {
 			MutationRef msg;
-			cloneReader >> msg;
+			reader >> msg;
 			// TraceEvent(SevDebug, "SSReadingLog", pStorageServerContext->thisServerID).detail("Mutation", msg);
 
 			if (firstMutation && msg.param1.startsWith(systemKeys.end))
@@ -5246,8 +5245,9 @@ ACTOR Future<Void> prepareEagerReadInfo(UpdateEagerReadInfo* pEagerReadInfo,
 // wait, flow will just return the previous result since it is already completed.
 // NOTE: This ACTOR must always be waited after created, since the pStorageServerContext is passed by pointer rather by
 // std::shared_ptr
-ACTOR Future<Void> ensureNoShardChange(StorageServerBase* pStorageServerContext,
-                                       std::function<Future<Void>()> actorWrapper) {
+ACTOR Future<Stopwatch::time_t> ensureNoShardChange(StorageServerBase* pStorageServerContext,
+                                                    std::function<Future<Void>()> actorWrapper) {
+	state Stopwatch stopwatch;
 	state uint64_t shardChangeCounter = 0;
 	loop {
 		shardChangeCounter = pStorageServerContext->shardChangeCounter;
@@ -5263,7 +5263,7 @@ ACTOR Future<Void> ensureNoShardChange(StorageServerBase* pStorageServerContext,
 		    .detail("AfterActor", shardChangeCounterNow);
 	}
 
-	return Void();
+	return stopwatch.lap();
 }
 
 // Updates the counter corresponds to the mutation type
@@ -5306,16 +5306,15 @@ ACTOR Future<Void> applyMutationsFromCursor(StorageUpdater* pStorageUpdater,
                                             StorageServerBase* pStorageServerContext) {
 	state Stopwatch stopwatch;
 	state SpanID spanContext = SpanID();
-	// Local pVersion
-	state Version ver = invalidVersion;
-	// Local updateChangeFeeds
-	state std::set<Key> updatedChangeFeeds;
+	state Version& ver = *pVersion;
+	state std::set<Key>& updatedChangeFeeds = *pUpdatedChangeFeeds;
+	state int mutationBytes = *pMutationBytes;
 
 	cursor->setProtocolVersion(pStorageServerContext->logProtocol);
 	for (; cursor->hasMessage(); cursor->nextMessage()) {
 
-		if (*pMutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
-			*pMutationBytes = 0;
+		if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
+			mutationBytes = 0;
 			// Instead of just yielding, leave time for the storage server to respond to reads
 			wait(delay(SERVER_KNOBS->UPDATE_DELAY));
 		}
@@ -5392,7 +5391,7 @@ ACTOR Future<Void> applyMutationsFromCursor(StorageUpdater* pStorageUpdater,
 
 				pStorageUpdater->applyMutation(pStorageServerContext, msg, ver, false);
 
-				*pMutationBytes += msg.totalSize();
+				mutationBytes += msg.totalSize();
 				pStorageServerContext->counters.mutationBytes += msg.totalSize();
 				++pStorageServerContext->counters.mutations;
 
@@ -5405,10 +5404,6 @@ ACTOR Future<Void> applyMutationsFromCursor(StorageUpdater* pStorageUpdater,
 		}
 	}
 	pStorageServerContext->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(stopwatch.lap());
-
-	// Update external variables
-	*pVersion = ver;
-	pUpdatedChangeFeeds->swap(updatedChangeFeeds);
 
 	return Void();
 }
@@ -5470,6 +5465,81 @@ ACTOR Future<Void> updatePreconditioner(StorageServerBase* pStorageServerContext
 	}
 
 	return Void();
+}
+
+void updateVersion(StorageServerBase* pStorageServerContext,
+                   const Optional<UID>& cursorSourceTLogID,
+                   const Version& version,
+                   const Version& minKnownCommittedVersion,
+                   const std::set<Key>& updatedChangeFeeds) {
+	// TODO(alexmiller): Update to version tracking.
+	// DEBUG_KEY_RANGE("SSUpdate", ver, KeyRangeRef());
+
+	pStorageServerContext->mutableData().createNewVersion(version);
+	if (pStorageServerContext->otherError.getFuture().isReady())
+		pStorageServerContext->otherError.getFuture().get();
+
+	pStorageServerContext->counters.fetchedVersions += (version - pStorageServerContext->version.get());
+	++pStorageServerContext->counters.fetchesFromLogs;
+
+	if (cursorSourceTLogID != pStorageServerContext->sourceTLogID) {
+		pStorageServerContext->sourceTLogID = cursorSourceTLogID;
+
+		TraceEvent("StorageServerSourceTLogID", pStorageServerContext->thisServerID)
+		    .detail("SourceTLogID",
+		            pStorageServerContext->sourceTLogID.present() ? pStorageServerContext->sourceTLogID.get().toString()
+		                                                          : "unknown")
+		    .trackLatest(pStorageServerContext->storageServerSourceTLogIDEventHolder->trackingKey);
+	}
+
+	pStorageServerContext->noRecentUpdates.set(false);
+	pStorageServerContext->lastUpdate = now();
+
+	pStorageServerContext->prevVersion = pStorageServerContext->version.get();
+	pStorageServerContext->version.set(version); // Triggers replies to waiting gets for new version(s)
+
+	for (auto& it : updatedChangeFeeds) {
+		auto feed = pStorageServerContext->uidChangeFeed.find(it);
+		if (feed != pStorageServerContext->uidChangeFeed.end()) {
+			feed->second->newMutations.trigger();
+		}
+	}
+
+	setDataVersion(pStorageServerContext->thisServerID, pStorageServerContext->version.get());
+	if (pStorageServerContext->otherError.getFuture().isReady())
+		pStorageServerContext->otherError.getFuture().get();
+
+	Version maxVersionsInMemory = SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+	for (int i = 0; i < pStorageServerContext->recoveryVersionSkips.size(); i++) {
+		maxVersionsInMemory += pStorageServerContext->recoveryVersionSkips[i].second;
+	}
+
+	// Trigger updateStorage if necessary
+	Version proposedOldestVersion =
+	    std::max(pStorageServerContext->version.get(), minKnownCommittedVersion) - maxVersionsInMemory;
+	if (pStorageServerContext->primaryLocality == tagLocalitySpecial ||
+	    pStorageServerContext->tag.locality == pStorageServerContext->primaryLocality) {
+		proposedOldestVersion =
+		    std::max(proposedOldestVersion, pStorageServerContext->lastTLogVersion - maxVersionsInMemory);
+	}
+	proposedOldestVersion = std::min(proposedOldestVersion, pStorageServerContext->version.get() - 1);
+	proposedOldestVersion = std::max(proposedOldestVersion, pStorageServerContext->oldestVersion.get());
+	proposedOldestVersion = std::max(proposedOldestVersion, pStorageServerContext->desiredOldestVersion.get());
+
+	//TraceEvent("StorageServerUpdated", pStorageServerContext->thisServerID).detail("Ver", ver).detail("DataVersion", pStorageServerContext->version.get())
+	//	.detail("LastTLogVersion", pStorageServerContext->lastTLogVersion).detail("NewOldest",
+	// pStorageServerContext->oldestVersion.get()).detail("DesiredOldest",pStorageServerContext->desiredOldestVersion.get())
+	//	.detail("MaxVersionInMemory", maxVersionsInMemory).detail("Proposed",
+	// proposedOldestVersion).detail("PrimaryLocality", pStorageServerContext->primaryLocality).detail("Tag",
+	// pStorageServerContext->tag.toString());
+
+	while (!pStorageServerContext->recoveryVersionSkips.empty() &&
+	       proposedOldestVersion > pStorageServerContext->recoveryVersionSkips.front().first) {
+		pStorageServerContext->recoveryVersionSkips.pop_front();
+	}
+	pStorageServerContext->desiredOldestVersion.set(proposedOldestVersion);
+	// It triggers updateStorage if the new desiredOldestVersion is greater than storageVersion() (i.e.
+	// oldestVersion)
 }
 
 } // namespace details
@@ -5621,13 +5691,11 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		state details::UniqueObjectHolder<FlowLock::Releaser> holdingDurableVersionLock =
 		    wait(details::takeDurableVersionLock(data));
 
-		start = now();
-
 		state Reference<ILogSystem::IPeekCursor> cloneCursor2;
 		state UpdateEagerReadInfo eager;
 		state FetchInjectionInfo fii;
 
-		wait(details::ensureNoShardChange(data, [this]() -> Future<Void> {
+		Stopwatch::time_t eagerReadLatency = wait(details::ensureNoShardChange(data, [this]() -> Future<Void> {
 			// TODO: Understand why we *MUST* call cloneCursor2 = cursor->cloneNoMore()
 			// Without this, tests might fail rarely
 			cloneCursor2 = cursor->cloneNoMore();
@@ -5640,12 +5708,12 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		// Needs explanation for this.
 
 		// TODO: Why is is named SSSlowTakeLock2?
-		if (now() - start > 0.1)
+		if (eagerReadLatency > 0.1)
 			TraceEvent("SSSlowTakeLock2", data->thisServerID)
 			    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken)
 			    .detail("Duration", now() - start)
 			    .detail("Version", data->version.get());
-		data->eagerReadsLatencyHistogram->sampleSeconds(now() - start);
+		data->eagerReadsLatencyHistogram->sampleSeconds(eagerReadLatency);
 
 		data->updateEagerReads = &eager;
 
@@ -5705,72 +5773,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		// The fully supported version (all data at or before this version have arrived) is increased. Update the
 		// version and possibly change the desired oldest version
 		if (ver != invalidVersion && ver > data->version.get()) {
-			// TODO(alexmiller): Update to version tracking.
-			// DEBUG_KEY_RANGE("SSUpdate", ver, KeyRangeRef());
-
-			data->mutableData().createNewVersion(ver);
-			if (data->otherError.getFuture().isReady())
-				data->otherError.getFuture().get();
-
-			data->counters.fetchedVersions += (ver - data->version.get());
-			++data->counters.fetchesFromLogs;
-			Optional<UID> curSourceTLogID = cursor->getCurrentPeekLocation();
-
-			if (curSourceTLogID != data->sourceTLogID) {
-				data->sourceTLogID = curSourceTLogID;
-
-				TraceEvent("StorageServerSourceTLogID", data->thisServerID)
-				    .detail("SourceTLogID",
-				            data->sourceTLogID.present() ? data->sourceTLogID.get().toString() : "unknown")
-				    .trackLatest(data->storageServerSourceTLogIDEventHolder->trackingKey);
-			}
-
-			data->noRecentUpdates.set(false);
-			data->lastUpdate = now();
-
-			data->prevVersion = data->version.get();
-			data->version.set(ver); // Triggers replies to waiting gets for new version(s)
-
-			for (auto& it : updatedChangeFeeds) {
-				auto feed = data->uidChangeFeed.find(it);
-				if (feed != data->uidChangeFeed.end()) {
-					feed->second->newMutations.trigger();
-				}
-			}
-
-			setDataVersion(data->thisServerID, data->version.get());
-			if (data->otherError.getFuture().isReady())
-				data->otherError.getFuture().get();
-
-			Version maxVersionsInMemory = SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
-			for (int i = 0; i < data->recoveryVersionSkips.size(); i++) {
-				maxVersionsInMemory += data->recoveryVersionSkips[i].second;
-			}
-
-			// Trigger updateStorage if necessary
-			Version proposedOldestVersion =
-			    std::max(data->version.get(), cursor->getMinKnownCommittedVersion()) - maxVersionsInMemory;
-			if (data->primaryLocality == tagLocalitySpecial || data->tag.locality == data->primaryLocality) {
-				proposedOldestVersion = std::max(proposedOldestVersion, data->lastTLogVersion - maxVersionsInMemory);
-			}
-			proposedOldestVersion = std::min(proposedOldestVersion, data->version.get() - 1);
-			proposedOldestVersion = std::max(proposedOldestVersion, data->oldestVersion.get());
-			proposedOldestVersion = std::max(proposedOldestVersion, data->desiredOldestVersion.get());
-
-			//TraceEvent("StorageServerUpdated", data->thisServerID).detail("Ver", ver).detail("DataVersion", data->version.get())
-			//	.detail("LastTLogVersion", data->lastTLogVersion).detail("NewOldest",
-			// data->oldestVersion.get()).detail("DesiredOldest",data->desiredOldestVersion.get())
-			//	.detail("MaxVersionInMemory", maxVersionsInMemory).detail("Proposed",
-			// proposedOldestVersion).detail("PrimaryLocality", data->primaryLocality).detail("Tag",
-			// data->tag.toString());
-
-			while (!data->recoveryVersionSkips.empty() &&
-			       proposedOldestVersion > data->recoveryVersionSkips.front().first) {
-				data->recoveryVersionSkips.pop_front();
-			}
-			data->desiredOldestVersion.set(proposedOldestVersion);
-			// It triggers updateStorage if the new desiredOldestVersion is greater than storageVersion() (i.e.
-			// oldestVersion)
+			Optional<UID> cursorSourceTLogID = cursor->getCurrentPeekLocation();
+			const Version minKnownCommittedVersion = cursor->getMinKnownCommittedVersion();
+			details::updateVersion(data, cursorSourceTLogID, ver, minKnownCommittedVersion, updatedChangeFeeds);
 		}
 
 		validate(data);
