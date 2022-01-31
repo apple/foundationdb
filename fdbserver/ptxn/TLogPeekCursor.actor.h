@@ -126,6 +126,19 @@ private:
 
 namespace details {
 
+// Extra items from TLog Peek replies that needs
+class ExtraTLogPeekReplyContextMixin {
+protected:
+	// The version the TLog has persisted
+	Version maxKnownVersion = invalidVersion;
+
+	// The version that is known beng commited, globally
+	Version minKnownCommittedVersion = invalidVersion;
+
+	const Version& getMaxKnownVersion() const { return maxKnownVersion; }
+	const Version& getMinKnownCommittedVersion() const { return minKnownCommittedVersion; }
+};
+
 class VersionSubsequencePeekCursorBase : public PeekCursorBase {
 public:
 	VersionSubsequencePeekCursorBase();
@@ -213,7 +226,8 @@ public:
 } // namespace details
 
 // Connect to given TLog server(s) and peeks for mutations with a given TeamID
-class StorageTeamPeekCursor : public details::VersionSubsequencePeekCursorBase {
+class StorageTeamPeekCursor : public details::VersionSubsequencePeekCursorBase,
+                              public details::ExtraTLogPeekReplyContextMixin {
 
 private:
 	const StorageTeamID storageTeamID;
@@ -272,6 +286,9 @@ public:
 
 	// Returns the beginning verion for the cursor. The cursor will start from the begin version.
 	const Version& getBeginVersion() const;
+
+	using details::ExtraTLogPeekReplyContextMixin::getMaxKnownVersion;
+	using details::ExtraTLogPeekReplyContextMixin::getMinKnownCommittedVersion;
 
 protected:
 	virtual Future<bool> remoteMoreAvailableImpl() override;
@@ -418,6 +435,7 @@ protected:
 // is done, i.e., the proxy broadcasts to all teams. In this case, even different teams might have different team
 // versions, they will be informed when the commit version has changed.
 class BroadcastedStorageTeamPeekCursorBase : public ptxn::details::VersionSubsequencePeekCursorBase,
+                                             public ptxn::details::ExtraTLogPeekReplyContextMixin,
                                              protected details::StorageTeamIDCursorMapper {
 protected:
 	std::unique_ptr<details::CursorContainerBase> pCursorContainer;
@@ -448,6 +466,9 @@ protected:
 	virtual std::shared_ptr<StorageTeamPeekCursor> removeCursorImpl(const StorageTeamID& cursor) override;
 
 public:
+	using ptxn::details::ExtraTLogPeekReplyContextMixin::getMaxKnownVersion;
+	using ptxn::details::ExtraTLogPeekReplyContextMixin::getMinKnownCommittedVersion;
+
 	using details::StorageTeamIDCursorMapper::addCursor;
 	using details::StorageTeamIDCursorMapper::getCursorStorageTeamIDs;
 	using details::StorageTeamIDCursorMapper::getNumCursors;

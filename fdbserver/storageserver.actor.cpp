@@ -5591,7 +5591,8 @@ void initializeUpdateCursor(ptxn::StorageServer& storageServerContext) {
 	    });
 }
 
-ACTOR Future<Void> updateImpl(std::shared_ptr<ptxn::StorageServer> storageServerContext, bool* pReceivedRemoteData) {
+ACTOR Future<Void> peekFromRemote(std::shared_ptr<ptxn::StorageServer> storageServerContext,
+                                  bool* pReceivedRemoteData) {
 	state Stopwatch stopwatch;
 
 	state std::shared_ptr<ptxn::PeekCursorBase> cursor = storageServerContext->logCursor;
@@ -5617,27 +5618,377 @@ ACTOR Future<Void> updateImpl(std::shared_ptr<ptxn::StorageServer> storageServer
 	}
 	storageServerContext->tlogCursorReadsLatencyHistogram->sampleSeconds(stopwatch.lap());
 
+	// TODO: Think about popped
+
+	++storageServerContext->counters.updateBatches;
+	// TODO getMaxKnownVersion, getMinKnownCommittedVersion
+
 	ASSERT(!*pReceivedRemoteData);
 	*pReceivedRemoteData = true;
-
-	// TODO: Update counters and versions
 
 	state ::details::UniqueObjectHolder<FlowLock::Releaser> holdingDurableVersionLock =
 	    wait(::details::takeDurableVersionLock(storageServerContext.get()));
 
-	for (const auto& vsm : *cursor) {
-		std::cout << vsm.toString() << std::endl;
+	return Void();
+}
+
+// Handle message by type
+class MessageHandlerBase {
+protected:
+	virtual void logProtocolHandler(const LogProtocolMessage&) = 0;
+	virtual void emptyVersionHandler() {}
+	virtual void spanContextHandler(const SpanContextMessage&) = 0;
+	virtual void mutationRefHandler(const MutationRef&) = 0;
+
+public:
+	void handleMessage(const Message&);
+};
+
+void MessageHandlerBase::handleMessage(const Message& message) {
+	switch (message.getType()) {
+	case Message::Type::LOG_PROTOCOL_MESSAGE:
+		logProtocolHandler(std::get<LogProtocolMessage>(message));
+		break;
+	case Message::Type::EMPTY_VERSION_MESSAGE:
+		emptyVersionHandler();
+		break;
+	case Message::Type::SPAN_CONTEXT_MESSAGE:
+		spanContextHandler(std::get<SpanContextMessage>(message));
+		break;
+	case Message::Type::MUTATION_REF:
+		mutationRefHandler(std::get<MutationRef>(message));
+		break;
+	default:
+		UNREACHABLE();
 	}
+}
+
+// Message handler for prepareEagerReadInfo
+class PrepareEagerReadInfoMessageHandler : public MessageHandlerBase {
+	UpdateEagerReadInfo& eagerReadInfo;
+
+	bool dbgLastMessageWasProtocol = false;
+	bool firstMutation = false;
+
+protected:
+	virtual void logProtocolHandler(const LogProtocolMessage&) override;
+	virtual void spanContextHandler(const SpanContextMessage&) override;
+	virtual void mutationRefHandler(const MutationRef&) override;
+
+public:
+	bool epochEnd = false;
+	bool hasPrivateData = false;
+
+	PrepareEagerReadInfoMessageHandler(UpdateEagerReadInfo& eagerReadInfo_) : eagerReadInfo(eagerReadInfo_) {}
+};
+
+void PrepareEagerReadInfoMessageHandler::logProtocolHandler(const LogProtocolMessage& logProtocolMessage) {
+	// TODO cursor should react to log protocol switch
+	dbgLastMessageWasProtocol = true;
+}
+
+void PrepareEagerReadInfoMessageHandler::spanContextHandler(const SpanContextMessage& spanContext) {
+	dbgLastMessageWasProtocol = false;
+}
+
+void PrepareEagerReadInfoMessageHandler::mutationRefHandler(const MutationRef& mutationRef) {
+	hasPrivateData = firstMutation && mutationRef.param1.startsWith(systemKeys.end);
+	firstMutation = false;
+
+	if (mutationRef.param1 == lastEpochEndPrivateKey) {
+		epochEnd = true;
+		ASSERT(dbgLastMessageWasProtocol);
+	}
+
+	eagerReadInfo.addMutation(mutationRef);
+	dbgLastMessageWasProtocol = false;
+}
+
+ACTOR Future<Void> prepareEagerReadInfo(UpdateEagerReadInfo* pEagerReadInfo,
+                                        FetchInjectionInfo* pFetchInjectionInfo,
+                                        StorageServer* pStorageServerContext) {
+	UpdateEagerReadInfo& eagerReadInfo = *pEagerReadInfo;
+	FetchInjectionInfo& fetchInjectionInfo = *pFetchInjectionInfo;
+
+	eagerReadInfo = UpdateEagerReadInfo();
+
+	PrepareEagerReadInfoMessageHandler messageHandler(eagerReadInfo);
+
+	// TODO Cursor might need to support protocol switching, e.g.
+	// cursor->setLogProtocolVersion(some value)
+
+	for (const auto vsm : *pStorageServerContext->logCursor) {
+		messageHandler.handleMessage(vsm.message);
+	}
+
+	// Any fetchKeys which are ready to transition their shards to the adding,transferred state do so now.
+	// If there is an epoch end we skip this step, to increase testability and to prevent inserting a version in
+	// the middle of a rolled back version range.
+	while (!messageHandler.hasPrivateData && !messageHandler.epochEnd &&
+	       !pStorageServerContext->readyFetchKeys.empty()) {
+		auto fk = pStorageServerContext->readyFetchKeys.back();
+		pStorageServerContext->readyFetchKeys.pop_back();
+		fk.send(&fetchInjectionInfo);
+		// fetchKeys() would put the pStorageServerContext it fetched into the fetchInjectionINfo. The thread will not
+		// return back to this actor until it was completed.
+	}
+
+	for (auto& c : fetchInjectionInfo.changes)
+		eagerReadInfo.addMutations(c.mutations);
+
+	wait(doEagerReads(pStorageServerContext, pEagerReadInfo));
+
+	return Void();
+}
+
+class ApplyMutationsFromCursorMessageHandler : public MessageHandlerBase {
+private:
+	SpanID& spanContext;
+	StorageServerBase* pStorageServerContext;
+	int& mutationBytes;
+	Version& version;
+	StorageUpdater& storageUpdater;
+
+	// If true, inject
+	bool tssFaultDropInjectionFlag;
+
+	// The version the cursor reported
+	Version cursorVersion;
+
+protected:
+	virtual void logProtocolHandler(const LogProtocolMessage&) override;
+	virtual void spanContextHandler(const SpanContextMessage&) override;
+	virtual void mutationRefHandler(const MutationRef&) override;
+
+public:
+	ApplyMutationsFromCursorMessageHandler(SpanID& spanContext_,
+	                                       StorageServerBase* pStorageServerContext_,
+	                                       int& mutationBytes_,
+	                                       Version& version_,
+	                                       StorageUpdater& storageUpdater_)
+	  : spanContext(spanContext_), pStorageServerContext(pStorageServerContext_), mutationBytes(mutationBytes_),
+	    version(version_), storageUpdater(storageUpdater_) {
+
+		tssFaultDropInjectionFlag = g_network->isSimulated() && pStorageServerContext->isTss() &&
+		                            !g_simulator.speedUpSimulation &&
+		                            g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations &&
+		                            pStorageServerContext->tssFaultInjectTime.present();
+	}
+
+	void setCursorVersion(const Version& version_) { cursorVersion = version_; }
+};
+
+void ApplyMutationsFromCursorMessageHandler::logProtocolHandler(const LogProtocolMessage& logProtocolMessage) {
+	// TODO: Handle the log protocol -- currently not supported in ptxn/MessageSerializer.h
+	return;
+}
+
+void ApplyMutationsFromCursorMessageHandler::spanContextHandler(const SpanContextMessage& spanContextMessage) {
+	spanContext = spanContextMessage.spanContext;
+}
+
+void ApplyMutationsFromCursorMessageHandler::mutationRefHandler(const MutationRef& mutationRef) {
+	Span span("SS:update"_loc, { spanContext });
+	span.addTag("key"_sr, mutationRef.param1);
+
+	// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS in
+	// quarantine.
+	if (tssFaultDropInjectionFlag && pStorageServerContext->tssFaultInjectTime.get() < now() &&
+	    (mutationRef.type == MutationRef::SetValue || mutationRef.type == MutationRef::ClearRange) &&
+	    (mutationRef.param1.size() < 2 || mutationRef.param1[0] != 0xff || mutationRef.param1[1] != 0xff) &&
+	    deterministicRandom()->random01() < 0.05) {
+		TraceEvent(SevWarnAlways, "TSSInjectDropMutation", pStorageServerContext->thisServerID)
+		    .detail("Mutation", mutationRef)
+		    .detail("Version", cursorVersion);
+		return;
+	}
+
+	if (pStorageServerContext->isTSSInQuarantine() &&
+	    (mutationRef.param1.size() < 2 || mutationRef.param1[0] != 0xff || mutationRef.param1[1] != 0xff)) {
+		TraceEvent("TSSQuarantineDropMutation", pStorageServerContext->thisServerID)
+		    .suppressFor(10.0)
+		    .detail("Version", cursorVersion);
+		return;
+	}
+
+	if (version == invalidVersion) { // This change belongs to a version < minVersion
+		TraceEvent(SevError, "DiscardingPeekedData", pStorageServerContext->thisServerID)
+		    .detail("Mutation", mutationRef)
+		    .detail("Version", cursorVersion);
+	}
+
+	DEBUG_MUTATION("SSPeek", version, mutationRef, pStorageServerContext->thisServerID);
+	if (version == 1) {
+		//TraceEvent("SSPeekMutation", pStorageServerContext->thisServerID).log();
+		// The following trace event may produce a value with special characters
+		TraceEvent("SSPeekMutation", pStorageServerContext->thisServerID)
+		    .detail("Mutation", mutationRef)
+		    .detail("Version", cursorVersion);
+	}
+
+	storageUpdater.applyMutation(pStorageServerContext, mutationRef, version, /* fromFetch = */ false);
+
+	const int mutationSize = mutationRef.totalSize();
+	mutationBytes += mutationSize;
+	pStorageServerContext->counters.mutationBytes += mutationSize;
+	++pStorageServerContext->counters.mutations;
+
+	::details::updateMutationTypeCounter(pStorageServerContext, mutationRef.type);
+
+	return;
+}
+
+using CursorIterator_t = decltype(StorageServer::logCursor->begin());
+
+ACTOR Future<Void> applyMutationsFromCursor(StorageUpdater* pStorageUpdater,
+                                            Version* pVersion,
+                                            int* pMutationBytes,
+                                            std::set<Key>* pUpdatedChangeFeeds,
+                                            StorageServer* pStorageServerContext) {
+	state Stopwatch stopwatch;
+	state SpanID spanContext = SpanID();
+	state std::set<Key>& updatedChangeFeeds = *pUpdatedChangeFeeds;
+	state int& mutationBytes = *pMutationBytes;
+	state Version& version = *pVersion;
+	state ApplyMutationsFromCursorMessageHandler messageHandler(
+	    spanContext, pStorageServerContext, mutationBytes, version, *pStorageUpdater);
+
+	// TODO cursor might need to adjust protocol
+	state CursorIterator_t cursorIterator = pStorageServerContext->logCursor->begin();
+	for (; cursorIterator != pStorageServerContext->logCursor->end(); std::next(cursorIterator)) {
+		if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
+			mutationBytes = 0;
+			// Instead of just yielding, leave time for the storage server to respond to reads
+			wait(delay(SERVER_KNOBS->UPDATE_DELAY));
+		}
+
+		const auto& versionSubsequenceMessage = *cursorIterator;
+		// Version for this immediate
+		Version cursorVersion = versionSubsequenceMessage.version;
+		if (cursorVersion > version) {
+			ASSERT(cursorVersion > pStorageServerContext->version.get());
+		}
+
+		// Are we seeing a new version?
+		if (cursorVersion > version && cursorVersion > pStorageServerContext->version.get()) {
+			++pStorageServerContext->counters.updateVersions;
+			if (pStorageServerContext->currentChangeFeeds.size()) {
+				pStorageServerContext->changeFeedVersions.emplace_back(
+				    std::vector<Key>(pStorageServerContext->currentChangeFeeds.begin(),
+				                     pStorageServerContext->currentChangeFeeds.end()),
+				    version);
+				updatedChangeFeeds.insert(pStorageServerContext->currentChangeFeeds.begin(),
+				                          pStorageServerContext->currentChangeFeeds.end());
+				pStorageServerContext->currentChangeFeeds.clear();
+			}
+			version = cursorVersion;
+		}
+
+		messageHandler.setCursorVersion(cursorVersion);
+		messageHandler.handleMessage(versionSubsequenceMessage.message);
+	}
+	pStorageServerContext->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(stopwatch.lap());
 
 	return Void();
 }
 
 // Reads data from TLogs and persists to KVStore
 ACTOR Future<Void> update(std::shared_ptr<ptxn::StorageServer> storageServerContext, bool* pReceivedRemoteData) {
+	state UpdateEagerReadInfo eagerReadInfo;
+	state FetchInjectionInfo fetchInjectionInfo;
+	state int mutationBytes = 0;
+	state Version version = invalidVersion;
+	state std::set<Key> updatedChangeFeeds;
+
 	ASSERT(SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS);
+	// At this stage we only support ProtocolVersion::withPartitionTransaction()
+	ASSERT(storageServerContext->logProtocol == ProtocolVersion::withPartitionTransaction());
 
 	try {
-		wait(updateImpl(storageServerContext, pReceivedRemoteData));
+		wait(::details::updatePreconditioner(storageServerContext.get()));
+		wait(peekFromRemote(storageServerContext, pReceivedRemoteData));
+
+		state ::details::UniqueObjectHolder<FlowLock::Releaser> holdingDurableVersionLock =
+		    wait(::details::takeDurableVersionLock(storageServerContext.get()));
+
+		Stopwatch::time_t eagerReadLatency =
+		    wait(::details::ensureNoShardChange(storageServerContext.get(), [this]() -> Future<Void> {
+			    return prepareEagerReadInfo(&eagerReadInfo, &fetchInjectionInfo, storageServerContext.get());
+		    }));
+		if (eagerReadLatency > 0.1) {
+			TraceEvent("SSSlowTakeLock2", storageServerContext->thisServerID)
+			    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken)
+			    .detail("Duration", eagerReadLatency)
+			    .detail("Version", storageServerContext->version.get());
+		}
+		storageServerContext->eagerReadsLatencyHistogram->sampleSeconds(eagerReadLatency);
+		storageServerContext->updateEagerReads = &eagerReadInfo;
+
+		storageServerContext->debug_inApplyUpdate = true;
+
+		if (EXPENSIVE_VALIDATION)
+			storageServerContext->data().atLatest().validate();
+		validate(storageServerContext.get());
+
+		state StorageUpdater storageUpdater(storageServerContext->lastVersionWithData,
+		                                    storageServerContext->restoredVersion);
+		state bool injectedChanges = wait(::details::applyMutationsFromFetchInjectionInfo(
+		    &storageUpdater, &fetchInjectionInfo, &mutationBytes, storageServerContext.get()));
+
+		wait(applyMutationsFromCursor(
+		    &storageUpdater, &version, &mutationBytes, &updatedChangeFeeds, storageServerContext.get()));
+
+		// Apply the mutations from the cursor.
+		wait(applyMutationsFromCursor(
+		    &storageUpdater, &version, &mutationBytes, &updatedChangeFeeds, storageServerContext.get()));
+
+		if (storageServerContext->currentChangeFeeds.size()) {
+			storageServerContext->changeFeedVersions.emplace_back(
+			    std::vector<Key>(storageServerContext->currentChangeFeeds.begin(),
+			                     storageServerContext->currentChangeFeeds.end()),
+			    version);
+			updatedChangeFeeds.insert(storageServerContext->currentChangeFeeds.begin(),
+			                          storageServerContext->currentChangeFeeds.end());
+			storageServerContext->currentChangeFeeds.clear();
+		}
+
+		if (version != invalidVersion) {
+			storageServerContext->lastVersionWithData = version;
+		}
+
+		// version = storageServerContext->logCursor->getVersion() - 1;
+
+		if (injectedChanges)
+			storageServerContext->lastVersionWithData = version;
+
+		storageServerContext->updateEagerReads = nullptr;
+		storageServerContext->debug_inApplyUpdate = false;
+
+		if (version == invalidVersion && !fetchInjectionInfo.changes.empty()) {
+			version = storageUpdater.currentVersion;
+		}
+
+		// The fully supported version (all storageServerContext at or before this version have arrived) is increased.
+		// Update the version and possibly change the desired oldest version
+		if (version != invalidVersion && version > storageServerContext->version.get()) {
+			// FIXME Set up TLogID
+			Optional<UID> cursorSourceTLogID = UID();
+			const Version minKnownCommittedVersion =
+			    dynamic_cast<ptxn::merged::BroadcastedStorageTeamPeekCursor_Ordered*>(storageServerContext->logCursor.get())
+			        ->getMinKnownCommittedVersion();
+			::details::updateVersion(
+			    storageServerContext.get(), cursorSourceTLogID, version, minKnownCommittedVersion, updatedChangeFeeds);
+		}
+
+		validate(storageServerContext.get());
+
+		if (version >= storageServerContext->lastTLogVersion && storageServerContext->behind) {
+			TraceEvent("StorageServerNoLongerBehind", storageServerContext->thisServerID)
+			    .detail("CursorVersion", version)
+			    .detail("TLogVersion", storageServerContext->lastTLogVersion);
+			storageServerContext->behind = false;
+		}
+
 	} catch (Error& error) {
 		// Need a local copy of error as there is a wait in the catch clause
 		state Error error_ = error;
