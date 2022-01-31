@@ -1641,6 +1641,9 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 }
 
 ACTOR Future<Void> chaosRangeMover(Reference<BlobManagerData> bmData) {
+	// Only move each granule once during the test, otherwise it can cause availability issues
+	// KeyRange isn't hashable and this is only for simulation, so just use toString of range
+	state std::unordered_set<std::string> alreadyMoved;
 	ASSERT(g_network->isSimulated());
 	loop {
 		wait(delay(30.0));
@@ -1657,13 +1660,14 @@ ACTOR Future<Void> chaosRangeMover(Reference<BlobManagerData> bmData) {
 			while (tries > 0) {
 				tries--;
 				auto randomRange = bmData->workerAssignments.randomRange();
-				if (randomRange.value() != UID()) {
+				if (randomRange.value() != UID() && !alreadyMoved.count(randomRange.range().toString())) {
 					if (BM_DEBUG) {
 						fmt::print("Range mover moving range [{0} - {1}): {2}\n",
 						           randomRange.begin().printable().c_str(),
 						           randomRange.end().printable().c_str(),
 						           randomRange.value().toString().c_str());
 					}
+					alreadyMoved.insert(randomRange.range().toString());
 
 					// FIXME: with low probability, could immediately revoke it from the new assignment and move
 					// it back right after to test that race
