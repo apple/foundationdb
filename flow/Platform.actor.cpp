@@ -3469,6 +3469,7 @@ void crashHandler(int sig) {
 	bool error = (sig != SIGUSR2);
 
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
+	StreamCipherKey::cleanup();
 	StreamCipher::cleanup();
 #endif
 

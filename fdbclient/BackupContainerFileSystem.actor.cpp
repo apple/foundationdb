@@ -1135,7 +1135,6 @@ public:
 		    0600));
 		StreamCipherKey testKey(AES_256_KEY_LENGTH);
 		testKey.initializeRandomTestKey();
-		// generateRandomData(testKey.data(), testKey.size());
 		keyFile->write(testKey.data(), testKey.size(), 0);
 		wait(keyFile->sync());
 		return Void();
@@ -1143,7 +1142,7 @@ public:
 
 	ACTOR static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
 		state Reference<IAsyncFile> keyFile;
-		state StreamCipherKey* cipherKey = StreamCipherKey::getGlobalCipherKey();
+		state StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
 		try {
 			Reference<IAsyncFile> _keyFile =
 			    wait(IAsyncFileSystem::filesystem()->open(encryptionKeyFileName, 0x0, 0400));

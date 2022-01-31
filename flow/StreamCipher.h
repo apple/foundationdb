@@ -45,24 +45,25 @@
 // encryption/decryption
 class StreamCipherKey : NonCopyable {
 	static std::unique_ptr<StreamCipherKey> globalKey;
+	static std::unordered_set<StreamCipherKey*> cipherKeys;
 	std::unique_ptr<uint8_t[]> arr;
 	int keySize;
 
 public:
-	StreamCipherKey(int size) : arr(std::make_unique<uint8_t[]>(size)), keySize(size) { memset(arr.get(), 0, keySize); }
-	~StreamCipherKey() { cleanup(); }
+	StreamCipherKey(int size);
+	~StreamCipherKey();
+
 	int size() const { return keySize; }
 	uint8_t* data() const { return arr.get(); }
-	void initializeKey(uint8_t* data, int len) {
-		memset(arr.get(), 0, keySize);
-		int copyLen = std::min(keySize, len);
-		memcpy(arr.get(), data, copyLen);
-	}
+	void initializeKey(uint8_t* data, int len);
 	void initializeRandomTestKey() { generateRandomData(arr.get(), keySize); }
-	void cleanup() noexcept { memset(arr.get(), 0, keySize); }
-	static StreamCipherKey* getGlobalCipherKey();
-	static void setGlobalCipherKey(uint8_t* const data, int len);
-	static void globalKeyCleanup();
+	void reset() { memset(arr.get(), 0, keySize); }
+
+	static bool isGlobalKeyPresent();
+	static void allocGlobalCipherKey();
+	static void initializeGlobalRandomTestKey();
+	static StreamCipherKey const* getGlobalCipherKey();
+	static void cleanup() noexcept;
 };
 
 class StreamCipher final : NonCopyable {
@@ -86,7 +87,7 @@ class EncryptionStreamCipher final : NonCopyable, public ReferenceCounted<Encryp
 	StreamCipher cipher;
 
 public:
-	EncryptionStreamCipher(const StreamCipherKey* const key, const StreamCipher::IV& iv);
+	EncryptionStreamCipher(const StreamCipherKey* key, const StreamCipher::IV& iv);
 	StringRef encrypt(unsigned char const* plaintext, int len, Arena&);
 	StringRef finish(Arena&);
 };
@@ -95,7 +96,7 @@ class DecryptionStreamCipher final : NonCopyable, public ReferenceCounted<Decryp
 	StreamCipher cipher;
 
 public:
-	DecryptionStreamCipher(const StreamCipherKey* const key, const StreamCipher::IV& iv);
+	DecryptionStreamCipher(const StreamCipherKey* key, const StreamCipher::IV& iv);
 	StringRef decrypt(unsigned char const* ciphertext, int len, Arena&);
 	StringRef finish(Arena&);
 };
@@ -109,8 +110,6 @@ public:
 	StringRef finish(Arena&);
 };
 
-void applyHmacKeyDerivationFunc(StreamCipherKey* const cipherKey,
-                                HmacSha256StreamCipher* const hmacGenerator,
-                                Arena& arena);
+void applyHmacKeyDerivationFunc(StreamCipherKey* cipherKey, HmacSha256StreamCipher* hmacGenerator, Arena& arena);
 
 #endif // ENCRYPTION_ENABLED

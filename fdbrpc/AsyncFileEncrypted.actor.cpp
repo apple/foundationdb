@@ -50,7 +50,7 @@ public:
 		state unsigned char* encrypted = new (arena) unsigned char[FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE];
 		int bytes = wait(
 		    self->file->read(encrypted, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * block));
-		StreamCipherKey* cipherKey = StreamCipherKey::getGlobalCipherKey();
+		StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
 		DecryptionStreamCipher decryptor(cipherKey, self->getIV(block));
 		auto decrypted = decryptor.decrypt(encrypted, bytes, arena);
 		return Standalone<StringRef>(decrypted, arena);
@@ -261,8 +261,7 @@ TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 	generateRandomData(&writeBuffer.front(), bytes);
 	state std::vector<unsigned char> readBuffer(bytes, 0);
 	ASSERT(g_network->isSimulated());
-	StreamCipherKey* cipherKey = StreamCipherKey::getGlobalCipherKey();
-	cipherKey->initializeRandomTestKey();
+	StreamCipherKey::initializeGlobalRandomTestKey();
 	int flags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
 	            IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_ENCRYPTED | IAsyncFile::OPEN_UNCACHED |
 	            IAsyncFile::OPEN_NO_AIO;

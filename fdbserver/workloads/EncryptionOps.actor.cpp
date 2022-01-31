@@ -117,7 +117,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		return iv;
 	}
 
-	std::string getModeStr() {
+	std::string getModeStr() const {
 		if (mode == 1) {
 			return "FixedSize";
 		} else if (mode == 0) {
@@ -135,7 +135,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		metrics->updateKeyDerivationTime(std::chrono::duration<double, std::nano>(end - start).count());
 	}
 
-	StringRef doEncryption(const StreamCipherKey* const key, uint8_t* payload, int len) {
+	StringRef doEncryption(const StreamCipherKey* key, uint8_t* payload, int len) {
 		EncryptionStreamCipher encryptor(key, iv);
 
 		auto start = std::chrono::high_resolution_clock::now();
@@ -152,7 +152,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		return encrypted;
 	}
 
-	void doDecryption(const StreamCipherKey* const key,
+	void doDecryption(const StreamCipherKey* key,
 	                  const StringRef& encrypted,
 	                  int len,
 	                  uint8_t* originalPayload,
