@@ -638,6 +638,7 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 // require doing a ton of storage metrics calls, which we should split up across multiple transactions likely.
 ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 	state Optional<Value> lastChangeKeyValue;
+	state bool needToCoalesce = bmData->epoch > 1;
 	loop {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 
@@ -662,6 +663,19 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				VectorRef<KeyRangeRef> rangesToAdd;
 				VectorRef<KeyRangeRef> rangesToRemove;
 				updateClientBlobRanges(&bmData->knownBlobRanges, results, ar, &rangesToAdd, &rangesToRemove);
+
+				if (needToCoalesce) {
+					// recovery has granules instead of known ranges in here. We need to do so to identify any parts of
+					// known client ranges the last manager didn't finish blob-ifying.
+					// To coalesce the map, we simply override known ranges with the current DB ranges after computing
+					// rangesToAdd + rangesToRemove
+					needToCoalesce = false;
+
+					for (int i = 0; i < results.size() - 1; i++) {
+						bool active = results[i].value == LiteralStringRef("1");
+						bmData->knownBlobRanges.insert(KeyRangeRef(results[i].key, results[i + 1].key), active);
+					}
+				}
 
 				for (KeyRangeRef range : rangesToRemove) {
 					if (BM_DEBUG) {
@@ -1775,16 +1789,6 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 			raAssign.keyRange = range.range();
 			raAssign.assign = RangeAssignmentData(AssignRequestType::Normal);
 			bmData->rangesToAssign.send(raAssign);
-		}
-	}
-
-	// coalesce known blob ranges within boundaries at the very end
-	RangeResult results =
-	    wait(krmGetRanges(tr, blobRangeKeys.begin, KeyRange(normalKeys), 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
-	ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
-	for (int i = 0; i < results.size() - 1; i++) {
-		if (results[i].value.size()) {
-			bmData->knownBlobRanges.coalesce(KeyRangeRef(results[i].key, results[i + 1].key));
 		}
 	}
 
