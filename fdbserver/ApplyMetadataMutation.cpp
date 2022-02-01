@@ -536,7 +536,6 @@ private:
 	}
 
 	void checkSetCheckpointKeys(MutationRef m) {
-		std::cout << "Apply checkpoint private mutation." << std::endl;
 		if (!m.param1.startsWith(checkpointPrefix)) {
 			return;
 		}

@@ -955,7 +955,8 @@ struct CheckpointMetaData {
 	  : version(version), range(range), format(format), checkpointID(checkpointID) {}
 
 	std::string toString() const {
-		std::string res = "Checkpoint MetaData:\nServer: " + ssID.toString() + "\nVersion: " + std::to_string(version) +
+		std::string res = "Checkpoint MetaData:\nServer: " + ssID.toString() + "\nID: " + checkpointID.toString() +
+		                  "\nVersion: " + std::to_string(version) +
 		                  "\nFormat: " + getFdbCheckpointFormatName(static_cast<CheckpointFormat>(format)) + "\n";
 		if (rocksCF.present()) {
 			res += rocksCF.get().toString();

@@ -6942,13 +6942,15 @@ static Future<Void> createCheckpointImpl(T tr, KeyRangeRef range, CheckpointForm
 
 		const int idx = deterministicRandom()->randomInt(0, src.size());
 
+		const UID checkpointID = deterministicRandom()->randomUniqueID();
+
 		TraceEvent("CreateCheckpointTransactionShard")
 		    .detail("Shard", shard.toString())
 		    .detail("SrcServers", describe(src))
 		    .detail("ServerSelected", src[idx])
+			.detail("CheckpointKey", checkpointKeyFor(checkpointID))
 		    .detail("ReadVersion", tr->getReadVersion().get());
 
-		const UID checkpointID = deterministicRandom()->randomUniqueID();
 		CheckpointMetaData checkpoint(shard & range, format, src[idx], checkpointID);
 		tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
 	}

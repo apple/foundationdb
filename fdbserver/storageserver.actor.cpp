@@ -4853,7 +4853,7 @@ public:
 			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix)) {
 				applyPrivateCacheData(data, m);
 			} else if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(checkpointPrefix)) {
-				std::cout << "Received create checkpoint mutation." << std::endl;
+				std::cout << "Received create checkpoint mutation:\n" << m.toString() << std::endl;
 				registerPendingCheckpoint(data, m, ver);
 			} else {
 				applyPrivateData(data, m);
@@ -5121,18 +5121,21 @@ private:
 
 	void registerPendingCheckpoint(StorageServer* data, const MutationRef& m, Version ver) {
 		CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
+		UID checkpointID = decodeCheckpointKey(m.param1.substr(1));
 		checkpoint.version = ver;
-		std::cout << std::endl << "Adding pending checkpoit: " << checkpoint.toString() << std::endl;
-		;
+		std::cout << std::endl
+		          << "Adding pending checkpoit: decoded ID: " << checkpointID.toString() << std::endl
+		          << checkpoint.toString() << std::endl;
 		data->pendingCheckpoints[ver].push_back(checkpoint);
 
 		auto& mLV = data->addVersionToMutationLog(ver);
 
-		KeyRef pendingCheckpointKey =
-		    m.param1.substr(1).removePrefix(checkpointPrefix).withPrefix(persistPendingCheckpointKeys.begin);
+		Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpointID.toString());
 		data->addMutationToMutationLog(
 		    mLV, MutationRef(MutationRef::SetValue, pendingCheckpointKey, checkpointValue(checkpoint)));
-		std::cout << "buffer write pending checkpoint key: " << pendingCheckpointKey.toString() << std::endl;
+		TraceEvent("RegisterPendingCheckpoint", data->thisServerID)
+		    .detail("Key", pendingCheckpointKey)
+		    .detail("Checkpoint", checkpoint.toString());
 	}
 };
 
